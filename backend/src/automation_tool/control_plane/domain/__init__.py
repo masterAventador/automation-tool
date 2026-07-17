@@ -1,6 +1,7 @@
 """Control Plane domain contracts and errors."""
 
 from automation_tool.control_plane.domain.errors import DependencyUnavailable
+from automation_tool.control_plane.domain.installations import InstallationStatus
 from automation_tool.control_plane.domain.ports import DatabaseLifecycle
 from automation_tool.control_plane.domain.resource_ids import (
     ActionId,
@@ -21,6 +22,7 @@ __all__ = [
     "ExecutionAttemptId",
     "ExecutorId",
     "InstallationId",
+    "InstallationStatus",
     "InvalidResourceId",
     "ResourceId",
     "TaskId",

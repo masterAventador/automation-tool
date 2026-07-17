@@ -9,13 +9,14 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from automation_tool.control_plane.bootstrap.database import database_url_from_environment
+from automation_tool.control_plane.infrastructure.database import metadata
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = None
+target_metadata = metadata
 
 
 def run_migrations_offline() -> None:

@@ -441,6 +441,8 @@ Control Plane PostgreSQL 最小表：
 | `artifacts` | 本地/云端 Artifact 元数据、摘要和保留策略 |
 | `audit_events` | 安装实例、任务控制和安全动作 |
 
+`installations` 的首个迁移固定 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、从 1 开始的正数 revision、`created_at`/`updated_at` 和可空 `revoked_at`。数据库同时约束公钥长度、ID 版本、状态集合、状态与吊销时间一致、时间不倒退；更新使用 `id + revision` 条件并原子递增，旧 revision 不得覆盖新状态。
+
 约束：
 
 - 每个资源都绑定 `installation_id`；
