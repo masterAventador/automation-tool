@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` 已完成 Backend、Control Plane、系统 API 和数据库访问/迁移基线，产品功能尚未开始 |
+| 产品代码 | `🚧` 已完成 Backend、Control Plane、数据库基线、Tauri 壳和无登录工作台/诊断状态；RPA 功能尚未开始 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 6、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
@@ -124,7 +124,7 @@
 | F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ✅ 已完成 |
 | F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ✅ 已完成 |
 | F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ✅ 已完成 |
-| F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ⬜ 未开始 |
+| F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ✅ 已完成 |
 | F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ⬜ 未开始 |
 | F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ⬜ 未开始 |
 | F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ⬜ 未开始 |
@@ -638,9 +638,23 @@
 - 文档：同步根/Frontend README、前端架构和本路线图；占位图标明确不是最终品牌设计，生成 Schema 与 target 均保持 Git 忽略
 - 遗留：`F1-08` 实现无登录工作台启动/后端故障诊断；测试 Capability 与桌面 E2E 权限归 `F1-13`，正式签名安装包归 Wave 4
 
+### F1-08 App 无登录启动页
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：引入 Vitest/Testing Library 后先创建 ready、Control Plane unavailable/retry、未知异常脱敏三项组件测试；`pnpm test:unit` 为 3 项失败，现有页面只有“桌面工作台正在初始化”，缺少目标工作台和诊断状态
+- GREEN：6 项 Node 工程契约 + 3 项 React 组件测试通过；`pnpm install --frozen-lockfile`、peer 检查、ESLint、严格 TypeScript、Vite build、`cargo test --locked` 和 Clippy `-D warnings` 全部通过
+- 真实边界：`agent-browser` 在真实 Vite UI Harness 验证主导航、RPA 工作台、概览与空任务态并保存忽略目录截图；控制台无 JS/Ant Design 错误；真实 `pnpm tauri dev --no-watch` 启动新工作台，CoreGraphics 确认屏幕内 1254×785 内容窗口
+- 失败矩阵：覆盖启动检查中、ready、Control Plane unavailable、重试恢复、未知异常详情不泄漏，以及页面没有产品登录/注册按钮；BaseUrl 非法、Rust Transport 失败和真实 Health 返回由 F1-09/F1-10 接入后补充
+- QA 修复：首次浏览器检查发现 Ant Design 6 的 `Space.direction` 与 `Tag.bordered` 弃用警告；改用 `orientation`/`variant` 后以全新浏览器会话复查，控制台只剩 Vite 连接与 React DevTools 提示
+- 清理：两个 agent-browser 隔离会话、Vite 和真实 Tauri 均已关闭，Rust PID 与 1420 端口无残留；QA 截图仅在根 `.local/`，不进入 Git
+- 文档：同步根 README、前端架构和本路线图；明确当前 `StartupCheck` 是 UI 组合缝，不以 WebView 直连冒充 F1-10 正式 Transport
+- 遗留：`F1-09` 实现并校验 local/demo BaseUrl Profile；`F1-10` 把真实 Tauri Transport 健康结果注入当前启动状态机；当前禁用菜单随对应业务任务逐项启用
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-08`：实现无产品登录的工作台启动页，以及后端不可用时可恢复的诊断入口；
+1. `F1-09`：实现 local/demo BaseUrl Profile Schema，限制 loopback、HTTPS 和允许域名；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

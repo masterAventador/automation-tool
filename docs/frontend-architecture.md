@@ -72,6 +72,8 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 第一期没有认证路由守卫。启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页，而不是登录页。
 
+当前工作台壳已实现 ready、checking、unavailable 三态和安全重试。F1-08 通过注入式 `StartupCheck` 验证 UI 行为，默认组合只代表桌面壳可渲染，不声称后端在线；F1-09/F1-10 接入受控 BaseUrl 和正式 Rust Transport 后替换该组合点，禁止临时让 WebView 直接请求 Control Plane。
+
 ### 4.2 Feature 层
 
 第一期 Feature：

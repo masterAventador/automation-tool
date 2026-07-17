@@ -1,6 +1,14 @@
-import { App as AntDesignApp, ConfigProvider, Flex, Typography } from "antd";
+import { App as AntDesignApp, ConfigProvider } from "antd";
 
-export function App() {
+import { StartupGate } from "./StartupGate";
+import { desktopShellStartupCheck, type StartupCheck } from "./startup";
+import { WorkbenchShell } from "./WorkbenchShell";
+
+interface AppProps {
+  startupCheck?: StartupCheck;
+}
+
+export function App({ startupCheck = desktopShellStartupCheck }: AppProps) {
   return (
     <ConfigProvider
       theme={{
@@ -13,12 +21,9 @@ export function App() {
       }}
     >
       <AntDesignApp>
-        <main className="desktop-bootstrap">
-          <Flex vertical align="center" gap={8}>
-            <Typography.Title level={2}>自动化运营工具</Typography.Title>
-            <Typography.Text type="secondary">桌面工作台正在初始化</Typography.Text>
-          </Flex>
-        </main>
+        <StartupGate startupCheck={startupCheck}>
+          <WorkbenchShell />
+        </StartupGate>
       </AntDesignApp>
     </ConfigProvider>
   );
