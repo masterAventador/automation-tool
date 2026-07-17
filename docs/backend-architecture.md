@@ -269,6 +269,8 @@ MVP 不使用 AI 页面理解、stealth 或验证码识别。
 - `executor_id`：一次 Executor 安装/版本实例；
 - `connection_id`：一次在线连接。
 
+稳定业务资源 ID 使用规范小写 UUIDv4。Python 领域层分别使用 `InstallationId`、`ExecutorId`、`TaskId`、`ExecutionAttemptId`、`ActionId` 和 `ArtifactId` 不可变值对象；即使底层 UUID 相同，不同资源类型也不相等、不可互相解析。外部输入拒绝 nil、非 v4、大小写/空白/URN/无连字符等非规范形式，错误不得回显原始值。`connection_id`、协议 message/correlation ID 在各自任务中沿用同一规范并建立具体类型。
+
 私钥和长期设备凭据留在 Tauri 安全存储，不进入 React 或 Python 普通配置。
 
 ### 9.2 Demo 注册

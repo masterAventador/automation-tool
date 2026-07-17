@@ -44,7 +44,8 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1 工程闭环已完成，准备进入安装实例与跨进程协议；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1 工程闭环与六类稳定资源 ID 已完成，正在实现安装实例认证与跨进程协议；RPA 功能尚未开始 |
+| 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
@@ -143,7 +144,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| I2-01 | 稳定资源 ID | installation/executor/task/attempt/action/artifact ID 类型与非法值测试 | F1-05 | ⬜ 未开始 |
+| I2-01 | 稳定资源 ID | installation/executor/task/attempt/action/artifact ID 类型与非法值测试 | F1-05 | ✅ 已完成 |
 | I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ⬜ 未开始 |
 | I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ⬜ 未开始 |
 | I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ⬜ 未开始 |
@@ -740,10 +741,23 @@
 - 文档：同步根/Frontend README 和本路线图；不新增重复 CI 文档
 - 遗留：正式签名、notarization、安装包上传和云端部署属于后续发布/Demo 任务，不在验证型 CI 中提前实现
 
+### I2-01 稳定资源 ID
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建六类资源 ID 的生成、规范解析、类型隔离、不可变和非法值矩阵测试；执行 `uv run pytest tests/unit/control_plane/domain/test_resource_ids.py -q`，收集阶段因 `ActionId` 等领域类型尚未公开而失败
+- GREEN：89 项资源 ID 目标测试、117 项 Backend 全量测试通过，总覆盖率 100%；`uv run ruff format --check .`、`uv run ruff check .` 和严格 `uv run mypy` 全部通过
+- 真实边界：Python 3.12.13 领域层使用不可变 UUIDv4 值对象；规范外部文本固定为小写带连字符形式；本任务不创建数据库表、不改变 OpenAPI，也不启动 Control Plane、Executor 或桌面 App
+- 失败矩阵：覆盖六类独立类型、随机生成、字符串/UUID/同类型回放、跨类型拒绝、nil、UUIDv1、畸形、大小写、首尾空白、无连字符、花括号、URN、非字符串类型、直接构造绕过、不可变和错误值不回显
+- 清理：纯单元与静态检查未启动服务、数据库、容器、浏览器或端口；测试和覆盖缓存保持 Git 忽略
+- 文档：同步根/Backend README、后端架构的稳定 ID 规范、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：`connection_id`、message/correlation/idempotency ID 随 I2-10/I2-13 的协议与连接语义建立具体类型；I2-02 使用 `InstallationId` 建表并验证真实 PostgreSQL
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-01`：建立 installation/executor/task/attempt/action/artifact 稳定资源 ID 与非法值测试；
-2. `I2-02`：建立 Installation 表、公钥、状态、revision、吊销迁移和真实 PostgreSQL 测试；
+1. `I2-02`：建立 Installation 表、公钥、状态、revision、吊销迁移和真实 PostgreSQL 测试；
+2. `I2-03`：建立限时、限环境、限用途的 Demo Bootstrap 模型；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。
