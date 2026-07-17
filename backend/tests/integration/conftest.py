@@ -4,17 +4,40 @@ import socket
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPOSITORY_ROOT / "compose.yaml"
+BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+
+
+class AlembicRunner(Protocol):
+    def __call__(self, database_url: str, *arguments: str) -> None: ...
 
 
 def unused_loopback_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+@pytest.fixture
+def alembic_runner() -> AlembicRunner:
+    def run(database_url: str, *arguments: str) -> None:
+        environment = os.environ.copy()
+        environment["AUTOMATION_TOOL_DATABASE_URL"] = database_url
+        subprocess.run(
+            ["alembic", *arguments],
+            check=True,
+            capture_output=True,
+            cwd=BACKEND_ROOT,
+            env=environment,
+            text=True,
+        )
+
+    return run
 
 
 @pytest.fixture(scope="session")

@@ -47,7 +47,8 @@
 | 产品代码 | `🚧` Wave 1 工程闭环与六类稳定资源 ID 已完成，正在实现安装实例认证与跨进程协议；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
-| 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
+| 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
+| Installation 持久化 | `✅` 32 字节公钥、active/revoked、revision CAS、吊销时间、唯一性和时间一致性约束已在 PostgreSQL 18.4 验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
@@ -145,7 +146,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | I2-01 | 稳定资源 ID | installation/executor/task/attempt/action/artifact ID 类型与非法值测试 | F1-05 | ✅ 已完成 |
-| I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ⬜ 未开始 |
+| I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ✅ 已完成 |
 | I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ⬜ 未开始 |
 | I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ⬜ 未开始 |
 | I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ⬜ 未开始 |
@@ -754,10 +755,23 @@
 - 文档：同步根/Backend README、后端架构的稳定 ID 规范、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：`connection_id`、message/correlation/idempotency ID 随 I2-10/I2-13 的协议与连接语义建立具体类型；I2-02 使用 `InstallationId` 建表并验证真实 PostgreSQL
 
+### I2-02 Installation 表
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增真实迁移、默认状态、revision CAS、吊销、非法状态和唯一约束测试；执行 `uv run pytest tests/integration/test_installation_schema.py -q`，收集阶段因 `InstallationStatus` 尚未公开而失败
+- GREEN：4 项 Installation 真实 PostgreSQL 测试、121 项 Backend 全量测试通过，总覆盖率 100%；迁移升级到 `20260718_0002`、`alembic check` 无漂移、降级到 `20260718_0001` 后表被删除并可重新升级；Ruff 格式/检查与严格 Mypy 全部通过
+- 真实边界：SQLAlchemy 2.0.51 + asyncpg 0.31.0 + Alembic 1.18.5 连接官方 PostgreSQL 18.4 容器；真实事务验证 active 默认值、32 字节公钥、revision 从 1 原子递增到 2、旧 revision 更新零命中以及 revoked 状态持久化
+- 失败矩阵：数据库拒绝 UUIDv1、31 字节公钥、未知状态、revision 0、active 带吊销时间、revoked 缺吊销时间、更新时间/吊销时间早于创建时间、重复 ID 和重复设备公钥；PostgreSQL 18 的额外 NOT NULL 约束不替代显式业务约束断言
+- 清理：每轮测试使用随机 loopback 端口、随机密码和隔离 Compose project；结束后测试容器、网络、卷和端口自动删除，不影响开发库与用户现有 5432 隧道
+- 文档：同步根/Backend README、后端架构的数据约束、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：I2-03 建立只可注册的 Demo Bootstrap 模型；Installation 仓储和注册 API 分别随 I2-05/I2-06 接入，不在本任务提前开放业务路由
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-02`：建立 Installation 表、公钥、状态、revision、吊销迁移和真实 PostgreSQL 测试；
-2. `I2-03`：建立限时、限环境、限用途的 Demo Bootstrap 模型；
+1. `I2-03`：建立限时、限环境、限用途的 Demo Bootstrap 模型；
+2. `I2-04`：在 Tauri 首启生成 Ed25519 设备密钥且私钥不进入 React/普通文件；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。

@@ -1,47 +1,39 @@
-import os
-import subprocess
-from pathlib import Path
-
 import pytest
+from conftest import AlembicRunner
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.infrastructure.database import Database
 
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-BASELINE_REVISION = "20260718_0001"
-
-
-def run_alembic(database_url: str, *arguments: str) -> None:
-    environment = os.environ.copy()
-    environment["AUTOMATION_TOOL_DATABASE_URL"] = database_url
-    subprocess.run(
-        ["alembic", *arguments],
-        check=True,
-        capture_output=True,
-        cwd=BACKEND_ROOT,
-        env=environment,
-        text=True,
-    )
+HEAD_REVISION = "20260718_0002"
 
 
 @pytest.mark.asyncio
-async def test_empty_database_upgrades_and_rolls_back(postgresql_url: str) -> None:
-    run_alembic(postgresql_url, "upgrade", "head")
+async def test_empty_database_upgrades_and_rolls_back(
+    postgresql_url: str, alembic_runner: AlembicRunner
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
     try:
         async with database.session() as session:
             revision = await session.scalar(text("select version_num from alembic_version"))
             database_name = await session.scalar(text("select current_database()"))
-        assert revision == BASELINE_REVISION
+        assert revision == HEAD_REVISION
         assert database_name == "automation_tool_test"
 
-        run_alembic(postgresql_url, "downgrade", "base")
+        alembic_runner(postgresql_url, "downgrade", "base")
 
         async with database.session() as session:
             remaining = await session.scalar(text("select count(*) from alembic_version"))
         assert remaining == 0
+
+        alembic_runner(postgresql_url, "upgrade", "head")
+        async with database.session() as session:
+            restored_revision = await session.scalar(
+                text("select version_num from alembic_version")
+            )
+        assert restored_revision == HEAD_REVISION
     finally:
         await database.close()
 
