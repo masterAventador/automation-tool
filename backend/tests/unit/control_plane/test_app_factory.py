@@ -1,0 +1,158 @@
+from collections.abc import Callable
+from uuid import UUID
+
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from httpx2 import Response
+
+from automation_tool.control_plane import create_app
+from automation_tool.control_plane.api.errors import AppError, register_error_handlers
+
+
+def assert_error_response(
+    response: Response,
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    retryable: bool = False,
+) -> None:
+    assert response.status_code == status_code
+    assert set(response.json()) == {"error"}
+    error = response.json()["error"]
+    assert error["code"] == code
+    assert error["message"] == message
+    assert error["retryable"] is retryable
+    assert UUID(error["requestId"])
+    assert response.headers["x-request-id"] == error["requestId"]
+
+
+def app_with_failing_route(error_factory: Callable[[], Exception]) -> FastAPI:
+    app = create_app()
+
+    async def fail() -> None:
+        raise error_factory()
+
+    app.add_api_route("/failure", fail, methods=["GET"])
+    return app
+
+
+def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
+    first = create_app()
+    second = create_app()
+
+    assert first is not second
+    assert first.state.lifecycle_state == "created"
+    assert second.state.lifecycle_state == "created"
+
+    with TestClient(first):
+        assert first.state.lifecycle_state == "running"
+        assert second.state.lifecycle_state == "created"
+
+    assert first.state.lifecycle_state == "stopped"
+
+
+def test_application_error_uses_the_public_structured_envelope() -> None:
+    app = app_with_failing_route(
+        lambda: AppError(
+            status_code=409,
+            code="conflict",
+            message="Task conflicts",
+            retryable=True,
+        )
+    )
+
+    response = TestClient(app).get("/failure")
+
+    assert_error_response(
+        response,
+        status_code=409,
+        code="conflict",
+        message="Task conflicts",
+        retryable=True,
+    )
+
+
+def test_framework_errors_are_normalized_without_reflecting_invalid_input() -> None:
+    app = create_app()
+
+    async def accepts_count(count: int) -> dict[str, int]:
+        return {"count": count}
+
+    async def forbidden() -> None:
+        raise HTTPException(status_code=403, detail="private policy detail")
+
+    app.add_api_route("/validated", accepts_count, methods=["GET"])
+    app.add_api_route("/forbidden", forbidden, methods=["GET"])
+
+    not_found = TestClient(app).get("/missing")
+    invalid = TestClient(app).get("/validated", params={"count": "private-invalid-value"})
+    forbidden_response = TestClient(app).get("/forbidden")
+
+    assert_error_response(
+        not_found,
+        status_code=404,
+        code="not_found",
+        message="Resource not found",
+    )
+    assert_error_response(
+        invalid,
+        status_code=422,
+        code="validation",
+        message="Request validation failed",
+    )
+    assert "private-invalid-value" not in invalid.text
+    assert_error_response(
+        forbidden_response,
+        status_code=403,
+        code="request_rejected",
+        message="Request failed",
+    )
+    assert "private policy detail" not in forbidden_response.text
+
+
+def test_unhandled_errors_fail_closed_without_leaking_exception_text() -> None:
+    app = app_with_failing_route(lambda: RuntimeError("password=private"))
+
+    response = TestClient(app, raise_server_exceptions=False).get("/failure")
+
+    assert_error_response(
+        response,
+        status_code=500,
+        code="internal",
+        message="Internal server error",
+    )
+    assert "private" not in response.text
+
+
+def test_valid_request_id_is_propagated_and_invalid_value_is_replaced() -> None:
+    app = create_app()
+    client = TestClient(app)
+    oversized_request_id = "x" * 129
+
+    accepted = client.get("/missing", headers={"x-request-id": "demo-request-42"})
+    replaced = client.get("/missing", headers={"x-request-id": oversized_request_id})
+
+    assert accepted.headers["x-request-id"] == "demo-request-42"
+    assert accepted.json()["error"]["requestId"] == "demo-request-42"
+    assert replaced.headers["x-request-id"] != oversized_request_id
+    assert UUID(replaced.headers["x-request-id"])
+
+
+def test_error_handler_generates_a_request_id_when_context_middleware_is_absent() -> None:
+    app = FastAPI()
+    register_error_handlers(app)
+
+    async def fail() -> None:
+        raise AppError(status_code=409, code="conflict", message="Conflict")
+
+    app.add_api_route("/failure", fail, methods=["GET"])
+
+    response = TestClient(app).get("/failure")
+
+    assert_error_response(
+        response,
+        status_code=409,
+        code="conflict",
+        message="Conflict",
+    )

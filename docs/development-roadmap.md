@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` 已完成 Backend 包基线，Control Plane 与产品功能尚未开始 |
+| 产品代码 | `🚧` 已完成 Backend 包和 Control Plane 应用工厂基线，产品功能尚未开始 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -114,7 +114,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | F1-01 | 初始化 Backend 包 | `backend/pyproject.toml`、src layout、uv lock、pytest/Ruff/类型检查最小配置 | R0-13 | ✅ 已完成 |
-| F1-02 | 初始化 Control Plane | FastAPI app factory、lifespan、结构化错误；失败测试先行 | F1-01 | ⬜ 未开始 |
+| F1-02 | 初始化 Control Plane | FastAPI app factory、lifespan、结构化错误；失败测试先行 | F1-01 | ✅ 已完成 |
 | F1-03 | Health/Version API | `/health`、`/version`、协议兼容范围和契约测试 | F1-02 | ⬜ 未开始 |
 | F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ⬜ 未开始 |
 | F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ⬜ 未开始 |
@@ -555,9 +555,22 @@
 - 文档：新增 `backend/README.md`，同步根 README、本路线图状态和当前下一步
 - 遗留：FastAPI、应用工厂、lifespan 和结构化错误归 `F1-02`
 
+### F1-02 初始化 Control Plane
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建应用工厂和错误边界测试，执行 `uv run pytest tests/unit/control_plane/test_app_factory.py -q`，收集阶段因 `ModuleNotFoundError: automation_tool.control_plane` 失败
+- GREEN：FastAPI 0.139.2、Pydantic 2.13.4、Starlette 1.3.1 与 httpx2 2.7.0 锁定；7 项 Backend 测试通过、总覆盖率 100%；`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 全部通过且无弃用警告
+- 真实边界：使用真实 ASGI lifespan 和 TestClient 验证每个 app 实例隔离、startup/shutdown 状态；本任务不绑定端口、不连接数据库、不部署服务
+- 失败矩阵：覆盖业务异常、404、其他 HTTP 异常、请求校验、未知异常、私密输入/异常不回显、请求 ID 允许字符/长度和无中间件回退；错误信封固定包含 code、message、requestId、retryable
+- 清理：测试客户端均退出 lifespan；无残留端口或进程；虚拟环境与缓存位于忽略路径
+- 文档：同步 Backend/根 README、后端架构稳定错误类别、本路线图状态和当前下一步
+- 遗留：Health/Version 路由、协议兼容范围和服务器入口归 `F1-03`
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-02`：初始化 FastAPI Control Plane、应用工厂、lifespan 和结构化错误；
+1. `F1-03`：实现 Health/Version API、协议兼容范围和契约测试；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

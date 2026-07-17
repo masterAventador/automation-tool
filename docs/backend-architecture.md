@@ -541,6 +541,8 @@ P2 内容素材和成片需要云端共享时再启用对象存储，继续使�
 
 ```text
 validation
+not_found
+request_rejected
 installation_unauthorized
 executor_offline
 protocol_mismatch
