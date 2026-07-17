@@ -168,6 +168,8 @@ interface PlatformAdapter {
 - 环境切换由构建/运行 Profile 完成，禁止在 Feature 中判断环境；
 - Demo 和 local 使用相同 API 版本、OpenAPI 和业务行为。
 
+当前 `src/schemas/base-url-profile.ts` 是 UI/配置侧的运行时 Schema：local 只接受无凭据、无路径的精确 `http://127.0.0.1:8765`；demo 只接受无凭据、无路径、无非标准端口的 HTTPS origin，并与构建提供的主机允许列表做规范化后精确匹配。任何非法输入只返回固定配置错误，不回显 URL 内容。Rust Transport 在 F1-10 仍须独立执行同等或更强校验，不能因为 React 已校验就信任页面输入。
+
 ### 5.2 Transport
 
 正式 Tauri 使用 Rust `ControlPlaneTransport`：

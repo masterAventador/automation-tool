@@ -125,7 +125,7 @@
 | F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ✅ 已完成 |
 | F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ✅ 已完成 |
 | F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ✅ 已完成 |
-| F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ⬜ 未开始 |
+| F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ✅ 已完成 |
 | F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ⬜ 未开始 |
 | F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ⬜ 未开始 |
 | F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ⬜ 未开始 |
@@ -652,9 +652,22 @@
 - 文档：同步根 README、前端架构和本路线图；明确当前 `StartupCheck` 是 UI 组合缝，不以 WebView 直连冒充 F1-10 正式 Transport
 - 遗留：`F1-09` 实现并校验 local/demo BaseUrl Profile；`F1-10` 把真实 Tauri Transport 健康结果注入当前启动状态机；当前禁用菜单随对应业务任务逐项启用
 
+### F1-09 BaseUrl Profile
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建 local/demo 正常值、规范化和绕过矩阵测试，执行 `pnpm test:unit -- src/schemas/base-url-profile.test.ts`，收集阶段因 `src/schemas/base-url-profile.ts` 不存在失败
+- GREEN：6 项 Node 工程契约 + 20 项 Vitest 组件/Schema 测试通过；`pnpm install --frozen-lockfile`、peer 检查、ESLint、严格 TypeScript 和 Vite build 全部通过；Zod 4.4.3 作为直接运行依赖锁定
+- 真实边界：使用运行时 WHATWG URL 解析而非字符串前缀判断；local 规范化为精确 `http://127.0.0.1:8765`，demo 规范化为允许列表中的 HTTPS origin；本任务不发起网络请求
+- 失败矩阵：拒绝 localhost、错端口、local HTTPS、路径、URL 凭据、demo HTTP、相似/后缀域名、`user@host` 欺骗、8443、路径、query、hash、未知 production Profile 和额外字段；固定错误不泄露私密 URL
+- 清理：纯单元/构建任务未启动 App、浏览器或服务，无端口和进程残留；pnpm 缓存与生成 dist 保持 Git 忽略
+- 文档：同步根 README、前端架构和本路线图；明确 UI Schema 不是 Rust 信任依据，F1-10 必须在原生 Transport 边界再次校验
+- 遗留：demo 的真实允许域名在部署任务确定后通过受控构建配置提供；`F1-10` 实现 Transport 契约、正式 Tauri stub 和测试 Harness 边界
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-09`：实现 local/demo BaseUrl Profile Schema，限制 loopback、HTTPS 和允许域名；
+1. `F1-10`：定义 ControlPlaneTransport 契约、正式 Tauri stub 与测试 Harness 实现边界；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

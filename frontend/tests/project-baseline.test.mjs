@@ -14,7 +14,12 @@ test("desktop frontend owns one private pnpm package with the required stack", a
   assert.equal(packageJson.name, "automation-tool-desktop");
   assert.equal(packageJson.private, true);
   assert.match(packageJson.packageManager, /^pnpm@\d+\.\d+\.\d+$/);
-  assert.deepEqual(Object.keys(packageJson.dependencies).sort(), ["antd", "react", "react-dom"]);
+  assert.deepEqual(Object.keys(packageJson.dependencies).sort(), [
+    "antd",
+    "react",
+    "react-dom",
+    "zod",
+  ]);
 
   for (const dependency of ["@vitejs/plugin-react", "typescript", "vite"]) {
     assert.equal(typeof packageJson.devDependencies[dependency], "string");
