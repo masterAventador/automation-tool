@@ -1,0 +1,56 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Project runtime data
+.local/
+browser-profiles/
+artifacts/
+diagnostics/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend / Tauri
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/src-tauri/target/
+frontend/src-tauri/binaries/
+
+# Python
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+backend/.coverage
+backend/htmlcov/
+backend/build/
+backend/dist/
+backend/*.spec.bak
+__pycache__/
+*.py[cod]
+
+# Rust / tooling
+target/
+.idea/
+.vscode/
+*.swp
+*~
