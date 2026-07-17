@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 1 工程骨架与开发闭环
+> 当前阶段：Wave 2 安装实例认证与跨进程协议
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,13 +44,14 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` 已完成 Backend、Control Plane、数据库基线、Tauri 壳和无登录工作台/诊断状态；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1 工程闭环已完成，准备进入安装实例与跨进程协议；RPA 功能尚未开始 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
+| 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -132,7 +133,7 @@
 | F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ✅ 已完成 |
 | F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ✅ 已完成 |
 | F1-13 | Tauri 四层测试基线 | Vitest、Playwright、Rust、WebdriverIO 命令和最小绿测 | F1-07,F1-12 | ✅ 已完成 |
-| F1-14 | CI 基线 | Backend、Frontend、Rust 分层检查；macOS/Windows 桌面骨架 | F1-05,F1-13 | ⬜ 未开始 |
+| F1-14 | CI 基线 | Backend、Frontend、Rust 分层检查；macOS/Windows 桌面骨架 | F1-05,F1-13 | ✅ 已完成 |
 
 ## 7. Wave 2：安装实例认证与跨进程协议
 
@@ -724,9 +725,25 @@
 - 文档：同步根/Frontend README、前端架构和本路线图，明确四层证据边界、测试构建隔离与上游依赖 workaround
 - 遗留：F1-14 将四层命令接入 Backend/Frontend/Rust CI 和 macOS/Windows 桌面骨架；后续每个原生能力任务必须扩充真实 Tauri E2E
 
+### F1-14 CI 基线
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建 CI 契约测试，执行 `node --test tests/ci-baseline.test.mjs`，因两个 workflow 均不存在产生 2 项目标失败；补充 Linux/Tauri 依赖断言后又准确捕获 `libwebkit2gtk-4.1-dev` 缺失
+- GREEN：2 项 CI 契约、14 项全部 Node 契约、25 项 Vitest、3 项 Playwright、28 项 Backend 与 4 项 Rust 测试通过，Backend 覆盖率 100%；冻结安装、peer、OpenAPI 漂移、Ruff、Mypy、ESLint、严格 TypeScript、生产边界、Rustfmt 和两种 Cargo 特性 Clippy 全部通过；`actionlint 1.7.12` 对两个 workflow 零错误
+- 真实边界：GitHub Hosted `ubuntu-latest` 分别执行 Backend、Frontend、Rust 门禁；`macos-latest` 与 `windows-latest` 均构建无测试驱动的 production debug binary，再运行 embedded WebdriverIO 真实 Tauri 冒烟；工作流不发布、不部署、不上传构建产物
+- 跨平台修复：首次 Windows Hosted Runner 在 `pnpm check:api` 暴露 Node 26 不能直接 `spawnSync("pnpm.cmd")` 且失败结果无 `stderr`；改为用 `process.execPath` 直接运行锁定包的官方 CLI，并从包根解析真实入口、提供固定失败消息。第二轮进一步暴露 Git checkout/生成器的 CRLF/LF 差异；新增纯函数测试，把生成、比较和写回统一为 LF，不放宽真实内容漂移。第三轮在真实 Tauri 冒烟阶段暴露 WebView2 与预装 `msedgedriver` 版本不匹配；按 `@wdio/tauri-service` 的 Windows 官方策略开启匹配驱动自动下载，仅写入 Runner 临时缓存，不安装外部 `tauri-driver`、不进入生产包
+- 失败矩阵：覆盖工作流缺失、职责混跑、Action 非完整 SHA、可读版本注释缺失、write 权限、secret、发布/部署步骤、Linux/Tauri 系统依赖、桌面矩阵缺平台、fail-fast 误停和生产测试边界未复原；业务失败矩阵不适用于纯 CI 基线
+- 工具：通过 Homebrew 全局安装并保留 `actionlint 1.7.12`，其全局依赖 `shellcheck 0.11.0` 同时保留供以后工作流检查；没有创建项目内重复副本
+- 清理：本地测试自动关闭 PostgreSQL 隔离容器、Playwright/Vite 与 Rust 测试进程；无端口、容器或桌面 App 残留，缓存和构建产物保持 Git 忽略
+- 文档：同步根/Frontend README 和本路线图；不新增重复 CI 文档
+- 遗留：正式签名、notarization、安装包上传和云端部署属于后续发布/Demo 任务，不在验证型 CI 中提前实现
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-14`：建立 Backend、Frontend、Rust 分层 CI，以及 macOS/Windows 桌面构建骨架；
-2. 完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。
+1. `I2-01`：建立 installation/executor/task/attempt/action/artifact 稳定资源 ID 与非法值测试；
+2. `I2-02`：建立 Installation 表、公钥、状态、revision、吊销迁移和真实 PostgreSQL 测试；
+3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。
