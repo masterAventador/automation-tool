@@ -46,7 +46,7 @@
 | 任务级路线图 | `✅` 本文件已建立 |
 | 产品代码 | `⬜` 尚未开始 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
-| GitHub 私有仓库 | `⛔` `gh auth status` 显示当前 `masterAventador` token 无效；重新认证后创建 |
+| GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本地/云端服务 | `⬜` 未启动、未部署 |
 
 ## 4. 全局完成门禁
@@ -100,7 +100,7 @@
 | R0-08 | 建立任务级路线图 | 本文件覆盖 MVP、后续 RPA、内容和 AI 的任务及状态 | R0-07 | ✅ 已完成 |
 | R0-09 | 建立仓库入口与忽略规则 | README、`.gitignore`、`.editorconfig`；本机数据不进入 Git | R0-06 | ✅ 已完成 |
 | R0-10 | 初始化本地 Git | `main` 分支、首个文档提交、工作树干净 | R0-09 | ✅ 已完成 |
-| R0-11 | 创建 GitHub 私有仓库 | `automation-tool` 为 private，remote 正确，首个提交推送成功 | R0-10 | ⛔ gh token 无效 |
+| R0-11 | 创建 GitHub 私有仓库 | `automation-tool` 为 private，remote 正确，首个提交推送成功 | R0-10 | ✅ 已完成 |
 | R0-12 | 旧代码复用审计 | 对 `local_executor.rs`、`sidecar_package.rs`、`browser_session.rs` 形成逐模块迁移清单 | R0-10 | ⬜ 未开始 |
 | R0-13 | 全局工具链体检 | 记录 Rust、Node/pnpm、uv/Python、Docker、Chrome/Edge、签名工具版本 | R0-10 | ⬜ 未开始 |
 
@@ -500,13 +500,25 @@
 - 失败矩阵：核对本机数据、凭据、数据库、浏览器 Profile、构建产物和测试产物忽略规则
 - 清理：`.DS_Store` 保留在本机但不进入 Git；没有启动进程、容器或浏览器
 - 文档：README、项目规则、产品/架构文档和本开发台账纳入首个基线提交
-- 遗留：GitHub 远端因当前 `gh` token 无效，归 `R0-11` 处理
+- 遗留：无；原 GitHub 认证阻塞已由 `R0-11` 解决
+
+### R0-11 创建 GitHub 私有仓库
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：`gh auth status` 报告 `masterAventador` 的旧 token 无效；只读查询确认同名仓库不存在
+- GREEN：通过 GitHub Device Flow 重新认证；`gh repo create automation-tool --private --source=. --remote=origin --push` 创建并首次推送成功
+- 真实边界：`gh repo view masterAventador/automation-tool --json nameWithOwner,visibility,url,defaultBranchRef` 返回 `visibility: PRIVATE`、默认分支 `main`
+- 失败矩阵：确认没有覆盖同名仓库；远端可见性不是 `PUBLIC`；`origin` 的 fetch/push 地址均为预期仓库
+- 清理：未创建临时仓库、分支或工作树；未在文档或命令输出中写入访问令牌
+- 文档：同步更新本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：无
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `R0-11`：修复 `gh` 认证，创建并推送 private `automation-tool`；
-2. `R0-12`：审计旧项目三个可复用 Rust 模块；
-3. `R0-13`：工具链体检；
-4. `F1-01`：从 Backend 工程和测试基线开始第一项产品代码任务。
+1. `R0-12`：审计旧项目三个可复用 Rust 模块；
+2. `R0-13`：工具链体检；
+3. `F1-01`：从 Backend 工程和测试基线开始第一项产品代码任务。
