@@ -1,0 +1,61 @@
+name: automation-tool-local
+
+services:
+  postgres-dev:
+    image: postgres:18.4-bookworm
+    restart: unless-stopped
+    init: true
+    shm_size: 128mb
+    environment:
+      POSTGRES_USER: ${AUTOMATION_TOOL_DEV_DB_USER:?set AUTOMATION_TOOL_DEV_DB_USER}
+      POSTGRES_PASSWORD: ${AUTOMATION_TOOL_DEV_DB_PASSWORD:?set AUTOMATION_TOOL_DEV_DB_PASSWORD}
+      POSTGRES_DB: ${AUTOMATION_TOOL_DEV_DB_NAME:?set AUTOMATION_TOOL_DEV_DB_NAME}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - target: 5432
+        published: ${AUTOMATION_TOOL_DEV_DB_PORT:-5432}
+        host_ip: 127.0.0.1
+        protocol: tcp
+        mode: host
+    volumes:
+      - type: volume
+        source: postgres-dev-data
+        target: /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 30s
+
+  postgres-test:
+    image: postgres:18.4-bookworm
+    restart: "no"
+    init: true
+    shm_size: 128mb
+    environment:
+      POSTGRES_USER: ${AUTOMATION_TOOL_TEST_DB_USER:?set AUTOMATION_TOOL_TEST_DB_USER}
+      POSTGRES_PASSWORD: ${AUTOMATION_TOOL_TEST_DB_PASSWORD:?set AUTOMATION_TOOL_TEST_DB_PASSWORD}
+      POSTGRES_DB: ${AUTOMATION_TOOL_TEST_DB_NAME:?set AUTOMATION_TOOL_TEST_DB_NAME}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - target: 5432
+        published: ${AUTOMATION_TOOL_TEST_DB_PORT:-5433}
+        host_ip: 127.0.0.1
+        protocol: tcp
+        mode: host
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 30s
+
+volumes:
+  postgres-dev-data:

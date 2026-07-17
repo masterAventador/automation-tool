@@ -45,6 +45,7 @@
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
 | 产品代码 | `🚧` 已完成 Backend 包和 Control Plane 应用工厂基线，产品功能尚未开始 |
+| 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -116,7 +117,7 @@
 | F1-01 | 初始化 Backend 包 | `backend/pyproject.toml`、src layout、uv lock、pytest/Ruff/类型检查最小配置 | R0-13 | ✅ 已完成 |
 | F1-02 | 初始化 Control Plane | FastAPI app factory、lifespan、结构化错误；失败测试先行 | F1-01 | ✅ 已完成 |
 | F1-03 | Health/Version API | `/api/v1/health`、`/api/v1/version`、协议兼容范围和契约测试 | F1-02 | ✅ 已完成 |
-| F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ⬜ 未开始 |
+| F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ✅ 已完成 |
 | F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ⬜ 未开始 |
 | F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ⬜ 未开始 |
 | F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ⬜ 未开始 |
@@ -581,9 +582,22 @@
 - 文档：同步 Backend/根 README、前后端架构固定 local BaseUrl、本路线图状态和当前下一步
 - 遗留：数据库就绪状态在 `F1-05` 后接入 Health；`/api/v1/capabilities` 随稳定能力实现，不在本任务返回空壳
 
+### F1-04 PostgreSQL Compose
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建 Compose 契约测试，执行 `uv run pytest tests/integration/test_compose_contract.py -q`，因根目录 `compose.yaml` 和 `.env.example` 不存在产生 5 项失败
+- GREEN：18 项 Backend 测试通过、总覆盖率 100%；Compose 契约 5 项通过；`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 全部通过；真实 PostgreSQL 18.4 双容器均 healthy 并能查询各自 database/user
+- 真实边界：使用官方 `postgres:18.4-bookworm`；开发和测试服务具有不同用户、密码、数据库、loopback 端口和数据目录，开发库用命名卷、测试库用 tmpfs；测试时因 5432 被现有 SSH 隧道占用，使用隔离端口 55432/55433
+- 失败矩阵：覆盖凭据缺失时 Compose config 失败、无密码默认值、无 trust auth、镜像非 latest、健康检查、端口仅 loopback、开发/测试存储不共享和真实数据库身份隔离
+- 清理：隔离项目 `automation-tool-f104-validation` 的两个容器、网络和专用卷已 `down --volumes`；55432/55433 已释放；未终止或修改用户的 5432 SSH 隧道；PostgreSQL 镜像作为全局 Docker 缓存保留
+- 文档：新增根 `.env.example`/`compose.yaml`，同步 Backend/根 README、工程结构、本路线图状态和当前下一步
+- 遗留：SQLAlchemy async session、Alembic 和数据库连接失败模型归 `F1-05`
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-04`：建立 PostgreSQL Compose、健康检查和独立开发/测试数据库；
+1. `F1-05`：建立 SQLAlchemy async session、Alembic 和真实 PostgreSQL 升级/回滚基线；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

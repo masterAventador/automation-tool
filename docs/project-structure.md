@@ -48,6 +48,7 @@ automation-tool/
 ├── README.md
 ├── .editorconfig
 ├── .gitignore
+├── compose.yaml                   # 本地独立 PostgreSQL 开发库与测试库
 └── .env.example                   # 只放非敏感示例
 ```
 
