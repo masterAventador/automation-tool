@@ -12,10 +12,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "check:api": "node scripts/openapi.mjs --check",
+    "check:production-boundaries": "pnpm build && node scripts/check-production-boundaries.mjs",
     "generate:api": "node scripts/openapi.mjs",
     "lint": "eslint . --max-warnings 0",
     "tauri": "tauri",
     "test": "node --test tests/*.test.mjs && vitest run",
+    "test:e2e": "playwright test",
     "test:unit": "vitest run",
     "typecheck": "tsc -b --pretty false"
   },
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "2.11.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

@@ -12,11 +12,14 @@ export interface TestHarnessControlPlaneHandlers {
 }
 
 class TestHarnessControlPlaneTransport implements ControlPlaneTransport {
+  private readonly runtimeMarker = "automation-tool-test-harness-adapter";
+
   constructor(private readonly handlers: TestHarnessControlPlaneHandlers) {}
 
   async checkHealth(
     options: ControlPlaneRequestOptions = {},
   ): Promise<ControlPlaneHealth> {
+    void this.runtimeMarker;
     const handler = this.handlers.checkHealth;
     if (handler === undefined) {
       throw new ControlPlaneTransportError("operation_unavailable", false);

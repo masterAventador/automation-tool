@@ -50,6 +50,7 @@
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
+| UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -129,7 +130,7 @@
 | F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ✅ 已完成 |
 | F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ✅ 已完成 |
 | F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ✅ 已完成 |
-| F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ⬜ 未开始 |
+| F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ✅ 已完成 |
 | F1-13 | Tauri 四层测试基线 | Vitest、Playwright、Rust、WebdriverIO 命令和最小绿测 | F1-07,F1-12 | ⬜ 未开始 |
 | F1-14 | CI 基线 | Backend、Frontend、Rust 分层检查；macOS/Windows 桌面骨架 | F1-05,F1-13 | ⬜ 未开始 |
 
@@ -693,9 +694,24 @@
 - 文档：同步根/Backend/Frontend README、前端架构和本路线图；生成 TypeScript 明确禁止手改
 - 遗留：F1-12 建立 Playwright UI Harness 并证明正式构建不包含测试 Adapter；后续每个 API 任务都必须同步快照、DTO 和漂移测试
 
+### F1-12 UI Harness 基线
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建 available、unavailable、flaky 三条 Playwright 测试，执行 `pnpm test:e2e`；因 `harness.html` 不存在被 Vite 回退到正式页面，Harness 标记和两种故障状态缺失，3 项全部按目标失败并生成截图/视频/trace
+- GREEN：8 项 Node 工程/契约 + 25 项 Vitest + 3 项 Playwright Chromium 测试通过；冻结安装、peer、OpenAPI 漂移、ESLint、严格 TypeScript、生产构建与 `check:production-boundaries` 全部通过
+- 真实边界：Playwright 1.61.1 使用匹配 Chromium 149 在真实 `127.0.0.1:1420` Vite 页面点击重试；浏览器 console/pageerror 均为空；正式 dist 实际只有 `index.html`、一个 CSS 和一个 JS
+- 失败矩阵：覆盖 ready 工作台、服务不可用诊断、flaky 首次失败后真实点击重试恢复、无产品登录/注册、浏览器错误捕获、Harness 页面误入生产、测试 runtime/Adapter 标记误入生产；不宣称 Tauri IPC 或 RPA 通过
+- 扫描器回归：临时构造干净产物、`harness.html` 污染和 Adapter marker 污染，分别验证通过/失败，避免生产排除检查自身静默失效
+- 工具：锁定 `@playwright/test 1.61.1`；Chromium/Headless Shell 149 和 Playwright 私有 FFmpeg 缓存在用户级 `~/Library/Caches/ms-playwright` 供后续复用，不进入 PATH、不替换 Homebrew `ffmpeg-full`
+- 清理：Playwright 自动关闭浏览器和 Vite；复查 1420 无监听、无 Chrome Headless/Playwright driver 残留；失败证据位于已忽略 `frontend/test-results/`
+- 文档：同步根/Frontend README、前端架构和本路线图，持续声明 Harness 不是 Web 产品、生产入口或原生能力验收
+- 遗留：F1-13 建立 Vitest/Playwright/Rust/WebdriverIO 四层统一命令与最小绿测；后续 Feature 的 UI Harness 用例长期保留
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-12`：建立 Playwright UI Harness，并静态证明生产构建不包含测试 Adapter；
+1. `F1-13`：建立 Vitest、Playwright、Rust、WebdriverIO 四层桌面测试命令与最小绿测；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

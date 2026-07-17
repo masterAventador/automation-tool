@@ -187,6 +187,8 @@ interface PlatformAdapter {
 
 当前 F1-10 契约只暴露业务需要的 `checkHealth`，不接受 URL 或任意 operation。正式 `TauriControlPlaneTransport` 在 Rust 网络桥完成前固定返回可重试的安全 unavailable；测试 Harness 只委托显式注入的 health handler，缺失 handler 时 fail closed。所有底层异常进入启动页前收敛为 `unavailable`，不反射原始 message。F1-11 生成 DTO 后扩展 operation 类型，I2-09 才实现真实 Rust 网络调用。
 
+当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky 健康投影，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
+
 ### 5.3 无登录页面下的安装实例认证
 
 第一期没有产品用户账号和登录 UI，但 Demo 云端仍需认证：

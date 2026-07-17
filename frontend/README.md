@@ -9,6 +9,8 @@ pnpm lint
 pnpm typecheck
 pnpm build
 pnpm check:api
+pnpm test:e2e
+pnpm check:production-boundaries
 pnpm dev
 pnpm tauri dev
 ```
@@ -25,3 +27,5 @@ pnpm check:api
 ```
 
 `src/api/generated/control-plane.ts` 禁止手改。后端契约先由 FastAPI 导出快照，前端再生成并检查逐字漂移。
+
+`harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
