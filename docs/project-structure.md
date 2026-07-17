@@ -319,24 +319,84 @@ app-data/
 
 ## 10. 从 agent-platform 复用边界
 
-优先迁移并重新测试：
+### 10.1 审计基线和判定方式
 
-- `frontend/src-tauri/src/local_executor.rs` 的进程监管、超时、停止和限界日志思想；
-- `frontend/src-tauri/src/sidecar_package.rs` 的签名、摘要、防降级和原子安装思想；
-- `frontend/src-tauri/src/browser_session.rs` 的私有目录、Profile、登录状态和注销清理思想；
+R0-12 审计基于旧仓库 `/Users/aventador/code/agent-platform` 的提交
+`a01cfc9aa93e87e71b78b73eee3e07a3b9d31061`。只把旧代码视为经过验证的实现样本，不把它作为当前仓库的依赖、Git 子模块或运行时来源。
+
+迁移判定统一为：
+
+- **提取迁移**：保留失败语义和核心算法，在当前仓库先写失败测试后提取；
+- **按新契约重写**：旧实现解决的问题仍存在，但公开类型、协议或存储方式已经变化；
+- **删除**：与当前架构冲突，不得进入新仓库；
+- **延后**：不属于 MVP，只有路线图任务进入时才能重新评估。
+
+旧模块现有 Rust 测试结果为 35 项通过：`browser_session` 9 项、`local_executor` 14 项、`sidecar_security` 12 项。测试通过只证明旧仓库样本可参考，不替代新仓库的 RED/GREEN、macOS/Windows 和正式安装包验收。
+
+### 10.2 `local_executor.rs` 逐项清单
+
+| 旧能力 | 决策 | 当前项目落点 | 迁移要求 |
+| --- | --- | --- | --- |
+| Unix process group、Windows Job Object | 提取迁移 | `E4-09` | 保留整棵进程树终止、重复停止幂等和挂起调用清理测试；Windows 必须在真实打包产物复验 |
+| 生命周期互斥、单实例 Supervisor | 按新契约重写 | `E4-07` | 保留并发启动线性化；改名 `ExecutorManager`，不暴露任意子进程能力 |
+| 后台退出检测和最多两次重启 | 提取迁移 | `E4-08` | 重启预算进入显式配置；正常停止、版本不兼容、认证失败和风控停止都不得自动重启 |
+| 调用超时并终止不确定进程 | 提取迁移 | `E4-07`、`E4-09` | 使用 Executor v1 类型化消息；外部副作用超时必须进入 `OUTCOME_UNCERTAIN`，不能当普通失败重试 |
+| stderr 独立排空、脱敏和内存限界 | 提取迁移 | `E4-10` | 保留单行、行数、总字节上限；补设备凭据、平台 Cookie、URL 查询串和本机路径样例 |
+| 256-bit stdin 会话令牌、常量时间比较 | 提取迁移 | `E4-06` | 令牌只能经 stdin bootstrap 传递，不进入 argv、env、日志、错误或响应 |
+| 逐行 JSON stdio request/response | 按新契约重写 | `I2-10`～`I2-13`、`E4-02` | stdin 只做本机 bootstrap；任务、命令和事件使用带版本、ID、deadline、幂等键和序号的协议，Executor 主动连接 Control Plane |
+| `serde_json::Value` 任意请求 | 删除 | — | 必须换成三语言共享 fixtures 验证的判别联合，未知字段 fail closed |
+| `current_exe + --social-operations-sidecar` 自身分叉 | 删除 | — | 当前 Executor 是独立 Python/PyInstaller `onedir` 发布单元，由 Tauri 解析受信资源路径 |
+| 硬编码 `CAPABILITY_ID` 和通用 Tauri invoke | 删除 | — | React 只能调用 allowlist 后的 `PlatformAdapter`/ControlPlaneTransport 操作 |
+| `run_sidecar_io` 固定 ACK 假执行器 | 删除 | — | 无副作用联调统一使用 `T3-10 FakeExecutor`；不得混入正式 Executor |
+| 已验证字节再执行的 TOCTOU 防护思路 | 按新契约重写 | `E4-05`、`E4-07` | 适配 PyInstaller 目录包和平台签名；不能只验证入口单文件后信任其余目录 |
+
+### 10.3 `sidecar_package.rs` 逐项清单
+
+| 旧能力 | 决策 | 当前项目落点 | 迁移要求 |
+| --- | --- | --- | --- |
+| Ed25519 manifest 签名、SHA-256、大小、平台和架构绑定 | 提取迁移 | `E4-04`、`E4-05` | Manifest 增加协议版本、构建 ID、入口和目录文件清单；任何未知/缺失字段拒绝 |
+| 防版本回退 | 提取迁移 | `E4-05` | 使用明确的版本解析规则；已安装版本和 App 允许范围都参与判断 |
+| 私有目录、拒绝 symlink、原子 staging/replace | 提取迁移 | `E4-05` | 安装根必须来自 Tauri app data/resource；路径不能由 React 或服务端任意指定 |
+| 打开文件后的稳定 identity 检查 | 提取迁移 | `E4-05` | 覆盖验证后替换、目录成员替换和入口被调包；macOS/Windows 分别验证 |
+| 凭据、Cookie、URL 和私有路径脱敏规则 | 提取迁移 | `E4-10` | 与 Python Executor 使用同一脱敏 fixtures，避免两端结论漂移 |
+| `CrashRecoveryPolicy` | 移位迁移 | `E4-08` | 归入 Executor 监管模块，不留在包验证模块 |
+| HTTPS 下载、redirect allowlist、在线安装 | 延后 | MVP 之后单独立项 | MVP 的 Executor 随 App 安装包交付；没有明确更新威胁模型前不做在线 Sidecar 更新器 |
+| `reqwest::blocking` 下载器和远程 URL 输入 | 删除 | — | Tauri 不接受 React/Control Plane 下发的任意下载 URL |
+| 单文件名 `social-operations-sidecar` | 删除 | — | 改为平台相关 PyInstaller `onedir` manifest，不沿用旧产品命名 |
+| 自定义 `x.y.z` 字符串比较 | 按新契约重写 | `E4-05` | 用受维护的语义版本库或严格内部版本类型，并覆盖预发布/非法版本 |
+
+### 10.4 `browser_session.rs` 逐项清单
+
+| 旧能力 | 决策 | 当前项目落点 | 迁移要求 |
+| --- | --- | --- | --- |
+| App-owned `platform/UUID` Profile 目录 | 提取迁移 | `B5-05` | 根目录改为当前 App 标识；只创建路线图已经启用的平台，不预建五平台目录 |
+| UUID 规范化和路径逃逸拒绝 | 提取迁移 | `B5-05` | 使用 `profile_id`，不能用昵称、手机号或平台账号作为目录名 |
+| 祖先 symlink 防护和私有权限 | 提取迁移 | `B5-05` | 补目录竞争、权限修复失败和 Windows reparse point 测试 |
+| Profile 定向删除 | 按新契约重写 | `B5-14` | 先阻止新任务、停止关联运行并释放锁，再只删除目标 Profile；失败可诊断、可重试 |
+| `QrLoginSession` 状态机、revision 和 circuit open | 按新契约重写 | `B5-09`～`B5-12` | 状态来自真实页面检测并持久化到本机账本/Control Plane；风险、验证码必须人工恢复 |
+| 进程内 `HashMap` 账号和单 active account | 删除 | — | 账号/Profile 事实不能只在 Tauri 内存；并发由 Profile 锁和任务账本决定 |
+| `EncryptedCookieVault` 和 Cookie 导入导出 | 删除 | — | Playwright 持久 Profile 是会话唯一来源；Cookie 不复制到独立文件、不上传 Control Plane |
+| 普通文件 `.cookie-key` | 删除 | — | 不再单独保存 Cookie；其他设备私钥只允许进入系统安全存储 |
+| ChaCha20Poly1305 Cookie 文件格式 `SOC1` | 删除 | — | 与当前持久 Profile 方案重复，避免形成第二份登录态 |
+| Douyin/Xiaohongshu/Kuaishou/Wechat 等一次性枚举 | 按阶段重写 | `B5-01` 及后续平台任务 | MVP 只实现抖音 Adapter；新增平台必须有独立页面对象、契约和真实验收 |
+
+### 10.5 跨模块保留与明确排除
+
+继续保留并在对应任务重新实现：
+
 - `PlatformAdapter` 的业务隔离规则；
-- 四层 Tauri 测试体系；
-- 本地执行器协议的版本、幂等、截止时间、事件序号、人工接管和脱敏原则。
+- UI Harness、Rust 集成、Tauri E2E 和正式包审计四层测试体系；
+- 版本、幂等、截止时间、事件序号、人工接管、资源清理和脱敏原则。
 
-不直接迁移：
+明确不迁移：
 
 - 产品注册登录、企业、租户、RBAC 和 Entitlement；
-- 旧项目的多租户设备注册、Entitlement 和远程调度实现；当前项目按自己的安装实例协议实现最小设备认证；
+- 旧项目的多租户设备注册、远程调度和 `SocialOperationsRuntime` 聚合实现；
 - LangGraph、Deep Agents、RAGFlow、LiteLLM 和 AI 中台 Core；
 - 旧项目绑定的腾讯云/阿里云部署基线；
 - 依赖旧租户、审批或审计模型的业务 API。
 
-旧代码迁移不是复制粘贴：每个模块先提取当前产品需要的公开契约和失败测试，再删除旧方向依赖，最后在新仓库重新通过目标平台测试。
+实施顺序固定为：先在新仓库建立公开契约和失败测试，再提取最小实现，随后删除旧产品命名与依赖，最后通过当前项目的 macOS/Windows、真实 Control Plane 和正式安装包门禁。禁止直接复制三个旧源文件后再修改。
 
 ## 11. 禁止事项
 
