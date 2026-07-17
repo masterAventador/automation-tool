@@ -14,7 +14,10 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
+uv run automation-tool-export-openapi --output ../contracts/openapi/control-plane.v1.json --check
 ```
+
+后端 Pydantic/FastAPI 是跨端 DTO 的唯一来源。路由契约变化后先去掉 `--check` 重新导出快照，再到 `frontend/` 执行 `pnpm generate:api`；提交前两侧都必须通过各自漂移检查。
 
 先在仓库根目录启动开发数据库：
 

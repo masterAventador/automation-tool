@@ -119,6 +119,8 @@ features/
 - SSE/事件快照的合并与恢复；
 - Zod 校验关键边界。
 
+当前 FastAPI OpenAPI 3.1 快照固定在 `contracts/openapi/control-plane.v1.json`，系统 operationId 为 `getSystemHealth`、`getSystemVersion`。`frontend/scripts/openapi.mjs` 使用锁定的 `openapi-typescript` 从快照机械生成 `src/api/generated/control-plane.ts`，`--check` 在系统临时目录重新生成并逐字比较；生成文件禁止手改。
+
 业务组件只处理统一 `AppError`，不直接判断 Axios、Rust 或 FastAPI 的原始异常。
 
 ### 4.5 Platform 层

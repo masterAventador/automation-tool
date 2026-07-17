@@ -47,7 +47,7 @@ def _disable_caching(response: Response) -> None:
     response.headers["cache-control"] = "no-store"
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse, operation_id="getSystemHealth")
 async def health(request: Request, response: Response) -> HealthResponse:
     _disable_caching(response)
     database: DatabaseLifecycle | None = request.app.state.database
@@ -64,7 +64,7 @@ async def health(request: Request, response: Response) -> HealthResponse:
     return HealthResponse(version=__version__)
 
 
-@router.get("/version", response_model=VersionResponse)
+@router.get("/version", response_model=VersionResponse, operation_id="getSystemVersion")
 async def version(response: Response) -> VersionResponse:
     _disable_caching(response)
     return VersionResponse(

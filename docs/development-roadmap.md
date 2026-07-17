@@ -47,7 +47,7 @@
 | 产品代码 | `🚧` 已完成 Backend、Control Plane、数据库基线、Tauri 壳和无登录工作台/诊断状态；RPA 功能尚未开始 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
-| 桌面 UI 资产 | `✅` React 19、TypeScript 6、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
+| 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -128,7 +128,7 @@
 | F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ✅ 已完成 |
 | F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ✅ 已完成 |
 | F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ✅ 已完成 |
-| F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ⬜ 未开始 |
+| F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ✅ 已完成 |
 | F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ⬜ 未开始 |
 | F1-13 | Tauri 四层测试基线 | Vitest、Playwright、Rust、WebdriverIO 命令和最小绿测 | F1-07,F1-12 | ⬜ 未开始 |
 | F1-14 | CI 基线 | Backend、Frontend、Rust 分层检查；macOS/Windows 桌面骨架 | F1-05,F1-13 | ⬜ 未开始 |
@@ -679,9 +679,23 @@
 - 文档：同步根 README、前端架构和本路线图；明确测试 Harness 不是正式实现，正式 Rust 网络桥仍归 I2-09
 - 遗留：F1-11 用 OpenAPI 生成 DTO 后扩充强类型 operation；F1-12 静态证明生产构建不包含测试 Harness；I2-09 实现 Rust allowlist、凭据注入和真实健康调用
 
+### F1-11 OpenAPI 导出
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：后端先创建确定性导出/漂移/已提交快照测试，收集阶段因 `bootstrap.openapi` 不存在失败；前端 Node 契约测试因 `contracts/openapi/control-plane.v1.json` 不存在失败
+- GREEN：Backend 28 项测试通过、总覆盖率 100%；Frontend 7 项 Node 契约 + 25 项 Vitest 通过；后端 OpenAPI `--check`、前端 `pnpm check:api`、Ruff、Mypy、ESLint、严格 TypeScript、Vite build、uv/pnpm 锁检查全部通过
+- 真实边界：FastAPI 导出 OpenAPI 3.1，Health/Version 固定 operationId `getSystemHealth`/`getSystemVersion`；`openapi-typescript 7.13.0` 生成 DTO；两侧 check 均从当前来源重新渲染后逐字比较
+- 失败矩阵：覆盖无数据库环境仍可导出、连续渲染确定、输出目录创建、快照缺失/内容漂移、CLI 非零退出、前端快照/生成文件存在和 operationId 稳定；业务错误响应 Schema 随后续具体 API 补充
+- 工具链修正：`openapi-typescript 7.13.0` 官方 peer 仅支持 TypeScript 5.x，next 标签也不支持 TS6；为消除真实 peer 冲突，将 TypeScript 从 6.0.3 固定到共同支持的 5.9.3，peer 检查、全量类型与构建均通过
+- 清理：前端生成检查只使用 `mkdtemp` 创建的精确临时目录并在 finally 删除；无服务、浏览器、数据库或端口残留；快照与生成 DTO 作为版本化源码提交
+- 文档：同步根/Backend/Frontend README、前端架构和本路线图；生成 TypeScript 明确禁止手改
+- 遗留：F1-12 建立 Playwright UI Harness 并证明正式构建不包含测试 Adapter；后续每个 API 任务都必须同步快照、DTO 和漂移测试
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-11`：导出并锁定 OpenAPI 快照，建立漂移检查与前端 DTO 生成脚本；
+1. `F1-12`：建立 Playwright UI Harness，并静态证明生产构建不包含测试 Adapter；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

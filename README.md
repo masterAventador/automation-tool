@@ -51,5 +51,6 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用时有脱敏诊断与重试状态，页面不存在产品登录或注册入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已建立窄接口、固定公开错误、正式 Tauri unavailable stub 和显式 handler 测试 Harness；不暴露任意 URL 代理；
+- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已生成，后端/前端分别具备确定性漂移检查；
 - 业务 API、真实后端 Transport 和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。
