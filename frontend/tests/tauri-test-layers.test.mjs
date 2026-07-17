@@ -29,6 +29,7 @@ test("WebdriverIO uses the embedded driver against a real Tauri binary", async (
 
   assert.match(wdioConfig, /@wdio\/tauri-service/);
   assert.match(wdioConfig, /driverProvider:\s*["']embedded["']/);
+  assert.match(wdioConfig, /autoDownloadEdgeDriver:\s*true/);
   assert.match(wdioConfig, /src-tauri[\\/]target[\\/]debug/);
   assert.match(wdioConfig, /browserName:\s*["']tauri["']/);
   assert.match(desktopSpec, /RPA 运营工作台/);

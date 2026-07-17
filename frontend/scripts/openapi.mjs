@@ -4,18 +4,23 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { normalizeGeneratedText } from "./generated-text.mjs";
+
 const frontendRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const snapshot = join(frontendRoot, "../contracts/openapi/control-plane.v1.json");
 const output = join(frontendRoot, "src/api/generated/control-plane.ts");
 const check = process.argv.includes("--check");
-const pnpmExecutable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const openapiTypescriptRoot = dirname(
+  fileURLToPath(import.meta.resolve("openapi-typescript/package.json")),
+);
+const openapiTypescriptCli = join(openapiTypescriptRoot, "bin/cli.js");
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "automation-tool-openapi-"));
 const temporaryOutput = join(temporaryDirectory, "control-plane.ts");
 
 try {
   const generation = spawnSync(
-    pnpmExecutable,
-    ["exec", "openapi-typescript", snapshot, "--output", temporaryOutput],
+    process.execPath,
+    [openapiTypescriptCli, snapshot, "--output", temporaryOutput],
     {
       cwd: frontendRoot,
       encoding: "utf8",
@@ -24,14 +29,15 @@ try {
   );
 
   if (generation.status !== 0) {
-    process.stderr.write(generation.stderr);
+    const generationFailure = generation.stderr ?? "";
+    process.stderr.write(generationFailure || "OpenAPI generation failed\n");
     process.exitCode = generation.status ?? 1;
   } else {
-    const generated = await readFile(temporaryOutput, "utf8");
+    const generated = normalizeGeneratedText(await readFile(temporaryOutput, "utf8"));
     if (check) {
       let committed = "";
       try {
-        committed = await readFile(output, "utf8");
+        committed = normalizeGeneratedText(await readFile(output, "utf8"));
       } catch {
         // A missing generated file is ordinary drift and uses the same safe message.
       }
