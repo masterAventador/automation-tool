@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：规划与仓库初始化
+> 当前阶段：Wave 1 工程骨架与开发闭环
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,8 +44,9 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` 已完成 Backend 包和 Control Plane 应用工厂基线，产品功能尚未开始 |
+| 产品代码 | `🚧` 已完成 Backend、Control Plane、系统 API 和数据库访问/迁移基线，产品功能尚未开始 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
+| 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -118,7 +119,7 @@
 | F1-02 | 初始化 Control Plane | FastAPI app factory、lifespan、结构化错误；失败测试先行 | F1-01 | ✅ 已完成 |
 | F1-03 | Health/Version API | `/api/v1/health`、`/api/v1/version`、协议兼容范围和契约测试 | F1-02 | ✅ 已完成 |
 | F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ✅ 已完成 |
-| F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ⬜ 未开始 |
+| F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ✅ 已完成 |
 | F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ⬜ 未开始 |
 | F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ⬜ 未开始 |
 | F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ⬜ 未开始 |
@@ -595,9 +596,22 @@
 - 文档：新增根 `.env.example`/`compose.yaml`，同步 Backend/根 README、工程结构、本路线图状态和当前下一步
 - 遗留：SQLAlchemy async session、Alembic 和数据库连接失败模型归 `F1-05`
 
+### F1-05 SQLAlchemy/Alembic 基线
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建真实迁移、session、Health 和安全配置测试，执行 `uv run pytest tests/integration/test_database_baseline.py tests/unit/control_plane/test_database_errors.py -q`，收集阶段因缺少 `sqlalchemy` 和 `automation_tool.control_plane.bootstrap.database` 失败
+- GREEN：24 项 Backend 测试通过、总覆盖率 100%；`uv run ruff format --check .`、`uv run ruff check .`、`uv run mypy`、`uv lock --check` 全部通过；真实 PostgreSQL 空库成功升级到 `20260718_0001`、回滚到 base 后 revision 清空并可再次建立连接
+- 真实边界：SQLAlchemy 2.0.51 + asyncpg 0.31.0 + Alembic 1.18.5 连接官方 PostgreSQL 18.4 容器；Health 对真实数据库返回 200，对拒绝连接返回脱敏、可重试的 `503 dependency_unavailable`
+- 失败矩阵：覆盖数据库配置缺失、非 async PostgreSQL URL、凭据不回显、连接拒绝、真实连接、空库迁移升级/回滚和 lifespan 释放 engine；唯一冲突、revision CAS、事务业务回滚、连接池耗尽随具体仓储任务补充
+- 清理：测试使用随机 loopback 端口和隔离 Compose project；结束后容器、网络、卷和端口均已清理；未影响用户现有 5432 SSH 隧道，PostgreSQL 镜像缓存保留
+- 文档：同步根/Backend README、环境变量示例、后端架构和本路线图；生产连接信息不进入 Alembic 配置或仓库
+- 遗留：业务表与仓储从 `I2-02` 开始按任务新增；下一项进入 `F1-06` Frontend 工程基线
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-05`：建立 SQLAlchemy async session、Alembic 和真实 PostgreSQL 升级/回滚基线；
+1. `F1-06`：初始化 React/TypeScript/Vite/Ant Design 前端并明确没有 Web 部署入口；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

@@ -28,7 +28,7 @@ def assert_error_response(
 
 
 def app_with_failing_route(error_factory: Callable[[], Exception]) -> FastAPI:
-    app = create_app()
+    app = create_app(database=None)
 
     async def fail() -> None:
         raise error_factory()
@@ -38,8 +38,8 @@ def app_with_failing_route(error_factory: Callable[[], Exception]) -> FastAPI:
 
 
 def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
-    first = create_app()
-    second = create_app()
+    first = create_app(database=None)
+    second = create_app(database=None)
 
     assert first is not second
     assert first.state.lifecycle_state == "created"
@@ -74,7 +74,7 @@ def test_application_error_uses_the_public_structured_envelope() -> None:
 
 
 def test_framework_errors_are_normalized_without_reflecting_invalid_input() -> None:
-    app = create_app()
+    app = create_app(database=None)
 
     async def accepts_count(count: int) -> dict[str, int]:
         return {"count": count}
@@ -126,7 +126,7 @@ def test_unhandled_errors_fail_closed_without_leaking_exception_text() -> None:
 
 
 def test_valid_request_id_is_propagated_and_invalid_value_is_replaced() -> None:
-    app = create_app()
+    app = create_app(database=None)
     client = TestClient(app)
     oversized_request_id = "x" * 129
 

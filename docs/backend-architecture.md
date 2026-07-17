@@ -161,6 +161,8 @@ infrastructure
 - OpenTelemetry 和结构化日志；
 - 不能反向定义业务语义。
 
+当前数据库基线固定为 SQLAlchemy asyncio + asyncpg。进程只持有一个 engine，应用用事务作用域 session；正常退出由 FastAPI lifespan 释放连接池。数据库 URL 只从 `AUTOMATION_TOOL_DATABASE_URL` 读取并要求 `postgresql+asyncpg://`，缺失或非法时启动 fail closed，错误不得回显凭据。Alembic 使用同一受校验配置，迁移文件和 `alembic.ini` 不保存连接信息。
+
 ## 7. Executor 分层
 
 ```text

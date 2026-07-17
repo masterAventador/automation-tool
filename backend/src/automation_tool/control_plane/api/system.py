@@ -2,10 +2,12 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from automation_tool import __version__
+from automation_tool.control_plane.api.errors import AppError
+from automation_tool.control_plane.domain import DatabaseLifecycle, DependencyUnavailable
 from automation_tool.protocol.version import (
     API_VERSION,
     CURRENT_EXECUTOR_PROTOCOL,
@@ -46,8 +48,19 @@ def _disable_caching(response: Response) -> None:
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health(response: Response) -> HealthResponse:
+async def health(request: Request, response: Response) -> HealthResponse:
     _disable_caching(response)
+    database: DatabaseLifecycle | None = request.app.state.database
+    if database is not None:
+        try:
+            await database.check_connection()
+        except DependencyUnavailable:
+            raise AppError(
+                status_code=503,
+                code="dependency_unavailable",
+                message="Database is unavailable",
+                retryable=True,
+            ) from None
     return HealthResponse(version=__version__)
 
 

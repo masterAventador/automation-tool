@@ -1,0 +1,4 @@
+SQLAlchemy database migrations for the Control Plane.
+
+Set `AUTOMATION_TOOL_DATABASE_URL` to an asyncpg PostgreSQL URL before running
+Alembic. Never put credentials in `alembic.ini` or migration source files.

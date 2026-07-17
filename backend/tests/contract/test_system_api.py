@@ -13,7 +13,7 @@ from automation_tool.protocol.version import (
 
 
 def test_health_contract_is_small_deterministic_and_not_cacheable() -> None:
-    response = TestClient(create_app()).get("/api/v1/health")
+    response = TestClient(create_app(database=None)).get("/api/v1/health")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -26,7 +26,7 @@ def test_health_contract_is_small_deterministic_and_not_cacheable() -> None:
 
 
 def test_version_contract_declares_api_and_executor_protocol_compatibility() -> None:
-    response = TestClient(create_app()).get("/api/v1/version")
+    response = TestClient(create_app(database=None)).get("/api/v1/version")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -43,7 +43,7 @@ def test_version_contract_declares_api_and_executor_protocol_compatibility() -> 
 
 
 def test_system_routes_are_get_only_and_framework_error_is_normalized() -> None:
-    client = TestClient(create_app())
+    client = TestClient(create_app(database=None))
 
     for path in ("/api/v1/health", "/api/v1/version"):
         response = client.post(path)
@@ -53,7 +53,7 @@ def test_system_routes_are_get_only_and_framework_error_is_normalized() -> None:
 
 
 def test_openapi_contains_the_versioned_system_contract_only_once() -> None:
-    schema = create_app().openapi()
+    schema = create_app(database=None).openapi()
 
     assert "/api/v1/health" in schema["paths"]
     assert "/api/v1/version" in schema["paths"]
