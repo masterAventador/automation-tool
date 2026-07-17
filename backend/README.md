@@ -8,6 +8,8 @@
 
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 
+`DemoBootstrapGrant` 是尚未签名/持久化的领域能力模型：有效期最多 7 天，绑定一个规范 `DemoEnvironmentId`，唯一 `BootstrapPurpose` 为 `installation.register`。调用方必须传入强类型 purpose 和环境，普通字符串、跨环境、未生效、已过期以及任何业务 API 操作均 fail closed。token 签名、批次次数、吊销和审计不在此模型中伪造，由后续注册与云 Demo 任务实现。
+
 ## 本地命令
 
 在 `backend/` 目录执行：
