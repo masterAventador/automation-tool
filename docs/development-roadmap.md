@@ -49,6 +49,7 @@
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
 | Installation 持久化 | `✅` 32 字节公钥、active/revoked、revision CAS、吊销时间、唯一性和时间一致性约束已在 PostgreSQL 18.4 验证 |
+| Demo Bootstrap | `✅` 最多 7 天、精确 Demo 环境、唯一 installation.register purpose 和业务 API 拒绝模型已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
@@ -147,7 +148,7 @@
 | --- | --- | --- | --- | --- |
 | I2-01 | 稳定资源 ID | installation/executor/task/attempt/action/artifact ID 类型与非法值测试 | F1-05 | ✅ 已完成 |
 | I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ✅ 已完成 |
-| I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ⬜ 未开始 |
+| I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ✅ 已完成 |
 | I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ⬜ 未开始 |
 | I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ⬜ 未开始 |
 | I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ⬜ 未开始 |
@@ -768,10 +769,23 @@
 - 文档：同步根/Backend README、后端架构的数据约束、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：I2-03 建立只可注册的 Demo Bootstrap 模型；Installation 仓储和注册 API 分别随 I2-05/I2-06 接入，不在本任务提前开放业务路由
 
+### I2-03 Demo Bootstrap 模型
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建环境 slug、固定注册 purpose、精确时窗、跨环境、业务 API 拒绝、不可变和直接构造绕过测试；执行 `uv run pytest tests/unit/control_plane/domain/test_demo_bootstrap.py -q`，收集阶段因 `MAX_DEMO_BOOTSTRAP_LIFETIME` 等领域类型尚未公开而失败
+- GREEN：34 项 Bootstrap 目标测试、155 项 Backend 全量测试通过，总覆盖率 100%；Ruff 格式/检查、严格 Mypy、uv 锁和 OpenAPI 漂移检查全部通过
+- 真实边界：Python 3.12.13 纯领域模型；`DemoEnvironmentId` 是最长 64 字符的小写 slug，grant 采用 `[not_before, expires_at)` UTC 半开时窗、最长 7 天，唯一强类型 purpose 为 `installation.register`；本任务不生成或保存真实 bootstrap token
+- 失败矩阵：拒绝空/大小写/下划线/路径/首尾连字符/超长/非字符串环境，普通字符串 purpose（包括同文案 `installation.register`）、业务操作、跨环境、未生效、到期、naive 时间、零/负/超长时窗、直接构造类型绕过和冻结对象篡改；固定错误不回显外部值
+- 清理：纯单元与静态检查不启动服务、数据库、App 或浏览器；全量回归的隔离 PostgreSQL 容器、网络、卷和随机端口已自动清理
+- 文档：同步根/Backend README、后端架构的 Bootstrap 能力边界、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：I2-05 在 challenge/response 注册 API 中承载并验证签名 claims；bootstrap 批次次数、撤销、持久化、审计和 Secret 管理由 C10-05/C10-06 实现，本任务不提前创建第二套 token 系统
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-03`：建立限时、限环境、限用途的 Demo Bootstrap 模型；
-2. `I2-04`：在 Tauri 首启生成 Ed25519 设备密钥且私钥不进入 React/普通文件；
+1. `I2-04`：在 Tauri 首启生成 Ed25519 设备密钥且私钥不进入 React/普通文件；
+2. `I2-05`：建立 Installation challenge/response 注册 API，并覆盖重放、过期和冒充；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。
