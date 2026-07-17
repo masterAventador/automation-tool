@@ -47,7 +47,8 @@
 | 产品代码 | `🚧` 已完成 Backend、Control Plane、系统 API 和数据库访问/迁移基线，产品功能尚未开始 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
-| 桌面 UI 资产 | `✅` React 19、TypeScript 6、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证；尚未接入 Tauri |
+| 桌面 UI 资产 | `✅` React 19、TypeScript 6、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
+| Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -122,7 +123,7 @@
 | F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ✅ 已完成 |
 | F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ✅ 已完成 |
 | F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ✅ 已完成 |
-| F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ⬜ 未开始 |
+| F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ✅ 已完成 |
 | F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ⬜ 未开始 |
 | F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ⬜ 未开始 |
 | F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ⬜ 未开始 |
@@ -623,9 +624,23 @@
 - 文档：新增 `frontend/README.md`，同步根 README 和本路线图；明确 Vite 只用于桌面资产/测试 Harness，`dist/` 不得作为 Web 产品发布
 - 遗留：Tauri v2、Capability、CSP 和真实桌面窗口归 `F1-07`；当前初始化文案不是 `F1-08` 工作台页面
 
+### F1-07 初始化 Tauri v2
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建三项 Tauri 工程契约测试，执行 `node --test tests/tauri-baseline.test.mjs`，因 `src-tauri/Cargo.toml`、`tauri.conf.json` 和 Capability 不存在产生 3 项预期失败
+- GREEN：6 项前端/Tauri 工程契约测试通过；`pnpm install --frozen-lockfile`、peer 检查、ESLint、严格 TypeScript、`cargo fmt --check`、`cargo test --locked`、Clippy `-D warnings` 和 `pnpm tauri build --debug --no-bundle` 全部通过
+- 真实边界：锁定 Tauri CLI 2.11.4、tauri 2.11.5 和 tauri-build 2.6.3；真实 `pnpm tauri dev --no-watch` 启动 macOS 前台进程，CoreGraphics 确认一个屏幕内窗口（内容区约 1254×785）；Vite 只监听 `127.0.0.1:1420`
+- 失败矩阵：覆盖 Tauri v2/Cargo 锁定、固定 loopback devUrl、bundled frontendDist、无远程窗口 URL、`withGlobalTauri=false`、显式 main Capability、空权限列表、生产/开发 CSP 和关闭时进程/端口清理；Sidecar、网络桥和业务命令尚不存在
+- 真实问题修复：首次启动发现 Tauri `freezePrototype` 与 Ant Design/dayjs 初始化冲突并产生只读属性错误；移除非必需选项后重新启动，持续运行无 WebView 错误，CSP 与零权限 Capability 保持不变
+- 清理：真实 Tauri/Vite 均 Ctrl-C 退出，Rust PID 与 1420 端口无残留；窗口截图因系统未授权 Screen Recording 而未生成文件；删除生成器额外产出的 Android/iOS 图标目录，仅保留 SVG 源文件及 macOS/Windows 桌面图标
+- 文档：同步根/Frontend README、前端架构和本路线图；占位图标明确不是最终品牌设计，生成 Schema 与 target 均保持 Git 忽略
+- 遗留：`F1-08` 实现无登录工作台启动/后端故障诊断；测试 Capability 与桌面 E2E 权限归 `F1-13`，正式签名安装包归 Wave 4
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-07`：初始化 Tauri v2、最小 Capability/CSP，并验证真实开发窗口；
+1. `F1-08`：实现无产品登录的工作台启动页，以及后端不可用时可恢复的诊断入口；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

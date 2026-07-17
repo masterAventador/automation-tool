@@ -34,6 +34,7 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/*.tsbuildinfo
 frontend/src-tauri/target/
+frontend/src-tauri/gen/schemas/
 frontend/src-tauri/binaries/
 
 # Python

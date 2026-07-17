@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Automation Tool placeholder icon">
+  <defs>
+    <linearGradient id="background" x1="72" y1="40" x2="440" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F6FED"/>
+      <stop offset="1" stop-color="#163B65"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#background)"/>
+  <path d="M142 173h114m0 0 114 83M256 173v166m0 0-114-83m114 83 114-83" fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-width="30"/>
+  <circle cx="142" cy="173" r="48" fill="#FFB545" stroke="#FFFFFF" stroke-width="18"/>
+  <circle cx="370" cy="256" r="48" fill="#4DD4AC" stroke="#FFFFFF" stroke-width="18"/>
+  <circle cx="256" cy="339" r="48" fill="#FFFFFF"/>
+  <path d="m241 312 43 27-43 27z" fill="#2F6FED"/>
+</svg>

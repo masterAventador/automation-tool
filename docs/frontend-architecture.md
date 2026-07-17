@@ -33,6 +33,8 @@
 
 第一期不引入 Next.js、SSR、SEO、PWA 或 Web 部署配置。
 
+当前 Tauri 基线锁定 CLI 2.11.4 / Rust crate 2.11.5。主窗口只加载 `http://127.0.0.1:1420` 开发服务或安装包内 `dist/`，不配置远程页面；生产 CSP 仅允许自身资源和 Tauri IPC 端点。`main` Capability 当前权限列表为空，后续原生命令必须按任务逐项授权，不能直接扩大为通用文件、Shell 或网络权限。
+
 ## 3. 总体架构
 
 ```text
