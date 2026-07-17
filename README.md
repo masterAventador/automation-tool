@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段，已建立 Backend、Health/Version API、本地 PostgreSQL 双库、SQLAlchemy/Alembic 数据库基线，以及 React/Tauri v2 桌面工程。
+当前处于第一期 MVP 实施阶段。Wave 1 工程闭环已完成，正在进入安装实例认证与跨进程协议。
 
 ## 第一阶段
 
@@ -54,5 +54,6 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已生成，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用和重试恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
+- GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；
 - 业务 API、真实后端 Transport 和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

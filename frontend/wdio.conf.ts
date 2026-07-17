@@ -22,7 +22,7 @@ export const config: WebdriverIO.Config = {
         appBinaryPath,
         driverProvider: "embedded",
         autoInstallTauriDriver: false,
-        autoDownloadEdgeDriver: false,
+        autoDownloadEdgeDriver: true,
         captureBackendLogs: true,
         captureFrontendLogs: true,
         startTimeout: 60_000,
