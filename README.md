@@ -55,5 +55,6 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Playwright UI Harness 已覆盖工作台、服务不可用和重试恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
 - GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；
+- installation、executor、task、execution attempt、action 和 artifact 已使用六种不可混用的规范 UUIDv4 领域类型；
 - 业务 API、真实后端 Transport 和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。
