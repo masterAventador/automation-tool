@@ -47,6 +47,7 @@
 | 产品代码 | `🚧` 已完成 Backend、Control Plane、系统 API 和数据库访问/迁移基线，产品功能尚未开始 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
+| 桌面 UI 资产 | `✅` React 19、TypeScript 6、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证；尚未接入 Tauri |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -120,7 +121,7 @@
 | F1-03 | Health/Version API | `/api/v1/health`、`/api/v1/version`、协议兼容范围和契约测试 | F1-02 | ✅ 已完成 |
 | F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ✅ 已完成 |
 | F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ✅ 已完成 |
-| F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ⬜ 未开始 |
+| F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ✅ 已完成 |
 | F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ⬜ 未开始 |
 | F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ⬜ 未开始 |
 | F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ⬜ 未开始 |
@@ -609,9 +610,22 @@
 - 文档：同步根/Backend README、环境变量示例、后端架构和本路线图；生产连接信息不进入 Alembic 配置或仓库
 - 遗留：业务表与仓储从 `I2-02` 开始按任务新增；下一项进入 `F1-06` Frontend 工程基线
 
+### F1-06 初始化 Frontend
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建三项前端工程契约测试，执行 `node --test frontend/tests/project-baseline.test.mjs`，因 `frontend/package.json`、`index.html`、React 入口和 Vite 配置不存在产生 3 项预期失败
+- GREEN：3 项工程契约测试通过；`pnpm peers check` 无兼容性问题；`pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm typecheck`、`pnpm build` 全部通过；Vite 8.1.5 生产资产构建成功
+- 真实边界：在 Node 26.0.0 / pnpm 11.9.0 上锁定 React/ReactDOM 19.2.7、Ant Design 6.5.1、TypeScript 6.0.3；真实 Vite server 只监听 `127.0.0.1:1420`，HTTP 返回桌面 UI 入口
+- 失败矩阵：覆盖私有 pnpm package、冻结锁文件、peer 兼容、严格 TypeScript、Lint、构建失败、固定 loopback 监听和 Web 发布入口缺失；本任务不含交互、Tauri、Sidecar、网络请求或 RPA，相关失败归后续任务
+- 清理：真实 Vite server 已 Ctrl-C 退出并确认 1420 无监听；`dist/`、`node_modules/` 和工具缓存均被 Git 忽略，依赖缓存保留供后续开发复用
+- 文档：新增 `frontend/README.md`，同步根 README 和本路线图；明确 Vite 只用于桌面资产/测试 Harness，`dist/` 不得作为 Web 产品发布
+- 遗留：Tauri v2、Capability、CSP 和真实桌面窗口归 `F1-07`；当前初始化文案不是 `F1-08` 工作台页面
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-06`：初始化 React/TypeScript/Vite/Ant Design 前端并明确没有 Web 部署入口；
+1. `F1-07`：初始化 Tauri v2、最小 Capability/CSP，并验证真实开发窗口；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

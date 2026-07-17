@@ -32,6 +32,7 @@ frontend/.vite/
 frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
+frontend/*.tsbuildinfo
 frontend/src-tauri/target/
 frontend/src-tauri/binaries/
 

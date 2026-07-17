@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段，已建立 Backend、Health/Version API、本地 PostgreSQL 双库，以及 SQLAlchemy/Alembic 数据访问与迁移基线。
+当前处于第一期 MVP 实施阶段，已建立 Backend、Health/Version API、本地 PostgreSQL 双库、SQLAlchemy/Alembic 数据库基线，以及 React/TypeScript/Vite 桌面 UI 资产工程。
 
 ## 第一阶段
 
@@ -46,5 +46,6 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Control Plane 已具备独立应用工厂、lifespan、请求关联 ID、不泄密错误信封，以及 Health/Version 和协议兼容响应；
 - PostgreSQL 18.4 开发库与测试库使用独立容器、凭据和存储，Compose 凭据缺失时 fail closed；
 - SQLAlchemy 使用 asyncpg、事务作用域 session 和连接预检；Alembic 已验证真实空库升级与回滚；数据库不可用时 Health 返回脱敏、可重试的 503；
-- 尚未初始化 Frontend 或 Tauri 工程，业务 API 尚未实现；
+- Frontend 已锁定 React、TypeScript、Vite 和 Ant Design，严格类型、Lint、冻结安装与生产资产构建通过；Vite 仅绑定 loopback 且仓库没有 Web 部署入口；
+- 尚未初始化 Tauri 工程，业务 API 和产品页面尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。
