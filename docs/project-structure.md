@@ -92,6 +92,7 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
+│   │   ├── device_identity.rs     # Ed25519 设备身份与系统安全存储
 │   │   ├── lib.rs
 │   │   └── main.rs
 │   ├── tests/

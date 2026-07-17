@@ -22,6 +22,8 @@ pnpm tauri dev
 
 当前 `src-tauri/capabilities/main.json` 不暴露任何 IPC 权限；后续每项原生能力必须随对应任务单独增加最小权限。`src-tauri/app-icon.svg` 是工程占位图标，不代表最终品牌设计。
 
+设备身份由 `src-tauri/src/device_identity.rs` 在 Rust 进程内管理。正式 App 首启使用系统 CSPRNG 生成 Ed25519 私钥，并以二进制 Secret 保存到 macOS Keychain 或 Windows Credential Manager；React、Tauri Command、普通配置文件和 `localStorage` 均没有私钥读写面。已存在的 32 字节私钥只复用不轮换，存储损坏、权限拒绝或随机源失败均 fail closed。`desktop-e2e` 构建只使用不落盘的临时身份，真实系统安全存储另由 Rust 平台测试完成往返和删除。
+
 API DTO 只能由 `../contracts/openapi/control-plane.v1.json` 生成：
 
 ```bash

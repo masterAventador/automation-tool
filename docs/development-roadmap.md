@@ -52,6 +52,7 @@
 | Demo Bootstrap | `✅` 最多 7 天、精确 Demo 环境、唯一 installation.register purpose 和业务 API 拒绝模型已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
+| 设备身份密钥 | `✅` Ed25519 首启生成、macOS Keychain / Windows Credential Manager 真实往返、React/普通文件零暴露和桌面隔离身份已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
@@ -149,7 +150,7 @@
 | I2-01 | 稳定资源 ID | installation/executor/task/attempt/action/artifact ID 类型与非法值测试 | F1-05 | ✅ 已完成 |
 | I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ✅ 已完成 |
 | I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ✅ 已完成 |
-| I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ⬜ 未开始 |
+| I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ✅ 已完成 |
 | I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ⬜ 未开始 |
 | I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ⬜ 未开始 |
 | I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ⬜ 未开始 |
@@ -782,10 +783,23 @@
 - 文档：同步根/Backend README、后端架构的 Bootstrap 能力边界、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：I2-05 在 challenge/response 注册 API 中承载并验证签名 claims；bootstrap 批次次数、撤销、持久化、审计和 Secret 管理由 C10-05/C10-06 实现，本任务不提前创建第二套 token 系统
 
+### I2-04 设备密钥生成
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交（PR #2）
+- RED：先创建 Rust/React 静态边界契约和设备身份行为测试；`node --test tests/device-identity-boundary.test.mjs` 因 `device_identity.rs` 不存在而失败，随后 `cargo test --manifest-path src-tauri/Cargo.toml --lib device_identity::tests --no-run` 因设备身份类型和安全存储适配器尚不存在而编译失败
+- GREEN：6 项 macOS 设备身份目标测试、8 项默认 Rust 测试、8 项 `desktop-e2e` Rust 测试、16 项 Node 契约、25 项 Vitest、3 项 Playwright 和 1 项真实 macOS Tauri/WebdriverIO 冒烟通过；Rustfmt、默认/测试特性 Clippy `-D warnings`、ESLint、严格 TypeScript、生产资产构建与边界扫描全部通过；GitHub Actions 运行 `29620527399` 的 Backend/Frontend/Linux Rust 和 `29620527397` 的 macOS/Windows 桌面矩阵五路通过
+- 真实边界：本机 macOS Keychain 使用唯一测试 account 完成二进制 Secret 写入、复用、读取和删除；GitHub Hosted Windows 的 Credential Manager 同样执行真实往返与删除；两平台均构建 production desktop binary 并启动真实 Tauri 窗口冒烟。Linux 不假装提供安全存储，经同一管理器的 unsupported store 固定 fail closed
+- 失败矩阵：覆盖首次生成、既有密钥复用、0/31/33/64 字节损坏拒绝且不轮换、安全存储读写拒绝、系统随机源失败、不同生成结果、固定不泄密错误；静态扫描拒绝私钥进入 React、Tauri Command、序列化和普通文件。网络、数据库、业务 API、取消、超时和结果不确定对纯本机首启密钥任务不适用
+- 清理：真实平台测试使用进程 ID + 纳秒时间的唯一 account，并由显式删除和 Drop 清理双保险移除；`desktop-e2e` 身份只驻留测试 App 进程、不写系统存储；测试未启动后端、数据库、浏览器或云端资源
+- 文档：同步根/Frontend README、前端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：I2-05 使用公钥完成 Installation 注册签名校验；I2-08 在同一系统安全存储增加可轮换、可删除的后端设备凭据，不把凭据职责混入本任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-04`：在 Tauri 首启生成 Ed25519 设备密钥且私钥不进入 React/普通文件；
-2. `I2-05`：建立 Installation challenge/response 注册 API，并覆盖重放、过期和冒充；
+1. `I2-05`：建立 Installation challenge/response 注册 API，并覆盖重放、过期和冒充；
+2. `I2-06`：签发可撤销、可轮换、最小 scope 的版本化设备凭据；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。
