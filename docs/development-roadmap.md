@@ -131,7 +131,7 @@
 | F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ✅ 已完成 |
 | F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ✅ 已完成 |
 | F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ✅ 已完成 |
-| F1-13 | Tauri 四层测试基线 | Vitest、Playwright、Rust、WebdriverIO 命令和最小绿测 | F1-07,F1-12 | ⬜ 未开始 |
+| F1-13 | Tauri 四层测试基线 | Vitest、Playwright、Rust、WebdriverIO 命令和最小绿测 | F1-07,F1-12 | ✅ 已完成 |
 | F1-14 | CI 基线 | Backend、Frontend、Rust 分层检查；macOS/Windows 桌面骨架 | F1-05,F1-13 | ⬜ 未开始 |
 
 ## 7. Wave 2：安装实例认证与跨进程协议
@@ -709,9 +709,24 @@
 - 文档：同步根/Frontend README、前端架构和本路线图，持续声明 Harness 不是 Web 产品、生产入口或原生能力验收
 - 遗留：F1-13 建立 Vitest/Playwright/Rust/WebdriverIO 四层统一命令与最小绿测；后续 Feature 的 UI Harness 用例长期保留
 
+### F1-13 Tauri 四层测试基线
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增四层命令、真实 Tauri binary、embedded provider 和生产隔离契约，执行 `node --test tests/tauri-test-layers.test.mjs` 得到 3 项目标失败；再新增 WDIO 标记污染样例，生产扫描器因未拒绝产生 1 项目标失败；首次四层总门禁还真实暴露测试 Capability 放在默认目录会破坏普通 `cargo test`
+- GREEN：11 项 Node 契约、25 项 Vitest、3 项 Playwright、2 项普通 Rust、2 项 `desktop-e2e` Rust 和 1 项真实 Tauri/WebdriverIO 测试通过；`pnpm test:layers`、正式生产扫描、OpenAPI 漂移、peer、ESLint、严格 TypeScript、Rustfmt 和两种特性的 Clippy 全部通过
+- 真实边界：WebdriverIO embedded provider 启动真实 macOS Tauri App 和 WKWebView 605.1.15，验证“RPA 运营工作台”、无产品登录/注册文案和 Tauri 原生 `main` 窗口标签；本任务不宣称 Control Plane 网络桥、Sidecar、外部浏览器或 RPA 可用
+- 安全隔离：WDIO Rust 插件是 `desktop-e2e` 可选依赖，前端桥只由 Vite `desktop-e2e` 测试入口引入；`withGlobalTauri` 与 WDIO Capability 只内联在 `tauri.test.conf.json`，production 仍为 false/仅 `main`；正常 Cargo 一层依赖树没有 WDIO，正式 dist 扫描拒绝 Harness 和 WDIO 标记
+- 工具问题：锁定 WebdriverIO 9.29.1、Tauri Service/插件 1.2.0；上游 1.2.0 发布清单引用的 native-utils 2.4.0 缺少其已调用导出，使用 pnpm 官方 override 固定 2.5.0，未修改第三方源码；embedded 成功链路仍会打印外部 driver 和会话后清 mock 两条上游诊断噪声，不安装未使用的 `tauri-driver`
+- 失败矩阵：覆盖四层命令漂移、真实 binary/provider、原生窗口查询、无登录 UI、测试前端桥误入生产、测试权限被默认 Cargo 扫描、正常/测试 Rust 特性独立编译、依赖版本不自洽和 App/driver 退出清理
+- 清理：WebdriverIO 自动结束 App 和 embedded server；复查 4445 无监听、无 App/WDIO/WebDriver 残留；测试产物、报告和 Rust target 均在忽略目录，生产 `dist/` 已重建覆盖测试资产
+- 文档：同步根/Frontend README、前端架构和本路线图，明确四层证据边界、测试构建隔离与上游依赖 workaround
+- 遗留：F1-14 将四层命令接入 Backend/Frontend/Rust CI 和 macOS/Windows 桌面骨架；后续每个原生能力任务必须扩充真实 Tauri E2E
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-13`：建立 Vitest、Playwright、Rust、WebdriverIO 四层桌面测试命令与最小绿测；
-2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。
+1. `F1-14`：建立 Backend、Frontend、Rust 分层 CI，以及 macOS/Windows 桌面构建骨架；
+2. 完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。

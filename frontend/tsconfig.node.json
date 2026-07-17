@@ -8,13 +8,20 @@
     "resolveJsonModule": true,
     "strict": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node",
+      "@wdio/globals/types",
+      "@wdio/mocha-framework",
+      "@wdio/tauri-service"
+    ]
   },
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
+    "wdio.conf.ts",
     "e2e/**/*.ts",
+    "e2e-tauri/**/*.ts",
     "eslint.config.js"
   ]
 }

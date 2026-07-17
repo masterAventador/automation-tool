@@ -9,6 +9,7 @@ const forbiddenMarkers = [
   "automation-tool-test-harness-adapter",
   "UI Harness root is missing",
 ];
+const forbiddenDesktopTestMarkers = ["wdioTauri", "plugin:wdio|", "TAURI_WEBDRIVER_PORT"];
 
 async function filesUnder(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -36,6 +37,9 @@ export async function assertProductionBoundaries(distribution) {
     const content = await readFile(path, "utf8");
     if (forbiddenMarkers.some((marker) => content.includes(marker))) {
       throw new Error("Production build contains a test Harness marker");
+    }
+    if (forbiddenDesktopTestMarkers.some((marker) => content.includes(marker))) {
+      throw new Error("Production build contains a desktop test marker");
     }
   }
 }

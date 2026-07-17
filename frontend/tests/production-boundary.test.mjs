@@ -28,6 +28,12 @@ test("production boundary scanner rejects Harness entries and markers", async ()
       assertProductionBoundaries(distribution),
       /Production build contains a test Harness marker/,
     );
+
+    await writeFile(join(assets, "app.js"), "window.wdioTauri = {};");
+    await assert.rejects(
+      assertProductionBoundaries(distribution),
+      /Production build contains a desktop test marker/,
+    );
   } finally {
     await rm(distribution, { recursive: true, force: true });
   }

@@ -1,8 +1,24 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig({
-  plugins: [react()],
+const desktopE2EMode = "desktop-e2e";
+
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    react(),
+    {
+      name: "desktop-e2e-entrypoint",
+      transformIndexHtml: {
+        order: "pre",
+        handler(html) {
+          if (mode !== desktopE2EMode) {
+            return html;
+          }
+          return html.replace("/src/main.tsx", "/src/test-tauri-main.ts");
+        },
+      },
+    },
+  ],
   clearScreen: false,
   server: {
     host: "127.0.0.1",
@@ -15,4 +31,4 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
   },
-});
+}));

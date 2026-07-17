@@ -30,4 +30,10 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["error", { allowConstantExport: true }],
     },
   },
+  {
+    files: ["e2e-tauri/**/*.ts"],
+    languageOptions: {
+      globals: globals.mocha,
+    },
+  },
 );

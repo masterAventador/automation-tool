@@ -404,6 +404,10 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 
+当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于 `tauri.test.conf.json` 对应的测试构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描 `wdioTauri`、WDIO IPC 和 WebDriver 端口标记并 fail closed。
+
+`pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。当前最小桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用，不证明后续 Control Plane 网络桥、Local Executor、外部运营浏览器或 RPA 可用；这些能力必须在对应任务新增自己的桌面用例。
+
 ## 14. 构建和配置
 
 - `local` 构建连接开发机本地 Control Plane；
