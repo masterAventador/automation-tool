@@ -50,5 +50,6 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Tauri v2 已具备真实 macOS 主窗口、生产 CSP、零 IPC 权限 Capability、桌面图标与 Cargo 锁文件，Rust/Clippy/无 bundle 构建通过；
 - App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用时有脱敏诊断与重试状态，页面不存在产品登录或注册入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
+- ControlPlaneTransport 已建立窄接口、固定公开错误、正式 Tauri unavailable stub 和显式 handler 测试 Harness；不暴露任意 URL 代理；
 - 业务 API、真实后端 Transport 和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

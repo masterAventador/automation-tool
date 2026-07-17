@@ -72,7 +72,7 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 第一期没有认证路由守卫。启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页，而不是登录页。
 
-当前工作台壳已实现 ready、checking、unavailable 三态和安全重试。F1-08 通过注入式 `StartupCheck` 验证 UI 行为，默认组合只代表桌面壳可渲染，不声称后端在线；F1-09/F1-10 接入受控 BaseUrl 和正式 Rust Transport 后替换该组合点，禁止临时让 WebView 直接请求 Control Plane。
+当前工作台壳已实现 ready、checking、unavailable 三态和安全重试。F1-08 通过注入式 `StartupCheck` 验证 UI 行为，默认组合只代表桌面壳可渲染，不声称后端在线；F1-10 已建立 Transport 适配缝，I2-09 接入正式 Rust 网络桥后替换默认组合，禁止临时让 WebView 直接请求 Control Plane。
 
 ### 4.2 Feature 层
 
@@ -182,6 +182,8 @@ interface PlatformAdapter {
 - 网络断开时关闭旧流，恢复后先拉任务快照，再从最后序号继续订阅。
 
 测试专用 UI Harness 使用同一个 TypeScript `ControlPlaneTransport` 接口，但可直接通过 Axios 访问本机测试后端。它不能进入正式包。
+
+当前 F1-10 契约只暴露业务需要的 `checkHealth`，不接受 URL 或任意 operation。正式 `TauriControlPlaneTransport` 在 Rust 网络桥完成前固定返回可重试的安全 unavailable；测试 Harness 只委托显式注入的 health handler，缺失 handler 时 fail closed。所有底层异常进入启动页前收敛为 `unavailable`，不反射原始 message。F1-11 生成 DTO 后扩展 operation 类型，I2-09 才实现真实 Rust 网络调用。
 
 ### 5.3 无登录页面下的安装实例认证
 

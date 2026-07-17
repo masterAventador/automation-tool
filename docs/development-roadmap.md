@@ -49,6 +49,7 @@
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚和脱敏连接错误已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 6、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
+| 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
@@ -126,7 +127,7 @@
 | F1-07 | 初始化 Tauri v2 | `src-tauri`、最小 Capability/CSP、开发窗口启动 | F1-06 | ✅ 已完成 |
 | F1-08 | App 无登录启动页 | 启动进入工作台壳；后端不可用进入诊断，不跳登录 | F1-03,F1-07 | ✅ 已完成 |
 | F1-09 | BaseUrl Profile | `local/demo` Schema；local 只允许 loopback，demo 强制 HTTPS/允许域名 | F1-07 | ✅ 已完成 |
-| F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ⬜ 未开始 |
+| F1-10 | ControlPlaneTransport 契约 | 业务层接口、正式 Tauri stub 与测试 Harness 实现边界 | F1-08,F1-09 | ✅ 已完成 |
 | F1-11 | OpenAPI 导出 | 后端生成快照、漂移检查、前端 DTO 生成脚本 | F1-03,F1-06 | ⬜ 未开始 |
 | F1-12 | UI Harness 基线 | Playwright 只测试 React UI；生产构建证明不含测试 Adapter | F1-10 | ⬜ 未开始 |
 | F1-13 | Tauri 四层测试基线 | Vitest、Playwright、Rust、WebdriverIO 命令和最小绿测 | F1-07,F1-12 | ⬜ 未开始 |
@@ -650,7 +651,7 @@
 - QA 修复：首次浏览器检查发现 Ant Design 6 的 `Space.direction` 与 `Tag.bordered` 弃用警告；改用 `orientation`/`variant` 后以全新浏览器会话复查，控制台只剩 Vite 连接与 React DevTools 提示
 - 清理：两个 agent-browser 隔离会话、Vite 和真实 Tauri 均已关闭，Rust PID 与 1420 端口无残留；QA 截图仅在根 `.local/`，不进入 Git
 - 文档：同步根 README、前端架构和本路线图；明确当前 `StartupCheck` 是 UI 组合缝，不以 WebView 直连冒充 F1-10 正式 Transport
-- 遗留：`F1-09` 实现并校验 local/demo BaseUrl Profile；`F1-10` 把真实 Tauri Transport 健康结果注入当前启动状态机；当前禁用菜单随对应业务任务逐项启用
+- 遗留：`F1-09` 实现并校验 local/demo BaseUrl Profile；`F1-10` 建立 Transport 到启动状态机的适配缝，真实 Rust 健康调用归 `I2-09`；当前禁用菜单随对应业务任务逐项启用
 
 ### F1-09 BaseUrl Profile
 
@@ -665,9 +666,22 @@
 - 文档：同步根 README、前端架构和本路线图；明确 UI Schema 不是 Rust 信任依据，F1-10 必须在原生 Transport 边界再次校验
 - 遗留：demo 的真实允许域名在部署任务确定后通过受控构建配置提供；`F1-10` 实现 Transport 契约、正式 Tauri stub 和测试 Harness 边界
 
+### F1-10 ControlPlaneTransport 契约
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建正式 stub、安全错误、测试 handler/AbortSignal、缺失 handler 和启动适配测试，执行 `pnpm test:unit -- src/api/control-plane/transport.test.ts`，收集阶段因 Tauri/Test Harness/公共 Transport 模块不存在失败
+- GREEN：6 项 Node 工程契约 + 25 项 Vitest 测试通过；`pnpm install --frozen-lockfile`、peer 检查、ESLint、严格 TypeScript 和 Vite build 全部通过
+- 真实边界：公共接口当前只暴露 `checkHealth` 和 AbortSignal，不接收 baseUrl、任意 URL、任意 operation、Header 或凭据；正式 Tauri 类在 I2-09 前固定返回可重试 unavailable；本任务不发起网络或 IPC
+- 失败矩阵：覆盖正式 stub 未接通、固定公开错误不携带 cause、测试 handler 显式委托、Signal 透传、缺失 operation fail closed、健康成功映射 ready 和任意异常映射 unavailable
+- 清理：纯单元/构建任务未启动 App、浏览器、服务或端口；dist、测试和依赖缓存均保持 Git 忽略
+- 文档：同步根 README、前端架构和本路线图；明确测试 Harness 不是正式实现，正式 Rust 网络桥仍归 I2-09
+- 遗留：F1-11 用 OpenAPI 生成 DTO 后扩充强类型 operation；F1-12 静态证明生产构建不包含测试 Harness；I2-09 实现 Rust allowlist、凭据注入和真实健康调用
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-10`：定义 ControlPlaneTransport 契约、正式 Tauri stub 与测试 Harness 实现边界；
+1. `F1-11`：导出并锁定 OpenAPI 快照，建立漂移检查与前端 DTO 生成脚本；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。
