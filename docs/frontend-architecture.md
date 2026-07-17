@@ -152,7 +152,7 @@ interface PlatformAdapter {
 
 | Profile | Base URL | 用途 |
 | --- | --- | --- |
-| `local` | `http://127.0.0.1:<port>` | 开发、单元集成和本机联调 |
+| `local` | `http://127.0.0.1:8765` | 开发、单元集成和本机联调 |
 | `demo` | `https://demo-api.<domain>` | 客户 Demo 安装包 |
 | `production` | 以后确认 | 正式上线 |
 

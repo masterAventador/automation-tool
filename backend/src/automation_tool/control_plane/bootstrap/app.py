@@ -10,6 +10,7 @@ from automation_tool.control_plane.api.errors import (
     install_request_context,
     register_error_handlers,
 )
+from automation_tool.control_plane.api.system import router as system_router
 
 
 @asynccontextmanager
@@ -34,4 +35,5 @@ def create_app() -> FastAPI:
     app.state.lifecycle_state = "created"
     install_request_context(app)
     register_error_handlers(app)
+    app.include_router(system_router)
     return app

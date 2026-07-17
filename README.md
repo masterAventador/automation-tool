@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段，已建立 Backend Python 包、FastAPI 应用工厂和统一错误基线。
+当前处于第一期 MVP 实施阶段，已建立 Backend Python 包、FastAPI 应用工厂、统一错误和 Health/Version API 基线。
 
 ## 第一阶段
 
@@ -43,6 +43,6 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - 产品、架构、MVP 和任务级开发台账已完成；
 - 仓库规则已从旧 `agent-platform` 项目筛选并改写；
 - Backend 已建立 uv/Python 3.12、src layout、Pytest、Ruff 和 Mypy 基线；
-- Control Plane 已具备独立应用工厂、lifespan、请求关联 ID 和不泄密错误信封；
-- 尚未初始化 Frontend、数据库或 Tauri 工程，Health/Version 与业务 API 尚未实现；
+- Control Plane 已具备独立应用工厂、lifespan、请求关联 ID、不泄密错误信封，以及 Health/Version 和协议兼容响应；
+- 尚未初始化 Frontend、数据库或 Tauri 工程，业务 API 尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

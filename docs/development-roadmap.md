@@ -115,7 +115,7 @@
 | --- | --- | --- | --- | --- |
 | F1-01 | 初始化 Backend 包 | `backend/pyproject.toml`、src layout、uv lock、pytest/Ruff/类型检查最小配置 | R0-13 | ✅ 已完成 |
 | F1-02 | 初始化 Control Plane | FastAPI app factory、lifespan、结构化错误；失败测试先行 | F1-01 | ✅ 已完成 |
-| F1-03 | Health/Version API | `/health`、`/version`、协议兼容范围和契约测试 | F1-02 | ⬜ 未开始 |
+| F1-03 | Health/Version API | `/api/v1/health`、`/api/v1/version`、协议兼容范围和契约测试 | F1-02 | ✅ 已完成 |
 | F1-04 | PostgreSQL Compose | 本地 Compose、健康检查、独立开发/测试数据库、无默认弱生产凭据 | F1-01 | ⬜ 未开始 |
 | F1-05 | SQLAlchemy/Alembic 基线 | async session、空库升级/回滚测试、连接失败安全错误 | F1-04 | ⬜ 未开始 |
 | F1-06 | 初始化 Frontend | React/TypeScript/Vite/Ant Design/pnpm lock；没有 Web 部署入口 | R0-13 | ⬜ 未开始 |
@@ -568,9 +568,22 @@
 - 文档：同步 Backend/根 README、后端架构稳定错误类别、本路线图状态和当前下一步
 - 遗留：Health/Version 路由、协议兼容范围和服务器入口归 `F1-03`
 
+### F1-03 Health/Version API
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建系统 API 契约和 CLI 测试，执行 `uv run pytest tests/contract/test_system_api.py tests/unit/control_plane/test_cli.py -q`，收集阶段分别因缺少 `automation_tool.protocol` 和 `uvicorn` 失败
+- GREEN：13 项 Backend 测试通过、总覆盖率 100%；`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy`、`uv lock --check` 全部通过；真实 Uvicorn HTTP 请求两个端点均返回 200 和预期 JSON
+- 真实边界：实际 CLI 绑定 `127.0.0.1:8765`；Health 返回服务/版本，Version 返回 API `v1` 和 Executor 协议 current/min/max `1.0`；响应均 `no-store` 且带 request ID
+- 失败矩阵：覆盖精确路径、GET-only、非版本化别名不存在、405 进入统一错误信封、响应模型与 OpenAPI、协议兼容范围和 console script；本机 8000 已被用户 SSH 隧道占用，因此未终止该进程并选定 8765
+- 清理：通过 Ctrl-C 完成真实 lifespan shutdown，Uvicorn 进程退出，复查 8765 无监听；未影响现有 8000 SSH 隧道
+- 文档：同步 Backend/根 README、前后端架构固定 local BaseUrl、本路线图状态和当前下一步
+- 遗留：数据库就绪状态在 `F1-05` 后接入 Health；`/api/v1/capabilities` 随稳定能力实现，不在本任务返回空壳
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `F1-03`：实现 Health/Version API、协议兼容范围和契约测试；
+1. `F1-04`：建立 PostgreSQL Compose、健康检查和独立开发/测试数据库；
 2. 按依赖完成 Wave 1 后继续执行 Wave 2、Wave 3 和 Wave 4，不在工程初始化后停止。
