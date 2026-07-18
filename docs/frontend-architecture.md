@@ -80,6 +80,8 @@ T3-07 在该 Rust client 中增加 `ListTasks` 与 `GetTask` 两个封闭 operat
 
 T3-12 在同一个正式 Rust client 中增加 `StreamTaskEvents`：路径只能由规范 Task UUID 构造，Rust 自行从 App 私有 vault 换取 `app.control-plane` Session 并注入 Bearer，支持标准 `Last-Event-ID`，限制单连接 512 KiB、单帧 64 KiB 和验收用有界停止数。解析器要求 `text/event-stream`、匹配 request ID、`no-store/no-transform`、禁代理缓冲，以及唯一 id/event/data 字段；公开 DTO 再核对连续安全整数序号、`1.0` 版本、封闭事件/Task 状态、UUIDv4、UTC 时间、进度与消息边界。React/IPC 不接触 Session、Header 或原始 SSE 文本。唯一 `visible=false` App 已从事件到达前建立连接，读完 1、2 后断开并以新 Session 从 2 续拉 3、4、5 到终态；T3-15 再把该正式 Rust 事件源映射到 Tauri Channel 与 reducer，而不是重新用 WebView EventSource。
 
+T3-13 又在相同 Rust client 中加入固定 `PauseTask`/`ResumeTask` operation。调用者只能提供规范 Task UUID 和受限幂等键；Rust 自行换 App Session、发送空 JSON、构造 `/pause` 或 `/resume` 固定路径，并只接受 202 创建或 200 重放。公开命令对象必须通过 Command/Task/Attempt UUIDv4、跨运行时安全 sequence、精确 command type、封闭 outbox status、正 revision 和 UTC deadline 校验。唯一 `visible=false` App 已经经 Rust API 写入 pause/resume，再经正式 Rust SSE 等到对应事件并核对最终 running 快照；React 控制按钮仍归 T3-18，不能为提前接 UI 暴露任意 operation、Header 或 bearer。
+
 ### 4.2 Feature 层
 
 第一期 Feature：

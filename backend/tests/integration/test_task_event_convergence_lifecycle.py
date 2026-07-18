@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from uuid import UUID
 
 import pytest
 from conftest import AlembicRunner
@@ -24,6 +25,9 @@ from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
     ExecutionAttemptStatus,
     InstallationId,
+    TaskCommandResponseType,
+    TaskCommandStatus,
+    TaskCommandType,
     TaskEventType,
     TaskId,
     TaskStatus,
@@ -134,6 +138,45 @@ async def seed_chain(
             .values(current_attempt_id=attempt_id.uuid)
         )
     return target_installation_id, task_id, attempt_id, action_id
+
+
+async def seed_acknowledged_control(
+    database: Database,
+    *,
+    installation_id: InstallationId,
+    task_id: TaskId,
+    attempt_id: ExecutionAttemptId,
+    message_type: str,
+) -> None:
+    command_type = {
+        "task.paused": TaskCommandType.TASK_PAUSE,
+        "task.resumed": TaskCommandType.TASK_RESUME,
+    }[message_type]
+    async with database.session() as session:
+        await session.execute(
+            insert(task_commands).values(
+                message_id=TaskId.new().uuid,
+                correlation_id=UUID("323e4567-e89b-42d3-a456-426614174002"),
+                installation_id=installation_id.uuid,
+                task_id=task_id.uuid,
+                execution_attempt_id=attempt_id.uuid,
+                sequence=1,
+                command_type=command_type.value,
+                status=TaskCommandStatus.ACKNOWLEDGED.value,
+                idempotency_key=f"task:t311:control:{task_id}",
+                revision=4,
+                delivery_attempts=1,
+                next_delivery_at=None,
+                lease_expires_at=None,
+                delivered_at=NOW,
+                acknowledged_at=NOW,
+                response_message_id=TaskId.new().uuid,
+                response_type=TaskCommandResponseType.TASK_CONTROL_ACK.value,
+                deadline_at=NOW + timedelta(minutes=5),
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
 
 
 def event(
@@ -622,6 +665,14 @@ async def test_each_status_event_projects_only_an_explicit_legal_transition(
             task_status=task_status,
             attempt_status=attempt_status,
         )
+        if message_type in {"task.paused", "task.resumed"}:
+            await seed_acknowledged_control(
+                database,
+                installation_id=installation_id,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                message_type=message_type,
+            )
 
         result = await service(database).receive(
             event(installation_id, task_id, attempt_id, message_type, sequence=1)
@@ -709,6 +760,14 @@ async def test_illegal_task_attempt_and_action_states_are_rejected_before_append
                 attempt_status=attempt_status,
                 action_status=action_status,
             )
+            if message_type == "task.paused":
+                await seed_acknowledged_control(
+                    database,
+                    installation_id=installation_id,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    message_type=message_type,
+                )
             payload = dict(base_payload)
             if message_type.startswith("step."):
                 payload["action_id"] = str(action_id)

@@ -121,7 +121,8 @@ frontend/
 │   ├── tauri.installation-revocation-e2e.conf.json # 后台隐藏的吊销验收
 │   ├── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
 │   ├── tauri.task-query-e2e.conf.json # 后台隐藏的 Task 查询验收
-│   └── tauri.task-event-stream-e2e.conf.json # 后台隐藏的 SSE 断线续拉验收
+│   ├── tauri.task-event-stream-e2e.conf.json # 后台隐藏的 SSE 断线续拉验收
+│   └── tauri.task-control-e2e.conf.json # 后台隐藏的暂停/恢复验收
 ├── public/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -133,6 +134,7 @@ frontend/
 ├── wdio.task-creation.conf.ts
 ├── wdio.task-query.conf.ts
 ├── wdio.task-event-stream.conf.ts
+├── wdio.task-control.conf.ts
 ├── tsconfig.json
 └── README.md
 ```
@@ -222,6 +224,8 @@ T3-10 的 `executor/fake.py` 只依赖共享 `protocol/`，以正式 command env
 T3-11 的 `application/task_event_convergence.py` 只做正式 TaskEvent payload 收窄、领域映射、deadline 和安全错误分类；`infrastructure/database/task_event_convergence_repository.py` 是唯一原子落库与 Task/Attempt/显式 Action 投影入口；`bootstrap/task_events.py` 只装配依赖；`api/executor_websocket.py` 仍是唯一生产接收入口。迁移 `20260718_0011` 只增加持久重放身份，不引入事件 JSON、队列、缓存或第二套状态机。
 
 T3-12 的 `application/task_event_stream.py` 定义公开事件记录、batch/watermark 不变量和 Last-Event-ID 用例；`infrastructure/database/task_event_stream_repository.py` 只从 PostgreSQL 已提交事实读取；`bootstrap/task_event_stream.py` 装配依赖；`api/task_event_stream.py` 负责固定 SSE 帧、keepalive、终态/限时关闭和安全错误映射。迁移 `20260718_0012` 只增加结构化进度列。桌面侧正式解析放在既有 `frontend/src-tauri/src/control_plane.rs`，T3-12 专用 `visible=false` 配置、WDIO spec 和编排脚本仅用于真实入口验收；T3-15 再接 Tauri Channel/React reducer，不在本任务创建第二个前端数据源。
+
+T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
 ### 4.1 Backend 依赖方向
 

@@ -175,6 +175,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{task_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Task */
+        post: operations["pauseTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Task */
+        post: operations["resumeTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/version": {
         parameters: {
             query?: never;
@@ -335,6 +369,43 @@ export interface components {
             scope: string;
             /** Version */
             version: number;
+        };
+        /**
+         * TaskCommandStatus
+         * @enum {string}
+         */
+        TaskCommandStatus: "pending" | "in_flight" | "delivered" | "acknowledged" | "rejected" | "expired";
+        /**
+         * TaskCommandType
+         * @enum {string}
+         */
+        TaskCommandType: "task.offer" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop";
+        /** TaskControlRequest */
+        TaskControlRequest: Record<string, never>;
+        /** TaskControlResponse */
+        TaskControlResponse: {
+            /** Commandid */
+            commandId: string;
+            commandType: components["schemas"]["TaskCommandType"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Deadlineat
+             * Format: date-time
+             */
+            deadlineAt: string;
+            /** Executionattemptid */
+            executionAttemptId: string;
+            /** Revision */
+            revision: number;
+            /** Sequence */
+            sequence: number;
+            status: components["schemas"]["TaskCommandStatus"];
+            /** Taskid */
+            taskId: string;
         };
         /** TaskCreateRequest */
         TaskCreateRequest: Record<string, never>;
@@ -702,6 +773,80 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pauseTask: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resumeTask: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskControlResponse"];
                 };
             };
             /** @description Validation Error */

@@ -380,6 +380,10 @@ T3-12 的 `TaskEventStreamService` 只解析规范 Task ID、标准十进制 `La
 
 SSE 空闲时发送不改变水位的 comment keepalive；追平终态 watermark 后关闭。非终态连接最多 55 秒主动轮换，使 Rust App 重新换取短期 Session 并携带相同 Last-Event-ID 续接；响应开始后数据库异常只安全断流，不能再伪造 JSON 503 或事件。响应固定 `no-store, no-transform`、禁代理缓冲和有界公开帧。真实验收由唯一 `visible=false` Tauri/WKWebView 通过正式 Rust 客户端先读取 1、2 并断线，再用新 App Session 从 2 续拉 3、4、5 到终态；FakeExecutor 同时走正式 Executor Session/WebSocket。
 
+T3-13 公开 `POST /api/v1/tasks/{task_id}/pause` 与 `/resume`。两者只接受空 JSON、必填幂等键和认证得到的 Installation scope；仓储锁定 active Installation、Task/current Attempt，在 running/running 或 paused/paused 精确组合下按 Attempt 现有最大 command sequence 原子分配下一值并写 pending Outbox。请求事务不更新 Task、Attempt、Action 或事件；首次返回 202，同键同意图重放返回 200，改意图、状态冲突、跨 scope、序号耗尽和数据库冲突均 fail closed。
+
+控制状态只由确认后的事件推进。Outbox delivered 和 `task.control_ack` 仍只改变 Command；`task.paused`/`task.resumed` 收敛时必须锁定该 Attempt 最新 pause/resume 命令，并同时核对目标类型、acknowledged、`task.control_ack` response、correlation 和确认时间。没有 ACK、旧命令、错 correlation 或 ACK 晚于事件接收时间都拒绝整笔事件事务，因此公开 API 不会把“请求已受理”伪装成“已经暂停”。隐藏 Tauri App、真实 Rust/Uvicorn/PostgreSQL 和 HOLD FakeExecutor 已完成 offer→pause→resume 整链，最终 Task/Attempt 恢复 running。
+
 ### 10.2 命令
 
 ```text
@@ -541,7 +545,7 @@ Outbox 状态精确为 pending、in_flight、delivered、acknowledged、rejected
 
 `(execution_attempt_id, sequence)`、`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别去重命令顺序、业务意图与响应重放；相同幂等键/响应 ID 不跨 Installation 互相阻塞。T3-09 已使用 due index 与 `FOR UPDATE SKIP LOCKED` 实现原子抢占、lease 恢复、ACK 超时重投、连接恢复和 deadline 过期；socket write 仍只等于 delivered，绝不等于 Executor 已处理。
 
-Outbox 不保存任意 payload。T3-09 的 task.offer 当前发送空 object 安全骨架，用于 T3-10 FakeExecutor 跑通无副作用命令/回执闭环；T3-17 必须在 Task 上增加抖音模板的明确列/DTO 后，才允许投递服务从这些受约束事实构造业务 payload。pause/resume/cancel/emergency-stop 的 enqueue/投递/ACK 通用能力已经具备，但公开控制 API 和状态确认分别等待 T3-13/T3-14/T3-11，不能在内部服务完成时提前宣称用户控制闭环。
+Outbox 不保存任意 payload。T3-09 的 task.offer 当前发送空 object 安全骨架，用于 T3-10 FakeExecutor 跑通无副作用命令/回执闭环；T3-17 必须在 Task 上增加抖音模板的明确列/DTO 后，才允许投递服务从这些受约束事实构造业务 payload。pause/resume 的公开 API 与确认门禁已由 T3-13 完成；cancel/emergency-stop 的 CANCELLING、竞态和结果不确定语义归 T3-14，不能直接照搬暂停状态转换。
 
 约束：
 
@@ -615,7 +619,7 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和 Task 创建/列表/详情/事件 SSE，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和 Task 创建/列表/详情/事件 SSE/暂停/恢复，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 

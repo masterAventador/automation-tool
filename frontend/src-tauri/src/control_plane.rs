@@ -40,6 +40,8 @@ enum ControlPlaneOperation {
     ListTasks,
     GetTask,
     StreamTaskEvents,
+    PauseTask,
+    ResumeTask,
 }
 
 impl ControlPlaneOperation {
@@ -55,7 +57,9 @@ impl ControlPlaneOperation {
             | Self::RotateDeviceCredential
             | Self::RevokeDeviceCredential
             | Self::ExchangeDeviceSession
-            | Self::CreateTask => "POST",
+            | Self::CreateTask
+            | Self::PauseTask
+            | Self::ResumeTask => "POST",
         }
     }
 
@@ -74,6 +78,8 @@ impl ControlPlaneOperation {
             Self::ListTasks => "/api/v1/tasks",
             Self::GetTask => "/api/v1/tasks/{task_id}",
             Self::StreamTaskEvents => "/api/v1/tasks/{task_id}/events",
+            Self::PauseTask => "/api/v1/tasks/{task_id}/pause",
+            Self::ResumeTask => "/api/v1/tasks/{task_id}/resume",
         }
     }
 
@@ -90,11 +96,14 @@ impl ControlPlaneOperation {
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
             | Self::CreateTask => 201,
+            Self::PauseTask | Self::ResumeTask => 202,
         }
     }
 
     fn accepts_status(self, status: u16) -> bool {
-        status == self.success_status() || matches!(self, Self::CreateTask) && status == 200
+        status == self.success_status()
+            || matches!(self, Self::CreateTask | Self::PauseTask | Self::ResumeTask)
+                && status == 200
     }
 
     fn outcome_is_uncertain_on_transport_failure(self) -> bool {
@@ -119,6 +128,7 @@ enum ControlPlaneRequestTarget<'a> {
         task_id: &'a str,
         last_event_id: Option<u64>,
     },
+    Control(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -483,6 +493,70 @@ impl ControlPlaneClient {
         parse_task_snapshot_body(&response_body)
     }
 
+    pub async fn pause_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<TaskControlCommand, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        self.control_task(
+            vault,
+            ControlPlaneOperation::PauseTask,
+            task_id,
+            idempotency_key,
+        )
+        .await
+    }
+
+    pub async fn resume_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<TaskControlCommand, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        self.control_task(
+            vault,
+            ControlPlaneOperation::ResumeTask,
+            task_id,
+            idempotency_key,
+        )
+        .await
+    }
+
+    async fn control_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        operation: ControlPlaneOperation,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<TaskControlCommand, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(task_id)?;
+        require_idempotency_key(idempotency_key)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let request_body = serde_json::json!({});
+        let response_body = self
+            .execute(
+                operation,
+                Some(session.token()),
+                Some(&request_body),
+                Some(idempotency_key),
+                Some(ControlPlaneRequestTarget::Control(task_id)),
+            )
+            .await?;
+        parse_task_control(&response_body, operation, task_id)
+    }
+
     pub async fn stream_task_events<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -682,6 +756,18 @@ fn request_path(
             Ok(format!("/api/v1/tasks/{task_id}"))
         }
         (
+            operation @ (ControlPlaneOperation::PauseTask | ControlPlaneOperation::ResumeTask),
+            Some(ControlPlaneRequestTarget::Control(task_id)),
+        ) => {
+            require_canonical_uuid_v4(task_id)?;
+            let suffix = if matches!(operation, ControlPlaneOperation::PauseTask) {
+                "pause"
+            } else {
+                "resume"
+            };
+            Ok(format!("/api/v1/tasks/{task_id}/{suffix}"))
+        }
+        (
             ControlPlaneOperation::StreamTaskEvents,
             Some(ControlPlaneRequestTarget::EventStream {
                 task_id,
@@ -697,7 +783,9 @@ fn request_path(
         (
             ControlPlaneOperation::ListTasks
             | ControlPlaneOperation::GetTask
-            | ControlPlaneOperation::StreamTaskEvents,
+            | ControlPlaneOperation::StreamTaskEvents
+            | ControlPlaneOperation::PauseTask
+            | ControlPlaneOperation::ResumeTask,
             _,
         )
         | (_, Some(_)) => Err(protocol_invalid()),
@@ -783,6 +871,8 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::CreateTask
                     | ControlPlaneOperation::ListTasks
                     | ControlPlaneOperation::GetTask
+                    | ControlPlaneOperation::PauseTask
+                    | ControlPlaneOperation::ResumeTask
             )
         {
             ControlPlaneErrorCode::InstallationAccessDenied
@@ -1012,6 +1102,20 @@ struct TaskSnapshotResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskControlResponse {
+    command_id: String,
+    task_id: String,
+    execution_attempt_id: String,
+    sequence: u64,
+    command_type: String,
+    status: String,
+    revision: u64,
+    created_at: String,
+    deadline_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskListResponse {
     items: Vec<TaskSnapshotResponse>,
     next_cursor: Option<String>,
@@ -1067,6 +1171,41 @@ impl TaskEvent {
 pub struct TaskEventStreamResult {
     events: Vec<TaskEvent>,
     terminal: bool,
+}
+
+pub struct TaskControlCommand {
+    command_id: String,
+    task_id: String,
+    execution_attempt_id: String,
+    sequence: u64,
+    command_type: String,
+    status: String,
+}
+
+impl TaskControlCommand {
+    pub fn command_id(&self) -> &str {
+        &self.command_id
+    }
+
+    pub fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
+    pub fn execution_attempt_id(&self) -> &str {
+        &self.execution_attempt_id
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn command_type(&self) -> &str {
+        &self.command_type
+    }
+
+    pub fn status(&self) -> &str {
+        &self.status
+    }
 }
 
 impl TaskEventStreamResult {
@@ -1211,6 +1350,46 @@ fn parse_created_task(body: &[u8]) -> Result<CreatedTask, ControlPlaneError> {
         task_id: snapshot.task_id,
         status: snapshot.status,
         revision: snapshot.revision,
+    })
+}
+
+fn parse_task_control(
+    body: &[u8],
+    operation: ControlPlaneOperation,
+    expected_task_id: &str,
+) -> Result<TaskControlCommand, ControlPlaneError> {
+    let response: TaskControlResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.command_id)?;
+    require_canonical_uuid_v4(&response.task_id)?;
+    require_canonical_uuid_v4(&response.execution_attempt_id)?;
+    let expected_type = match operation {
+        ControlPlaneOperation::PauseTask => "task.pause",
+        ControlPlaneOperation::ResumeTask => "task.resume",
+        _ => return Err(protocol_invalid()),
+    };
+    let created_at = require_bounded_timestamp(&response.created_at)?;
+    let deadline_at = require_bounded_timestamp(&response.deadline_at)?;
+    if response.task_id != expected_task_id
+        || response.sequence == 0
+        || response.sequence > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.command_type != expected_type
+        || !matches!(
+            response.status.as_str(),
+            "pending" | "in_flight" | "delivered" | "acknowledged" | "expired"
+        )
+        || response.revision == 0
+        || response.revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || deadline_at <= created_at
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(TaskControlCommand {
+        command_id: response.command_id,
+        task_id: response.task_id,
+        execution_attempt_id: response.execution_attempt_id,
+        sequence: response.sequence,
+        command_type: response.command_type,
+        status: response.status,
     })
 }
 
@@ -1559,11 +1738,11 @@ mod tests {
     use super::{
         new_request_id, parse_created_task, parse_device_session, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_list,
-        parse_task_snapshot_body, request_path, require_idempotency_key, require_list_cursor,
-        required_credential, sse_frame_end, transport_error, validate_response_metadata,
-        ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
-        DeviceSessionCapability, ResponseMetadata,
+        parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
+        parse_task_list, parse_task_snapshot_body, request_path, require_idempotency_key,
+        require_list_cursor, required_credential, sse_frame_end, transport_error,
+        validate_response_metadata, ControlPlaneErrorCode, ControlPlaneOperation,
+        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -1695,6 +1874,18 @@ mod tests {
                 "/api/v1/tasks/{task_id}/events",
                 200,
             ),
+            (
+                ControlPlaneOperation::PauseTask,
+                "POST",
+                "/api/v1/tasks/{task_id}/pause",
+                202,
+            ),
+            (
+                ControlPlaneOperation::ResumeTask,
+                "POST",
+                "/api/v1/tasks/{task_id}/resume",
+                202,
+            ),
         ];
 
         for (operation, method, path, success_status) in operations {
@@ -1733,6 +1924,19 @@ mod tests {
         .expect("valid Task event stream target");
         assert_eq!(event_path, format!("/api/v1/tasks/{IDENTIFIER}/events"));
 
+        let pause_path = request_path(
+            ControlPlaneOperation::PauseTask,
+            Some(ControlPlaneRequestTarget::Control(IDENTIFIER)),
+        )
+        .expect("valid pause target");
+        let resume_path = request_path(
+            ControlPlaneOperation::ResumeTask,
+            Some(ControlPlaneRequestTarget::Control(IDENTIFIER)),
+        )
+        .expect("valid resume target");
+        assert_eq!(pause_path, format!("/api/v1/tasks/{IDENTIFIER}/pause"));
+        assert_eq!(resume_path, format!("/api/v1/tasks/{IDENTIFIER}/resume"));
+
         for invalid in [
             request_path(ControlPlaneOperation::ListTasks, None),
             request_path(
@@ -1749,6 +1953,10 @@ mod tests {
             request_path(
                 ControlPlaneOperation::GetSystemHealth,
                 Some(ControlPlaneRequestTarget::Detail(IDENTIFIER)),
+            ),
+            request_path(
+                ControlPlaneOperation::PauseTask,
+                Some(ControlPlaneRequestTarget::Control("private-invalid")),
             ),
             request_path(
                 ControlPlaneOperation::StreamTaskEvents,
@@ -2285,6 +2493,77 @@ mod tests {
             &serde_json::to_vec(&invalid_status).expect("invalid task detail JSON")
         )
         .is_err());
+    }
+
+    #[test]
+    fn task_control_parser_is_operation_bound_bounded_and_secret_free() {
+        let response = serde_json::json!({
+            "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+            "taskId": IDENTIFIER,
+            "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+            "sequence": 2,
+            "commandType": "task.pause",
+            "status": "pending",
+            "revision": 1,
+            "createdAt": "2026-07-18T18:30:00Z",
+            "deadlineAt": "2026-07-18T18:31:00Z"
+        });
+        let encoded = serde_json::to_vec(&response).expect("task control JSON");
+        let parsed = parse_task_control(&encoded, ControlPlaneOperation::PauseTask, IDENTIFIER)
+            .expect("valid pause command");
+        assert_eq!(parsed.task_id(), IDENTIFIER);
+        assert_eq!(parsed.sequence(), 2);
+        assert_eq!(parsed.command_type(), "task.pause");
+        assert_eq!(parsed.status(), "pending");
+        assert_eq!(parsed.command_id(), "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc");
+        assert_eq!(
+            parsed.execution_attempt_id(),
+            "adff54bd-3571-44da-8acd-5ea15695e5e9"
+        );
+
+        for invalid in [
+            response.clone(),
+            serde_json::json!({
+                "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+                "taskId": IDENTIFIER,
+                "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+                "sequence": 0,
+                "commandType": "task.pause",
+                "status": "pending",
+                "revision": 1,
+                "createdAt": "2026-07-18T18:30:00Z",
+                "deadlineAt": "2026-07-18T18:31:00Z"
+            }),
+            serde_json::json!({
+                "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+                "taskId": IDENTIFIER,
+                "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+                "sequence": 2,
+                "commandType": "task.pause",
+                "status": "private",
+                "revision": 1,
+                "createdAt": "2026-07-18T18:30:00Z",
+                "deadlineAt": "2026-07-18T18:31:00Z"
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let operation = if invalid.0 == 0 {
+                ControlPlaneOperation::ResumeTask
+            } else {
+                ControlPlaneOperation::PauseTask
+            };
+            assert!(parse_task_control(
+                &serde_json::to_vec(&invalid.1).expect("invalid task control JSON"),
+                operation,
+                IDENTIFIER,
+            )
+            .is_err());
+        }
+        assert!(
+            parse_task_control(&encoded, ControlPlaneOperation::CreateTask, IDENTIFIER).is_err()
+        );
     }
 
     #[test]

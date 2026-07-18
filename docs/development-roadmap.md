@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化、Task 创建/查询 API、Executor Connection Registry 和持久命令投递已完成，准备实施 FakeExecutor；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-13 已完成；Task 创建/查询/SSE/暂停恢复、Executor WebSocket、FakeExecutor、持久命令和事件闭环可用，取消/紧停与 React 页面尚待实施；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -68,6 +68,7 @@
 | Command 投递闭环 | `✅` PostgreSQL 原子抢占、current WebSocket 发送、断线/ACK 超时重投、重连恢复、严格回执与 deadline 过期已在真实网络验证 |
 | 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、201/200 原子创建/重放、并发收敛与隐藏 Tauri App 生产同路径已验证 |
 | 查询 Task API | `✅` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
+| 暂停/恢复 API | `✅` Installation-scoped 幂等控制命令、原子 sequence、ACK 后事件门禁与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -198,7 +199,7 @@
 | T3-10 | FakeExecutor | 无副作用回放全部任务与控制事件；不放宽生产状态机 | T3-09 | ✅ 已完成 |
 | T3-11 | 事件接收与收敛 | sequence、重复、缺口、迟到事件和 revision CAS | T3-04,T3-10 | ✅ 已完成 |
 | T3-12 | SSE 事件流 | last-event/断线/重连/终态关闭；事件先落库后推送 | T3-11 | ✅ 已完成 |
-| T3-13 | 暂停/恢复 API | 命令与确认语义；未确认不能提前改状态 | T3-09,T3-11 | ⬜ 未开始 |
+| T3-13 | 暂停/恢复 API | 命令与确认语义；未确认不能提前改状态 | T3-09,T3-11 | ✅ 已完成 |
 | T3-14 | 取消/紧停 API | CANCELLING、确认、结果不确定和幂等 | T3-13 | ⬜ 未开始 |
 | T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ⬜ 未开始 |
 | T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ⬜ 未开始 |
@@ -1188,10 +1189,27 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图状态/完成记录和当前下一步；OpenAPI 与 `openapi-typescript` 同提交更新，没有新增重复规划文档
 - 遗留：T3-13/T3-14 建立控制命令 API；T3-15 把现有 Rust 事件源接入 Tauri Channel 与 React 快照 reducer，处理版本降级/缺口回拉，不在 WebView 重新持有 Session 或建立第二条 EventSource
 
+### T3-13 暂停/恢复 API
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先把台账置为 RED，并新增暂停/恢复应用服务、HTTP 契约、真实 PostgreSQL 生命周期测试；目标测试因 `application.task_controls` 不存在而收集失败。实现持久命令后，集成测试准确证明未 ACK 的 `task.paused` 仍会被既有事件收敛入口接受；再把 ACK/correlation 门禁写成失败测试后修复。产品入口契约最初因专用 `visible=false` Tauri 配置和编排脚本不存在而失败
+- GREEN：Backend 全量 `737 passed in 57.67s`，3894 条语句/740 个分支覆盖率 100%；30 项 Frontend Node 契约、63 项 Vitest、38 项 Rust 单元、3 项共享协议和 7 项安全配置测试通过。Ruff/格式、严格 Mypy、uv lock、Frontend lint/type、生产边界、Cargo fmt、全特性 Clippy、OpenAPI 与生成 DTO 漂移检查全部通过
+- API：新增 `POST /api/v1/tasks/{task_id}/pause` 与 `/resume`，只接受空 JSON、认证 Installation scope 和受限 `Idempotency-Key`；状态相容时原子分配 Attempt 内下一 command sequence 并写 pending Outbox，首次返回 202、同键同意图重放返回 200。响应只含公开 Command/Task/Attempt ID、sequence/type/status/revision 和 UTC 时间
+- 状态门禁：API、socket delivered 与 `task.control_ack` 均不修改 Task/Attempt。`task.paused`/`task.resumed` 收敛前必须锁定该 Attempt 最新 pause/resume 命令，并核对类型、acknowledged、control_ack、correlation 与确认时间；无 ACK、旧命令、错 correlation、状态冲突、跨 Installation 和序号耗尽全部 fail closed
+- Rust 边界：正式 `ControlPlaneClient` 增加固定 PauseTask/ResumeTask operation；从 App 私有 vault 换取 `app.control-plane` Session，禁止任意 URL/Header/bearer，并严格验证 202/200、UUIDv4、跨运行时安全序号、命令类型/状态、revision 与 deadline。长期凭据仍只在 `app_data_dir`，不用系统钥匙串、不进入 React/IPC
+- 生产同路径验收：`uv run python ../scripts/run_t3_13_acceptance.py` 后台启动隔离 PostgreSQL 18.4、完整 Alembic、真实 Uvicorn/SansIO 和唯一 `visible=false` Tauri/WKWebView。隐藏 App 经正式 Rust 注册/创建 Task，HOLD FakeExecutor 经正式 Session/WebSocket 处理 offer、pause、resume；App 写控制命令并通过正式 Rust SSE 等到 paused/resumed，最终命令 sequence 1/2/3 全部 acknowledged、事件 sequence 1..4、Task running/revision 5、Attempt running/revision 4
+- App 后台边界：自动化主窗口固定 `visible=false`，全程后台运行、不弹窗、不抢焦点；production `tauri.conf.json` 仍正常可见。暂停/恢复请求确实由真实 App/Rust 发出，直接 HTTP、TestClient、Mock 或 Harness 仅作为分层证据
+- 失败矩阵：覆盖非法/缺失幂等键、额外字段、未认证、服务不可用、未知/跨 Installation Task、Task/Attempt 状态错配、并发同键、同键改意图、序号上限、数据库唯一冲突、未投递/未 ACK 事件、ACK 不提前投影、错 correlation、公开响应脱敏和固定错误分类
+- 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和全部端口；没有浏览器 Profile、RPA、文件或社交平台副作用遗留
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图状态/完成记录和当前下一步；OpenAPI 与 `openapi-typescript` 同提交更新，没有新增重复规划文档
+- 遗留：T3-14 在同一持久控制基础上实现 cancel/emergency-stop，但必须单独处理 CANCELLING、完成竞态和 outcome uncertain；T3-18 再把 pause/resume 接入正式运行详情按钮
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-13`：建立暂停/恢复 API 与命令确认语义；
-2. `T3-14`：建立取消/紧停 API、CANCELLING 和结果不确定语义；
+1. `T3-14`：建立取消/紧停 API、CANCELLING 和结果不确定语义；
+2. `T3-15`：建立前端 Query/事件 Reducer 的快照、去重、缺口回拉和版本降级语义；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

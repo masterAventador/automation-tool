@@ -316,6 +316,89 @@
         "title": "RotatedDeviceCredentialResponse",
         "type": "object"
       },
+      "TaskCommandStatus": {
+        "enum": [
+          "pending",
+          "in_flight",
+          "delivered",
+          "acknowledged",
+          "rejected",
+          "expired"
+        ],
+        "title": "TaskCommandStatus",
+        "type": "string"
+      },
+      "TaskCommandType": {
+        "enum": [
+          "task.offer",
+          "task.pause",
+          "task.resume",
+          "task.cancel",
+          "task.emergency_stop"
+        ],
+        "title": "TaskCommandType",
+        "type": "string"
+      },
+      "TaskControlRequest": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "TaskControlRequest",
+        "type": "object"
+      },
+      "TaskControlResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "commandId": {
+            "title": "Commandid",
+            "type": "string"
+          },
+          "commandType": {
+            "$ref": "#/components/schemas/TaskCommandType"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "deadlineAt": {
+            "format": "date-time",
+            "title": "Deadlineat",
+            "type": "string"
+          },
+          "executionAttemptId": {
+            "title": "Executionattemptid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskCommandStatus"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandId",
+          "taskId",
+          "executionAttemptId",
+          "sequence",
+          "commandType",
+          "status",
+          "revision",
+          "createdAt",
+          "deadlineAt"
+        ],
+        "title": "TaskControlResponse",
+        "type": "object"
+      },
       "TaskCreateRequest": {
         "additionalProperties": false,
         "properties": {},
@@ -965,6 +1048,138 @@
           }
         ],
         "summary": "Stream Task Events",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/pause": {
+      "post": {
+        "operationId": "pauseTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskControlResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Pause Task",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/resume": {
+      "post": {
+        "operationId": "resumeTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskControlResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Resume Task",
         "tags": [
           "tasks"
         ]

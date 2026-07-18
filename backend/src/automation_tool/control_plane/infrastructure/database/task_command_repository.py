@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
@@ -15,18 +15,28 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryRejected,
     TaskCommandRecord,
 )
+from automation_tool.control_plane.application.task_controls import (
+    PendingTaskControl,
+    TaskControlConflict,
+    TaskControlEnqueueResult,
+    TaskControlNotFound,
+)
 from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
+    ExecutionAttemptStatus,
     InstallationId,
     InstallationStatus,
     TaskCommandResponseType,
     TaskCommandStatus,
     TaskCommandType,
     TaskId,
+    TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
+    execution_attempts,
     installations,
     task_commands,
+    tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
 from automation_tool.protocol import TaskCommandResultEnvelope
@@ -168,6 +178,133 @@ class SqlAlchemyTaskCommandRepository:
                 return _record(created)
         except IntegrityError:
             raise TaskCommandDeliveryRejected from None
+
+    async def enqueue_control(self, control: PendingTaskControl) -> TaskControlEnqueueResult:
+        """Allocate and persist one control sequence while leaving projections untouched."""
+
+        if not isinstance(control, PendingTaskControl):
+            raise TaskControlConflict
+        expected = {
+            TaskCommandType.TASK_PAUSE: (
+                TaskStatus.RUNNING,
+                ExecutionAttemptStatus.RUNNING,
+            ),
+            TaskCommandType.TASK_RESUME: (
+                TaskStatus.PAUSED,
+                ExecutionAttemptStatus.PAUSED,
+            ),
+        }[control.command_type]
+        try:
+            async with self._database.session() as session:
+                installation_status = await session.scalar(
+                    select(installations.c.status)
+                    .where(installations.c.id == control.installation_id.uuid)
+                    .with_for_update()
+                )
+                if installation_status != InstallationStatus.ACTIVE.value:
+                    raise TaskControlNotFound
+
+                existing_row = (
+                    (
+                        await session.execute(
+                            select(task_commands).where(
+                                task_commands.c.installation_id == control.installation_id.uuid,
+                                task_commands.c.idempotency_key == control.idempotency_key,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing_row is not None:
+                    existing = _record(existing_row)
+                    if (
+                        existing.task_id != control.task_id
+                        or existing.command_type is not control.command_type
+                    ):
+                        raise TaskControlConflict
+                    return TaskControlEnqueueResult(command=existing, created=False)
+
+                task_row = (
+                    (
+                        await session.execute(
+                            select(tasks)
+                            .where(
+                                tasks.c.id == control.task_id.uuid,
+                                tasks.c.installation_id == control.installation_id.uuid,
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if task_row is None:
+                    raise TaskControlNotFound
+                attempt_id = task_row["current_attempt_id"]
+                if attempt_id is None or task_row["status"] != expected[0].value:
+                    raise TaskControlConflict
+                attempt_row = (
+                    (
+                        await session.execute(
+                            select(execution_attempts)
+                            .where(
+                                execution_attempts.c.id == attempt_id,
+                                execution_attempts.c.task_id == control.task_id.uuid,
+                                execution_attempts.c.installation_id
+                                == control.installation_id.uuid,
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if attempt_row is None or attempt_row["status"] != expected[1].value:
+                    raise TaskControlConflict
+
+                last_sequence = await session.scalar(
+                    select(func.coalesce(func.max(task_commands.c.sequence), 0)).where(
+                        task_commands.c.execution_attempt_id == attempt_id,
+                        task_commands.c.task_id == control.task_id.uuid,
+                        task_commands.c.installation_id == control.installation_id.uuid,
+                    )
+                )
+                resolved_last_sequence = cast(int, last_sequence)
+                if resolved_last_sequence >= (1 << 53) - 1:
+                    raise TaskControlConflict
+                created = (
+                    (
+                        await session.execute(
+                            insert(task_commands)
+                            .values(
+                                message_id=control.message_id,
+                                correlation_id=control.correlation_id,
+                                installation_id=control.installation_id.uuid,
+                                task_id=control.task_id.uuid,
+                                execution_attempt_id=attempt_id,
+                                sequence=resolved_last_sequence + 1,
+                                command_type=control.command_type.value,
+                                status=TaskCommandStatus.PENDING.value,
+                                idempotency_key=control.idempotency_key,
+                                revision=1,
+                                delivery_attempts=0,
+                                next_delivery_at=control.created_at,
+                                deadline_at=control.deadline_at,
+                                created_at=control.created_at,
+                                updated_at=control.created_at,
+                            )
+                            .returning(*task_commands.c)
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                return TaskControlEnqueueResult(command=_record(created), created=True)
+        except (TaskControlNotFound, TaskControlConflict):
+            raise
+        except IntegrityError:
+            raise TaskControlConflict from None
 
     async def expire_due(
         self,

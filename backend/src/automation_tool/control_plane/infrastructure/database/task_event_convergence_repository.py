@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import desc, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -22,6 +22,9 @@ from automation_tool.control_plane.domain import (
     ActionStatus,
     ExecutionAttemptStatus,
     InvalidTaskTransition,
+    TaskCommandResponseType,
+    TaskCommandStatus,
+    TaskCommandType,
     TaskEventVersion,
     TaskId,
     TaskSnapshotProjection,
@@ -31,10 +34,16 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.infrastructure.database.schema import (
     execution_attempts,
     task_actions,
+    task_commands,
     task_events,
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
+
+_CONTROL_EVENT_COMMANDS = {
+    "task.paused": TaskCommandType.TASK_PAUSE,
+    "task.resumed": TaskCommandType.TASK_RESUME,
+}
 
 _STEP_EVENT_TYPES = frozenset(
     {
@@ -293,6 +302,43 @@ class SqlAlchemyTaskEventConvergenceRepository:
                     datetime, attempt_row["updated_at"]
                 ):
                     raise TaskEventConvergenceRejected
+
+                expected_control = _CONTROL_EVENT_COMMANDS.get(message.message_type)
+                if expected_control is not None:
+                    latest_control = (
+                        (
+                            await session.execute(
+                                select(task_commands)
+                                .where(
+                                    task_commands.c.execution_attempt_id == attempt_id,
+                                    task_commands.c.task_id == task_id,
+                                    task_commands.c.installation_id == installation_id,
+                                    task_commands.c.command_type.in_(
+                                        (
+                                            TaskCommandType.TASK_PAUSE.value,
+                                            TaskCommandType.TASK_RESUME.value,
+                                        )
+                                    ),
+                                )
+                                .order_by(desc(task_commands.c.sequence))
+                                .with_for_update()
+                                .limit(1)
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if (
+                        latest_control is None
+                        or latest_control["command_type"] != expected_control.value
+                        or latest_control["status"] != TaskCommandStatus.ACKNOWLEDGED.value
+                        or latest_control["response_type"]
+                        != TaskCommandResponseType.TASK_CONTROL_ACK.value
+                        or latest_control["correlation_id"] != UUID(str(message.correlation_id))
+                        or latest_control["acknowledged_at"] is None
+                        or cast(datetime, latest_control["acknowledged_at"]) > pending.received_at
+                    ):
+                        raise TaskEventConvergenceRejected
 
                 current_task_status = TaskStatus(cast(str, task_row["status"]))
                 current_attempt_status = ExecutionAttemptStatus(cast(str, attempt_row["status"]))
