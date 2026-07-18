@@ -31,6 +31,15 @@ from automation_tool.control_plane.domain.resource_ids import (
     ResourceId,
     TaskId,
 )
+from automation_tool.control_plane.domain.task_events import (
+    MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
+    MAX_TASK_EVENT_SEQUENCE,
+    InvalidTaskEventModel,
+    SafeTaskEventMessage,
+    TaskEventType,
+    TaskEventVersion,
+    TaskSnapshotProjection,
+)
 from automation_tool.control_plane.domain.task_state_machine import (
     InvalidTaskTransition,
     TaskStateMachine,
@@ -39,6 +48,8 @@ from automation_tool.control_plane.domain.task_state_machine import (
 
 __all__ = [
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
+    "MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS",
+    "MAX_TASK_EVENT_SEQUENCE",
     "TERMINAL_ACTION_STATUSES",
     "TERMINAL_EXECUTION_ATTEMPT_STATUSES",
     "ActionId",
@@ -61,9 +72,14 @@ __all__ = [
     "InvalidDemoBootstrap",
     "InvalidDemoEnvironmentId",
     "InvalidResourceId",
+    "InvalidTaskEventModel",
     "InvalidTaskTransition",
     "ResourceId",
+    "SafeTaskEventMessage",
+    "TaskEventType",
+    "TaskEventVersion",
     "TaskId",
+    "TaskSnapshotProjection",
     "TaskStateMachine",
     "TaskStatus",
 ]

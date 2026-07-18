@@ -6,7 +6,7 @@ from sqlalchemy import text
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.infrastructure.database import Database
 
-HEAD_REVISION = "20260718_0007"
+HEAD_REVISION = "20260718_0008"
 
 
 @pytest.mark.asyncio

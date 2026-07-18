@@ -9,6 +9,7 @@ from .schema import (
     installations,
     metadata,
     task_actions,
+    task_events,
     tasks,
 )
 from .session import Database
@@ -23,5 +24,6 @@ __all__ = [
     "installations",
     "metadata",
     "task_actions",
+    "task_events",
     "tasks",
 ]

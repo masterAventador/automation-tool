@@ -497,6 +497,12 @@ T3-03 的 `execution_attempts` 为一次任务投递与执行事实分配独立 
 
 归属链使用数据库复合外键而非应用约定：Attempt 必须命中 `(task_id, installation_id)`；Action 必须命中 `(execution_attempt_id, task_id, installation_id)`；`tasks.current_attempt_id` 必须命中自身 `(id, installation_id)` 下的 Attempt。三张表保留正 revision 和有序时间供 T3-11 事件 CAS；T3-03 只冻结数据契约，不提前实现命令投递、事件转换或任意 JSON payload。
 
+T3-04 的 `task_events` 使用 `(task_id, sequence)` 作为主键，sequence 与 Executor 协议共享 `1..2^53-1` 跨运行时安全整数上限。事件版本精确为 `1.0`，事件类型是前端架构列出的 19 项封闭词汇；每条事件持久化事件发生/入库时间，以及事件后的 Task status 和 revision，但不保存任意 JSON、页面原文或原始 Executor 文案。可选的 Attempt/Action 引用分别使用包含 Task/Installation 的三列、四列复合外键，不能把其他执行链的事件挂进当前 Task。
+
+Executor 来源的规范 UUIDv4 message ID 以 `(installation_id, source_message_id)` 唯一，用于 T3-11 区分同一来源消息重放；Control Plane 内部事件可以没有 source message。`SafeTaskEventMessage` 最多 1024 字符且必须是单行，和 Executor payload 共享敏感赋值、Bearer、私有绝对路径、file/data URI、控制字符与双向文本拒绝策略；PostgreSQL 再以命名约束拒绝空值、超过 1024 字符/4096 字节、控制字符和明显凭据，即使适配器误用也不会静默落入常见秘密。
+
+Task 行新增从 0 开始的 `last_event_sequence`，与现有 status、revision、updated time 组成 `TaskSnapshotProjection`。App 重连先拉该权威快照，再从水位后的事件续订；事件行携带的 post-event status/revision 用于审计和版本降级，不允许前端自行猜测快照。T3-04 只冻结模型，T3-11 必须在一个 PostgreSQL 事务中校验序号/revision、更新 Task/Attempt/Action、推进水位并插入事件，不能把本任务的独立 INSERT/UPDATE 测试当成收敛已完成。
+
 约束：
 
 - 每个资源都绑定 `installation_id`；

@@ -22,6 +22,8 @@ from pydantic import (
 )
 from pydantic_core import CoreSchema, core_schema
 
+from automation_tool.protocol.limits import MAX_CROSS_RUNTIME_SEQUENCE
+from automation_tool.protocol.safe_text import contains_control_or_bidi, is_unsafe_text
 from automation_tool.protocol.version import CURRENT_EXECUTOR_PROTOCOL
 
 EXECUTOR_PROTOCOL_VERSION = CURRENT_EXECUTOR_PROTOCOL
@@ -30,24 +32,12 @@ MAX_EXECUTOR_PAYLOAD_BYTES = 16 * 1024
 MAX_EXECUTOR_PAYLOAD_DEPTH = 8
 MAX_EXECUTOR_COLLECTION_ITEMS = 64
 MAX_EXECUTOR_STRING_LENGTH = 4096
-MAX_EXECUTOR_SEQUENCE = 2**53 - 1
+MAX_EXECUTOR_SEQUENCE = MAX_CROSS_RUNTIME_SEQUENCE
 
 _UUID_V4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
 _RFC3339_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
-)
-_CONTROL_OR_BIDI_PATTERN = re.compile(r"[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
-_PRIVATE_POSIX_PATH_PATTERN = re.compile(
-    r"(?:^|[\s\"'=])/(?:users|home|root|tmp|var/folders)(?:/|$)",
-    re.IGNORECASE,
-)
-_WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"(?:^|[\s\"'=])[a-z]:[\\/]", re.IGNORECASE)
-_INLINE_DATA_URI_PATTERN = re.compile(r"\bdata:[a-z0-9.+-]+/[a-z0-9.+-]+[^,]*,", re.IGNORECASE)
-_SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
-    r"(?:^|[^a-z0-9_])(?:access[_-]?token|api[_-]?key|authorization|cookie|credential|"
-    r"password|private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)\s*[:=]",
-    re.IGNORECASE,
 )
 _SENSITIVE_PAYLOAD_SEGMENTS = frozenset(
     {
@@ -325,16 +315,9 @@ def _normalized_payload_name(value: str) -> str:
 
 
 def _unsafe_payload_string(value: str) -> bool:
-    folded = value.casefold()
-    return (
-        len(value) > MAX_EXECUTOR_STRING_LENGTH
-        or _CONTROL_OR_BIDI_PATTERN.search(value) is not None
-        or "bearer " in folded
-        or "file://" in folded
-        or _SENSITIVE_ASSIGNMENT_PATTERN.search(value) is not None
-        or _INLINE_DATA_URI_PATTERN.search(value) is not None
-        or _PRIVATE_POSIX_PATH_PATTERN.search(value) is not None
-        or _WINDOWS_ABSOLUTE_PATH_PATTERN.search(value) is not None
+    return is_unsafe_text(
+        value,
+        maximum_characters=MAX_EXECUTOR_STRING_LENGTH,
     )
 
 
@@ -349,7 +332,7 @@ def _validate_payload_value(value: JsonValue, *, depth: int) -> None:
             if (
                 not key
                 or len(key) > 128
-                or _CONTROL_OR_BIDI_PATTERN.search(key) is not None
+                or contains_control_or_bidi(key)
                 or normalized_key in _SENSITIVE_PAYLOAD_NAMES
                 or set(normalized_key.split("_")) & _SENSITIVE_PAYLOAD_SEGMENTS
             ):

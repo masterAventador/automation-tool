@@ -18,11 +18,15 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 from automation_tool.control_plane.domain import (
+    MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
+    MAX_TASK_EVENT_SEQUENCE,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionOutcome,
     ActionStatus,
     ExecutionAttemptStatus,
     InstallationStatus,
+    TaskEventType,
+    TaskEventVersion,
     TaskStatus,
 )
 
@@ -235,6 +239,12 @@ tasks = Table(
     Column("installation_id", UUID(as_uuid=True), nullable=False),
     Column("current_attempt_id", UUID(as_uuid=True), nullable=True),
     Column(
+        "last_event_sequence",
+        BigInteger(),
+        nullable=False,
+        server_default=text("0"),
+    ),
+    Column(
         "status",
         String(length=32),
         nullable=False,
@@ -259,6 +269,10 @@ tasks = Table(
         name="ck_tasks_id_uuid_v4",
     ),
     CheckConstraint("revision > 0", name="ck_tasks_revision_positive"),
+    CheckConstraint(
+        f"last_event_sequence between 0 and {MAX_TASK_EVENT_SEQUENCE}",
+        name="ck_tasks_last_event_sequence_range",
+    ),
     CheckConstraint(
         "status in (" + ", ".join(f"'{status.value}'" for status in TaskStatus) + ")",
         name="ck_tasks_status",
@@ -489,6 +503,128 @@ Index(
     task_actions.c.ordinal,
 )
 
+task_events = Table(
+    "task_events",
+    metadata,
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("sequence", BigInteger(), nullable=False),
+    Column(
+        "event_version",
+        String(length=8),
+        nullable=False,
+        server_default=text(f"'{TaskEventVersion.V1.value}'"),
+    ),
+    Column("event_type", String(length=64), nullable=False),
+    Column("task_revision", BigInteger(), nullable=False),
+    Column("task_status", String(length=32), nullable=False),
+    Column("execution_attempt_id", UUID(as_uuid=True), nullable=True),
+    Column("action_id", UUID(as_uuid=True), nullable=True),
+    Column("source_message_id", UUID(as_uuid=True), nullable=True),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "recorded_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "safe_message",
+        String(),
+        nullable=True,
+    ),
+    CheckConstraint(
+        f"sequence between 1 and {MAX_TASK_EVENT_SEQUENCE}",
+        name="ck_task_events_sequence_range",
+    ),
+    CheckConstraint(
+        f"event_version = '{TaskEventVersion.V1.value}'",
+        name="ck_task_events_version",
+    ),
+    CheckConstraint(
+        "event_type in ("
+        + ", ".join(f"'{event_type.value}'" for event_type in TaskEventType)
+        + ")",
+        name="ck_task_events_type",
+    ),
+    CheckConstraint(
+        "task_revision > 0",
+        name="ck_task_events_task_revision_positive",
+    ),
+    CheckConstraint(
+        "task_status in (" + ", ".join(f"'{status.value}'" for status in TaskStatus) + ")",
+        name="ck_task_events_task_status",
+    ),
+    CheckConstraint(
+        "source_message_id is null or ("
+        "substring(source_message_id::text from 15 for 1) = '4' "
+        "and substring(source_message_id::text from 20 for 1) in ('8', '9', 'a', 'b'))",
+        name="ck_task_events_source_message_uuid_v4",
+    ),
+    CheckConstraint(
+        "action_id is null or execution_attempt_id is not null",
+        name="ck_task_events_action_requires_attempt",
+    ),
+    CheckConstraint(
+        "recorded_at >= occurred_at",
+        name="ck_task_events_time_order",
+    ),
+    CheckConstraint(
+        "safe_message is null or ("
+        f"char_length(safe_message) between 1 and {MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS} "
+        "and octet_length(safe_message) <= 4096 "
+        "and safe_message !~ '[[:cntrl:]]' "
+        "and lower(safe_message) not like '%bearer %' "
+        "and lower(safe_message) not like '%file://%' "
+        "and lower(safe_message) not like '%data:%;base64,%' "
+        "and lower(safe_message) !~ "
+        "'(access[_-]?token|api[_-]?key|authorization|cookie|credential|password|"
+        "private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)"
+        "[[:space:]]*[:=]')",
+        name="ck_task_events_safe_message",
+    ),
+    ForeignKeyConstraint(
+        ["task_id", "installation_id"],
+        ["tasks.id", "tasks.installation_id"],
+        name="fk_task_events_task_binding",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["execution_attempt_id", "task_id", "installation_id"],
+        [
+            "execution_attempts.id",
+            "execution_attempts.task_id",
+            "execution_attempts.installation_id",
+        ],
+        name="fk_task_events_attempt_binding",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["action_id", "execution_attempt_id", "task_id", "installation_id"],
+        [
+            "task_actions.id",
+            "task_actions.execution_attempt_id",
+            "task_actions.task_id",
+            "task_actions.installation_id",
+        ],
+        name="fk_task_events_action_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("task_id", "sequence", name="pk_task_events"),
+    UniqueConstraint(
+        "installation_id",
+        "source_message_id",
+        name="uq_task_events_source_message",
+    ),
+)
+
+Index(
+    "ix_task_events_installation_task_sequence",
+    task_events.c.installation_id,
+    task_events.c.task_id,
+    task_events.c.sequence,
+)
+
 device_sessions = Table(
     "device_sessions",
     metadata,
@@ -558,5 +694,6 @@ __all__ = [
     "installations",
     "metadata",
     "task_actions",
+    "task_events",
     "tasks",
 ]

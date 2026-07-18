@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action 持久化骨架已完成，准备实施 Event 模型；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event 持久化骨架已完成，准备实施 Command/Outbox；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -62,6 +62,7 @@
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
 | Task 持久化 | `✅` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
 | Attempt/Action 持久化 | `✅` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
+| Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -183,7 +184,7 @@
 | T3-01 | 任务状态机 | 全部合法/非法转换、终态、CANCELLING 和 OUTCOME_UNCERTAIN 单元测试 | I2-01 | ✅ 已完成 |
 | T3-02 | Task 数据模型 | tasks/revision/installation scope/Alembic/仓储集成测试 | T3-01,I2-02 | ✅ 已完成 |
 | T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ✅ 已完成 |
-| T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ⬜ 未开始 |
+| T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ✅ 已完成 |
 | T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ⬜ 未开始 |
 | T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ⬜ 未开始 |
 | T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ⬜ 未开始 |
@@ -1008,10 +1009,31 @@
 - 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-04 建立 task events 及复合归属；T3-05 通过持久命令驱动 Attempt offer/ack；T3-11 以事件和 revision CAS 驱动 Attempt/Action/Task 一致收敛，不能在数据库适配器复制状态分支
 
+### T3-04 Event 模型
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 Event/快照领域契约与真实 migration/schema 测试并把台账置为 RED；目标测试收集分别因 `MAX_TASK_EVENT_SEQUENCE`、Event 类型/版本、安全消息/快照模型和 `task_events` 表导出不存在而失败
+- GREEN：3 项纯领域契约 + 4 项真实 PostgreSQL Event 模型测试通过；Backend 全量 549 项且 2060 条语句、292 个分支覆盖率 100%，既有 Executor 协议 fixtures 全部通过，Ruff、严格 Mypy、uv lock 和 Alembic autogenerate `check` 通过
+- 事件词汇：封闭 19 种 task/step 事件并独立固定 `TaskEventVersion.V1 = 1.0`；未知类型/版本由领域和数据库共同拒绝，不允许消费者按名字猜测新事件
+- 序号：`(task_id, sequence)` 主键保证 Task 内唯一，sequence 与 Executor 协议共享 `1..2^53-1` 安全整数上限；同一序号不能覆盖，另一个 Task 可从 1 独立开始
+- 来源幂等：可空 `source_message_id` 必须是规范 UUIDv4，非空时 `(installation_id, source_message_id)` 唯一；同一 Executor 来源消息在一个 Installation 内不能重复落库，不阻塞另一个 Installation 的独立来源
+- Scope：事件必须命中 `(task_id, installation_id)`；Attempt 引用命中三列复合绑定，Action 引用命中四列复合绑定且 Action 非空时 Attempt 也必须非空；跨 Task/Installation/执行链引用由 PostgreSQL 拒绝
+- 安全消息：`SafeTaskEventMessage` 固定错误且不回显原值，限制 1～1024 字符单行并拒绝敏感赋值、Bearer、私有绝对路径、file/data URI、控制与双向字符；共享规则抽到 protocol 层供既有 Executor payload 同源复用。数据库再限制 1024 字符/4096 字节并拒绝空值、控制字符和明显凭据
+- 无任意载荷：`task_events` 只保存类型、版本、状态/revision、归属、序号、来源 ID、时间和安全消息，不保存任意 JSON、页面原文、Cookie、Token、本机路径、截图或聊天全文；事件型进度的结构化业务字段在 T3-11 以明确 DTO/列评估，不为赶进度先塞 JSON
+- 快照：`tasks.last_event_sequence` 以 0 表示尚无事件，并与 Task status/revision/updated time 组成不可变强类型 `TaskSnapshotProjection`；拒绝字符串冒充、bool revision/sequence、负数/超界水位和 naive time
+- 真实边界：官方 PostgreSQL 18.4 隔离容器执行 Alembic 空库升 head、autogenerate check、降级到 `0007`、确认 Event 表与 Task 水位列删除后再升 head；真实 INSERT/UPDATE 验证默认版本/入库时间、索引、去重、所有复合外键、安全消息和水位范围
+- 失败矩阵：覆盖未知版本/类型/状态、非正 revision、0/超界 sequence、重复 Task sequence、重复来源消息、非法来源 UUIDv4、跨 Installation/Task/Attempt/Action、Action 缺 Attempt、倒序时间、空/超长/凭据安全消息和非法快照输入
+- 原子性边界：本任务只冻结数据模型并证明数据库约束，尚未宣称事件收敛完成；T3-11 必须从正式 WebSocket 事件接收路径在同一事务插入事件、推进水位并 CAS 更新 Task/Attempt/Action，再由 T3-12/T3-15 验证断线续拉与前端降级
+- 清理：测试只启动隔离 PostgreSQL，fixture 结束删除容器、网络、卷；没有 App、Executor、浏览器、服务或端口遗留
+- 文档：同步根/Backend README、后端/前端架构边界、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-05 建立 Command/Outbox；T3-11 实现事件接收、缺口/迟到/重复与原子快照收敛；T3-12/T3-15 分别实现 SSE 续拉和 App 快照 reducer，均不得绕过本版本/序号/安全消息契约
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-04`：建立 Task Event 单调序号、版本与安全消息模型；
-2. `T3-05`：建立持久 Command/Outbox、幂等、deadline 与确认状态；
+1. `T3-05`：建立持久 Command/Outbox、幂等、deadline 与确认状态；
+2. `T3-06`：建立受 Installation 守卫保护的幂等创建任务 API；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

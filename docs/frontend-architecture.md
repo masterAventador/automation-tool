@@ -320,6 +320,8 @@ task.outcome_uncertain
 - 未知新事件受控降级，不猜测状态；
 - 任何错误文案只展示服务端或 Executor 生成的脱敏安全消息。
 
+T3-04 已把上述消费边界落为后端数据契约：事件版本精确为 `1.0`，19 种类型使用封闭枚举，sequence 限制在 `1..2^53-1` 且以 `(task_id, sequence)` 唯一；Task 快照携带 `last_event_sequence` 水位。安全消息最多 1024 字符，并在进入持久化前拒绝敏感赋值、Bearer、私有绝对路径、file/data URI、控制与双向字符。T3-15 的 Reducer 必须以服务端 Task status/revision/last sequence 快照为权威，未知版本、未知类型或序号缺口只能触发受控降级与重新拉取，不能从事件名自行补状态。
+
 ## 10. 错误模型
 
 统一错误至少区分：
