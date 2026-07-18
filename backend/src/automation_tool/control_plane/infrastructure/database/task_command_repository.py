@@ -1,0 +1,519 @@
+"""Atomic PostgreSQL repository for the persistent Executor command outbox."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import cast
+from uuid import UUID
+
+from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy.engine import RowMapping
+from sqlalchemy.exc import IntegrityError
+
+from automation_tool.control_plane.application.task_command_delivery import (
+    PendingTaskCommand,
+    TaskCommandDeliveryRejected,
+    TaskCommandRecord,
+)
+from automation_tool.control_plane.domain import (
+    ExecutionAttemptId,
+    InstallationId,
+    InstallationStatus,
+    TaskCommandResponseType,
+    TaskCommandStatus,
+    TaskCommandType,
+    TaskId,
+)
+from automation_tool.control_plane.infrastructure.database.schema import (
+    installations,
+    task_commands,
+)
+from automation_tool.control_plane.infrastructure.database.session import Database
+from automation_tool.protocol import TaskCommandResultEnvelope
+
+
+def _aware_utc(value: object) -> datetime:
+    if not isinstance(value, datetime) or value.utcoffset() is None:
+        raise TaskCommandDeliveryRejected
+    return value.astimezone(UTC)
+
+
+def _record(row: RowMapping) -> TaskCommandRecord:
+    try:
+        response_type = row["response_type"]
+        return TaskCommandRecord(
+            message_id=cast(UUID, row["message_id"]),
+            correlation_id=cast(UUID, row["correlation_id"]),
+            installation_id=InstallationId.parse(row["installation_id"]),
+            task_id=TaskId.parse(row["task_id"]),
+            execution_attempt_id=ExecutionAttemptId.parse(row["execution_attempt_id"]),
+            sequence=cast(int, row["sequence"]),
+            command_type=TaskCommandType(cast(str, row["command_type"])),
+            status=TaskCommandStatus(cast(str, row["status"])),
+            idempotency_key=cast(str, row["idempotency_key"]),
+            revision=cast(int, row["revision"]),
+            delivery_attempts=cast(int, row["delivery_attempts"]),
+            next_delivery_at=cast(datetime | None, row["next_delivery_at"]),
+            lease_expires_at=cast(datetime | None, row["lease_expires_at"]),
+            delivered_at=cast(datetime | None, row["delivered_at"]),
+            acknowledged_at=cast(datetime | None, row["acknowledged_at"]),
+            response_message_id=cast(UUID | None, row["response_message_id"]),
+            response_type=(
+                None if response_type is None else TaskCommandResponseType(cast(str, response_type))
+            ),
+            deadline_at=cast(datetime, row["deadline_at"]),
+            created_at=cast(datetime, row["created_at"]),
+            updated_at=cast(datetime, row["updated_at"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise TaskCommandDeliveryRejected from None
+
+
+def _same_intent(existing: TaskCommandRecord, pending: PendingTaskCommand) -> bool:
+    return (
+        existing.installation_id == pending.installation_id
+        and existing.task_id == pending.task_id
+        and existing.execution_attempt_id == pending.execution_attempt_id
+        and existing.sequence == pending.sequence
+        and existing.command_type is pending.command_type
+        and existing.idempotency_key == pending.idempotency_key
+        and existing.deadline_at == pending.deadline_at
+    )
+
+
+def _response_payload_is_valid(response: TaskCommandResultEnvelope) -> bool:
+    if response.message_type == TaskCommandResponseType.TASK_ACCEPT.value:
+        return response.payload == {"accepted": True}
+    if response.message_type == TaskCommandResponseType.TASK_REJECT.value:
+        return response.payload == {"accepted": False}
+    return response.payload == {"acknowledged": True}
+
+
+def _response_matches_command(
+    command_type: TaskCommandType,
+    response_type: TaskCommandResponseType,
+) -> bool:
+    if command_type is TaskCommandType.TASK_OFFER:
+        return response_type in {
+            TaskCommandResponseType.TASK_ACCEPT,
+            TaskCommandResponseType.TASK_REJECT,
+        }
+    return response_type is TaskCommandResponseType.TASK_CONTROL_ACK
+
+
+class SqlAlchemyTaskCommandRepository:
+    """Serialize enqueue/claim/delivery/ACK transitions in PostgreSQL."""
+
+    def __init__(self, database: Database) -> None:
+        if not isinstance(database, Database):
+            raise TaskCommandDeliveryRejected
+        self._database = database
+
+    async def enqueue(self, command: PendingTaskCommand) -> TaskCommandRecord:
+        if not isinstance(command, PendingTaskCommand):
+            raise TaskCommandDeliveryRejected
+        try:
+            async with self._database.session() as session:
+                installation_status = await session.scalar(
+                    select(installations.c.status)
+                    .where(installations.c.id == command.installation_id.uuid)
+                    .with_for_update()
+                )
+                if installation_status != InstallationStatus.ACTIVE.value:
+                    raise TaskCommandDeliveryRejected
+                existing_row = (
+                    (
+                        await session.execute(
+                            select(task_commands).where(
+                                task_commands.c.installation_id == command.installation_id.uuid,
+                                task_commands.c.idempotency_key == command.idempotency_key,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing_row is not None:
+                    existing = _record(existing_row)
+                    if not _same_intent(existing, command):
+                        raise TaskCommandDeliveryRejected
+                    return existing
+                created = (
+                    (
+                        await session.execute(
+                            insert(task_commands)
+                            .values(
+                                message_id=command.message_id,
+                                correlation_id=command.correlation_id,
+                                installation_id=command.installation_id.uuid,
+                                task_id=command.task_id.uuid,
+                                execution_attempt_id=command.execution_attempt_id.uuid,
+                                sequence=command.sequence,
+                                command_type=command.command_type.value,
+                                status=TaskCommandStatus.PENDING.value,
+                                idempotency_key=command.idempotency_key,
+                                revision=1,
+                                delivery_attempts=0,
+                                next_delivery_at=command.created_at,
+                                deadline_at=command.deadline_at,
+                                created_at=command.created_at,
+                                updated_at=command.created_at,
+                            )
+                            .returning(*task_commands.c)
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                return _record(created)
+        except IntegrityError:
+            raise TaskCommandDeliveryRejected from None
+
+    async def expire_due(
+        self,
+        *,
+        installation_id: InstallationId,
+        now: datetime,
+    ) -> int:
+        if type(installation_id) is not InstallationId:
+            raise TaskCommandDeliveryRejected
+        timestamp = _aware_utc(now)
+        async with self._database.session() as session:
+            expired = (
+                await session.scalars(
+                    update(task_commands)
+                    .where(
+                        task_commands.c.installation_id == installation_id.uuid,
+                        task_commands.c.status.in_(
+                            (
+                                TaskCommandStatus.PENDING.value,
+                                TaskCommandStatus.IN_FLIGHT.value,
+                                TaskCommandStatus.DELIVERED.value,
+                            )
+                        ),
+                        task_commands.c.deadline_at <= timestamp,
+                        task_commands.c.updated_at <= timestamp,
+                    )
+                    .values(
+                        status=TaskCommandStatus.EXPIRED.value,
+                        revision=task_commands.c.revision + 1,
+                        next_delivery_at=None,
+                        lease_expires_at=None,
+                        acknowledged_at=None,
+                        response_message_id=None,
+                        response_type=None,
+                        updated_at=timestamp,
+                    )
+                    .returning(task_commands.c.message_id)
+                )
+            ).all()
+        return len(expired)
+
+    async def claim_next(
+        self,
+        *,
+        installation_id: InstallationId,
+        now: datetime,
+        lease_expires_at: datetime,
+        retry_delivered_before: datetime,
+        recover_delivered: bool,
+    ) -> TaskCommandRecord | None:
+        if type(installation_id) is not InstallationId or type(recover_delivered) is not bool:
+            raise TaskCommandDeliveryRejected
+        timestamp = _aware_utc(now)
+        requested_lease = _aware_utc(lease_expires_at)
+        retry_before = _aware_utc(retry_delivered_before)
+        if requested_lease <= timestamp:
+            raise TaskCommandDeliveryRejected
+        delivered_due = (
+            task_commands.c.delivered_at < retry_before
+            if recover_delivered
+            else task_commands.c.delivered_at <= retry_before
+        )
+        due = or_(
+            and_(
+                task_commands.c.status == TaskCommandStatus.PENDING.value,
+                task_commands.c.next_delivery_at <= timestamp,
+            ),
+            and_(
+                task_commands.c.status == TaskCommandStatus.IN_FLIGHT.value,
+                task_commands.c.lease_expires_at <= timestamp,
+            ),
+            and_(
+                task_commands.c.status == TaskCommandStatus.DELIVERED.value,
+                delivered_due,
+            ),
+        )
+        async with self._database.session() as session:
+            current = (
+                (
+                    await session.execute(
+                        select(task_commands)
+                        .where(
+                            task_commands.c.installation_id == installation_id.uuid,
+                            task_commands.c.deadline_at > timestamp,
+                            task_commands.c.updated_at <= timestamp,
+                            due,
+                        )
+                        .order_by(
+                            task_commands.c.deadline_at,
+                            task_commands.c.created_at,
+                            task_commands.c.message_id,
+                        )
+                        .with_for_update(skip_locked=True)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if current is None:
+                return None
+            deadline = cast(datetime, current["deadline_at"])
+            lease_until = min(requested_lease, deadline)
+            claimed = (
+                (
+                    await session.execute(
+                        update(task_commands)
+                        .where(
+                            task_commands.c.message_id == current["message_id"],
+                            task_commands.c.revision == current["revision"],
+                        )
+                        .values(
+                            status=TaskCommandStatus.IN_FLIGHT.value,
+                            revision=task_commands.c.revision + 1,
+                            delivery_attempts=task_commands.c.delivery_attempts + 1,
+                            next_delivery_at=None,
+                            lease_expires_at=lease_until,
+                            delivered_at=None,
+                            acknowledged_at=None,
+                            response_message_id=None,
+                            response_type=None,
+                            updated_at=timestamp,
+                        )
+                        .returning(*task_commands.c)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            return _record(claimed)
+
+    async def mark_delivered(
+        self,
+        *,
+        message_id: UUID,
+        expected_revision: int,
+        delivered_at: datetime,
+    ) -> TaskCommandRecord:
+        timestamp = _aware_utc(delivered_at)
+        if not isinstance(message_id, UUID) or type(expected_revision) is not int:
+            raise TaskCommandDeliveryRejected
+        async with self._database.session() as session:
+            delivered = (
+                (
+                    await session.execute(
+                        update(task_commands)
+                        .where(
+                            task_commands.c.message_id == message_id,
+                            task_commands.c.revision == expected_revision,
+                            task_commands.c.status == TaskCommandStatus.IN_FLIGHT.value,
+                            task_commands.c.updated_at <= timestamp,
+                            task_commands.c.deadline_at > timestamp,
+                        )
+                        .values(
+                            status=TaskCommandStatus.DELIVERED.value,
+                            revision=task_commands.c.revision + 1,
+                            lease_expires_at=None,
+                            delivered_at=timestamp,
+                            updated_at=timestamp,
+                        )
+                        .returning(*task_commands.c)
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if delivered is None:
+                raise TaskCommandDeliveryRejected
+            return _record(delivered)
+
+    async def release_for_retry(
+        self,
+        *,
+        message_id: UUID,
+        expected_revision: int,
+        now: datetime,
+        retry_at: datetime,
+    ) -> TaskCommandRecord:
+        timestamp = _aware_utc(now)
+        retry_timestamp = _aware_utc(retry_at)
+        if (
+            not isinstance(message_id, UUID)
+            or type(expected_revision) is not int
+            or retry_timestamp < timestamp
+        ):
+            raise TaskCommandDeliveryRejected
+        async with self._database.session() as session:
+            current = (
+                (
+                    await session.execute(
+                        select(task_commands)
+                        .where(
+                            task_commands.c.message_id == message_id,
+                            task_commands.c.revision == expected_revision,
+                            task_commands.c.status == TaskCommandStatus.IN_FLIGHT.value,
+                        )
+                        .with_for_update()
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if current is None or timestamp < current["updated_at"]:
+                raise TaskCommandDeliveryRejected
+            expired = (
+                timestamp >= current["deadline_at"] or retry_timestamp >= current["deadline_at"]
+            )
+            released = (
+                (
+                    await session.execute(
+                        update(task_commands)
+                        .where(
+                            task_commands.c.message_id == message_id,
+                            task_commands.c.revision == expected_revision,
+                        )
+                        .values(
+                            status=(
+                                TaskCommandStatus.EXPIRED.value
+                                if expired
+                                else TaskCommandStatus.PENDING.value
+                            ),
+                            revision=task_commands.c.revision + 1,
+                            next_delivery_at=None if expired else retry_timestamp,
+                            lease_expires_at=None,
+                            delivered_at=None,
+                            acknowledged_at=None,
+                            response_message_id=None,
+                            response_type=None,
+                            updated_at=timestamp,
+                        )
+                        .returning(*task_commands.c)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            return _record(released)
+
+    async def acknowledge(
+        self,
+        *,
+        response: TaskCommandResultEnvelope,
+        received_at: datetime,
+    ) -> TaskCommandRecord:
+        if not isinstance(response, TaskCommandResultEnvelope) or not _response_payload_is_valid(
+            response
+        ):
+            raise TaskCommandDeliveryRejected
+        timestamp = _aware_utc(received_at)
+        installation_id = InstallationId.parse(str(response.installation_id))
+        task_id = TaskId.parse(str(response.task_id))
+        attempt_id = ExecutionAttemptId.parse(str(response.execution_attempt_id))
+        correlation_id = UUID(str(response.correlation_id))
+        response_message_id = UUID(str(response.message_id))
+        response_type = TaskCommandResponseType(response.message_type)
+        try:
+            async with self._database.session() as session:
+                current_row = (
+                    (
+                        await session.execute(
+                            select(task_commands)
+                            .where(
+                                task_commands.c.installation_id == installation_id.uuid,
+                                task_commands.c.task_id == task_id.uuid,
+                                task_commands.c.execution_attempt_id == attempt_id.uuid,
+                                task_commands.c.correlation_id == correlation_id,
+                                task_commands.c.sequence == response.sequence,
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if current_row is None:
+                    raise TaskCommandDeliveryRejected
+                current = _record(current_row)
+                if not _response_matches_command(current.command_type, response_type):
+                    raise TaskCommandDeliveryRejected
+                if current.status in {
+                    TaskCommandStatus.ACKNOWLEDGED,
+                    TaskCommandStatus.REJECTED,
+                }:
+                    if current.response_type is not response_type:
+                        raise TaskCommandDeliveryRejected
+                    return current
+                if current.status is TaskCommandStatus.EXPIRED:
+                    return current
+                if current.status is not TaskCommandStatus.DELIVERED:
+                    raise TaskCommandDeliveryRejected
+                if timestamp > current.deadline_at:
+                    expired = (
+                        (
+                            await session.execute(
+                                update(task_commands)
+                                .where(
+                                    task_commands.c.message_id == current.message_id,
+                                    task_commands.c.revision == current.revision,
+                                )
+                                .values(
+                                    status=TaskCommandStatus.EXPIRED.value,
+                                    revision=task_commands.c.revision + 1,
+                                    next_delivery_at=None,
+                                    lease_expires_at=None,
+                                    acknowledged_at=None,
+                                    response_message_id=None,
+                                    response_type=None,
+                                    updated_at=timestamp,
+                                )
+                                .returning(*task_commands.c)
+                            )
+                        )
+                        .mappings()
+                        .one()
+                    )
+                    return _record(expired)
+                final_status = (
+                    TaskCommandStatus.REJECTED
+                    if response_type is TaskCommandResponseType.TASK_REJECT
+                    else TaskCommandStatus.ACKNOWLEDGED
+                )
+                acknowledged = (
+                    (
+                        await session.execute(
+                            update(task_commands)
+                            .where(
+                                task_commands.c.message_id == current.message_id,
+                                task_commands.c.revision == current.revision,
+                            )
+                            .values(
+                                status=final_status.value,
+                                revision=task_commands.c.revision + 1,
+                                acknowledged_at=timestamp,
+                                response_message_id=response_message_id,
+                                response_type=response_type.value,
+                                updated_at=timestamp,
+                            )
+                            .returning(*task_commands.c)
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                return _record(acknowledged)
+        except IntegrityError:
+            raise TaskCommandDeliveryRejected from None
+
+
+__all__ = ["SqlAlchemyTaskCommandRepository"]

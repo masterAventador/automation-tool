@@ -23,6 +23,12 @@ from automation_tool.control_plane.application.executor_connections import (
     ExecutorConnectionRejected,
     ExecutorConnectionService,
 )
+from automation_tool.control_plane.application.task_command_delivery import (
+    TaskCommandDeliveryRejected,
+    TaskCommandDeliveryService,
+    TaskCommandDeliveryUnavailable,
+)
+from automation_tool.protocol import ExecutorLifecycleEnvelope, TaskCommandResultEnvelope
 
 EXECUTOR_CLOSE_AUTHENTICATION_REJECTED: Final = 4401
 EXECUTOR_CLOSE_IDENTITY_REJECTED: Final = 4403
@@ -102,6 +108,7 @@ async def _receive_text(websocket: WebSocket) -> str:
 async def connect_executor(websocket: WebSocket) -> None:
     service = websocket.app.state.executor_connection_service
     registry = websocket.app.state.executor_connection_registry
+    delivery = websocket.app.state.task_command_delivery_service
     if not isinstance(service, ExecutorConnectionService) or not isinstance(
         registry, ExecutorConnectionRegistry
     ):
@@ -189,6 +196,7 @@ async def connect_executor(websocket: WebSocket) -> None:
         return
 
     try:
+        recover_delivered = True
         while True:
             try:
                 if not await registry.is_current(bound):
@@ -227,6 +235,31 @@ async def connect_executor(websocket: WebSocket) -> None:
                 )
                 return
 
+            if delivery is not None:
+                if not isinstance(delivery, TaskCommandDeliveryService):
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                try:
+                    await delivery.dispatch_current(
+                        installation_id=bound.installation_id,
+                        executor_id=bound.executor_id,
+                        connection_id=bound.connection_id,
+                        recover_delivered=recover_delivered,
+                    )
+                    recover_delivered = False
+                except (TaskCommandDeliveryRejected, TaskCommandDeliveryUnavailable):
+                    logger.error("Executor command dispatch failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+
             try:
                 source = await asyncio.wait_for(
                     _receive_text(websocket),
@@ -245,7 +278,7 @@ async def connect_executor(websocket: WebSocket) -> None:
                 return
 
             try:
-                heartbeat = service.validate_lifecycle_message(bound, source)
+                message = service.validate_inbound_message(bound, source)
             except ExecutorConnectionRejected:
                 await _close(
                     websocket,
@@ -262,24 +295,53 @@ async def connect_executor(websocket: WebSocket) -> None:
                 )
                 return
 
-            try:
-                await registry.record_heartbeat(bound, sequence=heartbeat.sequence)
-            except StaleExecutorConnection:
-                await _close(
-                    websocket,
-                    code=EXECUTOR_CLOSE_CONNECTION_REPLACED,
-                    reason=_CONNECTION_REPLACED_REASON,
-                )
-                return
-            except ExecutorConnectionRegistryRejected:
+            if isinstance(message, ExecutorLifecycleEnvelope):
+                try:
+                    await registry.record_heartbeat(bound, sequence=message.sequence)
+                except StaleExecutorConnection:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_CONNECTION_REPLACED,
+                        reason=_CONNECTION_REPLACED_REASON,
+                    )
+                    return
+                except ExecutorConnectionRegistryRejected:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                except Exception:
+                    logger.error("Executor WebSocket heartbeat projection failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                continue
+
+            if not isinstance(message, TaskCommandResultEnvelope) or not isinstance(
+                delivery, TaskCommandDeliveryService
+            ):
                 await _close(
                     websocket,
                     code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
                     reason=_PROTOCOL_REJECTED_REASON,
                 )
                 return
-            except Exception:
-                logger.error("Executor WebSocket heartbeat projection failed")
+            try:
+                await delivery.acknowledge(message)
+            except TaskCommandDeliveryRejected:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                    reason=_PROTOCOL_REJECTED_REASON,
+                )
+                return
+            except TaskCommandDeliveryUnavailable:
+                logger.error("Executor command acknowledgement failed")
                 await _close(
                     websocket,
                     code=EXECUTOR_CLOSE_INTERNAL_ERROR,

@@ -47,7 +47,8 @@ automation-tool/
 │   ├── run_i2_14_acceptance.py   # 隐藏 Tauri 吊销诊断与最终状态验收
 │   ├── run_t3_06_acceptance.py   # 隐藏 Tauri 幂等创建 Task 纵向验收
 │   ├── run_t3_07_acceptance.py   # 隐藏 Tauri Task 分页/详情/scope 纵向验收
-│   └── run_t3_08_acceptance.py   # 后台真实 WebSocket Registry 单活/心跳验收
+│   ├── run_t3_08_acceptance.py   # 后台真实 WebSocket Registry 单活/心跳验收
+│   └── run_t3_09_acceptance.py   # 后台 PostgreSQL Outbox→WebSocket 重投/ACK/过期验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -209,6 +210,8 @@ backend/
 ├── Dockerfile                     # Control Plane 部署镜像
 └── README.md
 ```
+
+T3-09 的具体落点保持分层：`application/task_command_delivery.py` 定义命令记录、投递用例与安全错误；`infrastructure/database/task_command_repository.py` 实现 PostgreSQL enqueue/lease/retry/ACK；`bootstrap/task_commands.py` 只做依赖装配；`api/executor_websocket.py` 仍是唯一网络收发入口。没有另建 dispatcher 数据库、消息队列或第二套协议模型。
 
 ### 4.1 Backend 依赖方向
 

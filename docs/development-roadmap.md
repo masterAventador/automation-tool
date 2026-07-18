@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化、Task 创建/查询 API 和 Executor Connection Registry 已完成，准备实施命令投递服务；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化、Task 创建/查询 API、Executor Connection Registry 和持久命令投递已完成，准备实施 FakeExecutor；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -65,6 +65,7 @@
 | Attempt/Action 持久化 | `✅` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
 | Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
 | Command/Outbox 持久化 | `✅` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
+| Command 投递闭环 | `✅` PostgreSQL 原子抢占、current WebSocket 发送、断线/ACK 超时重投、重连恢复、严格回执与 deadline 过期已在真实网络验证 |
 | 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、201/200 原子创建/重放、并发收敛与隐藏 Tauri App 生产同路径已验证 |
 | 查询 Task API | `✅` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
@@ -193,7 +194,7 @@
 | T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ✅ 已完成 |
 | T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ✅ 已完成 |
 | T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ✅ 已完成 |
-| T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ⬜ 未开始 |
+| T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ✅ 已完成 |
 | T3-10 | FakeExecutor | 无副作用回放全部任务与控制事件；不放宽生产状态机 | T3-09 | ⬜ 未开始 |
 | T3-11 | 事件接收与收敛 | sequence、重复、缺口、迟到事件和 revision CAS | T3-04,T3-10 | ⬜ 未开始 |
 | T3-12 | SSE 事件流 | last-event/断线/重连/终态关闭；事件先落库后推送 | T3-11 | ⬜ 未开始 |
@@ -1110,10 +1111,30 @@
 - 文档：同步根/Backend README、后端架构、工程结构、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-09 使用 `send_current` 建立 Outbox 抢占、投递、ACK、过期和重连恢复；C10 多副本部署前新增跨副本连接路由，当前不引入 Redis 或第二事实源
 
+### T3-09 命令投递服务
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 pending offer 抢占/发送、socket 失败释放、真实 ACK 边界、重连恢复和非法 scope 测试并把台账置为 RED；`uv run pytest tests/unit/control_plane/test_task_command_delivery_service.py -q` 因 `automation_tool.control_plane.application.task_command_delivery` 不存在而在收集阶段失败
+- GREEN：投递应用模块 188 条语句/28 个分支、PostgreSQL 仓储 138 条语句/50 个分支、正式 WebSocket 路由 193 条语句/24 个分支分别达到 100%；Backend 全量 620 项、2892 条语句/476 个分支覆盖率 100%；uv lock、Ruff/格式、严格 Mypy、OpenAPI 3.1 与 Executor Schema 漂移检查通过
+- 原子 enqueue：服务生成规范 message/correlation UUIDv4，先锁 active Installation，再按 Installation-scoped idempotency key 查建；同一意图并发重放返回既有 Command，改换 Task/Attempt/sequence/type/deadline 的同 key 和数据库唯一冲突固定拒绝
+- 抢占与发送：每轮正式 WebSocket 重认证后先批量过期，再用 PostgreSQL `FOR UPDATE SKIP LOCKED` 按 deadline/创建时间抢占 pending、lease 过期 in-flight 或 ACK 超时 delivered；claim 原子递增 revision/delivery attempts 并持有不越 deadline 的 lease，有界批次只通过 Registry `send_current` 发送
+- 失败与恢复：socket unavailable/stale 时清 lease 并延迟回 pending；写入成功只记 delivered。新 Hello 立即重投连接前已 delivered 的同 message/idempotency，当前批次刚写入的命令不会自重投；Control Plane 崩溃遗留 in-flight 在持久 lease 到期后恢复，不依赖进程内状态
+- 严格 ACK：WebSocket 绑定后只接受同一身份 heartbeat 或 `TaskCommandResultEnvelope`；回执同时核对 Installation、Task、Attempt、correlation、sequence、命令/响应 mapping 与封闭布尔 payload。首个合法 response ID/服务端接收时间成为终态，后续同结论重复 ACK 幂等且不能覆盖，错配、未投递先确认、迟到、跨命令响应 ID 冲突固定拒绝
+- 状态边界：socket write 绝不冒充 Executor ACK；ACK 只把 Command 收敛为 acknowledged/rejected，不修改 Task/Attempt/Action。业务状态必须等 T3-11 的持久事件事实，暂停/恢复/取消/紧停的公开 API 分别等待 T3-13/T3-14
+- Payload 边界：Outbox 仍不保存任意 JSON；当前 task.offer 发送空 object 安全骨架，供 T3-10 FakeExecutor 无副作用回放。T3-17 必须先建立抖音模板明确列/DTO，再从受约束 Task 事实构造真实业务 payload，不能提前塞任意定义
+- 生产同路径验收：`uv run python ../scripts/run_t3_09_acceptance.py` 两次后台启动隔离 PostgreSQL 18.4、完整 Alembic 与真实 Uvicorn/SansIO；经正式 REST 换取 `executor.connect` Session，由标准 WebSocket 客户端验证首次 offer、断线同 message 重投、错误 ACK 4406、再次重投、真实 ACK、不同 response ID 的重复 ACK 幂等和离线 deadline 过期；最终数据库精确为原命令 delivery attempts 3/首个 response acknowledged，过期命令 attempts 0/无 response
+- App 测试边界：本任务正式产品入口是 Control Plane 持久 Outbox 到 Executor WebSocket，不是 App API；因此不启动 Tauri App、不弹窗、不抢焦点。T3-10 用正式 FakeExecutor 进程复用该入口，E4-02/E4-12 再由正式 Local Executor 复用
+- 失败矩阵：覆盖非法 ID/scope/sequence/type/key/time/config/clock/批次、未知/吊销 Installation、幂等意图改变、唯一冲突、并发抢占、lease/ACK 超时、write/stale/release/mark/持久化失败、错误/重复/迟到 ACK、控制回执 mapping、response ID 冲突、服务未装配和不泄密关闭码；本任务没有 REST/OpenAPI、数据库 Schema、TypeScript 或 Rust 改动
+- 清理：两次真实验收均在 finally 终止 Uvicorn、删除隔离 PostgreSQL 容器/网络/卷并确认 Control Plane/数据库端口关闭；复核无 T3-09 进程/容器、App、浏览器、WebDriver、Profile 或业务数据遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-10 实现不放宽生产协议/状态机的无副作用 FakeExecutor；T3-11 接收持久事件并收敛 Task/Attempt/Action；T3-13/T3-14 才开放用户控制命令。C10 多副本前仍需跨副本连接路由，本任务不引入第二事实源
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-09`：建立持久命令投递、ACK、重连恢复和过期处理；
-2. `T3-10`：建立不放宽生产状态机的无副作用 FakeExecutor；
+1. `T3-10`：建立不放宽生产协议与状态机的无副作用 FakeExecutor；
+2. `T3-11`：接收 Executor 事件并以 sequence/revision 原子收敛持久快照；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

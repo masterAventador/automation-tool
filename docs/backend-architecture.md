@@ -352,11 +352,17 @@ I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executo
 
 I2-12 已实现三端一致性：TypeScript 以严格 Zod 判别联合校验完整 envelope，并在普通 `JSON.parse` 前扫描所有对象的重复 key；Rust 以 `serde(deny_unknown_fields)` DTO、递归唯一 key visitor 和同一资源/隐私策略完成正式解析。两端都只暴露固定 `ExecutorProtocolError`，不保留或反射被拒绝的 wire。时间比较精确到 RFC3339 允许的 6 位小数，`-00:00` 不作为 canonical UTC 接受；sequence 上限固定为三端都能无损表示的 `2^53-1`。
 
-I2-13 已把 Python 正式解析入口接入 `WS /api/v1/executors/connect`。握手必须只提供 `automation-tool.executor.v1` 子协议和单个 Bearer `executor.connect` Session；第一帧限时为 `executor.hello`，绑定已认证 Installation、声明的 Executor、协议/Executor 版本、平台、架构、Hello sequence 和新生成的 `ExecutorConnectionId`。连接期间只接受同一身份的 heartbeat，并周期重新验证数据库中的 Session、父凭据与 Installation；任一失效立即固定 4401 断开，旧 Session 不能重新升级。Uvicorn 固定 `websockets-sansio` 并在传输层执行 32 KiB 上限；拒绝握手和关闭只返回固定状态/原因，原始 bearer、wire 和底层异常不进入公开响应或日志。
+I2-13 已把 Python 正式解析入口接入 `WS /api/v1/executors/connect`。握手必须只提供 `automation-tool.executor.v1` 子协议和单个 Bearer `executor.connect` Session；第一帧限时为 `executor.hello`，绑定已认证 Installation、声明的 Executor、协议/Executor 版本、平台、架构、Hello sequence 和新生成的 `ExecutorConnectionId`。T3-09 之后，连接期间只接受同一身份的 heartbeat 或任务命令回执；heartbeat 更新 Registry 单调水位，回执进入持久 Outbox 核对。服务周期重新验证数据库中的 Session、父凭据与 Installation；任一失效立即固定 4401 断开，旧 Session 不能重新升级。Uvicorn 固定 `websockets-sansio` 并在传输层执行 32 KiB 上限；拒绝握手和关闭只返回固定状态/原因，原始 bearer、wire 和底层异常不进入公开响应或日志。
 
 T3-08 在认证入口之后增加单进程 `ExecutorConnectionRegistry`。Registry 以 Installation 为唯一 live key，因此同一安装实例即使声明不同 ExecutorId 也只能有一个 current 连接；注册新 Hello 时先原子替换投影，再用固定 4409 关闭旧 socket。在线投影只包含强类型连接/Installation/Executor ID、运行时元数据、服务端连接/最后心跳时间和严格递增 sequence，不含 WebSocket、Session、凭据或客户端自报时间。旧连接的迟到 heartbeat、发送和 finally 清理均以 Connection ID 校验，不能覆盖或删除新连接；重复/倒序 heartbeat 固定按协议错误关闭。
 
 Registry 为 T3-09 提供 `send_current(installation_id, connection_id, wire)`：只接受 1..32 KiB UTF-8 文本，写入前后都确认目标仍是 current；传输失败与写入期间替换分别返回不泄密的 unavailable/stale 结果，调用者不能把 socket write 当成 Executor ACK。应用 lifespan 用 1012 清空所有连接。Registry 是单实例瞬时路由，不持久化认证、任务、命令或事件；PostgreSQL 仍是认证和业务事实源。
+
+T3-09 在每次连接重认证之后调用持久投递服务。仓储先把 deadline 已到的 pending/in-flight/delivered 批量置为 expired，再用 PostgreSQL `FOR UPDATE SKIP LOCKED` 按 deadline/创建顺序抢占 pending、lease 已过期的 in-flight，或 ACK 超时的 delivered；抢占时 revision 与 delivery attempts 同步递增并持有不越 deadline 的短 lease。同一连接内按有界批次发送，失败或 stale current 只释放成带延迟的 pending；写入成功清 lease 并记 delivered，不能改 Task/Attempt 状态。
+
+新 Executor Hello 的第一轮 dispatch 使用连接时刻作为恢复水位，立即重投此前 delivered 命令；本轮刚写入的 delivered 不会被同一批次再次抢占。Control Plane 崩溃留下的 in-flight 不靠内存恢复，而在持久 lease 到期后重新可抢占。message ID、correlation、sequence、idempotency key 和 deadline 在重投时保持不变，只有 sent time 与当前 Executor ID 来自本次发送，因此 Executor 必须以 message/idempotency 做本机去重，不能假设网络 exactly-once。
+
+任务回执必须通过正式 parser，并与当前连接身份、Outbox 的 Installation、Task、Attempt、correlation 和 sequence 全部一致。`task.accept` payload 精确为 `{"accepted":true}`，`task.reject` 为 `{"accepted":false}`，`task.control_ack` 为 `{"acknowledged":true}`；offer 只能收 accept/reject，控制命令只能收 control_ack。首个合法响应 ID 与服务端收到时间成为事实；同命令同结论的后续重复回执直接返回已有终态，不覆盖首个响应；错配、未投递先确认、迟到和跨命令响应 ID 冲突 fail closed。ACK 只结束 Command，Task/Attempt/Action 的业务状态必须等 T3-11 事件收敛。
 
 ### 10.2 命令
 
@@ -513,11 +519,13 @@ Executor 来源的规范 UUIDv4 message ID 以 `(installation_id, source_message
 
 Task 行新增从 0 开始的 `last_event_sequence`，与现有 status、revision、updated time 组成 `TaskSnapshotProjection`。App 重连先拉该权威快照，再从水位后的事件续订；事件行携带的 post-event status/revision 用于审计和版本降级，不允许前端自行猜测快照。T3-04 只冻结模型，T3-11 必须在一个 PostgreSQL 事务中校验序号/revision、更新 Task/Attempt/Action、推进水位并插入事件，不能把本任务的独立 INSERT/UPDATE 测试当成收敛已完成。
 
-T3-05 的 `task_commands` 是 Control Plane 到 Executor 的持久 Outbox。主键直接使用正式 wire `message_id`，同时持久化 correlation ID、Installation/Task/Attempt 复合归属、Attempt 内安全 sequence、Executor v1 命令类型、Installation 内幂等键、deadline、正 revision、投递次数与下一投递时间。表不保存任意 JSON；offer 的业务参数由 T3-09 从受约束 Task 定义构造，控制命令只需稳定引用执行链，避免在 Outbox 复制一份可漂移的任务定义。
+T3-05 的 `task_commands` 是 Control Plane 到 Executor 的持久 Outbox。主键直接使用正式 wire `message_id`，同时持久化 correlation ID、Installation/Task/Attempt 复合归属、Attempt 内安全 sequence、Executor v1 命令类型、Installation 内幂等键、deadline、正 revision、投递次数与下一投递时间。表不保存任意 JSON；当前 offer 只带 T3-09 的安全空骨架，业务参数等待 T3-17 从受约束 Task 定义构造；控制命令只需稳定引用执行链，避免在 Outbox 复制一份可漂移的任务定义。
 
 Outbox 状态精确为 pending、in_flight、delivered、acknowledged、rejected、expired。pending 才有 next delivery；in_flight 必须有未过 deadline 的 lease 且投递次数大于 0；delivered 只说明写入当前 WebSocket 成功；acknowledged/rejected 必须在 deadline 内收到独立 UUIDv4 response message 并保留确认时间；expired 不能带 ACK。offer 仅允许 task.accept/task.reject，pause/resume/cancel/emergency-stop 仅允许 task.control_ack，数据库拒绝“未发送先确认”、控制命令收到 accept、过期伪确认和倒序时间。
 
-`(execution_attempt_id, sequence)`、`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别去重命令顺序、业务意图与响应重放；相同幂等键/响应 ID 不跨 Installation 互相阻塞。due index 只为 T3-09 的 `FOR UPDATE SKIP LOCKED` 或等价原子抢占准备查询形状，T3-05 没有实现后台 dispatcher，也没有宣称 delivered 等于 Executor 已处理。
+`(execution_attempt_id, sequence)`、`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别去重命令顺序、业务意图与响应重放；相同幂等键/响应 ID 不跨 Installation 互相阻塞。T3-09 已使用 due index 与 `FOR UPDATE SKIP LOCKED` 实现原子抢占、lease 恢复、ACK 超时重投、连接恢复和 deadline 过期；socket write 仍只等于 delivered，绝不等于 Executor 已处理。
+
+Outbox 不保存任意 payload。T3-09 的 task.offer 当前发送空 object 安全骨架，用于 T3-10 FakeExecutor 跑通无副作用命令/回执闭环；T3-17 必须在 Task 上增加抖音模板的明确列/DTO 后，才允许投递服务从这些受约束事实构造业务 payload。pause/resume/cancel/emergency-stop 的 enqueue/投递/ACK 通用能力已经具备，但公开控制 API 和状态确认分别等待 T3-13/T3-14/T3-11，不能在内部服务完成时提前宣称用户控制闭环。
 
 约束：
 

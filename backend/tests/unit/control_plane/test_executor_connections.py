@@ -146,6 +146,32 @@ def lifecycle_message(
     )
 
 
+def task_result_message(
+    *,
+    installation_id: str = str(INSTALLATION_ID),
+    executor_id: str = str(EXECUTOR_ID),
+    message_type: str = "task.accept",
+) -> str:
+    return json.dumps(
+        {
+            "protocol_version": "1.0",
+            "message_id": "423e4567-e89b-42d3-a456-426614174001",
+            "message_type": message_type,
+            "sent_at": "2026-07-18T12:00:01Z",
+            "deadline_at": "2026-07-18T12:00:31Z",
+            "installation_id": installation_id,
+            "executor_id": executor_id,
+            "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
+            "idempotency_key": "task:accept:attempt:1",
+            "sequence": 1,
+            "payload": {"accepted": True},
+            "task_id": "123e4567-e89b-42d3-a456-426614174005",
+            "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
+        },
+        separators=(",", ":"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_authorize_uses_only_executor_capability_and_retains_no_raw_bearer() -> None:
     service, repository, token = connection_service()
@@ -247,6 +273,33 @@ async def test_bound_lifecycle_rejects_identity_switch_repeated_hello_and_task_t
     for source in rejected:
         with pytest.raises(ExecutorConnectionRejected):
             service.validate_lifecycle_message(bound, source)
+
+
+@pytest.mark.asyncio
+async def test_bound_inbound_accepts_command_results_but_rejects_identity_or_commands() -> None:
+    service, _, token = connection_service()
+    bound = service.bind_hello(await service.authorize(token), lifecycle_message())
+
+    heartbeat = service.validate_inbound_message(
+        bound,
+        lifecycle_message(
+            message_type="executor.heartbeat",
+            payload={"status": "healthy"},
+            sequence=2,
+        ),
+    )
+    accepted = service.validate_inbound_message(bound, task_result_message())
+
+    assert heartbeat.message_type == "executor.heartbeat"
+    assert accepted.message_type == "task.accept"
+    for source in (
+        task_result_message(installation_id=str(uuid4())),
+        task_result_message(executor_id=str(uuid4())),
+        lifecycle_message(message_type="task.offer"),
+        lifecycle_message(),
+    ):
+        with pytest.raises(ExecutorConnectionRejected):
+            service.validate_inbound_message(bound, source)
 
 
 @pytest.mark.asyncio

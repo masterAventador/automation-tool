@@ -14,10 +14,12 @@ from .schema import (
     tasks,
 )
 from .session import Database
+from .task_command_repository import SqlAlchemyTaskCommandRepository
 
 __all__ = [
     "Database",
     "SqlAlchemyInstallationRevocationRepository",
+    "SqlAlchemyTaskCommandRepository",
     "device_credentials",
     "device_sessions",
     "execution_attempts",

@@ -69,10 +69,10 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `GET /api/v1/tasks` 使用不透明 canonical Base64URL keyset cursor，按 `updated_at DESC, task_id DESC` 稳定分页；`GET /api/v1/tasks/{task_id}` 返回同一公开快照，未知、非法或其他 Installation 的 Task 均统一为不可见；
 - `execution_attempts`、`task_actions` 与 `tasks.current_attempt_id` 已形成 Task/Installation 复合绑定；每个 Task 只有一个非终态 Attempt、重试序号不可重复，每个 Attempt 内 Action ordinal 唯一，Action 阶段与结果确定性由数据库一致性约束锁定；
 - `task_events` 已建立版本化封闭事件词汇、`(task_id, sequence)` 唯一时间线、Installation/Attempt/Action 复合归属、来源消息去重和脱敏安全消息；`tasks.last_event_sequence` 与强类型快照投影为断线续拉提供权威水位；
-- `task_commands` 已建立持久 Outbox：Attempt 内 sequence、Installation 内幂等键/响应 message 唯一，pending/in_flight/delivered 与 acknowledged/rejected/expired 严格分离，并以 deadline、lease、投递/确认时间和响应类型约束拒绝伪确认；
+- `task_commands` 持久 Outbox 已接入正式 Executor WebSocket：PostgreSQL 以 `FOR UPDATE SKIP LOCKED` 原子抢占 lease，经当前连接写入后只记 delivered；断线、写入失败、ACK 超时和重连使用同一 message/idempotency 安全重投，只有匹配 Installation/Task/Attempt/correlation/sequence 的 accept/reject/control_ack 才能确认，deadline 到期固定 expired；
 - Executor v1 Envelope 已建立 Pydantic 判别联合：24 种生命周期/任务命令/回执/事件精确分型，显式 `1.0` 版本、规范 UUIDv4、UTC deadline、幂等键、正序号和受限安全 payload 均 fail closed；
 - Executor v1 Draft 2020-12 Schema 已从 Pydantic 确定性导出；Python、Rust、TypeScript 正式解析器共同回放 6 个 valid、25 个 invalid 公共 fixtures，并对结构、deadline、隐私和资源边界给出一致结论；
-- `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键，投影服务端心跳，新 Hello 固定 4409 替换旧连接，旧连接不能误删或冒充当前连接；
+- `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键并承载持久命令投递，连接后可接收 heartbeat 与严格绑定的命令回执，新 Hello 固定 4409 替换旧连接；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
 - 任务控制/事件流、Local Executor 进程和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

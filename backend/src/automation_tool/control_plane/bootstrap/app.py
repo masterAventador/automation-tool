@@ -35,6 +35,9 @@ from automation_tool.control_plane.application.executor_connections import (
     ExecutorConnectionService,
 )
 from automation_tool.control_plane.application.registration import InstallationRegistrationService
+from automation_tool.control_plane.application.task_command_delivery import (
+    TaskCommandDeliveryService,
+)
 from automation_tool.control_plane.application.task_queries import TaskQueryService
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
@@ -46,6 +49,9 @@ from automation_tool.control_plane.bootstrap.device_sessions import (
 )
 from automation_tool.control_plane.bootstrap.registration import (
     registration_service_from_environment,
+)
+from automation_tool.control_plane.bootstrap.task_commands import (
+    task_command_delivery_service as build_task_command_delivery_service,
 )
 from automation_tool.control_plane.bootstrap.tasks import (
     task_creation_service as build_task_creation_service,
@@ -99,6 +105,7 @@ def create_app(
     executor_connection_registry: ExecutorConnectionRegistry | None = None,
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
+    task_command_delivery_service: TaskCommandDeliveryService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
 ) -> FastAPI:
@@ -116,6 +123,7 @@ def create_app(
     )
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
+    resolved_task_command_delivery_service = task_command_delivery_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -134,6 +142,11 @@ def create_app(
         resolved_task_creation_service = build_task_creation_service(resolved_database)
     if resolved_task_query_service is None and isinstance(resolved_database, Database):
         resolved_task_query_service = build_task_query_service(resolved_database)
+    if resolved_task_command_delivery_service is None and isinstance(resolved_database, Database):
+        resolved_task_command_delivery_service = build_task_command_delivery_service(
+            resolved_database,
+            resolved_executor_connection_registry,
+        )
     hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
     recheck_interval_seconds = _positive_finite_seconds(
         executor_connection_recheck_interval_seconds
@@ -153,6 +166,7 @@ def create_app(
     app.state.executor_connection_registry = resolved_executor_connection_registry
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
+    app.state.task_command_delivery_service = resolved_task_command_delivery_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     install_request_context(app)
