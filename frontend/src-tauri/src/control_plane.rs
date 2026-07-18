@@ -25,6 +25,7 @@ const MAX_RESPONSE_LENGTH: usize = 64 * 1024;
 #[derive(Clone, Copy)]
 enum ControlPlaneOperation {
     GetSystemHealth,
+    GetCurrentInstallationAccess,
     IssueInstallationRegistrationChallenge,
     CompleteInstallationRegistration,
     RotateDeviceCredential,
@@ -35,7 +36,7 @@ enum ControlPlaneOperation {
 impl ControlPlaneOperation {
     fn method(self) -> &'static str {
         match self {
-            Self::GetSystemHealth => "GET",
+            Self::GetSystemHealth | Self::GetCurrentInstallationAccess => "GET",
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
@@ -47,6 +48,7 @@ impl ControlPlaneOperation {
     fn path(self) -> &'static str {
         match self {
             Self::GetSystemHealth => "/api/v1/health",
+            Self::GetCurrentInstallationAccess => "/api/v1/installations/current",
             Self::IssueInstallationRegistrationChallenge => {
                 "/api/v1/installations/registration-challenges"
             }
@@ -59,7 +61,9 @@ impl ControlPlaneOperation {
 
     fn success_status(self) -> u16 {
         match self {
-            Self::GetSystemHealth | Self::RevokeDeviceCredential => 200,
+            Self::GetSystemHealth
+            | Self::GetCurrentInstallationAccess
+            | Self::RevokeDeviceCredential => 200,
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
@@ -83,6 +87,7 @@ pub enum ControlPlaneErrorCode {
     TransportUnavailable,
     ProtocolInvalid,
     RequestRejected,
+    InstallationAccessDenied,
     CredentialMissing,
     IdentityUnavailable,
     StorageUnavailable,
@@ -133,6 +138,13 @@ struct HealthResponse {
     version: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InstallationAccessResponse {
+    installation_id: String,
+    status: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlPlaneHealth {
@@ -171,6 +183,29 @@ impl ControlPlaneClient {
             .execute(ControlPlaneOperation::GetSystemHealth, None, None)
             .await?;
         parse_health_response(&body)
+    }
+
+    pub async fn check_installation_access_if_registered<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<(), ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        if vault.load().map_err(map_vault_error)?.is_none() {
+            return Ok(());
+        }
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let body = self
+            .execute(
+                ControlPlaneOperation::GetCurrentInstallationAccess,
+                Some(session.token()),
+                None,
+            )
+            .await?;
+        parse_installation_access(&body)
     }
 
     pub async fn register_installation<S>(
@@ -446,14 +481,20 @@ fn validate_response_metadata(
         || !content_type_is_json
         || !cache_control_is_private
     {
-        return Err(ControlPlaneError::new(
-            if metadata.status == operation.success_status() {
-                ControlPlaneErrorCode::ProtocolInvalid
-            } else {
-                ControlPlaneErrorCode::RequestRejected
-            },
-            metadata.status >= 500,
-        ));
+        let code = if metadata.status == operation.success_status() {
+            ControlPlaneErrorCode::ProtocolInvalid
+        } else if metadata.status == 401
+            && matches!(
+                operation,
+                ControlPlaneOperation::ExchangeDeviceSession
+                    | ControlPlaneOperation::GetCurrentInstallationAccess
+            )
+        {
+            ControlPlaneErrorCode::InstallationAccessDenied
+        } else {
+            ControlPlaneErrorCode::RequestRejected
+        };
+        return Err(ControlPlaneError::new(code, metadata.status >= 500));
     }
     Ok(())
 }
@@ -475,6 +516,15 @@ fn parse_health_response(body: &[u8]) -> Result<ControlPlaneHealth, ControlPlane
         status: "available",
         service_version: response.version,
     })
+}
+
+fn parse_installation_access(body: &[u8]) -> Result<(), ControlPlaneError> {
+    let response: InstallationAccessResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.installation_id)?;
+    if response.status != "active" {
+        return Err(protocol_invalid());
+    }
+    Ok(())
 }
 
 pub struct DemoBootstrap {
@@ -788,7 +838,7 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        new_request_id, parse_device_session, parse_health_response,
+        new_request_id, parse_device_session, parse_health_response, parse_installation_access,
         parse_installation_registration, parse_registration_challenge, parse_revoked_credential,
         parse_rotated_credential, required_credential, transport_error, validate_response_metadata,
         ControlPlaneErrorCode, ControlPlaneOperation, DemoBootstrap, DeviceSessionCapability,
@@ -862,6 +912,12 @@ mod tests {
                 ControlPlaneOperation::GetSystemHealth,
                 "GET",
                 "/api/v1/health",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetCurrentInstallationAccess,
+                "GET",
+                "/api/v1/installations/current",
                 200,
             ),
             (
@@ -963,6 +1019,33 @@ mod tests {
             )
             .is_err());
         }
+
+        let access_denied = validate_response_metadata(
+            ControlPlaneOperation::GetCurrentInstallationAccess,
+            "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+            &ResponseMetadata {
+                status: 401,
+                ..valid.clone()
+            },
+        )
+        .expect_err("401 access denial");
+        assert_eq!(
+            access_denied.code(),
+            ControlPlaneErrorCode::InstallationAccessDenied
+        );
+        assert!(!access_denied.retryable());
+
+        let unavailable = validate_response_metadata(
+            ControlPlaneOperation::GetCurrentInstallationAccess,
+            "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+            &ResponseMetadata {
+                status: 503,
+                ..valid
+            },
+        )
+        .expect_err("503 access dependency failure");
+        assert_eq!(unavailable.code(), ControlPlaneErrorCode::RequestRejected);
+        assert!(unavailable.retryable());
     }
 
     #[test]
@@ -1048,6 +1131,13 @@ mod tests {
         let revocation = serde_json::json!({"version": 2, "status": "revoked"});
         parse_revoked_credential(&serde_json::to_vec(&revocation).expect("revocation JSON"))
             .expect("valid revocation");
+
+        let access = serde_json::json!({
+            "installationId": IDENTIFIER,
+            "status": "active"
+        });
+        parse_installation_access(&serde_json::to_vec(&access).expect("access JSON"))
+            .expect("valid access");
 
         let session = serde_json::json!({
             "sessionToken": session_value,
@@ -1135,6 +1225,21 @@ mod tests {
             )
             .is_err());
         }
+
+        for invalid in [
+            serde_json::json!({"installationId": IDENTIFIER, "status": "revoked"}),
+            serde_json::json!({"installationId": "private-invalid", "status": "active"}),
+            serde_json::json!({
+                "installationId": IDENTIFIER,
+                "status": "active",
+                "credential": "private"
+            }),
+        ] {
+            assert!(parse_installation_access(
+                &serde_json::to_vec(&invalid).expect("invalid access JSON")
+            )
+            .is_err());
+        }
     }
 
     #[test]
@@ -1170,6 +1275,18 @@ mod tests {
     }
 
     #[test]
+    fn unregistered_installation_skips_the_authenticated_access_probe() {
+        let missing = DeviceCredentialVault::new(MemorySecretStore {
+            value: None,
+            fail_load: Cell::new(false),
+        });
+        let client = super::ControlPlaneClient::local().expect("local client");
+
+        tauri::async_runtime::block_on(client.check_installation_access_if_registered(&missing))
+            .expect("unregistered App remains usable");
+    }
+
+    #[test]
     fn transport_failure_marks_only_stateful_or_issuing_operations_uncertain() {
         for operation in [
             ControlPlaneOperation::CompleteInstallationRegistration,
@@ -1183,6 +1300,7 @@ mod tests {
         }
         for operation in [
             ControlPlaneOperation::GetSystemHealth,
+            ControlPlaneOperation::GetCurrentInstallationAccess,
             ControlPlaneOperation::IssueInstallationRegistrationChallenge,
         ] {
             let error = transport_error(operation);

@@ -89,7 +89,7 @@ def _error_response(
     return JSONResponse(
         status_code=status_code,
         content=envelope.model_dump(mode="json", by_alias=True),
-        headers={REQUEST_ID_HEADER: request_id},
+        headers={REQUEST_ID_HEADER: request_id, "cache-control": "no-store"},
     )
 
 

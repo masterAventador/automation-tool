@@ -18,11 +18,13 @@
 
 当前长期凭据可调用 `POST /api/v1/device-sessions` 换取 `atds1.<session-id>.<256-bit-secret>`，响应禁止缓存。Session 固定 5 分钟寿命并允许客户端时钟最多落后 30 秒，只能精确选择 `app.control-plane` 或 `executor.connect` 一项能力。`device_sessions` 表只保存摘要及 Installation、父凭据 ID、父凭据版本的复合绑定；认证使用 `[not_before, expires_at)` 半开边界，父凭据轮换/吊销或 Installation 撤销后既有 Session 立即失效。
 
+服务器运维侧使用 `automation-tool-revoke-installation --installation-id ... --expected-revision ...` 原子吊销一个 Installation；命令在单事务中更新 Installation revision、active 长期凭据和全部 Session，未知/重复/stale revision/并发失败不会回显目标。App 业务路由统一依赖 `require_current_installation_access` 校验 `app.control-plane` Session 并取得强类型 Installation scope；`GET /api/v1/installations/current` 是首个消费者，后续任务路由不得相信客户端自报 scope 或复制一套认证。
+
 `WS /api/v1/executors/connect` 只接受唯一 `automation-tool.executor.v1` 子协议和 `executor.connect` Session；认证后立即从长连接 scope 擦除原始 Authorization Header。升级后第一帧必须是正式 Python parser 验证的 `executor.hello`，并把连接绑定到 Installation、Executor、协议版本、Executor 版本、平台、架构和独立 `ExecutorConnectionId`；后续 I2-13 阶段只接受同一身份的 heartbeat。连接每秒重新读取 PostgreSQL 认证状态，Session、父凭据或 Installation 失效会以固定 4401 关闭，冒充、协议错误、Hello 超时和内部失败使用固定关闭码与不泄密文案。Uvicorn 固定使用 `websockets-sansio`，并在传输层把消息限制为 32 KiB。
 
 真实网络验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`。脚本后台启动隔离 PostgreSQL 和真实 Uvicorn，经正式 REST 换票/吊销端点与标准 WebSocket 客户端验证子协议、超大帧、冒充、在线吊销和旧 Session 重连拒绝，结束后回收服务、端口、容器、网络和卷；不启动桌面 App。
 
-真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册、设备凭据轮换/吊销和 Session 换票端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名与凭据注入，React 不接触任何秘密；纵向验收连接真实 FastAPI 与隔离 PostgreSQL，并核对最终数据库状态。
+真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销和 Session 换票端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名与凭据注入，React 不接触任何秘密；I2-14 纵向验收以隐藏窗口连接真实 FastAPI 与隔离 PostgreSQL，再由服务端 CLI 吊销并验证同一 App 进入独立失效诊断及最终数据库状态。
 
 ## 本地命令
 
@@ -69,6 +71,7 @@ AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY=<32-byte-ed25519-public-key-base64url>
 - `GET http://127.0.0.1:8765/api/v1/version`
 - `POST http://127.0.0.1:8765/api/v1/installations/registration-challenges`
 - `POST http://127.0.0.1:8765/api/v1/installations`
+- `GET http://127.0.0.1:8765/api/v1/installations/current`
 - `POST http://127.0.0.1:8765/api/v1/device-credentials/rotations`
 - `POST http://127.0.0.1:8765/api/v1/device-credentials/revocations`
 - `POST http://127.0.0.1:8765/api/v1/device-sessions`

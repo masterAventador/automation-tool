@@ -293,6 +293,12 @@ I2-09 已建立正式桌面消费链路。生产 React 只通过窄 `TauriContro
 
 生产同路径验收由隐藏窗口的真实测试版 Tauri App 发起，连接真实 FastAPI 与隔离 PostgreSQL，依次完成 Health、Installation 注册、`app.control-plane` Session、凭据轮换、`executor.connect` Session 和吊销。验收同时核对设备公钥与 App 私有身份一致、challenge 已消费、v1/v2 凭据为 rotated/revoked、两张 Session 均随父凭据失效，以及长期凭据文件已删除；测试结束精确回收本地服务、容器、卷和隔离 App 数据。
 
+I2-14 增加服务器运维侧 Installation 吊销入口和统一 App 业务访问守卫。`automation-tool-revoke-installation` 只能在具备服务器数据库配置的运维环境运行，以 Installation ID + expected revision 做 fail-closed CAS；同一 PostgreSQL 事务把 Installation 置为 revoked/revision+1、吊销 active 长期凭据并吊销全部未失效 Session。未知、重复、stale revision 和并发失败使用固定文案，不输出目标或底层异常。它不是匿名 HTTP 管理接口，也不向桌面 App 暴露运维能力。
+
+`require_current_installation_access` 是后续 App 业务路由的统一 FastAPI 依赖：只认证 `app.control-plane` Session 并返回强类型 `InstallationId` scope。`GET /api/v1/installations/current` 是正式启动探针，也是该守卫的首个消费者；缺少、畸形、过期或已吊销认证共享固定 401，依赖不可用使用固定可重试 503，所有响应禁止缓存。未来创建、读取和控制任务不得复制认证逻辑或只相信请求体中的 Installation ID；T3-06 在路线图上强制依赖 I2-14。
+
+隐藏 Tauri 生产同路径验收会先由 App 正式 Rust 桥注册并访问探针，再由服务器运维 CLI 吊销，最后让同一 App 重新走启动入口并得到独立吊销诊断；同时核对 Installation、长期凭据和全部 App Session 的原子最终状态。服务端吊销后本地凭据仍保留在 Rust 管理的 App 私有目录以稳定识别该安装状态，但已无法换取任何 Session；重新授权与本地凭据替换必须由后续显式流程完成。
+
 这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
 
 ### 9.3 请求授权

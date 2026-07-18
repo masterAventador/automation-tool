@@ -72,7 +72,7 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 第一期没有认证路由守卫。启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页，而不是登录页。
 
-当前工作台壳已实现 ready、checking、unavailable 三态和安全重试。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`，由真实 WebView invoke 正式 Rust Command，再由 Rust 请求 Control Plane Health。禁止让 WebView 直接请求 Control Plane。
+当前工作台壳已实现 ready、checking、unavailable、revoked 四态和安全重试。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`，由真实 WebView invoke 正式 Rust Command，再由 Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
 
 ### 4.2 Feature 层
 
@@ -187,13 +187,13 @@ interface PlatformAdapter {
 
 测试专用 UI Harness 使用同一个 TypeScript `ControlPlaneTransport` 接口，但可直接通过 Axios 访问本机测试后端。它不能进入正式包。
 
-当前生产 TypeScript Transport 只暴露业务需要的 `checkHealth`，不接受 URL、Header、凭据或任意 operation，并只 invoke `check_control_plane_health`。Rust 使用 `reqwest` 从固定 local origin 发起请求，封闭 allowlist 覆盖 Health、Installation challenge/complete、凭据轮换/吊销和 Session 换票；请求禁止系统代理与重定向，连接超时 3 秒、总超时 10 秒、响应体上限 64 KiB，并严格校验状态、JSON content type、`no-store`、关联 ID、UUIDv4、UTC 时间和 opaque 凭据格式。底层异常只映射成固定 transport/protocol/request/identity/storage/outcome-uncertain 错误，不反射原因或秘密。
+当前生产 TypeScript Transport 只暴露业务需要的 `checkHealth`，不接受 URL、Header、凭据或任意 operation，并只 invoke `check_control_plane_health`。Rust 使用 `reqwest` 从固定 local origin 发起请求，封闭 allowlist 覆盖 Health、当前 Installation 访问探针、Installation challenge/complete、凭据轮换/吊销和 Session 换票；请求禁止系统代理与重定向，连接超时 3 秒、总超时 10 秒、响应体上限 64 KiB，并严格校验状态、JSON content type、`no-store`、关联 ID、UUIDv4、UTC 时间和 opaque 凭据格式。底层异常只映射成固定 transport/protocol/request/identity/storage/outcome-uncertain 错误；只有 Session 换票或当前 Installation 探针的精确 401 会映射成 `installation_access_denied`，且不反射原因或秘密。
 
 设备注册由 Rust 使用 App 私有目录中的生产设备身份签名 challenge，注册响应中的 `atdc1` 直接写入同一 Rust 私有凭据仓。Session 令牌保存在 Rust `Zeroizing` 缓冲，轮换以新值原子替换，吊销后删除；Bootstrap、私钥、长期凭据和 Session 都没有 React/序列化/通用 IPC 读写面。测试 Harness 仍只用于分层 UI 测试，不能替代正式桥。
 
 I2-04 建立的设备密钥边界已在 I2-08 按当前产品决策迁移到统一 App 私有存储：Rust 1.88 基线使用 `ed25519-dalek 3.0.0`、`getrandom 0.4.3` 和 `zeroize 1.9.0` 生成、派生并及时清零临时私钥缓冲；私钥与长期凭据分别使用 `device-identity-ed25519-v1` 和 `device-credential-v1` 固定文件，根目录由正式 Tauri 入口通过 `app.path().app_data_dir()` 解析。Unix 目录/文件权限固定为 `0700`/`0600`，Windows 继承当前用户 AppData ACL；存储拒绝符号链接、非普通文件、超限内容和不安全文件名，写入经同目录独占临时文件、同步及原子替换完成。正式入口只托管公钥和 Rust 凭据仓，不提供序列化、Command 或 React 接口，也不调用系统钥匙串。私钥缺项时首启生成并保存，已有值必须精确为 32 字节；长期凭据必须是 canonical `atdc1` 且允许原子替换和幂等删除。权限拒绝、随机源失败、损坏和非法凭据均 fail closed，并收敛为固定不泄密错误。
 
-当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky 健康投影，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
+当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky、revoked 健康/授权投影，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
 
 ### 5.3 无登录页面下的安装实例认证
 

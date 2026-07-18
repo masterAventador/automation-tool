@@ -37,3 +37,30 @@ fn desktop_e2e_configuration_enables_only_explicit_test_capabilities() {
         .iter()
         .any(|permission| permission == "wdio-webdriver:default"));
 }
+
+#[test]
+fn installation_revocation_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.installation-revocation-e2e.conf.json");
+    let windows = config["app"]["windows"]
+        .as_array()
+        .expect("acceptance windows must be an array");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.i214acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{ "label": "main", "visible": false }])
+    );
+    assert_eq!(windows.len(), 1);
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(
+        capabilities[1]["identifier"],
+        "wdio-installation-revocation"
+    );
+    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+}

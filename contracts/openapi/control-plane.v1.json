@@ -115,6 +115,26 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InstallationAccessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "installationId": {
+            "title": "Installationid",
+            "type": "string"
+          },
+          "status": {
+            "const": "active",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installationId",
+          "status"
+        ],
+        "title": "InstallationAccessResponse",
+        "type": "object"
+      },
       "InstallationRegistrationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -367,6 +387,10 @@
       }
     },
     "securitySchemes": {
+      "AppSession": {
+        "scheme": "bearer",
+        "type": "http"
+      },
       "DemoBootstrap": {
         "scheme": "bearer",
         "type": "http"
@@ -543,6 +567,32 @@
           }
         ],
         "summary": "Complete Installation Registration",
+        "tags": [
+          "installations"
+        ]
+      }
+    },
+    "/api/v1/installations/current": {
+      "get": {
+        "operationId": "getCurrentInstallationAccess",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationAccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Current Installation Access",
         "tags": [
           "installations"
         ]

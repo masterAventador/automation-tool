@@ -24,6 +24,7 @@ test("the production network bridge exposes only fixed Control Plane operations"
   assert.match(rustEntry, /check_control_plane_health/);
   assert.match(bridgeSource, /ControlPlaneOperation/);
   assert.match(bridgeSource, /GetSystemHealth/);
+  assert.match(bridgeSource, /GetCurrentInstallationAccess/);
   assert.match(bridgeSource, /IssueInstallationRegistrationChallenge/);
   assert.match(bridgeSource, /CompleteInstallationRegistration/);
   assert.match(bridgeSource, /RotateDeviceCredential/);

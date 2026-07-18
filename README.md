@@ -50,14 +50,15 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Installation 注册已具备离线 Ed25519 签名 Bootstrap claims、5 分钟一次性 challenge、设备私钥持有证明和 PostgreSQL 原子消费；重放、过期、冒充、跨环境、并发和重复设备均 fail closed；
 - 注册成功会在同一事务签发 `atdc1` 长期设备凭据；服务端只保存 32 字节摘要和版本历史，不保存明文凭据或设备私钥；凭据只具备 `device.session.exchange` scope，并支持原子轮换、自吊销、旧版本立即失效和并发单赢家；
 - `POST /api/v1/device-sessions` 可把当前长期凭据换成 5 分钟 `atds1` 短期票据；每张票只具备 App Control Plane 或 Executor 连接能力之一，数据库只保存摘要和精确父凭据版本绑定，父凭据/Installation 失效会立即拒绝既有票据；
+- 服务端运维 CLI 可用 revision CAS 原子吊销 Installation、active 长期凭据与全部 Session；`GET /api/v1/installations/current` 和可复用业务守卫强制 `app.control-plane` scope，未来创建任务 API 已在台账中强制依赖该守卫；
 - Frontend 已锁定 React、TypeScript、Vite 和 Ant Design，严格类型、Lint、冻结安装与生产资产构建通过；Vite 仅绑定 loopback 且仓库没有 Web 部署入口；
 - Tauri v2 已具备真实 macOS 主窗口、生产 CSP、零 IPC 权限 Capability、桌面图标与 Cargo 锁文件，Rust/Clippy/无 bundle 构建通过；
 - Tauri 首启设备身份已在 Rust 内生成 Ed25519 密钥：私钥和长期设备凭据只进入 `app_data_dir` 下由 Rust 管理的 App 私有文件，不进入 React、Tauri IPC、`localStorage` 或普通配置，也不调用系统钥匙串；
-- App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用时有脱敏诊断与重试状态，页面不存在产品登录或注册入口；
+- App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用与 Installation 已吊销分别显示脱敏诊断和重试状态，页面不存在产品登录或注册入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已接入正式 Tauri IPC/Rust 网络桥：生产入口由真实 App 发起 Health 请求；Rust 侧以固定 origin、封闭 operation allowlist、禁止重定向/代理、请求与响应大小/时间上限和关联 ID 调用 Control Plane，不暴露任意 URL 代理；
 - Installation 注册、长期凭据轮换/吊销和两类短期 Session 已通过测试版真实 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；
-- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册、设备凭据生命周期和短期 Session 交换，后端/前端分别具备确定性漂移检查；
+- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期和短期 Session 交换，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用和重试恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
 - GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；

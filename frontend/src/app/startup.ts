@@ -1,6 +1,12 @@
-import type { ControlPlaneTransport } from "../api/control-plane/transport";
+import {
+  ControlPlaneTransportError,
+  type ControlPlaneTransport,
+} from "../api/control-plane/transport";
 
-export type StartupCheckResult = { status: "ready" } | { status: "unavailable" };
+export type StartupCheckResult =
+  | { status: "ready" }
+  | { status: "unavailable" }
+  | { status: "revoked" };
 
 export interface StartupCheck {
   check(): Promise<StartupCheckResult>;
@@ -23,7 +29,13 @@ export function createTransportStartupCheck(transport: ControlPlaneTransport): S
       try {
         await transport.checkHealth();
         return { status: "ready" };
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof ControlPlaneTransportError &&
+          error.code === "installation_access_denied"
+        ) {
+          return { status: "revoked" };
+        }
         return { status: "unavailable" };
       }
     },

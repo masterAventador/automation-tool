@@ -20,6 +20,21 @@ function isControlPlaneHealth(value: unknown): value is ControlPlaneHealth {
   );
 }
 
+function installationAccessError(value: unknown): ControlPlaneTransportError | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length === 2 &&
+    record.code === "installation_access_denied" &&
+    record.retryable === false
+  ) {
+    return new ControlPlaneTransportError("installation_access_denied", false);
+  }
+  return undefined;
+}
+
 export class TauriControlPlaneTransport implements ControlPlaneTransport {
   async checkHealth(
     options: ControlPlaneRequestOptions = {},
@@ -37,6 +52,10 @@ export class TauriControlPlaneTransport implements ControlPlaneTransport {
     } catch (error) {
       if (error instanceof ControlPlaneTransportError) {
         throw error;
+      }
+      const denied = installationAccessError(error);
+      if (denied !== undefined) {
+        throw denied;
       }
       throw new ControlPlaneTransportError("transport_unavailable", true);
     }

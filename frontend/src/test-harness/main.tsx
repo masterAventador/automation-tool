@@ -2,7 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { createTestHarnessControlPlaneTransport } from "../api/control-plane/test-harness";
-import type { ControlPlaneHealth } from "../api/control-plane/transport";
+import {
+  ControlPlaneTransportError,
+  type ControlPlaneHealth,
+} from "../api/control-plane/transport";
 import { App } from "../app/App";
 import { createTransportStartupCheck } from "../app/startup";
 import "../styles/global.css";
@@ -22,6 +25,9 @@ const healthy: ControlPlaneHealth = {
 const transport = createTestHarnessControlPlaneTransport({
   async checkHealth() {
     attempts += 1;
+    if (healthMode === "revoked") {
+      throw new ControlPlaneTransportError("installation_access_denied", false);
+    }
     if (healthMode === "unavailable" || (healthMode === "flaky" && attempts <= 2)) {
       throw new Error("Harness-configured unavailable state");
     }

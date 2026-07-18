@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { StartupCheck } from "./startup";
 
-type StartupState = "checking" | "ready" | "unavailable";
+type StartupState = "checking" | "ready" | "unavailable" | "revoked";
 
 interface StartupGateProps {
   startupCheck: StartupCheck;
@@ -56,12 +56,22 @@ export function StartupGate({ startupCheck, children }: StartupGateProps) {
     );
   }
 
+  const revoked = state === "revoked";
+
   return (
     <main className="startup-screen startup-screen--diagnostic">
       <Result
         status="error"
-        title={<Typography.Title level={2}>暂时无法连接业务服务</Typography.Title>}
-        subTitle="桌面应用已启动，但 Control Plane 当前不可用。请检查本地服务或网络后重试。"
+        title={
+          <Typography.Title level={2}>
+            {revoked ? "当前安装实例已失效" : "暂时无法连接业务服务"}
+          </Typography.Title>
+        }
+        subTitle={
+          revoked
+            ? "此设备的演示授权已被吊销或失效，请联系演示管理员重新授权。"
+            : "桌面应用已启动，但 Control Plane 当前不可用。请检查本地服务或网络后重试。"
+        }
         extra={
           <Button
             type="primary"
@@ -77,9 +87,13 @@ export function StartupGate({ startupCheck, children }: StartupGateProps) {
       >
         <Card className="diagnostic-card" size="small">
           <Space orientation="vertical" size={6}>
-            <Typography.Text strong>Control Plane 不可用</Typography.Text>
+            <Typography.Text strong>
+              {revoked ? "安装实例授权不可用" : "Control Plane 不可用"}
+            </Typography.Text>
             <Typography.Text type="secondary">
-              诊断信息不会显示连接凭据或底层异常。稍后可在“设置与诊断”中查看安全报告。
+              {revoked
+                ? "重新授权后可使用此按钮再次检查，不需要登录产品账号。"
+                : "诊断信息不会显示连接凭据或底层异常。稍后可在“设置与诊断”中查看安全报告。"}
             </Typography.Text>
           </Space>
         </Card>

@@ -45,6 +45,21 @@ describe("ControlPlaneTransport boundary", () => {
     await expect(request).rejects.not.toHaveProperty("cause");
   });
 
+  it("preserves only the exact native Installation revocation category", async () => {
+    invoke.mockRejectedValueOnce({
+      code: "installation_access_denied",
+      retryable: false,
+    });
+    const transport = new TauriControlPlaneTransport();
+
+    await expect(transport.checkHealth()).rejects.toMatchObject({
+      name: "ControlPlaneTransportError",
+      code: "installation_access_denied",
+      message: "Installation access is unavailable",
+      retryable: false,
+    });
+  });
+
   it("rejects malformed native responses without treating protocol failures as retryable", async () => {
     invoke.mockResolvedValueOnce({
       status: "available",
@@ -126,8 +141,18 @@ describe("ControlPlaneTransport boundary", () => {
         checkHealth: vi.fn().mockRejectedValue(new Error("private-password")),
       }),
     );
+    const revoked = createTransportStartupCheck(
+      createTestHarnessControlPlaneTransport({
+        checkHealth: vi
+          .fn()
+          .mockRejectedValue(
+            new ControlPlaneTransportError("installation_access_denied", false),
+          ),
+      }),
+    );
 
     await expect(available.check()).resolves.toEqual({ status: "ready" });
     await expect(unavailable.check()).resolves.toEqual({ status: "unavailable" });
+    await expect(revoked.check()).resolves.toEqual({ status: "revoked" });
   });
 });

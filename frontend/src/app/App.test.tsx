@@ -54,4 +54,18 @@ describe("desktop startup", () => {
     ).toBeVisible();
     expect(document.body).not.toHaveTextContent("private-startup-secret");
   });
+
+  it("shows a distinct safe diagnostic when the Installation is revoked", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({ status: "revoked" as const }),
+    };
+
+    render(<App startupCheck={startupCheck} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "当前安装实例已失效" }),
+    ).toBeVisible();
+    expect(screen.getByText("安装实例授权不可用")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/账号登录|注册账号|私钥|凭据/);
+  });
 });

@@ -49,3 +49,14 @@ test("flaky Harness recovers through the real retry interaction", async ({ page 
   await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
+
+test("revoked Harness shows the distinct Installation diagnostic", async ({ page }) => {
+  const consoleErrors = failOnConsoleErrors(page);
+
+  await page.goto("/harness.html?health=revoked");
+
+  await expect(page.getByRole("heading", { name: "当前安装实例已失效" })).toBeVisible();
+  await expect(page.getByText("安装实例授权不可用")).toBeVisible();
+  await expect(page.getByRole("button", { name: /登录|注册/ })).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});

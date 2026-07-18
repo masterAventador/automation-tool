@@ -5,7 +5,7 @@ pub mod executor_protocol;
 pub mod secure_store;
 
 use device_credentials::initialize_production_device_credential_vault;
-#[cfg(feature = "control-plane-e2e")]
+#[cfg(not(feature = "desktop-e2e"))]
 use device_credentials::ProductionDeviceCredentialVault;
 #[cfg(feature = "desktop-e2e")]
 use device_identity::initialize_ephemeral_identity;
@@ -23,10 +23,28 @@ struct ControlPlaneCommandError {
 }
 
 #[tauri::command]
+#[cfg(feature = "desktop-e2e")]
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
     client.check_health().await.map_err(map_control_plane_error)
+}
+
+#[tauri::command]
+#[cfg(not(feature = "desktop-e2e"))]
+async fn check_control_plane_health(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
+    let health = client
+        .check_health()
+        .await
+        .map_err(map_control_plane_error)?;
+    client
+        .check_installation_access_if_registered(&vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(health)
 }
 
 fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPlaneCommandError {
@@ -36,6 +54,9 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
         control_plane::ControlPlaneErrorCode::IdentityUnavailable => "identity_unavailable",
         control_plane::ControlPlaneErrorCode::StorageUnavailable => "storage_unavailable",
         control_plane::ControlPlaneErrorCode::OutcomeUncertain => "outcome_uncertain",
+        control_plane::ControlPlaneErrorCode::InstallationAccessDenied => {
+            "installation_access_denied"
+        }
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
         | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
     };
@@ -57,6 +78,50 @@ struct ControlPlaneAcceptanceSummary {
     second_capability: &'static str,
     revoked_version: u32,
     app_secret_removed: bool,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallationRevocationAcceptanceRegistration {
+    installation_id: String,
+    revision: u32,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn register_installation_for_revocation_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<InstallationRevocationAcceptanceRegistration, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_I214_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_I214_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    client
+        .check_installation_access_if_registered(&vault)
+        .await
+        .map_err(map_control_plane_error)?;
+
+    Ok(InstallationRevocationAcceptanceRegistration {
+        installation_id: registration.installation_id().to_owned(),
+        revision: 1,
+    })
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -173,7 +238,8 @@ pub fn run() {
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
-        run_control_plane_acceptance
+        run_control_plane_acceptance,
+        register_installation_for_revocation_acceptance
     ]);
 
     builder

@@ -20,6 +20,9 @@ from automation_tool.control_plane.api.errors import (
 from automation_tool.control_plane.api.executor_websocket import (
     router as executor_websocket_router,
 )
+from automation_tool.control_plane.api.installation_access import (
+    router as installation_access_router,
+)
 from automation_tool.control_plane.api.registrations import router as registration_router
 from automation_tool.control_plane.api.system import router as system_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
@@ -128,5 +131,6 @@ def create_app(
     app.include_router(registration_router)
     app.include_router(device_credential_router)
     app.include_router(device_session_router)
+    app.include_router(installation_access_router)
     app.include_router(executor_websocket_router)
     return app
