@@ -32,6 +32,18 @@ from automation_tool.control_plane.infrastructure.database.schema import (
 from automation_tool.control_plane.infrastructure.database.session import Database
 
 
+def _validate_challenge_availability(
+    *,
+    consumed_at: datetime | None,
+    expires_at: datetime,
+    completed_at: datetime,
+) -> None:
+    if consumed_at is not None:
+        raise RegistrationChallengeUsed
+    if completed_at >= expires_at:
+        raise RegistrationChallengeExpired
+
+
 class SqlAlchemyInstallationRegistrationRepository:
     """Serialize challenge consumption and installation creation in one transaction."""
 
@@ -88,10 +100,11 @@ class SqlAlchemyInstallationRegistrationRepository:
                     )
                 ):
                     raise RegistrationProofRejected
-                if challenge["consumed_at"] is not None:
-                    raise RegistrationChallengeUsed
-                if completed_at >= challenge["expires_at"]:
-                    raise RegistrationChallengeExpired
+                _validate_challenge_availability(
+                    consumed_at=challenge["consumed_at"],
+                    expires_at=challenge["expires_at"],
+                    completed_at=completed_at,
+                )
                 try:
                     Ed25519PublicKey.from_public_bytes(challenge["device_public_key"]).verify(
                         signature,
