@@ -491,6 +491,12 @@ T3-02 的 `tasks` 表只建立后续阶段共同需要的稳定骨架：规范 T
 
 `SqlAlchemyTaskRepository.create` 先锁目标 Installation，只有 active 状态才能在同一事务创建 draft Task，因此与 Installation 吊销按同一行锁线性化；未知、已吊销或重复目标共享固定拒绝。读取和状态更新始终同时携带 Task ID + Installation ID，跨 Installation 与未知 Task 对仓储调用者不可见。状态更新锁定精确 `id + installation_id + expected_revision`，调用唯一 `TaskStateMachine` 后 revision 原子加一；两个并发旧 revision 只有一个成功，非法转换、旧 revision、scope 冒充和时间回退均不修改行。
 
+T3-03 的 `execution_attempts` 为一次任务投递与执行事实分配独立 UUIDv4 和正 `attempt_number`。状态闭集为 pending、offered、accepted、running、paused、awaiting_human、cancelling，以及 succeeded、partially_succeeded、failed、cancelled、rejected、expired、outcome_uncertain 七个终态；终态必须带 `finished_at`，非终态禁止提前带完成时间。`(task_id, attempt_number)` 不可重复，部分唯一索引保证同一 Task 最多存在一个非终态 Attempt；完成后重试必须保留旧行并使用新序号。
+
+`task_actions` 表示一次 Attempt 中可外部观察的动作，正 `ordinal` 在 Attempt 内唯一。状态将副作用阶段固定为 planned、authorized、prepared、dispatched、verified、cancelled、outcome_uncertain，结果单独固定为 pending、succeeded、failed、cancelled、outcome_uncertain：未结算阶段只能是 pending 且没有完成时间；verified 只能结算为 succeeded/failed；cancelled 与 outcome_uncertain 必须和同名结果及完成时间一致。因此“已经派发但尚未确认”的动作不会被误写成成功，也不能靠非法组合触发自动重放。
+
+归属链使用数据库复合外键而非应用约定：Attempt 必须命中 `(task_id, installation_id)`；Action 必须命中 `(execution_attempt_id, task_id, installation_id)`；`tasks.current_attempt_id` 必须命中自身 `(id, installation_id)` 下的 Attempt。三张表保留正 revision 和有序时间供 T3-11 事件 CAS；T3-03 只冻结数据契约，不提前实现命令投递、事件转换或任意 JSON payload。
+
 约束：
 
 - 每个资源都绑定 `installation_id`；

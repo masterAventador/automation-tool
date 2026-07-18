@@ -17,7 +17,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 
-from automation_tool.control_plane.domain import InstallationStatus, TaskStatus
+from automation_tool.control_plane.domain import (
+    TERMINAL_EXECUTION_ATTEMPT_STATUSES,
+    ActionOutcome,
+    ActionStatus,
+    ExecutionAttemptStatus,
+    InstallationStatus,
+    TaskStatus,
+)
 
 metadata = MetaData()
 
@@ -226,6 +233,7 @@ tasks = Table(
     metadata,
     Column("id", UUID(as_uuid=True), nullable=False),
     Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("current_attempt_id", UUID(as_uuid=True), nullable=True),
     Column(
         "status",
         String(length=32),
@@ -271,6 +279,214 @@ Index(
     tasks.c.installation_id,
     tasks.c.updated_at,
     tasks.c.id,
+)
+
+_terminal_attempt_values = ", ".join(
+    f"'{status.value}'" for status in TERMINAL_EXECUTION_ATTEMPT_STATUSES
+)
+_nonterminal_attempt_values = ", ".join(
+    f"'{status.value}'"
+    for status in ExecutionAttemptStatus
+    if status not in TERMINAL_EXECUTION_ATTEMPT_STATUSES
+)
+
+execution_attempts = Table(
+    "execution_attempts",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("attempt_number", BigInteger(), nullable=False),
+    Column(
+        "status",
+        String(length=32),
+        nullable=False,
+        server_default=text(f"'{ExecutionAttemptStatus.PENDING.value}'"),
+    ),
+    Column("revision", BigInteger(), nullable=False, server_default=text("1")),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column("started_at", DateTime(timezone=True), nullable=True),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_execution_attempts_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "attempt_number > 0",
+        name="ck_execution_attempts_number_positive",
+    ),
+    CheckConstraint("revision > 0", name="ck_execution_attempts_revision_positive"),
+    CheckConstraint(
+        "status in (" + ", ".join(f"'{status.value}'" for status in ExecutionAttemptStatus) + ")",
+        name="ck_execution_attempts_status",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at "
+        "and (started_at is null or started_at >= created_at) "
+        "and (finished_at is null or finished_at >= coalesce(started_at, created_at)) "
+        "and updated_at >= coalesce(finished_at, started_at, created_at)",
+        name="ck_execution_attempts_time_order",
+    ),
+    CheckConstraint(
+        f"(status in ({_terminal_attempt_values}) and finished_at is not null) or "
+        f"(status in ({_nonterminal_attempt_values}) and finished_at is null)",
+        name="ck_execution_attempts_terminal_time",
+    ),
+    ForeignKeyConstraint(
+        ["task_id", "installation_id"],
+        ["tasks.id", "tasks.installation_id"],
+        name="fk_execution_attempts_task_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_execution_attempts"),
+    UniqueConstraint(
+        "id",
+        "task_id",
+        "installation_id",
+        name="uq_execution_attempts_binding",
+    ),
+    UniqueConstraint(
+        "task_id",
+        "attempt_number",
+        name="uq_execution_attempts_task_number",
+    ),
+)
+
+Index(
+    "uq_execution_attempts_one_active_task",
+    execution_attempts.c.task_id,
+    unique=True,
+    postgresql_where=text(f"status in ({_nonterminal_attempt_values})"),
+)
+Index(
+    "ix_execution_attempts_installation_updated",
+    execution_attempts.c.installation_id,
+    execution_attempts.c.updated_at,
+    execution_attempts.c.id,
+)
+
+tasks.append_constraint(
+    ForeignKeyConstraint(
+        [tasks.c.current_attempt_id, tasks.c.id, tasks.c.installation_id],
+        [
+            execution_attempts.c.id,
+            execution_attempts.c.task_id,
+            execution_attempts.c.installation_id,
+        ],
+        name="fk_tasks_current_attempt_binding",
+        ondelete="RESTRICT",
+        use_alter=True,
+    )
+)
+
+task_actions = Table(
+    "task_actions",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("ordinal", BigInteger(), nullable=False),
+    Column(
+        "status",
+        String(length=32),
+        nullable=False,
+        server_default=text(f"'{ActionStatus.PLANNED.value}'"),
+    ),
+    Column(
+        "outcome",
+        String(length=32),
+        nullable=False,
+        server_default=text(f"'{ActionOutcome.PENDING.value}'"),
+    ),
+    Column("revision", BigInteger(), nullable=False, server_default=text("1")),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_task_actions_id_uuid_v4",
+    ),
+    CheckConstraint("ordinal > 0", name="ck_task_actions_ordinal_positive"),
+    CheckConstraint("revision > 0", name="ck_task_actions_revision_positive"),
+    CheckConstraint(
+        "status in (" + ", ".join(f"'{status.value}'" for status in ActionStatus) + ")",
+        name="ck_task_actions_status",
+    ),
+    CheckConstraint(
+        "outcome in (" + ", ".join(f"'{outcome.value}'" for outcome in ActionOutcome) + ")",
+        name="ck_task_actions_outcome",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at "
+        "and (finished_at is null or "
+        "(finished_at >= created_at and updated_at >= finished_at))",
+        name="ck_task_actions_time_order",
+    ),
+    CheckConstraint(
+        "(status in ('planned', 'authorized', 'prepared', 'dispatched') "
+        "and outcome = 'pending' and finished_at is null) or "
+        "(status = 'verified' and outcome in ('succeeded', 'failed') "
+        "and finished_at is not null) or "
+        "(status = 'cancelled' and outcome = 'cancelled' and finished_at is not null) or "
+        "(status = 'outcome_uncertain' and outcome = 'outcome_uncertain' "
+        "and finished_at is not null)",
+        name="ck_task_actions_result_coherence",
+    ),
+    ForeignKeyConstraint(
+        ["execution_attempt_id", "task_id", "installation_id"],
+        [
+            "execution_attempts.id",
+            "execution_attempts.task_id",
+            "execution_attempts.installation_id",
+        ],
+        name="fk_task_actions_attempt_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_task_actions"),
+    UniqueConstraint(
+        "id",
+        "execution_attempt_id",
+        "task_id",
+        "installation_id",
+        name="uq_task_actions_binding",
+    ),
+    UniqueConstraint(
+        "execution_attempt_id",
+        "ordinal",
+        name="uq_task_actions_attempt_ordinal",
+    ),
+)
+
+Index(
+    "ix_task_actions_installation_task",
+    task_actions.c.installation_id,
+    task_actions.c.task_id,
+    task_actions.c.execution_attempt_id,
+    task_actions.c.ordinal,
 )
 
 device_sessions = Table(
@@ -337,8 +553,10 @@ Index(
 __all__ = [
     "device_credentials",
     "device_sessions",
+    "execution_attempts",
     "installation_registration_challenges",
     "installations",
     "metadata",
+    "task_actions",
     "tasks",
 ]

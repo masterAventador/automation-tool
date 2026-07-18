@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task 状态机与持久化骨架已完成，准备实施 Attempt/Action 模型；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action 持久化骨架已完成，准备实施 Event 模型；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -61,6 +61,7 @@
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
 | Task 持久化 | `✅` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
+| Attempt/Action 持久化 | `✅` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -181,7 +182,7 @@
 | --- | --- | --- | --- | --- |
 | T3-01 | 任务状态机 | 全部合法/非法转换、终态、CANCELLING 和 OUTCOME_UNCERTAIN 单元测试 | I2-01 | ✅ 已完成 |
 | T3-02 | Task 数据模型 | tasks/revision/installation scope/Alembic/仓储集成测试 | T3-01,I2-02 | ✅ 已完成 |
-| T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ⬜ 未开始 |
+| T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ✅ 已完成 |
 | T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ⬜ 未开始 |
 | T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ⬜ 未开始 |
 | T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ⬜ 未开始 |
@@ -987,10 +988,30 @@
 - 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-03 增加 execution attempts、actions 及 Task current attempt 复合绑定；T3-06 创建 API 必须先经过 I2-14 Installation 访问守卫并调用本仓储；T3-07 查询 API 复用相同 scope 条件
 
+### T3-03 Attempt/Action 模型
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增领域契约和真实 migration/schema 测试并把台账置为 RED；目标测试收集分别因 `ActionOutcome`、Attempt/Action 状态契约与数据库表导出不存在而失败
+- GREEN：2 项纯领域契约 + 4 项真实 PostgreSQL 模型测试通过；Backend 全量 542 项且 1993 条语句、288 个分支覆盖率 100%，Ruff、严格 Mypy、uv lock 和 Alembic autogenerate `check` 通过
+- Attempt：迁移 `20260718_0007` 新增规范 Execution Attempt UUIDv4、Task/Installation 复合归属、正 attempt number/revision、有序 created/updated/started/finished time 和 14 个状态；七个终态必须有 finished time，七个非终态禁止提前完成
+- 单活与重试：`(task_id, attempt_number)` 唯一，部分唯一索引限定每个 Task 最多一个非终态 Attempt；旧 Attempt 终结后才能以新序号重试，不能覆盖原链路或并发创建两个活动执行
+- Current binding：`tasks.current_attempt_id + tasks.id + tasks.installation_id` 复合外键精确指向 Attempt 的 `id + task_id + installation_id`；空值代表尚无执行，非空时不能引用其他 Task 或 Installation
+- Action：每个 Action 使用规范 UUIDv4，`(execution_attempt_id, ordinal)` 唯一，正 revision 和有序时间；planned/authorized/prepared/dispatched 是未结算阶段，verified/cancelled/outcome_uncertain 是终态，结果单独限定为 pending/succeeded/failed/cancelled/outcome_uncertain
+- 结果确定性：数据库一致性约束要求未结算阶段只能是 pending 且无完成时间，verified 只能是 succeeded/failed，cancelled 与 outcome_uncertain 必须分别匹配同名结果和完成时间；不允许把 dispatched 伪装成成功或在结果未知时自动重放
+- Scope：Attempt 复合外键命中 `(task_id, installation_id)`，Action 复合外键命中 `(execution_attempt_id, task_id, installation_id)`；跨 Task/Installation 绑定与当前 Attempt 冒充都由 PostgreSQL 拒绝，而不是依赖调用者自觉
+- 真实边界：官方 PostgreSQL 18.4 隔离容器执行 Alembic 空库升 head、autogenerate check、降级到 `0006`、确认两张新表与 current column 删除后再升 head；真实 INSERT/UPDATE 验证默认值、外键、部分唯一索引、序号和终态组合
+- 失败矩阵：覆盖非法 UUIDv4、错误 Task/Installation scope、重复重试序号、两个活动 Attempt、非法状态/revision/时间、终态缺完成时间、非终态提前完成、跨 Task current Attempt、重复/非正 Action ordinal、非法 Action 状态/结果与阶段结果矛盾
+- 最小边界：本任务没有加入任意 JSON、页面原文、Cookie、Token、本机路径、命令、事件或平台业务参数；Attempt/Action 的创建与转换应用服务随 T3-05/T3-06/T3-11 建立，不能把本次数据库直连测试冒充未来 API/事件验收
+- 清理：测试只启动隔离 PostgreSQL，fixture 结束删除容器、网络、卷；没有 App、Executor、浏览器、服务或端口遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-04 建立 task events 及复合归属；T3-05 通过持久命令驱动 Attempt offer/ack；T3-11 以事件和 revision CAS 驱动 Attempt/Action/Task 一致收敛，不能在数据库适配器复制状态分支
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-03`：建立 Execution Attempt/Action 模型和唯一约束；
-2. `T3-04`：建立 Task Event 单调序号、版本与安全消息模型；
+1. `T3-04`：建立 Task Event 单调序号、版本与安全消息模型；
+2. `T3-05`：建立持久 Command/Outbox、幂等、deadline 与确认状态；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

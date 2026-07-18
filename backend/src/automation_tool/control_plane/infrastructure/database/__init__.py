@@ -4,9 +4,11 @@ from .installation_revocation_repository import SqlAlchemyInstallationRevocation
 from .schema import (
     device_credentials,
     device_sessions,
+    execution_attempts,
     installation_registration_challenges,
     installations,
     metadata,
+    task_actions,
     tasks,
 )
 from .session import Database
@@ -16,8 +18,10 @@ __all__ = [
     "SqlAlchemyInstallationRevocationRepository",
     "device_credentials",
     "device_sessions",
+    "execution_attempts",
     "installation_registration_challenges",
     "installations",
     "metadata",
+    "task_actions",
     "tasks",
 ]

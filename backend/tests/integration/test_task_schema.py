@@ -18,11 +18,12 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0005"
-HEAD_REVISION = "20260718_0006"
+HEAD_REVISION = "20260718_0007"
 NOW = datetime(2026, 7, 18, 14, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "id",
     "installation_id",
+    "current_attempt_id",
     "status",
     "revision",
     "created_at",

@@ -65,6 +65,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - installation、executor、task、execution attempt、action 和 artifact 已使用六种不可混用的规范 UUIDv4 领域类型；
 - Task 纯领域状态机已锁定 16 个状态、5 个无出边终态和全部显式转换；256 个状态对均已穷举，取消先进入 `CANCELLING`、取消/完成竞态按最终事实收敛，`OUTCOME_UNCERTAIN` 不可从执行前阶段伪造；
 - `tasks` 已具备 PostgreSQL/Alembic 持久化、Task UUIDv4、Installation scope、状态/revision/时间约束和仓储 CAS；只允许 active Installation 创建，跨 Installation 查询/更新不可见，并发旧 revision 只有一个赢家；
+- `execution_attempts`、`task_actions` 与 `tasks.current_attempt_id` 已形成 Task/Installation 复合绑定；每个 Task 只有一个非终态 Attempt、重试序号不可重复，每个 Attempt 内 Action ordinal 唯一，Action 阶段与结果确定性由数据库一致性约束锁定；
 - Executor v1 Envelope 已建立 Pydantic 判别联合：24 种生命周期/任务命令/回执/事件精确分型，显式 `1.0` 版本、规范 UUIDv4、UTC deadline、幂等键、正序号和受限安全 payload 均 fail closed；
 - Executor v1 Draft 2020-12 Schema 已从 Pydantic 确定性导出；Python、Rust、TypeScript 正式解析器共同回放 6 个 valid、25 个 invalid 公共 fixtures，并对结构、deadline、隐私和资源边界给出一致结论；
 - `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；

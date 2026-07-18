@@ -11,6 +11,13 @@ from automation_tool.control_plane.domain.demo_bootstrap import (
     InvalidDemoEnvironmentId,
 )
 from automation_tool.control_plane.domain.errors import DependencyUnavailable
+from automation_tool.control_plane.domain.execution_models import (
+    TERMINAL_ACTION_STATUSES,
+    TERMINAL_EXECUTION_ATTEMPT_STATUSES,
+    ActionOutcome,
+    ActionStatus,
+    ExecutionAttemptStatus,
+)
 from automation_tool.control_plane.domain.installations import InstallationStatus
 from automation_tool.control_plane.domain.ports import DatabaseLifecycle
 from automation_tool.control_plane.domain.resource_ids import (
@@ -32,7 +39,11 @@ from automation_tool.control_plane.domain.task_state_machine import (
 
 __all__ = [
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
+    "TERMINAL_ACTION_STATUSES",
+    "TERMINAL_EXECUTION_ATTEMPT_STATUSES",
     "ActionId",
+    "ActionOutcome",
+    "ActionStatus",
     "ArtifactId",
     "BootstrapAuthorizationDenied",
     "BootstrapDenialReason",
@@ -42,6 +53,7 @@ __all__ = [
     "DemoEnvironmentId",
     "DependencyUnavailable",
     "ExecutionAttemptId",
+    "ExecutionAttemptStatus",
     "ExecutorConnectionId",
     "ExecutorId",
     "InstallationId",
