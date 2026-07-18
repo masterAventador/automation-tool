@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化和幂等创建 Task API 已完成，准备实施任务查询 API；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化及 Task 创建/查询 API 已完成，准备实施 Executor Connection Registry；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -65,6 +65,7 @@
 | Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
 | Command/Outbox 持久化 | `✅` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
 | 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、201/200 原子创建/重放、并发收敛与隐藏 Tauri App 生产同路径已验证 |
+| 查询 Task API | `✅` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -189,7 +190,7 @@
 | T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ✅ 已完成 |
 | T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ✅ 已完成 |
 | T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ✅ 已完成 |
-| T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ⬜ 未开始 |
+| T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ✅ 已完成 |
 | T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ⬜ 未开始 |
 | T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ⬜ 未开始 |
 | T3-10 | FakeExecutor | 无副作用回放全部任务与控制事件；不放宽生产状态机 | T3-09 | ⬜ 未开始 |
@@ -1070,10 +1071,28 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-07 建立 Installation-scoped 查询/分页；T3-17 才添加抖音模板字段和生产 UI 创建命令；T3-09/T3-11 分别负责投递与事件收敛，当前创建成功不冒充任务已运行
 
+### T3-07 任务查询 API
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增列表/详情 API 契约、真实 PostgreSQL scope/keyset 生命周期和查询服务非法输入测试并把台账置为 RED；`uv run pytest tests/contract/test_task_query_api.py tests/integration/test_task_query_lifecycle.py tests/unit/control_plane/test_task_query_service.py -q` 因 `automation_tool.control_plane.application.task_queries` 不存在而在收集阶段失败
+- GREEN：Backend 全量 577 项且 2315 条语句、342 个分支覆盖率 100%，Ruff、格式和严格 Mypy 通过；OpenAPI 3.1/生成 TypeScript DTO 无漂移；Frontend 28 项 Node 契约、63 项 Vitest、4 项 Playwright、ESLint、TypeScript 和 production build/边界扫描通过；Rust 默认与 `control-plane-e2e` 各 43 项测试、fmt 及全目标全特性 Clippy `-D warnings` 通过
+- API 契约：新增 `GET /api/v1/tasks`/`listTasks` 和 `GET /api/v1/tasks/{task_id}`/`getTask`；两者强制复用 `require_current_installation_access`，只返回 taskId/status/revision/createdAt/updatedAt 公开快照并固定 `no-store`
+- 分页：列表按 `(updated_at DESC, task_id DESC)` 使用 PostgreSQL keyset 查询并多取一行，`limit` 限制为 `1..100`；下一页 cursor 是长度不超过 256 的 canonical JSON Base64URL，包含 UTC 微秒时间和规范 Task UUIDv4，不包含明文幂等键或凭据
+- 隔离与错误：列表查询在 SQL 条件中固定 Installation；详情用 `task_id + installation_id` 同时命中。非法/未知/跨 Installation Task 对外共享同一 `task_not_found` 404；重复/未知 cursor 字段、非法 UUID/时间、非规范 Base64/JSON、极短畸形 Base64 和非法 limit 统一 fail closed 且不回显输入
+- App 正式边界：Rust 封闭 allowlist 增加 `ListTasks`/`GetTask`，只构造固定列表路径和通过 UUIDv4 校验的详情路径；每次调用从 App 私有 vault 换取 `app.control-plane` Session，严格解析公开状态、正 revision、UTC 时间、降序列表和 opaque cursor，不向 React/IPC 暴露 bearer、长期凭据、Session、Header 或任意 URL
+- 生产同路径验收：`uv run python ../scripts/run_t3_07_acceptance.py` 后台启动隔离 PostgreSQL 18.4、完整 Alembic、真实 Uvicorn 和唯一 `visible=false` 的真实 Tauri/WKWebView；先预置另一个 Installation/Task，再由隐藏 App 注册、创建三个自有 Task、完成 2+1 分页、读取详情并确认外部 Task 不可见，最终核对两个 Installation、四条 Task、七张正式 App Session、已消费 challenge 及 App 私有身份/凭据权限
+- 条件编译：Rust `desktop-e2e + control-plane-e2e` 同时启用时明确选择生产身份/凭据边界，避免全特性构建漏失 vault；默认、单独控制面特性和 all-features Clippy 均已验证
+- 失败矩阵：覆盖缺失/错误认证、服务未装配、非法 scope/Task ID/limit/cursor、重复与未知 JSON key、非规范编码、同时间 Task ID tie-break、分页边界、未知与跨 Installation 不可见、Rust 固定路径/DTO/顺序/metadata/transport 拒绝，以及查询不修改其他 scope 数据
+- 清理：隐藏验收在 finally 精确终止 App/Uvicorn、删除隔离 App 私有目录、`docker compose down --volumes --remove-orphans` 并释放随机数据库端口和 8765；复核无监听、容器或测试 App 数据遗留，全程未弹出或聚焦 App
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-08 建立 Executor Connection Registry；T3-09 负责持久命令投递；T3-12/T3-15/T3-16 再接事件续拉与 App 投影，当前查询 API 不冒充实时任务闭环
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-07`：建立 Installation 隔离的任务列表/详情/分页 API；
-2. `T3-08`：建立 Executor Connection Registry；
+1. `T3-08`：建立 Executor Connection Registry；
+2. `T3-09`：建立持久命令投递、ACK、重连恢复和过期处理；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

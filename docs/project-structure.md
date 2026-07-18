@@ -45,7 +45,8 @@ automation-tool/
 │   ├── run_i2_09_acceptance.py   # 隐藏 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
 │   ├── run_i2_13_acceptance.py   # 后台 Uvicorn→WebSocket→PostgreSQL 隔离验收
 │   ├── run_i2_14_acceptance.py   # 隐藏 Tauri 吊销诊断与最终状态验收
-│   └── run_t3_06_acceptance.py   # 隐藏 Tauri 幂等创建 Task 纵向验收
+│   ├── run_t3_06_acceptance.py   # 隐藏 Tauri 幂等创建 Task 纵向验收
+│   └── run_t3_07_acceptance.py   # 隐藏 Tauri Task 分页/详情/scope 纵向验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -116,7 +117,8 @@ frontend/
 │   ├── tauri.test.conf.json       # 后台隐藏的通用桌面测试配置
 │   ├── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
 │   ├── tauri.installation-revocation-e2e.conf.json # 后台隐藏的吊销验收
-│   └── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
+│   ├── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
+│   └── tauri.task-query-e2e.conf.json # 后台隐藏的 Task 查询验收
 ├── public/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -126,6 +128,7 @@ frontend/
 ├── wdio.control-plane.conf.ts
 ├── wdio.installation-revocation.conf.ts
 ├── wdio.task-creation.conf.ts
+├── wdio.task-query.conf.ts
 ├── tsconfig.json
 └── README.md
 ```

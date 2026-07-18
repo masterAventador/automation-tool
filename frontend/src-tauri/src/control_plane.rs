@@ -33,12 +33,17 @@ enum ControlPlaneOperation {
     RevokeDeviceCredential,
     ExchangeDeviceSession,
     CreateTask,
+    ListTasks,
+    GetTask,
 }
 
 impl ControlPlaneOperation {
     fn method(self) -> &'static str {
         match self {
-            Self::GetSystemHealth | Self::GetCurrentInstallationAccess => "GET",
+            Self::GetSystemHealth
+            | Self::GetCurrentInstallationAccess
+            | Self::ListTasks
+            | Self::GetTask => "GET",
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
@@ -60,6 +65,8 @@ impl ControlPlaneOperation {
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
             Self::CreateTask => "/api/v1/tasks",
+            Self::ListTasks => "/api/v1/tasks",
+            Self::GetTask => "/api/v1/tasks/{task_id}",
         }
     }
 
@@ -67,7 +74,9 @@ impl ControlPlaneOperation {
         match self {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
-            | Self::RevokeDeviceCredential => 200,
+            | Self::RevokeDeviceCredential
+            | Self::ListTasks
+            | Self::GetTask => 200,
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
@@ -89,6 +98,12 @@ impl ControlPlaneOperation {
                 | Self::ExchangeDeviceSession
         )
     }
+}
+
+#[derive(Clone, Copy)]
+enum ControlPlaneRequestTarget<'a> {
+    TaskList { cursor: Option<&'a str>, limit: u16 },
+    TaskDetail(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -189,7 +204,13 @@ impl ControlPlaneClient {
 
     pub async fn check_health(&self) -> Result<ControlPlaneHealth, ControlPlaneError> {
         let body = self
-            .execute(ControlPlaneOperation::GetSystemHealth, None, None, None)
+            .execute(
+                ControlPlaneOperation::GetSystemHealth,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
         parse_health_response(&body)
     }
@@ -211,6 +232,7 @@ impl ControlPlaneClient {
             .execute(
                 ControlPlaneOperation::GetCurrentInstallationAccess,
                 Some(session.token()),
+                None,
                 None,
                 None,
             )
@@ -244,6 +266,7 @@ impl ControlPlaneClient {
                 Some(bootstrap.token()),
                 Some(&challenge_request),
                 None,
+                None,
             )
             .await?;
         let challenge = parse_registration_challenge(&challenge_body)?;
@@ -263,6 +286,7 @@ impl ControlPlaneClient {
                 ControlPlaneOperation::CompleteInstallationRegistration,
                 Some(bootstrap.token()),
                 Some(&completion_request),
+                None,
                 None,
             )
             .await?;
@@ -297,6 +321,7 @@ impl ControlPlaneClient {
             .execute(
                 ControlPlaneOperation::RotateDeviceCredential,
                 Some(credential.as_str()),
+                None,
                 None,
                 None,
             )
@@ -334,6 +359,7 @@ impl ControlPlaneClient {
                 Some(credential.as_str()),
                 Some(&request_body),
                 None,
+                None,
             )
             .await?;
         parse_device_session(&response_body, capability)
@@ -351,6 +377,7 @@ impl ControlPlaneClient {
             .execute(
                 ControlPlaneOperation::RevokeDeviceCredential,
                 Some(credential.as_str()),
+                None,
                 None,
                 None,
             )
@@ -381,9 +408,64 @@ impl ControlPlaneClient {
                 Some(session.token()),
                 Some(&request_body),
                 Some(idempotency_key),
+                None,
             )
             .await?;
         parse_created_task(&response_body)
+    }
+
+    pub async fn list_tasks<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<TaskListPage, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        if !(1..=100).contains(&limit) {
+            return Err(protocol_invalid());
+        }
+        if let Some(value) = cursor {
+            require_list_cursor(value)?;
+        }
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::ListTasks,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::TaskList { cursor, limit }),
+            )
+            .await?;
+        parse_task_list(&response_body)
+    }
+
+    pub async fn get_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+    ) -> Result<TaskSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(task_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::GetTask,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::TaskDetail(task_id)),
+            )
+            .await?;
+        parse_task_snapshot_body(&response_body)
     }
 
     async fn execute(
@@ -392,9 +474,11 @@ impl ControlPlaneClient {
         bearer: Option<&str>,
         body: Option<&serde_json::Value>,
         idempotency_key: Option<&str>,
+        target: Option<ControlPlaneRequestTarget<'_>>,
     ) -> Result<Zeroizing<Vec<u8>>, ControlPlaneError> {
         let request_id = new_request_id()?;
-        let url = format!("{LOCAL_CONTROL_PLANE_ORIGIN}{}", operation.path());
+        let path = request_path(operation, target)?;
+        let url = format!("{LOCAL_CONTROL_PLANE_ORIGIN}{path}");
         let mut request = match operation.method() {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
@@ -453,6 +537,34 @@ impl ControlPlaneClient {
             response_body.extend_from_slice(&chunk);
         }
         Ok(response_body)
+    }
+}
+
+fn request_path(
+    operation: ControlPlaneOperation,
+    target: Option<ControlPlaneRequestTarget<'_>>,
+) -> Result<String, ControlPlaneError> {
+    match (operation, target) {
+        (
+            ControlPlaneOperation::ListTasks,
+            Some(ControlPlaneRequestTarget::TaskList { cursor, limit }),
+        ) if (1..=100).contains(&limit) => {
+            let mut path = format!("{}?limit={limit}", operation.path());
+            if let Some(value) = cursor {
+                require_list_cursor(value)?;
+                path.push_str("&cursor=");
+                path.push_str(value);
+            }
+            Ok(path)
+        }
+        (ControlPlaneOperation::GetTask, Some(ControlPlaneRequestTarget::TaskDetail(task_id))) => {
+            require_canonical_uuid_v4(task_id)?;
+            Ok(format!("/api/v1/tasks/{task_id}"))
+        }
+        (ControlPlaneOperation::ListTasks | ControlPlaneOperation::GetTask, _) | (_, Some(_)) => {
+            Err(protocol_invalid())
+        }
+        (_, None) => Ok(operation.path().to_owned()),
     }
 }
 
@@ -532,6 +644,8 @@ fn validate_response_metadata(
                 ControlPlaneOperation::ExchangeDeviceSession
                     | ControlPlaneOperation::GetCurrentInstallationAccess
                     | ControlPlaneOperation::CreateTask
+                    | ControlPlaneOperation::ListTasks
+                    | ControlPlaneOperation::GetTask
             )
         {
             ControlPlaneErrorCode::InstallationAccessDenied
@@ -573,12 +687,19 @@ fn parse_installation_access(body: &[u8]) -> Result<(), ControlPlaneError> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreatedTaskResponse {
+struct TaskSnapshotResponse {
     task_id: String,
     status: String,
     revision: u32,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskListResponse {
+    items: Vec<TaskSnapshotResponse>,
+    next_cursor: Option<String>,
 }
 
 pub struct CreatedTask {
@@ -601,6 +722,42 @@ impl CreatedTask {
     }
 }
 
+pub struct TaskSnapshot {
+    task_id: String,
+    status: String,
+    revision: u32,
+    updated_at: OffsetDateTime,
+}
+
+impl TaskSnapshot {
+    pub fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+
+    pub fn revision(&self) -> u32 {
+        self.revision
+    }
+}
+
+pub struct TaskListPage {
+    items: Vec<TaskSnapshot>,
+    next_cursor: Option<String>,
+}
+
+impl TaskListPage {
+    pub fn items(&self) -> &[TaskSnapshot] {
+        &self.items
+    }
+
+    pub fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
+}
+
 fn require_idempotency_key(value: &str) -> Result<(), ControlPlaneError> {
     let mut bytes = value.bytes();
     let first = bytes.next();
@@ -615,18 +772,100 @@ fn require_idempotency_key(value: &str) -> Result<(), ControlPlaneError> {
     Ok(())
 }
 
-fn parse_created_task(body: &[u8]) -> Result<CreatedTask, ControlPlaneError> {
-    let response: CreatedTaskResponse = parse_exact_json(body)?;
+fn require_list_cursor(value: &str) -> Result<(), ControlPlaneError> {
+    if value.is_empty()
+        || value.len() > 256
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn valid_task_status(value: &str) -> bool {
+    matches!(
+        value,
+        "draft"
+            | "validating"
+            | "awaiting_platform_login"
+            | "awaiting_confirmation"
+            | "queued"
+            | "offered"
+            | "running"
+            | "paused"
+            | "awaiting_human"
+            | "cancelling"
+            | "succeeded"
+            | "partially_succeeded"
+            | "failed"
+            | "cancelled"
+            | "rejected"
+            | "outcome_uncertain"
+    )
+}
+
+fn parse_task_snapshot(response: TaskSnapshotResponse) -> Result<TaskSnapshot, ControlPlaneError> {
     require_canonical_uuid_v4(&response.task_id)?;
     let created_at = require_bounded_timestamp(&response.created_at)?;
     let updated_at = require_bounded_timestamp(&response.updated_at)?;
-    if response.status != "draft" || response.revision != 1 || updated_at < created_at {
+    if !valid_task_status(&response.status) || response.revision == 0 || updated_at < created_at {
         return Err(protocol_invalid());
     }
-    Ok(CreatedTask {
+    Ok(TaskSnapshot {
         task_id: response.task_id,
         status: response.status,
         revision: response.revision,
+        updated_at,
+    })
+}
+
+fn parse_task_snapshot_body(body: &[u8]) -> Result<TaskSnapshot, ControlPlaneError> {
+    parse_task_snapshot(parse_exact_json(body)?)
+}
+
+fn parse_created_task(body: &[u8]) -> Result<CreatedTask, ControlPlaneError> {
+    let snapshot = parse_task_snapshot_body(body)?;
+    if snapshot.status != "draft" || snapshot.revision != 1 {
+        return Err(protocol_invalid());
+    }
+    Ok(CreatedTask {
+        task_id: snapshot.task_id,
+        status: snapshot.status,
+        revision: snapshot.revision,
+    })
+}
+
+fn parse_task_list(body: &[u8]) -> Result<TaskListPage, ControlPlaneError> {
+    let response: TaskListResponse = parse_exact_json(body)?;
+    if response.items.len() > 100
+        || response.items.is_empty() && response.next_cursor.is_some()
+        || response
+            .next_cursor
+            .as_deref()
+            .is_some_and(|cursor| require_list_cursor(cursor).is_err())
+    {
+        return Err(protocol_invalid());
+    }
+    let items = response
+        .items
+        .into_iter()
+        .map(parse_task_snapshot)
+        .collect::<Result<Vec<_>, _>>()?;
+    for pair in items.windows(2) {
+        let previous = &pair[0];
+        let current = &pair[1];
+        if previous.updated_at < current.updated_at
+            || previous.updated_at == current.updated_at
+                && previous.task_id.as_str() <= current.task_id.as_str()
+        {
+            return Err(protocol_invalid());
+        }
+    }
+    Ok(TaskListPage {
+        items,
+        next_cursor: response.next_cursor,
     })
 }
 
@@ -943,9 +1182,11 @@ mod tests {
     use super::{
         new_request_id, parse_created_task, parse_device_session, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, require_idempotency_key,
+        parse_revoked_credential, parse_rotated_credential, parse_task_list,
+        parse_task_snapshot_body, request_path, require_idempotency_key, require_list_cursor,
         required_credential, transport_error, validate_response_metadata, ControlPlaneErrorCode,
-        ControlPlaneOperation, DemoBootstrap, DeviceSessionCapability, ResponseMetadata,
+        ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -1059,12 +1300,66 @@ mod tests {
                 "/api/v1/tasks",
                 201,
             ),
+            (
+                ControlPlaneOperation::ListTasks,
+                "GET",
+                "/api/v1/tasks",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetTask,
+                "GET",
+                "/api/v1/tasks/{task_id}",
+                200,
+            ),
         ];
 
         for (operation, method, path, success_status) in operations {
             assert_eq!(operation.method(), method);
             assert_eq!(operation.path(), path);
             assert_eq!(operation.success_status(), success_status);
+        }
+    }
+
+    #[test]
+    fn task_query_targets_build_only_validated_fixed_paths() {
+        let list_path = request_path(
+            ControlPlaneOperation::ListTasks,
+            Some(ControlPlaneRequestTarget::TaskList {
+                cursor: Some("YWJj"),
+                limit: 20,
+            }),
+        )
+        .expect("valid list target");
+        assert_eq!(list_path, "/api/v1/tasks?limit=20&cursor=YWJj");
+
+        let detail_path = request_path(
+            ControlPlaneOperation::GetTask,
+            Some(ControlPlaneRequestTarget::TaskDetail(IDENTIFIER)),
+        )
+        .expect("valid detail target");
+        assert_eq!(detail_path, format!("/api/v1/tasks/{IDENTIFIER}"));
+
+        for invalid in [
+            request_path(ControlPlaneOperation::ListTasks, None),
+            request_path(
+                ControlPlaneOperation::ListTasks,
+                Some(ControlPlaneRequestTarget::TaskList {
+                    cursor: None,
+                    limit: 0,
+                }),
+            ),
+            request_path(
+                ControlPlaneOperation::GetTask,
+                Some(ControlPlaneRequestTarget::TaskDetail("private-invalid")),
+            ),
+            request_path(
+                ControlPlaneOperation::GetSystemHealth,
+                Some(ControlPlaneRequestTarget::TaskDetail(IDENTIFIER)),
+            ),
+        ] {
+            let error = invalid.expect_err("invalid target");
+            assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
         }
     }
 
@@ -1432,6 +1727,97 @@ mod tests {
     }
 
     #[test]
+    fn task_list_cursors_use_bounded_base64url_shape() {
+        let longest_valid = "a".repeat(256);
+        for valid in ["a", "YWJj_123-xyz", longest_valid.as_str()] {
+            require_list_cursor(valid).expect("valid list cursor");
+        }
+        let too_long = "a".repeat(257);
+        for invalid in ["", "private+cursor", "contains space", too_long.as_str()] {
+            let error = require_list_cursor(invalid).expect_err("invalid list cursor");
+            assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+            assert_eq!(error.to_string(), "Control Plane request failed");
+        }
+    }
+
+    #[test]
+    fn task_query_parsers_require_public_ordered_snapshots() {
+        let older_id = "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc";
+        let detail = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "running",
+            "revision": 3,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T03:00:00Z"
+        });
+        let parsed_detail =
+            parse_task_snapshot_body(&serde_json::to_vec(&detail).expect("task detail JSON"))
+                .expect("valid task detail");
+        assert_eq!(parsed_detail.task_id(), IDENTIFIER);
+        assert_eq!(parsed_detail.status(), "running");
+        assert_eq!(parsed_detail.revision(), 3);
+
+        let older = serde_json::json!({
+            "taskId": older_id,
+            "status": "draft",
+            "revision": 1,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T02:00:00Z"
+        });
+        let page = serde_json::json!({
+            "items": [detail, older],
+            "nextCursor": "YWJj"
+        });
+        let parsed_page = parse_task_list(&serde_json::to_vec(&page).expect("task list JSON"))
+            .expect("valid task list");
+        assert_eq!(parsed_page.items().len(), 2);
+        assert_eq!(parsed_page.items()[1].task_id(), older_id);
+        assert_eq!(parsed_page.next_cursor(), Some("YWJj"));
+    }
+
+    #[test]
+    fn task_query_parsers_reject_invalid_status_order_cursor_and_unknown_fields() {
+        let first = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "draft",
+            "revision": 1,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T02:00:00Z"
+        });
+        let later = serde_json::json!({
+            "taskId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+            "status": "draft",
+            "revision": 1,
+            "createdAt": "2026-07-18T03:00:00Z",
+            "updatedAt": "2026-07-18T03:00:00Z"
+        });
+        for invalid in [
+            serde_json::json!({"items": [], "nextCursor": "YWJj"}),
+            serde_json::json!({"items": [first.clone()], "nextCursor": "private+cursor"}),
+            serde_json::json!({"items": [first.clone(), later], "nextCursor": null}),
+            serde_json::json!({"items": [first.clone(), first.clone()], "nextCursor": null}),
+            serde_json::json!({"items": [first.clone()], "nextCursor": null, "unknown": true}),
+        ] {
+            assert!(parse_task_list(
+                &serde_json::to_vec(&invalid).expect("invalid task list JSON")
+            )
+            .is_err());
+        }
+
+        let invalid_status = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "private_unknown",
+            "revision": 1,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T02:00:00Z"
+        });
+        assert!(parse_task_snapshot_body(
+            &serde_json::to_vec(&invalid_status).expect("invalid task detail JSON")
+        )
+        .is_err());
+    }
+
+    #[test]
     fn credential_loading_distinguishes_missing_corrupt_and_storage_failure() {
         let missing = DeviceCredentialVault::new(MemorySecretStore {
             value: None,
@@ -1492,6 +1878,8 @@ mod tests {
             ControlPlaneOperation::GetCurrentInstallationAccess,
             ControlPlaneOperation::IssueInstallationRegistrationChallenge,
             ControlPlaneOperation::CreateTask,
+            ControlPlaneOperation::ListTasks,
+            ControlPlaneOperation::GetTask,
         ] {
             let error = transport_error(operation);
             assert_eq!(error.code(), ControlPlaneErrorCode::TransportUnavailable);

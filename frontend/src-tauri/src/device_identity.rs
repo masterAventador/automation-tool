@@ -151,7 +151,7 @@ pub(crate) fn initialize_production_identity(
     })
 }
 
-#[cfg(feature = "desktop-e2e")]
+#[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
 pub(crate) fn initialize_ephemeral_identity() -> Result<DevicePublicIdentity, DeviceIdentityError> {
     let secret = SystemSecretKeyGenerator.generate()?;
     Ok(identity_from_secret(&secret))

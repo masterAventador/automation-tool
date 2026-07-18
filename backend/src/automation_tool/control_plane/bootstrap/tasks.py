@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from automation_tool.control_plane.application.task_queries import TaskQueryService
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.infrastructure.database import Database
 from automation_tool.control_plane.infrastructure.database.task_repository import (
@@ -21,4 +22,8 @@ def task_creation_service(database: Database) -> TaskCreationService:
     )
 
 
-__all__ = ["task_creation_service"]
+def task_query_service(database: Database) -> TaskQueryService:
+    return TaskQueryService(repository=SqlAlchemyTaskRepository(database))
+
+
+__all__ = ["task_creation_service", "task_query_service"]

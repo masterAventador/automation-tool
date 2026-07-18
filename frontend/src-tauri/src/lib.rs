@@ -5,11 +5,11 @@ pub mod executor_protocol;
 pub mod secure_store;
 
 use device_credentials::initialize_production_device_credential_vault;
-#[cfg(not(feature = "desktop-e2e"))]
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_credentials::ProductionDeviceCredentialVault;
-#[cfg(feature = "desktop-e2e")]
+#[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
 use device_identity::initialize_ephemeral_identity;
-#[cfg(not(feature = "desktop-e2e"))]
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_identity::initialize_production_identity;
 #[cfg(feature = "control-plane-e2e")]
 use device_identity::ProductionDeviceIdentity;
@@ -97,6 +97,119 @@ struct TaskCreationAcceptanceSummary {
     status: String,
     revision: u32,
     replayed: bool,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskQueryAcceptanceSummary {
+    installation_id: String,
+    first_page_count: usize,
+    second_page_count: usize,
+    detail_matched: bool,
+    foreign_hidden: bool,
+    cursor_opaque: bool,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn query_tasks_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskQueryAcceptanceSummary, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T307_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T307_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let foreign_task_id = std::env::var("AUTOMATION_TOOL_T307_FOREIGN_TASK_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+
+    let mut expected_ids = Vec::new();
+    for key in [
+        "task:query:tauri-acceptance:1",
+        "task:query:tauri-acceptance:2",
+        "task:query:tauri-acceptance:3",
+    ] {
+        let task = client
+            .create_task(&vault, key)
+            .await
+            .map_err(map_control_plane_error)?;
+        expected_ids.push(task.task_id().to_owned());
+    }
+
+    let first_page = client
+        .list_tasks(&vault, None, 2)
+        .await
+        .map_err(map_control_plane_error)?;
+    let cursor = first_page.next_cursor().ok_or(ControlPlaneCommandError {
+        code: "operation_unavailable",
+        retryable: false,
+    })?;
+    let cursor_opaque = !expected_ids.iter().any(|task_id| cursor.contains(task_id));
+    let second_page = client
+        .list_tasks(&vault, Some(cursor), 2)
+        .await
+        .map_err(map_control_plane_error)?;
+    let detail_task_id = expected_ids[1].clone();
+    let detail = client
+        .get_task(&vault, &detail_task_id)
+        .await
+        .map_err(map_control_plane_error)?;
+
+    let mut listed_ids = first_page
+        .items()
+        .iter()
+        .chain(second_page.items())
+        .map(|task| task.task_id().to_owned())
+        .collect::<Vec<_>>();
+    listed_ids.sort();
+    expected_ids.sort();
+    let detail_matched = detail.task_id() == detail_task_id;
+    let foreign_hidden = client
+        .get_task(&vault, &foreign_task_id)
+        .await
+        .is_err_and(|error| error.code() == control_plane::ControlPlaneErrorCode::RequestRejected);
+    if listed_ids != expected_ids
+        || first_page.items().len() != 2
+        || second_page.items().len() != 1
+        || second_page.next_cursor().is_some()
+        || !detail_matched
+        || !foreign_hidden
+        || !cursor_opaque
+    {
+        return Err(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        });
+    }
+
+    Ok(TaskQueryAcceptanceSummary {
+        installation_id: registration.installation_id().to_owned(),
+        first_page_count: first_page.items().len(),
+        second_page_count: second_page.items().len(),
+        detail_matched,
+        foreign_hidden,
+        cursor_opaque,
+    })
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -269,7 +382,7 @@ async fn run_control_plane_acceptance(
 pub fn run() {
     let builder = tauri::Builder::default().setup(|app| {
         app.manage(control_plane::ControlPlaneClient::local()?);
-        #[cfg(feature = "desktop-e2e")]
+        #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
         {
             let _production_identity_boundary = device_identity::initialize_production_identity;
             let _production_credential_boundary = initialize_production_device_credential_vault;
@@ -278,7 +391,7 @@ pub fn run() {
             app.manage(device_identity);
         }
 
-        #[cfg(not(feature = "desktop-e2e"))]
+        #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
         {
             let app_data_directory = app.path().app_data_dir()?;
             let device_identity = initialize_production_identity(&app_data_directory)?;
@@ -303,7 +416,8 @@ pub fn run() {
         check_control_plane_health,
         run_control_plane_acceptance,
         register_installation_for_revocation_acceptance,
-        create_task_for_acceptance
+        create_task_for_acceptance,
+        query_tasks_for_acceptance
     ]);
 
     builder

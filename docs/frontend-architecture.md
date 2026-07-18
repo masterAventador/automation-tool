@@ -76,6 +76,8 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation：Rust 自行从 App 私有 vault 取长期凭据、换取 `app.control-plane` Session、注入受限 `Idempotency-Key`，并只接受 201 创建或 200 重放的同形 draft Task 快照。当前产品 UI 尚没有平台模板表单，因此生产 React 不暴露通用 create Command；T3-17 必须通过窄任务表单命令调用该客户端，不能让 WebView 接触 bearer、Header 或任意 URL。T3-06 的完成证据来自 `visible=false` 真实 Tauri App，而不是浏览器 Harness 或直接 HTTP。
 
+T3-07 在该 Rust client 中增加 `ListTasks` 与 `GetTask` 两个封闭 operation。列表只允许固定 `/api/v1/tasks`、`1..100` limit 和长度受限的 canonical Base64URL cursor；详情先把 Task ID 验证为规范 UUIDv4 才构造固定路径。Rust 只暴露不可变公开 Task 快照和分页对象，并复核 16 态枚举、正 revision、UTC 时间、列表降序及 cursor 形状；跨 Installation 详情只得到统一拒绝。当前生产 React 仍无通用查询 Command，T3-15/T3-16 应通过窄投影接口消费；T3-07 已由唯一 `visible=false` App 经正式 Rust 桥、真实 FastAPI/PostgreSQL 完成 2+1 分页、详情与跨 scope 不可见验收。
+
 ### 4.2 Feature 层
 
 第一期 Feature：
@@ -189,7 +191,7 @@ interface PlatformAdapter {
 
 测试专用 UI Harness 使用同一个 TypeScript `ControlPlaneTransport` 接口，但可直接通过 Axios 访问本机测试后端。它不能进入正式包。
 
-当前生产 TypeScript Transport 只暴露业务需要的 `checkHealth`，不接受 URL、Header、凭据或任意 operation，并只 invoke `check_control_plane_health`。Rust 使用 `reqwest` 从固定 local origin 发起请求，封闭 allowlist 覆盖 Health、当前 Installation 访问探针、Installation challenge/complete、凭据轮换/吊销和 Session 换票；请求禁止系统代理与重定向，连接超时 3 秒、总超时 10 秒、响应体上限 64 KiB，并严格校验状态、JSON content type、`no-store`、关联 ID、UUIDv4、UTC 时间和 opaque 凭据格式。底层异常只映射成固定 transport/protocol/request/identity/storage/outcome-uncertain 错误；只有 Session 换票或当前 Installation 探针的精确 401 会映射成 `installation_access_denied`，且不反射原因或秘密。
+当前生产 TypeScript Transport 只暴露业务需要的 `checkHealth`，不接受 URL、Header、凭据或任意 operation，并只 invoke `check_control_plane_health`。Rust 使用 `reqwest` 从固定 local origin 发起请求，封闭 allowlist 覆盖 Health、当前 Installation 访问探针、Installation challenge/complete、凭据轮换/吊销、Session 换票和 Task 创建/列表/详情；请求禁止系统代理与重定向，连接超时 3 秒、总超时 10 秒、响应体上限 64 KiB，并严格校验状态、JSON content type、`no-store`、关联 ID、UUIDv4、UTC 时间、opaque 凭据及分页游标格式。底层异常只映射成固定 transport/protocol/request/identity/storage/outcome-uncertain 错误；只有 Session 换票或当前 Installation 探针的精确 401 会映射成 `installation_access_denied`，且不反射原因或秘密。
 
 设备注册由 Rust 使用 App 私有目录中的生产设备身份签名 challenge，注册响应中的 `atdc1` 直接写入同一 Rust 私有凭据仓。Session 令牌保存在 Rust `Zeroizing` 缓冲，轮换以新值原子替换，吊销后删除；Bootstrap、私钥、长期凭据和 Session 都没有 React/序列化/通用 IPC 读写面。测试 Harness 仍只用于分层 UI 测试，不能替代正式桥。
 
@@ -416,7 +418,7 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 
-当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描 `wdioTauri`、WDIO IPC 和 WebDriver 端口标记并 fail closed。所有自动化 Tauri 配置（包括通用、Control Plane、Installation 吊销和 Task 创建验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
+当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描 `wdioTauri`、WDIO IPC 和 WebDriver 端口标记并 fail closed。所有自动化 Tauri 配置（包括通用、Control Plane、Installation 吊销、Task 创建和 Task 查询验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
 
 I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 

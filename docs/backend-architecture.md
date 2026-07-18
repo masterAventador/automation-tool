@@ -493,7 +493,9 @@ T3-02 的 `tasks` 表只建立后续阶段共同需要的稳定骨架：规范 T
 
 T3-06 用迁移 `20260718_0010` 把创建幂等固定为 Task 的持久事实：`creation_idempotency_key` 只能使用协议允许字符且最长 128 字节，`(installation_id, creation_idempotency_key)` 唯一；旧行回填 `legacy:<task-id>`，升级不改变原 Task 身份。仓储在同一 Installation 行锁内先查同键快照再插入，因此两个并发请求只能得到一条 Task，另一个 Installation 可复用同键且不会泄露前者。
 
-`POST /api/v1/tasks` 是第一个 Task 业务入口。它必须经过 `require_current_installation_access` 取得服务端认证的强类型 scope，只接受精确空 JSON 骨架和必填 `Idempotency-Key`；第一次创建返回 201，重放返回相同公开快照和 200。响应不含幂等键、凭据、Session、模板或任意 payload。模板/平台字段归 T3-17，查询与分页归 T3-07，不能提前把不受约束 JSON 塞入当前 API。
+`POST /api/v1/tasks` 是第一个 Task 业务入口。它必须经过 `require_current_installation_access` 取得服务端认证的强类型 scope，只接受精确空 JSON 骨架和必填 `Idempotency-Key`；第一次创建返回 201，重放返回相同公开快照和 200。响应不含幂等键、凭据、Session、模板或任意 payload。模板/平台字段归 T3-17；查询与分页已由 T3-07 单独建立，不能把不受约束 JSON 塞入创建 API。
+
+T3-07 建立同一 scope 下的 Task 只读边界。`GET /api/v1/tasks` 按 `(updated_at DESC, id DESC)` 使用 PostgreSQL keyset 查询并多取一行决定下一页，避免 offset 在并发写入下重复或跳项；opaque cursor 只编码规范 UTC 微秒时间与 Task UUIDv4，并要求 canonical JSON/Base64URL 往返一致。`GET /api/v1/tasks/{task_id}` 将非法 ID、未知 Task 和其他 Installation 的 Task 收敛成相同 404。两条路由只返回 taskId/status/revision/createdAt/updatedAt，统一 `no-store`；任何 cursor、scope 或仓储输入失败不回显原值。T3-12/T3-15 后续读取同一权威快照，不能另建客户端事实源。
 
 T3-03 的 `execution_attempts` 为一次任务投递与执行事实分配独立 UUIDv4 和正 `attempt_number`。状态闭集为 pending、offered、accepted、running、paused、awaiting_human、cancelling，以及 succeeded、partially_succeeded、failed、cancelled、rejected、expired、outcome_uncertain 七个终态；终态必须带 `finished_at`，非终态禁止提前带完成时间。`(task_id, attempt_number)` 不可重复，部分唯一索引保证同一 Task 最多存在一个非终态 Attempt；完成后重试必须保留旧行并使用新序号。
 

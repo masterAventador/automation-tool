@@ -86,3 +86,49 @@ async def test_repository_rejects_untyped_identity_revision_status_and_time_befo
         assert "private" not in repr(captured.value)
         assert captured.value.__cause__ is None
         assert captured.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_repository_rejects_invalid_page_boundaries_before_io() -> None:
+    repository = SqlAlchemyTaskRepository(cast(Database, object()))
+    installation_id = InstallationId.new()
+    task_id = TaskId.new()
+    operations = (
+        repository.list_page(
+            installation_id=cast(InstallationId, "private-installation"),
+            before_updated_at=None,
+            before_task_id=None,
+            limit=20,
+        ),
+        repository.list_page(
+            installation_id=installation_id,
+            before_updated_at=None,
+            before_task_id=None,
+            limit=cast(int, True),
+        ),
+        repository.list_page(
+            installation_id=installation_id,
+            before_updated_at=None,
+            before_task_id=None,
+            limit=0,
+        ),
+        repository.list_page(
+            installation_id=installation_id,
+            before_updated_at=NOW,
+            before_task_id=None,
+            limit=20,
+        ),
+        repository.list_page(
+            installation_id=installation_id,
+            before_updated_at=None,
+            before_task_id=task_id,
+            limit=20,
+        ),
+    )
+
+    for operation in operations:
+        with pytest.raises(TaskPersistenceRejected) as captured:
+            await operation
+        assert str(captured.value) == "Task persistence operation is rejected"
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None

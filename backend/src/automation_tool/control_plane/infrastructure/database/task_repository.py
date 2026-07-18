@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import and_, desc, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
@@ -138,6 +138,32 @@ class SqlAlchemyTaskRepository:
                 .one_or_none()
             )
         return None if row is None else _record(row)
+
+    async def list_page(
+        self,
+        *,
+        installation_id: InstallationId,
+        before_updated_at: datetime | None,
+        before_task_id: TaskId | None,
+        limit: int,
+    ) -> tuple[TaskRecord, ...]:
+        if not isinstance(installation_id, InstallationId) or type(limit) is not int:
+            raise TaskPersistenceRejected
+        if not 1 <= limit <= 101 or (before_updated_at is None) != (before_task_id is None):
+            raise TaskPersistenceRejected
+        statement = select(tasks).where(tasks.c.installation_id == installation_id.uuid)
+        if before_updated_at is not None and before_task_id is not None:
+            timestamp = _aware_utc(before_updated_at)
+            statement = statement.where(
+                or_(
+                    tasks.c.updated_at < timestamp,
+                    and_(tasks.c.updated_at == timestamp, tasks.c.id < before_task_id.uuid),
+                )
+            )
+        statement = statement.order_by(desc(tasks.c.updated_at), desc(tasks.c.id)).limit(limit)
+        async with self._database.session() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(_record(row) for row in rows)
 
     async def transition(
         self,

@@ -24,7 +24,7 @@ pnpm tauri dev
 
 设备身份和长期设备凭据只由 Rust 管理。正式 App 首启使用系统 CSPRNG 生成 Ed25519 私钥，并保存到 Tauri `app_data_dir` 下的固定 App 私有文件；长期 `atdc1` 凭据使用同一存储边界。目录在 Unix 为 `0700`、文件为 `0600`，写入使用同目录临时文件、落盘同步和原子替换；Windows 使用当前用户 AppData 继承的私有 ACL。React、Tauri Command、普通配置文件和 `localStorage` 均没有密钥或长期凭据读写面，也不调用 macOS Keychain 或 Windows Credential Manager，因此不会产生系统钥匙串授权提示。已存在的 32 字节私钥只复用不轮换，凭据可替换和删除；符号链接、非法权限、内容损坏、存储拒绝或随机源失败均 fail closed。`desktop-e2e` 构建只使用不落盘的临时身份，App 私有存储由 Rust 行为测试和正式 Tauri 启动验收覆盖。
 
-正式 `TauriControlPlaneTransport` 只调用注册过的 `check_control_plane_health` Command；请求由 Rust `reqwest` 客户端从固定 local origin 发出。Rust 网络层的封闭 operation allowlist 还覆盖当前 Installation 访问探针、Installation challenge/complete、凭据轮换/吊销、两类 Session 换票和 `POST /api/v1/tasks`，禁止 React 传入 URL、路径、Header 或 bearer。创建任务由 Rust 生成/注入短期 App Session 和受限幂等键，严格接受 201 创建或 200 重放的同形公开快照；T3-17 再把该能力接入受约束的任务表单命令。请求禁止系统代理和重定向，具有固定连接/总超时、64 KiB 响应上限、规范 UUIDv4 关联 ID、严格 JSON DTO 与 `no-store` 校验；设备签名及凭据注入只在 Rust 内完成。未注册 App 仍直接进入工作台；已有长期凭据时启动命令会换取 `app.control-plane` Session 并检查访问，只有精确 401 映射为独立 Installation 失效诊断。
+正式 `TauriControlPlaneTransport` 只调用注册过的 `check_control_plane_health` Command；请求由 Rust `reqwest` 客户端从固定 local origin 发出。Rust 网络层的封闭 operation allowlist 还覆盖当前 Installation 访问探针、Installation challenge/complete、凭据轮换/吊销、两类 Session 换票，以及 Task 创建、固定列表路径和经 UUIDv4 校验的详情路径，禁止 React 传入任意 URL、Header 或 bearer。Task 操作均由 Rust 从 App 私有 vault 换取短期 App Session：创建只接受 201/200 同形快照；查询严格校验公开状态、UTC 时间、降序稳定性和 opaque cursor，详情不能借错误枚举其他 Installation。T3-17 再把创建能力接入受约束表单，T3-15/T3-16 再接查询投影；当前不暴露通用业务 IPC。请求禁止系统代理和重定向，具有固定连接/总超时、64 KiB 响应上限、规范 UUIDv4 关联 ID、严格 JSON DTO 与 `no-store` 校验；设备签名及凭据注入只在 Rust 内完成。未注册 App 仍直接进入工作台；已有长期凭据时启动命令会换取 `app.control-plane` Session 并检查访问，只有精确 401 映射为独立 Installation 失效诊断。
 
 API DTO 只能由 `../contracts/openapi/control-plane.v1.json` 生成：
 
@@ -53,6 +53,8 @@ uv run python ../scripts/run_i2_09_acceptance.py
 I2-14 的 Installation 吊销纵向验收同样必须从 uv 后端环境执行 `uv run python ../scripts/run_i2_14_acceptance.py`。它会验证测试配置的主窗口为 `visible=false`，再由隐藏真实 App 完成注册和受保护访问，由服务器运维 CLI 原子吊销 Installation，最后让同一 App 从正式启动入口进入“当前安装实例已失效”；长期凭据只保留在隔离 `app_data_dir` 私有文件中且不经 React/IPC 返回，结束后精确清理。
 
 T3-06 的创建任务纵向验收执行 `uv run python ../scripts/run_t3_06_acceptance.py`。它先校验专用 Tauri 配置只有一个 `visible=false` 主窗口，再由隐藏真实 App 经正式 Rust 客户端完成 Installation 注册、两次 App Session 换票和同键创建/重放；最终核对 App 私有身份/凭据权限、PostgreSQL 只有一条 draft Task，结束后清理隔离 App 数据、Uvicorn、容器、卷和端口。直接 HTTP、TestClient、Mock 或 UI Harness 不能替代该验收。
+
+T3-07 的任务查询纵向验收执行 `uv run python ../scripts/run_t3_07_acceptance.py`。脚本先预置另一个 Installation 的 Task，再由唯一 `visible=false` 真实 App 经正式 Rust 客户端完成注册、创建三个自有 Task、2+1 游标分页、详情读取和跨 Installation 不可见检查；最终核对两个 Installation、四条 Task、七张正式 App Session、App 私有身份/凭据权限及预置数据未被改动，结束后精确清理。直接 HTTP、TestClient、Mock 或 UI Harness 不能替代该验收。
 
 `@wdio/tauri-service 1.2.0` 的发布清单仍将 `@wdio/native-utils` 固定在缺少其已调用导出的 2.4.0，因此 `pnpm-workspace.yaml` 通过官方依赖 override 固定到已提供该导出的 2.5.0；未修改任何第三方源码。当前 embedded provider 的成功测试仍会输出两条上游诊断噪声：误检查外部 `tauri-driver`，以及会话销毁后清理空 mock；两者不影响真实 WKWebView 会话和测试结果，项目不会因此安装未使用的外部驱动。
 
