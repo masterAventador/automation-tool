@@ -18,6 +18,7 @@
     "build:tauri:task-event-stream-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.task-event-stream-e2e.conf.json",
     "build:tauri:task-control-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.task-control-e2e.conf.json",
     "build:tauri:task-termination-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.task-termination-e2e.conf.json",
+    "build:tauri:task-projection-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.task-projection-e2e.conf.json",
     "build:tauri:test": "tauri build --debug --no-bundle --features desktop-e2e --config src-tauri/tauri.test.conf.json",
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -35,6 +36,7 @@
     "test:task-event-stream-tauri": "pnpm build:tauri:task-event-stream-test && wdio run wdio.task-event-stream.conf.ts",
     "test:task-control-tauri": "pnpm build:tauri:task-control-test && wdio run wdio.task-control.conf.ts",
     "test:task-termination-tauri": "pnpm build:tauri:task-termination-test && wdio run wdio.task-termination.conf.ts",
+    "test:task-projection-tauri": "pnpm build:tauri:task-projection-test && wdio run wdio.task-projection.conf.ts",
     "test:e2e": "playwright test",
     "test:layers": "pnpm test && pnpm test:ui && pnpm test:rust && pnpm test:tauri",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --locked",
@@ -44,6 +46,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.2",
     "@tauri-apps/api": "2.11.1",
     "antd": "^6.5.1",
     "react": "^19.2.7",

@@ -21,7 +21,11 @@ from automation_tool.control_plane.application.tasks import (
     TaskPersistenceRejected,
     TaskRecord,
 )
-from automation_tool.control_plane.domain import InstallationId, TaskStatus
+from automation_tool.control_plane.domain import (
+    MAX_TASK_EVENT_SEQUENCE,
+    InstallationId,
+    TaskStatus,
+)
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
@@ -35,7 +39,12 @@ class TaskResponse(BaseModel):
 
     task_id: str = Field(alias="taskId")
     status: TaskStatus
-    revision: int
+    revision: int = Field(ge=1, le=MAX_TASK_EVENT_SEQUENCE)
+    last_event_sequence: int = Field(
+        alias="lastEventSequence",
+        ge=0,
+        le=MAX_TASK_EVENT_SEQUENCE,
+    )
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -76,6 +85,7 @@ def _task_response(task: TaskRecord) -> TaskResponse:
         taskId=str(task.task_id),
         status=task.status,
         revision=task.revision,
+        lastEventSequence=task.last_event_sequence,
         createdAt=task.created_at,
         updatedAt=task.updated_at,
     )

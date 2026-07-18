@@ -48,6 +48,7 @@ class MemoryTaskRepository:
             installation_id=installation_id,
             status=TaskStatus.DRAFT,
             revision=1,
+            last_event_sequence=0,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -116,6 +117,7 @@ def test_create_and_replay_return_one_public_task_snapshot_without_secrets() -> 
         "taskId": str(next(iter(repository.records.values())).task_id),
         "status": "draft",
         "revision": 1,
+        "lastEventSequence": 0,
         "createdAt": "2026-07-18T06:00:00Z",
         "updatedAt": "2026-07-18T06:00:00Z",
     }

@@ -51,7 +51,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - 注册成功会在同一事务签发 `atdc1` 长期设备凭据；服务端只保存 32 字节摘要和版本历史，不保存明文凭据或设备私钥；凭据只具备 `device.session.exchange` scope，并支持原子轮换、自吊销、旧版本立即失效和并发单赢家；
 - `POST /api/v1/device-sessions` 可把当前长期凭据换成 5 分钟 `atds1` 短期票据；每张票只具备 App Control Plane 或 Executor 连接能力之一，数据库只保存摘要和精确父凭据版本绑定，父凭据/Installation 失效会立即拒绝既有票据；
 - 服务端运维 CLI 可用 revision CAS 原子吊销 Installation、active 长期凭据与全部 Session；`GET /api/v1/installations/current` 和可复用业务守卫强制 `app.control-plane` scope；Task 创建、列表和详情 API 均复用该守卫，客户端不能自报 Installation scope；
-- Frontend 已锁定 React、TypeScript、Vite 和 Ant Design，严格类型、Lint、冻结安装与生产资产构建通过；Vite 仅绑定 loopback 且仓库没有 Web 部署入口；
+- Frontend 已锁定 React、TypeScript、Vite、Ant Design、TanStack Query 和 Zod，严格类型、Lint、冻结安装与生产资产构建通过；Vite 仅绑定 loopback 且仓库没有 Web 部署入口；
 - Tauri v2 已具备真实 macOS 主窗口、生产 CSP、零 IPC 权限 Capability、桌面图标与 Cargo 锁文件，Rust/Clippy/无 bundle 构建通过；
 - Tauri 首启设备身份已在 Rust 内生成 Ed25519 密钥：私钥和长期设备凭据只进入 `app_data_dir` 下由 Rust 管理的 App 私有文件，不进入 React、Tauri IPC、`localStorage` 或普通配置，也不调用系统钥匙串；
 - App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用与 Installation 已吊销分别显示脱敏诊断和重试状态，页面不存在产品登录或注册入口；
@@ -66,7 +66,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Task 纯领域状态机已锁定 16 个状态、5 个无出边终态和全部显式转换；256 个状态对均已穷举，取消先进入 `CANCELLING`、取消/完成竞态按最终事实收敛，`OUTCOME_UNCERTAIN` 不可从执行前阶段伪造；
 - `tasks` 已具备 PostgreSQL/Alembic 持久化、Task UUIDv4、Installation scope、状态/revision/时间约束和仓储 CAS；只允许 active Installation 创建，跨 Installation 查询/更新不可见，并发旧 revision 只有一个赢家；
 - `POST /api/v1/tasks` 要求精确 `app.control-plane` Session、空 JSON 骨架和 Installation-scoped `Idempotency-Key`；首次返回 201，原子重放返回同一公开 Task 的 200，并发同键只创建一行；平台模板字段留给 T3-17；
-- `GET /api/v1/tasks` 使用不透明 canonical Base64URL keyset cursor，按 `updated_at DESC, task_id DESC` 稳定分页；`GET /api/v1/tasks/{task_id}` 返回同一公开快照，未知、非法或其他 Installation 的 Task 均统一为不可见；
+- `GET /api/v1/tasks` 使用不透明 canonical Base64URL keyset cursor，按 `updated_at DESC, task_id DESC` 稳定分页；`GET /api/v1/tasks/{task_id}` 返回包含 `status/revision/lastEventSequence` 的同一权威公开快照，未知、非法或其他 Installation 的 Task 均统一为不可见；
 - `execution_attempts`、`task_actions` 与 `tasks.current_attempt_id` 已形成 Task/Installation 复合绑定；每个 Task 只有一个非终态 Attempt、重试序号不可重复，每个 Attempt 内 Action ordinal 唯一，Action 阶段与结果确定性由数据库一致性约束锁定；
 - `task_events` 已建立版本化封闭事件词汇、连续 `(task_id, sequence)` 时间线、Installation/Attempt/Action 复合归属，以及 message/idempotency 双键和 32 字节意图指纹去重；正式 WebSocket 事件在一个 PostgreSQL 事务内落库并以 revision CAS 推进 Task/Attempt/显式 Action 与 `last_event_sequence`；
 - `GET /api/v1/tasks/{task_id}/events` 已建立受 `app.control-plane` Session 保护的 SSE：只从 PostgreSQL 已提交事件按 sequence 读取，支持标准 `Last-Event-ID`、断线续拉、keepalive、限时换票重连和终态关闭；正式 Rust App 客户端严格验证响应头、公开字段、版本、序号、UUID、UTC 时间与资源上限；
@@ -78,5 +78,5 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键并承载持久命令投递，连接后可接收 heartbeat、严格绑定的命令回执与任务事件，新 Hello 固定 4409 替换旧连接；
 - 无副作用 FakeExecutor 已复用正式 v1 parser、envelope、子协议和 Session WebSocket：可确定性回放 accept/reject、成功/部分成功/失败、登录、接管、结果不确定及暂停/恢复/取消/紧停，并按 message/idempotency 双键返回完全相同的结果且不重复事件；它不导入 Control Plane、RPA、文件、子进程或数据库实现；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
-- React 事件 Reducer/页面、正式 Local Executor 进程和 RPA 功能尚未实现；
+- React 已具备 TanStack Query Key、严格公开 Task DTO、快照权威事件 Reducer、重复去重、缺口/版本降级回拉，以及 Rust SSE → Tauri Channel 正式 source；工作台/任务页面、正式 Local Executor 进程和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

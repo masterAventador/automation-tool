@@ -28,6 +28,7 @@ class TaskRecord:
     installation_id: InstallationId
     status: TaskStatus
     revision: int
+    last_event_sequence: int
     created_at: datetime
     updated_at: datetime
 

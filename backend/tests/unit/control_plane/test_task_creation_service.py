@@ -40,6 +40,7 @@ class RecordingRepository:
             installation_id=installation_id,
             status=TaskStatus.DRAFT,
             revision=1,
+            last_event_sequence=0,
             created_at=created_at,
             updated_at=created_at,
         )

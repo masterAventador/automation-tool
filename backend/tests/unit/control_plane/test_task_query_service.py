@@ -125,6 +125,7 @@ async def test_query_service_rejects_naive_page_boundary_timestamp() -> None:
         installation_id=installation_id,
         status=TaskStatus.DRAFT,
         revision=1,
+        last_event_sequence=0,
         created_at=naive.replace(tzinfo=UTC),
         updated_at=naive,
     )

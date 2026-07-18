@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-14 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令和事件闭环可用，React 页面尚待实施；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-15 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环和桌面投影可用，React 页面尚待实施；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -70,6 +70,7 @@
 | 查询 Task API | `✅` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
 | 暂停/恢复 API | `✅` Installation-scoped 幂等控制命令、原子 sequence、ACK 后事件门禁与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
 | 取消/紧停 API | `✅` 原子 CANCELLING、幂等重放、ACK 后终态、完成竞态、结果不确定与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
+| Task 桌面投影 | `✅` TanStack Query 权威快照、严格 DTO、事件去重、缺口/版本回拉、有限降级及 Rust SSE→Tauri Channel 已由隐藏 App 生产同路径验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -202,7 +203,7 @@
 | T3-12 | SSE 事件流 | last-event/断线/重连/终态关闭；事件先落库后推送 | T3-11 | ✅ 已完成 |
 | T3-13 | 暂停/恢复 API | 命令与确认语义；未确认不能提前改状态 | T3-09,T3-11 | ✅ 已完成 |
 | T3-14 | 取消/紧停 API | CANCELLING、确认、结果不确定和幂等 | T3-13 | ✅ 已完成 |
-| T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ⬜ 未开始 |
+| T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ✅ 已完成 |
 | T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ⬜ 未开始 |
 | T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ⬜ 未开始 |
 | T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ⬜ 未开始 |
@@ -1226,10 +1227,25 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 与生成 TypeScript DTO；没有新增重复规划文档
 - 遗留：T3-15 将权威快照、事件去重/缺口与版本降级接入 React reducer；T3-16/T3-18 再把取消/紧停接入工作台和运行详情。离线本机紧停与外部动作账本的精确 uncertain 判定分别归 H8-03/A7-13
 
+### T3-15 前端 Query/事件 Reducer
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 TanStack Query key/取消边界、Task 快照与事件运行时契约、快照权威 Reducer、重复去重、缺口回拉、未知版本/类型降级、有限恢复，以及固定 Tauri Channel source 测试。`./node_modules/.bin/tsc -p tsconfig.app.json --noEmit --incremental false --pretty false` 因 `task-projections`、`task-projection-reducer`、`task-projection-controller` 与 `task-projection-source` 尚不存在而按预期失败；后端契约同时先要求公开快照返回 `lastEventSequence`
+- 实现边界：后端已有 `tasks.last_event_sequence` 是唯一权威水位；现有列表/详情/创建同形公开快照增加 `lastEventSequence`。Rust 严格解析快照和 SSE 后边读边推 Tauri Channel，React 使用 TanStack Query、Zod 与纯 Reducer；WebView 不持有 Session、Header、Bearer、原始 SSE 或任意 URL，不建立 EventSource 和第二事实源
+- 分层验证：Backend 全量 `743 passed in 56.19s`；Frontend 32 项 Node 工程契约和 88 项 Vitest 全绿；Rust all-features 38 项单元、3 项共享协议、9 项安全配置全绿。Ruff/格式、严格 Mypy、ESLint、TypeScript 类型、OpenAPI 漂移、production boundary、Cargo fmt 和全特性 Clippy 零警告全部通过
+- 产品同路径：`uv run python ../scripts/run_t3_15_acceptance.py` 用隔离 PostgreSQL、完整 Alembic、真实 Uvicorn/FakeExecutor 和唯一 `visible=false` Tauri/WKWebView 运行。WebView 中的正式 TypeScript source 先经 Query 调用 Rust 快照 Command，再通过 Tauri Channel 消费正式 Rust SSE，并由同一 Reducer 收敛 sequence 1..5；App 与数据库共同确认最终 `succeeded`、revision 6、lastEventSequence 5
+- App 与秘密边界：设备私钥和长期凭据仍只在独立 `app_data_dir` 私有文件中，不使用系统钥匙串；App 全程后台、不弹窗、不抢焦点。浏览器 Harness、直接 HTTP、Mock 与纯 Reducer 只作为分层证据
+- 失败与恢复矩阵：覆盖严格快照/列表/事件 DTO、未知字段、非法 UUID/UTC 微秒时间/状态/版本/事件类型、敏感消息、Task scope 错配、重复事件、序号缺口、revision/水位回退、未知版本/类型、正常 SSE 轮换、传输异常、取消和恢复预算耗尽；任何不兼容都先回拉服务端快照，连续失败才进入有界 degraded，不从事件名推断状态
+- 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和端口；复核 8765 无监听、无 `automation-tool-t315` 容器遗留
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
+- 遗留：T3-16 把该投影接入当前任务/最近任务工作台及全局紧停；T3-17/T3-18 分别建立新建任务骨架和运行详情，本任务不提前实现页面
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-15`：建立前端 Query/事件 Reducer 的快照、去重、缺口回拉和版本降级语义；
-2. `T3-16`～`T3-20`：按依赖完成工作台、任务页面、UI E2E 和 Control Plane 恢复；
+1. `T3-16`：把正式 Task 投影接入工作台的当前任务、最近任务、后端/Executor 状态和全局紧停；
+2. `T3-17`～`T3-20`：按依赖完成新建任务、运行详情、UI E2E 和 Control Plane 恢复；
 3. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。

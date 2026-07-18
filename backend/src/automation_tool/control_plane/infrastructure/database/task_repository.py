@@ -44,6 +44,7 @@ def _record(row: RowMapping) -> TaskRecord:
         installation_id=InstallationId.parse(row["installation_id"]),
         status=TaskStatus(cast(str, row["status"])),
         revision=cast(int, row["revision"]),
+        last_event_sequence=cast(int, row["last_event_sequence"]),
         created_at=cast(datetime, row["created_at"]),
         updated_at=cast(datetime, row["updated_at"]),
     )

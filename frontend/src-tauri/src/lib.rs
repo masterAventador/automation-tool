@@ -66,6 +66,66 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
     }
 }
 
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskProjectionStreamSummary {
+    last_sequence: u64,
+    terminal: bool,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_task_snapshot(
+    task_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskSnapshot, ControlPlaneCommandError> {
+    client
+        .get_task(&vault, &task_id)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_task_snapshots(
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskListPage, ControlPlaneCommandError> {
+    client
+        .list_tasks(&vault, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn stream_task_projection_events(
+    task_id: String,
+    after_sequence: u64,
+    on_event: tauri::ipc::Channel<control_plane::TaskEvent>,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskProjectionStreamSummary, ControlPlaneCommandError> {
+    let result = client
+        .stream_task_events_with(&vault, &task_id, Some(after_sequence), None, |event| {
+            on_event.send(event.clone()).is_ok()
+        })
+        .await
+        .map_err(map_control_plane_error)?;
+    let mut last_sequence = after_sequence;
+    for event in result.events() {
+        last_sequence = event.sequence();
+    }
+    Ok(TaskProjectionStreamSummary {
+        last_sequence,
+        terminal: result.terminal(),
+    })
+}
+
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,6 +181,14 @@ struct TaskEventStreamAcceptanceSummary {
     resumed_sequences: Vec<u64>,
     terminal: bool,
     progress_percent: Option<u8>,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskProjectionAcceptancePreparation {
+    installation_id: String,
+    task_id: String,
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -462,6 +530,41 @@ async fn stream_task_events_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_task_projection_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskProjectionAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T315_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T315_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let task = client
+        .create_task(&vault, "task:projection:tauri-acceptance")
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(TaskProjectionAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+        task_id: task.task_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 async fn query_tasks_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
@@ -758,16 +861,27 @@ pub fn run() {
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
 
-    #[cfg(not(feature = "control-plane-e2e"))]
+    #[cfg(all(not(feature = "control-plane-e2e"), feature = "desktop-e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![check_control_plane_health]);
+    #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        check_control_plane_health,
+        get_task_snapshot,
+        list_task_snapshots,
+        stream_task_projection_events
+    ]);
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
+        get_task_snapshot,
+        list_task_snapshots,
+        stream_task_projection_events,
         run_control_plane_acceptance,
         register_installation_for_revocation_acceptance,
         create_task_for_acceptance,
         query_tasks_for_acceptance,
         stream_task_events_for_acceptance,
+        prepare_task_projection_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance
     ]);

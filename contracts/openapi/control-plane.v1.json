@@ -442,7 +442,15 @@
             "title": "Createdat",
             "type": "string"
           },
+          "lastEventSequence": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
           "revision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
             "title": "Revision",
             "type": "integer"
           },
@@ -463,6 +471,7 @@
           "taskId",
           "status",
           "revision",
+          "lastEventSequence",
           "createdAt",
           "updatedAt"
         ],

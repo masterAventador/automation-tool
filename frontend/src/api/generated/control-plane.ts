@@ -457,6 +457,8 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+            /** Lasteventsequence */
+            lastEventSequence: number;
             /** Revision */
             revision: number;
             status: components["schemas"]["TaskStatus"];

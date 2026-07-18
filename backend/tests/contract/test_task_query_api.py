@@ -72,6 +72,7 @@ def record(*, offset: int, installation_id: InstallationId = INSTALLATION_ID) ->
         revision=1,
         created_at=timestamp,
         updated_at=timestamp,
+        last_event_sequence=offset,
     )
 
 
@@ -95,6 +96,27 @@ def test_openapi_exposes_app_session_protected_task_list_and_detail_operations()
         "cursor",
         "limit",
     ]
+    task_schema = schema["components"]["schemas"]["TaskResponse"]
+    assert task_schema["required"] == [
+        "taskId",
+        "status",
+        "revision",
+        "lastEventSequence",
+        "createdAt",
+        "updatedAt",
+    ]
+    assert task_schema["properties"]["revision"] == {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer",
+    }
+    assert task_schema["properties"]["lastEventSequence"] == {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "title": "Lasteventsequence",
+        "type": "integer",
+    }
 
 
 def test_list_uses_opaque_keyset_pagination_and_returns_public_snapshots_only() -> None:
@@ -120,6 +142,7 @@ def test_list_uses_opaque_keyset_pagination_and_returns_public_snapshots_only() 
                 "taskId": str(older.task_id),
                 "status": "draft",
                 "revision": 1,
+                "lastEventSequence": 0,
                 "createdAt": "2026-07-18T17:00:00Z",
                 "updatedAt": "2026-07-18T17:00:00Z",
             }

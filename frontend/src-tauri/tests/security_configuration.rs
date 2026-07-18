@@ -164,3 +164,23 @@ fn task_termination_acceptance_is_isolated_and_hidden() {
     assert_eq!(capabilities[1]["identifier"], "wdio-task-termination");
     assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
 }
+
+#[test]
+fn task_projection_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.task-projection-e2e.conf.json");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.t315acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{ "label": "main", "visible": false }])
+    );
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(capabilities[1]["identifier"], "wdio-task-projection");
+    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+}

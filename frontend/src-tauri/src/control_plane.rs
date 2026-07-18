@@ -615,6 +615,22 @@ impl ControlPlaneClient {
     where
         S: SecretStore,
     {
+        self.stream_task_events_with(vault, task_id, last_event_id, stop_after, |_| true)
+            .await
+    }
+
+    pub async fn stream_task_events_with<S, F>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        last_event_id: Option<u64>,
+        stop_after: Option<u16>,
+        mut on_event: F,
+    ) -> Result<TaskEventStreamResult, ControlPlaneError>
+    where
+        S: SecretStore,
+        F: FnMut(&TaskEvent) -> bool,
+    {
         require_canonical_uuid_v4(task_id)?;
         if last_event_id.is_some_and(|sequence| sequence > MAX_CROSS_RUNTIME_SEQUENCE)
             || stop_after.is_some_and(|limit| !(1..=100).contains(&limit))
@@ -661,6 +677,9 @@ impl ControlPlaneClient {
                 let frame = pending.drain(..frame_end).collect::<Vec<_>>();
                 let event = parse_sse_frame(&frame, task_id, expected_start + events.len() as u64)?;
                 if let Some(event) = event {
+                    if !on_event(&event) {
+                        return Err(protocol_invalid());
+                    }
                     events.push(event);
                     if target_count == Some(events.len()) {
                         return Ok(TaskEventStreamResult {
@@ -698,6 +717,9 @@ impl ControlPlaneClient {
             if let Some(event) =
                 parse_sse_frame(&frame, task_id, expected_start + events.len() as u64)?
             {
+                if !on_event(&event) {
+                    return Err(protocol_invalid());
+                }
                 events.push(event);
             }
         }
@@ -1070,11 +1092,18 @@ fn parse_task_event(
         return Err(protocol_invalid());
     }
     Ok(TaskEvent {
+        task_id: response.task_id,
         sequence: response.sequence,
+        event_version: response.event_version,
         event_type: response.event_type,
         task_revision: response.task_revision,
         task_status: response.task_status,
+        execution_attempt_id: response.execution_attempt_id,
+        action_id: response.action_id,
         progress_percent: response.progress_percent,
+        occurred_at: response.occurred_at,
+        recorded_at: response.recorded_at,
+        message: response.message,
     })
 }
 
@@ -1153,6 +1182,7 @@ struct TaskSnapshotResponse {
     task_id: String,
     status: String,
     revision: u32,
+    last_event_sequence: u64,
     created_at: String,
     updated_at: String,
 }
@@ -1195,12 +1225,21 @@ struct TaskEventResponse {
     message: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskEvent {
+    task_id: String,
     sequence: u64,
+    event_version: String,
     event_type: String,
     task_revision: u64,
     task_status: String,
+    execution_attempt_id: Option<String>,
+    action_id: Option<String>,
     progress_percent: Option<u8>,
+    occurred_at: String,
+    recorded_at: String,
+    message: Option<String>,
 }
 
 impl TaskEvent {
@@ -1295,11 +1334,17 @@ impl CreatedTask {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
     task_id: String,
     status: String,
     revision: u32,
-    updated_at: OffsetDateTime,
+    last_event_sequence: u64,
+    created_at: String,
+    updated_at: String,
+    #[serde(skip)]
+    updated_at_value: OffsetDateTime,
 }
 
 impl TaskSnapshot {
@@ -1314,8 +1359,14 @@ impl TaskSnapshot {
     pub fn revision(&self) -> u32 {
         self.revision
     }
+
+    pub fn last_event_sequence(&self) -> u64 {
+        self.last_event_sequence
+    }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskListPage {
     items: Vec<TaskSnapshot>,
     next_cursor: Option<String>,
@@ -1362,10 +1413,11 @@ fn valid_task_status(value: &str) -> bool {
         value,
         "draft"
             | "validating"
+            | "awaiting_device"
             | "awaiting_platform_login"
+            | "discovering_targets"
             | "awaiting_confirmation"
             | "queued"
-            | "offered"
             | "running"
             | "paused"
             | "awaiting_human"
@@ -1374,7 +1426,6 @@ fn valid_task_status(value: &str) -> bool {
             | "partially_succeeded"
             | "failed"
             | "cancelled"
-            | "rejected"
             | "outcome_uncertain"
     )
 }
@@ -1383,14 +1434,22 @@ fn parse_task_snapshot(response: TaskSnapshotResponse) -> Result<TaskSnapshot, C
     require_canonical_uuid_v4(&response.task_id)?;
     let created_at = require_bounded_timestamp(&response.created_at)?;
     let updated_at = require_bounded_timestamp(&response.updated_at)?;
-    if !valid_task_status(&response.status) || response.revision == 0 || updated_at < created_at {
+    if !valid_task_status(&response.status)
+        || response.revision == 0
+        || response.last_event_sequence > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.last_event_sequence > u64::from(response.revision)
+        || updated_at < created_at
+    {
         return Err(protocol_invalid());
     }
     Ok(TaskSnapshot {
         task_id: response.task_id,
         status: response.status,
         revision: response.revision,
-        updated_at,
+        last_event_sequence: response.last_event_sequence,
+        created_at: response.created_at,
+        updated_at: response.updated_at,
+        updated_at_value: updated_at,
     })
 }
 
@@ -1400,7 +1459,7 @@ fn parse_task_snapshot_body(body: &[u8]) -> Result<TaskSnapshot, ControlPlaneErr
 
 fn parse_created_task(body: &[u8]) -> Result<CreatedTask, ControlPlaneError> {
     let snapshot = parse_task_snapshot_body(body)?;
-    if snapshot.status != "draft" || snapshot.revision != 1 {
+    if snapshot.status != "draft" || snapshot.revision != 1 || snapshot.last_event_sequence != 0 {
         return Err(protocol_invalid());
     }
     Ok(CreatedTask {
@@ -1471,8 +1530,8 @@ fn parse_task_list(body: &[u8]) -> Result<TaskListPage, ControlPlaneError> {
     for pair in items.windows(2) {
         let previous = &pair[0];
         let current = &pair[1];
-        if previous.updated_at < current.updated_at
-            || previous.updated_at == current.updated_at
+        if previous.updated_at_value < current.updated_at_value
+            || previous.updated_at_value == current.updated_at_value
                 && previous.task_id.as_str() <= current.task_id.as_str()
         {
             return Err(protocol_invalid());
@@ -2083,6 +2142,10 @@ mod tests {
         assert_eq!(parsed.task_revision(), 2);
         assert_eq!(parsed.task_status(), "running");
         assert_eq!(parsed.progress_percent(), None);
+        assert_eq!(
+            serde_json::to_value(&parsed).expect("public event JSON"),
+            data
+        );
         assert!(parse_sse_frame(b": keep-alive\n\n", IDENTIFIER, 2)
             .expect("valid keepalive")
             .is_none());
@@ -2341,6 +2404,7 @@ mod tests {
             "taskId": IDENTIFIER,
             "status": "draft",
             "revision": 1,
+            "lastEventSequence": 0,
             "createdAt": "2026-07-18T02:00:00Z",
             "updatedAt": "2026-07-18T02:00:00Z"
         });
@@ -2441,6 +2505,7 @@ mod tests {
                 "taskId": IDENTIFIER,
                 "status": "ready",
                 "revision": 1,
+                "lastEventSequence": 0,
                 "createdAt": "2026-07-18T02:00:00Z",
                 "updatedAt": "2026-07-18T02:00:00Z"
             }),
@@ -2448,6 +2513,7 @@ mod tests {
                 "taskId": IDENTIFIER,
                 "status": "draft",
                 "revision": 1,
+                "lastEventSequence": 0,
                 "createdAt": "2026-07-18T02:05:00Z",
                 "updatedAt": "2026-07-18T02:00:00Z"
             }),
@@ -2455,6 +2521,7 @@ mod tests {
                 "taskId": IDENTIFIER,
                 "status": "draft",
                 "revision": 1,
+                "lastEventSequence": 0,
                 "createdAt": "2026-07-18T02:00:00Z",
                 "updatedAt": "2026-07-18T02:00:00Z",
                 "unknown": true
@@ -2511,6 +2578,7 @@ mod tests {
             "taskId": IDENTIFIER,
             "status": "running",
             "revision": 3,
+            "lastEventSequence": 2,
             "createdAt": "2026-07-18T02:00:00Z",
             "updatedAt": "2026-07-18T03:00:00Z"
         });
@@ -2520,11 +2588,13 @@ mod tests {
         assert_eq!(parsed_detail.task_id(), IDENTIFIER);
         assert_eq!(parsed_detail.status(), "running");
         assert_eq!(parsed_detail.revision(), 3);
+        assert_eq!(parsed_detail.last_event_sequence(), 2);
 
         let older = serde_json::json!({
             "taskId": older_id,
             "status": "draft",
             "revision": 1,
+            "lastEventSequence": 0,
             "createdAt": "2026-07-18T02:00:00Z",
             "updatedAt": "2026-07-18T02:00:00Z"
         });
@@ -2545,6 +2615,7 @@ mod tests {
             "taskId": IDENTIFIER,
             "status": "draft",
             "revision": 1,
+            "lastEventSequence": 0,
             "createdAt": "2026-07-18T02:00:00Z",
             "updatedAt": "2026-07-18T02:00:00Z"
         });
@@ -2552,6 +2623,7 @@ mod tests {
             "taskId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
             "status": "draft",
             "revision": 1,
+            "lastEventSequence": 0,
             "createdAt": "2026-07-18T03:00:00Z",
             "updatedAt": "2026-07-18T03:00:00Z"
         });
@@ -2572,11 +2644,51 @@ mod tests {
             "taskId": IDENTIFIER,
             "status": "private_unknown",
             "revision": 1,
+            "lastEventSequence": 0,
             "createdAt": "2026-07-18T02:00:00Z",
             "updatedAt": "2026-07-18T02:00:00Z"
         });
         assert!(parse_task_snapshot_body(
             &serde_json::to_vec(&invalid_status).expect("invalid task detail JSON")
+        )
+        .is_err());
+
+        let unsafe_watermark = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "running",
+            "revision": 3,
+            "lastEventSequence": 1_u64 << 53,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T03:00:00Z"
+        });
+        assert!(parse_task_snapshot_body(
+            &serde_json::to_vec(&unsafe_watermark).expect("unsafe watermark JSON")
+        )
+        .is_err());
+
+        let watermark_after_revision = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "running",
+            "revision": 2,
+            "lastEventSequence": 3,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T03:00:00Z"
+        });
+        assert!(parse_task_snapshot_body(
+            &serde_json::to_vec(&watermark_after_revision).expect("invalid watermark JSON")
+        )
+        .is_err());
+
+        let unsafe_revision = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "running",
+            "revision": 1_u64 << 53,
+            "lastEventSequence": 0,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T03:00:00Z"
+        });
+        assert!(parse_task_snapshot_body(
+            &serde_json::to_vec(&unsafe_revision).expect("unsafe revision JSON")
         )
         .is_err());
     }
