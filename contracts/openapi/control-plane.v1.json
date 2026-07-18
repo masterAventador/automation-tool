@@ -103,6 +103,9 @@
       "InstallationRegistrationResponse": {
         "additionalProperties": false,
         "properties": {
+          "deviceCredential": {
+            "$ref": "#/components/schemas/IssuedDeviceCredentialResponse"
+          },
           "installationId": {
             "format": "uuid",
             "title": "Installationid",
@@ -120,9 +123,34 @@
         "required": [
           "installationId",
           "status",
-          "revision"
+          "revision",
+          "deviceCredential"
         ],
         "title": "InstallationRegistrationResponse",
+        "type": "object"
+      },
+      "IssuedDeviceCredentialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "title": "Credential",
+            "type": "string"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential",
+          "version",
+          "scope"
+        ],
+        "title": "IssuedDeviceCredentialResponse",
         "type": "object"
       },
       "RegistrationChallengeRequest": {
@@ -172,6 +200,49 @@
           "expiresAt"
         ],
         "title": "RegistrationChallengeResponse",
+        "type": "object"
+      },
+      "RevokedDeviceCredentialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "status"
+        ],
+        "title": "RevokedDeviceCredentialResponse",
+        "type": "object"
+      },
+      "RotatedDeviceCredentialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "title": "Credential",
+            "type": "string"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential",
+          "version",
+          "scope"
+        ],
+        "title": "RotatedDeviceCredentialResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -248,6 +319,10 @@
       "DemoBootstrap": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "DeviceCredential": {
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -257,6 +332,58 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/device-credentials/revocations": {
+      "post": {
+        "operationId": "revokeDeviceCredential",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokedDeviceCredentialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DeviceCredential": []
+          }
+        ],
+        "summary": "Revoke Device Credential",
+        "tags": [
+          "device-credentials"
+        ]
+      }
+    },
+    "/api/v1/device-credentials/rotations": {
+      "post": {
+        "operationId": "rotateDeviceCredential",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotatedDeviceCredentialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DeviceCredential": []
+          }
+        ],
+        "summary": "Rotate Device Credential",
+        "tags": [
+          "device-credentials"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "getSystemHealth",

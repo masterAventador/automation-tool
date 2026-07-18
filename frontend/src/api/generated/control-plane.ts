@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/v1/device-credentials/revocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Device Credential */
+        post: operations["revokeDeviceCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/device-credentials/rotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate Device Credential */
+        post: operations["rotateDeviceCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -123,6 +157,7 @@ export interface components {
         };
         /** InstallationRegistrationResponse */
         InstallationRegistrationResponse: {
+            deviceCredential: components["schemas"]["IssuedDeviceCredentialResponse"];
             /**
              * Installationid
              * Format: uuid
@@ -132,6 +167,15 @@ export interface components {
             revision: number;
             /** Status */
             status: string;
+        };
+        /** IssuedDeviceCredentialResponse */
+        IssuedDeviceCredentialResponse: {
+            /** Credential */
+            credential: string;
+            /** Scope */
+            scope: string;
+            /** Version */
+            version: number;
         };
         /** RegistrationChallengeRequest */
         RegistrationChallengeRequest: {
@@ -154,6 +198,22 @@ export interface components {
             expiresAt: string;
             /** Signingpayload */
             signingPayload: string;
+        };
+        /** RevokedDeviceCredentialResponse */
+        RevokedDeviceCredentialResponse: {
+            /** Status */
+            status: string;
+            /** Version */
+            version: number;
+        };
+        /** RotatedDeviceCredentialResponse */
+        RotatedDeviceCredentialResponse: {
+            /** Credential */
+            credential: string;
+            /** Scope */
+            scope: string;
+            /** Version */
+            version: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -191,6 +251,46 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    revokeDeviceCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokedDeviceCredentialResponse"];
+                };
+            };
+        };
+    };
+    rotateDeviceCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotatedDeviceCredentialResponse"];
+                };
+            };
+        };
+    };
     getSystemHealth: {
         parameters: {
             query?: never;

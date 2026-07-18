@@ -6,14 +6,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from automation_tool import __version__
+from automation_tool.control_plane.api.device_credentials import (
+    router as device_credential_router,
+)
 from automation_tool.control_plane.api.errors import (
     install_request_context,
     register_error_handlers,
 )
 from automation_tool.control_plane.api.registrations import router as registration_router
 from automation_tool.control_plane.api.system import router as system_router
+from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.registration import InstallationRegistrationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
+from automation_tool.control_plane.bootstrap.device_credentials import (
+    device_credential_service as build_device_credential_service,
+)
 from automation_tool.control_plane.bootstrap.registration import (
     registration_service_from_environment,
 )
@@ -46,6 +53,7 @@ def create_app(
     *,
     database: DatabaseLifecycle | None | _FromEnvironment = _FROM_ENVIRONMENT,
     registration_service: InstallationRegistrationService | None = None,
+    device_credential_service: DeviceCredentialService | None = None,
 ) -> FastAPI:
     """Create an isolated Control Plane application instance."""
 
@@ -53,12 +61,15 @@ def create_app(
         database_from_environment() if isinstance(database, _FromEnvironment) else database
     )
     resolved_registration_service = registration_service
+    resolved_device_credential_service = device_credential_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
         and isinstance(resolved_database, Database)
     ):
         resolved_registration_service = registration_service_from_environment(resolved_database)
+    if resolved_device_credential_service is None and isinstance(resolved_database, Database):
+        resolved_device_credential_service = build_device_credential_service(resolved_database)
 
     app = FastAPI(
         title="automation-tool Control Plane",
@@ -68,8 +79,10 @@ def create_app(
     app.state.lifecycle_state = "created"
     app.state.database = resolved_database
     app.state.registration_service = resolved_registration_service
+    app.state.device_credential_service = resolved_device_credential_service
     install_request_context(app)
     register_error_handlers(app)
     app.include_router(system_router)
     app.include_router(registration_router)
+    app.include_router(device_credential_router)
     return app

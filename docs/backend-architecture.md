@@ -283,6 +283,10 @@ I2-05 将这些 claims 封装为验证专用的 `atb1.<payload>.<signature>`：p
 
 注册固定两步：`issueInstallationRegistrationChallenge` 验证 bootstrap 后产生 32 字节 CSPRNG nonce，并返回最长 5 分钟、且不晚于 bootstrap 到期的 opaque canonical signing payload；`completeInstallationRegistration` 再次验证同一 bootstrap，按 challenge ID `SELECT ... FOR UPDATE`，常量时间核对环境、bootstrap 指纹和 payload 摘要，再用 challenge 绑定的设备公钥验证 Ed25519 签名。同一事务创建 Installation 并标记 challenge 已消费，因此进程重启、串行或并发重放都只能成功一次。到期采用半开边界，错误设备、另一份有效 bootstrap、篡改 payload、未知 challenge 和跨环境都不消费 challenge。
 
+I2-06 把初始凭据签发并入同一个注册事务：凭据使用 `atdc1.<credential-id>.<256-bit-secret>` opaque 格式，明文只在注册或轮换成功响应中出现一次；PostgreSQL 只保存秘密的 SHA-256 摘要，不保存明文凭据、设备私钥或额外服务端签名私钥。凭据版本从 1 开始，唯一 scope 固定为 `device.session.exchange`，数据库保存 `active`、`rotated`、`revoked` 历史，并通过部分唯一索引保证每个 Installation 同时最多一个 active 版本。
+
+设备可使用当前 bearer 调用 `rotateDeviceCredential` 或 `revokeDeviceCredential`。仓储先按公开 credential ID 定位，再按固定顺序锁 Installation 和凭据，用常量时间比较摘要并确认 Installation/凭据仍 active；轮换在单事务中把旧版本标记为 rotated、关联新版本并插入下一正数版本，吊销则将当前版本标记 revoked。两个并发轮换只有一个能成功，旧版本、错误秘密、未知凭据、重复吊销和已吊销 Installation 对外共享固定 401，不能据此枚举凭据状态。scope 只授权 I2-07 的短期 Session 交换，不直接授权任务或业务 API；凭据轮换/吊销属于 bearer 自身生命周期，而非额外业务 scope。
+
 这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
 
 ### 9.3 请求授权

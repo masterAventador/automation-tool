@@ -6,9 +6,11 @@ import re
 import secrets
 from datetime import UTC, datetime
 from typing import Final
+from uuid import uuid4
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from automation_tool.control_plane.application.device_credentials import DeviceCredentialFactory
 from automation_tool.control_plane.application.registration import (
     InstallationRegistrationService,
 )
@@ -81,6 +83,10 @@ def registration_service_from_environment(
         expected_environment_id=environment_id,
         clock=_SystemClock(),
         nonce_source=secrets.token_bytes,
+        credential_factory=DeviceCredentialFactory(
+            secret_source=secrets.token_bytes,
+            id_source=uuid4,
+        ),
     )
 
 

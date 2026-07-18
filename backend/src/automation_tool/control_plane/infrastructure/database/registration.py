@@ -10,6 +10,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
 
+from automation_tool.control_plane.application.device_credentials import (
+    DEVICE_CREDENTIAL_SCOPE,
+    IssuedDeviceCredential,
+    PendingDeviceCredential,
+)
 from automation_tool.control_plane.application.registration import (
     InstallationAlreadyRegistered,
     RegisteredInstallation,
@@ -20,6 +25,7 @@ from automation_tool.control_plane.application.registration import (
 )
 from automation_tool.control_plane.domain import DemoEnvironmentId, InstallationId
 from automation_tool.control_plane.infrastructure.database.schema import (
+    device_credentials,
     installation_registration_challenges,
     installations,
 )
@@ -55,6 +61,7 @@ class SqlAlchemyInstallationRegistrationRepository:
         signing_payload: bytes,
         signature: bytes,
         completed_at: datetime,
+        initial_credential: PendingDeviceCredential,
     ) -> RegisteredInstallation:
         try:
             async with self._database.session() as session:
@@ -115,6 +122,18 @@ class SqlAlchemyInstallationRegistrationRepository:
                     .one()
                 )
                 await session.execute(
+                    insert(device_credentials).values(
+                        id=initial_credential.credential_id,
+                        installation_id=installation_id.uuid,
+                        version=1,
+                        scope=DEVICE_CREDENTIAL_SCOPE,
+                        secret_digest=initial_credential.secret_digest,
+                        status="active",
+                        created_at=completed_at,
+                        updated_at=completed_at,
+                    )
+                )
+                await session.execute(
                     update(installation_registration_challenges)
                     .where(installation_registration_challenges.c.id == challenge_id)
                     .values(
@@ -126,6 +145,13 @@ class SqlAlchemyInstallationRegistrationRepository:
                     installation_id=created["id"],
                     status=created["status"],
                     revision=created["revision"],
+                    device_credential=IssuedDeviceCredential(
+                        credential_id=initial_credential.credential_id,
+                        installation_id=installation_id.uuid,
+                        credential=initial_credential.credential,
+                        version=1,
+                        scope=DEVICE_CREDENTIAL_SCOPE,
+                    ),
                 )
         except IntegrityError:
             raise InstallationAlreadyRegistered from None

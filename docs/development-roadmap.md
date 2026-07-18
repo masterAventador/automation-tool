@@ -51,6 +51,7 @@
 | Installation 持久化 | `✅` 32 字节公钥、active/revoked、revision CAS、吊销时间、唯一性和时间一致性约束已在 PostgreSQL 18.4 验证 |
 | Demo Bootstrap | `✅` 最多 7 天、精确 Demo 环境、唯一 installation.register purpose 和业务 API 拒绝模型已验证 |
 | Installation 注册 | `✅` 离线签名 Bootstrap、最长 5 分钟的一次性 challenge、设备 Ed25519 证明和 PostgreSQL 原子消费已验证 |
+| 设备凭据 | `✅` `atdc1` 一次返回、摘要持久化、版本历史、最小 session scope、原子轮换/吊销和并发单赢家已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份密钥 | `✅` Ed25519 首启生成、macOS Keychain / Windows Credential Manager 真实往返、React/普通文件零暴露和桌面隔离身份已验证 |
@@ -153,7 +154,7 @@
 | I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ✅ 已完成 |
 | I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ✅ 已完成 |
 | I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ✅ 已完成 |
-| I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ⬜ 未开始 |
+| I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ✅ 已完成 |
 | I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ⬜ 未开始 |
 | I2-08 | Rust 安全存储 | 读写/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ⬜ 未开始 |
 | I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；禁止任意 URL 代理 | I2-08,F1-11 | ⬜ 未开始 |
@@ -810,10 +811,24 @@
 - 文档：同步根/Backend README、后端架构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：I2-06 在注册成功后签发版本化、可撤销、可轮换且最小 scope 的设备凭据；C10-06 再增加 bootstrap 批次次数、吊销、持久化和审计，本任务不冒充完整账号体系
 
+### I2-06 设备凭据签发
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 256-bit opaque 凭据、canonical 解析、摘要化、轮换/吊销编排单测，执行 `uv run pytest tests/unit/control_plane/test_device_credentials.py -q` 因 `application.device_credentials` 不存在而收集失败；随后真实 Schema 测试因 `device_credentials` 未导出失败，注册原子签发测试因服务不接受 `credential_factory` 失败，生命周期仓储测试因适配器模块不存在失败，HTTP 契约因路由和依赖注入不存在产生 4 项失败
+- GREEN：64 项 I2-06 目标契约/单元/真实 PostgreSQL 测试通过，Backend 全量 265 项通过，语句与分支覆盖率均 100%；uv 锁、Ruff 格式/检查、严格 Mypy、Alembic check、OpenAPI/前端 DTO 双向漂移检查全部通过；Frontend 16 项 Node 契约、25 项 Vitest、ESLint、严格 TypeScript、生产构建与边界扫描通过
+- 真实边界：官方 PostgreSQL 18.4 容器执行迁移 `20260718_0004`、真实 FastAPI 请求、摘要认证、Installation/credential 行锁、轮换、吊销、并发双轮换、升级到 head、降级到 `0003` 并重新升级；初始 v1 凭据和 Installation/challenge 消费在同一事务提交，服务端没有新增签名私钥
+- 安全模型：`atdc1.<credential-id>.<256-bit-secret>` 明文只在初始签发或轮换成功时返回一次；数据库只保存 32 字节 SHA-256 摘要、正数版本、精确 `device.session.exchange` scope 和状态历史。每个 Installation 只有一个 active 版本；生命周期操作按固定顺序锁 Installation 再锁凭据，摘要使用常量时间比较
+- 失败矩阵：覆盖空/超长/非 canonical/非法 UUID/错误版本/错误随机源、未知 ID、同 ID 错误秘密、旧版本、重复吊销、已吊销 Installation、非法 scope/status/version/摘要长度/时间/UUID、重复版本/摘要、同 Installation 双 active，以及两个并发轮换只能一个成功；认证错误固定且不回显 bearer，注册重放不再次返回凭据
+- 清理：每轮真实数据库测试使用随机 loopback 端口、随机密码和独立 Compose project，结束后删除测试容器、网络和卷；未启动 App、浏览器、Executor 或云资源，构建与覆盖率产物保持 Git 忽略
+- 文档：同步根/Backend README、后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：I2-07 使用该长期凭据的唯一 scope 换取短期 Session；I2-08 再把长期凭据的读写、轮换替换和删除接入 Tauri 系统安全存储；当前 React 和普通文件仍不接触凭据
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-06`：签发可撤销、可轮换、最小 scope 的版本化设备凭据；
-2. `I2-07`：使用长期设备凭据换取短期能力，并覆盖过期、时钟偏差和吊销；
+1. `I2-07`：使用长期设备凭据换取短期能力，并覆盖过期、时钟偏差和吊销；
+2. `I2-08`：把设备凭据安全读写、删除和损坏处理接入 Rust 系统安全存储；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。

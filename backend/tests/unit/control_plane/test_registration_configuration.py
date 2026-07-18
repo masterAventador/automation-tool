@@ -7,6 +7,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.application.registration import InstallationRegistrationService
+from automation_tool.control_plane.bootstrap.device_credentials import (
+    _SystemClock as DeviceCredentialSystemClock,
+)
 from automation_tool.control_plane.bootstrap.registration import (
     RegistrationConfigurationError,
     _SystemClock,
@@ -84,6 +87,7 @@ def test_partial_or_invalid_configuration_fails_closed_without_reflection(
 
 def test_system_clock_is_timezone_aware() -> None:
     assert _SystemClock().now().tzinfo == UTC
+    assert DeviceCredentialSystemClock().now().tzinfo == UTC
 
 
 def test_default_app_factory_wires_valid_deployment_registration(

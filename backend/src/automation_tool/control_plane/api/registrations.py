@@ -65,6 +65,15 @@ class InstallationRegistrationResponse(BaseModel):
     installation_id: UUID = Field(alias="installationId")
     status: str
     revision: int
+    device_credential: "IssuedDeviceCredentialResponse" = Field(alias="deviceCredential")
+
+
+class IssuedDeviceCredentialResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    credential: str
+    version: int
+    scope: str
 
 
 def _decode_base64url(value: str, *, exact_length: int | None = None) -> bytes:
@@ -211,6 +220,11 @@ async def complete_installation_registration(
         installationId=registered.installation_id,
         status=registered.status,
         revision=registered.revision,
+        deviceCredential=IssuedDeviceCredentialResponse(
+            credential=registered.device_credential.credential,
+            version=registered.device_credential.version,
+            scope=registered.device_credential.scope,
+        ),
     )
 
 

@@ -1,11 +1,13 @@
 import base64
+import secrets
 from datetime import UTC, datetime
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
 from automation_tool.control_plane import create_app
+from automation_tool.control_plane.application.device_credentials import DeviceCredentialFactory
 from automation_tool.control_plane.application.registration import (
     BootstrapTokenVerifier,
     InstallationRegistrationRepository,
@@ -30,6 +32,10 @@ def inert_registration_service() -> InstallationRegistrationService:
         expected_environment_id=DemoEnvironmentId.parse("demo-cn-1"),
         clock=FixedClock(),
         nonce_source=lambda length: b"x" * length,
+        credential_factory=DeviceCredentialFactory(
+            secret_source=secrets.token_bytes,
+            id_source=uuid4,
+        ),
     )
 
 

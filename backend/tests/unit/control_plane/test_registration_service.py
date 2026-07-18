@@ -7,6 +7,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from automation_tool.control_plane.application.device_credentials import (
+    DEVICE_CREDENTIAL_SCOPE,
+    DeviceCredentialFactory,
+    IssuedDeviceCredential,
+    PendingDeviceCredential,
+)
 from automation_tool.control_plane.application.registration import (
     CHALLENGE_LIFETIME,
     BootstrapCredentialRejected,
@@ -33,10 +39,19 @@ class FakeRepository:
 
     async def complete_challenge(self, **values: object) -> RegisteredInstallation:
         self.completions.append(values)
+        pending = cast(PendingDeviceCredential, values["initial_credential"])
+        installation_id = uuid4()
         return RegisteredInstallation(
-            installation_id=uuid4(),
+            installation_id=installation_id,
             status="active",
             revision=1,
+            device_credential=IssuedDeviceCredential(
+                credential_id=pending.credential_id,
+                installation_id=installation_id,
+                credential=pending.credential,
+                version=1,
+                scope=DEVICE_CREDENTIAL_SCOPE,
+            ),
         )
 
 
@@ -93,6 +108,10 @@ def service(
             expected_environment_id=DemoEnvironmentId.parse("demo-cn-1"),
             clock=clock or MutableClock(NOW),
             nonce_source=cast(Callable[[int], bytes], resolved_nonce_source),
+            credential_factory=DeviceCredentialFactory(
+                secret_source=lambda length: b"c" * length,
+                id_source=lambda: UUID("9ef928d0-92af-45e5-96ac-cc97829b5812"),
+            ),
         ),
         resolved_repository,
     )
@@ -268,12 +287,21 @@ async def test_valid_completion_delegates_all_verified_bindings() -> None:
     )
 
     assert completed.status == "active"
+    assert completed.device_credential.version == 1
+    assert completed.device_credential.scope == "device.session.exchange"
+    initial_credential = cast(
+        PendingDeviceCredential,
+        repository.completions[0]["initial_credential"],
+    )
+    assert initial_credential.credential.startswith("atdc1.9ef928d0-92af-45e5-96ac-cc97829b5812.")
+    assert len(initial_credential.secret_digest) == 32
     assert repository.completions == [
         {
             "bootstrap_fingerprint": b"f" * 32,
             "challenge_id": challenge_id,
             "completed_at": NOW,
             "environment_id": DemoEnvironmentId.parse("demo-cn-1"),
+            "initial_credential": initial_credential,
             "signature": b"s" * 64,
             "signing_payload": b"payload",
         }

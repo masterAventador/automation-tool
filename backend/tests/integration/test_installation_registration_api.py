@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import hashlib
 import json
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -15,6 +17,10 @@ from httpx2 import Response
 from sqlalchemy import delete, func, select
 
 from automation_tool.control_plane import create_app
+from automation_tool.control_plane.application.device_credentials import (
+    DeviceCredentialFactory,
+    PendingDeviceCredential,
+)
 from automation_tool.control_plane.application.registration import (
     CHALLENGE_LIFETIME,
     InstallationRegistrationService,
@@ -25,6 +31,7 @@ from automation_tool.control_plane.application.registration import (
 from automation_tool.control_plane.domain import DemoEnvironmentId
 from automation_tool.control_plane.infrastructure.database import (
     Database,
+    device_credentials,
     installation_registration_challenges,
     installations,
 )
@@ -95,7 +102,18 @@ def registration_service(
         expected_environment_id=DemoEnvironmentId.parse("demo-cn-1"),
         clock=clock,
         nonce_source=fixed_nonce_source(bytes(range(32))),
+        credential_factory=DeviceCredentialFactory(
+            secret_source=secrets.token_bytes,
+            id_source=uuid4,
+        ),
     )
+
+
+def pending_device_credential() -> PendingDeviceCredential:
+    return DeviceCredentialFactory(
+        secret_source=secrets.token_bytes,
+        id_source=uuid4,
+    ).create()
 
 
 async def reset_registration_data(database_url: str) -> None:
@@ -103,12 +121,13 @@ async def reset_registration_data(database_url: str) -> None:
     try:
         async with database.session() as session:
             await session.execute(delete(installation_registration_challenges))
+            await session.execute(delete(device_credentials))
             await session.execute(delete(installations))
     finally:
         await database.close()
 
 
-async def persisted_registration_counts(database_url: str) -> tuple[int, int, int]:
+async def persisted_registration_counts(database_url: str) -> tuple[int, int, int, int]:
     database = Database.from_url(database_url)
     try:
         async with database.session() as session:
@@ -123,7 +142,15 @@ async def persisted_registration_counts(database_url: str) -> tuple[int, int, in
                 .select_from(installation_registration_challenges)
                 .where(installation_registration_challenges.c.consumed_at.is_not(None))
             )
-        return int(installation_count or 0), int(challenge_count or 0), int(consumed_count or 0)
+            credential_count = await session.scalar(
+                select(func.count()).select_from(device_credentials)
+            )
+        return (
+            int(installation_count or 0),
+            int(challenge_count or 0),
+            int(consumed_count or 0),
+            int(credential_count or 0),
+        )
     finally:
         await database.close()
 
@@ -209,12 +236,33 @@ def test_signed_registration_creates_one_installation_and_replay_is_rejected(
         )
 
     assert registered.status_code == 201
-    assert set(registered.json()) == {"installationId", "revision", "status"}
-    assert registered.json()["status"] == "active"
-    assert registered.json()["revision"] == 1
+    registered_body = registered.json()
+    assert set(registered_body) == {"deviceCredential", "installationId", "revision", "status"}
+    assert registered_body["status"] == "active"
+    assert registered_body["revision"] == 1
+    assert set(registered_body["deviceCredential"]) == {"credential", "scope", "version"}
+    assert registered_body["deviceCredential"]["version"] == 1
+    assert registered_body["deviceCredential"]["scope"] == "device.session.exchange"
+    plaintext_credential = registered_body["deviceCredential"]["credential"]
+    assert plaintext_credential.startswith("atdc1.")
+    secret = decode_base64url(plaintext_credential.rsplit(".", maxsplit=1)[1])
+
+    async def persisted_digest() -> bytes:
+        verification_database = Database.from_url(postgresql_url)
+        try:
+            async with verification_database.session() as session:
+                return cast(
+                    bytes,
+                    await session.scalar(select(device_credentials.c.secret_digest)),
+                )
+        finally:
+            await verification_database.close()
+
+    assert asyncio.run(persisted_digest()) == hashlib.sha256(secret).digest()
     assert replay.status_code == 409
     assert replay.json()["error"]["code"] == "registration_challenge_used"
-    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (1, 1, 1)
+    assert plaintext_credential not in replay.text
+    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (1, 1, 1, 1)
 
 
 def test_impersonation_and_cross_bootstrap_attempts_do_not_consume_the_challenge(
@@ -278,7 +326,7 @@ def test_impersonation_and_cross_bootstrap_attempts_do_not_consume_the_challenge
         assert first_token not in rejected.text
         assert other_valid_token not in rejected.text
     assert legitimate.status_code == 201
-    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (1, 1, 1)
+    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (1, 1, 1, 1)
 
 
 def test_missing_challenge_and_duplicate_device_key_are_stable_conflicts(
@@ -335,7 +383,7 @@ def test_missing_challenge_and_duplicate_device_key_are_stable_conflicts(
     assert first.status_code == 201
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "installation_exists"
-    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (1, 2, 1)
+    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (1, 2, 1, 1)
 
 
 def test_expired_challenge_is_rejected_without_installation_or_consumption(
@@ -370,7 +418,7 @@ def test_expired_challenge_is_rejected_without_installation_or_consumption(
 
     assert expired.status_code == 410
     assert expired.json()["error"]["code"] == "registration_challenge_expired"
-    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (0, 1, 0)
+    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (0, 1, 0, 0)
 
 
 def test_missing_invalid_or_cross_environment_bootstrap_is_rejected_before_persistence(
@@ -412,7 +460,7 @@ def test_missing_invalid_or_cross_environment_bootstrap_is_rejected_before_persi
     assert "private-invalid-token" not in malformed.text
     assert cross_environment.status_code == 403
     assert cross_environment.json()["error"]["code"] == "bootstrap_denied"
-    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (0, 0, 0)
+    assert asyncio.run(persisted_registration_counts(postgresql_url)) == (0, 0, 0, 0)
 
 
 @pytest.mark.asyncio
@@ -453,7 +501,7 @@ async def test_concurrent_completion_allows_exactly_one_transaction(
 
     assert sum(not isinstance(result, BaseException) for result in results) == 1
     assert sum(isinstance(result, RegistrationChallengeUsed) for result in results) == 1
-    assert await persisted_registration_counts(postgresql_url) == (1, 1, 1)
+    assert await persisted_registration_counts(postgresql_url) == (1, 1, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -484,6 +532,7 @@ async def test_repository_rejects_environment_mismatch_without_consuming_challen
                 signing_payload=challenge.signing_payload,
                 signature=device_key.sign(challenge.signing_payload),
                 completed_at=NOW,
+                initial_credential=pending_device_credential(),
             )
         completed = await service.complete_registration(
             bootstrap_token=token,
@@ -496,7 +545,7 @@ async def test_repository_rejects_environment_mismatch_without_consuming_challen
         await database.close()
 
     assert completed.status == "active"
-    assert await persisted_registration_counts(postgresql_url) == (1, 1, 1)
+    assert await persisted_registration_counts(postgresql_url) == (1, 1, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -524,6 +573,7 @@ async def test_repository_explicitly_rejects_missing_expired_and_invalid_signatu
                 signing_payload=b"missing",
                 signature=b"s" * 64,
                 completed_at=NOW,
+                initial_credential=pending_device_credential(),
             )
 
         expired = await service.issue_challenge(
@@ -539,6 +589,7 @@ async def test_repository_explicitly_rejects_missing_expired_and_invalid_signatu
                 signing_payload=expired.signing_payload,
                 signature=device_key.sign(expired.signing_payload),
                 completed_at=expired.expires_at,
+                initial_credential=pending_device_credential(),
             )
 
         invalid_signature = await service.issue_challenge(
@@ -554,8 +605,9 @@ async def test_repository_explicitly_rejects_missing_expired_and_invalid_signatu
                 signing_payload=invalid_signature.signing_payload,
                 signature=b"s" * 64,
                 completed_at=NOW,
+                initial_credential=pending_device_credential(),
             )
     finally:
         await database.close()
 
-    assert await persisted_registration_counts(postgresql_url) == (0, 2, 0)
+    assert await persisted_registration_counts(postgresql_url) == (0, 2, 0, 0)

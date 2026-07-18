@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKeyConstraint,
+    Index,
     LargeBinary,
     MetaData,
     PrimaryKeyConstraint,
@@ -132,4 +133,91 @@ installation_registration_challenges = Table(
     PrimaryKeyConstraint("id", name="pk_registration_challenges"),
 )
 
-__all__ = ["installation_registration_challenges", "installations", "metadata"]
+device_credentials = Table(
+    "device_credentials",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("version", BigInteger(), nullable=False),
+    Column("scope", String(length=64), nullable=False),
+    Column("secret_digest", LargeBinary(length=32), nullable=False),
+    Column("status", String(length=16), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("replaced_by_id", UUID(as_uuid=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_device_credentials_id_uuid_v4",
+    ),
+    CheckConstraint("version > 0", name="ck_device_credentials_version_positive"),
+    CheckConstraint(
+        "scope = 'device.session.exchange'",
+        name="ck_device_credentials_scope",
+    ),
+    CheckConstraint(
+        "octet_length(secret_digest) = 32",
+        name="ck_device_credentials_secret_digest_length",
+    ),
+    CheckConstraint(
+        "status in ('active', 'revoked', 'rotated')",
+        name="ck_device_credentials_status",
+    ),
+    CheckConstraint(
+        "(status = 'active' and revoked_at is null and replaced_by_id is null) or "
+        "(status = 'revoked' and revoked_at is not null and replaced_by_id is null) or "
+        "(status = 'rotated' and revoked_at is not null and replaced_by_id is not null "
+        "and replaced_by_id <> id)",
+        name="ck_device_credentials_lifecycle_state",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at and (revoked_at is null or revoked_at >= created_at)",
+        name="ck_device_credentials_timestamp_order",
+    ),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_device_credentials_installation_id",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["replaced_by_id"],
+        ["device_credentials.id"],
+        name="fk_device_credentials_replaced_by_id",
+        ondelete="RESTRICT",
+        deferrable=True,
+        initially="DEFERRED",
+    ),
+    PrimaryKeyConstraint("id", name="pk_device_credentials"),
+    UniqueConstraint(
+        "installation_id",
+        "version",
+        name="uq_device_credentials_installation_version",
+    ),
+    UniqueConstraint("secret_digest", name="uq_device_credentials_secret_digest"),
+)
+
+Index(
+    "uq_device_credentials_active_installation",
+    device_credentials.c.installation_id,
+    unique=True,
+    postgresql_where=device_credentials.c.status == "active",
+)
+
+__all__ = [
+    "device_credentials",
+    "installation_registration_challenges",
+    "installations",
+    "metadata",
+]

@@ -9,6 +9,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from automation_tool.control_plane.application.device_credentials import (
+    DeviceCredentialFactory,
+    IssuedDeviceCredential,
+    PendingDeviceCredential,
+)
 from automation_tool.control_plane.domain import (
     BootstrapAuthorizationDenied,
     BootstrapPurpose,
@@ -102,6 +107,7 @@ class RegisteredInstallation:
     installation_id: UUID
     status: str
     revision: int
+    device_credential: IssuedDeviceCredential
 
 
 class Clock(Protocol):
@@ -124,6 +130,7 @@ class InstallationRegistrationRepository(Protocol):
         signing_payload: bytes,
         signature: bytes,
         completed_at: datetime,
+        initial_credential: PendingDeviceCredential,
     ) -> RegisteredInstallation: ...
 
 
@@ -204,12 +211,14 @@ class InstallationRegistrationService:
         expected_environment_id: DemoEnvironmentId,
         clock: Clock,
         nonce_source: Callable[[int], bytes],
+        credential_factory: DeviceCredentialFactory,
     ) -> None:
         self._repository = repository
         self._bootstrap_verifier = bootstrap_verifier
         self._expected_environment_id = expected_environment_id
         self._clock = clock
         self._nonce_source = nonce_source
+        self._credential_factory = credential_factory
 
     async def issue_challenge(
         self,
@@ -290,6 +299,7 @@ class InstallationRegistrationService:
             environment_id=environment,
             at=now,
         )
+        initial_credential = self._credential_factory.create()
         return await self._repository.complete_challenge(
             challenge_id=challenge_id,
             environment_id=environment,
@@ -297,6 +307,7 @@ class InstallationRegistrationService:
             signing_payload=signing_payload,
             signature=signature,
             completed_at=now,
+            initial_credential=initial_credential,
         )
 
 
