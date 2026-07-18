@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01 任务状态机已完成，准备实施 Task 持久化模型；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task 状态机与持久化骨架已完成，准备实施 Attempt/Action 模型；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -60,6 +60,7 @@
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
+| Task 持久化 | `✅` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -179,7 +180,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | T3-01 | 任务状态机 | 全部合法/非法转换、终态、CANCELLING 和 OUTCOME_UNCERTAIN 单元测试 | I2-01 | ✅ 已完成 |
-| T3-02 | Task 数据模型 | tasks/revision/installation scope/Alembic/仓储集成测试 | T3-01,I2-02 | ⬜ 未开始 |
+| T3-02 | Task 数据模型 | tasks/revision/installation scope/Alembic/仓储集成测试 | T3-01,I2-02 | ✅ 已完成 |
 | T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ⬜ 未开始 |
 | T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ⬜ 未开始 |
 | T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ⬜ 未开始 |
@@ -969,10 +970,27 @@
 - 文档：同步根/Backend README、后端架构的精确转换图、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-02 建立 tasks/revision/installation scope 与 PostgreSQL CAS；T3-11 必须把事件映射到本状态机而非另建转换表；人工接管的恢复目标由后续 attempt/checkpoint 事实决定
 
+### T3-02 Task 数据模型
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 migration/schema 与仓储真实 PostgreSQL 测试并把台账置为 RED；目标测试收集分别因数据库包没有 `tasks` export、`application.tasks` 与正式 Task repository 不存在而失败
+- GREEN：1 项输入失败矩阵 + 8 项真实 PostgreSQL 目标测试通过；Backend 全量 536 项且 1950 条语句、288 个分支覆盖率 100%，Ruff、严格 Mypy、uv lock 和 Alembic autogenerate `check` 通过
+- Schema：迁移 `20260718_0006` 新增 `tasks`，字段精确为 Task UUIDv4、Installation ID、status、revision、created/updated time；约束完整 16 状态集合、revision > 0、时间不倒退、Installation RESTRICT 外键和 `(id, installation_id)` 唯一绑定，并建立 `(installation_id, updated_at, id)` 索引
+- 最小边界：本任务不提前存平台模板、页面原文或任意 JSON definition；T3-17 再按抖音搜索曝光模板的明确 DTO 扩展。`current_attempt_id` 等待 T3-03 创建 Attempt 表后以真实复合外键增加，不先放悬空 UUID
+- 仓储：`SqlAlchemyTaskRepository` 先锁 Installation，仅 active 才创建 draft；get/transition 固定 Task + Installation 双条件。转换锁精确 expected revision 行、调用 T3-01 唯一状态机、revision+1，并拒绝旧 revision、跨 scope、时间回退和非强类型输入；错误不回显 Task/Installation
+- 并发与吊销：两个相同旧 revision 并发转换只有一个赢家。Task 创建与 Installation 吊销使用相同 Installation 行锁顺序，因此线性化：吊销提交后不能新建 Task；对已吊销与未知 Installation 的创建共享固定失败
+- 真实边界：官方 PostgreSQL 18.4 隔离容器执行完整 Alembic upgrade/check、降级到 `0005`、确认 Installation 表保留后再升 head；真实仓储连接同一数据库验证默认值、约束、scope、状态转换、回滚和并发。当前没有 Task API，正式产品调用边界从 T3-06 建立
+- 失败矩阵：覆盖非法 UUIDv4、未知 Installation、非法状态/revision/时间、重复 Task、已吊销 Installation、跨 Installation 读取/转换、非法状态跳转、stale revision、时间回退、并发 CAS 和迁移回滚；API 幂等/参数、Attempt/Action 唯一约束与数据库重启恢复分别归 T3-06/T3-03/T3-20
+- 安全与清理：Task 表没有 Cookie、Token、页面内容、聊天、本机路径或任意 JSON；测试只启动隔离 PostgreSQL，fixture 结束删除容器、网络、卷，无 App、Executor、浏览器、服务或端口遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-03 增加 execution attempts、actions 及 Task current attempt 复合绑定；T3-06 创建 API 必须先经过 I2-14 Installation 访问守卫并调用本仓储；T3-07 查询 API 复用相同 scope 条件
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-02`：建立 Task 数据模型、Installation scope 与 Alembic；
-2. `T3-03`：建立 Execution Attempt/Action 模型和唯一约束；
+1. `T3-03`：建立 Execution Attempt/Action 模型和唯一约束；
+2. `T3-04`：建立 Task Event 单调序号、版本与安全消息模型；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

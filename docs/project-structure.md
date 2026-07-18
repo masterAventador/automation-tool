@@ -156,9 +156,9 @@ backend/
 │       │   ├── bootstrap/         # 配置、注册、设备凭据和 Session 依赖装配
 │       │   ├── api/               # REST、设备认证、SSE/WebSocket 和错误映射
 │       │   ├── application/       # 注册、凭据、任务、配置、内容和工作流用例
-│       │   ├── domain/            # 任务、事件、动作、风险和 Artifact
+│       │   ├── domain/            # 稳定 ID、Task 状态机、事件、动作、风险和 Artifact
 │       │   └── infrastructure/
-│       │       ├── database/      # PostgreSQL Schema、注册、凭据和 Session 仓储
+│       │       ├── database/      # PostgreSQL Schema、注册、凭据、Session 和 Task 仓储
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
 │       │       ├── events/
 │       │       ├── object_storage/

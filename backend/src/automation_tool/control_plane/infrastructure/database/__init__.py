@@ -7,6 +7,7 @@ from .schema import (
     installation_registration_challenges,
     installations,
     metadata,
+    tasks,
 )
 from .session import Database
 
@@ -18,4 +19,5 @@ __all__ = [
     "installation_registration_challenges",
     "installations",
     "metadata",
+    "tasks",
 ]

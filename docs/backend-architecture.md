@@ -487,6 +487,10 @@ Control Plane PostgreSQL 最小表：
 
 `installation_registration_challenges` 固定 UUIDv4、规范环境、32 字节 bootstrap 指纹/设备公钥/payload 摘要、创建与到期时间，以及成对出现的 `consumed_at + installation_id`。数据库约束到期晚于创建、消费早于到期、长度/环境/状态一致和 Installation 外键；应用层在行锁事务中验证并消费，唯一设备公钥冲突回滚整个消费。
 
+T3-02 的 `tasks` 表只建立后续阶段共同需要的稳定骨架：规范 Task UUIDv4、不可空 Installation 外键、`TaskStatus`、从 1 开始的 revision、创建/更新时间，以及供未来 Attempt/Action 做复合外键的 `(id, installation_id)` 唯一绑定。数据库约束完整状态集合、正 revision、时间不倒退，并为 `(installation_id, updated_at, id)` 建索引；具体平台模板和参数在 T3-17 以受约束 DTO 增加，当前不提前保存任意 JSON、页面原文或供应商对象。
+
+`SqlAlchemyTaskRepository.create` 先锁目标 Installation，只有 active 状态才能在同一事务创建 draft Task，因此与 Installation 吊销按同一行锁线性化；未知、已吊销或重复目标共享固定拒绝。读取和状态更新始终同时携带 Task ID + Installation ID，跨 Installation 与未知 Task 对仓储调用者不可见。状态更新锁定精确 `id + installation_id + expected_revision`，调用唯一 `TaskStateMachine` 后 revision 原子加一；两个并发旧 revision 只有一个成功，非法转换、旧 revision、scope 冒充和时间回退均不修改行。
+
 约束：
 
 - 每个资源都绑定 `installation_id`；

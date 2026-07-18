@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 
-from automation_tool.control_plane.domain import InstallationStatus
+from automation_tool.control_plane.domain import InstallationStatus, TaskStatus
 
 metadata = MetaData()
 
@@ -221,6 +221,58 @@ Index(
     postgresql_where=device_credentials.c.status == "active",
 )
 
+tasks = Table(
+    "tasks",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column(
+        "status",
+        String(length=32),
+        nullable=False,
+        server_default=text(f"'{TaskStatus.DRAFT.value}'"),
+    ),
+    Column("revision", BigInteger(), nullable=False, server_default=text("1")),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_tasks_id_uuid_v4",
+    ),
+    CheckConstraint("revision > 0", name="ck_tasks_revision_positive"),
+    CheckConstraint(
+        "status in (" + ", ".join(f"'{status.value}'" for status in TaskStatus) + ")",
+        name="ck_tasks_status",
+    ),
+    CheckConstraint("updated_at >= created_at", name="ck_tasks_timestamp_order"),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_tasks_installation_id",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_tasks"),
+    UniqueConstraint("id", "installation_id", name="uq_tasks_binding"),
+)
+
+Index(
+    "ix_tasks_installation_updated",
+    tasks.c.installation_id,
+    tasks.c.updated_at,
+    tasks.c.id,
+)
+
 device_sessions = Table(
     "device_sessions",
     metadata,
@@ -288,4 +340,5 @@ __all__ = [
     "installation_registration_challenges",
     "installations",
     "metadata",
+    "tasks",
 ]
