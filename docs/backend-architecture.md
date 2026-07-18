@@ -269,7 +269,7 @@ MVP 不使用 AI 页面理解、stealth 或验证码识别。
 - `executor_id`：一次 Executor 安装/版本实例；
 - `connection_id`：一次在线连接。
 
-稳定业务资源 ID 使用规范小写 UUIDv4。Python 领域层分别使用 `InstallationId`、`ExecutorId`、`TaskId`、`ExecutionAttemptId`、`ActionId` 和 `ArtifactId` 不可变值对象；即使底层 UUID 相同，不同资源类型也不相等、不可互相解析。外部输入拒绝 nil、非 v4、大小写/空白/URN/无连字符等非规范形式，错误不得回显原始值。`connection_id`、协议 message/correlation ID 在各自任务中沿用同一规范并建立具体类型。
+稳定业务资源 ID 使用规范小写 UUIDv4。Python 领域层分别使用 `InstallationId`、`ExecutorId`、`TaskId`、`ExecutionAttemptId`、`ActionId` 和 `ArtifactId` 不可变值对象；即使底层 UUID 相同，不同资源类型也不相等、不可互相解析。外部输入拒绝 nil、非 v4、大小写/空白/URN/无连字符等非规范形式，错误不得回显原始值。一次在线连接使用独立短生命周期 `ExecutorConnectionId`；协议 message/correlation ID 也沿用同一规范并保持用途隔离。
 
 私钥和长期设备凭据留在 Tauri `app_data_dir` 下由 Rust 管理的 App 私有文件，不调用系统钥匙串，也不进入 React、Tauri Command 或 Python 普通配置。
 
@@ -344,7 +344,9 @@ I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executo
 
 公共 `contracts/fixtures/executor-v1` 固定 6 个 valid 与 25 个 invalid wire 文件：15 个结构层无效样例必须由标准 Schema 和正式解析器同时拒绝，另 10 个语义层无效样例允许标准 Schema 接受但必须由正式解析器拒绝。Schema 生成器提供 write/check 两种模式，缺失或逐字漂移都用固定错误失败；Backend CI 在测试前执行 `--check`。Python、Rust、TypeScript 只能回放这套公共 fixtures 并实现相同语义扩展，不得各自另造“等价”样例。
 
-I2-12 已实现三端一致性：TypeScript 以严格 Zod 判别联合校验完整 envelope，并在普通 `JSON.parse` 前扫描所有对象的重复 key；Rust 以 `serde(deny_unknown_fields)` DTO、递归唯一 key visitor 和同一资源/隐私策略完成正式解析。两端都只暴露固定 `ExecutorProtocolError`，不保留或反射被拒绝的 wire。时间比较精确到 RFC3339 允许的 6 位小数，`-00:00` 不作为 canonical UTC 接受；sequence 上限固定为三端都能无损表示的 `2^53-1`。I2-13 必须通过这些正式入口收发真实 WebSocket 消息，不能在连接层另写宽松解析。
+I2-12 已实现三端一致性：TypeScript 以严格 Zod 判别联合校验完整 envelope，并在普通 `JSON.parse` 前扫描所有对象的重复 key；Rust 以 `serde(deny_unknown_fields)` DTO、递归唯一 key visitor 和同一资源/隐私策略完成正式解析。两端都只暴露固定 `ExecutorProtocolError`，不保留或反射被拒绝的 wire。时间比较精确到 RFC3339 允许的 6 位小数，`-00:00` 不作为 canonical UTC 接受；sequence 上限固定为三端都能无损表示的 `2^53-1`。
+
+I2-13 已把 Python 正式解析入口接入 `WS /api/v1/executors/connect`。握手必须只提供 `automation-tool.executor.v1` 子协议和单个 Bearer `executor.connect` Session；第一帧限时为 `executor.hello`，绑定已认证 Installation、声明的 Executor、协议/Executor 版本、平台、架构和新生成的 `ExecutorConnectionId`。连接期间只接受同一身份的 heartbeat，并周期重新验证数据库中的 Session、父凭据与 Installation；任一失效立即固定 4401 断开，旧 Session 不能重新升级。Uvicorn 固定 `websockets-sansio` 并在传输层执行 32 KiB 上限；拒绝握手和关闭只返回固定状态/原因，原始 bearer、wire 和底层异常不进入公开响应或日志。T3-08 再增加在线投影、单实例旧连接替换和 Registry，不在认证入口维护第二份事实源。
 
 ### 10.2 命令
 

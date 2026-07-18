@@ -204,6 +204,19 @@ class DeviceSessionService:
         required_capability: DeviceSessionCapability,
     ) -> AuthenticatedDeviceSession:
         presented_session = parse_device_session(session_token)
+        return await self.authenticate_parsed(
+            presented_session=presented_session,
+            required_capability=required_capability,
+        )
+
+    async def authenticate_parsed(
+        self,
+        *,
+        presented_session: ParsedDeviceSession,
+        required_capability: DeviceSessionCapability,
+    ) -> AuthenticatedDeviceSession:
+        """Revalidate already parsed in-memory proof without retaining its bearer text."""
+
         if not isinstance(required_capability, DeviceSessionCapability):
             raise InvalidDeviceSessionCapability
         authenticated_at = _aware_utc(self._clock)

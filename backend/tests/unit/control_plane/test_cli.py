@@ -4,6 +4,7 @@ from typing import Any
 import uvicorn
 
 from automation_tool.control_plane.bootstrap.cli import main
+from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 
 def test_control_plane_console_script_targets_the_factory() -> None:
@@ -33,4 +34,6 @@ def test_local_cli_binds_loopback_and_enables_factory_mode(monkeypatch: Any) -> 
         "factory": True,
         "host": "127.0.0.1",
         "port": 8765,
+        "ws": "websockets-sansio",
+        "ws_max_size": MAX_EXECUTOR_MESSAGE_BYTES,
     }

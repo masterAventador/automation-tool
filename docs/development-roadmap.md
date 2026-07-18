@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1 工程闭环与六类稳定资源 ID 已完成，正在实现安装实例认证与跨进程协议；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1 工程闭环与 Wave 2 Executor 认证通道已完成，正在收口 Installation 吊销闭环；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -57,6 +57,7 @@
 | 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
 | Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
+| Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -164,7 +165,7 @@
 | I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ✅ 已完成 |
 | I2-11 | 协议 Schema/Fixtures | 有效/无效样例覆盖未知字段、敏感数据、非法时间和枚举 | I2-10 | ✅ 已完成 |
 | I2-12 | Rust/TS 协议一致性 | 三语言回放同一 fixtures，结论一致 | I2-11,F1-11 | ✅ 已完成 |
-| I2-13 | Executor WebSocket 认证 | installation/executor/版本绑定；旧连接、冒充和吊销测试 | I2-07,I2-10 | ⬜ 未开始 |
+| I2-13 | Executor WebSocket 认证 | installation/executor/版本绑定；旧连接、冒充和吊销测试 | I2-07,I2-10 | ✅ 已完成 |
 | I2-14 | 安装实例吊销闭环 | 吊销阻止 App 请求、新任务和 Executor 连接；UI 明确诊断 | I2-09,I2-13 | ⬜ 未开始 |
 
 ## 8. Wave 3：Control Plane 任务与事件闭环
@@ -917,10 +918,26 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、fixture 说明、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：generic payload 仍只是 Envelope 级安全下限，具体 payload 随 T3/E4 收紧；I2-13 接入真实 Executor WebSocket 认证、版本绑定、旧连接和吊销关闭，不在本任务提前建设连接生命周期
 
+### I2-13 Executor WebSocket 认证
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 Executor 连接应用服务单元测试，执行目标用例因正式模块不存在而在收集阶段失败；随后补充 WebSocket 路由契约与真实 PostgreSQL 生命周期测试。首轮真实 PostgreSQL 用例准确暴露测试夹具把凭据创建时间设在未来；修正为稳定历史时钟后通过。首轮真实 Uvicorn 验收又暴露 TestClient 未发现的拒绝握手重复 `Content-Length`，标准客户端按非法 HTTP 拒绝；删除应用层自动长度并固定 Uvicorn SansIO 后真实网络通过
+- GREEN：7 项连接应用服务单元、28 项 WebSocket 路由契约、1 项真实 PostgreSQL 生命周期测试通过；Backend 全量 491 项且语句/分支覆盖率 100%，uv lock、Ruff、严格 Mypy、OpenAPI 与 Executor Schema 漂移全部通过。Frontend 23 项 Node 契约、61 项 Vitest、ESLint、严格 TypeScript、API 漂移与生产构建边界通过；默认、`desktop-e2e`、`control-plane-e2e` 三种 Rust 配置各通过 29 项库测试、3 项协议 fixture 和 2 项配置测试，Rustfmt 与三种 all-target Clippy `-D warnings` 通过。WebSocket 路由不进入 REST OpenAPI，协议 Schema 无变化
+- 认证与绑定：`WS /api/v1/executors/connect` 只接受唯一 `automation-tool.executor.v1` 子协议与 `executor.connect` Session；认证成功后立即从 ASGI scope 擦除 Authorization Header 并删除局部明文，只保留摘要形式的重认证材料。第一帧必须在 5 秒内通过正式 `parse_executor_message` 成为 `executor.hello`，并绑定 Session 的 Installation、声明 Executor、协议/Executor 版本、macOS/Windows、arm64/x86_64 和独立规范 UUIDv4 `ExecutorConnectionId`
+- 生命周期：绑定后当前阶段只接受同一 Installation/Executor 的 `executor.heartbeat`，重复 Hello、任务消息、身份切换、二进制和畸形 wire 均拒绝。服务默认每秒重新从 PostgreSQL 验证 Session、父凭据版本和 Installation；轮换、吊销、过期或绑定变化会关闭在线连接，旧 Session 不能重新升级
+- 传输与错误：Uvicorn 本地入口和生产同路径脚本固定 `websockets-sansio`，传输层与正式 parser 共用 32 KiB 上限。握手失败使用 403/503 + `no-store`；已升级连接使用固定 4401/4403/4406/4408/1011 和固定安全原因。未知内部异常不反射 bearer、wire、数据库细节或异常链
+- 生产同路径验收：`uv run python ../scripts/run_i2_13_acceptance.py` 后台启动随机端口上的真实 PostgreSQL 18.4、完整 Alembic 链和真实 Uvicorn；经正式 REST 换取 Session，再由标准 WebSocket 客户端验证错误子协议 403、超 32 KiB 帧 1009、Installation 冒充 4403、合法 Hello/heartbeat、真实 REST 凭据吊销导致在线 4401，以及旧 Session 重连 403；最终核对凭据和 Session 均已撤销
+- App 测试边界：本任务是服务器 WebSocket 入口，正式调用方式就是网络升级与帧收发，因此不启动 Tauri App、不以进程内 TestClient 代替真实网络；E4-02/E4-12 再由正式 Local Executor 进程复用同一入口完成两端纵向验收。后续任何必须启动 App 的自动化仍只用 `visible=false` 测试配置在后台运行
+- 清理：真实验收结束显式终止 Uvicorn、删除隔离 PostgreSQL 容器/网络/卷并确认随机 Control Plane/数据库端口无监听；无 App、浏览器、WebDriver、外部平台动作或本地业务凭据遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
+- 遗留：I2-14 收口 Installation 吊销对 App API、新任务和在线 Executor 的统一行为；T3-08 建立连接 Registry、在线投影与单实例旧连接替换；E4-02/E4-12 实现正式 Local Executor 出站连接与端到端任务消息，不在认证入口提前维护任务状态
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-13`：建立 Executor WebSocket 安装实例认证与连接生命周期；
-2. `I2-14`：完成 Installation 吊销对 App 请求、任务与 Executor 连接的闭环；
+1. `I2-14`：完成 Installation 吊销对 App 请求、任务与 Executor 连接的闭环；
+2. `T3-01`：定义任务状态机与非法转换矩阵；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

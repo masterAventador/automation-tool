@@ -42,7 +42,8 @@ automation-tool/
 │   ├── development-roadmap.md
 │   └── adr/                       # 后续重要架构决策
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
-│   └── run_i2_09_acceptance.py   # 真实 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
+│   ├── run_i2_09_acceptance.py   # 隐藏 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
+│   └── run_i2_13_acceptance.py   # 后台 Uvicorn→WebSocket→PostgreSQL 隔离验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略

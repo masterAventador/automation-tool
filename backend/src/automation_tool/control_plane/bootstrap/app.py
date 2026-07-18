@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from math import isfinite
 
 from fastapi import FastAPI
 
@@ -16,10 +17,16 @@ from automation_tool.control_plane.api.errors import (
     install_request_context,
     register_error_handlers,
 )
+from automation_tool.control_plane.api.executor_websocket import (
+    router as executor_websocket_router,
+)
 from automation_tool.control_plane.api.registrations import router as registration_router
 from automation_tool.control_plane.api.system import router as system_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
+from automation_tool.control_plane.application.executor_connections import (
+    ExecutorConnectionService,
+)
 from automation_tool.control_plane.application.registration import InstallationRegistrationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
 from automation_tool.control_plane.bootstrap.device_credentials import (
@@ -42,6 +49,14 @@ class _FromEnvironment:
 _FROM_ENVIRONMENT = _FromEnvironment()
 
 
+def _positive_finite_seconds(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (float, int)):
+        raise ValueError("Executor connection timeouts must be positive")
+    if not isfinite(value) or value <= 0:
+        raise ValueError("Executor connection timeouts must be positive")
+    return float(value)
+
+
 @asynccontextmanager
 async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own resources that must exist for exactly one application lifespan."""
@@ -62,6 +77,9 @@ def create_app(
     registration_service: InstallationRegistrationService | None = None,
     device_credential_service: DeviceCredentialService | None = None,
     device_session_service: DeviceSessionService | None = None,
+    executor_connection_service: ExecutorConnectionService | None = None,
+    executor_connection_hello_timeout_seconds: float = 5.0,
+    executor_connection_recheck_interval_seconds: float = 1.0,
 ) -> FastAPI:
     """Create an isolated Control Plane application instance."""
 
@@ -71,6 +89,7 @@ def create_app(
     resolved_registration_service = registration_service
     resolved_device_credential_service = device_credential_service
     resolved_device_session_service = device_session_service
+    resolved_executor_connection_service = executor_connection_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -81,6 +100,14 @@ def create_app(
         resolved_device_credential_service = build_device_credential_service(resolved_database)
     if resolved_device_session_service is None and isinstance(resolved_database, Database):
         resolved_device_session_service = build_device_session_service(resolved_database)
+    if resolved_executor_connection_service is None and resolved_device_session_service is not None:
+        resolved_executor_connection_service = ExecutorConnectionService(
+            resolved_device_session_service
+        )
+    hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
+    recheck_interval_seconds = _positive_finite_seconds(
+        executor_connection_recheck_interval_seconds
+    )
 
     app = FastAPI(
         title="automation-tool Control Plane",
@@ -92,10 +119,14 @@ def create_app(
     app.state.registration_service = resolved_registration_service
     app.state.device_credential_service = resolved_device_credential_service
     app.state.device_session_service = resolved_device_session_service
+    app.state.executor_connection_service = resolved_executor_connection_service
+    app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
+    app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     install_request_context(app)
     register_error_handlers(app)
     app.include_router(system_router)
     app.include_router(registration_router)
     app.include_router(device_credential_router)
     app.include_router(device_session_router)
+    app.include_router(executor_websocket_router)
     return app

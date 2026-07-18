@@ -2,6 +2,7 @@
 
 from automation_tool.protocol.executor_envelope import (
     EXECUTOR_PROTOCOL_VERSION,
+    MAX_EXECUTOR_MESSAGE_BYTES,
     CorrelationId,
     ExecutorEnvelope,
     ExecutorLifecycleEnvelope,
@@ -30,6 +31,7 @@ __all__ = [
     "CURRENT_EXECUTOR_PROTOCOL",
     "EXECUTOR_PROTOCOL_VERSION",
     "MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
+    "MAX_EXECUTOR_MESSAGE_BYTES",
     "MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "CorrelationId",
     "ExecutorEnvelope",

@@ -262,6 +262,8 @@ def main() -> None:
                 "127.0.0.1",
                 "--port",
                 str(CONTROL_PLANE_PORT),
+                "--ws",
+                "websockets-sansio",
                 "--no-access-log",
             ],
             cwd=BACKEND_ROOT,

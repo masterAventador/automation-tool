@@ -78,6 +78,14 @@ class ExecutorId(ResourceId):
 
 
 @final
+class ExecutorConnectionId(ResourceId):
+    """An ephemeral identifier for one authenticated Executor connection."""
+
+    __slots__ = ()
+    _resource = "executor connection"
+
+
+@final
 class TaskId(ResourceId):
     """A stable task identifier."""
 
@@ -113,6 +121,7 @@ __all__ = [
     "ActionId",
     "ArtifactId",
     "ExecutionAttemptId",
+    "ExecutorConnectionId",
     "ExecutorId",
     "InstallationId",
     "InvalidResourceId",
