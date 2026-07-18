@@ -134,7 +134,10 @@ def test_protocol_identifier_value_types_validate_direct_construction() -> None:
         MessageId(MESSAGE_ID.upper())
 
 
-@pytest.mark.parametrize("invalid_time", ("", "2026-07-18T03:00:00", 0, None))
+@pytest.mark.parametrize(
+    "invalid_time",
+    ("", "2026-07-18T03:00:00", "2026-07-18T03:00:00-00:00", 0, None),
+)
 @pytest.mark.parametrize("field", ("sent_at", "deadline_at"))
 def test_timestamps_require_aware_rfc3339_values(field: str, invalid_time: object) -> None:
     with pytest.raises(ValidationError):
@@ -189,8 +192,8 @@ def test_idempotency_key_value_type_validates_direct_construction() -> None:
         IdempotencyKey(cast(str, 1))
 
 
-@pytest.mark.parametrize("invalid_sequence", (0, -1, 2**63, 1.0, True, "1"))
-def test_sequence_is_a_positive_strict_signed_64_bit_integer(
+@pytest.mark.parametrize("invalid_sequence", (0, -1, 2**53, 2**63, 1.0, True, "1"))
+def test_sequence_is_a_positive_strict_cross_language_safe_integer(
     invalid_sequence: object,
 ) -> None:
     with pytest.raises(ValidationError):

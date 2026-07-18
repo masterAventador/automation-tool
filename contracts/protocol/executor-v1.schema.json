@@ -118,7 +118,7 @@
           "type": "string"
         },
         "sequence": {
-          "maximum": 9223372036854775807,
+          "maximum": 9007199254740991,
           "minimum": 1,
           "title": "Sequence",
           "type": "integer"
@@ -224,7 +224,7 @@
           "type": "string"
         },
         "sequence": {
-          "maximum": 9223372036854775807,
+          "maximum": 9007199254740991,
           "minimum": 1,
           "title": "Sequence",
           "type": "integer"
@@ -336,7 +336,7 @@
           "type": "string"
         },
         "sequence": {
-          "maximum": 9223372036854775807,
+          "maximum": 9007199254740991,
           "minimum": 1,
           "title": "Sequence",
           "type": "integer"
@@ -459,7 +459,7 @@
           "type": "string"
         },
         "sequence": {
-          "maximum": 9223372036854775807,
+          "maximum": 9007199254740991,
           "minimum": 1,
           "title": "Sequence",
           "type": "integer"

@@ -1,6 +1,7 @@
 pub mod control_plane;
 pub mod device_credentials;
 pub mod device_identity;
+pub mod executor_protocol;
 pub mod secure_store;
 
 use device_credentials::initialize_production_device_credential_vault;

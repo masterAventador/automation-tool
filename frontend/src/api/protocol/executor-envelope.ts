@@ -1,0 +1,367 @@
+import { z } from "zod";
+
+const MAX_MESSAGE_BYTES = 32 * 1024;
+const MAX_PAYLOAD_BYTES = 16 * 1024;
+const MAX_PAYLOAD_DEPTH = 8;
+const MAX_COLLECTION_ITEMS = 64;
+const MAX_STRING_LENGTH = 4096;
+const canonicalUuidV4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const idempotencyKey = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const utcTimestamp =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(?:Z|\+00:00)$/;
+const inlineDataUri = /\bdata:[a-z0-9.+-]+\/[a-z0-9.+-]+[^,]*,/i;
+const sensitiveAssignment =
+  /(?:^|[^a-z0-9_])(?:access[_-]?token|api[_-]?key|authorization|cookie|credential|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)\s*[:=]/i;
+const privatePosixPath = /(?:^|[\s"'=])\/(?:users|home|root|tmp|var\/folders)(?:\/|$)/i;
+const windowsAbsolutePath = /(?:^|[\s"'=])[a-z]:[\\/]/i;
+const sensitiveNames = new Set([
+  "access_token",
+  "api_key",
+  "authorization",
+  "captcha_code",
+  "cookie",
+  "cookies",
+  "credential",
+  "credentials",
+  "file_path",
+  "image",
+  "image_data",
+  "inline_image",
+  "inline_screenshot",
+  "local_path",
+  "otp",
+  "password",
+  "private_key",
+  "refresh_token",
+  "screenshot",
+  "secret",
+  "secrets",
+  "session_cookie",
+  "token",
+  "tokens",
+  "verification_code",
+]);
+const sensitiveSegments = new Set([
+  "cookie",
+  "cookies",
+  "credential",
+  "credentials",
+  "password",
+  "secret",
+  "secrets",
+  "token",
+  "tokens",
+]);
+
+function parseCanonicalUtcTimestamp(value: string): bigint | null {
+  const match = utcTimestamp.exec(value);
+  if (match === null) {
+    return null;
+  }
+  const [, year, month, day, hour, minute, second, fraction = ""] = match;
+  const numeric = [year, month, day, hour, minute, second].map(Number);
+  if (numeric.some((part) => !Number.isInteger(part))) {
+    return null;
+  }
+  const [yearValue, monthValue, dayValue, hourValue, minuteValue, secondValue] = numeric;
+  if (
+    yearValue === undefined ||
+    yearValue < 1 ||
+    monthValue === undefined ||
+    dayValue === undefined ||
+    hourValue === undefined ||
+    minuteValue === undefined ||
+    secondValue === undefined
+  ) {
+    return null;
+  }
+  const paddedFraction = fraction.padEnd(6, "0");
+  const milliseconds = Number(paddedFraction.slice(0, 3));
+  const parsed = new Date(0);
+  parsed.setUTCFullYear(yearValue, monthValue - 1, dayValue);
+  parsed.setUTCHours(hourValue, minuteValue, secondValue, milliseconds);
+  if (
+    Number.isFinite(parsed.getTime()) &&
+    parsed.getUTCFullYear() === yearValue &&
+    parsed.getUTCMonth() === monthValue - 1 &&
+    parsed.getUTCDate() === dayValue &&
+    parsed.getUTCHours() === hourValue &&
+    parsed.getUTCMinutes() === minuteValue &&
+    parsed.getUTCSeconds() === secondValue
+  ) {
+    return BigInt(parsed.getTime()) * 1000n + BigInt(paddedFraction.slice(3));
+  }
+  return null;
+}
+
+function normalizedPayloadName(value: string): string {
+  return value
+    .replace(/(?<=[a-z0-9])(?=[A-Z])/g, "_")
+    .replace(/[.-]+/g, "_")
+    .toLowerCase();
+}
+
+function containsControlOrBidi(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const point = character.codePointAt(0);
+    return (
+      point !== undefined &&
+      (point < 0x20 ||
+        point === 0x7f ||
+        (point >= 0x202a && point <= 0x202e) ||
+        (point >= 0x2066 && point <= 0x2069))
+    );
+  });
+}
+
+function unsafePayloadString(value: string): boolean {
+  const folded = value.toLowerCase();
+  return (
+    Array.from(value).length > MAX_STRING_LENGTH ||
+    containsControlOrBidi(value) ||
+    folded.includes("bearer ") ||
+    folded.includes("file://") ||
+    sensitiveAssignment.test(value) ||
+    inlineDataUri.test(value) ||
+    privatePosixPath.test(value) ||
+    windowsAbsolutePath.test(value)
+  );
+}
+
+function validatePayloadValue(value: unknown, depth: number): boolean {
+  if (depth > MAX_PAYLOAD_DEPTH) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return (
+      value.length <= MAX_COLLECTION_ITEMS &&
+      value.every((item) => validatePayloadValue(item, depth + 1))
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value);
+    return (
+      entries.length <= MAX_COLLECTION_ITEMS &&
+      entries.every(([key, child]) => {
+        const normalized = normalizedPayloadName(key);
+        const segments = normalized.split("_");
+        return (
+          key.length > 0 &&
+          Array.from(key).length <= 128 &&
+          !containsControlOrBidi(key) &&
+          !sensitiveNames.has(normalized) &&
+          !segments.some((segment) => sensitiveSegments.has(segment)) &&
+          validatePayloadValue(child, depth + 1)
+        );
+      })
+    );
+  }
+  if (typeof value === "string") {
+    return !unsafePayloadString(value);
+  }
+  return typeof value !== "number" || Number.isFinite(value);
+}
+
+const payloadSchema = z.record(z.string(), z.json()).superRefine((payload, context) => {
+  const encodedLength = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+  if (!validatePayloadValue(payload, 0) || encodedLength > MAX_PAYLOAD_BYTES) {
+    context.addIssue({ code: "custom", message: "Invalid Executor payload" });
+  }
+});
+const timestampSchema = z.string().refine((value) => parseCanonicalUtcTimestamp(value) !== null);
+const commonEnvelope = z
+  .object({
+    protocol_version: z.literal("1.0"),
+    message_id: z.string().regex(canonicalUuidV4),
+    sent_at: timestampSchema,
+    deadline_at: timestampSchema,
+    installation_id: z.string().regex(canonicalUuidV4),
+    executor_id: z.string().regex(canonicalUuidV4),
+    correlation_id: z.string().regex(canonicalUuidV4),
+    idempotency_key: z.string().regex(idempotencyKey),
+    sequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    payload: payloadSchema,
+  })
+  .strict();
+const taskScope = {
+  task_id: z.string().regex(canonicalUuidV4),
+  execution_attempt_id: z.string().regex(canonicalUuidV4),
+};
+const lifecycleEnvelope = commonEnvelope.extend({
+  message_type: z.enum(["executor.hello", "executor.heartbeat"]),
+});
+const taskCommandEnvelope = commonEnvelope.extend({
+  ...taskScope,
+  message_type: z.enum([
+    "task.offer",
+    "task.pause",
+    "task.resume",
+    "task.cancel",
+    "task.emergency_stop",
+  ]),
+});
+const taskCommandResultEnvelope = commonEnvelope.extend({
+  ...taskScope,
+  message_type: z.enum(["task.accept", "task.reject", "task.control_ack"]),
+});
+const taskEventEnvelope = commonEnvelope.extend({
+  ...taskScope,
+  message_type: z.enum([
+    "task.started",
+    "step.started",
+    "step.progress",
+    "step.completed",
+    "step.failed",
+    "session.login_required",
+    "handoff.requested",
+    "task.paused",
+    "task.resumed",
+    "task.cancelled",
+    "task.completed",
+    "task.partially_completed",
+    "task.failed",
+    "task.outcome_uncertain",
+  ]),
+});
+const executorEnvelopeSchema = z
+  .discriminatedUnion("message_type", [
+    lifecycleEnvelope,
+    taskCommandEnvelope,
+    taskCommandResultEnvelope,
+    taskEventEnvelope,
+  ])
+  .superRefine((message, context) => {
+    const sentAt = parseCanonicalUtcTimestamp(message.sent_at);
+    const deadlineAt = parseCanonicalUtcTimestamp(message.deadline_at);
+    if (sentAt === null || deadlineAt === null || deadlineAt <= sentAt) {
+      context.addIssue({ code: "custom", message: "Invalid Executor deadline" });
+    }
+  });
+
+export type ExecutorEnvelope = z.infer<typeof executorEnvelopeSchema>;
+
+export class ExecutorProtocolError extends Error {
+  constructor() {
+    super("Invalid Executor protocol message");
+    this.name = "ExecutorProtocolError";
+  }
+}
+
+function assertNoDuplicateObjectKeys(source: string): void {
+  let index = 0;
+  const skipWhitespace = () => {
+    while (/\s/u.test(source[index] ?? "")) {
+      index += 1;
+    }
+  };
+  const parseString = (): string => {
+    const start = index;
+    index += 1;
+    while (index < source.length) {
+      const character = source[index];
+      if (character === "\\") {
+        index += 2;
+      } else if (character === '"') {
+        index += 1;
+        return JSON.parse(source.slice(start, index)) as string;
+      } else {
+        index += 1;
+      }
+    }
+    throw new Error("unterminated string");
+  };
+  const parseValue = (): void => {
+    skipWhitespace();
+    const character = source[index];
+    if (character === "{") {
+      index += 1;
+      skipWhitespace();
+      const keys = new Set<string>();
+      if (source[index] === "}") {
+        index += 1;
+        return;
+      }
+      while (index < source.length) {
+        if (source[index] !== '"') {
+          throw new Error("invalid object key");
+        }
+        const key = parseString();
+        if (keys.has(key)) {
+          throw new Error("duplicate object key");
+        }
+        keys.add(key);
+        skipWhitespace();
+        if (source[index] !== ":") {
+          throw new Error("missing object colon");
+        }
+        index += 1;
+        parseValue();
+        skipWhitespace();
+        if (source[index] === "}") {
+          index += 1;
+          return;
+        }
+        if (source[index] !== ",") {
+          throw new Error("invalid object separator");
+        }
+        index += 1;
+        skipWhitespace();
+      }
+      throw new Error("unterminated object");
+    }
+    if (character === "[") {
+      index += 1;
+      skipWhitespace();
+      if (source[index] === "]") {
+        index += 1;
+        return;
+      }
+      while (index < source.length) {
+        parseValue();
+        skipWhitespace();
+        if (source[index] === "]") {
+          index += 1;
+          return;
+        }
+        if (source[index] !== ",") {
+          throw new Error("invalid array separator");
+        }
+        index += 1;
+      }
+      throw new Error("unterminated array");
+    }
+    if (character === '"') {
+      parseString();
+      return;
+    }
+    const start = index;
+    while (index < source.length && !/[\s,}\]]/u.test(source[index] ?? "")) {
+      index += 1;
+    }
+    if (index === start) {
+      throw new Error("invalid JSON value");
+    }
+  };
+
+  parseValue();
+  skipWhitespace();
+  if (index !== source.length) {
+    throw new Error("trailing JSON content");
+  }
+}
+
+export function parseExecutorMessage(source: string): ExecutorEnvelope {
+  try {
+    if (
+      typeof source !== "string" ||
+      new TextEncoder().encode(source).byteLength > MAX_MESSAGE_BYTES
+    ) {
+      throw new Error("invalid message size");
+    }
+    assertNoDuplicateObjectKeys(source);
+    return executorEnvelopeSchema.parse(JSON.parse(source) as unknown);
+  } catch {
+    throw new ExecutorProtocolError();
+  }
+}

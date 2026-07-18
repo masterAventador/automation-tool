@@ -76,6 +76,7 @@ frontend/
 │   ├── api/
 │   │   ├── generated/             # 由 OpenAPI 生成，禁止手改
 │   │   ├── control-plane/         # 窄 Transport 接口与测试 Harness
+│   │   ├── protocol/              # Executor v1 Zod 正式解析与公共 fixture 回归
 │   │   ├── client.ts              # 后续业务 API 客户端
 │   │   ├── events.ts              # 后续实时事件连接与投影
 │   │   └── query-client.ts
@@ -100,10 +101,12 @@ frontend/
 │   │   ├── control_plane.rs       # 固定 origin、operation allowlist 与凭据注入
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
+│   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
 │   │   ├── lib.rs
 │   │   └── main.rs
 │   ├── tests/
+│   │   └── executor_protocol_fixtures.rs # 回放三端共享原始 wire
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
 │   ├── capabilities/              # 正式最小权限
 │   ├── tauri.conf.json
@@ -177,6 +180,7 @@ backend/
 │       │       └── logging/
 │       ├── protocol/              # Control Plane ↔ Executor 版本化协议
 │       │   ├── executor_envelope.py # v1 判别联合、ID/时限/幂等/序号和安全 payload
+│       │   ├── schema.py          # Draft 2020-12 确定性导出与漂移检查
 │       │   └── version.py         # 当前与最小/最大兼容版本
 │       └── capabilities/
 │           ├── content_studio/    # P2 服务端能力
@@ -231,9 +235,13 @@ Python Pydantic / FastAPI
       │                            ▼
       │                    TypeScript generated client
       │
-      └── Event JSON Schema ─→ contracts/events/
-                                   │
-                           Rust/TypeScript fixtures
+      └── Executor JSON Schema → contracts/protocol/
+                                      │
+                                      ▼
+                              共享原始 wire fixtures
+                              ├── Python parser
+                              ├── Rust parser
+                              └── TypeScript parser
 ```
 
 规则：

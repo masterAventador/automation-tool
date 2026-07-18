@@ -24,12 +24,14 @@ FIXTURE_DOCUMENT = FIXTURE_ROOT / "README.md"
 EXPECTED_VALID_FIXTURES = {
     "executor-heartbeat.json",
     "executor-hello.json",
+    "microsecond-deadline.json",
     "step-progress.json",
     "task-accept.json",
     "task-offer.json",
 }
 EXPECTED_INVALID_FIXTURES = {
     "deadline-before-send.json",
+    "deadline-before-send-microsecond.json",
     "deadline-equals-send.json",
     "duplicate-key.json",
     "inline-data-uri.json",
@@ -41,6 +43,7 @@ EXPECTED_INVALID_FIXTURES = {
     "lifecycle-with-task-scope.json",
     "missing-protocol-version.json",
     "naive-sent-at.json",
+    "negative-zero-offset.json",
     "non-finite-number.json",
     "non-utc-sent-at.json",
     "payload-too-deep.json",
@@ -51,9 +54,11 @@ EXPECTED_INVALID_FIXTURES = {
     "task-missing-attempt.json",
     "unknown-envelope-field.json",
     "unknown-message-type.json",
+    "unsafe-sequence.json",
 }
 SEMANTIC_ONLY_INVALID_FIXTURES = {
     "deadline-before-send.json",
+    "deadline-before-send-microsecond.json",
     "deadline-equals-send.json",
     "duplicate-key.json",
     "inline-data-uri.json",
@@ -137,13 +142,13 @@ def test_fixture_inventory_is_exact_documented_and_nontrivial() -> None:
 
     assert fixture_names(VALID_FIXTURE_ROOT) == EXPECTED_VALID_FIXTURES
     assert fixture_names(INVALID_FIXTURE_ROOT) == EXPECTED_INVALID_FIXTURES
-    assert len(EXPECTED_VALID_FIXTURES) == 5
-    assert len(EXPECTED_INVALID_FIXTURES) == 22
-    assert len(SEMANTIC_ONLY_INVALID_FIXTURES) == 9
+    assert len(EXPECTED_VALID_FIXTURES) == 6
+    assert len(EXPECTED_INVALID_FIXTURES) == 25
+    assert len(SEMANTIC_ONLY_INVALID_FIXTURES) == 10
     for fixture_name in sorted(SEMANTIC_ONLY_INVALID_FIXTURES):
         assert f"`{fixture_name}`" in document
-    assert "9 个语义层无效样例" in document
-    assert "其余 13 个结构层无效样例" in document
+    assert "10 个语义层无效样例" in document
+    assert "其余 15 个结构层无效样例" in document
 
 
 @pytest.mark.parametrize(

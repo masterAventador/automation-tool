@@ -30,7 +30,7 @@ MAX_EXECUTOR_PAYLOAD_BYTES = 16 * 1024
 MAX_EXECUTOR_PAYLOAD_DEPTH = 8
 MAX_EXECUTOR_COLLECTION_ITEMS = 64
 MAX_EXECUTOR_STRING_LENGTH = 4096
-MAX_EXECUTOR_SEQUENCE = 2**63 - 1
+MAX_EXECUTOR_SEQUENCE = 2**53 - 1
 
 _UUID_V4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
@@ -217,7 +217,11 @@ class _ExecutorEnvelopeBase(_ProtocolModel):
     def require_rfc3339_or_datetime(cls, value: object) -> object:
         if isinstance(value, datetime):
             return value
-        if type(value) is str and _RFC3339_PATTERN.fullmatch(value) is not None:
+        if (
+            type(value) is str
+            and _RFC3339_PATTERN.fullmatch(value) is not None
+            and not value.endswith("-00:00")
+        ):
             return value
         raise ValueError("timestamps must use RFC3339")
 

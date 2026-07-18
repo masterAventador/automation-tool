@@ -50,10 +50,23 @@ test("device identity uses Ed25519 and App-private storage at the Rust boundary"
 });
 
 test("React sources have no device private-key or secure-store surface", async () => {
-  const sourceText = (await readFrontendSources()).join("\n");
+  const [sourceText, executorProtocolSource] = await Promise.all([
+    readFrontendSources().then((sources) => sources.join("\n")),
+    readProjectFile("src/api/protocol/executor-envelope.ts"),
+  ]);
+  const protocolPrivateKeyDenylistLiteral = '"private_key"';
+
+  assert.equal(
+    executorProtocolSource.split(protocolPrivateKeyDenylistLiteral).length - 1,
+    1,
+  );
+  assert.doesNotMatch(
+    sourceText.replace(executorProtocolSource, ""),
+    /private[_-]?key|signing[_-]?key|device[_-]?secret|keyring|credential manager/i,
+  );
 
   assert.doesNotMatch(
-    sourceText,
+    executorProtocolSource.replace(protocolPrivateKeyDenylistLiteral, ""),
     /private[_-]?key|signing[_-]?key|device[_-]?secret|keyring|credential manager/i,
   );
 });

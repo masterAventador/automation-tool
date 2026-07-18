@@ -56,7 +56,7 @@
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
-| Executor v1 协议 | `✅` 24 种消息 Pydantic 判别联合、显式版本、用途隔离 UUIDv4、UTC deadline、幂等键、正序号、安全 payload、Draft 2020-12 Schema 与 27 个公共 fixtures 已验证 |
+| Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -163,7 +163,7 @@
 | I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；真实 Tauri App 调用 Health/注册/凭据/Session；禁止任意 URL 代理 | I2-08,F1-11 | ✅ 已完成 |
 | I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ✅ 已完成 |
 | I2-11 | 协议 Schema/Fixtures | 有效/无效样例覆盖未知字段、敏感数据、非法时间和枚举 | I2-10 | ✅ 已完成 |
-| I2-12 | Rust/TS 协议一致性 | 三语言回放同一 fixtures，结论一致 | I2-11,F1-11 | ⬜ 未开始 |
+| I2-12 | Rust/TS 协议一致性 | 三语言回放同一 fixtures，结论一致 | I2-11,F1-11 | ✅ 已完成 |
 | I2-13 | Executor WebSocket 认证 | installation/executor/版本绑定；旧连接、冒充和吊销测试 | I2-07,I2-10 | ⬜ 未开始 |
 | I2-14 | 安装实例吊销闭环 | 吊销阻止 App 请求、新任务和 Executor 连接；UI 明确诊断 | I2-09,I2-13 | ⬜ 未开始 |
 
@@ -879,7 +879,7 @@
 - RED：先创建 64 项目标测试并把任务状态置为 RED，执行 `uv run pytest tests/unit/protocol/test_executor_envelope.py -q` 因 `automation_tool.protocol.executor_envelope` 不存在而收集失败；GREEN 后继续补敏感字段片段/赋值文本/通用 data URI 用例得到 3 项准确失败，再补异常链断言准确证明固定错误仍挂有含私密输入的 Pydantic cause
 - GREEN：79 项 Envelope 目标测试通过，目标模块语句/分支覆盖率均 100%；Backend 全量增至 394 项且语句/分支覆盖率保持 100%，uv lock、Ruff 格式/检查与严格 Mypy 通过。正式类型入口、判别 Schema 结构、显式版本、所有已声明 message type、用途隔离 ID、时间/幂等/序号、任务作用域、payload 资源与隐私边界、重复 JSON key、wire 大小和固定错误均有确定性回归
 - 协议模型：以 `message_type` 判别 `ExecutorLifecycleEnvelope`、`TaskCommandEnvelope`、`TaskCommandResultEnvelope`、`TaskEventEnvelope` 四类、共 24 种 v1 消息。生命周期只绑定 installation/executor，不伪造 task；其余任务消息强制同时绑定 task/attempt。所有模型 frozen、`extra=forbid`，`protocol_version` 无默认值且精确为 `1.0`
-- 边界类型：message/correlation/installation/executor/task/attempt 使用不同运行时类型的 canonical 小写 RFC 4122 UUIDv4；RFC3339 时间必须显式 UTC 且 `deadline_at > sent_at`；幂等键只允许 1～128 字符规范字符集；sequence 是 `1..2^63-1` 的 strict integer，不接受 bool、float 或字符串强转
+- 边界类型：message/correlation/installation/executor/task/attempt 使用不同运行时类型的 canonical 小写 RFC 4122 UUIDv4；RFC3339 时间必须显式 UTC 且 `deadline_at > sent_at`；幂等键只允许 1～128 字符规范字符集；I2-10 初版 sequence 为 `1..2^63-1`，I2-12 的三语言 RED 证明 TypeScript 无法精确表达后统一收紧为 `1..2^53-1` strict safe integer，不接受 bool、float 或字符串强转
 - 资源与隐私：正式解析器只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key；payload 最大 16 KiB、深度 8、单集合 64 项、字符串 4096 字符，递归拒绝 Cookie/Token/密码/私钥/凭据字段与赋值文本、Bearer、私有绝对路径、`file://`、inline data URI、控制/双向字符、NaN/Infinity。解析失败只有固定 `Invalid Executor protocol message`，不回显输入，也不保留底层 cause/context
 - 旧项目取舍：只吸收显式版本、deadline、幂等、判别联合和安全文本的通用经验；未迁移旧 `tenant_id`、Core capability/governance、social-operations 扩展、同步 stdio request/response 或其领域 payload。stdin 仍只留给 E4-02/E4-06 一次性本机 bootstrap，正式消息通道归 I2-13 WebSocket
 - 生产同路径：本任务只建立两进程将共同调用的纯协议解析入口，没有网络、数据库、App UI、Executor 进程或外部副作用，因此真实 Tauri/PostgreSQL/RPA 验收不适用；I2-11 用公共 fixtures 固化跨语言 wire 结论，I2-12 由 Python/Rust/TypeScript 回放同一 fixtures，I2-13 才通过真实 WebSocket 使用该入口
@@ -894,17 +894,33 @@
 - RED：先新增 Schema 漂移、Draft 2020-12、fixture 清单、valid round-trip、invalid 固定拒绝和结构/语义分层测试，执行 `uv run pytest tests/contract/test_executor_protocol_schema.py -q` 因 `automation_tool.protocol.schema` 不存在而收集失败；首次生成后 49/50 通过，准确暴露基础 `jsonschema` 环境没有启用 `date-time` format checker、无时区字符串被标准 Schema 放行
 - GREEN：51 项 Schema/fixture 目标契约通过，Schema 导出模块语句/分支覆盖率 100%；Backend 全量增至 445 项且语句/分支覆盖率保持 100%，uv lock、双 Schema 漂移、Ruff 和严格 Mypy 通过；Frontend 23 项 Node 契约通过。没有安装宽泛 format extras，而是把当前协议要求的 UTC RFC3339 直接编码成跨语言 pattern，使无时区与非 UTC 时间都成为结构失败，deadline 先后仍由语义解析器处理
 - 权威生成：`ExecutorMessage.model_json_schema()` 是唯一手写来源；确定性导出补充 Draft 2020-12 `$schema`、固定 `$id`、UTC pattern、payload `maxProperties`、wire/payload 五项资源上限和六条 `x-semantic-validation-required`。`automation-tool-export-executor-schema` 支持 write/check，缺失或逐字漂移均固定失败，CLI 错误不回显目标路径
-- Fixtures：`contracts/fixtures/executor-v1` 精确包含 5 个 valid 和 22 个 invalid wire 文件。valid 覆盖 lifecycle、task command、command result 和 event；invalid 覆盖缺失/错误版本、未知枚举/字段、UUID、幂等键、序号类型/边界、任务作用域、UTC/倒序 deadline、重复 key、敏感字段/赋值、私有路径、inline data、NaN、深度和集合上限
-- 双层结论：13 个结构层 invalid 必须被标准 Draft 2020-12 validator 和正式 Python parser 同时拒绝；9 个明确登记的语义层 invalid 可以通过标准 Schema，但必须由正式 parser 拒绝。README 逐项列出语义样例，Schema 扩展同步声明实现责任，避免其他语言误把 Schema 通过当成完整验收
+- Fixtures：I2-11 完成时 `contracts/fixtures/executor-v1` 精确包含 5 个 valid 和 22 个 invalid wire 文件，覆盖 lifecycle、task command、command result、event，以及版本、枚举/字段、UUID、幂等键、序号、任务作用域、UTC/deadline、重复 key、隐私与资源边界。I2-12 的跨语言 RED 又增加安全整数、微秒 deadline 和 negative-zero UTC 边界，当前事实源为 6 valid、25 invalid
+- 双层结论：I2-11 初始 13 个结构层、9 个语义层 invalid；I2-12 扩展后为 15 个结构层、10 个语义层。结构层必须被标准 Draft 2020-12 validator 和正式 parser 同时拒绝；README 登记的语义层可以通过标准 Schema，但必须由正式 parser 拒绝，避免其他语言误把 Schema 通过当成完整验收
 - 工具与 CI：新增锁定 `jsonschema 4.26.0` 和匹配的 `types-jsonschema` 开发依赖，未依赖偶然传递安装；GitHub Backend gate 在 pytest 前执行 Schema `--check`，前端 CI 契约会阻止该门禁被删除。依赖只进入开发组，不进入正式运行依赖
-- 生产同路径：本任务产物是进程双方共同消费的静态 wire 合约，没有 App、网络、数据库、Executor 进程或外部副作用；正式完成证据是权威 Pydantic → 生成 Schema → 标准 validator/正式 parser 回放公共文件。I2-12 才建立 Rust/TypeScript 的正式解析实现并对同一 fixtures 给出一致结论
+- 生产同路径：本任务产物是进程双方共同消费的静态 wire 合约，没有 App、网络、数据库、Executor 进程或外部副作用；正式完成证据是权威 Pydantic → 生成 Schema → 标准 validator/正式 parser 回放公共文件。随后 I2-12 已建立 Rust/TypeScript 正式解析实现并对同一 fixtures 给出一致结论
 - 文档：同步根/Backend README、前后端契约结构、后端架构、本路线图快照、任务状态、完成记录和当前下一步
-- 遗留：I2-12 为 Rust/TypeScript 实现同一结构和九条语义扩展；I2-13 通过真实 Executor WebSocket 使用这些模型。具体任务 payload 仍必须随 T3/E4 任务收紧为判别类型
+- 后续：I2-12 已为 Rust/TypeScript 实现同一结构和十项语义样例；I2-13 通过真实 Executor WebSocket 使用这些模型。具体任务 payload 仍必须随 T3/E4 任务收紧为判别类型
+
+### I2-12 Rust/TS 协议一致性
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先把跨语言安全序号 `2^53` 加入 Python 单元、Schema 和公共 invalid fixture，三条 Python 入口均错误接受，证明 I2-10 的 `2^63-1` 上限不能被 TypeScript `number` 无损表达；随后新增 TypeScript/Rust 公共 fixture 契约，分别因 `executor-envelope` 和 `executor_protocol` 正式模块不存在而失败。实现过程中再用共享微秒 deadline 与 `-00:00` 样例锁定 JS 毫秒截断和非 canonical UTC 差异
+- GREEN：Python 目标 140 项、TypeScript 目标 32 项、Rust 共享 fixture 3 项全部通过；Backend 全量 455 项且语句/分支覆盖率 100%，Ruff、严格 Mypy、OpenAPI/Executor Schema 漂移通过；Frontend 23 项 Node 契约、61 项 Vitest、ESLint、严格 TypeScript、正式生产构建与边界扫描通过；默认、`desktop-e2e`、`control-plane-e2e` 三种 Rust 配置测试通过，Rustfmt 与三种 all-target Clippy `-D warnings` 通过
+- 三端契约：权威 Python Pydantic、TypeScript Zod 判别联合、Rust `serde(deny_unknown_fields)` DTO 精确支持同一 24 种 message type 和四类 envelope。`contracts/fixtures/executor-v1` 当前精确包含 6 个 valid、25 个 invalid 原始 wire；15 个结构层样例由 Schema/三端 parser 同拒绝，10 个语义层样例由三端正式 parser 同拒绝
+- 一致性修正：sequence 统一为 `1..2^53-1` strict safe integer；时间只接受 canonical UTC `Z`/`+00:00`、最多 6 位小数并做微秒级 deadline 比较，不接受 `-00:00`；三端都拒绝重复 key、未知字段、任务作用域混淆和非 object payload。TypeScript 在 `JSON.parse` 前递归检测重复 key，Rust 使用递归唯一 key Visitor，避免解析库默认覆盖旧值
+- 失败矩阵：覆盖缺失/错误版本、未知 message/字段、非法与跨用途 ID、非 UTC/无时区/negative-zero/相等或倒序 deadline、非法幂等键、零/类型错误/不安全序号、lifecycle/task scope 混淆、重复 key、NaN、深度/集合/字符串/wire 大小、Cookie/Token/凭据字段与赋值、私有路径、inline data URI、控制/双向字符。Python、Rust、TypeScript 失败均收敛为固定 `Invalid Executor protocol message`，不挂 cause、不回显 wire
+- 安全边界：React 只新增协议拒绝策略，不新增设备私钥、长期凭据、系统钥匙串或 Tauri Command 表面；既有静态边界对协议 denylist 中唯一 `private_key` 字面量做精确验证后，仍扫描该解析器其余内容及全部 React 源。Rust parser 不读取 App 私有文件，也不扩大 Capability/CSP
+- 生产同路径：本任务交付的是后续 WebSocket 两端直接调用的正式纯解析入口，没有网络、数据库、App UI、Executor 进程或外部副作用，因此不启动 Tauri App，也不以 Mock/Harness 冒充跨端验收；I2-13 必须让真实受认证 WebSocket 收发直接经过 Python/Rust parser，TypeScript 只消费经过边界验证的公开投影
+- 清理：没有启动 App、服务、容器、浏览器或桌面窗口，无测试进程和临时业务数据遗留；全量门禁两次准确复现既有 Rust 测试仅靠 macOS 时间戳生成临时目录、并行用例同名碰撞的问题，保留原工具并加入进程内原子序号后连续回归，未改产品存储逻辑
+- 文档：同步根/Backend/Frontend README、前后端架构、fixture 说明、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：generic payload 仍只是 Envelope 级安全下限，具体 payload 随 T3/E4 收紧；I2-13 接入真实 Executor WebSocket 认证、版本绑定、旧连接和吊销关闭，不在本任务提前建设连接生命周期
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-12`：由 Python、Rust、TypeScript 回放同一份协议 fixtures；
-2. `I2-13`：建立 Executor WebSocket 安装实例认证与连接生命周期；
-3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。
+1. `I2-13`：建立 Executor WebSocket 安装实例认证与连接生命周期；
+2. `I2-14`：完成 Installation 吊销对 App 请求、任务与 Executor 连接的闭环；
+3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

@@ -229,6 +229,7 @@ fn sync_directory(_path: &Path) -> Result<(), SecureStoreError> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{AppDataSecretStore, SecretStore, SecureStoreError};
@@ -237,15 +238,18 @@ mod tests {
         path: std::path::PathBuf,
     }
 
+    static NEXT_TEMPORARY_APP_DATA: AtomicU64 = AtomicU64::new(0);
+
     impl TemporaryAppData {
         fn new() -> Self {
             let unique = format!(
-                "automation-tool-i2-08-{}-{}",
+                "automation-tool-i2-08-{}-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("system time")
-                    .as_nanos()
+                    .as_nanos(),
+                NEXT_TEMPORARY_APP_DATA.fetch_add(1, Ordering::Relaxed),
             );
             Self {
                 path: std::env::temp_dir().join(unique),
