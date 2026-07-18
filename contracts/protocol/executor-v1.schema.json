@@ -1,0 +1,514 @@
+{
+  "$defs": {
+    "ExecutorEnvelope": {
+      "discriminator": {
+        "mapping": {
+          "executor.heartbeat": "#/$defs/ExecutorLifecycleEnvelope",
+          "executor.hello": "#/$defs/ExecutorLifecycleEnvelope",
+          "handoff.requested": "#/$defs/TaskEventEnvelope",
+          "session.login_required": "#/$defs/TaskEventEnvelope",
+          "step.completed": "#/$defs/TaskEventEnvelope",
+          "step.failed": "#/$defs/TaskEventEnvelope",
+          "step.progress": "#/$defs/TaskEventEnvelope",
+          "step.started": "#/$defs/TaskEventEnvelope",
+          "task.accept": "#/$defs/TaskCommandResultEnvelope",
+          "task.cancel": "#/$defs/TaskCommandEnvelope",
+          "task.cancelled": "#/$defs/TaskEventEnvelope",
+          "task.completed": "#/$defs/TaskEventEnvelope",
+          "task.control_ack": "#/$defs/TaskCommandResultEnvelope",
+          "task.emergency_stop": "#/$defs/TaskCommandEnvelope",
+          "task.failed": "#/$defs/TaskEventEnvelope",
+          "task.offer": "#/$defs/TaskCommandEnvelope",
+          "task.outcome_uncertain": "#/$defs/TaskEventEnvelope",
+          "task.partially_completed": "#/$defs/TaskEventEnvelope",
+          "task.pause": "#/$defs/TaskCommandEnvelope",
+          "task.paused": "#/$defs/TaskEventEnvelope",
+          "task.reject": "#/$defs/TaskCommandResultEnvelope",
+          "task.resume": "#/$defs/TaskCommandEnvelope",
+          "task.resumed": "#/$defs/TaskEventEnvelope",
+          "task.started": "#/$defs/TaskEventEnvelope"
+        },
+        "propertyName": "message_type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ExecutorLifecycleEnvelope"
+        },
+        {
+          "$ref": "#/$defs/TaskCommandEnvelope"
+        },
+        {
+          "$ref": "#/$defs/TaskCommandResultEnvelope"
+        },
+        {
+          "$ref": "#/$defs/TaskEventEnvelope"
+        }
+      ]
+    },
+    "ExecutorLifecycleEnvelope": {
+      "additionalProperties": false,
+      "description": "Executor-scoped lifecycle traffic that has no task identity.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "enum": [
+            "executor.hello",
+            "executor.heartbeat"
+          ],
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "maxProperties": 64,
+          "title": "Payload",
+          "type": "object"
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "message_type"
+      ],
+      "title": "ExecutorLifecycleEnvelope",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "TaskCommandEnvelope": {
+      "additionalProperties": false,
+      "description": "Control Plane commands that target one execution attempt.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "enum": [
+            "task.offer",
+            "task.pause",
+            "task.resume",
+            "task.cancel",
+            "task.emergency_stop"
+          ],
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "maxProperties": 64,
+          "title": "Payload",
+          "type": "object"
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskCommandEnvelope",
+      "type": "object"
+    },
+    "TaskCommandResultEnvelope": {
+      "additionalProperties": false,
+      "description": "Executor acknowledgements and decisions for a command.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "enum": [
+            "task.accept",
+            "task.reject",
+            "task.control_ack"
+          ],
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "maxProperties": 64,
+          "title": "Payload",
+          "type": "object"
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskCommandResultEnvelope",
+      "type": "object"
+    },
+    "TaskEventEnvelope": {
+      "additionalProperties": false,
+      "description": "Executor facts emitted for one execution attempt.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "enum": [
+            "task.started",
+            "step.started",
+            "step.progress",
+            "step.completed",
+            "step.failed",
+            "session.login_required",
+            "handoff.requested",
+            "task.paused",
+            "task.resumed",
+            "task.cancelled",
+            "task.completed",
+            "task.partially_completed",
+            "task.failed",
+            "task.outcome_uncertain"
+          ],
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "maxProperties": 64,
+          "title": "Payload",
+          "type": "object"
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskEventEnvelope",
+      "type": "object"
+    }
+  },
+  "$id": "https://automation-tool.local/contracts/protocol/executor-v1.schema.json",
+  "$ref": "#/$defs/ExecutorEnvelope",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Pydantic discriminated union for every supported v1 message type.",
+  "title": "Automation Tool Executor Protocol v1",
+  "x-semantic-validation-required": [
+    "wire input must be a bounded UTF-8 JSON object with no duplicate keys",
+    "sent_at and deadline_at must use RFC3339 UTC",
+    "deadline_at must be later than sent_at",
+    "payload encoded size and recursive depth must stay within x-wire-limits",
+    "payload strings and field names must not carry credentials or private local data",
+    "payload numbers must be finite JSON numbers"
+  ],
+  "x-wire-limits": {
+    "maxCollectionItems": 64,
+    "maxMessageBytes": 32768,
+    "maxPayloadBytes": 16384,
+    "maxPayloadDepth": 8,
+    "maxStringLength": 4096
+  }
+}

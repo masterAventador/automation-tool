@@ -63,6 +63,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；
 - installation、executor、task、execution attempt、action 和 artifact 已使用六种不可混用的规范 UUIDv4 领域类型；
 - Executor v1 Envelope 已建立 Pydantic 判别联合：24 种生命周期/任务命令/回执/事件精确分型，显式 `1.0` 版本、规范 UUIDv4、UTC deadline、幂等键、正序号和受限安全 payload 均 fail closed；
+- Executor v1 Draft 2020-12 Schema 已从 Pydantic 确定性导出；5 个 valid、22 个 invalid 公共 fixtures 同时固化结构层与 deadline/隐私/资源等语义层结论，CI 会阻止 Schema 漂移；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
 - 任务等业务 API、Executor WebSocket/进程和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

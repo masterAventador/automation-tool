@@ -29,8 +29,10 @@ automation-tool/
 ├── backend/                       # Python 可部署业务后端和本地执行器
 ├── contracts/                     # 跨 Rust/TypeScript/Python 的生成协议
 │   ├── openapi/                   # FastAPI OpenAPI 快照
+│   ├── protocol/                  # Executor 等跨进程 JSON Schema 快照
 │   ├── events/                    # 任务事件 JSON Schema
-│   └── fixtures/                  # 跨语言有效/无效协议样例
+│   └── fixtures/
+│       └── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
 ├── docs/
 │   ├── dt-ai-helper-competitive-analysis.md
 │   ├── product-plan.md

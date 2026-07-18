@@ -40,6 +40,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy
       - run: uv run automation-tool-export-openapi --output ../contracts/openapi/control-plane.v1.json --check
+      - run: uv run automation-tool-export-executor-schema --output ../contracts/protocol/executor-v1.schema.json --check
       - run: uv run pytest --cov=automation_tool --cov-report=term-missing
 
   frontend:

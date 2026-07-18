@@ -338,7 +338,11 @@ payload
 
 I2-10 的正式 Pydantic 入口是 `parse_executor_message`。Envelope 以 `message_type` 做判别联合，把 24 种已声明 v1 类型精确分到 Executor 生命周期、任务命令、任务回执和任务事件四类；公共字段拒绝未知项且模型冻结。`protocol_version` 必须显式为 `1.0`；message/correlation/installation/executor/task/attempt ID 都是用途隔离的 canonical 小写 RFC 4122 UUIDv4 字符串；时间必须为带时区 RFC3339 且精确 UTC，deadline 严格晚于 sent；幂等键为 1～128 字符受限字符集，sequence 为 `1..2^63-1` 的 strict integer。
 
-正式解析只接受最大 32 KiB 的 UTF-8 JSON object，并拒绝重复 key。Payload 当前是后续任务消息 Schema 的受限容器：最大 16 KiB、深度 8、每层集合最多 64 项、字符串最多 4096 字符；递归拒绝 Cookie/Token/密码/私钥/凭据字段、凭据赋值文本、Bearer、私有绝对路径、`file://`、inline data URI、控制/双向字符和 NaN/Infinity。任何结构、语义、编码或资源限制失败都收敛成固定 `ExecutorProtocolError`，且异常对象不保留原始 cause/context；调用方不得直接把 Pydantic `ValidationError` 暴露到日志或远端。I2-11 再导出权威 JSON Schema 和跨语言有效/无效 fixtures，具体 payload 业务字段随对应消息任务收紧。
+正式解析只接受最大 32 KiB 的 UTF-8 JSON object，并拒绝重复 key。Payload 当前是后续任务消息 Schema 的受限容器：最大 16 KiB、深度 8、每层集合最多 64 项、字符串最多 4096 字符；递归拒绝 Cookie/Token/密码/私钥/凭据字段、凭据赋值文本、Bearer、私有绝对路径、`file://`、inline data URI、控制/双向字符和 NaN/Infinity。任何结构、语义、编码或资源限制失败都收敛成固定 `ExecutorProtocolError`，且异常对象不保留原始 cause/context；调用方不得直接把 Pydantic `ValidationError` 暴露到日志或远端。具体 payload 业务字段仍须随对应消息任务收紧。
+
+I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executor-v1.schema.json`，dialect 固定 Draft 2020-12，并内嵌 `$id`、wire/payload 资源上限和 `x-semantic-validation-required`。Schema 尽可能结构化表达 24 种 message type、required/unknown field、用途 ID pattern、幂等键、序号、任务作用域、payload 顶层项数和 UTC RFC3339 pattern；无法由标准 JSON Schema表达的 deadline 先后、重复 key、递归 payload 限制和隐私文本由显式语义扩展声明，不能静默省略。
+
+公共 `contracts/fixtures/executor-v1` 固定 5 个 valid 与 22 个 invalid wire 文件：13 个结构层无效样例必须由标准 Schema 和正式解析器同时拒绝，另 9 个语义层无效样例允许标准 Schema 接受但必须由正式解析器拒绝。Schema 生成器提供 write/check 两种模式，缺失或逐字漂移都用固定错误失败；Backend CI 在测试前执行 `--check`。I2-12 的 Rust/TypeScript 只能回放这套公共 fixtures 并实现相同语义扩展，不得各自另造“等价”样例。
 
 ### 10.2 命令
 

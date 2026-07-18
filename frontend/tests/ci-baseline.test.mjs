@@ -40,6 +40,11 @@ test("quality CI separates Backend, Frontend, and Rust gates", async () => {
   assert.match(workflow, /uv sync --locked --dev/);
   assert.match(workflow, /uv run pytest --cov=automation_tool --cov-report=term-missing/);
   assert.match(workflow, /uv run automation-tool-export-openapi .* --check/);
+  assert.match(
+    workflow,
+    /uv run automation-tool-export-executor-schema .* --check/,
+    "CI must reject Executor protocol schema drift",
+  );
   assert.match(workflow, /pnpm install --frozen-lockfile/);
   assert.match(workflow, /pnpm test:ui/);
   assert.match(workflow, /pnpm check:production-boundaries/);
