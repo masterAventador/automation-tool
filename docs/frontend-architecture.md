@@ -74,7 +74,7 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 App 启动边界已实现 ready、checking、unavailable、revoked 四态和安全重试；ready 后进入正式工作台页面。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`、`TauriTaskProjectionSource` 与 `TauriWorkbenchGateway`。真实 WebView 只 invoke 固定 Rust Command，Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
 
-T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation：Rust 自行从 App 私有 vault 取长期凭据、换取 `app.control-plane` Session、注入受限 `Idempotency-Key`，并只接受 201 创建或 200 重放的同形 draft Task 快照。当前产品 UI 尚没有平台模板表单，因此生产 React 不暴露通用 create Command；T3-17 必须通过窄任务表单命令调用该客户端，不能让 WebView 接触 bearer、Header 或任意 URL。T3-06 的完成证据来自 `visible=false` 真实 Tauri App，而不是浏览器 Harness 或直接 HTTP。
+T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation；T3-17 已以 `create_douyin_search_exposure_task` 固定 Command 接入窄任务表单。React 只能提交 `douyin.search_exposure.v1` 的明确字段，Zod 先校验，Rust 再校验安全文本、动作/消息关系、数量、间隔和强制确认，然后自行从 App 私有 vault 换取 `app.control-plane` Session 并注入受限幂等键。WebView 不接触 bearer、Header 或任意 URL。完成证据来自 `visible=false` 真实 Tauri App 点击表单并核对 PostgreSQL 最终定义，而不是浏览器 Harness 或直接 HTTP。
 
 T3-07 在该 Rust client 中增加 `ListTasks` 与 `GetTask` 两个封闭 operation。列表只允许固定 `/api/v1/tasks`、`1..100` limit 和长度受限的 canonical Base64URL cursor；详情先把 Task ID 验证为规范 UUIDv4 才构造固定路径。T3-15 将既有数据库水位加入同一公开快照，当前 DTO 为 taskId/status/revision/lastEventSequence/createdAt/updatedAt；Rust 复核 16 态枚举、正 revision、安全水位、UTC 时间、列表降序及 cursor 形状，跨 Installation 详情只得到统一拒绝。生产 React 只通过窄 `TauriTaskProjectionSource` 消费，不存在通用 URL/请求代理。
 

@@ -11,6 +11,8 @@ from sqlalchemy import delete, insert, select
 
 from automation_tool.control_plane.application.tasks import TaskPersistenceRejected
 from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
+    DouyinSearchExposureDefinition,
     InstallationId,
     InvalidTaskTransition,
     TaskId,
@@ -20,6 +22,7 @@ from automation_tool.control_plane.infrastructure.database import (
     Database,
     device_credentials,
     device_sessions,
+    douyin_search_exposure_definitions,
     installation_registration_challenges,
     installations,
     tasks,
@@ -29,6 +32,16 @@ from automation_tool.control_plane.infrastructure.database.task_repository impor
 )
 
 NOW = datetime(2026, 7, 18, 15, 0, tzinfo=UTC)
+DEFINITION = DouyinSearchExposureDefinition(
+    search_keyword="新能源汽车",
+    action=DouyinSearchExposureAction.BROWSE,
+    message_template=None,
+    target_limit=10,
+    minimum_interval_seconds=30,
+    maximum_interval_seconds=90,
+    preview_required=True,
+    final_confirmation_required=True,
+)
 
 
 class TransitionValues(TypedDict):
@@ -40,6 +53,7 @@ class TransitionValues(TypedDict):
 
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
+        await session.execute(delete(douyin_search_exposure_definitions))
         await session.execute(delete(tasks))
         await session.execute(delete(installation_registration_challenges))
         await session.execute(delete(device_sessions))
@@ -87,12 +101,14 @@ async def test_repository_creates_and_reads_only_within_the_installation_scope(
             task_id=first_id,
             installation_id=first_installation,
             idempotency_key="task:repository:first",
+            definition=DEFINITION,
             created_at=NOW,
         )
         second_result = await repository.create(
             task_id=second_id,
             installation_id=second_installation,
             idempotency_key="task:repository:second",
+            definition=DEFINITION,
             created_at=NOW + timedelta(seconds=1),
         )
         first = first_result.task
@@ -148,6 +164,7 @@ async def test_repository_rejects_unknown_revoked_and_duplicate_create_targets_s
             task_id=task_id,
             installation_id=active,
             idempotency_key="task:repository:original",
+            definition=DEFINITION,
             created_at=NOW,
         )
 
@@ -161,6 +178,7 @@ async def test_repository_rejects_unknown_revoked_and_duplicate_create_targets_s
                     task_id=candidate_id,
                     installation_id=installation_id,
                     idempotency_key=f"task:repository:candidate:{candidate_id}",
+                    definition=DEFINITION,
                     created_at=NOW,
                 )
             assert str(captured.value) == "Task persistence operation is rejected"
@@ -193,6 +211,7 @@ async def test_repository_applies_state_machine_and_revision_cas_without_scope_l
             task_id=task_id,
             installation_id=installation_id,
             idempotency_key="task:repository:transition",
+            definition=DEFINITION,
             created_at=NOW,
         )
 
@@ -266,6 +285,7 @@ async def test_two_concurrent_transitions_have_one_revision_winner(
             task_id=task_id,
             installation_id=installation_id,
             idempotency_key="task:repository:concurrent",
+            definition=DEFINITION,
             created_at=NOW,
         )
 

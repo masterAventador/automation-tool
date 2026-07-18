@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-15 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环和桌面投影可用，React 页面尚待实施；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-17 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台和受约束新建表单可用；完整运行详情与 RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -66,7 +66,7 @@
 | Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
 | Command/Outbox 持久化 | `✅` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
 | Command 投递闭环 | `✅` PostgreSQL 原子抢占、current WebSocket 发送、断线/ACK 超时重投、重连恢复、严格回执与 deadline 过期已在真实网络验证 |
-| 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、201/200 原子创建/重放、并发收敛与隐藏 Tauri App 生产同路径已验证 |
+| 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、唯一抖音搜索曝光 DTO、Task/定义原子创建、201/200 重放与隐藏 Tauri App 表单生产同路径已验证 |
 | 查询 Task API | `✅` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
 | 暂停/恢复 API | `✅` Installation-scoped 幂等控制命令、原子 sequence、ACK 后事件门禁与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
 | 取消/紧停 API | `✅` 原子 CANCELLING、幂等重放、ACK 后终态、完成竞态、结果不确定与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
@@ -92,6 +92,7 @@
 - 协议：OpenAPI/JSON Schema/fixtures 重新生成且无漂移；
 - 数据库：真实 PostgreSQL 集成和迁移；
 - RPA：真实受控平台最终状态，不以 Mock/点击/日志替代；
+- 真实账号非阻塞策略：账号、扫码或平台人工安全校验暂不可用时，使用自建测试页与隔离 Adapter 完成可自动化实现，将真实最终状态验收保持为 `🔍 待真实账号` 并自动继续后续无账号依赖任务；不得把测试页/Fake 标成真实平台已通过；
 - 安全：敏感信息、资源上限、取消、超时和清理；
 - 文档：同一任务更新本路线图状态和验证证据。
 
@@ -205,7 +206,7 @@
 | T3-14 | 取消/紧停 API | CANCELLING、确认、结果不确定和幂等 | T3-13 | ✅ 已完成 |
 | T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ✅ 已完成 |
 | T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ✅ 已完成 |
-| T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ⬜ 未开始 |
+| T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ✅ 已完成 |
 | T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ⬜ 未开始 |
 | T3-19 | UI Harness E2E | 创建→运行→暂停→恢复→取消/成功→刷新恢复 | T3-16,T3-17,T3-18 | ⬜ 未开始 |
 | T3-20 | Control Plane 重启恢复 | PostgreSQL 保持任务/命令/事件，FakeExecutor 重连收敛 | T3-11,T3-19 | ⬜ 未开始 |
@@ -1258,10 +1259,27 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
 - 遗留：T3-17 新建任务骨架、T3-18 完整运行详情、E4 本机 Executor 管理和 H8 业务指标不提前实现
 
+### T3-17 新建任务骨架
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- 目标：建立唯一 `douyin.search_exposure.v1` 模板的明确字段、PostgreSQL 持久化、客户端/服务端同形校验、生产 Tauri 创建 Command 和无登录桌面表单；不存任意 JSON，不提前发现目标或执行平台动作
+- RED：新增后端模板/OpenAPI/安全失败契约、Frontend 表单/gateway 和生产 Command 工程契约。后端目标 suite 2 项准确失败于空请求模型及有效模板仍被 422 拒绝，既有安全失败矩阵 1 项通过；Frontend 两个 suite 因 `TaskCreate`/gateway 尚不存在而无法加载；Node 工程契约因固定生产 Tauri 创建入口尚不存在而准确失败
+- 持久与契约：可回滚迁移 `20260718_0013` 新增 `douyin_search_exposure_definitions`，以 `(task_id, installation_id)` 复合外键绑定父 Task，并只用明确列保存模板版本、关键词、动作、条件消息、`1..100` 目标上限、`1..3600` 有序间隔和固定开启的预览/最终确认。Pydantic/OpenAPI、领域对象、PostgreSQL 约束、生成 TypeScript DTO、Zod 与 Rust 复验共同 fail closed，不保存任意 JSON
+- 原子与幂等：创建服务和仓储在一个事务写 Task 与定义；同 Installation/key/完全相同定义返回既有公开快照，同键改任一字段或碰撞旧无定义 Task 固定拒绝。既有旧 Task 仍可查询，公开响应不回显定义、幂等键、Session、凭据或私有路径
+- 页面与原生边界：工作台“新建任务”已启用，表单只展示封闭字段和安全校验；`TauriTaskCreationGateway` 只调用固定 `create_douyin_search_exposure_task` Command。Rust 自行从 `app_data_dir` 私有文件换取 Session 并注入请求，React 不接触 BaseUrl、Header、bearer、设备私钥或长期凭据，不使用系统钥匙串
+- 分层验证：Backend 全量 `753 passed in 61.98s` 且语句/分支覆盖率 100%；Frontend 35 项 Node 工程契约、100 项 Vitest 和 4 项 Playwright 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置均为 40 项单元、3 项共享协议、11 项安全配置全绿。uv lock、Ruff/格式、严格 Mypy、ESLint、TypeScript、peer dependency、OpenAPI/Executor Schema 漂移、production boundary、Cargo fmt 与三种配置 Clippy 零警告全部通过
+- 产品同路径：`backend/.venv/bin/python scripts/run_t3_17_acceptance.py` 后台启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn 和唯一 `visible=false` Tauri/WKWebView。页面真实进入“新建任务”、填写“新能源汽车”和目标数 12 并点击创建；正式 TypeScript gateway→Rust Command→网络桥写入一条 draft/revision 1 Task 和完全匹配的定义，最终直接核对 PostgreSQL 事实
+- 失败与恢复矩阵：覆盖未知模板/字段/动作、空白/控制/过长/敏感文本、动作与消息矛盾、布尔冒充整数、数量/间隔越界和逆序、确认开关关闭、缺失/非法认证与幂等键、吊销 scope、仓储拒绝、同键同定义重放、同键改定义、跨 Installation、并发单赢家、旧数据迁移/碰撞、数据库 check/FK、Rust DTO/metadata/transport 和表单安全重试
+- App 与清理：唯一自动化 App 全程隐藏后台运行，不弹窗、不抢焦点；设备私钥和长期凭据只在隔离 `app_data_dir` 私有文件。纵向验收 finally 回收 WDIO、Uvicorn、PostgreSQL 容器/网络/卷、App 测试目录和端口；复核无测试资源遗留
+- 真实账号边界：本任务只创建无外部副作用的 draft 定义，不操作抖音，因此无需真实平台账号也不宣称平台验收。可选目标过滤、黑名单/排除、真实平台频控阈值、Candidate 发现与最终状态验收仍由 D6/A7 承接；账号暂不可用时按全局规则用自建测试页继续实现并保持 `🔍 待真实账号`
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-17`：建立抖音运营新建任务骨架与受约束 DTO；
-2. `T3-18`～`T3-20`：按依赖完成运行详情、UI E2E 和 Control Plane 恢复；
+1. `T3-18`：建立完整运行详情、事件时间线和任务控制入口；
+2. `T3-19`～`T3-20`：按依赖完成 UI E2E 和 Control Plane 恢复；
 3. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。

@@ -37,6 +37,16 @@ from automation_tool.control_plane.domain.task_commands import (
     TaskCommandStatus,
     TaskCommandType,
 )
+from automation_tool.control_plane.domain.task_definitions import (
+    DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
+    MAX_MESSAGE_TEMPLATE_CHARACTERS,
+    MAX_SEARCH_KEYWORD_CHARACTERS,
+    MAX_TASK_INTERVAL_SECONDS,
+    MAX_TASK_TARGET_LIMIT,
+    DouyinSearchExposureAction,
+    DouyinSearchExposureDefinition,
+    InvalidTaskDefinition,
+)
 from automation_tool.control_plane.domain.task_events import (
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
     MAX_TASK_EVENT_SEQUENCE,
@@ -53,9 +63,14 @@ from automation_tool.control_plane.domain.task_state_machine import (
 )
 
 __all__ = [
+    "DOUYIN_SEARCH_EXPOSURE_TEMPLATE",
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
+    "MAX_MESSAGE_TEMPLATE_CHARACTERS",
     "MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS",
+    "MAX_SEARCH_KEYWORD_CHARACTERS",
     "MAX_TASK_EVENT_SEQUENCE",
+    "MAX_TASK_INTERVAL_SECONDS",
+    "MAX_TASK_TARGET_LIMIT",
     "TERMINAL_ACTION_STATUSES",
     "TERMINAL_EXECUTION_ATTEMPT_STATUSES",
     "TERMINAL_TASK_COMMAND_STATUSES",
@@ -70,6 +85,8 @@ __all__ = [
     "DemoBootstrapGrant",
     "DemoEnvironmentId",
     "DependencyUnavailable",
+    "DouyinSearchExposureAction",
+    "DouyinSearchExposureDefinition",
     "ExecutionAttemptId",
     "ExecutionAttemptStatus",
     "ExecutorConnectionId",
@@ -79,6 +96,7 @@ __all__ = [
     "InvalidDemoBootstrap",
     "InvalidDemoEnvironmentId",
     "InvalidResourceId",
+    "InvalidTaskDefinition",
     "InvalidTaskEventModel",
     "InvalidTaskTransition",
     "ResourceId",

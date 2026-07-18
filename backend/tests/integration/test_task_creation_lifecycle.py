@@ -8,18 +8,42 @@ import pytest
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert, select
 
-from automation_tool.control_plane.application.tasks import TaskCreationResult
-from automation_tool.control_plane.domain import InstallationId, TaskId
-from automation_tool.control_plane.infrastructure.database import Database, installations, tasks
+from automation_tool.control_plane.application.tasks import (
+    TaskCreationResult,
+    TaskPersistenceRejected,
+)
+from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
+    DouyinSearchExposureDefinition,
+    InstallationId,
+    TaskId,
+)
+from automation_tool.control_plane.infrastructure.database import (
+    Database,
+    douyin_search_exposure_definitions,
+    installations,
+    tasks,
+)
 from automation_tool.control_plane.infrastructure.database.task_repository import (
     SqlAlchemyTaskRepository,
 )
 
 NOW = datetime(2026, 7, 18, 6, 0, tzinfo=UTC)
+DEFINITION = DouyinSearchExposureDefinition(
+    search_keyword="新能源汽车",
+    action=DouyinSearchExposureAction.BROWSE,
+    message_template=None,
+    target_limit=10,
+    minimum_interval_seconds=30,
+    maximum_interval_seconds=90,
+    preview_required=True,
+    final_confirmation_required=True,
+)
 
 
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
+        await session.execute(delete(douyin_search_exposure_definitions))
         await session.execute(delete(tasks))
         await session.execute(delete(installations))
 
@@ -54,24 +78,46 @@ async def test_repository_replays_same_installation_key_and_isolates_other_insta
             task_id=TaskId.new(),
             installation_id=first_installation,
             idempotency_key="task:create:shared",
+            definition=DEFINITION,
             created_at=NOW,
         )
         replay = await repository.create(
             task_id=TaskId.new(),
             installation_id=first_installation,
             idempotency_key="task:create:shared",
+            definition=DEFINITION,
             created_at=NOW,
         )
         other = await repository.create(
             task_id=TaskId.new(),
             installation_id=second_installation,
             idempotency_key="task:create:shared",
+            definition=DEFINITION,
             created_at=NOW,
         )
 
         assert isinstance(first, TaskCreationResult) and first.created is True
         assert replay.created is False and replay.task == first.task
         assert other.created is True and other.task.task_id != first.task.task_id
+
+        changed_definition = DouyinSearchExposureDefinition(
+            search_keyword="智能驾驶",
+            action=DouyinSearchExposureAction.BROWSE,
+            message_template=None,
+            target_limit=10,
+            minimum_interval_seconds=30,
+            maximum_interval_seconds=90,
+            preview_required=True,
+            final_confirmation_required=True,
+        )
+        with pytest.raises(TaskPersistenceRejected):
+            await repository.create(
+                task_id=TaskId.new(),
+                installation_id=first_installation,
+                idempotency_key="task:create:shared",
+                definition=changed_definition,
+                created_at=NOW,
+            )
     finally:
         await reset_data(database)
         await database.close()
@@ -94,6 +140,7 @@ async def test_concurrent_same_key_has_one_created_task_and_one_replay(
                     task_id=TaskId.new(),
                     installation_id=installation_id,
                     idempotency_key="task:create:concurrent",
+                    definition=DEFINITION,
                     created_at=NOW,
                 )
                 for _ in range(2)

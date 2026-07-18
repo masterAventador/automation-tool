@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from automation_tool.control_plane.domain import InstallationId, TaskId, TaskStatus
+from automation_tool.control_plane.domain import (
+    DouyinSearchExposureDefinition,
+    InstallationId,
+    TaskId,
+    TaskStatus,
+)
 from automation_tool.protocol import IdempotencyKey
 
 
@@ -50,6 +55,7 @@ class TaskRepository(Protocol):
         task_id: TaskId,
         installation_id: InstallationId,
         idempotency_key: str,
+        definition: DouyinSearchExposureDefinition,
         created_at: datetime,
     ) -> TaskCreationResult: ...
 
@@ -81,8 +87,11 @@ class TaskCreationService:
         *,
         installation_id: InstallationId,
         idempotency_key: str,
+        definition: DouyinSearchExposureDefinition,
     ) -> TaskCreationResult:
-        if not isinstance(installation_id, InstallationId):
+        if not isinstance(installation_id, InstallationId) or not isinstance(
+            definition, DouyinSearchExposureDefinition
+        ):
             raise InvalidTaskCreation
         try:
             normalized_key = str(IdempotencyKey(idempotency_key))
@@ -94,6 +103,7 @@ class TaskCreationService:
             task_id=TaskId.new(),
             installation_id=installation_id,
             idempotency_key=normalized_key,
+            definition=definition,
             created_at=self._clock.now(),
         )
 

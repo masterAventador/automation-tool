@@ -12,9 +12,25 @@ from automation_tool.control_plane.application.tasks import (
     TaskRecord,
 )
 from automation_tool.control_plane.bootstrap.tasks import _SystemClock
-from automation_tool.control_plane.domain import InstallationId, TaskId, TaskStatus
+from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
+    DouyinSearchExposureDefinition,
+    InstallationId,
+    TaskId,
+    TaskStatus,
+)
 
 NOW = datetime(2026, 7, 18, 16, 0, tzinfo=UTC)
+DEFINITION = DouyinSearchExposureDefinition(
+    search_keyword="新能源汽车",
+    action=DouyinSearchExposureAction.BROWSE,
+    message_template=None,
+    target_limit=10,
+    minimum_interval_seconds=30,
+    maximum_interval_seconds=90,
+    preview_required=True,
+    final_confirmation_required=True,
+)
 
 
 class FixedClock:
@@ -24,7 +40,16 @@ class FixedClock:
 
 class RecordingRepository:
     def __init__(self) -> None:
-        self.created: tuple[TaskId, InstallationId, str, datetime] | None = None
+        self.created: (
+            tuple[
+                TaskId,
+                InstallationId,
+                str,
+                DouyinSearchExposureDefinition,
+                datetime,
+            ]
+            | None
+        ) = None
 
     async def create(
         self,
@@ -32,9 +57,10 @@ class RecordingRepository:
         task_id: TaskId,
         installation_id: InstallationId,
         idempotency_key: str,
+        definition: DouyinSearchExposureDefinition,
         created_at: datetime,
     ) -> TaskCreationResult:
-        self.created = (task_id, installation_id, idempotency_key, created_at)
+        self.created = (task_id, installation_id, idempotency_key, definition, created_at)
         task = TaskRecord(
             task_id=task_id,
             installation_id=installation_id,
@@ -75,6 +101,7 @@ async def test_service_creates_one_scoped_draft_through_the_repository_contract(
     result = await service.create(
         installation_id=installation_id,
         idempotency_key="task:create:service",
+        definition=DEFINITION,
     )
 
     assert result.created is True
@@ -84,6 +111,7 @@ async def test_service_creates_one_scoped_draft_through_the_repository_contract(
         result.task.task_id,
         installation_id,
         "task:create:service",
+        DEFINITION,
         NOW,
     )
 
@@ -99,7 +127,11 @@ async def test_service_rejects_untyped_scope_and_invalid_keys_without_repository
         (InstallationId.new(), cast(str, object())),
     ]:
         with pytest.raises(InvalidTaskCreation) as captured:
-            await service.create(installation_id=installation_id, idempotency_key=key)
+            await service.create(
+                installation_id=installation_id,
+                idempotency_key=key,
+                definition=DEFINITION,
+            )
         assert str(captured.value) == "Task creation request is invalid"
         assert "private" not in repr(captured.value)
         assert captured.value.__cause__ is None

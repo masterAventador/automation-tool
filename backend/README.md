@@ -12,9 +12,9 @@
 
 `control_plane.domain.task_state_machine` 定义 16 个 `TaskStatus`、5 个无出边终态和唯一显式转换矩阵。取消必须先进入 `cancelling`；取消/完成竞态从 `cancelling` 按真实事实收敛；`outcome_uncertain` 只可从已执行、人工接管或取消中的状态进入。所有 256 个状态对均由单元测试分类，字符串输入、自循环、终态复活和未列出的跳转固定拒绝，后续应用服务不得另建状态分支。
 
-`tasks` 表已通过迁移 `20260718_0006` 建立 Task UUIDv4、Installation 外键、状态、正 revision 和有序时间，并保留 `(id, installation_id)` 复合绑定及 Installation 更新时间索引。迁移 `20260718_0010` 增加受协议字符集/128 字节上限约束的 `creation_idempotency_key`，并以 `(installation_id, creation_idempotency_key)` 唯一；旧 Task 确定性回填 `legacy:<task-id>`。`SqlAlchemyTaskRepository` 先锁 Installation 再查/建，因此同 Installation 并发同键线性收敛为一条 draft Task，另一个 Installation 可独立复用同键。读取/转换始终携带 Installation scope，状态转换复用领域状态机并以 expected revision + 行锁做 CAS。未知/已吊销 Installation、跨 scope、旧 revision、时间回退和并发输家固定拒绝。平台模板参数将在 T3-17 以明确 DTO 增加，当前表/API 不接受任意 JSON。
+`tasks` 表已通过迁移 `20260718_0006` 建立 Task UUIDv4、Installation 外键、状态、正 revision 和有序时间，并保留 `(id, installation_id)` 复合绑定及 Installation 更新时间索引。迁移 `20260718_0010` 增加受协议字符集/128 字节上限约束的 `creation_idempotency_key`，并以 `(installation_id, creation_idempotency_key)` 唯一；旧 Task 确定性回填 `legacy:<task-id>`。迁移 `20260718_0013` 增加与 `(task_id, installation_id)` 强绑定的 `douyin_search_exposure_definitions`，以明确列保存版本、关键词、动作、消息模板、目标上限、间隔和强制确认开关，不保存任意 JSON。`SqlAlchemyTaskRepository` 先锁 Installation，再原子写 Task 与定义；同 scope/key 只有定义完全一致才重放，改参数会拒绝。读取/转换始终携带 Installation scope，状态转换复用领域状态机并以 expected revision + 行锁做 CAS。
 
-`POST /api/v1/tasks` 只接受空 JSON object 和必填 `Idempotency-Key`，并强制复用 `require_current_installation_access` 的精确 `app.control-plane` Session scope。第一次创建返回 201；相同 Installation/key 的重放返回同一 Task 快照和 200；响应只有 task ID、draft 状态、revision 与 UTC 时间，不回显幂等键、Session 或凭据。非法/过长 key、额外字段、缺失认证、吊销 Installation 和持久化冲突均进入稳定的 `no-store` 错误边界。
+`POST /api/v1/tasks` 只接受 `douyin.search_exposure.v1` 的封闭 DTO 和必填 `Idempotency-Key`，并强制复用 `require_current_installation_access` 的精确 `app.control-plane` Session scope。DTO 明确校验安全关键词、browse/comment/direct_message、动作与消息模板关系、`1..100` 目标上限、`1..3600` 有序间隔，以及固定开启的预览和最终确认。第一次创建返回 201；同 Installation/key/定义重放返回相同公开快照和 200；响应不回显定义、幂等键、Session 或凭据。未知字段、敏感文本、改意图重放和持久化冲突均进入稳定 `no-store` 错误边界。
 
 `GET /api/v1/tasks` 与 `GET /api/v1/tasks/{task_id}` 使用同一服务端 Installation scope。列表按 `(updated_at DESC, task_id DESC)` 做 PostgreSQL keyset 分页，`limit` 为 `1..100`，下一页游标是长度受限、canonical JSON 编码的 opaque Base64URL；重复 key、未知字段、非法 UUID/UTC 时间、非规范编码和畸形 Base64 均统一返回 422。详情对非法、未知和其他 Installation 的 Task 统一返回相同 `task_not_found` 404；列表和详情只返回公开快照并固定 `no-store`，不泄露幂等键、凭据或其他 scope 是否存在。
 
@@ -38,7 +38,7 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
 
-当前 offer payload 保持空的安全骨架，因为平台任务定义尚未在 T3-17 建模；FakeExecutor 只按相同正式 envelope 做无副作用回放，T3-17 再从明确列/DTO 构造业务 payload。T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
+当前 offer payload 仍保持空的安全骨架；T3-17 已建立受约束 Task 定义事实，但尚未发布 Executor 业务 payload 版本，后续只能从这些明确列构造，不能退回任意 JSON。FakeExecutor 继续按相同正式 envelope 做无副作用回放；T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
 
 `automation_tool.executor.fake` 是不依赖 Control Plane 内部实现的确定性协议引擎：严格复用正式 parser、身份、deadline、Attempt command sequence 和 task/attempt 绑定，按 message ID 与 idempotency key 双账本去重。它覆盖 accept/reject、成功、部分成功、失败、登录、人工接管、结果不确定和 hold 场景，并为 pause/resume/cancel/emergency-stop 生成正式 control ACK 与单调事件；生成中失败会原子回滚状态和事件水位。`fake_client` 只通过 `ws(s)://.../api/v1/executors/connect`、唯一正式子协议和 Bearer Session 出站连接，不执行 RPA、文件、子进程或数据库副作用。
 
@@ -58,9 +58,9 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 `GET /api/v1/workbench/status` 复用 `require_current_installation_access`，从 Registry 只投影 `ready`、Executor `online/offline` 与服务端最后心跳时间，统一 `no-store`，不返回 Installation、Executor、Connection ID 或底层异常。该状态是工作台只读在线事实，任务状态仍只来自 PostgreSQL 快照与事件。
 
-真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`；取消/紧停入口执行 `uv run python ../scripts/run_t3_14_acceptance.py`；Query/Reducer/Tauri Channel 入口执行 `uv run python ../scripts/run_t3_15_acceptance.py`；工作台真实页面入口执行 `uv run python ../scripts/run_t3_16_acceptance.py`。T3-16 后台启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn、HOLD FakeExecutor 和唯一 `visible=false` Tauri/WKWebView，由页面真实点击紧停并核对 Command ACK、事件 sequence 及最终 `outcome_uncertain`。验收结束回收 App 数据、服务、端口、容器、网络和卷。
+真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`；取消/紧停入口执行 `uv run python ../scripts/run_t3_14_acceptance.py`；Query/Reducer/Tauri Channel 入口执行 `uv run python ../scripts/run_t3_15_acceptance.py`；工作台真实页面入口执行 `uv run python ../scripts/run_t3_16_acceptance.py`；新建任务表单入口在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`。T3-16 由页面真实点击紧停并核对 Command ACK、事件 sequence 及最终 `outcome_uncertain`；T3-17 由同样隐藏的 App 真实填写并创建受约束定义。验收均使用隔离 PostgreSQL、完整 Alembic、真实 Uvicorn 与唯一 `visible=false` Tauri/WKWebView，结束后回收 App 数据、服务、端口、容器、网络和卷。
 
-真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询/事件端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名、凭据注入与 SSE 严格解析，React 不接触任何秘密；I2-14 验证隐藏 App 吊销诊断，T3-06 验证幂等创建，T3-07 验证隔离查询，T3-12 验证断线续拉和终态关闭，T3-15 已验证带 `lastEventSequence` 的权威快照、Tauri Channel 与 React Reducer 同路径收敛。
+真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询/事件端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名、凭据注入、任务定义复验与 SSE 严格解析，React 不接触任何秘密；T3-17 已由唯一 `visible=false` App 真实点击新建表单，经固定 Tauri Command、Uvicorn 和 PostgreSQL 原子创建匹配定义。
 
 ## 本地命令
 

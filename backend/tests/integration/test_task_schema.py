@@ -12,13 +12,14 @@ from automation_tool.control_plane.infrastructure.database import (
     Database,
     device_credentials,
     device_sessions,
+    douyin_search_exposure_definitions,
     installation_registration_challenges,
     installations,
     tasks,
 )
 
 PREVIOUS_REVISION = "20260718_0005"
-HEAD_REVISION = "20260718_0012"
+HEAD_REVISION = "20260718_0013"
 NOW = datetime(2026, 7, 18, 14, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "id",
@@ -46,6 +47,7 @@ EXPECTED_CONSTRAINTS = {
 
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
+        await session.execute(delete(douyin_search_exposure_definitions))
         await session.execute(delete(tasks))
         await session.execute(delete(installation_registration_challenges))
         await session.execute(delete(device_sessions))

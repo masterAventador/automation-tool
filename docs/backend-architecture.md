@@ -523,13 +523,13 @@ Control Plane PostgreSQL 最小表：
 
 `installation_registration_challenges` 固定 UUIDv4、规范环境、32 字节 bootstrap 指纹/设备公钥/payload 摘要、创建与到期时间，以及成对出现的 `consumed_at + installation_id`。数据库约束到期晚于创建、消费早于到期、长度/环境/状态一致和 Installation 外键；应用层在行锁事务中验证并消费，唯一设备公钥冲突回滚整个消费。
 
-T3-02 的 `tasks` 表只建立后续阶段共同需要的稳定骨架：规范 Task UUIDv4、不可空 Installation 外键、`TaskStatus`、从 1 开始的 revision、创建/更新时间，以及供未来 Attempt/Action 做复合外键的 `(id, installation_id)` 唯一绑定。数据库约束完整状态集合、正 revision、时间不倒退，并为 `(installation_id, updated_at, id)` 建索引；具体平台模板和参数在 T3-17 以受约束 DTO 增加，当前不提前保存任意 JSON、页面原文或供应商对象。
+T3-02 的 `tasks` 表建立跨模板稳定骨架；T3-17 通过独立 `douyin_search_exposure_definitions` 表增加 `douyin.search_exposure.v1`。定义以 `(task_id, installation_id)` 复合外键绑定父 Task，并用明确列保存关键词、动作、消息模板、目标上限、有序间隔和强制预览/最终确认，不保存任意 JSON、页面原文或供应商对象。数据库、Pydantic 与领域对象共同拒绝未知模板、敏感/控制文本、动作/消息矛盾、越界数量和间隔。
 
 `SqlAlchemyTaskRepository.create` 先锁目标 Installation，只有 active 状态才能在同一事务创建 draft Task，因此与 Installation 吊销按同一行锁线性化；未知、已吊销或重复目标共享固定拒绝。读取和状态更新始终同时携带 Task ID + Installation ID，跨 Installation 与未知 Task 对仓储调用者不可见。状态更新锁定精确 `id + installation_id + expected_revision`，调用唯一 `TaskStateMachine` 后 revision 原子加一；两个并发旧 revision 只有一个成功，非法转换、旧 revision、scope 冒充和时间回退均不修改行。
 
 T3-06 用迁移 `20260718_0010` 把创建幂等固定为 Task 的持久事实：`creation_idempotency_key` 只能使用协议允许字符且最长 128 字节，`(installation_id, creation_idempotency_key)` 唯一；旧行回填 `legacy:<task-id>`，升级不改变原 Task 身份。仓储在同一 Installation 行锁内先查同键快照再插入，因此两个并发请求只能得到一条 Task，另一个 Installation 可复用同键且不会泄露前者。
 
-`POST /api/v1/tasks` 是第一个 Task 业务入口。它必须经过 `require_current_installation_access` 取得服务端认证的强类型 scope，只接受精确空 JSON 骨架和必填 `Idempotency-Key`；第一次创建返回 201，重放返回相同公开快照和 200。响应不含幂等键、凭据、Session、模板或任意 payload。模板/平台字段归 T3-17；查询与分页已由 T3-07 单独建立，不能把不受约束 JSON 塞入创建 API。
+`POST /api/v1/tasks` 必须经过 `require_current_installation_access` 取得服务端认证的强类型 scope，只接受精确 `douyin.search_exposure.v1` DTO 和必填 `Idempotency-Key`；第一次原子创建 Task/定义返回 201，同 scope/key/定义重放返回相同公开快照和 200，同键改定义拒绝。响应不含幂等键、凭据、Session、模板或任意 payload。查询与分页继续只投影公开 Task 快照，不能把定义或不受约束 JSON 泄漏到响应。
 
 T3-07 建立同一 scope 下的 Task 只读边界。`GET /api/v1/tasks` 按 `(updated_at DESC, id DESC)` 使用 PostgreSQL keyset 查询并多取一行决定下一页，避免 offset 在并发写入下重复或跳项；opaque cursor 只编码规范 UTC 微秒时间与 Task UUIDv4，并要求 canonical JSON/Base64URL 往返一致。`GET /api/v1/tasks/{task_id}` 将非法 ID、未知 Task 和其他 Installation 的 Task 收敛成相同 404。T3-15 将已有数据库水位加入同一 DTO，两条路由当前只返回 taskId/status/revision/lastEventSequence/createdAt/updatedAt 并统一 `no-store`；任何 cursor、scope 或仓储输入失败不回显原值。React Query/Reducer 已消费这份权威快照与 T3-12 SSE，没有另建客户端事实源。
 
@@ -545,13 +545,13 @@ Executor 来源的规范 UUIDv4 message ID 以 `(installation_id, source_message
 
 Task 行新增从 0 开始的 `last_event_sequence`，与现有 status、revision、updated time 组成 `TaskSnapshotProjection`。App 重连先拉该权威快照，再从水位后的事件续订；事件行携带的 post-event status/revision 用于审计和版本降级，不允许前端自行猜测快照。T3-04 只冻结模型，T3-11 必须在一个 PostgreSQL 事务中校验序号/revision、更新 Task/Attempt/Action、推进水位并插入事件，不能把本任务的独立 INSERT/UPDATE 测试当成收敛已完成。
 
-T3-05 的 `task_commands` 是 Control Plane 到 Executor 的持久 Outbox。主键直接使用正式 wire `message_id`，同时持久化 correlation ID、Installation/Task/Attempt 复合归属、Attempt 内安全 sequence、Executor v1 命令类型、Installation 内幂等键、deadline、正 revision、投递次数与下一投递时间。表不保存任意 JSON；当前 offer 只带 T3-09 的安全空骨架，业务参数等待 T3-17 从受约束 Task 定义构造；控制命令只需稳定引用执行链，避免在 Outbox 复制一份可漂移的任务定义。
+T3-05 的 `task_commands` 是 Control Plane 到 Executor 的持久 Outbox。主键直接使用正式 wire `message_id`，同时持久化 correlation ID、Installation/Task/Attempt 复合归属、Attempt 内安全 sequence、Executor v1 命令类型、Installation 内幂等键、deadline、正 revision、投递次数与下一投递时间。表不保存任意 JSON；当前 offer 只带安全空骨架，后续业务参数从 T3-17 已持久化的受约束 Task 定义按正式协议构造；控制命令只需稳定引用执行链，避免在 Outbox 复制一份可漂移的任务定义。
 
 Outbox 状态精确为 pending、in_flight、delivered、acknowledged、rejected、expired。pending 才有 next delivery；in_flight 必须有未过 deadline 的 lease 且投递次数大于 0；delivered 只说明写入当前 WebSocket 成功；acknowledged/rejected 必须在 deadline 内收到独立 UUIDv4 response message 并保留确认时间；expired 不能带 ACK。offer 仅允许 task.accept/task.reject，pause/resume/cancel/emergency-stop 仅允许 task.control_ack，数据库拒绝“未发送先确认”、控制命令收到 accept、过期伪确认和倒序时间。
 
 `(execution_attempt_id, sequence)`、`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别去重命令顺序、业务意图与响应重放；相同幂等键/响应 ID 不跨 Installation 互相阻塞。T3-09 已使用 due index 与 `FOR UPDATE SKIP LOCKED` 实现原子抢占、lease 恢复、ACK 超时重投、连接恢复和 deadline 过期；socket write 仍只等于 delivered，绝不等于 Executor 已处理。
 
-Outbox 不保存任意 payload。T3-09 的 task.offer 当前发送空 object 安全骨架，用于 T3-10 FakeExecutor 跑通无副作用命令/回执闭环；T3-17 必须在 Task 上增加抖音模板的明确列/DTO 后，才允许投递服务从这些受约束事实构造业务 payload。pause/resume 的公开 API 与确认门禁已由 T3-13 完成；cancel/emergency-stop 已由 T3-14 在同一 Outbox 上实现 CANCELLING、完成竞态和结果不确定语义。
+Outbox 不保存任意 payload。T3-09 的 task.offer 当前仍发送空 object 安全骨架，用于 FakeExecutor 无副作用闭环；T3-17 已提供可读取的明确 Task 定义事实，后续 Executor 业务 payload 只能从这些受约束列按正式版本构造，不能在 Outbox 复制定义或退回任意 JSON。pause/resume 与 cancel/emergency-stop 继续复用同一确认门禁。
 
 约束：
 

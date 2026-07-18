@@ -26,6 +26,11 @@ const MAX_RESPONSE_LENGTH: usize = 64 * 1024;
 const MAX_SSE_RESPONSE_LENGTH: usize = 512 * 1024;
 const MAX_SSE_FRAME_LENGTH: usize = 64 * 1024;
 const MAX_CROSS_RUNTIME_SEQUENCE: u64 = (1_u64 << 53) - 1;
+const DOUYIN_SEARCH_EXPOSURE_TEMPLATE: &str = "douyin.search_exposure.v1";
+const MAX_SEARCH_KEYWORD_CHARACTERS: usize = 80;
+const MAX_MESSAGE_TEMPLATE_CHARACTERS: usize = 500;
+const MAX_TASK_TARGET_LIMIT: u16 = 100;
+const MAX_TASK_INTERVAL_SECONDS: u16 = 3600;
 
 #[derive(Clone, Copy)]
 enum ControlPlaneOperation {
@@ -215,6 +220,78 @@ struct InstallationAccessResponse {
 pub struct ControlPlaneHealth {
     status: &'static str,
     service_version: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DouyinSearchExposureAction {
+    Browse,
+    Comment,
+    DirectMessage,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DouyinSearchExposureTaskDefinition {
+    template: String,
+    search_keyword: String,
+    action: DouyinSearchExposureAction,
+    message_template: Option<String>,
+    target_limit: u16,
+    minimum_interval_seconds: u16,
+    maximum_interval_seconds: u16,
+    preview_required: bool,
+    final_confirmation_required: bool,
+}
+
+impl DouyinSearchExposureTaskDefinition {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        search_keyword: String,
+        action: DouyinSearchExposureAction,
+        message_template: Option<String>,
+        target_limit: u16,
+        minimum_interval_seconds: u16,
+        maximum_interval_seconds: u16,
+    ) -> Result<Self, ControlPlaneError> {
+        let definition = Self {
+            template: DOUYIN_SEARCH_EXPOSURE_TEMPLATE.to_owned(),
+            search_keyword,
+            action,
+            message_template,
+            target_limit,
+            minimum_interval_seconds,
+            maximum_interval_seconds,
+            preview_required: true,
+            final_confirmation_required: true,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_safe_exact_text(&self.search_keyword, MAX_SEARCH_KEYWORD_CHARACTERS)?;
+        match (self.action, self.message_template.as_deref()) {
+            (DouyinSearchExposureAction::Browse, None) => {}
+            (DouyinSearchExposureAction::Comment, Some(message))
+            | (DouyinSearchExposureAction::DirectMessage, Some(message)) => {
+                require_safe_exact_text(message, MAX_MESSAGE_TEMPLATE_CHARACTERS)?;
+            }
+            _ => return Err(protocol_invalid()),
+        }
+        if self.template != DOUYIN_SEARCH_EXPOSURE_TEMPLATE
+            || self.target_limit == 0
+            || self.target_limit > MAX_TASK_TARGET_LIMIT
+            || self.minimum_interval_seconds == 0
+            || self.minimum_interval_seconds > self.maximum_interval_seconds
+            || self.maximum_interval_seconds > MAX_TASK_INTERVAL_SECONDS
+            || !self.preview_required
+            || !self.final_confirmation_required
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
 }
 
 impl ControlPlaneHealth {
@@ -434,15 +511,17 @@ impl ControlPlaneClient {
         &self,
         vault: &DeviceCredentialVault<S>,
         idempotency_key: &str,
-    ) -> Result<CreatedTask, ControlPlaneError>
+        definition: &DouyinSearchExposureTaskDefinition,
+    ) -> Result<TaskSnapshot, ControlPlaneError>
     where
         S: SecretStore,
     {
         require_idempotency_key(idempotency_key)?;
+        definition.validate()?;
         let session = self
             .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
             .await?;
-        let request_body = serde_json::json!({});
+        let request_body = serde_json::to_value(definition).map_err(|_| protocol_invalid())?;
         let response_body = self
             .execute(
                 ControlPlaneOperation::CreateTask,
@@ -1358,26 +1437,6 @@ impl TaskEventStreamResult {
     }
 }
 
-pub struct CreatedTask {
-    task_id: String,
-    status: String,
-    revision: u32,
-}
-
-impl CreatedTask {
-    pub fn task_id(&self) -> &str {
-        &self.task_id
-    }
-
-    pub fn status(&self) -> &str {
-        &self.status
-    }
-
-    pub fn revision(&self) -> u32 {
-        self.revision
-    }
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
@@ -1434,6 +1493,64 @@ fn require_idempotency_key(value: &str) -> Result<(), ControlPlaneError> {
         || !bytes.all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
         })
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn require_safe_exact_text(
+    value: &str,
+    maximum_characters: usize,
+) -> Result<(), ControlPlaneError> {
+    let folded = value.to_lowercase();
+    let sensitive_names = [
+        "access_token",
+        "access-token",
+        "api_key",
+        "api-key",
+        "authorization",
+        "cookie",
+        "credential",
+        "password",
+        "private_key",
+        "private-key",
+        "refresh_token",
+        "refresh-token",
+        "secret",
+        "session_cookie",
+        "session-cookie",
+        "token",
+    ];
+    let sensitive_assignment = sensitive_names.iter().any(|name| {
+        folded.match_indices(name).any(|(index, matched)| {
+            let prefix_is_boundary = index == 0
+                || folded[..index]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
+            let suffix = folded[index + matched.len()..].trim_start();
+            prefix_is_boundary && (suffix.starts_with(':') || suffix.starts_with('='))
+        })
+    });
+    let has_private_path = ["/users/", "/home/", "/root/", "/tmp/", "/var/folders/"]
+        .iter()
+        .any(|path| folded.contains(path));
+    let has_windows_path = folded.as_bytes().windows(3).any(|window| {
+        window[0].is_ascii_alphabetic() && window[1] == b':' && matches!(window[2], b'/' | b'\\')
+    });
+    if value.is_empty()
+        || value.trim() != value
+        || value.chars().count() > maximum_characters
+        || value.chars().any(|character| {
+            character.is_control() || matches!(character as u32, 0x202a..=0x202e | 0x2066..=0x2069)
+        })
+        || folded.contains("bearer ")
+        || folded.contains("file://")
+        || folded.contains("data:")
+        || has_private_path
+        || has_windows_path
+        || sensitive_assignment
     {
         return Err(protocol_invalid());
     }
@@ -1520,16 +1637,12 @@ fn parse_task_snapshot_body(body: &[u8]) -> Result<TaskSnapshot, ControlPlaneErr
     parse_task_snapshot(parse_exact_json(body)?)
 }
 
-fn parse_created_task(body: &[u8]) -> Result<CreatedTask, ControlPlaneError> {
+fn parse_created_task(body: &[u8]) -> Result<TaskSnapshot, ControlPlaneError> {
     let snapshot = parse_task_snapshot_body(body)?;
     if snapshot.status != "draft" || snapshot.revision != 1 || snapshot.last_event_sequence != 0 {
         return Err(protocol_invalid());
     }
-    Ok(CreatedTask {
-        task_id: snapshot.task_id,
-        status: snapshot.status,
-        revision: snapshot.revision,
-    })
+    Ok(snapshot)
 }
 
 fn parse_task_control(
@@ -1923,7 +2036,8 @@ mod tests {
         parse_task_list, parse_task_snapshot_body, parse_workbench_status, request_path,
         require_idempotency_key, require_list_cursor, required_credential, sse_frame_end,
         transport_error, validate_response_metadata, ControlPlaneErrorCode, ControlPlaneOperation,
-        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability, ResponseMetadata,
+        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -2624,6 +2738,60 @@ mod tests {
                 assert!(!error.to_string().contains(invalid));
             }
         }
+    }
+
+    #[test]
+    fn douyin_task_definition_serializes_exactly_and_rejects_changed_contracts() {
+        let definition = DouyinSearchExposureTaskDefinition::new(
+            "新能源汽车".to_owned(),
+            DouyinSearchExposureAction::Comment,
+            Some("内容很有启发".to_owned()),
+            12,
+            30,
+            90,
+        )
+        .expect("valid Task definition");
+        assert_eq!(
+            serde_json::to_value(&definition).expect("definition JSON"),
+            serde_json::json!({
+                "template": "douyin.search_exposure.v1",
+                "searchKeyword": "新能源汽车",
+                "action": "comment",
+                "messageTemplate": "内容很有启发",
+                "targetLimit": 12,
+                "minimumIntervalSeconds": 30,
+                "maximumIntervalSeconds": 90,
+                "previewRequired": true,
+                "finalConfirmationRequired": true
+            })
+        );
+
+        let base = serde_json::to_value(&definition).expect("definition JSON");
+        for (field, invalid) in [
+            ("template", serde_json::json!("private.template")),
+            (
+                "searchKeyword",
+                serde_json::json!(" password=private-value"),
+            ),
+            ("action", serde_json::json!("browse")),
+            ("targetLimit", serde_json::json!(101)),
+            ("minimumIntervalSeconds", serde_json::json!(91)),
+            ("previewRequired", serde_json::json!(false)),
+            ("finalConfirmationRequired", serde_json::json!(false)),
+        ] {
+            let mut candidate = base.clone();
+            candidate[field] = invalid;
+            let parsed: DouyinSearchExposureTaskDefinition =
+                serde_json::from_value(candidate).expect("typed candidate");
+            let error = parsed.validate().expect_err("invalid Task definition");
+            assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+            assert_eq!(error.to_string(), "Control Plane request failed");
+            assert!(!error.to_string().contains("private-value"));
+        }
+
+        let mut unknown = base;
+        unknown["unknown"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DouyinSearchExposureTaskDefinition>(unknown).is_err());
     }
 
     #[test]

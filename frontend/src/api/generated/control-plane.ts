@@ -306,6 +306,11 @@ export interface components {
             /** Sessiontoken */
             sessionToken: string;
         };
+        /**
+         * DouyinSearchExposureAction
+         * @enum {string}
+         */
+        DouyinSearchExposureAction: "browse" | "comment" | "direct_message";
         /** ExecutorProtocolCompatibility */
         ExecutorProtocolCompatibility: {
             /** Current */
@@ -459,7 +464,34 @@ export interface components {
             taskId: string;
         };
         /** TaskCreateRequest */
-        TaskCreateRequest: Record<string, never>;
+        TaskCreateRequest: {
+            action: components["schemas"]["DouyinSearchExposureAction"];
+            /**
+             * Finalconfirmationrequired
+             * @constant
+             */
+            finalConfirmationRequired: true;
+            /** Maximumintervalseconds */
+            maximumIntervalSeconds: number;
+            /** Messagetemplate */
+            messageTemplate: string | null;
+            /** Minimumintervalseconds */
+            minimumIntervalSeconds: number;
+            /**
+             * Previewrequired
+             * @constant
+             */
+            previewRequired: true;
+            /** Searchkeyword */
+            searchKeyword: string;
+            /** Targetlimit */
+            targetLimit: number;
+            /**
+             * Template
+             * @constant
+             */
+            template: "douyin.search_exposure.v1";
+        };
         /** TaskListResponse */
         TaskListResponse: {
             /** Items */

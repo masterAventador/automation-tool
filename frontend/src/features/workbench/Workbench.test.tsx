@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -21,14 +21,20 @@ import type {
 const RUNNING_TASK_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const COMPLETED_TASK_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
+function todayAt(hour: number, minute: number): string {
+  const value = new Date();
+  value.setHours(hour, minute, 0, 0);
+  return value.toISOString();
+}
+
 function task(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
   return {
     taskId: RUNNING_TASK_ID,
     status: "running",
     revision: 5,
     lastEventSequence: 2,
-    createdAt: "2026-07-18T14:00:00Z",
-    updatedAt: "2026-07-18T14:05:00Z",
+    createdAt: todayAt(14, 0),
+    updatedAt: todayAt(14, 5),
     ...overrides,
   };
 }
@@ -42,8 +48,8 @@ function taskPage(): TaskListPage {
         status: "succeeded",
         revision: 6,
         lastEventSequence: 5,
-        createdAt: "2026-07-18T13:00:00Z",
-        updatedAt: "2026-07-18T13:08:00Z",
+        createdAt: todayAt(13, 0),
+        updatedAt: todayAt(13, 8),
       }),
     ],
     nextCursor: null,
@@ -118,7 +124,7 @@ describe("RPA workbench", () => {
     expect(screen.getByText("已成功")).toBeVisible();
     const today = screen.getByText("今日任务").closest(".ant-statistic");
     expect(today).toBeVisible();
-    expect(today).toHaveTextContent("2");
+    await waitFor(() => expect(today).toHaveTextContent("2"));
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
   });
 

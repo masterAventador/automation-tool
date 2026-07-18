@@ -55,7 +55,8 @@ automation-tool/
 │   ├── run_t3_13_acceptance.py   # 隐藏 Tauri 暂停/恢复验收
 │   ├── run_t3_14_acceptance.py   # 隐藏 Tauri 取消/紧停验收
 │   ├── run_t3_15_acceptance.py   # 隐藏 Tauri Query/Reducer/Channel 验收
-│   └── run_t3_16_acceptance.py   # 隐藏 Tauri 工作台页面真实紧停验收
+│   ├── run_t3_16_acceptance.py   # 隐藏 Tauri 工作台页面真实紧停验收
+│   └── run_t3_17_acceptance.py   # 隐藏 Tauri 新建表单→API→定义持久化验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -78,7 +79,7 @@ frontend/
 │   ├── app/                       # Provider、路由、布局和错误边界
 │   ├── features/
 │   │   ├── workbench/             # RPA 运营工作台
-│   │   ├── task-create/           # 新建任务与目标预览
+│   │   ├── task-create/           # 受约束的新建任务表单
 │   │   ├── task-runs/             # 运行详情、事件和结果
 │   │   ├── platform-sessions/     # 平台登录态和人工接管，不是产品账号中心
 │   │   ├── diagnostics/           # 环境、浏览器和 Sidecar 诊断
@@ -96,6 +97,7 @@ frontend/
 │   ├── platform/
 │   │   ├── tauri/
 │   │   │   ├── control-plane-transport.ts # 正式启动检查 Tauri invoke 适配器
+│   │   │   ├── task-creation-gateway.ts   # 固定抖音任务定义创建 Command
 │   │   │   ├── task-projection-source.ts  # 固定 Task 快照/列表/Channel source
 │   │   │   └── workbench-gateway.ts       # 固定运行状态与全局紧停 gateway
 │   │   ├── types.ts               # PlatformAdapter 公共接口
@@ -129,6 +131,7 @@ frontend/
 │   ├── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
 │   ├── tauri.installation-revocation-e2e.conf.json # 后台隐藏的吊销验收
 │   ├── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
+│   ├── tauri.task-create-form-e2e.conf.json # 后台隐藏的新建表单真实入口验收
 │   ├── tauri.task-query-e2e.conf.json # 后台隐藏的 Task 查询验收
 │   ├── tauri.task-event-stream-e2e.conf.json # 后台隐藏的 SSE 断线续拉验收
 │   ├── tauri.task-control-e2e.conf.json # 后台隐藏的暂停/恢复验收
@@ -144,6 +147,7 @@ frontend/
 ├── wdio.control-plane.conf.ts
 ├── wdio.installation-revocation.conf.ts
 ├── wdio.task-creation.conf.ts
+├── wdio.task-create-form.conf.ts
 ├── wdio.task-query.conf.ts
 ├── wdio.task-event-stream.conf.ts
 ├── wdio.task-control.conf.ts
@@ -241,6 +245,8 @@ T3-11 的 `application/task_event_convergence.py` 只做正式 TaskEvent payload
 T3-12 的 `application/task_event_stream.py` 定义公开事件记录、batch/watermark 不变量和 Last-Event-ID 用例；`infrastructure/database/task_event_stream_repository.py` 只从 PostgreSQL 已提交事实读取；`bootstrap/task_event_stream.py` 装配依赖；`api/task_event_stream.py` 负责固定 SSE 帧、keepalive、终态/限时关闭和安全错误映射。迁移 `20260718_0012` 只增加结构化进度列。桌面侧正式解析放在既有 `frontend/src-tauri/src/control_plane.rs`，T3-12 专用 `visible=false` 配置、WDIO spec 和编排脚本仅用于真实入口验收；T3-15 已在同一 Rust SSE 源上接入 Tauri Channel/React reducer，没有创建第二个前端数据源。
 
 T3-15 的 `frontend/src/api/control-plane/task-projections.ts` 定义严格公开 DTO、TanStack Query Key/options 与 source 契约；`features/task-runs/task-projection-reducer.ts` 只合并服务端快照和事件 post-state，`task-projection-controller.ts` 负责快照优先、续订、缺口回拉与有限降级；`platform/tauri/task-projection-source.ts` 只调用固定 Task Command 并接收 Tauri Channel。Rust `stream_task_events_with` 在正式 SSE 解析循环逐条推送，不把 Session/Header/原始帧交给 WebView。`tauri.task-projection-e2e.conf.json`、对应 WDIO spec/runner 和 `scripts/run_t3_15_acceptance.py` 仅存在于 `control-plane-e2e` 隐藏 App 验收，不进入生产资产。
+
+T3-17 的 `domain/task_definitions.py` 定义唯一 `douyin.search_exposure.v1` 领域对象，迁移 `20260718_0013` 与既有 Task 复合 scope 绑定明确列定义；`api/tasks.py`、`application/tasks.py` 和 `infrastructure/database/task_repository.py` 沿同一正式创建链原子保存并校验幂等重放。桌面侧 `features/task-create/` 只处理封闭表单，`platform/tauri/task-creation-gateway.ts` 只调用固定 Rust Command；专用隐藏 Tauri 配置、WDIO spec 与 `scripts/run_t3_17_acceptance.py` 只承担真实 App→API→PostgreSQL 最终状态验收。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

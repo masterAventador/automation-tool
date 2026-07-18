@@ -30,7 +30,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0006"
-HEAD_REVISION = "20260718_0012"
+HEAD_REVISION = "20260718_0013"
 NOW = datetime(2026, 7, 18, 16, 0, tzinfo=UTC)
 EXPECTED_ATTEMPT_COLUMNS = {
     "id",
@@ -329,8 +329,8 @@ async def test_attempt_defaults_current_binding_and_retry_uniqueness_are_databas
                 .where(execution_attempts.c.id == attempt_id.uuid)
                 .values(
                     status=ExecutionAttemptStatus.FAILED.value,
-                    updated_at=NOW + timedelta(seconds=1),
-                    finished_at=NOW + timedelta(seconds=1),
+                    updated_at=created["created_at"] + timedelta(seconds=1),
+                    finished_at=created["created_at"] + timedelta(seconds=1),
                 )
             )
 

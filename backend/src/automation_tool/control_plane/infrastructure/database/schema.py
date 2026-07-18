@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -18,11 +19,17 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 from automation_tool.control_plane.domain import (
+    DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
+    MAX_MESSAGE_TEMPLATE_CHARACTERS,
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
+    MAX_SEARCH_KEYWORD_CHARACTERS,
     MAX_TASK_EVENT_SEQUENCE,
+    MAX_TASK_INTERVAL_SECONDS,
+    MAX_TASK_TARGET_LIMIT,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionOutcome,
     ActionStatus,
+    DouyinSearchExposureAction,
     ExecutionAttemptStatus,
     InstallationStatus,
     TaskCommandStatus,
@@ -305,6 +312,99 @@ Index(
     tasks.c.installation_id,
     tasks.c.updated_at,
     tasks.c.id,
+)
+
+douyin_search_exposure_definitions = Table(
+    "douyin_search_exposure_definitions",
+    metadata,
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column(
+        "template",
+        String(length=64),
+        nullable=False,
+        server_default=text(f"'{DOUYIN_SEARCH_EXPOSURE_TEMPLATE}'"),
+    ),
+    Column("search_keyword", String(), nullable=False),
+    Column("action", String(length=32), nullable=False),
+    Column("message_template", String(), nullable=True),
+    Column("target_limit", BigInteger(), nullable=False),
+    Column("minimum_interval_seconds", BigInteger(), nullable=False),
+    Column("maximum_interval_seconds", BigInteger(), nullable=False),
+    Column(
+        "preview_required",
+        Boolean(),
+        nullable=False,
+        server_default=text("true"),
+    ),
+    Column(
+        "final_confirmation_required",
+        Boolean(),
+        nullable=False,
+        server_default=text("true"),
+    ),
+    CheckConstraint(
+        f"template = '{DOUYIN_SEARCH_EXPOSURE_TEMPLATE}'",
+        name="ck_douyin_search_exposure_template",
+    ),
+    CheckConstraint(
+        f"char_length(search_keyword) between 1 and {MAX_SEARCH_KEYWORD_CHARACTERS} "
+        f"and octet_length(search_keyword) <= {MAX_SEARCH_KEYWORD_CHARACTERS * 4} "
+        "and btrim(search_keyword) = search_keyword "
+        "and search_keyword !~ '[[:cntrl:]]'",
+        name="ck_douyin_search_exposure_keyword",
+    ),
+    CheckConstraint(
+        "action in ("
+        + ", ".join(f"'{action.value}'" for action in DouyinSearchExposureAction)
+        + ")",
+        name="ck_douyin_search_exposure_action",
+    ),
+    CheckConstraint(
+        "(action = 'browse' and message_template is null) or "
+        "(action in ('comment', 'direct_message') and message_template is not null)",
+        name="ck_douyin_search_exposure_message_presence",
+    ),
+    CheckConstraint(
+        "message_template is null or ("
+        f"char_length(message_template) between 1 and {MAX_MESSAGE_TEMPLATE_CHARACTERS} "
+        f"and octet_length(message_template) <= {MAX_MESSAGE_TEMPLATE_CHARACTERS * 4} "
+        "and btrim(message_template) = message_template "
+        "and message_template !~ '[[:cntrl:]]' "
+        "and lower(message_template) not like '%bearer %' "
+        "and lower(message_template) not like '%file://%' "
+        "and lower(message_template) !~ "
+        "'(access[_-]?token|api[_-]?key|authorization|cookie|credential|password|"
+        "private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)"
+        "[[:space:]]*[:=]')",
+        name="ck_douyin_search_exposure_message_safe",
+    ),
+    CheckConstraint(
+        f"target_limit between 1 and {MAX_TASK_TARGET_LIMIT}",
+        name="ck_douyin_search_exposure_target_limit",
+    ),
+    CheckConstraint(
+        "minimum_interval_seconds between 1 and "
+        f"{MAX_TASK_INTERVAL_SECONDS} and maximum_interval_seconds between "
+        f"minimum_interval_seconds and {MAX_TASK_INTERVAL_SECONDS}",
+        name="ck_douyin_search_exposure_interval",
+    ),
+    CheckConstraint(
+        "preview_required and final_confirmation_required",
+        name="ck_douyin_search_exposure_mandatory_confirmation",
+    ),
+    ForeignKeyConstraint(
+        ["task_id", "installation_id"],
+        ["tasks.id", "tasks.installation_id"],
+        name="fk_douyin_search_exposure_task_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("task_id", name="pk_douyin_search_exposure_definitions"),
+    UniqueConstraint(
+        "task_id",
+        "installation_id",
+        name="uq_douyin_search_exposure_binding",
+    ),
 )
 
 _terminal_attempt_values = ", ".join(
@@ -893,6 +993,7 @@ Index(
 __all__ = [
     "device_credentials",
     "device_sessions",
+    "douyin_search_exposure_definitions",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",

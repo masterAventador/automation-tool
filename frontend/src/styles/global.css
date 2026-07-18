@@ -186,6 +186,28 @@ body {
   margin-top: 20px;
 }
 
+.task-create-card {
+  margin-top: 20px;
+  border-color: #e7ebf2;
+  box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
+}
+
+.task-create-stack {
+  width: 100%;
+}
+
+.task-create-card .ant-form {
+  max-width: 760px;
+}
+
+.task-create-card .ant-input-number {
+  width: 180px;
+}
+
+.task-create-notice {
+  margin-bottom: 20px;
+}
+
 .runtime-status-row {
   min-height: 24px;
 }

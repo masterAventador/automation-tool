@@ -7,17 +7,38 @@ import pytest
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert
 
-from automation_tool.control_plane.domain import InstallationId, TaskId
-from automation_tool.control_plane.infrastructure.database import Database, installations, tasks
+from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
+    DouyinSearchExposureDefinition,
+    InstallationId,
+    TaskId,
+)
+from automation_tool.control_plane.infrastructure.database import (
+    Database,
+    douyin_search_exposure_definitions,
+    installations,
+    tasks,
+)
 from automation_tool.control_plane.infrastructure.database.task_repository import (
     SqlAlchemyTaskRepository,
 )
 
 NOW = datetime(2026, 7, 18, 17, 0, tzinfo=UTC)
+DEFINITION = DouyinSearchExposureDefinition(
+    search_keyword="新能源汽车",
+    action=DouyinSearchExposureAction.BROWSE,
+    message_template=None,
+    target_limit=10,
+    minimum_interval_seconds=30,
+    maximum_interval_seconds=90,
+    preview_required=True,
+    final_confirmation_required=True,
+)
 
 
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
+        await session.execute(delete(douyin_search_exposure_definitions))
         await session.execute(delete(tasks))
         await session.execute(delete(installations))
 
@@ -54,6 +75,7 @@ async def test_repository_lists_stable_keyset_pages_in_scope_and_hides_other_ins
                 task_id=TaskId.new(),
                 installation_id=installation_id,
                 idempotency_key=f"task:query:{offset}",
+                definition=DEFINITION,
                 created_at=NOW + timedelta(minutes=offset),
             )
             created.append(result.task)
@@ -62,6 +84,7 @@ async def test_repository_lists_stable_keyset_pages_in_scope_and_hides_other_ins
                 task_id=TaskId.new(),
                 installation_id=other_installation,
                 idempotency_key="task:query:other",
+                definition=DEFINITION,
                 created_at=NOW + timedelta(minutes=10),
             )
         ).task
@@ -113,6 +136,7 @@ async def test_repository_uses_task_id_as_the_deterministic_timestamp_tiebreaker
                         task_id=TaskId.new(),
                         installation_id=installation_id,
                         idempotency_key=f"task:query:tied:{index}",
+                        definition=DEFINITION,
                         created_at=NOW,
                     )
                 ).task

@@ -1,4 +1,5 @@
 import { Badge, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
+import { useState } from "react";
 
 import {
   TaskProjectionSourceError,
@@ -6,10 +7,15 @@ import {
 } from "../api/control-plane/task-projections";
 import { Workbench } from "../features/workbench/Workbench";
 import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
+import { TaskCreate } from "../features/task-create/TaskCreate";
+import {
+  TaskCreationGatewayError,
+  type TaskCreationGateway,
+} from "../features/task-create/task-creation-gateway";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
-  { key: "task-create", label: "新建任务", disabled: true },
+  { key: "task-create", label: "新建任务" },
   { key: "task-runs", label: "任务记录", disabled: true },
   { key: "platform", label: "平台状态", disabled: true },
   { key: "diagnostics", label: "设置与诊断", disabled: true },
@@ -40,15 +46,26 @@ const shellWorkbenchGateway: WorkbenchGateway = {
   },
 };
 
+const shellTaskCreationGateway: TaskCreationGateway = {
+  async createDouyinSearchExposureTask() {
+    throw new TaskCreationGatewayError("transport_unavailable", true);
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
+  readonly taskCreationGateway?: TaskCreationGateway | undefined;
 }
 
 export function WorkbenchShell({
   taskSource = shellTaskSource,
   gateway = shellWorkbenchGateway,
+  taskCreationGateway = shellTaskCreationGateway,
 }: WorkbenchShellProps) {
+  const [activePage, setActivePage] = useState("workbench");
+  const creatingTask = activePage === "task-create";
+
   return (
     <Layout className="desktop-shell">
       <Layout.Sider className="desktop-sidebar" width={232} theme="light">
@@ -62,7 +79,16 @@ export function WorkbenchShell({
           </Space>
         </Flex>
         <nav aria-label="桌面主导航">
-          <Menu mode="inline" selectedKeys={["workbench"]} items={navigationItems} />
+          <Menu
+            mode="inline"
+            selectedKeys={[activePage]}
+            items={navigationItems}
+            onClick={({ key }) => {
+              if (key === "workbench" || key === "task-create") {
+                setActivePage(key);
+              }
+            }}
+          />
         </nav>
         <div className="sidebar-status">
           <Badge status="processing" text="桌面端已就绪" />
@@ -78,17 +104,30 @@ export function WorkbenchShell({
           <main>
             <Flex justify="space-between" align="end" gap={24}>
               <Space orientation="vertical" size={4}>
-                <Typography.Title level={2}>RPA 运营工作台</Typography.Title>
+                <Typography.Title level={2}>
+                  {creatingTask ? "新建运营任务" : "RPA 运营工作台"}
+                </Typography.Title>
                 <Typography.Text type="secondary">
-                  从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。
+                  {creatingTask
+                    ? "配置一个可预览、可确认的抖音搜索曝光任务。"
+                    : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
                 </Typography.Text>
               </Space>
               <Tag variant="filled" color="green">
-                工作台已就绪
+                {creatingTask ? "任务模板已就绪" : "工作台已就绪"}
               </Tag>
             </Flex>
 
-            <Workbench taskSource={taskSource} gateway={gateway} />
+            {creatingTask ? (
+              <TaskCreate
+                gateway={taskCreationGateway}
+                onCreated={() => {
+                  // Keep the success receipt visible until the operator chooses to leave.
+                }}
+              />
+            ) : (
+              <Workbench taskSource={taskSource} gateway={gateway} />
+            )}
           </main>
         </Layout.Content>
       </Layout>

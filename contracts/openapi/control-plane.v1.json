@@ -52,6 +52,15 @@
         "title": "DeviceSessionExchangeResponse",
         "type": "object"
       },
+      "DouyinSearchExposureAction": {
+        "enum": [
+          "browse",
+          "comment",
+          "direct_message"
+        ],
+        "title": "DouyinSearchExposureAction",
+        "type": "string"
+      },
       "ExecutorProtocolCompatibility": {
         "additionalProperties": false,
         "properties": {
@@ -401,7 +410,73 @@
       },
       "TaskCreateRequest": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/DouyinSearchExposureAction"
+          },
+          "finalConfirmationRequired": {
+            "const": true,
+            "title": "Finalconfirmationrequired",
+            "type": "boolean"
+          },
+          "maximumIntervalSeconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Maximumintervalseconds",
+            "type": "integer"
+          },
+          "messageTemplate": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messagetemplate"
+          },
+          "minimumIntervalSeconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Minimumintervalseconds",
+            "type": "integer"
+          },
+          "previewRequired": {
+            "const": true,
+            "title": "Previewrequired",
+            "type": "boolean"
+          },
+          "searchKeyword": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Searchkeyword",
+            "type": "string"
+          },
+          "targetLimit": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Targetlimit",
+            "type": "integer"
+          },
+          "template": {
+            "const": "douyin.search_exposure.v1",
+            "title": "Template",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "searchKeyword",
+          "action",
+          "messageTemplate",
+          "targetLimit",
+          "minimumIntervalSeconds",
+          "maximumIntervalSeconds",
+          "previewRequired",
+          "finalConfirmationRequired"
+        ],
         "title": "TaskCreateRequest",
         "type": "object"
       },

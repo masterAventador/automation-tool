@@ -14,10 +14,26 @@ from automation_tool.control_plane.application.tasks import (
     TaskPersistenceRejected,
     TaskRecord,
 )
-from automation_tool.control_plane.domain import InstallationId, TaskId, TaskStatus
+from automation_tool.control_plane.domain import (
+    DouyinSearchExposureDefinition,
+    InstallationId,
+    TaskId,
+    TaskStatus,
+)
 
 NOW = datetime(2026, 7, 18, 6, 0, tzinfo=UTC)
 INSTALLATION_ID = InstallationId.new()
+VALID_PAYLOAD = {
+    "template": "douyin.search_exposure.v1",
+    "searchKeyword": "新能源汽车",
+    "action": "browse",
+    "messageTemplate": None,
+    "targetLimit": 10,
+    "minimumIntervalSeconds": 30,
+    "maximumIntervalSeconds": 90,
+    "previewRequired": True,
+    "finalConfirmationRequired": True,
+}
 
 
 class FixedClock:
@@ -36,6 +52,7 @@ class MemoryTaskRepository:
         task_id: TaskId,
         installation_id: InstallationId,
         idempotency_key: str,
+        definition: DouyinSearchExposureDefinition,
         created_at: datetime,
     ) -> TaskCreationResult:
         if self.reject:
@@ -105,8 +122,8 @@ def test_create_and_replay_return_one_public_task_snapshot_without_secrets() -> 
     client, repository = task_app()
     headers = {"Idempotency-Key": "task:create:demo-1"}
 
-    created = client.post("/api/v1/tasks", headers=headers, json={})
-    replayed = client.post("/api/v1/tasks", headers=headers, json={})
+    created = client.post("/api/v1/tasks", headers=headers, json=VALID_PAYLOAD)
+    replayed = client.post("/api/v1/tasks", headers=headers, json=VALID_PAYLOAD)
 
     assert created.status_code == 201
     assert replayed.status_code == 200
@@ -127,21 +144,21 @@ def test_create_and_replay_return_one_public_task_snapshot_without_secrets() -> 
 def test_invalid_key_unknown_body_and_missing_auth_fail_closed() -> None:
     client, _ = task_app()
     invalid = (
-        client.post("/api/v1/tasks", json={}),
+        client.post("/api/v1/tasks", json=VALID_PAYLOAD),
         client.post(
             "/api/v1/tasks",
             headers={"Idempotency-Key": "contains space"},
-            json={},
+            json=VALID_PAYLOAD,
         ),
         client.post(
             "/api/v1/tasks",
             headers={"Idempotency-Key": "x" * 129},
-            json={},
+            json=VALID_PAYLOAD,
         ),
         client.post(
             "/api/v1/tasks",
             headers={"Idempotency-Key": "task:create:extra"},
-            json={"template": "private-future-field"},
+            json={**VALID_PAYLOAD, "unknown": "private-future-field"},
         ),
     )
     for response in invalid:
@@ -153,7 +170,7 @@ def test_invalid_key_unknown_body_and_missing_auth_fail_closed() -> None:
     unauthorized = TestClient(create_app(database=None)).post(
         "/api/v1/tasks",
         headers={"Idempotency-Key": "task:create:no-auth"},
-        json={},
+        json=VALID_PAYLOAD,
     )
     assert unauthorized.status_code == 401
     assert unauthorized.json()["error"]["code"] == "installation_access_denied"
@@ -165,7 +182,7 @@ def test_unavailable_and_repository_rejection_are_stable_non_cacheable_errors() 
     unavailable = TestClient(app).post(
         "/api/v1/tasks",
         headers={"Idempotency-Key": "task:create:unavailable"},
-        json={},
+        json=VALID_PAYLOAD,
     )
     assert unavailable.status_code == 503
     assert unavailable.headers["cache-control"] == "no-store"
@@ -177,7 +194,7 @@ def test_unavailable_and_repository_rejection_are_stable_non_cacheable_errors() 
     rejected = client.post(
         "/api/v1/tasks",
         headers={"Idempotency-Key": "task:create:rejected"},
-        json={},
+        json=VALID_PAYLOAD,
     )
     assert rejected.status_code == 409
     assert rejected.headers["cache-control"] == "no-store"

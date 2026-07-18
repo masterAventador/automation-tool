@@ -65,7 +65,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - installation、executor、task、execution attempt、action 和 artifact 已使用六种不可混用的规范 UUIDv4 领域类型；
 - Task 纯领域状态机已锁定 16 个状态、5 个无出边终态和全部显式转换；256 个状态对均已穷举，取消先进入 `CANCELLING`、取消/完成竞态按最终事实收敛，`OUTCOME_UNCERTAIN` 不可从执行前阶段伪造；
 - `tasks` 已具备 PostgreSQL/Alembic 持久化、Task UUIDv4、Installation scope、状态/revision/时间约束和仓储 CAS；只允许 active Installation 创建，跨 Installation 查询/更新不可见，并发旧 revision 只有一个赢家；
-- `POST /api/v1/tasks` 要求精确 `app.control-plane` Session、空 JSON 骨架和 Installation-scoped `Idempotency-Key`；首次返回 201，原子重放返回同一公开 Task 的 200，并发同键只创建一行；平台模板字段留给 T3-17；
+- `POST /api/v1/tasks` 要求精确 `app.control-plane` Session、Installation-scoped `Idempotency-Key` 和唯一 `douyin.search_exposure.v1` 封闭定义；Task 与明确列定义在同一事务创建，同键同定义返回同一公开 Task，同键改定义拒绝，不保存任意 JSON；
 - `GET /api/v1/tasks` 使用不透明 canonical Base64URL keyset cursor，按 `updated_at DESC, task_id DESC` 稳定分页；`GET /api/v1/tasks/{task_id}` 返回包含 `status/revision/lastEventSequence` 的同一权威公开快照，未知、非法或其他 Installation 的 Task 均统一为不可见；
 - `execution_attempts`、`task_actions` 与 `tasks.current_attempt_id` 已形成 Task/Installation 复合绑定；每个 Task 只有一个非终态 Attempt、重试序号不可重复，每个 Attempt 内 Action ordinal 唯一，Action 阶段与结果确定性由数据库一致性约束锁定；
 - `task_events` 已建立版本化封闭事件词汇、连续 `(task_id, sequence)` 时间线、Installation/Attempt/Action 复合归属，以及 message/idempotency 双键和 32 字节意图指纹去重；正式 WebSocket 事件在一个 PostgreSQL 事务内落库并以 revision CAS 推进 Task/Attempt/显式 Action 与 `last_event_sequence`；
@@ -78,5 +78,5 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键并承载持久命令投递，连接后可接收 heartbeat、严格绑定的命令回执与任务事件，新 Hello 固定 4409 替换旧连接；
 - 无副作用 FakeExecutor 已复用正式 v1 parser、envelope、子协议和 Session WebSocket：可确定性回放 accept/reject、成功/部分成功/失败、登录、接管、结果不确定及暂停/恢复/取消/紧停，并按 message/idempotency 双键返回完全相同的结果且不重复事件；它不导入 Control Plane、RPA、文件、子进程或数据库实现；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
-- React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件 Reducer和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；全局紧停经固定 Rust operation 发出并以 Executor 最终事实收敛。新建任务、完整运行详情、正式 Local Executor 进程和 RPA 功能尚未实现；
+- React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件 Reducer和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；全局紧停经固定 Rust operation 发出并以 Executor 最终事实收敛。“新建任务”已提供受约束的抖音搜索曝光表单，经固定 Rust operation 创建 draft Task。完整运行详情、正式 Local Executor 进程和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

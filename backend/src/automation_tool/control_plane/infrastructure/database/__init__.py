@@ -4,6 +4,7 @@ from .installation_revocation_repository import SqlAlchemyInstallationRevocation
 from .schema import (
     device_credentials,
     device_sessions,
+    douyin_search_exposure_definitions,
     execution_attempts,
     installation_registration_challenges,
     installations,
@@ -26,6 +27,7 @@ __all__ = [
     "SqlAlchemyTaskEventStreamRepository",
     "device_credentials",
     "device_sessions",
+    "douyin_search_exposure_definitions",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",

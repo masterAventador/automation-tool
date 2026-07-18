@@ -10,6 +10,7 @@ from automation_tool.control_plane.api.installation_access import (
 )
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
+    ExecutorConnectionRegistryRejected,
     OnlineExecutorConnection,
 )
 from automation_tool.control_plane.application.executor_connections import (
@@ -37,6 +38,15 @@ class StaticExecutorRegistry(ExecutorConnectionRegistry):
     ) -> OnlineExecutorConnection | None:
         assert installation_id == INSTALLATION_ID
         return self.online
+
+
+class RejectingExecutorRegistry(ExecutorConnectionRegistry):
+    async def snapshot(
+        self,
+        installation_id: InstallationId,
+    ) -> OnlineExecutorConnection | None:
+        assert installation_id == INSTALLATION_ID
+        raise ExecutorConnectionRegistryRejected
 
 
 def online_executor() -> OnlineExecutorConnection:
@@ -112,3 +122,15 @@ def test_offline_auth_and_registry_failure_are_safe_and_non_cacheable() -> None:
         "requestId": unavailable.headers["x-request-id"],
         "retryable": True,
     }
+
+    rejecting_app = create_app(
+        database=None,
+        executor_connection_registry=RejectingExecutorRegistry(),
+    )
+    rejecting_app.dependency_overrides[require_current_installation_access] = lambda: (
+        INSTALLATION_ID
+    )
+    rejected = TestClient(rejecting_app).get("/api/v1/workbench/status")
+    assert rejected.status_code == 503
+    assert rejected.headers["cache-control"] == "no-store"
+    assert rejected.json()["error"]["code"] == "workbench_status_unavailable"

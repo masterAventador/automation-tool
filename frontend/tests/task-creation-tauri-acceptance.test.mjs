@@ -30,7 +30,10 @@ test("Task creation acceptance uses one isolated hidden Tauri App path", async (
   assert.doesNotMatch(wdioConfig, /\*\.spec/);
   assert.match(spec, /core\.invoke\("create_task_for_acceptance"\)/);
   assert.match(spec, /summary\.replayed, true/);
-  assert.match(rustEntry, /\.create_task\(&vault, "task:create:tauri-acceptance"\)/);
+  assert.match(
+    rustEntry,
+    /\.create_task\(\s*&vault,\s*"task:create:tauri-acceptance",\s*&acceptance_task_definition\(\),?\s*\)/,
+  );
   assert.match(orchestrator, /test:task-creation-tauri/);
   assert.match(orchestrator, /visible.*False|hidden Tauri App/);
 });

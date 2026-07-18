@@ -15,13 +15,19 @@ from automation_tool.control_plane.application.tasks import (
     TaskRecord,
 )
 from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
+    DouyinSearchExposureDefinition,
     InstallationId,
     InstallationStatus,
     TaskId,
     TaskStateMachine,
     TaskStatus,
 )
-from automation_tool.control_plane.infrastructure.database.schema import installations, tasks
+from automation_tool.control_plane.infrastructure.database.schema import (
+    douyin_search_exposure_definitions,
+    installations,
+    tasks,
+)
 from automation_tool.control_plane.infrastructure.database.session import Database
 from automation_tool.protocol import IdempotencyKey
 
@@ -50,6 +56,22 @@ def _record(row: RowMapping) -> TaskRecord:
     )
 
 
+def _definition(row: RowMapping) -> DouyinSearchExposureDefinition:
+    try:
+        return DouyinSearchExposureDefinition(
+            search_keyword=cast(str, row["search_keyword"]),
+            action=DouyinSearchExposureAction(cast(str, row["action"])),
+            message_template=cast(str | None, row["message_template"]),
+            target_limit=cast(int, row["target_limit"]),
+            minimum_interval_seconds=cast(int, row["minimum_interval_seconds"]),
+            maximum_interval_seconds=cast(int, row["maximum_interval_seconds"]),
+            preview_required=cast(bool, row["preview_required"]),
+            final_confirmation_required=cast(bool, row["final_confirmation_required"]),
+        )
+    except (TypeError, ValueError):
+        raise TaskPersistenceRejected from None
+
+
 class SqlAlchemyTaskRepository:
     """Serialize creation and state CAS without exposing cross-Installation rows."""
 
@@ -62,9 +84,12 @@ class SqlAlchemyTaskRepository:
         task_id: TaskId,
         installation_id: InstallationId,
         idempotency_key: str,
+        definition: DouyinSearchExposureDefinition,
         created_at: datetime,
     ) -> TaskCreationResult:
         target_task, target_installation = _require_identity(task_id, installation_id)
+        if not isinstance(definition, DouyinSearchExposureDefinition):
+            raise TaskPersistenceRejected
         timestamp = _aware_utc(created_at)
         try:
             normalized_key = str(IdempotencyKey(idempotency_key))
@@ -94,6 +119,21 @@ class SqlAlchemyTaskRepository:
                     .one_or_none()
                 )
                 if existing is not None:
+                    stored_definition = (
+                        (
+                            await session.execute(
+                                select(douyin_search_exposure_definitions).where(
+                                    douyin_search_exposure_definitions.c.task_id == existing["id"],
+                                    douyin_search_exposure_definitions.c.installation_id
+                                    == target_installation.uuid,
+                                )
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if stored_definition is None or _definition(stored_definition) != definition:
+                        raise TaskPersistenceRejected
                     return TaskCreationResult(task=_record(existing), created=False)
                 created = (
                     (
@@ -113,6 +153,21 @@ class SqlAlchemyTaskRepository:
                     )
                     .mappings()
                     .one()
+                )
+                await session.execute(
+                    insert(douyin_search_exposure_definitions).values(
+                        task_id=target_task.uuid,
+                        installation_id=target_installation.uuid,
+                        template=definition.template,
+                        search_keyword=definition.search_keyword,
+                        action=definition.action.value,
+                        message_template=definition.message_template,
+                        target_limit=definition.target_limit,
+                        minimum_interval_seconds=definition.minimum_interval_seconds,
+                        maximum_interval_seconds=definition.maximum_interval_seconds,
+                        preview_required=definition.preview_required,
+                        final_confirmation_required=definition.final_confirmation_required,
+                    )
                 )
                 return TaskCreationResult(task=_record(created), created=True)
         except IntegrityError:
