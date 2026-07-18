@@ -308,7 +308,7 @@ I2-09 已建立正式桌面消费链路。生产 React 只通过窄 `TauriContro
 
 ### 10.1 Envelope
 
-所有 Control Plane 与 Executor 消息包含：
+所有 Control Plane 与 Executor 消息包含下列公共字段：
 
 ```text
 protocol_version
@@ -318,13 +318,13 @@ sent_at
 deadline_at
 installation_id
 executor_id
-task_id
-execution_attempt_id
 correlation_id
 idempotency_key
 sequence
 payload
 ```
+
+只有 `task.*`、`step.*`、`session.login_required` 和 `handoff.requested` 等任务作用域消息额外强制包含 `task_id` 与 `execution_attempt_id`。`executor.hello`/`executor.heartbeat` 是安装实例与 Executor 作用域，不允许为了凑字段伪造 task/attempt ID。
 
 规则：
 
@@ -335,6 +335,10 @@ payload
 - message ID 和幂等键有唯一约束；
 - payload 不允许平台 Cookie、验证码、私有路径和内联截图；
 - 大文件通过受控 Artifact 引用，不通过 WebSocket 内联。
+
+I2-10 的正式 Pydantic 入口是 `parse_executor_message`。Envelope 以 `message_type` 做判别联合，把 24 种已声明 v1 类型精确分到 Executor 生命周期、任务命令、任务回执和任务事件四类；公共字段拒绝未知项且模型冻结。`protocol_version` 必须显式为 `1.0`；message/correlation/installation/executor/task/attempt ID 都是用途隔离的 canonical 小写 RFC 4122 UUIDv4 字符串；时间必须为带时区 RFC3339 且精确 UTC，deadline 严格晚于 sent；幂等键为 1～128 字符受限字符集，sequence 为 `1..2^63-1` 的 strict integer。
+
+正式解析只接受最大 32 KiB 的 UTF-8 JSON object，并拒绝重复 key。Payload 当前是后续任务消息 Schema 的受限容器：最大 16 KiB、深度 8、每层集合最多 64 项、字符串最多 4096 字符；递归拒绝 Cookie/Token/密码/私钥/凭据字段、凭据赋值文本、Bearer、私有绝对路径、`file://`、inline data URI、控制/双向字符和 NaN/Infinity。任何结构、语义、编码或资源限制失败都收敛成固定 `ExecutorProtocolError`，且异常对象不保留原始 cause/context；调用方不得直接把 Pydantic `ValidationError` 暴露到日志或远端。I2-11 再导出权威 JSON Schema 和跨语言有效/无效 fixtures，具体 payload 业务字段随对应消息任务收紧。
 
 ### 10.2 命令
 

@@ -56,6 +56,7 @@
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
+| Executor v1 Envelope | `✅` 24 种消息 Pydantic 判别联合、显式版本、用途隔离 UUIDv4、UTC deadline、幂等键、正序号、安全 payload 与固定解析错误已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -160,7 +161,7 @@
 | I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ✅ 已完成 |
 | I2-08 | Rust App 私有存储 | `app_data_dir` 读写/替换/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ✅ 已完成 |
 | I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；真实 Tauri App 调用 Health/注册/凭据/Session；禁止任意 URL 代理 | I2-08,F1-11 | ✅ 已完成 |
-| I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ⬜ 未开始 |
+| I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ✅ 已完成 |
 | I2-11 | 协议 Schema/Fixtures | 有效/无效样例覆盖未知字段、敏感数据、非法时间和枚举 | I2-10 | ⬜ 未开始 |
 | I2-12 | Rust/TS 协议一致性 | 三语言回放同一 fixtures，结论一致 | I2-11,F1-11 | ⬜ 未开始 |
 | I2-13 | Executor WebSocket 认证 | installation/executor/版本绑定；旧连接、冒充和吊销测试 | I2-07,I2-10 | ⬜ 未开始 |
@@ -870,10 +871,25 @@
 - 文档与 CI：同步项目后台测试规则、根/Frontend/Backend README、前后端架构、工程结构和本台账；Ubuntu Rust 门禁增加 `desktop-e2e` 与 `control-plane-e2e` 的 test/Clippy，仍只读、不部署、不读取 secret
 - 遗留：I2-10 开始定义 Executor v1 Envelope；I2-13 才实现 Executor WebSocket 认证，SSE/任务业务 API 和 Demo HTTPS 签名 Profile 随对应台账任务接入，不能把本任务的 local Health/认证链路外推成 RPA 已可用
 
+### I2-10 Executor v1 Envelope
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建 64 项目标测试并把任务状态置为 RED，执行 `uv run pytest tests/unit/protocol/test_executor_envelope.py -q` 因 `automation_tool.protocol.executor_envelope` 不存在而收集失败；GREEN 后继续补敏感字段片段/赋值文本/通用 data URI 用例得到 3 项准确失败，再补异常链断言准确证明固定错误仍挂有含私密输入的 Pydantic cause
+- GREEN：79 项 Envelope 目标测试通过，目标模块语句/分支覆盖率均 100%；Backend 全量增至 394 项且语句/分支覆盖率保持 100%，uv lock、Ruff 格式/检查与严格 Mypy 通过。正式类型入口、判别 Schema 结构、显式版本、所有已声明 message type、用途隔离 ID、时间/幂等/序号、任务作用域、payload 资源与隐私边界、重复 JSON key、wire 大小和固定错误均有确定性回归
+- 协议模型：以 `message_type` 判别 `ExecutorLifecycleEnvelope`、`TaskCommandEnvelope`、`TaskCommandResultEnvelope`、`TaskEventEnvelope` 四类、共 24 种 v1 消息。生命周期只绑定 installation/executor，不伪造 task；其余任务消息强制同时绑定 task/attempt。所有模型 frozen、`extra=forbid`，`protocol_version` 无默认值且精确为 `1.0`
+- 边界类型：message/correlation/installation/executor/task/attempt 使用不同运行时类型的 canonical 小写 RFC 4122 UUIDv4；RFC3339 时间必须显式 UTC 且 `deadline_at > sent_at`；幂等键只允许 1～128 字符规范字符集；sequence 是 `1..2^63-1` 的 strict integer，不接受 bool、float 或字符串强转
+- 资源与隐私：正式解析器只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key；payload 最大 16 KiB、深度 8、单集合 64 项、字符串 4096 字符，递归拒绝 Cookie/Token/密码/私钥/凭据字段与赋值文本、Bearer、私有绝对路径、`file://`、inline data URI、控制/双向字符、NaN/Infinity。解析失败只有固定 `Invalid Executor protocol message`，不回显输入，也不保留底层 cause/context
+- 旧项目取舍：只吸收显式版本、deadline、幂等、判别联合和安全文本的通用经验；未迁移旧 `tenant_id`、Core capability/governance、social-operations 扩展、同步 stdio request/response 或其领域 payload。stdin 仍只留给 E4-02/E4-06 一次性本机 bootstrap，正式消息通道归 I2-13 WebSocket
+- 生产同路径：本任务只建立两进程将共同调用的纯协议解析入口，没有网络、数据库、App UI、Executor 进程或外部副作用，因此真实 Tauri/PostgreSQL/RPA 验收不适用；I2-11 用公共 fixtures 固化跨语言 wire 结论，I2-12 由 Python/Rust/TypeScript 回放同一 fixtures，I2-13 才通过真实 WebSocket 使用该入口
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：generic payload 容器只承担 Envelope 级资源/隐私下限，具体消息 payload 必须随 T3/E4 对应任务改为严格类型；I2-11 先导出 JSON Schema 与有效/无效 fixtures，不能把 generic payload 当成长期业务契约
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-10`：定义 Executor v1 Envelope，并建立严格版本、时限、幂等和序号边界；
-2. `I2-11`：为协议建立跨语言 Schema 与有效/无效 fixtures；
+1. `I2-11`：为协议建立跨语言 Schema 与有效/无效 fixtures；
+2. `I2-12`：由 Python、Rust、TypeScript 回放同一份协议 fixtures；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。

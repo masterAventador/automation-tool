@@ -174,6 +174,8 @@ backend/
 │       │       ├── desktop/
 │       │       └── logging/
 │       ├── protocol/              # Control Plane ↔ Executor 版本化协议
+│       │   ├── executor_envelope.py # v1 判别联合、ID/时限/幂等/序号和安全 payload
+│       │   └── version.py         # 当前与最小/最大兼容版本
 │       └── capabilities/
 │           ├── content_studio/    # P2 服务端能力
 │           └── ai_workflows/      # P3 服务端能力
