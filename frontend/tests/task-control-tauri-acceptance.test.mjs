@@ -33,8 +33,10 @@ test("pause and resume acceptance uses the formal Rust bridge from one hidden Ap
   assert.match(spec, /core\.invoke\("control_task_for_acceptance"\)/);
   assert.match(rustClient, /pub async fn pause_task/);
   assert.match(rustClient, /pub async fn resume_task/);
-  assert.match(rustEntry, /\.pause_task\(&vault/);
-  assert.match(rustEntry, /\.resume_task\(&vault/);
+  assert.match(rustClient, /pub async fn cancel_task/);
+  assert.match(rustClient, /pub async fn emergency_stop_task/);
+  assert.match(rustEntry, /\.pause_task\(\s*&vault/);
+  assert.match(rustEntry, /\.resume_task\(\s*&vault/);
   assert.match(orchestrator, /test:task-control-tauri/);
   assert.match(orchestrator, /visible=false/);
 });

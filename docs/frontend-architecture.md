@@ -82,6 +82,8 @@ T3-12 在同一个正式 Rust client 中增加 `StreamTaskEvents`：路径只能
 
 T3-13 又在相同 Rust client 中加入固定 `PauseTask`/`ResumeTask` operation。调用者只能提供规范 Task UUID 和受限幂等键；Rust 自行换 App Session、发送空 JSON、构造 `/pause` 或 `/resume` 固定路径，并只接受 202 创建或 200 重放。公开命令对象必须通过 Command/Task/Attempt UUIDv4、跨运行时安全 sequence、精确 command type、封闭 outbox status、正 revision 和 UTC deadline 校验。唯一 `visible=false` App 已经经 Rust API 写入 pause/resume，再经正式 Rust SSE 等到对应事件并核对最终 running 快照；React 控制按钮仍归 T3-18，不能为提前接 UI 暴露任意 operation、Header 或 bearer。
 
+T3-14 继续在同一 Rust client 增加固定 `CancelTask`/`EmergencyStopTask` operation，沿用规范 Task UUID、受限幂等键、App 私有 vault 换票和严格公开 Command 解析；固定路径只能是 `/cancel` 与 `/emergency-stop`，仍只接受 202/200。同一 `visible=false` App 已顺序调用两种操作并通过正式 Rust SSE 验证 cancelled/outcome uncertain 终态；React 按钮仍等待 T3-16/T3-18，WebView 不新增通用 URL、Header、bearer 或原始响应入口。
+
 ### 4.2 Feature 层
 
 第一期 Feature：

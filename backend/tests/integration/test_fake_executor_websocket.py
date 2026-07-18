@@ -233,14 +233,23 @@ def test_every_offer_scenario_replays_over_real_websocket(
     assert not thread.is_alive()
 
 
-@pytest.mark.parametrize("terminal_command", ("task.cancel", "task.emergency_stop"))
-def test_every_control_command_replays_over_real_websocket(terminal_command: str) -> None:
+@pytest.mark.parametrize(
+    ("terminal_command", "terminal_event"),
+    (
+        ("task.cancel", "task.cancelled"),
+        ("task.emergency_stop", "task.outcome_uncertain"),
+    ),
+)
+def test_every_control_command_replays_over_real_websocket(
+    terminal_command: str,
+    terminal_event: str,
+) -> None:
     captured: queue.Queue[object] = queue.Queue()
     plan = (
         ("task.offer", ("task.accept", "task.started", "step.started")),
         ("task.pause", ("task.control_ack", "task.paused")),
         ("task.resume", ("task.control_ack", "task.resumed")),
-        (terminal_command, ("task.control_ack", "task.cancelled")),
+        (terminal_command, ("task.control_ack", terminal_event)),
     )
 
     def handler(connection: ServerConnection) -> None:

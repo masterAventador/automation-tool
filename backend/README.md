@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询和暂停/恢复 API；尚未提供取消/紧停 API、React 事件 Reducer 或正式 Local Executor 进程。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API；尚未提供 React 事件 Reducer 或正式 Local Executor 进程。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -36,6 +36,8 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 暂停/恢复还有独立确认门禁：socket delivered 与 `task.control_ack` 都只改变 Command。`task.paused`/`task.resumed` 收敛事务必须锁定该 Attempt 最新 pause/resume 命令，并核对类型、acknowledged、`task.control_ack`、correlation 和确认时间；未确认、旧控制命令或伪造 correlation 的事件不能提前改 Task/Attempt。唯一 `visible=false` Tauri/WKWebView 已经经正式 Rust API、真实 Uvicorn/PostgreSQL 与 HOLD FakeExecutor 跑通 offer→pause→resume，最终 Task 回到 running。
 
+`POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
+
 当前 offer payload 保持空的安全骨架，因为平台任务定义尚未在 T3-17 建模；FakeExecutor 只按相同正式 envelope 做无副作用回放，T3-17 再从明确列/DTO 构造业务 payload。T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
 
 `automation_tool.executor.fake` 是不依赖 Control Plane 内部实现的确定性协议引擎：严格复用正式 parser、身份、deadline、Attempt command sequence 和 task/attempt 绑定，按 message ID 与 idempotency key 双账本去重。它覆盖 accept/reject、成功、部分成功、失败、登录、人工接管、结果不确定和 hold 场景，并为 pause/resume/cancel/emergency-stop 生成正式 control ACK 与单调事件；生成中失败会原子回滚状态和事件水位。`fake_client` 只通过 `ws(s)://.../api/v1/executors/connect`、唯一正式子协议和 Bearer Session 出站连接，不执行 RPA、文件、子进程或数据库副作用。
@@ -54,7 +56,7 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 `ExecutorConnectionRegistry` 是当前单 Control Plane 进程内唯一在线事实源，以 Installation 为单活键并公开不含 channel/凭据的只读投影：连接/Executor ID、版本/平台/架构、服务端连接与最后心跳时间、最后 sequence。新 Hello 先原子成为 current，再以固定 4409 关闭旧连接；旧连接迟到 heartbeat 和 unregister 都不能影响新连接。`send_current` 必须同时命中 Installation 与预期 Connection ID，限制 UTF-8 wire 为 1..32 KiB，并在 socket 写入后再次检查 current；写入竞态、连接替换和传输失败由持久投递服务做重投判断。应用 lifespan 以 1012 关闭并清空全部连接。Registry 不持久化认证或任务事实，MVP/Demo 因而必须保持单 Control Plane 实例，多副本前先建设跨副本连接路由。
 
-真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复 App 入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`。T3-13 后台启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn 和唯一 `visible=false` Tauri/WKWebView；隐藏 App 经正式 Rust 客户端写入 pause/resume 并从 SSE 等待确认事件，HOLD FakeExecutor 经正式 Session/WebSocket 处理 offer/pause/resume。验收结束回收 App 数据、服务、端口、容器、网络和卷。
+真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`；取消/紧停入口执行 `uv run python ../scripts/run_t3_14_acceptance.py`。T3-14 后台启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn 和唯一 `visible=false` Tauri/WKWebView；同一隐藏 App 经正式 Rust 依次发出 cancel/emergency-stop，HOLD FakeExecutor 经正式 Session/WebSocket 分别回报 cancelled/outcome uncertain。验收结束回收 App 数据、服务、端口、容器、网络和卷。
 
 真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询/事件端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名、凭据注入与 SSE 严格解析，React 不接触任何秘密；I2-14 验证隐藏 App 吊销诊断，T3-06 验证幂等创建，T3-07 验证隔离查询，T3-12 验证断线续拉和终态关闭。T3-15 再把正式 Rust 事件源接入 Tauri Channel 与 React reducer。
 

@@ -42,6 +42,8 @@ enum ControlPlaneOperation {
     StreamTaskEvents,
     PauseTask,
     ResumeTask,
+    CancelTask,
+    EmergencyStopTask,
 }
 
 impl ControlPlaneOperation {
@@ -59,7 +61,9 @@ impl ControlPlaneOperation {
             | Self::ExchangeDeviceSession
             | Self::CreateTask
             | Self::PauseTask
-            | Self::ResumeTask => "POST",
+            | Self::ResumeTask
+            | Self::CancelTask
+            | Self::EmergencyStopTask => "POST",
         }
     }
 
@@ -80,6 +84,8 @@ impl ControlPlaneOperation {
             Self::StreamTaskEvents => "/api/v1/tasks/{task_id}/events",
             Self::PauseTask => "/api/v1/tasks/{task_id}/pause",
             Self::ResumeTask => "/api/v1/tasks/{task_id}/resume",
+            Self::CancelTask => "/api/v1/tasks/{task_id}/cancel",
+            Self::EmergencyStopTask => "/api/v1/tasks/{task_id}/emergency-stop",
         }
     }
 
@@ -96,14 +102,20 @@ impl ControlPlaneOperation {
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
             | Self::CreateTask => 201,
-            Self::PauseTask | Self::ResumeTask => 202,
+            Self::PauseTask | Self::ResumeTask | Self::CancelTask | Self::EmergencyStopTask => 202,
         }
     }
 
     fn accepts_status(self, status: u16) -> bool {
         status == self.success_status()
-            || matches!(self, Self::CreateTask | Self::PauseTask | Self::ResumeTask)
-                && status == 200
+            || matches!(
+                self,
+                Self::CreateTask
+                    | Self::PauseTask
+                    | Self::ResumeTask
+                    | Self::CancelTask
+                    | Self::EmergencyStopTask
+            ) && status == 200
     }
 
     fn outcome_is_uncertain_on_transport_failure(self) -> bool {
@@ -529,6 +541,42 @@ impl ControlPlaneClient {
         .await
     }
 
+    pub async fn cancel_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<TaskControlCommand, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        self.control_task(
+            vault,
+            ControlPlaneOperation::CancelTask,
+            task_id,
+            idempotency_key,
+        )
+        .await
+    }
+
+    pub async fn emergency_stop_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<TaskControlCommand, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        self.control_task(
+            vault,
+            ControlPlaneOperation::EmergencyStopTask,
+            task_id,
+            idempotency_key,
+        )
+        .await
+    }
+
     async fn control_task<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -756,14 +804,19 @@ fn request_path(
             Ok(format!("/api/v1/tasks/{task_id}"))
         }
         (
-            operation @ (ControlPlaneOperation::PauseTask | ControlPlaneOperation::ResumeTask),
+            operation @ (ControlPlaneOperation::PauseTask
+            | ControlPlaneOperation::ResumeTask
+            | ControlPlaneOperation::CancelTask
+            | ControlPlaneOperation::EmergencyStopTask),
             Some(ControlPlaneRequestTarget::Control(task_id)),
         ) => {
             require_canonical_uuid_v4(task_id)?;
-            let suffix = if matches!(operation, ControlPlaneOperation::PauseTask) {
-                "pause"
-            } else {
-                "resume"
+            let suffix = match operation {
+                ControlPlaneOperation::PauseTask => "pause",
+                ControlPlaneOperation::ResumeTask => "resume",
+                ControlPlaneOperation::CancelTask => "cancel",
+                ControlPlaneOperation::EmergencyStopTask => "emergency-stop",
+                _ => return Err(protocol_invalid()),
             };
             Ok(format!("/api/v1/tasks/{task_id}/{suffix}"))
         }
@@ -785,7 +838,9 @@ fn request_path(
             | ControlPlaneOperation::GetTask
             | ControlPlaneOperation::StreamTaskEvents
             | ControlPlaneOperation::PauseTask
-            | ControlPlaneOperation::ResumeTask,
+            | ControlPlaneOperation::ResumeTask
+            | ControlPlaneOperation::CancelTask
+            | ControlPlaneOperation::EmergencyStopTask,
             _,
         )
         | (_, Some(_)) => Err(protocol_invalid()),
@@ -873,6 +928,8 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::GetTask
                     | ControlPlaneOperation::PauseTask
                     | ControlPlaneOperation::ResumeTask
+                    | ControlPlaneOperation::CancelTask
+                    | ControlPlaneOperation::EmergencyStopTask
             )
         {
             ControlPlaneErrorCode::InstallationAccessDenied
@@ -1365,6 +1422,8 @@ fn parse_task_control(
     let expected_type = match operation {
         ControlPlaneOperation::PauseTask => "task.pause",
         ControlPlaneOperation::ResumeTask => "task.resume",
+        ControlPlaneOperation::CancelTask => "task.cancel",
+        ControlPlaneOperation::EmergencyStopTask => "task.emergency_stop",
         _ => return Err(protocol_invalid()),
     };
     let created_at = require_bounded_timestamp(&response.created_at)?;
@@ -1886,6 +1945,18 @@ mod tests {
                 "/api/v1/tasks/{task_id}/resume",
                 202,
             ),
+            (
+                ControlPlaneOperation::CancelTask,
+                "POST",
+                "/api/v1/tasks/{task_id}/cancel",
+                202,
+            ),
+            (
+                ControlPlaneOperation::EmergencyStopTask,
+                "POST",
+                "/api/v1/tasks/{task_id}/emergency-stop",
+                202,
+            ),
         ];
 
         for (operation, method, path, success_status) in operations {
@@ -1936,6 +2007,21 @@ mod tests {
         .expect("valid resume target");
         assert_eq!(pause_path, format!("/api/v1/tasks/{IDENTIFIER}/pause"));
         assert_eq!(resume_path, format!("/api/v1/tasks/{IDENTIFIER}/resume"));
+        let cancel_path = request_path(
+            ControlPlaneOperation::CancelTask,
+            Some(ControlPlaneRequestTarget::Control(IDENTIFIER)),
+        )
+        .expect("valid cancel target");
+        let emergency_stop_path = request_path(
+            ControlPlaneOperation::EmergencyStopTask,
+            Some(ControlPlaneRequestTarget::Control(IDENTIFIER)),
+        )
+        .expect("valid emergency-stop target");
+        assert_eq!(cancel_path, format!("/api/v1/tasks/{IDENTIFIER}/cancel"));
+        assert_eq!(
+            emergency_stop_path,
+            format!("/api/v1/tasks/{IDENTIFIER}/emergency-stop")
+        );
 
         for invalid in [
             request_path(ControlPlaneOperation::ListTasks, None),
@@ -2520,6 +2606,24 @@ mod tests {
             parsed.execution_attempt_id(),
             "adff54bd-3571-44da-8acd-5ea15695e5e9"
         );
+
+        for (operation, command_type) in [
+            (ControlPlaneOperation::CancelTask, "task.cancel"),
+            (
+                ControlPlaneOperation::EmergencyStopTask,
+                "task.emergency_stop",
+            ),
+        ] {
+            let mut termination = response.clone();
+            termination["commandType"] = serde_json::Value::String(command_type.to_owned());
+            let parsed = parse_task_control(
+                &serde_json::to_vec(&termination).expect("termination command JSON"),
+                operation,
+                IDENTIFIER,
+            )
+            .expect("valid termination command");
+            assert_eq!(parsed.command_type(), command_type);
+        }
 
         for invalid in [
             response.clone(),

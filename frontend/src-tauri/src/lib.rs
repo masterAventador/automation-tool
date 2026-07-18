@@ -142,6 +142,27 @@ struct TaskControlAcceptanceSummary {
 }
 
 #[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskTerminationAcceptanceSummary {
+    installation_id: String,
+    cancel_task_id: String,
+    cancel_command_type: String,
+    cancel_command_status: String,
+    cancel_sequence: u64,
+    cancel_event_type: String,
+    cancel_final_status: String,
+    cancel_final_revision: u32,
+    emergency_task_id: String,
+    emergency_command_type: String,
+    emergency_command_status: String,
+    emergency_sequence: u64,
+    emergency_event_type: String,
+    emergency_final_status: String,
+    emergency_final_revision: u32,
+}
+
+#[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
 async fn control_task_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -237,6 +258,136 @@ async fn control_task_for_acceptance(
         resumed_event_type: resumed_event.event_type().to_owned(),
         final_status: final_snapshot.status().to_owned(),
         final_revision: final_snapshot.revision(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn terminate_tasks_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskTerminationAcceptanceSummary, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T314_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T314_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+
+    let cancel_task = client
+        .create_task(&vault, "task:termination:cancel:tauri-acceptance")
+        .await
+        .map_err(map_control_plane_error)?;
+    let cancel_initial = client
+        .stream_task_events(&vault, cancel_task.task_id(), None, Some(2))
+        .await
+        .map_err(map_control_plane_error)?;
+    let cancel_cursor = cancel_initial
+        .events()
+        .last()
+        .map(control_plane::TaskEvent::sequence)
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })?;
+    let cancel = client
+        .cancel_task(
+            &vault,
+            cancel_task.task_id(),
+            "task:termination:cancel-command:tauri-acceptance",
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    let cancel_terminal = client
+        .stream_task_events(&vault, cancel_task.task_id(), Some(cancel_cursor), Some(1))
+        .await
+        .map_err(map_control_plane_error)?;
+    let cancel_event = cancel_terminal
+        .events()
+        .first()
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })?;
+    let cancel_final = client
+        .get_task(&vault, cancel_task.task_id())
+        .await
+        .map_err(map_control_plane_error)?;
+
+    let emergency_task = client
+        .create_task(&vault, "task:termination:emergency:tauri-acceptance")
+        .await
+        .map_err(map_control_plane_error)?;
+    let emergency_initial = client
+        .stream_task_events(&vault, emergency_task.task_id(), None, Some(2))
+        .await
+        .map_err(map_control_plane_error)?;
+    let emergency_cursor = emergency_initial
+        .events()
+        .last()
+        .map(control_plane::TaskEvent::sequence)
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })?;
+    let emergency = client
+        .emergency_stop_task(
+            &vault,
+            emergency_task.task_id(),
+            "task:termination:emergency-command:tauri-acceptance",
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    let emergency_terminal = client
+        .stream_task_events(
+            &vault,
+            emergency_task.task_id(),
+            Some(emergency_cursor),
+            Some(1),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    let emergency_event = emergency_terminal
+        .events()
+        .first()
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })?;
+    let emergency_final = client
+        .get_task(&vault, emergency_task.task_id())
+        .await
+        .map_err(map_control_plane_error)?;
+
+    Ok(TaskTerminationAcceptanceSummary {
+        installation_id: registration.installation_id().to_owned(),
+        cancel_task_id: cancel_task.task_id().to_owned(),
+        cancel_command_type: cancel.command_type().to_owned(),
+        cancel_command_status: cancel.status().to_owned(),
+        cancel_sequence: cancel.sequence(),
+        cancel_event_type: cancel_event.event_type().to_owned(),
+        cancel_final_status: cancel_final.status().to_owned(),
+        cancel_final_revision: cancel_final.revision(),
+        emergency_task_id: emergency_task.task_id().to_owned(),
+        emergency_command_type: emergency.command_type().to_owned(),
+        emergency_command_status: emergency.status().to_owned(),
+        emergency_sequence: emergency.sequence(),
+        emergency_event_type: emergency_event.event_type().to_owned(),
+        emergency_final_status: emergency_final.status().to_owned(),
+        emergency_final_revision: emergency_final.revision(),
     })
 }
 
@@ -617,7 +768,8 @@ pub fn run() {
         create_task_for_acceptance,
         query_tasks_for_acceptance,
         stream_task_events_for_acceptance,
-        control_task_for_acceptance
+        control_task_for_acceptance,
+        terminate_tasks_for_acceptance
     ]);
 
     builder

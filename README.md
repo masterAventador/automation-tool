@@ -57,8 +57,8 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用与 Installation 已吊销分别显示脱敏诊断和重试状态，页面不存在产品登录或注册入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已接入正式 Tauri IPC/Rust 网络桥：生产入口由真实 App 发起 Health 请求；Rust 侧以固定 origin、封闭 operation allowlist、禁止重定向/代理、请求与响应大小/时间上限和关联 ID 调用 Control Plane，不暴露任意 URL 代理；
-- Installation 注册、长期凭据轮换/吊销、两类短期 Session，以及 Task 幂等创建、分页列表、详情、事件 SSE 和暂停/恢复，已通过测试版真实隐藏 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；
-- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期、短期 Session 交换，以及 Task 创建/列表/详情/事件 SSE/暂停/恢复，后端/前端分别具备确定性漂移检查；
+- Installation 注册、长期凭据轮换/吊销、两类短期 Session，以及 Task 幂等创建、分页列表、详情、事件 SSE、暂停/恢复和取消/紧停，已通过测试版真实隐藏 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；
+- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期、短期 Session 交换，以及 Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用和重试恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
 - GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；
@@ -71,11 +71,12 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `task_events` 已建立版本化封闭事件词汇、连续 `(task_id, sequence)` 时间线、Installation/Attempt/Action 复合归属，以及 message/idempotency 双键和 32 字节意图指纹去重；正式 WebSocket 事件在一个 PostgreSQL 事务内落库并以 revision CAS 推进 Task/Attempt/显式 Action 与 `last_event_sequence`；
 - `GET /api/v1/tasks/{task_id}/events` 已建立受 `app.control-plane` Session 保护的 SSE：只从 PostgreSQL 已提交事件按 sequence 读取，支持标准 `Last-Event-ID`、断线续拉、keepalive、限时换票重连和终态关闭；正式 Rust App 客户端严格验证响应头、公开字段、版本、序号、UUID、UTC 时间与资源上限；
 - `POST /api/v1/tasks/{task_id}/pause` 与 `/resume` 只在当前 Task/Attempt 状态相容时原子分配下一命令序号并写入持久 Outbox，首次返回 202、同键重放返回 200；投递和 `task.control_ack` 都不能提前修改 Task/Attempt，只有与最新已确认控制命令 correlation 一致的 `task.paused`/`task.resumed` 事件才会收敛状态；
+- `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 在同一事务写入持久命令，并把可取消的 Task/Attempt 各前进一次到 `cancelling`；同键重放不重复增 revision，终态必须来自匹配最新已确认终止命令的事件，完成事实并发到达时仍按真实 succeeded/partial/failed 收敛，硬紧停动作无法确认时进入 `outcome_uncertain`；
 - `task_commands` 持久 Outbox 已接入正式 Executor WebSocket：PostgreSQL 以 `FOR UPDATE SKIP LOCKED` 原子抢占 lease，经当前连接写入后只记 delivered；断线、写入失败、ACK 超时和重连使用同一 message/idempotency 安全重投，只有匹配 Installation/Task/Attempt/correlation/sequence 的 accept/reject/control_ack 才能确认，deadline 到期固定 expired；
 - Executor v1 Envelope 已建立 Pydantic 判别联合：24 种生命周期/任务命令/回执/事件精确分型，显式 `1.0` 版本、规范 UUIDv4、UTC deadline、幂等键、正序号和受限安全 payload 均 fail closed；
 - Executor v1 Draft 2020-12 Schema 已从 Pydantic 确定性导出；Python、Rust、TypeScript 正式解析器共同回放 6 个 valid、25 个 invalid 公共 fixtures，并对结构、deadline、隐私和资源边界给出一致结论；
 - `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键并承载持久命令投递，连接后可接收 heartbeat、严格绑定的命令回执与任务事件，新 Hello 固定 4409 替换旧连接；
 - 无副作用 FakeExecutor 已复用正式 v1 parser、envelope、子协议和 Session WebSocket：可确定性回放 accept/reject、成功/部分成功/失败、登录、接管、结果不确定及暂停/恢复/取消/紧停，并按 message/idempotency 双键返回完全相同的结果且不重复事件；它不导入 Control Plane、RPA、文件、子进程或数据库实现；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
-- 取消/紧停 API、React 事件 Reducer/页面、正式 Local Executor 进程和 RPA 功能尚未实现；
+- React 事件 Reducer/页面、正式 Local Executor 进程和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

@@ -151,6 +151,7 @@ async def seed_acknowledged_control(
     command_type = {
         "task.paused": TaskCommandType.TASK_PAUSE,
         "task.resumed": TaskCommandType.TASK_RESUME,
+        "task.cancelled": TaskCommandType.TASK_CANCEL,
     }[message_type]
     async with database.session() as session:
         await session.execute(
@@ -665,7 +666,7 @@ async def test_each_status_event_projects_only_an_explicit_legal_transition(
             task_status=task_status,
             attempt_status=attempt_status,
         )
-        if message_type in {"task.paused", "task.resumed"}:
+        if message_type in {"task.paused", "task.resumed", "task.cancelled"}:
             await seed_acknowledged_control(
                 database,
                 installation_id=installation_id,

@@ -1,4 +1,4 @@
-"""Installation-scoped pause and resume command intents."""
+"""Installation-scoped Task control command intents."""
 
 from __future__ import annotations
 
@@ -71,7 +71,13 @@ class PendingTaskControl:
         if (
             type(self.installation_id) is not InstallationId
             or type(self.task_id) is not TaskId
-            or self.command_type not in {TaskCommandType.TASK_PAUSE, TaskCommandType.TASK_RESUME}
+            or self.command_type
+            not in {
+                TaskCommandType.TASK_PAUSE,
+                TaskCommandType.TASK_RESUME,
+                TaskCommandType.TASK_CANCEL,
+                TaskCommandType.TASK_EMERGENCY_STOP,
+            }
         ):
             raise InvalidTaskControl
         try:
@@ -98,6 +104,8 @@ class TaskControlEnqueueResult:
         if self.command.command_type not in {
             TaskCommandType.TASK_PAUSE,
             TaskCommandType.TASK_RESUME,
+            TaskCommandType.TASK_CANCEL,
+            TaskCommandType.TASK_EMERGENCY_STOP,
         }:
             raise InvalidTaskControl
 
@@ -108,7 +116,7 @@ class TaskControlRepository(Protocol):
 
 
 class TaskControlService:
-    """Persist control intent without projecting Task or Attempt state."""
+    """Persist one Task control intent through its operation-specific projection rule."""
 
     def __init__(
         self,
@@ -158,6 +166,34 @@ class TaskControlService:
             task_id=task_id,
             idempotency_key=idempotency_key,
             command_type=TaskCommandType.TASK_RESUME,
+        )
+
+    async def cancel(
+        self,
+        *,
+        installation_id: InstallationId,
+        task_id: str,
+        idempotency_key: str,
+    ) -> TaskControlEnqueueResult:
+        return await self._request(
+            installation_id=installation_id,
+            task_id=task_id,
+            idempotency_key=idempotency_key,
+            command_type=TaskCommandType.TASK_CANCEL,
+        )
+
+    async def emergency_stop(
+        self,
+        *,
+        installation_id: InstallationId,
+        task_id: str,
+        idempotency_key: str,
+    ) -> TaskControlEnqueueResult:
+        return await self._request(
+            installation_id=installation_id,
+            task_id=task_id,
+            idempotency_key=idempotency_key,
+            command_type=TaskCommandType.TASK_EMERGENCY_STOP,
         )
 
     async def _request(

@@ -264,7 +264,7 @@ def test_hold_scenario_replays_pause_resume_cancel_and_emergency_events() -> Non
     stopped = emergency.handle(command("task.emergency_stop", sequence=2))
     assert [message.message_type for message in stopped] == [
         "task.control_ack",
-        "task.cancelled",
+        "task.outcome_uncertain",
     ]
 
 

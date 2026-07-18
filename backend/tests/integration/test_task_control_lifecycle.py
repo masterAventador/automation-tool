@@ -19,6 +19,7 @@ from automation_tool.control_plane.application.task_command_delivery import (
 from automation_tool.control_plane.application.task_controls import (
     PendingTaskControl,
     TaskControlConflict,
+    TaskControlEnqueueResult,
     TaskControlNotFound,
     TaskControlService,
 )
@@ -445,6 +446,308 @@ async def test_ack_is_required_but_only_the_following_event_projects_pause_and_r
             "last_event_sequence": 2,
         }
         assert final_attempt == ExecutionAttemptStatus.RUNNING.value
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation_name", "command_type", "conflicting_operation"),
+    (
+        ("cancel", TaskCommandType.TASK_CANCEL, "emergency_stop"),
+        ("emergency_stop", TaskCommandType.TASK_EMERGENCY_STOP, "cancel"),
+    ),
+)
+async def test_termination_is_atomic_idempotent_and_enters_cancelling_once(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+    operation_name: str,
+    command_type: TaskCommandType,
+    conflicting_operation: str,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_running_task(database)
+        service = TaskControlService(
+            repository=SqlAlchemyTaskCommandRepository(database),
+            clock=FixedClock(NOW + timedelta(seconds=1)),
+        )
+        operation = getattr(service, operation_name)
+        key = f"task:t314:{operation_name}:atomic"
+
+        first, replay = await asyncio.gather(
+            operation(
+                installation_id=installation_id,
+                task_id=str(task_id),
+                idempotency_key=key,
+            ),
+            operation(
+                installation_id=installation_id,
+                task_id=str(task_id),
+                idempotency_key=key,
+            ),
+        )
+        assert {first.created, replay.created} == {True, False}
+        assert first.command.message_id == replay.command.message_id
+        assert first.command.command_type is replay.command.command_type is command_type
+        assert first.command.sequence == replay.command.sequence == 1
+
+        async with database.session() as session:
+            task_row = (
+                (
+                    await session.execute(
+                        select(
+                            tasks.c.status,
+                            tasks.c.revision,
+                            tasks.c.last_event_sequence,
+                        ).where(tasks.c.id == task_id.uuid)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            attempt_row = (
+                (
+                    await session.execute(
+                        select(
+                            execution_attempts.c.status,
+                            execution_attempts.c.revision,
+                            execution_attempts.c.finished_at,
+                        ).where(execution_attempts.c.id == attempt_id.uuid)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            event_count = len(
+                list(
+                    await session.scalars(
+                        select(task_events.c.sequence).where(task_events.c.task_id == task_id.uuid)
+                    )
+                )
+            )
+        assert task_row == {
+            "status": TaskStatus.CANCELLING.value,
+            "revision": 4,
+            "last_event_sequence": 0,
+        }
+        assert attempt_row == {
+            "status": ExecutionAttemptStatus.CANCELLING.value,
+            "revision": 3,
+            "finished_at": None,
+        }
+        assert event_count == 0
+
+        with pytest.raises(TaskControlConflict):
+            await getattr(service, conflicting_operation)(
+                installation_id=installation_id,
+                task_id=str(task_id),
+                idempotency_key=key,
+            )
+        with pytest.raises(TaskControlConflict):
+            await operation(
+                installation_id=installation_id,
+                task_id=str(task_id),
+                idempotency_key=f"{key}:second",
+            )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation_name", "terminal_event", "terminal_task", "terminal_attempt"),
+    (
+        (
+            "cancel",
+            "task.cancelled",
+            TaskStatus.CANCELLED,
+            ExecutionAttemptStatus.CANCELLED,
+        ),
+        (
+            "emergency_stop",
+            "task.outcome_uncertain",
+            TaskStatus.OUTCOME_UNCERTAIN,
+            ExecutionAttemptStatus.OUTCOME_UNCERTAIN,
+        ),
+    ),
+)
+async def test_termination_requires_ack_before_confirmed_terminal_fact(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+    operation_name: str,
+    terminal_event: str,
+    terminal_task: TaskStatus,
+    terminal_attempt: ExecutionAttemptStatus,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_running_task(database)
+        commands = SqlAlchemyTaskCommandRepository(database)
+        service = TaskControlService(
+            repository=commands,
+            clock=FixedClock(NOW + timedelta(seconds=1)),
+        )
+        requested = await getattr(service, operation_name)(
+            installation_id=installation_id,
+            task_id=str(task_id),
+            idempotency_key=f"task:t314:{operation_name}:confirmed",
+        )
+        terminal = event(
+            installation_id,
+            task_id,
+            attempt_id,
+            terminal_event,
+            sequence=1,
+            at=NOW + timedelta(seconds=3),
+            correlation_id=str(requested.command.correlation_id),
+        )
+        convergence = TaskEventConvergenceService(
+            repository=SqlAlchemyTaskEventConvergenceRepository(database),
+            clock=FixedClock(NOW + timedelta(seconds=3)),
+        )
+
+        with pytest.raises(TaskEventConvergenceRejected):
+            await convergence.receive(terminal)
+        acknowledged = await deliver_and_acknowledge(
+            commands,
+            installation_id,
+            at=NOW + timedelta(seconds=2),
+        )
+        assert acknowledged.status is TaskCommandStatus.ACKNOWLEDGED
+        with pytest.raises(TaskEventConvergenceRejected):
+            await convergence.receive(
+                event(
+                    installation_id,
+                    task_id,
+                    attempt_id,
+                    terminal_event,
+                    sequence=1,
+                    at=NOW + timedelta(seconds=3),
+                    correlation_id=str(uuid4()),
+                )
+            )
+
+        result = await convergence.receive(terminal)
+        assert result.snapshot.status is terminal_task
+        async with database.session() as session:
+            task_row = (
+                (
+                    await session.execute(
+                        select(
+                            tasks.c.status,
+                            tasks.c.revision,
+                            tasks.c.last_event_sequence,
+                        ).where(tasks.c.id == task_id.uuid)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            attempt_row = (
+                (
+                    await session.execute(
+                        select(
+                            execution_attempts.c.status,
+                            execution_attempts.c.revision,
+                            execution_attempts.c.finished_at,
+                        ).where(execution_attempts.c.id == attempt_id.uuid)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert task_row == {
+            "status": terminal_task.value,
+            "revision": 5,
+            "last_event_sequence": 1,
+        }
+        assert attempt_row["status"] == terminal_attempt.value
+        assert attempt_row["revision"] == 4
+        assert attempt_row["finished_at"] == NOW + timedelta(seconds=3)
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_completion_fact_wins_a_race_with_cancellation_request(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_running_task(database)
+        control = TaskControlService(
+            repository=SqlAlchemyTaskCommandRepository(database),
+            clock=FixedClock(NOW + timedelta(seconds=1)),
+        )
+        completion = TaskEventConvergenceService(
+            repository=SqlAlchemyTaskEventConvergenceRepository(database),
+            clock=FixedClock(NOW + timedelta(seconds=2)),
+        )
+        outcomes = await asyncio.gather(
+            control.cancel(
+                installation_id=installation_id,
+                task_id=str(task_id),
+                idempotency_key="task:t314:cancel:completion-race",
+            ),
+            completion.receive(
+                event(
+                    installation_id,
+                    task_id,
+                    attempt_id,
+                    "task.completed",
+                    sequence=1,
+                    at=NOW + timedelta(seconds=2),
+                    correlation_id=str(uuid4()),
+                )
+            ),
+            return_exceptions=True,
+        )
+        assert not isinstance(outcomes[1], Exception)
+        assert outcomes[0].__class__ in {
+            TaskControlEnqueueResult,
+            TaskControlConflict,
+        }
+
+        async with database.session() as session:
+            task_row = (
+                (
+                    await session.execute(
+                        select(tasks.c.status, tasks.c.revision).where(tasks.c.id == task_id.uuid)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            attempt_row = await session.scalar(
+                select(execution_attempts.c.status).where(
+                    execution_attempts.c.id == attempt_id.uuid
+                )
+            )
+            command_count = len(
+                list(
+                    await session.scalars(
+                        select(task_commands.c.message_id).where(
+                            task_commands.c.task_id == task_id.uuid
+                        )
+                    )
+                )
+            )
+        assert task_row["status"] == TaskStatus.SUCCEEDED.value
+        assert task_row["revision"] in {4, 5}
+        assert attempt_row == ExecutionAttemptStatus.SUCCEEDED.value
+        assert command_count in {0, 1}
+        assert (task_row["revision"], command_count) in {(4, 0), (5, 1)}
     finally:
         await reset_data(database)
         await database.close()

@@ -1,4 +1,4 @@
-"""Installation-scoped Task pause and resume API."""
+"""Installation-scoped Task control API."""
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -152,6 +152,58 @@ async def resume_task(
     response.headers["cache-control"] = "no-store"
     result = await _control(
         service.resume,
+        task_id=task_id,
+        idempotency_key=idempotency_key,
+        installation_id=installation_id,
+    )
+    if not result.created:
+        response.status_code = status.HTTP_200_OK
+    return _response(result)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=TaskControlResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="cancelTask",
+)
+async def cancel_task(
+    task_id: str,
+    _payload: TaskControlRequest,
+    response: Response,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    installation_id: Annotated[InstallationId, Depends(require_current_installation_access)],
+    service: Annotated[TaskControlService, Depends(_service)],
+) -> TaskControlResponse:
+    response.headers["cache-control"] = "no-store"
+    result = await _control(
+        service.cancel,
+        task_id=task_id,
+        idempotency_key=idempotency_key,
+        installation_id=installation_id,
+    )
+    if not result.created:
+        response.status_code = status.HTTP_200_OK
+    return _response(result)
+
+
+@router.post(
+    "/{task_id}/emergency-stop",
+    response_model=TaskControlResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="emergencyStopTask",
+)
+async def emergency_stop_task(
+    task_id: str,
+    _payload: TaskControlRequest,
+    response: Response,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    installation_id: Annotated[InstallationId, Depends(require_current_installation_access)],
+    service: Annotated[TaskControlService, Depends(_service)],
+) -> TaskControlResponse:
+    response.headers["cache-control"] = "no-store"
+    result = await _control(
+        service.emergency_stop,
         task_id=task_id,
         idempotency_key=idempotency_key,
         installation_id=installation_id,

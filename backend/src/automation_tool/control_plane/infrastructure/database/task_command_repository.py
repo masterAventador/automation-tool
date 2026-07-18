@@ -30,6 +30,7 @@ from automation_tool.control_plane.domain import (
     TaskCommandStatus,
     TaskCommandType,
     TaskId,
+    TaskStateMachine,
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
@@ -111,6 +112,24 @@ def _response_matches_command(
     return response_type is TaskCommandResponseType.TASK_CONTROL_ACK
 
 
+_TERMINATION_COMMANDS = frozenset(
+    {
+        TaskCommandType.TASK_CANCEL,
+        TaskCommandType.TASK_EMERGENCY_STOP,
+    }
+)
+_CANCELLABLE_ATTEMPT_STATUSES = frozenset(
+    {
+        ExecutionAttemptStatus.PENDING,
+        ExecutionAttemptStatus.OFFERED,
+        ExecutionAttemptStatus.ACCEPTED,
+        ExecutionAttemptStatus.RUNNING,
+        ExecutionAttemptStatus.PAUSED,
+        ExecutionAttemptStatus.AWAITING_HUMAN,
+    }
+)
+
+
 class SqlAlchemyTaskCommandRepository:
     """Serialize enqueue/claim/delivery/ACK transitions in PostgreSQL."""
 
@@ -180,20 +199,25 @@ class SqlAlchemyTaskCommandRepository:
             raise TaskCommandDeliveryRejected from None
 
     async def enqueue_control(self, control: PendingTaskControl) -> TaskControlEnqueueResult:
-        """Allocate and persist one control sequence while leaving projections untouched."""
+        """Allocate one control, projecting only a first termination to CANCELLING."""
 
         if not isinstance(control, PendingTaskControl):
             raise TaskControlConflict
-        expected = {
-            TaskCommandType.TASK_PAUSE: (
-                TaskStatus.RUNNING,
-                ExecutionAttemptStatus.RUNNING,
-            ),
-            TaskCommandType.TASK_RESUME: (
-                TaskStatus.PAUSED,
-                ExecutionAttemptStatus.PAUSED,
-            ),
-        }[control.command_type]
+        is_termination = control.command_type in _TERMINATION_COMMANDS
+        expected = (
+            None
+            if is_termination
+            else {
+                TaskCommandType.TASK_PAUSE: (
+                    TaskStatus.RUNNING,
+                    ExecutionAttemptStatus.RUNNING,
+                ),
+                TaskCommandType.TASK_RESUME: (
+                    TaskStatus.PAUSED,
+                    ExecutionAttemptStatus.PAUSED,
+                ),
+            }[control.command_type]
+        )
         try:
             async with self._database.session() as session:
                 installation_status = await session.scalar(
@@ -242,7 +266,7 @@ class SqlAlchemyTaskCommandRepository:
                 if task_row is None:
                     raise TaskControlNotFound
                 attempt_id = task_row["current_attempt_id"]
-                if attempt_id is None or task_row["status"] != expected[0].value:
+                if attempt_id is None:
                     raise TaskControlConflict
                 attempt_row = (
                     (
@@ -258,10 +282,28 @@ class SqlAlchemyTaskCommandRepository:
                         )
                     )
                     .mappings()
-                    .one_or_none()
+                    .one()
                 )
-                if attempt_row is None or attempt_row["status"] != expected[1].value:
+                if expected is not None and (
+                    task_row["status"] != expected[0].value
+                    or attempt_row["status"] != expected[1].value
+                ):
                     raise TaskControlConflict
+                if is_termination:
+                    current_task_status = TaskStatus(cast(str, task_row["status"]))
+                    current_attempt_status = ExecutionAttemptStatus(
+                        cast(str, attempt_row["status"])
+                    )
+                    if (
+                        not TaskStateMachine.can_transition(
+                            current_task_status,
+                            TaskStatus.CANCELLING,
+                        )
+                        or current_attempt_status not in _CANCELLABLE_ATTEMPT_STATUSES
+                        or control.created_at < cast(datetime, task_row["updated_at"])
+                        or control.created_at < cast(datetime, attempt_row["updated_at"])
+                    ):
+                        raise TaskControlConflict
 
                 last_sequence = await session.scalar(
                     select(func.coalesce(func.max(task_commands.c.sequence), 0)).where(
@@ -300,6 +342,38 @@ class SqlAlchemyTaskCommandRepository:
                     .mappings()
                     .one()
                 )
+                if is_termination:
+                    updated_task = await session.execute(
+                        update(tasks)
+                        .where(
+                            tasks.c.id == control.task_id.uuid,
+                            tasks.c.installation_id == control.installation_id.uuid,
+                            tasks.c.revision == task_row["revision"],
+                            tasks.c.status == task_row["status"],
+                        )
+                        .values(
+                            status=TaskStatus.CANCELLING.value,
+                            revision=tasks.c.revision + 1,
+                            updated_at=control.created_at,
+                        )
+                        .returning(tasks.c.id)
+                    )
+                    updated_task.scalar_one()
+                    updated_attempt = await session.execute(
+                        update(execution_attempts)
+                        .where(
+                            execution_attempts.c.id == attempt_id,
+                            execution_attempts.c.revision == attempt_row["revision"],
+                            execution_attempts.c.status == attempt_row["status"],
+                        )
+                        .values(
+                            status=ExecutionAttemptStatus.CANCELLING.value,
+                            revision=execution_attempts.c.revision + 1,
+                            updated_at=control.created_at,
+                        )
+                        .returning(execution_attempts.c.id)
+                    )
+                    updated_attempt.scalar_one()
                 return TaskControlEnqueueResult(command=_record(created), created=True)
         except (TaskControlNotFound, TaskControlConflict):
             raise

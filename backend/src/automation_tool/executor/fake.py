@@ -307,7 +307,11 @@ class FakeExecutorEngine:
             }:
                 raise FakeExecutorRejected
             self._attempt_states[attempt_id] = _AttemptState.TERMINAL
-            event_type = "task.cancelled"
+            event_type = (
+                "task.outcome_uncertain"
+                if command.message_type == "task.emergency_stop"
+                else "task.cancelled"
+            )
         return (
             self._result(command, "task.control_ack"),
             self._event(command, event_type),

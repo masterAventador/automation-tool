@@ -82,18 +82,23 @@ def control_app(
     return TestClient(app), resolved
 
 
-def test_openapi_exposes_two_app_session_protected_control_operations() -> None:
+def test_openapi_exposes_four_app_session_protected_control_operations() -> None:
     schema = create_app(database=None).openapi()
     pause = schema["paths"]["/api/v1/tasks/{task_id}/pause"]["post"]
     resume = schema["paths"]["/api/v1/tasks/{task_id}/resume"]["post"]
+    cancel = schema["paths"]["/api/v1/tasks/{task_id}/cancel"]["post"]
+    emergency_stop = schema["paths"]["/api/v1/tasks/{task_id}/emergency-stop"]["post"]
 
     assert pause["operationId"] == "pauseTask"
     assert resume["operationId"] == "resumeTask"
-    assert pause["security"] == resume["security"] == [{"AppSession": []}]
-    assert [parameter["name"] for parameter in pause["parameters"]] == [
-        "task_id",
-        "Idempotency-Key",
-    ]
+    assert cancel["operationId"] == "cancelTask"
+    assert emergency_stop["operationId"] == "emergencyStopTask"
+    for operation in (pause, resume, cancel, emergency_stop):
+        assert operation["security"] == [{"AppSession": []}]
+        assert [parameter["name"] for parameter in operation["parameters"]] == [
+            "task_id",
+            "Idempotency-Key",
+        ]
 
 
 def test_pause_resume_and_idempotent_replay_return_only_public_command_state() -> None:
@@ -130,6 +135,32 @@ def test_pause_resume_and_idempotent_replay_return_only_public_command_state() -
         assert response.headers["cache-control"] == "no-store"
         assert "idempotency" not in response.text.lower()
         UUID(response.json()["commandId"])
+
+
+def test_cancel_and_emergency_stop_return_only_public_idempotent_command_state() -> None:
+    client, _ = control_app()
+    controls = (
+        ("cancel", "task:cancel:demo-1", "task.cancel", 2),
+        ("emergency-stop", "task:emergency-stop:demo-1", "task.emergency_stop", 3),
+    )
+    for path, key, command_type, sequence in controls:
+        first = client.post(
+            f"/api/v1/tasks/{TASK_ID}/{path}",
+            headers={"Idempotency-Key": key},
+            json={},
+        )
+        replay = client.post(
+            f"/api/v1/tasks/{TASK_ID}/{path}",
+            headers={"Idempotency-Key": key},
+            json={},
+        )
+        assert first.status_code == 202
+        assert replay.status_code == 200
+        assert first.json() == replay.json()
+        assert first.json()["commandType"] == command_type
+        assert first.json()["sequence"] == sequence
+        assert first.headers["cache-control"] == "no-store"
+        assert "idempotency" not in first.text.lower()
 
 
 def test_invalid_input_auth_not_found_conflict_and_unavailable_fail_closed() -> None:

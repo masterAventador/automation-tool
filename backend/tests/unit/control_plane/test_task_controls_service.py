@@ -80,9 +80,20 @@ class MemoryTaskControlRepository:
 
 
 @pytest.mark.asyncio
-async def test_pause_and_resume_create_only_persistent_control_intents() -> None:
+async def test_all_task_controls_create_only_persistent_control_intents() -> None:
     repository = MemoryTaskControlRepository()
-    identifiers = iter((MESSAGE_ID, CORRELATION_ID, MESSAGE_ID, CORRELATION_ID))
+    identifiers = iter(
+        (
+            MESSAGE_ID,
+            CORRELATION_ID,
+            MESSAGE_ID,
+            CORRELATION_ID,
+            MESSAGE_ID,
+            CORRELATION_ID,
+            MESSAGE_ID,
+            CORRELATION_ID,
+        )
+    )
     service = TaskControlService(
         repository=repository,
         clock=MutableClock(),
@@ -100,11 +111,30 @@ async def test_pause_and_resume_create_only_persistent_control_intents() -> None
         task_id=str(TASK_ID),
         idempotency_key="task:resume:demo-1",
     )
+    cancelled = await service.cancel(
+        installation_id=INSTALLATION_ID,
+        task_id=str(TASK_ID),
+        idempotency_key="task:cancel:demo-1",
+    )
+    stopped = await service.emergency_stop(
+        installation_id=INSTALLATION_ID,
+        task_id=str(TASK_ID),
+        idempotency_key="task:emergency-stop:demo-1",
+    )
 
     assert paused.command.command_type is TaskCommandType.TASK_PAUSE
     assert resumed.command.command_type is TaskCommandType.TASK_RESUME
-    assert paused.command.status is resumed.command.status is TaskCommandStatus.PENDING
+    assert cancelled.command.command_type is TaskCommandType.TASK_CANCEL
+    assert stopped.command.command_type is TaskCommandType.TASK_EMERGENCY_STOP
+    assert {
+        paused.command.status,
+        resumed.command.status,
+        cancelled.command.status,
+        stopped.command.status,
+    } == {TaskCommandStatus.PENDING}
     assert [control.deadline_at for control in repository.controls] == [
+        NOW + timedelta(seconds=45),
+        NOW + timedelta(seconds=45),
         NOW + timedelta(seconds=45),
         NOW + timedelta(seconds=45),
     ]

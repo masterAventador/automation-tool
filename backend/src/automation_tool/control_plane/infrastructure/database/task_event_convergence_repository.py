@@ -41,9 +41,13 @@ from automation_tool.control_plane.infrastructure.database.schema import (
 from automation_tool.control_plane.infrastructure.database.session import Database
 
 _CONTROL_EVENT_COMMANDS = {
-    "task.paused": TaskCommandType.TASK_PAUSE,
-    "task.resumed": TaskCommandType.TASK_RESUME,
+    "task.paused": frozenset({TaskCommandType.TASK_PAUSE}),
+    "task.resumed": frozenset({TaskCommandType.TASK_RESUME}),
 }
+_PAUSE_RESUME_COMMANDS = frozenset({TaskCommandType.TASK_PAUSE, TaskCommandType.TASK_RESUME})
+_TERMINATION_COMMANDS = frozenset(
+    {TaskCommandType.TASK_CANCEL, TaskCommandType.TASK_EMERGENCY_STOP}
+)
 
 _STEP_EVENT_TYPES = frozenset(
     {
@@ -303,8 +307,17 @@ class SqlAlchemyTaskEventConvergenceRepository:
                 ):
                     raise TaskEventConvergenceRejected
 
-                expected_control = _CONTROL_EVENT_COMMANDS.get(message.message_type)
-                if expected_control is not None:
+                current_task_status = TaskStatus(cast(str, task_row["status"]))
+                current_attempt_status = ExecutionAttemptStatus(cast(str, attempt_row["status"]))
+                expected_controls = _CONTROL_EVENT_COMMANDS.get(message.message_type)
+                control_family = _PAUSE_RESUME_COMMANDS
+                if message.message_type == "task.cancelled" or (
+                    message.message_type == "task.outcome_uncertain"
+                    and current_task_status is TaskStatus.CANCELLING
+                ):
+                    expected_controls = _TERMINATION_COMMANDS
+                    control_family = _TERMINATION_COMMANDS
+                if expected_controls is not None:
                     latest_control = (
                         (
                             await session.execute(
@@ -314,10 +327,7 @@ class SqlAlchemyTaskEventConvergenceRepository:
                                     task_commands.c.task_id == task_id,
                                     task_commands.c.installation_id == installation_id,
                                     task_commands.c.command_type.in_(
-                                        (
-                                            TaskCommandType.TASK_PAUSE.value,
-                                            TaskCommandType.TASK_RESUME.value,
-                                        )
+                                        tuple(command.value for command in control_family)
                                     ),
                                 )
                                 .order_by(desc(task_commands.c.sequence))
@@ -330,7 +340,8 @@ class SqlAlchemyTaskEventConvergenceRepository:
                     )
                     if (
                         latest_control is None
-                        or latest_control["command_type"] != expected_control.value
+                        or latest_control["command_type"]
+                        not in {command.value for command in expected_controls}
                         or latest_control["status"] != TaskCommandStatus.ACKNOWLEDGED.value
                         or latest_control["response_type"]
                         != TaskCommandResponseType.TASK_CONTROL_ACK.value
@@ -340,8 +351,6 @@ class SqlAlchemyTaskEventConvergenceRepository:
                     ):
                         raise TaskEventConvergenceRejected
 
-                current_task_status = TaskStatus(cast(str, task_row["status"]))
-                current_attempt_status = ExecutionAttemptStatus(cast(str, attempt_row["status"]))
                 next_task_status = _next_task_status(current_task_status, pending)
                 next_attempt_status = _next_attempt_status(current_attempt_status, pending)
 
