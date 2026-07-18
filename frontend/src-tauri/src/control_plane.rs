@@ -21,7 +21,11 @@ use crate::secure_store::SecretStore;
 const LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
+const LAST_EVENT_ID_HEADER: &str = "last-event-id";
 const MAX_RESPONSE_LENGTH: usize = 64 * 1024;
+const MAX_SSE_RESPONSE_LENGTH: usize = 512 * 1024;
+const MAX_SSE_FRAME_LENGTH: usize = 64 * 1024;
+const MAX_CROSS_RUNTIME_SEQUENCE: u64 = (1_u64 << 53) - 1;
 
 #[derive(Clone, Copy)]
 enum ControlPlaneOperation {
@@ -35,6 +39,7 @@ enum ControlPlaneOperation {
     CreateTask,
     ListTasks,
     GetTask,
+    StreamTaskEvents,
 }
 
 impl ControlPlaneOperation {
@@ -43,7 +48,8 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
             | Self::ListTasks
-            | Self::GetTask => "GET",
+            | Self::GetTask
+            | Self::StreamTaskEvents => "GET",
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
@@ -67,6 +73,7 @@ impl ControlPlaneOperation {
             Self::CreateTask => "/api/v1/tasks",
             Self::ListTasks => "/api/v1/tasks",
             Self::GetTask => "/api/v1/tasks/{task_id}",
+            Self::StreamTaskEvents => "/api/v1/tasks/{task_id}/events",
         }
     }
 
@@ -76,7 +83,8 @@ impl ControlPlaneOperation {
             | Self::GetCurrentInstallationAccess
             | Self::RevokeDeviceCredential
             | Self::ListTasks
-            | Self::GetTask => 200,
+            | Self::GetTask
+            | Self::StreamTaskEvents => 200,
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
@@ -102,8 +110,15 @@ impl ControlPlaneOperation {
 
 #[derive(Clone, Copy)]
 enum ControlPlaneRequestTarget<'a> {
-    TaskList { cursor: Option<&'a str>, limit: u16 },
-    TaskDetail(&'a str),
+    List {
+        cursor: Option<&'a str>,
+        limit: u16,
+    },
+    Detail(&'a str),
+    EventStream {
+        task_id: &'a str,
+        last_event_id: Option<u64>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -438,7 +453,7 @@ impl ControlPlaneClient {
                 Some(session.token()),
                 None,
                 None,
-                Some(ControlPlaneRequestTarget::TaskList { cursor, limit }),
+                Some(ControlPlaneRequestTarget::List { cursor, limit }),
             )
             .await?;
         parse_task_list(&response_body)
@@ -462,10 +477,115 @@ impl ControlPlaneClient {
                 Some(session.token()),
                 None,
                 None,
-                Some(ControlPlaneRequestTarget::TaskDetail(task_id)),
+                Some(ControlPlaneRequestTarget::Detail(task_id)),
             )
             .await?;
         parse_task_snapshot_body(&response_body)
+    }
+
+    pub async fn stream_task_events<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        last_event_id: Option<u64>,
+        stop_after: Option<u16>,
+    ) -> Result<TaskEventStreamResult, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(task_id)?;
+        if last_event_id.is_some_and(|sequence| sequence > MAX_CROSS_RUNTIME_SEQUENCE)
+            || stop_after.is_some_and(|limit| !(1..=100).contains(&limit))
+        {
+            return Err(protocol_invalid());
+        }
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let request_id = new_request_id()?;
+        let path = request_path(
+            ControlPlaneOperation::StreamTaskEvents,
+            Some(ControlPlaneRequestTarget::EventStream {
+                task_id,
+                last_event_id,
+            }),
+        )?;
+        let mut request = self
+            .client
+            .get(format!("{LOCAL_CONTROL_PLANE_ORIGIN}{path}"))
+            .timeout(Duration::from_secs(60))
+            .header(ACCEPT, "text/event-stream")
+            .header(REQUEST_ID_HEADER, &request_id)
+            .header(AUTHORIZATION, format!("Bearer {}", session.token()));
+        if let Some(sequence) = last_event_id {
+            request = request.header(LAST_EVENT_ID_HEADER, sequence.to_string());
+        }
+        let mut response = request
+            .send()
+            .await
+            .map_err(|_| transport_error(ControlPlaneOperation::StreamTaskEvents))?;
+        validate_sse_response_metadata(&request_id, &response)?;
+
+        let expected_start = last_event_id.unwrap_or(0) + 1;
+        let target_count = stop_after.map(usize::from);
+        let mut total_bytes = 0_usize;
+        let mut pending = Vec::new();
+        let mut events = Vec::new();
+        loop {
+            while let Some(frame_end) = sse_frame_end(&pending) {
+                if frame_end > MAX_SSE_FRAME_LENGTH {
+                    return Err(protocol_invalid());
+                }
+                let frame = pending.drain(..frame_end).collect::<Vec<_>>();
+                let event = parse_sse_frame(&frame, task_id, expected_start + events.len() as u64)?;
+                if let Some(event) = event {
+                    events.push(event);
+                    if target_count == Some(events.len()) {
+                        return Ok(TaskEventStreamResult {
+                            terminal: events
+                                .last()
+                                .is_some_and(|item| terminal_task_status(item.task_status())),
+                            events,
+                        });
+                    }
+                }
+            }
+            let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| transport_error(ControlPlaneOperation::StreamTaskEvents))?
+            else {
+                break;
+            };
+            total_bytes = total_bytes
+                .checked_add(chunk.len())
+                .ok_or_else(protocol_invalid)?;
+            if total_bytes > MAX_SSE_RESPONSE_LENGTH {
+                return Err(protocol_invalid());
+            }
+            pending.extend_from_slice(&chunk);
+            if sse_frame_end(&pending).is_none() && pending.len() > MAX_SSE_FRAME_LENGTH {
+                return Err(protocol_invalid());
+            }
+        }
+        while let Some(frame_end) = sse_frame_end(&pending) {
+            if frame_end > MAX_SSE_FRAME_LENGTH {
+                return Err(protocol_invalid());
+            }
+            let frame = pending.drain(..frame_end).collect::<Vec<_>>();
+            if let Some(event) =
+                parse_sse_frame(&frame, task_id, expected_start + events.len() as u64)?
+            {
+                events.push(event);
+            }
+        }
+        if !pending.is_empty() {
+            return Err(protocol_invalid());
+        }
+        let terminal = events
+            .last()
+            .is_some_and(|event| terminal_task_status(event.task_status()));
+        Ok(TaskEventStreamResult { events, terminal })
     }
 
     async fn execute(
@@ -547,7 +667,7 @@ fn request_path(
     match (operation, target) {
         (
             ControlPlaneOperation::ListTasks,
-            Some(ControlPlaneRequestTarget::TaskList { cursor, limit }),
+            Some(ControlPlaneRequestTarget::List { cursor, limit }),
         ) if (1..=100).contains(&limit) => {
             let mut path = format!("{}?limit={limit}", operation.path());
             if let Some(value) = cursor {
@@ -557,13 +677,30 @@ fn request_path(
             }
             Ok(path)
         }
-        (ControlPlaneOperation::GetTask, Some(ControlPlaneRequestTarget::TaskDetail(task_id))) => {
+        (ControlPlaneOperation::GetTask, Some(ControlPlaneRequestTarget::Detail(task_id))) => {
             require_canonical_uuid_v4(task_id)?;
             Ok(format!("/api/v1/tasks/{task_id}"))
         }
-        (ControlPlaneOperation::ListTasks | ControlPlaneOperation::GetTask, _) | (_, Some(_)) => {
-            Err(protocol_invalid())
+        (
+            ControlPlaneOperation::StreamTaskEvents,
+            Some(ControlPlaneRequestTarget::EventStream {
+                task_id,
+                last_event_id,
+            }),
+        ) => {
+            require_canonical_uuid_v4(task_id)?;
+            if last_event_id.is_some_and(|sequence| sequence > MAX_CROSS_RUNTIME_SEQUENCE) {
+                return Err(protocol_invalid());
+            }
+            Ok(format!("/api/v1/tasks/{task_id}/events"))
         }
+        (
+            ControlPlaneOperation::ListTasks
+            | ControlPlaneOperation::GetTask
+            | ControlPlaneOperation::StreamTaskEvents,
+            _,
+        )
+        | (_, Some(_)) => Err(protocol_invalid()),
         (_, None) => Ok(operation.path().to_owned()),
     }
 }
@@ -657,6 +794,184 @@ fn validate_response_metadata(
     Ok(())
 }
 
+fn validate_sse_response_metadata(
+    expected_request_id: &str,
+    response: &reqwest::Response,
+) -> Result<(), ControlPlaneError> {
+    let content_type_is_sse = header_text(response.headers(), CONTENT_TYPE.as_str())
+        .as_deref()
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
+    let cache_control = header_text(response.headers(), CACHE_CONTROL.as_str());
+    let has_cache_directives = ["no-store", "no-transform"].into_iter().all(|expected| {
+        cache_control
+            .as_deref()
+            .is_some_and(|value| value.split(',').any(|part| part.trim() == expected))
+    });
+    let buffering_disabled = header_text(response.headers(), "x-accel-buffering")
+        .is_some_and(|value| value.eq_ignore_ascii_case("no"));
+    if response.status().as_u16() != 200
+        || header_text(response.headers(), REQUEST_ID_HEADER).as_deref()
+            != Some(expected_request_id)
+        || !content_type_is_sse
+        || !has_cache_directives
+        || !buffering_disabled
+    {
+        let status = response.status().as_u16();
+        let code = if status == 401 {
+            ControlPlaneErrorCode::InstallationAccessDenied
+        } else if status == 200 {
+            ControlPlaneErrorCode::ProtocolInvalid
+        } else {
+            ControlPlaneErrorCode::RequestRejected
+        };
+        return Err(ControlPlaneError::new(code, status >= 500));
+    }
+    Ok(())
+}
+
+fn sse_frame_end(pending: &[u8]) -> Option<usize> {
+    let lf = pending
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| index + 2);
+    let crlf = pending
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4);
+    match (lf, crlf) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(end), None) | (None, Some(end)) => Some(end),
+        (None, None) => None,
+    }
+}
+
+fn valid_task_event_type(value: &str) -> bool {
+    matches!(
+        value,
+        "task.created"
+            | "task.validation_started"
+            | "task.validation_failed"
+            | "task.awaiting_platform_login"
+            | "task.awaiting_confirmation"
+            | "task.started"
+            | "step.started"
+            | "step.progress"
+            | "step.completed"
+            | "step.failed"
+            | "task.awaiting_human"
+            | "task.paused"
+            | "task.resumed"
+            | "task.cancelling"
+            | "task.cancelled"
+            | "task.completed"
+            | "task.partially_completed"
+            | "task.failed"
+            | "task.outcome_uncertain"
+    )
+}
+
+fn terminal_task_status(value: &str) -> bool {
+    matches!(
+        value,
+        "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "outcome_uncertain"
+    )
+}
+
+fn parse_task_event(
+    response: TaskEventResponse,
+    expected_task_id: &str,
+    expected_sequence: u64,
+) -> Result<TaskEvent, ControlPlaneError> {
+    require_canonical_uuid_v4(&response.task_id)?;
+    if response.task_id != expected_task_id
+        || response.sequence != expected_sequence
+        || response.sequence > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.event_version != "1.0"
+        || !valid_task_event_type(&response.event_type)
+        || response.task_revision == 0
+        || response.task_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || !valid_task_status(&response.task_status)
+    {
+        return Err(protocol_invalid());
+    }
+    if let Some(attempt_id) = response.execution_attempt_id.as_deref() {
+        require_canonical_uuid_v4(attempt_id)?;
+    }
+    if let Some(action_id) = response.action_id.as_deref() {
+        require_canonical_uuid_v4(action_id)?;
+        if response.execution_attempt_id.is_none() {
+            return Err(protocol_invalid());
+        }
+    }
+    if response
+        .progress_percent
+        .is_some_and(|progress| progress > 100)
+        || response.event_type != "step.progress" && response.progress_percent.is_some()
+    {
+        return Err(protocol_invalid());
+    }
+    let occurred_at = require_bounded_timestamp(&response.occurred_at)?;
+    let recorded_at = require_bounded_timestamp(&response.recorded_at)?;
+    if recorded_at < occurred_at
+        || response.message.as_deref().is_some_and(|message| {
+            message.is_empty()
+                || message.chars().count() > 1024
+                || message.chars().any(char::is_control)
+        })
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(TaskEvent {
+        sequence: response.sequence,
+        event_type: response.event_type,
+        task_revision: response.task_revision,
+        task_status: response.task_status,
+        progress_percent: response.progress_percent,
+    })
+}
+
+fn parse_sse_frame(
+    frame: &[u8],
+    expected_task_id: &str,
+    expected_sequence: u64,
+) -> Result<Option<TaskEvent>, ControlPlaneError> {
+    let text = std::str::from_utf8(frame).map_err(|_| protocol_invalid())?;
+    let mut identifier = None;
+    let mut event_name = None;
+    let mut data = None;
+    for line in text.lines() {
+        if line.is_empty() || line.starts_with(':') {
+            continue;
+        }
+        let (name, value) = line.split_once(':').ok_or_else(protocol_invalid)?;
+        let value = value.strip_prefix(' ').unwrap_or(value);
+        let target = match name {
+            "id" => &mut identifier,
+            "event" => &mut event_name,
+            "data" => &mut data,
+            _ => return Err(protocol_invalid()),
+        };
+        if target.replace(value).is_some() {
+            return Err(protocol_invalid());
+        }
+    }
+    if identifier.is_none() && event_name.is_none() && data.is_none() {
+        return Ok(None);
+    }
+    let identifier = identifier.ok_or_else(protocol_invalid)?;
+    let event_name = event_name.ok_or_else(protocol_invalid)?;
+    let data = data.ok_or_else(protocol_invalid)?;
+    if identifier != expected_sequence.to_string() {
+        return Err(protocol_invalid());
+    }
+    let response: TaskEventResponse = serde_json::from_str(data).map_err(|_| protocol_invalid())?;
+    if response.event_type != event_name {
+        return Err(protocol_invalid());
+    }
+    parse_task_event(response, expected_task_id, expected_sequence).map(Some)
+}
+
 fn parse_health_response(body: &[u8]) -> Result<ControlPlaneHealth, ControlPlaneError> {
     let response: HealthResponse = serde_json::from_slice(body)
         .map_err(|_| ControlPlaneError::new(ControlPlaneErrorCode::ProtocolInvalid, false))?;
@@ -700,6 +1015,68 @@ struct TaskSnapshotResponse {
 struct TaskListResponse {
     items: Vec<TaskSnapshotResponse>,
     next_cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskEventResponse {
+    task_id: String,
+    sequence: u64,
+    event_version: String,
+    event_type: String,
+    task_revision: u64,
+    task_status: String,
+    execution_attempt_id: Option<String>,
+    action_id: Option<String>,
+    progress_percent: Option<u8>,
+    occurred_at: String,
+    recorded_at: String,
+    message: Option<String>,
+}
+
+pub struct TaskEvent {
+    sequence: u64,
+    event_type: String,
+    task_revision: u64,
+    task_status: String,
+    progress_percent: Option<u8>,
+}
+
+impl TaskEvent {
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn event_type(&self) -> &str {
+        &self.event_type
+    }
+
+    pub fn task_revision(&self) -> u64 {
+        self.task_revision
+    }
+
+    pub fn task_status(&self) -> &str {
+        &self.task_status
+    }
+
+    pub fn progress_percent(&self) -> Option<u8> {
+        self.progress_percent
+    }
+}
+
+pub struct TaskEventStreamResult {
+    events: Vec<TaskEvent>,
+    terminal: bool,
+}
+
+impl TaskEventStreamResult {
+    pub fn events(&self) -> &[TaskEvent] {
+        &self.events
+    }
+
+    pub fn terminal(&self) -> bool {
+        self.terminal
+    }
 }
 
 pub struct CreatedTask {
@@ -1182,11 +1559,11 @@ mod tests {
     use super::{
         new_request_id, parse_created_task, parse_device_session, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, parse_task_list,
+        parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_list,
         parse_task_snapshot_body, request_path, require_idempotency_key, require_list_cursor,
-        required_credential, transport_error, validate_response_metadata, ControlPlaneErrorCode,
-        ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
-        ResponseMetadata,
+        required_credential, sse_frame_end, transport_error, validate_response_metadata,
+        ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
+        DeviceSessionCapability, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -1312,6 +1689,12 @@ mod tests {
                 "/api/v1/tasks/{task_id}",
                 200,
             ),
+            (
+                ControlPlaneOperation::StreamTaskEvents,
+                "GET",
+                "/api/v1/tasks/{task_id}/events",
+                200,
+            ),
         ];
 
         for (operation, method, path, success_status) in operations {
@@ -1325,7 +1708,7 @@ mod tests {
     fn task_query_targets_build_only_validated_fixed_paths() {
         let list_path = request_path(
             ControlPlaneOperation::ListTasks,
-            Some(ControlPlaneRequestTarget::TaskList {
+            Some(ControlPlaneRequestTarget::List {
                 cursor: Some("YWJj"),
                 limit: 20,
             }),
@@ -1335,31 +1718,118 @@ mod tests {
 
         let detail_path = request_path(
             ControlPlaneOperation::GetTask,
-            Some(ControlPlaneRequestTarget::TaskDetail(IDENTIFIER)),
+            Some(ControlPlaneRequestTarget::Detail(IDENTIFIER)),
         )
         .expect("valid detail target");
         assert_eq!(detail_path, format!("/api/v1/tasks/{IDENTIFIER}"));
+
+        let event_path = request_path(
+            ControlPlaneOperation::StreamTaskEvents,
+            Some(ControlPlaneRequestTarget::EventStream {
+                task_id: IDENTIFIER,
+                last_event_id: Some(42),
+            }),
+        )
+        .expect("valid Task event stream target");
+        assert_eq!(event_path, format!("/api/v1/tasks/{IDENTIFIER}/events"));
 
         for invalid in [
             request_path(ControlPlaneOperation::ListTasks, None),
             request_path(
                 ControlPlaneOperation::ListTasks,
-                Some(ControlPlaneRequestTarget::TaskList {
+                Some(ControlPlaneRequestTarget::List {
                     cursor: None,
                     limit: 0,
                 }),
             ),
             request_path(
                 ControlPlaneOperation::GetTask,
-                Some(ControlPlaneRequestTarget::TaskDetail("private-invalid")),
+                Some(ControlPlaneRequestTarget::Detail("private-invalid")),
             ),
             request_path(
                 ControlPlaneOperation::GetSystemHealth,
-                Some(ControlPlaneRequestTarget::TaskDetail(IDENTIFIER)),
+                Some(ControlPlaneRequestTarget::Detail(IDENTIFIER)),
+            ),
+            request_path(
+                ControlPlaneOperation::StreamTaskEvents,
+                Some(ControlPlaneRequestTarget::EventStream {
+                    task_id: IDENTIFIER,
+                    last_event_id: Some(1_u64 << 53),
+                }),
             ),
         ] {
             let error = invalid.expect_err("invalid target");
             assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+        }
+    }
+
+    #[test]
+    fn sse_parser_accepts_exact_contiguous_public_events_and_keepalive_comments() {
+        let data = serde_json::json!({
+            "actionId": null,
+            "eventType": "task.started",
+            "eventVersion": "1.0",
+            "executionAttemptId": IDENTIFIER,
+            "message": null,
+            "occurredAt": "2026-07-18T20:00:01.000000Z",
+            "progressPercent": null,
+            "recordedAt": "2026-07-18T20:00:01.000000Z",
+            "sequence": 1,
+            "taskId": IDENTIFIER,
+            "taskRevision": 2,
+            "taskStatus": "running"
+        });
+        let frame = format!("id: 1\nevent: task.started\ndata: {data}\n\n");
+        let parsed = parse_sse_frame(frame.as_bytes(), IDENTIFIER, 1)
+            .expect("valid SSE frame")
+            .expect("event frame");
+
+        assert_eq!(parsed.sequence(), 1);
+        assert_eq!(parsed.event_type(), "task.started");
+        assert_eq!(parsed.task_revision(), 2);
+        assert_eq!(parsed.task_status(), "running");
+        assert_eq!(parsed.progress_percent(), None);
+        assert!(parse_sse_frame(b": keep-alive\n\n", IDENTIFIER, 2)
+            .expect("valid keepalive")
+            .is_none());
+        assert_eq!(sse_frame_end(frame.as_bytes()), Some(frame.len()));
+        assert_eq!(
+            sse_frame_end(b": keep-alive\r\n\r\n"),
+            Some(b": keep-alive\r\n\r\n".len())
+        );
+        assert_eq!(sse_frame_end(b"id: 1\n"), None);
+    }
+
+    #[test]
+    fn sse_parser_rejects_gaps_malformed_fields_and_invalid_event_projection() {
+        let valid = serde_json::json!({
+            "actionId": null,
+            "eventType": "step.progress",
+            "eventVersion": "1.0",
+            "executionAttemptId": IDENTIFIER,
+            "message": "公开进度",
+            "occurredAt": "2026-07-18T20:00:01.000000Z",
+            "progressPercent": 50,
+            "recordedAt": "2026-07-18T20:00:01.000000Z",
+            "sequence": 2,
+            "taskId": IDENTIFIER,
+            "taskRevision": 3,
+            "taskStatus": "running"
+        });
+        let cases = [
+            format!("id: 3\nevent: step.progress\ndata: {valid}\n\n"),
+            format!("id: 2\nid: 2\nevent: step.progress\ndata: {valid}\n\n"),
+            format!("id: 2\nevent: step.started\ndata: {valid}\n\n"),
+            format!("id: 2\nevent: step.progress\nprivate: value\ndata: {valid}\n\n"),
+            "id: 2\nevent: step.progress\ndata: {}\n\n".to_owned(),
+        ];
+        for frame in cases {
+            let error = match parse_sse_frame(frame.as_bytes(), IDENTIFIER, 2) {
+                Err(error) => error,
+                Ok(_) => panic!("expected invalid SSE frame"),
+            };
+            assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+            assert!(!error.to_string().contains("private"));
         }
     }
 

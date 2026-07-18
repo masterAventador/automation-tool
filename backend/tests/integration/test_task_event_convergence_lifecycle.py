@@ -278,6 +278,7 @@ async def test_ordered_events_atomically_project_task_attempt_action_and_timelin
             TaskEventType.TASK_COMPLETED.value,
         ]
         assert [row["task_revision"] for row in event_rows] == [4, 5, 6, 7, 8]
+        assert [row["progress_percent"] for row in event_rows] == [None, None, 50, None, None]
         assert all(len(row["source_fingerprint"]) == 32 for row in event_rows)
         assert all(row["source_idempotency_key"] for row in event_rows)
     finally:

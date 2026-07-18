@@ -112,6 +112,87 @@ struct TaskQueryAcceptanceSummary {
 }
 
 #[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskEventStreamAcceptanceSummary {
+    installation_id: String,
+    task_id: String,
+    initial_sequences: Vec<u64>,
+    resumed_sequences: Vec<u64>,
+    terminal: bool,
+    progress_percent: Option<u8>,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn stream_task_events_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskEventStreamAcceptanceSummary, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T312_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T312_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let task = client
+        .create_task(&vault, "task:stream:tauri-acceptance")
+        .await
+        .map_err(map_control_plane_error)?;
+    let initial = client
+        .stream_task_events(&vault, task.task_id(), None, Some(2))
+        .await
+        .map_err(map_control_plane_error)?;
+    let last_event_id = initial
+        .events()
+        .last()
+        .map(control_plane::TaskEvent::sequence)
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })?;
+    let resumed = client
+        .stream_task_events(&vault, task.task_id(), Some(last_event_id), None)
+        .await
+        .map_err(map_control_plane_error)?;
+    let progress_percent = resumed
+        .events()
+        .iter()
+        .find(|event| event.event_type() == "step.progress")
+        .and_then(control_plane::TaskEvent::progress_percent);
+
+    Ok(TaskEventStreamAcceptanceSummary {
+        installation_id: registration.installation_id().to_owned(),
+        task_id: task.task_id().to_owned(),
+        initial_sequences: initial
+            .events()
+            .iter()
+            .map(control_plane::TaskEvent::sequence)
+            .collect(),
+        resumed_sequences: resumed
+            .events()
+            .iter()
+            .map(control_plane::TaskEvent::sequence)
+            .collect(),
+        terminal: resumed.terminal(),
+        progress_percent,
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
 async fn query_tasks_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -417,7 +498,8 @@ pub fn run() {
         run_control_plane_acceptance,
         register_installation_for_revocation_acceptance,
         create_task_for_acceptance,
-        query_tasks_for_acceptance
+        query_tasks_for_acceptance,
+        stream_task_events_for_acceptance
     ]);
 
     builder

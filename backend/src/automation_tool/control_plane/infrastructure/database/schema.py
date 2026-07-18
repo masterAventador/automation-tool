@@ -535,6 +535,7 @@ task_events = Table(
     Column("source_message_id", UUID(as_uuid=True), nullable=True),
     Column("source_idempotency_key", String(), nullable=False),
     Column("source_fingerprint", LargeBinary(length=32), nullable=False),
+    Column("progress_percent", BigInteger(), nullable=True),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
     Column(
         "recorded_at",
@@ -582,6 +583,11 @@ task_events = Table(
     CheckConstraint(
         "octet_length(source_fingerprint) = 32",
         name="ck_task_events_source_fingerprint_length",
+    ),
+    CheckConstraint(
+        "progress_percent is null or "
+        "(event_type = 'step.progress' and progress_percent between 0 and 100)",
+        name="ck_task_events_progress_percent",
     ),
     CheckConstraint(
         "action_id is null or execution_attempt_id is not null",

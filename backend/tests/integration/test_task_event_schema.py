@@ -35,7 +35,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0007"
-HEAD_REVISION = "20260718_0011"
+HEAD_REVISION = "20260718_0012"
 NOW = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)
 EXPECTED_EVENT_COLUMNS = {
     "task_id",
@@ -50,6 +50,7 @@ EXPECTED_EVENT_COLUMNS = {
     "source_message_id",
     "source_idempotency_key",
     "source_fingerprint",
+    "progress_percent",
     "occurred_at",
     "recorded_at",
     "safe_message",
@@ -69,6 +70,7 @@ EXPECTED_EVENT_CONSTRAINTS = {
     "ck_task_events_source_message_uuid_v4",
     "ck_task_events_source_idempotency_key",
     "ck_task_events_source_fingerprint_length",
+    "ck_task_events_progress_percent",
     "ck_task_events_action_requires_attempt",
     "ck_task_events_time_order",
     "ck_task_events_safe_message",
@@ -321,6 +323,7 @@ async def test_event_defaults_scope_and_task_snapshot_watermark_are_persisted(
                             source_message_id=source_message_id,
                             source_idempotency_key="task:event:progress:1",
                             source_fingerprint=b"p" * 32,
+                            progress_percent=50,
                             occurred_at=NOW,
                             safe_message="正在处理第 1 个目标",
                         )
@@ -349,6 +352,7 @@ async def test_event_defaults_scope_and_task_snapshot_watermark_are_persisted(
         assert created["event_version"] == TaskEventVersion.V1.value
         assert created["recorded_at"].tzinfo is not None
         assert created["recorded_at"] >= created["occurred_at"]
+        assert created["progress_percent"] == 50
         assert projection == {
             "status": TaskStatus.RUNNING.value,
             "revision": 4,
@@ -434,6 +438,9 @@ async def test_event_constraints_reject_invalid_scope_version_projection_time_an
             {"task_revision": 0},
             {"task_status": "unknown"},
             {"source_message_id": UUID("123e4567-e89b-12d3-a456-426614174000")},
+            {"progress_percent": -1},
+            {"progress_percent": 101},
+            {"progress_percent": 50},
             {"recorded_at": NOW - timedelta(microseconds=1)},
             {"safe_message": ""},
             {"safe_message": "x" * 1025},

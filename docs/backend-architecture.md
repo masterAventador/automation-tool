@@ -372,7 +372,13 @@ T3-11 将 `TaskEventEnvelope` 纳入 bound WebSocket 消息，但不混入 heart
 
 PostgreSQL 仓储按 Installation + Task 锁行，要求事件 sequence 恰好等于 `last_event_sequence + 1`。`source_message_id`、`source_idempotency_key` 任一命中且 32 字节稳定意图指纹一致时幂等返回当前快照；key 冲突、同 sequence 不同事实、缺口和非精确迟到均拒绝，不缓存乱序事件。合法事件在同一事务内插入 `task_events`，Task 每条事件都以 revision/watermark CAS 前进；Attempt/Action 只在明确状态变化时各自 CAS 增 revision，并使用服务端接收时间写 started/finished。任一 scope、状态、时间、唯一约束或写入失败使整笔事务回滚。
 
-WebSocket 对收敛拒绝使用固定 4406，对数据库不可用/内部失败使用固定 1011，日志不包含 wire、payload 或底层异常文本。`20260718_0011` 对旧事件回填受限幂等键和 32 字节指纹后再设非空/唯一约束，可完整降级而不删除事件事实。真实验收由 FakeExecutor 成功场景经 Session、Outbox 和 Uvicorn 发送五条事件，数据库最终形成连续 sequence/revision 与一致 Task/Attempt 终态；T3-12 只能从这些已提交事实构建 SSE，不能先推送后落库。
+WebSocket 对收敛拒绝使用固定 4406，对数据库不可用/内部失败使用固定 1011，日志不包含 wire、payload 或底层异常文本。`20260718_0011` 对旧事件回填受限幂等键和 32 字节指纹后再设非空/唯一约束，可完整降级而不删除事件事实。真实验收由 FakeExecutor 成功场景经 Session、Outbox 和 Uvicorn 发送五条事件，数据库最终形成连续 sequence/revision 与一致 Task/Attempt 终态。
+
+T3-12 的 `TaskEventStreamService` 只解析规范 Task ID、标准十进制 `Last-Event-ID` 和有界 batch，并核对仓储返回的 Task、连续 sequence 与 watermark；未知、非法和跨 Installation Task 保持不可区分。`SqlAlchemyTaskEventStreamRepository` 用单条 outer-join 查询从一个 PostgreSQL MVCC statement snapshot 同时得到当前 Task status/watermark 与其后最多 100 条事件，所以收敛事务提交前，事件行和 Task 投影都不会进入 SSE；它不订阅进程内队列，也不把轮询结果缓存成第二事实源。
+
+`GET /api/v1/tasks/{task_id}/events` 复用精确 `app.control-plane` Session。每帧 `id` 就是持久 sequence，`event` 是封闭事件类型，`data` 只包含公开 Task/Attempt/Action ID、版本、类型、revision/status、结构化 `progressPercent`、UTC 时间与安全消息；来源 message/idempotency/fingerprint 永不出站。迁移 `20260718_0012` 只增加受事件类型和 `0..100` 约束的 nullable `progress_percent` 明确列，不保存 Executor 任意 payload。
+
+SSE 空闲时发送不改变水位的 comment keepalive；追平终态 watermark 后关闭。非终态连接最多 55 秒主动轮换，使 Rust App 重新换取短期 Session 并携带相同 Last-Event-ID 续接；响应开始后数据库异常只安全断流，不能再伪造 JSON 503 或事件。响应固定 `no-store, no-transform`、禁代理缓冲和有界公开帧。真实验收由唯一 `visible=false` Tauri/WKWebView 通过正式 Rust 客户端先读取 1、2 并断线，再用新 App Session 从 2 续拉 3、4、5 到终态；FakeExecutor 同时走正式 Executor Session/WebSocket。
 
 ### 10.2 命令
 
@@ -515,7 +521,7 @@ T3-06 用迁移 `20260718_0010` 把创建幂等固定为 Task 的持久事实：
 
 `POST /api/v1/tasks` 是第一个 Task 业务入口。它必须经过 `require_current_installation_access` 取得服务端认证的强类型 scope，只接受精确空 JSON 骨架和必填 `Idempotency-Key`；第一次创建返回 201，重放返回相同公开快照和 200。响应不含幂等键、凭据、Session、模板或任意 payload。模板/平台字段归 T3-17；查询与分页已由 T3-07 单独建立，不能把不受约束 JSON 塞入创建 API。
 
-T3-07 建立同一 scope 下的 Task 只读边界。`GET /api/v1/tasks` 按 `(updated_at DESC, id DESC)` 使用 PostgreSQL keyset 查询并多取一行决定下一页，避免 offset 在并发写入下重复或跳项；opaque cursor 只编码规范 UTC 微秒时间与 Task UUIDv4，并要求 canonical JSON/Base64URL 往返一致。`GET /api/v1/tasks/{task_id}` 将非法 ID、未知 Task 和其他 Installation 的 Task 收敛成相同 404。两条路由只返回 taskId/status/revision/createdAt/updatedAt，统一 `no-store`；任何 cursor、scope 或仓储输入失败不回显原值。T3-12/T3-15 后续读取同一权威快照，不能另建客户端事实源。
+T3-07 建立同一 scope 下的 Task 只读边界。`GET /api/v1/tasks` 按 `(updated_at DESC, id DESC)` 使用 PostgreSQL keyset 查询并多取一行决定下一页，避免 offset 在并发写入下重复或跳项；opaque cursor 只编码规范 UTC 微秒时间与 Task UUIDv4，并要求 canonical JSON/Base64URL 往返一致。`GET /api/v1/tasks/{task_id}` 将非法 ID、未知 Task 和其他 Installation 的 Task 收敛成相同 404。两条路由只返回 taskId/status/revision/createdAt/updatedAt，统一 `no-store`；任何 cursor、scope 或仓储输入失败不回显原值。T3-12 的 SSE 已读取同一权威快照和事件水位；T3-15 必须消费这两类事实，不能另建客户端事实源。
 
 T3-03 的 `execution_attempts` 为一次任务投递与执行事实分配独立 UUIDv4 和正 `attempt_number`。状态闭集为 pending、offered、accepted、running、paused、awaiting_human、cancelling，以及 succeeded、partially_succeeded、failed、cancelled、rejected、expired、outcome_uncertain 七个终态；终态必须带 `finished_at`，非终态禁止提前带完成时间。`(task_id, attempt_number)` 不可重复，部分唯一索引保证同一 Task 最多存在一个非终态 Attempt；完成后重试必须保留旧行并使用新序号。
 
@@ -588,7 +594,6 @@ POST /api/v1/tasks/{task_id}/cancel
 POST /api/v1/tasks/{task_id}/emergency-stop
 POST /api/v1/tasks/{task_id}/resolve-uncertain
 GET  /api/v1/tasks/{task_id}/events
-GET  /api/v1/tasks/{task_id}/events/stream
 ```
 
 ### 平台状态与诊断
@@ -610,7 +615,7 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和 Task 创建/列表/详情，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和 Task 创建/列表/详情/事件 SSE，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 
@@ -619,7 +624,7 @@ MVP/Demo 使用单个 Control Plane 实例：
 - Executor WebSocket 连接保存在当前 API 进程；
 - Registry 以 Installation 为单活键，心跳只更新不含秘密的瞬时在线投影；
 - 所有事件先持久化 PostgreSQL，再推送给 SSE 客户端；
-- App 断线后从数据库快照与最后事件序号恢复；
+- App 断线后用标准 Last-Event-ID 从数据库最后已消费序号恢复；
 - 进程重启丢失连接不丢事件，Executor 自动重连并重新声明未完成 attempt；
 - 不把进程内队列当成唯一事实源。
 

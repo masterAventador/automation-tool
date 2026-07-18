@@ -78,6 +78,8 @@ T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task
 
 T3-07 在该 Rust client 中增加 `ListTasks` 与 `GetTask` 两个封闭 operation。列表只允许固定 `/api/v1/tasks`、`1..100` limit 和长度受限的 canonical Base64URL cursor；详情先把 Task ID 验证为规范 UUIDv4 才构造固定路径。Rust 只暴露不可变公开 Task 快照和分页对象，并复核 16 态枚举、正 revision、UTC 时间、列表降序及 cursor 形状；跨 Installation 详情只得到统一拒绝。当前生产 React 仍无通用查询 Command，T3-15/T3-16 应通过窄投影接口消费；T3-07 已由唯一 `visible=false` App 经正式 Rust 桥、真实 FastAPI/PostgreSQL 完成 2+1 分页、详情与跨 scope 不可见验收。
 
+T3-12 在同一个正式 Rust client 中增加 `StreamTaskEvents`：路径只能由规范 Task UUID 构造，Rust 自行从 App 私有 vault 换取 `app.control-plane` Session 并注入 Bearer，支持标准 `Last-Event-ID`，限制单连接 512 KiB、单帧 64 KiB 和验收用有界停止数。解析器要求 `text/event-stream`、匹配 request ID、`no-store/no-transform`、禁代理缓冲，以及唯一 id/event/data 字段；公开 DTO 再核对连续安全整数序号、`1.0` 版本、封闭事件/Task 状态、UUIDv4、UTC 时间、进度与消息边界。React/IPC 不接触 Session、Header 或原始 SSE 文本。唯一 `visible=false` App 已从事件到达前建立连接，读完 1、2 后断开并以新 Session 从 2 续拉 3、4、5 到终态；T3-15 再把该正式 Rust 事件源映射到 Tauri Channel 与 reducer，而不是重新用 WebView EventSource。
+
 ### 4.2 Feature 层
 
 第一期 Feature：

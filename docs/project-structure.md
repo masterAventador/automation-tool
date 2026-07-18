@@ -104,7 +104,7 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
-│   │   ├── control_plane.rs       # 固定 origin、operation allowlist 与凭据注入
+│   │   ├── control_plane.rs       # 固定 origin、operation allowlist、凭据注入与 SSE 严格解析
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
 │   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
@@ -120,7 +120,8 @@ frontend/
 │   ├── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
 │   ├── tauri.installation-revocation-e2e.conf.json # 后台隐藏的吊销验收
 │   ├── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
-│   └── tauri.task-query-e2e.conf.json # 后台隐藏的 Task 查询验收
+│   ├── tauri.task-query-e2e.conf.json # 后台隐藏的 Task 查询验收
+│   └── tauri.task-event-stream-e2e.conf.json # 后台隐藏的 SSE 断线续拉验收
 ├── public/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -131,6 +132,7 @@ frontend/
 ├── wdio.installation-revocation.conf.ts
 ├── wdio.task-creation.conf.ts
 ├── wdio.task-query.conf.ts
+├── wdio.task-event-stream.conf.ts
 ├── tsconfig.json
 └── README.md
 ```
@@ -218,6 +220,8 @@ T3-09 的具体落点保持分层：`application/task_command_delivery.py` 定�
 T3-10 的 `executor/fake.py` 只依赖共享 `protocol/`，以正式 command envelope 驱动确定性无副作用场景并保存进程内回放账本；`fake_client.py` 只负责正式 WebSocket 传输。它们不能导入 `control_plane/`、RPA Adapter、文件系统、子进程或数据库，也不能替代 Wave 4 正式 Executor 的本机持久幂等账本、生命周期监管和真实平台实现。
 
 T3-11 的 `application/task_event_convergence.py` 只做正式 TaskEvent payload 收窄、领域映射、deadline 和安全错误分类；`infrastructure/database/task_event_convergence_repository.py` 是唯一原子落库与 Task/Attempt/显式 Action 投影入口；`bootstrap/task_events.py` 只装配依赖；`api/executor_websocket.py` 仍是唯一生产接收入口。迁移 `20260718_0011` 只增加持久重放身份，不引入事件 JSON、队列、缓存或第二套状态机。
+
+T3-12 的 `application/task_event_stream.py` 定义公开事件记录、batch/watermark 不变量和 Last-Event-ID 用例；`infrastructure/database/task_event_stream_repository.py` 只从 PostgreSQL 已提交事实读取；`bootstrap/task_event_stream.py` 装配依赖；`api/task_event_stream.py` 负责固定 SSE 帧、keepalive、终态/限时关闭和安全错误映射。迁移 `20260718_0012` 只增加结构化进度列。桌面侧正式解析放在既有 `frontend/src-tauri/src/control_plane.rs`，T3-12 专用 `visible=false` 配置、WDIO spec 和编排脚本仅用于真实入口验收；T3-15 再接 Tauri Channel/React reducer，不在本任务创建第二个前端数据源。
 
 ### 4.1 Backend 依赖方向
 

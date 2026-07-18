@@ -197,7 +197,7 @@
 | T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ✅ 已完成 |
 | T3-10 | FakeExecutor | 无副作用回放全部任务与控制事件；不放宽生产状态机 | T3-09 | ✅ 已完成 |
 | T3-11 | 事件接收与收敛 | sequence、重复、缺口、迟到事件和 revision CAS | T3-04,T3-10 | ✅ 已完成 |
-| T3-12 | SSE 事件流 | last-event/断线/重连/终态关闭；事件先落库后推送 | T3-11 | ⬜ 未开始 |
+| T3-12 | SSE 事件流 | last-event/断线/重连/终态关闭；事件先落库后推送 | T3-11 | ✅ 已完成 |
 | T3-13 | 暂停/恢复 API | 命令与确认语义；未确认不能提前改状态 | T3-09,T3-11 | ⬜ 未开始 |
 | T3-14 | 取消/紧停 API | CANCELLING、确认、结果不确定和幂等 | T3-13 | ⬜ 未开始 |
 | T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ⬜ 未开始 |
@@ -1170,10 +1170,28 @@
 - 文档：同步根/Backend README、后端架构、工程结构、本路线图状态/完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-12 必须只推送已提交事件并支持 Last-Event-ID/断线续拉；T3-13/T3-14 先持久命令再等待本收敛入口确认状态；T3-17 再建立真实抖音 Action/模板，不把 Fake payload 扩成任意 JSON
 
+### T3-12 SSE 事件流
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先把台账置为 RED 并新增 Last-Event-ID、终态/分批、gap/错 Task/超前水位、公开模型和安全错误测试；`uv run pytest tests/unit/control_plane/test_task_event_stream_service.py -q` 因 `application.task_event_stream` 不存在而收集失败。随后新增真实 PostgreSQL 已提交/未提交可见性测试，因 `SqlAlchemyTaskEventStreamRepository` 不存在而收集失败；HTTP 契约因路由和 App factory 注入缺失 8 项失败。补产品入口时再先新增隐藏 App 工程契约，因专用 `visible=false` 配置不存在而 RED
+- GREEN：SSE 应用、API、PostgreSQL 仓储和 bootstrap 共 219 条语句/48 个分支，45 项定向测试覆盖率 100%；Backend 全量 727 项、3679 条语句/694 个分支覆盖率 100%。Rust 单元 37 项、共享协议 3 项、配置安全 6 项全部通过；Ruff/格式、严格 Mypy、Cargo test/fmt、全特性 Clippy、Frontend lint/type、OpenAPI 与生成 DTO 漂移检查通过
+- 持久模型：新增可回滚 `20260718_0012`，只为 `task_events` 增加 nullable `progress_percent` 明确列，并以数据库约束限制为 `step.progress` 的 `0..100`；正式 T3-11 收敛入口保存已经 strict-int 验证的值，不引入任意 JSON、Executor 原文或页面内容
+- 已提交边界：`SqlAlchemyTaskEventStreamRepository` 用单条 PostgreSQL outer-join/MVCC statement 同时读取 Installation-scoped Task status/watermark 和其后最多 100 条事件；独立 writer 事务提交前，事件行和 Task 终态投影均不可见。流不依赖进程内队列、LISTEN 缓存或 WebSocket 内存状态，服务重启后仍从同一事实续拉
+- 顺序与恢复：标准 `Last-Event-ID` 只接受规范十进制 `0..2^53-1`；每批第一条必须等于 cursor+1，后续连续且属于同 Task。超前水位返回 422，未知/非法/跨 Installation Task 统一 404，已落水位前出现空洞或错 scope 结果固定 503；不缓存乱序事件
+- SSE 语义：帧 `id` 等于持久 sequence，`event` 等于封闭事件类型，`data` 只含公开 Task/Attempt/Action ID、版本/类型、revision/status、结构化进度、UTC 时间和安全消息；来源 message/idempotency/fingerprint 不出站。响应固定 `no-store, no-transform`、禁代理缓冲，15 秒 comment keepalive；追平终态水位立即关闭，非终态连接最多 55 秒轮换以便重新换票。响应开始后的失败只断流，不伪造半途 JSON 错误
+- Rust 正式入口：既有 `ControlPlaneClient` 增加固定 Task SSE operation；自己从 App 私有 vault 换取 `app.control-plane` Session，禁止任意 URL、重定向和代理，限制单连接 512 KiB/单帧 64 KiB，并验证 request ID、SSE content type/cache 头、唯一 id/event/data、连续序号、版本、事件/状态词汇、UUIDv4、UTC 时间、进度和消息边界。React/IPC 不接触长期凭据、Session、Header 或原始 SSE wire
+- 产品同路径验收：`uv run python ../scripts/run_t3_12_acceptance.py` 后台启动隔离 PostgreSQL 18.4、完整 Alembic、真实 Uvicorn/SansIO 和唯一 `visible=false` Tauri/WKWebView。隐藏 App 经正式 Rust 桥注册、创建 Task，并在事件到达前建立 SSE；FakeExecutor 经正式 Executor Session/WebSocket 产生五条事件。App 读取 1、2 后主动断开，以新 App Session 和 `Last-Event-ID: 2` 续拉 3、4、5，核对 progress 50、连续 revision/类型和终态关闭；数据库最终为 succeeded/revision 6/watermark 5
+- App 后台边界：唯一自动化主窗口固定 `visible=false`，全程后台运行、不弹窗、不抢焦点；production `tauri.conf.json` 仍正常可见。SSE 请求确实由真实 App/Rust 发出，不以 TestClient、mock、浏览器 Harness 或 Python HTTP 客户端冒充产品入口
+- 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和全部端口；没有浏览器、WebDriver、Profile、RPA、文件或社交平台副作用遗留
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图状态/完成记录和当前下一步；OpenAPI 与 `openapi-typescript` 同提交更新，没有新增重复规划文档
+- 遗留：T3-13/T3-14 建立控制命令 API；T3-15 把现有 Rust 事件源接入 Tauri Channel 与 React 快照 reducer，处理版本降级/缺口回拉，不在 WebView 重新持有 Session 或建立第二条 EventSource
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-12`：建立先落库后推送、支持断线续拉的 SSE 事件流；
-2. `T3-13`：建立暂停/恢复 API 与命令确认语义；
+1. `T3-13`：建立暂停/恢复 API 与命令确认语义；
+2. `T3-14`：建立取消/紧停 API、CANCELLING 和结果不确定语义；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

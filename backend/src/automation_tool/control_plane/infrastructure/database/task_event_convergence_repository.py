@@ -389,6 +389,7 @@ class SqlAlchemyTaskEventConvergenceRepository:
                         source_message_id=message_id,
                         source_idempotency_key=str(message.idempotency_key),
                         source_fingerprint=pending.source_fingerprint,
+                        progress_percent=pending.progress_percent,
                         occurred_at=message.sent_at,
                         recorded_at=pending.received_at,
                         safe_message=None,

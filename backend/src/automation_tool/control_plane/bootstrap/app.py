@@ -25,6 +25,7 @@ from automation_tool.control_plane.api.installation_access import (
 )
 from automation_tool.control_plane.api.registrations import router as registration_router
 from automation_tool.control_plane.api.system import router as system_router
+from automation_tool.control_plane.api.task_event_stream import router as task_event_stream_router
 from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
@@ -41,6 +42,7 @@ from automation_tool.control_plane.application.task_command_delivery import (
 from automation_tool.control_plane.application.task_event_convergence import (
     TaskEventConvergenceService,
 )
+from automation_tool.control_plane.application.task_event_stream import TaskEventStreamService
 from automation_tool.control_plane.application.task_queries import TaskQueryService
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
@@ -55,6 +57,9 @@ from automation_tool.control_plane.bootstrap.registration import (
 )
 from automation_tool.control_plane.bootstrap.task_commands import (
     task_command_delivery_service as build_task_command_delivery_service,
+)
+from automation_tool.control_plane.bootstrap.task_event_stream import (
+    task_event_stream_service as build_task_event_stream_service,
 )
 from automation_tool.control_plane.bootstrap.task_events import (
     task_event_convergence_service as build_task_event_convergence_service,
@@ -81,6 +86,14 @@ def _positive_finite_seconds(value: object) -> float:
         raise ValueError("Executor connection timeouts must be positive")
     if not isfinite(value) or value <= 0:
         raise ValueError("Executor connection timeouts must be positive")
+    return float(value)
+
+
+def _positive_finite_stream_seconds(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (float, int)):
+        raise ValueError("Task event stream timing must be positive")
+    if not isfinite(value) or value <= 0:
+        raise ValueError("Task event stream timing must be positive")
     return float(value)
 
 
@@ -113,8 +126,12 @@ def create_app(
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
     task_event_convergence_service: TaskEventConvergenceService | None = None,
+    task_event_stream_service: TaskEventStreamService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
+    task_event_stream_poll_interval_seconds: float = 0.25,
+    task_event_stream_keepalive_interval_seconds: float = 15.0,
+    task_event_stream_max_connection_seconds: float = 55.0,
 ) -> FastAPI:
     """Create an isolated Control Plane application instance."""
 
@@ -132,6 +149,7 @@ def create_app(
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
     resolved_task_event_convergence_service = task_event_convergence_service
+    resolved_task_event_stream_service = task_event_stream_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -159,9 +177,20 @@ def create_app(
         resolved_task_event_convergence_service = build_task_event_convergence_service(
             resolved_database
         )
+    if resolved_task_event_stream_service is None and isinstance(resolved_database, Database):
+        resolved_task_event_stream_service = build_task_event_stream_service(resolved_database)
     hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
     recheck_interval_seconds = _positive_finite_seconds(
         executor_connection_recheck_interval_seconds
+    )
+    stream_poll_interval_seconds = _positive_finite_stream_seconds(
+        task_event_stream_poll_interval_seconds
+    )
+    stream_keepalive_interval_seconds = _positive_finite_stream_seconds(
+        task_event_stream_keepalive_interval_seconds
+    )
+    stream_max_connection_seconds = _positive_finite_stream_seconds(
+        task_event_stream_max_connection_seconds
     )
 
     app = FastAPI(
@@ -180,8 +209,12 @@ def create_app(
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
     app.state.task_event_convergence_service = resolved_task_event_convergence_service
+    app.state.task_event_stream_service = resolved_task_event_stream_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
+    app.state.task_event_stream_poll_interval_seconds = stream_poll_interval_seconds
+    app.state.task_event_stream_keepalive_interval_seconds = stream_keepalive_interval_seconds
+    app.state.task_event_stream_max_connection_seconds = stream_max_connection_seconds
     install_request_context(app)
     register_error_handlers(app)
     app.include_router(system_router)
@@ -189,6 +222,7 @@ def create_app(
     app.include_router(device_credential_router)
     app.include_router(device_session_router)
     app.include_router(installation_access_router)
+    app.include_router(task_event_stream_router)
     app.include_router(task_router)
     app.include_router(executor_websocket_router)
     return app

@@ -7,9 +7,10 @@ from automation_tool.control_plane import create_app
 from automation_tool.control_plane.application.task_event_convergence import (
     TaskEventConvergenceService,
 )
+from automation_tool.control_plane.application.task_event_stream import TaskEventStreamService
 from automation_tool.control_plane.infrastructure.database import Database
 
-HEAD_REVISION = "20260718_0011"
+HEAD_REVISION = "20260718_0012"
 
 
 @pytest.mark.asyncio
@@ -46,6 +47,7 @@ def test_health_checks_a_real_postgresql_connection(postgresql_url: str) -> None
     app = create_app(database=database)
 
     assert isinstance(app.state.task_event_convergence_service, TaskEventConvergenceService)
+    assert isinstance(app.state.task_event_stream_service, TaskEventStreamService)
     with TestClient(app) as client:
         response = client.get("/api/v1/health")
 
