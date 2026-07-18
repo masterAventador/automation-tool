@@ -31,6 +31,7 @@ const MAX_CROSS_RUNTIME_SEQUENCE: u64 = (1_u64 << 53) - 1;
 enum ControlPlaneOperation {
     GetSystemHealth,
     GetCurrentInstallationAccess,
+    GetWorkbenchStatus,
     IssueInstallationRegistrationChallenge,
     CompleteInstallationRegistration,
     RotateDeviceCredential,
@@ -51,6 +52,7 @@ impl ControlPlaneOperation {
         match self {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
+            | Self::GetWorkbenchStatus
             | Self::ListTasks
             | Self::GetTask
             | Self::StreamTaskEvents => "GET",
@@ -71,6 +73,7 @@ impl ControlPlaneOperation {
         match self {
             Self::GetSystemHealth => "/api/v1/health",
             Self::GetCurrentInstallationAccess => "/api/v1/installations/current",
+            Self::GetWorkbenchStatus => "/api/v1/workbench/status",
             Self::IssueInstallationRegistrationChallenge => {
                 "/api/v1/installations/registration-challenges"
             }
@@ -93,6 +96,7 @@ impl ControlPlaneOperation {
         match self {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
+            | Self::GetWorkbenchStatus
             | Self::RevokeDeviceCredential
             | Self::ListTasks
             | Self::GetTask
@@ -449,6 +453,28 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_created_task(&response_body)
+    }
+
+    pub async fn get_workbench_status<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<WorkbenchRuntimeStatus, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::GetWorkbenchStatus,
+                Some(session.token()),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_workbench_status(&response_body)
     }
 
     pub async fn list_tasks<S>(
@@ -1189,6 +1215,14 @@ struct TaskSnapshotResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkbenchStatusResponse {
+    control_plane_status: String,
+    executor_status: String,
+    executor_last_heartbeat_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskControlResponse {
     command_id: String,
     task_id: String,
@@ -1269,6 +1303,8 @@ pub struct TaskEventStreamResult {
     terminal: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskControlCommand {
     command_id: String,
     task_id: String,
@@ -1276,6 +1312,14 @@ pub struct TaskControlCommand {
     sequence: u64,
     command_type: String,
     status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkbenchRuntimeStatus {
+    control_plane_status: String,
+    executor_status: String,
+    executor_last_heartbeat_at: Option<String>,
 }
 
 impl TaskControlCommand {
@@ -1450,6 +1494,25 @@ fn parse_task_snapshot(response: TaskSnapshotResponse) -> Result<TaskSnapshot, C
         created_at: response.created_at,
         updated_at: response.updated_at,
         updated_at_value: updated_at,
+    })
+}
+
+fn parse_workbench_status(body: &[u8]) -> Result<WorkbenchRuntimeStatus, ControlPlaneError> {
+    let response: WorkbenchStatusResponse = parse_exact_json(body)?;
+    let online = response.executor_status == "online";
+    if response.control_plane_status != "ready"
+        || !matches!(response.executor_status.as_str(), "online" | "offline")
+        || online != response.executor_last_heartbeat_at.is_some()
+    {
+        return Err(protocol_invalid());
+    }
+    if let Some(timestamp) = response.executor_last_heartbeat_at.as_deref() {
+        require_bounded_timestamp(timestamp)?;
+    }
+    Ok(WorkbenchRuntimeStatus {
+        control_plane_status: response.control_plane_status,
+        executor_status: response.executor_status,
+        executor_last_heartbeat_at: response.executor_last_heartbeat_at,
     })
 }
 
@@ -1857,9 +1920,9 @@ mod tests {
         new_request_id, parse_created_task, parse_device_session, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
         parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
-        parse_task_list, parse_task_snapshot_body, request_path, require_idempotency_key,
-        require_list_cursor, required_credential, sse_frame_end, transport_error,
-        validate_response_metadata, ControlPlaneErrorCode, ControlPlaneOperation,
+        parse_task_list, parse_task_snapshot_body, parse_workbench_status, request_path,
+        require_idempotency_key, require_list_cursor, required_credential, sse_frame_end,
+        transport_error, validate_response_metadata, ControlPlaneErrorCode, ControlPlaneOperation,
         ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
@@ -1936,6 +1999,12 @@ mod tests {
                 ControlPlaneOperation::GetCurrentInstallationAccess,
                 "GET",
                 "/api/v1/installations/current",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetWorkbenchStatus,
+                "GET",
+                "/api/v1/workbench/status",
                 200,
             ),
             (
@@ -2610,6 +2679,51 @@ mod tests {
     }
 
     #[test]
+    fn workbench_status_parser_accepts_only_exact_public_runtime_state() {
+        let online = serde_json::json!({
+            "controlPlaneStatus": "ready",
+            "executorStatus": "online",
+            "executorLastHeartbeatAt": "2026-07-18T22:30:00.000000Z"
+        });
+        let parsed =
+            parse_workbench_status(&serde_json::to_vec(&online).expect("workbench status JSON"))
+                .expect("valid workbench status");
+        assert_eq!(
+            serde_json::to_value(parsed).expect("public workbench status JSON"),
+            online
+        );
+
+        for invalid in [
+            serde_json::json!({
+                "controlPlaneStatus": "private",
+                "executorStatus": "offline",
+                "executorLastHeartbeatAt": null
+            }),
+            serde_json::json!({
+                "controlPlaneStatus": "ready",
+                "executorStatus": "online",
+                "executorLastHeartbeatAt": null
+            }),
+            serde_json::json!({
+                "controlPlaneStatus": "ready",
+                "executorStatus": "offline",
+                "executorLastHeartbeatAt": "2026-07-18T22:30:00Z"
+            }),
+            serde_json::json!({
+                "controlPlaneStatus": "ready",
+                "executorStatus": "offline",
+                "executorLastHeartbeatAt": null,
+                "executorId": IDENTIFIER
+            }),
+        ] {
+            assert!(parse_workbench_status(
+                &serde_json::to_vec(&invalid).expect("invalid workbench status JSON")
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn task_query_parsers_reject_invalid_status_order_cursor_and_unknown_fields() {
         let first = serde_json::json!({
             "taskId": IDENTIFIER,
@@ -2841,6 +2955,7 @@ mod tests {
         for operation in [
             ControlPlaneOperation::GetSystemHealth,
             ControlPlaneOperation::GetCurrentInstallationAccess,
+            ControlPlaneOperation::GetWorkbenchStatus,
             ControlPlaneOperation::IssueInstallationRegistrationChallenge,
             ControlPlaneOperation::CreateTask,
             ControlPlaneOperation::ListTasks,

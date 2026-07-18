@@ -569,6 +569,43 @@
         ],
         "title": "VersionResponse",
         "type": "object"
+      },
+      "WorkbenchStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "controlPlaneStatus": {
+            "const": "ready",
+            "title": "Controlplanestatus",
+            "type": "string"
+          },
+          "executorLastHeartbeatAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorlastheartbeatat"
+          },
+          "executorStatus": {
+            "enum": [
+              "online",
+              "offline"
+            ],
+            "title": "Executorstatus",
+            "type": "string"
+          }
+        },
+        "required": [
+          "controlPlaneStatus",
+          "executorStatus",
+          "executorLastHeartbeatAt"
+        ],
+        "title": "WorkbenchStatusResponse",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -1344,6 +1381,32 @@
         "summary": "Version",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/workbench/status": {
+      "get": {
+        "operationId": "getWorkbenchStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Workbench Status",
+        "tags": [
+          "workbench"
         ]
       }
     }

@@ -1,4 +1,11 @@
-import { Badge, Card, Col, Flex, Layout, Menu, Row, Space, Statistic, Tag, Typography } from "antd";
+import { Badge, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
+
+import {
+  TaskProjectionSourceError,
+  type TaskProjectionSource,
+} from "../api/control-plane/task-projections";
+import { Workbench } from "../features/workbench/Workbench";
+import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
@@ -8,13 +15,40 @@ const navigationItems = [
   { key: "diagnostics", label: "设置与诊断", disabled: true },
 ];
 
-const overviewItems = [
-  { title: "当前运行任务", value: 0 },
-  { title: "待人工处理", value: 0 },
-  { title: "今日已完成", value: 0 },
-];
+const shellTaskSource: TaskProjectionSource = {
+  async getTask() {
+    throw new TaskProjectionSourceError("transport_unavailable", true);
+  },
+  async listTasks() {
+    return { items: [], nextCursor: null };
+  },
+  async streamTaskEvents(_taskId, afterSequence) {
+    return { lastSequence: afterSequence, terminal: false };
+  },
+};
 
-export function WorkbenchShell() {
+const shellWorkbenchGateway: WorkbenchGateway = {
+  async getRuntimeStatus() {
+    return {
+      controlPlaneStatus: "ready",
+      executorStatus: "offline",
+      executorLastHeartbeatAt: null,
+    };
+  },
+  async emergencyStopTask() {
+    throw new Error("Workbench emergency stop is unavailable");
+  },
+};
+
+interface WorkbenchShellProps {
+  readonly taskSource?: TaskProjectionSource | undefined;
+  readonly gateway?: WorkbenchGateway | undefined;
+}
+
+export function WorkbenchShell({
+  taskSource = shellTaskSource,
+  gateway = shellWorkbenchGateway,
+}: WorkbenchShellProps) {
   return (
     <Layout className="desktop-shell">
       <Layout.Sider className="desktop-sidebar" width={232} theme="light">
@@ -54,27 +88,7 @@ export function WorkbenchShell() {
               </Tag>
             </Flex>
 
-            <Row className="overview-grid" gutter={16}>
-              {overviewItems.map((item) => (
-                <Col span={8} key={item.title}>
-                  <Card>
-                    <Statistic title={item.title} value={item.value} />
-                  </Card>
-                </Col>
-              ))}
-            </Row>
-
-            <Card className="empty-workbench-card">
-              <Space orientation="vertical" size={10} align="center">
-                <div className="empty-orbit" aria-hidden="true">
-                  <span />
-                </div>
-                <Typography.Title level={4}>还没有运行中的任务</Typography.Title>
-                <Typography.Text type="secondary">
-                  后续接入 Control Plane 与本地执行器后，可从这里创建第一条抖音运营任务。
-                </Typography.Text>
-              </Space>
-            </Card>
+            <Workbench taskSource={taskSource} gateway={gateway} />
           </main>
         </Layout.Content>
       </Layout>

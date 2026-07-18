@@ -48,7 +48,14 @@ automation-tool/
 │   ├── run_t3_06_acceptance.py   # 隐藏 Tauri 幂等创建 Task 纵向验收
 │   ├── run_t3_07_acceptance.py   # 隐藏 Tauri Task 分页/详情/scope 纵向验收
 │   ├── run_t3_08_acceptance.py   # 后台真实 WebSocket Registry 单活/心跳验收
-│   └── run_t3_09_acceptance.py   # 后台 PostgreSQL Outbox→WebSocket 重投/ACK/过期验收
+│   ├── run_t3_09_acceptance.py   # 后台 PostgreSQL Outbox→WebSocket 重投/ACK/过期验收
+│   ├── run_t3_10_acceptance.py   # FakeExecutor 正式协议纵向验收
+│   ├── run_t3_11_acceptance.py   # Task 事件原子收敛纵向验收
+│   ├── run_t3_12_acceptance.py   # 隐藏 Tauri SSE 断线续拉验收
+│   ├── run_t3_13_acceptance.py   # 隐藏 Tauri 暂停/恢复验收
+│   ├── run_t3_14_acceptance.py   # 隐藏 Tauri 取消/紧停验收
+│   ├── run_t3_15_acceptance.py   # 隐藏 Tauri Query/Reducer/Channel 验收
+│   └── run_t3_16_acceptance.py   # 隐藏 Tauri 工作台页面真实紧停验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -88,7 +95,9 @@ frontend/
 │   │   └── query-client.ts
 │   ├── platform/
 │   │   ├── tauri/
-│   │   │   └── control-plane-transport.ts # 正式 Tauri invoke 适配器
+│   │   │   ├── control-plane-transport.ts # 正式启动检查 Tauri invoke 适配器
+│   │   │   ├── task-projection-source.ts  # 固定 Task 快照/列表/Channel source
+│   │   │   └── workbench-gateway.ts       # 固定运行状态与全局紧停 gateway
 │   │   ├── types.ts               # PlatformAdapter 公共接口
 │   │   └── test-harness.ts        # 仅测试构建可用
 │   ├── schemas/                   # Zod 运行时校验
@@ -123,7 +132,9 @@ frontend/
 │   ├── tauri.task-query-e2e.conf.json # 后台隐藏的 Task 查询验收
 │   ├── tauri.task-event-stream-e2e.conf.json # 后台隐藏的 SSE 断线续拉验收
 │   ├── tauri.task-control-e2e.conf.json # 后台隐藏的暂停/恢复验收
-│   └── tauri.task-termination-e2e.conf.json # 后台隐藏的取消/紧停验收
+│   ├── tauri.task-termination-e2e.conf.json # 后台隐藏的取消/紧停验收
+│   ├── tauri.task-projection-e2e.conf.json # 后台隐藏的 Query/Channel 验收
+│   └── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
 ├── public/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -137,6 +148,8 @@ frontend/
 ├── wdio.task-event-stream.conf.ts
 ├── wdio.task-control.conf.ts
 ├── wdio.task-termination.conf.ts
+├── wdio.task-projection.conf.ts
+├── wdio.workbench.conf.ts
 ├── tsconfig.json
 └── README.md
 ```

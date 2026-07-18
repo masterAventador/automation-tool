@@ -180,3 +180,51 @@ body {
   left: 31px;
   background: #4dd4ac;
 }
+
+.workbench-content {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.runtime-status-row {
+  min-height: 24px;
+}
+
+.workbench-state-card {
+  min-height: 180px;
+  margin-top: 20px;
+  border-color: #e7ebf2;
+}
+
+.current-task-card,
+.recent-tasks-card {
+  border-color: #e7ebf2;
+  box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
+}
+
+.current-task-card .ant-card-head-title .ant-typography,
+.recent-tasks-card .ant-card-head-title .ant-typography {
+  margin: 0;
+}
+
+.command-notice {
+  margin-top: 16px;
+}
+
+.recent-task-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.recent-task-list li {
+  display: flex;
+  min-height: 46px;
+  border-bottom: 1px solid #edf0f5;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recent-task-list li:last-child {
+  border-bottom: 0;
+}

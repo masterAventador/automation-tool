@@ -356,6 +356,8 @@ I2-13 已把 Python 正式解析入口接入 `WS /api/v1/executors/connect`。�
 
 T3-08 在认证入口之后增加单进程 `ExecutorConnectionRegistry`。Registry 以 Installation 为唯一 live key，因此同一安装实例即使声明不同 ExecutorId 也只能有一个 current 连接；注册新 Hello 时先原子替换投影，再用固定 4409 关闭旧 socket。在线投影只包含强类型连接/Installation/Executor ID、运行时元数据、服务端连接/最后心跳时间和严格递增 sequence，不含 WebSocket、Session、凭据或客户端自报时间。旧连接的迟到 heartbeat、发送和 finally 清理均以 Connection ID 校验，不能覆盖或删除新连接；重复/倒序 heartbeat 固定按协议错误关闭。
 
+T3-16 增加 Installation-scoped `GET /api/v1/workbench/status`。路由强制复用 `require_current_installation_access`，从 Registry 只投影 Control Plane `ready`、Executor `online/offline` 和可空服务端最后心跳时间，固定 `no-store`；不返回 Installation、Executor、Connection ID、channel、Session 或底层错误。该端点只描述当前进程的在线事实，Task 状态与指标仍从 PostgreSQL 权威快照/事件计算；MVP/Demo 多副本前必须先建设跨实例 Executor 路由，不能把单进程 Registry 冒充集群在线状态。
+
 Registry 为 T3-09 提供 `send_current(installation_id, connection_id, wire)`：只接受 1..32 KiB UTF-8 文本，写入前后都确认目标仍是 current；传输失败与写入期间替换分别返回不泄密的 unavailable/stale 结果，调用者不能把 socket write 当成 Executor ACK。应用 lifespan 用 1012 清空所有连接。Registry 是单实例瞬时路由，不持久化认证、任务、命令或事件；PostgreSQL 仍是认证和业务事实源。
 
 T3-09 在每次连接重认证之后调用持久投递服务。仓储先把 deadline 已到的 pending/in-flight/delivered 批量置为 expired，再用 PostgreSQL `FOR UPDATE SKIP LOCKED` 按 deadline/创建顺序抢占 pending、lease 已过期的 in-flight，或 ACK 超时的 delivered；抢占时 revision 与 delivery attempts 同步递增并持有不越 deadline 的短 lease。同一连接内按有界批次发送，失败或 stale current 只释放成带延迟的 pending；写入成功清 lease 并记 delivered，不能改 Task/Attempt 状态。

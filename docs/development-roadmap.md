@@ -204,7 +204,7 @@
 | T3-13 | 暂停/恢复 API | 命令与确认语义；未确认不能提前改状态 | T3-09,T3-11 | ✅ 已完成 |
 | T3-14 | 取消/紧停 API | CANCELLING、确认、结果不确定和幂等 | T3-13 | ✅ 已完成 |
 | T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ✅ 已完成 |
-| T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ⬜ 未开始 |
+| T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ✅ 已完成 |
 | T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ⬜ 未开始 |
 | T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ⬜ 未开始 |
 | T3-19 | UI Harness E2E | 创建→运行→暂停→恢复→取消/成功→刷新恢复 | T3-16,T3-17,T3-18 | ⬜ 未开始 |
@@ -1225,7 +1225,7 @@
 - 失败矩阵：覆盖缺失/非法幂等键、额外字段、未认证、服务不可用、未知/跨 Installation Task、无 current Attempt、Task/Attempt 终态或错配、并发同键、同键改意图、重复终止、序号上限、时间回退、未 ACK/错 correlation、取消/完成竞态、cancelled/outcome uncertain 两类终态和公开响应脱敏
 - 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和全部端口；复核没有相关进程、监听、容器或目录遗留，没有浏览器 Profile、RPA、文件或社交平台副作用
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 与生成 TypeScript DTO；没有新增重复规划文档
-- 遗留：T3-15 将权威快照、事件去重/缺口与版本降级接入 React reducer；T3-16/T3-18 再把取消/紧停接入工作台和运行详情。离线本机紧停与外部动作账本的精确 uncertain 判定分别归 H8-03/A7-13
+- 后续承接：T3-15 已将权威快照、事件去重/缺口与版本降级接入 React reducer；T3-16 已把紧停接入工作台，T3-18 再接运行详情。离线本机紧停与外部动作账本的精确 uncertain 判定分别归 H8-03/A7-13
 
 ### T3-15 前端 Query/事件 Reducer
 
@@ -1240,12 +1240,28 @@
 - 失败与恢复矩阵：覆盖严格快照/列表/事件 DTO、未知字段、非法 UUID/UTC 微秒时间/状态/版本/事件类型、敏感消息、Task scope 错配、重复事件、序号缺口、revision/水位回退、未知版本/类型、正常 SSE 轮换、传输异常、取消和恢复预算耗尽；任何不兼容都先回拉服务端快照，连续失败才进入有界 degraded，不从事件名推断状态
 - 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和端口；复核 8765 无监听、无 `automation-tool-t315` 容器遗留
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
-- 遗留：T3-16 把该投影接入当前任务/最近任务工作台及全局紧停；T3-17/T3-18 分别建立新建任务骨架和运行详情，本任务不提前实现页面
+- 后续承接：T3-16 已把该投影接入当前任务/最近任务工作台及全局紧停；T3-17/T3-18 分别建立新建任务骨架和运行详情
+
+### T3-16 工作台页面
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：新增 Installation-scoped 工作台运行状态契约、真实 Task 列表/当前任务/最近任务/指标页面、固定 Tauri gateway、全局紧停确认和安全重试测试。Backend 3 项因 `/api/v1/workbench/status` 尚不存在而准确失败；Frontend 两个新 suite 因正式 `Workbench` 与 `workbench-gateway` 尚不存在而准确失败，既有 88 项继续通过
+- 实现边界：新增受 `app.control-plane` Session 保护的 `GET /api/v1/workbench/status`，只公开 ready、online/offline 与服务端最后心跳，不暴露 Connection/Executor/Installation ID。React 工作台复用 T3-15 Task source/Query/Reducer，并通过固定 `get_workbench_status`、`emergency_stop_workbench_task` Command 调用 Rust；WebView 不接触 URL、Header、Bearer、长期凭据或系统钥匙串
+- 页面闭环：工作台展示后端/Executor 状态、今日任务/成功/失败/待人工指标、当前任务与最近任务；实时投影会覆盖列表中的旧状态。全局紧停要求二次确认，按 Task 复用同一幂等键，提交后失效列表/详情/运行状态并继续以 Executor 最终事件为准；隐藏窗口也持续轮询运行状态
+- 分层验证：Backend 全量 `746 passed in 59.23s`；Frontend 33 项 Node 工程契约、96 项 Vitest 和 4 项 Playwright 全绿；Rust all-features 39 项单元、3 项共享协议、10 项安全配置全绿。Ruff/格式、严格 Mypy、ESLint、TypeScript、OpenAPI/Executor Schema 漂移、production boundary、Cargo fmt 与全特性 Clippy 零警告全部通过
+- 产品同路径：`uv run python ../scripts/run_t3_16_acceptance.py` 启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn、HOLD FakeExecutor 和唯一 `visible=false` Tauri/WKWebView。页面先显示真实 running Task 与 Executor online，再真实点击“全局紧急停止/确认紧停”；正式 Rust operation 写入命令，FakeExecutor 收到并 ACK，事件 sequence 1..3 将 Task 收敛到 `outcome_uncertain`、revision 5、lastEventSequence 3
+- 失败与恢复矩阵：覆盖 Executor online/offline、未认证、Registry 不可用、非法公开 DTO/UTC 日期、任务列表/运行状态失败脱敏、无当前任务禁用紧停、紧停二次确认、重试复用幂等键、命令提交后权威回拉、后台轮询、实时状态覆盖旧列表、卸载取消和页面无产品登录/注册
+- 补充 UI 证据：无头浏览器和现有 Playwright Harness 均验证无登录工作台、空任务状态、紧停禁用、故障重试及零页面错误；Harness 不替代真实 App 验收
+- App 与清理：设备私钥和长期凭据仍只在独立 `app_data_dir` 私有文件，不调用系统钥匙串；所有 App 测试全程后台。纵向验收 finally 回收 WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和端口
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
+- 遗留：T3-17 新建任务骨架、T3-18 完整运行详情、E4 本机 Executor 管理和 H8 业务指标不提前实现
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-16`：把正式 Task 投影接入工作台的当前任务、最近任务、后端/Executor 状态和全局紧停；
-2. `T3-17`～`T3-20`：按依赖完成新建任务、运行详情、UI E2E 和 Control Plane 恢复；
+1. `T3-17`：建立抖音运营新建任务骨架与受约束 DTO；
+2. `T3-18`～`T3-20`：按依赖完成运行详情、UI E2E 和 Control Plane 恢复；
 3. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。

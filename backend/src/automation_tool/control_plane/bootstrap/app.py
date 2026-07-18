@@ -28,6 +28,7 @@ from automation_tool.control_plane.api.system import router as system_router
 from automation_tool.control_plane.api.task_controls import router as task_control_router
 from automation_tool.control_plane.api.task_event_stream import router as task_event_stream_router
 from automation_tool.control_plane.api.tasks import router as task_router
+from automation_tool.control_plane.api.workbench import router as workbench_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
 from automation_tool.control_plane.application.executor_connection_registry import (
@@ -235,5 +236,6 @@ def create_app(
     app.include_router(task_event_stream_router)
     app.include_router(task_control_router)
     app.include_router(task_router)
+    app.include_router(workbench_router)
     app.include_router(executor_websocket_router)
     return app

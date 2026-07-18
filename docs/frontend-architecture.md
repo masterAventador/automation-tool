@@ -72,7 +72,7 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 第一期没有认证路由守卫。启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页，而不是登录页。
 
-当前工作台壳已实现 ready、checking、unavailable、revoked 四态和安全重试。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`，由真实 WebView invoke 正式 Rust Command，再由 Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
+App 启动边界已实现 ready、checking、unavailable、revoked 四态和安全重试；ready 后进入正式工作台页面。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`、`TauriTaskProjectionSource` 与 `TauriWorkbenchGateway`。真实 WebView 只 invoke 固定 Rust Command，Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
 
 T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation：Rust 自行从 App 私有 vault 取长期凭据、换取 `app.control-plane` Session、注入受限 `Idempotency-Key`，并只接受 201 创建或 200 重放的同形 draft Task 快照。当前产品 UI 尚没有平台模板表单，因此生产 React 不暴露通用 create Command；T3-17 必须通过窄任务表单命令调用该客户端，不能让 WebView 接触 bearer、Header 或任意 URL。T3-06 的完成证据来自 `visible=false` 真实 Tauri App，而不是浏览器 Harness 或直接 HTTP。
 
@@ -82,9 +82,11 @@ T3-12 在同一个正式 Rust client 中增加 `StreamTaskEvents`：路径只能
 
 T3-13 又在相同 Rust client 中加入固定 `PauseTask`/`ResumeTask` operation。调用者只能提供规范 Task UUID 和受限幂等键；Rust 自行换 App Session、发送空 JSON、构造 `/pause` 或 `/resume` 固定路径，并只接受 202 创建或 200 重放。公开命令对象必须通过 Command/Task/Attempt UUIDv4、跨运行时安全 sequence、精确 command type、封闭 outbox status、正 revision 和 UTC deadline 校验。唯一 `visible=false` App 已经经 Rust API 写入 pause/resume，再经正式 Rust SSE 等到对应事件并核对最终 running 快照；React 控制按钮仍归 T3-18，不能为提前接 UI 暴露任意 operation、Header 或 bearer。
 
-T3-14 继续在同一 Rust client 增加固定 `CancelTask`/`EmergencyStopTask` operation，沿用规范 Task UUID、受限幂等键、App 私有 vault 换票和严格公开 Command 解析；固定路径只能是 `/cancel` 与 `/emergency-stop`，仍只接受 202/200。同一 `visible=false` App 已顺序调用两种操作并通过正式 Rust SSE 验证 cancelled/outcome uncertain 终态；React 按钮仍等待 T3-16/T3-18，WebView 不新增通用 URL、Header、bearer 或原始响应入口。
+T3-14 继续在同一 Rust client 增加固定 `CancelTask`/`EmergencyStopTask` operation，沿用规范 Task UUID、受限幂等键、App 私有 vault 换票和严格公开 Command 解析；固定路径只能是 `/cancel` 与 `/emergency-stop`，仍只接受 202/200。同一 `visible=false` App 已顺序调用两种操作并通过正式 Rust SSE 验证 cancelled/outcome uncertain 终态；T3-16 已接全局紧停，T3-18 再接运行详情控制，WebView 不新增通用 URL、Header、bearer 或原始响应入口。
 
 T3-15 建立正式 Task 投影边界：`TauriTaskProjectionSource` 只 invoke 固定快照、列表和事件 Channel Command，Rust 从私有 vault 换票并返回精确公开 DTO；`taskProjectionKeys`/Query options 管理服务端快照，纯 Reducer 以 status/revision/lastEventSequence 为权威。水位内事件直接去重；下一序号缺口、Task/revision 回退、未知版本/类型或畸形 DTO 只进入 `refresh_required`，先失效并回拉 Query 快照再续订；连续不兼容超过有界预算进入 `degraded`，不从事件名猜状态。正常 SSE 限时关闭也先读新快照再续订，不计作协议降级。唯一 `visible=false` App 已从 WebView 正式 TypeScript source 经 Rust/真实后端/FakeExecutor 收敛 sequence 1..5 到 succeeded。
+
+T3-16 将投影接入正式 RPA 工作台：`Workbench` 展示 Control Plane/Executor 状态、今日任务指标、当前任务和最近任务，较新的实时快照会覆盖列表旧状态。`TauriWorkbenchGateway` 只允许固定工作台状态与紧停 Command；全局紧停必须二次确认，同一 Task 的不确定重试复用幂等键，提交后回拉列表/详情/运行状态，最终状态仍只认 Executor 事件。运行状态轮询设置为隐藏窗口继续执行，满足后台 App 验收。唯一 `visible=false` App 已从页面点击紧停，经正式 Rust/后端/Outbox/FakeExecutor ACK 收敛到 `outcome_uncertain`；长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。
 
 ### 4.2 Feature 层
 
@@ -426,7 +428,7 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 
-当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描测试标记并 fail closed。所有自动化 Tauri 配置（包括 T3-15 Task 投影验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
+当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描测试标记并 fail closed。所有自动化 Tauri 配置（包括 T3-15 Task 投影与 T3-16 工作台验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
 
 I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 
