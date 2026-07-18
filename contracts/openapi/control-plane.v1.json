@@ -25,6 +25,19 @@
         "title": "ExecutorProtocolCompatibility",
         "type": "object"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -49,6 +62,156 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InstallationRegistrationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "format": "uuid",
+            "title": "Challengeid",
+            "type": "string"
+          },
+          "environmentId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Environmentid",
+            "type": "string"
+          },
+          "signature": {
+            "maxLength": 86,
+            "minLength": 86,
+            "title": "Signature",
+            "type": "string"
+          },
+          "signingPayload": {
+            "maxLength": 2731,
+            "minLength": 1,
+            "title": "Signingpayload",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challengeId",
+          "environmentId",
+          "signingPayload",
+          "signature"
+        ],
+        "title": "InstallationRegistrationRequest",
+        "type": "object"
+      },
+      "InstallationRegistrationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installationId",
+          "status",
+          "revision"
+        ],
+        "title": "InstallationRegistrationResponse",
+        "type": "object"
+      },
+      "RegistrationChallengeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "devicePublicKey": {
+            "maxLength": 43,
+            "minLength": 43,
+            "title": "Devicepublickey",
+            "type": "string"
+          },
+          "environmentId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Environmentid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "environmentId",
+          "devicePublicKey"
+        ],
+        "title": "RegistrationChallengeRequest",
+        "type": "object"
+      },
+      "RegistrationChallengeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "format": "uuid",
+            "title": "Challengeid",
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "signingPayload": {
+            "title": "Signingpayload",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challengeId",
+          "signingPayload",
+          "expiresAt"
+        ],
+        "title": "RegistrationChallengeResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
         "type": "object"
       },
       "VersionResponse": {
@@ -80,6 +243,12 @@
         "title": "VersionResponse",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "DemoBootstrap": {
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -106,6 +275,98 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/installations": {
+      "post": {
+        "operationId": "completeInstallationRegistration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallationRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationRegistrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DemoBootstrap": []
+          }
+        ],
+        "summary": "Complete Installation Registration",
+        "tags": [
+          "installations"
+        ]
+      }
+    },
+    "/api/v1/installations/registration-challenges": {
+      "post": {
+        "operationId": "issueInstallationRegistrationChallenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationChallengeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DemoBootstrap": []
+          }
+        ],
+        "summary": "Issue Registration Challenge",
+        "tags": [
+          "installations"
         ]
       }
     },

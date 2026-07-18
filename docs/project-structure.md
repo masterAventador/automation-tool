@@ -145,6 +145,7 @@ backend/
 │       │   ├── domain/            # 任务、事件、动作、风险和 Artifact
 │       │   └── infrastructure/
 │       │       ├── database/      # PostgreSQL 仓储
+│       │       ├── security/      # Bootstrap 签名验证等密码学适配
 │       │       ├── events/
 │       │       ├── object_storage/
 │       │       └── observability/

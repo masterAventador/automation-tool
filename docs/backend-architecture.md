@@ -279,6 +279,10 @@ MVP 不使用 AI 页面理解、stealth 或验证码识别。
 
 领域层的 `DemoBootstrapGrant` 固定唯一 purpose `installation.register`，绑定一个小写规范 Demo 环境 slug，采用 `[not_before, expires_at)` 半开时窗且硬上限 7 天。调用必须使用强类型 purpose/环境；原始字符串即使内容相同也不能越过能力边界，跨环境、未生效和到期均返回固定拒绝原因且不回显输入。这个对象只表达待签名 claims 的授权语义，不存 token、不读取环境变量，也不提前替代 C10-06 的注册次数、吊销、批次持久化和审计。
 
+I2-05 将这些 claims 封装为验证专用的 `atb1.<payload>.<signature>`：payload 必须是 exact-field canonical JSON，签名算法固定 Ed25519，Control Plane 只从部署配置读取 32 字节验证公钥和精确 Demo 环境，不持有离线签发私钥。未知字段、重复 JSON key、非 canonical base64url、错误版本/用途/时间类型、超长、篡改和错误 signer 统一拒绝；服务端只保存 token 的 SHA-256 指纹用于 challenge 绑定，不保存原 token。
+
+注册固定两步：`issueInstallationRegistrationChallenge` 验证 bootstrap 后产生 32 字节 CSPRNG nonce，并返回最长 5 分钟、且不晚于 bootstrap 到期的 opaque canonical signing payload；`completeInstallationRegistration` 再次验证同一 bootstrap，按 challenge ID `SELECT ... FOR UPDATE`，常量时间核对环境、bootstrap 指纹和 payload 摘要，再用 challenge 绑定的设备公钥验证 Ed25519 签名。同一事务创建 Installation 并标记 challenge 已消费，因此进程重启、串行或并发重放都只能成功一次。到期采用半开边界，错误设备、另一份有效 bootstrap、篡改 payload、未知 challenge 和跨环境都不消费 challenge。
+
 这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
 
 ### 9.3 请求授权
@@ -431,6 +435,7 @@ Control Plane PostgreSQL 最小表：
 | 表 | 作用 |
 | --- | --- |
 | `installations` | 安装实例、公钥、状态和吊销 |
+| `installation_registration_challenges` | 5 分钟设备证明、bootstrap 指纹和原子消费状态，不存原 token |
 | `device_credentials` | 凭据版本、状态和过期，不存明文私钥 |
 | `executors` | Executor 平台、架构、版本和最后在线 |
 | `platform_session_health` | 平台登录健康元数据，不存 Cookie |
@@ -444,6 +449,8 @@ Control Plane PostgreSQL 最小表：
 | `audit_events` | 安装实例、任务控制和安全动作 |
 
 `installations` 的首个迁移固定 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、从 1 开始的正数 revision、`created_at`/`updated_at` 和可空 `revoked_at`。数据库同时约束公钥长度、ID 版本、状态集合、状态与吊销时间一致、时间不倒退；更新使用 `id + revision` 条件并原子递增，旧 revision 不得覆盖新状态。
+
+`installation_registration_challenges` 固定 UUIDv4、规范环境、32 字节 bootstrap 指纹/设备公钥/payload 摘要、创建与到期时间，以及成对出现的 `consumed_at + installation_id`。数据库约束到期晚于创建、消费早于到期、长度/环境/状态一致和 Installation 外键；应用层在行锁事务中验证并消费，唯一设备公钥冲突回滚整个消费。
 
 约束：
 
@@ -518,7 +525,7 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version，不为上述规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version 与两个 Installation 注册 operation，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 

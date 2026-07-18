@@ -2,13 +2,13 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID，以及 Installation 持久化表；尚未提供业务路由。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表和无账号 Installation 注册 API；尚未提供任务等业务路由。
 
 资源 ID 统一使用规范小写 UUIDv4，并通过 `InstallationId`、`ExecutorId`、`TaskId`、`ExecutionAttemptId`、`ActionId` 和 `ArtifactId` 值对象隔离。外部字符串必须先调用对应类型的 `parse`，新资源调用 `new`；不能把普通字符串、另一类资源 ID 或非 UUIDv4 值直接带入领域层。
 
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 
-`DemoBootstrapGrant` 是尚未签名/持久化的领域能力模型：有效期最多 7 天，绑定一个规范 `DemoEnvironmentId`，唯一 `BootstrapPurpose` 为 `installation.register`。调用方必须传入强类型 purpose 和环境，普通字符串、跨环境、未生效、已过期以及任何业务 API 操作均 fail closed。token 签名、批次次数、吊销和审计不在此模型中伪造，由后续注册与云 Demo 任务实现。
+`DemoBootstrapGrant` 的 claims 由离线 Ed25519 私钥签名为 `atb1` 凭据；Control Plane 只配置 32 字节公钥并验证签名，不持有签发私钥。claims 有效期最多 7 天，绑定一个规范 `DemoEnvironmentId`，唯一 `BootstrapPurpose` 为 `installation.register`。服务端签发最长 5 分钟且不超过 bootstrap 到期时间的一次性 challenge，绑定环境、bootstrap SHA-256 指纹和设备公钥；App 用设备 Ed25519 私钥签名后，PostgreSQL 在同一事务中锁定 challenge、验证证明、创建 Installation 并标记消费。批次次数、撤销和审计仍由 C10-06 实现，不在本 API 中伪造。
 
 ## 本地命令
 
@@ -41,10 +41,19 @@ uv run --env-file ../.env alembic upgrade head
 uv run --env-file ../.env automation-tool-control-plane
 ```
 
+注册 API 默认关闭；Demo/本地注册联调必须同时提供下列公开部署配置，缺一或格式非法时启动 fail closed。公钥使用无 padding 的 canonical base64url，离线签发私钥不得进入服务器环境、仓库或日志：
+
+```bash
+AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID=demo-cn-1
+AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY=<32-byte-ed25519-public-key-base64url>
+```
+
 服务只绑定 `127.0.0.1:8765`。启动时配置缺失会 fail closed；数据库断开时 Health 返回可重试的结构化 `503 dependency_unavailable`。当前端点为：
 
 - `GET http://127.0.0.1:8765/api/v1/health`
 - `GET http://127.0.0.1:8765/api/v1/version`
+- `POST http://127.0.0.1:8765/api/v1/installations/registration-challenges`
+- `POST http://127.0.0.1:8765/api/v1/installations`
 
 迁移回滚验证（只对明确的测试数据库执行）：
 

@@ -50,6 +50,7 @@
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
 | Installation 持久化 | `✅` 32 字节公钥、active/revoked、revision CAS、吊销时间、唯一性和时间一致性约束已在 PostgreSQL 18.4 验证 |
 | Demo Bootstrap | `✅` 最多 7 天、精确 Demo 环境、唯一 installation.register purpose 和业务 API 拒绝模型已验证 |
+| Installation 注册 | `✅` 离线签名 Bootstrap、最长 5 分钟的一次性 challenge、设备 Ed25519 证明和 PostgreSQL 原子消费已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份密钥 | `✅` Ed25519 首启生成、macOS Keychain / Windows Credential Manager 真实往返、React/普通文件零暴露和桌面隔离身份已验证 |
@@ -151,7 +152,7 @@
 | I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ✅ 已完成 |
 | I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ✅ 已完成 |
 | I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ✅ 已完成 |
-| I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ⬜ 未开始 |
+| I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ✅ 已完成 |
 | I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ⬜ 未开始 |
 | I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ⬜ 未开始 |
 | I2-08 | Rust 安全存储 | 读写/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ⬜ 未开始 |
@@ -796,10 +797,23 @@
 - 文档：同步根/Frontend README、前端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：I2-05 使用公钥完成 Installation 注册签名校验；I2-08 在同一系统安全存储增加可轮换、可删除的后端设备凭据，不把凭据职责混入本任务
 
+### I2-05 Installation 注册 API
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先创建 Bootstrap token 签名 claims 单测和真实 PostgreSQL 注册 API 测试；`uv run pytest tests/unit/control_plane/test_bootstrap_tokens.py -q` 因 `infrastructure.security` 不存在而收集失败，`uv run pytest tests/integration/test_installation_registration_api.py -q` 因 `application.registration` 不存在而收集失败；实现路由后 OpenAPI `--check` 按预期报告快照过期
+- GREEN：77 项 I2-05 目标契约/单元/真实 PostgreSQL 测试通过，Backend 全量 232 项通过，语句与分支覆盖率均 100%；uv 锁、Ruff 格式/检查、严格 Mypy、Alembic check、OpenAPI/前端 DTO 双向漂移检查全部通过；Frontend 16 项 Node 契约、25 项 Vitest、ESLint、严格 TypeScript、生产构建与边界扫描通过
+- 真实边界：`cryptography 49.0.0` 验证离线 Ed25519 签名 `atb1` claims；官方 PostgreSQL 18.4 容器执行迁移 `20260718_0003`、真实 FastAPI 请求、行锁事务、并发双提交、唯一冲突、升级到 head、降级到 `0002` 并重新升级。服务只配置验证公钥，未生成或保存 bootstrap 签发私钥
+- 失败矩阵：覆盖 token 空/超长/Unicode/非 canonical base64url、错误 signer、篡改、错误版本/用途/字段/类型、重复 JSON key、非法环境、未生效/过期/超 7 天；API 覆盖缺失 bearer、未配置、非法 UUID/公钥/签名、跨环境、另一份有效 bootstrap、未知/过期/已消费 challenge、篡改 payload、错误设备签名、重复设备公钥，以及两个并发完成只能一个成功；固定错误不回显 token、公钥配置或底层异常
+- 清理：每轮真实数据库测试使用随机 loopback 端口、随机密码和独立 Compose project，结束后删除测试容器、网络和卷；最终 `docker ps` 无 `automation-tool-pytest-*` 残留；未启动 App、浏览器、Executor 或云资源
+- 文档：同步根/Backend README、后端架构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：I2-06 在注册成功后签发版本化、可撤销、可轮换且最小 scope 的设备凭据；C10-06 再增加 bootstrap 批次次数、吊销、持久化和审计，本任务不冒充完整账号体系
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-05`：建立 Installation challenge/response 注册 API，并覆盖重放、过期和冒充；
-2. `I2-06`：签发可撤销、可轮换、最小 scope 的版本化设备凭据；
+1. `I2-06`：签发可撤销、可轮换、最小 scope 的版本化设备凭据；
+2. `I2-07`：使用长期设备凭据换取短期能力，并覆盖过期、时钟偏差和吊销；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。

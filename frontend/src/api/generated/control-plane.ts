@@ -21,6 +21,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Installation Registration */
+        post: operations["completeInstallationRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/installations/registration-challenges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue Registration Challenge */
+        post: operations["issueInstallationRegistrationChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/version": {
         parameters: {
             query?: never;
@@ -51,6 +85,11 @@ export interface components {
             /** Minimumcompatible */
             minimumCompatible: string;
         };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -67,6 +106,67 @@ export interface components {
             status: "ok";
             /** Version */
             version: string;
+        };
+        /** InstallationRegistrationRequest */
+        InstallationRegistrationRequest: {
+            /**
+             * Challengeid
+             * Format: uuid
+             */
+            challengeId: string;
+            /** Environmentid */
+            environmentId: string;
+            /** Signature */
+            signature: string;
+            /** Signingpayload */
+            signingPayload: string;
+        };
+        /** InstallationRegistrationResponse */
+        InstallationRegistrationResponse: {
+            /**
+             * Installationid
+             * Format: uuid
+             */
+            installationId: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+        };
+        /** RegistrationChallengeRequest */
+        RegistrationChallengeRequest: {
+            /** Devicepublickey */
+            devicePublicKey: string;
+            /** Environmentid */
+            environmentId: string;
+        };
+        /** RegistrationChallengeResponse */
+        RegistrationChallengeResponse: {
+            /**
+             * Challengeid
+             * Format: uuid
+             */
+            challengeId: string;
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /** Signingpayload */
+            signingPayload: string;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
         /** VersionResponse */
         VersionResponse: {
@@ -107,6 +207,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    completeInstallationRegistration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallationRegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallationRegistrationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issueInstallationRegistrationChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistrationChallengeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationChallengeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
