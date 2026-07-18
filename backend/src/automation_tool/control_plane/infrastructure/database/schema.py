@@ -205,6 +205,12 @@ device_credentials = Table(
         "version",
         name="uq_device_credentials_installation_version",
     ),
+    UniqueConstraint(
+        "id",
+        "installation_id",
+        "version",
+        name="uq_device_credentials_binding",
+    ),
     UniqueConstraint("secret_digest", name="uq_device_credentials_secret_digest"),
 )
 
@@ -215,8 +221,70 @@ Index(
     postgresql_where=device_credentials.c.status == "active",
 )
 
+device_sessions = Table(
+    "device_sessions",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("device_credential_id", UUID(as_uuid=True), nullable=False),
+    Column("credential_version", BigInteger(), nullable=False),
+    Column("capability", String(length=32), nullable=False),
+    Column("secret_digest", LargeBinary(length=32), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("not_before", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_device_sessions_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "credential_version > 0",
+        name="ck_device_sessions_credential_version_positive",
+    ),
+    CheckConstraint(
+        "capability in ('app.control-plane', 'executor.connect')",
+        name="ck_device_sessions_capability",
+    ),
+    CheckConstraint(
+        "octet_length(secret_digest) = 32",
+        name="ck_device_sessions_secret_digest_length",
+    ),
+    CheckConstraint(
+        "not_before <= created_at "
+        "and created_at - not_before <= interval '30 seconds' "
+        "and expires_at > created_at "
+        "and expires_at <= created_at + interval '5 minutes'",
+        name="ck_device_sessions_time_window",
+    ),
+    CheckConstraint(
+        "revoked_at is null or revoked_at >= created_at",
+        name="ck_device_sessions_revocation_time",
+    ),
+    ForeignKeyConstraint(
+        ["device_credential_id", "installation_id", "credential_version"],
+        [
+            "device_credentials.id",
+            "device_credentials.installation_id",
+            "device_credentials.version",
+        ],
+        name="fk_device_sessions_credential_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_device_sessions"),
+    UniqueConstraint("secret_digest", name="uq_device_sessions_secret_digest"),
+)
+
+Index(
+    "ix_device_sessions_installation_expiry",
+    device_sessions.c.installation_id,
+    device_sessions.c.expires_at,
+)
+
 __all__ = [
     "device_credentials",
+    "device_sessions",
     "installation_registration_challenges",
     "installations",
     "metadata",

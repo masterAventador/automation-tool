@@ -18,12 +18,13 @@ from automation_tool.control_plane.application.device_credentials import (
 from automation_tool.control_plane.domain import InstallationStatus
 from automation_tool.control_plane.infrastructure.database.schema import (
     device_credentials,
+    device_sessions,
     installations,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
 
 
-async def _lock_authenticated_credential(
+async def lock_authenticated_device_credential(
     session: AsyncSession,
     presented: ParsedDeviceCredential,
 ) -> RowMapping:
@@ -78,7 +79,7 @@ class SqlAlchemyDeviceCredentialRepository:
         rotated_at: datetime,
     ) -> IssuedDeviceCredential:
         async with self._database.session() as session:
-            current = await _lock_authenticated_credential(session, presented)
+            current = await lock_authenticated_device_credential(session, presented)
             next_version = current["version"] + 1
             await session.execute(
                 update(device_credentials)
@@ -89,6 +90,14 @@ class SqlAlchemyDeviceCredentialRepository:
                     revoked_at=rotated_at,
                     replaced_by_id=replacement.credential_id,
                 )
+            )
+            await session.execute(
+                update(device_sessions)
+                .where(
+                    device_sessions.c.device_credential_id == current["id"],
+                    device_sessions.c.revoked_at.is_(None),
+                )
+                .values(revoked_at=rotated_at)
             )
             await session.execute(
                 insert(device_credentials).values(
@@ -117,7 +126,7 @@ class SqlAlchemyDeviceCredentialRepository:
         revoked_at: datetime,
     ) -> RevokedDeviceCredential:
         async with self._database.session() as session:
-            current = await _lock_authenticated_credential(session, presented)
+            current = await lock_authenticated_device_credential(session, presented)
             await session.execute(
                 update(device_credentials)
                 .where(device_credentials.c.id == current["id"])
@@ -127,6 +136,14 @@ class SqlAlchemyDeviceCredentialRepository:
                     revoked_at=revoked_at,
                 )
             )
+            await session.execute(
+                update(device_sessions)
+                .where(
+                    device_sessions.c.device_credential_id == current["id"],
+                    device_sessions.c.revoked_at.is_(None),
+                )
+                .values(revoked_at=revoked_at)
+            )
             return RevokedDeviceCredential(
                 credential_id=current["id"],
                 installation_id=current["installation_id"],
@@ -135,4 +152,7 @@ class SqlAlchemyDeviceCredentialRepository:
             )
 
 
-__all__ = ["SqlAlchemyDeviceCredentialRepository"]
+__all__ = [
+    "SqlAlchemyDeviceCredentialRepository",
+    "lock_authenticated_device_credential",
+]

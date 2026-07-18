@@ -155,7 +155,7 @@
 | I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ✅ 已完成 |
 | I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ✅ 已完成 |
 | I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ✅ 已完成 |
-| I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ⬜ 未开始 |
+| I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ✅ 已完成 |
 | I2-08 | Rust 安全存储 | 读写/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ⬜ 未开始 |
 | I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；禁止任意 URL 代理 | I2-08,F1-11 | ⬜ 未开始 |
 | I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ⬜ 未开始 |
@@ -825,10 +825,24 @@
 - 文档：同步根/Backend README、后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
 - 遗留：I2-07 使用该长期凭据的唯一 scope 换取短期 Session；I2-08 再把长期凭据的读写、轮换替换和删除接入 Tauri 系统安全存储；当前 React 和普通文件仍不接触凭据
 
+### I2-07 短期设备 Session
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 `atds1` opaque Session、两种精确 capability、5 分钟寿命与 30 秒时钟偏差单测，执行 `uv run pytest tests/unit/control_plane/test_device_sessions.py -q` 因 `application.device_sessions` 不存在而收集失败；随后 Schema 测试因 `device_sessions` 未导出失败，生命周期测试因 Session 仓储模块不存在失败，HTTP 契约因路由和依赖注入不存在产生 5 项失败
+- GREEN：43 项 I2-07 定向契约/单元/真实 PostgreSQL 测试通过，Backend 全量 311 项通过，语句与分支覆盖率均 100%；Ruff 格式/检查、严格 Mypy、Alembic check、OpenAPI/前端 DTO 双向漂移检查全部通过；Frontend 16 项 Node 契约、25 项 Vitest、3 项 Playwright、ESLint、严格 TypeScript、生产构建与边界扫描通过
+- 真实边界：官方 PostgreSQL 18.4 容器执行迁移 `20260718_0005`、真实 FastAPI `POST /api/v1/device-sessions` 请求、摘要认证、Installation/credential/session 行锁、父凭据轮换与吊销联动、升级到 head、降级到 `0004` 并重新升级；服务端仍不持有新增签名私钥，前端 DTO 从权威 OpenAPI 机械生成
+- 安全模型：长期 `atdc1` bearer 只能换取 `atds1.<session-id>.<256-bit-secret>`，数据库仅保存 SHA-256 摘要和 Installation/credential ID/version 精确复合绑定。每张票只具备 `app.control-plane` 或 `executor.connect` 之一，采用 `[issued_at - 30s, issued_at + 5m)` 半开时窗；认证固定按 Installation、父凭据、Session 顺序锁定并逐次确认仍 active
+- 失败矩阵：覆盖空/超长/非 canonical/非法 UUID/错误版本/错误随机源、未知 ID、同 ID 错误秘密、能力混用、未生效前 1 微秒、到期精确边界、非法数据库绑定/能力/摘要/时间、父凭据轮换或撤销、Installation 撤销以及认证中 Session 被并发清理；所有 bearer 错误固定且不回显输入
+- 清理：每轮真实数据库测试使用随机 loopback 端口、随机密码和独立 Compose project，结束后删除测试容器、网络和卷；UI 测试 Vite 进程由 Playwright 回收，未启动真实 App、Executor、浏览器运营 Profile 或云资源
+- 文档：同步根/Backend README、后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
+- 遗留：I2-08 将长期设备凭据接入 Tauri 系统安全存储；I2-09/I2-10 再建立跨进程协议与兼容矩阵；I2-13 才让 Executor WebSocket 使用 `executor.connect` Session，业务 API 授权随对应任务接入 `app.control-plane`
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-07`：使用长期设备凭据换取短期能力，并覆盖过期、时钟偏差和吊销；
-2. `I2-08`：把设备凭据安全读写、删除和损坏处理接入 Rust 系统安全存储；
+1. `I2-08`：把设备凭据安全读写、删除和损坏处理接入 Rust 系统安全存储；
+2. `I2-09`：定义 Control Plane 与 Local Executor 的版本化消息 Envelope；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。

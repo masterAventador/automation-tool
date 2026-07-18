@@ -12,12 +12,13 @@ from automation_tool.control_plane.domain import InstallationId
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     device_credentials,
+    device_sessions,
     installation_registration_challenges,
     installations,
 )
 
 PREVIOUS_REVISION = "20260718_0003"
-HEAD_REVISION = "20260718_0004"
+HEAD_REVISION = "20260718_0005"
 EXPECTED_CONSTRAINTS = {
     "pk_device_credentials",
     "fk_device_credentials_installation_id",
@@ -37,6 +38,7 @@ EXPECTED_CONSTRAINTS = {
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
         await session.execute(delete(installation_registration_challenges))
+        await session.execute(delete(device_sessions))
         await session.execute(delete(device_credentials))
         await session.execute(delete(installations))
 

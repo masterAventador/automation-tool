@@ -1,6 +1,57 @@
 {
   "components": {
     "schemas": {
+      "DeviceSessionCapability": {
+        "enum": [
+          "app.control-plane",
+          "executor.connect"
+        ],
+        "title": "DeviceSessionCapability",
+        "type": "string"
+      },
+      "DeviceSessionExchangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/DeviceSessionCapability"
+          }
+        },
+        "required": [
+          "capability"
+        ],
+        "title": "DeviceSessionExchangeRequest",
+        "type": "object"
+      },
+      "DeviceSessionExchangeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/DeviceSessionCapability"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "issuedAt": {
+            "format": "date-time",
+            "title": "Issuedat",
+            "type": "string"
+          },
+          "sessionToken": {
+            "title": "Sessiontoken",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionToken",
+          "capability",
+          "issuedAt",
+          "expiresAt"
+        ],
+        "title": "DeviceSessionExchangeResponse",
+        "type": "object"
+      },
       "ExecutorProtocolCompatibility": {
         "additionalProperties": false,
         "properties": {
@@ -381,6 +432,52 @@
         "summary": "Rotate Device Credential",
         "tags": [
           "device-credentials"
+        ]
+      }
+    },
+    "/api/v1/device-sessions": {
+      "post": {
+        "operationId": "exchangeDeviceSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceSessionExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSessionExchangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DeviceCredential": []
+          }
+        ],
+        "summary": "Exchange Device Session",
+        "tags": [
+          "device-sessions"
         ]
       }
     },

@@ -287,6 +287,8 @@ I2-06 把初始凭据签发并入同一个注册事务：凭据使用 `atdc1.<cr
 
 设备可使用当前 bearer 调用 `rotateDeviceCredential` 或 `revokeDeviceCredential`。仓储先按公开 credential ID 定位，再按固定顺序锁 Installation 和凭据，用常量时间比较摘要并确认 Installation/凭据仍 active；轮换在单事务中把旧版本标记为 rotated、关联新版本并插入下一正数版本，吊销则将当前版本标记 revoked。两个并发轮换只有一个能成功，旧版本、错误秘密、未知凭据、重复吊销和已吊销 Installation 对外共享固定 401，不能据此枚举凭据状态。scope 只授权 I2-07 的短期 Session 交换，不直接授权任务或业务 API；凭据轮换/吊销属于 bearer 自身生命周期，而非额外业务 scope。
 
+I2-07 实现唯一换票端点 `exchangeDeviceSession`。客户端以当前 `atdc1` bearer 换取 `atds1.<session-id>.<256-bit-secret>`；票据固定 5 分钟，`not_before` 向前回退 30 秒容纳客户端落后时钟，过期仍采用严格半开边界且没有到期后宽限。每张票必须精确选择 `app.control-plane` 或 `executor.connect`，不能组合或使用通配符。PostgreSQL 仅保存 Session 秘密的 SHA-256 摘要，并以复合外键绑定 Installation、父凭据 ID 和父凭据版本；认证固定按 Installation、父凭据、Session 顺序锁定，三者任一失效即统一拒绝。父凭据轮换/吊销会在同一事务写入相关 Session 的 `revoked_at`，Installation 撤销也会在每次认证时即时生效。服务端不为 Session 增加签名私钥。
+
 这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
 
 ### 9.3 请求授权
@@ -529,7 +531,7 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version 与两个 Installation 注册 operation，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、设备凭据轮换/吊销和短期 Session 交换，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 

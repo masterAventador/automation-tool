@@ -23,6 +23,7 @@ from automation_tool.control_plane.domain import InstallationId, InstallationSta
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     device_credentials,
+    device_sessions,
     installation_registration_challenges,
     installations,
 )
@@ -48,6 +49,7 @@ def credential_factory() -> DeviceCredentialFactory:
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
         await session.execute(delete(installation_registration_challenges))
+        await session.execute(delete(device_sessions))
         await session.execute(delete(device_credentials))
         await session.execute(delete(installations))
 

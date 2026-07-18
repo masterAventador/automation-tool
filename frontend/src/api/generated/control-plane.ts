@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/device-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exchange Device Session */
+        post: operations["exchangeDeviceSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -110,6 +127,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * DeviceSessionCapability
+         * @enum {string}
+         */
+        DeviceSessionCapability: "app.control-plane" | "executor.connect";
+        /** DeviceSessionExchangeRequest */
+        DeviceSessionExchangeRequest: {
+            capability: components["schemas"]["DeviceSessionCapability"];
+        };
+        /** DeviceSessionExchangeResponse */
+        DeviceSessionExchangeResponse: {
+            capability: components["schemas"]["DeviceSessionCapability"];
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /**
+             * Issuedat
+             * Format: date-time
+             */
+            issuedAt: string;
+            /** Sessiontoken */
+            sessionToken: string;
+        };
         /** ExecutorProtocolCompatibility */
         ExecutorProtocolCompatibility: {
             /** Current */
@@ -287,6 +329,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RotatedDeviceCredentialResponse"];
+                };
+            };
+        };
+    };
+    exchangeDeviceSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceSessionExchangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceSessionExchangeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

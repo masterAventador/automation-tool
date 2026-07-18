@@ -32,6 +32,7 @@ from automation_tool.control_plane.domain import DemoEnvironmentId
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     device_credentials,
+    device_sessions,
     installation_registration_challenges,
     installations,
 )
@@ -121,6 +122,7 @@ async def reset_registration_data(database_url: str) -> None:
     try:
         async with database.session() as session:
             await session.execute(delete(installation_registration_challenges))
+            await session.execute(delete(device_sessions))
             await session.execute(delete(device_credentials))
             await session.execute(delete(installations))
     finally:

@@ -139,12 +139,12 @@ backend/
 ├── src/
 │   └── automation_tool/
 │       ├── control_plane/         # 独立部署的 FastAPI 业务后端
-│       │   ├── bootstrap/         # 配置、注册和设备凭据依赖装配
+│       │   ├── bootstrap/         # 配置、注册、设备凭据和 Session 依赖装配
 │       │   ├── api/               # REST、设备认证、SSE/WebSocket 和错误映射
 │       │   ├── application/       # 注册、凭据、任务、配置、内容和工作流用例
 │       │   ├── domain/            # 任务、事件、动作、风险和 Artifact
 │       │   └── infrastructure/
-│       │       ├── database/      # PostgreSQL Schema、注册和凭据仓储
+│       │       ├── database/      # PostgreSQL Schema、注册、凭据和 Session 仓储
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
 │       │       ├── events/
 │       │       ├── object_storage/

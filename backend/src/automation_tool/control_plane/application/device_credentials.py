@@ -1,20 +1,18 @@
 """Versioned long-lived device credentials with digest-only persistence."""
 
-import base64
-import binascii
-import hashlib
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, Protocol
 from uuid import UUID
 
+from automation_tool.control_plane.application.opaque_bearers import (
+    InvalidOpaqueBearer,
+    OpaqueBearerCodec,
+)
+
 DEVICE_CREDENTIAL_SCOPE: Final = "device.session.exchange"
-_CREDENTIAL_PREFIX: Final = "atdc1"
-_SECRET_LENGTH: Final = 32
-_MAX_CREDENTIAL_LENGTH: Final = 256
-_BASE64URL_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]+")
+_CREDENTIAL_CODEC: Final = OpaqueBearerCodec("atdc1")
 
 
 class InvalidDeviceCredential(ValueError):
@@ -90,36 +88,15 @@ class DeviceCredentialRepository(Protocol):
     ) -> RevokedDeviceCredential: ...
 
 
-def _base64url(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
 def parse_device_credential(value: object) -> ParsedDeviceCredential:
     """Parse a credential without retaining or returning its plaintext secret."""
-
-    if not isinstance(value, str) or not value or len(value) > _MAX_CREDENTIAL_LENGTH:
-        raise InvalidDeviceCredential
     try:
-        prefix, identifier, encoded_secret = value.split(".")
-    except ValueError:
+        parsed = _CREDENTIAL_CODEC.parse(value)
+    except InvalidOpaqueBearer:
         raise InvalidDeviceCredential from None
-    if prefix != _CREDENTIAL_PREFIX or _BASE64URL_PATTERN.fullmatch(encoded_secret) is None:
-        raise InvalidDeviceCredential
-    try:
-        credential_id = UUID(identifier)
-        secret = base64.urlsafe_b64decode(encoded_secret + ("=" * (-len(encoded_secret) % 4)))
-    except (ValueError, binascii.Error):
-        raise InvalidDeviceCredential from None
-    if (
-        credential_id.version != 4
-        or str(credential_id) != identifier
-        or len(secret) != _SECRET_LENGTH
-        or _base64url(secret) != encoded_secret
-    ):
-        raise InvalidDeviceCredential
     return ParsedDeviceCredential(
-        credential_id=credential_id,
-        secret_digest=hashlib.sha256(secret).digest(),
+        credential_id=parsed.bearer_id,
+        secret_digest=parsed.secret_digest,
     )
 
 
@@ -136,20 +113,17 @@ class DeviceCredentialFactory:
         self._id_source = id_source
 
     def create(self) -> PendingDeviceCredential:
-        secret = self._secret_source(_SECRET_LENGTH)
-        credential_id = self._id_source()
-        if (
-            not isinstance(secret, bytes)
-            or len(secret) != _SECRET_LENGTH
-            or not isinstance(credential_id, UUID)
-            or credential_id.version != 4
-        ):
-            raise RuntimeError("Device credential generation failed")
-        encoded_secret = _base64url(secret)
+        try:
+            created = _CREDENTIAL_CODEC.create(
+                secret_source=self._secret_source,
+                id_source=self._id_source,
+            )
+        except RuntimeError:
+            raise RuntimeError("Device credential generation failed") from None
         return PendingDeviceCredential(
-            credential_id=credential_id,
-            credential=f"{_CREDENTIAL_PREFIX}.{credential_id}.{encoded_secret}",
-            secret_digest=hashlib.sha256(secret).digest(),
+            credential_id=created.bearer_id,
+            credential=created.bearer,
+            secret_digest=created.secret_digest,
         )
 
 
