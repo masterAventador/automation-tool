@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、纯领域任务状态机，以及 Task/Attempt/Action/Event 持久化模型；尚未提供 Task 业务路由或 Local Executor 进程。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、纯领域任务状态机，以及 Task/Attempt/Action/Event/Command 持久化模型；尚未提供 Task 业务路由或 Local Executor 进程。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -17,6 +17,8 @@
 迁移 `20260718_0007` 新增 `execution_attempts`、`task_actions` 和 `tasks.current_attempt_id`。Attempt 以 `(task_id, attempt_number)` 去重，部分唯一索引保证每个 Task 最多一个非终态 Attempt；终态必须有完成时间，重试只能创建新序号。Action 以 `(execution_attempt_id, ordinal)` 去重，明确区分 planned/authorized/prepared/dispatched/verified 等副作用阶段与 pending/succeeded/failed/cancelled/outcome_uncertain 结果；数据库拒绝阶段、结果和完成时间矛盾。Task→Attempt→Action 全链路使用包含 Task 与 Installation 的复合外键，不能把其他任务或安装实例的子资源挂入当前链路。
 
 迁移 `20260718_0008` 新增 `task_events` 与 `tasks.last_event_sequence`。19 种事件使用独立 `1.0` 版本，序号统一限制为 Python/Rust/TypeScript 可无损表达的 `1..2^53-1`；`(task_id, sequence)` 主键拒绝重复，`(installation_id, source_message_id)` 去重 Executor 来源消息。事件可选引用 Attempt/Action，但复合外键始终锁死同一 Task 和 Installation。`SafeTaskEventMessage` 与 Executor payload 复用一套敏感赋值、私有路径、inline data、控制/双向字符拒绝规则，数据库再拒绝空值、超长、控制字符和明显凭据；表内没有任意 JSON 或页面原文。Task 快照以 status/revision/last event sequence 为权威，事件原子收敛由 T3-11 实现。
+
+迁移 `20260718_0009` 新增 `task_commands` 持久 Outbox。wire message/correlation/response ID 必须是 UUIDv4；命令类型精确匹配 Executor v1 的 offer/pause/resume/cancel/emergency-stop，Attempt 内 sequence 唯一且不超过 `2^53-1`，Installation 内 idempotency key 和 response message 分别唯一。pending、in_flight、delivered、acknowledged、rejected、expired 六态与 next delivery、lease、delivery attempts、投递/确认时间、deadline、响应类型保持数据库一致：socket 投递不能冒充 Executor ACK，offer 只接受 accept/reject，控制命令只接受 control_ack。当前表不保存任意 payload；T3-09 从受约束 Task/Attempt 事实构造正式 envelope，并实现 lease/重投/过期/确认服务。
 
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 

@@ -25,6 +25,8 @@ from automation_tool.control_plane.domain import (
     ActionStatus,
     ExecutionAttemptStatus,
     InstallationStatus,
+    TaskCommandStatus,
+    TaskCommandType,
     TaskEventType,
     TaskEventVersion,
     TaskStatus,
@@ -625,6 +627,177 @@ Index(
     task_events.c.sequence,
 )
 
+task_commands = Table(
+    "task_commands",
+    metadata,
+    Column("message_id", UUID(as_uuid=True), nullable=False),
+    Column("correlation_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
+    Column("sequence", BigInteger(), nullable=False),
+    Column("command_type", String(length=32), nullable=False),
+    Column(
+        "status",
+        String(length=16),
+        nullable=False,
+        server_default=text(f"'{TaskCommandStatus.PENDING.value}'"),
+    ),
+    Column("idempotency_key", String(), nullable=False),
+    Column("revision", BigInteger(), nullable=False, server_default=text("1")),
+    Column(
+        "delivery_attempts",
+        BigInteger(),
+        nullable=False,
+        server_default=text("0"),
+    ),
+    Column("next_delivery_at", DateTime(timezone=True), nullable=True),
+    Column("lease_expires_at", DateTime(timezone=True), nullable=True),
+    Column("delivered_at", DateTime(timezone=True), nullable=True),
+    Column("acknowledged_at", DateTime(timezone=True), nullable=True),
+    Column("response_message_id", UUID(as_uuid=True), nullable=True),
+    Column("response_type", String(length=32), nullable=True),
+    Column("deadline_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "substring(message_id::text from 15 for 1) = '4' "
+        "and substring(message_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_task_commands_message_uuid_v4",
+    ),
+    CheckConstraint(
+        "substring(correlation_id::text from 15 for 1) = '4' "
+        "and substring(correlation_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_task_commands_correlation_uuid_v4",
+    ),
+    CheckConstraint(
+        "response_message_id is null or ("
+        "substring(response_message_id::text from 15 for 1) = '4' "
+        "and substring(response_message_id::text from 20 for 1) in ('8', '9', 'a', 'b'))",
+        name="ck_task_commands_response_uuid_v4",
+    ),
+    CheckConstraint(
+        f"sequence between 1 and {MAX_TASK_EVENT_SEQUENCE}",
+        name="ck_task_commands_sequence_range",
+    ),
+    CheckConstraint(
+        "command_type in (" + ", ".join(f"'{command.value}'" for command in TaskCommandType) + ")",
+        name="ck_task_commands_type",
+    ),
+    CheckConstraint(
+        "status in (" + ", ".join(f"'{status.value}'" for status in TaskCommandStatus) + ")",
+        name="ck_task_commands_status",
+    ),
+    CheckConstraint(
+        "idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'",
+        name="ck_task_commands_idempotency_key",
+    ),
+    CheckConstraint("revision > 0", name="ck_task_commands_revision_positive"),
+    CheckConstraint(
+        "delivery_attempts >= 0",
+        name="ck_task_commands_delivery_attempts_nonnegative",
+    ),
+    CheckConstraint(
+        "deadline_at > created_at and updated_at >= created_at "
+        "and (next_delivery_at is null or "
+        "(next_delivery_at >= created_at and next_delivery_at < deadline_at)) "
+        "and (lease_expires_at is null or "
+        "(lease_expires_at > updated_at and lease_expires_at <= deadline_at)) "
+        "and (delivered_at is null or "
+        "(delivered_at >= created_at and delivered_at <= deadline_at)) "
+        "and (acknowledged_at is null or "
+        "(delivered_at is not null and acknowledged_at >= delivered_at "
+        "and acknowledged_at <= deadline_at))",
+        name="ck_task_commands_time_order",
+    ),
+    CheckConstraint(
+        "(status = 'pending' and next_delivery_at is not null "
+        "and lease_expires_at is null and delivered_at is null "
+        "and acknowledged_at is null and response_message_id is null "
+        "and response_type is null) or "
+        "(status = 'in_flight' and delivery_attempts > 0 "
+        "and next_delivery_at is null and lease_expires_at is not null "
+        "and delivered_at is null and acknowledged_at is null "
+        "and response_message_id is null and response_type is null) or "
+        "(status = 'delivered' and delivery_attempts > 0 "
+        "and next_delivery_at is null and lease_expires_at is null "
+        "and delivered_at is not null and acknowledged_at is null "
+        "and response_message_id is null and response_type is null) or "
+        "(status = 'acknowledged' and delivery_attempts > 0 "
+        "and next_delivery_at is null and lease_expires_at is null "
+        "and delivered_at is not null and acknowledged_at is not null "
+        "and response_message_id is not null "
+        "and response_type in ('task.accept', 'task.control_ack')) or "
+        "(status = 'rejected' and delivery_attempts > 0 "
+        "and next_delivery_at is null and lease_expires_at is null "
+        "and delivered_at is not null and acknowledged_at is not null "
+        "and response_message_id is not null and response_type = 'task.reject') or "
+        "(status = 'expired' and next_delivery_at is null "
+        "and lease_expires_at is null and acknowledged_at is null "
+        "and response_message_id is null and response_type is null "
+        "and (delivered_at is null or delivery_attempts > 0))",
+        name="ck_task_commands_status_coherence",
+    ),
+    CheckConstraint(
+        "response_type is null or "
+        "(command_type = 'task.offer' and response_type in ('task.accept', 'task.reject')) or "
+        "(command_type in ('task.pause', 'task.resume', 'task.cancel', "
+        "'task.emergency_stop') and response_type = 'task.control_ack')",
+        name="ck_task_commands_response_coherence",
+    ),
+    ForeignKeyConstraint(
+        ["execution_attempt_id", "task_id", "installation_id"],
+        [
+            "execution_attempts.id",
+            "execution_attempts.task_id",
+            "execution_attempts.installation_id",
+        ],
+        name="fk_task_commands_attempt_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("message_id", name="pk_task_commands"),
+    UniqueConstraint(
+        "execution_attempt_id",
+        "sequence",
+        name="uq_task_commands_attempt_sequence",
+    ),
+    UniqueConstraint(
+        "installation_id",
+        "idempotency_key",
+        name="uq_task_commands_idempotency",
+    ),
+    UniqueConstraint(
+        "installation_id",
+        "response_message_id",
+        name="uq_task_commands_response_message",
+    ),
+)
+
+Index(
+    "ix_task_commands_outbox_due",
+    task_commands.c.status,
+    task_commands.c.next_delivery_at,
+    task_commands.c.deadline_at,
+    task_commands.c.message_id,
+)
+Index(
+    "ix_task_commands_installation_task_created",
+    task_commands.c.installation_id,
+    task_commands.c.task_id,
+    task_commands.c.created_at,
+    task_commands.c.message_id,
+)
+
 device_sessions = Table(
     "device_sessions",
     metadata,
@@ -694,6 +867,7 @@ __all__ = [
     "installations",
     "metadata",
     "task_actions",
+    "task_commands",
     "task_events",
     "tasks",
 ]

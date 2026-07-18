@@ -503,6 +503,12 @@ Executor 来源的规范 UUIDv4 message ID 以 `(installation_id, source_message
 
 Task 行新增从 0 开始的 `last_event_sequence`，与现有 status、revision、updated time 组成 `TaskSnapshotProjection`。App 重连先拉该权威快照，再从水位后的事件续订；事件行携带的 post-event status/revision 用于审计和版本降级，不允许前端自行猜测快照。T3-04 只冻结模型，T3-11 必须在一个 PostgreSQL 事务中校验序号/revision、更新 Task/Attempt/Action、推进水位并插入事件，不能把本任务的独立 INSERT/UPDATE 测试当成收敛已完成。
 
+T3-05 的 `task_commands` 是 Control Plane 到 Executor 的持久 Outbox。主键直接使用正式 wire `message_id`，同时持久化 correlation ID、Installation/Task/Attempt 复合归属、Attempt 内安全 sequence、Executor v1 命令类型、Installation 内幂等键、deadline、正 revision、投递次数与下一投递时间。表不保存任意 JSON；offer 的业务参数由 T3-09 从受约束 Task 定义构造，控制命令只需稳定引用执行链，避免在 Outbox 复制一份可漂移的任务定义。
+
+Outbox 状态精确为 pending、in_flight、delivered、acknowledged、rejected、expired。pending 才有 next delivery；in_flight 必须有未过 deadline 的 lease 且投递次数大于 0；delivered 只说明写入当前 WebSocket 成功；acknowledged/rejected 必须在 deadline 内收到独立 UUIDv4 response message 并保留确认时间；expired 不能带 ACK。offer 仅允许 task.accept/task.reject，pause/resume/cancel/emergency-stop 仅允许 task.control_ack，数据库拒绝“未发送先确认”、控制命令收到 accept、过期伪确认和倒序时间。
+
+`(execution_attempt_id, sequence)`、`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别去重命令顺序、业务意图与响应重放；相同幂等键/响应 ID 不跨 Installation 互相阻塞。due index 只为 T3-09 的 `FOR UPDATE SKIP LOCKED` 或等价原子抢占准备查询形状，T3-05 没有实现后台 dispatcher，也没有宣称 delivered 等于 Executor 已处理。
+
 约束：
 
 - 每个资源都绑定 `installation_id`；

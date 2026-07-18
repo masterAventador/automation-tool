@@ -9,6 +9,7 @@ from .schema import (
     installations,
     metadata,
     task_actions,
+    task_commands,
     task_events,
     tasks,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "installations",
     "metadata",
     "task_actions",
+    "task_commands",
     "task_events",
     "tasks",
 ]

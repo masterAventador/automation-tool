@@ -31,6 +31,12 @@ from automation_tool.control_plane.domain.resource_ids import (
     ResourceId,
     TaskId,
 )
+from automation_tool.control_plane.domain.task_commands import (
+    TERMINAL_TASK_COMMAND_STATUSES,
+    TaskCommandResponseType,
+    TaskCommandStatus,
+    TaskCommandType,
+)
 from automation_tool.control_plane.domain.task_events import (
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
     MAX_TASK_EVENT_SEQUENCE,
@@ -52,6 +58,7 @@ __all__ = [
     "MAX_TASK_EVENT_SEQUENCE",
     "TERMINAL_ACTION_STATUSES",
     "TERMINAL_EXECUTION_ATTEMPT_STATUSES",
+    "TERMINAL_TASK_COMMAND_STATUSES",
     "ActionId",
     "ActionOutcome",
     "ActionStatus",
@@ -76,6 +83,9 @@ __all__ = [
     "InvalidTaskTransition",
     "ResourceId",
     "SafeTaskEventMessage",
+    "TaskCommandResponseType",
+    "TaskCommandStatus",
+    "TaskCommandType",
     "TaskEventType",
     "TaskEventVersion",
     "TaskId",

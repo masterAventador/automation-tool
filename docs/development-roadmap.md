@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event 持久化骨架已完成，准备实施 Command/Outbox；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化骨架已完成，准备实施创建任务 API；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -63,6 +63,7 @@
 | Task 持久化 | `✅` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
 | Attempt/Action 持久化 | `✅` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
 | Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
+| Command/Outbox 持久化 | `✅` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -185,7 +186,7 @@
 | T3-02 | Task 数据模型 | tasks/revision/installation scope/Alembic/仓储集成测试 | T3-01,I2-02 | ✅ 已完成 |
 | T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ✅ 已完成 |
 | T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ✅ 已完成 |
-| T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ⬜ 未开始 |
+| T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ✅ 已完成 |
 | T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ⬜ 未开始 |
 | T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ⬜ 未开始 |
 | T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ⬜ 未开始 |
@@ -1030,10 +1031,31 @@
 - 文档：同步根/Backend README、后端/前端架构边界、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-05 建立 Command/Outbox；T3-11 实现事件接收、缺口/迟到/重复与原子快照收敛；T3-12/T3-15 分别实现 SSE 续拉和 App 快照 reducer，均不得绕过本版本/序号/安全消息契约
 
+### T3-05 Command/Outbox 模型
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 Command/Response/Outbox 状态契约与真实 migration/schema 测试并把台账置为 RED；目标测试收集分别因 `TERMINAL_TASK_COMMAND_STATUSES`、命令/响应类型和 `task_commands` 表导出不存在而失败
+- GREEN：2 项纯领域契约 + 4 项真实 PostgreSQL Outbox 测试通过；Backend 全量 555 项且 2085 条语句、292 个分支覆盖率 100%，Ruff、严格 Mypy、uv lock 和 Alembic autogenerate `check` 通过
+- Wire 身份：`message_id` 直接作为持久命令主键，message/correlation/response ID 均限制为规范 UUIDv4；command/response 类型精确匹配 Executor v1 的五种命令与 accept/reject/control_ack，不复制第二套 wire 名称
+- 幂等与顺序：`(execution_attempt_id, sequence)` 唯一且 sequence 为 `1..2^53-1`；`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别拒绝业务意图/ACK 重放，相同值在另一个 Installation 内可独立使用
+- 状态：pending、in_flight、delivered、acknowledged、rejected、expired 六态封闭；acknowledged/rejected/expired 是终态。pending 才有 next delivery，in_flight 必须持 lease，delivered 只证明 socket 写入，ACK/REJECT 必须有真实响应 message/type/time
+- Deadline 与时间：deadline 严格晚于创建；next delivery 必须在窗口内，lease 晚于更新且不越 deadline，投递/确认时间有序且确认不晚于 deadline；过期可以发生在未投递或等待 ACK 阶段，但不得保留 lease/响应伪装成功
+- 响应一致性：task.offer 只接受 task.accept/task.reject；pause/resume/cancel/emergency-stop 只接受 task.control_ack；数据库拒绝 offer 收 control_ack、控制命令收 accept、rejected 携带非 reject、未投递先确认和 response UUID 非 v4
+- Scope：每条命令通过 `(execution_attempt_id, task_id, installation_id)` 复合外键锁死执行链；跨 Task/Installation/Attempt 冒充由 PostgreSQL 拒绝，不相信发送方自报 scope
+- 无任意载荷：Outbox 只保存稳定引用、wire 身份、类型、序号、幂等、deadline、lease、投递/响应状态与时间，不存任意 JSON、页面原文、Cookie、Token、浏览器资料或本机路径；T3-09 从受约束 Task/Attempt 数据构造正式 envelope
+- 真实边界：官方 PostgreSQL 18.4 隔离容器执行 Alembic 空库升 head、autogenerate check、降级到 `0008`、确认 Command 表删除且 Event 表保留后再升 head；真实 INSERT 验证六种合法状态、默认值、所有唯一/复合外键、响应 mapping、时间和失败回滚
+- 失败矩阵：覆盖非法 message/correlation/response UUIDv4、跨 scope、0/超界/重复 sequence、重复 idempotency/response、非法 key/type/status/revision/attempt count、deadline/next/lease/投递/确认倒序、状态字段矛盾和命令响应错配
+- 服务边界：T3-05 只建立持久模型和 due 查询索引；T3-09 必须从正式 Executor Connection Registry 路径原子抢占 lease、发送、重试、过期与接收 ACK，不能把当前数据库 INSERT 当成投递服务验收，也不能把 delivered 提前映射成任务状态完成
+- 清理：测试只启动隔离 PostgreSQL，fixture 结束删除容器、网络、卷；没有 App、Executor、浏览器、服务或端口遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-06/T3-07 建立任务创建与查询 API；T3-08 建立在线连接 Registry；T3-09 才实现 Outbox dispatcher/ACK；T3-13/T3-14 控制 API 必须等确认事件后再改 Task 状态
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-05`：建立持久 Command/Outbox、幂等、deadline 与确认状态；
-2. `T3-06`：建立受 Installation 守卫保护的幂等创建任务 API；
+1. `T3-06`：建立受 Installation 守卫保护的幂等创建任务 API；
+2. `T3-07`：建立 Installation 隔离的任务列表/详情/分页 API；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。
