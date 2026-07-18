@@ -110,6 +110,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -122,7 +123,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "types-jsonschema" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -135,6 +135,7 @@ requires-dist = [
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extras = ["asyncio"] },
     { name = "uvicorn", extras = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.metadata.requires-dev]
@@ -147,7 +148,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "types-jsonschema" },
-    { name = "websockets" },
 ]
 
 [[package]]

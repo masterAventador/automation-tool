@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings",
     "sqlalchemy[asyncio]",
     "uvicorn[standard]",
+    "websockets",
 ]
 
 [project.scripts]
@@ -35,7 +36,6 @@ dev = [
     "pytest-cov",
     "ruff",
     "types-jsonschema",
-    "websockets",
 ]
 
 [tool.pytest.ini_options]

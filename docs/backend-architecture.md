@@ -364,6 +364,10 @@ T3-09 在每次连接重认证之后调用持久投递服务。仓储先把 dead
 
 任务回执必须通过正式 parser，并与当前连接身份、Outbox 的 Installation、Task、Attempt、correlation 和 sequence 全部一致。`task.accept` payload 精确为 `{"accepted":true}`，`task.reject` 为 `{"accepted":false}`，`task.control_ack` 为 `{"acknowledged":true}`；offer 只能收 accept/reject，控制命令只能收 control_ack。首个合法响应 ID 与服务端收到时间成为事实；同命令同结论的后续重复回执直接返回已有终态，不覆盖首个响应；错配、未投递先确认、迟到和跨命令响应 ID 冲突 fail closed。ACK 只结束 Command，Task/Attempt/Action 的业务状态必须等 T3-11 事件收敛。
 
+T3-10 增加独立 `FakeExecutorEngine` 与 `FakeExecutorClient`。引擎只导入共享 protocol，正式解析每条 command，并核对 Installation/Executor、deadline、Attempt 内 command sequence 及 task/attempt 绑定；message ID 与 idempotency key 任一重放都返回首次生成的完全相同 envelope，不再次递增事件序号，意图变化则拒绝。成功、部分成功、失败、登录、接管、结果不确定、拒绝和 hold 场景覆盖全部当前任务事件；hold 只允许合法 pause/resume/cancel/emergency-stop，生成阶段失败会同时回滚状态与事件水位。
+
+Fake 客户端只接受无 userinfo/query/fragment 的固定 Executor `ws`/`wss` 路径、受限 Session 和有界命令数，使用共享的唯一子协议、32 KiB 限制和正式 Hello/结果/事件 envelope。核心不读取文件、不启动进程、不操作浏览器/桌面、不访问 Control Plane 数据库；内存状态只是测试场景投影，不能成为生产任务事实。真实 Uvicorn 验收选择不产生事件的 reject 场景验证当前 Outbox/ACK 全链路；全部事件经真实 WebSocket controller 验证传输，但服务端接收、sequence 缺口和 revision CAS 必须由 T3-11 完成，不能把 controller 测试冒充持久事件闭环。
+
 ### 10.2 命令
 
 ```text

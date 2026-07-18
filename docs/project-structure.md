@@ -175,6 +175,8 @@ backend/
 │       │       ├── object_storage/
 │       │       └── observability/
 │       ├── executor/              # 永远运行在用户电脑的执行器
+│       │   ├── fake.py            # 无 I/O 场景引擎；复用正式 parser/envelope/幂等规则
+│       │   ├── fake_client.py     # 正式 Session WebSocket 的有界联调客户端
 │       │   ├── bootstrap/         # Sidecar 入口、握手和生命周期
 │       │   ├── application/       # 领取、执行、暂停、取消和上报
 │       │   ├── rpa/
@@ -212,6 +214,8 @@ backend/
 ```
 
 T3-09 的具体落点保持分层：`application/task_command_delivery.py` 定义命令记录、投递用例与安全错误；`infrastructure/database/task_command_repository.py` 实现 PostgreSQL enqueue/lease/retry/ACK；`bootstrap/task_commands.py` 只做依赖装配；`api/executor_websocket.py` 仍是唯一网络收发入口。没有另建 dispatcher 数据库、消息队列或第二套协议模型。
+
+T3-10 的 `executor/fake.py` 只依赖共享 `protocol/`，以正式 command envelope 驱动确定性无副作用场景并保存进程内回放账本；`fake_client.py` 只负责正式 WebSocket 传输。它们不能导入 `control_plane/`、RPA Adapter、文件系统、子进程或数据库，也不能替代 Wave 4 正式 Executor 的本机持久幂等账本、生命周期监管和真实平台实现。
 
 ### 4.1 Backend 依赖方向
 

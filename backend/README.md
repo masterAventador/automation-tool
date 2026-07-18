@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、持久命令投递/重连/ACK、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建和隔离查询 API；尚未提供 Task 控制路由或 Local Executor 进程。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、持久命令投递/重连/ACK、无副作用 FakeExecutor、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建和隔离查询 API；尚未提供服务端事件收敛、Task 控制路由或正式 Local Executor 进程。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -26,7 +26,9 @@
 
 `TaskCommandDeliveryService` 与 `SqlAlchemyTaskCommandRepository` 已把 Outbox 接入当前 Executor 连接。enqueue 先锁 active Installation 并对同 scope 幂等重放；每轮 WebSocket 重认证后先批量过期，再以 `FOR UPDATE SKIP LOCKED` 抢占 pending、过期 lease 或 ACK 超时的 delivered 命令。发送失败释放为延迟 pending；发送成功只进入 delivered；新连接会立即重投此前 delivered，Control Plane 崩溃留下的 in-flight 则在 lease 到期后恢复。回执同时匹配 Installation、Task、Attempt、correlation 和 sequence，且 accept/reject/control_ack payload 使用封闭布尔形状；首个合法回执持久化，后续同结论重复回执幂等，错配、迟到和响应 ID 冲突 fail closed。
 
-当前 offer payload 保持空的安全骨架，因为平台任务定义尚未在 T3-17 建模；T3-10 FakeExecutor 只按相同正式 envelope 做无副作用回放，T3-17 再从明确列/DTO 构造业务 payload。T3-09 不因 ACK 提前修改 Task/Attempt，状态收敛仍必须等待 T3-11 的持久事件事实。
+当前 offer payload 保持空的安全骨架，因为平台任务定义尚未在 T3-17 建模；FakeExecutor 只按相同正式 envelope 做无副作用回放，T3-17 再从明确列/DTO 构造业务 payload。T3-09 不因 ACK 提前修改 Task/Attempt，状态收敛仍必须等待 T3-11 的持久事件事实。
+
+`automation_tool.executor.fake` 是不依赖 Control Plane 内部实现的确定性协议引擎：严格复用正式 parser、身份、deadline、Attempt command sequence 和 task/attempt 绑定，按 message ID 与 idempotency key 双账本去重。它覆盖 accept/reject、成功、部分成功、失败、登录、人工接管、结果不确定和 hold 场景，并为 pause/resume/cancel/emergency-stop 生成正式 control ACK 与单调事件；生成中失败会原子回滚状态和事件水位。`fake_client` 只通过 `ws(s)://.../api/v1/executors/connect`、唯一正式子协议和 Bearer Session 出站连接，不执行 RPA、文件、子进程或数据库副作用。
 
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 
@@ -42,7 +44,7 @@
 
 `ExecutorConnectionRegistry` 是当前单 Control Plane 进程内唯一在线事实源，以 Installation 为单活键并公开不含 channel/凭据的只读投影：连接/Executor ID、版本/平台/架构、服务端连接与最后心跳时间、最后 sequence。新 Hello 先原子成为 current，再以固定 4409 关闭旧连接；旧连接迟到 heartbeat 和 unregister 都不能影响新连接。`send_current` 必须同时命中 Installation 与预期 Connection ID，限制 UTF-8 wire 为 1..32 KiB，并在 socket 写入后再次检查 current；写入竞态、连接替换和传输失败由持久投递服务做重投判断。应用 lifespan 以 1012 关闭并清空全部连接。Registry 不持久化认证或任务事实，MVP/Demo 因而必须保持单 Control Plane 实例，多副本前先建设跨副本连接路由。
 
-真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`。后者后台启动隔离 PostgreSQL、完整 Alembic 和真实 Uvicorn，经正式 REST 换票与标准 WebSocket 客户端验证首次 offer、断线同 message 重投、错误 ACK 拒绝、恢复 ACK、重复 ACK 幂等和离线过期；结束后回收服务、端口、容器、网络和卷，不启动桌面 App。
+真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`。T3-10 后台启动隔离 PostgreSQL、完整 Alembic 和真实 Uvicorn，经正式 REST 换取 `executor.connect` Session，再由 FakeExecutor 接收持久 offer、回传 reject 并核对数据库终态。全部事件和控制场景另经真实 loopback WebSocket controller 回放；Control Plane 事件接收/持久化明确留给 T3-11，不以测试 controller 冒充。验收结束回收服务、端口、容器、网络和卷，不启动桌面 App。
 
 真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名与凭据注入，React 不接触任何秘密；I2-14 验证隐藏 App 吊销诊断，T3-06 验证幂等创建，T3-07 再由独立 `visible=false` App 对三个自有 Task 做 2+1 稳定分页、读取详情并确认预置的其他 Installation Task 不可见，最终核对七张正式 App Session 和数据库 scope。
 

@@ -27,13 +27,13 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.protocol import (
     EXECUTOR_PROTOCOL_VERSION,
+    EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorLifecycleEnvelope,
     ExecutorProtocolError,
     TaskCommandResultEnvelope,
     parse_executor_message,
 )
 
-EXECUTOR_WEBSOCKET_SUBPROTOCOL: Final = "automation-tool.executor.v1"
 _EXECUTOR_VERSION_PATTERN: Final = (
     r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?"
