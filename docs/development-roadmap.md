@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1 工程闭环与 Wave 2 全部完成，准备实施 Wave 3 任务状态机；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01 任务状态机已完成，准备实施 Task 持久化模型；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -59,6 +59,7 @@
 | Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
+| Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -177,7 +178,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| T3-01 | 任务状态机 | 全部合法/非法转换、终态、CANCELLING 和 OUTCOME_UNCERTAIN 单元测试 | I2-01 | ⬜ 未开始 |
+| T3-01 | 任务状态机 | 全部合法/非法转换、终态、CANCELLING 和 OUTCOME_UNCERTAIN 单元测试 | I2-01 | ✅ 已完成 |
 | T3-02 | Task 数据模型 | tasks/revision/installation scope/Alembic/仓储集成测试 | T3-01,I2-02 | ⬜ 未开始 |
 | T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ⬜ 未开始 |
 | T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ⬜ 未开始 |
@@ -951,10 +952,27 @@
 - 文档：同步根/Backend README、前后端架构、OpenAPI/TypeScript DTO、本路线图快照、依赖、状态、完成记录和当前下一步；没有新增重复规划文档
 - 遗留：正式重新授权/凭据替换流程随 Demo 授权管理实现；T3-06 必须把 `require_current_installation_access` 作为创建任务入口的强制依赖；T3-08 继续建设连接 Registry，而不是重复认证与吊销逻辑
 
+### T3-01 任务状态机
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增领域状态机目标测试并把台账置为 RED；`uv run pytest tests/unit/control_plane/domain/test_task_state_machine.py -q` 在收集阶段因 `automation_tool.control_plane.domain.task_state_machine` 不存在而失败
+- GREEN：12 项目标测试通过并穷举 16×16 共 256 个来源/目标组合；Backend 全量 527 项且 1875 条语句、276 个分支覆盖率 100%，Ruff 与严格 Mypy 通过
+- 状态契约：`TaskStatus` 精确包含 draft、validating、awaiting device/platform login、discovering targets、awaiting confirmation、queued、running、paused、awaiting human、cancelling 与五个终态；allowlist 使用只读 mapping + frozenset，字符串和其他非强类型输入不做隐式转换
+- 取消与竞态：运行中不能直接跳 `CANCELLED`，必须先进入 `CANCELLING`；如果完成/失败事实与取消并发到达，允许从 `CANCELLING` 收敛到 succeeded、partially succeeded、failed、cancelled 或 outcome uncertain，不能用用户请求覆盖 Executor 最终事实
+- 终态与不确定：succeeded、partially succeeded、failed、cancelled、outcome uncertain 无任何出边且禁止自循环；outcome uncertain 只允许从 running、awaiting human、cancelling 进入，执行前阶段不能伪造副作用不确定
+- 真实边界：本任务是无 I/O 的 Control Plane 领域规则，正式调用方式是后续应用服务直接使用同一 `TaskStateMachine`；不启动数据库、服务、App、Executor 或浏览器。T3-02/T3-11 分别把它接入持久化 CAS 与正式事件收敛，不能以当前纯单元测试替代后续跨边界验收
+- 失败矩阵：覆盖全部合法/非法跳转、同状态重复、终态复活、非强类型输入、暂停/恢复、目标发现人工接管、取消未确认、取消/完成竞态和副作用结果不确定；事件乱序/重复/迟到与 Control Plane/Executor 崩溃恢复不在纯状态机内放宽，分别归 T3-11/T3-20
+- 安全：非法转换只返回固定 `Task state transition is invalid`，不回显来源、目标或异常 cause；领域模块只依赖标准库，不读取 Installation、凭据、私有路径或环境配置
+- 清理：没有启动 App、服务、数据库、容器、浏览器或 Executor，无进程、端口和临时业务数据需要清理
+- 文档：同步根/Backend README、后端架构的精确转换图、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-02 建立 tasks/revision/installation scope 与 PostgreSQL CAS；T3-11 必须把事件映射到本状态机而非另建转换表；人工接管的恢复目标由后续 attempt/checkpoint 事实决定
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-01`：定义任务状态机与非法转换矩阵；
-2. `T3-02`：建立 Task 数据模型、Installation scope 与 Alembic；
+1. `T3-02`：建立 Task 数据模型、Installation scope 与 Alembic；
+2. `T3-03`：建立 Execution Attempt/Action 模型和唯一约束；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

@@ -396,28 +396,35 @@ Pydantic 是 wire format 单一来源，导出 JSON Schema 与有效/无效 fixt
 Control Plane 任务状态：
 
 ```text
-DRAFT
-  → VALIDATING
-  → AWAITING_DEVICE
-  → AWAITING_PLATFORM_LOGIN
-  → DISCOVERING_TARGETS
-  → AWAITING_CONFIRMATION
-  → QUEUED
-  → RUNNING
-      ↔ PAUSED
-      → AWAITING_HUMAN
-      → CANCELLING
-  → SUCCEEDED | PARTIALLY_SUCCEEDED | FAILED | CANCELLED | OUTCOME_UNCERTAIN
+DRAFT                  → VALIDATING
+VALIDATING             → AWAITING_DEVICE | CANCELLING | FAILED
+AWAITING_DEVICE        → AWAITING_PLATFORM_LOGIN | CANCELLING | FAILED
+AWAITING_PLATFORM_LOGIN → DISCOVERING_TARGETS | CANCELLING | FAILED
+DISCOVERING_TARGETS    → AWAITING_CONFIRMATION | AWAITING_HUMAN | CANCELLING | FAILED
+AWAITING_CONFIRMATION  → DISCOVERING_TARGETS | QUEUED | CANCELLING
+QUEUED                 → AWAITING_DEVICE | RUNNING | CANCELLING | FAILED
+RUNNING                → PAUSED | AWAITING_HUMAN | CANCELLING
+                       → SUCCEEDED | PARTIALLY_SUCCEEDED | FAILED | OUTCOME_UNCERTAIN
+PAUSED                 → RUNNING | AWAITING_HUMAN | CANCELLING
+AWAITING_HUMAN         → DISCOVERING_TARGETS | RUNNING | CANCELLING
+                       → FAILED | OUTCOME_UNCERTAIN
+CANCELLING             → SUCCEEDED | PARTIALLY_SUCCEEDED | FAILED
+                       → CANCELLED | OUTCOME_UNCERTAIN
 ```
 
 约束：
 
 - 任一状态只允许显式列出的转换；
-- 终态不可再次运行；
+- `SUCCEEDED`、`PARTIALLY_SUCCEEDED`、`FAILED`、`CANCELLED`、`OUTCOME_UNCERTAIN` 是无出边终态，不能再次运行；
 - “取消请求已发送”是 `CANCELLING`，不是 `CANCELLED`；
+- 取消与完成并发时，`CANCELLING` 允许按 Executor 已确认的真实最终事实收敛到任一终态，不能为了迎合取消请求覆盖已经发生的完成或失败；
+- `OUTCOME_UNCERTAIN` 只允许从 `RUNNING`、`AWAITING_HUMAN` 或 `CANCELLING` 进入，校验、排队和目标发现阶段不能伪造外部副作用不确定；
+- 同状态转换一律非法；重复/迟到事件由 T3-11 按序号和幂等处理，不通过放宽领域状态机吸收；
 - Executor 断连不自动等于失败；按租约和动作阶段决定等待、暂停或结果不确定；
 - 已发生副作用的执行尝试不通过创建新任务偷偷覆盖；
 - 重试失败目标创建新的 execution attempt 和 idempotency key，保留原链路。
+
+T3-01 的 `TaskStateMachine` 是无 I/O 的唯一领域转换策略。输入必须是强类型 `TaskStatus`，不把字符串隐式转换成状态；拒绝使用固定不回显来源/目标的 `InvalidTaskTransition`。测试穷举 16×16 全部状态对并核对 immutable allowlist，后续 API、事件投影、FakeExecutor 和仓储不得复制或放宽矩阵。
 
 ## 12. 幂等与结果不确定
 

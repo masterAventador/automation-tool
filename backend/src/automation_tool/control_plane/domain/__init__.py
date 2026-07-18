@@ -24,6 +24,11 @@ from automation_tool.control_plane.domain.resource_ids import (
     ResourceId,
     TaskId,
 )
+from automation_tool.control_plane.domain.task_state_machine import (
+    InvalidTaskTransition,
+    TaskStateMachine,
+    TaskStatus,
+)
 
 __all__ = [
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
@@ -44,6 +49,9 @@ __all__ = [
     "InvalidDemoBootstrap",
     "InvalidDemoEnvironmentId",
     "InvalidResourceId",
+    "InvalidTaskTransition",
     "ResourceId",
     "TaskId",
+    "TaskStateMachine",
+    "TaskStatus",
 ]
