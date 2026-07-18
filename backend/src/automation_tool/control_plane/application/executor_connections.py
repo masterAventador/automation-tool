@@ -87,6 +87,7 @@ class BoundExecutorConnection:
     executor_version: str
     platform: ExecutorPlatform
     architecture: ExecutorArchitecture
+    hello_sequence: int
     _authorization: AuthorizedExecutorConnection = field(repr=False)
 
     @property
@@ -146,6 +147,7 @@ class ExecutorConnectionService:
                 executor_version=payload.executor_version,
                 platform=payload.platform,
                 architecture=payload.architecture,
+                hello_sequence=message.sequence,
                 _authorization=authorized,
             )
         except (

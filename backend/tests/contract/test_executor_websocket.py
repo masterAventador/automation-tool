@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -16,6 +17,7 @@ from starlette.websockets import WebSocketDisconnect
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.api.executor_websocket import (
     EXECUTOR_CLOSE_AUTHENTICATION_REJECTED,
+    EXECUTOR_CLOSE_CONNECTION_REPLACED,
     EXECUTOR_CLOSE_HELLO_TIMEOUT,
     EXECUTOR_CLOSE_IDENTITY_REJECTED,
     EXECUTOR_CLOSE_INTERNAL_ERROR,
@@ -31,10 +33,17 @@ from automation_tool.control_plane.application.device_sessions import (
     ParsedDeviceSession,
     PendingDeviceSession,
 )
+from automation_tool.control_plane.application.executor_connection_registry import (
+    ExecutorConnectionRegistry,
+    ExecutorConnectionRegistryRejected,
+    OnlineExecutorConnection,
+    StaleExecutorConnection,
+)
 from automation_tool.control_plane.application.executor_connections import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorConnectionService,
 )
+from automation_tool.control_plane.domain import InstallationId
 
 NOW = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 INSTALLATION_ID = UUID("123e4567-e89b-42d3-a456-426614174003")
@@ -118,7 +127,12 @@ def app_with_live_session() -> tuple[FastAPI, SwitchableSessionRepository, str]:
     return app, repository, material.session_token
 
 
-def hello(*, installation_id: str = str(INSTALLATION_ID)) -> str:
+def hello(
+    *,
+    installation_id: str = str(INSTALLATION_ID),
+    executor_id: str = EXECUTOR_ID,
+    sequence: int = 1,
+) -> str:
     return json.dumps(
         {
             "protocol_version": "1.0",
@@ -127,10 +141,10 @@ def hello(*, installation_id: str = str(INSTALLATION_ID)) -> str:
             "sent_at": "2026-07-18T12:00:00Z",
             "deadline_at": "2026-07-18T12:00:30Z",
             "installation_id": installation_id,
-            "executor_id": EXECUTOR_ID,
+            "executor_id": executor_id,
             "correlation_id": "123e4567-e89b-42d3-a456-426614174002",
-            "idempotency_key": "executor:hello:1",
-            "sequence": 1,
+            "idempotency_key": f"executor:hello:{sequence}",
+            "sequence": sequence,
             "payload": {
                 "architecture": "arm64",
                 "executor_version": "0.1.0",
@@ -139,6 +153,42 @@ def hello(*, installation_id: str = str(INSTALLATION_ID)) -> str:
         },
         separators=(",", ":"),
     )
+
+
+def heartbeat(*, executor_id: str = EXECUTOR_ID, sequence: int) -> str:
+    return json.dumps(
+        {
+            "protocol_version": "1.0",
+            "message_id": "123e4567-e89b-42d3-a456-426614174009",
+            "message_type": "executor.heartbeat",
+            "sent_at": "2026-07-18T12:00:01Z",
+            "deadline_at": "2026-07-18T12:00:31Z",
+            "installation_id": str(INSTALLATION_ID),
+            "executor_id": executor_id,
+            "correlation_id": "123e4567-e89b-42d3-a456-426614174008",
+            "idempotency_key": f"executor:heartbeat:{sequence}",
+            "sequence": sequence,
+            "payload": {"status": "healthy"},
+        },
+        separators=(",", ":"),
+    )
+
+
+def wait_for_online(
+    client: TestClient,
+    registry: ExecutorConnectionRegistry,
+    predicate: Any,
+) -> OnlineExecutorConnection | None:
+    portal = client.portal
+    assert portal is not None
+    installation_id = InstallationId.parse(INSTALLATION_ID)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        snapshot = portal.call(registry.snapshot, installation_id)
+        if predicate(snapshot):
+            return snapshot
+        time.sleep(0.005)
+    raise AssertionError("Executor online projection did not reach the expected state")
 
 
 def test_executor_websocket_route_is_registered_without_polluting_openapi() -> None:
@@ -200,6 +250,23 @@ def test_upgrade_is_retryably_denied_when_connection_service_is_unavailable() ->
     assert captured.value.status_code == 503
     assert captured.value.headers["cache-control"] == "no-store"
     assert "private-session" not in captured.value.text
+
+
+def test_upgrade_is_retryably_denied_when_registry_is_unavailable() -> None:
+    app, _, token = app_with_live_session()
+    app.state.executor_connection_registry = None
+    with (
+        pytest.raises(WebSocketDenialResponse) as captured,
+        TestClient(app).websocket_connect(
+            "/api/v1/executors/connect",
+            headers={"authorization": f"Bearer {token}"},
+            subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+        ),
+    ):
+        pass
+
+    assert captured.value.status_code == 503
+    assert captured.value.headers["cache-control"] == "no-store"
 
 
 def test_unexpected_upgrade_authentication_failure_is_retryably_denied(
@@ -367,6 +434,194 @@ def test_bound_executor_can_disconnect_cleanly() -> None:
         subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
     ) as websocket:
         websocket.send_text(hello())
+
+
+def test_new_hello_replaces_old_installation_connection_and_heartbeat_projects_online() -> None:
+    app, _, token = app_with_live_session()
+    registry = cast(ExecutorConnectionRegistry, app.state.executor_connection_registry)
+    headers = {"authorization": f"Bearer {token}"}
+    replacement_executor_id = str(uuid4())
+
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/api/v1/executors/connect",
+            headers=headers,
+            subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+        ) as first:
+            first.send_text(hello())
+            first_online = wait_for_online(client, registry, lambda value: value is not None)
+            assert first_online is not None
+
+            with client.websocket_connect(
+                "/api/v1/executors/connect",
+                headers=headers,
+                subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+            ) as second:
+                second.send_text(hello(executor_id=replacement_executor_id))
+                replacement = wait_for_online(
+                    client,
+                    registry,
+                    lambda value: (
+                        value is not None and value.connection_id != first_online.connection_id
+                    ),
+                )
+                assert replacement is not None
+                assert str(replacement.executor_id) == replacement_executor_id
+                with pytest.raises(WebSocketDisconnect) as replaced:
+                    first.receive_text()
+                assert replaced.value.code == EXECUTOR_CLOSE_CONNECTION_REPLACED
+                assert replaced.value.reason == "Executor connection was replaced"
+
+                second.send_text(heartbeat(executor_id=replacement_executor_id, sequence=2))
+                heartbeat_projection = wait_for_online(
+                    client,
+                    registry,
+                    lambda value: value is not None and value.last_sequence == 2,
+                )
+                assert heartbeat_projection is not None
+                assert heartbeat_projection.connected_at <= heartbeat_projection.last_heartbeat_at
+
+                second.send_text(heartbeat(executor_id=replacement_executor_id, sequence=2))
+                with pytest.raises(WebSocketDisconnect) as duplicate:
+                    second.receive_text()
+                assert duplicate.value.code == EXECUTOR_CLOSE_PROTOCOL_REJECTED
+                assert duplicate.value.reason == "Executor protocol is rejected"
+
+        assert wait_for_online(client, registry, lambda value: value is None) is None
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    (
+        (ExecutorConnectionRegistryRejected(), EXECUTOR_CLOSE_INTERNAL_ERROR),
+        (RuntimeError("private registration failure"), EXECUTOR_CLOSE_INTERNAL_ERROR),
+    ),
+)
+def test_registry_registration_failures_close_without_private_details(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    expected_code: int,
+) -> None:
+    app, _, token = app_with_live_session()
+
+    async def fail_registration(*_values: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(ExecutorConnectionRegistry, "register", fail_registration)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+    assert captured.value.reason == "Executor connection failed"
+    assert "private" not in captured.value.reason
+
+
+@pytest.mark.parametrize(
+    ("current", "expected_code", "expected_reason"),
+    (
+        (False, EXECUTOR_CLOSE_CONNECTION_REPLACED, "Executor connection was replaced"),
+        (
+            RuntimeError("private current failure"),
+            EXECUTOR_CLOSE_INTERNAL_ERROR,
+            "Executor connection failed",
+        ),
+    ),
+)
+def test_registry_current_check_failures_close_safely(
+    monkeypatch: pytest.MonkeyPatch,
+    current: bool | Exception,
+    expected_code: int,
+    expected_reason: str,
+) -> None:
+    app, _, token = app_with_live_session()
+
+    async def check_current(*_values: object) -> bool:
+        if isinstance(current, Exception):
+            raise current
+        return current
+
+    monkeypatch.setattr(ExecutorConnectionRegistry, "is_current", check_current)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+    assert captured.value.reason == expected_reason
+    assert "private" not in captured.value.reason
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code", "expected_reason"),
+    (
+        (
+            StaleExecutorConnection(),
+            EXECUTOR_CLOSE_CONNECTION_REPLACED,
+            "Executor connection was replaced",
+        ),
+        (
+            RuntimeError("private heartbeat projection failure"),
+            EXECUTOR_CLOSE_INTERNAL_ERROR,
+            "Executor connection failed",
+        ),
+    ),
+)
+def test_registry_heartbeat_projection_failures_close_safely(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    expected_code: int,
+    expected_reason: str,
+) -> None:
+    app, _, token = app_with_live_session()
+
+    async def fail_heartbeat(*_values: object, **_named: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(ExecutorConnectionRegistry, "record_heartbeat", fail_heartbeat)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(heartbeat(sequence=2))
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+    assert captured.value.reason == expected_reason
+    assert "private" not in captured.value.reason
+
+
+def test_registry_cleanup_failure_is_logged_without_reaching_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token = app_with_live_session()
+
+    async def fail_cleanup(*_values: object) -> None:
+        raise RuntimeError("private cleanup failure")
+
+    monkeypatch.setattr(ExecutorConnectionRegistry, "unregister", fail_cleanup)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+
+    assert "Executor WebSocket registry cleanup failed" in caplog.text
+    assert "private cleanup failure" not in caplog.text
 
 
 @pytest.mark.parametrize("invalid_frame", ["binary", "malformed-heartbeat"])

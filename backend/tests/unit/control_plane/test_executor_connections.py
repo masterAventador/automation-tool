@@ -195,6 +195,7 @@ async def test_hello_binds_installation_executor_protocol_and_runtime_versions()
     assert bound.executor_version == "0.1.0"
     assert bound.platform is ExecutorPlatform.MACOS
     assert bound.architecture is ExecutorArchitecture.ARM64
+    assert bound.hello_sequence == 1
     assert token not in repr(bound)
 
 

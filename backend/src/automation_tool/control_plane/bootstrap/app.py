@@ -28,6 +28,9 @@ from automation_tool.control_plane.api.system import router as system_router
 from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
+from automation_tool.control_plane.application.executor_connection_registry import (
+    ExecutorConnectionRegistry,
+)
 from automation_tool.control_plane.application.executor_connections import (
     ExecutorConnectionService,
 )
@@ -77,6 +80,9 @@ async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        registry = app.state.executor_connection_registry
+        if isinstance(registry, ExecutorConnectionRegistry):
+            await registry.shutdown()
         database: DatabaseLifecycle | None = app.state.database
         if database is not None:
             await database.close()
@@ -90,6 +96,7 @@ def create_app(
     device_credential_service: DeviceCredentialService | None = None,
     device_session_service: DeviceSessionService | None = None,
     executor_connection_service: ExecutorConnectionService | None = None,
+    executor_connection_registry: ExecutorConnectionRegistry | None = None,
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
@@ -104,6 +111,9 @@ def create_app(
     resolved_device_credential_service = device_credential_service
     resolved_device_session_service = device_session_service
     resolved_executor_connection_service = executor_connection_service
+    resolved_executor_connection_registry = (
+        executor_connection_registry or ExecutorConnectionRegistry()
+    )
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
     if (
@@ -140,6 +150,7 @@ def create_app(
     app.state.device_credential_service = resolved_device_credential_service
     app.state.device_session_service = resolved_device_session_service
     app.state.executor_connection_service = resolved_executor_connection_service
+    app.state.executor_connection_registry = resolved_executor_connection_registry
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds

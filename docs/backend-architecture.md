@@ -352,7 +352,11 @@ I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executo
 
 I2-12 已实现三端一致性：TypeScript 以严格 Zod 判别联合校验完整 envelope，并在普通 `JSON.parse` 前扫描所有对象的重复 key；Rust 以 `serde(deny_unknown_fields)` DTO、递归唯一 key visitor 和同一资源/隐私策略完成正式解析。两端都只暴露固定 `ExecutorProtocolError`，不保留或反射被拒绝的 wire。时间比较精确到 RFC3339 允许的 6 位小数，`-00:00` 不作为 canonical UTC 接受；sequence 上限固定为三端都能无损表示的 `2^53-1`。
 
-I2-13 已把 Python 正式解析入口接入 `WS /api/v1/executors/connect`。握手必须只提供 `automation-tool.executor.v1` 子协议和单个 Bearer `executor.connect` Session；第一帧限时为 `executor.hello`，绑定已认证 Installation、声明的 Executor、协议/Executor 版本、平台、架构和新生成的 `ExecutorConnectionId`。连接期间只接受同一身份的 heartbeat，并周期重新验证数据库中的 Session、父凭据与 Installation；任一失效立即固定 4401 断开，旧 Session 不能重新升级。Uvicorn 固定 `websockets-sansio` 并在传输层执行 32 KiB 上限；拒绝握手和关闭只返回固定状态/原因，原始 bearer、wire 和底层异常不进入公开响应或日志。T3-08 再增加在线投影、单实例旧连接替换和 Registry，不在认证入口维护第二份事实源。
+I2-13 已把 Python 正式解析入口接入 `WS /api/v1/executors/connect`。握手必须只提供 `automation-tool.executor.v1` 子协议和单个 Bearer `executor.connect` Session；第一帧限时为 `executor.hello`，绑定已认证 Installation、声明的 Executor、协议/Executor 版本、平台、架构、Hello sequence 和新生成的 `ExecutorConnectionId`。连接期间只接受同一身份的 heartbeat，并周期重新验证数据库中的 Session、父凭据与 Installation；任一失效立即固定 4401 断开，旧 Session 不能重新升级。Uvicorn 固定 `websockets-sansio` 并在传输层执行 32 KiB 上限；拒绝握手和关闭只返回固定状态/原因，原始 bearer、wire 和底层异常不进入公开响应或日志。
+
+T3-08 在认证入口之后增加单进程 `ExecutorConnectionRegistry`。Registry 以 Installation 为唯一 live key，因此同一安装实例即使声明不同 ExecutorId 也只能有一个 current 连接；注册新 Hello 时先原子替换投影，再用固定 4409 关闭旧 socket。在线投影只包含强类型连接/Installation/Executor ID、运行时元数据、服务端连接/最后心跳时间和严格递增 sequence，不含 WebSocket、Session、凭据或客户端自报时间。旧连接的迟到 heartbeat、发送和 finally 清理均以 Connection ID 校验，不能覆盖或删除新连接；重复/倒序 heartbeat 固定按协议错误关闭。
+
+Registry 为 T3-09 提供 `send_current(installation_id, connection_id, wire)`：只接受 1..32 KiB UTF-8 文本，写入前后都确认目标仍是 current；传输失败与写入期间替换分别返回不泄密的 unavailable/stale 结果，调用者不能把 socket write 当成 Executor ACK。应用 lifespan 用 1012 清空所有连接。Registry 是单实例瞬时路由，不持久化认证、任务、命令或事件；PostgreSQL 仍是认证和业务事实源。
 
 ### 10.2 命令
 
@@ -588,13 +592,14 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和幂等创建 Task，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和 Task 创建/列表/详情，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 
 MVP/Demo 使用单个 Control Plane 实例：
 
 - Executor WebSocket 连接保存在当前 API 进程；
+- Registry 以 Installation 为单活键，心跳只更新不含秘密的瞬时在线投影；
 - 所有事件先持久化 PostgreSQL，再推送给 SSE 客户端；
 - App 断线后从数据库快照与最后事件序号恢复；
 - 进程重启丢失连接不丢事件，Executor 自动重连并重新声明未完成 attempt；

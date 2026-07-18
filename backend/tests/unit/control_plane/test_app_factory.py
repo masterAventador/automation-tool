@@ -7,6 +7,9 @@ from httpx2 import Response
 
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.api.errors import AppError, register_error_handlers
+from automation_tool.control_plane.application.executor_connection_registry import (
+    ExecutorConnectionRegistry,
+)
 
 
 def assert_error_response(
@@ -42,6 +45,9 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
     second = create_app(database=None)
 
     assert first is not second
+    assert isinstance(first.state.executor_connection_registry, ExecutorConnectionRegistry)
+    assert isinstance(second.state.executor_connection_registry, ExecutorConnectionRegistry)
+    assert first.state.executor_connection_registry is not second.state.executor_connection_registry
     assert first.state.lifecycle_state == "created"
     assert second.state.lifecycle_state == "created"
 
@@ -50,6 +56,16 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
         assert second.state.lifecycle_state == "created"
 
     assert first.state.lifecycle_state == "stopped"
+
+
+def test_lifespan_tolerates_an_unavailable_registry_during_shutdown() -> None:
+    app = create_app(database=None)
+    app.state.executor_connection_registry = object()
+
+    with TestClient(app):
+        assert app.state.lifecycle_state == "running"
+
+    assert app.state.lifecycle_state == "stopped"
 
 
 def test_application_error_uses_the_public_structured_envelope() -> None:

@@ -46,7 +46,8 @@ automation-tool/
 │   ├── run_i2_13_acceptance.py   # 后台 Uvicorn→WebSocket→PostgreSQL 隔离验收
 │   ├── run_i2_14_acceptance.py   # 隐藏 Tauri 吊销诊断与最终状态验收
 │   ├── run_t3_06_acceptance.py   # 隐藏 Tauri 幂等创建 Task 纵向验收
-│   └── run_t3_07_acceptance.py   # 隐藏 Tauri Task 分页/详情/scope 纵向验收
+│   ├── run_t3_07_acceptance.py   # 隐藏 Tauri Task 分页/详情/scope 纵向验收
+│   └── run_t3_08_acceptance.py   # 后台真实 WebSocket Registry 单活/心跳验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略

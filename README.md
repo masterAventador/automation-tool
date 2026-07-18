@@ -72,7 +72,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `task_commands` 已建立持久 Outbox：Attempt 内 sequence、Installation 内幂等键/响应 message 唯一，pending/in_flight/delivered 与 acknowledged/rejected/expired 严格分离，并以 deadline、lease、投递/确认时间和响应类型约束拒绝伪确认；
 - Executor v1 Envelope 已建立 Pydantic 判别联合：24 种生命周期/任务命令/回执/事件精确分型，显式 `1.0` 版本、规范 UUIDv4、UTC deadline、幂等键、正序号和受限安全 payload 均 fail closed；
 - Executor v1 Draft 2020-12 Schema 已从 Pydantic 确定性导出；Python、Rust、TypeScript 正式解析器共同回放 6 个 valid、25 个 invalid 公共 fixtures，并对结构、deadline、隐私和资源边界给出一致结论；
-- `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；
+- `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键，投影服务端心跳，新 Hello 固定 4409 替换旧连接，旧连接不能误删或冒充当前连接；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
 - 任务控制/事件流、Local Executor 进程和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

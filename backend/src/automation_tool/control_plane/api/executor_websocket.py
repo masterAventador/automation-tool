@@ -11,6 +11,13 @@ from fastapi import APIRouter, WebSocket
 from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
+from automation_tool.control_plane.application.executor_connection_registry import (
+    EXECUTOR_CONNECTION_REPLACED_CODE,
+    EXECUTOR_CONNECTION_REPLACED_REASON,
+    ExecutorConnectionRegistry,
+    ExecutorConnectionRegistryRejected,
+    StaleExecutorConnection,
+)
 from automation_tool.control_plane.application.executor_connections import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorConnectionRejected,
@@ -21,12 +28,14 @@ EXECUTOR_CLOSE_AUTHENTICATION_REJECTED: Final = 4401
 EXECUTOR_CLOSE_IDENTITY_REJECTED: Final = 4403
 EXECUTOR_CLOSE_PROTOCOL_REJECTED: Final = 4406
 EXECUTOR_CLOSE_HELLO_TIMEOUT: Final = 4408
+EXECUTOR_CLOSE_CONNECTION_REPLACED: Final = EXECUTOR_CONNECTION_REPLACED_CODE
 EXECUTOR_CLOSE_INTERNAL_ERROR: Final = 1011
 
 _AUTHENTICATION_REJECTED_REASON: Final = "Executor authentication is rejected"
 _IDENTITY_REJECTED_REASON: Final = "Executor identity is rejected"
 _PROTOCOL_REJECTED_REASON: Final = "Executor protocol is rejected"
 _HELLO_TIMEOUT_REASON: Final = "Executor hello timed out"
+_CONNECTION_REPLACED_REASON: Final = EXECUTOR_CONNECTION_REPLACED_REASON
 _INTERNAL_ERROR_REASON: Final = "Executor connection failed"
 
 logger = logging.getLogger(__name__)
@@ -92,7 +101,10 @@ async def _receive_text(websocket: WebSocket) -> str:
 @router.websocket("/api/v1/executors/connect")
 async def connect_executor(websocket: WebSocket) -> None:
     service = websocket.app.state.executor_connection_service
-    if not isinstance(service, ExecutorConnectionService):
+    registry = websocket.app.state.executor_connection_registry
+    if not isinstance(service, ExecutorConnectionService) or not isinstance(
+        registry, ExecutorConnectionRegistry
+    ):
         await _deny(websocket, 503)
         return
     if not _offered_exact_subprotocol(websocket):
@@ -158,63 +170,132 @@ async def connect_executor(websocket: WebSocket) -> None:
         )
         return
 
-    while True:
-        try:
-            await service.reauthorize(bound)
-        except ExecutorConnectionRejected:
-            await _close(
-                websocket,
-                code=EXECUTOR_CLOSE_AUTHENTICATION_REJECTED,
-                reason=_AUTHENTICATION_REJECTED_REASON,
-            )
-            return
-        except Exception:
-            logger.error("Executor WebSocket reauthentication failed")
-            await _close(
-                websocket,
-                code=EXECUTOR_CLOSE_INTERNAL_ERROR,
-                reason=_INTERNAL_ERROR_REASON,
-            )
-            return
+    try:
+        await registry.register(bound, websocket)
+    except ExecutorConnectionRegistryRejected:
+        await _close(
+            websocket,
+            code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+            reason=_INTERNAL_ERROR_REASON,
+        )
+        return
+    except Exception:
+        logger.error("Executor WebSocket registration failed")
+        await _close(
+            websocket,
+            code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+            reason=_INTERNAL_ERROR_REASON,
+        )
+        return
 
-        try:
-            source = await asyncio.wait_for(
-                _receive_text(websocket),
-                timeout=recheck_interval,
-            )
-        except TimeoutError:
-            continue
-        except WebSocketDisconnect:
-            return
-        except _TextFrameRequired:
-            await _close(
-                websocket,
-                code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
-                reason=_PROTOCOL_REJECTED_REASON,
-            )
-            return
+    try:
+        while True:
+            try:
+                if not await registry.is_current(bound):
+                    raise StaleExecutorConnection
+            except StaleExecutorConnection:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_CONNECTION_REPLACED,
+                    reason=_CONNECTION_REPLACED_REASON,
+                )
+                return
+            except Exception:
+                logger.error("Executor WebSocket registry check failed")
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                    reason=_INTERNAL_ERROR_REASON,
+                )
+                return
 
+            try:
+                await service.reauthorize(bound)
+            except ExecutorConnectionRejected:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_AUTHENTICATION_REJECTED,
+                    reason=_AUTHENTICATION_REJECTED_REASON,
+                )
+                return
+            except Exception:
+                logger.error("Executor WebSocket reauthentication failed")
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                    reason=_INTERNAL_ERROR_REASON,
+                )
+                return
+
+            try:
+                source = await asyncio.wait_for(
+                    _receive_text(websocket),
+                    timeout=recheck_interval,
+                )
+            except TimeoutError:
+                continue
+            except WebSocketDisconnect:
+                return
+            except _TextFrameRequired:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                    reason=_PROTOCOL_REJECTED_REASON,
+                )
+                return
+
+            try:
+                heartbeat = service.validate_lifecycle_message(bound, source)
+            except ExecutorConnectionRejected:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                    reason=_PROTOCOL_REJECTED_REASON,
+                )
+                return
+            except Exception:
+                logger.error("Executor WebSocket lifecycle validation failed")
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                    reason=_INTERNAL_ERROR_REASON,
+                )
+                return
+
+            try:
+                await registry.record_heartbeat(bound, sequence=heartbeat.sequence)
+            except StaleExecutorConnection:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_CONNECTION_REPLACED,
+                    reason=_CONNECTION_REPLACED_REASON,
+                )
+                return
+            except ExecutorConnectionRegistryRejected:
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                    reason=_PROTOCOL_REJECTED_REASON,
+                )
+                return
+            except Exception:
+                logger.error("Executor WebSocket heartbeat projection failed")
+                await _close(
+                    websocket,
+                    code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                    reason=_INTERNAL_ERROR_REASON,
+                )
+                return
+    finally:
         try:
-            service.validate_lifecycle_message(bound, source)
-        except ExecutorConnectionRejected:
-            await _close(
-                websocket,
-                code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
-                reason=_PROTOCOL_REJECTED_REASON,
-            )
-            return
+            await registry.unregister(bound)
         except Exception:
-            logger.error("Executor WebSocket lifecycle validation failed")
-            await _close(
-                websocket,
-                code=EXECUTOR_CLOSE_INTERNAL_ERROR,
-                reason=_INTERNAL_ERROR_REASON,
-            )
-            return
+            logger.error("Executor WebSocket registry cleanup failed")
 
 
 __all__ = [
     "EXECUTOR_CLOSE_AUTHENTICATION_REJECTED",
+    "EXECUTOR_CLOSE_CONNECTION_REPLACED",
     "EXECUTOR_CLOSE_HELLO_TIMEOUT",
     "EXECUTOR_CLOSE_IDENTITY_REJECTED",
     "EXECUTOR_CLOSE_INTERNAL_ERROR",

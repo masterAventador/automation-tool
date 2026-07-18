@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化及 Task 创建/查询 API 已完成，准备实施 Executor Connection Registry；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化、Task 创建/查询 API 和 Executor Connection Registry 已完成，准备实施命令投递服务；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -58,6 +58,7 @@
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
 | Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
+| Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
 | Task 持久化 | `✅` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
@@ -191,7 +192,7 @@
 | T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ✅ 已完成 |
 | T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ✅ 已完成 |
 | T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ✅ 已完成 |
-| T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ⬜ 未开始 |
+| T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ✅ 已完成 |
 | T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ⬜ 未开始 |
 | T3-10 | FakeExecutor | 无副作用回放全部任务与控制事件；不放宽生产状态机 | T3-09 | ⬜ 未开始 |
 | T3-11 | 事件接收与收敛 | sequence、重复、缺口、迟到事件和 revision CAS | T3-04,T3-10 | ⬜ 未开始 |
@@ -1089,10 +1090,30 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-08 建立 Executor Connection Registry；T3-09 负责持久命令投递；T3-12/T3-15/T3-16 再接事件续拉与 App 投影，当前查询 API 不冒充实时任务闭环
 
+### T3-08 Executor Connection Registry
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增单活在线投影、旧连接替换、heartbeat sequence、stale cleanup、进程退出和非法输入测试并把台账置为 RED；`uv run pytest tests/unit/control_plane/test_executor_connection_registry.py -q` 因 `automation_tool.control_plane.application.executor_connection_registry` 不存在而在收集阶段失败
+- GREEN：Registry/路由聚焦 60 项通过，Registry 模块自身 153 条语句、40 个分支覆盖率 100%；Backend 全量 597 项且 2515 条语句、386 个分支覆盖率 100%；uv lock、Ruff/格式、严格 Mypy、OpenAPI 和 Executor Schema 漂移检查通过。任务未改 TypeScript、Rust、REST OpenAPI 或数据库 Schema
+- 单活与投影：每个 FastAPI app 拥有一个独立进程内 Registry，以强类型 InstallationId 为唯一 live key；公开不可变投影只含 Connection/Installation/Executor ID、协议/Executor 版本、平台/架构、服务端 connected/heartbeat 时间和最后 sequence，不包含 WebSocket、Session、凭据或客户端时间
+- 替换与竞态：新 Hello 先原子成为 current，再用固定 4409/`Executor connection was replaced` 关闭旧 socket；同 Installation 即使 ExecutorId 不同也不能并存。所有 heartbeat、send 和 unregister 都同时核对 Connection ID，旧连接迟到消息或 finally 清理不能覆盖/删除新连接
+- Heartbeat：Bound connection 保留 Hello sequence；后续 heartbeat 必须属于同一 Installation/Executor 且在 `1..2^53-1` 内严格递增，在线时间只取服务端 UTC clock。重复/倒序 sequence、时钟回退和 stale heartbeat 均 fail closed，不把客户端 timestamp 当在线权威
+- 当前连接发送 API：`send_current` 必须精确命中 Installation + 预期 Connection ID，只接受 1..32 KiB UTF-8 wire；socket 写入失败返回固定 unavailable，写入期间发生替换则在写后复核中返回 stale。T3-09 必须据此驱动持久 Outbox，不能把 send 成功当成 Executor ACK
+- 生命周期：WebSocket 认证/Hello 后才注册；周期重认证前确认连接仍 current，合法 heartbeat 更新投影；协议、认证、Registry 和内部失败使用固定 4401/4406/4409/1011。App lifespan 用 1012 关闭并清空全部连接，关闭单个故障不阻塞其他连接清理
+- 生产同路径验收：`uv run python ../scripts/run_t3_08_acceptance.py` 后台启动隔离 PostgreSQL 18.4、完整 Alembic 和真实 Uvicorn/SansIO；经正式 REST 换取 `executor.connect` Session，由标准 WebSocket 客户端完成第一连接 heartbeat、不同 ExecutorId 的同 Installation 替换、旧连接 4409、当前 heartbeat、重复 sequence 4406 和重新连接恢复，最终确认凭据/Session 仍 active
+- 单实例约束：Registry 是瞬时连接路由，不复制 PostgreSQL 认证、任务、命令或事件事实。MVP/Demo 必须保持单 Control Plane 实例；C10 横向扩容前必须先增加跨副本连接路由与事件总线，不能直接把副本数改为 N
+- 失败矩阵：覆盖非法 bound/channel/clock/sequence/wire/Installation/Connection ID、重复注册、shutdown 后注册、不同 Installation 共存、旧连接替换关闭失败、发送失败、发送中替换、stale heartbeat/send/unregister、Registry 未装配、注册/current/heartbeat/cleanup 内部异常及无秘密错误
+- App 测试边界：本任务正式入口是服务器 WebSocket，真实网络验收已覆盖原始调用方式，因此不启动 Tauri App、不运行前台窗口；E4-02/E4-12 再由正式 Local Executor 进程复用该入口
+- 清理：两次真实验收均在 finally 终止 Uvicorn、删除隔离 PostgreSQL 容器/网络/卷并确认 Control Plane/数据库端口关闭；无 App、浏览器、WebDriver、测试 Profile 或业务数据遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-09 使用 `send_current` 建立 Outbox 抢占、投递、ACK、过期和重连恢复；C10 多副本部署前新增跨副本连接路由，当前不引入 Redis 或第二事实源
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-08`：建立 Executor Connection Registry；
-2. `T3-09`：建立持久命令投递、ACK、重连恢复和过期处理；
+1. `T3-09`：建立持久命令投递、ACK、重连恢复和过期处理；
+2. `T3-10`：建立不放宽生产状态机的无副作用 FakeExecutor；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。
