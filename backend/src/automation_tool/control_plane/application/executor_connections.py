@@ -31,6 +31,7 @@ from automation_tool.protocol import (
     ExecutorLifecycleEnvelope,
     ExecutorProtocolError,
     TaskCommandResultEnvelope,
+    TaskEventEnvelope,
     parse_executor_message,
 )
 
@@ -184,13 +185,16 @@ class ExecutorConnectionService:
         self,
         bound: BoundExecutorConnection,
         source: str | bytes,
-    ) -> ExecutorLifecycleEnvelope | TaskCommandResultEnvelope:
-        """Accept only a bound heartbeat or command result after Hello."""
+    ) -> ExecutorLifecycleEnvelope | TaskCommandResultEnvelope | TaskEventEnvelope:
+        """Accept only a bound heartbeat, command result, or Task event after Hello."""
 
         try:
             message = parse_executor_message(source)
             if (
-                not isinstance(message, (ExecutorLifecycleEnvelope, TaskCommandResultEnvelope))
+                not isinstance(
+                    message,
+                    (ExecutorLifecycleEnvelope, TaskCommandResultEnvelope, TaskEventEnvelope),
+                )
                 or (
                     isinstance(message, ExecutorLifecycleEnvelope)
                     and message.message_type != "executor.heartbeat"

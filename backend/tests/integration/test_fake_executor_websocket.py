@@ -172,7 +172,7 @@ def test_fake_client_uses_real_websocket_and_sends_formal_hello_result_and_event
         ),
         (
             FakeExecutorScenario.LOGIN_REQUIRED,
-            ("task.accept", "task.started", "session.login_required"),
+            ("task.accept", "session.login_required"),
         ),
         (
             FakeExecutorScenario.HANDOFF,

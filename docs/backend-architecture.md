@@ -366,7 +366,13 @@ T3-09 在每次连接重认证之后调用持久投递服务。仓储先把 dead
 
 T3-10 增加独立 `FakeExecutorEngine` 与 `FakeExecutorClient`。引擎只导入共享 protocol，正式解析每条 command，并核对 Installation/Executor、deadline、Attempt 内 command sequence 及 task/attempt 绑定；message ID 与 idempotency key 任一重放都返回首次生成的完全相同 envelope，不再次递增事件序号，意图变化则拒绝。成功、部分成功、失败、登录、接管、结果不确定、拒绝和 hold 场景覆盖全部当前任务事件；hold 只允许合法 pause/resume/cancel/emergency-stop，生成阶段失败会同时回滚状态与事件水位。
 
-Fake 客户端只接受无 userinfo/query/fragment 的固定 Executor `ws`/`wss` 路径、受限 Session 和有界命令数，使用共享的唯一子协议、32 KiB 限制和正式 Hello/结果/事件 envelope。核心不读取文件、不启动进程、不操作浏览器/桌面、不访问 Control Plane 数据库；内存状态只是测试场景投影，不能成为生产任务事实。真实 Uvicorn 验收选择不产生事件的 reject 场景验证当前 Outbox/ACK 全链路；全部事件经真实 WebSocket controller 验证传输，但服务端接收、sequence 缺口和 revision CAS 必须由 T3-11 完成，不能把 controller 测试冒充持久事件闭环。
+Fake 客户端只接受无 userinfo/query/fragment 的固定 Executor `ws`/`wss` 路径、受限 Session 和有界命令数，使用共享的唯一子协议、32 KiB 限制和正式 Hello/结果/事件 envelope。核心不读取文件、不启动进程、不操作浏览器/桌面、不访问 Control Plane 数据库；内存状态只是测试场景投影，不能成为生产任务事实。T3-10 的真实 Uvicorn 验收选择不产生事件的 reject 场景验证当时的 Outbox/ACK 全链路；其后 T3-11 已由生产 WebSocket 完成服务端接收、sequence 缺口和 revision CAS 的持久闭环，controller 测试不作为落库证据。
+
+T3-11 将 `TaskEventEnvelope` 纳入 bound WebSocket 消息，但不混入 heartbeat sequence 或 Command ACK 逻辑。事件应用服务只接受当前 14 种类型：非 step payload 必须为空；step 只允许可选 canonical `action_id`，progress 另要求 `0..100` strict integer。Action 无显式 ID 时只记录 Attempt-scoped 事件，不通过 ordinal、最近一条或“唯一活动动作”猜测归属。事件 deadline 已到、客户端时间晚于服务端、身份冒充和非法 payload 都在持久化前拒绝。
+
+PostgreSQL 仓储按 Installation + Task 锁行，要求事件 sequence 恰好等于 `last_event_sequence + 1`。`source_message_id`、`source_idempotency_key` 任一命中且 32 字节稳定意图指纹一致时幂等返回当前快照；key 冲突、同 sequence 不同事实、缺口和非精确迟到均拒绝，不缓存乱序事件。合法事件在同一事务内插入 `task_events`，Task 每条事件都以 revision/watermark CAS 前进；Attempt/Action 只在明确状态变化时各自 CAS 增 revision，并使用服务端接收时间写 started/finished。任一 scope、状态、时间、唯一约束或写入失败使整笔事务回滚。
+
+WebSocket 对收敛拒绝使用固定 4406，对数据库不可用/内部失败使用固定 1011，日志不包含 wire、payload 或底层异常文本。`20260718_0011` 对旧事件回填受限幂等键和 32 字节指纹后再设非空/唯一约束，可完整降级而不删除事件事实。真实验收由 FakeExecutor 成功场景经 Session、Outbox 和 Uvicorn 发送五条事件，数据库最终形成连续 sequence/revision 与一致 Task/Attempt 终态；T3-12 只能从这些已提交事实构建 SSE，不能先推送后落库。
 
 ### 10.2 命令
 

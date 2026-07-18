@@ -48,6 +48,8 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
     assert isinstance(first.state.executor_connection_registry, ExecutorConnectionRegistry)
     assert isinstance(second.state.executor_connection_registry, ExecutorConnectionRegistry)
     assert first.state.executor_connection_registry is not second.state.executor_connection_registry
+    assert first.state.task_event_convergence_service is None
+    assert second.state.task_event_convergence_service is None
     assert first.state.lifecycle_state == "created"
     assert second.state.lifecycle_state == "created"
 

@@ -49,6 +49,13 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
     TaskCommandRecord,
 )
+from automation_tool.control_plane.application.task_event_convergence import (
+    PendingTaskEvent,
+    TaskEventConvergenceRejected,
+    TaskEventConvergenceResult,
+    TaskEventConvergenceService,
+    TaskEventConvergenceUnavailable,
+)
 from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
     InstallationId,
@@ -56,6 +63,8 @@ from automation_tool.control_plane.domain import (
     TaskCommandStatus,
     TaskCommandType,
     TaskId,
+    TaskSnapshotProjection,
+    TaskStatus,
 )
 from automation_tool.protocol import TaskCommandResultEnvelope
 
@@ -184,6 +193,27 @@ class ContractCommandRepository:
         return self.command
 
 
+class ContractEventRepository:
+    def __init__(self) -> None:
+        self.pending: list[PendingTaskEvent] = []
+        self.failure: Exception | None = None
+
+    async def converge(self, pending: PendingTaskEvent) -> TaskEventConvergenceResult:
+        if self.failure is not None:
+            raise self.failure
+        self.pending.append(pending)
+        return TaskEventConvergenceResult(
+            snapshot=TaskSnapshotProjection(
+                task_id=TaskId.parse(str(pending.message.task_id)),
+                status=pending.target_task_status or TaskStatus.RUNNING,
+                revision=2,
+                last_event_sequence=pending.message.sequence,
+                updated_at=pending.received_at,
+            ),
+            duplicate=False,
+        )
+
+
 @dataclass
 class SwitchableSessionRepository:
     expected: ParsedDeviceSession
@@ -285,6 +315,21 @@ def app_with_pending_command() -> tuple[
     return app, sessions, token, repository, clock
 
 
+def app_with_event_service() -> tuple[
+    FastAPI,
+    SwitchableSessionRepository,
+    str,
+    ContractEventRepository,
+]:
+    app, sessions, token = app_with_live_session()
+    repository = ContractEventRepository()
+    app.state.task_event_convergence_service = TaskEventConvergenceService(
+        repository=repository,
+        clock=FixedClock(),
+    )
+    return app, sessions, token, repository
+
+
 def hello(
     *,
     installation_id: str = str(INSTALLATION_ID),
@@ -353,6 +398,31 @@ def command_response(
             "payload": {"accepted": True},
             "task_id": offer["task_id"],
             "execution_attempt_id": offer["execution_attempt_id"],
+        },
+        separators=(",", ":"),
+    )
+
+
+def task_event(
+    *,
+    message_id: str = "523e4567-e89b-42d3-a456-426614174001",
+    idempotency_key: str = "task:event:started:1",
+) -> str:
+    return json.dumps(
+        {
+            "protocol_version": "1.0",
+            "message_id": message_id,
+            "message_type": "task.started",
+            "sent_at": "2026-07-18T12:00:00Z",
+            "deadline_at": "2026-07-18T12:00:30Z",
+            "installation_id": str(INSTALLATION_ID),
+            "executor_id": EXECUTOR_ID,
+            "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
+            "idempotency_key": idempotency_key,
+            "sequence": 1,
+            "payload": {},
+            "task_id": "123e4567-e89b-42d3-a456-426614174005",
+            "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
         },
         separators=(",", ":"),
     )
@@ -446,6 +516,111 @@ def test_command_offer_is_redelivered_on_reconnect_and_only_executor_ack_termina
                 lambda value: value is not None and value.last_sequence == 3,
             )
             assert repository.command.response_message_id == response_id
+
+
+def test_task_event_uses_the_wired_convergence_service_and_keeps_connection_open() -> None:
+    app, _, token, repository = app_with_event_service()
+    registry = app.state.executor_connection_registry
+
+    with (
+        TestClient(app) as client,
+        client.websocket_connect(
+            "/api/v1/executors/connect",
+            headers={"authorization": f"Bearer {token}"},
+            subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+        ) as websocket,
+    ):
+        websocket.send_text(hello())
+        websocket.send_text(task_event())
+        websocket.send_text(heartbeat(sequence=2))
+        wait_for_online(
+            client,
+            registry,
+            lambda value: value is not None and value.last_sequence == 2,
+        )
+
+    assert len(repository.pending) == 1
+    assert repository.pending[0].message.message_type == "task.started"
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    (
+        (TaskEventConvergenceRejected(), EXECUTOR_CLOSE_PROTOCOL_REJECTED),
+        (TaskEventConvergenceUnavailable(), EXECUTOR_CLOSE_INTERNAL_ERROR),
+        (RuntimeError("private event persistence failure"), EXECUTOR_CLOSE_INTERNAL_ERROR),
+    ),
+)
+def test_task_event_failures_close_with_safe_protocol_or_internal_reason(
+    failure: Exception,
+    expected_code: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token, repository = app_with_event_service()
+    repository.failure = failure
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(task_event())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+    assert "private" not in captured.value.reason
+    assert "private event persistence failure" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("event_service", "expected_code"),
+    ((None, EXECUTOR_CLOSE_PROTOCOL_REJECTED), (object(), EXECUTOR_CLOSE_INTERNAL_ERROR)),
+)
+def test_task_event_requires_a_valid_wired_convergence_service(
+    event_service: object,
+    expected_code: int,
+) -> None:
+    app, _, token = app_with_live_session()
+    app.state.task_event_convergence_service = event_service
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(task_event())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+
+
+def test_unexpected_task_event_service_failure_closes_without_private_details(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token, _ = app_with_event_service()
+
+    async def fail(*_values: object) -> None:
+        raise RuntimeError("private unexpected convergence failure")
+
+    monkeypatch.setattr(TaskEventConvergenceService, "receive", fail)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(task_event())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == EXECUTOR_CLOSE_INTERNAL_ERROR
+    assert "private" not in captured.value.reason
+    assert "private unexpected convergence failure" not in caplog.text
 
 
 def test_idle_receive_timeout_keeps_the_authenticated_connection_alive() -> None:

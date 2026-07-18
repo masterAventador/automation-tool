@@ -28,7 +28,16 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
     TaskCommandDeliveryUnavailable,
 )
-from automation_tool.protocol import ExecutorLifecycleEnvelope, TaskCommandResultEnvelope
+from automation_tool.control_plane.application.task_event_convergence import (
+    TaskEventConvergenceRejected,
+    TaskEventConvergenceService,
+    TaskEventConvergenceUnavailable,
+)
+from automation_tool.protocol import (
+    ExecutorLifecycleEnvelope,
+    TaskCommandResultEnvelope,
+    TaskEventEnvelope,
+)
 
 EXECUTOR_CLOSE_AUTHENTICATION_REJECTED: Final = 4401
 EXECUTOR_CLOSE_IDENTITY_REJECTED: Final = 4403
@@ -109,6 +118,7 @@ async def connect_executor(websocket: WebSocket) -> None:
     service = websocket.app.state.executor_connection_service
     registry = websocket.app.state.executor_connection_registry
     delivery = websocket.app.state.task_command_delivery_service
+    event_convergence = websocket.app.state.task_event_convergence_service
     if not isinstance(service, ExecutorConnectionService) or not isinstance(
         registry, ExecutorConnectionRegistry
     ):
@@ -314,6 +324,48 @@ async def connect_executor(websocket: WebSocket) -> None:
                     return
                 except Exception:
                     logger.error("Executor WebSocket heartbeat projection failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                continue
+
+            if isinstance(message, TaskEventEnvelope):
+                if event_convergence is None:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                if not isinstance(event_convergence, TaskEventConvergenceService):
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                try:
+                    await event_convergence.receive(message)
+                except TaskEventConvergenceRejected:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                except TaskEventConvergenceUnavailable:
+                    logger.error("Executor Task event persistence failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                except Exception:
+                    logger.error("Executor Task event convergence failed")
                     await _close(
                         websocket,
                         code=EXECUTOR_CLOSE_INTERNAL_ERROR,

@@ -86,10 +86,7 @@ _SCENARIO_EVENTS: dict[FakeExecutorScenario, tuple[str, ...]] = {
         "step.failed",
         "task.failed",
     ),
-    FakeExecutorScenario.LOGIN_REQUIRED: (
-        "task.started",
-        "session.login_required",
-    ),
+    FakeExecutorScenario.LOGIN_REQUIRED: ("session.login_required",),
     FakeExecutorScenario.HANDOFF: (
         "task.started",
         "handoff.requested",

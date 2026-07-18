@@ -38,6 +38,9 @@ from automation_tool.control_plane.application.registration import InstallationR
 from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
 )
+from automation_tool.control_plane.application.task_event_convergence import (
+    TaskEventConvergenceService,
+)
 from automation_tool.control_plane.application.task_queries import TaskQueryService
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
@@ -52,6 +55,9 @@ from automation_tool.control_plane.bootstrap.registration import (
 )
 from automation_tool.control_plane.bootstrap.task_commands import (
     task_command_delivery_service as build_task_command_delivery_service,
+)
+from automation_tool.control_plane.bootstrap.task_events import (
+    task_event_convergence_service as build_task_event_convergence_service,
 )
 from automation_tool.control_plane.bootstrap.tasks import (
     task_creation_service as build_task_creation_service,
@@ -106,6 +112,7 @@ def create_app(
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
+    task_event_convergence_service: TaskEventConvergenceService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
 ) -> FastAPI:
@@ -124,6 +131,7 @@ def create_app(
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
+    resolved_task_event_convergence_service = task_event_convergence_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -147,6 +155,10 @@ def create_app(
             resolved_database,
             resolved_executor_connection_registry,
         )
+    if resolved_task_event_convergence_service is None and isinstance(resolved_database, Database):
+        resolved_task_event_convergence_service = build_task_event_convergence_service(
+            resolved_database
+        )
     hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
     recheck_interval_seconds = _positive_finite_seconds(
         executor_connection_recheck_interval_seconds
@@ -167,6 +179,7 @@ def create_app(
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
+    app.state.task_event_convergence_service = resolved_task_event_convergence_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     install_request_context(app)

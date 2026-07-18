@@ -4,9 +4,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from automation_tool.control_plane import create_app
+from automation_tool.control_plane.application.task_event_convergence import (
+    TaskEventConvergenceService,
+)
 from automation_tool.control_plane.infrastructure.database import Database
 
-HEAD_REVISION = "20260718_0010"
+HEAD_REVISION = "20260718_0011"
 
 
 @pytest.mark.asyncio
@@ -40,8 +43,10 @@ async def test_empty_database_upgrades_and_rolls_back(
 
 def test_health_checks_a_real_postgresql_connection(postgresql_url: str) -> None:
     database = Database.from_url(postgresql_url)
+    app = create_app(database=database)
 
-    with TestClient(create_app(database=database)) as client:
+    assert isinstance(app.state.task_event_convergence_service, TaskEventConvergenceService)
+    with TestClient(app) as client:
         response = client.get("/api/v1/health")
 
     assert response.status_code == 200

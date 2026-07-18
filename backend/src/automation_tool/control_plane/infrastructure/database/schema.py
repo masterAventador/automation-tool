@@ -533,6 +533,8 @@ task_events = Table(
     Column("execution_attempt_id", UUID(as_uuid=True), nullable=True),
     Column("action_id", UUID(as_uuid=True), nullable=True),
     Column("source_message_id", UUID(as_uuid=True), nullable=True),
+    Column("source_idempotency_key", String(), nullable=False),
+    Column("source_fingerprint", LargeBinary(length=32), nullable=False),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
     Column(
         "recorded_at",
@@ -572,6 +574,14 @@ task_events = Table(
         "substring(source_message_id::text from 15 for 1) = '4' "
         "and substring(source_message_id::text from 20 for 1) in ('8', '9', 'a', 'b'))",
         name="ck_task_events_source_message_uuid_v4",
+    ),
+    CheckConstraint(
+        "source_idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'",
+        name="ck_task_events_source_idempotency_key",
+    ),
+    CheckConstraint(
+        "octet_length(source_fingerprint) = 32",
+        name="ck_task_events_source_fingerprint_length",
     ),
     CheckConstraint(
         "action_id is null or execution_attempt_id is not null",
@@ -627,6 +637,11 @@ task_events = Table(
         "installation_id",
         "source_message_id",
         name="uq_task_events_source_message",
+    ),
+    UniqueConstraint(
+        "installation_id",
+        "source_idempotency_key",
+        name="uq_task_events_source_idempotency",
     ),
 )
 

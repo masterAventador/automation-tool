@@ -196,7 +196,7 @@
 | T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ✅ 已完成 |
 | T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ✅ 已完成 |
 | T3-10 | FakeExecutor | 无副作用回放全部任务与控制事件；不放宽生产状态机 | T3-09 | ✅ 已完成 |
-| T3-11 | 事件接收与收敛 | sequence、重复、缺口、迟到事件和 revision CAS | T3-04,T3-10 | ⬜ 未开始 |
+| T3-11 | 事件接收与收敛 | sequence、重复、缺口、迟到事件和 revision CAS | T3-04,T3-10 | ✅ 已完成 |
 | T3-12 | SSE 事件流 | last-event/断线/重连/终态关闭；事件先落库后推送 | T3-11 | ⬜ 未开始 |
 | T3-13 | 暂停/恢复 API | 命令与确认语义；未确认不能提前改状态 | T3-09,T3-11 | ⬜ 未开始 |
 | T3-14 | 取消/紧停 API | CANCELLING、确认、结果不确定和幂等 | T3-13 | ⬜ 未开始 |
@@ -1150,10 +1150,30 @@
 - 文档：同步根/Backend README、后端架构、工程结构、本路线图状态/完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-11 将正式 WebSocket TaskEvent 原子落库并推进 Task/Attempt/Action；T3-13/T3-14 才开放控制 API；E4-02/E4-12 由正式 Local Executor 复用相同协议与传输，Fake 内存账本不得进入生产恢复路径
 
+### T3-11 事件接收与收敛
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先把台账置为 RED 并新增全部事件映射/Action 显式绑定/非法 payload/deadline 测试；`uv run pytest tests/unit/control_plane/test_task_event_convergence_service.py -q` 因 `application.task_event_convergence` 不存在而收集失败。随后新增真实 PostgreSQL 生命周期测试，因 `SqlAlchemyTaskEventConvergenceRepository` 未导出而收集失败；正式 bound WebSocket 测试则证明 TaskEvent 被现有连接入口 4406 拒绝
+- GREEN：事件应用、PostgreSQL 仓储、正式 WebSocket 与 bootstrap 合计 471 条语句/120 个分支、100 项定向测试覆盖率 100%；Backend 全量 689 项、3439 条语句/640 个分支覆盖率 100%；uv sync/lock、Ruff/格式、严格 Mypy、OpenAPI 3.1 与 Executor Schema 漂移检查通过
+- 迁移：新增可回滚 `20260718_0011`，为旧事件确定性回填后强制非空 `source_idempotency_key` 与 32 字节 `source_fingerprint`，增加格式/长度和 Installation-scoped 唯一约束；空库升级、完整降级恢复和 0010 既有事件升级回填均由真实 PostgreSQL 验证
+- 输入收窄：正式 WebSocket bound parser 接受 TaskEvent；14 种 source type 映射到封闭领域事件和 Task/Attempt 目标。非 step payload 必须为空；step 只允许可选 canonical Action ID，progress 必须携带 `0..100` strict integer；不保存任意 payload、页面文本或 Executor 错误原文
+- 原子收敛：仓储先按 Installation + Task `FOR UPDATE`，同时核对 current Attempt 与可选 Action 复合归属；事件插入、Task revision/watermark CAS、Attempt 状态/started/finished 和显式 Action 状态/outcome/finished 在同一事务完成，任一失败全部回滚。Task 每条事件增 revision，Attempt/Action 只在明确状态变化时增 revision
+- 重放与顺序：message ID 或 idempotency key 任一命中且稳定意图指纹一致即返回当前快照且不增 revision；交叉 key、同 key 改意图、同 sequence 不同事件、sequence 缺口和非精确迟到固定拒绝。不同 Task 并发争用同 Installation/idempotency 只有一条事实和一个快照赢家
+- 状态与时间：所有状态变化复用 `TaskStateMachine` 及封闭 Attempt/Action 转换；终态不能复活，step 只允许 running/cancelling Attempt/Task，Action 仅在明确 ID 且阶段相容时更新。occurred 使用 Executor sent time，recorded/updated 使用服务端 UTC 接收时间；未来事件、deadline 到期和服务端时间回退均拒绝
+- WebSocket 错误：身份/协议/状态/顺序冲突统一固定 4406；数据库或内部不可用统一固定 1011，公开原因和日志不含 bearer、wire、payload、数据库地址或底层异常文本。heartbeat、Command ACK 与 TaskEvent 保持三条独立处理分支
+- 生产同路径验收：`uv run ../scripts/run_t3_11_acceptance.py` 后台启动隔离 PostgreSQL 18.4、完整 Alembic 和真实 Uvicorn/SansIO；正式 REST 换取 `executor.connect` Session，FakeExecutor 从持久 Outbox 收到 offer 后回传 accept 与五条成功事件；最终 Command acknowledged/attempts 1，Task succeeded/revision 6/watermark 5，Attempt succeeded/revision 3 且 started/finished 完整，事件 sequence `1..5`、task revision `2..6` 和类型全部精确
+- Fake 语义修正：登录场景改为先发 `session.login_required` 而不伪造 `task.started`，从 awaiting-device 合法收敛到 awaiting-platform-login；其余成功/部分/失败/接管/不确定/hold 网络回放保持通过
+- App 测试边界：本任务唯一生产入口是 Executor 出站 WebSocket，不是 App API；未启动 Tauri App，不弹窗、不抢焦点。T3-12/T3-15 再从隐藏 App 的正式 Rust/React 入口验收事件消费
+- 清理：真实验收在 finally 终止 Uvicorn、删除隔离 PostgreSQL 容器/网络/卷并确认 Control Plane/数据库端口关闭；无 App、浏览器、WebDriver、Profile、RPA、文件或业务副作用遗留
+- 文档：同步根/Backend README、后端架构、工程结构、本路线图状态/完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-12 必须只推送已提交事件并支持 Last-Event-ID/断线续拉；T3-13/T3-14 先持久命令再等待本收敛入口确认状态；T3-17 再建立真实抖音 Action/模板，不把 Fake payload 扩成任意 JSON
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-11`：接收 Executor 事件并以 sequence/revision 原子收敛持久快照；
-2. `T3-12`：建立先落库后推送、支持断线续拉的 SSE 事件流；
+1. `T3-12`：建立先落库后推送、支持断线续拉的 SSE 事件流；
+2. `T3-13`：建立暂停/恢复 API 与命令确认语义；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

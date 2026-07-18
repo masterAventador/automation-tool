@@ -35,7 +35,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0007"
-HEAD_REVISION = "20260718_0010"
+HEAD_REVISION = "20260718_0011"
 NOW = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)
 EXPECTED_EVENT_COLUMNS = {
     "task_id",
@@ -48,6 +48,8 @@ EXPECTED_EVENT_COLUMNS = {
     "execution_attempt_id",
     "action_id",
     "source_message_id",
+    "source_idempotency_key",
+    "source_fingerprint",
     "occurred_at",
     "recorded_at",
     "safe_message",
@@ -58,12 +60,15 @@ EXPECTED_EVENT_CONSTRAINTS = {
     "fk_task_events_attempt_binding",
     "fk_task_events_action_binding",
     "uq_task_events_source_message",
+    "uq_task_events_source_idempotency",
     "ck_task_events_sequence_range",
     "ck_task_events_version",
     "ck_task_events_type",
     "ck_task_events_task_revision_positive",
     "ck_task_events_task_status",
     "ck_task_events_source_message_uuid_v4",
+    "ck_task_events_source_idempotency_key",
+    "ck_task_events_source_fingerprint_length",
     "ck_task_events_action_requires_attempt",
     "ck_task_events_time_order",
     "ck_task_events_safe_message",
@@ -158,6 +163,8 @@ def event_values(
         "event_type": TaskEventType.TASK_STARTED.value,
         "task_revision": 4,
         "task_status": TaskStatus.RUNNING.value,
+        "source_idempotency_key": f"task:event:{sequence}",
+        "source_fingerprint": bytes([sequence % 256]) * 32,
         "occurred_at": NOW,
         "recorded_at": NOW,
     }
@@ -235,6 +242,58 @@ async def test_task_event_migration_upgrades_checks_and_downgrades_cleanly(
 
 
 @pytest.mark.asyncio
+async def test_event_replay_identity_migration_backfills_existing_rows(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "downgrade", "20260718_0010")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id, _ = await seed_execution_chain(database)
+        source_message_id = uuid4()
+        async with database.session() as session:
+            await session.execute(
+                insert(task_events).values(
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    sequence=1,
+                    event_type=TaskEventType.TASK_STARTED.value,
+                    task_revision=4,
+                    task_status=TaskStatus.RUNNING.value,
+                    execution_attempt_id=attempt_id.uuid,
+                    source_message_id=source_message_id,
+                    occurred_at=NOW,
+                    recorded_at=NOW,
+                )
+            )
+
+        alembic_runner(postgresql_url, "upgrade", "head")
+        async with database.session() as session:
+            backfilled = (
+                (
+                    await session.execute(
+                        select(
+                            task_events.c.source_idempotency_key,
+                            task_events.c.source_fingerprint,
+                        ).where(
+                            task_events.c.task_id == task_id.uuid,
+                            task_events.c.sequence == 1,
+                        )
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert backfilled["source_idempotency_key"] == f"legacy:event:{task_id}:1"
+        assert len(backfilled["source_fingerprint"]) == 32
+    finally:
+        alembic_runner(postgresql_url, "upgrade", "head")
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_event_defaults_scope_and_task_snapshot_watermark_are_persisted(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
@@ -260,6 +319,8 @@ async def test_event_defaults_scope_and_task_snapshot_watermark_are_persisted(
                             execution_attempt_id=attempt_id.uuid,
                             action_id=action_id.uuid,
                             source_message_id=source_message_id,
+                            source_idempotency_key="task:event:progress:1",
+                            source_fingerprint=b"p" * 32,
                             occurred_at=NOW,
                             safe_message="正在处理第 1 个目标",
                         )
