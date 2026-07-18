@@ -22,7 +22,7 @@ async function readFrontendSources(directory = new URL("src/", frontendRoot)) {
   return sources;
 }
 
-test("device identity uses Ed25519 and native secure stores at the Rust boundary", async () => {
+test("device identity uses Ed25519 and App-private storage at the Rust boundary", async () => {
   const [cargoManifest, rustEntry, identitySource] = await Promise.all([
     readProjectFile("src-tauri/Cargo.toml"),
     readProjectFile("src-tauri/src/lib.rs"),
@@ -33,7 +33,7 @@ test("device identity uses Ed25519 and native secure stores at the Rust boundary
   assert.match(cargoManifest, /ed25519-dalek\s*=\s*"=3\.0\.0"/);
   assert.match(cargoManifest, /getrandom\s*=\s*"=0\.4\.3"/);
   assert.match(cargoManifest, /zeroize\s*=\s*"=1\.9\.0"/);
-  assert.match(cargoManifest, /keyring\s*=\s*"=4\.1\.5"/);
+  assert.doesNotMatch(cargoManifest, /keyring\s*=/);
   assert.match(rustEntry, /mod device_identity;/);
   assert.match(rustEntry, /initialize_production_identity/);
   assert.match(rustEntry, /initialize_ephemeral_identity/);
@@ -41,9 +41,9 @@ test("device identity uses Ed25519 and native secure stores at the Rust boundary
   assert.match(identitySource, /SigningKey/);
   assert.match(identitySource, /getrandom::fill/);
   assert.match(identitySource, /Zeroizing/);
-  assert.match(identitySource, /KeyringDeviceSecretStore/);
-  assert.match(identitySource, /real_platform_secure_store_round_trip/);
-  assert.doesNotMatch(identitySource, /std::fs|File::create|tauri::command|Serialize|Deserialize/);
+  assert.match(identitySource, /AppDataSecretStore/);
+  assert.match(identitySource, /real_app_data_secure_store_round_trip/);
+  assert.doesNotMatch(identitySource, /tauri::command|Serialize|Deserialize/);
 });
 
 test("React sources have no device private-key or secure-store surface", async () => {

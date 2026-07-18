@@ -54,7 +54,7 @@
 | 设备凭据 | `✅` `atdc1` 一次返回、摘要持久化、版本历史、最小 session scope、原子轮换/吊销和并发单赢家已验证 |
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
-| 设备身份密钥 | `✅` Ed25519 首启生成、macOS Keychain / Windows Credential Manager 真实往返、React/普通文件零暴露和桌面隔离身份已验证 |
+| 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
@@ -67,11 +67,13 @@
 
 每个代码任务都必须满足：
 
+- 生产同路径验收：从该接口/功能在正式产品中的原始入口，经正式适配层调用真实依赖并验证最终结果；直接调用下层、Mock/Fake、Test Harness、进程内客户端和日志只能作为分层证据，不能替代完成验收；真实链路未建立时相关跨端或用户功能任务最多标 `🔍 待验收`，并登记补验收依赖；
 - 测试先行并保存 RED 证据；
 - Python 相关：Ruff、类型检查、相关 pytest；
 - TypeScript 相关：Lint、Typecheck、相关 Vitest；
 - UI 行为：相关 Playwright UI Harness；
 - Rust/Tauri：fmt、Clippy、相关 Rust 测试和 Tauri E2E；
+- App 调用的 API：必须由真实测试版 Tauri App 经正式 Rust 网络桥请求真实本地/隔离后端；Mock、Test Harness、直接 HTTP 客户端只算分层测试，不能替代跨端验收；现有 Health/注册/凭据/Session 端点统一在 I2-09 补齐该门禁；
 - 协议：OpenAPI/JSON Schema/fixtures 重新生成且无漂移；
 - 数据库：真实 PostgreSQL 集成和迁移；
 - RPA：真实受控平台最终状态，不以 Mock/点击/日志替代；
@@ -152,12 +154,12 @@
 | I2-01 | 稳定资源 ID | installation/executor/task/attempt/action/artifact ID 类型与非法值测试 | F1-05 | ✅ 已完成 |
 | I2-02 | Installation 表 | 公钥、状态、revision、吊销和迁移；真实 PostgreSQL 测试 | I2-01 | ✅ 已完成 |
 | I2-03 | Demo Bootstrap 模型 | 限时、限环境、限用途；不能调用业务 API | I2-02 | ✅ 已完成 |
-| I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通文件 | F1-07,I2-01 | ✅ 已完成 |
+| I2-04 | 设备密钥生成 | Tauri 首启生成 Ed25519 密钥；私钥不进入 React/普通配置 | F1-07,I2-01 | ✅ 已完成 |
 | I2-05 | Installation 注册 API | challenge/response 或等价签名注册；重放、过期、冒充测试 | I2-03,I2-04 | ✅ 已完成 |
 | I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ✅ 已完成 |
 | I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ✅ 已完成 |
-| I2-08 | Rust 安全存储 | 读写/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ⬜ 未开始 |
-| I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；禁止任意 URL 代理 | I2-08,F1-11 | ⬜ 未开始 |
+| I2-08 | Rust App 私有存储 | `app_data_dir` 读写/替换/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ✅ 已完成 |
+| I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；真实 Tauri App 调用 Health/注册/凭据/Session；禁止任意 URL 代理 | I2-08,F1-11 | ⬜ 未开始 |
 | I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ⬜ 未开始 |
 | I2-11 | 协议 Schema/Fixtures | 有效/无效样例覆盖未知字段、敏感数据、非法时间和枚举 | I2-10 | ⬜ 未开始 |
 | I2-12 | Rust/TS 协议一致性 | 三语言回放同一 fixtures，结论一致 | I2-11,F1-11 | ⬜ 未开始 |
@@ -792,11 +794,11 @@
 - 提交：本任务提交（PR #2）
 - RED：先创建 Rust/React 静态边界契约和设备身份行为测试；`node --test tests/device-identity-boundary.test.mjs` 因 `device_identity.rs` 不存在而失败，随后 `cargo test --manifest-path src-tauri/Cargo.toml --lib device_identity::tests --no-run` 因设备身份类型和安全存储适配器尚不存在而编译失败
 - GREEN：6 项 macOS 设备身份目标测试、8 项默认 Rust 测试、8 项 `desktop-e2e` Rust 测试、16 项 Node 契约、25 项 Vitest、3 项 Playwright 和 1 项真实 macOS Tauri/WebdriverIO 冒烟通过；Rustfmt、默认/测试特性 Clippy `-D warnings`、ESLint、严格 TypeScript、生产资产构建与边界扫描全部通过；GitHub Actions 运行 `29620527399` 的 Backend/Frontend/Linux Rust 和 `29620527397` 的 macOS/Windows 桌面矩阵五路通过
-- 真实边界：本机 macOS Keychain 使用唯一测试 account 完成二进制 Secret 写入、复用、读取和删除；GitHub Hosted Windows 的 Credential Manager 同样执行真实往返与删除；两平台均构建 production desktop binary 并启动真实 Tauri 窗口冒烟。Linux 不假装提供安全存储，经同一管理器的 unsupported store 固定 fail closed
-- 失败矩阵：覆盖首次生成、既有密钥复用、0/31/33/64 字节损坏拒绝且不轮换、安全存储读写拒绝、系统随机源失败、不同生成结果、固定不泄密错误；静态扫描拒绝私钥进入 React、Tauri Command、序列化和普通文件。网络、数据库、业务 API、取消、超时和结果不确定对纯本机首启密钥任务不适用
-- 清理：真实平台测试使用进程 ID + 纳秒时间的唯一 account，并由显式删除和 Drop 清理双保险移除；`desktop-e2e` 身份只驻留测试 App 进程、不写系统存储；测试未启动后端、数据库、浏览器或云端资源
+- 真实边界：本任务当时完成了 macOS/Windows 平台存储和 production desktop binary 冒烟；I2-08 根据后续明确产品决策，将持久化实现统一迁移为 Tauri `app_data_dir` 下的 App 私有文件，并以新的正式 App 启动、平台文件语义和凭据生命周期证据取代原存储实现，I2-04 的密钥生成与 React/IPC 隔离边界继续保留
+- 失败矩阵：覆盖首次生成、既有密钥复用、0/31/33/64 字节损坏拒绝且不轮换、存储读写拒绝、系统随机源失败、不同生成结果和固定不泄密错误；静态扫描拒绝私钥进入 React、Tauri Command、序列化和普通配置。网络、数据库、业务 API、取消、超时和结果不确定对纯本机首启密钥任务不适用
+- 清理：I2-08 使用隔离 App 标识和临时 App 数据目录替代旧平台存储测试对象；`desktop-e2e` 身份仍只驻留测试 App 进程，测试不启动后端、数据库、浏览器或云端资源
 - 文档：同步根/Frontend README、前端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步
-- 遗留：I2-05 使用公钥完成 Installation 注册签名校验；I2-08 在同一系统安全存储增加可轮换、可删除的后端设备凭据，不把凭据职责混入本任务
+- 遗留：I2-05 使用公钥完成 Installation 注册签名校验；I2-08 统一迁移私钥存储并增加可轮换、可删除的长期设备凭据，不把服务端签发职责混入本任务
 
 ### I2-05 Installation 注册 API
 
@@ -823,7 +825,7 @@
 - 失败矩阵：覆盖空/超长/非 canonical/非法 UUID/错误版本/错误随机源、未知 ID、同 ID 错误秘密、旧版本、重复吊销、已吊销 Installation、非法 scope/status/version/摘要长度/时间/UUID、重复版本/摘要、同 Installation 双 active，以及两个并发轮换只能一个成功；认证错误固定且不回显 bearer，注册重放不再次返回凭据
 - 清理：每轮真实数据库测试使用随机 loopback 端口、随机密码和独立 Compose project，结束后删除测试容器、网络和卷；未启动 App、浏览器、Executor 或云资源，构建与覆盖率产物保持 Git 忽略
 - 文档：同步根/Backend README、后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
-- 遗留：I2-07 使用该长期凭据的唯一 scope 换取短期 Session；I2-08 再把长期凭据的读写、轮换替换和删除接入 Tauri 系统安全存储；当前 React 和普通文件仍不接触凭据
+- 遗留：I2-07 使用该长期凭据的唯一 scope 换取短期 Session；I2-08 再把长期凭据的读写、原子替换和删除接入 Rust 管理的 App 私有存储；当前 React 和普通配置仍不接触凭据
 
 ### I2-07 短期设备 Session
 
@@ -837,12 +839,26 @@
 - 失败矩阵：覆盖空/超长/非 canonical/非法 UUID/错误版本/错误随机源、未知 ID、同 ID 错误秘密、能力混用、未生效前 1 微秒、到期精确边界、非法数据库绑定/能力/摘要/时间、父凭据轮换或撤销、Installation 撤销以及认证中 Session 被并发清理；所有 bearer 错误固定且不回显输入
 - 清理：每轮真实数据库测试使用随机 loopback 端口、随机密码和独立 Compose project，结束后删除测试容器、网络和卷；UI 测试 Vite 进程由 Playwright 回收，未启动真实 App、Executor、浏览器运营 Profile 或云资源
 - 文档：同步根/Backend README、后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照、任务状态、完成记录和当前下一步
-- 遗留：I2-08 将长期设备凭据接入 Tauri 系统安全存储；I2-09/I2-10 再建立跨进程协议与兼容矩阵；I2-13 才让 Executor WebSocket 使用 `executor.connect` Session，业务 API 授权随对应任务接入 `app.control-plane`
+- 遗留：I2-08 将长期设备凭据接入 Rust 管理的 App 私有存储；I2-09/I2-10 再建立跨进程协议与兼容矩阵；I2-13 才让 Executor WebSocket 使用 `executor.connect` Session，业务 API 授权随对应任务接入 `app.control-plane`
+
+### I2-08 Rust App 私有存储
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增长期设备凭据静态边界和 Rust 行为契约；Node 因 `secure_store.rs` 不存在而失败，Rust 因共享存储和 `DeviceCredentialVault` 类型不存在而编译失败。用户明确改为 App 私有目录后，再把契约收紧为必须使用 `app_data_dir`、彻底移除 `keyring`，此时 Node 因依赖和入口仍是系统存储而失败，Rust 因 `AppDataSecretStore` 不存在而编译失败
+- GREEN：默认和 `desktop-e2e` 两种 Rust 配置各通过 19 项库测试、2 项配置集成测试和文档测试；warnings-as-errors 全目标编译、Rustfmt、18 项 Node 契约、25 项 Vitest、3 项 Playwright、ESLint、严格 TypeScript、OpenAPI 漂移、生产构建/边界扫描和 1 项真实 macOS Tauri/WebdriverIO 冒烟通过；提交后的 GitHub Actions 继续执行默认/测试特性 Clippy 与 macOS/Windows 桌面矩阵
+- 真实边界：使用正式、非 `desktop-e2e` Tauri 入口和隔离 App 标识启动真实 macOS App，`app.path().app_data_dir()` 实际创建私有目录与 `device-identity-ed25519-v1`；目录为 `0700`、文件为 `0600` 且精确 32 字节。停止并第二次启动后文件修改时间保持不变，证明既有私钥复用且未静默轮换；未签发凭据时没有空 `device-credential-v1`，全程未调用系统钥匙串、未出现授权提示。长期凭据的真实文件往返、原子替换和幂等删除由同一 Rust 生产存储适配器验证；I2-09 再从真实 App 网络响应消费该仓库
+- 安全模型：私钥和长期凭据分别使用两个固定文件名，最大 Secret 为 4096 字节；目录拒绝符号链接和非目录，Secret 拒绝符号链接、非普通文件和 Unix 组/其他用户权限。写入使用同目录 `create_new` 临时文件、`sync_all`、原子 `rename` 和 Unix 目录同步；缓冲区使用 `Zeroizing`，错误固定且不回显路径、凭据或底层异常。React、Tauri Command、序列化和 `localStorage` 均没有读写面，Cargo 锁文件不再包含 `keyring` 及其 macOS/Windows 平台依赖
+- 失败矩阵：覆盖缺项、首次生成、既有私钥复用、凭据写入/替换/删除、重复删除、非法前缀/UUID 版本/编码/长度/Unicode、损坏 UTF-8、尾随内容、空值、超限输入和超限已存内容、存储读写删拒绝、目录/文件符号链接、非目录/非普通文件、过宽权限、随机源失败和固定不泄密错误；正式 App 启动与重启补齐真实入口，网络、数据库和 API 调用统一留给 I2-09 的纵向验收
+- 清理：正式 App 验收使用启动前确认不存在的隔离标识目录；验证后停止 App/Vite，确认 loopback 端口无监听，再精确删除该测试目录和 Git 忽略的临时配置。未触碰正式 App 数据、后端、数据库、浏览器运营 Profile 或云资源
+- 文档：同步项目规则、根/Frontend README、竞品分析中的我方方案、前后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；明确密钥与长期凭据只存 App 私有目录且不使用系统钥匙串
+- 遗留：I2-09 通过正式 Rust 网络桥把注册响应、凭据轮换/吊销和 Session 换票接到该仓库，并由真实测试版 Tauri App 请求真实隔离后端；此前 Health/注册/凭据/Session 的服务端证据不能替代这次纵向验收
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-08`：把设备凭据安全读写、删除和损坏处理接入 Rust 系统安全存储；
-2. `I2-09`：定义 Control Plane 与 Local Executor 的版本化消息 Envelope；
+1. `I2-09`：实现 Rust 网络桥，并由真实测试版 Tauri App 调用 Health、注册、凭据和 Session 接口；
+2. `I2-10`：定义 Executor v1 Envelope，并建立严格版本、时限、幂等和序号边界；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。

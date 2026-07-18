@@ -177,7 +177,7 @@ interface PlatformAdapter {
 正式 Tauri 使用 Rust `ControlPlaneTransport`：
 
 - Rust 读取受控 `baseUrl`；
-- 安装实例长期私钥或设备凭据保存在系统安全存储，不进入 React、`localStorage` 或普通配置；
+- 安装实例长期私钥和设备凭据保存在 Tauri `app_data_dir` 下由 Rust 管理的 App 私有文件，不调用系统钥匙串，也不进入 React、`localStorage` 或普通配置；
 - Rust 为请求附加短期访问凭据和关联 ID；
 - Rust 只允许调用从 OpenAPI operation ID 生成的允许列表，不提供任意 URL 代理；
 - SSE/事件流由 Rust 建立并通过 Tauri Channel 传给 React；
@@ -187,7 +187,7 @@ interface PlatformAdapter {
 
 当前 F1-10 契约只暴露业务需要的 `checkHealth`，不接受 URL 或任意 operation。正式 `TauriControlPlaneTransport` 在 Rust 网络桥完成前固定返回可重试的安全 unavailable；测试 Harness 只委托显式注入的 health handler，缺失 handler 时 fail closed。所有底层异常进入启动页前收敛为 `unavailable`，不反射原始 message。F1-11 生成 DTO 后扩展 operation 类型，I2-09 才实现真实 Rust 网络调用。
 
-I2-04 已建立设备密钥边界：Rust 1.88 基线使用 `ed25519-dalek 3.0.0`、`getrandom 0.4.3` 和 `zeroize 1.9.0` 生成、派生并及时清零临时私钥缓冲；`keyring 4.1.5` 的 v1 二进制 API 在 macOS 映射 Keychain、在 Windows 映射 Credential Manager。正式入口只把 32 字节公钥作为 Tauri 托管状态，私钥没有序列化、Command 或 React 接口，也不写普通文件。安全存储缺项时首启生成并保存；已有值必须精确为 32 字节，否则拒绝启动且不静默轮换。平台存储拒绝、随机源失败和损坏都收敛为固定错误，不回显 service、account、密钥或底层异常。
+I2-04 建立的设备密钥边界已在 I2-08 按当前产品决策迁移到统一 App 私有存储：Rust 1.88 基线使用 `ed25519-dalek 3.0.0`、`getrandom 0.4.3` 和 `zeroize 1.9.0` 生成、派生并及时清零临时私钥缓冲；私钥与长期凭据分别使用 `device-identity-ed25519-v1` 和 `device-credential-v1` 固定文件，根目录由正式 Tauri 入口通过 `app.path().app_data_dir()` 解析。Unix 目录/文件权限固定为 `0700`/`0600`，Windows 继承当前用户 AppData ACL；存储拒绝符号链接、非普通文件、超限内容和不安全文件名，写入经同目录独占临时文件、同步及原子替换完成。正式入口只托管公钥和 Rust 凭据仓，不提供序列化、Command 或 React 接口，也不调用系统钥匙串。私钥缺项时首启生成并保存，已有值必须精确为 32 字节；长期凭据必须是 canonical `atdc1` 且允许原子替换和幂等删除。权限拒绝、随机源失败、损坏和非法凭据均 fail closed，并收敛为固定不泄密错误。
 
 当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky 健康投影，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
 
@@ -345,7 +345,7 @@ unknown
 - WebView 不加载抖音、小红书或微信页面；
 - 外部平台始终在独立 Chrome/Edge 窗口打开；
 - 长期设备凭据和平台会话不进入 React；
-- Ed25519 设备私钥只进入系统安全存储；损坏或不可用时 fail closed，不回退到普通文件；
+- Ed25519 设备私钥和长期设备凭据只进入 Rust 管理的 `app_data_dir` 固定私有文件；损坏或不可用时 fail closed，不回退到普通配置、React 存储或系统钥匙串；
 - Markdown、模型输出和服务端文本按不可信内容处理；
 - 外链只允许 `https` 且展示目标域名；
 - 文件选择通过 Tauri，后端不能请求任意本机路径；
@@ -391,7 +391,7 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 
 - baseUrl Profile 校验；
 - 安装实例凭据安全存储；
-- macOS Keychain / Windows Credential Manager 的真实二进制 Secret 往返、复用、损坏拒绝和清理；
+- macOS/Windows 的真实 App 私有数据目录往返、权限边界、复用、原子替换、损坏拒绝和清理；
 - HTTP operation allowlist；
 - SSE 到 Tauri Channel 映射；
 - Executor 启停、超时、崩溃、重启预算和进程树清理；
@@ -410,7 +410,7 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 
 当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于 `tauri.test.conf.json` 对应的测试构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描 `wdioTauri`、WDIO IPC 和 WebDriver 端口标记并 fail closed。
 
-I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免桌面冒烟污染开发机或 CI 的生产 Keychain/Credential Manager account；默认 Rust 平台测试仍直接调用真实系统安全存储，以唯一测试 account 完成写入、复用、读取和删除。两个边界必须同时通过，临时身份不能替代真实安全存储验收。
+I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 
 `pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。当前最小桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用，不证明后续 Control Plane 网络桥、Local Executor、外部运营浏览器或 RPA 可用；这些能力必须在对应任务新增自己的桌面用例。
 

@@ -92,7 +92,9 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
-│   │   ├── device_identity.rs     # Ed25519 设备身份与系统安全存储
+│   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
+│   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
+│   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
 │   │   ├── lib.rs
 │   │   └── main.rs
 │   ├── tests/
@@ -379,7 +381,7 @@ R0-12 审计基于旧仓库 `/Users/aventador/code/agent-platform` 的提交
 | `QrLoginSession` 状态机、revision 和 circuit open | 按新契约重写 | `B5-09`～`B5-12` | 状态来自真实页面检测并持久化到本机账本/Control Plane；风险、验证码必须人工恢复 |
 | 进程内 `HashMap` 账号和单 active account | 删除 | — | 账号/Profile 事实不能只在 Tauri 内存；并发由 Profile 锁和任务账本决定 |
 | `EncryptedCookieVault` 和 Cookie 导入导出 | 删除 | — | Playwright 持久 Profile 是会话唯一来源；Cookie 不复制到独立文件、不上传 Control Plane |
-| 普通文件 `.cookie-key` | 删除 | — | 不再单独保存 Cookie；其他设备私钥只允许进入系统安全存储 |
+| 普通文件 `.cookie-key` | 删除 | — | 不再单独保存 Cookie；设备密钥只允许进入 Rust 管理的 `app_data_dir` 固定私有文件，不能形成第二份配置或导出文件 |
 | ChaCha20Poly1305 Cookie 文件格式 `SOC1` | 删除 | — | 与当前持久 Profile 方案重复，避免形成第二份登录态 |
 | Douyin/Xiaohongshu/Kuaishou/Wechat 等一次性枚举 | 按阶段重写 | `B5-01` 及后续平台任务 | MVP 只实现抖音 Adapter；新增平台必须有独立页面对象、契约和真实验收 |
 

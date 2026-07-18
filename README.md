@@ -52,7 +52,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `POST /api/v1/device-sessions` 可把当前长期凭据换成 5 分钟 `atds1` 短期票据；每张票只具备 App Control Plane 或 Executor 连接能力之一，数据库只保存摘要和精确父凭据版本绑定，父凭据/Installation 失效会立即拒绝既有票据；
 - Frontend 已锁定 React、TypeScript、Vite 和 Ant Design，严格类型、Lint、冻结安装与生产资产构建通过；Vite 仅绑定 loopback 且仓库没有 Web 部署入口；
 - Tauri v2 已具备真实 macOS 主窗口、生产 CSP、零 IPC 权限 Capability、桌面图标与 Cargo 锁文件，Rust/Clippy/无 bundle 构建通过；
-- Tauri 首启设备身份已在 Rust 内生成 Ed25519 密钥：私钥只进入 macOS Keychain / Windows Credential Manager，不进入 React、Tauri IPC、`localStorage` 或普通文件；
+- Tauri 首启设备身份已在 Rust 内生成 Ed25519 密钥：私钥和长期设备凭据只进入 `app_data_dir` 下由 Rust 管理的 App 私有文件，不进入 React、Tauri IPC、`localStorage` 或普通配置，也不调用系统钥匙串；
 - App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用时有脱敏诊断与重试状态，页面不存在产品登录或注册入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已建立窄接口、固定公开错误、正式 Tauri unavailable stub 和显式 handler 测试 Harness；不暴露任意 URL 代理；

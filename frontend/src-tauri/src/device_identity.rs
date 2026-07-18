@@ -1,14 +1,14 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 
 use ed25519_dalek::SigningKey;
 use zeroize::Zeroizing;
 
+use crate::secure_store::{SecretStore, SecureStoreError};
+
 const DEVICE_SECRET_LENGTH: usize = 32;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-const DEVICE_KEYRING_SERVICE: &str = "com.aventador.automationtool.device-identity";
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-const DEVICE_KEYRING_ACCOUNT: &str = "ed25519-signing-key-v1";
+const DEVICE_IDENTITY_FILE_NAME: &str = "device-identity-ed25519-v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DeviceIdentityErrorCode {
@@ -52,11 +52,6 @@ impl DevicePublicIdentity {
     }
 }
 
-trait DeviceSecretStore {
-    fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, DeviceIdentityError>;
-    fn save(&self, secret: &[u8]) -> Result<(), DeviceIdentityError>;
-}
-
 trait SecretKeyGenerator {
     fn generate(&self) -> Result<Zeroizing<[u8; DEVICE_SECRET_LENGTH]>, DeviceIdentityError>;
 }
@@ -80,7 +75,7 @@ struct DeviceIdentityManager<'a, S, G> {
 
 impl<'a, S, G> DeviceIdentityManager<'a, S, G>
 where
-    S: DeviceSecretStore,
+    S: SecretStore,
     G: SecretKeyGenerator,
 {
     fn new(store: &'a S, generator: &'a G) -> Self {
@@ -88,14 +83,18 @@ where
     }
 
     fn get_or_create(&self) -> Result<DevicePublicIdentity, DeviceIdentityError> {
-        if let Some(stored_secret) = self.store.load()? {
+        if let Some(stored_secret) = self.store.load().map_err(map_store_error)? {
             return identity_from_stored_secret(&stored_secret);
         }
 
         let secret = self.generator.generate()?;
-        self.store.save(secret.as_ref())?;
+        self.store.save(secret.as_ref()).map_err(map_store_error)?;
         Ok(identity_from_secret(&secret))
     }
+}
+
+fn map_store_error(_error: SecureStoreError) -> DeviceIdentityError {
+    DeviceIdentityError::new(DeviceIdentityErrorCode::SecureStoreUnavailable)
 }
 
 fn identity_from_stored_secret(
@@ -115,80 +114,13 @@ fn identity_from_secret(secret: &[u8; DEVICE_SECRET_LENGTH]) -> DevicePublicIden
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-struct KeyringDeviceSecretStore {
-    entry: keyring::v1::Entry,
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-impl KeyringDeviceSecretStore {
-    fn new(service: &str, account: &str) -> Result<Self, DeviceIdentityError> {
-        let entry = keyring::v1::Entry::new(service, account).map_err(|_| {
-            DeviceIdentityError::new(DeviceIdentityErrorCode::SecureStoreUnavailable)
-        })?;
-        Ok(Self { entry })
-    }
-
-    #[cfg(test)]
-    fn delete_for_test(&self) -> Result<(), DeviceIdentityError> {
-        match self.entry.delete_credential() {
-            Ok(()) | Err(keyring::v1::Error::NoEntry) => Ok(()),
-            Err(_) => Err(DeviceIdentityError::new(
-                DeviceIdentityErrorCode::SecureStoreUnavailable,
-            )),
-        }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-impl DeviceSecretStore for KeyringDeviceSecretStore {
-    fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, DeviceIdentityError> {
-        match self.entry.get_secret() {
-            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
-            Err(keyring::v1::Error::NoEntry) => Ok(None),
-            Err(_) => Err(DeviceIdentityError::new(
-                DeviceIdentityErrorCode::SecureStoreUnavailable,
-            )),
-        }
-    }
-
-    fn save(&self, secret: &[u8]) -> Result<(), DeviceIdentityError> {
-        self.entry
-            .set_secret(secret)
-            .map_err(|_| DeviceIdentityError::new(DeviceIdentityErrorCode::SecureStoreUnavailable))
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) fn initialize_production_identity() -> Result<DevicePublicIdentity, DeviceIdentityError>
-{
-    let store = KeyringDeviceSecretStore::new(DEVICE_KEYRING_SERVICE, DEVICE_KEYRING_ACCOUNT)?;
+pub(crate) fn initialize_production_identity(
+    app_data_directory: &Path,
+) -> Result<DevicePublicIdentity, DeviceIdentityError> {
+    let store =
+        crate::secure_store::AppDataSecretStore::new(app_data_directory, DEVICE_IDENTITY_FILE_NAME)
+            .map_err(map_store_error)?;
     DeviceIdentityManager::new(&store, &SystemSecretKeyGenerator).get_or_create()
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-struct UnsupportedDeviceSecretStore;
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-impl DeviceSecretStore for UnsupportedDeviceSecretStore {
-    fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, DeviceIdentityError> {
-        Err(DeviceIdentityError::new(
-            DeviceIdentityErrorCode::SecureStoreUnavailable,
-        ))
-    }
-
-    fn save(&self, _secret: &[u8]) -> Result<(), DeviceIdentityError> {
-        Err(DeviceIdentityError::new(
-            DeviceIdentityErrorCode::SecureStoreUnavailable,
-        ))
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub(crate) fn initialize_production_identity() -> Result<DevicePublicIdentity, DeviceIdentityError>
-{
-    DeviceIdentityManager::new(&UnsupportedDeviceSecretStore, &SystemSecretKeyGenerator)
-        .get_or_create()
 }
 
 #[cfg(feature = "desktop-e2e")]
@@ -205,19 +137,10 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        DeviceIdentityError, DeviceIdentityErrorCode, DeviceIdentityManager, DeviceSecretStore,
-        SecretKeyGenerator, SystemSecretKeyGenerator,
+        DeviceIdentityError, DeviceIdentityErrorCode, DeviceIdentityManager, SecretKeyGenerator,
+        SystemSecretKeyGenerator,
     };
-
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    struct PlatformSecretCleanup<'a>(&'a super::KeyringDeviceSecretStore);
-
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    impl Drop for PlatformSecretCleanup<'_> {
-        fn drop(&mut self) {
-            let _ = self.0.delete_for_test();
-        }
-    }
+    use crate::secure_store::{SecretStore, SecureStoreError};
 
     #[derive(Default)]
     struct MemorySecretStore {
@@ -240,24 +163,25 @@ mod tests {
         }
     }
 
-    impl DeviceSecretStore for MemorySecretStore {
-        fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, DeviceIdentityError> {
+    impl SecretStore for MemorySecretStore {
+        fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, SecureStoreError> {
             if self.fail_load.get() {
-                return Err(DeviceIdentityError::new(
-                    DeviceIdentityErrorCode::SecureStoreUnavailable,
-                ));
+                return Err(SecureStoreError::Unavailable);
             }
             Ok(self.secret.borrow().clone().map(Zeroizing::new))
         }
 
-        fn save(&self, secret: &[u8]) -> Result<(), DeviceIdentityError> {
+        fn save(&self, secret: &[u8]) -> Result<(), SecureStoreError> {
             if self.fail_save.get() {
-                return Err(DeviceIdentityError::new(
-                    DeviceIdentityErrorCode::SecureStoreUnavailable,
-                ));
+                return Err(SecureStoreError::Unavailable);
             }
             self.save_count.set(self.save_count.get() + 1);
             self.secret.replace(Some(secret.to_vec()));
+            Ok(())
+        }
+
+        fn delete(&self) -> Result<(), SecureStoreError> {
+            self.secret.replace(None);
             Ok(())
         }
     }
@@ -394,41 +318,36 @@ mod tests {
         assert_ne!(first_store.saved_secret(), second_store.saved_secret());
     }
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
-    fn real_platform_secure_store_round_trip() {
+    fn real_app_data_secure_store_round_trip() {
+        use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        use super::KeyringDeviceSecretStore;
+        use crate::secure_store::AppDataSecretStore;
 
-        let unique_account = format!(
+        let unique_directory = std::env::temp_dir().join(format!(
             "i2-04-test-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("system time")
                 .as_nanos()
-        );
-        let store = KeyringDeviceSecretStore::new(
-            "com.aventador.automationtool.tests.device-identity",
-            &unique_account,
-        )
-        .expect("create platform keyring entry");
-        let _cleanup = PlatformSecretCleanup(&store);
+        ));
+        let store = AppDataSecretStore::new(&unique_directory, "device-identity-ed25519-v1")
+            .expect("create app data store");
         let generator = SystemSecretKeyGenerator;
         let manager = DeviceIdentityManager::new(&store, &generator);
 
-        let first = manager.get_or_create().expect("store platform identity");
-        let second = manager.get_or_create().expect("reload platform identity");
+        let first = manager.get_or_create().expect("store app data identity");
+        let second = manager.get_or_create().expect("reload app data identity");
 
         assert_eq!(second, first);
         assert_eq!(
-            store.load().expect("load platform secret").unwrap().len(),
+            store.load().expect("load app data secret").unwrap().len(),
             32
         );
-        store
-            .delete_for_test()
-            .expect("delete platform test identity");
+        store.delete().expect("delete app data test identity");
         assert!(store.load().expect("confirm deletion").is_none());
+        fs::remove_dir_all(unique_directory).expect("clean app data test directory");
     }
 }
