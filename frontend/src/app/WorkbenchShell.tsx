@@ -5,18 +5,23 @@ import {
   TaskProjectionSourceError,
   type TaskProjectionSource,
 } from "../api/control-plane/task-projections";
-import { Workbench } from "../features/workbench/Workbench";
-import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 import { TaskCreate } from "../features/task-create/TaskCreate";
 import {
   TaskCreationGatewayError,
   type TaskCreationGateway,
 } from "../features/task-create/task-creation-gateway";
+import { TaskRunDetails } from "../features/task-runs/TaskRunDetails";
+import {
+  TaskRunControlGatewayError,
+  type TaskRunControlGateway,
+} from "../features/task-runs/task-run-controls";
+import { Workbench } from "../features/workbench/Workbench";
+import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
   { key: "task-create", label: "新建任务" },
-  { key: "task-runs", label: "任务记录", disabled: true },
+  { key: "task-runs", label: "任务记录" },
   { key: "platform", label: "平台状态", disabled: true },
   { key: "diagnostics", label: "设置与诊断", disabled: true },
 ];
@@ -52,19 +57,43 @@ const shellTaskCreationGateway: TaskCreationGateway = {
   },
 };
 
+const shellTaskRunControlGateway: TaskRunControlGateway = {
+  async pauseTask() {
+    throw new TaskRunControlGatewayError("transport_unavailable", true);
+  },
+  async resumeTask() {
+    throw new TaskRunControlGatewayError("transport_unavailable", true);
+  },
+  async cancelTask() {
+    throw new TaskRunControlGatewayError("transport_unavailable", true);
+  },
+  async emergencyStopTask() {
+    throw new TaskRunControlGatewayError("transport_unavailable", true);
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
   readonly taskCreationGateway?: TaskCreationGateway | undefined;
+  readonly taskRunControlGateway?: TaskRunControlGateway | undefined;
 }
 
 export function WorkbenchShell({
   taskSource = shellTaskSource,
   gateway = shellWorkbenchGateway,
   taskCreationGateway = shellTaskCreationGateway,
+  taskRunControlGateway = shellTaskRunControlGateway,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const creatingTask = activePage === "task-create";
+  const showingTaskRun = activePage === "task-runs";
+
+  const openTask = (taskId: string) => {
+    setSelectedTaskId(taskId);
+    setActivePage("task-runs");
+  };
 
   return (
     <Layout className="desktop-shell">
@@ -84,7 +113,7 @@ export function WorkbenchShell({
             selectedKeys={[activePage]}
             items={navigationItems}
             onClick={({ key }) => {
-              if (key === "workbench" || key === "task-create") {
+              if (key === "workbench" || key === "task-create" || key === "task-runs") {
                 setActivePage(key);
               }
             }}
@@ -105,28 +134,50 @@ export function WorkbenchShell({
             <Flex justify="space-between" align="end" gap={24}>
               <Space orientation="vertical" size={4}>
                 <Typography.Title level={2}>
-                  {creatingTask ? "新建运营任务" : "RPA 运营工作台"}
+                  {creatingTask
+                    ? "新建运营任务"
+                    : showingTaskRun
+                      ? "任务记录"
+                      : "RPA 运营工作台"}
                 </Typography.Title>
                 <Typography.Text type="secondary">
                   {creatingTask
                     ? "配置一个可预览、可确认的抖音搜索曝光任务。"
+                    : showingTaskRun
+                      ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
                 </Typography.Text>
               </Space>
               <Tag variant="filled" color="green">
-                {creatingTask ? "任务模板已就绪" : "工作台已就绪"}
+                {creatingTask
+                  ? "任务模板已就绪"
+                  : showingTaskRun
+                    ? "任务事实已连接"
+                    : "工作台已就绪"}
               </Tag>
             </Flex>
 
             {creatingTask ? (
               <TaskCreate
                 gateway={taskCreationGateway}
-                onCreated={() => {
-                  // Keep the success receipt visible until the operator chooses to leave.
-                }}
+                onCreated={openTask}
               />
+            ) : showingTaskRun && selectedTaskId !== null ? (
+              <TaskRunDetails
+                taskId={selectedTaskId}
+                taskSource={taskSource}
+                controlGateway={taskRunControlGateway}
+                onBack={() => setActivePage("workbench")}
+              />
+            ) : showingTaskRun ? (
+              <div className="task-run-empty">
+                <Typography.Title level={4}>请选择一个任务</Typography.Title>
+                <Typography.Text type="secondary">
+                  从工作台当前任务或最近任务进入运行详情。
+                </Typography.Text>
+              </div>
             ) : (
-              <Workbench taskSource={taskSource} gateway={gateway} />
+              <Workbench taskSource={taskSource} gateway={gateway} onOpenTask={openTask} />
             )}
           </main>
         </Layout.Content>

@@ -320,9 +320,17 @@ async def test_body_stops_before_or_after_poll_when_the_client_disconnects() -> 
         task_id=str(TASK_ID),
         initial=initial,
     )
+    after_one_poll = _event_body(
+        request=cast(Request, TestRequest([False, False, True])),
+        service=service,
+        installation_id=INSTALLATION_ID,
+        task_id=str(TASK_ID),
+        initial=initial,
+    )
 
     assert [item async for item in before] == []
     assert [item async for item in after] == []
+    assert [item async for item in after_one_poll] == []
 
 
 @pytest.mark.asyncio

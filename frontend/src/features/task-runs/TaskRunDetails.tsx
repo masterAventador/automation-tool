@@ -1,0 +1,526 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Flex,
+  Popconfirm,
+  Progress,
+  Space,
+  Tag,
+  Timeline,
+  Typography,
+} from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  parseTaskEvent,
+  taskProjectionKeys,
+  taskSnapshotQueryOptions,
+  type TaskEvent,
+  type TaskProjectionSource,
+  type TaskSnapshot,
+  type TaskStatus,
+} from "../../api/control-plane/task-projections";
+import type {
+  TaskRunControlGateway,
+  TaskRunControlOperation,
+  TaskRunControlReceipt,
+} from "./task-run-controls";
+
+const MAX_RETAINED_TIMELINE_EVENTS = 200;
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  draft: "草稿",
+  validating: "校验中",
+  awaiting_device: "等待执行器",
+  awaiting_platform_login: "等待平台登录",
+  discovering_targets: "发现目标中",
+  awaiting_confirmation: "等待确认",
+  queued: "排队中",
+  running: "运行中",
+  paused: "已暂停",
+  awaiting_human: "等待人工处理",
+  cancelling: "正在取消",
+  succeeded: "已成功",
+  partially_succeeded: "部分成功",
+  failed: "已失败",
+  cancelled: "已取消",
+  outcome_uncertain: "结果待确认",
+};
+
+const EVENT_LABELS: Record<TaskEvent["eventType"], string> = {
+  "task.created": "任务创建",
+  "task.validation_started": "开始校验",
+  "task.validation_failed": "校验失败",
+  "task.awaiting_platform_login": "等待平台登录",
+  "task.awaiting_confirmation": "等待确认",
+  "task.started": "任务开始",
+  "step.started": "步骤开始",
+  "step.progress": "步骤进度",
+  "step.completed": "步骤完成",
+  "step.failed": "步骤失败",
+  "task.awaiting_human": "等待人工处理",
+  "task.paused": "任务已暂停",
+  "task.resumed": "任务已恢复",
+  "task.cancelling": "正在取消",
+  "task.cancelled": "任务已取消",
+  "task.completed": "任务完成",
+  "task.partially_completed": "任务部分完成",
+  "task.failed": "任务失败",
+  "task.outcome_uncertain": "结果待确认",
+};
+
+const COMMAND_LABELS: Record<TaskRunControlOperation, string> = {
+  pause: "暂停",
+  resume: "恢复",
+  cancel: "取消",
+  emergency_stop: "紧停",
+};
+
+const TERMINAL_STATUSES = new Set<TaskStatus>([
+  "succeeded",
+  "partially_succeeded",
+  "failed",
+  "cancelled",
+  "outcome_uncertain",
+]);
+
+const CANCELLABLE_STATUSES = new Set<TaskStatus>([
+  "awaiting_platform_login",
+  "discovering_targets",
+  "awaiting_confirmation",
+  "queued",
+  "running",
+  "paused",
+  "awaiting_human",
+]);
+
+const EMERGENCY_STOPPABLE_STATUSES = new Set<TaskStatus>([
+  "running",
+  "paused",
+  "awaiting_human",
+]);
+
+interface TaskRunDetailsProps {
+  readonly taskId: string;
+  readonly taskSource: TaskProjectionSource;
+  readonly controlGateway: TaskRunControlGateway;
+  readonly onBack: () => void;
+}
+
+interface ControlRequest {
+  readonly operation: TaskRunControlOperation;
+  readonly baselineRevision: number;
+}
+
+interface SubmittedControl extends ControlRequest {
+  readonly receipt: TaskRunControlReceipt;
+}
+
+interface ActionProjection {
+  readonly actionId: string;
+  readonly status: "running" | "succeeded" | "failed";
+  readonly updatedAt: string;
+}
+
+function statusColor(status: TaskStatus): string {
+  if (status === "succeeded") return "green";
+  if (status === "failed" || status === "outcome_uncertain") return "red";
+  if (status === "awaiting_human" || status === "partially_succeeded") return "gold";
+  if (status === "cancelled") return "default";
+  return "blue";
+}
+
+function projectSnapshot(snapshot: TaskSnapshot, events: readonly TaskEvent[]): TaskSnapshot {
+  let projected = snapshot;
+  for (const event of events) {
+    if (event.sequence <= projected.lastEventSequence) continue;
+    if (
+      event.sequence !== projected.lastEventSequence + 1 ||
+      event.taskRevision <= projected.revision
+    ) {
+      return projected;
+    }
+    projected = {
+      ...projected,
+      status: event.taskStatus,
+      revision: event.taskRevision,
+      lastEventSequence: event.sequence,
+      updatedAt: event.recordedAt,
+    };
+  }
+  return projected;
+}
+
+function actionProjections(events: readonly TaskEvent[]): readonly ActionProjection[] {
+  const projections = new Map<string, ActionProjection>();
+  for (const event of events) {
+    if (event.actionId === null || !event.eventType.startsWith("step.")) continue;
+    const status =
+      event.eventType === "step.completed"
+        ? "succeeded"
+        : event.eventType === "step.failed"
+          ? "failed"
+          : "running";
+    projections.set(event.actionId, {
+      actionId: event.actionId,
+      status,
+      updatedAt: event.recordedAt,
+    });
+  }
+  return [...projections.values()];
+}
+
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+async function invokeControl(
+  gateway: TaskRunControlGateway,
+  taskId: string,
+  idempotencyKey: string,
+  operation: TaskRunControlOperation,
+  signal: AbortSignal,
+): Promise<TaskRunControlReceipt> {
+  const options = { signal };
+  if (operation === "pause") return gateway.pauseTask(taskId, idempotencyKey, options);
+  if (operation === "resume") return gateway.resumeTask(taskId, idempotencyKey, options);
+  if (operation === "cancel") return gateway.cancelTask(taskId, idempotencyKey, options);
+  return gateway.emergencyStopTask(taskId, idempotencyKey, options);
+}
+
+export function TaskRunDetails({
+  taskId,
+  taskSource,
+  controlGateway,
+  onBack,
+}: TaskRunDetailsProps) {
+  const queryClient = useQueryClient();
+  const taskQuery = useQuery(taskSnapshotQueryOptions(taskSource, taskId));
+  const [events, setEvents] = useState<readonly TaskEvent[]>([]);
+  const [streamError, setStreamError] = useState(false);
+  const [streamGeneration, setStreamGeneration] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState<SubmittedControl | null>(null);
+  const commandKeys = useRef(
+    new Map<TaskRunControlOperation, { revision: number; key: string }>(),
+  );
+  const commandAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let lastSequence = 0;
+
+    const follow = async () => {
+      while (!controller.signal.aborted) {
+        const previousSequence = lastSequence;
+        const summary = await taskSource.streamTaskEvents(
+          taskId,
+          previousSequence,
+          (unknownEvent) => {
+            if (controller.signal.aborted) return;
+            let event: TaskEvent;
+            try {
+              event = parseTaskEvent(unknownEvent);
+            } catch {
+              setStreamError(true);
+              controller.abort();
+              return;
+            }
+            if (event.taskId !== taskId || event.sequence !== lastSequence + 1) {
+              setStreamError(true);
+              controller.abort();
+              return;
+            }
+            lastSequence = event.sequence;
+            setEvents((current) =>
+              [...current, event].slice(-MAX_RETAINED_TIMELINE_EVENTS),
+            );
+          },
+          { signal: controller.signal },
+        );
+        if (summary.lastSequence !== lastSequence) {
+          setStreamError(true);
+          return;
+        }
+        if (summary.terminal) return;
+      }
+    };
+
+    void Promise.resolve()
+      .then(async () => {
+        if (controller.signal.aborted) return;
+        setEvents([]);
+        setStreamError(false);
+        await follow();
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setStreamError(true);
+      });
+    return () => controller.abort();
+  }, [streamGeneration, taskId, taskSource]);
+
+  useEffect(
+    () => () => {
+      commandAbort.current?.abort();
+    },
+    [],
+  );
+
+  const projectedSnapshot = useMemo(
+    () => (taskQuery.data === undefined ? null : projectSnapshot(taskQuery.data, events)),
+    [events, taskQuery.data],
+  );
+
+  const controls = useMutation({
+    mutationFn: async (request: ControlRequest) => {
+      const existing = commandKeys.current.get(request.operation);
+      const key =
+        existing?.revision === request.baselineRevision
+          ? existing.key
+          : `task-run:${request.operation}:${globalThis.crypto.randomUUID()}`;
+      commandKeys.current.set(request.operation, {
+        revision: request.baselineRevision,
+        key,
+      });
+      const controller = new AbortController();
+      commandAbort.current = controller;
+      const receipt = await invokeControl(
+        controlGateway,
+        taskId,
+        key,
+        request.operation,
+        controller.signal,
+      );
+      return { ...request, receipt };
+    },
+    onSuccess: async (result) => {
+      setSubmitted(result);
+      setNotice(`${COMMAND_LABELS[result.operation]}命令已提交，等待 Executor 确认`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskProjectionKeys.detail(taskId) }),
+        queryClient.invalidateQueries({ queryKey: taskProjectionKeys.lists() }),
+      ]);
+    },
+    onError: () => {
+      setNotice("命令结果暂时无法确认，请查看权威状态后重试");
+    },
+    onSettled: () => {
+      commandAbort.current = null;
+    },
+  });
+
+  if (taskQuery.isError) {
+    return (
+      <Card className="task-run-state-card">
+        <Alert
+          type="warning"
+          showIcon
+          title="任务详情暂时不可用"
+          description="没有显示底层错误或凭据；可安全重新读取权威快照。"
+          action={<Button onClick={() => void taskQuery.refetch()}>重新加载详情</Button>}
+        />
+      </Card>
+    );
+  }
+
+  if (taskQuery.isPending || projectedSnapshot === null) {
+    return <Card className="task-run-state-card" loading />;
+  }
+
+  const status = projectedSnapshot.status;
+  const latestProgress = [...events]
+    .reverse()
+    .find((event) => event.progressPercent !== null)?.progressPercent;
+  const progress = status === "succeeded" ? 100 : (latestProgress ?? 0);
+  const latestStep = [...events].reverse().find((event) => event.eventType.startsWith("step."));
+  const results = actionProjections(events);
+  const busy = controls.isPending;
+  const effectiveSubmitted =
+    submitted !== null && submitted.baselineRevision >= projectedSnapshot.revision
+      ? submitted
+      : null;
+  const terminationSubmitted =
+    effectiveSubmitted?.operation === "cancel" ||
+    effectiveSubmitted?.operation === "emergency_stop";
+
+  const submit = (operation: TaskRunControlOperation) => {
+    setNotice(null);
+    controls.mutate({ operation, baselineRevision: projectedSnapshot.revision });
+  };
+
+  return (
+    <Space className="task-run-content" orientation="vertical" size={16}>
+      <Flex justify="space-between" align="center" gap={16} wrap>
+        <Space orientation="vertical" size={2}>
+          <Button type="link" className="task-run-back" onClick={onBack}>
+            返回工作台
+          </Button>
+          <Typography.Title level={3}>任务运行详情</Typography.Title>
+          <Typography.Text type="secondary">{taskId}</Typography.Text>
+        </Space>
+        <Tag color={statusColor(status)}>{STATUS_LABELS[status]}</Tag>
+      </Flex>
+
+      <Card title="运行概览">
+        <Descriptions column={3} size="small">
+          <Descriptions.Item label="当前状态">
+            <Tag color={statusColor(status)}>{STATUS_LABELS[status]}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="当前步骤">
+            {latestStep === undefined ? "尚无步骤事实" : EVENT_LABELS[latestStep.eventType]}
+          </Descriptions.Item>
+          <Descriptions.Item label="事件水位">
+            {projectedSnapshot.lastEventSequence}
+          </Descriptions.Item>
+          <Descriptions.Item label="Revision">{projectedSnapshot.revision}</Descriptions.Item>
+          <Descriptions.Item label="开始时间">
+            {formatTimestamp(projectedSnapshot.createdAt)}
+          </Descriptions.Item>
+          <Descriptions.Item label="更新时间">
+            {formatTimestamp(projectedSnapshot.updatedAt)}
+          </Descriptions.Item>
+        </Descriptions>
+        <Progress percent={progress} status={status === "failed" ? "exception" : "normal"} />
+      </Card>
+
+      <Card title="任务控制">
+        <Flex gap={10} wrap>
+          <Button
+            disabled={
+              busy ||
+              terminationSubmitted ||
+              effectiveSubmitted?.operation === "pause" ||
+              status !== "running"
+            }
+            loading={busy && controls.variables?.operation === "pause"}
+            onClick={() => submit("pause")}
+          >
+            暂停
+          </Button>
+          <Button
+            disabled={
+              busy ||
+              terminationSubmitted ||
+              effectiveSubmitted?.operation === "resume" ||
+              status !== "paused"
+            }
+            loading={busy && controls.variables?.operation === "resume"}
+            onClick={() => submit("resume")}
+          >
+            恢复
+          </Button>
+          <Popconfirm
+            title="确认取消当前任务？"
+            description="提交后仍以 Executor 确认的最终事实为准。"
+            okText="确认取消"
+            cancelText="继续运行"
+            onConfirm={() => submit("cancel")}
+            disabled={busy || terminationSubmitted || !CANCELLABLE_STATUSES.has(status)}
+          >
+            <Button
+              danger
+              disabled={busy || terminationSubmitted || !CANCELLABLE_STATUSES.has(status)}
+              loading={busy && controls.variables?.operation === "cancel"}
+            >
+              取消任务
+            </Button>
+          </Popconfirm>
+          <Popconfirm
+            title="确认紧急停止当前任务？"
+            description="动作结果无法确认时会进入结果待确认，不会伪报成功。"
+            okText="确认紧停"
+            cancelText="继续运行"
+            onConfirm={() => submit("emergency_stop")}
+            disabled={busy || terminationSubmitted || !EMERGENCY_STOPPABLE_STATUSES.has(status)}
+          >
+            <Button
+              danger
+              type="primary"
+              disabled={busy || terminationSubmitted || !EMERGENCY_STOPPABLE_STATUSES.has(status)}
+              loading={busy && controls.variables?.operation === "emergency_stop"}
+            >
+              紧急停止
+            </Button>
+          </Popconfirm>
+        </Flex>
+        {notice === null ? null : (
+          <Alert className="command-notice" type="info" showIcon title={notice} />
+        )}
+      </Card>
+
+      {streamError ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="事件时间线暂时中断"
+          description="页面保留最后一份权威快照；重试会从持久事件起点重新核对。"
+          action={
+            <Button onClick={() => setStreamGeneration((current) => current + 1)}>
+              重新加载时间线
+            </Button>
+          }
+        />
+      ) : null}
+
+      <Card title="目标结果">
+        {results.length === 0 ? (
+          <Empty description="还没有带 Action 标识的目标结果" />
+        ) : (
+          <ul className="task-result-list">
+            {results.map((result) => (
+              <li key={result.actionId}>
+                <Typography.Text>目标 {result.actionId.slice(-8)}</Typography.Text>
+                <Tag
+                  color={
+                    result.status === "succeeded"
+                      ? "green"
+                      : result.status === "failed"
+                        ? "red"
+                        : "blue"
+                  }
+                >
+                  {result.status === "succeeded"
+                    ? "成功"
+                    : result.status === "failed"
+                      ? "失败"
+                      : "进行中"}
+                </Tag>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title="事件时间线">
+        {events.length === 0 ? (
+          <Empty description="还没有已提交事件" />
+        ) : (
+          <Timeline
+            items={events.map((event) => ({
+              color: event.eventType.endsWith("failed") ? "red" : "blue",
+              content: (
+                <Space orientation="vertical" size={0}>
+                  <Typography.Text strong>{EVENT_LABELS[event.eventType]}</Typography.Text>
+                  <Typography.Text type="secondary">
+                    #{event.sequence} · {formatTimestamp(event.recordedAt)}
+                  </Typography.Text>
+                  {event.message === null ? null : (
+                    <Typography.Text>{event.message}</Typography.Text>
+                  )}
+                </Space>
+              ),
+            }))}
+          />
+        )}
+      </Card>
+
+      {TERMINAL_STATUSES.has(status) ? (
+        <Alert type="success" showIcon title="任务已进入终态，控制按钮已关闭" />
+      ) : null}
+    </Space>
+  );
+}

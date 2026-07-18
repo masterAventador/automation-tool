@@ -6,6 +6,7 @@ import { createTransportStartupCheck } from "./app/startup";
 import { TauriControlPlaneTransport } from "./platform/tauri/control-plane-transport";
 import { TauriTaskProjectionSource } from "./platform/tauri/task-projection-source";
 import { TauriTaskCreationGateway } from "./platform/tauri/task-creation-gateway";
+import { TauriTaskRunControlGateway } from "./platform/tauri/task-run-control-gateway";
 import { TauriWorkbenchGateway } from "./platform/tauri/workbench-gateway";
 import "./styles/global.css";
 
@@ -18,6 +19,7 @@ if (root === null) {
 const startupCheck = createTransportStartupCheck(new TauriControlPlaneTransport());
 const taskSource = new TauriTaskProjectionSource();
 const taskCreationGateway = new TauriTaskCreationGateway();
+const taskRunControlGateway = new TauriTaskRunControlGateway();
 const workbenchGateway = new TauriWorkbenchGateway();
 
 createRoot(root).render(
@@ -26,6 +28,7 @@ createRoot(root).render(
       startupCheck={startupCheck}
       taskSource={taskSource}
       taskCreationGateway={taskCreationGateway}
+      taskRunControlGateway={taskRunControlGateway}
       workbenchGateway={workbenchGateway}
     />
   </StrictMode>,

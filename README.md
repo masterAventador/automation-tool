@@ -78,5 +78,5 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - `WS /api/v1/executors/connect` 已通过真实 Uvicorn 网络边界接入 `executor.connect` 短期 Session：精确子协议、Installation/Executor/运行时版本绑定、独立连接 ID、32 KiB 传输上限、周期重认证和吊销断连均 fail closed；进程内 Registry 以 Installation 为单活键并承载持久命令投递，连接后可接收 heartbeat、严格绑定的命令回执与任务事件，新 Hello 固定 4409 替换旧连接；
 - 无副作用 FakeExecutor 已复用正式 v1 parser、envelope、子协议和 Session WebSocket：可确定性回放 accept/reject、成功/部分成功/失败、登录、接管、结果不确定及暂停/恢复/取消/紧停，并按 message/idempotency 双键返回完全相同的结果且不重复事件；它不导入 Control Plane、RPA、文件、子进程或数据库实现；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
-- React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件 Reducer和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；全局紧停经固定 Rust operation 发出并以 Executor 最终事实收敛。“新建任务”已提供受约束的抖音搜索曝光表单，经固定 Rust operation 创建 draft Task。完整运行详情、正式 Local Executor 进程和 RPA 功能尚未实现；
+- React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件投影和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；“新建任务”提供受约束的抖音搜索曝光表单。运行详情展示权威状态、进度、事件时间线和已有 Action 结果，并通过四个固定 Rust operation 提交暂停、恢复、取消与紧停，最终仍以 Executor 事实收敛。正式 Local Executor 进程和真实 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

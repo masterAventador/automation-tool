@@ -129,6 +129,62 @@ async fn emergency_stop_workbench_task(
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
+async fn pause_task_run(
+    task_id: String,
+    idempotency_key: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskControlCommand, ControlPlaneCommandError> {
+    client
+        .pause_task(&vault, &task_id, &idempotency_key)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn resume_task_run(
+    task_id: String,
+    idempotency_key: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskControlCommand, ControlPlaneCommandError> {
+    client
+        .resume_task(&vault, &task_id, &idempotency_key)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn cancel_task_run(
+    task_id: String,
+    idempotency_key: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskControlCommand, ControlPlaneCommandError> {
+    client
+        .cancel_task(&vault, &task_id, &idempotency_key)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn emergency_stop_task_run(
+    task_id: String,
+    idempotency_key: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskControlCommand, ControlPlaneCommandError> {
+    client
+        .emergency_stop_task(&vault, &task_id, &idempotency_key)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
 async fn get_task_snapshot(
     task_id: String,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -217,6 +273,15 @@ struct TaskCreationAcceptanceSummary {
 #[serde(rename_all = "camelCase")]
 struct TaskCreateFormAcceptancePreparation {
     installation_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskRunAcceptancePreparation {
+    installation_id: String,
+    controlled_task_id: String,
+    emergency_task_id: String,
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -722,6 +787,54 @@ async fn prepare_task_create_form_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_task_run_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskRunAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T318_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T318_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let controlled_task = client
+        .create_task(
+            &vault,
+            "task:run:controlled:tauri-acceptance",
+            &acceptance_task_definition(),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    let emergency_task = client
+        .create_task(
+            &vault,
+            "task:run:emergency:tauri-acceptance",
+            &acceptance_task_definition(),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(TaskRunAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+        controlled_task_id: controlled_task.task_id().to_owned(),
+        emergency_task_id: emergency_task.task_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 async fn query_tasks_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
@@ -1034,6 +1147,10 @@ pub fn run() {
         create_douyin_search_exposure_task,
         get_workbench_status,
         emergency_stop_workbench_task,
+        pause_task_run,
+        resume_task_run,
+        cancel_task_run,
+        emergency_stop_task_run,
         get_task_snapshot,
         list_task_snapshots,
         stream_task_projection_events
@@ -1044,6 +1161,10 @@ pub fn run() {
         create_douyin_search_exposure_task,
         get_workbench_status,
         emergency_stop_workbench_task,
+        pause_task_run,
+        resume_task_run,
+        cancel_task_run,
+        emergency_stop_task_run,
         get_task_snapshot,
         list_task_snapshots,
         stream_task_projection_events,
@@ -1054,6 +1175,7 @@ pub fn run() {
         stream_task_events_for_acceptance,
         prepare_task_projection_for_acceptance,
         prepare_task_create_form_for_acceptance,
+        prepare_task_run_for_acceptance,
         prepare_workbench_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance

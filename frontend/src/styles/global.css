@@ -208,6 +208,43 @@ body {
   margin-bottom: 20px;
 }
 
+.task-run-content {
+  display: flex;
+  width: 100%;
+  margin-top: 24px;
+}
+
+.task-run-back {
+  height: auto;
+  padding: 0;
+}
+
+.task-run-state-card,
+.task-run-empty {
+  margin-top: 24px;
+}
+
+.task-run-empty {
+  padding: 40px;
+  text-align: center;
+  border: 1px dashed #d8dee9;
+  border-radius: 10px;
+}
+
+.task-result-list {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.task-result-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .runtime-status-row {
   min-height: 24px;
 }

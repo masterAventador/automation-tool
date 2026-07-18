@@ -67,6 +67,7 @@ const NEEDS_HUMAN = new Set<TaskStatus>([
 interface WorkbenchProps {
   readonly taskSource: TaskProjectionSource;
   readonly gateway: WorkbenchGateway;
+  readonly onOpenTask?: (taskId: string) => void;
 }
 
 function isToday(timestamp: string): boolean {
@@ -87,7 +88,11 @@ function statusColor(status: TaskStatus): string {
   return "blue";
 }
 
-export function Workbench({ taskSource, gateway }: WorkbenchProps) {
+export function Workbench({
+  taskSource,
+  gateway,
+  onOpenTask = () => undefined,
+}: WorkbenchProps) {
   const queryClient = useQueryClient();
   const taskList = useQuery(taskListQueryOptions(taskSource, null, 20));
   const runtime = useQuery(workbenchRuntimeStatusQueryOptions(gateway));
@@ -228,23 +233,31 @@ export function Workbench({ taskSource, gateway }: WorkbenchProps) {
         className="current-task-card"
         title={<Typography.Title level={4}>当前任务</Typography.Title>}
         extra={
-          <Popconfirm
-            title="确认紧急停止当前任务？"
-            description="命令提交后仍以 Executor 返回的最终事实为准。"
-            okText="确认紧停"
-            cancelText="继续运行"
-            onConfirm={() => latestCurrent !== null && emergencyStop.mutate(latestCurrent)}
-            disabled={latestCurrent === null || latestCurrent.status === "cancelling"}
-          >
+          <Space>
             <Button
-              danger
-              type="primary"
-              loading={emergencyStop.isPending}
+              disabled={latestCurrent === null}
+              onClick={() => latestCurrent !== null && onOpenTask(latestCurrent.taskId)}
+            >
+              查看运行详情
+            </Button>
+            <Popconfirm
+              title="确认紧急停止当前任务？"
+              description="命令提交后仍以 Executor 返回的最终事实为准。"
+              okText="确认紧停"
+              cancelText="继续运行"
+              onConfirm={() => latestCurrent !== null && emergencyStop.mutate(latestCurrent)}
               disabled={latestCurrent === null || latestCurrent.status === "cancelling"}
             >
-              全局紧急停止
-            </Button>
-          </Popconfirm>
+              <Button
+                danger
+                type="primary"
+                loading={emergencyStop.isPending}
+                disabled={latestCurrent === null || latestCurrent.status === "cancelling"}
+              >
+                全局紧急停止
+              </Button>
+            </Popconfirm>
+          </Space>
         }
       >
         {latestCurrent === null ? (
@@ -278,7 +291,9 @@ export function Workbench({ taskSource, gateway }: WorkbenchProps) {
           <ul className="recent-task-list">
             {projectedTasks.slice(0, 5).map((task) => (
               <li key={task.taskId}>
-                <Typography.Text>{task.taskId}</Typography.Text>
+                <Button type="link" onClick={() => onOpenTask(task.taskId)}>
+                  {task.taskId}
+                </Button>
                 <Tag color={statusColor(task.status)}>{STATUS_LABELS[task.status]}</Tag>
               </li>
             ))}

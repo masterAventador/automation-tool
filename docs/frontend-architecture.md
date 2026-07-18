@@ -80,13 +80,15 @@ T3-07 在该 Rust client 中增加 `ListTasks` 与 `GetTask` 两个封闭 operat
 
 T3-12 在同一个正式 Rust client 中增加 `StreamTaskEvents`：路径只能由规范 Task UUID 构造，Rust 自行从 App 私有 vault 换取 `app.control-plane` Session 并注入 Bearer，支持标准 `Last-Event-ID`，限制单连接 512 KiB、单帧 64 KiB 和验收用有界停止数。解析器要求 `text/event-stream`、匹配 request ID、`no-store/no-transform`、禁代理缓冲，以及唯一 id/event/data 字段；公开 DTO 再核对连续安全整数序号、`1.0` 版本、封闭事件/Task 状态、UUIDv4、UTC 时间、进度与消息边界。React/IPC 不接触 Session、Header 或原始 SSE 文本。T3-15 已在同一解析循环逐条调用回调并推送 Tauri Channel，不等整条 SSE 结束，也没有重新用 WebView EventSource。
 
-T3-13 又在相同 Rust client 中加入固定 `PauseTask`/`ResumeTask` operation。调用者只能提供规范 Task UUID 和受限幂等键；Rust 自行换 App Session、发送空 JSON、构造 `/pause` 或 `/resume` 固定路径，并只接受 202 创建或 200 重放。公开命令对象必须通过 Command/Task/Attempt UUIDv4、跨运行时安全 sequence、精确 command type、封闭 outbox status、正 revision 和 UTC deadline 校验。唯一 `visible=false` App 已经经 Rust API 写入 pause/resume，再经正式 Rust SSE 等到对应事件并核对最终 running 快照；React 控制按钮仍归 T3-18，不能为提前接 UI 暴露任意 operation、Header 或 bearer。
+T3-13 又在相同 Rust client 中加入固定 `PauseTask`/`ResumeTask` operation。调用者只能提供规范 Task UUID 和受限幂等键；Rust 自行换 App Session、发送空 JSON、构造 `/pause` 或 `/resume` 固定路径，并只接受 202 创建或 200 重放。公开命令对象必须通过 Command/Task/Attempt UUIDv4、跨运行时安全 sequence、精确 command type、封闭 outbox status、正 revision 和 UTC deadline 校验。T3-18 已把两种操作接入正式运行详情，仍不向 React 暴露任意 operation、Header 或 bearer。
 
-T3-14 继续在同一 Rust client 增加固定 `CancelTask`/`EmergencyStopTask` operation，沿用规范 Task UUID、受限幂等键、App 私有 vault 换票和严格公开 Command 解析；固定路径只能是 `/cancel` 与 `/emergency-stop`，仍只接受 202/200。同一 `visible=false` App 已顺序调用两种操作并通过正式 Rust SSE 验证 cancelled/outcome uncertain 终态；T3-16 已接全局紧停，T3-18 再接运行详情控制，WebView 不新增通用 URL、Header、bearer 或原始响应入口。
+T3-14 继续在同一 Rust client 增加固定 `CancelTask`/`EmergencyStopTask` operation，沿用规范 Task UUID、受限幂等键、App 私有 vault 换票和严格公开 Command 解析；固定路径只能是 `/cancel` 与 `/emergency-stop`，仍只接受 202/200。T3-16 已接全局紧停，T3-18 已接运行详情的二次确认控制；WebView 不新增通用 URL、Header、bearer 或原始响应入口。
 
 T3-15 建立正式 Task 投影边界：`TauriTaskProjectionSource` 只 invoke 固定快照、列表和事件 Channel Command，Rust 从私有 vault 换票并返回精确公开 DTO；`taskProjectionKeys`/Query options 管理服务端快照，纯 Reducer 以 status/revision/lastEventSequence 为权威。水位内事件直接去重；下一序号缺口、Task/revision 回退、未知版本/类型或畸形 DTO 只进入 `refresh_required`，先失效并回拉 Query 快照再续订；连续不兼容超过有界预算进入 `degraded`，不从事件名猜状态。正常 SSE 限时关闭也先读新快照再续订，不计作协议降级。唯一 `visible=false` App 已从 WebView 正式 TypeScript source 经 Rust/真实后端/FakeExecutor 收敛 sequence 1..5 到 succeeded。
 
 T3-16 将投影接入正式 RPA 工作台：`Workbench` 展示 Control Plane/Executor 状态、今日任务指标、当前任务和最近任务，较新的实时快照会覆盖列表旧状态。`TauriWorkbenchGateway` 只允许固定工作台状态与紧停 Command；全局紧停必须二次确认，同一 Task 的不确定重试复用幂等键，提交后回拉列表/详情/运行状态，最终状态仍只认 Executor 事件。运行状态轮询设置为隐藏窗口继续执行，满足后台 App 验收。唯一 `visible=false` App 已从页面点击紧停，经正式 Rust/后端/Outbox/FakeExecutor ACK 收敛到 `outcome_uncertain`；长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。
+
+T3-18 将工作台 Task 入口接到正式 `TaskRunDetails`。页面先读 TanStack Query 权威快照，再从持久事件起点通过同一 Rust SSE/Tauri Channel 重放并跟随时间线；只投影明确的进度、step 与 `actionId` 事实，缺少目标或平台证据时显示空态。`TauriTaskRunControlGateway` 暴露四个窄方法，对应四个固定 Rust Command；按钮按权威状态启停，取消/紧停二次确认，不确定重试在同 revision 复用幂等键，提交回执不会冒充 Executor 已执行。事件畸形、错 Task 或缺口会 fail closed 并要求显式重载。唯一 `visible=false` App 已真实点击四类控制并经后端与 HOLD FakeExecutor 收敛最终事实。
 
 ### 4.2 Feature 层
 

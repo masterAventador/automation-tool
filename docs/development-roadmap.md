@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-17 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台和受约束新建表单可用；完整运行详情与 RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-18 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台、受约束新建表单和权威运行详情可用；真实 RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -207,7 +207,7 @@
 | T3-15 | 前端 Query/事件 Reducer | 快照权威、事件去重、缺口回拉和版本降级 | T3-07,T3-12 | ✅ 已完成 |
 | T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ✅ 已完成 |
 | T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ✅ 已完成 |
-| T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ⬜ 未开始 |
+| T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ✅ 已完成 |
 | T3-19 | UI Harness E2E | 创建→运行→暂停→恢复→取消/成功→刷新恢复 | T3-16,T3-17,T3-18 | ⬜ 未开始 |
 | T3-20 | Control Plane 重启恢复 | PostgreSQL 保持任务/命令/事件，FakeExecutor 重连收敛 | T3-11,T3-19 | ⬜ 未开始 |
 
@@ -1207,7 +1207,7 @@
 - 失败矩阵：覆盖非法/缺失幂等键、额外字段、未认证、服务不可用、未知/跨 Installation Task、Task/Attempt 状态错配、并发同键、同键改意图、序号上限、数据库唯一冲突、未投递/未 ACK 事件、ACK 不提前投影、错 correlation、公开响应脱敏和固定错误分类
 - 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和全部端口；没有浏览器 Profile、RPA、文件或社交平台副作用遗留
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图状态/完成记录和当前下一步；OpenAPI 与 `openapi-typescript` 同提交更新，没有新增重复规划文档
-- 遗留：T3-14 在同一持久控制基础上实现 cancel/emergency-stop，但必须单独处理 CANCELLING、完成竞态和 outcome uncertain；T3-18 再把 pause/resume 接入正式运行详情按钮
+- 后续承接：T3-14 已在同一持久控制基础上实现 cancel/emergency-stop 并单独处理 CANCELLING、完成竞态和 outcome uncertain；T3-18 已把 pause/resume 接入正式运行详情按钮
 
 ### T3-14 取消/紧停 API
 
@@ -1226,7 +1226,7 @@
 - 失败矩阵：覆盖缺失/非法幂等键、额外字段、未认证、服务不可用、未知/跨 Installation Task、无 current Attempt、Task/Attempt 终态或错配、并发同键、同键改意图、重复终止、序号上限、时间回退、未 ACK/错 correlation、取消/完成竞态、cancelled/outcome uncertain 两类终态和公开响应脱敏
 - 清理：纵向验收 finally 回收隐藏 App/WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和全部端口；复核没有相关进程、监听、容器或目录遗留，没有浏览器 Profile、RPA、文件或社交平台副作用
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 与生成 TypeScript DTO；没有新增重复规划文档
-- 后续承接：T3-15 已将权威快照、事件去重/缺口与版本降级接入 React reducer；T3-16 已把紧停接入工作台，T3-18 再接运行详情。离线本机紧停与外部动作账本的精确 uncertain 判定分别归 H8-03/A7-13
+- 后续承接：T3-15 已将权威快照、事件去重/缺口与版本降级接入 React reducer；T3-16 已把紧停接入工作台，T3-18 已接运行详情。离线本机紧停与外部动作账本的精确 uncertain 判定分别归 H8-03/A7-13
 
 ### T3-15 前端 Query/事件 Reducer
 
@@ -1257,7 +1257,7 @@
 - 补充 UI 证据：无头浏览器和现有 Playwright Harness 均验证无登录工作台、空任务状态、紧停禁用、故障重试及零页面错误；Harness 不替代真实 App 验收
 - App 与清理：设备私钥和长期凭据仍只在独立 `app_data_dir` 私有文件，不调用系统钥匙串；所有 App 测试全程后台。纵向验收 finally 回收 WDIO、Uvicorn、隔离 PostgreSQL 容器/网络/卷、App 私有测试目录和端口
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
-- 遗留：T3-17 新建任务骨架、T3-18 完整运行详情、E4 本机 Executor 管理和 H8 业务指标不提前实现
+- 后续承接：T3-17 新建任务骨架和 T3-18 完整运行详情均已完成；E4 本机 Executor 管理和 H8 业务指标继续按台账实现
 
 ### T3-17 新建任务骨架
 
@@ -1276,10 +1276,27 @@
 - 真实账号边界：本任务只创建无外部副作用的 draft 定义，不操作抖音，因此无需真实平台账号也不宣称平台验收。可选目标过滤、黑名单/排除、真实平台频控阈值、Candidate 发现与最终状态验收仍由 D6/A7 承接；账号暂不可用时按全局规则用自建测试页继续实现并保持 `🔍 待真实账号`
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构、本路线图、OpenAPI 快照与生成 TypeScript DTO；未新增重复规划文档
 
+### T3-18 运行详情页面
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- 目标：用 T3-15 权威快照/SSE 投影建立任务运行详情，展示状态、结构化进度、事件时间线和已有 Action 结果，并从页面正式调用暂停、恢复、取消、紧停；不从事件名伪造未提供的浏览器/平台事实
+- 边界：目标摘要、跳过原因、平台证据、浏览器状态与人工接管分别等待 D6/A7/E4/B5 的明确事实；本任务只对已有公开 `actionId` 和 step 事件做脱敏结果投影，缺少事实时展示空态，不以占位数据冒充已执行
+- RED：先新增页面、控制契约、固定 Tauri gateway 与产品入口契约测试；Vitest 因 `TaskRunDetails`/`task-run-controls`/gateway 尚不存在而无法加载，Node 契约因四个固定生产 Command 尚不存在而准确失败。实现后第一次隐藏 App 验收已进入真实详情并读到历史，但因 Ant Design 双汉字按钮的可见文本间距导致 WDIO 精确选择器失败；改用受限 XPath 后同链路通过，没有用产品逻辑绕过失败
+- 页面与事实：工作台当前/最近任务可进入详情；页面从权威 Query 快照和从 sequence 0 开始的持久 SSE 事件构造状态、revision、水位、时间、结构化进度、当前步骤和最多 200 条时间线。只把明确 `actionId` 的 step 事实投影为进行中/成功/失败；无 Action 时显示空态，终态关闭全部控制
+- 控制边界：`TauriTaskRunControlGateway` 只调用 `pause_task_run`、`resume_task_run`、`cancel_task_run`、`emergency_stop_task_run` 四个固定 Command；Rust 复用既有严格网络操作与 App 私有凭据。页面按权威状态启用按钮，取消/紧停二次确认，命令提交不提前伪改状态；同 operation/revision 的不确定重试复用幂等键，响应必须绑定目标 Task 和精确 command type
+- 失败与恢复：畸形/错 Task/序号缺口事件立即停止时间线并保留最后权威快照，只能由显式重试从持久起点复核；查询、传输、原生错误均显示固定安全提示，不回显底层内容。测试覆盖断流重试、跨 Task receipt、取消、终态禁用、状态相容控制和 uncertain 重试幂等。全量门禁还暴露 SSE keepalive 的既有时间竞态覆盖偶发降至 99.98%，已用确定性断连序列固定为稳定 100%
+- 分层验证：Backend `753 passed`，4045 条语句/772 个分支覆盖率 100%；Frontend 37 项 Node 工程契约、111 项 Vitest 和 4 项 Playwright 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置均为 40 项单元、3 项共享协议、12 项安全配置全绿。Ruff/格式、严格 Mypy、uv lock、ESLint、TypeScript、peer dependency、OpenAPI 漂移、production boundary、Cargo fmt 与三种配置 Clippy 零警告全部通过
+- 产品同路径：`backend/.venv/bin/python scripts/run_t3_18_acceptance.py` 启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn、HOLD FakeExecutor 与唯一 `visible=false` Tauri/WKWebView。页面真实打开两个 Task：第一个从持久时间线读取 started/step started 后依次点击暂停、恢复、取消，第二个点击紧急停止；正式 TypeScript gateway→固定 Rust Command→真实后端 Outbox→Executor ACK→持久事件闭环最终分别收敛为 `cancelled` 与 `outcome_uncertain`
+- App、账号与清理：验收核对受控 Task 的 offer/pause/resume/cancel 和紧停 Task 的 offer/emergency-stop 全部 acknowledged，并核对事件序列、revision、watermark、Attempt 终态。App 全程隐藏后台，不弹窗、不抢焦点；设备私钥与长期凭据只在隔离 `app_data_dir` 私有文件，不使用系统钥匙串。finally 回收 App、服务、端口、容器、网络、卷和测试目录
+- 真实账号边界：本任务只验证桌面控制面和受控 Executor，无社交平台副作用，不需要真实平台账号也不宣称平台验收。后续真实抖音/小红书行为若暂缺账号，继续用自建测试页/适配器完成工程验收并将平台项保留为 `🔍 待真实账号`，不得阻塞后续任务
+- 文档：同步根/Backend/Frontend README、前端架构、工程结构与本路线图；没有新增重复规划文档
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-18`：建立完整运行详情、事件时间线和任务控制入口；
-2. `T3-19`～`T3-20`：按依赖完成 UI E2E 和 Control Plane 恢复；
+1. `T3-19`：完成创建→运行→暂停→恢复→取消/成功→刷新恢复的 UI Harness E2E；
+2. `T3-20`：完成 Control Plane 与 Executor 重启恢复；
 3. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
