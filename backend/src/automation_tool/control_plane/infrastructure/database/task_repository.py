@@ -10,6 +10,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from automation_tool.control_plane.application.tasks import (
+    TaskCreationResult,
     TaskPersistenceRejected,
     TaskRecord,
 )
@@ -22,6 +23,7 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database.schema import installations, tasks
 from automation_tool.control_plane.infrastructure.database.session import Database
+from automation_tool.protocol import IdempotencyKey
 
 
 def _aware_utc(value: object) -> datetime:
@@ -58,10 +60,17 @@ class SqlAlchemyTaskRepository:
         *,
         task_id: TaskId,
         installation_id: InstallationId,
+        idempotency_key: str,
         created_at: datetime,
-    ) -> TaskRecord:
+    ) -> TaskCreationResult:
         target_task, target_installation = _require_identity(task_id, installation_id)
         timestamp = _aware_utc(created_at)
+        try:
+            normalized_key = str(IdempotencyKey(idempotency_key))
+        except (TypeError, ValueError):
+            normalized_key = None
+        if normalized_key is None:
+            raise TaskPersistenceRejected
         try:
             async with self._database.session() as session:
                 installation_status = await session.scalar(
@@ -71,6 +80,20 @@ class SqlAlchemyTaskRepository:
                 )
                 if installation_status != InstallationStatus.ACTIVE.value:
                     raise TaskPersistenceRejected
+                existing = (
+                    (
+                        await session.execute(
+                            select(tasks).where(
+                                tasks.c.installation_id == target_installation.uuid,
+                                tasks.c.creation_idempotency_key == normalized_key,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing is not None:
+                    return TaskCreationResult(task=_record(existing), created=False)
                 created = (
                     (
                         await session.execute(
@@ -78,6 +101,7 @@ class SqlAlchemyTaskRepository:
                             .values(
                                 id=target_task.uuid,
                                 installation_id=target_installation.uuid,
+                                creation_idempotency_key=normalized_key,
                                 status=TaskStatus.DRAFT.value,
                                 revision=1,
                                 created_at=timestamp,
@@ -89,7 +113,7 @@ class SqlAlchemyTaskRepository:
                     .mappings()
                     .one()
                 )
-                return _record(created)
+                return TaskCreationResult(task=_record(created), created=True)
         except IntegrityError:
             raise TaskPersistenceRejected from None
 

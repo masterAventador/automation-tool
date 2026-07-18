@@ -123,6 +123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Task */
+        post: operations["createTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/version": {
         parameters: {
             query?: never;
@@ -284,6 +301,32 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** TaskCreateRequest */
+        TaskCreateRequest: Record<string, never>;
+        /** TaskResponse */
+        TaskResponse: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Revision */
+            revision: number;
+            status: components["schemas"]["TaskStatus"];
+            /** Taskid */
+            taskId: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * TaskStatus
+         * @description Persisted and public lifecycle states for one task.
+         * @enum {string}
+         */
+        TaskStatus: "draft" | "validating" | "awaiting_device" | "awaiting_platform_login" | "discovering_targets" | "awaiting_confirmation" | "queued" | "running" | "paused" | "awaiting_human" | "cancelling" | "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "outcome_uncertain";
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -486,6 +529,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegistrationChallengeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createTask: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskResponse"];
                 };
             };
             /** @description Validation Error */

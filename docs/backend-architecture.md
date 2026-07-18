@@ -491,6 +491,10 @@ T3-02 的 `tasks` 表只建立后续阶段共同需要的稳定骨架：规范 T
 
 `SqlAlchemyTaskRepository.create` 先锁目标 Installation，只有 active 状态才能在同一事务创建 draft Task，因此与 Installation 吊销按同一行锁线性化；未知、已吊销或重复目标共享固定拒绝。读取和状态更新始终同时携带 Task ID + Installation ID，跨 Installation 与未知 Task 对仓储调用者不可见。状态更新锁定精确 `id + installation_id + expected_revision`，调用唯一 `TaskStateMachine` 后 revision 原子加一；两个并发旧 revision 只有一个成功，非法转换、旧 revision、scope 冒充和时间回退均不修改行。
 
+T3-06 用迁移 `20260718_0010` 把创建幂等固定为 Task 的持久事实：`creation_idempotency_key` 只能使用协议允许字符且最长 128 字节，`(installation_id, creation_idempotency_key)` 唯一；旧行回填 `legacy:<task-id>`，升级不改变原 Task 身份。仓储在同一 Installation 行锁内先查同键快照再插入，因此两个并发请求只能得到一条 Task，另一个 Installation 可复用同键且不会泄露前者。
+
+`POST /api/v1/tasks` 是第一个 Task 业务入口。它必须经过 `require_current_installation_access` 取得服务端认证的强类型 scope，只接受精确空 JSON 骨架和必填 `Idempotency-Key`；第一次创建返回 201，重放返回相同公开快照和 200。响应不含幂等键、凭据、Session、模板或任意 payload。模板/平台字段归 T3-17，查询与分页归 T3-07，不能提前把不受约束 JSON 塞入当前 API。
+
 T3-03 的 `execution_attempts` 为一次任务投递与执行事实分配独立 UUIDv4 和正 `attempt_number`。状态闭集为 pending、offered、accepted、running、paused、awaiting_human、cancelling，以及 succeeded、partially_succeeded、failed、cancelled、rejected、expired、outcome_uncertain 七个终态；终态必须带 `finished_at`，非终态禁止提前带完成时间。`(task_id, attempt_number)` 不可重复，部分唯一索引保证同一 Task 最多存在一个非终态 Attempt；完成后重试必须保留旧行并使用新序号。
 
 `task_actions` 表示一次 Attempt 中可外部观察的动作，正 `ordinal` 在 Attempt 内唯一。状态将副作用阶段固定为 planned、authorized、prepared、dispatched、verified、cancelled、outcome_uncertain，结果单独固定为 pending、succeeded、failed、cancelled、outcome_uncertain：未结算阶段只能是 pending 且没有完成时间；verified 只能结算为 succeeded/failed；cancelled 与 outcome_uncertain 必须和同名结果及完成时间一致。因此“已经派发但尚未确认”的动作不会被误写成成功，也不能靠非法组合触发自动重放。
@@ -582,7 +586,7 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、设备凭据轮换/吊销和短期 Session 交换，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和幂等创建 Task，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 

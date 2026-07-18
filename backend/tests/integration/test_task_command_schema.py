@@ -33,7 +33,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0008"
-HEAD_REVISION = "20260718_0009"
+HEAD_REVISION = "20260718_0010"
 NOW = datetime(2026, 7, 18, 5, 30, tzinfo=UTC)
 DEADLINE = NOW + timedelta(minutes=5)
 EXPECTED_COLUMNS = {
@@ -110,6 +110,7 @@ async def seed_attempt(database: Database) -> tuple[InstallationId, TaskId, Exec
             insert(tasks).values(
                 id=task_id.uuid,
                 installation_id=installation_id.uuid,
+                creation_idempotency_key=f"task:seed:{task_id}",
                 created_at=NOW,
                 updated_at=NOW,
             )

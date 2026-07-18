@@ -316,6 +316,70 @@
         "title": "RotatedDeviceCredentialResponse",
         "type": "object"
       },
+      "TaskCreateRequest": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "TaskCreateRequest",
+        "type": "object"
+      },
+      "TaskResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "TaskResponse",
+        "type": "object"
+      },
+      "TaskStatus": {
+        "description": "Persisted and public lifecycle states for one task.",
+        "enum": [
+          "draft",
+          "validating",
+          "awaiting_device",
+          "awaiting_platform_login",
+          "discovering_targets",
+          "awaiting_confirmation",
+          "queued",
+          "running",
+          "paused",
+          "awaiting_human",
+          "cancelling",
+          "succeeded",
+          "partially_succeeded",
+          "failed",
+          "cancelled",
+          "outcome_uncertain"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -641,6 +705,63 @@
         "summary": "Issue Registration Challenge",
         "tags": [
           "installations"
+        ]
+      }
+    },
+    "/api/v1/tasks": {
+      "post": {
+        "operationId": "createTask",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Create Task",
+        "tags": [
+          "tasks"
         ]
       }
     },

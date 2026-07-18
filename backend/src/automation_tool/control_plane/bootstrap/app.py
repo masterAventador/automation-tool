@@ -25,12 +25,14 @@ from automation_tool.control_plane.api.installation_access import (
 )
 from automation_tool.control_plane.api.registrations import router as registration_router
 from automation_tool.control_plane.api.system import router as system_router
+from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
 from automation_tool.control_plane.application.executor_connections import (
     ExecutorConnectionService,
 )
 from automation_tool.control_plane.application.registration import InstallationRegistrationService
+from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
 from automation_tool.control_plane.bootstrap.device_credentials import (
     device_credential_service as build_device_credential_service,
@@ -40,6 +42,9 @@ from automation_tool.control_plane.bootstrap.device_sessions import (
 )
 from automation_tool.control_plane.bootstrap.registration import (
     registration_service_from_environment,
+)
+from automation_tool.control_plane.bootstrap.tasks import (
+    task_creation_service as build_task_creation_service,
 )
 from automation_tool.control_plane.domain import DatabaseLifecycle
 from automation_tool.control_plane.infrastructure.database import Database
@@ -81,6 +86,7 @@ def create_app(
     device_credential_service: DeviceCredentialService | None = None,
     device_session_service: DeviceSessionService | None = None,
     executor_connection_service: ExecutorConnectionService | None = None,
+    task_creation_service: TaskCreationService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
 ) -> FastAPI:
@@ -93,6 +99,7 @@ def create_app(
     resolved_device_credential_service = device_credential_service
     resolved_device_session_service = device_session_service
     resolved_executor_connection_service = executor_connection_service
+    resolved_task_creation_service = task_creation_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -107,6 +114,8 @@ def create_app(
         resolved_executor_connection_service = ExecutorConnectionService(
             resolved_device_session_service
         )
+    if resolved_task_creation_service is None and isinstance(resolved_database, Database):
+        resolved_task_creation_service = build_task_creation_service(resolved_database)
     hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
     recheck_interval_seconds = _positive_finite_seconds(
         executor_connection_recheck_interval_seconds
@@ -123,6 +132,7 @@ def create_app(
     app.state.device_credential_service = resolved_device_credential_service
     app.state.device_session_service = resolved_device_session_service
     app.state.executor_connection_service = resolved_executor_connection_service
+    app.state.task_creation_service = resolved_task_creation_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     install_request_context(app)
@@ -132,5 +142,6 @@ def create_app(
     app.include_router(device_credential_router)
     app.include_router(device_session_router)
     app.include_router(installation_access_router)
+    app.include_router(task_router)
     app.include_router(executor_websocket_router)
     return app

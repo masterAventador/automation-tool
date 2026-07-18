@@ -18,7 +18,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0003"
-HEAD_REVISION = "20260718_0009"
+HEAD_REVISION = "20260718_0010"
 EXPECTED_CONSTRAINTS = {
     "pk_device_credentials",
     "fk_device_credentials_installation_id",

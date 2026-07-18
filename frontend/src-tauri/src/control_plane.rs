@@ -20,6 +20,7 @@ use crate::secure_store::SecretStore;
 
 const LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
 const REQUEST_ID_HEADER: &str = "x-request-id";
+const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
 const MAX_RESPONSE_LENGTH: usize = 64 * 1024;
 
 #[derive(Clone, Copy)]
@@ -31,6 +32,7 @@ enum ControlPlaneOperation {
     RotateDeviceCredential,
     RevokeDeviceCredential,
     ExchangeDeviceSession,
+    CreateTask,
 }
 
 impl ControlPlaneOperation {
@@ -41,7 +43,8 @@ impl ControlPlaneOperation {
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
             | Self::RevokeDeviceCredential
-            | Self::ExchangeDeviceSession => "POST",
+            | Self::ExchangeDeviceSession
+            | Self::CreateTask => "POST",
         }
     }
 
@@ -56,6 +59,7 @@ impl ControlPlaneOperation {
             Self::RotateDeviceCredential => "/api/v1/device-credentials/rotations",
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
+            Self::CreateTask => "/api/v1/tasks",
         }
     }
 
@@ -67,8 +71,13 @@ impl ControlPlaneOperation {
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
-            | Self::ExchangeDeviceSession => 201,
+            | Self::ExchangeDeviceSession
+            | Self::CreateTask => 201,
         }
+    }
+
+    fn accepts_status(self, status: u16) -> bool {
+        status == self.success_status() || matches!(self, Self::CreateTask) && status == 200
     }
 
     fn outcome_is_uncertain_on_transport_failure(self) -> bool {
@@ -180,7 +189,7 @@ impl ControlPlaneClient {
 
     pub async fn check_health(&self) -> Result<ControlPlaneHealth, ControlPlaneError> {
         let body = self
-            .execute(ControlPlaneOperation::GetSystemHealth, None, None)
+            .execute(ControlPlaneOperation::GetSystemHealth, None, None, None)
             .await?;
         parse_health_response(&body)
     }
@@ -202,6 +211,7 @@ impl ControlPlaneClient {
             .execute(
                 ControlPlaneOperation::GetCurrentInstallationAccess,
                 Some(session.token()),
+                None,
                 None,
             )
             .await?;
@@ -233,6 +243,7 @@ impl ControlPlaneClient {
                 ControlPlaneOperation::IssueInstallationRegistrationChallenge,
                 Some(bootstrap.token()),
                 Some(&challenge_request),
+                None,
             )
             .await?;
         let challenge = parse_registration_challenge(&challenge_body)?;
@@ -252,6 +263,7 @@ impl ControlPlaneClient {
                 ControlPlaneOperation::CompleteInstallationRegistration,
                 Some(bootstrap.token()),
                 Some(&completion_request),
+                None,
             )
             .await?;
         let registered = parse_installation_registration(&registration_body)?;
@@ -285,6 +297,7 @@ impl ControlPlaneClient {
             .execute(
                 ControlPlaneOperation::RotateDeviceCredential,
                 Some(credential.as_str()),
+                None,
                 None,
             )
             .await?;
@@ -320,6 +333,7 @@ impl ControlPlaneClient {
                 ControlPlaneOperation::ExchangeDeviceSession,
                 Some(credential.as_str()),
                 Some(&request_body),
+                None,
             )
             .await?;
         parse_device_session(&response_body, capability)
@@ -338,6 +352,7 @@ impl ControlPlaneClient {
                 ControlPlaneOperation::RevokeDeviceCredential,
                 Some(credential.as_str()),
                 None,
+                None,
             )
             .await?;
         let revoked = parse_revoked_credential(&response_body)?;
@@ -347,11 +362,36 @@ impl ControlPlaneClient {
         Ok(revoked.version)
     }
 
+    pub async fn create_task<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        idempotency_key: &str,
+    ) -> Result<CreatedTask, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_idempotency_key(idempotency_key)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let request_body = serde_json::json!({});
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::CreateTask,
+                Some(session.token()),
+                Some(&request_body),
+                Some(idempotency_key),
+            )
+            .await?;
+        parse_created_task(&response_body)
+    }
+
     async fn execute(
         &self,
         operation: ControlPlaneOperation,
         bearer: Option<&str>,
         body: Option<&serde_json::Value>,
+        idempotency_key: Option<&str>,
     ) -> Result<Zeroizing<Vec<u8>>, ControlPlaneError> {
         let request_id = new_request_id()?;
         let url = format!("{LOCAL_CONTROL_PLANE_ORIGIN}{}", operation.path());
@@ -369,6 +409,9 @@ impl ControlPlaneClient {
         .header(REQUEST_ID_HEADER, &request_id);
         if let Some(credential) = bearer {
             request = request.header(AUTHORIZATION, format!("Bearer {credential}"));
+        }
+        if let Some(key) = idempotency_key {
+            request = request.header(IDEMPOTENCY_KEY_HEADER, key);
         }
         if let Some(payload) = body {
             request = request.json(payload);
@@ -476,18 +519,19 @@ fn validate_response_metadata(
         .cache_control
         .as_deref()
         .is_some_and(|value| value.split(',').any(|part| part.trim() == "no-store"));
-    if metadata.status != operation.success_status()
+    if !operation.accepts_status(metadata.status)
         || metadata.request_id.as_deref() != Some(expected_request_id)
         || !content_type_is_json
         || !cache_control_is_private
     {
-        let code = if metadata.status == operation.success_status() {
+        let code = if operation.accepts_status(metadata.status) {
             ControlPlaneErrorCode::ProtocolInvalid
         } else if metadata.status == 401
             && matches!(
                 operation,
                 ControlPlaneOperation::ExchangeDeviceSession
                     | ControlPlaneOperation::GetCurrentInstallationAccess
+                    | ControlPlaneOperation::CreateTask
             )
         {
             ControlPlaneErrorCode::InstallationAccessDenied
@@ -525,6 +569,65 @@ fn parse_installation_access(body: &[u8]) -> Result<(), ControlPlaneError> {
         return Err(protocol_invalid());
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreatedTaskResponse {
+    task_id: String,
+    status: String,
+    revision: u32,
+    created_at: String,
+    updated_at: String,
+}
+
+pub struct CreatedTask {
+    task_id: String,
+    status: String,
+    revision: u32,
+}
+
+impl CreatedTask {
+    pub fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+
+    pub fn revision(&self) -> u32 {
+        self.revision
+    }
+}
+
+fn require_idempotency_key(value: &str) -> Result<(), ControlPlaneError> {
+    let mut bytes = value.bytes();
+    let first = bytes.next();
+    if value.len() > 128
+        || !first.is_some_and(|byte| byte.is_ascii_alphanumeric())
+        || !bytes.all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
+        })
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn parse_created_task(body: &[u8]) -> Result<CreatedTask, ControlPlaneError> {
+    let response: CreatedTaskResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.task_id)?;
+    let created_at = require_bounded_timestamp(&response.created_at)?;
+    let updated_at = require_bounded_timestamp(&response.updated_at)?;
+    if response.status != "draft" || response.revision != 1 || updated_at < created_at {
+        return Err(protocol_invalid());
+    }
+    Ok(CreatedTask {
+        task_id: response.task_id,
+        status: response.status,
+        revision: response.revision,
+    })
 }
 
 pub struct DemoBootstrap {
@@ -838,11 +941,11 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        new_request_id, parse_device_session, parse_health_response, parse_installation_access,
-        parse_installation_registration, parse_registration_challenge, parse_revoked_credential,
-        parse_rotated_credential, required_credential, transport_error, validate_response_metadata,
-        ControlPlaneErrorCode, ControlPlaneOperation, DemoBootstrap, DeviceSessionCapability,
-        ResponseMetadata,
+        new_request_id, parse_created_task, parse_device_session, parse_health_response,
+        parse_installation_access, parse_installation_registration, parse_registration_challenge,
+        parse_revoked_credential, parse_rotated_credential, require_idempotency_key,
+        required_credential, transport_error, validate_response_metadata, ControlPlaneErrorCode,
+        ControlPlaneOperation, DemoBootstrap, DeviceSessionCapability, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -950,6 +1053,12 @@ mod tests {
                 "/api/v1/device-sessions",
                 201,
             ),
+            (
+                ControlPlaneOperation::CreateTask,
+                "POST",
+                "/api/v1/tasks",
+                201,
+            ),
         ];
 
         for (operation, method, path, success_status) in operations {
@@ -1046,6 +1155,20 @@ mod tests {
         .expect_err("503 access dependency failure");
         assert_eq!(unavailable.code(), ControlPlaneErrorCode::RequestRejected);
         assert!(unavailable.retryable());
+
+        for status in [200, 201] {
+            validate_response_metadata(
+                ControlPlaneOperation::CreateTask,
+                "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+                &ResponseMetadata {
+                    status,
+                    request_id: Some("f831a58a-a54c-4bd9-8f3e-0383c4df609d".to_owned()),
+                    content_type: Some("application/json".to_owned()),
+                    cache_control: Some("no-store".to_owned()),
+                },
+            )
+            .expect("task creation or replay response");
+        }
     }
 
     #[test]
@@ -1154,6 +1277,19 @@ mod tests {
             parsed.capability(),
             DeviceSessionCapability::ExecutorConnect
         );
+
+        let task = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "status": "draft",
+            "revision": 1,
+            "createdAt": "2026-07-18T02:00:00Z",
+            "updatedAt": "2026-07-18T02:00:00Z"
+        });
+        let parsed_task =
+            parse_created_task(&serde_json::to_vec(&task).expect("task JSON")).expect("valid task");
+        assert_eq!(parsed_task.task_id(), IDENTIFIER);
+        assert_eq!(parsed_task.status(), "draft");
+        assert_eq!(parsed_task.revision(), 1);
     }
 
     #[test]
@@ -1240,6 +1376,59 @@ mod tests {
             )
             .is_err());
         }
+
+        for invalid in [
+            serde_json::json!({
+                "taskId": IDENTIFIER,
+                "status": "ready",
+                "revision": 1,
+                "createdAt": "2026-07-18T02:00:00Z",
+                "updatedAt": "2026-07-18T02:00:00Z"
+            }),
+            serde_json::json!({
+                "taskId": IDENTIFIER,
+                "status": "draft",
+                "revision": 1,
+                "createdAt": "2026-07-18T02:05:00Z",
+                "updatedAt": "2026-07-18T02:00:00Z"
+            }),
+            serde_json::json!({
+                "taskId": IDENTIFIER,
+                "status": "draft",
+                "revision": 1,
+                "createdAt": "2026-07-18T02:00:00Z",
+                "updatedAt": "2026-07-18T02:00:00Z",
+                "unknown": true
+            }),
+        ] {
+            assert!(
+                parse_created_task(&serde_json::to_vec(&invalid).expect("invalid task JSON"))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn task_idempotency_keys_use_the_exact_protocol_alphabet_and_bounds() {
+        let longest_valid = "a".repeat(128);
+        for valid in ["a", "task:create/demo_1-2.3", longest_valid.as_str()] {
+            require_idempotency_key(valid).expect("valid idempotency key");
+        }
+        let too_long = "a".repeat(129);
+        for invalid in [
+            "",
+            "-leading",
+            "contains space",
+            "private@value",
+            too_long.as_str(),
+        ] {
+            let error = require_idempotency_key(invalid).expect_err("invalid idempotency key");
+            assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+            assert_eq!(error.to_string(), "Control Plane request failed");
+            if !invalid.is_empty() {
+                assert!(!error.to_string().contains(invalid));
+            }
+        }
     }
 
     #[test]
@@ -1302,6 +1491,7 @@ mod tests {
             ControlPlaneOperation::GetSystemHealth,
             ControlPlaneOperation::GetCurrentInstallationAccess,
             ControlPlaneOperation::IssueInstallationRegistrationChallenge,
+            ControlPlaneOperation::CreateTask,
         ] {
             let error = transport_error(operation);
             assert_eq!(error.code(), ControlPlaneErrorCode::TransportUnavailable);

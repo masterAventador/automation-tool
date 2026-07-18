@@ -83,16 +83,20 @@ async def test_repository_creates_and_reads_only_within_the_installation_scope(
         first_id = TaskId.new()
         second_id = TaskId.new()
 
-        first = await repository.create(
+        first_result = await repository.create(
             task_id=first_id,
             installation_id=first_installation,
+            idempotency_key="task:repository:first",
             created_at=NOW,
         )
-        second = await repository.create(
+        second_result = await repository.create(
             task_id=second_id,
             installation_id=second_installation,
+            idempotency_key="task:repository:second",
             created_at=NOW + timedelta(seconds=1),
         )
+        first = first_result.task
+        second = second_result.task
 
         assert first.task_id == first_id
         assert first.installation_id == first_installation
@@ -140,7 +144,12 @@ async def test_repository_rejects_unknown_revoked_and_duplicate_create_targets_s
         await reset_data(database)
         active = await seed_installation(database)
         revoked = await seed_installation(database, revoked=True)
-        await repository.create(task_id=task_id, installation_id=active, created_at=NOW)
+        await repository.create(
+            task_id=task_id,
+            installation_id=active,
+            idempotency_key="task:repository:original",
+            created_at=NOW,
+        )
 
         for installation_id, candidate_id in (
             (InstallationId.new(), TaskId.new()),
@@ -151,6 +160,7 @@ async def test_repository_rejects_unknown_revoked_and_duplicate_create_targets_s
                 await repository.create(
                     task_id=candidate_id,
                     installation_id=installation_id,
+                    idempotency_key=f"task:repository:candidate:{candidate_id}",
                     created_at=NOW,
                 )
             assert str(captured.value) == "Task persistence operation is rejected"
@@ -182,6 +192,7 @@ async def test_repository_applies_state_machine_and_revision_cas_without_scope_l
         await repository.create(
             task_id=task_id,
             installation_id=installation_id,
+            idempotency_key="task:repository:transition",
             created_at=NOW,
         )
 
@@ -254,6 +265,7 @@ async def test_two_concurrent_transitions_have_one_revision_winner(
         await repository.create(
             task_id=task_id,
             installation_id=installation_id,
+            idempotency_key="task:repository:concurrent",
             created_at=NOW,
         )
 

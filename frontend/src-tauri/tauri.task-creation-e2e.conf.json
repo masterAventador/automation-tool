@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.aventador.automationtool.t306acceptance",
+  "build": {
+    "beforeBuildCommand": "pnpm build:control-plane-e2e-assets"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "visible": false
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "main",
+        {
+          "identifier": "wdio-task-creation",
+          "description": "Test-only WebdriverIO access for the isolated Task creation acceptance build",
+          "windows": ["main"],
+          "permissions": [
+            "wdio:allow-execute",
+            "wdio:allow-log-frontend",
+            "wdio:allow-debug-plugin",
+            "wdio:allow-get-active-window-label",
+            "wdio:allow-get-window-states",
+            "wdio:allow-list-windows",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  }
+}

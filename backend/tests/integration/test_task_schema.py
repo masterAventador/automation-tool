@@ -18,11 +18,12 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0005"
-HEAD_REVISION = "20260718_0009"
+HEAD_REVISION = "20260718_0010"
 NOW = datetime(2026, 7, 18, 14, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "id",
     "installation_id",
+    "creation_idempotency_key",
     "current_attempt_id",
     "last_event_sequence",
     "status",
@@ -31,9 +32,11 @@ EXPECTED_COLUMNS = {
     "updated_at",
 }
 EXPECTED_CONSTRAINTS = {
+    "ck_tasks_creation_idempotency_key",
     "pk_tasks",
     "fk_tasks_installation_id",
     "uq_tasks_binding",
+    "uq_tasks_creation_idempotency",
     "ck_tasks_id_uuid_v4",
     "ck_tasks_revision_positive",
     "ck_tasks_status",
@@ -68,6 +71,7 @@ def task_values(installation_id: InstallationId) -> dict[str, object]:
     return {
         "id": TaskId.new().uuid,
         "installation_id": installation_id.uuid,
+        "creation_idempotency_key": f"task:test:{TaskId.new()}",
         "status": TaskStatus.DRAFT.value,
         "revision": 1,
         "created_at": NOW,
@@ -150,7 +154,11 @@ async def test_task_defaults_and_installation_binding_are_real_database_constrai
                 (
                     await session.execute(
                         insert(tasks)
-                        .values(id=task_id.uuid, installation_id=installation_id.uuid)
+                        .values(
+                            id=task_id.uuid,
+                            installation_id=installation_id.uuid,
+                            creation_idempotency_key="task:test:defaults",
+                        )
                         .returning(*tasks.c)
                     )
                 )
@@ -160,6 +168,7 @@ async def test_task_defaults_and_installation_binding_are_real_database_constrai
 
         assert created["id"] == task_id.uuid
         assert created["installation_id"] == installation_id.uuid
+        assert created["creation_idempotency_key"] == "task:test:defaults"
         assert created["status"] == TaskStatus.DRAFT.value
         assert created["revision"] == 1
         assert created["created_at"].tzinfo is not None
@@ -171,6 +180,7 @@ async def test_task_defaults_and_installation_binding_are_real_database_constrai
                     insert(tasks).values(
                         id=TaskId.new().uuid,
                         installation_id=InstallationId.new().uuid,
+                        creation_idempotency_key="task:test:unknown-installation",
                     )
                 )
     finally:
@@ -226,6 +236,42 @@ async def test_task_id_is_globally_unique_while_binding_is_installation_scoped(
         with pytest.raises(IntegrityError):
             async with database.session() as session:
                 await session.execute(insert(tasks).values(duplicate))
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_task_creation_idempotency_is_valid_and_installation_scoped(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        first_installation = await seed_installation(database)
+        second_installation = await seed_installation(database)
+        original = task_values(first_installation)
+        original["creation_idempotency_key"] = "task:test:shared"
+        other_installation = task_values(second_installation)
+        other_installation["creation_idempotency_key"] = "task:test:shared"
+        async with database.session() as session:
+            await session.execute(insert(tasks).values(original))
+            await session.execute(insert(tasks).values(other_installation))
+
+        duplicate = task_values(first_installation)
+        duplicate["creation_idempotency_key"] = "task:test:shared"
+        with pytest.raises(IntegrityError):
+            async with database.session() as session:
+                await session.execute(insert(tasks).values(duplicate))
+
+        for invalid in ["", "-leading", "contains space", "a" * 129]:
+            values = task_values(first_installation)
+            values["creation_idempotency_key"] = invalid
+            with pytest.raises(IntegrityError):
+                async with database.session() as session:
+                    await session.execute(insert(tasks).values(values))
     finally:
         await reset_data(database)
         await database.close()

@@ -7,6 +7,7 @@ from typing import cast
 import pytest
 
 from automation_tool.control_plane.application.tasks import (
+    TaskCreationResult,
     TaskPersistenceRejected,
     TaskRecord,
 )
@@ -24,26 +25,36 @@ async def test_repository_rejects_untyped_identity_revision_status_and_time_befo
     repository = SqlAlchemyTaskRepository(cast(Database, object()))
     task_id = TaskId.new()
     installation_id = InstallationId.new()
-    operations: tuple[Awaitable[TaskRecord | None], ...] = (
+    operations: tuple[Awaitable[TaskCreationResult | TaskRecord | None], ...] = (
         repository.create(
             task_id=cast(TaskId, "private-task"),
             installation_id=installation_id,
+            idempotency_key="task:validation:1",
             created_at=NOW,
         ),
         repository.create(
             task_id=task_id,
             installation_id=cast(InstallationId, "private-installation"),
+            idempotency_key="task:validation:2",
             created_at=NOW,
         ),
         repository.create(
             task_id=task_id,
             installation_id=installation_id,
+            idempotency_key="task:validation:3",
             created_at=cast(datetime, "private-time"),
         ),
         repository.create(
             task_id=task_id,
             installation_id=installation_id,
+            idempotency_key="task:validation:4",
             created_at=datetime(2026, 7, 18, 15, 0),
+        ),
+        repository.create(
+            task_id=task_id,
+            installation_id=installation_id,
+            idempotency_key="contains space",
+            created_at=NOW,
         ),
         repository.transition(
             task_id=task_id,

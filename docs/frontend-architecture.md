@@ -74,6 +74,8 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 当前工作台壳已实现 ready、checking、unavailable、revoked 四态和安全重试。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`，由真实 WebView invoke 正式 Rust Command，再由 Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
 
+T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation：Rust 自行从 App 私有 vault 取长期凭据、换取 `app.control-plane` Session、注入受限 `Idempotency-Key`，并只接受 201 创建或 200 重放的同形 draft Task 快照。当前产品 UI 尚没有平台模板表单，因此生产 React 不暴露通用 create Command；T3-17 必须通过窄任务表单命令调用该客户端，不能让 WebView 接触 bearer、Header 或任意 URL。T3-06 的完成证据来自 `visible=false` 真实 Tauri App，而不是浏览器 Harness 或直接 HTTP。
+
 ### 4.2 Feature 层
 
 第一期 Feature：
@@ -414,7 +416,7 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 
-当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描 `wdioTauri`、WDIO IPC 和 WebDriver 端口标记并 fail closed。`tauri.test.conf.json` 与 `tauri.control-plane-e2e.conf.json` 都把测试主窗口固定为 `visible=false`，自动化 App 只在后台运行；production `tauri.conf.json` 保持窗口可见。
+当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描 `wdioTauri`、WDIO IPC 和 WebDriver 端口标记并 fail closed。所有自动化 Tauri 配置（包括通用、Control Plane、Installation 吊销和 Task 创建验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
 
 I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 

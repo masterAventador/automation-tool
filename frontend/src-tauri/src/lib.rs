@@ -89,6 +89,69 @@ struct InstallationRevocationAcceptanceRegistration {
 }
 
 #[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskCreationAcceptanceSummary {
+    installation_id: String,
+    task_id: String,
+    status: String,
+    revision: u32,
+    replayed: bool,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn create_task_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskCreationAcceptanceSummary, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T306_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T306_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let first = client
+        .create_task(&vault, "task:create:tauri-acceptance")
+        .await
+        .map_err(map_control_plane_error)?;
+    let replay = client
+        .create_task(&vault, "task:create:tauri-acceptance")
+        .await
+        .map_err(map_control_plane_error)?;
+    let replayed = first.task_id() == replay.task_id()
+        && first.status() == replay.status()
+        && first.revision() == replay.revision();
+    if !replayed {
+        return Err(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        });
+    }
+
+    Ok(TaskCreationAcceptanceSummary {
+        installation_id: registration.installation_id().to_owned(),
+        task_id: first.task_id().to_owned(),
+        status: first.status().to_owned(),
+        revision: first.revision(),
+        replayed,
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
 async fn register_installation_for_revocation_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -239,7 +302,8 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         run_control_plane_acceptance,
-        register_installation_for_revocation_acceptance
+        register_installation_for_revocation_acceptance,
+        create_task_for_acceptance
     ]);
 
     builder

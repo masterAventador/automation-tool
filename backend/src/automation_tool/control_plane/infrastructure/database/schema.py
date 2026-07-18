@@ -239,6 +239,7 @@ tasks = Table(
     metadata,
     Column("id", UUID(as_uuid=True), nullable=False),
     Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("creation_idempotency_key", String(), nullable=False),
     Column("current_attempt_id", UUID(as_uuid=True), nullable=True),
     Column(
         "last_event_sequence",
@@ -276,6 +277,10 @@ tasks = Table(
         name="ck_tasks_last_event_sequence_range",
     ),
     CheckConstraint(
+        "creation_idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'",
+        name="ck_tasks_creation_idempotency_key",
+    ),
+    CheckConstraint(
         "status in (" + ", ".join(f"'{status.value}'" for status in TaskStatus) + ")",
         name="ck_tasks_status",
     ),
@@ -288,6 +293,11 @@ tasks = Table(
     ),
     PrimaryKeyConstraint("id", name="pk_tasks"),
     UniqueConstraint("id", "installation_id", name="uq_tasks_binding"),
+    UniqueConstraint(
+        "installation_id",
+        "creation_idempotency_key",
+        name="uq_tasks_creation_idempotency",
+    ),
 )
 
 Index(

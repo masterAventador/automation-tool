@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化骨架已完成，准备实施创建任务 API；RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、Task/Attempt/Action/Event/Command 持久化和幂等创建 Task API 已完成，准备实施任务查询 API；RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -64,6 +64,7 @@
 | Attempt/Action 持久化 | `✅` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
 | Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
 | Command/Outbox 持久化 | `✅` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
+| 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、201/200 原子创建/重放、并发收敛与隐藏 Tauri App 生产同路径已验证 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
@@ -187,7 +188,7 @@
 | T3-03 | Attempt/Action 模型 | execution attempt、action 状态与唯一约束 | T3-02 | ✅ 已完成 |
 | T3-04 | Event 模型 | `(task_id, sequence)` 唯一、版本、安全消息和快照投影 | T3-02 | ✅ 已完成 |
 | T3-05 | Command/Outbox 模型 | 持久命令、幂等、deadline、投递/确认状态 | T3-03 | ✅ 已完成 |
-| T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ⬜ 未开始 |
+| T3-06 | 创建任务 API | idempotency、参数校验、installation 隔离 | T3-02,I2-14 | ✅ 已完成 |
 | T3-07 | 任务查询 API | 列表/详情/分页；跨 installation 按不可见处理 | T3-06 | ⬜ 未开始 |
 | T3-08 | Executor Connection Registry | 心跳、在线、旧连接替换和单实例 API 约束 | I2-13 | ⬜ 未开始 |
 | T3-09 | 命令投递服务 | task offer/ack、重连恢复、过期和重复投递 | T3-05,T3-08 | ⬜ 未开始 |
@@ -1052,10 +1053,27 @@
 - 文档：同步根/Backend README、后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；没有新增重复规划文档
 - 遗留：T3-06/T3-07 建立任务创建与查询 API；T3-08 建立在线连接 Registry；T3-09 才实现 Outbox dispatcher/ACK；T3-13/T3-14 控制 API 必须等确认事件后再改 Task 状态
 
+### T3-06 创建任务 API
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增创建/重放 API 契约、同 Installation/跨 Installation 仓储生命周期和并发同键测试并把台账置为 RED；目标测试收集因 `TaskCreationResult` 尚不存在而失败
+- GREEN：创建 API/仓储/迁移聚焦 17 项通过；Backend 全量 566 项且 2173 条语句、306 个分支覆盖率 100%；Ruff、严格 Mypy、uv lock、OpenAPI 漂移通过；Frontend 27 项契约、63 项 Vitest、ESLint、TypeScript、production build/API/边界扫描通过；Rust 默认与 `control-plane-e2e` 测试、fmt 和两组 Clippy `-D warnings` 通过
+- API 契约：新增 `POST /api/v1/tasks`/`createTask`；只接受精确空 JSON object 和必填 `Idempotency-Key`，强制复用 `require_current_installation_access` 的 `app.control-plane` scope；首次创建 201，重放同一公开 Task 快照 200，响应固定为 taskId/status/revision/createdAt/updatedAt 且 `no-store`
+- 幂等与事务：迁移 `20260718_0010` 新增受协议字符集和 128 字节上限约束的 `creation_idempotency_key`，以 `(installation_id, creation_idempotency_key)` 唯一；仓储先锁 Installation 再查/建，同 Installation 并发同键只产生一条 draft/revision 1 Task，另一个 Installation 可独立复用同键
+- 迁移兼容：旧 Task 升级时确定性回填 `legacy:<task-id>`，保持 Task 身份与状态；空库 upgrade/check、从 `0009` 带旧数据升级、约束/索引、降级/再升级均在官方 PostgreSQL 18.4 验证
+- App 正式边界：Rust 封闭 operation allowlist 加入固定 `POST /api/v1/tasks`，从 App 私有 vault 取长期凭据并换取短期 App Session，注入幂等键，严格解析 201/200 同形 DTO；没有向 React 暴露 bearer、长期凭据、Session、Header 或任意 URL 代理
+- 生产同路径验收：`uv run python ../scripts/run_t3_06_acceptance.py` 后台启动隔离 PostgreSQL 18.4、完整 Alembic、真实 Uvicorn 和唯一 `visible=false` 的真实 Tauri/WKWebView；隐藏 App 经正式 Rust 客户端完成注册后连续两次同键创建，最终核对一个 active Installation、一条 draft/revision 1 Task、两张正式 `app.control-plane` Session，以及 App 私有身份/凭据文件形状和权限
+- 失败矩阵：覆盖缺失/非法/过长幂等键、未知请求字段、缺失认证、错误 Session scope、吊销 Installation、服务未装配、仓储拒绝、同键重放、跨 Installation 隔离、并发同键、数据库唯一/check/FK、旧数据迁移和 Rust DTO/metadata/transport 安全失败；平台模板字段明确归 T3-17
+- 清理：两次隐藏验收均在 finally 精确终止 App/Uvicorn、删除隔离 App 私有目录、`docker compose down --volumes --remove-orphans` 并释放随机数据库端口和 8765；没有可见 App、浏览器、容器、服务或测试 Profile 遗留
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构、OpenAPI 3.1 快照、生成 TypeScript DTO、本路线图快照/状态/完成记录和当前下一步；没有新增重复规划文档
+- 遗留：T3-07 建立 Installation-scoped 查询/分页；T3-17 才添加抖音模板字段和生产 UI 创建命令；T3-09/T3-11 分别负责投递与事件收敛，当前创建成功不冒充任务已运行
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-06`：建立受 Installation 守卫保护的幂等创建任务 API；
-2. `T3-07`：建立 Installation 隔离的任务列表/详情/分页 API；
+1. `T3-07`：建立 Installation 隔离的任务列表/详情/分页 API；
+2. `T3-08`：建立 Executor Connection Registry；
 3. 按台账顺序持续执行 Wave 3 和 Wave 4，不在单个工程任务后停止。

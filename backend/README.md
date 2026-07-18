@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、纯领域任务状态机，以及 Task/Attempt/Action/Event/Command 持久化模型；尚未提供 Task 业务路由或 Local Executor 进程。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型和幂等创建 Task API；尚未提供 Task 查询/控制路由或 Local Executor 进程。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -12,7 +12,9 @@
 
 `control_plane.domain.task_state_machine` 定义 16 个 `TaskStatus`、5 个无出边终态和唯一显式转换矩阵。取消必须先进入 `cancelling`；取消/完成竞态从 `cancelling` 按真实事实收敛；`outcome_uncertain` 只可从已执行、人工接管或取消中的状态进入。所有 256 个状态对均由单元测试分类，字符串输入、自循环、终态复活和未列出的跳转固定拒绝，后续应用服务不得另建状态分支。
 
-`tasks` 表已通过迁移 `20260718_0006` 建立 Task UUIDv4、Installation 外键、状态、正 revision 和有序时间，并保留 `(id, installation_id)` 复合绑定及 Installation 更新时间索引。`SqlAlchemyTaskRepository` 只允许 active Installation 创建 draft Task；读取/转换始终携带 Installation scope，状态转换复用领域状态机并以 expected revision + 行锁做 CAS。未知/已吊销 Installation、重复 Task、跨 scope、旧 revision、时间回退和并发输家固定拒绝。平台模板参数将在 T3-17 以明确 DTO 增加，当前表不接受任意 JSON。
+`tasks` 表已通过迁移 `20260718_0006` 建立 Task UUIDv4、Installation 外键、状态、正 revision 和有序时间，并保留 `(id, installation_id)` 复合绑定及 Installation 更新时间索引。迁移 `20260718_0010` 增加受协议字符集/128 字节上限约束的 `creation_idempotency_key`，并以 `(installation_id, creation_idempotency_key)` 唯一；旧 Task 确定性回填 `legacy:<task-id>`。`SqlAlchemyTaskRepository` 先锁 Installation 再查/建，因此同 Installation 并发同键线性收敛为一条 draft Task，另一个 Installation 可独立复用同键。读取/转换始终携带 Installation scope，状态转换复用领域状态机并以 expected revision + 行锁做 CAS。未知/已吊销 Installation、跨 scope、旧 revision、时间回退和并发输家固定拒绝。平台模板参数将在 T3-17 以明确 DTO 增加，当前表/API 不接受任意 JSON。
+
+`POST /api/v1/tasks` 只接受空 JSON object 和必填 `Idempotency-Key`，并强制复用 `require_current_installation_access` 的精确 `app.control-plane` Session scope。第一次创建返回 201；相同 Installation/key 的重放返回同一 Task 快照和 200；响应只有 task ID、draft 状态、revision 与 UTC 时间，不回显幂等键、Session 或凭据。非法/过长 key、额外字段、缺失认证、吊销 Installation 和持久化冲突均进入稳定的 `no-store` 错误边界。
 
 迁移 `20260718_0007` 新增 `execution_attempts`、`task_actions` 和 `tasks.current_attempt_id`。Attempt 以 `(task_id, attempt_number)` 去重，部分唯一索引保证每个 Task 最多一个非终态 Attempt；终态必须有完成时间，重试只能创建新序号。Action 以 `(execution_attempt_id, ordinal)` 去重，明确区分 planned/authorized/prepared/dispatched/verified 等副作用阶段与 pending/succeeded/failed/cancelled/outcome_uncertain 结果；数据库拒绝阶段、结果和完成时间矛盾。Task→Attempt→Action 全链路使用包含 Task 与 Installation 的复合外键，不能把其他任务或安装实例的子资源挂入当前链路。
 
@@ -28,13 +30,13 @@
 
 当前长期凭据可调用 `POST /api/v1/device-sessions` 换取 `atds1.<session-id>.<256-bit-secret>`，响应禁止缓存。Session 固定 5 分钟寿命并允许客户端时钟最多落后 30 秒，只能精确选择 `app.control-plane` 或 `executor.connect` 一项能力。`device_sessions` 表只保存摘要及 Installation、父凭据 ID、父凭据版本的复合绑定；认证使用 `[not_before, expires_at)` 半开边界，父凭据轮换/吊销或 Installation 撤销后既有 Session 立即失效。
 
-服务器运维侧使用 `automation-tool-revoke-installation --installation-id ... --expected-revision ...` 原子吊销一个 Installation；命令在单事务中更新 Installation revision、active 长期凭据和全部 Session，未知/重复/stale revision/并发失败不会回显目标。App 业务路由统一依赖 `require_current_installation_access` 校验 `app.control-plane` Session 并取得强类型 Installation scope；`GET /api/v1/installations/current` 是首个消费者，后续任务路由不得相信客户端自报 scope 或复制一套认证。
+服务器运维侧使用 `automation-tool-revoke-installation --installation-id ... --expected-revision ...` 原子吊销一个 Installation；命令在单事务中更新 Installation revision、active 长期凭据和全部 Session，未知/重复/stale revision/并发失败不会回显目标。App 业务路由统一依赖 `require_current_installation_access` 校验 `app.control-plane` Session 并取得强类型 Installation scope；`GET /api/v1/installations/current` 和 `POST /api/v1/tasks` 都使用该依赖，后续任务路由不得相信客户端自报 scope 或复制一套认证。
 
 `WS /api/v1/executors/connect` 只接受唯一 `automation-tool.executor.v1` 子协议和 `executor.connect` Session；认证后立即从长连接 scope 擦除原始 Authorization Header。升级后第一帧必须是正式 Python parser 验证的 `executor.hello`，并把连接绑定到 Installation、Executor、协议版本、Executor 版本、平台、架构和独立 `ExecutorConnectionId`；后续 I2-13 阶段只接受同一身份的 heartbeat。连接每秒重新读取 PostgreSQL 认证状态，Session、父凭据或 Installation 失效会以固定 4401 关闭，冒充、协议错误、Hello 超时和内部失败使用固定关闭码与不泄密文案。Uvicorn 固定使用 `websockets-sansio`，并在传输层把消息限制为 32 KiB。
 
 真实网络验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`。脚本后台启动隔离 PostgreSQL 和真实 Uvicorn，经正式 REST 换票/吊销端点与标准 WebSocket 客户端验证子协议、超大帧、冒充、在线吊销和旧 Session 重连拒绝，结束后回收服务、端口、容器、网络和卷；不启动桌面 App。
 
-真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销和 Session 换票端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名与凭据注入，React 不接触任何秘密；I2-14 纵向验收以隐藏窗口连接真实 FastAPI 与隔离 PostgreSQL，再由服务端 CLI 吊销并验证同一 App 进入独立失效诊断及最终数据库状态。
+真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和创建 Task 端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名与凭据注入，React 不接触任何秘密；I2-14 纵向验收验证隐藏 App 吊销诊断，T3-06 纵向验收由另一个 `visible=false` 隔离 App 连续两次调用创建接口，并核对 PostgreSQL 只有一条 Task 和两张正式 App Session。
 
 ## 本地命令
 
@@ -85,6 +87,7 @@ AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY=<32-byte-ed25519-public-key-base64url>
 - `POST http://127.0.0.1:8765/api/v1/device-credentials/rotations`
 - `POST http://127.0.0.1:8765/api/v1/device-credentials/revocations`
 - `POST http://127.0.0.1:8765/api/v1/device-sessions`
+- `POST http://127.0.0.1:8765/api/v1/tasks`
 - `WS ws://127.0.0.1:8765/api/v1/executors/connect`
 
 迁移回滚验证（只对明确的测试数据库执行）：

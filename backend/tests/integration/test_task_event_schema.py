@@ -35,7 +35,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0007"
-HEAD_REVISION = "20260718_0009"
+HEAD_REVISION = "20260718_0010"
 NOW = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)
 EXPECTED_EVENT_COLUMNS = {
     "task_id",
@@ -103,6 +103,7 @@ async def seed_execution_chain(
             insert(tasks).values(
                 id=task_id.uuid,
                 installation_id=installation_id.uuid,
+                creation_idempotency_key=f"task:seed:{task_id}",
                 status=TaskStatus.RUNNING.value,
                 revision=4,
                 created_at=NOW,
