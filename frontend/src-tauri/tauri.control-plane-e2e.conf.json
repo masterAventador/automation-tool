@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.aventador.automationtool.i209acceptance",
   "build": {
-    "beforeBuildCommand": "pnpm build:desktop-e2e-assets"
+    "beforeBuildCommand": "pnpm build:control-plane-e2e-assets"
   },
   "app": {
     "withGlobalTauri": true,
@@ -15,8 +16,8 @@
       "capabilities": [
         "main",
         {
-          "identifier": "wdio",
-          "description": "Test-only WebdriverIO access for the desktop E2E build",
+          "identifier": "wdio-control-plane",
+          "description": "Test-only WebdriverIO access for the isolated Control Plane acceptance build",
           "windows": ["main"],
           "permissions": [
             "wdio:allow-execute",

@@ -289,6 +289,10 @@ I2-06 把初始凭据签发并入同一个注册事务：凭据使用 `atdc1.<cr
 
 I2-07 实现唯一换票端点 `exchangeDeviceSession`。客户端以当前 `atdc1` bearer 换取 `atds1.<session-id>.<256-bit-secret>`；票据固定 5 分钟，`not_before` 向前回退 30 秒容纳客户端落后时钟，过期仍采用严格半开边界且没有到期后宽限。每张票必须精确选择 `app.control-plane` 或 `executor.connect`，不能组合或使用通配符。PostgreSQL 仅保存 Session 秘密的 SHA-256 摘要，并以复合外键绑定 Installation、父凭据 ID 和父凭据版本；认证固定按 Installation、父凭据、Session 顺序锁定，三者任一失效即统一拒绝。父凭据轮换/吊销会在同一事务写入相关 Session 的 `revoked_at`，Installation 撤销也会在每次认证时即时生效。服务端不为 Session 增加签名私钥。
 
+I2-09 已建立正式桌面消费链路。生产 React 只通过窄 `TauriControlPlaneTransport` 发起 Health 检查；Rust 以固定 origin 和封闭 operation allowlist 调用 Health、注册、凭据生命周期和 Session 端点，不接受 WebView 下发任意 URL、路径、Header 或 bearer。设备私钥从 App 私有目录按需加载并只在 Rust 内签名，注册/轮换返回的长期凭据直接原子写回 Rust 凭据仓，Session 只保存在及时清零的原生缓冲。请求具有关联 ID、超时、响应大小、内容类型、禁止缓存和严格 DTO 校验；所有底层失败收敛为不泄密固定错误。
+
+生产同路径验收由隐藏窗口的真实测试版 Tauri App 发起，连接真实 FastAPI 与隔离 PostgreSQL，依次完成 Health、Installation 注册、`app.control-plane` Session、凭据轮换、`executor.connect` Session 和吊销。验收同时核对设备公钥与 App 私有身份一致、challenge 已消费、v1/v2 凭据为 rotated/revoked、两张 Session 均随父凭据失效，以及长期凭据文件已删除；测试结束精确回收本地服务、容器、卷和隔离 App 数据。
+
 这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
 
 ### 9.3 请求授权

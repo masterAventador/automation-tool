@@ -7,9 +7,9 @@ export interface StartupCheck {
 }
 
 /**
- * F1-08 proves the desktop shell states without bypassing the Rust network boundary.
- * F1-10 adds the transport adapter below; I2-09 replaces this shell-only default
- * when the allowlisted Rust network bridge is available.
+ * F1-08 keeps this deterministic shell-only check for isolated UI composition tests.
+ * Production main.tsx composes createTransportStartupCheck with the allowlisted
+ * Tauri/Rust Control Plane transport instead.
  */
 export const desktopShellStartupCheck: StartupCheck = {
   async check() {

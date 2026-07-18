@@ -46,7 +46,17 @@ test("quality CI separates Backend, Frontend, and Rust gates", async () => {
   assert.match(workflow, /libwebkit2gtk-4\.1-dev/);
   assert.match(workflow, /libayatana-appindicator3-dev/);
   assert.match(workflow, /cargo test --manifest-path src-tauri\/Cargo\.toml --locked/);
+  assert.match(
+    workflow,
+    /cargo test .* --features control-plane-e2e/,
+    "CI must compile and test the production-path Control Plane acceptance feature",
+  );
   assert.match(workflow, /cargo clippy .* -- -D warnings/);
+  assert.match(
+    workflow,
+    /cargo clippy .* --features control-plane-e2e -- -D warnings/,
+    "CI must lint the production-path Control Plane acceptance feature",
+  );
 });
 
 test("desktop CI builds and smokes both supported desktop platforms", async () => {

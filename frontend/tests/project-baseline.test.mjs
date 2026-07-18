@@ -15,6 +15,7 @@ test("desktop frontend owns one private pnpm package with the required stack", a
   assert.equal(packageJson.private, true);
   assert.match(packageJson.packageManager, /^pnpm@\d+\.\d+\.\d+$/);
   assert.deepEqual(Object.keys(packageJson.dependencies).sort(), [
+    "@tauri-apps/api",
     "antd",
     "react",
     "react-dom",

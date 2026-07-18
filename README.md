@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1 工程闭环已完成，正在进入安装实例认证与跨进程协议。
+当前处于第一期 MVP 实施阶段。Wave 1 工程闭环已完成，正在实施安装实例认证与跨进程协议。
 
 ## 第一阶段
 
@@ -55,12 +55,13 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Tauri 首启设备身份已在 Rust 内生成 Ed25519 密钥：私钥和长期设备凭据只进入 `app_data_dir` 下由 Rust 管理的 App 私有文件，不进入 React、Tauri IPC、`localStorage` 或普通配置，也不调用系统钥匙串；
 - App 打开后直接进入 RPA 运营工作台壳；Control Plane 不可用时有脱敏诊断与重试状态，页面不存在产品登录或注册入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
-- ControlPlaneTransport 已建立窄接口、固定公开错误、正式 Tauri unavailable stub 和显式 handler 测试 Harness；不暴露任意 URL 代理；
+- ControlPlaneTransport 已接入正式 Tauri IPC/Rust 网络桥：生产入口由真实 App 发起 Health 请求；Rust 侧以固定 origin、封闭 operation allowlist、禁止重定向/代理、请求与响应大小/时间上限和关联 ID 调用 Control Plane，不暴露任意 URL 代理；
+- Installation 注册、长期凭据轮换/吊销和两类短期 Session 已通过测试版真实 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；
 - FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册、设备凭据生命周期和短期 Session 交换，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用和重试恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
 - GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；
 - installation、executor、task、execution attempt、action 和 artifact 已使用六种不可混用的规范 UUIDv4 领域类型；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
-- 业务 API、真实后端 Transport 和 RPA 功能尚未实现；
+- 任务等业务 API、Executor 协议和 RPA 功能尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

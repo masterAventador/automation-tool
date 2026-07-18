@@ -43,8 +43,16 @@ test("device credentials stay in a fixed App-private Rust storage boundary", asy
   assert.match(secureStoreSource, /rename/);
   assert.doesNotMatch(secureStoreSource, /keyring|Keychain|Credential Manager/i);
   assert.doesNotMatch(
-    `${rustEntry}\n${credentialSource}\n${secureStoreSource}`,
+    `${credentialSource}\n${secureStoreSource}`,
     /tauri::command|invoke_handler|Serialize|Deserialize/,
+  );
+  assert.doesNotMatch(
+    rustEntry,
+    /async\s+fn\s+(?:get|load|read|save|set|replace|delete)_?device_credential/i,
+  );
+  assert.doesNotMatch(
+    rustEntry,
+    /struct\s+\w*(?:Command|Summary)\s*\{[^}]*(?:credential|token|private_key)\s*:/is,
   );
 });
 

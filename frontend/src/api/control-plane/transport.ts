@@ -13,11 +13,13 @@ export interface ControlPlaneTransport {
 
 export type ControlPlaneTransportErrorCode =
   | "transport_unavailable"
-  | "operation_unavailable";
+  | "operation_unavailable"
+  | "request_cancelled";
 
 const PUBLIC_ERROR_MESSAGES: Record<ControlPlaneTransportErrorCode, string> = {
   transport_unavailable: "Control Plane transport is unavailable",
   operation_unavailable: "Control Plane operation is unavailable",
+  request_cancelled: "Control Plane request was cancelled",
 };
 
 export class ControlPlaneTransportError extends Error {

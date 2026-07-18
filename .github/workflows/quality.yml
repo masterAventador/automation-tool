@@ -110,5 +110,8 @@ jobs:
       - run: pnpm build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features desktop-e2e
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features control-plane-e2e
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features desktop-e2e -- -D warnings
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --features control-plane-e2e -- -D warnings

@@ -37,7 +37,10 @@ test("device identity uses Ed25519 and App-private storage at the Rust boundary"
   assert.match(rustEntry, /mod device_identity;/);
   assert.match(rustEntry, /initialize_production_identity/);
   assert.match(rustEntry, /initialize_ephemeral_identity/);
-  assert.doesNotMatch(rustEntry, /invoke_handler/);
+  assert.doesNotMatch(
+    rustEntry,
+    /async\s+fn\s+(?:get|load|read|save|set|replace|delete|export|sign)_?device_(?:identity|key)/i,
+  );
   assert.match(identitySource, /SigningKey/);
   assert.match(identitySource, /getrandom::fill/);
   assert.match(identitySource, /Zeroizing/);

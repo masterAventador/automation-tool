@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signer, SigningKey};
 use zeroize::Zeroizing;
 
 use crate::secure_store::{SecretStore, SecureStoreError};
@@ -44,6 +44,29 @@ impl Error for DeviceIdentityError {}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DevicePublicIdentity {
     public_key: [u8; DEVICE_SECRET_LENGTH],
+}
+
+pub struct ProductionDeviceIdentity {
+    public_identity: DevicePublicIdentity,
+    store: crate::secure_store::AppDataSecretStore,
+}
+
+impl ProductionDeviceIdentity {
+    pub(crate) fn public_key(&self) -> &[u8; DEVICE_SECRET_LENGTH] {
+        self.public_identity.as_bytes()
+    }
+
+    pub(crate) fn sign(&self, payload: &[u8]) -> Result<[u8; 64], DeviceIdentityError> {
+        let stored_secret = self.store.load().map_err(map_store_error)?.ok_or_else(|| {
+            DeviceIdentityError::new(DeviceIdentityErrorCode::SecureStoreUnavailable)
+        })?;
+        let secret: [u8; DEVICE_SECRET_LENGTH] = stored_secret
+            .as_slice()
+            .try_into()
+            .map_err(|_| DeviceIdentityError::new(DeviceIdentityErrorCode::CorruptStoredKey))?;
+        let secret = Zeroizing::new(secret);
+        Ok(SigningKey::from_bytes(&secret).sign(payload).to_bytes())
+    }
 }
 
 impl DevicePublicIdentity {
@@ -116,11 +139,16 @@ fn identity_from_secret(secret: &[u8; DEVICE_SECRET_LENGTH]) -> DevicePublicIden
 
 pub(crate) fn initialize_production_identity(
     app_data_directory: &Path,
-) -> Result<DevicePublicIdentity, DeviceIdentityError> {
+) -> Result<ProductionDeviceIdentity, DeviceIdentityError> {
     let store =
         crate::secure_store::AppDataSecretStore::new(app_data_directory, DEVICE_IDENTITY_FILE_NAME)
             .map_err(map_store_error)?;
-    DeviceIdentityManager::new(&store, &SystemSecretKeyGenerator).get_or_create()
+    let public_identity =
+        DeviceIdentityManager::new(&store, &SystemSecretKeyGenerator).get_or_create()?;
+    Ok(ProductionDeviceIdentity {
+        public_identity,
+        store,
+    })
 }
 
 #[cfg(feature = "desktop-e2e")]
@@ -132,13 +160,15 @@ pub(crate) fn initialize_ephemeral_identity() -> Result<DevicePublicIdentity, De
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use ed25519_dalek::SigningKey;
+    use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
     use zeroize::Zeroizing;
 
     use super::{
-        DeviceIdentityError, DeviceIdentityErrorCode, DeviceIdentityManager, SecretKeyGenerator,
-        SystemSecretKeyGenerator,
+        initialize_production_identity, DeviceIdentityError, DeviceIdentityErrorCode,
+        DeviceIdentityManager, SecretKeyGenerator, SystemSecretKeyGenerator,
     };
     use crate::secure_store::{SecretStore, SecureStoreError};
 
@@ -211,6 +241,31 @@ mod tests {
                 ));
             }
             Ok(Zeroizing::new(self.secret))
+        }
+    }
+
+    struct TemporaryAppData {
+        path: std::path::PathBuf,
+    }
+
+    impl TemporaryAppData {
+        fn new(label: &str) -> Self {
+            Self {
+                path: std::env::temp_dir().join(format!(
+                    "{label}-{}-{}",
+                    std::process::id(),
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("system time")
+                        .as_nanos()
+                )),
+            }
+        }
+    }
+
+    impl Drop for TemporaryAppData {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
         }
     }
 
@@ -320,20 +375,10 @@ mod tests {
 
     #[test]
     fn real_app_data_secure_store_round_trip() {
-        use std::fs;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
         use crate::secure_store::AppDataSecretStore;
 
-        let unique_directory = std::env::temp_dir().join(format!(
-            "i2-04-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time")
-                .as_nanos()
-        ));
-        let store = AppDataSecretStore::new(&unique_directory, "device-identity-ed25519-v1")
+        let app_data = TemporaryAppData::new("i2-04-test");
+        let store = AppDataSecretStore::new(&app_data.path, "device-identity-ed25519-v1")
             .expect("create app data store");
         let generator = SystemSecretKeyGenerator;
         let manager = DeviceIdentityManager::new(&store, &generator);
@@ -348,6 +393,31 @@ mod tests {
         );
         store.delete().expect("delete app data test identity");
         assert!(store.load().expect("confirm deletion").is_none());
-        fs::remove_dir_all(unique_directory).expect("clean app data test directory");
+    }
+
+    #[test]
+    fn production_identity_reloads_private_app_data_for_signing_and_rejects_corruption() {
+        let app_data = TemporaryAppData::new("i2-09-signing-test");
+        let identity = initialize_production_identity(&app_data.path).expect("production identity");
+        let payload = b"registration-proof-payload";
+
+        let signature = Signature::from_bytes(&identity.sign(payload).expect("signature"));
+        let verifying_key =
+            VerifyingKey::from_bytes(identity.public_key()).expect("public verifying key");
+        verifying_key
+            .verify(payload, &signature)
+            .expect("valid device proof");
+
+        let reloaded =
+            initialize_production_identity(&app_data.path).expect("reloaded production identity");
+        assert_eq!(reloaded.public_key(), identity.public_key());
+
+        fs::write(app_data.path.join("device-identity-ed25519-v1"), [9_u8; 31])
+            .expect("corrupt stored identity");
+        let error = reloaded
+            .sign(payload)
+            .expect_err("corrupt signing identity");
+        assert_eq!(error.code(), DeviceIdentityErrorCode::CorruptStoredKey);
+        assert_eq!(error.to_string(), "device identity unavailable");
     }
 }

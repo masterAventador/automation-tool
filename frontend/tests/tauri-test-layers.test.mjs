@@ -32,6 +32,8 @@ test("WebdriverIO uses the embedded driver against a real Tauri binary", async (
   assert.match(wdioConfig, /autoDownloadEdgeDriver:\s*true/);
   assert.match(wdioConfig, /src-tauri[\\/]target[\\/]debug/);
   assert.match(wdioConfig, /browserName:\s*["']tauri["']/);
+  assert.match(wdioConfig, /e2e-tauri\/workbench\.spec\.ts/);
+  assert.doesNotMatch(wdioConfig, /e2e-tauri\/\*\*|control-plane\.spec\.ts/);
   assert.match(desktopSpec, /RPA 运营工作台/);
   assert.match(desktopSpec, /listWindows/);
 });
@@ -54,6 +56,7 @@ test("WDIO plugins and permissions are isolated from production", async () => {
   assert.equal(mainCapability, "main");
   assert.equal(testCapability.identifier, "wdio");
   assert.equal(testConfig.app.withGlobalTauri, true);
+  assert.deepEqual(testConfig.app.windows, [{ label: "main", visible: false }]);
   assert.ok(testCapability.permissions.includes("wdio:allow-list-windows"));
   assert.ok(testCapability.permissions.includes("wdio-webdriver:default"));
   await assert.rejects(readProjectFile("src-tauri/capabilities/wdio.json"), { code: "ENOENT" });

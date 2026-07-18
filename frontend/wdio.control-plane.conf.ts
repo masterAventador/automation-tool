@@ -2,7 +2,10 @@ import { resolve } from "node:path";
 
 import type { TauriCapabilities } from "@wdio/tauri-service";
 
-const binaryName = process.platform === "win32" ? "automation-tool-desktop.exe" : "automation-tool-desktop";
+const binaryName =
+  process.platform === "win32"
+    ? "automation-tool-desktop.exe"
+    : "automation-tool-desktop";
 const appBinaryPath = resolve("src-tauri/target/debug", binaryName);
 const capabilities: TauriCapabilities = {
   browserName: "tauri",
@@ -13,7 +16,7 @@ const capabilities: TauriCapabilities = {
 
 export const config: WebdriverIO.Config = {
   runner: "local",
-  specs: ["./e2e-tauri/workbench.spec.ts"],
+  specs: ["./e2e-tauri/control-plane.spec.ts"],
   maxInstances: 1,
   services: [
     [
@@ -32,7 +35,7 @@ export const config: WebdriverIO.Config = {
   ],
   capabilities: [capabilities],
   logLevel: "warn",
-  bail: 0,
+  bail: 1,
   waitforTimeout: 10_000,
   connectionRetryTimeout: 90_000,
   connectionRetryCount: 1,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTransportStartupCheck } from "../../app/startup";
 import { TauriControlPlaneTransport } from "../../platform/tauri/control-plane-transport";
@@ -10,15 +10,83 @@ const healthy: ControlPlaneHealth = {
   serviceVersion: "0.1.0",
 };
 
+const invoke = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
 describe("ControlPlaneTransport boundary", () => {
-  it("formal Tauri stub fails safely until the Rust operation is wired", async () => {
+  beforeEach(() => {
+    invoke.mockReset();
+  });
+
+  it("formal Tauri transport invokes only the fixed native health command", async () => {
+    invoke.mockResolvedValueOnce(healthy);
     const transport = new TauriControlPlaneTransport();
 
-    await expect(transport.checkHealth()).rejects.toMatchObject({
+    await expect(transport.checkHealth()).resolves.toEqual(healthy);
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledWith("check_control_plane_health");
+  });
+
+  it("maps native rejection to a fixed public error without reflecting its cause", async () => {
+    invoke.mockRejectedValueOnce({
+      code: "private-native-code",
+      message: "password=private-native-password",
+    });
+    const transport = new TauriControlPlaneTransport();
+
+    const request = transport.checkHealth();
+    await expect(request).rejects.toMatchObject({
       name: "ControlPlaneTransportError",
       code: "transport_unavailable",
       message: "Control Plane transport is unavailable",
       retryable: true,
+    });
+    await expect(request).rejects.not.toHaveProperty("cause");
+  });
+
+  it("rejects malformed native responses without treating protocol failures as retryable", async () => {
+    invoke.mockResolvedValueOnce({
+      status: "available",
+      serviceVersion: "0.1.0",
+      privateCredential: "atdc1.private",
+    });
+    const transport = new TauriControlPlaneTransport();
+
+    const request = transport.checkHealth();
+    await expect(request).rejects.toMatchObject({
+      code: "operation_unavailable",
+      retryable: false,
+      message: "Control Plane operation is unavailable",
+    });
+    await expect(request).rejects.not.toHaveProperty("cause");
+  });
+
+  it("honors cancellation without invoking native code when already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const transport = new TauriControlPlaneTransport();
+
+    await expect(
+      transport.checkHealth({ signal: controller.signal }),
+    ).rejects.toMatchObject({
+      code: "request_cancelled",
+      retryable: false,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("settles an in-flight health request as cancelled", async () => {
+    const controller = new AbortController();
+    invoke.mockImplementationOnce(() => new Promise(() => undefined));
+    const transport = new TauriControlPlaneTransport();
+
+    const request = transport.checkHealth({ signal: controller.signal });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({
+      code: "request_cancelled",
+      retryable: false,
     });
   });
 

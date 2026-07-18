@@ -2,6 +2,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const desktopE2EMode = "desktop-e2e";
+const controlPlaneE2EMode = "control-plane-e2e";
 
 export default defineConfig(({ mode }) => ({
   plugins: [
@@ -11,10 +12,16 @@ export default defineConfig(({ mode }) => ({
       transformIndexHtml: {
         order: "pre",
         handler(html) {
-          if (mode !== desktopE2EMode) {
+          if (mode !== desktopE2EMode && mode !== controlPlaneE2EMode) {
             return html;
           }
-          return html.replace("/src/main.tsx", "/src/test-tauri-main.ts");
+          if (mode === controlPlaneE2EMode) {
+            return html.replace(
+              "/src/main.tsx",
+              "/src/test-control-plane-main.ts",
+            );
+          }
+          return html.replace("/src/main.tsx", "/src/test-tauri-main.tsx");
         },
       },
     },

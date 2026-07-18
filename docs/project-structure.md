@@ -39,7 +39,8 @@ automation-tool/
 │   ├── backend-architecture.md
 │   ├── development-roadmap.md
 │   └── adr/                       # 后续重要架构决策
-├── scripts/                       # 跨工程生成、检查和打包脚本
+├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
+│   └── run_i2_09_acceptance.py   # 真实 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -72,12 +73,14 @@ frontend/
 │   ├── components/                # 真正跨 Feature 复用的 UI
 │   ├── api/
 │   │   ├── generated/             # 由 OpenAPI 生成，禁止手改
-│   │   ├── client.ts              # Control Plane API 客户端
-│   │   ├── events.ts              # 实时事件连接与投影
+│   │   ├── control-plane/         # 窄 Transport 接口与测试 Harness
+│   │   ├── client.ts              # 后续业务 API 客户端
+│   │   ├── events.ts              # 后续实时事件连接与投影
 │   │   └── query-client.ts
 │   ├── platform/
+│   │   ├── tauri/
+│   │   │   └── control-plane-transport.ts # 正式 Tauri invoke 适配器
 │   │   ├── types.ts               # PlatformAdapter 公共接口
-│   │   ├── tauri.ts               # 正式 Tauri 实现
 │   │   └── test-harness.ts        # 仅测试构建可用
 │   ├── schemas/                   # Zod 运行时校验
 │   ├── stores/                    # 少量纯客户端 Zustand 状态
@@ -92,6 +95,7 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
+│   │   ├── control_plane.rs       # 固定 origin、operation allowlist 与凭据注入
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
@@ -101,13 +105,15 @@ frontend/
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
 │   ├── capabilities/              # 正式最小权限
 │   ├── tauri.conf.json
-│   └── tauri.test.conf.json       # 仅测试驱动权限
+│   ├── tauri.test.conf.json       # 后台隐藏的通用桌面测试配置
+│   └── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
 ├── public/
 ├── package.json
 ├── pnpm-lock.yaml
 ├── vite.config.ts
 ├── playwright.config.ts
 ├── wdio.conf.ts
+├── wdio.control-plane.conf.ts
 ├── tsconfig.json
 └── README.md
 ```

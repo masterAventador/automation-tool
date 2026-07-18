@@ -55,13 +55,13 @@
 | 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
-| 前端 Transport | `✅` 窄 health 契约、固定安全错误、正式 Tauri stub、测试 Harness handler 和启动适配已验证；真实 Rust 网络桥未开始 |
+| 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
 | UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
 | 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
-| 本地/云端服务 | `⬜` 未启动、未部署 |
+| 本地/云端服务 | `⬜` 开发验收会临时启动并清理本地服务；尚无常驻环境，未部署云端 |
 
 ## 4. 全局完成门禁
 
@@ -159,7 +159,7 @@
 | I2-06 | 设备凭据签发 | 凭据版本、吊销、轮换、最小 scope；数据库不存明文私钥 | I2-05 | ✅ 已完成 |
 | I2-07 | 短期设备 Session | 长期凭据换短期能力；过期、时钟偏差和吊销测试 | I2-06 | ✅ 已完成 |
 | I2-08 | Rust App 私有存储 | `app_data_dir` 读写/替换/删除设备凭据；权限拒绝和存储损坏受控失败 | I2-04,I2-07 | ✅ 已完成 |
-| I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；真实 Tauri App 调用 Health/注册/凭据/Session；禁止任意 URL 代理 | I2-08,F1-11 | ⬜ 未开始 |
+| I2-09 | Rust 网络桥 | operation allowlist、凭据注入、关联 ID；真实 Tauri App 调用 Health/注册/凭据/Session；禁止任意 URL 代理 | I2-08,F1-11 | ✅ 已完成 |
 | I2-10 | Executor v1 Envelope | Pydantic 判别联合、version/message/deadline/idempotency/sequence | I2-01 | ⬜ 未开始 |
 | I2-11 | 协议 Schema/Fixtures | 有效/无效样例覆盖未知字段、敏感数据、非法时间和枚举 | I2-10 | ⬜ 未开始 |
 | I2-12 | Rust/TS 协议一致性 | 三语言回放同一 fixtures，结论一致 | I2-11,F1-11 | ⬜ 未开始 |
@@ -855,10 +855,25 @@
 - 文档：同步项目规则、根/Frontend README、竞品分析中的我方方案、前后端架构、工程结构、本路线图快照、任务状态、完成记录和当前下一步；明确密钥与长期凭据只存 App 私有目录且不使用系统钥匙串
 - 遗留：I2-09 通过正式 Rust 网络桥把注册响应、凭据轮换/吊销和 Session 换票接到该仓库，并由真实测试版 Tauri App 请求真实隔离后端；此前 Health/注册/凭据/Session 的服务端证据不能替代这次纵向验收
 
+### I2-09 Rust 网络桥
+
+- 状态：✅ 已完成
+- 日期：2026-07-18
+- 提交：本任务提交
+- RED：先新增 Rust/React 网络边界契约，因 `reqwest`、封闭 operation、正式 Tauri invoke 和响应解析器不存在而失败；随后真实 Tauri 纵向契约因专用配置、WDIO 用例和隔离编排脚本不存在而失败。首轮真实 App 又准确暴露生产前端未装载 WDIO 测试插件、响应凭据未做 canonical 校验、Session 时间倒序仍被接受，以及通用 WDIO glob 误运行专用用例，逐项补失败测试后修复
+- GREEN：Backend 全量 315 项通过且语句/分支覆盖率 100%，uv lock、Ruff 和严格 Mypy 通过；Frontend 23 项 Node 契约、29 项 Vitest、3 项 Playwright、OpenAPI 漂移、ESLint、严格 TypeScript 和生产资产边界通过；默认、`desktop-e2e`、`control-plane-e2e` 三种 Rust 配置各通过 29 项库测试和 2 项配置测试，Rustfmt 与三种配置 warnings-as-errors 编译通过；通用后台 Tauri 冒烟和专用真实后端纵向用例各 1 项通过
+- 正式链路：生产 `main.tsx` 组合真实 `TauriControlPlaneTransport`，经 Tauri invoke 调用正式 Rust Health Command；Rust `reqwest` 客户端使用固定 `http://127.0.0.1:8765` origin 和封闭 allowlist，覆盖 Health、注册 challenge/complete、凭据轮换/吊销和两种 Session 换票，不接受 React 传入 URL、路径、Header 或 bearer。请求禁止系统代理与重定向，连接/总超时为 3/10 秒，响应体上限 64 KiB，并验证关联 ID、状态、JSON content type、`no-store`、规范 UUIDv4、UTC 时间和 opaque 格式
+- 凭据边界：注册签名从正式 `ProductionDeviceIdentity` 按需读取 App 私有身份；初始/轮换 `atdc1` 只进入 Rust `DeviceCredentialVault` 并原子替换，吊销后删除；短期 `atds1` 只进入 Rust `Zeroizing` 缓冲。Bootstrap、设备私钥、长期凭据和 Session 都没有 React、序列化或通用 IPC 读写面，错误只暴露固定类别且不携带 cause/输入
+- 生产同路径验收：`uv run python ../scripts/run_i2_09_acceptance.py` 以随机密码/端口启动真实 PostgreSQL 18.4、完整 Alembic 链和真实 FastAPI，再由测试版真实 Tauri/WKWebView 从正式 React 入口完成 Health → 注册 → `app.control-plane` Session → 轮换 → `executor.connect` Session → 吊销；最终核对 App 身份公钥、challenge 已消费、v1/v2 凭据为 rotated/revoked、两张 Session 已撤销且 App 私有目录不再保留长期凭据
+- 后台测试：通用和专用 Tauri 测试配置都把 `main` 窗口设为 `visible=false`，验收仅在后台运行，不弹窗、不抢占前台；production 配置仍正常可见。embedded provider 成功用例仍会输出其已记录的外部 `tauri-driver` 误检查、隐藏窗口聚焦和会话后空 mock 清理诊断噪声，不安装未使用驱动，也不影响真实 WKWebView 结果
+- 清理：验收结束确认 8765/1420 无监听、无 Tauri/uvicorn 进程、无 I2-09 容器，并精确删除隔离 Compose 网络/卷和 `com.aventador.automationtool.i209acceptance` App 数据目录；未触碰正式 App 数据、开发库、浏览器 Profile 或云资源
+- 文档与 CI：同步项目后台测试规则、根/Frontend/Backend README、前后端架构、工程结构和本台账；Ubuntu Rust 门禁增加 `desktop-e2e` 与 `control-plane-e2e` 的 test/Clippy，仍只读、不部署、不读取 secret
+- 遗留：I2-10 开始定义 Executor v1 Envelope；I2-13 才实现 Executor WebSocket 认证，SSE/任务业务 API 和 Demo HTTPS 签名 Profile 随对应台账任务接入，不能把本任务的 local Health/认证链路外推成 RPA 已可用
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `I2-09`：实现 Rust 网络桥，并由真实测试版 Tauri App 调用 Health、注册、凭据和 Session 接口；
-2. `I2-10`：定义 Executor v1 Envelope，并建立严格版本、时限、幂等和序号边界；
+1. `I2-10`：定义 Executor v1 Envelope，并建立严格版本、时限、幂等和序号边界；
+2. `I2-11`：为协议建立跨语言 Schema 与有效/无效 fixtures；
 3. 按台账顺序持续执行 Wave 2、Wave 3 和 Wave 4，不在单个工程任务后停止。
