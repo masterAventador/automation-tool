@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 3 已完成，Wave 4 已推进到正式包安全审计 `E4-15`。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 3 已完成，Wave 4 的 macOS 工程与正式包门禁已跑通，正在进入 Wave 5 外部浏览器运行时。
 
 ## 第一阶段
 
@@ -82,6 +82,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Local Executor 已有锁定 PyInstaller 构建依赖和确定性 `onedir` spec；macOS 冻结入口已在无项目 Python 的 PATH 下完成 bootstrap 拒绝与真实 WebSocket 连接失败冒烟，构建分析未包含 Playwright。macOS/Windows 使用同一只读 GitHub 矩阵定义且不上传或发布产物；当前 Windows job 因 GitHub 账户 Billing/Actions spending limit 未获 runner，保留待设备验收；
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Python fixture 已实测，Windows 原生 runner 仍受 GitHub Billing 阻塞，保留待验收；
+- E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App，Windows 原生仍待 Hosted Runner 恢复；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；
 - React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件投影和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；“新建任务”提供受约束的抖音搜索曝光表单。运行详情展示权威状态、进度、事件时间线和已有 Action 结果，并通过四个固定 Rust operation 提交暂停、恢复、取消与紧停，最终仍以 Executor 事实收敛。正式 Local Executor 最小进程已能联网和健康退出，真实任务处理与 RPA 尚未实现；
 - 尚未部署任何服务或执行真实社交平台动作。

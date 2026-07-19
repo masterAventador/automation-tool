@@ -72,7 +72,7 @@ test("desktop CI builds and smokes both supported desktop platforms", async () =
   assert.match(workflow, /runner:\s*\[macos-latest, windows-latest\]/);
   assert.match(workflow, /runs-on:\s*\$\{\{\s*matrix\.runner\s*\}\}/);
   assert.match(workflow, /fail-fast:\s*false/);
-  assert.match(workflow, /pnpm tauri build --debug --no-bundle/);
+  assert.match(workflow, /python \.\.\/scripts\/run_e4_15_acceptance\.py/);
   assert.match(workflow, /pnpm test:tauri/);
   assert.match(workflow, /pnpm check:production-boundaries/);
   assert.match(workflow, /timeout-minutes:\s*45/);

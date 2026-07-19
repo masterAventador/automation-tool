@@ -16,6 +16,8 @@ name = "automation_tool_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
+base64 = "=0.22.1"
+ed25519-dalek = "=3.0.0"
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]

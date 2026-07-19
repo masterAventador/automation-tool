@@ -266,6 +266,10 @@ E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.pa
 
 E4-14 专用配置只在 `control-plane-e2e` 编译中允许 runner 注入规范动态 loopback origin，并只在该特性注册真实 OS crash/hang 与正常退出验收 Command；默认和 `desktop-e2e` 构建没有这些入口。真实链路发现首个健康心跳为 15 秒而原启动预算为 10 秒，现将 App 组合根启动预算固定为 30 秒。生产 Tauri event loop 在 `RunEvent::ExitRequested` 或 `RunEvent::Exit` 上显式调用唯一 Platform service 停止 Executor，Manager Drop 仍是兜底，不能依赖测试驱动杀进程触发析构。验收核对 App 私有稳定 UUID、SQLite v1 identity、Unix 权限和凭据不入库；所有服务、进程、端口与数据均按本次专属标识清理。
 
+E4-15 把测试隔离从源码约束扩展到实际 release 字节。`build.rs` 在 `PROFILE=release` 时先验证编译期 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY` 是 canonical 32 字节、有效且非弱 Ed25519 公钥，失败发生在 `tauri_build::build()` 之前且错误不回显输入；公开开发 fixture key 只存在于 debug 分支。生产二进制审计同时读取无默认特性的 Cargo 依赖树、正式 Tauri 配置和 Vite 资产，拒绝 WDIO/WebDriver、验收 Command、测试 origin/标识/Sidecar、Harness、开发验证公钥和 1420 调试端口，并要求实际制品包含预期发布公钥。
+
+真实 release 审计最初发现 `tauri.conf.json` 的 `devUrl`/devCSP 即使 release 不使用仍会进入二进制，因此现已拆到只由 `pnpm tauri:dev` 显式合并的 `tauri.dev.conf.json`。自动化配置继续只用于各自 `--config` 测试构建；正式配置保持唯一可见主窗口、`withGlobalTauri=false`、唯一 `main` Capability 与生产 CSP。E4-15 临时 release target 每次唯一且结束删除，不启动 App、不绑定端口。
+
 ## 7. 页面与导航
 
 MVP 导航：
@@ -461,6 +465,7 @@ I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临�
 - baseUrl 和允许域名进入签名构建 Profile；
 - Demo bootstrap 授权以限时、限环境方式注入，不写入源码或普通 Vite 环境变量；
 - 正式构建只包含 Tauri 入口，不发布 Vite 静态站点；
+- 正式配置不含 dev URL/devCSP；release 必须注入经构建脚本验证的 Executor 公钥并通过实际二进制审计；
 - Local Executor 随目标平台安装包构建、签名和版本锁定；
 - App、Executor 和 Control Plane 建立明确兼容矩阵与最小支持版本。
 

@@ -200,6 +200,8 @@ E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bo
 
 E4-14 已用唯一隐藏 Tauri App 经正式 Rust client 连接动态 loopback Control Plane，并以真实 PostgreSQL、短期 Session、WebSocket 和 signed PyInstaller Executor 验证启动、异常恢复、挂起停止、再次启动及 App 退出清理。动态 origin 和 OS 故障注入只存在于 `control-plane-e2e` 编译，不改变服务端生产协议或部署拓扑；生产仍由固定 Profile/BaseUrl 连接独立部署的同一 Control Plane。最终数据库只出现 `app.control-plane` 与 `executor.connect` 两类最小能力，秘密不进入 Executor SQLite 或服务端日志。
 
+E4-15 不改变 Control Plane 协议或部署边界。桌面 release 在打包前强制绑定非开发 Executor 验证公钥，并对实际二进制/依赖树排除验收 Command、测试 origin、WebDriver 和调试端口；因此服务端不能通过配置把测试能力重新打开。正式公钥是公开信任根，不是签发私钥或设备秘密；验收公钥只进入随即删除的临时制品，真实发布仍必须由打包流水线注入对应发布 signer 的公钥。
+
 E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-diagnostics-v1` fixtures，固定清除凭据/Cookie、URL userinfo/query、data/file URL、私有路径和控制/Bidi 字符。该模块为后续 Executor 结构化安全消息提供单一规则，但不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。Python 当前正式 CLI 仍只输出既有固定错误，不新增任意异常或秘密日志。
 
 E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在正式 CLI 联网前打开。固定 `PRAGMA user_version=1` 迁移一次创建 identity、commands、attempt checkpoints、outbox 四表；数据库绑定唯一 Installation/Executor，未来版本、缺表/损坏、身份错绑、symlink/reparse point、宽权限、非普通文件和打开 identity 变化全部 fail closed。命令以 message ID、idempotency key、32 字节意图 SHA-256 和 Attempt 连续 sequence 去重；checkpoint 以 revision/CAS 和单调 event sequence 更新；outbox 只接受正式 `TaskCommandResultEnvelope`/`TaskEventEnvelope` 并保留精确 wire 重放身份。SQLite 不保存 bootstrap Session、本机会话、Cookie、平台登录态、密钥或任意配置，不调用系统钥匙串，也不替代云端 PostgreSQL 权威状态。
@@ -733,7 +735,7 @@ internal
 ```text
 PostgreSQL: Docker Compose
 Control Plane: uv + FastAPI reload
-Tauri App: pnpm tauri dev
+Tauri App: pnpm tauri:dev
 Local Executor: uv 源码模式或测试构建
 ```
 

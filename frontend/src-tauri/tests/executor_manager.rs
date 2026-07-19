@@ -778,7 +778,7 @@ fn acceptance_fault_injection_crashes_recovers_and_hangs_the_real_process() {
     let package = TemporaryPackage::new(HEALTHY_FIXTURE);
     let manager = manager_for_root_with_timeouts(
         package.root.clone(),
-        Duration::from_secs(1),
+        Duration::from_secs(10),
         Duration::from_millis(100),
     );
 

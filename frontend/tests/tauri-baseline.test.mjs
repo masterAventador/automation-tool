@@ -19,12 +19,19 @@ test("Tauri v2 is the only desktop runtime entry", async () => {
 });
 
 test("desktop window consumes only loopback Vite or bundled assets", async () => {
+  const packageJson = JSON.parse(await readProjectFile("package.json"));
   const config = JSON.parse(await readProjectFile("src-tauri/tauri.conf.json"));
+  const devConfig = JSON.parse(await readProjectFile("src-tauri/tauri.dev.conf.json"));
 
-  assert.equal(config.build.devUrl, "http://127.0.0.1:1420");
+  assert.equal(config.build.devUrl, undefined);
+  assert.equal(config.build.beforeDevCommand, undefined);
+  assert.equal(config.app.security.devCsp, undefined);
   assert.equal(config.build.frontendDist, "../dist");
-  assert.equal(config.build.beforeDevCommand, "pnpm dev");
   assert.equal(config.build.beforeBuildCommand, "pnpm build");
+  assert.equal(devConfig.build.devUrl, "http://127.0.0.1:1420");
+  assert.equal(devConfig.build.beforeDevCommand, "pnpm dev");
+  assert.match(devConfig.app.security.devCsp["connect-src"], /127\.0\.0\.1:1420/);
+  assert.equal(packageJson.scripts["tauri:dev"], "tauri dev --config src-tauri/tauri.dev.conf.json");
   assert.deepEqual(config.app.windows, [
     {
       label: "main",

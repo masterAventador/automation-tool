@@ -63,6 +63,7 @@
 | Rust Executor package verifier | `🔍` macOS arm64 已用当前目标包与 Python 签名 fixture 验证签名、完整目录、平台/架构、SemVer 范围和防降级；Windows 原生代码已进入同一 CI，但 runner 仍受 GitHub Billing 阻塞 |
 | Executor stdin 认证 | `✅` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
 | Rust ExecutorManager | `🔍` macOS 已从公开 Rust 生命周期入口完成签名 PyInstaller onedir→stdin 认证→真实 Uvicorn→健康/停止证明全链路；单实例、并发启动、后台崩溃检测、两次重启预算、显式停止不重启和 fail closed 已验证，Windows 原生仍随 Billing 阻塞待验收 |
+| 正式桌面制品隔离 | `🔍` macOS release 实际二进制、正式资产/配置和无默认特性依赖树已确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed，Windows 原生仍待 runner |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -238,7 +239,7 @@
 | E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | 🔍 待验收 |
 | E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | 🔍 待 Windows 原生验收 |
 | E4-14 | Tauri 生命周期 E2E | 启动/调用/挂起/崩溃/重启/停止/退出清理 | E4-09,E4-13 | 🔍 待 Windows 原生验收 |
-| E4-15 | 正式包测试能力审计 | 生产包不含 WebDriver、测试命令、测试 Sidecar 或调试端口 | E4-14 | ⬜ 未开始 |
+| E4-15 | 正式包测试能力审计 | 生产包不含 WebDriver、测试命令、测试 Sidecar 或调试端口 | E4-14 | 🔍 待 Windows 原生验收 |
 
 ## 10. Wave 5：外部浏览器与抖音登录
 
@@ -1582,10 +1583,28 @@
 - 文档：同步根/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份 implementation plan
 - 后续：E4-15 审计正式包不含 WebDriver、验收 Command、测试 Sidecar、测试 origin 或调试端口，并固化 release 验证公钥 fail-closed 边界
 
+### E4-15 正式包测试能力审计
+
+- 状态：🔍 待 Windows 原生验收；macOS production-mode Tauri release 实际二进制与依赖树审计通过，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：不能只凭 Rust `cfg`、源码扫描或 debug build 推断安全；必须在实际 release 制品上证明没有 WebDriver、验收 Command、测试 Executor/Sidecar、测试 origin/标识、Harness 或调试端口，并保证发布 Executor 验证公钥在打包前 fail closed
+- RED：新增制品审计测试先因 `audit-production-package.mjs` 不存在而失败；发布公钥测试准确证明原 `build.rs` 只调用 `tauri_build::build()`；正式编排测试再因 runner 不存在而失败。首轮真实 release 随后抓到 `tauri.conf.json` 中未使用的 `http://127.0.0.1:1420` 仍被编入二进制，说明源码特性检查不能替代制品扫描
+- 发布公钥：`build.rs` 仅在 Cargo release Profile 读取编译期 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY`，在 `tauri_build::build()` 前拒绝缺失、非 canonical Base64URL、非 32 字节、无效或 weak Ed25519 key，固定错误不回显输入。debug 可继续信任公开开发 fixture；实际 release 审计同时拒绝该开发公钥的编码和原始字节，并要求制品确实包含本次预期发布公钥
+- 配置隔离：正式 `tauri.conf.json` 删除 `beforeDevCommand`、`devUrl` 和 devCSP；它们只存在于 `tauri.dev.conf.json`，`pnpm tauri:dev` 固定展开为带该 `--config` 的开发命令。自动化各自继续显式合并专用隐藏配置，不能污染正式窗口、Capability 或 CSP
+- 制品审计：`frontend/scripts/audit-production-package.mjs` 扫描真实 release binary、正式 Vite `dist`、正式 Tauri 配置和 `cargo tree --locked --edges normal --no-default-features`；拒绝 WDIO/WebDriver 依赖/标记、全部验收 Command、E2E 环境名、测试 App/build ID、测试资源/Sidecar、Harness、开发验证公钥和 1420 调试 URL，同时锁定唯一 `main` Capability、`withGlobalTauri=false`、可见产品窗口与生产 CSP
+- 正式编排：`scripts/run_e4_15_acceptance.py` 使用唯一 `automation-tool-e415-target-*` 临时 Cargo target。先分别执行缺公钥和畸形公钥的 `cargo check --release` 并核对精确安全失败，再以与开发 signer 不同的验收专用公开公钥执行 `pnpm tauri build --no-bundle`，审计实际 binary 后由 TemporaryDirectory 删除全部临时制品；不保存私钥、不启动 App、不监听端口、不上传产物
+- 真实发现与稳定性：修复 1420 泄漏后同一真实 release 审计通过。全量 `control-plane-e2e` 并发测试曾让故障注入 fixture 的 1 秒测试启动预算超时；单线程原测试立即通过，随后把仅测试的启动预算提高到 10 秒并重跑整套 93 项通过，未改生产 30 秒预算，也没有以单项重跑掩盖不稳定
+- 门禁：E4-15 正式 release 编排通过；Frontend 56 项 Node 契约、119 项 Vitest、5 项 Playwright、ESLint、严格 TypeScript、API 和 production boundary 全绿；Rust 默认/`desktop-e2e` 各 92 项、`control-plane-e2e` 93 项通过，三套 Clippy `-D warnings` 与 Rustfmt 全绿；Python runner Ruff、格式与严格 Mypy 通过；唯一 `visible=false` 真实 Tauri/WKWebView 冒烟 1 项通过
+- 隔离与清理：任务未启动 Backend、PostgreSQL、Docker 或业务端口；Playwright 前先确认 automation-tool 专属 1420 空闲，结束后再次确认释放。release target 每次唯一并删除；隐藏 Tauri 冒烟结束确认无 App/WebDriver 进程，正式 Vite 资产已恢复，其他项目容器、端口和文件均未读取或修改
+- Windows：相同 runner、纯 Node binary scanner、Cargo tree 和 release build 已接入只读 macOS/Windows Desktop matrix；GitHub Hosted Windows 仍因账户 Billing/Actions spending limit 未启动，Windows PE 字节、可执行路径与 runner 原生结果不以 macOS 冒充，任务保持 `🔍`
+- 文档：同步根/Frontend README、前后端架构、工程结构、开发命令、CI 与唯一开发台账；没有新增第二份 implementation plan
+- 后续：B5-01 审计旧 `browser_session`，锁定只迁移私有 Profile/状态机/清理语义并排除旧账号、RBAC、Cookie Vault 与聚合运行时
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-15`：审计正式包不含 WebDriver、测试命令、测试 Sidecar、测试 origin 或调试端口，并固化发布验证公钥边界；
-2. `B5-01`：进入 Wave 5，建立外部浏览器运行时接口与平台 Profile 边界；
-3. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-15～Wave 10 的无设备依赖任务。
+1. `B5-01`：审计旧 `browser_session`，建立当前外部浏览器/Profile/Session 迁移与删除清单；
+2. `B5-02`：实现 macOS Chrome/Edge 受信发现与路径失效失败矩阵；
+3. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
