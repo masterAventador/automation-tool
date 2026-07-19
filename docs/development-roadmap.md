@@ -280,7 +280,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | ⬜ 未开始 |
+| D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | 🟩 完成 |
 | D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | ⬜ 未开始 |
 | D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | ⬜ 未开始 |
 | D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | ⬜ 未开始 |
@@ -1881,10 +1881,24 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 Wave 6 `D6-01` 抖音页面版本模型；B5-15 真实账号 App 双重启证据在独立登录 Profile 再次可用时补跑，不阻塞无账号任务
 
+### D6-01 抖音页面版本模型
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；新增 41 个版本模型用例准确失败于 `page_version` 生产模块不存在，没有先写实现或把既有 Session selector version 冒充成搜索页面版本
+- 单一模型：新增 Executor-only `douyin.web.v1` 封闭模型，版本、入口与 evidence 均为 `StrEnum`，合法观察只能是 v1 + `home/session_probe/search_results` 的精确组合；`unknown` 只能携带 `origin_invalid/entry_unknown/search_route_invalid`，伪造版本、入口或 evidence 组合在对象创建阶段拒绝
+- 已知入口：首页只接受官方 canonical `/`，Session 入口只接受 `/user/self`，搜索结果只接受 `/search/<canonical percent-encoded term>?type=general`。共同要求精确 HTTPS `www.douyin.com`、无 userinfo、端口仅默认/443、无 fragment、受限 URL 长度；B5-09/B5-10 的 probe URL 改为从该唯一模型导入，不再维护第二份字符串
+- 失败关闭：空值、非字符串、控制/Bidi、HTTP、裸域/伪域、userinfo、异常端口、未知页面、首页/Session 额外查询、空搜索词、多层路径、非法 UTF-8/percent escape、非 canonical 小写转义、超长、Bidi 搜索词、未知/重复 query 全部投影 `unknown` 且 `circuit_open=true`；`require_entry()` 对 unknown 和预期入口不匹配统一抛出不反射输入的固定错误
+- 真实结构核查：使用生产 `BrowserRuntime`、系统 Chrome、一次性私有临时 Profile 对公开首页和 general 搜索 URL 做无头只读探测，只输出候选结构计数。当前空白 Profile 只能可靠确认官方 origin/route 和根节点，缺少足以宣称可交互页面版本的 DOM 锚点；因此 D6-01 如实只建立严格 route contract，`#root` 不算可操作证据，具体 DOM 版本锚点和页面对象由 D6-02 继续 RED→GREEN
+- 边界：模型不导入 Playwright、Control Plane、Task 领域、数据库或网络客户端，不读取正文、Cookie、storage state、账号、Profile 或任意查询值；观察和错误 `repr/str` 不回显源 URL。页面版本继续只属于 Python Local Executor，不进入任务定义、WebSocket、Tauri IPC 或 React
+- 故障闭环：首次全局 Node 契约准确发现 B5-09/B5-10 两条旧断言仍要求 probe URL 字面量留在 `session.py`。没有复制字符串回去放宽唯一来源，而是把契约升级为同时验证 Session 只导入中央常量、URL/`douyin.web.v1` 只存在于 `page_version.py`；原参数重跑 72 项契约全绿
+- 测试：聚焦版本模型 110 条语句/30 个分支覆盖率 100%；Backend 全量 `1035 passed, 4 skipped in 86.61s`，6480 条语句/1306 个分支覆盖率 100%；Ruff/格式 215 个文件、严格 Mypy 199 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 72 项 Node 契约、132 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-02`，在该 v1 route contract 上集中封装搜索入口、结果列表、弹窗和登录跳转；任何 DOM 锚点不足或冲突继续 unknown/fail closed
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-01`：建立抖音页面版本模型、已知入口与未知版本 fail-closed 边界；
+1. `D6-02`：在 `douyin.web.v1` 上集中封装搜索入口、结果列表、弹窗和登录跳转；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。

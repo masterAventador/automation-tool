@@ -8,10 +8,10 @@ from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_version import DOUYIN_SESSION_PROBE_URL
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 DOUYIN_SESSION_SELECTOR_VERSION = "douyin.session.v1"
-DOUYIN_SESSION_PROBE_URL = "https://www.douyin.com/user/self"
 _MAX_PAGE_URL_CHARACTERS = 2048
 
 _RISK_SELECTORS = (

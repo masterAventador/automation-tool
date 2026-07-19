@@ -274,7 +274,7 @@ backend/
 │       │   ├── rpa/
 │       │   │   ├── base/          # 平台 Adapter、动作和页面契约
 │       │   │   ├── browser/       # Playwright、Profile 和页面证据
-│       │   │   ├── douyin/        # MVP 抖音实现；页面健康、扫码状态机和最小健康上报
+│       │   │   ├── douyin/        # MVP 抖音实现；v1 页面路由、Session、扫码和最小健康上报
 │       │   │   ├── xiaohongshu/   # P1.3
 │       │   │   ├── kuaishou/      # P1.5
 │       │   │   ├── wechat_channels/
@@ -339,6 +339,8 @@ B5-13/B5-14 的服务端查询和 logout prepare 落在 `control_plane/api/platf
 B5-15 的 `scripts/run_b5_15_acceptance.py` 使用另一个唯一 App 标识和同一 AppData 连续运行四次隐藏 App，逐轮复验 Profile marker/device/inode、Executor/Chrome 退出及服务端权威状态。`backend/tests/fixtures/automation-tool-executor-b515.spec` 只构建独立签名的验收 Executor，固定路由官方 probe origin 的 healthy/expired/risk 页面事实；正式 `backend/automation-tool-executor.spec` 不包含该入口。首次健康 epoch 的生产修复位于 `executor/ledger.py`，测试夹具不修改生产 detector、flow、Rust Manager、Tauri Gateway 或 Control Plane。
 
 B5-16 的隐藏配置、WDIO spec 与 `scripts/run_b5_16_acceptance.py` 只协调一个正式页面调用期间的活跃浏览器审计。spec 只写临时 ready/release 信号，不读取 Profile；runner 从 current marker 在内部解析私有目录，核对唯一 Chrome 根和完整后代树的 `--user-data-dir`，再用 `lsof` 验证实际打开文件没有触碰默认 Chrome/Edge User Data，所有路径和 UUID 都不输出。`frontend/tests/default-browser-profile-isolation.test.mjs` 递归扫描生产源码并锁定 Rust→Executor→Playwright 唯一 Profile 链；验收配置、信号和审计代码不进入发布包。
+
+D6-01 的 `executor/rpa/douyin/page_version.py` 是平台页面 route/version 唯一来源，不是 Task 领域模型或通用 URL parser。它封闭定义 `douyin.web.v1`、首页/Session/search 三个入口、固定非敏感 evidence 和 `require_entry()` 熔断；B5-09 的 probe URL 已从该文件导入。模块不依赖 BrowserRuntime/Playwright、Control Plane、数据库或协议，D6-02 页面对象只能消费该模型，不能复制 origin/path/version 判断。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 

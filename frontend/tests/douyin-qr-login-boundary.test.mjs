@@ -9,9 +9,10 @@ async function readRepositoryFile(path) {
 }
 
 test("B5-10 opens a dedicated external window and rechecks only real page facts", async () => {
-  const [login, session, runtime, protocol, native] = await Promise.all([
+  const [login, session, pageVersion, runtime, protocol, native] = await Promise.all([
     readRepositoryFile("backend/src/automation_tool/executor/rpa/douyin/login.py"),
     readRepositoryFile("backend/src/automation_tool/executor/rpa/douyin/session.py"),
+    readRepositoryFile("backend/src/automation_tool/executor/rpa/douyin/page_version.py"),
     readRepositoryFile("backend/src/automation_tool/executor/browser_runtime.py"),
     readRepositoryFile("contracts/protocol/executor-v1.schema.json"),
     readRepositoryFile("frontend/src-tauri/src/lib.rs"),
@@ -33,7 +34,8 @@ test("B5-10 opens a dedicated external window and rechecks only real page facts"
   assert.match(login, /\.open_window\(\)/u);
   assert.match(login, /DouyinSessionDetector/u);
   assert.match(login, /def recheck\(self\)/u);
-  assert.match(session, /https:\/\/www\.douyin\.com\/user\/self/u);
+  assert.match(session, /page_version import DOUYIN_SESSION_PROBE_URL/u);
+  assert.match(pageVersion, /https:\/\/www\.douyin\.com\/user\/self/u);
   assert.match(protocol, /session\.login_required/u);
   assert.match(runtime, /headless:\s*bool\s*=\s*False/u);
   assert.match(runtime, /headless=request\.headless/u);
