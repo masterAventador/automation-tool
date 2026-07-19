@@ -233,7 +233,7 @@
 | E4-07 | Rust ExecutorManager | 固定 start/status/stop Rust 生命周期，单实例和并发线性化 | E4-05,E4-06 | 🔍 待验收 |
 | E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | 🔍 待验收 |
 | E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | 🔍 待验收 |
-| E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | ⬜ 未开始 |
+| E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | 🔍 待验收 |
 | E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | ⬜ 未开始 |
 | E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | ⬜ 未开始 |
 | E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | ⬜ 未开始 |
@@ -1488,9 +1488,27 @@
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：E4-10 在现有 stderr reader 上实现凭据/私有路径脱敏与行数、单行、总大小三重限界；之后依次推进 E4-11～E4-15
 
+### E4-10 stderr 脱敏限界
+
+- 状态：🔍 待 Windows 原生验收；macOS 真实 stderr 行为通过，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：只从真实 Executor stderr 异步读取诊断，Rust 在信任边界再次脱敏并以 200 行、单行 4096 bytes、总计 64 KiB 三重上限保存在内存；超长/非法编码输入不能造成无界分配或以截断半段绕过秘密识别
+- RED：新增三端共享 `executor-diagnostics-v1` fixtures，Python 测试准确失败于正式 redactor 模块不存在；公开 Rust Manager 测试准确编译失败于没有 `diagnostics()`，Node 边界准确失败于缺少独立诊断模块。真实签名进程测试从 stderr 写入凭据、Cookie、URL 查询串、私有路径、控制字符及 400 行/超长行，不能以直接调用 redactor 或 Mock pipe 冒充通过
+- 流式读取：`read_bounded_diagnostic_line` 只使用 `BufRead::fill_buf/consume` 和固定 4096-byte Vec；无换行恶意输出会持续消费但不扩大缓冲。精确超过单行上限时丢弃内容并仅保留 `[TRUNCATED]`，非法 UTF-8 仅保留 `[REDACTED]`，避免先截断再脱敏导致半段令牌绕过；CRLF 只移除末尾 CR，内嵌控制/Bidi 字符统一为空格
+- 脱敏与一致性：根目录 14 组 `executor-diagnostics-v1` fixtures 覆盖 Authorization/Bearer、设备/本机会话 envelope、64 位本机令牌、敏感 JSON/assignment、抖音/平台 Cookie、URL userinfo/全部 query、file/data URL、macOS/Linux/Windows 私有路径与控制字符。Python `executor/diagnostics.py` 和 Rust `executor_diagnostics.rs` 逐字回放同一结果；Rust 不信任 Python，仍对所有原始 stderr 重做规则
+- 内存边界：Manager Core 持有唯一 `ExecutorDiagnostics`，首次启动和最多两次恢复共享同一滚动队列；每条先安全化再计 UTF-8 bytes，超过 200 行或 64 KiB 时从最旧项开始淘汰。公开 `diagnostics()` 只克隆安全行，锁失败返回既有固定 `ProcessUnavailable`，不返回原始 stderr、PID、路径、Session 或内部错误
+- 真实失败矩阵：第一项真实 signed Python 进程在 healthy 前从 stderr 写入全部共享 fixture，Manager 原入口最终逐行只返回 expected；第二项真实进程写 400 行含秘密的 1000-byte 诊断、一个 5000-byte 无秘密行和完成哨兵，最终同时满足行数、单行、总字节、秘密消失及固定超长占位。E4-07～E4-09 的并发启动、重启预算、超时和进程树 13 项继续通过
+- 正式路径与 App：Backend 锁定环境的真实 Manifest CLI→signed PyInstaller onedir→公开 Rust Manager→Uvicorn/Session/Registry 再次通过 `registered → heartbeat → unregistered`。本任务只新增 Rust 内部安全副本 API，没有 Tauri Command/React 页面，因此构建但不启动 App；E4-13 才装配固定诊断展示，E4-14 再由唯一隐藏 App 验收
+- 门禁：Manager 15 项普通测试通过、1 项 PyInstaller 编排项由专用脚本通过；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 3 协议 fixture + 14 安全配置，共 89 项全绿。Frontend 46 项 Node 契约、112 项 Vitest 全绿；Backend `856 passed in 77.62s`、4609 条语句/878 个分支 100%。正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App；Clippy all-targets/all-features、Rustfmt、ESLint、TypeScript、OpenAPI、production boundary、Ruff、Mypy 165 个源码文件和 uv lock 全绿
+- 凭据与持久化：原始 stderr 只在 OS pipe/有界 reader buffer 短暂存在，安全诊断只在 Manager 内存；不写仓库、普通配置、`app_data_dir` 或系统钥匙串，也不上传 Control Plane。Python/Rust fixtures 只含明确测试秘密，没有真实账号、Cookie 或设备凭据
+- Windows：诊断算法和 Node 静态边界已实现，但本机 Homebrew Rust 无 Windows 标准库，GitHub Hosted Runner 仍受 Billing/Actions spending limit；Windows signed PyInstaller stderr、CRLF、超长无换行和 Manager 恢复共享缓冲矩阵保持 `🔍`，不以 macOS结果冒充
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
+- 后续：E4-11 建立 Executor 本机 SQLite command/idempotency/checkpoint/outbox 最小账本与迁移，再由 E4-12 从真实 Control Plane 回放无副作用任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-10`：在现有 Manager stderr reader 上增加凭据/私有路径脱敏与行数、单行、总大小限界；
-2. E4-03/E4-05/E4-07/E4-08/E4-09 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-10～Wave 10 的无设备依赖任务。
+1. `E4-11`：建立 Executor 本机 SQLite command/idempotency/checkpoint/outbox 最小账本与迁移；
+2. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-11～Wave 10 的无设备依赖任务。

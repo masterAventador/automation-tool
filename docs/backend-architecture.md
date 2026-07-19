@@ -198,6 +198,8 @@ browser/desktop infrastructure
 
 E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、本机启动令牌、短期 `executor.connect` Session、Installation/Executor UUIDv4 和心跳间隔。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`；两个 Session 用途隔离并分别只驻留在秘密类型中，不进入 argv、环境、stderr 或异常。
 
+E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-diagnostics-v1` fixtures，固定清除凭据/Cookie、URL userinfo/query、data/file URL、私有路径和控制/Bidi 字符。该模块为后续 Executor 结构化安全消息提供单一规则，但不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。Python 当前正式 CLI 仍只输出既有固定错误，不新增任意异常或秘密日志。
+
 进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。当前任何 Task Command 或其他应用帧都 fail closed，不提前伪造 ACK/事件；E4-12 在本机幂等账本和监管完成后才接入无副作用命令回放。
 
 E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python。构建依赖只在 uv dev group，当前未加入 Python Playwright；macOS 本机已从冻结入口验证 bootstrap 与网络失败的固定退出契约，GitHub macOS/Windows 矩阵使用同一测试，但当前 Hosted Runner 因账户 Billing/Actions spending limit 在启动前被拒绝，因此 Windows 仍是明确待验收项。该 PoC 不承担目录 Manifest、签名、完整性或防降级，以上边界继续由 E4-04/E4-05 实现。

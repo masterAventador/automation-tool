@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "expected": "executor reconnect attempt=2",
+      "input": "executor reconnect attempt=2",
+      "name": "plain"
+    },
+    {
+      "expected": "request Authorization: [REDACTED]",
+      "input": "request Authorization: Bearer private-access-token",
+      "name": "authorization_header"
+    },
+    {
+      "expected": "response Cookie: [REDACTED]",
+      "input": "response Cookie: sid_tt=private; sessionid=hidden",
+      "name": "cookie_header"
+    },
+    {
+      "expected": "{\"access_token\":\"[REDACTED]\",\"password\":\"[REDACTED]\"}",
+      "input": "{\"access_token\":\"private-token\",\"password\":\"hunter2\"}",
+      "name": "json_secrets"
+    },
+    {
+      "expected": "local_session_token=[REDACTED] password=[REDACTED]",
+      "input": "local_session_token=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f password='hunter2'",
+      "name": "assignments"
+    },
+    {
+      "expected": "sid_tt=[REDACTED] web_session=[REDACTED]",
+      "input": "sid_tt=private-cookie web_session=hidden-cookie",
+      "name": "platform_cookies"
+    },
+    {
+      "expected": "session [REDACTED] proof [REDACTED]",
+      "input": "session atds1.private-session proof atlep1.private-proof",
+      "name": "credential_envelopes"
+    },
+    {
+      "expected": "digest [REDACTED]",
+      "input": "digest 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "name": "unlabelled_local_token"
+    },
+    {
+      "expected": "request=https://example.com/path?[REDACTED]#fragment",
+      "input": "request=https://example.com/path?token=private&next=/home/alice#fragment",
+      "name": "url_query"
+    },
+    {
+      "expected": "origin=https://[REDACTED]@example.com/path",
+      "input": "origin=https://alice:hunter2@example.com/path",
+      "name": "url_userinfo"
+    },
+    {
+      "expected": "paths [REDACTED] [REDACTED]",
+      "input": "paths /Users/alice/Library/App C:\\Users\\alice\\secret.txt",
+      "name": "private_paths"
+    },
+    {
+      "expected": "artifact [REDACTED]",
+      "input": "artifact file:///private/var/folders/zz/alice/capture.png",
+      "name": "file_url"
+    },
+    {
+      "expected": "image [REDACTED]",
+      "input": "image data:image/png;base64,cHJpdmF0ZQ==",
+      "name": "inline_data"
+    },
+    {
+      "expected": "unsafe   sequence",
+      "input": "unsafe\r\t‮sequence",
+      "name": "control_and_bidi"
+    }
+  ],
+  "fixtureVersion": "1"
+}

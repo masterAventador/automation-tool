@@ -102,6 +102,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hmac",
  "libc",
+ "regex",
  "reqwest",
  "semver",
  "serde",

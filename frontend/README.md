@@ -47,6 +47,8 @@ E4-08 在同一 Manager 内增加唯一命名 supervisor thread 和显式 `Execu
 
 E4-09 继续在同一 `executor_manager.rs` 内为每次启动建立独立 OS 进程容器。Unix 在 exec 前调用 `process_group(0)`，所有强制边界向负 PGID 发 `SIGKILL`；显式 stop 先让主进程提交认证 stopped proof，主进程退出后仍清理剩余后代。Windows 以 `CREATE_SUSPENDED` 消除挂 Job 前的派生竞态，配置并挂入 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Job Object 后才恢复主线程，失败即关闭/终止。真实签名进程生成的忽略 `SIGTERM` 孙进程已证明正常停止、挂起停止超时、启动超时、异常恢复和 Manager Drop 均无残留；macOS 通过，Windows 类型与行为待原生 runner。
 
+E4-10 的 `src-tauri/src/executor_diagnostics.rs` 是 stderr 的第二道信任边界。Manager 不使用 `lines()` 或 `read_to_end`，而是以 `fill_buf/consume` 流式排空；单行超过 4096 bytes 或非法 UTF-8 时只留固定占位，避免无界分配和截断秘密。有效行移除 Authorization/Bearer、设备/本机会话、Cookie、密码/私钥、URL userinfo/全部 query、data/file URL、macOS/Linux/Windows 私有路径及控制/Bidi 字符，然后以 200 行/64 KiB 滚动内存队列保留。`diagnostics()` 只返回安全副本，不含原始 stderr、PID 或 Session，也不写 App data/钥匙串。Python 与 Rust 共同回放根目录 14 组 fixtures；真实 signed Executor stderr 另行证明 Manager 原入口的脱敏和三重限界。Windows 实包 stderr 仍随 runner 待验收。
+
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。

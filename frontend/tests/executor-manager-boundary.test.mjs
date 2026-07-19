@@ -50,3 +50,24 @@ test("E4-09 isolates and terminates the complete Executor process tree on each p
   assert.match(cargo, /Win32_System_Threading/);
   assert.match(cargo, /Win32_System_Diagnostics_ToolHelp/);
 });
+
+test("E4-10 bounds and redacts stderr before diagnostics leave the Rust manager", async () => {
+  const [diagnostics, entry, manager, fixture] = await Promise.all([
+    readFile(new URL("src-tauri/src/executor_diagnostics.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/lib.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
+    readFile(
+      new URL("../contracts/fixtures/executor-diagnostics-v1.json", frontendRoot),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(entry, /mod executor_diagnostics;/);
+  assert.match(manager, /pub fn diagnostics/);
+  assert.match(diagnostics, /MAX_RETAINED_DIAGNOSTIC_LINES:\s*usize\s*=\s*200/);
+  assert.match(diagnostics, /MAX_RETAINED_DIAGNOSTIC_BYTES:\s*usize\s*=\s*64\s*\*\s*1024/);
+  assert.match(diagnostics, /MAX_DIAGNOSTIC_LINE_BYTES:\s*usize\s*=\s*4096/);
+  assert.match(diagnostics, /\[TRUNCATED\]/);
+  assert.doesNotMatch(manager, /BufReader::new\(stderr\)\.lines\(\)/);
+  assert.equal(JSON.parse(fixture).fixtureVersion, "1");
+});

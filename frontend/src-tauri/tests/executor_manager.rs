@@ -151,6 +151,68 @@ subprocess.Popen([sys.executable, "-c", descendant_source, {marker_path}], stdin
     )
 }
 
+fn diagnostic_fixture(before_healthy: &str) -> String {
+    format!(
+        r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, signal, sys, time
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+stopping = False
+def proof(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    return "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def emit(event):
+    print(json.dumps({{"authenticationProof": proof(event), "event": event, "protocolVersion": "1.0"}}, separators=(",", ":")), flush=True)
+def stop(_signum, _frame):
+    global stopping
+    stopping = True
+signal.signal(signal.SIGTERM, stop)
+{before_healthy}
+emit("executor.healthy")
+while not stopping:
+    time.sleep(0.01)
+emit("executor.stopped")
+"#,
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DiagnosticFixtureDocument {
+    fixture_version: String,
+    cases: Vec<DiagnosticFixtureCase>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiagnosticFixtureCase {
+    expected: String,
+    input: String,
+    name: String,
+}
+
+fn diagnostic_fixture_document() -> DiagnosticFixtureDocument {
+    serde_json::from_str(include_str!(
+        "../../../contracts/fixtures/executor-diagnostics-v1.json"
+    ))
+    .expect("strict diagnostic fixture")
+}
+
+fn wait_for_diagnostic(manager: &ExecutorManager, expected: &str) -> Vec<String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let diagnostics = manager.diagnostics().expect("safe diagnostics");
+        if diagnostics.iter().any(|line| line == expected) {
+            return diagnostics;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "diagnostic reader did not retain the expected line"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn silent_process_tree_fixture(marker: &DescendantMarker) -> String {
     let marker_path = marker.path.to_string_lossy().replace('\'', "'\"'\"'");
     format!(
@@ -470,7 +532,7 @@ fn startup_timeout_terminates_the_complete_executor_process_tree() {
     let package = TemporaryPackage::new(&silent_process_tree_fixture(&marker));
     let manager = manager_for_root_with_timeouts(
         package.root.clone(),
-        Duration::from_secs(3),
+        Duration::from_secs(10),
         Duration::from_secs(1),
     );
 
@@ -498,6 +560,56 @@ emit("executor.stopped")"#,
     drop(manager);
 
     marker.wait_for_exit(descendant_id);
+}
+
+#[test]
+fn real_executor_stderr_is_redacted_by_the_manager_before_diagnostics_are_exposed() {
+    let document = diagnostic_fixture_document();
+    assert_eq!(document.fixture_version, "1");
+    let inputs = document
+        .cases
+        .iter()
+        .map(|case| case.input.clone())
+        .collect::<Vec<_>>();
+    let encoded_inputs = serde_json::to_string(&inputs).expect("diagnostic inputs");
+    let package = TemporaryPackage::new(&diagnostic_fixture(&format!(
+        "for line in {encoded_inputs}: print(line, file=sys.stderr, flush=True)"
+    )));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("start diagnostic fixture");
+    let diagnostics = wait_for_diagnostic(
+        &manager,
+        &document.cases.last().expect("last case").expected,
+    );
+    manager.stop().expect("stop diagnostic fixture");
+
+    assert_eq!(diagnostics.len(), document.cases.len());
+    for (actual, expected) in diagnostics.iter().zip(document.cases.iter()) {
+        assert_eq!(actual, &expected.expected, "{}", expected.name);
+    }
+}
+
+#[test]
+fn real_executor_stderr_retention_is_bounded_before_and_after_redaction() {
+    let package = TemporaryPackage::new(&diagnostic_fixture(
+        r#"for index in range(400):
+    print("token=secret-%s %s" % (index, "x" * 1000), file=sys.stderr, flush=True)
+print("y" * 5000, file=sys.stderr, flush=True)
+print("diagnostic-complete", file=sys.stderr, flush=True)"#,
+    ));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("start bounded diagnostics");
+    let diagnostics = wait_for_diagnostic(&manager, "diagnostic-complete");
+    manager.stop().expect("stop bounded diagnostics");
+
+    assert!(!diagnostics.is_empty());
+    assert!(diagnostics.len() <= 200);
+    assert!(diagnostics.iter().all(|line| line.len() <= 4096));
+    assert!(diagnostics.iter().map(String::len).sum::<usize>() <= 64 * 1024);
+    assert!(diagnostics.iter().all(|line| !line.contains("secret-")));
+    assert!(diagnostics.iter().any(|line| line == "[TRUNCATED]"));
 }
 
 struct LaunchCounter {

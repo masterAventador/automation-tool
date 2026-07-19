@@ -3,6 +3,7 @@
 use crate::executor_bootstrap::{
     ExecutorBootstrapErrorCode, ExecutorBootstrapInput, LocalExecutorEvent, LocalSessionToken,
 };
+use crate::executor_diagnostics::{ExecutorDiagnostics, MAX_DIAGNOSTIC_LINE_BYTES};
 use crate::executor_package::{ExecutorPackageVerifier, VerifiedExecutorPackage};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -214,6 +215,7 @@ struct ExecutorManagerCore {
     start_timeout: Duration,
     stop_timeout: Duration,
     restart_policy: ExecutorRestartPolicy,
+    diagnostics: Arc<ExecutorDiagnostics>,
     slot: Mutex<ExecutorManagerSlot>,
 }
 
@@ -262,6 +264,7 @@ impl ExecutorManager {
             start_timeout,
             stop_timeout,
             restart_policy,
+            diagnostics: Arc::new(ExecutorDiagnostics::default()),
             slot: Mutex::new(ExecutorManagerSlot {
                 lifecycle: None,
                 status: ExecutorManagerStatus::stopped(0),
@@ -300,7 +303,13 @@ impl ExecutorManager {
             .verify_current(&self.core.package_root)
             .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::PackageRejected))?;
         let status = ExecutorManagerStatus::running(&package, 0);
-        let running = spawn_executor(package, &launch, self.core.start_timeout, 0)?;
+        let running = spawn_executor(
+            package,
+            &launch,
+            self.core.start_timeout,
+            0,
+            Arc::clone(&self.core.diagnostics),
+        )?;
         slot.status = status.clone();
         slot.lifecycle = Some(ManagedExecutorLifecycle::Running(ManagedExecutor {
             process: running,
@@ -314,6 +323,13 @@ impl ExecutorManager {
         let mut slot = self.lock_slot()?;
         reconcile_supervision(&self.core, &mut slot)?;
         Ok(slot.status.clone())
+    }
+
+    pub fn diagnostics(&self) -> Result<Vec<String>, ExecutorManagerError> {
+        self.core
+            .diagnostics
+            .snapshot()
+            .map_err(|()| process_unavailable())
     }
 
     pub fn stop(&self) -> Result<ExecutorManagerStatus, ExecutorManagerError> {
@@ -578,6 +594,7 @@ fn spawn_executor(
     launch: &ExecutorLaunchConfiguration,
     start_timeout: Duration,
     restart_count: u8,
+    diagnostics: Arc<ExecutorDiagnostics>,
 ) -> Result<RunningExecutor, ExecutorManagerError> {
     let token = LocalSessionToken::generate()
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))?;
@@ -603,7 +620,7 @@ fn spawn_executor(
         let stdout = child.stdout.take().ok_or_else(process_unavailable)?;
         let stderr = child.stderr.take().ok_or_else(process_unavailable)?;
         let (lifecycle_events, stdout_thread) = spawn_stdout_reader(stdout);
-        let stderr_thread = spawn_stderr_drain(stderr);
+        let stderr_thread = spawn_stderr_drain(stderr, diagnostics);
         token
             .write_bootstrap(&mut stdin, &launch.bootstrap_input()?)
             .map_err(map_bootstrap_error)?;
@@ -656,11 +673,51 @@ fn spawn_stdout_reader(stdout: ChildStdout) -> (Receiver<Result<String, ()>>, Jo
     (receiver, thread)
 }
 
-fn spawn_stderr_drain(stderr: ChildStderr) -> JoinHandle<()> {
+fn spawn_stderr_drain(
+    stderr: ChildStderr,
+    diagnostics: Arc<ExecutorDiagnostics>,
+) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut stderr = stderr;
-        let _ = io::copy(&mut stderr, &mut io::sink());
+        let mut reader = BufReader::new(stderr);
+        while let Ok(Some(line)) = read_bounded_diagnostic_line(&mut reader) {
+            diagnostics.retain_raw_line(&line.bytes, line.truncated);
+        }
     })
+}
+
+struct BoundedDiagnosticLine {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+fn read_bounded_diagnostic_line(
+    reader: &mut impl BufRead,
+) -> io::Result<Option<BoundedDiagnosticLine>> {
+    let mut bytes = Vec::with_capacity(MAX_DIAGNOSTIC_LINE_BYTES);
+    let mut truncated = false;
+    let mut saw_input = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return if saw_input {
+                Ok(Some(BoundedDiagnosticLine { bytes, truncated }))
+            } else {
+                Ok(None)
+            };
+        }
+        saw_input = true;
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let content_bytes = newline.unwrap_or(available.len());
+        let remaining = MAX_DIAGNOSTIC_LINE_BYTES.saturating_sub(bytes.len());
+        let retained_bytes = content_bytes.min(remaining);
+        bytes.extend_from_slice(&available[..retained_bytes]);
+        truncated |= content_bytes > retained_bytes;
+        let consumed = newline.map_or(available.len(), |position| position + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(Some(BoundedDiagnosticLine { bytes, truncated }));
+        }
+    }
 }
 
 fn read_bounded_line(reader: &mut impl BufRead) -> Result<Option<String>, ()> {
@@ -838,6 +895,7 @@ fn reconcile_supervision(
                         &pending.launch,
                         core.start_timeout,
                         pending.restart_count,
+                        Arc::clone(&core.diagnostics),
                     )
                 });
             match restarted {
