@@ -249,6 +249,7 @@ backend/
 │       │   ├── __main__.py        # 源码模式与 PyInstaller 共用的模块入口
 │       │   ├── authentication.py  # 本机启动令牌校验、可清零 HMAC 事件证明
 │       │   ├── bootstrap.py       # 一次性 stdin bootstrap、端点/Session/身份严格校验
+│       │   ├── browser_runtime.py # 冻结 Playwright driver 启动显式系统浏览器的受限 primitive
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
 │       │   ├── ledger.py          # 本机 SQLite v1 命令/幂等/checkpoint/outbox 账本
@@ -313,7 +314,7 @@ T3-20 的 `FakeExecutorClient.run_reconnecting` 只扩展无副作用测试 Exec
 
 E4-02 的正式进程入口固定为 `automation-tool-executor`。`bootstrap.py` 只读一条受限 stdin JSON，`runtime.py` 发送 Executor v1 Hello/Heartbeat、消费 E4-12 正式任务帧并输出固定健康事件，`transport.py` 是正式进程和 Fake 客户端唯一共享的网络零件，`cli.py` 只装配账本/处理器、安装 SIGINT/SIGTERM 并映射固定退出码。真实集成测试从安装后的控制台脚本启动独立子进程，连接真实 Uvicorn/正式 Session/Registry 后再发信号退出；没有调用内部函数冒充进程验收，也没有引入旧 stdio 任务协议。PyInstaller、Tauri 监管、本机账本与无副作用协议回放现已分别由 E4-03、E4-07、E4-11、E4-12 接入。
 
-E4-03 使用 `automation-tool-executor.spec` 从同一 `executor/__main__.py` 构建 console `onedir`，不维护第二份 Python 入口。PyInstaller 只在 uv 开发依赖组锁定，正式运行依赖和 spec 均不包含 Playwright；集成测试从临时目录构建后清空 PATH，直接启动冻结可执行文件并验证 bootstrap 拒绝、WebSocket 不可用的固定退出契约和分析清单。`.github/workflows/desktop.yml` 已为 macOS/Windows 配置同一实包测试，只验证构建和启动，不上传、发布或签名产物；macOS 已在本机通过，Windows Hosted Runner 当前因 GitHub 账户 Billing/Actions spending limit 未启动，不能冒充目标平台已验收。目录签名与可信安装由 E4-04/E4-05 承接。
+E4-03 使用 `automation-tool-executor.spec` 从同一 `executor/__main__.py` 构建 console `onedir`，不维护第二份 Python 入口；其历史交付当时未加入 Playwright。B5-07 已把 Playwright 提升为正式运行依赖并由同一 spec 收集 Python driver，但不执行浏览器安装，正式目录不得出现 `.local-browsers` 或 Playwright Chromium/Firefox/WebKit 缓存。常规冻结入口继续验证 bootstrap 与网络失败契约；测试专用探针另从生产 `browser_runtime.py` 启动显式系统 Chrome/Edge，探针不进入正式 onedir。`.github/workflows/desktop.yml` 已为 macOS/Windows 配置同一实包测试，只验证构建和启动，不上传、发布或签名产物；macOS 已通过，Windows Hosted Runner 当前因 GitHub 账户 Billing/Actions spending limit 未启动，不能冒充目标平台已验收。目录签名与可信安装仍由 E4-04/E4-05 承担，正式浏览器进程所有权由 B5-08 承担。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 

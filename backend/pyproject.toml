@@ -9,6 +9,7 @@ dependencies = [
     "asyncpg",
     "cryptography",
     "fastapi",
+    "playwright",
     "pydantic",
     "pydantic-settings",
     "sqlalchemy[asyncio]",

@@ -210,7 +210,7 @@ E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在�
 
 `executor/command_processor.py` 不复用 FakeExecutor 内存状态。message/idempotency 命中同一意图时读取首次持久 outbox；生成中断只保留 received checkpoint；并发提交失败时只接受已出现的赢家 outbox。runtime 在每次 Hello 后把已发送 outbox 重新排队并按 ordinal 发送，每帧成功写入 WebSocket 后才标 delivered，所以崩溃/部分发送只会重放原 ID/幂等键/正文。正式 E4-12 编排已用同一 SQLite 状态目录两次启动 signed PyInstaller Executor，Control Plane 的 acknowledged command 与五条 PostgreSQL Event 快照保持不变。该路径仍不执行浏览器、微信或平台账号副作用，后续 Adapter 才接入真实动作。
 
-E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python。构建依赖只在 uv dev group，当前未加入 Python Playwright；macOS 本机已从冻结入口验证 bootstrap 与网络失败的固定退出契约，GitHub macOS/Windows 矩阵使用同一测试，但当前 Hosted Runner 因账户 Billing/Actions spending limit 在启动前被拒绝，因此 Windows 仍是明确待验收项。该 PoC 不承担目录 Manifest、签名、完整性或防降级，以上边界继续由 E4-04/E4-05 实现。
+E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python；该任务完成时尚未加入 Python Playwright。B5-07 现已把 Playwright 1.61.0 作为正式运行依赖并由 spec 收集 Python driver，同时明确不执行浏览器安装、不把任何 Playwright 浏览器缓存塞入包。macOS 本机从冻结的生产 `browser_runtime.py` 以显式系统 Chrome、私有 Profile、headed persistent context 完成真实启动/关闭；测试专用探针不属于正式入口，业务任务仍不会执行浏览器。GitHub macOS/Windows 矩阵使用同一实包验证，但 Hosted Windows Runner 因账户 Billing/Actions spending limit 在启动前被拒绝，因此 Windows 仍是明确待验收项。目录 Manifest、签名、完整性和防降级仍由 E4-04/E4-05 承担，正式资源所有权由 B5-08 承担。
 
 E4-04 增加唯一离线构建入口 `automation-tool-build-executor-manifest`。它只从 stdin 读取精确 32 字节 Ed25519 seed，拒绝把发布私钥放入 argv、环境、输出、仓库或 App；输出是 `onedir` 根内的 `executor-manifest.v1.json` 与 `executor-manifest.v1.sig`。Manifest v1 精确绑定 SemVer、受限 build ID、`macos|windows`、`aarch64|x86_64`、平台精确入口、payload 总大小、目录摘要，以及按 ASCII 相对路径排序的全部普通文件路径/大小/SHA-256；Manifest/签名 metadata 自身不参与 payload 清单。
 

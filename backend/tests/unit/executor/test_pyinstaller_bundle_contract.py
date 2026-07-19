@@ -8,13 +8,13 @@ REPOSITORY_ROOT = BACKEND_ROOT.parent
 SPEC_PATH = BACKEND_ROOT / "automation-tool-executor.spec"
 
 
-def test_pyinstaller_is_locked_as_a_development_only_dependency() -> None:
+def test_pyinstaller_and_playwright_are_locked_in_their_runtime_scopes() -> None:
     project = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     development_dependencies = project["dependency-groups"]["dev"]
 
     assert any(dependency.startswith("pyinstaller") for dependency in development_dependencies)
     assert "pyinstaller" not in project["project"]["dependencies"]
-    assert "playwright" not in project["project"]["dependencies"]
+    assert "playwright" in project["project"]["dependencies"]
     assert "playwright" not in development_dependencies
     assert (
         project["project"]["scripts"]["automation-tool-build-executor-manifest"]
@@ -31,7 +31,8 @@ def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() ->
     assert "COLLECT(" in source
     assert 'name="automation-tool-executor"' in source
     assert "console=True" in source
-    assert "playwright" not in source.lower()
+    assert 'collect_all("playwright")' in source
+    assert '"automation_tool.executor.browser_runtime"' in source
 
 
 def test_desktop_ci_smokes_the_executor_bundle_on_both_supported_platforms() -> None:
@@ -43,5 +44,8 @@ def test_desktop_ci_smokes_the_executor_bundle_on_both_supported_platforms() -> 
     assert "test_package_manifest.py" in source
     assert "test_executor_manifest_cli.py" in source
     assert "test_pyinstaller_bundle.py" in source
+    assert "test_packaged_browser_probe.py" in source
+    assert "dtolnay/rust-toolchain" in source
+    assert "frontend/src-tauri -> target" in source
     assert "backend/automation-tool-executor.spec" in source
     assert "contracts/fixtures/executor-package-v1/**" in source

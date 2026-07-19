@@ -282,6 +282,8 @@ B5-04 将该信任根收口到两个无路径 Tauri Command：`get_browser_setti
 
 B5-05 新增纯 Rust `BrowserProfileStore`，由 Tauri setup 从自身 `app.path().app_data_dir()` 管理唯一实例，只固定派生 `browser-profiles/douyin/<canonical UUIDv4>`，Profile ID 由本机 CSPRNG 生成；当前没有 Tauri Command、React DTO、Control Plane 接口或其他平台目录。Unix 逐级使用目录句柄、`openat(O_NOFOLLOW)`、`mkdirat` 和 dev+inode，Windows 固定子目录使用父 HANDLE 相对 `NtCreateFile(FILE_OPEN_REPARSE_POINT)`、volume/file index、最终路径和当前用户 protected DACL。Store/Profile 持有打开的目录身份并在创建、重开与交给后续浏览器前复验；路径被 symlink/reparse、普通文件或 rename 后同名替换时 fail closed。B5-06 只能在该身份上增加跨进程锁，B5-07 才能在持锁后把私有目录交给系统浏览器。
 
+B5-06 已在同一稳定 Profile identity 上加入原生跨进程非阻塞排他锁和崩溃标记：同 Profile 竞争拒绝，不同 Profile 可并行，只有显式释放清除标记，意外退出要求后续恢复流程。B5-07 已证明正式 PyInstaller onedir 可携带 Python Playwright driver 而不携带浏览器，并从 Rust 受信浏览器复验、私有 Profile 与锁链路启动本机系统 Chrome headed persistent context；冻结探针仅用于验收，不是 App Command 或用户功能。B5-08 才会把 context、浏览器进程树和锁 guard 绑定成正式 BrowserRuntime。
+
 ## 7. 页面与导航
 
 MVP 导航：

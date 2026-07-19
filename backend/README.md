@@ -92,7 +92,9 @@ uv run automation-tool-build-executor-manifest \
   < /path/to/offline-32-byte-ed25519-seed
 ```
 
-PyInstaller 产物固定为 `dist/automation-tool-executor/` 的 `onedir` 目录；macOS 入口为同名可执行文件，Windows 入口为 `automation-tool-executor.exe`。`pyinstaller` 只锁在开发依赖组，当前包不引入 Playwright；双平台 CI 已配置从冻结产物启动入口并验证 bootstrap/连接失败的固定退出契约。当前 macOS 实包已通过，Windows Hosted Runner 因 GitHub 账户 Billing/Actions spending limit 在分配 runner 前被拒绝，仍需在可用 Windows runner 或实体机补验收。
+PyInstaller 产物固定为 `dist/automation-tool-executor/` 的 `onedir` 目录；macOS 入口为同名可执行文件，Windows 入口为 `automation-tool-executor.exe`。`pyinstaller` 只锁在开发依赖组；B5-07 起 Playwright 是 Executor 正式运行依赖，spec 用 `collect_all("playwright")` 收集 Python driver，但仓库和构建流程均不执行 `playwright install`，正式目录不包含 Playwright 浏览器缓存。双平台 CI 从冻结产物验证 bootstrap/连接失败契约及 driver/浏览器分离，另由测试专用冻结探针从生产 `browser_runtime.py` 启动系统 Chrome/Edge headed persistent context；探针不进入正式包、不上传或发布产物。macOS 实包与真实系统 Chrome 已通过，Windows Hosted Runner 因 GitHub 账户 Billing/Actions spending limit 在分配 runner 前被拒绝，仍需在可用 Windows runner 或实体机补验收。
+
+B5-07 只证明 Playwright Python runtime 可冻结且能使用显式受信系统浏览器与 App 私有 Profile。生产 primitive 固定 `headless=False`、显式 `executable_path`、`accept_downloads=False` 和 30 秒启动上限，拒绝相对路径、控制/Bidi 字符、symlink、非普通/不可执行浏览器及无效 Profile，并对异常和对象表示脱敏。它没有 Tauri Command、React/Control Plane 输入面，也没有正式任务进程所有权；B5-08 将在 Rust 持有 B5-06 Profile 锁并复验 B5-02/B5-03 浏览器后装配完整 BrowserRuntime。
 
 Manifest 工具在 `onedir` 根内写入 `executor-manifest.v1.json` 和 `executor-manifest.v1.sig`。Manifest 使用 compact、键排序的 ASCII JSON 加单个 LF，签名覆盖这些原始字节；签名文件固定为无 padding Base64URL 的 `atems1` envelope。Manifest 绑定 SemVer、构建 ID、平台、架构、平台精确入口、总大小、目录摘要和每个 payload 普通文件的相对路径/大小/SHA-256；metadata 自身不进入清单。离线 Ed25519 私钥必须是 stdin 中精确 32 字节，不能放入 argv、环境、日志、仓库、构建产物或 App；仓库固定 fixture 使用的 `00..1f` 只是假测试种子，不能用于发布。
 

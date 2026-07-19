@@ -38,7 +38,9 @@ def bootstrap(state_directory: Path) -> bytes:
     ).encode()
 
 
-def test_pyinstaller_onedir_bundle_starts_without_python_or_playwright(tmp_path: Path) -> None:
+def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright(
+    tmp_path: Path,
+) -> None:
     distribution_root = tmp_path / "dist"
     work_root = tmp_path / "build"
     completed = subprocess.run(
@@ -119,8 +121,20 @@ def test_pyinstaller_onedir_bundle_starts_without_python_or_playwright(tmp_path:
     assert unavailable.stderr == b"Local Executor process is unavailable\n"
     assert PRIVATE_SESSION.encode() not in unavailable.stderr
 
-    assert not any("playwright" in path.name.lower() for path in distribution_root.rglob("*"))
+    inventory = tuple(
+        path.relative_to(executable.parent).as_posix() for path in executable.parent.rglob("*")
+    )
+    directory_names = tuple(
+        path.name.lower() for path in executable.parent.rglob("*") if path.is_dir()
+    )
+    assert any("playwright" in path.lower() for path in inventory)
+    assert not any(
+        name == ".local-browsers"
+        or name.startswith(("chromium-", "firefox-", "webkit-", "ffmpeg-"))
+        for name in directory_names
+    )
     analysis_text = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore") for path in work_root.rglob("*.toc")
     )
-    assert "playwright" not in analysis_text.lower()
+    assert "playwright" in analysis_text.lower()
+    assert "automation_tool.executor.browser_runtime" in analysis_text

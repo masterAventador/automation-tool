@@ -1,16 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
 backend_root = Path(SPECPATH)
 source_root = backend_root / "src"
+playwright_datas, playwright_binaries, playwright_hiddenimports = collect_all("playwright")
+playwright_hiddenimports.append("automation_tool.executor.browser_runtime")
 
 analysis = Analysis(
     [str(source_root / "automation_tool/executor/__main__.py")],
     pathex=[str(source_root)],
-    binaries=[],
-    datas=[],
-    hiddenimports=[],
+    binaries=playwright_binaries,
+    datas=playwright_datas,
+    hiddenimports=playwright_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
