@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime、抖音 Session 页面证据、真实扫码及人工接管，下一项为 Session 健康上报 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime、抖音 Session 页面证据、真实扫码、人工接管及最小健康上报，下一项为平台状态页面 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -56,7 +56,7 @@
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
-| Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
+| Executor v1 协议 | `✅` 25 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 33 个公共 fixtures 已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Executor Playwright onedir | `🔍` macOS arm64 正式 onedir 已包含 Python Playwright driver 且无浏览器缓存，冻结生产 primitive 已用受信系统 Chrome + 私有 Profile + 原生锁启动 headed context；Windows 同测试已配置，但 GitHub Hosted Runner 因账户 Billing/Actions spending limit 未启动 |
 | Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS 冻结实包验证 |
@@ -69,6 +69,7 @@
 | 私有浏览器 Profile | `🔍` macOS/Unix 已从公开 Rust Store 原入口完成本机 UUIDv4 Profile 原子创建、重开、权限、symlink、identity 替换与并发矩阵；Windows handle-relative/私有 ACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | Profile 单实例锁 | `🔍` macOS/Unix 已从公开 Rust Profile 原入口验证同 Profile 跨进程排他、不同 Profile 并行、显式释放及真实子进程被 kill 后需恢复；Windows HANDLE-relative/LockFileEx/私有 DACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | BrowserRuntime | `🔍` macOS 冻结生产模块已用受信系统 Chrome/私有 Profile/原生锁验证单 context、双窗口正常关闭和 process-group 整树强杀；Windows 复用 Job Object 组合，待原生 runner 实际执行 |
+| 平台 Session 健康投影 | `✅` 生产 detector→本机 SQLite v2 单调 epoch→认证 Executor WebSocket→PostgreSQL 六列最小投影已在后台无头系统 Chrome/真实网络边界验证 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -265,7 +266,7 @@
 | B5-09 | 抖音 Session 检测 | healthy/expired/missing/risk/unknown；使用页面状态而非 Cookie 上传 | B5-08 | ✅ 已完成 |
 | B5-10 | 抖音扫码流程 | login_required、外部窗口、二维码过期、重新检查 | B5-09 | ✅ 已完成 |
 | B5-11 | 人工接管 | 验证码/滑块/风控进入 handoff，不自动处理 | B5-10 | ✅ 已完成 |
-| B5-12 | Session 健康上报 | Control Plane 只存平台/状态/revision/时间，不存 Cookie | B5-09,T3-11 | ⬜ 未开始 |
+| B5-12 | Session 健康上报 | Control Plane 只存平台/状态/revision/时间，不存 Cookie | B5-09,T3-11 | ✅ 已完成 |
 | B5-13 | 平台状态页面 | 查看登录健康、打开处理、重新检查和注销 | B5-10,B5-12 | ⬜ 未开始 |
 | B5-14 | 安全注销 | 先阻止新任务、停关联执行、再删除平台 Profile | B5-06,B5-13 | ⬜ 未开始 |
 | B5-15 | 登录复用验收 | App/Executor/浏览器重启后不重扫；失效后正确接管 | B5-14 | 🔍 待真实账号 |
@@ -344,13 +345,18 @@
 | H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ⬜ 未开始 |
 | H8-16 | 规格复审 | 从分叉点审查完整实现是否满足产品/MVP/文档 | H8-15 | ⬜ 未开始 |
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16 | ⬜ 未开始 |
+| H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ⬜ 未开始 |
+| H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ⬜ 未开始 |
+| H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ⬜ 未开始 |
+| H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ⬜ 未开始 |
+| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | ⬜ 未开始 |
 
 ## 14. Wave 9：双平台安装包与本地候选版
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-17 | ⬜ 未开始 |
-| P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-17 | ⬜ 未开始 |
+| P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ⬜ 未开始 |
+| P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ⬜ 未开始 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | ⬜ 未开始 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | ⬜ 未开始 |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ⬜ 未开始 |
@@ -1789,10 +1795,30 @@
 - 文档：同步根/Backend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：B5-12 持久化本机单调 `session_revision` 并只向 Control Plane 上报平台、健康状态、revision 和观察时间，不上传 Cookie、验证码、页面原文或 Profile 路径
 
+### B5-12 Session 健康上报
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：把 B5-09 生产 detector 的封闭页面事实作为 Executor-scoped 消息上报；本机和服务端都以单调 epoch 阻止旧健康复活，Control Plane 只持久化最小状态，不接收浏览器秘密或页面内容
+- RED：先把台账置为 `🧪 RED`；Python 聚焦测试在收集阶段准确失败于缺少 `PlatformSessionHealthEnvelope` 和 `PlatformSessionState`，随后才加入生产协议、账本、应用服务、仓储和 WebSocket 分发。没有用 REST 测试客户端、Mock socket 或直接仓储写入冒充原始调用入口
+- 三端协议：Executor v1 新增唯一 Executor-scoped `platform.session_health`；exact payload 只有 `platform/state/session_revision/observed_at`，不允许 task/attempt scope 或附加字段。Pydantic 权威 Schema、TypeScript 与 Rust 正式解析器共同回放新增 valid/invalid fixtures；公共清单现为 7 valid、26 invalid，描述文本也不得出现页面/Profile 敏感概念
+- 本机持久化：SQLite v1→v2 在单个排他事务内保留 identity、command、checkpoint 和 outbox，新增 `executor_platform_sessions(platform,state,session_revision,observed_at)`。首次观察建立 revision 1；倒序时间、相同时间不同事实、较低 epoch 和同 epoch 非健康→健康全部拒绝，重新登录或显式恢复必须 `advance_epoch`。正式 Executor 进程验收同步核对 v2 与四列精确表形状
+- 服务端投影：Alembic `20260718_0014` 新增 `platform_session_health`，精确六列为 `installation_id/platform/state/session_revision/observed_at/updated_at`。仓储在 active Installation 行锁下拒绝旧 revision、倒序观察和同 epoch 非健康→健康；完全相同事实幂等。WebSocket 只接受当前已认证 Installation/Executor scope，不持久 message/executor ID、Cookie、二维码、验证码、页面原文或 Profile 路径
+- 原始调用验收：`scripts/run_b5_12_acceptance.py` 使用后台无头系统 Chrome 把隔离健康 DOM 绑定到官方 origin，经生产 `DouyinSessionDetector`→`DouyinSessionHealthReporter`→SQLite v2→正式 WebSocket transport→真实 Uvicorn/设备 Session→完整 Alembic→PostgreSQL 查询六列 projection，最终输出 `Real-network non-sensitive Session projection acceptance passed`。B5-12 的原始调用者是 Local Executor，不是尚未实现的平台状态页，因此不启动隐藏 App 空壳；B5-13 再从真实 App 用户入口消费该投影
+- 安全失败收口：首次真实编排使用系统临时目录时被账本正确拒绝 `/var` symlink，改为 canonical `/private/tmp` 后通过，证明私有状态路径没有为验收放宽。Backend 全量还发现正式进程测试遗留 v1 断言，已升级为 v2/精确列检查；Frontend 边界发现 Schema 说明包含敏感概念关键字，已从发布契约删除而不降低字段级拒绝
+- 后台测试规则：本机常规自动化外部浏览器固定无头；既有 B5-07 产品 headed 打包验收改为显式环境开关，仅在独立桌面 CI Runner 或提前告知的专门验收执行。所有浏览器测试必须在成功/失败/超时/取消路径关闭 Page、Context、driver 和完整进程树，并复查本次项目资源无残留；正式产品扫码/人工接管浏览器仍保持可见
+- 门禁：Backend 全量 `944 passed, 4 skipped`，uv lock、Ruff/格式 208 个文件、严格 Mypy 192 个源码文件、OpenAPI 与 Executor Schema 漂移全绿；Frontend 68 项 Node 契约、125 项 Vitest、ESLint、严格 TypeScript、API 与 production build/边界全绿；Rust 默认与 `desktop-e2e` 各 120 项、`control-plane-e2e` 121 项通过，Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿
+- 波动记录：Rust 默认套件的一项既有 E4-08 崩溃恢复预算测试在并行运行时单次读到 1/预期 2；未修改生产逻辑、超时或断言，按原参数精确用例和完整默认套件复跑均通过。若再次出现必须独立建账定位，不能长期依赖复跑
+- 资源与隐私：最终验收使用唯一 Compose project、随机 loopback 端口、专属容器/网络/卷和 `/private/tmp` 唯一 App 状态，结束后容器、网络、卷、Uvicorn、Chrome、Playwright 与探针进程复查为空。未触碰或输出用户已登录的持久 Profile，也未要求再次扫码；默认 Chrome Profile、其他项目资源和系统钥匙串均未读取或修改
+- 文档：同步项目规则、根/Backend README、前后端架构、工程结构、通用更新选型和唯一开发台账；没有新增重复计划。自动更新继续按 H8-18～H8-22 使用官方 Tauri updater 安装底座与业务无关的自有策略层，并包含用户主动“检查更新”入口
+- 后续：B5-13 从正式 App 平台状态页接入健康查询、打开浏览器处理、无参数重新检查和安全注销入口；相关 Control Plane 请求必须从隐藏真实 App 的正式 TypeScript/Rust 网桥发出
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-12`：把平台 Session 健康以最小状态投影上报 Control Plane，禁止 Cookie 和页面原文离开本机；
-2. `B5-13`：从正式 App 平台状态页接入登录健康、打开处理、重新检查和注销入口；
-3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-13`：从正式 App 平台状态页接入登录健康、打开处理、重新检查和注销入口；
+2. `B5-14`：在平台状态页完成先阻止新任务、停止关联执行、释放锁后再定向删除 Profile 的安全注销；
+3. `B5-15`：从真实 App/Executor/浏览器重启验证现有抖音登录态复用；真实自然失效不可控时先完成隔离接管矩阵且不破坏用户保留的持久 Profile；
+4. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。

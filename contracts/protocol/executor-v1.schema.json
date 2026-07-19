@@ -6,6 +6,7 @@
           "executor.heartbeat": "#/$defs/ExecutorLifecycleEnvelope",
           "executor.hello": "#/$defs/ExecutorLifecycleEnvelope",
           "handoff.requested": "#/$defs/TaskEventEnvelope",
+          "platform.session_health": "#/$defs/PlatformSessionHealthEnvelope",
           "session.login_required": "#/$defs/TaskEventEnvelope",
           "step.completed": "#/$defs/TaskEventEnvelope",
           "step.failed": "#/$defs/TaskEventEnvelope",
@@ -33,6 +34,9 @@
       "oneOf": [
         {
           "$ref": "#/$defs/ExecutorLifecycleEnvelope"
+        },
+        {
+          "$ref": "#/$defs/PlatformSessionHealthEnvelope"
         },
         {
           "$ref": "#/$defs/TaskCommandEnvelope"
@@ -141,6 +145,136 @@
       "type": "object"
     },
     "JsonValue": {},
+    "PlatformSessionHealthEnvelope": {
+      "additionalProperties": false,
+      "description": "Executor-scoped platform Session health fact.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "const": "platform.session_health",
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlatformSessionHealthPayload"
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "message_type"
+      ],
+      "title": "PlatformSessionHealthEnvelope",
+      "type": "object"
+    },
+    "PlatformSessionHealthPayload": {
+      "additionalProperties": false,
+      "description": "The complete non-sensitive platform Session projection on the wire.",
+      "properties": {
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "platform": {
+          "const": "douyin",
+          "title": "Platform",
+          "type": "string"
+        },
+        "session_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Session Revision",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/PlatformSessionState"
+        }
+      },
+      "required": [
+        "platform",
+        "state",
+        "session_revision",
+        "observed_at"
+      ],
+      "title": "PlatformSessionHealthPayload",
+      "type": "object"
+    },
+    "PlatformSessionState": {
+      "description": "Closed platform-login health state; only healthy closes the circuit.",
+      "enum": [
+        "healthy",
+        "expired",
+        "missing",
+        "risk",
+        "unknown"
+      ],
+      "title": "PlatformSessionState",
+      "type": "string"
+    },
     "TaskCommandEnvelope": {
       "additionalProperties": false,
       "description": "Control Plane commands that target one execution attempt.",

@@ -252,7 +252,7 @@ backend/
 │       │   ├── browser_runtime.py # 单 context、页面/窗口、超时和清理的 Playwright BrowserRuntime
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
-│       │   ├── ledger.py          # 本机 SQLite v1 命令/幂等/checkpoint/outbox 账本
+│       │   ├── ledger.py          # 本机 SQLite v2 命令/checkpoint/outbox/平台 Session 账本
 │       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
 │       │   ├── runtime.py         # Hello/Heartbeat、固定健康投影和有界停止
 │       │   ├── transport.py       # Fake/正式 Executor 共用的受认证 WebSocket 传输
@@ -262,7 +262,7 @@ backend/
 │       │   ├── rpa/
 │       │   │   ├── base/          # 平台 Adapter、动作和页面契约
 │       │   │   ├── browser/       # Playwright、Profile 和页面证据
-│       │   │   ├── douyin/        # MVP 抖音实现；session.py 健康，login.py 扫码状态机
+│       │   │   ├── douyin/        # MVP 抖音实现；页面健康、扫码状态机和最小健康上报
 │       │   │   ├── xiaohongshu/   # P1.3
 │       │   │   ├── kuaishou/      # P1.5
 │       │   │   ├── wechat_channels/

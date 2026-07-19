@@ -15,6 +15,7 @@ from automation_tool.protocol.executor_envelope import (
     ExecutorProtocolError,
     IdempotencyKey,
     MessageId,
+    PlatformSessionHealthEnvelope,
     TaskCommandEnvelope,
     TaskEventEnvelope,
     parse_executor_message,
@@ -60,12 +61,28 @@ def task_message(**changes: object) -> dict[str, object]:
     return message
 
 
+def platform_session_health_message(**changes: object) -> dict[str, object]:
+    message = lifecycle_message(
+        message_type="platform.session_health",
+        idempotency_key="platform:douyin:session:7:healthy",
+        payload={
+            "platform": "douyin",
+            "state": "healthy",
+            "session_revision": 7,
+            "observed_at": "2026-07-18T03:00:00Z",
+        },
+    )
+    message.update(changes)
+    return message
+
+
 def validate(message: dict[str, object]) -> ExecutorMessage:
     return ExecutorMessage.model_validate(message)
 
 
-def test_discriminated_union_selects_lifecycle_command_and_event_variants() -> None:
+def test_discriminated_union_selects_lifecycle_platform_command_and_event_variants() -> None:
     lifecycle = validate(lifecycle_message()).root
+    platform_health = validate(platform_session_health_message()).root
     command = validate(task_message()).root
     event = validate(
         task_message(
@@ -77,15 +94,39 @@ def test_discriminated_union_selects_lifecycle_command_and_event_variants() -> N
     ).root
 
     assert isinstance(lifecycle, ExecutorLifecycleEnvelope)
+    assert isinstance(platform_health, PlatformSessionHealthEnvelope)
     assert isinstance(command, TaskCommandEnvelope)
     assert isinstance(event, TaskEventEnvelope)
     assert lifecycle.protocol_version == EXECUTOR_PROTOCOL_VERSION
     assert type(lifecycle.message_id) is MessageId
     assert type(lifecycle.correlation_id) is CorrelationId
+    assert not hasattr(platform_health, "task_id")
     assert (
         ExecutorMessage.model_validate_json(ExecutorMessage(root=event).model_dump_json()).root
         == event
     )
+
+
+def test_platform_session_health_is_executor_scoped_and_rejects_sensitive_payloads() -> None:
+    parsed = validate(platform_session_health_message()).root
+
+    assert isinstance(parsed, PlatformSessionHealthEnvelope)
+    assert parsed.message_type == "platform.session_health"
+    assert parsed.payload.model_dump(mode="json") == {
+        "platform": "douyin",
+        "state": "healthy",
+        "session_revision": 7,
+        "observed_at": "2026-07-18T03:00:00Z",
+    }
+    for changes in (
+        {"task_id": TASK_ID, "execution_attempt_id": ATTEMPT_ID},
+        {"payload": {"platform": "douyin", "cookie": "private-cookie-value"}},
+        {"payload": {"platform": "douyin", "profile_path": "/private/profile"}},
+        {"payload": {"platform": "douyin", "qr_image": "fixture"}},
+        {"payload": {"platform": "douyin", "captcha_code": "fixture"}},
+    ):
+        with pytest.raises(ValidationError):
+            validate(platform_session_health_message(**changes))
 
 
 @pytest.mark.parametrize("invalid_version", (None, "", "1", "1.1", 1.0))
@@ -306,6 +347,7 @@ def test_schema_publishes_one_exact_discriminator_and_explicit_required_core_fie
     expected_message_types = {
         "executor.heartbeat",
         "executor.hello",
+        "platform.session_health",
         "handoff.requested",
         "session.login_required",
         "step.completed",
@@ -334,6 +376,7 @@ def test_schema_publishes_one_exact_discriminator_and_explicit_required_core_fie
     assert set(envelope_schema["discriminator"]["mapping"]) == expected_message_types
     for model_name in (
         "ExecutorLifecycleEnvelope",
+        "PlatformSessionHealthEnvelope",
         "TaskCommandEnvelope",
         "TaskCommandResultEnvelope",
         "TaskEventEnvelope",

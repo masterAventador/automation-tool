@@ -9,12 +9,14 @@ import sqlite3
 import stat
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, cast
 from uuid import RFC_4122, UUID
 
 from automation_tool.protocol import (
+    PlatformSessionState,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
     TaskEventEnvelope,
@@ -22,7 +24,7 @@ from automation_tool.protocol import (
 )
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 1
+_SCHEMA_VERSION: Final = 2
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_CROSS_RUNTIME_SEQUENCE: Final = 2**53 - 1
 
@@ -40,6 +42,29 @@ class AttemptCheckpointState(StrEnum):
     PAUSED = "paused"
     TERMINAL = "terminal"
     OUTCOME_UNCERTAIN = "outcome_uncertain"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalPlatformSession:
+    platform: str
+    state: PlatformSessionState
+    session_revision: int
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            self.platform != "douyin"
+            or not isinstance(self.state, PlatformSessionState)
+            or type(self.session_revision) is not int
+            or self.session_revision <= 0
+            or not isinstance(self.observed_at, datetime)
+            or self.observed_at.utcoffset() != UTC.utcoffset(self.observed_at)
+        ):
+            raise ExecutorLedgerRejected
+
+    @property
+    def circuit_open(self) -> bool:
+        return self.state is not PlatformSessionState.HEALTHY
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +124,14 @@ class ExecutorLedger:
     @property
     def database_path(self) -> Path:
         return self._database_path
+
+    @property
+    def installation_id(self) -> str:
+        return self._installation_id
+
+    @property
+    def executor_id(self) -> str:
+        return self._executor_id
 
     def receive_command(self, command: TaskCommandEnvelope) -> CommandReceipt:
         try:
@@ -209,6 +242,107 @@ class ExecutorLedger:
                     (canonical_attempt_id,),
                 ).fetchone()
             return None if row is None else _checkpoint(row)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def get_platform_session(self, platform: str) -> LocalPlatformSession | None:
+        try:
+            _require_platform(platform)
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    """
+                    SELECT platform, state, session_revision, observed_at
+                    FROM executor_platform_sessions
+                    WHERE platform = ?
+                    """,
+                    (platform,),
+                ).fetchone()
+            return None if row is None else _platform_session(row)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def record_platform_session(
+        self,
+        *,
+        platform: str,
+        state: PlatformSessionState,
+        observed_at: datetime,
+        advance_epoch: bool = False,
+    ) -> LocalPlatformSession:
+        """Persist one page-derived state without allowing an implicit recovery."""
+
+        try:
+            _require_platform(platform)
+            if (
+                not isinstance(state, PlatformSessionState)
+                or not isinstance(observed_at, datetime)
+                or observed_at.utcoffset() is None
+                or type(advance_epoch) is not bool
+            ):
+                raise ValueError
+            canonical_observed_at = observed_at.astimezone(UTC)
+            encoded_observed_at = _encode_utc(canonical_observed_at)
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT platform, state, session_revision, observed_at
+                    FROM executor_platform_sessions
+                    WHERE platform = ?
+                    """,
+                    (platform,),
+                ).fetchone()
+                if row is None:
+                    if advance_epoch:
+                        raise ValueError
+                    revision = 1
+                    connection.execute(
+                        """
+                        INSERT INTO executor_platform_sessions (
+                            platform, state, session_revision, observed_at
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (platform, state.value, revision, encoded_observed_at),
+                    )
+                else:
+                    current = _platform_session(row)
+                    if canonical_observed_at < current.observed_at:
+                        raise ValueError
+                    if canonical_observed_at == current.observed_at:
+                        if not advance_epoch and state is current.state:
+                            connection.commit()
+                            return current
+                        raise ValueError
+                    if (
+                        not advance_epoch
+                        and current.circuit_open
+                        and state is PlatformSessionState.HEALTHY
+                    ):
+                        raise ValueError
+                    revision = (
+                        current.session_revision + 1 if advance_epoch else current.session_revision
+                    )
+                    connection.execute(
+                        """
+                        UPDATE executor_platform_sessions
+                        SET state = ?, session_revision = ?, observed_at = ?
+                        WHERE platform = ? AND session_revision = ?
+                        """,
+                        (
+                            state.value,
+                            revision,
+                            encoded_observed_at,
+                            platform,
+                            current.session_revision,
+                        ),
+                    )
+                connection.commit()
+            return LocalPlatformSession(
+                platform=platform,
+                state=state,
+                session_revision=revision,
+                observed_at=canonical_observed_at,
+            )
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -645,7 +779,11 @@ class ExecutorLedger:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version == 0:
                 _migrate_v1(connection)
-            elif version != _SCHEMA_VERSION:
+                version = 1
+            if version == 1:
+                _migrate_v2(connection)
+                version = 2
+            if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
                 """
@@ -727,6 +865,22 @@ def _migrate_v1(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 1")
 
 
+def _migrate_v2(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE executor_platform_sessions (
+            platform TEXT PRIMARY KEY CHECK (platform = 'douyin'),
+            state TEXT NOT NULL CHECK (
+                state IN ('healthy', 'expired', 'missing', 'risk', 'unknown')
+            ),
+            session_revision INTEGER NOT NULL CHECK (session_revision >= 1),
+            observed_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute("PRAGMA user_version = 2")
+
+
 def _canonical_uuid_v4(value: object) -> str:
     if type(value) is not str:
         raise ValueError
@@ -783,6 +937,25 @@ def _checkpoint(row: sqlite3.Row | tuple[object, ...]) -> AttemptCheckpoint:
     )
 
 
+def _require_platform(value: object) -> None:
+    if value != "douyin" or type(value) is not str:
+        raise ValueError
+
+
+def _encode_utc(value: datetime) -> str:
+    return value.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _platform_session(row: sqlite3.Row | tuple[object, ...]) -> LocalPlatformSession:
+    observed_at = datetime.fromisoformat(str(row[3]).replace("Z", "+00:00"))
+    return LocalPlatformSession(
+        platform=str(row[0]),
+        state=PlatformSessionState(str(row[1])),
+        session_revision=cast(int, row[2]),
+        observed_at=observed_at,
+    )
+
+
 def _parse_outbound(source: str) -> OutboundExecutorMessage:
     parsed = parse_executor_message(source)
     if not isinstance(parsed, (TaskCommandResultEnvelope, TaskEventEnvelope)):
@@ -807,5 +980,7 @@ __all__ = [
     "CommandReceipt",
     "ExecutorLedger",
     "ExecutorLedgerRejected",
+    "LocalPlatformSession",
     "OutboxEntry",
+    "PlatformSessionState",
 ]

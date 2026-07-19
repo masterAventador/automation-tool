@@ -191,6 +191,17 @@ const taskScope = {
 const lifecycleEnvelope = commonEnvelope.extend({
   message_type: z.enum(["executor.hello", "executor.heartbeat"]),
 });
+const platformSessionHealthEnvelope = commonEnvelope.extend({
+  message_type: z.literal("platform.session_health"),
+  payload: z
+    .object({
+      platform: z.literal("douyin"),
+      state: z.enum(["healthy", "expired", "missing", "risk", "unknown"]),
+      session_revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+      observed_at: timestampSchema,
+    })
+    .strict(),
+});
 const taskCommandEnvelope = commonEnvelope.extend({
   ...taskScope,
   message_type: z.enum([
@@ -227,6 +238,7 @@ const taskEventEnvelope = commonEnvelope.extend({
 const executorEnvelopeSchema = z
   .discriminatedUnion("message_type", [
     lifecycleEnvelope,
+    platformSessionHealthEnvelope,
     taskCommandEnvelope,
     taskCommandResultEnvelope,
     taskEventEnvelope,
@@ -236,6 +248,12 @@ const executorEnvelopeSchema = z
     const deadlineAt = parseCanonicalUtcTimestamp(message.deadline_at);
     if (sentAt === null || deadlineAt === null || deadlineAt <= sentAt) {
       context.addIssue({ code: "custom", message: "Invalid Executor deadline" });
+    }
+    if (message.message_type === "platform.session_health") {
+      const observedAt = parseCanonicalUtcTimestamp(message.payload.observed_at);
+      if (observedAt === null || sentAt === null || observedAt > sentAt) {
+        context.addIssue({ code: "custom", message: "Invalid Session observation time" });
+      }
     }
   });
 

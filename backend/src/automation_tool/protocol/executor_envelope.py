@@ -6,6 +6,7 @@ import json
 import math
 import re
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Annotated, ClassVar, Literal
 from uuid import RFC_4122, UUID
 
@@ -225,11 +226,17 @@ class _ExecutorEnvelopeBase(_ProtocolModel):
 
     @field_validator("payload")
     @classmethod
-    def require_bounded_safe_payload(cls, payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        _validate_payload_value(payload, depth=0)
+    def require_bounded_safe_payload(
+        cls,
+        payload: dict[str, JsonValue] | BaseModel,
+    ) -> dict[str, JsonValue] | BaseModel:
+        bounded_payload = (
+            payload.model_dump(mode="json") if isinstance(payload, BaseModel) else payload
+        )
+        _validate_payload_value(bounded_payload, depth=0)
         try:
             encoded = json.dumps(
-                payload,
+                bounded_payload,
                 allow_nan=False,
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -252,6 +259,42 @@ class ExecutorLifecycleEnvelope(_ExecutorEnvelopeBase):
     """Executor-scoped lifecycle traffic that has no task identity."""
 
     message_type: Literal["executor.hello", "executor.heartbeat"]
+
+
+class PlatformSessionState(StrEnum):
+    """Closed platform-login health state; only healthy closes the circuit."""
+
+    HEALTHY = "healthy"
+    EXPIRED = "expired"
+    MISSING = "missing"
+    RISK = "risk"
+    UNKNOWN = "unknown"
+
+
+class PlatformSessionHealthPayload(_ProtocolModel):
+    """The complete non-sensitive platform Session projection on the wire."""
+
+    platform: Literal["douyin"]
+    state: PlatformSessionState
+    session_revision: Annotated[int, Field(strict=True, ge=1, le=MAX_EXECUTOR_SEQUENCE)]
+    observed_at: AwareDatetime
+
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def require_rfc3339_or_datetime(cls, value: object) -> object:
+        return _ExecutorEnvelopeBase.require_rfc3339_or_datetime(value)
+
+    @field_validator("observed_at")
+    @classmethod
+    def require_utc_timestamp(cls, value: datetime) -> datetime:
+        return _ExecutorEnvelopeBase.require_utc_timestamps(value)
+
+
+class PlatformSessionHealthEnvelope(_ExecutorEnvelopeBase):
+    """Executor-scoped platform Session health fact."""
+
+    message_type: Literal["platform.session_health"]
+    payload: PlatformSessionHealthPayload  # type: ignore[assignment]
 
 
 class _TaskEnvelopeBase(_ExecutorEnvelopeBase):
@@ -299,7 +342,11 @@ class TaskEventEnvelope(_TaskEnvelopeBase):
 
 
 type ExecutorEnvelope = Annotated[
-    ExecutorLifecycleEnvelope | TaskCommandEnvelope | TaskCommandResultEnvelope | TaskEventEnvelope,
+    ExecutorLifecycleEnvelope
+    | PlatformSessionHealthEnvelope
+    | TaskCommandEnvelope
+    | TaskCommandResultEnvelope
+    | TaskEventEnvelope,
     Field(discriminator="message_type"),
 ]
 

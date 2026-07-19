@@ -17,7 +17,7 @@ _POLL_INTERVAL_SECONDS = 1.5
 _TERMINAL_STATES = {
     DouyinQrLoginState.QR_EXPIRED,
     DouyinQrLoginState.HEALTHY,
-    DouyinQrLoginState.RISK,
+    DouyinQrLoginState.HANDOFF_REQUIRED,
 }
 _READY = "douyin.qr-login.ready"
 _ERROR = "Douyin QR login acceptance is unavailable"

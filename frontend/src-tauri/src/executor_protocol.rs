@@ -59,6 +59,7 @@ const SENSITIVE_PAYLOAD_SEGMENTS: [&str; 9] = [
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ExecutorEnvelopeKind {
     Lifecycle,
+    PlatformSessionHealth,
     TaskCommand,
     TaskCommandResult,
     TaskEvent,
@@ -251,6 +252,12 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
                 return Err(());
             }
         }
+        ExecutorEnvelopeKind::PlatformSessionHealth => {
+            if raw.task_id.is_some() || raw.execution_attempt_id.is_some() {
+                return Err(());
+            }
+            validate_platform_session_health(&raw.payload.0, sent_at)?;
+        }
         ExecutorEnvelopeKind::TaskCommand
         | ExecutorEnvelopeKind::TaskCommandResult
         | ExecutorEnvelopeKind::TaskEvent => {
@@ -272,6 +279,7 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
 fn message_kind(message_type: &str) -> Option<ExecutorEnvelopeKind> {
     match message_type {
         "executor.hello" | "executor.heartbeat" => Some(ExecutorEnvelopeKind::Lifecycle),
+        "platform.session_health" => Some(ExecutorEnvelopeKind::PlatformSessionHealth),
         "task.offer" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop" => {
             Some(ExecutorEnvelopeKind::TaskCommand)
         }
@@ -294,6 +302,35 @@ fn message_kind(message_type: &str) -> Option<ExecutorEnvelopeKind> {
         | "task.outcome_uncertain" => Some(ExecutorEnvelopeKind::TaskEvent),
         _ => None,
     }
+}
+
+fn validate_platform_session_health(payload: &Value, sent_at: OffsetDateTime) -> Result<(), ()> {
+    let object = payload.as_object().ok_or(())?;
+    if object.len() != 4
+        || object.get("platform").and_then(Value::as_str) != Some("douyin")
+        || !matches!(
+            object.get("state").and_then(Value::as_str),
+            Some("healthy" | "expired" | "missing" | "risk" | "unknown")
+        )
+    {
+        return Err(());
+    }
+    let revision = object
+        .get("session_revision")
+        .and_then(Value::as_u64)
+        .ok_or(())?;
+    if !(1..=MAX_SEQUENCE).contains(&revision) {
+        return Err(());
+    }
+    let observed_at = object
+        .get("observed_at")
+        .and_then(Value::as_str)
+        .and_then(parse_canonical_utc_timestamp)
+        .ok_or(())?;
+    if observed_at > sent_at {
+        return Err(());
+    }
+    Ok(())
 }
 
 fn is_canonical_uuid_v4(value: &str) -> bool {

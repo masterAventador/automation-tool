@@ -11,8 +11,13 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
 PROBE_NAME = "automation-tool-browser-probe"
 PROBE_ENVIRONMENT = "AUTOMATION_TOOL_B507_PACKAGED_PROBE"
+VISIBLE_BROWSER_ENVIRONMENT = "AUTOMATION_TOOL_ALLOW_VISIBLE_BROWSER_TESTS"
 
 
+@pytest.mark.skipif(
+    os.environ.get(VISIBLE_BROWSER_ENVIRONMENT) != "1",
+    reason="explicit visible-browser acceptance; routine local tests stay headless",
+)
 def test_frozen_runtime_launches_a_rust_authorized_system_browser(tmp_path: Path) -> None:
     if sys.platform not in {"darwin", "win32"}:
         pytest.skip("B5-07 supports only the two desktop target platforms")

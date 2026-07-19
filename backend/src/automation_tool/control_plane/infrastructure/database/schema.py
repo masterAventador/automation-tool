@@ -96,6 +96,44 @@ installations = Table(
     ),
 )
 
+platform_session_health = Table(
+    "platform_session_health",
+    metadata,
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("platform", String(length=16), nullable=False),
+    Column("state", String(length=16), nullable=False),
+    Column("session_revision", BigInteger(), nullable=False),
+    Column("observed_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "platform = 'douyin'",
+        name="ck_platform_session_health_platform",
+    ),
+    CheckConstraint(
+        "state in ('healthy', 'expired', 'missing', 'risk', 'unknown')",
+        name="ck_platform_session_health_state",
+    ),
+    CheckConstraint(
+        "session_revision > 0",
+        name="ck_platform_session_health_revision_positive",
+    ),
+    CheckConstraint(
+        "updated_at >= observed_at",
+        name="ck_platform_session_health_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_platform_session_health_installation_id",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint(
+        "installation_id",
+        "platform",
+        name="pk_platform_session_health",
+    ),
+)
+
 installation_registration_challenges = Table(
     "installation_registration_challenges",
     metadata,

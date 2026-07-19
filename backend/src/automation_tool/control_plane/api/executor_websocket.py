@@ -23,6 +23,11 @@ from automation_tool.control_plane.application.executor_connections import (
     ExecutorConnectionRejected,
     ExecutorConnectionService,
 )
+from automation_tool.control_plane.application.platform_session_health import (
+    PlatformSessionHealthRejected,
+    PlatformSessionHealthService,
+    PlatformSessionHealthUnavailable,
+)
 from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryRejected,
     TaskCommandDeliveryService,
@@ -35,6 +40,7 @@ from automation_tool.control_plane.application.task_event_convergence import (
 )
 from automation_tool.protocol import (
     ExecutorLifecycleEnvelope,
+    PlatformSessionHealthEnvelope,
     TaskCommandResultEnvelope,
     TaskEventEnvelope,
 )
@@ -119,6 +125,7 @@ async def connect_executor(websocket: WebSocket) -> None:
     registry = websocket.app.state.executor_connection_registry
     delivery = websocket.app.state.task_command_delivery_service
     event_convergence = websocket.app.state.task_event_convergence_service
+    session_health = websocket.app.state.platform_session_health_service
     if not isinstance(service, ExecutorConnectionService) or not isinstance(
         registry, ExecutorConnectionRegistry
     ):
@@ -324,6 +331,48 @@ async def connect_executor(websocket: WebSocket) -> None:
                     return
                 except Exception:
                     logger.error("Executor WebSocket heartbeat projection failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                continue
+
+            if isinstance(message, PlatformSessionHealthEnvelope):
+                if session_health is None:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                if not isinstance(session_health, PlatformSessionHealthService):
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                try:
+                    await session_health.receive(message)
+                except PlatformSessionHealthRejected:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                except PlatformSessionHealthUnavailable:
+                    logger.error("Executor platform Session health persistence failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                except Exception:
+                    logger.error("Executor platform Session health convergence failed")
                     await _close(
                         websocket,
                         code=EXECUTOR_CLOSE_INTERNAL_ERROR,

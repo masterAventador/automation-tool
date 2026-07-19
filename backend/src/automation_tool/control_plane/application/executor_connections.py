@@ -30,6 +30,7 @@ from automation_tool.protocol import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorLifecycleEnvelope,
     ExecutorProtocolError,
+    PlatformSessionHealthEnvelope,
     TaskCommandResultEnvelope,
     TaskEventEnvelope,
     parse_executor_message,
@@ -185,15 +186,25 @@ class ExecutorConnectionService:
         self,
         bound: BoundExecutorConnection,
         source: str | bytes,
-    ) -> ExecutorLifecycleEnvelope | TaskCommandResultEnvelope | TaskEventEnvelope:
-        """Accept only a bound heartbeat, command result, or Task event after Hello."""
+    ) -> (
+        ExecutorLifecycleEnvelope
+        | PlatformSessionHealthEnvelope
+        | TaskCommandResultEnvelope
+        | TaskEventEnvelope
+    ):
+        """Accept only bound Executor facts and acknowledgements after Hello."""
 
         try:
             message = parse_executor_message(source)
             if (
                 not isinstance(
                     message,
-                    (ExecutorLifecycleEnvelope, TaskCommandResultEnvelope, TaskEventEnvelope),
+                    (
+                        ExecutorLifecycleEnvelope,
+                        PlatformSessionHealthEnvelope,
+                        TaskCommandResultEnvelope,
+                        TaskEventEnvelope,
+                    ),
                 )
                 or (
                     isinstance(message, ExecutorLifecycleEnvelope)

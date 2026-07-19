@@ -6,15 +6,16 @@ use automation_tool_desktop_lib::executor_protocol::{
     parse_executor_message, ExecutorEnvelopeKind,
 };
 
-const VALID_FIXTURES: [&str; 6] = [
+const VALID_FIXTURES: [&str; 7] = [
     "executor-heartbeat.json",
     "executor-hello.json",
     "microsecond-deadline.json",
+    "platform-session-health.json",
     "step-progress.json",
     "task-accept.json",
     "task-offer.json",
 ];
-const INVALID_FIXTURES: [&str; 25] = [
+const INVALID_FIXTURES: [&str; 26] = [
     "deadline-before-send.json",
     "deadline-before-send-microsecond.json",
     "deadline-equals-send.json",
@@ -33,6 +34,7 @@ const INVALID_FIXTURES: [&str; 25] = [
     "non-utc-sent-at.json",
     "payload-too-deep.json",
     "payload-too-many-fields.json",
+    "platform-session-health-with-task-scope.json",
     "private-path.json",
     "sensitive-assignment.json",
     "sensitive-cookie-field.json",
@@ -91,6 +93,7 @@ fn rust_formal_parser_accepts_every_shared_valid_fixture() {
         kinds,
         BTreeSet::from([
             ExecutorEnvelopeKind::Lifecycle,
+            ExecutorEnvelopeKind::PlatformSessionHealth,
             ExecutorEnvelopeKind::TaskCommand,
             ExecutorEnvelopeKind::TaskCommandResult,
             ExecutorEnvelopeKind::TaskEvent,

@@ -204,7 +204,7 @@ E4-15 不改变 Control Plane 协议或部署边界。桌面 release 在打包�
 
 E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-diagnostics-v1` fixtures，固定清除凭据/Cookie、URL userinfo/query、data/file URL、私有路径和控制/Bidi 字符。该模块为后续 Executor 结构化安全消息提供单一规则，但不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。Python 当前正式 CLI 仍只输出既有固定错误，不新增任意异常或秘密日志。
 
-E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在正式 CLI 联网前打开。固定 `PRAGMA user_version=1` 迁移一次创建 identity、commands、attempt checkpoints、outbox 四表；数据库绑定唯一 Installation/Executor，未来版本、缺表/损坏、身份错绑、symlink/reparse point、宽权限、非普通文件和打开 identity 变化全部 fail closed。命令以 message ID、idempotency key、32 字节意图 SHA-256 和 Attempt 连续 sequence 去重；checkpoint 以 revision/CAS 和单调 event sequence 更新；outbox 只接受正式 `TaskCommandResultEnvelope`/`TaskEventEnvelope` 并保留精确 wire 重放身份。SQLite 不保存 bootstrap Session、本机会话、Cookie、平台登录态、密钥或任意配置，不调用系统钥匙串，也不替代云端 PostgreSQL 权威状态。
+E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在正式 CLI 联网前打开。初始 `PRAGMA user_version=1` 创建 identity、commands、attempt checkpoints、outbox 四表；B5-12 再以排他事务迁移到 v2 并增加四列平台 Session 健康表。数据库绑定唯一 Installation/Executor，未来版本、缺表/损坏、身份错绑、symlink/reparse point、宽权限、非普通文件和打开 identity 变化全部 fail closed。命令以 message ID、idempotency key、32 字节意图 SHA-256 和 Attempt 连续 sequence 去重；checkpoint 以 revision/CAS 和单调 event sequence 更新；outbox 只接受正式 `TaskCommandResultEnvelope`/`TaskEventEnvelope` 并保留精确 wire 重放身份。SQLite 不保存 bootstrap/Control Plane Session、Cookie、浏览器登录数据、密钥、页面原文或任意配置，不调用系统钥匙串，也不替代云端 PostgreSQL 权威状态。
 
 进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。E4-12 已接入无副作用命令回放：只接受身份/deadline 合法的 `task.offer`，先持久 receipt，再以一个 SQLite 事务提交 terminal checkpoint 与固定 `task.accept` 加五条 success Event；其他命令和非法帧继续 fail closed。
 
@@ -266,7 +266,7 @@ Playwright headed persistent context
 - 首次扫码后复用独立 Profile 登录态；
 - Executor 只上报平台、健康、过期和 revision，不上传 Cookie。
 
-B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC、Entitlement 或云端账号模型。当前 Profile ID 是 App 本机生成的 canonical UUIDv4，不是产品账号；Session 健康由真实页面封闭为 `missing/healthy/expired/risk/unknown`，只有 `healthy` 允许后续动作。Control Plane 只保存 Installation-scoped 的平台、状态、`session_revision` 和观察时间，不保存 Cookie、二维码、验证码、页面原文或 Profile 路径。
+B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC、Entitlement 或云端账号模型。当前 Profile ID 是 App 本机生成的 canonical UUIDv4，不是产品账号；Session 健康由真实页面封闭为 `missing/healthy/expired/risk/unknown`，只有 `healthy` 允许后续动作。B5-12 已把该事实接入正式 Executor WebSocket：本机 SQLite v2 为每个平台持久化正数、单调递增的 `session_revision`，同 epoch 的旧观察或从非健康状态直接回到健康均拒绝，重新登录或显式恢复必须推进 epoch。Control Plane 只在 `platform_session_health` 保存 Installation、平台、状态、revision、观察时间和更新时间六列；较低 revision、倒序观察和同 epoch 非健康→健康同样 fail closed，不保存 Cookie、二维码、验证码、页面原文、Executor/message ID 或 Profile 路径。
 
 安全注销由后续 B5-14 跨边界协调：先打开熔断并拒绝新任务，停止关联动作和浏览器、释放 Profile 锁，再由本机定向删除目标目录，最后递增 revision 并上报 `missing`。停止失败或外部最终状态无法确认时不得删 Profile 或自动重试，必须保留阻断状态并按 `OUTCOME_UNCERTAIN` 处理。
 
@@ -612,14 +612,15 @@ Outbox 不保存任意 payload。T3-09 的 task.offer 当前仍发送空 object 
 - Cookie、Token、页面原文、聊天全文和本机绝对路径不入库；
 - 删除任务不立即删除审计；Artifact 按保留策略异步清理。
 
-E4-11 已实现的 Executor 本机 SQLite v1 只保存：
+E4-11 建立、B5-12 升级到 v2 的 Executor 本机 SQLite 只保存：
 
 - 已接收正式命令的封闭 envelope、message/idempotency 双键与意图 SHA-256；
 - 当前 Attempt 的 task 绑定、连续 command sequence、单调 event sequence、封闭 checkpoint state 和 revision；
 - 与来源命令、Task/Attempt/correlation 严格绑定的待发送正式回执/事件及 delivered 标记；
+- 每个平台最新的封闭健康状态、单调 `session_revision` 和观察时间；
 - 不保存可由 Control Plane 恢复的第二套完整业务数据库。
 
-action 副作用账本、Artifact spool、Profile revision 与非敏感会话健康仍是后续 E4/B5/A7 任务，不能在 E4-11 的通用表中提前塞任意 JSON。任何 Session、Cookie、浏览器登录态、密钥和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
+v1→v2 在单个排他迁移事务内保留既有 identity、command、checkpoint 和 outbox；损坏、未来版本或身份错绑继续拒绝。action 副作用账本与 Artifact spool 仍是后续 A7/H8 任务，不能在通用表中提前塞任意 JSON。任何 Control Plane Session、Cookie、浏览器登录态、密钥、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
 ## 15. API 基线
 

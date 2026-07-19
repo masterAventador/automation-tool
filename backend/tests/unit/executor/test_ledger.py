@@ -17,6 +17,7 @@ from automation_tool.executor.ledger import (
     AttemptCheckpointState,
     ExecutorLedger,
     ExecutorLedgerRejected,
+    PlatformSessionState,
 )
 from automation_tool.protocol import (
     ExecutorLifecycleEnvelope,
@@ -101,14 +102,14 @@ def ledger(state_directory: Path) -> ExecutorLedger:
     )
 
 
-def test_empty_private_directory_migrates_to_the_exact_v1_schema(tmp_path: Path) -> None:
+def test_empty_private_directory_migrates_to_the_exact_v2_schema(tmp_path: Path) -> None:
     state_directory = tmp_path / "executor-state"
 
     opened = ledger(state_directory)
 
     assert opened.database_path == state_directory / EXECUTOR_LEDGER_FILE_NAME
     with sqlite3.connect(opened.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (1,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
         tables = {
             row[0]
             for row in connection.execute(
@@ -120,6 +121,7 @@ def test_empty_private_directory_migrates_to_the_exact_v1_schema(tmp_path: Path)
         "executor_commands",
         "executor_identity",
         "executor_outbox",
+        "executor_platform_sessions",
     }
     if os.name != "nt":
         assert stat.S_IMODE(state_directory.stat().st_mode) == 0o700
@@ -133,6 +135,69 @@ def test_empty_private_directory_migrates_to_the_exact_v1_schema(tmp_path: Path)
             installation_id="123e4567-e89b-42d3-a456-426614174099",
             executor_id=EXECUTOR_ID,
         )
+
+
+def test_platform_session_revision_is_durable_monotonic_and_recovery_is_explicit(
+    tmp_path: Path,
+) -> None:
+    state_directory = tmp_path / "session-state"
+    opened = ledger(state_directory)
+
+    missing = opened.record_platform_session(
+        platform="douyin",
+        state=PlatformSessionState.MISSING,
+        observed_at=NOW,
+    )
+    expired = opened.record_platform_session(
+        platform="douyin",
+        state=PlatformSessionState.EXPIRED,
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.record_platform_session(
+            platform="douyin",
+            state=PlatformSessionState.HEALTHY,
+            observed_at=NOW + timedelta(seconds=2),
+        )
+    recovered = opened.record_platform_session(
+        platform="douyin",
+        state=PlatformSessionState.HEALTHY,
+        observed_at=NOW + timedelta(seconds=3),
+        advance_epoch=True,
+    )
+
+    assert missing.session_revision == 1
+    assert missing.circuit_open is True
+    assert expired.session_revision == 1
+    assert recovered.session_revision == 2
+    assert recovered.circuit_open is False
+    assert ledger(state_directory).get_platform_session("douyin") == recovered
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.record_platform_session(
+            platform="douyin",
+            state=PlatformSessionState.RISK,
+            observed_at=NOW - timedelta(seconds=1),
+        )
+
+
+def test_v1_ledger_is_migrated_in_place_without_losing_commands(tmp_path: Path) -> None:
+    state_directory = tmp_path / "legacy-state"
+    opened = ledger(state_directory)
+    source = command(1)
+    opened.receive_command(source)
+    with sqlite3.connect(opened.database_path) as connection:
+        connection.execute("DROP TABLE executor_platform_sessions")
+        connection.execute("PRAGMA user_version = 1")
+
+    migrated = ledger(state_directory)
+
+    assert migrated.receive_command(source).replayed is True
+    with sqlite3.connect(migrated.database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'executor_platform_sessions'"
+        ).fetchone() == ("executor_platform_sessions",)
 
 
 def test_commands_are_durable_idempotent_and_attempt_sequences_are_contiguous(
@@ -510,7 +575,7 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)
     with sqlite3.connect(opened.database_path) as connection:
-        connection.execute("PRAGMA user_version = 2")
+        connection.execute("PRAGMA user_version = 3")
     with pytest.raises(ExecutorLedgerRejected):
         ledger(state_directory)
 

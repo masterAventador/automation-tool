@@ -26,7 +26,7 @@ from automation_tool.control_plane.application.executor_connections import (
     ExecutorPlatform,
 )
 from automation_tool.control_plane.domain import ExecutorConnectionId
-from automation_tool.protocol import TaskEventEnvelope
+from automation_tool.protocol import PlatformSessionHealthEnvelope, TaskEventEnvelope
 
 NOW = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 INSTALLATION_ID = UUID("123e4567-e89b-42d3-a456-426614174003")
@@ -198,6 +198,34 @@ def task_event_message(
     )
 
 
+def platform_session_health_message(
+    *,
+    installation_id: str = str(INSTALLATION_ID),
+    executor_id: str = str(EXECUTOR_ID),
+) -> str:
+    return json.dumps(
+        {
+            "protocol_version": "1.0",
+            "message_id": "723e4567-e89b-42d3-a456-426614174001",
+            "message_type": "platform.session_health",
+            "sent_at": "2026-07-18T12:00:01Z",
+            "deadline_at": "2026-07-18T12:00:31Z",
+            "installation_id": installation_id,
+            "executor_id": executor_id,
+            "correlation_id": "723e4567-e89b-42d3-a456-426614174002",
+            "idempotency_key": "platform:douyin:session:7:healthy",
+            "sequence": 7,
+            "payload": {
+                "platform": "douyin",
+                "state": "healthy",
+                "session_revision": 7,
+                "observed_at": "2026-07-18T12:00:00Z",
+            },
+        },
+        separators=(",", ":"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_authorize_uses_only_executor_capability_and_retains_no_raw_bearer() -> None:
     service, repository, token = connection_service()
@@ -302,7 +330,7 @@ async def test_bound_lifecycle_rejects_identity_switch_repeated_hello_and_task_t
 
 
 @pytest.mark.asyncio
-async def test_bound_inbound_accepts_results_and_events_but_rejects_identity_or_commands() -> None:
+async def test_bound_inbound_accepts_platform_health_and_rejects_impersonation() -> None:
     service, _, token = connection_service()
     bound = service.bind_hello(await service.authorize(token), lifecycle_message())
 
@@ -316,16 +344,21 @@ async def test_bound_inbound_accepts_results_and_events_but_rejects_identity_or_
     )
     accepted = service.validate_inbound_message(bound, task_result_message())
     task_event = service.validate_inbound_message(bound, task_event_message())
+    platform_health = service.validate_inbound_message(bound, platform_session_health_message())
 
     assert heartbeat.message_type == "executor.heartbeat"
     assert accepted.message_type == "task.accept"
     assert isinstance(task_event, TaskEventEnvelope)
     assert task_event.message_type == "task.started"
+    assert isinstance(platform_health, PlatformSessionHealthEnvelope)
+    assert platform_health.message_type == "platform.session_health"
     for source in (
         task_result_message(installation_id=str(uuid4())),
         task_result_message(executor_id=str(uuid4())),
         task_event_message(installation_id=str(uuid4())),
         task_event_message(executor_id=str(uuid4())),
+        platform_session_health_message(installation_id=str(uuid4())),
+        platform_session_health_message(executor_id=str(uuid4())),
         lifecycle_message(message_type="task.offer"),
         lifecycle_message(),
     ):

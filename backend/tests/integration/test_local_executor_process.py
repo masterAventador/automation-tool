@@ -264,10 +264,16 @@ def test_real_process_bootstraps_over_stdin_heartbeats_to_control_plane_and_stop
         ledger_path = state_directory / "executor-ledger.sqlite3"
         assert ledger_path.is_file()
         with sqlite3.connect(ledger_path) as connection:
-            assert connection.execute("PRAGMA user_version").fetchone() == (1,)
+            assert connection.execute("PRAGMA user_version").fetchone() == (2,)
             assert connection.execute(
                 "SELECT installation_id, executor_id FROM executor_identity"
             ).fetchone() == (str(INSTALLATION_ID), str(EXECUTOR_ID))
+            assert [
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(executor_platform_sessions)"
+                ).fetchall()
+            ] == ["platform", "state", "session_revision", "observed_at"]
         ledger_bytes = ledger_path.read_bytes()
         assert control_plane.session_token.encode() not in ledger_bytes
         assert LOCAL_SESSION_TOKEN.encode() not in ledger_bytes

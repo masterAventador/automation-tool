@@ -1,6 +1,7 @@
 """Async PostgreSQL infrastructure."""
 
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
+from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
     device_credentials,
     device_sessions,
@@ -9,6 +10,7 @@ from .schema import (
     installation_registration_challenges,
     installations,
     metadata,
+    platform_session_health,
     task_actions,
     task_commands,
     task_events,
@@ -22,6 +24,7 @@ from .task_event_stream_repository import SqlAlchemyTaskEventStreamRepository
 __all__ = [
     "Database",
     "SqlAlchemyInstallationRevocationRepository",
+    "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
     "SqlAlchemyTaskEventConvergenceRepository",
     "SqlAlchemyTaskEventStreamRepository",
@@ -32,6 +35,7 @@ __all__ = [
     "installation_registration_challenges",
     "installations",
     "metadata",
+    "platform_session_health",
     "task_actions",
     "task_commands",
     "task_events",
