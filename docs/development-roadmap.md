@@ -287,7 +287,7 @@
 | D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | 🟩 完成 |
 | D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | 🟩 完成 |
 | D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | 🟩 完成 |
-| D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | ⬜ 未开始 |
+| D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | 🟩 完成 |
 | D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | ⬜ 未开始 |
 | D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | ⬜ 未开始 |
 | D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | ⬜ 未开始 |
@@ -1971,10 +1971,22 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；D6-06 历史契约只移除“Page Object 尚未解析 Candidate”的阶段性断言，滚动层无解析和 wire/IPC 未接入门禁保持不变
 - 后续：进入 `D6-08`，只对本任务已裁剪 Candidate 做本任务去重、历史窗口去重和黑名单原因，不重新读取页面或扩展个人信息
 
+### D6-08 黑名单/去重
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；Python 领域测试准确在收集期失败于 `douyin_candidate_policy.py` 不存在，跨边界 Node 契约也因同一生产模块缺失失败，随后才实现并从 Control Plane domain 公共入口导出
+- 固定策略：新增纯 `douyin.candidate-policy.v1`，MVP 历史去重窗固定 30 天且 UI 不可放宽；以包含 cutoff 的 UTC 区间判断历史。输入 Candidate/history/blacklist 均为 exact tuple、各限 100 项，Candidate 必须属于同一 page revision；历史和黑名单只携带稳定 `DouyinCandidateKey`，不接受平台 ID、昵称、公开号或任意原因文本
+- 原因与顺序：评估保留输入顺序和全部 Candidate，不做破坏性过滤；每条 Decision 只有 `eligible/duplicate_in_task/duplicate_in_history/blacklisted` 之一，优先级固定为黑名单 > 本任务后续重复 > 窗口内历史重复 > 可用。同一目标跨名称/handle 变化仍按 D6-06 key 命中；提供分类计数、可用 Candidate tuple、统一 page revision 与 cutoff 供后续预览/持久化
+- 失败关闭：未来历史、非 UTC/非 datetime、早于可计算窗口的时钟、重复历史/黑名单 lookup key、伪类型、超限集合和混合 revision 全部固定拒绝。Evaluation 自身拒绝把首条伪造成本任务重复、把后续重复伪造为可用/历史重复或拼接不同 revision，错误/repr 不回显候选或 key
+- 边界与原调用方：本任务产物是 Control Plane 纯领域函数，正式调用方式就是传入已构造 Candidate、相关历史/黑名单 key 与 UTC 评估时刻并取得不可变 Evaluation；没有 App、API、数据库、网络、浏览器、Executor 或外部副作用，因此不启动空壳 App/服务。策略不导入 SQLAlchemy/仓储/RPA/HTTP/Tauri，也未修改 Executor wire/IPC；D6-09 才接真实 PostgreSQL 事实和 Target 持久化
+- 测试：26 项聚焦 Python 用例，134 条语句/34 个分支覆盖率 100%；Backend 全量 `1232 passed, 4 skipped in 87.29s`，7386 条语句/1530 个分支覆盖率 100%。232 个 Python 文件格式、Ruff、严格 Mypy 216 个源码文件、uv lock、OpenAPI 和 Executor Schema 漂移全绿。Frontend 79 项 Node 契约、145 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试及三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿；UI 回归结束后 1420 与浏览器/Vite 进程均无残留
+- 文档：同步产品规划、根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-09`，以 PostgreSQL/Alembic 建立 Installation-scoped `task_targets`、唯一约束、稳定分页，并在保存前调用本任务策略
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-08`：实现黑名单与去重，覆盖本任务重复、历史窗口重复和固定黑名单原因；
+1. `D6-09`：实现 Installation-scoped Target 数据库、唯一约束、稳定分页与策略结果持久化；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。

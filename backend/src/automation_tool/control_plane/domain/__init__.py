@@ -10,6 +10,16 @@ from automation_tool.control_plane.domain.demo_bootstrap import (
     InvalidDemoBootstrap,
     InvalidDemoEnvironmentId,
 )
+from automation_tool.control_plane.domain.douyin_candidate_policy import (
+    DOUYIN_CANDIDATE_HISTORY_WINDOW,
+    DOUYIN_CANDIDATE_POLICY_VERSION,
+    DouyinCandidateDecision,
+    DouyinCandidateDisposition,
+    DouyinCandidateEvaluation,
+    DouyinCandidateHistoryFact,
+    InvalidDouyinCandidatePolicy,
+    evaluate_douyin_candidates,
+)
 from automation_tool.control_plane.domain.errors import DependencyUnavailable
 from automation_tool.control_plane.domain.execution_models import (
     TERMINAL_ACTION_STATUSES,
@@ -63,6 +73,8 @@ from automation_tool.control_plane.domain.task_state_machine import (
 )
 
 __all__ = [
+    "DOUYIN_CANDIDATE_HISTORY_WINDOW",
+    "DOUYIN_CANDIDATE_POLICY_VERSION",
     "DOUYIN_SEARCH_EXPOSURE_TEMPLATE",
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
     "MAX_MESSAGE_TEMPLATE_CHARACTERS",
@@ -85,6 +97,10 @@ __all__ = [
     "DemoBootstrapGrant",
     "DemoEnvironmentId",
     "DependencyUnavailable",
+    "DouyinCandidateDecision",
+    "DouyinCandidateDisposition",
+    "DouyinCandidateEvaluation",
+    "DouyinCandidateHistoryFact",
     "DouyinSearchExposureAction",
     "DouyinSearchExposureDefinition",
     "ExecutionAttemptId",
@@ -95,6 +111,7 @@ __all__ = [
     "InstallationStatus",
     "InvalidDemoBootstrap",
     "InvalidDemoEnvironmentId",
+    "InvalidDouyinCandidatePolicy",
     "InvalidResourceId",
     "InvalidTaskDefinition",
     "InvalidTaskEventModel",
@@ -110,4 +127,5 @@ __all__ = [
     "TaskSnapshotProjection",
     "TaskStateMachine",
     "TaskStatus",
+    "evaluate_douyin_candidates",
 ]
