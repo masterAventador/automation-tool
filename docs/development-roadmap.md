@@ -62,7 +62,7 @@
 | Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS 冻结实包验证 |
 | Rust Executor package verifier | `🔍` macOS arm64 已用当前目标包与 Python 签名 fixture 验证签名、完整目录、平台/架构、SemVer 范围和防降级；Windows 原生代码已进入同一 CI，但 runner 仍受 GitHub Billing 阻塞 |
 | Executor stdin 认证 | `✅` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
-| Rust ExecutorManager | `🔍` macOS 已从公开 Rust 生命周期入口完成签名 PyInstaller onedir→stdin 认证→真实 Uvicorn→健康/停止证明全链路；单实例、并发启动、超时回收和 fail closed 已验证，Windows 原生仍随 Billing 阻塞待验收 |
+| Rust ExecutorManager | `🔍` macOS 已从公开 Rust 生命周期入口完成签名 PyInstaller onedir→stdin 认证→真实 Uvicorn→健康/停止证明全链路；单实例、并发启动、后台崩溃检测、两次重启预算、显式停止不重启和 fail closed 已验证，Windows 原生仍随 Billing 阻塞待验收 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -231,7 +231,7 @@
 | E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | 🔍 待验收 |
 | E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ✅ 已完成 |
 | E4-07 | Rust ExecutorManager | 固定 start/status/stop Rust 生命周期，单实例和并发线性化 | E4-05,E4-06 | 🔍 待验收 |
-| E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | ⬜ 未开始 |
+| E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | 🔍 待验收 |
 | E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | ⬜ 未开始 |
 | E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | ⬜ 未开始 |
 | E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | ⬜ 未开始 |
@@ -1453,9 +1453,26 @@
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：E4-08 在 Manager 上增加后台退出检测、有界重启预算与显式停止不重启；E4-03/E4-05/E4-07 Windows 原生验收待 GitHub Billing 或 Windows 设备恢复后补齐
 
+### E4-08 进程监管
+
+- 状态：🔍 待 Windows 原生验收；macOS 监管行为通过，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：在 E4-07 唯一 Manager 内后台发现 Executor 非预期退出，以显式有界策略最多恢复两次；显式 stop、正常退出、固定 bootstrap/process 失败、坏包或坏认证均不得形成重启循环，不新增第二 Supervisor 或宽进程接口
+- RED：先扩展公开 Rust Manager 测试与独立 Node 架构契约；Rust 准确失败于 `ExecutorRestartPolicy`、第五个 Manager 构造参数和 `restart_count` 不存在，Node 准确失败于缺少显式策略/监管线程，证明不是轮询测试代码或旧 Manager 让测试假绿
+- 实现：`ExecutorRestartPolicy` 显式接收 `maximum_restarts`、monitor interval 和 restart delay，拒绝超过 8 次、零时长或 60 秒以上配置；当前 MVP 测试/装配预算固定为 2。Manager 内部仅有一个命名 supervisor thread 和 Mutex 状态机，状态扩为 `running/restarting/stopped`，公开 `restartCount` 不暴露 PID、路径或 Session。每次恢复仍重新执行 E4-05 整包验证、生成新的 E4-06 本机会话并等待认证 healthy，不复用旧进程 proof
+- 重启判定：macOS/Unix 只把 signal 终止视为可重启崩溃；正常退出 0、固定 process failure 1 和 bootstrap failure 2 都停止且不消耗新预算。Windows 代码只把负 NT 异常状态视为崩溃，尚待真实原生验收。显式 stop 在同一线性化锁内先移除 running/pending 生命周期再终止进程，因此 supervisor 无目标可重启；Manager Drop 先关闭/join supervisor，再回收直接子进程
+- 失败矩阵与事实：真实签名测试进程前两次 healthy 后收到 SIGKILL，后台恰好启动第三个进程并报告 `restartCount=2`；持续 SIGKILL 也只产生初次+两次恢复，之后稳定 stopped。另行验证显式 stop 后启动次数保持 1、退出码 0/1 均不恢复、非法预算/时长拒绝、E4-07 并发/超时/坏包/坏 proof 全部继续通过。测试计数文件位于独立临时路径，不修改已签名包，RAII 删除
+- 正式路径回归：E4-07 的真实 Manifest CLI→signed PyInstaller onedir→公开 Rust Manager→真实 Uvicorn/Session/Registry 验收在加入 supervisor 后再次通过，事实仍为 `registered → heartbeat → unregistered`。本任务的崩溃预算从公开 Manager 原入口驱动真实 OS 子进程与 SIGKILL；正式 PyInstaller 崩溃、隐藏 App 与整棵进程树联合验收按路线图归 E4-14，不能以当前 fixture 冒充
+- 门禁：Manager 8 项普通测试通过、1 项 PyInstaller 编排项按专用脚本通过；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 42 单元 + 3 bootstrap + 8 manager + 10 package + 3 协议 fixture + 14 安全配置，共 80 项全绿。Frontend 44 项 Node 契约、112 项 Vitest 全绿；Backend 回归 `855 passed in 88.12s`、4571 条语句/878 个分支 100%；正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App。Clippy all-targets/all-features、Rustfmt、ESLint、TypeScript、OpenAPI、production boundary、Ruff、Mypy 和 uv lock 继续全绿
+- App、凭据与清理：本任务仍只有 Rust 内部生命周期 API，没有 Tauri Command/React 页面，因此不启动 App；E4-13/E4-14 才做固定桌面入口。Control Plane Session 为受监管重启仅保留在 `Zeroizing<String>` 内存，新的本机会话每次独立生成；不写系统钥匙串、`app_data_dir`、环境、argv 或日志。验收后无 Executor、supervisor、Cargo、Uvicorn、PyInstaller 或临时计数文件残留
+- Windows：Hosted Runner 的 Billing/Actions spending limit 未恢复，本任务不重复空跑 workflow；Windows crash code、强制停止和 Job Object 原生语义保持 `🔍`，E4-09 与恢复后的同一矩阵补齐，不阻塞后续无设备依赖实现
+- 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增第二份计划
+- 后续：E4-09 给每次启动建立 Unix process group/Windows Job Object，超时、显式 stop、Manager Drop 和挂起边界必须清理完整进程树；之后 E4-10 做 stderr 限界脱敏
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-08`：在现有 Rust `ExecutorManager` 上实现后台退出检测、有界重启预算与显式停止不重启；
-2. E4-03/E4-05/E4-07 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-08～Wave 10 的无设备依赖任务。
+1. `E4-09`：为现有 Manager 增加 Unix process group、Windows Job Object 与挂起/超时完整进程树清理；
+2. E4-03/E4-05/E4-07/E4-08 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-09～Wave 10 的无设备依赖任务。

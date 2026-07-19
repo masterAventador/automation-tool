@@ -43,6 +43,8 @@ E4-06 的 `src-tauri/src/executor_bootstrap.rs` 是本机进程启动认证边�
 
 E4-07 的 `src-tauri/src/executor_manager.rs` 是固定 start/status/stop 生命周期边界。它在每次 start 前复验 signed onedir，从 Manifest 精确入口无参数启动单一子进程，经 stdin 写入并关闭 E4-06 bootstrap，只接受有界且认证的 healthy/stopped stdout 事件；并发 start 由 Mutex 线性化，超时、坏包、坏证明和 Drop 均 fail closed 并回收直接子进程。模块不提供旧 stdio `invoke`、任意 payload、Tauri Command 或 React API；E4-13/E4-14 才从固定 PlatformAdapter 和隐藏真实 App 接入。`../scripts/run_e4_07_acceptance.py` 已从公开 Rust Manager 原入口完成真实签名 PyInstaller→Uvicorn 的 macOS 全链路，Windows 原生仍随 GitHub Billing 阻塞待验收。
 
+E4-08 在同一 Manager 内增加唯一命名 supervisor thread 和显式 `ExecutorRestartPolicy`。状态机公开 running/restarting/stopped 与已消耗 `restartCount`；当前 MVP 预算为 2。只有 OS 异常崩溃进入延迟恢复，每次恢复重新验包、生成新 stdin 本机会话并验证 healthy；显式 stop、正常退出、固定失败退出、坏包/坏认证不会重启。Manager Drop 先关闭并 join supervisor，再回收子进程。macOS 已用真实签名进程、SIGKILL 与公开 Manager 入口验证两次恢复和预算耗尽；完整 PyInstaller 路径也已回归。Windows 原生与整棵进程树分别待 runner/E4-09。
+
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。

@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::PathBuf;
-use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::sync::Mutex;
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
@@ -18,6 +19,7 @@ use zeroize::Zeroizing;
 const EXECUTOR_PROTOCOL_VERSION: &str = "1.0";
 const MAX_LIFECYCLE_LINE_BYTES: usize = 4096;
 const MAX_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_RESTARTS: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutorManagerErrorCode {
@@ -65,6 +67,7 @@ impl std::error::Error for ExecutorManagerError {}
 #[serde(rename_all = "snake_case")]
 pub enum ExecutorManagerState {
     Running,
+    Restarting,
     Stopped,
 }
 
@@ -74,22 +77,34 @@ pub struct ExecutorManagerStatus {
     state: ExecutorManagerState,
     version: Option<String>,
     build_id: Option<String>,
+    restart_count: u8,
 }
 
 impl ExecutorManagerStatus {
-    fn stopped() -> Self {
+    fn stopped(restart_count: u8) -> Self {
         Self {
             state: ExecutorManagerState::Stopped,
             version: None,
             build_id: None,
+            restart_count,
         }
     }
 
-    fn running(package: &VerifiedExecutorPackage) -> Self {
+    fn running(package: &VerifiedExecutorPackage, restart_count: u8) -> Self {
         Self {
             state: ExecutorManagerState::Running,
             version: Some(package.version().to_string()),
             build_id: Some(package.build_id().to_owned()),
+            restart_count,
+        }
+    }
+
+    fn restarting(running: &Self, restart_count: u8) -> Self {
+        Self {
+            state: ExecutorManagerState::Restarting,
+            version: running.version.clone(),
+            build_id: running.build_id.clone(),
+            restart_count,
         }
     }
 
@@ -103,6 +118,10 @@ impl ExecutorManagerStatus {
 
     pub fn build_id(&self) -> Option<&str> {
         self.build_id.as_deref()
+    }
+
+    pub const fn restart_count(&self) -> u8 {
+        self.restart_count
     }
 }
 
@@ -151,12 +170,72 @@ impl ExecutorLaunchConfiguration {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExecutorRestartPolicy {
+    maximum_restarts: u8,
+    monitor_interval: Duration,
+    restart_delay: Duration,
+}
+
+impl ExecutorRestartPolicy {
+    pub fn new(
+        maximum_restarts: u8,
+        monitor_interval: Duration,
+        restart_delay: Duration,
+    ) -> Result<Self, ExecutorManagerError> {
+        if maximum_restarts > MAX_RESTARTS
+            || monitor_interval.is_zero()
+            || monitor_interval > MAX_LIFECYCLE_TIMEOUT
+            || restart_delay.is_zero()
+            || restart_delay > MAX_LIFECYCLE_TIMEOUT
+        {
+            return Err(ExecutorManagerError::new(
+                ExecutorManagerErrorCode::ConfigurationInvalid,
+            ));
+        }
+        Ok(Self {
+            maximum_restarts,
+            monitor_interval,
+            restart_delay,
+        })
+    }
+}
+
 pub struct ExecutorManager {
+    core: Arc<ExecutorManagerCore>,
+    supervisor_shutdown: Arc<AtomicBool>,
+    supervisor_wake: Sender<()>,
+    supervisor_thread: Option<JoinHandle<()>>,
+}
+
+struct ExecutorManagerCore {
     package_root: PathBuf,
     verifier: ExecutorPackageVerifier,
     start_timeout: Duration,
     stop_timeout: Duration,
-    slot: Mutex<Option<RunningExecutor>>,
+    restart_policy: ExecutorRestartPolicy,
+    slot: Mutex<ExecutorManagerSlot>,
+}
+
+struct ExecutorManagerSlot {
+    lifecycle: Option<ManagedExecutorLifecycle>,
+    status: ExecutorManagerStatus,
+}
+
+enum ManagedExecutorLifecycle {
+    Running(ManagedExecutor),
+    RestartPending(PendingExecutorRestart),
+}
+
+struct ManagedExecutor {
+    process: RunningExecutor,
+    launch: ExecutorLaunchConfiguration,
+}
+
+struct PendingExecutorRestart {
+    launch: ExecutorLaunchConfiguration,
+    restart_count: u8,
+    not_before: Instant,
 }
 
 impl ExecutorManager {
@@ -165,6 +244,7 @@ impl ExecutorManager {
         verifier: ExecutorPackageVerifier,
         start_timeout: Duration,
         stop_timeout: Duration,
+        restart_policy: ExecutorRestartPolicy,
     ) -> Result<Self, ExecutorManagerError> {
         if package_root.as_os_str().is_empty()
             || start_timeout.is_zero()
@@ -176,12 +256,30 @@ impl ExecutorManager {
                 ExecutorManagerErrorCode::ConfigurationInvalid,
             ));
         }
-        Ok(Self {
+        let core = Arc::new(ExecutorManagerCore {
             package_root,
             verifier,
             start_timeout,
             stop_timeout,
-            slot: Mutex::new(None),
+            restart_policy,
+            slot: Mutex::new(ExecutorManagerSlot {
+                lifecycle: None,
+                status: ExecutorManagerStatus::stopped(0),
+            }),
+        });
+        let supervisor_shutdown = Arc::new(AtomicBool::new(false));
+        let (supervisor_wake, wake_receiver) = mpsc::channel();
+        let thread_core = Arc::clone(&core);
+        let thread_shutdown = Arc::clone(&supervisor_shutdown);
+        let supervisor_thread = std::thread::Builder::new()
+            .name("automation-tool-executor-supervisor".to_owned())
+            .spawn(move || supervisor_loop(thread_core, thread_shutdown, wake_receiver))
+            .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))?;
+        Ok(Self {
+            core,
+            supervisor_shutdown,
+            supervisor_wake,
+            supervisor_thread: Some(supervisor_thread),
         })
     }
 
@@ -190,45 +288,52 @@ impl ExecutorManager {
         launch: ExecutorLaunchConfiguration,
     ) -> Result<ExecutorManagerStatus, ExecutorManagerError> {
         let mut slot = self.lock_slot()?;
-        refresh_exited(&mut slot)?;
-        if slot.is_some() {
+        reconcile_supervision(&self.core, &mut slot)?;
+        if slot.lifecycle.is_some() {
             return Err(ExecutorManagerError::new(
                 ExecutorManagerErrorCode::AlreadyRunning,
             ));
         }
         let package = self
+            .core
             .verifier
-            .verify_current(&self.package_root)
+            .verify_current(&self.core.package_root)
             .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::PackageRejected))?;
-        let status = ExecutorManagerStatus::running(&package);
-        let running = spawn_executor(package, launch, self.start_timeout)?;
-        *slot = Some(running);
+        let status = ExecutorManagerStatus::running(&package, 0);
+        let running = spawn_executor(package, &launch, self.core.start_timeout, 0)?;
+        slot.status = status.clone();
+        slot.lifecycle = Some(ManagedExecutorLifecycle::Running(ManagedExecutor {
+            process: running,
+            launch,
+        }));
+        let _ = self.supervisor_wake.send(());
         Ok(status)
     }
 
     pub fn status(&self) -> Result<ExecutorManagerStatus, ExecutorManagerError> {
         let mut slot = self.lock_slot()?;
-        refresh_exited(&mut slot)?;
-        Ok(slot
-            .as_ref()
-            .map(|running| running.status.clone())
-            .unwrap_or_else(ExecutorManagerStatus::stopped))
+        reconcile_supervision(&self.core, &mut slot)?;
+        Ok(slot.status.clone())
     }
 
     pub fn stop(&self) -> Result<ExecutorManagerStatus, ExecutorManagerError> {
         let mut slot = self.lock_slot()?;
-        refresh_exited(&mut slot)?;
-        let Some(mut running) = slot.take() else {
-            return Ok(ExecutorManagerStatus::stopped());
+        reconcile_supervision(&self.core, &mut slot)?;
+        let restart_count = slot.status.restart_count();
+        let Some(lifecycle) = slot.lifecycle.take() else {
+            slot.status = ExecutorManagerStatus::stopped(restart_count);
+            return Ok(slot.status.clone());
         };
-        stop_executor(&mut running, self.stop_timeout)?;
-        Ok(ExecutorManagerStatus::stopped())
+        slot.status = ExecutorManagerStatus::stopped(restart_count);
+        if let ManagedExecutorLifecycle::Running(mut managed) = lifecycle {
+            stop_executor(&mut managed.process, self.core.stop_timeout)?;
+        }
+        Ok(slot.status.clone())
     }
 
-    fn lock_slot(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Option<RunningExecutor>>, ExecutorManagerError> {
-        self.slot
+    fn lock_slot(&self) -> Result<MutexGuard<'_, ExecutorManagerSlot>, ExecutorManagerError> {
+        self.core
+            .slot
             .lock()
             .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))
     }
@@ -236,10 +341,16 @@ impl ExecutorManager {
 
 impl Drop for ExecutorManager {
     fn drop(&mut self) {
-        if let Ok(slot) = self.slot.get_mut() {
-            if let Some(mut running) = slot.take() {
-                force_stop(&mut running);
+        self.supervisor_shutdown.store(true, Ordering::Release);
+        let _ = self.supervisor_wake.send(());
+        if let Some(thread) = self.supervisor_thread.take() {
+            let _ = thread.join();
+        }
+        if let Ok(mut slot) = self.core.slot.lock() {
+            if let Some(ManagedExecutorLifecycle::Running(mut managed)) = slot.lifecycle.take() {
+                force_stop(&mut managed.process);
             }
+            slot.status = ExecutorManagerStatus::stopped(slot.status.restart_count());
         }
     }
 }
@@ -263,8 +374,9 @@ struct ExecutorLifecycleEvent {
 
 fn spawn_executor(
     package: VerifiedExecutorPackage,
-    launch: ExecutorLaunchConfiguration,
+    launch: &ExecutorLaunchConfiguration,
     start_timeout: Duration,
+    restart_count: u8,
 ) -> Result<RunningExecutor, ExecutorManagerError> {
     let token = LocalSessionToken::generate()
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))?;
@@ -294,7 +406,7 @@ fn spawn_executor(
             return Err(error);
         }
     };
-    let status = ExecutorManagerStatus::running(&package);
+    let status = ExecutorManagerStatus::running(&package, restart_count);
     let mut running = RunningExecutor {
         child,
         token,
@@ -442,21 +554,106 @@ fn request_graceful_stop(_child: &mut Child) -> Result<(), ExecutorManagerError>
     Err(process_unavailable())
 }
 
-fn refresh_exited(slot: &mut Option<RunningExecutor>) -> Result<(), ExecutorManagerError> {
-    let exited = match slot.as_mut() {
-        Some(running) => running
-            .child
-            .try_wait()
-            .map_err(|_| process_unavailable())?
-            .is_some(),
-        None => false,
+fn supervisor_loop(core: Arc<ExecutorManagerCore>, shutdown: Arc<AtomicBool>, wake: Receiver<()>) {
+    while !shutdown.load(Ordering::Acquire) {
+        let _ = wake.recv_timeout(core.restart_policy.monitor_interval);
+        if shutdown.load(Ordering::Acquire) {
+            break;
+        }
+        let Ok(mut slot) = core.slot.lock() else {
+            break;
+        };
+        let _ = reconcile_supervision(&core, &mut slot);
+    }
+}
+
+fn reconcile_supervision(
+    core: &ExecutorManagerCore,
+    slot: &mut ExecutorManagerSlot,
+) -> Result<(), ExecutorManagerError> {
+    let Some(lifecycle) = slot.lifecycle.take() else {
+        return Ok(());
     };
-    if exited {
-        if let Some(mut running) = slot.take() {
-            join_readers(&mut running);
+    match lifecycle {
+        ManagedExecutorLifecycle::Running(mut managed) => {
+            let exit_status = match managed.process.child.try_wait() {
+                Ok(Some(status)) => status,
+                Ok(None) => {
+                    slot.lifecycle = Some(ManagedExecutorLifecycle::Running(managed));
+                    return Ok(());
+                }
+                Err(_) => {
+                    slot.lifecycle = Some(ManagedExecutorLifecycle::Running(managed));
+                    return Err(process_unavailable());
+                }
+            };
+            join_readers(&mut managed.process);
+            let restart_count = managed.process.status.restart_count();
+            if restartable_exit(exit_status) && restart_count < core.restart_policy.maximum_restarts
+            {
+                let next_restart_count = restart_count + 1;
+                slot.status =
+                    ExecutorManagerStatus::restarting(&managed.process.status, next_restart_count);
+                slot.lifecycle = Some(ManagedExecutorLifecycle::RestartPending(
+                    PendingExecutorRestart {
+                        launch: managed.launch,
+                        restart_count: next_restart_count,
+                        not_before: Instant::now() + core.restart_policy.restart_delay,
+                    },
+                ));
+            } else {
+                slot.status = ExecutorManagerStatus::stopped(restart_count);
+            }
+        }
+        ManagedExecutorLifecycle::RestartPending(pending) => {
+            if Instant::now() < pending.not_before {
+                slot.lifecycle = Some(ManagedExecutorLifecycle::RestartPending(pending));
+                return Ok(());
+            }
+            let restarted = core
+                .verifier
+                .verify_current(&core.package_root)
+                .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::PackageRejected))
+                .and_then(|package| {
+                    spawn_executor(
+                        package,
+                        &pending.launch,
+                        core.start_timeout,
+                        pending.restart_count,
+                    )
+                });
+            match restarted {
+                Ok(process) => {
+                    slot.status = process.status.clone();
+                    slot.lifecycle = Some(ManagedExecutorLifecycle::Running(ManagedExecutor {
+                        process,
+                        launch: pending.launch,
+                    }));
+                }
+                Err(_) => {
+                    slot.status = ExecutorManagerStatus::stopped(pending.restart_count);
+                }
+            }
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn restartable_exit(status: ExitStatus) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+
+    status.signal().is_some()
+}
+
+#[cfg(windows)]
+fn restartable_exit(status: ExitStatus) -> bool {
+    status.code().is_some_and(|code| code < 0)
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn restartable_exit(_status: ExitStatus) -> bool {
+    false
 }
 
 fn force_stop(running: &mut RunningExecutor) {

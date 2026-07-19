@@ -21,3 +21,17 @@ test("E4-07 keeps Executor lifecycle in a fixed Rust manager without restoring s
   assert.doesNotMatch(manager, /#\[tauri::command\]/);
   assert.doesNotMatch(manager, /std::env::var|https?:\/\//);
 });
+
+test("E4-08 supervises only the fixed Executor with an explicit bounded restart policy", async () => {
+  const manager = await readFile(
+    new URL("src-tauri/src/executor_manager.rs", frontendRoot),
+    "utf8",
+  );
+
+  assert.match(manager, /ExecutorRestartPolicy/);
+  assert.match(manager, /maximum_restarts/);
+  assert.match(manager, /restart_count/);
+  assert.match(manager, /std::thread::Builder/);
+  assert.match(manager, /RestartPending/);
+  assert.doesNotMatch(manager, /loop\s*\{[^}]*Command::new/s);
+});

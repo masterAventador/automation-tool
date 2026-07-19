@@ -291,6 +291,8 @@ E4-06 的 `src-tauri/src/executor_bootstrap.rs` 只提供 Rust 内部 `LocalSess
 
 E4-07 的 `src-tauri/src/executor_manager.rs` 组合 E4-05/E4-06，但不复制两者规则：Manager 每次 start 复验固定包根并只启动验证后的 Manifest 入口，stdin 一次写入 bootstrap，stdout 只消费认证 lifecycle 事件；一个 Mutex 线性化 start/status/stop，错误、超时与 Drop 回收直接子进程。它不含旧 stdio task invoke、`serde_json::Value`、capability、任意路径/URL/命令或 Tauri Command。`scripts/run_e4_07_acceptance.py` 使用真实 Manifest CLI、PyInstaller onedir、本地 Uvicorn/Session/Registry 和公开 Rust Manager 原入口证明 `registered → heartbeat → unregistered`；私有配置只以 `0600` 临时文件存在并删除。后台退出监管、进程树、stderr 诊断和桌面 PlatformAdapter 分别留给 E4-08～E4-10/E4-13。
 
+E4-08 不新增 supervisor 文件或第二生命周期源，而是在同一 `executor_manager.rs` 中加入显式 `ExecutorRestartPolicy`、唯一命名后台线程和 running/restarting/stopped 内部状态机。只有 OS crash 能在预算内转入 pending restart；每次恢复仍复用 E4-05/E4-06 的原始公开边界重新验包和生成令牌。显式 stop 先移除 pending/running，正常或固定失败退出直接停止，Drop 先 join supervisor；公开状态仅增加 `restartCount`。测试用已签名真实进程和 OS SIGKILL 证明初次+两次恢复的硬事实，临时计数位于包外并由 RAII 删除；PyInstaller/Uvicorn 正式链路另行回归。完整进程树和 Windows 原生恢复仍归 E4-09/待 runner 验收。
+
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
 T3-14 复用同一 `task_controls.py`、HTTP router、Outbox repository 和事件收敛仓储：cancel/emergency-stop 首次请求在命令事务内把 Task/Attempt 投影到 CANCELLING，终态再由匹配最新 ACK/correlation 的 Executor 事件决定，完成竞态仍服从领域状态机。桌面侧仍只扩展同一个 `control_plane.rs` 固定 operation；T3-14 专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_14_acceptance.py` 顺序验证取消和紧停，不建立第二网络桥或第二状态源。

@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::executor_manager::{
     ExecutorLaunchConfiguration, ExecutorManager, ExecutorManagerErrorCode, ExecutorManagerState,
+    ExecutorRestartPolicy,
 };
 use automation_tool_desktop_lib::executor_package::ExecutorPackageVerifier;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -172,8 +173,18 @@ fn manager_for_root_with_timeouts(
         .to_bytes();
     let verifier =
         ExecutorPackageVerifier::new(verifying_key, "=0.1.0", None).expect("test verifier");
+    let restart_policy =
+        ExecutorRestartPolicy::new(2, Duration::from_millis(10), Duration::from_millis(10))
+            .expect("restart policy");
     Arc::new(
-        ExecutorManager::new(package_root, verifier, start_timeout, stop_timeout).expect("manager"),
+        ExecutorManager::new(
+            package_root,
+            verifier,
+            start_timeout,
+            stop_timeout,
+            restart_policy,
+        )
+        .expect("manager"),
     )
 }
 
@@ -274,6 +285,17 @@ fn invalid_package_configuration_and_health_proof_fail_closed_without_leaks() {
         0,
     )
     .is_err());
+
+    for policy in [
+        ExecutorRestartPolicy::new(9, Duration::from_millis(10), Duration::from_millis(10)),
+        ExecutorRestartPolicy::new(2, Duration::ZERO, Duration::from_millis(10)),
+        ExecutorRestartPolicy::new(2, Duration::from_millis(10), Duration::from_secs(61)),
+    ] {
+        assert_eq!(
+            policy.expect_err("invalid restart policy").code(),
+            ExecutorManagerErrorCode::ConfigurationInvalid,
+        );
+    }
 }
 
 #[test]
@@ -291,6 +313,158 @@ fn startup_timeout_force_stops_the_child_and_leaves_the_manager_stopped() {
         manager.status().expect("status after timeout").state(),
         ExecutorManagerState::Stopped,
     );
+}
+
+struct LaunchCounter {
+    path: PathBuf,
+}
+
+impl LaunchCounter {
+    fn new() -> Self {
+        Self {
+            path: std::env::temp_dir().join(format!(
+                "automation-tool-e4-08-counter-{}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system time")
+                    .as_nanos(),
+                TEMPORARY_PACKAGE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            )),
+        }
+    }
+
+    fn value(&self) -> u8 {
+        fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn wait_for(&self, expected: u8) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while self.value() != expected && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(self.value(), expected);
+    }
+}
+
+impl Drop for LaunchCounter {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn supervised_fixture(counter: &LaunchCounter, after_healthy: &str) -> String {
+    let counter_path =
+        serde_json::to_string(&counter.path.to_string_lossy()).expect("counter path");
+    format!(
+        r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, os, pathlib, signal, sys, time
+counter = pathlib.Path({counter_path})
+count = int(counter.read_text()) + 1 if counter.exists() else 1
+counter.write_text(str(count))
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+stopping = False
+def proof(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    return "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def emit(event):
+    print(json.dumps({{"authenticationProof": proof(event), "event": event, "protocolVersion": "1.0"}}, separators=(",", ":")), flush=True)
+def stop(_signum, _frame):
+    global stopping
+    stopping = True
+signal.signal(signal.SIGTERM, stop)
+emit("executor.healthy")
+{after_healthy}
+while not stopping:
+    time.sleep(0.01)
+emit("executor.stopped")
+"#,
+    )
+}
+
+fn wait_for_state(manager: &ExecutorManager, expected: ExecutorManagerState) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while manager.status().expect("supervised status").state() != expected
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        manager.status().expect("final supervised status").state(),
+        expected,
+    );
+}
+
+#[test]
+fn background_supervisor_recovers_two_crashes_and_reports_the_consumed_budget() {
+    let counter = LaunchCounter::new();
+    let package = TemporaryPackage::new(&supervised_fixture(
+        &counter,
+        "if count <= 2: os.kill(os.getpid(), signal.SIGKILL)",
+    ));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("initial start");
+    counter.wait_for(3);
+    wait_for_state(&manager, ExecutorManagerState::Running);
+    assert_eq!(
+        manager.status().expect("restarted status").restart_count(),
+        2
+    );
+
+    manager.stop().expect("explicit stop after recovery");
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(counter.value(), 3);
+}
+
+#[test]
+fn exhausted_restart_budget_converges_to_stopped_without_a_crash_loop() {
+    let counter = LaunchCounter::new();
+    let package = TemporaryPackage::new(&supervised_fixture(
+        &counter,
+        "os.kill(os.getpid(), signal.SIGKILL)",
+    ));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("initial start");
+    counter.wait_for(3);
+    wait_for_state(&manager, ExecutorManagerState::Stopped);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(counter.value(), 3);
+}
+
+#[test]
+fn explicit_stop_never_consumes_restart_budget_or_relaunches() {
+    let counter = LaunchCounter::new();
+    let package = TemporaryPackage::new(&supervised_fixture(&counter, ""));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("initial start");
+    counter.wait_for(1);
+    manager.stop().expect("explicit stop");
+    std::thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(counter.value(), 1);
+    assert_eq!(manager.status().expect("stopped status").restart_count(), 0);
+}
+
+#[test]
+fn normal_and_fixed_failure_exits_are_not_restartable() {
+    for exit in ["sys.exit(0)", "sys.exit(1)"] {
+        let counter = LaunchCounter::new();
+        let package = TemporaryPackage::new(&supervised_fixture(&counter, exit));
+        let manager = manager(&package);
+
+        manager.start(launch()).expect("initial start");
+        counter.wait_for(1);
+        wait_for_state(&manager, ExecutorManagerState::Stopped);
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(counter.value(), 1);
+    }
 }
 
 #[test]
