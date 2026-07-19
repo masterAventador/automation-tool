@@ -68,7 +68,8 @@ automation-tool/
 │   ├── run_e4_15_acceptance.py   # 临时 release→实际二进制/依赖树安全审计
 │   ├── run_b5_12_acceptance.py   # 无头浏览器→Executor WebSocket→平台投影验收
 │   ├── run_b5_13_acceptance.py   # 隐藏 App→signed Executor→无头浏览器→平台页面验收
-│   └── run_b5_15_acceptance.py   # 四轮隐藏 App/Executor/浏览器复用与接管验收
+│   ├── run_b5_15_acceptance.py   # 四轮隐藏 App/Executor/浏览器复用与接管验收
+│   └── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -180,6 +181,7 @@ frontend/
 │   ├── tauri.executor-lifecycle-e2e.conf.json # 后台隐藏的 signed Executor 生命周期验收
 │   ├── tauri.platform-session-e2e.conf.json # 后台隐藏的平台状态与无头浏览器验收
 │   ├── tauri.platform-session-reuse-e2e.conf.json # 后台隐藏的登录复用/失效接管验收
+│   ├── tauri.default-profile-isolation-e2e.conf.json # 后台隐藏的默认 Profile 隔离验收
 │   └── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
 ├── public/
 ├── package.json
@@ -203,6 +205,7 @@ frontend/
 ├── wdio.executor-lifecycle.conf.ts
 ├── wdio.platform-session.conf.ts
 ├── wdio.platform-session-reuse.conf.ts
+├── wdio.default-profile-isolation.conf.ts
 ├── wdio.workbench.conf.ts
 ├── tsconfig.json
 └── README.md
@@ -334,6 +337,8 @@ B5-10 的 `executor/rpa/douyin/login.py` 是 detector 的窄工作流组合，�
 B5-13/B5-14 的服务端查询和 logout prepare 落在 `control_plane/api/platform_sessions.py`、同一 application service 和 PostgreSQL repository，只返回 current Installation 的最小公开投影或 blocked revision；`platform_session_gates` 是新 Task/offer 的持久熔断事实。桌面页面落在 `features/platform-sessions/`，Tauri 适配器落在 `platform/tauri/platform-session-gateway.ts`；四个方法分别映射固定查询、打开处理、重新检查和安全注销 Command，不提供 URL、路径、Header、revision 或任意 invoke。Rust `executor_bootstrap.rs`/`executor_manager.rs` 在同一个 Executor stdin/stdout 上发送和验证 `atlcp1` 本机命令，`executor_platform.rs` 只从 AppData 解析 current Profile、owned lease 与重新受信的浏览器；注销由 `lib.rs` 固定编排 prepare→stop→定向删除→restart→path-free complete→权威查询。Python `executor/platform_commands.py` 在线程内复用 `DouyinQrLoginFlow` 或记录显式退出 epoch，健康消息仍由 `runtime.py` 经正式 WebSocket 发送。`scripts/run_b5_13_acceptance.py` 以唯一隐藏 App、隔离 Control Plane/PostgreSQL/signed package 和无头系统浏览器验收状态/注销链路并审计只删目标 Profile、保留 SQLite、阻断新任务且零残留；测试专用 headless 与动态 origin 不进入生产构建。
 
 B5-15 的 `scripts/run_b5_15_acceptance.py` 使用另一个唯一 App 标识和同一 AppData 连续运行四次隐藏 App，逐轮复验 Profile marker/device/inode、Executor/Chrome 退出及服务端权威状态。`backend/tests/fixtures/automation-tool-executor-b515.spec` 只构建独立签名的验收 Executor，固定路由官方 probe origin 的 healthy/expired/risk 页面事实；正式 `backend/automation-tool-executor.spec` 不包含该入口。首次健康 epoch 的生产修复位于 `executor/ledger.py`，测试夹具不修改生产 detector、flow、Rust Manager、Tauri Gateway 或 Control Plane。
+
+B5-16 的隐藏配置、WDIO spec 与 `scripts/run_b5_16_acceptance.py` 只协调一个正式页面调用期间的活跃浏览器审计。spec 只写临时 ready/release 信号，不读取 Profile；runner 从 current marker 在内部解析私有目录，核对唯一 Chrome 根和完整后代树的 `--user-data-dir`，再用 `lsof` 验证实际打开文件没有触碰默认 Chrome/Edge User Data，所有路径和 UUID 都不输出。`frontend/tests/default-browser-profile-isolation.test.mjs` 递归扫描生产源码并锁定 Rust→Executor→Playwright 唯一 Profile 链；验收配置、信号和审计代码不进入发布包。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 

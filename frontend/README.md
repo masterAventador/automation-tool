@@ -79,6 +79,8 @@ B5-06 已为该 Profile 对象加入跨进程单实例锁和崩溃恢复标记�
 
 B5-15 的 `pnpm test:platform-session-reuse-tauri` 只启动 `visible=false` 的独立 App 标识。四个 App 生命周期复用同一 AppData/Profile，前两轮从页面操作验证重启后直接健康，后两轮验证过期扫码和风控人工接管；runner 在每轮 App 退出后核对 Profile marker、device/inode、Executor/Chrome 清理及最终服务端投影。测试页面只在单独签名的验收 Executor 中路由到官方 origin，不进入正式 Executor、Vite 资产或发布配置；真实账号最终证据不由该夹具替代。
 
+B5-16 的 `pnpm test:default-profile-isolation-tauri` 使用另一个 `visible=false` App 标识，并从同一正式平台状态页面打开无头系统 Chrome。WDIO 只用两个临时信号文件建立“浏览器已活跃/审计已结束”握手，不接收 Profile ID、目录或 Cookie；外层 runner 在 Chrome 活跃窗口检查完整进程树的 `--user-data-dir` 和 `lsof` 打开文件，只允许 Rust `BrowserProfileStore.current_douyin_profile()` 派生的 App 私有 Profile。生产源码契约还递归拒绝 Chrome/Edge 默认 User Data 与 Cookie/storage-state API，测试结束核对浏览器和项目资源零残留。
+
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。

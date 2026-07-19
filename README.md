@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 4 的工程前置已完成；Wave 5 已完成到登录复用的工程验收，真实账号的 App 双重启证据因已登录隔离 Profile 不再存在而保持待补，当前进入默认浏览器 Profile 隔离审计。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 5 的工程前置与浏览器登录边界已完成；真实账号的 App 双重启证据因已登录隔离 Profile 不再存在而保持待补，当前进入 Wave 6 抖音目标发现与用户预览。
 
 ## 第一阶段
 
@@ -82,6 +82,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Local Executor 已有锁定 PyInstaller 构建依赖和确定性 `onedir` spec；正式 `onedir` 收集 Python Playwright driver，但不执行 `playwright install`、不捆绑或下载 Chromium/Firefox/WebKit。B5-08 正式 BrowserRuntime 在同一 Executor 模块内只持有一个 thread-confined headed persistent context，提供主窗口、开窗、捕获弹窗、有界超时、定向关窗和幂等关闭；启动前再次复验路径，异常统一脱敏。macOS 冻结验收已沿受信浏览器→私有 Profile→单实例锁启动系统 Chrome，完成双窗口正常关闭及独立 process group 整树强杀；Windows Job Object 代码已存在，原生 BrowserRuntime 验收仍受 GitHub Billing/Actions spending limit 阻塞。B5-09 已从生产 `BrowserWindow` 的官方抖音页面事实封闭产生 `healthy/expired/missing/risk/unknown`，固定以 `/user/self` 受保护页判断真实登录，只有 `healthy` 关闭熔断。B5-10/B5-11 在同一 Python 页面层用专用 headed 窗口实现 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/handoff_required/unknown`，只由 `begin()` 和无参数 `recheck()` 推进；B5-12 再把 detector 事实写入 App 私有 SQLite v2 单调 epoch，并经正式 Executor WebSocket 投影到 PostgreSQL 六列最小状态。真实 Chrome 已验证空白 Profile 的官方二维码、实际扫码后收敛到 `healthy`，以及已登录持久 Profile 重开后直接复用。验证码、滑块或风控外层挑战一律进入人工接管并保持熔断，代码不点击、不填写、不拖拽、不绕过，也不读取、导出或上传 Cookie；
 - B5-13/B5-14 已提供桌面“平台状态”和安全注销：状态查询只展示服务端平台/状态/观察时间；打开处理与重新检查经同一个 signed Executor 调用本机页面 flow。注销先由 `POST /api/v1/platform-sessions/douyin/logout/prepare` 持久化服务端门闩并拒绝新任务/新投递，已排队的工作命令也不再 claim，只有取消/紧停可继续投递；再停止 Executor 与完整浏览器树、释放 Profile lease，Rust 基于稳定目录句柄只删除 current Douyin Profile，随后重启 Executor 发送无路径 `douyin.logout.complete` 并等待 WebSocket 将权威投影推进到 `missing`。React 不接触凭据、路径、Cookie、页面对象、revision 或 headless 参数；停止或删除失败不会伪报成功，门闩只允许更高 revision 的真实 `healthy` 重新开放；
 - B5-15 修复了“已有健康 Profile 作为本机首个观察时被错误拒绝”的 epoch 初始化缺陷：首次健康固定建立 revision 1，只有已有非健康 epoch 的恢复才递增 revision。独立 `visible=false` App 连续四次从原页面入口启动/退出同一个 signed Executor、无头系统 Chrome 和 App 私有 Profile，验证健康重启不进入扫码、过期进入扫码、风控进入人工接管，并核对 marker/目录 identity、SQLite 与 PostgreSQL。确定性官方 origin 页面只存在于单独签名的验收 Executor spec，不进入正式发布包；真实账号 App 双重启仍按台账保持待补；
+- B5-16 已把“绝不接管用户默认浏览器 Profile”升级为源码与运行时双证据：生产源码递归扫描拒绝 Chrome/Edge 默认 User Data、Cookie 和 storage-state 入口；唯一 `visible=false` App 从正式页面链路启动 signed Executor 与无头系统 Chrome 后，runner 在 Chrome 活跃期间核对完整进程树的唯一 `--user-data-dir` 和 `lsof` 已打开文件，只允许 AppData 下的 current 私有 Profile。验收结束确认 App、Executor、driver、Chrome、随机端口、Compose 容器/网络/Volume 与专属 AppData 零残留；
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Python fixture 已实测，Windows 原生 runner 仍受 GitHub Billing 阻塞，保留待验收；
 - E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App，Windows 原生仍待 Hosted Runner 恢复；

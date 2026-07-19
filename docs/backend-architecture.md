@@ -628,6 +628,8 @@ v1→v2 在单个排他迁移事务内保留既有 identity、command、checkpoi
 
 B5-15 明确首次健康 Profile 的 epoch 语义：若本机尚无平台行，无论调用方是否标记“恢复”，都只能创建 revision 1；只有已有行之后的显式健康恢复才递增 revision。这样 App/Executor 重启后可从现存 Profile 直接建立首个健康事实，同时仍禁止已有非健康 epoch 被隐式健康覆盖。四轮隐藏 App 验收验证健康→健康(revision 2)→expired→risk，后两次非健康变化保持同一 revision，Control Plane 最终只保存最小 risk 投影。
 
+B5-16 没有新增 Control Plane Profile API，也没有把浏览器路径下发给 Executor。运行时证据从隐藏 App 的正式平台页面入口启动同一个 signed Executor/BrowserRuntime，OS 进程树必须只有一个系统 Chrome 根且其 `--user-data-dir` 精确等于 Rust current Profile；`lsof` 对该根、后代与引用私有目录的关联进程逐一取证，必须观察到私有 Profile 文件且不能观察到用户默认 Chrome/Edge User Data。源码递归门禁同时拒绝生产层出现默认 User Data 常量、`--profile-directory`、Cookie 或 storage-state 读取；因此服务端仍只接收非敏感 Session 健康投影。
+
 ## 15. API 基线
 
 ### 健康与兼容

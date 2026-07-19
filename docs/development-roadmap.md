@@ -270,7 +270,7 @@
 | B5-13 | 平台状态页面 | 查看登录健康、打开处理、重新检查和注销 | B5-10,B5-12 | ✅ 已完成 |
 | B5-14 | 安全注销 | 先阻止新任务、停关联执行、再删除平台 Profile | B5-06,B5-13 | ✅ 已完成 |
 | B5-15 | 登录复用验收 | App/Executor/浏览器重启后不重扫；失效后正确接管 | B5-14 | 🔍 待真实账号 |
-| B5-16 | 默认 Profile 隔离审计 | 测试和运行证据证明未读用户默认 Chrome User Data | B5-15 | ⬜ 未开始 |
+| B5-16 | 默认 Profile 隔离审计 | 测试和运行证据证明未读用户默认 Chrome User Data | B5-15 | 🟩 完成 |
 
 ## 11. Wave 6：抖音目标发现与用户预览
 
@@ -1868,10 +1868,23 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：B5-16 审计源码、构建产物和运行证据，证明正式 App/Executor 从未读取用户默认 Chrome/Edge User Data；用户真实账号和独立 Profile 再次可用时补跑 B5-15 真实 App 双重启并只更新同一台账状态
 
+### B5-16 默认 Profile 隔离审计
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；新增 Node 契约准确失败于缺少 B5-16 隐藏 App spec/config/runner，没有把既有源码约定冒充为运行时证据
+- 唯一生产链：契约固定 `BrowserProfileStore.current_douyin_profile()`→Rust owned lease→认证本机命令→Python `launch_persistent_context(request.profile_directory)`；递归扫描 `backend/src`、`frontend/src`、`frontend/src-tauri/src`，拒绝 Chrome/Edge 默认 User Data 常量、`--profile-directory`、Cookie 与 storage-state API，不允许增加第二个 Profile 来源
+- 原始 App 验收：`scripts/run_b5_16_acceptance.py` 构建唯一 `visible=false` Tauri App 与单独签名验收 Executor，从真实平台状态页面点击“打开登录处理”，经 TypeScript Gateway→Tauri IPC→Rust 受信浏览器/current Profile/lease→Manager→signed PyInstaller Executor→无头系统 Chrome→正式 WebSocket→Uvicorn/Alembic/PostgreSQL；确定性 expired 页面只让生产 persistent context 保持活跃，不替代 Profile、runtime、网络或数据库链路
+- 活跃系统证据：WDIO 只写不含敏感数据的临时 ready/release 信号。Chrome 存活期间 runner 从 OS 进程表定位唯一系统 Chrome 根，递归收集后代及引用私有目录的关联进程，要求所有 `--user-data-dir` 精确指向 current App 私有 Profile；随后用 `lsof` 确认这些进程确实打开私有 Profile 文件，且命令行和打开文件均没有落入用户默认 Chrome/Edge User Data
+- 隐私与状态：runner 内部解析并复验 canonical current Profile，但不打印 Profile 路径或 UUID；React/IPC/spec 不接触 Profile、Cookie 或路径。最终本机 SQLite 和 PostgreSQL 均收敛 `douyin/expired/revision 1`，只有一个 Installation、零 Task、零 logout gate
+- 清理：App 完成审计后由正式退出 Command 结束；独立复核确认本次 App/Executor/driver/Chrome、随机端口、专属 Compose 容器/网络/Volume 和精确 AppData 无残留，没有停止或删除其他项目资源
+- 门禁：Backend 全量 `994 passed, 4 skipped in 84.90s`，6370 条语句/1276 个分支覆盖率 100%；Ruff/格式 213 个文件、严格 Mypy 197 个源码文件、uv lock、OpenAPI 漂移全绿。Frontend 72 项 Node 契约、132 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿；B5-16 隐藏 App 纵向验收按最终源码通过
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 Wave 6 `D6-01` 抖音页面版本模型；B5-15 真实账号 App 双重启证据在独立登录 Profile 再次可用时补跑，不阻塞无账号任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-16`：审计测试与运行证据，证明从未读取用户默认 Chrome/Edge User Data；
+1. `D6-01`：建立抖音页面版本模型、已知入口与未知版本 fail-closed 边界；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
-3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。
