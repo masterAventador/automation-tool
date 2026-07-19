@@ -143,6 +143,16 @@ class DouyinPageVersionModel:
         return f"DouyinPageVersionModel(version={DOUYIN_PAGE_MODEL_VERSION!r})"
 
 
+def douyin_search_results_url(keyword: str) -> str:
+    """Build one canonical search route under this page-version contract."""
+
+    if type(keyword) is not str:
+        raise DouyinPageVersionRejected
+    result = f"{DOUYIN_SEARCH_ENTRY_URL}/{quote(keyword, safe='')}?{_SEARCH_QUERY}"
+    DouyinPageVersionModel().require_entry(result, DouyinPageEntry.SEARCH_RESULTS)
+    return result
+
+
 def _official_url(source: object) -> SplitResult | None:
     if (
         type(source) is not str
@@ -215,4 +225,5 @@ __all__ = [
     "DouyinPageVersion",
     "DouyinPageVersionModel",
     "DouyinPageVersionRejected",
+    "douyin_search_results_url",
 ]

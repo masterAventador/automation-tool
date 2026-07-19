@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from time import monotonic
 from typing import Protocol, cast
+
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.rpa.douyin.page_version import (
@@ -40,6 +43,7 @@ _BLOCKING_DIALOG_SELECTORS = (
     '[role="dialog"]',
     '[data-e2e="modal"]',
 )
+_MAX_WAIT_MILLISECONDS = 60_000
 
 
 class DouyinSearchPageRejected(RuntimeError):
@@ -177,6 +181,8 @@ class _Locator(Protocol):
 
     def is_visible(self) -> bool: ...
 
+    def wait_for(self, *, state: str, timeout: float) -> None: ...
+
 
 class _Page(Protocol):
     @property
@@ -292,6 +298,32 @@ class DouyinSearchPage:
         self._require_state(DouyinSearchPageState.DIALOG_BLOCKED)
         return self._require_locator(_BLOCKING_DIALOG_SELECTORS)
 
+    def wait_for_home_ready(
+        self,
+        *,
+        timeout_milliseconds: int,
+    ) -> DouyinSearchPageObservation:
+        """Wait only for the versioned home anchors, then re-observe all facts."""
+
+        return self._wait_for_state(
+            DouyinSearchPageState.HOME_READY,
+            (_SEARCH_INPUT_SELECTORS, _SEARCH_SUBMIT_SELECTORS),
+            timeout_milliseconds,
+        )
+
+    def wait_for_results_ready(
+        self,
+        *,
+        timeout_milliseconds: int,
+    ) -> DouyinSearchPageObservation:
+        """Wait only for the versioned result anchor, then re-observe all facts."""
+
+        return self._wait_for_state(
+            DouyinSearchPageState.RESULTS_READY,
+            (_RESULT_LIST_SELECTORS,),
+            timeout_milliseconds,
+        )
+
     def _require_state(self, state: DouyinSearchPageState) -> None:
         if self.observe().state is not state:
             raise DouyinSearchPageRejected
@@ -305,6 +337,56 @@ class DouyinSearchPage:
             raise DouyinSearchPageRejected
         return locator
 
+    def _wait_for_state(
+        self,
+        expected: DouyinSearchPageState,
+        anchor_groups: tuple[tuple[str, ...], ...],
+        timeout_milliseconds: int,
+    ) -> DouyinSearchPageObservation:
+        if (
+            type(timeout_milliseconds) is not int
+            or not 1 <= timeout_milliseconds <= _MAX_WAIT_MILLISECONDS
+        ):
+            raise DouyinSearchPageRejected
+        observation = self.observe()
+        if not _can_wait(observation, expected):
+            return observation
+        deadline = monotonic() + timeout_milliseconds / 1_000
+        for selectors in anchor_groups:
+            remaining = (deadline - monotonic()) * 1_000
+            if remaining <= 0:
+                return self.observe()
+            try:
+                self._page.locator(", ".join(selectors)).first.wait_for(
+                    state="visible",
+                    timeout=remaining,
+                )
+            except PlaywrightTimeoutError:
+                return self.observe()
+            except Exception:
+                return self._page_unavailable()
+            observation = self.observe()
+            if not _can_wait(observation, expected):
+                return observation
+        return observation
+
+    def _page_unavailable(self) -> DouyinSearchPageObservation:
+        try:
+            version = self._versions.check(self._page.url)
+        except Exception:
+            version = self._versions.check("")
+        if not version.compatible:
+            return _observation(
+                version,
+                DouyinSearchPageState.UNKNOWN,
+                DouyinSearchPageEvidence.PAGE_VERSION_UNKNOWN,
+            )
+        return _observation(
+            version,
+            DouyinSearchPageState.UNKNOWN,
+            DouyinSearchPageEvidence.PAGE_UNAVAILABLE,
+        )
+
 
 def _visible_locator(page: _Page, selectors: tuple[str, ...]) -> _Locator | None:
     for selector in selectors:
@@ -312,6 +394,26 @@ def _visible_locator(page: _Page, selectors: tuple[str, ...]) -> _Locator | None
         if locator.is_visible():
             return locator
     return None
+
+
+def _can_wait(
+    observation: DouyinSearchPageObservation,
+    expected: DouyinSearchPageState,
+) -> bool:
+    return (
+        observation.state is DouyinSearchPageState.UNKNOWN
+        and observation.evidence is DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING
+        and (
+            (
+                expected is DouyinSearchPageState.HOME_READY
+                and observation.entry is DouyinPageEntry.HOME
+            )
+            or (
+                expected is DouyinSearchPageState.RESULTS_READY
+                and observation.entry is DouyinPageEntry.SEARCH_RESULTS
+            )
+        )
+    )
 
 
 def _observation(

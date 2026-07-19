@@ -110,6 +110,8 @@ D6-02 的 `executor/rpa/douyin/search_page.py` 是搜索页唯一 Page Object。
 
 D6-03 的 `protocol/douyin_search.py` 是 Control Plane 与 Local Executor 共同使用的 `douyin.search-input.v1` 输入策略：关键词按 Unicode code point 限 `1..80`，必须保持原始首尾边界且拒绝 C0/C1、DEL、Bidi、敏感赋值、私有路径和 inline data；单任务目标数固定 `1..100` 并拒绝 bool/浮点冒充整数。T3-17 领域对象已改为构造该共享不可变对象，不再维护第二组 Python 常量或校验分支；错误和对象表示不回显关键词。FastAPI/OpenAPI、PostgreSQL、React Zod/表单和 Rust 原生桥继续在各自信任边界复验相同上下限。
 
+D6-04 的 `executor/rpa/douyin/search.py` 是搜索动作的单次执行边界。它只接收 Runtime-owned `BrowserWindow` 与 D6-03 `DouyinSearchInput`，经 D6-01 构造并复验 canonical 结果 URL，经 D6-02 Page Object 等待并重新取得控件；固定执行一次首页导航、一次原样 `fill`、一次 `click(no_wait_after=True)`、精确结果 URL 等待和结果列表复验。每阶段有界，任何超时、登录、阻塞弹窗、入口/锚点冲突、DOM 漂移或页面异常都返回不含关键词/URL 的封闭结果，并且同一执行对象不可再次运行。模块不滚动、不评论、不私信、不执行页面脚本、不访问 Cookie/storage，也不连接 Control Plane；D6-05 才在成功结果页上增加有界滚动。
+
 B5-11 把 flow 契约升级为 `douyin.qr-login.v2`，当前状态固定为 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/handoff_required/unknown`。B5-09 发现 ByteDance 验证中心外层挑战后只投影 `handoff_required/risk_challenge`，不读取跨源挑战内容，也没有点击、填写、拖拽、验证码识别或绕过路径；同一个可见窗口留给用户处理。无参数 `recheck()` 只有重新观察到 `healthy` 才关闭熔断，挑战仍在、页面未知或登录失效都继续阻止副作用。代码不调用 Cookie/storage-state API，页面、二维码、验证码、Profile 路径和账号信息不进入协议、Tauri IPC 或日志。B5-13 已提供平台状态与重新检查，B5-14 已启用带二次确认的安全注销。
 
 B5-12 的 `executor/rpa/douyin/health.py` 把生产 detector 事实写入 SQLite v2 平台 Session 表，再构造 Executor-scoped `platform.session_health`。首次观察建立 revision 1；倒序观察、较低 revision 和同 epoch 非健康→健康全部拒绝，只有显式恢复/重新登录推进 epoch。Control Plane 在认证 WebSocket 上复验 Installation/Executor scope，PostgreSQL 表只保留 `installation_id/platform/state/session_revision/observed_at/updated_at`；Cookie、Profile、二维码、验证码、页面原文、message/executor ID 均不持久化。

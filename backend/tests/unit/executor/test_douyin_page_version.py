@@ -15,7 +15,9 @@ from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageVersion,
     DouyinPageVersionModel,
     DouyinPageVersionRejected,
+    douyin_search_results_url,
 )
+from automation_tool.protocol import DouyinSearchInput
 
 
 @pytest.mark.parametrize(
@@ -188,3 +190,24 @@ def test_model_and_errors_do_not_reflect_page_input() -> None:
     with pytest.raises(DouyinPageVersionRejected) as captured:
         model.require_entry(source, DouyinPageEntry.HOME)
     assert source not in str(captured.value)
+
+
+def test_canonical_search_url_preserves_shared_validated_keyword() -> None:
+    search = DouyinSearchInput(keyword="新能源汽车 😀", target_limit=20)
+
+    result = douyin_search_results_url(search.keyword)
+
+    assert result == (
+        f"{DOUYIN_SEARCH_ENTRY_URL}/"
+        "%E6%96%B0%E8%83%BD%E6%BA%90%E6%B1%BD%E8%BD%A6%20%F0%9F%98%80?type=general"
+    )
+    assert (
+        DouyinPageVersionModel()
+        .require_entry(
+            result,
+            DouyinPageEntry.SEARCH_RESULTS,
+        )
+        .compatible
+    )
+    with pytest.raises(DouyinPageVersionRejected, match="page version is unavailable"):
+        douyin_search_results_url(cast(str, object()))

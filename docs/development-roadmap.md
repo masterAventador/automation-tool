@@ -283,7 +283,7 @@
 | D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | 🟩 完成 |
 | D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | 🟩 完成 |
 | D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | 🟩 完成 |
-| D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | ⬜ 未开始 |
+| D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | 🟩 完成 |
 | D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | ⬜ 未开始 |
 | D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | ⬜ 未开始 |
 | D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | ⬜ 未开始 |
@@ -1920,10 +1920,23 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 `D6-04`，只通过 D6-02 Page Object 和本任务公共输入执行打开首页、输入、提交、等待结果；网络慢、超时、登录/弹窗与未知页面继续失败关闭
 
+### D6-04 搜索执行
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；Backend 新用例准确失败于 canonical 结果 URL 构造器和 `search.py` 不存在，跨边界 Node 契约同时因生产执行模块缺失失败，随后才实现最小闭环
+- 单次执行：新增 Executor-only `douyin.search-execution.v1`，构造时只接受 Runtime-owned `BrowserWindow` 与 D6-03 公共 `DouyinSearchInput`。同一实例只允许 `run()` 一次，提交无自动重试；结果状态/evidence 是不可伪造的固定组合，对象与错误不回显关键词、URL、DOM 或 selector
+- 固定路径：先用 D6-01 canonical 首页导航并等待 `domcontentloaded`，再只经 D6-02 Page Object 等候和二次确认输入/提交控件；原样填写关键词、恰好一次 `click(no_wait_after=True)`，随后等待 D6-01 构造并复验的精确关键词结果 URL，最后等候并再次取得结果列表才成功。执行模块没有 URL/selector 字面量或任意 locator
+- 有界与熔断：导航 30 秒、页面锚点 10 秒总预算、动作 15 秒、结果 URL 30 秒；慢输入/提交/结果锚点按剩余预算推进。导航、动作、结果 URL 和结果锚点超时分别输出固定 evidence；登录、阻塞弹窗、版本未知、入口/锚点冲突、DOM 动态消失、Playwright 异常全部开路停止，点击后不确定也不再次提交
+- 边界：本任务不滚动、不读取结果项、不评论、不私信、不执行页面脚本、不访问 Cookie/storage/page body，不创建 Task/Attempt 或调用 Control Plane。D6-05 从已确认的结果页增加有界滚动，D6-10 才接入正式命令闭环
+- 原调用方验收：新增生产 `BrowserRuntime` 集成验收，以一次性 `0700` Profile、`headless=True` 系统 Chrome 和仅测试进程内的官方 origin 路由页，从公开 `DouyinSearchExecution.run()` 真实完成导航→输入→点击→URL→结果列表；没有直调下层 Locator、没有启动空壳 App，也没有触碰默认浏览器 Profile。真实账号/最终抖音 DOM 仍由 D6-16 独立验收，不把隔离页冒充线上证据
+- 测试：聚焦 85 项 Python 用例，D6-01/D6-02/D6-04 三个变更模块共 394 条语句/90 个分支覆盖率 100%；跨边界 Node 契约验证单次、有界、Page Object 唯一 selector 来源和协议/App 隔离；生产 BrowserRuntime 无头验收通过并确认进程树退出。Backend 全量 `1103 passed, 4 skipped in 85.60s`，6789 条语句/1368 个分支覆盖率 100%；Ruff/格式 222 个文件、严格 Mypy 206 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 75 项 Node 契约、145 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-05`，只在 D6-04 成功且结果列表已复验的页面上实现最大轮次、最大目标、无新增停止和取消检查点
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-04`：复用页面对象与公共输入实现打开页面、输入、提交、等待结果，并覆盖网络慢/超时；
+1. `D6-05`：在已确认结果页实现有界滚动，锁定最大轮次、最大目标、无新增停止和取消检查点；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。
