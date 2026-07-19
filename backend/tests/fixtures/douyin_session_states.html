@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Douyin session evidence fixture</title>
+    <style>
+      body { font-family: sans-serif; }
+      iframe, [data-e2e] { display: block; width: 320px; height: 80px; }
+    </style>
+  </head>
+  <body>
+    <main id="evidence"></main>
+    <script>
+      const state = new URLSearchParams(window.location.search).get("state");
+      const evidence = document.querySelector("#evidence");
+      const marker = (name) => {
+        const node = document.createElement("div");
+        node.dataset.e2e = name;
+        node.textContent = name;
+        evidence.append(node);
+      };
+      if (state === "risk") {
+        const frame = document.createElement("iframe");
+        frame.src = "https://rmc.bytedance.com/verifycenter/captcha/v2";
+        frame.srcdoc = "<!doctype html><p>challenge</p>";
+        evidence.append(frame);
+      } else if (state === "expired") {
+        marker("login-expired");
+      } else if (state === "healthy") {
+        marker("user-avatar");
+      } else if (state === "missing") {
+        marker("login-button");
+      } else if (state === "conflicting") {
+        marker("user-avatar");
+        marker("login-button");
+      }
+    </script>
+  </body>
+</html>
