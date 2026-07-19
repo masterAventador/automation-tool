@@ -626,6 +626,8 @@ E4-11 建立、B5-12 升级到 v2 的 Executor 本机 SQLite 只保存：
 
 v1→v2 在单个排他迁移事务内保留既有 identity、command、checkpoint 和 outbox；损坏、未来版本或身份错绑继续拒绝。action 副作用账本与 Artifact spool 仍是后续 A7/H8 任务，不能在通用表中提前塞任意 JSON。任何 Control Plane Session、Cookie、浏览器登录态、密钥、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
+B5-15 明确首次健康 Profile 的 epoch 语义：若本机尚无平台行，无论调用方是否标记“恢复”，都只能创建 revision 1；只有已有行之后的显式健康恢复才递增 revision。这样 App/Executor 重启后可从现存 Profile 直接建立首个健康事实，同时仍禁止已有非健康 epoch 被隐式健康覆盖。四轮隐藏 App 验收验证健康→健康(revision 2)→expired→risk，后两次非健康变化保持同一 revision，Control Plane 最终只保存最小 risk 投影。
+
 ## 15. API 基线
 
 ### 健康与兼容

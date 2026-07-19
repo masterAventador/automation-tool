@@ -201,6 +201,7 @@ def test_begin_opens_one_dedicated_window_and_derives_only_page_facts(
         observation = flow.begin()
 
         assert len(runtime.windows()) == 1
+        assert flow.active_window().playwright_page is page
         assert page.navigations == ["https://www.douyin.com/user/self"]
         assert observation.state is state
         assert observation.evidence is evidence

@@ -293,8 +293,6 @@ class ExecutorLedger:
                     (platform,),
                 ).fetchone()
                 if row is None:
-                    if advance_epoch:
-                        raise ValueError
                     revision = 1
                     connection.execute(
                         """

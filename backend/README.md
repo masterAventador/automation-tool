@@ -66,6 +66,8 @@ E4-02 增加正式控制台入口 `automation-tool-executor`。`executor/bootstr
 
 B5-13/B5-14 的隐藏 App 原入口执行 `uv run --project backend python scripts/run_b5_13_acceptance.py`：唯一 `visible=false` Tauri App 实际点击平台状态、打开处理、重新检查和确认安全注销，经正式 TypeScript/Rust、signed Executor、后台系统 Chrome、认证 WebSocket 和真实 Uvicorn/Alembic/PostgreSQL 核对 `missing` projection 与持久 logout gate，并从 App 原入口确认新任务被门闩拒绝。runner 使用专属随机端口、Compose project、AppData、SQLite 和 Profile；注销后只允许 current Profile 消失，Executor SQLite 必须保留，并在 App 正常退出后审计浏览器、Executor、容器和端口零残留。
 
+B5-15 工程纵向验收执行 `backend/.venv/bin/python scripts/run_b5_15_acceptance.py`。它用唯一 AppData/Profile 连续运行 `first/restart/expired/risk` 四个隐藏 Tauri App 生命周期，每轮都从正式 TypeScript Gateway、Tauri IPC、Rust Manager、本机认证命令、signed Executor、无头系统 Chrome、WebSocket 到 PostgreSQL；前两轮必须保持同一 marker 和目录 identity 且直接健康，后两轮分别进入扫码和人工接管，最终 SQLite/PostgreSQL 固定收敛到 revision 2/risk。官方 origin 的确定性页面只打入 `backend/tests/fixtures/automation-tool-executor-b515.spec` 生成的独立验收包，不改变正式 Executor spec，也不冒充真实账号证据；真实账号纵向补验仍保持待办。
+
 E4-10 的 `executor/diagnostics.py` 与 Rust Manager 共同回放根目录 `contracts/fixtures/executor-diagnostics-v1.json`，为 Python 后续结构化诊断提供同一 fail-closed 脱敏规则。它不改变正式 CLI 的固定 stderr，也不替代 Rust 对真实子进程 stderr 的独立流式限界和再次脱敏。
 
 E4-11 的 `executor/ledger.py` 使用 Python 内置 `sqlite3`，不引入第二 ORM 或服务端数据库依赖。v1 建立 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints` 和 `executor_outbox`；B5-12 以排他事务迁移到 v2 并增加四列 `executor_platform_sessions`。命令按 message/idempotency 双键与 SHA-256 意图指纹重放，Attempt 命令序号连续，checkpoint 用 revision/CAS 和单调事件序号更新，outbox 保存已通过正式协议模型的精确回执/事件并可持久标记 delivered；平台健康只保存平台、封闭状态、单调 revision 和观察时间。目录祖先 symlink/reparse point、宽权限、身份错绑、更新竞争、损坏/未来 schema 和文件替换均 fail closed。CLI 在联网前完成迁移；数据库只在 App 私有目录保存协议任务事实和非敏感平台健康，不保存 Control Plane Session、Cookie、浏览器登录数据、密钥、页面原文或任意配置，也不使用系统钥匙串。

@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime、抖音 Session 页面证据、真实扫码、人工接管、最小健康上报、平台状态页与安全注销，下一项为登录复用验收 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成到登录复用工程验收，真实账号 App 双重启证据因现有隔离登录 Profile 已失效而待补，下一项为默认 Profile 隔离审计 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -1850,10 +1850,28 @@
 - 文档：同步根/Backend README、前后端架构、工程结构、OpenAPI/生成 DTO 和唯一开发台账；没有新增第二份计划
 - 后续：B5-15 从真实 App/Executor/浏览器重启验证登录复用与失效接管；若需要用户账号而用户不在线，先完成不破坏持久 Profile 的隔离重启/失效矩阵并记录待真实账号证据，不得停住后续无账号任务
 
+### B5-15 登录复用验收
+
+- 状态：🔍 工程实现与隔离纵向验收已完成；真实账号 App 双重启证据待补
+- 日期：2026-07-20
+- 提交：本任务提交
+- 目标：证明同一 App 私有 Profile 可跨 Tauri App、Local Executor 和系统浏览器完整重启继续使用；页面失效时必须进入扫码或人工接管，不能沿用旧健康事实，也不能读取用户默认 Chrome Profile
+- RED：先把唯一台账置为 `🧪 RED`。新增 Python 用例准确捕获已有健康 Profile 作为本机首个观察时，`recovered=true` 被 SQLite 错误拒绝；Node 契约准确失败于缺少 B5-15 隐藏 App spec/config/runner。两项失败都发生在生产入口实现前，没有放宽 assertion 或把 Mock 结果标为通过
+- epoch 修复：`ExecutorLedger.record_platform_session()` 在本机尚无平台行时固定创建 revision 1，不再因首次事实同时带恢复标记而拒绝；只有已有行之后的显式健康恢复才递增 revision。已有非健康→健康仍必须显式恢复，倒序时间、同时间冲突和隐式复活继续 fail closed
+- 四轮原始调用：`scripts/run_b5_15_acceptance.py` 只构建一个 `visible=false` Tauri binary，以同一 AppData/Profile 连续运行 `first/restart/expired/risk` 四个完整 App 生命周期。每轮都从真实 React 页面/TypeScript Gateway→Tauri IPC→Rust 浏览器复验/Profile lease/Executor Manager→本机 HMAC 命令→signed PyInstaller Executor→无头系统 Chrome→正式 WebSocket→Uvicorn/Alembic/PostgreSQL；App 自己退出后再启动下一轮，不用直接 Python 调用代替产品入口
+- 复用事实：首轮健康建立 revision 1；第二轮 App、Executor、persistent context 和 Chrome 全部重建后仍直接健康且 revision 变为 2，页面没有进入扫码或人工接管。runner 在四轮之后逐次比较 current marker 摘要与 Profile 目录 device/inode，任何重建或换 Profile 都立即失败；本机 SQLite 最终为 `douyin/risk/revision 2`，PostgreSQL 只有同一最小投影、一个 Installation、零 Task、零 logout gate
+- 失效接管：第三轮 expired 页面必须在原页面入口得到“请扫码”且服务端权威投影收敛 expired；第四轮 risk 必须得到人工接管提示并收敛 risk。`healthy` 之外始终保持熔断，不点击、不填写、不拖拽、不识别或绕过验证码，也不从测试代码直接写数据库状态
+- 测试边界：确定性 healthy/expired/risk 页面只存在于 `backend/tests/fixtures/automation-tool-executor-b515.spec` 单独构建、单独签名的验收 Executor，通过 Playwright route 绑定官方 `/user/self` origin；正式 `backend/automation-tool-executor.spec`、生产 Vite 资产和 Tauri 配置都不包含该入口。夹具只替代平台不可控页面，不替代生产 detector/flow/BrowserRuntime/IPC/Manager/网络和数据库链路，也不冒充真实账号证据
+- 真实账号核查：生产 AppData 当前没有 current Profile marker；系统临时目录内 8 个明确属于本项目的隔离 Chrome Profile 经生产 `BrowserRuntime`/`DouyinQrLoginFlow` 无头只读探测，健康候选为 0。没有扩大到用户默认 Chrome User Data，也没有读取/输出 Cookie、Profile 路径、账号名或页面原文；B5-10 的真实 Profile 直开健康证据仍保留，但因本轮无法从真实 App 双重启复现，状态如实保持 `🔍 待真实账号`，不阻塞 B5-16 及后续无账号任务
+- 故障闭环：第一次完整编排在 expired 分支准确发现夹具二维码没有可见尺寸，生产 selector 正确拒绝；修复测试图片可见尺寸后原参数四轮通过。失败轮和成功轮结束后均确认项目专属 App/Executor/driver/Chrome、随机端口、Compose 容器/网络/Volume 和精确 AppData 无残留，未停止或删除其他项目资源
+- 门禁：Backend 全量 `994 passed, 4 skipped in 86.94s`，6370 条语句/1276 个分支覆盖率 100%；Ruff/格式 213 个文件、严格 Mypy 197 个源码文件、uv lock、OpenAPI 漂移全绿。Frontend 71 项 Node 契约、132 项 Vitest、5 项 Playwright 无头 UI、ESLint、严格 TypeScript、API/生产构建边界与制品审计全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿；最终按精确格式化/类型修复后的源码重新构建并跑通四轮隐藏 App 纵向验收
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：B5-16 审计源码、构建产物和运行证据，证明正式 App/Executor 从未读取用户默认 Chrome/Edge User Data；用户真实账号和独立 Profile 再次可用时补跑 B5-15 真实 App 双重启并只更新同一台账状态
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-15`：从真实 App/Executor/浏览器重启验证现有抖音登录态复用；真实自然失效不可控时先完成隔离接管矩阵且不破坏用户保留的持久 Profile；
-2. `B5-16`：审计测试与运行证据，证明从未读取用户默认 Chrome/Edge User Data；
+1. `B5-16`：审计测试与运行证据，证明从未读取用户默认 Chrome/Edge User Data；
+2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。

@@ -179,9 +179,7 @@ def start_control_plane() -> RunningControlPlane:
     listener.listen()
     port = int(listener.getsockname()[1])
     server = uvicorn.Server(
-        uvicorn.Config(
-            app, log_level="critical", access_log=False, ws="websockets-sansio"
-        )
+        uvicorn.Config(app, log_level="critical", access_log=False, ws="websockets-sansio")
     )
     thread = threading.Thread(
         target=server.run,
@@ -197,9 +195,19 @@ def start_control_plane() -> RunningControlPlane:
     return RunningControlPlane(server, thread, port, registry, material.session_token)
 
 
-def build_signed_executor(workspace: Path, *, build_id: str = "e4-07-real") -> Path:
+def build_signed_executor(
+    workspace: Path,
+    *,
+    build_id: str = "e4-07-real",
+    spec_path: Path | None = None,
+) -> Path:
     distribution = workspace / "dist"
     work = workspace / "build"
+    resolved_spec = (
+        BACKEND_ROOT / "automation-tool-executor.spec" if spec_path is None else spec_path
+    )
+    if not resolved_spec.is_file():
+        raise RuntimeError("E4-07 PyInstaller spec is missing")
     completed = subprocess.run(
         [
             sys.executable,
@@ -211,7 +219,7 @@ def build_signed_executor(workspace: Path, *, build_id: str = "e4-07-real") -> P
             os.fspath(distribution),
             "--workpath",
             os.fspath(work),
-            os.fspath(BACKEND_ROOT / "automation-tool-executor.spec"),
+            os.fspath(resolved_spec),
         ],
         cwd=BACKEND_ROOT,
         capture_output=True,
@@ -258,9 +266,7 @@ def run_rust_manager(
         json.dumps(
             {
                 "packageRoot": os.fspath(package_root),
-                "websocketUrl": (
-                    f"ws://127.0.0.1:{control_plane.port}/api/v1/executors/connect"
-                ),
+                "websocketUrl": (f"ws://127.0.0.1:{control_plane.port}/api/v1/executors/connect"),
                 "sessionToken": control_plane.session_token,
                 "installationId": str(INSTALLATION_ID),
                 "executorId": str(EXECUTOR_ID),
@@ -313,9 +319,7 @@ def run_rust_manager(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchone()
     if version != (1,) or identity != (str(INSTALLATION_ID), str(EXECUTOR_ID)):
-        raise RuntimeError(
-            "E4-11 Executor ledger migration or identity binding is invalid"
-        )
+        raise RuntimeError("E4-11 Executor ledger migration or identity binding is invalid")
     ledger_bytes = ledger_path.read_bytes()
     if control_plane.session_token.encode() in ledger_bytes:
         raise RuntimeError("E4-11 Executor ledger persisted the Control Plane session")
@@ -338,9 +342,7 @@ def main() -> None:
         raise RuntimeError(f"{error}\nControl Plane events: {observed!r}") from None
     finally:
         control_plane.stop()
-    print(
-        "E4-07 acceptance passed: Rust Manager -> signed PyInstaller Executor -> Uvicorn"
-    )
+    print("E4-07 acceptance passed: Rust Manager -> signed PyInstaller Executor -> Uvicorn")
 
 
 if __name__ == "__main__":

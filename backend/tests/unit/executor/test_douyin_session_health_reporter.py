@@ -127,6 +127,22 @@ def test_page_recovery_requires_explicit_new_epoch_and_survives_reopen(tmp_path:
     assert persisted.circuit_open is False
 
 
+def test_first_observation_can_reuse_an_already_healthy_persistent_profile(
+    tmp_path: Path,
+) -> None:
+    health = reporter(tmp_path / "state", FixedClock())
+
+    reused = health.observe(
+        window('[data-e2e="user-avatar"]'),
+        sequence=2,
+        recovered=True,
+    )
+
+    assert reused.payload.state is PlatformSessionState.HEALTHY
+    assert reused.payload.session_revision == 1
+    assert reused.payload.observed_at == NOW
+
+
 def test_explicit_logout_fact_advances_to_missing_without_page_inference(tmp_path: Path) -> None:
     state_directory = tmp_path / "state"
     clock = FixedClock()

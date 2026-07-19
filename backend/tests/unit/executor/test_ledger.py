@@ -211,19 +211,13 @@ def test_platform_session_values_and_transitions_fail_closed_at_every_boundary(
             state="missing",  # type: ignore[arg-type]
             observed_at=NOW,
         )
-    with pytest.raises(ExecutorLedgerRejected):
-        opened.record_platform_session(
-            platform="douyin",
-            state=PlatformSessionState.MISSING,
-            observed_at=NOW,
-            advance_epoch=True,
-        )
-
     first = opened.record_platform_session(
         platform="douyin",
         state=PlatformSessionState.MISSING,
         observed_at=NOW,
+        advance_epoch=True,
     )
+    assert first.session_revision == 1
     assert (
         opened.record_platform_session(
             platform="douyin",
