@@ -125,6 +125,7 @@ frontend/
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
 │   │   ├── executor_bootstrap.rs  # 256-bit stdin 启动令牌与 HMAC 健康证明校验
+│   │   ├── executor_manager.rs    # signed Executor 固定 start/status/stop 生命周期
 │   │   ├── executor_package.rs    # signed onedir 验签、完整目录复算与防降级
 │   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
@@ -132,6 +133,7 @@ frontend/
 │   │   └── main.rs
 │   ├── tests/
 │   │   ├── executor_bootstrap.rs  # 随机令牌、stdin 文档、常量时间证明与失败矩阵
+│   │   ├── executor_manager.rs    # 单实例、并发、超时、坏包/证明与真实包入口
 │   │   ├── executor_package.rs    # 当前目标包、Python fixture 与失败矩阵
 │   │   └── executor_protocol_fixtures.rs # 回放三端共享原始 wire
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
@@ -286,6 +288,8 @@ E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool
 E4-05 的 `src-tauri/src/executor_package.rs` 直接消费同一 Manifest/`atems1` fixture，不复制 Python 签发逻辑。它以 `ed25519-dalek::verify_strict`、`sha2`、受维护的 `semver` 和 `walkdir` 完成验签、canonical/exact-field 解析、当前平台/架构/入口绑定、允许范围、已安装版本防降级和完整目录双枚举；每个 payload 由拒绝 symlink 的稳定文件句柄读取并核对 Unix dev/inode 或 Windows volume/file index。公开 Rust API 只返回验证后的版本/build/入口/统计和固定错误码，没有 Tauri Command、React、URL 或远程信任配置。E4-07 只能从 Rust 受信资源边界装配该 verifier 并在启动前使用，不能把路径、公钥或版本策略扩成 IPC。
 
 E4-06 的 `src-tauri/src/executor_bootstrap.rs` 只提供 Rust 内部 `LocalSessionToken`、受限 bootstrap 输入和事件证明 verifier：系统 CSPRNG 每次产生 32 字节，写入 stdin 时临时编码为 64 位小写十六进制，Drop/临时缓冲区均清零；Control Plane Session 保持独立字段。Python `authentication.py` 从 `SecretStr` 派生可清零 HMAC key，stdout 只输出绑定固定域、事件名和协议版本的 `atlep1` 证明。Rust 以维护中的 `hmac` crate 常量时间校验；两端共享固定测试向量但不提交真实令牌。模块没有启动进程、命令行/环境传密、Tauri Command 或 React 面，E4-07 才把它与 E4-05 verifier 组合为 Manager。
+
+E4-07 的 `src-tauri/src/executor_manager.rs` 组合 E4-05/E4-06，但不复制两者规则：Manager 每次 start 复验固定包根并只启动验证后的 Manifest 入口，stdin 一次写入 bootstrap，stdout 只消费认证 lifecycle 事件；一个 Mutex 线性化 start/status/stop，错误、超时与 Drop 回收直接子进程。它不含旧 stdio task invoke、`serde_json::Value`、capability、任意路径/URL/命令或 Tauri Command。`scripts/run_e4_07_acceptance.py` 使用真实 Manifest CLI、PyInstaller onedir、本地 Uvicorn/Session/Registry 和公开 Rust Manager 原入口证明 `registered → heartbeat → unregistered`；私有配置只以 `0600` 临时文件存在并删除。后台退出监管、进程树、stderr 诊断和桌面 PlatformAdapter 分别留给 E4-08～E4-10/E4-13。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

@@ -2,6 +2,7 @@ pub mod control_plane;
 pub mod device_credentials;
 pub mod device_identity;
 pub mod executor_bootstrap;
+pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_protocol;
 pub mod secure_store;

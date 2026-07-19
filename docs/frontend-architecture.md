@@ -252,7 +252,9 @@ E4-05 已实现 `executor_package.rs` 原生 verifier。信任输入只允许来
 
 验证顺序固定为：拒绝根/祖先 symlink → 有界稳定读取 Manifest/签名 → `verify_strict` 验签 → exact-field 反序列化并逐字节重建 canonical JSON → 绑定 manifest 版本、build ID、当前 OS/架构和平台精确入口 → 执行 App 允许范围与已安装版本防降级 → 拒绝目录 symlink/非普通文件并取得排序后的完整 payload 集合 → 以安全打开的文件句柄逐项复算大小/SHA-256 和目录摘要 → 再枚举一次目录确认验证窗口内没有成员增删。打开文件在读前、读后及按路径重开时核对平台稳定 identity；Unix 使用 `O_NOFOLLOW + dev/inode`，Windows 实现使用 reparse-point 打开约束和 volume/file index。失败只返回固定错误码和 `executor package is rejected`，不反射路径、Manifest 或签名。由于进程尚未接入，验证返回值仅是 Rust 内部的版本、build、入口和资源统计，不暴露给 WebView。
 
-E4-06 已实现 `executor_bootstrap.rs` 本机认证原语。它把每次启动的 32 字节本机会话与 Control Plane `executor.connect` Session 分成两个字段，只通过受限 stdin JSON 写入；本机会话的 Rust 内存 Drop 清零，Python 认证器在退出时清零，所有错误与 Debug 输出固定脱敏。Python stdout 不回传令牌，只返回按事件/协议域隔离的 `atlep1` HMAC 证明；Rust 使用常量时间 MAC 校验。当前模块没有进程、页面、Tauri Command 或 IPC，E4-07 才在签名包验证后装配真实子进程，并让隐藏 App 从正式生命周期入口验收该证明。
+E4-06 已实现 `executor_bootstrap.rs` 本机认证原语。它把每次启动的 32 字节本机会话与 Control Plane `executor.connect` Session 分成两个字段，只通过受限 stdin JSON 写入；本机会话的 Rust 内存 Drop 清零，Python 认证器在退出时清零，所有错误与 Debug 输出固定脱敏。Python stdout 不回传令牌，只返回按事件/协议域隔离的 `atlep1` HMAC 证明；Rust 使用常量时间 MAC 校验。该模块本身没有进程、页面、Tauri Command 或 IPC。
+
+E4-07 已实现 `executor_manager.rs` 固定生命周期。Manager 的受信装配项只有包根、E4-05 verifier 和 60 秒内的 start/stop timeout；每次 start 都先复验完整目录，再从 Manifest 精确入口无参数 spawn，唯一 stdin 写入 E4-06 bootstrap 后关闭。stdout reader 只接受 4096 字节内的严格 healthy/stopped JSON+LF 并验证事件 proof；stderr 当前只排空，E4-10 才做限界脱敏诊断。一个 Mutex 使 start/status/stop 线性化，8 路并发 start 只产生一个子进程，超时/坏证明/Drop 都强制回收直接子进程。当前没有 Tauri Command 或 React API；E4-13/E4-14 才装配固定桌面入口。macOS 已从公开 Rust Manager 原入口跑通真实 signed PyInstaller Executor→Uvicorn→Heartbeat→停止，Windows 原生仍待 runner。
 
 ## 7. 页面与导航
 
