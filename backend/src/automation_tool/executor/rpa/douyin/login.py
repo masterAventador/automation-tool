@@ -21,7 +21,7 @@ from automation_tool.executor.rpa.douyin.session import (
     DouyinSessionState,
 )
 
-DOUYIN_QR_LOGIN_FLOW_VERSION = "douyin.qr-login.v1"
+DOUYIN_QR_LOGIN_FLOW_VERSION = "douyin.qr-login.v2"
 _NAVIGATION_TIMEOUT_MILLISECONDS = 30_000
 _QR_READY_TIMEOUT_MILLISECONDS = 10_000
 _QR_READY_SELECTOR = 'img[aria-label="二维码"], img[alt="二维码"]'
@@ -58,7 +58,7 @@ class DouyinQrLoginState(StrEnum):
     AWAITING_CONFIRMATION = "awaiting_confirmation"
     QR_EXPIRED = "qr_expired"
     HEALTHY = "healthy"
-    RISK = "risk"
+    HANDOFF_REQUIRED = "handoff_required"
     UNKNOWN = "unknown"
 
 
@@ -234,7 +234,7 @@ class DouyinQrLoginFlow:
             )
         if session.state is DouyinSessionState.RISK:
             return _observation(
-                DouyinQrLoginState.RISK,
+                DouyinQrLoginState.HANDOFF_REQUIRED,
                 DouyinQrLoginEvidence.RISK_CHALLENGE,
             )
         if session.state in {DouyinSessionState.MISSING, DouyinSessionState.EXPIRED}:

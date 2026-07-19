@@ -56,8 +56,12 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
         expired = flow.recheck()
         login_page.evaluate("window.setState('conflicting')")
         conflicting = flow.recheck()
-        login_page.evaluate("window.setState('risk')")
-        risk = flow.recheck()
+        handoffs = []
+        for state in ("captcha", "slider", "risk"):
+            login_page.evaluate("state => window.setState(state)", state)
+            handoffs.append(flow.recheck())
+        login_page.evaluate("window.setState('healthy')")
+        recovered = flow.recheck()
 
         assert len(runtime.windows()) == 2
         assert (awaiting_scan.state, awaiting_scan.evidence) == (
@@ -69,7 +73,14 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
         assert not healthy.circuit_open
         assert expired.state is DouyinQrLoginState.QR_EXPIRED
         assert conflicting.state is DouyinQrLoginState.UNKNOWN
-        assert risk.state is DouyinQrLoginState.RISK
+        assert all(
+            handoff.state is DouyinQrLoginState.HANDOFF_REQUIRED
+            and handoff.evidence is DouyinQrLoginEvidence.RISK_CHALLENGE
+            and handoff.circuit_open
+            for handoff in handoffs
+        )
+        assert recovered.state is DouyinQrLoginState.HEALTHY
+        assert not recovered.circuit_open
         assert all(
             observation.circuit_open
             for observation in (
@@ -77,7 +88,7 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
                 awaiting_confirmation,
                 expired,
                 conflicting,
-                risk,
+                *handoffs,
             )
         )
 

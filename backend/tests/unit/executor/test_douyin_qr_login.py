@@ -178,7 +178,7 @@ def running_runtime(tmp_path: Path, page: FakePage) -> BrowserRuntime:
         ),
         (
             {'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'},
-            DouyinQrLoginState.RISK,
+            DouyinQrLoginState.HANDOFF_REQUIRED,
             DouyinQrLoginEvidence.RISK_CHALLENGE,
         ),
         (
@@ -234,6 +234,31 @@ def test_recheck_observes_scan_confirmation_and_real_session_health(
 
         assert healthy.state is DouyinQrLoginState.HEALTHY
         assert not healthy.circuit_open
+        assert page.navigations == ["https://www.douyin.com/user/self"]
+    finally:
+        runtime.close()
+
+
+def test_platform_challenges_remain_in_handoff_until_page_health_is_rechecked(
+    tmp_path: Path,
+) -> None:
+    page = FakePage({'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'})
+    runtime = running_runtime(tmp_path, page)
+    flow = DouyinQrLoginFlow(runtime)
+    try:
+        initial = flow.begin()
+        page.visible_selectors = {'iframe[src*="/verifycenter/captcha/"]'}
+        still_blocked = flow.recheck()
+        page.visible_selectors = {'[data-e2e="user-info"]'}
+        resolved = flow.recheck()
+
+        assert initial.state is DouyinQrLoginState.HANDOFF_REQUIRED
+        assert still_blocked.state is DouyinQrLoginState.HANDOFF_REQUIRED
+        assert initial.evidence is DouyinQrLoginEvidence.RISK_CHALLENGE
+        assert still_blocked.evidence is DouyinQrLoginEvidence.RISK_CHALLENGE
+        assert initial.circuit_open and still_blocked.circuit_open
+        assert resolved.state is DouyinQrLoginState.HEALTHY
+        assert not resolved.circuit_open
         assert page.navigations == ["https://www.douyin.com/user/self"]
     finally:
         runtime.close()
@@ -418,7 +443,7 @@ def test_window_open_and_close_failures_are_fixed_and_close_before_begin_is_term
     [
         {"state": cast(Any, "healthy")},
         {"evidence": cast(Any, "session_healthy")},
-        {"flow_version": "douyin.qr-login.v2"},
+        {"flow_version": "douyin.qr-login.v3"},
     ],
 )
 def test_observation_rejects_changed_or_untyped_contracts(changes: dict[str, object]) -> None:

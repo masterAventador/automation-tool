@@ -23,12 +23,12 @@ test("B5-10 opens a dedicated external window and rechecks only real page facts"
     "awaiting_confirmation",
     "qr_expired",
     "healthy",
-    "risk",
+    "handoff_required",
     "unknown",
   ]) {
     assert.match(login, new RegExp(`\\b${state.toUpperCase()}\\b`, "u"));
   }
-  assert.match(login, /douyin\.qr-login\.v1/u);
+  assert.match(login, /douyin\.qr-login\.v2/u);
   assert.match(login, /DOUYIN_SESSION_PROBE_URL/u);
   assert.match(login, /\.open_window\(\)/u);
   assert.match(login, /DouyinSessionDetector/u);

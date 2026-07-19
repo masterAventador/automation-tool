@@ -42,9 +42,9 @@
           text("二维码已失效，请重新获取");
         } else if (state === "healthy") {
           marker("user-info");
-        } else if (state === "risk") {
+        } else if (["captcha", "slider", "risk"].includes(state)) {
           const frame = document.createElement("iframe");
-          frame.src = "https://rmc.bytedance.com/verifycenter/captcha/v2";
+          frame.src = `https://rmc.bytedance.com/verifycenter/captcha/v2?kind=${state}`;
           frame.srcdoc = "<!doctype html><p>challenge</p>";
           evidence.append(frame);
         } else if (state === "conflicting") {

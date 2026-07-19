@@ -320,7 +320,7 @@ B5-08 的 `BrowserRuntime` 是 Local Executor 内部窄服务，不新增第二 
 
 B5-09 的 `executor/rpa/douyin/session.py` 是首个正式页面对象边界。它公开固定 `/user/self` 探测 URL、版本化 selector、五态枚举、固定 evidence 与派生熔断，只接受 `BrowserRuntime` 所属窗口；非官方 origin、冲突/缺失证据和页面异常 fail closed 为 `unknown`。测试专用 live probe 只输出状态变化与 `ready`，不输出 DOM、账号、Cookie 或 Profile 路径，也不进入产品 UI；B5-10 必须复用该模块，不能在 Rust/React 复制页面选择器。
 
-B5-10 的 `executor/rpa/douyin/login.py` 是 detector 的窄工作流组合，不是第二 BrowserRuntime。它创建一个 Runtime-owned 专用窗口，固定打开 `/user/self`，以最多 10 秒的 Playwright 页面事实等待吸收异步二维码/用户资料加载，再由无参数 `recheck()` 投影扫码、手机确认、过期、健康、风险和未知状态。调用方没有 `QrScanned`、`Authenticated` 或任意页面状态注入面；冲突、等待/页面失败和未知 DOM 保持熔断。测试 live probe 仅输出固定状态变化，二维码、Page、Profile 路径和账号均不输出；B5-13 组合 App 原入口时必须复用该对象，不能把选择器迁到 WebView。
+B5-10 的 `executor/rpa/douyin/login.py` 是 detector 的窄工作流组合，不是第二 BrowserRuntime。它创建一个 Runtime-owned 专用窗口，固定打开 `/user/self`，以最多 10 秒的 Playwright 页面事实等待吸收异步二维码/用户资料加载，再由无参数 `recheck()` 投影扫码、手机确认、过期、健康、人工接管和未知状态。B5-11 将契约升级到 `douyin.qr-login.v2`，Session `risk` 只能成为 `handoff_required/risk_challenge`；生产模块不读取跨源挑战内部内容，也没有点击、填写、拖拽、识别或绕过方法。调用方没有 `QrScanned`、`Authenticated` 或任意页面状态注入面；冲突、等待/页面失败和未知 DOM 保持熔断，人工处理后只有页面重新成为 `healthy` 才恢复。测试 live probe 仅输出固定状态变化，二维码、验证码、Page、Profile 路径和账号均不输出；B5-13 组合 App 原入口时必须复用该对象，不能把选择器迁到 WebView。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 
