@@ -32,6 +32,7 @@ dev = [
     "httpx2",
     "jsonschema",
     "mypy",
+    "pyinstaller>=6.21.0",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",

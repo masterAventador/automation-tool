@@ -200,6 +200,8 @@ E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bo
 
 进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。当前任何 Task Command 或其他应用帧都 fail closed，不提前伪造 ACK/事件；E4-12 在本机幂等账本和监管完成后才接入无副作用命令回放。
 
+E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python。构建依赖只在 uv dev group，当前未加入 Python Playwright；macOS 本机已从冻结入口验证 bootstrap 与网络失败的固定退出契约，GitHub macOS/Windows 矩阵使用同一测试，但当前 Hosted Runner 因账户 Billing/Actions spending limit 在启动前被拒绝，因此 Windows 仍是明确待验收项。该 PoC 不承担目录 Manifest、签名、完整性或防降级，以上边界继续由 E4-04/E4-05 实现。
+
 ### 7.2 Application
 
 - 领取并校验命令；

@@ -78,9 +78,12 @@ uv run ruff format --check .
 uv run mypy
 uv run automation-tool-export-openapi --output ../contracts/openapi/control-plane.v1.json --check
 uv run automation-tool-export-executor-schema --output ../contracts/protocol/executor-v1.schema.json --check
+uv run pyinstaller --noconfirm --clean automation-tool-executor.spec
 ```
 
-`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。E4-03 完成前，本地正式入口由测试和开发环境的安装脚本提供。
+PyInstaller 产物固定为 `dist/automation-tool-executor/` 的 `onedir` 目录；macOS 入口为同名可执行文件，Windows 入口为 `automation-tool-executor.exe`。`pyinstaller` 只锁在开发依赖组，当前包不引入 Playwright；双平台 CI 已配置从冻结产物启动入口并验证 bootstrap/连接失败的固定退出契约。当前 macOS 实包已通过，Windows Hosted Runner 因 GitHub 账户 Billing/Actions spending limit 在分配 runner 前被拒绝，仍需在可用 Windows runner 或实体机补验收。
+
+`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。构建目录和产物均被 Git 忽略，后续由 E4-04/E4-05 增加 Manifest、签名和 Rust 侧完整目录验证。
 
 后端 Pydantic/FastAPI 是跨端 DTO 的唯一来源。路由契约变化后先去掉 `--check` 重新导出快照，再到 `frontend/` 执行 `pnpm generate:api`；提交前两侧都必须通过各自漂移检查。
 

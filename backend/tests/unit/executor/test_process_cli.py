@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import signal
+import subprocess
 import sys
 from io import BytesIO, StringIO, TextIOWrapper
 
@@ -103,3 +104,17 @@ def test_main_uses_binary_stdin_and_exits_with_run_status(monkeypatch: pytest.Mo
     assert captured.value.code == 2
     assert stdout.getvalue() == ""
     assert stderr.getvalue() == "Local Executor bootstrap is rejected\n"
+
+
+def test_executor_package_module_uses_the_formal_cli_entry() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "automation_tool.executor"],
+        input=b"",
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == b""
+    assert completed.stderr == b"Local Executor bootstrap is rejected\n"

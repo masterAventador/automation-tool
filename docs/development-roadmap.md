@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 3 Control Plane 任务与事件闭环
+> 当前阶段：Wave 4 Tauri 与 Local Executor 生命周期
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -58,6 +58,7 @@
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
 | Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
+| Executor onedir PoC | `🔍` macOS arm64 冻结实包已启动且未包含 Playwright；Windows 同测试已配置，但 GitHub Hosted Runner 因账户 Billing/Actions spending limit 未启动，待 Windows 环境补验收 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -221,7 +222,7 @@
 | --- | --- | --- | --- | --- |
 | E4-01 | 审计旧 local_executor | 列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖 | R0-12,I2-10 | ✅ 已完成 |
 | E4-02 | Executor Python 入口 | stdin bootstrap、健康、信号和出站连接最小进程 | E4-01,I2-13 | ✅ 已完成 |
-| E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | ⬜ 未开始 |
+| E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | 🔍 待验收 |
 | E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ⬜ 未开始 |
 | E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | ⬜ 未开始 |
 | E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ⬜ 未开始 |
@@ -1363,9 +1364,25 @@
 - App、账号与清理：本任务正式消费者是尚未由 Rust 监管的 Executor 控制台入口，不新增 App API 或用户页面，因此不启动 Tauri App、不需要平台账号，也不宣称任务/RPA 验收；E4-07/E4-12 再补隐藏 App/真实 Executor 纵向链路。测试子进程、Uvicorn、socket、线程与隔离 PostgreSQL 资源均由 finally/fixture 回收
 - 文档：同步根 README、Backend README、前后端架构、工程结构与本路线图；没有新增第二份规划或实现台账
 
+### E4-03 PyInstaller onedir PoC
+
+- 状态：🔍 待 Windows 设备验收
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：用唯一正式模块入口构建 macOS/Windows PyInstaller `onedir`，证明用户无需另装 Python即可启动 Executor；本阶段不加入 Playwright，不提前承担 Manifest、签名或 Tauri 监管
+- RED：先新增源码模块入口、PyInstaller dev-only 依赖、spec、冻结实包启动和双平台 CI 契约；定向 suite 准确得到 5 个失败，分别是缺少 `executor.__main__`、PyInstaller 依赖、spec、CI job，以及 `No module named PyInstaller`
+- 实现：uv 锁定 PyInstaller 6.21.0 及平台依赖，正式运行依赖不含 PyInstaller/Playwright；`automation-tool-executor.spec` 直接执行 `executor/__main__.py` 并以 `EXE(exclude_binaries=True) + COLLECT` 生成 console `onedir`，没有第二份 CLI 逻辑
+- macOS GREEN：macOS arm64 从临时目录真实构建冻结产物，使用不含项目 Python 的 PATH 启动；空 stdin 精确返回 bootstrap rejected/退出码 2，合法 bootstrap 连接不可用精确返回 process unavailable/退出码 1，Session 不泄漏。分析 TOC 和目录名均无 Playwright；冻结实包聚焦 9 项、静态/类型/锁文件门禁全绿
+- 全量门禁：Backend 最终 `815 passed in 76.80s`，4378 条语句/838 个分支 100%；Frontend 40 项工程契约与 Actionlint 全绿。第一次全量 814 项行为全过但 `__main__` 子进程覆盖未合并且 SSE 时序分支偶发未命中，明确把已由子进程/冻结包验收的入口标为覆盖排除，并用确定性单调时钟测试固定 SSE 分支后恢复 100%，未改业务语义掩盖失败
+- Windows 真实边界：`.github/workflows/desktop.yml` 已增加 macOS/Windows `executor-bundle` 矩阵，同一测试不上传、不发布产物。临时分支运行 `29669599452` 的四个桌面 job 均在 0 step、无 runner 阶段失败；GitHub 注解明确为账户近期付款失败或 Actions spending limit 需提高。只读检查确认本机没有 Parallels/VMware/VirtualBox/UTM/QEMU/Wine 或现成 Windows VM，因此不把 macOS、静态契约或 Wine 冒充 Windows 通过
+- 失败矩阵：覆盖缺入口/依赖/spec、源码与冻结入口、无 Python PATH、bootstrap 拒绝、WebSocket 连接失败、固定退出码/输出、Session 脱敏、Playwright 依赖与构建分析隔离、macOS/Windows job 配置和工作流只读/无发布；Windows 实际构建/启动待 runner 或实体机恢复
+- 清理：PyInstaller 构建使用 pytest 临时目录并自动删除；无 Executor、PyInstaller、Uvicorn、Docker 或 App 进程残留，`backend/build`/`dist` 持续 Git 忽略。临时 CI 分支在主提交完成后删除；失败运行保留 GitHub 证据
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增第二份打包或实施文档
+- 后续：E4-04 所需的稳定 `onedir` 目录与入口工程依赖已经具备，可继续生成跨平台 Manifest；E4-03 保持 `🔍`，在 GitHub Billing 恢复或取得 Windows 设备后补同一实包测试，不阻塞无设备依赖任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-03`：完成 PyInstaller `onedir` PoC，验证 macOS/Windows 入口可启动且不提前打包 Playwright；
-2. 按台账与 TaskList 顺序持续执行 E4-04～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
+1. `E4-04`：为稳定 `onedir` 目录生成包含版本、平台、架构、大小、SHA-256 和 Ed25519 签名的 Executor Manifest；
+2. E4-03 Windows 实包启动在 GitHub Billing/Windows 设备恢复后补验收；不降低门禁，也不阻塞 E4-04～Wave 10 的无设备依赖任务。

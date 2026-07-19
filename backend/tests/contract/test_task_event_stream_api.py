@@ -11,6 +11,7 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from automation_tool.control_plane import create_app
+from automation_tool.control_plane.api import task_event_stream as task_event_stream_module
 from automation_tool.control_plane.api.installation_access import (
     require_current_installation_access,
 )
@@ -347,6 +348,33 @@ async def test_body_rotates_immediately_when_its_bounded_connection_age_is_reach
     )
     body = _event_body(
         request=cast(Request, TestRequest([False], maximum=1e-12)),
+        service=service,
+        installation_id=INSTALLATION_ID,
+        task_id=str(TASK_ID),
+        initial=initial,
+    )
+
+    assert [item async for item in body] == []
+
+
+@pytest.mark.asyncio
+async def test_body_rotates_when_the_bounded_age_is_reached_during_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MemoryRepository()
+    repository.events = ()
+    repository.watermark = 0
+    repository.status = TaskStatus.RUNNING
+    service = TaskEventStreamService(repository=repository)
+    initial = await service.read(
+        installation_id=INSTALLATION_ID,
+        task_id=str(TASK_ID),
+        last_event_id=None,
+    )
+    monotonic_times = iter((0.0, 0.0, 1.0))
+    monkeypatch.setattr(task_event_stream_module, "monotonic", monotonic_times.__next__)
+    body = _event_body(
+        request=cast(Request, TestRequest([False, False], maximum=1.0)),
         service=service,
         installation_id=INSTALLATION_ID,
         task_id=str(TASK_ID),
