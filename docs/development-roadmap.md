@@ -281,7 +281,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | 🟩 完成 |
-| D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | ⬜ 未开始 |
+| D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | 🟩 完成 |
 | D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | ⬜ 未开始 |
 | D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | ⬜ 未开始 |
 | D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | ⬜ 未开始 |
@@ -1895,10 +1895,22 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 `D6-02`，在该 v1 route contract 上集中封装搜索入口、结果列表、弹窗和登录跳转；任何 DOM 锚点不足或冲突继续 unknown/fail closed
 
+### D6-02 页面对象基础
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；新增页面对象用例准确失败于 `search_page` 生产模块不存在，随后才建立实现。首轮覆盖率验收又准确暴露动态 DOM 下“识别后控件消失/查询失败”的未覆盖分支，补齐失败关闭用例后才转绿
+- 唯一页面对象：新增 Executor-only `DouyinSearchPage` 和 `douyin.search-page.v1` selector contract，只接受 Runtime-owned `BrowserWindow` 并复用 D6-01 `DouyinPageVersionModel`，没有复制官方 origin、route 或页面版本判断。搜索输入、提交控件、结果列表、登录弹窗和阻塞弹窗全部集中在一个模块，优先使用 role/label/placeholder 等语义锚点，再使用版本化 `data-e2e` 兜底
+- 封闭事实：观察结果只能是 `home_ready/results_ready/login_required/dialog_blocked/unknown` 与固定 evidence 的合法组合；Session probe 不查询 DOM 就投影登录跳转，登录弹窗优先于其通用 dialog 外壳，普通阻塞弹窗优先于搜索/结果锚点。入口与锚点冲突、锚点缺失、未知 route/version、定位异常和识别后 DOM 变化全部保持 `circuit_open=true`
+- 只读边界：本任务只识别并返回当前仍可见的受控 Locator，不导航、不点击、不输入、不滚动、不执行脚本，也不读取 Cookie、storage state、Local/Session Storage 或页面正文；对象与异常不输出 URL、selector、DOM、账号或 Profile。跨端契约同时锁定页面对象、selector 和 Page 句柄不能进入 Executor wire schema、Tauri Command 或 Control Plane
+- 验收边界：D6-02 交付的是尚未接入 Task/App 的纯只读页面基础，因此使用原对象公开入口和确定性 Page/Locator 双桩验收状态矩阵，没有启动隐藏 App 空壳，也没有把双桩冒充真实抖音 DOM。D6-01 的公开无头实探已说明当前空白 Profile 缺少稳定交互锚点；D6-15 负责浏览器 Fake 页面回归，D6-16 再由真实账号确认最终 DOM 与完整目标发现
+- 测试：聚焦 23 项页面对象用例，126 条语句/32 个分支覆盖率 100%；跨边界 Node 契约验证只读、版本唯一来源和协议隔离。Backend 全量 `1058 passed, 4 skipped in 94.15s`，6606 条语句/1338 个分支覆盖率 100%；Ruff/格式 217 个文件、严格 Mypy 201 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 73 项 Node 契约、132 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-03`，把关键词长度、空白、控制字符、任务上限和服务端一致规则收敛为唯一领域约束
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-02`：在 `douyin.web.v1` 上集中封装搜索入口、结果列表、弹窗和登录跳转；
+1. `D6-03`：收敛关键词长度、空白、控制字符、任务上限和服务端一致规则；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。

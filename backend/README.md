@@ -106,6 +106,8 @@ B5-10 的 `executor/rpa/douyin/login.py` 复用该 detector，并从同一个 Ru
 
 D6-01 的 `executor/rpa/douyin/page_version.py` 是 Wave 6 唯一页面 route/version 模型。它只认 `douyin.web.v1` 的 canonical 首页、`/user/self` 和 `/search/<term>?type=general`，并严格校验 HTTPS 官方 host、端口、userinfo、fragment、路径、查询、percent/UTF-8 编码、控制/Bidi 与资源上限；任何未知组合返回 `unknown/circuit_open`，`require_entry()` 不允许调用方带着错误入口继续。B5-09 Session probe 常量已改从该模型导入；模型不依赖 Playwright、Control Plane 或 Task 领域，不读取或输出页面正文、Cookie、账号、Profile 和源 URL。
 
+D6-02 的 `executor/rpa/douyin/search_page.py` 是搜索页唯一 Page Object。它复用 D6-01 route/version 事实，按可访问语义优先、版本化 `data-e2e` 兜底集中封装搜索输入、提交、结果列表、登录和阻塞弹窗，并只从 Runtime-owned `BrowserWindow` 产生 `home_ready/results_ready/login_required/dialog_blocked/unknown`。入口/锚点冲突、缺失、页面异常和识别后的 DOM 变化全部 fail closed；模块本身不导航、不点击、不输入、不滚动、不执行页面脚本，也不读取或输出 Cookie、storage state、页面正文、URL、账号或 Profile。
+
 B5-11 把 flow 契约升级为 `douyin.qr-login.v2`，当前状态固定为 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/handoff_required/unknown`。B5-09 发现 ByteDance 验证中心外层挑战后只投影 `handoff_required/risk_challenge`，不读取跨源挑战内容，也没有点击、填写、拖拽、验证码识别或绕过路径；同一个可见窗口留给用户处理。无参数 `recheck()` 只有重新观察到 `healthy` 才关闭熔断，挑战仍在、页面未知或登录失效都继续阻止副作用。代码不调用 Cookie/storage-state API，页面、二维码、验证码、Profile 路径和账号信息不进入协议、Tauri IPC 或日志。B5-13 已提供平台状态与重新检查，B5-14 已启用带二次确认的安全注销。
 
 B5-12 的 `executor/rpa/douyin/health.py` 把生产 detector 事实写入 SQLite v2 平台 Session 表，再构造 Executor-scoped `platform.session_health`。首次观察建立 revision 1；倒序观察、较低 revision 和同 epoch 非健康→健康全部拒绝，只有显式恢复/重新登录推进 epoch。Control Plane 在认证 WebSocket 上复验 Installation/Executor scope，PostgreSQL 表只保留 `installation_id/platform/state/session_revision/observed_at/updated_at`；Cookie、Profile、二维码、验证码、页面原文、message/executor ID 均不持久化。
