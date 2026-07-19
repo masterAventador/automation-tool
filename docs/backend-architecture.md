@@ -368,7 +368,7 @@ T3-09 在每次连接重认证之后调用持久投递服务。仓储先把 dead
 
 T3-10 增加独立 `FakeExecutorEngine` 与 `FakeExecutorClient`。引擎只导入共享 protocol，正式解析每条 command，并核对 Installation/Executor、deadline、Attempt 内 command sequence 及 task/attempt 绑定；message ID 与 idempotency key 任一重放都返回首次生成的完全相同 envelope，不再次递增事件序号，意图变化则拒绝。成功、部分成功、失败、登录、接管、结果不确定、拒绝和 hold 场景覆盖全部当前任务事件；hold 只允许合法 pause/resume/cancel/emergency-stop，生成阶段失败会同时回滚状态与事件水位。
 
-Fake 客户端只接受无 userinfo/query/fragment 的固定 Executor `ws`/`wss` 路径、受限 Session 和有界命令数，使用共享的唯一子协议、32 KiB 限制和正式 Hello/结果/事件 envelope。核心不读取文件、不启动进程、不操作浏览器/桌面、不访问 Control Plane 数据库；内存状态只是测试场景投影，不能成为生产任务事实。T3-10 的真实 Uvicorn 验收选择不产生事件的 reject 场景验证当时的 Outbox/ACK 全链路；其后 T3-11 已由生产 WebSocket 完成服务端接收、sequence 缺口和 revision CAS 的持久闭环，controller 测试不作为落库证据。
+Fake 客户端只接受无 userinfo/query/fragment 的固定 Executor `ws`/`wss` 路径、受限 Session 和有界命令数，使用共享的唯一子协议、32 KiB 限制和正式 Hello/结果/事件 envelope。T3-20 增加有界 `run_reconnecting`：同一 Engine/Session 跨连接保留幂等投影，按稳定 Command message ID 统计唯一命令，重投完整返回首次批次但不重复占用处理名额；非法预算/延迟、二进制或非 Command 帧、连接失败和预算耗尽统一 fail closed 且不泄密。核心不读取文件、不启动进程、不操作浏览器/桌面、不访问 Control Plane 数据库；内存状态只是测试场景投影，不能成为生产任务事实。T3-10 的真实 Uvicorn 验收选择不产生事件的 reject 场景验证当时的 Outbox/ACK 全链路；T3-11 已由生产 WebSocket 完成事件持久闭环，T3-20 再以真实停服/同库重启证明 pending Command 和已有事件跨进程恢复。
 
 T3-11 将 `TaskEventEnvelope` 纳入 bound WebSocket 消息，但不混入 heartbeat sequence 或 Command ACK 逻辑。事件应用服务只接受当前 14 种类型：非 step payload 必须为空；step 只允许可选 canonical `action_id`，progress 另要求 `0..100` strict integer。Action 无显式 ID 时只记录 Attempt-scoped 事件，不通过 ordinal、最近一条或“唯一活动动作”猜测归属。事件 deadline 已到、客户端时间晚于服务端、身份冒充和非法 payload 都在持久化前拒绝。
 
@@ -637,6 +637,8 @@ MVP/Demo 使用单个 Control Plane 实例：
 - App 断线后用标准 Last-Event-ID 从数据库最后已消费序号恢复；
 - 进程重启丢失连接不丢事件，Executor 自动重连并重新声明未完成 attempt；
 - 不把进程内队列当成唯一事实源。
+
+T3-20 已验证上述单实例恢复契约：隐藏 App 页面创建并运行 Task，在 Executor 离线时通过正式 Rust/API 提交取消，数据库在停服点持有 acknowledged offer、pending cancel、连续两条 Event 与 `cancelling` 快照。首个 Uvicorn 退出且端口关闭后，App 整页刷新进入固定不可用诊断；同一 FakeExecutor/Session 在服务不可达期间有界重试，第二个 Uvicorn 连接同一 PostgreSQL 后领取原 cancel，最终以 ACK 和第三条 Event 收敛为 `cancelled`。Task/Command/Event 原 ID、定义和创建时间不变；Registry 在线投影按新进程重建，不被持久化或冒充业务事实。
 
 出现 Control Plane 多副本需求时，必须先增加跨副本连接路由和事件总线，再水平扩容；不能简单把副本数从 1 改成 N。
 

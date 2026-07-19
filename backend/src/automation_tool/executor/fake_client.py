@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel
-from websockets.sync.client import connect
+from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Subprotocol
 
 from automation_tool.executor.fake import FakeExecutorEngine
 from automation_tool.protocol import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     MAX_EXECUTOR_MESSAGE_BYTES,
+    TaskCommandEnvelope,
+    parse_executor_message,
 )
 
 _EXECUTOR_PATH = "/api/v1/executors/connect"
@@ -99,24 +102,27 @@ class FakeExecutorClient:
         self._open_timeout = _positive_seconds(open_timeout)
         self._close_timeout = _positive_seconds(close_timeout)
 
+    def _connect(self) -> ClientConnection:
+        return connect(
+            self._configuration.websocket_url,
+            subprotocols=[Subprotocol(EXECUTOR_WEBSOCKET_SUBPROTOCOL)],
+            additional_headers={
+                "Authorization": f"Bearer {self._configuration.session_token}",
+            },
+            compression=None,
+            proxy=None,
+            open_timeout=self._open_timeout,
+            close_timeout=self._close_timeout,
+            max_size=MAX_EXECUTOR_MESSAGE_BYTES,
+        )
+
     def run(self, *, max_commands: int) -> int:
         if type(max_commands) is not int or not 1 <= max_commands <= 1000:
             raise FakeExecutorTransportRejected
         processed = 0
         failed = False
         try:
-            with connect(
-                self._configuration.websocket_url,
-                subprotocols=[Subprotocol(EXECUTOR_WEBSOCKET_SUBPROTOCOL)],
-                additional_headers={
-                    "Authorization": f"Bearer {self._configuration.session_token}",
-                },
-                compression=None,
-                proxy=None,
-                open_timeout=self._open_timeout,
-                close_timeout=self._close_timeout,
-                max_size=MAX_EXECUTOR_MESSAGE_BYTES,
-            ) as websocket:
+            with self._connect() as websocket:
                 websocket.send(_wire(self._engine.build_hello()))
                 while processed < max_commands:
                     source = websocket.recv()
@@ -131,6 +137,51 @@ class FakeExecutorClient:
         if failed:
             raise FakeExecutorTransportRejected
         return processed
+
+    def run_reconnecting(
+        self,
+        *,
+        max_commands: int,
+        max_reconnects: int,
+        reconnect_delay: timedelta = timedelta(milliseconds=100),
+    ) -> int:
+        """Replay through bounded reconnects, counting each stable command once."""
+
+        if (
+            type(max_commands) is not int
+            or not 1 <= max_commands <= 1000
+            or type(max_reconnects) is not int
+            or not 1 <= max_reconnects <= 1000
+        ):
+            raise FakeExecutorTransportRejected
+        delay_seconds = _positive_seconds(reconnect_delay)
+        processed_message_ids: set[str] = set()
+        reconnects = 0
+        failed = False
+        while len(processed_message_ids) < max_commands:
+            try:
+                with self._connect() as websocket:
+                    websocket.send(_wire(self._engine.build_hello(sequence=reconnects + 1)))
+                    while len(processed_message_ids) < max_commands:
+                        source = websocket.recv()
+                        if type(source) is not str:
+                            raise FakeExecutorTransportRejected
+                        parsed = parse_executor_message(source)
+                        if not isinstance(parsed, TaskCommandEnvelope):
+                            raise FakeExecutorTransportRejected
+                        messages = self._engine.handle(source)
+                        for message in messages:
+                            websocket.send(_wire(message))
+                        processed_message_ids.add(str(parsed.message_id))
+            except Exception:
+                if reconnects >= max_reconnects:
+                    failed = True
+                    break
+                reconnects += 1
+                time.sleep(delay_seconds)
+        if failed:
+            raise FakeExecutorTransportRejected
+        return len(processed_message_ids)
 
 
 __all__ = [

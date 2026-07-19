@@ -72,6 +72,8 @@ T3-18 的运行详情纵向验收在仓库根目录执行 `backend/.venv/bin/pyt
 
 T3-19 的完整生命周期纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_19_acceptance.py`。唯一 `visible=false` 真实 App 从页面创建两个 Task：首个依次真实点击暂停、恢复、取消，第二个由受控 Executor 收敛为成功；随后整页刷新并从工作台重新进入成功详情。正式 TypeScript gateway、固定 Rust Command、真实 Uvicorn/PostgreSQL、Outbox 和 Executor 链路全部参与，最终核对命令 ACK、事件、revision、水位与两个页面创建的定义；设备秘密只在隔离 `app_data_dir`，结束后精确清理。
 
+T3-20 的重启恢复纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_20_acceptance.py`。唯一 `visible=false` App 从页面创建并运行 Task，在 Executor 离线时真实提交取消；runner 停止首个 Uvicorn 后整页刷新验证“Control Plane 不可用”，再以同一 PostgreSQL 启动第二个 Uvicorn。同一 FakeExecutor/Session 自动重连并消费原 pending cancel，App 点击“重新检查”后从工作台和详情读取 `cancelled`；最终核对原 Task/Command/Event ID、定义、revision 与水位未丢失，秘密仍只在隔离 `app_data_dir`。
+
 `@wdio/tauri-service 1.2.0` 的发布清单仍将 `@wdio/native-utils` 固定在缺少其已调用导出的 2.4.0，因此 `pnpm-workspace.yaml` 通过官方依赖 override 固定到已提供该导出的 2.5.0；未修改任何第三方源码。当前 embedded provider 的成功测试仍会输出两条上游诊断噪声：误检查外部 `tauri-driver`，以及会话销毁后清理空 mock；两者不影响真实 WKWebView 会话和测试结果，项目不会因此安装未使用的外部驱动。
 
 CI 在 `quality.yml` 的 Ubuntu Frontend/Rust job 重放契约、单测、Lint、类型、UI Harness、生产边界，以及默认、`desktop-e2e`、`control-plane-e2e` 三种 Cargo 配置检查；`desktop.yml` 再用 GitHub Hosted macOS/Windows 构建 production debug binary，并运行后台隐藏窗口的真实 Tauri 冒烟。两条工作流都只有 `contents: read`，不读取 secret、不上传安装包，也不执行发布或部署。

@@ -146,6 +146,188 @@ def test_fake_client_uses_real_websocket_and_sends_formal_hello_result_and_event
     assert not thread.is_alive()
 
 
+def test_fake_client_reconnects_and_does_not_count_a_replayed_command_twice() -> None:
+    captured: queue.Queue[object] = queue.Queue()
+    connections = count(1)
+
+    def handler(connection: ServerConnection) -> None:
+        connection_number = next(connections)
+        try:
+            hello = parse_executor_message(connection.recv(timeout=2))
+            assert isinstance(hello, ExecutorLifecycleEnvelope)
+            connection.send(command("task.offer", sequence=1))
+            offer_batch = tuple(
+                parse_executor_message(connection.recv(timeout=2)) for _ in range(3)
+            )
+            if connection_number == 1:
+                connection.close(code=1012, reason="controlled restart")
+                captured.put(("first", offer_batch))
+                return
+            connection.send(command("task.cancel", sequence=2))
+            cancel_batch = tuple(
+                parse_executor_message(connection.recv(timeout=2)) for _ in range(2)
+            )
+            captured.put(("second", offer_batch, cancel_batch))
+        except Exception as error:
+            captured.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        client = FakeExecutorClient(
+            configuration=FakeExecutorClientConfiguration(
+                websocket_url=f"ws://127.0.0.1:{port}/api/v1/executors/connect",
+                session_token="private-session",
+            ),
+            engine=FakeExecutorEngine(
+                installation_id=INSTALLATION_ID,
+                executor_id=EXECUTOR_ID,
+                scenario=FakeExecutorScenario.HOLD,
+                clock=MutableClock(),
+                id_source=DeterministicIds(),
+            ),
+        )
+
+        assert (
+            client.run_reconnecting(
+                max_commands=2,
+                max_reconnects=1,
+                reconnect_delay=timedelta(milliseconds=1),
+            )
+            == 2
+        )
+        first = captured.get(timeout=2)
+        second = captured.get(timeout=2)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        first_typed = cast(
+            tuple[str, tuple[TaskCommandResultEnvelope | TaskEventEnvelope, ...]],
+            first,
+        )
+        second_typed = cast(
+            tuple[
+                str,
+                tuple[TaskCommandResultEnvelope | TaskEventEnvelope, ...],
+                tuple[TaskCommandResultEnvelope | TaskEventEnvelope, ...],
+            ],
+            second,
+        )
+        assert first_typed[0] == "first"
+        assert second_typed[0] == "second"
+        assert first_typed[1] == second_typed[1]
+        assert [message.message_type for message in second_typed[2]] == [
+            "task.control_ack",
+            "task.cancelled",
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_reconnecting_client_rejects_limits_and_exhausts_without_leaking() -> None:
+    client = FakeExecutorClient(
+        configuration=FakeExecutorClientConfiguration(
+            websocket_url="ws://127.0.0.1:9/api/v1/executors/connect",
+            session_token="private-session",
+        ),
+        engine=FakeExecutorEngine(
+            installation_id=INSTALLATION_ID,
+            executor_id=EXECUTOR_ID,
+            scenario=FakeExecutorScenario.HOLD,
+        ),
+        open_timeout=timedelta(milliseconds=50),
+    )
+    for max_commands, max_reconnects in (
+        (0, 1),
+        (True, 1),
+        (1001, 1),
+        (1, 0),
+        (1, True),
+        (1, 1001),
+    ):
+        with pytest.raises(FakeExecutorTransportRejected):
+            client.run_reconnecting(
+                max_commands=max_commands,
+                max_reconnects=max_reconnects,
+            )
+    with pytest.raises(FakeExecutorTransportRejected):
+        client.run_reconnecting(
+            max_commands=1,
+            max_reconnects=1,
+            reconnect_delay=timedelta(0),
+        )
+
+    with pytest.raises(
+        FakeExecutorTransportRejected,
+        match=r"^Fake Executor transport is unavailable$",
+    ) as captured:
+        client.run_reconnecting(
+            max_commands=1,
+            max_reconnects=1,
+            reconnect_delay=timedelta(milliseconds=1),
+        )
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert "private" not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    "invalid_source",
+    (
+        b"private-binary-command",
+        _wire(
+            FakeExecutorEngine(
+                installation_id=INSTALLATION_ID,
+                executor_id=EXECUTOR_ID,
+                scenario=FakeExecutorScenario.HOLD,
+                clock=MutableClock(),
+                id_source=DeterministicIds(),
+            ).build_hello()
+        ),
+    ),
+)
+def test_reconnecting_client_rejects_non_command_frames(
+    invalid_source: str | bytes,
+) -> None:
+    connections: queue.Queue[object] = queue.Queue()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.send(invalid_source)
+            connections.put(True)
+        except Exception as error:
+            connections.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        client = FakeExecutorClient(
+            configuration=FakeExecutorClientConfiguration(
+                websocket_url=f"ws://127.0.0.1:{port}/api/v1/executors/connect",
+                session_token="private-session",
+            ),
+            engine=FakeExecutorEngine(
+                installation_id=INSTALLATION_ID,
+                executor_id=EXECUTOR_ID,
+                scenario=FakeExecutorScenario.HOLD,
+            ),
+        )
+        with pytest.raises(FakeExecutorTransportRejected):
+            client.run_reconnecting(
+                max_commands=1,
+                max_reconnects=1,
+                reconnect_delay=timedelta(milliseconds=1),
+            )
+        assert connections.get(timeout=2) is True
+        assert connections.get(timeout=2) is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
 @pytest.mark.parametrize(
     ("scenario", "expected_types"),
     (

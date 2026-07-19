@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-19 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台、受约束新建表单、权威运行详情和刷新恢复 E2E 可用；真实 RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-20 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台、受约束新建表单、权威运行详情、刷新及 Control Plane 重启恢复可用；真实 RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -209,7 +209,7 @@
 | T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ✅ 已完成 |
 | T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ✅ 已完成 |
 | T3-19 | UI Harness E2E | 创建→运行→暂停→恢复→取消/成功→刷新恢复 | T3-16,T3-17,T3-18 | ✅ 已完成 |
-| T3-20 | Control Plane 重启恢复 | PostgreSQL 保持任务/命令/事件，FakeExecutor 重连收敛 | T3-11,T3-19 | ⬜ 未开始 |
+| T3-20 | Control Plane 重启恢复 | PostgreSQL 保持任务/命令/事件，FakeExecutor 重连收敛 | T3-11,T3-19 | ✅ 已完成 |
 
 ## 9. Wave 4：Tauri 与 Local Executor 生命周期
 
@@ -1312,9 +1312,28 @@
 - 真实账号边界：本任务无社交平台副作用，不需要真实账号也不宣称抖音/小红书最终状态。后续缺真实账号时继续用自建测试页/隔离 Adapter 完成工程验收，仅把平台最终状态标记为 `🔍 待真实账号`，不阻塞后续 Wave
 - 文档：同步根/Backend/Frontend README、前端架构、工程结构与本路线图；没有增加重复规划文档
 
+### T3-20 Control Plane 重启恢复
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：在同一 PostgreSQL 上真实停止并重启 Control Plane，证明 Task、Attempt、Command、Event 与定义不丢失；FakeExecutor 使用同一正式身份和幂等内存账本自动重连、重放未确认命令并继续控制，隐藏 App 刷新后从权威快照恢复
+- 边界：本任务仍使用无平台副作用 FakeExecutor，只验证云端 Control Plane 进程恢复和客户端重连语义；Local Executor 进程监管、本机 SQLite 账本与真实 RPA 由 Wave 4 以后实现
+- RED：先新增 FakeExecutor 自动重连的真实 WebSocket 测试，以及 T3-20 隐藏 App 配置、WDIO 流程、Rust 注册入口和跨进程 runner 工程契约；后端测试因客户端没有 `run_reconnecting` 准确失败，Node/Rust 分别因 `tauri.task-restart-e2e.conf.json` 等专用桌面验收文件不存在而准确失败
+- 重连实现：`FakeExecutorClient.run_reconnecting` 使用同一引擎和正式 WebSocket/Session，按有界次数与正延迟重连；以稳定 Command message ID 计数，因此重投会完整重发首次生成的 ACK/Event 批次，但不会被当成新的业务命令。二进制帧、非 Command 帧、非法预算、非法延迟和预算耗尽统一返回不泄密的 transport unavailable
+- 真实 WebSocket：测试先在第一条连接处理 HOLD offer 后以 1012 关闭，再在第二条连接重放同一 offer 并下发 cancel；两次 offer 回执/事件完全相同，重放不占第二个唯一命令名额，cancel 正常收敛。该分层证据覆盖活连接中断；桌面纵向验收另覆盖服务不可达期间的自动连接重试
+- 产品同路径：`backend/.venv/bin/python scripts/run_t3_20_acceptance.py` 启动隔离 PostgreSQL、完整 Alembic、首个真实 Uvicorn 和唯一 `visible=false` Tauri/WKWebView。App 页面创建 Task，HOLD FakeExecutor 先经正式 Session/WebSocket 处理 offer；Executor 离线后页面真实提交取消，使 PostgreSQL 形成 offer acknowledged、cancel pending、started/step started 和 `cancelling` 权威快照
+- 重启与恢复：runner 真实停止首个 Uvicorn，确认 8765 关闭；App 整页刷新并显示“Control Plane 不可用”。同一 FakeExecutor/Session 在服务不可达时启动有界自动重连，第二个 Uvicorn 以同一环境和 PostgreSQL 重启；App 点击真实“重新检查”恢复工作台，Executor 领取原 pending cancel，ACK 与 cancelled Event 落库，App 再从工作台进入详情读取终态
+- 最终事实：重启前 Task 为 `cancelling`、revision 4、watermark 2；重启后为 `cancelled`、revision 5、watermark 3，Attempt 为 `cancelled`。offer/cancel 两条 Command 原 message ID 不变且最终均 acknowledged，started/step started 原 source message ID、Task created_at 和页面创建定义不变；全过程只签发一张 `executor.connect` Session
+- 失败矩阵：首次桌面验收已正确进入不可用页，但 WDIO 误写按钮文案“重试连接”，与产品真实“重新检查”不符而失败；只修测试选择器后原链路通过。首次全量覆盖率中 754 项行为均通过但新增失败分支使总覆盖率为 99.77%；补非法上限、二进制/非 Command 帧和预算耗尽测试后达到 100%，未修改生产语义绕过门禁
+- 分层验证：Backend `757 passed`，4079 条语句/788 个分支覆盖率 100%；Frontend 39 项 Node 工程契约、112 项 Vitest、5 项 Playwright 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置均为 40 项单元、3 项共享协议、14 项安全配置全绿。Ruff/格式、严格 Mypy、uv lock/sync、ESLint、TypeScript、peer dependency、OpenAPI 漂移、production boundary、Cargo fmt 与三种配置 Clippy 零警告全部通过
+- App、秘密与清理：App 全程隐藏后台，不弹窗、不抢焦点；设备私钥与长期凭据只在隔离 `app_data_dir` 私有文件，不使用系统钥匙串。成功与失败运行均回收 App、两个 Uvicorn、8765、PostgreSQL 容器/网络/卷、信号目录和隔离 App 数据
+- 真实账号边界：本任务无社交平台副作用，不需要真实账号也不宣称平台最终状态。后续缺账号时继续使用自建测试页/隔离 Adapter，平台最终状态保留 `🔍 待真实账号` 而不阻塞 Wave 4～10
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构与本路线图；没有新增重复规划文档
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-20`：完成 Control Plane 与 Executor 重启恢复；
-2. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
+1. `E4-01`：审计旧 `local_executor`，列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖；
+2. 按台账与 TaskList 顺序持续执行 E4-02～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
