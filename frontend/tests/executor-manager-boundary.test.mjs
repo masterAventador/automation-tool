@@ -139,3 +139,31 @@ test("E4-12 consumes real offers only through the durable no-side-effect protoco
   assert.doesNotMatch(processor, /FakeExecutor|playwright|selenium|keyring|keychain/i);
   assert.doesNotMatch(runtime, /#\[tauri::command\]/);
 });
+
+test("E4-13 exposes only fixed Executor lifecycle Commands through PlatformAdapter", async () => {
+  const [entry, nativePlatform, platformTypes, tauriAdapter] = await Promise.all([
+    readFile(new URL("src-tauri/src/lib.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_platform.rs", frontendRoot), "utf8"),
+    readFile(new URL("src/platform/types.ts", frontendRoot), "utf8"),
+    readFile(
+      new URL("src/platform/tauri/platform-adapter.ts", frontendRoot),
+      "utf8",
+    ),
+  ]);
+
+  for (const command of [
+    "get_executor_status",
+    "restart_executor",
+    "get_executor_diagnostics",
+    "emergency_stop_executor",
+  ]) {
+    assert.match(entry, new RegExp(`async fn ${command}|fn ${command}`));
+    assert.match(tauriAdapter, new RegExp(`"${command}"`));
+  }
+  assert.match(entry, /app\.path\(\)\.app_data_dir\(\)/);
+  assert.match(nativePlatform, /local-executor/);
+  assert.match(nativePlatform, /executor-id-v1/);
+  assert.match(platformTypes, /export interface PlatformAdapter/);
+  assert.doesNotMatch(tauriAdapter, /https?:|wss?:|session|token|packageRoot|stateDirectory/i);
+  assert.doesNotMatch(nativePlatform, /#\[tauri::command\]/);
+});

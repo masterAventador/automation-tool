@@ -14,10 +14,10 @@ Desktop.ini
 
 # Project runtime data
 .local/
-browser-profiles/
-artifacts/
-diagnostics/
-logs/
+/browser-profiles/
+/artifacts/
+/diagnostics/
+/logs/
 *.log
 *.sqlite
 *.sqlite3

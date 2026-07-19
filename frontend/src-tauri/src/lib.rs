@@ -5,6 +5,7 @@ pub mod executor_bootstrap;
 mod executor_diagnostics;
 pub mod executor_manager;
 pub mod executor_package;
+pub mod executor_platform;
 pub mod executor_protocol;
 pub mod secure_store;
 
@@ -24,6 +25,120 @@ use tauri::Manager;
 struct ControlPlaneCommandError {
     code: &'static str,
     retryable: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutorPlatformCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ExecutorDiagnosticsSnapshot {
+    lines: Vec<String>,
+}
+
+fn map_executor_platform_error(
+    error: executor_platform::ExecutorPlatformError,
+) -> ExecutorPlatformCommandError {
+    let (code, retryable) = match error.code() {
+        executor_platform::ExecutorPlatformErrorCode::ConfigurationInvalid => {
+            ("configuration_invalid", false)
+        }
+        executor_platform::ExecutorPlatformErrorCode::StorageUnavailable => {
+            ("storage_unavailable", false)
+        }
+        executor_platform::ExecutorPlatformErrorCode::AlreadyRunning => ("already_running", true),
+        executor_platform::ExecutorPlatformErrorCode::AuthenticationRejected => {
+            ("authentication_rejected", false)
+        }
+        executor_platform::ExecutorPlatformErrorCode::PackageRejected => {
+            ("package_rejected", false)
+        }
+        executor_platform::ExecutorPlatformErrorCode::ProcessUnavailable => {
+            ("process_unavailable", true)
+        }
+        executor_platform::ExecutorPlatformErrorCode::TimedOut => ("timed_out", true),
+    };
+    ExecutorPlatformCommandError { code, retryable }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_executor_connection_error(
+    error: control_plane::ControlPlaneError,
+) -> ExecutorPlatformCommandError {
+    let retryable = error.retryable();
+    let code = match error.code() {
+        control_plane::ControlPlaneErrorCode::CredentialMissing => "credential_missing",
+        control_plane::ControlPlaneErrorCode::InstallationAccessDenied => {
+            "installation_access_denied"
+        }
+        control_plane::ControlPlaneErrorCode::TransportUnavailable
+        | control_plane::ControlPlaneErrorCode::OutcomeUncertain => "transport_unavailable",
+        control_plane::ControlPlaneErrorCode::IdentityUnavailable
+        | control_plane::ControlPlaneErrorCode::StorageUnavailable => "storage_unavailable",
+        control_plane::ControlPlaneErrorCode::ProtocolInvalid
+        | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
+    };
+    ExecutorPlatformCommandError { code, retryable }
+}
+
+#[tauri::command]
+fn get_executor_status(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    platform.status().map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
+fn get_executor_diagnostics(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<ExecutorDiagnosticsSnapshot, ExecutorPlatformCommandError> {
+    platform
+        .diagnostics()
+        .map(|lines| ExecutorDiagnosticsSnapshot { lines })
+        .map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
+fn emergency_stop_executor(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    platform
+        .emergency_stop()
+        .map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+async fn restart_executor(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    let connection = client
+        .issue_executor_connection(&vault)
+        .await
+        .map_err(map_executor_connection_error)?;
+    let service = platform.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.restart(connection))
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
+#[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
+async fn restart_executor(
+) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    Err(ExecutorPlatformCommandError {
+        code: "operation_unavailable",
+        retryable: false,
+    })
 }
 
 #[tauri::command]
@@ -1176,6 +1291,10 @@ async fn run_control_plane_acceptance(
 pub fn run() {
     let builder = tauri::Builder::default().setup(|app| {
         app.manage(control_plane::ControlPlaneClient::local()?);
+        let app_data_directory = app.path().app_data_dir()?;
+        app.manage(executor_platform::ExecutorPlatformService::initialize(
+            &app_data_directory,
+        )?);
         #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
         {
             let _production_identity_boundary = device_identity::initialize_production_identity;
@@ -1187,7 +1306,6 @@ pub fn run() {
 
         #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
         {
-            let app_data_directory = app.path().app_data_dir()?;
             let device_identity = initialize_production_identity(&app_data_directory)?;
             let device_credential_vault =
                 initialize_production_device_credential_vault(&app_data_directory)?;
@@ -1204,7 +1322,13 @@ pub fn run() {
         .plugin(tauri_plugin_wdio_webdriver::init());
 
     #[cfg(all(not(feature = "control-plane-e2e"), feature = "desktop-e2e"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![check_control_plane_health]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        check_control_plane_health,
+        get_executor_status,
+        restart_executor,
+        get_executor_diagnostics,
+        emergency_stop_executor
+    ]);
     #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
@@ -1217,7 +1341,11 @@ pub fn run() {
         emergency_stop_task_run,
         get_task_snapshot,
         list_task_snapshots,
-        stream_task_projection_events
+        stream_task_projection_events,
+        get_executor_status,
+        restart_executor,
+        get_executor_diagnostics,
+        emergency_stop_executor
     ]);
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1244,7 +1372,11 @@ pub fn run() {
         prepare_task_restart_for_acceptance,
         prepare_workbench_for_acceptance,
         control_task_for_acceptance,
-        terminate_tasks_for_acceptance
+        terminate_tasks_for_acceptance,
+        get_executor_status,
+        restart_executor,
+        get_executor_diagnostics,
+        emergency_stop_executor
     ]);
 
     builder

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import type { StartupCheck } from "./startup";
+import type { PlatformAdapter } from "../platform/types";
 
 describe("desktop startup", () => {
   it("opens the RPA workbench without any product login route", async () => {
@@ -67,5 +68,32 @@ describe("desktop startup", () => {
     ).toBeVisible();
     expect(screen.getByText("安装实例授权不可用")).toBeVisible();
     expect(document.body).not.toHaveTextContent(/账号登录|注册账号|私钥|凭据/);
+  });
+
+  it("opens settings and diagnostics through the injected PlatformAdapter", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({ status: "ready" as const }),
+    };
+    const platformAdapter: PlatformAdapter = {
+      getExecutorStatus: vi.fn().mockResolvedValue({
+        state: "running",
+        version: "0.1.0",
+        buildId: "app-test",
+        restartCount: 0,
+      }),
+      restartExecutor: vi.fn(),
+      getExecutorDiagnostics: vi.fn().mockResolvedValue(["safe app diagnostic"]),
+      emergencyStopExecutor: vi.fn(),
+    };
+    const user = userEvent.setup();
+
+    render(<App startupCheck={startupCheck} platformAdapter={platformAdapter} />);
+
+    await screen.findByRole("heading", { name: "RPA 运营工作台" });
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    expect(await screen.findByRole("heading", { name: "设置与诊断" })).toBeVisible();
+    expect(await screen.findByText("本地执行器运行中")).toBeVisible();
+    expect(screen.getByText("safe app diagnostic")).toBeVisible();
+    expect(platformAdapter.getExecutorStatus).toHaveBeenCalledTimes(1);
   });
 });

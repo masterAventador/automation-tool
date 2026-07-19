@@ -19,6 +19,8 @@ use crate::device_identity::ProductionDeviceIdentity;
 use crate::secure_store::SecretStore;
 
 const LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+const LOCAL_EXECUTOR_WEBSOCKET_URL: &str = "ws://127.0.0.1:8765/api/v1/executors/connect";
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -355,7 +357,38 @@ impl ControlPlaneClient {
                 None,
             )
             .await?;
-        parse_installation_access(&body)
+        parse_installation_access(&body).map(|_| ())
+    }
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    pub(crate) async fn issue_executor_connection<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<ExecutorConnectionMaterial, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        let app_session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let access_body = self
+            .execute(
+                ControlPlaneOperation::GetCurrentInstallationAccess,
+                Some(app_session.token()),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        let installation_id = parse_installation_access(&access_body)?;
+        let executor_session = self
+            .exchange_device_session(vault, DeviceSessionCapability::ExecutorConnect)
+            .await?;
+        Ok(ExecutorConnectionMaterial {
+            websocket_url: LOCAL_EXECUTOR_WEBSOCKET_URL.to_owned(),
+            session_token: executor_session.into_token(),
+            installation_id,
+        })
     }
 
     pub async fn register_installation<S>(
@@ -1272,13 +1305,13 @@ fn parse_health_response(body: &[u8]) -> Result<ControlPlaneHealth, ControlPlane
     })
 }
 
-fn parse_installation_access(body: &[u8]) -> Result<(), ControlPlaneError> {
+fn parse_installation_access(body: &[u8]) -> Result<String, ControlPlaneError> {
     let response: InstallationAccessResponse = parse_exact_json(body)?;
     require_canonical_uuid_v4(&response.installation_id)?;
     if response.status != "active" {
         return Err(protocol_invalid());
     }
-    Ok(())
+    Ok(response.installation_id)
 }
 
 #[derive(Deserialize)]
@@ -1878,6 +1911,25 @@ impl DeviceSession {
 
     pub fn capability(&self) -> DeviceSessionCapability {
         self.capability
+    }
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    fn into_token(self) -> Zeroizing<String> {
+        self.token
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+pub(crate) struct ExecutorConnectionMaterial {
+    websocket_url: String,
+    session_token: Zeroizing<String>,
+    installation_id: String,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl ExecutorConnectionMaterial {
+    pub(crate) fn into_parts(self) -> (String, Zeroizing<String>, String) {
+        (self.websocket_url, self.session_token, self.installation_id)
     }
 }
 
@@ -2564,8 +2616,11 @@ mod tests {
             "installationId": IDENTIFIER,
             "status": "active"
         });
-        parse_installation_access(&serde_json::to_vec(&access).expect("access JSON"))
-            .expect("valid access");
+        assert_eq!(
+            parse_installation_access(&serde_json::to_vec(&access).expect("access JSON"))
+                .expect("valid access"),
+            IDENTIFIER
+        );
 
         let session = serde_json::json!({
             "sessionToken": session_value,

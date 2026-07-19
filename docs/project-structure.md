@@ -105,6 +105,7 @@ frontend/
 │   │   │   ├── task-creation-gateway.ts   # 固定抖音任务定义创建 Command
 │   │   │   ├── task-projection-source.ts  # 固定 Task 快照/列表/Channel source
 │   │   │   ├── task-run-control-gateway.ts # 固定暂停/恢复/取消/紧停 Command
+│   │   │   ├── platform-adapter.ts         # 固定 Executor 状态/重启/诊断/本机紧停 Command
 │   │   │   └── workbench-gateway.ts       # 固定运行状态与全局紧停 gateway
 │   │   ├── types.ts               # PlatformAdapter 公共接口
 │   │   └── test-harness.ts        # 仅测试构建可用
@@ -129,6 +130,7 @@ frontend/
 │   │   ├── executor_diagnostics.rs # stderr 流式限界、脱敏与内存滚动保留
 │   │   ├── executor_manager.rs    # signed Executor 生命周期、监管与跨平台进程树
 │   │   ├── executor_package.rs    # signed onedir 验签、完整目录复算与防降级
+│   │   ├── executor_platform.rs   # app_data 固定路径、稳定 Executor ID 与 Manager 组合根
 │   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
 │   │   ├── lib.rs
@@ -137,6 +139,7 @@ frontend/
 │   │   ├── executor_bootstrap.rs  # 随机令牌、stdin 文档、常量时间证明与失败矩阵
 │   │   ├── executor_manager.rs    # 单实例、监管、超时、进程树与真实包入口
 │   │   ├── executor_package.rs    # 当前目标包、Python fixture 与失败矩阵
+│   │   ├── executor_platform.rs   # App 私有固定路径、身份持久化与权限失败矩阵
 │   │   └── executor_protocol_fixtures.rs # 回放三端共享原始 wire
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
 │   ├── capabilities/              # 正式最小权限
@@ -303,7 +306,9 @@ E4-10 新建的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承
 
 E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3` 和 v1 identity/commands/attempt checkpoints/outbox 四表。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS 和协议 outbox 重放均在该模块内事务化；测试覆盖真实并发、重开恢复、迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
 
-E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。当前仍没有 Tauri Command/React API，E4-13/E4-14 才从 App `app_data_dir` 装配并做隐藏 App 验收。
+E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 再做隐藏 App 验收。
+
+E4-13 的 `src-tauri/src/executor_platform.rs` 是唯一 App 组合根：包、SQLite 状态和稳定 Executor UUID 都从 Tauri `app_data_dir/local-executor` 固定派生，不接受 WebView 路径；重启所需 Installation 和短期 `executor.connect` Session 只由 Rust Control Plane client 换取。`src/platform/tauri/platform-adapter.ts` 只 invoke 四个无参数生命周期 Command，并对状态和诊断 DTO fail closed；`features/diagnostics` 只消费该接口。账本、Session、PID、路径、包信任参数和原始 stderr 都不进入 React。E4-14 再用隐藏真实 App 完成纵向生命周期验收。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

@@ -144,6 +144,24 @@ impl ExecutorLaunchConfiguration {
         state_directory: PathBuf,
         heartbeat_interval_seconds: u8,
     ) -> Result<Self, ExecutorManagerError> {
+        Self::new_with_secret(
+            websocket_url,
+            Zeroizing::new(control_plane_session),
+            installation_id,
+            executor_id,
+            state_directory,
+            heartbeat_interval_seconds,
+        )
+    }
+
+    pub(crate) fn new_with_secret(
+        websocket_url: String,
+        control_plane_session: Zeroizing<String>,
+        installation_id: String,
+        executor_id: String,
+        state_directory: PathBuf,
+        heartbeat_interval_seconds: u8,
+    ) -> Result<Self, ExecutorManagerError> {
         ExecutorBootstrapInput::new(
             &websocket_url,
             &control_plane_session,
@@ -155,7 +173,7 @@ impl ExecutorLaunchConfiguration {
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))?;
         Ok(Self {
             websocket_url,
-            control_plane_session: Zeroizing::new(control_plane_session),
+            control_plane_session,
             installation_id,
             executor_id,
             state_directory,

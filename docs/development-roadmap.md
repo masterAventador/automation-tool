@@ -236,7 +236,7 @@
 | E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | 🔍 待验收 |
 | E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | 🔍 待验收 |
 | E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | 🔍 待验收 |
-| E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | ⬜ 未开始 |
+| E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | 🔍 待 E4-14 隐藏 App/Windows 原生验收 |
 | E4-14 | Tauri 生命周期 E2E | 启动/调用/挂起/崩溃/重启/停止/退出清理 | E4-09,E4-13 | ⬜ 未开始 |
 | E4-15 | 正式包测试能力审计 | 生产包不含 WebDriver、测试命令、测试 Sidecar 或调试端口 | E4-14 | ⬜ 未开始 |
 
@@ -1545,9 +1545,28 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份 implementation plan
 - 后续：E4-13 建立固定 PlatformAdapter/Tauri Commands，从 Tauri 自身 `app_data_dir` 派生 Executor 状态目录，并向 React 只暴露受限状态、重启、脱敏诊断和紧停
 
+### E4-13 PlatformAdapter 接入
+
+- 状态：🔍 待 E4-14 隐藏 App 生命周期与 Windows 原生验收；实现和本机分层门禁已完成，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：从 Tauri 自身 `app_data_dir` 固定装配唯一 Local Executor，把状态、重启、脱敏诊断和本机进程树紧停收敛为四个无参数 Command；React 只能经 `PlatformAdapter` 使用，不能提交 URL、Session、包根、状态目录或 Executor 身份
+- RED：先新增 Node 架构边界、Vitest Adapter/诊断页和 Rust App-data 集成测试并实跑；分别准确失败于缺少 `executor_platform.rs`、`platform/types.ts`/Tauri Adapter、`Diagnostics.tsx` 和公开 Rust 模块，证明没有借旧 capability invoke、Mock Manager 或组件空壳让结果假绿。正式诊断 Feature 首建时又发现通用 `diagnostics/` 忽略规则会吞源码，已把四类运行目录规则锚定到仓库根并纳入同一回归
+- Rust 装配：新增 `ExecutorPlatformService`，固定使用 `app_data_dir/local-executor/package` 与 `app_data_dir/local-executor/state`，状态目录 Unix 权限 `0700`；`executor-id-v1` 由系统 CSPRNG 生成 canonical UUIDv4，经既有 App 私有原子存储以 `0600` 持久，App 重启复用，损坏、相对/根路径、symlink 和存储拒绝均 fail closed。React/Tauri IPC 没有路径或身份参数
+- 会话与启动：`restart_executor` 先由 Rust 凭据仓换取 `app.control-plane` Session，读取当前 active Installation ID，再换取独立 `executor.connect` 短期 Session；Session 只在 `Zeroizing<String>` 与 stdin 启动链短暂存在。Manager 先停止旧进程树，再以固定 WebSocket endpoint、Installation/Executor ID、状态目录和 15 秒心跳启动签名包。debug 只信任公开测试 signer；release 构建缺少打包流水线注入的 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY` 时 fail closed，不把测试 signer 当发布信任根
+- IPC 与 UI：正式 Command allowlist 只有 `get_executor_status`、`restart_executor`、`get_executor_diagnostics`、`emergency_stop_executor`。TypeScript Adapter 严格校验 exact-field 状态、SemVer/build ID、0..8 恢复次数和 200 行/4096-byte 安全诊断，原生异常只映射固定 allowlist 错误且不反射详情。“设置与诊断”页面可查看状态/版本/构建/恢复次数和安全 stderr、启动/重启，并在二次确认后执行本机硬停止；页面明确区分本机进程树停止与业务 Task 协作式紧停，不能宣称远端副作用已停止
+- 分层 GREEN：Frontend 49 项 Node 架构/契约、118 项 Vitest 全绿，ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 2 platform + 3 protocol fixture + 14 security，共 91 项通过，另有 1 项正式 PyInstaller 编排由专用脚本负责并在普通 suite 中 ignored。三套 Clippy `-D warnings` 与 Rustfmt 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功，App 未启动
+- 原始入口与待验收：组件测试已经从页面注入正式接口并验证四个精确 invoke，Rust 测试验证私有目录/稳定身份，但根据全局“生产同路径验收”规则，这些证据不能证明真实 WebView IPC、Control Plane 换票、signed Executor 生命周期和 App 退出清理。因此本任务保持 `🔍`；E4-14 必须用唯一 `visible=false` App 从诊断页面真实点击启动/重启/紧停，覆盖挂起、崩溃恢复、退出清理和数据库/协议最终事实后才能补验收
+- 失败矩阵：覆盖恶意/未知原生 DTO、超长或控制/Bidi 诊断、原生秘密异常不反射、状态目录/身份损坏、相对路径、Unix 权限、重复启动先停旧树、缺凭据/安装授权/网络/协议、包拒绝、认证拒绝、超时与进程不可用的固定错误映射；真实崩溃/挂起/退出竞态归 E4-14，Windows AppData ACL/Job Object/IPC 归原生 runner
+- 本地隔离与清理：本任务没有启动前端、后端、Docker、测试服务器或可见/隐藏 App，没有监听或占用端口；只执行编译和进程内测试，临时 App-data 目录由 RAII 删除。项目规则同时新增“启动前查端口、`automation-tool` 专属 Compose/容器/网络/Volume/SQLite/端口段、只清理本次实例”的强制隔离要求，后续 E4-14 起执行
+- 文档：同步根/Frontend README、前端架构、工程结构、Git 忽略边界和唯一开发台账；没有新增第二份 implementation plan
+- Windows：GitHub Hosted Runner 仍受 Billing/Actions spending limit，当前不空跑 workflow；四个 Command、AppData 身份/权限、签名包、Job Object 和隐藏 App 生命周期不得以 macOS 或静态契约冒充通过
+- 后续：E4-14 建立专属隔离端口/资源和 `visible=false` Tauri 生命周期 E2E，从真实诊断页面覆盖启动、调用、挂起、崩溃、监管重启、停止与 App 退出清理；随后 E4-15 审计正式包测试能力与发布验证公钥边界
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-13`：建立固定 PlatformAdapter/Tauri Commands，从 App 私有数据目录装配 Executor，并向 React 暴露受限状态、重启、诊断和紧停；
-2. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-13～Wave 10 的无设备依赖任务。
+1. `E4-14`：使用项目专属隔离端口和资源建立 `visible=false` Tauri 生命周期 E2E，从真实诊断页面覆盖启动、调用、挂起、崩溃、重启、停止和退出清理，并补 E4-13 生产同路径验收；
+2. `E4-15`：审计正式包不含 WebDriver、测试命令、测试 Sidecar 或调试端口，并固化发布验证公钥边界；
+3. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-14～Wave 10 的无设备依赖任务。

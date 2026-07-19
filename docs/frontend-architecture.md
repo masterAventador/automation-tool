@@ -143,22 +143,18 @@ Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.t
 
 ### 4.5 Platform 层
 
-`PlatformAdapter` 至少覆盖：
+E4-13 当前已经实现的 `PlatformAdapter` 只覆盖已有产品能力：
 
 ```ts
 interface PlatformAdapter {
-  getCapabilities(): Promise<PlatformCapabilities>
-  getExecutorStatus(): Promise<ExecutorStatus>
-  restartExecutor(): Promise<void>
-  requestHumanHandoff(input: HandoffInput): Promise<void>
-  emergencyStop(input: EmergencyStopInput): Promise<StopResult>
-  selectFiles(input: FileSelectionInput): Promise<SelectedFile[]>
-  revealFile(input: RevealFileInput): Promise<void>
-  exportDiagnostics(input: DiagnosticsExportInput): Promise<ExportResult>
-  showNotification(input: NotificationInput): Promise<void>
-  openExternalUrl(input: ExternalUrlInput): Promise<void>
+  getExecutorStatus(): Promise<ExecutorManagerStatus>
+  restartExecutor(): Promise<ExecutorManagerStatus>
+  getExecutorDiagnostics(): Promise<readonly string[]>
+  emergencyStopExecutor(): Promise<ExecutorManagerStatus>
 }
 ```
+
+浏览器发现、人工接管、文件、诊断导出、通知和外部 URL 等尚未实现的能力在对应 Wave 按真实需求扩展，不在当前接口预留不可用占位方法。
 
 强制约束：
 
@@ -254,17 +250,19 @@ E4-05 已实现 `executor_package.rs` 原生 verifier。信任输入只允许来
 
 E4-06 已实现 `executor_bootstrap.rs` 本机认证原语。它把每次启动的 32 字节本机会话与 Control Plane `executor.connect` Session 分成两个字段，只通过受限 stdin JSON 写入；本机会话的 Rust 内存 Drop 清零，Python 认证器在退出时清零，所有错误与 Debug 输出固定脱敏。Python stdout 不回传令牌，只返回按事件/协议域隔离的 `atlep1` HMAC 证明；Rust 使用常量时间 MAC 校验。该模块本身没有进程、页面、Tauri Command 或 IPC。
 
-E4-07 已实现 `executor_manager.rs` 固定生命周期。Manager 的受信装配项只有包根、E4-05 verifier 和 60 秒内的 start/stop timeout；每次 start 都先复验完整目录，再从 Manifest 精确入口无参数 spawn，唯一 stdin 写入 E4-06 bootstrap 后关闭。stdout reader 只接受 4096 字节内的严格 healthy/stopped JSON+LF 并验证事件 proof；stderr 由 E4-10 的独立限界脱敏模块处理。一个 Mutex 使 start/status/stop 线性化，8 路并发 start 只产生一个子进程，超时/坏证明/Drop 都强制回收直接子进程。当前没有 Tauri Command 或 React API；E4-13/E4-14 才装配固定桌面入口。macOS 已从公开 Rust Manager 原入口跑通真实 signed PyInstaller Executor→Uvicorn→Heartbeat→停止，Windows 原生仍待 runner。
+E4-07 已实现 `executor_manager.rs` 固定生命周期。Manager 的受信装配项只有包根、E4-05 verifier 和 60 秒内的 start/stop timeout；每次 start 都先复验完整目录，再从 Manifest 精确入口无参数 spawn，唯一 stdin 写入 E4-06 bootstrap 后关闭。stdout reader 只接受 4096 字节内的严格 healthy/stopped JSON+LF 并验证事件 proof；stderr 由 E4-10 的独立限界脱敏模块处理。一个 Mutex 使 start/status/stop 线性化，8 路并发 start 只产生一个子进程，超时/坏证明/Drop 都强制回收直接子进程。E4-13 已从固定 Tauri Command/PlatformAdapter 装配，E4-14 再做隐藏 App 生命周期纵向验收。macOS 已从公开 Rust Manager 原入口跑通真实 signed PyInstaller Executor→Uvicorn→Heartbeat→停止，Windows 原生仍待 runner。
 
 E4-08 的监管仍在同一个 Manager：调用方必须显式提供最大重启次数、monitor interval 和 restart delay，模块再以 8 次/60 秒硬上限约束；MVP 预算为 2。唯一 supervisor thread 通过 channel 唤醒和有界轮询观察 Child，Mutex 内状态机为 running/restarting/stopped。Unix 只对 signal crash、Windows 只计划对负 NT 异常码重启；正常/固定失败退出、显式 stop、坏包或启动认证失败直接 stopped。恢复前重新执行完整包验证并生成新的本机会话，公开状态只增加 `restartCount`。显式 stop 会先从状态机移除 running/pending，Drop 先关闭/join supervisor，因此不会与后台线程形成复活竞态；E4-09 已把直接 Child 清理扩展成完整进程树。
 
 E4-09 把完整进程树所有权收回同一个 `RunningExecutor`，不引入第二 Manager。Unix `CommandExt::process_group(0)` 在 exec 前创建独立 PGID，强制清理只向该负 PGID 发 `SIGKILL`，`ESRCH` 作为已清理处理；正常 stop 仍只向主进程发 `SIGTERM` 以取得认证 stopped proof，但主进程退出后必须再次终止组内剩余后代再 join reader。Windows 进程以 `CREATE_SUSPENDED` 启动，在任何业务代码运行前配置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`、挂入 Job Object 并恢复初始线程；配置、挂载或恢复失败均关闭 Job/终止 suspended child。启动/停止超时、显式 stop、异常退出准备重启和 Manager Drop 都走同一树清理原语。macOS 已用真实签名进程和忽略 `SIGTERM` 的孙进程验证全部边界；Windows 原生行为仍因 runner 计费限制保持待验收。当前仍无 task invoke API，因此 E4-09 的“挂起”指进程生命周期挂起；任务副作用超时与 `OUTCOME_UNCERTAIN` 归 E4-12/后续 RPA 执行层。
 
-E4-10 将所有代次共享的 `ExecutorDiagnostics` 放在 Manager Core，重启不会创建第二日志源。stderr reader 用 `BufRead::fill_buf/consume` 在输入阶段限制捕获，不会因未换行恶意输出无界分配；超长和非法 UTF-8 行只产生固定 `[TRUNCATED]`/`[REDACTED]`。其余行先清除控制/Bidi 字符，再按三端共享 fixtures 依次移除认证 Header、Bearer、设备/本机会话 envelope、64 位本机令牌、平台 Cookie、敏感 JSON/assignment、URL userinfo/全部 query、file/data URL 和私有路径；最终以 200 行、单行 4096 bytes、总计 64 KiB 三重上限滚动淘汰。公开 `diagnostics()` 只克隆安全内存，不提供原始数据、持久化或 WebView 命令；E4-13 才通过固定 PlatformAdapter 展示。macOS 真实 signed 子进程 stderr 已通过，Windows 实包仍待 runner。
+E4-10 将所有代次共享的 `ExecutorDiagnostics` 放在 Manager Core，重启不会创建第二日志源。stderr reader 用 `BufRead::fill_buf/consume` 在输入阶段限制捕获，不会因未换行恶意输出无界分配；超长和非法 UTF-8 行只产生固定 `[TRUNCATED]`/`[REDACTED]`。其余行先清除控制/Bidi 字符，再按三端共享 fixtures 依次移除认证 Header、Bearer、设备/本机会话 envelope、64 位本机令牌、平台 Cookie、敏感 JSON/assignment、URL userinfo/全部 query、file/data URL 和私有路径；最终以 200 行、单行 4096 bytes、总计 64 KiB 三重上限滚动淘汰。公开 `diagnostics()` 只克隆安全内存；E4-13 的固定 PlatformAdapter 再次校验行数、字节和控制/Bidi 边界后展示。macOS 真实 signed 子进程 stderr 已通过，Windows 实包仍待 runner。
 
-E4-11 仍不新增第二 Manager 或 WebView API。`ExecutorLaunchConfiguration` 持有经过绝对路径/长度/组件校验的 `state_directory: PathBuf`；后续 E4-13 必须从 Tauri 自身解析的 `app_data_dir` 派生固定 Executor 子目录，React 不能提交路径。Rust 只把它放入受限 stdin bootstrap，Python CLI 在任何网络连接前完成 `executor-ledger.sqlite3` v1 迁移和 Installation/Executor 身份绑定。该数据库属于 Executor 的本机恢复边界，不是 Control Plane 副本：只保存正式协议命令身份/意图指纹、Attempt checkpoint 和 outbox，不保存 Session、Cookie、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串。
+E4-11 仍不新增第二 Manager 或账本 WebView API。`ExecutorLaunchConfiguration` 持有经过绝对路径/长度/组件校验的 `state_directory: PathBuf`；E4-13 已从 Tauri 自身解析的 `app_data_dir` 派生固定 `local-executor/state`，React 不能提交路径。Rust 只把它放入受限 stdin bootstrap，Python CLI 在任何网络连接前完成 `executor-ledger.sqlite3` v1 迁移和 Installation/Executor 身份绑定。该数据库属于 Executor 的本机恢复边界，不是 Control Plane 副本：只保存正式协议命令身份/意图指纹、Attempt checkpoint 和 outbox，不保存 Session、Cookie、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串。
 
-E4-12 没有给 WebView 增加通用命令通道：Rust Manager 仍只监管正式 Python Executor，由 Python 在 Control Plane WebSocket 内消费 `task.offer` 并从同一 SQLite 精确重放 ACK/Event。macOS 已从公开 Manager 原入口两次启动 signed PyInstaller 产物验证同一状态目录恢复；React 不读取账本、不提交路径，也不能直接调用 Executor。E4-13/E4-14 再通过固定 PlatformAdapter 与隐藏 App 验收 `app_data_dir` 装配。
+E4-12 没有给 WebView 增加通用命令通道：Rust Manager 仍只监管正式 Python Executor，由 Python 在 Control Plane WebSocket 内消费 `task.offer` 并从同一 SQLite 精确重放 ACK/Event。macOS 已从公开 Manager 原入口两次启动 signed PyInstaller 产物验证同一状态目录恢复；React 不读取账本、不提交路径，也不能直接调用 Executor。
+
+E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.path().app_data_dir()` 派生 `local-executor/package`、`local-executor/state` 和 `executor-id-v1`；稳定 Executor UUIDv4 使用既有 App 私有原子存储，Unix 目录/文件为 `0700/0600`。重启时 Rust 依次换取 `app.control-plane` Session、校验当前 Installation，再换取独立 `executor.connect` Session 并启动 Manager；React 只能调用四个无参数 Command，不能传 URL、Session、路径、包根或身份。`emergency_stop_executor` 是本机完整进程树硬停止，与 T3-16/T3-18 的业务 Task 协作式紧停严格分离。诊断页已经接入正式 Adapter，但真实 WebView→IPC→Control Plane→signed Executor→退出清理的完成证据归 E4-14 `visible=false` App。
 
 ## 7. 页面与导航
 

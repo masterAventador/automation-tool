@@ -17,13 +17,15 @@ import {
 } from "../features/task-runs/task-run-controls";
 import { Workbench } from "../features/workbench/Workbench";
 import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
+import { Diagnostics } from "../features/diagnostics/Diagnostics";
+import type { PlatformAdapter } from "../platform/types";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
   { key: "task-create", label: "新建任务" },
   { key: "task-runs", label: "任务记录" },
   { key: "platform", label: "平台状态", disabled: true },
-  { key: "diagnostics", label: "设置与诊断", disabled: true },
+  { key: "diagnostics", label: "设置与诊断" },
 ];
 
 const shellTaskSource: TaskProjectionSource = {
@@ -72,11 +74,27 @@ const shellTaskRunControlGateway: TaskRunControlGateway = {
   },
 };
 
+const shellPlatformAdapter: PlatformAdapter = {
+  async getExecutorStatus() {
+    return { state: "stopped", version: null, buildId: null, restartCount: 0 };
+  },
+  async restartExecutor() {
+    throw new Error("Local Executor restart is unavailable");
+  },
+  async getExecutorDiagnostics() {
+    return [];
+  },
+  async emergencyStopExecutor() {
+    return { state: "stopped", version: null, buildId: null, restartCount: 0 };
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
   readonly taskCreationGateway?: TaskCreationGateway | undefined;
   readonly taskRunControlGateway?: TaskRunControlGateway | undefined;
+  readonly platformAdapter?: PlatformAdapter | undefined;
 }
 
 export function WorkbenchShell({
@@ -84,11 +102,13 @@ export function WorkbenchShell({
   gateway = shellWorkbenchGateway,
   taskCreationGateway = shellTaskCreationGateway,
   taskRunControlGateway = shellTaskRunControlGateway,
+  platformAdapter = shellPlatformAdapter,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const creatingTask = activePage === "task-create";
   const showingTaskRun = activePage === "task-runs";
+  const showingDiagnostics = activePage === "diagnostics";
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -113,7 +133,12 @@ export function WorkbenchShell({
             selectedKeys={[activePage]}
             items={navigationItems}
             onClick={({ key }) => {
-              if (key === "workbench" || key === "task-create" || key === "task-runs") {
+              if (
+                key === "workbench" ||
+                key === "task-create" ||
+                key === "task-runs" ||
+                key === "diagnostics"
+              ) {
                 setActivePage(key);
               }
             }}
@@ -136,6 +161,8 @@ export function WorkbenchShell({
                 <Typography.Title level={2}>
                   {creatingTask
                     ? "新建运营任务"
+                    : showingDiagnostics
+                      ? "设置与诊断"
                     : showingTaskRun
                       ? "任务记录"
                       : "RPA 运营工作台"}
@@ -143,6 +170,8 @@ export function WorkbenchShell({
                 <Typography.Text type="secondary">
                   {creatingTask
                     ? "配置一个可预览、可确认的抖音搜索曝光任务。"
+                    : showingDiagnostics
+                      ? "查看、重启和紧急停止 App 管理的本地执行器。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
@@ -151,6 +180,8 @@ export function WorkbenchShell({
               <Tag variant="filled" color="green">
                 {creatingTask
                   ? "任务模板已就绪"
+                  : showingDiagnostics
+                    ? "本地边界"
                   : showingTaskRun
                     ? "任务事实已连接"
                     : "工作台已就绪"}
@@ -162,6 +193,8 @@ export function WorkbenchShell({
                 gateway={taskCreationGateway}
                 onCreated={openTask}
               />
+            ) : showingDiagnostics ? (
+              <Diagnostics platform={platformAdapter} />
             ) : showingTaskRun && selectedTaskId !== null ? (
               <TaskRunDetails
                 taskId={selectedTaskId}
