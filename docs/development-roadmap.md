@@ -32,7 +32,7 @@
 
 ## 3. 当前进度快照
 
-快照日期：2026-07-19。
+快照日期：2026-07-20。
 
 | 范围 | 当前结果 |
 | --- | --- |
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime、抖音 Session 页面证据、真实扫码、人工接管及最小健康上报，下一项为平台状态页面 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime、抖音 Session 页面证据、真实扫码、人工接管、最小健康上报、平台状态页与安全注销，下一项为登录复用验收 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -268,7 +268,7 @@
 | B5-11 | 人工接管 | 验证码/滑块/风控进入 handoff，不自动处理 | B5-10 | ✅ 已完成 |
 | B5-12 | Session 健康上报 | Control Plane 只存平台/状态/revision/时间，不存 Cookie | B5-09,T3-11 | ✅ 已完成 |
 | B5-13 | 平台状态页面 | 查看登录健康、打开处理、重新检查和注销 | B5-10,B5-12 | ✅ 已完成 |
-| B5-14 | 安全注销 | 先阻止新任务、停关联执行、再删除平台 Profile | B5-06,B5-13 | ⬜ 未开始 |
+| B5-14 | 安全注销 | 先阻止新任务、停关联执行、再删除平台 Profile | B5-06,B5-13 | ✅ 已完成 |
 | B5-15 | 登录复用验收 | App/Executor/浏览器重启后不重扫；失效后正确接管 | B5-14 | 🔍 待真实账号 |
 | B5-16 | 默认 Profile 隔离审计 | 测试和运行证据证明未读用户默认 Chrome User Data | B5-15 | ⬜ 未开始 |
 
@@ -1831,11 +1831,29 @@
 - 文档：同步根/Backend README、前后端架构、工程结构、OpenAPI/生成 DTO 和唯一开发台账；没有新增第二份计划
 - 后续：B5-14 从当前禁用入口实现安全注销，严格按“持久熔断/拒绝新任务→停止关联执行→关闭浏览器并释放 lease→定向删除唯一 Profile→推进 revision 并投影 missing”完成；任一步失败不得伪报注销成功
 
+### B5-14 安全注销
+
+- 状态：✅ 已完成
+- 日期：2026-07-20
+- 提交：本任务提交
+- 目标：从真实桌面平台状态页实现可确认、可重试、失败关闭的抖音安全注销；必须先持久阻断新工作，再停止并释放浏览器资源，只删除 current Douyin Profile，最后由正式 Executor 上报新的 `missing` epoch，任何中间失败都不能伪报成功
+- RED：开始时先把唯一台账置为 `🧪 RED`；后端契约缺少 logout prepare 与持久门闩，Rust/Profile 测试缺少稳定句柄删除和 path-free session command，前端测试仍断言安全注销禁用，隐藏 App 契约缺少确认→删除→服务端 `missing`→拒绝新任务的完整事实，随后才逐层实现
+- 服务端门闩：Alembic `20260718_0015` 新增 exact `platform_session_gates(installation_id,platform,state,session_revision,updated_at)`；`POST /api/v1/platform-sessions/douyin/logout/prepare` 复用 `app.control-plane` Session，在 active Installation 行锁下创建当前投影 revision +1 或无投影 revision 1 的 blocked gate，重复调用返回同一事实。Task create 与新 offer 在 gate 存在时 fail closed，已有同键 Task/command 重放仍幂等；claim 与 prepare 共用 Installation 行锁，已排队/待重投工作命令不再取出，只有取消/紧停可继续投递。同 revision 的 `missing` 保持阻断，只有更高 revision 的真实 `healthy` 才删除 gate
+- 固定注销时序：`logout_douyin_session` 先调用服务端 prepare；成功后通过唯一 Manager `emergency_stop()` 关闭 flow、persistent context、driver 和完整 Executor/浏览器进程树并释放 Profile lease，任意 stop 错误都在删除前返回。随后只删除 current Douyin Profile，重启 signed Executor，发送不含 executable/Profile/headless 的 `douyin.logout.complete`，把本机 SQLite epoch 推进为 `missing` 并经正式 WebSocket 上报；Rust 最多有界等待 5 秒重新查询服务端，只有权威投影为 `missing` 才返回 React
+- 安全删除：macOS/Unix 和 Windows 分别持有 App 私有根、平台目录、Profile 的稳定原生句柄；删除前获取 OS 排他锁并区分真实活跃 lease 与遗留 marker，将目标原子改名为确定 `.removing-<profile-id>` tombstone，重新打开并复验同一目录 identity 后才删除。崩溃重试可续删 tombstone；原目录+tombstone 同时存在、symlink/reparse、非目录、identity 漂移或活跃锁都 fail closed。current marker 只在删除成功后清除，平台父目录、兄弟 Profile、Executor SQLite、设备身份/凭据和设置全部保留
+- 本机认证协议：复用 E4-06 每次启动会话与 `atlcp1` 域，新增唯一 `douyin.logout.complete` session command；Pydantic/Rust exact parser 都拒绝路径和 headless 字段，跨语言固定 HMAC 向量一致。结果固定绑定 `douyin.session-control.v1/logged_out`；Python 在处理前关闭任何活跃登录 flow，生成严格单调 sequence，由 `DouyinSessionHealthReporter.record_logout()` 持久递增 revision 并只上报非敏感 `missing` 事实
+- 用户入口：平台状态页使用 Ant Design 二次确认，pending 时禁止重复触发；确认前不调用 Gateway，取消不产生副作用。完成后页面只采用 Tauri 返回的权威服务端快照，不以本机时间、按钮结果或乐观状态伪造注销成功；“暂不注销”不改变服务端或 Profile
+- 原始调用验收：扩展唯一 `visible=false` 隐藏 App 编排，从真实页面打开平台状态、触发登录检查、确认安全注销，经正式 TypeScript Gateway→Tauri IPC→Rust Control Plane client/Executor Manager→signed PyInstaller Executor→后台系统 Chrome→认证 WebSocket→Uvicorn/Alembic/PostgreSQL。最终数据库只有一个 `missing` projection 与相同 revision 的 blocked gate；测试再从 App 的生产 Task 创建入口发起真实 API 调用并确认被 gate 拒绝。AppData 审计确认 current marker/Profile/tombstone 消失而 `local-executor/state/executor-ledger.sqlite3` 保留
+- 关闭边界：测试由 App 自己请求正常退出；嵌入式 WebDriver 在 App 关闭后清理 Session 固定收到 `ECONNREFUSED`，runner 只在没有测试断言错误且数据库、本机文件、端口、进程和容器审计全部通过时接受该精确签名。真实链路最终输出 `Hidden-App platform status and safe logout acceptance passed`
+- 门禁：Backend 全量 `993 passed, 4 skipped in 80.13s` 且严格语句/分支覆盖率门禁通过，Ruff/格式 212 个文件、严格 Mypy 196 个源码文件、uv lock、OpenAPI 快照/生成 DTO 全绿；Frontend 70 项 Node 契约、132 项 Vitest、5 项 Playwright 无头 UI、ESLint、严格 TypeScript、生产构建/边界全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套测试、三套全目标 Clippy `-D warnings` 与 Rustfmt 全绿；隐藏 App 真实纵向验收通过
+- 隐私与隔离：常规浏览器全程 headless，测试后 Page/Context/driver/App/Executor/浏览器进程、随机端口和项目专属 Compose 容器/网络/Volume 均复查无残留；只使用唯一隔离 App identifier/AppData/Profile/SQLite，没有读取、删除或输出用户保留的真实抖音 Profile，也未触碰默认 Chrome User Data、其他项目资源或系统钥匙串
+- 文档：同步根/Backend README、前后端架构、工程结构、OpenAPI/生成 DTO 和唯一开发台账；没有新增第二份计划
+- 后续：B5-15 从真实 App/Executor/浏览器重启验证登录复用与失效接管；若需要用户账号而用户不在线，先完成不破坏持久 Profile 的隔离重启/失效矩阵并记录待真实账号证据，不得停住后续无账号任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-14`：在平台状态页完成先阻止新任务、停止关联执行、释放锁后再定向删除 Profile 的安全注销；
-2. `B5-15`：从真实 App/Executor/浏览器重启验证现有抖音登录态复用；真实自然失效不可控时先完成隔离接管矩阵且不破坏用户保留的持久 Profile；
-3. `B5-16`：审计测试与运行证据，证明从未读取用户默认 Chrome/Edge User Data；
-4. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-15`：从真实 App/Executor/浏览器重启验证现有抖音登录态复用；真实自然失效不可控时先完成隔离接管矩阵且不破坏用户保留的持久 Profile；
+2. `B5-16`：审计测试与运行证据，证明从未读取用户默认 Chrome/Edge User Data；
+3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。

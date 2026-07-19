@@ -98,6 +98,30 @@ fn owned_profile_lease_keeps_the_profile_exclusive_until_explicit_release() {
 }
 
 #[test]
+fn safe_current_removal_retains_profile_while_an_owned_lease_is_active() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let profile = store.current_douyin_profile().expect("current profile");
+    let profile_directory = profile.directory().to_path_buf();
+    let lease = profile.try_acquire_owned_lock().expect("owned lease");
+
+    assert_eq!(
+        store
+            .remove_current_douyin_profile()
+            .expect_err("active Profile must never be deleted")
+            .code(),
+        BrowserProfileErrorCode::ProfileInUse,
+    );
+    assert!(profile_directory.is_dir());
+
+    lease.release().expect("release owned lease");
+    store
+        .remove_current_douyin_profile()
+        .expect("remove after release");
+    assert!(!profile_directory.exists());
+}
+
+#[test]
 fn different_profiles_may_be_locked_at_the_same_time() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");

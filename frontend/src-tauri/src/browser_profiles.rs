@@ -172,6 +172,27 @@ impl BrowserProfileStore {
         Ok(self.profile(profile_id.to_owned(), handle))
     }
 
+    pub fn remove_current_douyin_profile(&self) -> Result<(), BrowserProfileError> {
+        let store = self
+            .current_profile_store
+            .lock()
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        let Some(stored) = store
+            .load()
+            .map_err(|_| BrowserProfileError::storage_unavailable())?
+        else {
+            return Ok(());
+        };
+        let profile_id =
+            std::str::from_utf8(&stored).map_err(|_| BrowserProfileError::storage_unavailable())?;
+        require_canonical_profile_id(profile_id)
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        self.platform.remove_profile(profile_id)?;
+        store
+            .delete()
+            .map_err(|_| BrowserProfileError::storage_unavailable())
+    }
+
     fn profile(&self, profile_id: String, handle: PlatformProfile) -> BrowserProfile {
         BrowserProfile {
             platform: Arc::clone(&self.platform),

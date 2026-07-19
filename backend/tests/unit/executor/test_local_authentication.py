@@ -17,6 +17,7 @@ from automation_tool.executor.bootstrap import (
 
 LOCAL_SESSION_TOKEN = "".join(f"{value:02x}" for value in range(32))
 EXPECTED_HEALTHY_PROOF = "atlep1.NOuvIGSTV1bPoAZcqjJCd4V0TtBvVdvc4nPHufoUpRY"
+COMMAND_ID = "123e4567-e89b-42d3-a456-426614174005"
 
 
 def bootstrap_source(local_session_token: object = LOCAL_SESSION_TOKEN) -> bytes:
@@ -126,3 +127,100 @@ def test_authenticator_rejects_unknown_events_with_one_fixed_error() -> None:
         LocalSessionAuthenticator(SecretStr("A" * 64))
     with pytest.raises(LocalSessionAuthenticationRejected):
         LocalSessionAuthenticator("0" * 64)  # type: ignore[arg-type]
+
+
+def test_session_command_and_result_proofs_are_command_bound_and_verified() -> None:
+    authenticator = LocalSessionAuthenticator(SecretStr(LOCAL_SESSION_TOKEN))
+
+    proof = authenticator.proof_for_session_command(
+        command_id=COMMAND_ID,
+        command_type="douyin.logout.complete",
+    )
+    assert proof == "atlcp1._NWhd5jlSI3elRsNVLNm7d-CEDz4A08bB4gIL2USR64"
+    authenticator.verify_session_command(
+        command_id=COMMAND_ID,
+        command_type="douyin.logout.complete",
+        presented_proof=proof,
+    )
+
+    for invalid_proof in ("atlcp1.private", 0):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.verify_session_command(
+                command_id=COMMAND_ID,
+                command_type="douyin.logout.complete",
+                presented_proof=invalid_proof,  # type: ignore[arg-type]
+            )
+
+    command_proof = authenticator.proof_for_command(
+        command_id=COMMAND_ID,
+        command_type="douyin.login.recheck",
+        executable_path="/private/chrome",
+        profile_directory="/private/profile",
+        headless=False,
+    )
+    authenticator.verify_command(
+        command_id=COMMAND_ID,
+        command_type="douyin.login.recheck",
+        executable_path="/private/chrome",
+        profile_directory="/private/profile",
+        headless=False,
+        presented_proof=command_proof,
+    )
+    with pytest.raises(LocalSessionAuthenticationRejected):
+        authenticator.verify_command(
+            command_id=COMMAND_ID,
+            command_type="douyin.login.recheck",
+            executable_path="/private/chrome",
+            profile_directory="/private/profile",
+            headless=False,
+            presented_proof="atlcp1.private",
+        )
+
+
+def test_command_proofs_reject_invalid_uuid_type_scope_state_and_paths() -> None:
+    authenticator = LocalSessionAuthenticator(SecretStr(LOCAL_SESSION_TOKEN))
+
+    for command_id in (0, "private", "123e4567-e89b-12d3-a456-426614174005", COMMAND_ID.upper()):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.proof_for_session_command(
+                command_id=command_id,  # type: ignore[arg-type]
+                command_type="douyin.logout.complete",
+            )
+    for command_type in ("douyin.login.open", 0):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.proof_for_session_command(
+                command_id=COMMAND_ID,
+                command_type=command_type,  # type: ignore[arg-type]
+            )
+    for state in ("private", 0):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.proof_for_command_result(
+                command_id=COMMAND_ID,
+                state=state,  # type: ignore[arg-type]
+            )
+
+    valid = {
+        "command_id": COMMAND_ID,
+        "command_type": "douyin.login.open",
+        "executable_path": "/private/chrome",
+        "profile_directory": "/private/profile",
+        "headless": True,
+    }
+    invalid = (
+        {"command_type": "douyin.logout.complete"},
+        {"command_type": 0},
+        {"executable_path": ""},
+        {"executable_path": 0},
+        {"executable_path": "x" * 4097},
+        {"profile_directory": ""},
+        {"profile_directory": 0},
+        {"profile_directory": "x" * 4097},
+        {"headless": 1},
+    )
+    for overrides in invalid:
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.proof_for_command(**(valid | overrides))  # type: ignore[arg-type]
+
+    authenticator.close()
+    with pytest.raises(LocalSessionAuthenticationRejected):
+        authenticator.proof_for_command_result(command_id=COMMAND_ID, state="logged_out")

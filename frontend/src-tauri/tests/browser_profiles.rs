@@ -98,6 +98,124 @@ fn current_douyin_profile_is_created_once_and_reused_across_app_restarts() {
 }
 
 #[test]
+fn safe_removal_deletes_only_the_current_profile_and_clears_its_marker() {
+    let app_data = TemporaryAppData::new();
+    fs::write(app_data.path.join("keep-me"), b"app data").expect("app sentinel");
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let current = store.current_douyin_profile().expect("current profile");
+    let current_id = current.profile_id().to_owned();
+    let current_directory = current.directory().to_path_buf();
+    fs::write(current_directory.join("Cookies"), b"session").expect("profile data");
+    let sibling = store.create_douyin_profile().expect("sibling profile");
+    let sibling_directory = sibling.directory().to_path_buf();
+    fs::write(sibling_directory.join("keep"), b"sibling").expect("sibling data");
+    drop(current);
+    drop(sibling);
+
+    store
+        .remove_current_douyin_profile()
+        .expect("remove current profile");
+
+    assert!(!current_directory.exists());
+    assert!(sibling_directory.join("keep").is_file());
+    assert_eq!(
+        fs::read(app_data.path.join("keep-me")).unwrap(),
+        b"app data"
+    );
+    assert!(!app_data
+        .path
+        .join("browser-profiles/current-douyin-profile-v1")
+        .exists());
+    let replacement = store.current_douyin_profile().expect("replacement current");
+    assert_ne!(replacement.profile_id(), current_id);
+}
+
+#[test]
+fn safe_removal_resumes_one_staged_tombstone_after_a_crash() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let current = store.current_douyin_profile().expect("current profile");
+    let profile_id = current.profile_id().to_owned();
+    let staged = current
+        .directory()
+        .parent()
+        .expect("platform directory")
+        .join(format!(".removing-{profile_id}"));
+    fs::rename(current.directory(), &staged).expect("simulate staged removal");
+    drop(current);
+
+    store
+        .remove_current_douyin_profile()
+        .expect("resume staged removal");
+
+    assert!(!staged.exists());
+    assert!(!app_data
+        .path
+        .join("browser-profiles/current-douyin-profile-v1")
+        .exists());
+}
+
+#[test]
+fn safe_removal_fails_closed_when_original_and_tombstone_both_exist() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let current = store.current_douyin_profile().expect("current profile");
+    let staged = current
+        .directory()
+        .parent()
+        .expect("platform directory")
+        .join(format!(".removing-{}", current.profile_id()));
+    fs::create_dir(&staged).expect("conflicting staged directory");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o700))
+            .expect("private conflicting directory");
+    }
+
+    assert_eq!(
+        store
+            .remove_current_douyin_profile()
+            .expect_err("ambiguous removal must fail")
+            .code(),
+        BrowserProfileErrorCode::RecoveryRequired,
+    );
+    assert!(current.directory().is_dir());
+    assert!(staged.is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn safe_removal_never_follows_a_staged_leaf_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let current = store.current_douyin_profile().expect("current profile");
+    let staged = current
+        .directory()
+        .parent()
+        .expect("platform directory")
+        .join(format!(".removing-{}", current.profile_id()));
+    let outside = app_data.path.with_extension("outside-profile");
+    fs::rename(current.directory(), &outside).expect("move profile outside fixed root");
+    fs::write(outside.join("keep"), b"outside").expect("outside sentinel");
+    symlink(&outside, &staged).expect("staged leaf symlink");
+    drop(current);
+
+    assert_eq!(
+        store
+            .remove_current_douyin_profile()
+            .expect_err("staged symlink must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory,
+    );
+    assert_eq!(fs::read(outside.join("keep")).unwrap(), b"outside");
+    fs::remove_file(staged).expect("remove staged symlink");
+    fs::rename(&outside, app_data.path.join("restored-profile")).expect("restore cleanup scope");
+}
+
+#[test]
 fn rejects_noncanonical_or_non_v4_profile_identifiers_without_path_escape() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");

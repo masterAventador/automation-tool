@@ -72,42 +72,63 @@ class DouyinSessionHealthReporter:
                 or type(recovered) is not bool
             ):
                 raise ValueError
-            observed_at = self._now()
-            message_id = self._new_id()
-            correlation_id = self._new_id()
             observation = self._detector.check(window)
             state = PlatformSessionState(observation.state.value)
-            persisted = self._ledger.record_platform_session(
-                platform="douyin",
-                state=state,
-                observed_at=observed_at,
-                advance_epoch=recovered,
-            )
-            return PlatformSessionHealthEnvelope.model_validate(
-                {
-                    "protocol_version": EXECUTOR_PROTOCOL_VERSION,
-                    "message_id": message_id,
-                    "message_type": "platform.session_health",
-                    "sent_at": observed_at,
-                    "deadline_at": observed_at + _MESSAGE_DEADLINE,
-                    "installation_id": self._ledger.installation_id,
-                    "executor_id": self._ledger.executor_id,
-                    "correlation_id": correlation_id,
-                    "idempotency_key": (
-                        "platform:douyin:session:"
-                        f"{persisted.session_revision}:{_utc_microseconds(observed_at)}"
-                    ),
-                    "sequence": sequence,
-                    "payload": {
-                        "platform": persisted.platform,
-                        "state": persisted.state,
-                        "session_revision": persisted.session_revision,
-                        "observed_at": persisted.observed_at,
-                    },
-                }
+            return self._record(state=state, sequence=sequence, advance_epoch=recovered)
+        except Exception:
+            raise DouyinSessionHealthReportRejected from None
+
+    def record_logout(self, *, sequence: int) -> PlatformSessionHealthEnvelope:
+        try:
+            if type(sequence) is not int or not 1 <= sequence <= MAX_EXECUTOR_SEQUENCE:
+                raise ValueError
+            return self._record(
+                state=PlatformSessionState.MISSING,
+                sequence=sequence,
+                advance_epoch=True,
             )
         except Exception:
             raise DouyinSessionHealthReportRejected from None
+
+    def _record(
+        self,
+        *,
+        state: PlatformSessionState,
+        sequence: int,
+        advance_epoch: bool,
+    ) -> PlatformSessionHealthEnvelope:
+        observed_at = self._now()
+        message_id = self._new_id()
+        correlation_id = self._new_id()
+        persisted = self._ledger.record_platform_session(
+            platform="douyin",
+            state=state,
+            observed_at=observed_at,
+            advance_epoch=advance_epoch,
+        )
+        return PlatformSessionHealthEnvelope.model_validate(
+            {
+                "protocol_version": EXECUTOR_PROTOCOL_VERSION,
+                "message_id": message_id,
+                "message_type": "platform.session_health",
+                "sent_at": observed_at,
+                "deadline_at": observed_at + _MESSAGE_DEADLINE,
+                "installation_id": self._ledger.installation_id,
+                "executor_id": self._ledger.executor_id,
+                "correlation_id": correlation_id,
+                "idempotency_key": (
+                    "platform:douyin:session:"
+                    f"{persisted.session_revision}:{_utc_microseconds(observed_at)}"
+                ),
+                "sequence": sequence,
+                "payload": {
+                    "platform": persisted.platform,
+                    "state": persisted.state,
+                    "session_revision": persisted.session_revision,
+                    "observed_at": persisted.observed_at,
+                },
+            }
+        )
 
     def _now(self) -> datetime:
         value = self._clock.now()

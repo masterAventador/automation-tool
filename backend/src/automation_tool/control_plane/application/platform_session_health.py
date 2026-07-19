@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from automation_tool.control_plane.domain import InstallationId
 from automation_tool.protocol import PlatformSessionHealthEnvelope, PlatformSessionState
@@ -81,6 +81,27 @@ class PlatformSessionHealthConvergenceResult:
             raise PlatformSessionHealthRejected
 
 
+@dataclass(frozen=True, slots=True)
+class PlatformSessionLogoutGate:
+    installation_id: InstallationId
+    platform: str
+    state: Literal["blocked"]
+    session_revision: int
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.installation_id, InstallationId)
+            or self.platform != "douyin"
+            or self.state != "blocked"
+            or type(self.session_revision) is not int
+            or self.session_revision <= 0
+            or not isinstance(self.updated_at, datetime)
+            or self.updated_at.utcoffset() != UTC.utcoffset(self.updated_at)
+        ):
+            raise PlatformSessionHealthRejected
+
+
 @runtime_checkable
 class PlatformSessionHealthRepository(Protocol):
     async def converge(
@@ -93,6 +114,13 @@ class PlatformSessionHealthRepository(Protocol):
         installation_id: InstallationId,
         platform: str,
     ) -> PlatformSessionHealthProjection | None: ...
+
+    async def begin_logout(
+        self,
+        installation_id: InstallationId,
+        platform: str,
+        blocked_at: datetime,
+    ) -> PlatformSessionLogoutGate: ...
 
 
 class PlatformSessionHealthClock(Protocol):
@@ -181,6 +209,35 @@ class PlatformSessionHealthService:
             raise PlatformSessionHealthUnavailable
         return projection
 
+    async def begin_logout(
+        self,
+        installation_id: InstallationId,
+        *,
+        platform: str,
+    ) -> PlatformSessionLogoutGate:
+        if not isinstance(installation_id, InstallationId) or platform != "douyin":
+            raise PlatformSessionHealthRejected
+        blocked_at = self._now()
+        try:
+            gate = await self._repository.begin_logout(
+                installation_id,
+                platform,
+                blocked_at,
+            )
+        except PlatformSessionHealthRejected:
+            raise
+        except PlatformSessionHealthUnavailable:
+            raise
+        except Exception:
+            raise PlatformSessionHealthUnavailable from None
+        if (
+            not isinstance(gate, PlatformSessionLogoutGate)
+            or gate.installation_id != installation_id
+            or gate.platform != platform
+        ):
+            raise PlatformSessionHealthUnavailable
+        return gate
+
 
 def _validate_projection_fields(
     *,
@@ -216,5 +273,6 @@ __all__ = [
     "PlatformSessionHealthRepository",
     "PlatformSessionHealthService",
     "PlatformSessionHealthUnavailable",
+    "PlatformSessionLogoutGate",
     "SystemPlatformSessionHealthClock",
 ]

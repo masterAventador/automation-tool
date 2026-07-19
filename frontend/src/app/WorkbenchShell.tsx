@@ -111,6 +111,9 @@ const shellPlatformSessionGateway: PlatformSessionGateway = {
   async recheckDouyinLogin() {
     throw new PlatformSessionGatewayError("operation_unavailable", false);
   },
+  async logoutDouyinSession() {
+    throw new PlatformSessionGatewayError("operation_unavailable", false);
+  },
 };
 
 interface WorkbenchShellProps {

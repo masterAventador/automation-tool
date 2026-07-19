@@ -1,6 +1,6 @@
 use super::{BrowserProfileError, CreateProfileError};
 use std::ffi::{CString, OsStr};
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
@@ -57,6 +57,17 @@ struct FileIdentity {
 
 impl PlatformProfile {
     pub(super) fn try_acquire_lock(&self) -> Result<PlatformProfileLock, BrowserProfileError> {
+        self.acquire_lock(false)
+    }
+
+    fn try_acquire_removal_lock(&self) -> Result<PlatformProfileLock, BrowserProfileError> {
+        self.acquire_lock(true)
+    }
+
+    fn acquire_lock(
+        &self,
+        allow_abandoned_active_marker: bool,
+    ) -> Result<PlatformProfileLock, BrowserProfileError> {
         if directory_identity(&self.directory.file)? != self.directory.identity {
             return Err(BrowserProfileError::identity_changed());
         }
@@ -88,7 +99,7 @@ impl PlatformProfile {
             return Err(BrowserProfileError::identity_changed());
         }
         let state = read_lock_state(&mut file)?;
-        if !state.is_empty() {
+        if !(state.is_empty() || allow_abandoned_active_marker && state == ACTIVE_LOCK_MARKER) {
             return Err(BrowserProfileError::recovery_required());
         }
         write_lock_state(&mut file, ACTIVE_LOCK_MARKER)?;
@@ -220,6 +231,63 @@ impl PlatformProfileStore {
         }
         require_private_directory(&profile.directory.file)?;
         require_private_directory(&reopened.file)?;
+        self.revalidate_layout()
+    }
+
+    pub(super) fn remove_profile(&self, profile_id: &str) -> Result<(), BrowserProfileError> {
+        self.revalidate_layout()?;
+        let profile_name = safe_name(profile_id)?;
+        let removal_id = format!(".removing-{profile_id}");
+        let removal_name = safe_name(&removal_id)?;
+        let original = open_optional_child(&self.platform, &profile_name)?;
+        let staged = open_optional_child(&self.platform, &removal_name)?;
+        if original.is_some() && staged.is_some() {
+            return Err(BrowserProfileError::recovery_required());
+        }
+        if let Some(directory) = original {
+            let profile = PlatformProfile { directory };
+            let lock = profile.try_acquire_removal_lock()?;
+            if unsafe {
+                libc::renameat(
+                    self.platform.file.as_raw_fd(),
+                    profile_name.as_ptr(),
+                    self.platform.file.as_raw_fd(),
+                    removal_name.as_ptr(),
+                )
+            } != 0
+            {
+                return Err(BrowserProfileError::storage_unavailable());
+            }
+            let reopened = open_child(&self.platform, &removal_name, PermissionPolicy::Require)?;
+            if reopened.identity != profile.directory.identity {
+                return Err(BrowserProfileError::identity_changed());
+            }
+            sync_directory_handle(&self.platform.file)?;
+            lock.release()?;
+            drop(reopened);
+            drop(profile);
+        } else if let Some(directory) = staged {
+            let profile = PlatformProfile { directory };
+            let lock = profile.try_acquire_removal_lock()?;
+            lock.release()?;
+            drop(profile);
+        } else {
+            return Ok(());
+        }
+        self.revalidate_layout()?;
+        let removal_path = self
+            .app_data_path
+            .join(self.profile_root_name.to_string_lossy().as_ref())
+            .join(self.platform_name.to_string_lossy().as_ref())
+            .join(&removal_id);
+        fs::remove_dir_all(&removal_path)
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        sync_directory_handle(&self.platform.file)?;
+        if open_optional_child(&self.platform, &profile_name)?.is_some()
+            || open_optional_child(&self.platform, &removal_name)?.is_some()
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
         self.revalidate_layout()
     }
 
@@ -362,6 +430,17 @@ fn open_child(
         },
         file,
     })
+}
+
+fn open_optional_child(
+    parent: &DirectoryHandle,
+    name: &CString,
+) -> Result<Option<DirectoryHandle>, BrowserProfileError> {
+    match open_child(parent, name, PermissionPolicy::Require) {
+        Ok(directory) => Ok(Some(directory)),
+        Err(error) if error.code() == super::BrowserProfileErrorCode::ProfileNotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn require_private_directory(file: &File) -> Result<(), BrowserProfileError> {

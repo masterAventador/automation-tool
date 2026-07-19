@@ -17,6 +17,7 @@ from automation_tool.executor.ledger import (
     AttemptCheckpointState,
     ExecutorLedger,
     ExecutorLedgerRejected,
+    LocalPlatformSession,
     PlatformSessionState,
 )
 from automation_tool.protocol import (
@@ -178,6 +179,70 @@ def test_platform_session_revision_is_durable_monotonic_and_recovery_is_explicit
             state=PlatformSessionState.RISK,
             observed_at=NOW - timedelta(seconds=1),
         )
+
+
+def test_platform_session_values_and_transitions_fail_closed_at_every_boundary(
+    tmp_path: Path,
+) -> None:
+    valid = {
+        "platform": "douyin",
+        "state": PlatformSessionState.MISSING,
+        "session_revision": 1,
+        "observed_at": NOW,
+    }
+    invalid_values = (
+        {"platform": "private"},
+        {"state": "missing"},
+        {"session_revision": True},
+        {"session_revision": 0},
+        {"observed_at": "private"},
+        {"observed_at": datetime(2026, 7, 19, 10, 0)},
+    )
+    for overrides in invalid_values:
+        with pytest.raises(ExecutorLedgerRejected):
+            LocalPlatformSession(**(valid | overrides))  # type: ignore[arg-type]
+
+    opened = ledger(tmp_path / "session-boundaries")
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.get_platform_session("private")
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.record_platform_session(
+            platform="douyin",
+            state="missing",  # type: ignore[arg-type]
+            observed_at=NOW,
+        )
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.record_platform_session(
+            platform="douyin",
+            state=PlatformSessionState.MISSING,
+            observed_at=NOW,
+            advance_epoch=True,
+        )
+
+    first = opened.record_platform_session(
+        platform="douyin",
+        state=PlatformSessionState.MISSING,
+        observed_at=NOW,
+    )
+    assert (
+        opened.record_platform_session(
+            platform="douyin",
+            state=PlatformSessionState.MISSING,
+            observed_at=NOW,
+        )
+        == first
+    )
+    for state, advance_epoch in (
+        (PlatformSessionState.EXPIRED, False),
+        (PlatformSessionState.MISSING, True),
+    ):
+        with pytest.raises(ExecutorLedgerRejected):
+            opened.record_platform_session(
+                platform="douyin",
+                state=state,
+                observed_at=NOW,
+                advance_epoch=advance_epoch,
+            )
 
 
 def test_v1_ledger_is_migrated_in_place_without_losing_commands(tmp_path: Path) -> None:

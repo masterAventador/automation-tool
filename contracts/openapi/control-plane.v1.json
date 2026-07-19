@@ -233,6 +233,33 @@
         "title": "IssuedDeviceCredentialResponse",
         "type": "object"
       },
+      "PlatformSessionLogoutPrepareResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "const": "douyin",
+            "title": "Platform",
+            "type": "string"
+          },
+          "sessionRevision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sessionrevision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "blocked",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "state",
+          "sessionRevision"
+        ],
+        "title": "PlatformSessionLogoutPrepareResponse",
+        "type": "object"
+      },
       "PlatformSessionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1006,6 +1033,32 @@
           }
         ],
         "summary": "Get Douyin Platform Session",
+        "tags": [
+          "platform-sessions"
+        ]
+      }
+    },
+    "/api/v1/platform-sessions/douyin/logout/prepare": {
+      "post": {
+        "operationId": "prepareDouyinPlatformSessionLogout",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformSessionLogoutPrepareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Prepare Douyin Platform Session Logout",
         "tags": [
           "platform-sessions"
         ]

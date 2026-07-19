@@ -12,6 +12,7 @@ from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.rpa.douyin.health import (
     DouyinSessionHealthReporter,
     DouyinSessionHealthReportRejected,
+    SystemSessionHealthClock,
 )
 from automation_tool.protocol import PlatformSessionHealthEnvelope, PlatformSessionState
 
@@ -126,6 +127,28 @@ def test_page_recovery_requires_explicit_new_epoch_and_survives_reopen(tmp_path:
     assert persisted.circuit_open is False
 
 
+def test_explicit_logout_fact_advances_to_missing_without_page_inference(tmp_path: Path) -> None:
+    state_directory = tmp_path / "state"
+    clock = FixedClock()
+    health = reporter(state_directory, clock)
+    health.observe(window('[data-e2e="user-avatar"]'), sequence=2)
+    clock.value += timedelta(seconds=1)
+
+    logged_out = health.record_logout(sequence=3)
+
+    assert logged_out.payload.state is PlatformSessionState.MISSING
+    assert logged_out.payload.session_revision == 2
+    assert logged_out.payload.observed_at == clock.value
+    persisted = ExecutorLedger(
+        state_directory=state_directory,
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    ).get_platform_session("douyin")
+    assert persisted is not None
+    assert persisted.state is PlatformSessionState.MISSING
+    assert persisted.session_revision == 2
+
+
 def test_reporter_rejects_invalid_dependencies_sequence_clock_and_ids(tmp_path: Path) -> None:
     ledger = ExecutorLedger(
         state_directory=tmp_path / "state",
@@ -150,3 +173,17 @@ def test_reporter_rejects_invalid_dependencies_sequence_clock_and_ids(tmp_path: 
             health.observe(window('[data-e2e="login-button"]'), sequence=sequence)
     with pytest.raises(DouyinSessionHealthReportRejected):
         health.observe(window('[data-e2e="login-button"]'), sequence=2)
+
+
+def test_logout_rejects_invalid_sequence_and_invalid_clock_without_writing(tmp_path: Path) -> None:
+    clock = FixedClock()
+    health = reporter(tmp_path / "state", clock)
+    for sequence in (0, True, 2**53):
+        with pytest.raises(DouyinSessionHealthReportRejected):
+            health.record_logout(sequence=sequence)
+
+    clock.value = datetime(2026, 7, 19, 12, 0)
+    with pytest.raises(DouyinSessionHealthReportRejected):
+        health.record_logout(sequence=2)
+    assert health._ledger.get_platform_session("douyin") is None
+    assert SystemSessionHealthClock().now().utcoffset() == UTC.utcoffset(NOW)

@@ -189,6 +189,12 @@ def test_invalid_starter_request_and_starter_failure_are_fixed_errors(tmp_path: 
             executable_path=cast(Any, "not-a-path"),
             profile_directory=profile,
         )
+    with pytest.raises(BrowserRuntimeRejected):
+        BrowserLaunchRequest(
+            executable_path=executable,
+            profile_directory=profile,
+            headless=cast(Any, 1),
+        )
     runtime = PackagedBrowserRuntime(starter=lambda: (_ for _ in ()).throw(RuntimeError("secret")))
     with pytest.raises(BrowserRuntimeRejected):
         runtime.open(request)

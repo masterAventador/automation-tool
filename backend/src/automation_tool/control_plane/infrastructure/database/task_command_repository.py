@@ -36,6 +36,7 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.infrastructure.database.schema import (
     execution_attempts,
     installations,
+    platform_session_gates,
     task_commands,
     tasks,
 )
@@ -167,6 +168,14 @@ class SqlAlchemyTaskCommandRepository:
                     if not _same_intent(existing, command):
                         raise TaskCommandDeliveryRejected
                     return existing
+                blocked = await session.scalar(
+                    select(platform_session_gates.c.session_revision).where(
+                        platform_session_gates.c.installation_id == command.installation_id.uuid,
+                        platform_session_gates.c.platform == "douyin",
+                    )
+                )
+                if blocked is not None:
+                    raise TaskCommandDeliveryRejected
                 created = (
                     (
                         await session.execute(
@@ -456,17 +465,35 @@ class SqlAlchemyTaskCommandRepository:
             ),
         )
         async with self._database.session() as session:
+            installation_status = await session.scalar(
+                select(installations.c.status)
+                .where(installations.c.id == installation_id.uuid)
+                .with_for_update()
+            )
+            if installation_status != InstallationStatus.ACTIVE.value:
+                return None
+            blocked = await session.scalar(
+                select(platform_session_gates.c.session_revision).where(
+                    platform_session_gates.c.installation_id == installation_id.uuid,
+                    platform_session_gates.c.platform == "douyin",
+                )
+            )
+            query = select(task_commands).where(
+                task_commands.c.installation_id == installation_id.uuid,
+                task_commands.c.deadline_at > timestamp,
+                task_commands.c.updated_at <= timestamp,
+                due,
+            )
+            if blocked is not None:
+                query = query.where(
+                    task_commands.c.command_type.in_(
+                        command_type.value for command_type in _TERMINATION_COMMANDS
+                    )
+                )
             current = (
                 (
                     await session.execute(
-                        select(task_commands)
-                        .where(
-                            task_commands.c.installation_id == installation_id.uuid,
-                            task_commands.c.deadline_at > timestamp,
-                            task_commands.c.updated_at <= timestamp,
-                            due,
-                        )
-                        .order_by(
+                        query.order_by(
                             task_commands.c.deadline_at,
                             task_commands.c.created_at,
                             task_commands.c.message_id,

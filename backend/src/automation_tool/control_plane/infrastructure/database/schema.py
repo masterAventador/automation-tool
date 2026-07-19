@@ -134,6 +134,33 @@ platform_session_health = Table(
     ),
 )
 
+platform_session_gates = Table(
+    "platform_session_gates",
+    metadata,
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("platform", String(length=16), nullable=False),
+    Column("state", String(length=16), nullable=False),
+    Column("session_revision", BigInteger(), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("platform = 'douyin'", name="ck_platform_session_gates_platform"),
+    CheckConstraint("state = 'blocked'", name="ck_platform_session_gates_state"),
+    CheckConstraint(
+        "session_revision > 0",
+        name="ck_platform_session_gates_revision_positive",
+    ),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_platform_session_gates_installation_id",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint(
+        "installation_id",
+        "platform",
+        name="pk_platform_session_gates",
+    ),
+)
+
 installation_registration_challenges = Table(
     "installation_registration_challenges",
     metadata,
@@ -1036,6 +1063,8 @@ __all__ = [
     "installation_registration_challenges",
     "installations",
     "metadata",
+    "platform_session_gates",
+    "platform_session_health",
     "task_actions",
     "task_commands",
     "task_events",

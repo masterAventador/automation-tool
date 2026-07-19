@@ -22,6 +22,11 @@ function gateway(): PlatformSessionGateway {
       state: "healthy",
       flowVersion: "douyin.qr-login.v2",
     }),
+    logoutDouyinSession: vi.fn().mockResolvedValue({
+      platform: "douyin",
+      state: "missing",
+      observedAt: "2026-07-19T14:31:00Z",
+    }),
   };
 }
 
@@ -42,11 +47,24 @@ describe("platform status page", () => {
     expect(screen.getByText("需要登录")).toBeVisible();
   });
 
-  it("exposes but does not fake the B5-14 safe logout operation", async () => {
-    render(<PlatformSessions gateway={gateway()} />);
+  it("requires confirmation and renders only the authoritative safe logout result", async () => {
+    const source = gateway();
+    vi.mocked(source.getDouyinSession).mockResolvedValue({
+      platform: "douyin",
+      state: "healthy",
+      observedAt: "2026-07-19T14:30:00Z",
+    });
+    const user = userEvent.setup();
+    render(<PlatformSessions gateway={source} />);
 
-    expect(await screen.findByRole("button", { name: "安全注销" })).toBeDisabled();
-    expect(screen.getByText("安全注销将在下一项任务中启用")).toBeVisible();
+    expect(await screen.findByText("登录正常")).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "安全注销" }));
+    expect(source.logoutDouyinSession).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "确认注销" }));
+
+    expect(source.logoutDouyinSession).toHaveBeenCalledOnce();
+    expect(await screen.findByText("需要登录")).toBeVisible();
+    expect(screen.getByText(/最近检查/u)).toBeVisible();
   });
 
   it("never reflects gateway error details", async () => {

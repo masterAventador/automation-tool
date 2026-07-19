@@ -108,6 +108,26 @@ fn map_executor_platform_error(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_browser_profile_logout_error(
+    error: browser_profiles::BrowserProfileError,
+) -> ExecutorPlatformCommandError {
+    let (code, retryable) = match error.code() {
+        browser_profiles::BrowserProfileErrorCode::ProfileInUse => ("profile_in_use", true),
+        browser_profiles::BrowserProfileErrorCode::RecoveryRequired => {
+            ("profile_recovery_required", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::InvalidProfileId
+        | browser_profiles::BrowserProfileErrorCode::ProfileNotFound
+        | browser_profiles::BrowserProfileErrorCode::UnsafeDirectory
+        | browser_profiles::BrowserProfileErrorCode::IdentityChanged
+        | browser_profiles::BrowserProfileErrorCode::StorageUnavailable => {
+            ("storage_unavailable", false)
+        }
+    };
+    ExecutorPlatformCommandError { code, retryable }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn map_executor_connection_error(
     error: control_plane::ControlPlaneError,
 ) -> ExecutorPlatformCommandError {
@@ -275,6 +295,79 @@ async fn recheck_douyin_login(
         &profiles,
     )
     .await
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn logout_douyin_session(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
+) -> Result<control_plane::PlatformSessionStatus, ExecutorPlatformCommandError> {
+    client
+        .prepare_douyin_platform_session_logout(&vault)
+        .await
+        .map_err(map_executor_connection_error)?;
+
+    let service = platform.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(map_executor_platform_error)?;
+
+    profiles
+        .remove_current_douyin_profile()
+        .map_err(map_browser_profile_logout_error)?;
+
+    let connection = client
+        .issue_executor_connection(&vault)
+        .await
+        .map_err(map_executor_connection_error)?;
+    let service = platform.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.restart(connection))
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(map_executor_platform_error)?;
+
+    let service = platform.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        service
+            .execute_session_command(executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout)
+    })
+    .await
+    .map_err(|_| ExecutorPlatformCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?
+    .map_err(map_executor_platform_error)?;
+    if result.state() != "logged_out" {
+        return Err(ExecutorPlatformCommandError {
+            code: "authentication_rejected",
+            retryable: false,
+        });
+    }
+
+    for _ in 0..100 {
+        let snapshot = client
+            .get_douyin_platform_session(&vault)
+            .await
+            .map_err(map_executor_connection_error)?;
+        if snapshot.state() == "missing" {
+            return Ok(snapshot);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(ExecutorPlatformCommandError {
+        code: "timed_out",
+        retryable: true,
+    })
 }
 
 #[tauri::command]
@@ -1592,6 +1685,7 @@ pub fn run() {
         get_workbench_status,
         open_douyin_login,
         recheck_douyin_login,
+        logout_douyin_session,
         emergency_stop_workbench_task,
         pause_task_run,
         resume_task_run,
@@ -1615,6 +1709,7 @@ pub fn run() {
         get_workbench_status,
         open_douyin_login,
         recheck_douyin_login,
+        logout_douyin_session,
         emergency_stop_workbench_task,
         pause_task_run,
         resume_task_run,

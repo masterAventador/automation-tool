@@ -29,8 +29,8 @@ async function waitForOneFact(): Promise<void> {
   );
 }
 
-describe("B5-13 platform status production-path acceptance", () => {
-  it("queries Control Plane and drives the packaged headless Executor from the hidden App UI", async () => {
+describe("B5-13/B5-14 platform Session production-path acceptance", () => {
+  it("queries status, drives the headless Executor, and safely logs out from the hidden App UI", async () => {
     await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_platform_session_for_acceptance"),
@@ -62,7 +62,40 @@ describe("B5-13 platform status production-path acceptance", () => {
       timeout: 120_000,
       timeoutMsg: "platform recheck did not settle",
     });
-    assert.equal(await browser.$("button=安全注销").isEnabled(), false);
+    const logout = await browser.$("button=安全注销");
+    assert.equal(await logout.isEnabled(), true);
+    await logout.click();
+    await browser.$("button=确认注销").click();
+    await browser.waitUntil(
+      async () => {
+        const text = await browser.$("body").getText();
+        return text.includes("需要登录") && (await logout.isEnabled());
+      },
+      { timeout: 180_000, timeoutMsg: "safe logout did not render authoritative missing state" },
+    );
+
+    const blocked = (await browser.tauri.execute(async ({ core }) => {
+      try {
+        await core.invoke("create_douyin_search_exposure_task", {
+          definition: {
+            template: "douyin.search_exposure.v1",
+            searchKeyword: "新能源汽车",
+            action: "browse",
+            messageTemplate: null,
+            targetLimit: 10,
+            minimumIntervalSeconds: 30,
+            maximumIntervalSeconds: 90,
+            previewRequired: true,
+            finalConfirmationRequired: true,
+          },
+          idempotencyKey: "task:b514:blocked-after-logout",
+        });
+        return false;
+      } catch {
+        return true;
+      }
+    })) as boolean;
+    assert.equal(blocked, true, "real App Task API must observe the persistent logout gate");
 
     await browser.tauri.execute(({ core }) => core.invoke("exit_app_for_acceptance"));
     await browser.pause(12_000);

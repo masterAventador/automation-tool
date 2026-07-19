@@ -14,6 +14,8 @@ from automation_tool.control_plane.application.platform_session_health import (
     PlatformSessionHealthRepository,
     PlatformSessionHealthService,
     PlatformSessionHealthUnavailable,
+    PlatformSessionLogoutGate,
+    SystemPlatformSessionHealthClock,
 )
 from automation_tool.control_plane.domain import InstallationId
 from automation_tool.protocol import (
@@ -39,6 +41,7 @@ class Repository:
     def __init__(self) -> None:
         self.pending: PendingPlatformSessionHealth | None = None
         self.failure: Exception | None = None
+        self.blocked_at: datetime | None = None
 
     async def converge(
         self,
@@ -75,6 +78,23 @@ class Repository:
             session_revision=7,
             observed_at=OBSERVED_AT,
             updated_at=NOW,
+        )
+
+    async def begin_logout(
+        self,
+        installation_id: InstallationId,
+        platform: str,
+        blocked_at: datetime,
+    ) -> PlatformSessionLogoutGate:
+        if self.failure is not None:
+            raise self.failure
+        self.blocked_at = blocked_at
+        return PlatformSessionLogoutGate(
+            installation_id=installation_id,
+            platform=platform,
+            state="blocked",
+            session_revision=8,
+            updated_at=blocked_at,
         )
 
 
@@ -157,6 +177,22 @@ async def test_get_returns_only_the_current_installation_projection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_begin_logout_persists_one_typed_gate_at_the_service_clock() -> None:
+    repository = Repository()
+    service = PlatformSessionHealthService(repository=repository, clock=FixedClock())
+
+    gate = await service.begin_logout(
+        InstallationId.parse(INSTALLATION_ID),
+        platform="douyin",
+    )
+
+    assert gate.state == "blocked"
+    assert gate.session_revision == 8
+    assert gate.updated_at == NOW
+    assert repository.blocked_at == NOW
+
+
+@pytest.mark.asyncio
 async def test_get_rejects_invalid_scope_and_maps_repository_failure() -> None:
     repository = Repository()
     service = PlatformSessionHealthService(repository=repository, clock=FixedClock())
@@ -194,6 +230,10 @@ async def test_repository_rejection_is_preserved_and_unknown_failure_is_safe() -
     with pytest.raises(PlatformSessionHealthRejected):
         await service.receive(message())
 
+    repository.failure = PlatformSessionHealthUnavailable()
+    with pytest.raises(PlatformSessionHealthUnavailable):
+        await service.receive(message())
+
     repository.failure = RuntimeError("private database detail")
     with pytest.raises(PlatformSessionHealthUnavailable) as captured:
         await service.receive(message())
@@ -212,3 +252,124 @@ async def test_service_requires_a_structural_repository_and_aware_clock() -> Non
     with pytest.raises(PlatformSessionHealthUnavailable):
         await service.receive(message())
     assert isinstance(repository, PlatformSessionHealthRepository)
+
+
+def test_typed_health_values_reject_malformed_fields_and_expose_circuit_state() -> None:
+    installation_id = InstallationId.parse(INSTALLATION_ID)
+    valid = {
+        "installation_id": installation_id,
+        "platform": "douyin",
+        "state": PlatformSessionState.MISSING,
+        "session_revision": 1,
+        "observed_at": OBSERVED_AT,
+        "updated_at": NOW,
+    }
+    invalid = (
+        {"installation_id": object()},
+        {"platform": "private"},
+        {"state": "missing"},
+        {"session_revision": True},
+        {"session_revision": 0},
+        {"observed_at": "private"},
+        {"observed_at": datetime(2026, 7, 19, 10, 59)},
+        {"updated_at": "private"},
+        {"updated_at": datetime(2026, 7, 19, 11, 0)},
+        {"updated_at": OBSERVED_AT - timedelta(microseconds=1)},
+    )
+    for overrides in invalid:
+        with pytest.raises(PlatformSessionHealthRejected):
+            PlatformSessionHealthProjection(**(valid | overrides))  # type: ignore[arg-type]
+
+    pending = PendingPlatformSessionHealth(
+        installation_id=installation_id,
+        platform="douyin",
+        state=PlatformSessionState.MISSING,
+        session_revision=1,
+        observed_at=OBSERVED_AT,
+        received_at=NOW,
+    )
+    projection = PlatformSessionHealthProjection(**valid)  # type: ignore[arg-type]
+    assert pending.circuit_open is True
+    assert projection.circuit_open is True
+
+    with pytest.raises(PlatformSessionHealthRejected):
+        PlatformSessionHealthConvergenceResult(
+            projection=object(),  # type: ignore[arg-type]
+            duplicate=False,
+        )
+    with pytest.raises(PlatformSessionHealthRejected):
+        PlatformSessionHealthConvergenceResult(projection=projection, duplicate=1)  # type: ignore[arg-type]
+
+
+def test_logout_gate_rejects_every_malformed_field() -> None:
+    valid = {
+        "installation_id": InstallationId.parse(INSTALLATION_ID),
+        "platform": "douyin",
+        "state": "blocked",
+        "session_revision": 1,
+        "updated_at": NOW,
+    }
+    invalid = (
+        {"installation_id": object()},
+        {"platform": "private"},
+        {"state": "open"},
+        {"session_revision": True},
+        {"session_revision": 0},
+        {"updated_at": "private"},
+        {"updated_at": datetime(2026, 7, 19, 11, 0)},
+    )
+    for overrides in invalid:
+        with pytest.raises(PlatformSessionHealthRejected):
+            PlatformSessionLogoutGate(**(valid | overrides))  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_service_preserves_explicit_failures_and_rejects_malformed_results() -> None:
+    installation_id = InstallationId.parse(INSTALLATION_ID)
+    repository = Repository()
+    service = PlatformSessionHealthService(repository=repository, clock=FixedClock())
+
+    for failure in (PlatformSessionHealthRejected(), PlatformSessionHealthUnavailable()):
+        repository.failure = failure
+        with pytest.raises(type(failure)):
+            await service.get(installation_id, platform="douyin")
+        with pytest.raises(type(failure)):
+            await service.begin_logout(installation_id, platform="douyin")
+
+    repository.failure = RuntimeError("private database detail")
+    with pytest.raises(PlatformSessionHealthUnavailable):
+        await service.begin_logout(installation_id, platform="douyin")
+
+    repository.failure = None
+
+    async def malformed_get(
+        installation_id: InstallationId,
+        platform: str,
+    ) -> object:
+        return object()
+
+    repository.get = malformed_get  # type: ignore[method-assign,assignment]
+    with pytest.raises(PlatformSessionHealthUnavailable):
+        await service.get(installation_id, platform="douyin")
+
+    async def malformed_gate(
+        installation_id: InstallationId,
+        platform: str,
+        blocked_at: datetime,
+    ) -> object:
+        return object()
+
+    repository.begin_logout = malformed_gate  # type: ignore[method-assign,assignment]
+    with pytest.raises(PlatformSessionHealthUnavailable):
+        await service.begin_logout(installation_id, platform="douyin")
+
+
+@pytest.mark.asyncio
+async def test_begin_logout_rejects_invalid_scope_and_system_clock_is_utc() -> None:
+    service = PlatformSessionHealthService(repository=Repository(), clock=FixedClock())
+    with pytest.raises(PlatformSessionHealthRejected):
+        await service.begin_logout(
+            InstallationId.parse(INSTALLATION_ID),
+            platform="private",
+        )
+    assert SystemPlatformSessionHealthClock().now().utcoffset() == UTC.utcoffset(NOW)

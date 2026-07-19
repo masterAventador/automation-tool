@@ -376,7 +376,50 @@ impl ExecutorManager {
                     headless,
                 )
                 .map_err(map_bootstrap_error)?;
-            receive_platform_command_result(&managed.process, &command_id, PLATFORM_COMMAND_TIMEOUT)
+            receive_platform_command_result(
+                &managed.process,
+                &command_id,
+                command,
+                PLATFORM_COMMAND_TIMEOUT,
+            )
+        })();
+        if outcome.is_err() {
+            let restart_count = slot.status.restart_count();
+            if let Some(ManagedExecutorLifecycle::Running(mut managed)) = slot.lifecycle.take() {
+                force_stop(&mut managed.process);
+            }
+            slot.status = ExecutorManagerStatus::stopped(restart_count);
+        }
+        outcome
+    }
+
+    pub fn execute_session_command(
+        &self,
+        command: LocalPlatformCommand,
+    ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
+        let mut slot = self.lock_slot()?;
+        reconcile_supervision(&self.core, &mut slot)?;
+        let outcome = (|| {
+            let Some(ManagedExecutorLifecycle::Running(managed)) = slot.lifecycle.as_mut() else {
+                return Err(process_unavailable());
+            };
+            let command_id = generate_uuid_v4()?;
+            let stdin = managed
+                .process
+                .stdin
+                .as_mut()
+                .ok_or_else(process_unavailable)?;
+            managed
+                .process
+                .token
+                .write_session_command(stdin, &command_id, command)
+                .map_err(map_bootstrap_error)?;
+            receive_platform_command_result(
+                &managed.process,
+                &command_id,
+                command,
+                PLATFORM_COMMAND_TIMEOUT,
+            )
         })();
         if outcome.is_err() {
             let restart_count = slot.status.restart_count();
@@ -862,6 +905,7 @@ fn receive_event(
 fn receive_platform_command_result(
     running: &RunningExecutor,
     command_id: &str,
+    command: LocalPlatformCommand,
     timeout: Duration,
 ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
     let line = running
@@ -876,7 +920,7 @@ fn receive_platform_command_result(
         .map_err(|()| process_unavailable())?;
     running
         .token
-        .parse_platform_command_result(command_id, &line)
+        .parse_platform_command_result(command_id, command, &line)
         .map_err(map_bootstrap_error)
 }
 

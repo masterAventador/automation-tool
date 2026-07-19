@@ -1,6 +1,6 @@
 use super::{BrowserProfileError, CreateProfileError};
 use std::ffi::{c_void, OsStr};
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -92,6 +92,17 @@ struct FileIdentity {
 
 impl PlatformProfile {
     pub(super) fn try_acquire_lock(&self) -> Result<PlatformProfileLock, BrowserProfileError> {
+        self.acquire_lock(false)
+    }
+
+    fn try_acquire_removal_lock(&self) -> Result<PlatformProfileLock, BrowserProfileError> {
+        self.acquire_lock(true)
+    }
+
+    fn acquire_lock(
+        &self,
+        allow_abandoned_active_marker: bool,
+    ) -> Result<PlatformProfileLock, BrowserProfileError> {
         if directory_identity(&self.directory.file)? != self.directory.identity {
             return Err(BrowserProfileError::identity_changed());
         }
@@ -153,7 +164,7 @@ impl PlatformProfile {
             return Err(BrowserProfileError::identity_changed());
         }
         let state = read_lock_state(&mut file)?;
-        if !state.is_empty() {
+        if !(state.is_empty() || allow_abandoned_active_marker && state == ACTIVE_LOCK_MARKER) {
             return Err(BrowserProfileError::recovery_required());
         }
         write_lock_state(&mut file, ACTIVE_LOCK_MARKER)?;
@@ -303,6 +314,53 @@ impl PlatformProfileStore {
         self.revalidate_layout()
     }
 
+    pub(super) fn remove_profile(&self, profile_id: &str) -> Result<(), BrowserProfileError> {
+        self.revalidate_layout()?;
+        require_safe_name(profile_id)?;
+        let removal_id = format!(".removing-{profile_id}");
+        require_safe_name(&removal_id)?;
+        let original = open_optional_directory(&self.platform, profile_id)?;
+        let staged = open_optional_directory(&self.platform, &removal_id)?;
+        if original.is_some() && staged.is_some() {
+            return Err(BrowserProfileError::recovery_required());
+        }
+        if let Some(directory) = original {
+            let profile = PlatformProfile { directory };
+            let lock = profile.try_acquire_removal_lock()?;
+            let staged_path = self.platform.path.join(&removal_id);
+            fs::rename(&profile.directory.path, &staged_path)
+                .map_err(|_| BrowserProfileError::storage_unavailable())?;
+            let reopened = open_relative_directory(
+                &self.platform,
+                &removal_id,
+                FILE_OPEN,
+                AclPolicy::Require,
+            )?;
+            if reopened.identity != profile.directory.identity {
+                return Err(BrowserProfileError::identity_changed());
+            }
+            lock.release()?;
+            drop(reopened);
+            drop(profile);
+        } else if let Some(directory) = staged {
+            let profile = PlatformProfile { directory };
+            let lock = profile.try_acquire_removal_lock()?;
+            lock.release()?;
+            drop(profile);
+        } else {
+            return Ok(());
+        }
+        self.revalidate_layout()?;
+        fs::remove_dir_all(self.platform.path.join(&removal_id))
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        if open_optional_directory(&self.platform, profile_id)?.is_some()
+            || open_optional_directory(&self.platform, &removal_id)?.is_some()
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        self.revalidate_layout()
+    }
+
     fn revalidate_layout(&self) -> Result<(), BrowserProfileError> {
         for directory in [&self.app_data, &self.profile_root, &self.platform] {
             if directory_identity(&directory.file)? != directory.identity
@@ -445,6 +503,17 @@ fn open_relative_directory(
     })
 }
 
+fn open_optional_directory(
+    parent: &DirectoryHandle,
+    name: &str,
+) -> Result<Option<DirectoryHandle>, BrowserProfileError> {
+    match open_relative_directory(parent, name, FILE_OPEN, AclPolicy::Require) {
+        Ok(directory) => Ok(Some(directory)),
+        Err(error) if error.code() == super::BrowserProfileErrorCode::ProfileNotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 fn open_relative_lock_file(
     parent: &DirectoryHandle,
     name: &str,
@@ -484,7 +553,7 @@ fn open_relative_lock_file(
             &mut io_status,
             null(),
             FILE_ATTRIBUTE_NORMAL,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             disposition,
             FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT,
             null(),

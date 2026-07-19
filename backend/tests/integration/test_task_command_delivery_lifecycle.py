@@ -31,6 +31,7 @@ from automation_tool.control_plane.infrastructure.database import (
     execution_attempts,
     installation_registration_challenges,
     installations,
+    platform_session_gates,
     task_actions,
     task_commands,
     task_events,
@@ -55,6 +56,7 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(installation_registration_challenges))
         await session.execute(delete(device_sessions))
         await session.execute(delete(device_credentials))
+        await session.execute(delete(platform_session_gates))
         await session.execute(delete(installations))
 
 
@@ -177,6 +179,114 @@ async def test_enqueue_is_idempotent_scoped_and_rejects_changed_intent(
         )
         with pytest.raises(TaskCommandDeliveryRejected):
             await repository.enqueue(changed)
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_persistent_platform_gate_rejects_a_new_offer(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_attempt(database)
+        async with database.session() as session:
+            await session.execute(
+                insert(platform_session_gates).values(
+                    installation_id=installation_id.uuid,
+                    platform="douyin",
+                    state="blocked",
+                    session_revision=1,
+                    updated_at=NOW,
+                )
+            )
+
+        with pytest.raises(TaskCommandDeliveryRejected):
+            await SqlAlchemyTaskCommandRepository(database).enqueue(
+                pending(installation_id, task_id, attempt_id)
+            )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_persistent_platform_gate_prevents_a_queued_offer_from_being_claimed(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_attempt(database)
+        repository = SqlAlchemyTaskCommandRepository(database)
+        await repository.enqueue(pending(installation_id, task_id, attempt_id))
+        async with database.session() as session:
+            await session.execute(
+                insert(platform_session_gates).values(
+                    installation_id=installation_id.uuid,
+                    platform="douyin",
+                    state="blocked",
+                    session_revision=1,
+                    updated_at=NOW,
+                )
+            )
+
+        claimed = await repository.claim_next(
+            installation_id=installation_id,
+            now=NOW,
+            lease_expires_at=NOW + timedelta(seconds=10),
+            retry_delivered_before=NOW - timedelta(seconds=5),
+            recover_delivered=False,
+        )
+
+        assert claimed is None
+        async with database.session() as session:
+            await session.execute(
+                insert(task_commands).values(
+                    message_id=UUID("723e4567-e89b-42d3-a456-426614174001"),
+                    correlation_id=UUID("723e4567-e89b-42d3-a456-426614174002"),
+                    installation_id=installation_id.uuid,
+                    task_id=task_id.uuid,
+                    execution_attempt_id=attempt_id.uuid,
+                    sequence=2,
+                    command_type=TaskCommandType.TASK_EMERGENCY_STOP.value,
+                    status=TaskCommandStatus.PENDING.value,
+                    idempotency_key="task:emergency-stop:logout-gate",
+                    revision=1,
+                    delivery_attempts=0,
+                    next_delivery_at=NOW,
+                    deadline_at=NOW + timedelta(minutes=5),
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+
+        termination = await repository.claim_next(
+            installation_id=installation_id,
+            now=NOW,
+            lease_expires_at=NOW + timedelta(seconds=10),
+            retry_delivered_before=NOW - timedelta(seconds=5),
+            recover_delivered=False,
+        )
+        assert termination is not None
+        assert termination.command_type is TaskCommandType.TASK_EMERGENCY_STOP
+
+        assert (
+            await repository.claim_next(
+                installation_id=InstallationId.new(),
+                now=NOW,
+                lease_expires_at=NOW + timedelta(seconds=10),
+                retry_delivered_before=NOW - timedelta(seconds=5),
+                recover_delivered=False,
+            )
+            is None
+        )
     finally:
         await reset_data(database)
         await database.close()

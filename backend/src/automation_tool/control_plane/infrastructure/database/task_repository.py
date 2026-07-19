@@ -26,6 +26,7 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.infrastructure.database.schema import (
     douyin_search_exposure_definitions,
     installations,
+    platform_session_gates,
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
@@ -135,6 +136,14 @@ class SqlAlchemyTaskRepository:
                     if stored_definition is None or _definition(stored_definition) != definition:
                         raise TaskPersistenceRejected
                     return TaskCreationResult(task=_record(existing), created=False)
+                blocked = await session.scalar(
+                    select(platform_session_gates.c.session_revision).where(
+                        platform_session_gates.c.installation_id == target_installation.uuid,
+                        platform_session_gates.c.platform == "douyin",
+                    )
+                )
+                if blocked is not None:
+                    raise TaskPersistenceRejected
                 created = (
                     (
                         await session.execute(

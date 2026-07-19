@@ -30,4 +30,8 @@ export class TauriPlatformSessionGateway implements PlatformSessionGateway {
   async recheckDouyinLogin(): Promise<PlatformSessionAction> {
     return parsePlatformSessionAction(await safeInvoke("recheck_douyin_login"));
   }
+
+  async logoutDouyinSession(): Promise<PlatformSessionSnapshot> {
+    return parsePlatformSessionSnapshot(await safeInvoke("logout_douyin_session"));
+  }
 }

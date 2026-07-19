@@ -38,6 +38,7 @@ enum ControlPlaneOperation {
     GetCurrentInstallationAccess,
     GetWorkbenchStatus,
     GetDouyinPlatformSession,
+    PrepareDouyinPlatformSessionLogout,
     IssueInstallationRegistrationChallenge,
     CompleteInstallationRegistration,
     RotateDeviceCredential,
@@ -68,6 +69,7 @@ impl ControlPlaneOperation {
             | Self::RotateDeviceCredential
             | Self::RevokeDeviceCredential
             | Self::ExchangeDeviceSession
+            | Self::PrepareDouyinPlatformSessionLogout
             | Self::CreateTask
             | Self::PauseTask
             | Self::ResumeTask
@@ -82,6 +84,9 @@ impl ControlPlaneOperation {
             Self::GetCurrentInstallationAccess => "/api/v1/installations/current",
             Self::GetWorkbenchStatus => "/api/v1/workbench/status",
             Self::GetDouyinPlatformSession => "/api/v1/platform-sessions/douyin",
+            Self::PrepareDouyinPlatformSessionLogout => {
+                "/api/v1/platform-sessions/douyin/logout/prepare"
+            }
             Self::IssueInstallationRegistrationChallenge => {
                 "/api/v1/installations/registration-challenges"
             }
@@ -106,6 +111,7 @@ impl ControlPlaneOperation {
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
             | Self::GetDouyinPlatformSession
+            | Self::PrepareDouyinPlatformSessionLogout
             | Self::RevokeDeviceCredential
             | Self::ListTasks
             | Self::GetTask
@@ -652,6 +658,28 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_douyin_platform_session(&response_body)
+    }
+
+    pub async fn prepare_douyin_platform_session_logout<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<u64, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::PrepareDouyinPlatformSessionLogout,
+                Some(session.token()),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_douyin_platform_session_logout_prepare(&response_body)
     }
 
     pub async fn list_tasks<S>(
@@ -1408,6 +1436,14 @@ struct PlatformSessionResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PlatformSessionLogoutPrepareResponse {
+    platform: String,
+    state: String,
+    session_revision: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskControlResponse {
     command_id: String,
     task_id: String,
@@ -1513,6 +1549,12 @@ pub struct PlatformSessionStatus {
     platform: String,
     state: String,
     observed_at: Option<String>,
+}
+
+impl PlatformSessionStatus {
+    pub fn state(&self) -> &str {
+        &self.state
+    }
 }
 
 impl TaskControlCommand {
@@ -1766,6 +1808,18 @@ fn parse_douyin_platform_session(body: &[u8]) -> Result<PlatformSessionStatus, C
         state: response.state,
         observed_at: response.observed_at,
     })
+}
+
+fn parse_douyin_platform_session_logout_prepare(body: &[u8]) -> Result<u64, ControlPlaneError> {
+    let response: PlatformSessionLogoutPrepareResponse = parse_exact_json(body)?;
+    if response.platform != "douyin"
+        || response.state != "blocked"
+        || response.session_revision == 0
+        || response.session_revision > MAX_CROSS_RUNTIME_SEQUENCE
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(response.session_revision)
 }
 
 fn parse_task_snapshot_body(body: &[u8]) -> Result<TaskSnapshot, ControlPlaneError> {
@@ -2185,14 +2239,15 @@ mod tests {
 
     use super::{
         new_request_id, parse_created_task, parse_device_session, parse_douyin_platform_session,
-        parse_health_response, parse_installation_access, parse_installation_registration,
-        parse_registration_challenge, parse_revoked_credential, parse_rotated_credential,
-        parse_sse_frame, parse_task_control, parse_task_list, parse_task_snapshot_body,
-        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
-        required_credential, sse_frame_end, transport_error, validate_response_metadata,
-        validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
-        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
-        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
+        parse_douyin_platform_session_logout_prepare, parse_health_response,
+        parse_installation_access, parse_installation_registration, parse_registration_challenge,
+        parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
+        parse_task_list, parse_task_snapshot_body, parse_workbench_status, request_path,
+        require_idempotency_key, require_list_cursor, required_credential, sse_frame_end,
+        transport_error, validate_response_metadata, validated_loopback_origin,
+        ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
+        DeviceSessionCapability, DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition,
+        ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -2280,6 +2335,12 @@ mod tests {
                 ControlPlaneOperation::GetDouyinPlatformSession,
                 "GET",
                 "/api/v1/platform-sessions/douyin",
+                200,
+            ),
+            (
+                ControlPlaneOperation::PrepareDouyinPlatformSessionLogout,
+                "POST",
+                "/api/v1/platform-sessions/douyin/logout/prepare",
                 200,
             ),
             (
@@ -3101,6 +3162,22 @@ mod tests {
             &serde_json::to_vec(&unknown).expect("unknown platform Session JSON")
         )
         .is_ok());
+
+        assert_eq!(
+            parse_douyin_platform_session_logout_prepare(
+                br#"{"platform":"douyin","state":"blocked","sessionRevision":8}"#,
+            )
+            .expect("valid logout gate"),
+            8,
+        );
+        for invalid_gate in [
+            br#"{"platform":"douyin","state":"open","sessionRevision":8}"#.as_slice(),
+            br#"{"platform":"douyin","state":"blocked","sessionRevision":0}"#.as_slice(),
+            br#"{"platform":"douyin","state":"blocked","sessionRevision":8,"profile":"private"}"#
+                .as_slice(),
+        ] {
+            assert!(parse_douyin_platform_session_logout_prepare(invalid_gate).is_err());
+        }
 
         for invalid in [
             serde_json::json!({

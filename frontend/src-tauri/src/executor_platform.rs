@@ -246,6 +246,18 @@ impl ExecutorPlatformService {
         result
     }
 
+    pub fn execute_session_command(
+        &self,
+        command: LocalPlatformCommand,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        if command != LocalPlatformCommand::CompleteDouyinLogout {
+            return Err(configuration_invalid());
+        }
+        self.manager
+            .execute_session_command(command)
+            .map_err(map_manager_error)
+    }
+
     #[cfg(feature = "control-plane-e2e")]
     pub fn inject_crash_for_acceptance(&self) -> Result<(), ExecutorPlatformError> {
         self.manager

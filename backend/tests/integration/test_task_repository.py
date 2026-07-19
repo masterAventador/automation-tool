@@ -25,6 +25,7 @@ from automation_tool.control_plane.infrastructure.database import (
     douyin_search_exposure_definitions,
     installation_registration_challenges,
     installations,
+    platform_session_gates,
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.task_repository import (
@@ -58,6 +59,7 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(installation_registration_challenges))
         await session.execute(delete(device_sessions))
         await session.execute(delete(device_credentials))
+        await session.execute(delete(platform_session_gates))
         await session.execute(delete(installations))
 
 
@@ -189,6 +191,41 @@ async def test_repository_rejects_unknown_revoked_and_duplicate_create_targets_s
             persisted = list((await session.execute(select(tasks))).mappings())
         assert len(persisted) == 1
         assert persisted[0]["id"] == task_id.uuid
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_persistent_platform_gate_rejects_new_task_creation(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTaskRepository(database)
+    try:
+        await reset_data(database)
+        installation_id = await seed_installation(database)
+        async with database.session() as session:
+            await session.execute(
+                insert(platform_session_gates).values(
+                    installation_id=installation_id.uuid,
+                    platform="douyin",
+                    state="blocked",
+                    session_revision=1,
+                    updated_at=NOW,
+                )
+            )
+
+        with pytest.raises(TaskPersistenceRejected):
+            await repository.create(
+                task_id=TaskId.new(),
+                installation_id=installation_id,
+                idempotency_key="task:repository:blocked-platform",
+                definition=DEFINITION,
+                created_at=NOW,
+            )
     finally:
         await reset_data(database)
         await database.close()

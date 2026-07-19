@@ -149,6 +149,15 @@ async def verify_database_state(database_url: str) -> None:
                     )
                 )
             ).all()
+            gate_rows = (
+                await connection.execute(
+                    text(
+                        "select platform, state, session_revision "
+                        "from platform_session_gates"
+                    )
+                )
+            ).all()
+            task_count = await connection.scalar(text("select count(*) from tasks"))
     finally:
         await engine.dispose()
     if installation_count != 1:
@@ -158,12 +167,27 @@ async def verify_database_state(database_url: str) -> None:
     platform, state, revision, timestamp_ordered = rows[0]
     if (
         platform != "douyin"
-        or state not in VALID_STATES
+        or state != "missing"
         or not isinstance(revision, int)
         or revision < 1
         or timestamp_ordered is not True
     ):
         raise RuntimeError("B5-13 platform health projection is invalid")
+    if gate_rows != [("douyin", "blocked", revision)] or task_count != 0:
+        raise RuntimeError("B5-14 logout gate or blocked Task projection is invalid")
+
+
+def verify_logout_local_state(private_app_data: Path) -> None:
+    profile_root = private_app_data / "browser-profiles"
+    current_marker = profile_root / "current-douyin-profile-v1"
+    platform_root = profile_root / "douyin"
+    if current_marker.exists():
+        raise RuntimeError("B5-14 safe logout retained the current Profile marker")
+    if platform_root.is_dir() and any(platform_root.iterdir()):
+        raise RuntimeError("B5-14 safe logout retained a Profile or removal tombstone")
+    ledger = private_app_data / "local-executor" / "state" / "executor-ledger.sqlite3"
+    if not ledger.is_file():
+        raise RuntimeError("B5-14 safe logout removed the Local Executor ledger")
 
 
 def matching_project_processes(
@@ -317,9 +341,10 @@ def main() -> None:
             app_process = None
 
             verify_app_private_data(private_app_data)
+            verify_logout_local_state(private_app_data)
             asyncio.run(verify_database_state(database_url))
             require_no_residual_project_processes(private_app_data, package_entrypoint)
-            print("[B5-13] Hidden-App platform status production-path acceptance passed")
+            print("[B5-13/B5-14] Hidden-App platform status and safe logout acceptance passed")
         finally:
             if app_process is not None:
                 terminate_process(app_process)

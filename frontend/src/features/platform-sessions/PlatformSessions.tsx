@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Flex, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Flex, Popconfirm, Space, Spin, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 
 import type {
@@ -41,7 +41,7 @@ export function PlatformSessions({ gateway }: PlatformSessionsProps) {
   const [snapshot, setSnapshot] = useState<PlatformSessionSnapshot | null>(null);
   const [action, setAction] = useState<PlatformSessionAction | null>(null);
   const [failure, setFailure] = useState(false);
-  const [pending, setPending] = useState<"open" | "recheck" | null>(null);
+  const [pending, setPending] = useState<"open" | "recheck" | "logout" | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -68,6 +68,20 @@ export function PlatformSessions({ gateway }: PlatformSessionsProps) {
       const result =
         kind === "open" ? await gateway.openDouyinLogin() : await gateway.recheckDouyinLogin();
       setAction(result);
+    } catch {
+      setFailure(true);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const logout = async () => {
+    setPending("logout");
+    setFailure(false);
+    try {
+      const result = await gateway.logoutDouyinSession();
+      setSnapshot(result);
+      setAction(null);
     } catch {
       setFailure(true);
     } finally {
@@ -118,10 +132,17 @@ export function PlatformSessions({ gateway }: PlatformSessionsProps) {
           >
             我已处理，重新检查
           </Button>
-          <Button danger disabled>
-            安全注销
-          </Button>
-          <Typography.Text type="secondary">安全注销将在下一项任务中启用</Typography.Text>
+          <Popconfirm
+            title="确定安全注销抖音吗？"
+            description="将停止本机抖音任务并删除此 App 专用的抖音登录 Profile。"
+            okText="确认注销"
+            cancelText="取消"
+            onConfirm={() => logout()}
+          >
+            <Button danger loading={pending === "logout"} disabled={pending !== null}>
+              安全注销
+            </Button>
+          </Popconfirm>
         </Space>
       </Space>
     </Card>

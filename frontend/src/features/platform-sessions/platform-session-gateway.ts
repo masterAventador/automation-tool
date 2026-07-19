@@ -64,6 +64,7 @@ export interface PlatformSessionGateway {
   getDouyinSession(): Promise<PlatformSessionSnapshot>;
   openDouyinLogin(): Promise<PlatformSessionAction>;
   recheckDouyinLogin(): Promise<PlatformSessionAction>;
+  logoutDouyinSession(): Promise<PlatformSessionSnapshot>;
 }
 
 export type PlatformSessionGatewayErrorCode =

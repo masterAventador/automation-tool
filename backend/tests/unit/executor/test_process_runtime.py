@@ -63,6 +63,30 @@ def test_reporter_writes_only_fixed_bounded_health_events() -> None:
     assert LOCAL_SESSION_TOKEN not in output.getvalue()
 
 
+def test_reporter_writes_authenticated_platform_results_and_fails_closed() -> None:
+    output = StringIO()
+    process_reporter = ExecutorProcessReporter(output, authenticator())
+
+    process_reporter.platform_command_result(
+        command_id="123e4567-e89b-42d3-a456-426614174005",
+        state="logged_out",
+    )
+
+    result = json.loads(output.getvalue())
+    assert result["flowVersion"] == "douyin.session-control.v1"
+    assert result["state"] == "logged_out"
+
+    class FailingOutput(StringIO):
+        def write(self, value: str) -> int:
+            raise OSError("private output failure")
+
+    with pytest.raises(ExecutorProcessRejected):
+        ExecutorProcessReporter(FailingOutput(), authenticator()).platform_command_result(
+            command_id="123e4567-e89b-42d3-a456-426614174005",
+            state="logged_out",
+        )
+
+
 def test_reporter_and_runtime_fail_closed_on_invalid_dependencies() -> None:
     with pytest.raises(ExecutorProcessRejected):
         ExecutorProcessReporter(object(), authenticator())  # type: ignore[arg-type]

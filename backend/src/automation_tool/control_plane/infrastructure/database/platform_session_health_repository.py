@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -15,10 +15,12 @@ from automation_tool.control_plane.application.platform_session_health import (
     PlatformSessionHealthProjection,
     PlatformSessionHealthRejected,
     PlatformSessionHealthUnavailable,
+    PlatformSessionLogoutGate,
 )
 from automation_tool.control_plane.domain import InstallationStatus
 from automation_tool.control_plane.infrastructure.database.schema import (
     installations,
+    platform_session_gates,
     platform_session_health,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
@@ -160,6 +162,15 @@ class SqlAlchemyPlatformSessionHealthRepository:
                 if pending.received_at < projection.updated_at:
                     raise PlatformSessionHealthRejected
 
+                gate_revision = await session.scalar(
+                    select(platform_session_gates.c.session_revision)
+                    .where(
+                        platform_session_gates.c.installation_id == pending.installation_id.uuid,
+                        platform_session_gates.c.platform == pending.platform,
+                    )
+                    .with_for_update()
+                )
+
                 await session.execute(
                     update(platform_session_health)
                     .where(
@@ -174,6 +185,19 @@ class SqlAlchemyPlatformSessionHealthRepository:
                         updated_at=pending.received_at,
                     )
                 )
+                if (
+                    pending.state is PlatformSessionState.HEALTHY
+                    and isinstance(gate_revision, int)
+                    and pending.session_revision > gate_revision
+                ):
+                    await session.execute(
+                        delete(platform_session_gates).where(
+                            platform_session_gates.c.installation_id
+                            == pending.installation_id.uuid,
+                            platform_session_gates.c.platform == pending.platform,
+                            platform_session_gates.c.session_revision == gate_revision,
+                        )
+                    )
                 return PlatformSessionHealthConvergenceResult(
                     projection=PlatformSessionHealthProjection(
                         installation_id=pending.installation_id,
@@ -184,6 +208,84 @@ class SqlAlchemyPlatformSessionHealthRepository:
                         updated_at=pending.received_at,
                     ),
                     duplicate=False,
+                )
+        except PlatformSessionHealthRejected:
+            raise
+        except IntegrityError:
+            raise PlatformSessionHealthRejected from None
+        except SQLAlchemyError:
+            raise PlatformSessionHealthUnavailable from None
+        except Exception:
+            raise PlatformSessionHealthUnavailable from None
+
+    async def begin_logout(
+        self,
+        installation_id: object,
+        platform: str,
+        blocked_at: datetime,
+    ) -> PlatformSessionLogoutGate:
+        from automation_tool.control_plane.domain import InstallationId
+
+        if (
+            not isinstance(installation_id, InstallationId)
+            or platform != "douyin"
+            or not isinstance(blocked_at, datetime)
+            or blocked_at.utcoffset() is None
+        ):
+            raise PlatformSessionHealthRejected
+        try:
+            async with self._database.session() as session:
+                installation_status = await session.scalar(
+                    select(installations.c.status)
+                    .where(installations.c.id == installation_id.uuid)
+                    .with_for_update()
+                )
+                if installation_status != InstallationStatus.ACTIVE.value:
+                    raise PlatformSessionHealthRejected
+                existing = (
+                    (
+                        await session.execute(
+                            select(platform_session_gates)
+                            .where(
+                                platform_session_gates.c.installation_id == installation_id.uuid,
+                                platform_session_gates.c.platform == platform,
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if existing is not None:
+                    return PlatformSessionLogoutGate(
+                        installation_id=installation_id,
+                        platform=platform,
+                        state="blocked",
+                        session_revision=cast(int, existing["session_revision"]),
+                        updated_at=cast(datetime, existing["updated_at"]),
+                    )
+                current_revision = await session.scalar(
+                    select(platform_session_health.c.session_revision).where(
+                        platform_session_health.c.installation_id == installation_id.uuid,
+                        platform_session_health.c.platform == platform,
+                    )
+                )
+                revision = (current_revision if isinstance(current_revision, int) else 0) + 1
+                await session.execute(
+                    insert(platform_session_gates).values(
+                        installation_id=installation_id.uuid,
+                        platform=platform,
+                        state="blocked",
+                        session_revision=revision,
+                        updated_at=blocked_at,
+                    )
+                )
+                return PlatformSessionLogoutGate(
+                    installation_id=installation_id,
+                    platform=platform,
+                    state="blocked",
+                    session_revision=revision,
+                    updated_at=blocked_at,
                 )
         except PlatformSessionHealthRejected:
             raise

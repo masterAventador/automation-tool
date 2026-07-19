@@ -115,6 +115,7 @@ describe("desktop startup", () => {
       }),
       openDouyinLogin: vi.fn(),
       recheckDouyinLogin: vi.fn(),
+      logoutDouyinSession: vi.fn(),
     };
     const user = userEvent.setup();
 

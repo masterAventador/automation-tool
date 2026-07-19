@@ -9,7 +9,7 @@ from pathlib import Path
 from queue import Queue
 from typing import Annotated, BinaryIO, Literal, Protocol, TextIO, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from automation_tool.executor.authentication import (
     LocalSessionAuthenticationRejected,
@@ -49,19 +49,23 @@ class PlatformCommand(BaseModel):
         str, Field(alias="authenticationProof", min_length=50, max_length=50)
     ]
     command_id: MessageId = Field(alias="commandId")
-    command_type: Literal["douyin.login.open", "douyin.login.recheck"] = Field(alias="commandType")
-    executable_path: Annotated[str, Field(min_length=1, max_length=4096)] = Field(
-        alias="executablePath"
+    command_type: Literal["douyin.login.open", "douyin.login.recheck", "douyin.logout.complete"] = (
+        Field(alias="commandType")
     )
-    headless: bool
-    profile_directory: Annotated[str, Field(min_length=1, max_length=4096)] = Field(
-        alias="profileDirectory"
+    executable_path: Annotated[str, Field(min_length=1, max_length=4096)] | None = Field(
+        default=None, alias="executablePath"
+    )
+    headless: bool | None = None
+    profile_directory: Annotated[str, Field(min_length=1, max_length=4096)] | None = Field(
+        default=None, alias="profileDirectory"
     )
     protocol_version: Literal["1.0"] = Field(alias="protocolVersion")
 
     @field_validator("executable_path", "profile_directory")
     @classmethod
-    def require_safe_absolute_path_shape(cls, value: str) -> str:
+    def require_safe_absolute_path_shape(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         path = Path(value)
         if (
             contains_control_or_bidi(value)
@@ -71,6 +75,16 @@ class PlatformCommand(BaseModel):
         ):
             raise ValueError("invalid local path")
         return value
+
+    @model_validator(mode="after")
+    def require_command_specific_fields(self) -> PlatformCommand:
+        paths = (self.executable_path, self.profile_directory, self.headless)
+        if self.command_type == "douyin.logout.complete":
+            if paths != (None, None, None):
+                raise ValueError("logout command must be path free")
+        elif any(value is None for value in paths):
+            raise ValueError("login command requires browser identity")
+        return self
 
     def __repr__(self) -> str:
         return "PlatformCommand(<redacted>)"
@@ -152,6 +166,8 @@ class _HealthReporter(Protocol):
         recovered: bool,
     ) -> PlatformSessionHealthEnvelope: ...
 
+    def record_logout(self, *, sequence: int) -> PlatformSessionHealthEnvelope: ...
+
 
 class _LoginFlow(Protocol):
     def begin(self) -> object: ...
@@ -202,22 +218,33 @@ class DouyinLoginCommandOperation:
     def handle(self, command: PlatformCommand) -> str:
         if not isinstance(command, PlatformCommand):
             raise PlatformCommandRejected
-        identity = (
-            command.executable_path,
-            command.profile_directory,
-            command.headless,
-        )
         try:
+            if command.command_type == "douyin.logout.complete":
+                self._close_active()
+                sequence = self._next_sequence()
+                self._outbound.put(self._health_reporter.record_logout(sequence=sequence))
+                return "logged_out"
+            if (
+                command.executable_path is None
+                or command.profile_directory is None
+                or command.headless is None
+            ):
+                raise ValueError
+            identity = (
+                command.executable_path,
+                command.profile_directory,
+                command.headless,
+            )
             if command.command_type == "douyin.login.open":
                 self._close_active()
-                self._begin(command, identity)
+                self._begin(identity)
                 flow = self._flow
                 if flow is None:
                     raise ValueError
                 observation = flow.begin()
             elif command.command_type == "douyin.login.recheck":
                 if self._flow is None:
-                    self._begin(command, identity)
+                    self._begin(identity)
                     flow = self._flow
                     if flow is None:
                         raise ValueError
@@ -239,14 +266,7 @@ class DouyinLoginCommandOperation:
                 "unknown",
             }:
                 raise ValueError
-            sequence = self._sequence_source()
-            if (
-                type(sequence) is not int
-                or not 1 <= sequence <= MAX_EXECUTOR_SEQUENCE
-                or sequence <= self._last_sequence
-            ):
-                raise ValueError
-            self._last_sequence = sequence
+            sequence = self._next_sequence()
             flow = self._flow
             if flow is None:
                 raise ValueError
@@ -265,17 +285,28 @@ class DouyinLoginCommandOperation:
             self._close_active(best_effort=True)
             raise PlatformCommandRejected from None
 
+    def _next_sequence(self) -> int:
+        sequence = self._sequence_source()
+        if (
+            type(sequence) is not int
+            or not 1 <= sequence <= MAX_EXECUTOR_SEQUENCE
+            or sequence <= self._last_sequence
+        ):
+            raise ValueError
+        self._last_sequence = sequence
+        return sequence
+
     def _begin(
         self,
-        command: PlatformCommand,
         identity: tuple[str, str, bool],
     ) -> None:
         runtime = self._runtime_factory()
+        executable_path, profile_directory, headless = identity
         runtime.start(
             BrowserLaunchRequest(
-                executable_path=Path(command.executable_path),
-                profile_directory=Path(command.profile_directory),
-                headless=command.headless,
+                executable_path=Path(executable_path),
+                profile_directory=Path(profile_directory),
+                headless=headless,
             )
         )
         try:
@@ -340,14 +371,24 @@ def read_platform_command(
             raise ValueError
         decoded = decode_bounded_json_object(source[:-1], maximum_bytes=MAX_PLATFORM_COMMAND_BYTES)
         command = PlatformCommand.model_validate(decoded)
-        authenticator.verify_command(
-            command_id=str(command.command_id),
-            command_type=command.command_type,
-            executable_path=command.executable_path,
-            profile_directory=command.profile_directory,
-            headless=command.headless,
-            presented_proof=command.authentication_proof,
-        )
+        if command.command_type == "douyin.logout.complete":
+            authenticator.verify_session_command(
+                command_id=str(command.command_id),
+                command_type=command.command_type,
+                presented_proof=command.authentication_proof,
+            )
+        else:
+            assert command.executable_path is not None
+            assert command.profile_directory is not None
+            assert command.headless is not None
+            authenticator.verify_command(
+                command_id=str(command.command_id),
+                command_type=command.command_type,
+                executable_path=command.executable_path,
+                profile_directory=command.profile_directory,
+                headless=command.headless,
+                presented_proof=command.authentication_proof,
+            )
         return command
     except (
         AttributeError,
@@ -380,7 +421,11 @@ def write_platform_command_result(
                 "authenticationProof": proof,
                 "commandId": command_id,
                 "event": "platform.command.completed",
-                "flowVersion": DOUYIN_QR_LOGIN_FLOW_VERSION,
+                "flowVersion": (
+                    "douyin.session-control.v1"
+                    if state == "logged_out"
+                    else DOUYIN_QR_LOGIN_FLOW_VERSION
+                ),
                 "platform": "douyin",
                 "protocolVersion": EXECUTOR_PROTOCOL_VERSION,
                 "state": state,

@@ -90,6 +90,7 @@ pub enum LocalExecutorEvent {
 pub enum LocalPlatformCommand {
     OpenDouyinLogin,
     RecheckDouyinLogin,
+    CompleteDouyinLogout,
 }
 
 impl LocalPlatformCommand {
@@ -97,6 +98,7 @@ impl LocalPlatformCommand {
         match self {
             Self::OpenDouyinLogin => "douyin.login.open",
             Self::RecheckDouyinLogin => "douyin.login.recheck",
+            Self::CompleteDouyinLogout => "douyin.logout.complete",
         }
     }
 }
@@ -124,6 +126,15 @@ struct LocalPlatformCommandDocument<'a> {
     executable_path: &'a Path,
     headless: bool,
     profile_directory: &'a Path,
+    protocol_version: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalSessionCommandDocument<'a> {
+    authentication_proof: &'a str,
+    command_id: &'a str,
+    command_type: &'static str,
     protocol_version: &'static str,
 }
 
@@ -276,9 +287,44 @@ impl LocalSessionToken {
             .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())
     }
 
+    pub fn write_session_command(
+        &self,
+        writer: &mut impl Write,
+        command_id: &str,
+        command: LocalPlatformCommand,
+    ) -> Result<(), ExecutorBootstrapError> {
+        require_uuid_v4(command_id)?;
+        if command != LocalPlatformCommand::CompleteDouyinLogout {
+            return Err(ExecutorBootstrapError::bootstrap_rejected());
+        }
+        let proof = self.command_proof(
+            COMMAND_AUTHENTICATION_DOMAIN,
+            &[command_id, command.as_str(), EXECUTOR_PROTOCOL_VERSION],
+        )?;
+        let document = LocalSessionCommandDocument {
+            authentication_proof: &proof,
+            command_id,
+            command_type: command.as_str(),
+            protocol_version: EXECUTOR_PROTOCOL_VERSION,
+        };
+        let mut serialized = Zeroizing::new(
+            serde_json::to_vec(&document)
+                .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
+        );
+        serialized.push(b'\n');
+        if serialized.len() > MAX_PLATFORM_COMMAND_BYTES {
+            return Err(ExecutorBootstrapError::bootstrap_rejected());
+        }
+        writer
+            .write_all(&serialized)
+            .and_then(|()| writer.flush())
+            .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())
+    }
+
     pub fn parse_platform_command_result(
         &self,
         expected_command_id: &str,
+        expected_command: LocalPlatformCommand,
         source: &str,
     ) -> Result<LocalPlatformCommandResult, ExecutorBootstrapError> {
         require_uuid_v4(expected_command_id)?;
@@ -287,12 +333,24 @@ impl LocalSessionToken {
         }
         let document: LocalPlatformCommandResultDocument = serde_json::from_str(source)
             .map_err(|_| ExecutorBootstrapError::authentication_rejected())?;
+        let expected_flow_version = match expected_command {
+            LocalPlatformCommand::CompleteDouyinLogout => "douyin.session-control.v1",
+            LocalPlatformCommand::OpenDouyinLogin | LocalPlatformCommand::RecheckDouyinLogin => {
+                "douyin.qr-login.v2"
+            }
+        };
+        let valid_state = match expected_command {
+            LocalPlatformCommand::CompleteDouyinLogout => document.state == "logged_out",
+            LocalPlatformCommand::OpenDouyinLogin | LocalPlatformCommand::RecheckDouyinLogin => {
+                valid_platform_command_state(&document.state)
+            }
+        };
         if document.command_id != expected_command_id
             || document.event != "platform.command.completed"
-            || document.flow_version != "douyin.qr-login.v2"
+            || document.flow_version != expected_flow_version
             || document.platform != "douyin"
             || document.protocol_version != EXECUTOR_PROTOCOL_VERSION
-            || !valid_platform_command_state(&document.state)
+            || !valid_state
         {
             return Err(ExecutorBootstrapError::authentication_rejected());
         }
@@ -565,10 +623,26 @@ mod tests {
         let result = token
             .parse_platform_command_result(
                 "123e4567-e89b-42d3-a456-426614174005",
+                LocalPlatformCommand::OpenDouyinLogin,
                 r#"{"authenticationProof":"atlcp1.RSBSCseDm8EcwHuenH2QWdQOMjD6L5X1J_mwPqoqd_s","commandId":"123e4567-e89b-42d3-a456-426614174005","event":"platform.command.completed","flowVersion":"douyin.qr-login.v2","platform":"douyin","protocolVersion":"1.0","state":"awaiting_scan"}"#,
             )
             .expect("valid platform command result");
         assert_eq!(result.state(), "awaiting_scan");
+
+        let mut logout = Vec::new();
+        token
+            .write_session_command(
+                &mut logout,
+                "123e4567-e89b-42d3-a456-426614174005",
+                LocalPlatformCommand::CompleteDouyinLogout,
+            )
+            .expect("valid logout completion command");
+        let command: serde_json::Value =
+            serde_json::from_slice(&logout).expect("logout command JSON");
+        assert_eq!(
+            command["authenticationProof"],
+            "atlcp1._NWhd5jlSI3elRsNVLNm7d-CEDz4A08bB4gIL2USR64"
+        );
     }
 
     #[test]

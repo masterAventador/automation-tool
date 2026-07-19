@@ -43,6 +43,15 @@ from automation_tool.control_plane.application.executor_connections import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorConnectionService,
 )
+from automation_tool.control_plane.application.platform_session_health import (
+    PendingPlatformSessionHealth,
+    PlatformSessionHealthConvergenceResult,
+    PlatformSessionHealthProjection,
+    PlatformSessionHealthRejected,
+    PlatformSessionHealthService,
+    PlatformSessionHealthUnavailable,
+    PlatformSessionLogoutGate,
+)
 from automation_tool.control_plane.application.task_command_delivery import (
     PendingTaskCommand,
     TaskCommandDeliveryRejected,
@@ -66,7 +75,7 @@ from automation_tool.control_plane.domain import (
     TaskSnapshotProjection,
     TaskStatus,
 )
-from automation_tool.protocol import TaskCommandResultEnvelope
+from automation_tool.protocol import PlatformSessionState, TaskCommandResultEnvelope
 
 NOW = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 INSTALLATION_ID = UUID("123e4567-e89b-42d3-a456-426614174003")
@@ -214,6 +223,46 @@ class ContractEventRepository:
         )
 
 
+class ContractPlatformSessionRepository:
+    def __init__(self) -> None:
+        self.pending: list[PendingPlatformSessionHealth] = []
+        self.failure: Exception | None = None
+
+    async def converge(
+        self,
+        pending: PendingPlatformSessionHealth,
+    ) -> PlatformSessionHealthConvergenceResult:
+        if self.failure is not None:
+            raise self.failure
+        self.pending.append(pending)
+        return PlatformSessionHealthConvergenceResult(
+            projection=PlatformSessionHealthProjection(
+                installation_id=pending.installation_id,
+                platform=pending.platform,
+                state=pending.state,
+                session_revision=pending.session_revision,
+                observed_at=pending.observed_at,
+                updated_at=pending.received_at,
+            ),
+            duplicate=False,
+        )
+
+    async def get(
+        self,
+        installation_id: InstallationId,
+        platform: str,
+    ) -> PlatformSessionHealthProjection | None:
+        return None
+
+    async def begin_logout(
+        self,
+        installation_id: InstallationId,
+        platform: str,
+        blocked_at: datetime,
+    ) -> PlatformSessionLogoutGate:
+        raise AssertionError("not used")
+
+
 @dataclass
 class SwitchableSessionRepository:
     expected: ParsedDeviceSession
@@ -330,6 +379,21 @@ def app_with_event_service() -> tuple[
     return app, sessions, token, repository
 
 
+def app_with_platform_session_service() -> tuple[
+    FastAPI,
+    SwitchableSessionRepository,
+    str,
+    ContractPlatformSessionRepository,
+]:
+    app, sessions, token = app_with_live_session()
+    repository = ContractPlatformSessionRepository()
+    app.state.platform_session_health_service = PlatformSessionHealthService(
+        repository=repository,
+        clock=FixedClock(),
+    )
+    return app, sessions, token, repository
+
+
 def hello(
     *,
     installation_id: str = str(INSTALLATION_ID),
@@ -423,6 +487,30 @@ def task_event(
             "payload": {},
             "task_id": "123e4567-e89b-42d3-a456-426614174005",
             "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
+        },
+        separators=(",", ":"),
+    )
+
+
+def platform_session_health() -> str:
+    return json.dumps(
+        {
+            "protocol_version": "1.0",
+            "message_id": "623e4567-e89b-42d3-a456-426614174001",
+            "message_type": "platform.session_health",
+            "sent_at": "2026-07-18T12:00:00Z",
+            "deadline_at": "2026-07-18T12:00:30Z",
+            "installation_id": str(INSTALLATION_ID),
+            "executor_id": EXECUTOR_ID,
+            "correlation_id": "623e4567-e89b-42d3-a456-426614174002",
+            "idempotency_key": "platform:douyin:session:1:1",
+            "sequence": 2,
+            "payload": {
+                "platform": "douyin",
+                "state": PlatformSessionState.MISSING.value,
+                "session_revision": 1,
+                "observed_at": "2026-07-18T12:00:00Z",
+            },
         },
         separators=(",", ":"),
     )
@@ -541,6 +629,110 @@ def test_task_event_uses_the_wired_convergence_service_and_keeps_connection_open
 
     assert len(repository.pending) == 1
     assert repository.pending[0].message.message_type == "task.started"
+
+
+def test_platform_session_health_uses_wired_service_and_keeps_connection_open() -> None:
+    app, _, token, repository = app_with_platform_session_service()
+    registry = app.state.executor_connection_registry
+
+    with (
+        TestClient(app) as client,
+        client.websocket_connect(
+            "/api/v1/executors/connect",
+            headers={"authorization": f"Bearer {token}"},
+            subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+        ) as websocket,
+    ):
+        websocket.send_text(hello())
+        websocket.send_text(platform_session_health())
+        websocket.send_text(heartbeat(sequence=3))
+        wait_for_online(
+            client,
+            registry,
+            lambda value: value is not None and value.last_sequence == 3,
+        )
+
+    assert len(repository.pending) == 1
+    assert repository.pending[0].state is PlatformSessionState.MISSING
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    (
+        (PlatformSessionHealthRejected(), EXECUTOR_CLOSE_PROTOCOL_REJECTED),
+        (PlatformSessionHealthUnavailable(), EXECUTOR_CLOSE_INTERNAL_ERROR),
+    ),
+)
+def test_platform_session_health_failures_close_with_safe_reason(
+    failure: Exception,
+    expected_code: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token, repository = app_with_platform_session_service()
+    repository.failure = failure
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(platform_session_health())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+    assert "private" not in captured.value.reason
+    assert "private" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("health_service", "expected_code"),
+    ((None, EXECUTOR_CLOSE_PROTOCOL_REJECTED), (object(), EXECUTOR_CLOSE_INTERNAL_ERROR)),
+)
+def test_platform_session_health_requires_a_valid_wired_service(
+    health_service: object,
+    expected_code: int,
+) -> None:
+    app, _, token = app_with_live_session()
+    app.state.platform_session_health_service = health_service
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(platform_session_health())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+
+
+def test_unexpected_platform_session_health_failure_is_internal_and_safe(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token, _ = app_with_platform_session_service()
+
+    async def fail(*_values: object, **_kwargs: object) -> None:
+        raise RuntimeError("private unexpected convergence failure")
+
+    monkeypatch.setattr(PlatformSessionHealthService, "receive", fail)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(platform_session_health())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == EXECUTOR_CLOSE_INTERNAL_ERROR
+    assert "private" not in captured.value.reason
+    assert "private unexpected convergence failure" not in caplog.text
 
 
 @pytest.mark.parametrize(

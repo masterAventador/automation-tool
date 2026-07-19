@@ -20,6 +20,7 @@ _COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-command.v1\0"
 _COMMAND_RESULT_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-result.v1\0"
 _COMMAND_PROOF_PREFIX = "atlcp1."
 _ALLOWED_COMMANDS = frozenset(("douyin.login.open", "douyin.login.recheck"))
+_ALLOWED_SESSION_COMMANDS = frozenset(("douyin.logout.complete",))
 _ALLOWED_COMMAND_RESULTS = frozenset(
     (
         "login_required",
@@ -29,6 +30,7 @@ _ALLOWED_COMMAND_RESULTS = frozenset(
         "healthy",
         "handoff_required",
         "unknown",
+        "logged_out",
     )
 )
 
@@ -119,6 +121,29 @@ class LocalSessionAuthenticator:
             executable_path=executable_path,
             profile_directory=profile_directory,
             headless=headless,
+        )
+        if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
+            raise LocalSessionAuthenticationRejected
+
+    def proof_for_session_command(self, *, command_id: str, command_type: str) -> str:
+        _require_uuid_v4(command_id)
+        if type(command_type) is not str or command_type not in _ALLOWED_SESSION_COMMANDS:
+            raise LocalSessionAuthenticationRejected
+        return self._proof(
+            _COMMAND_AUTHENTICATION_DOMAIN,
+            (command_id, command_type, EXECUTOR_PROTOCOL_VERSION),
+        )
+
+    def verify_session_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        presented_proof: str,
+    ) -> None:
+        expected = self.proof_for_session_command(
+            command_id=command_id,
+            command_type=command_type,
         )
         if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
             raise LocalSessionAuthenticationRejected

@@ -328,7 +328,7 @@ B5-09 的 `executor/rpa/douyin/session.py` 是首个正式页面对象边界。�
 
 B5-10 的 `executor/rpa/douyin/login.py` 是 detector 的窄工作流组合，不是第二 BrowserRuntime。它创建一个 Runtime-owned 专用窗口，固定打开 `/user/self`，以最多 10 秒的 Playwright 页面事实等待吸收异步二维码/用户资料加载，再由无参数 `recheck()` 投影扫码、手机确认、过期、健康、人工接管和未知状态。B5-11 将契约升级到 `douyin.qr-login.v2`，Session `risk` 只能成为 `handoff_required/risk_challenge`；生产模块不读取跨源挑战内部内容，也没有点击、填写、拖拽、识别或绕过方法。调用方没有 `QrScanned`、`Authenticated` 或任意页面状态注入面；冲突、等待/页面失败和未知 DOM 保持熔断，人工处理后只有页面重新成为 `healthy` 才恢复。测试 live probe 仅输出固定状态变化，二维码、验证码、Page、Profile 路径和账号均不输出；B5-13 组合 App 原入口时必须复用该对象，不能把选择器迁到 WebView。
 
-B5-13 的服务端查询落在 `control_plane/api/platform_sessions.py`、既有 application service 和 PostgreSQL repository，只返回 current Installation 的最小公开投影。桌面页面落在 `features/platform-sessions/`，Tauri 适配器落在 `platform/tauri/platform-session-gateway.ts`；三个方法分别映射固定查询、打开处理和重新检查 Command，不提供 URL、路径、Header 或任意 invoke。Rust `executor_bootstrap.rs`/`executor_manager.rs` 在同一个已运行 Executor stdin/stdout 上发送和验证 `atlcp1` 本机命令，`executor_platform.rs` 只从 AppData 解析 current Profile、owned lease 与重新受信的浏览器。Python `executor/platform_commands.py` 在线程内复用 `DouyinQrLoginFlow`，健康消息仍由 `runtime.py` 经正式 WebSocket 发送。`scripts/run_b5_13_acceptance.py` 以唯一隐藏 App、隔离 Control Plane/PostgreSQL/signed package 和无头系统浏览器验收整个链路并审计零残留；测试专用 headless 与动态 origin 不进入生产构建。
+B5-13/B5-14 的服务端查询和 logout prepare 落在 `control_plane/api/platform_sessions.py`、同一 application service 和 PostgreSQL repository，只返回 current Installation 的最小公开投影或 blocked revision；`platform_session_gates` 是新 Task/offer 的持久熔断事实。桌面页面落在 `features/platform-sessions/`，Tauri 适配器落在 `platform/tauri/platform-session-gateway.ts`；四个方法分别映射固定查询、打开处理、重新检查和安全注销 Command，不提供 URL、路径、Header、revision 或任意 invoke。Rust `executor_bootstrap.rs`/`executor_manager.rs` 在同一个 Executor stdin/stdout 上发送和验证 `atlcp1` 本机命令，`executor_platform.rs` 只从 AppData 解析 current Profile、owned lease 与重新受信的浏览器；注销由 `lib.rs` 固定编排 prepare→stop→定向删除→restart→path-free complete→权威查询。Python `executor/platform_commands.py` 在线程内复用 `DouyinQrLoginFlow` 或记录显式退出 epoch，健康消息仍由 `runtime.py` 经正式 WebSocket 发送。`scripts/run_b5_13_acceptance.py` 以唯一隐藏 App、隔离 Control Plane/PostgreSQL/signed package 和无头系统浏览器验收状态/注销链路并审计只删目标 Profile、保留 SQLite、阻断新任务且零残留；测试专用 headless 与动态 origin 不进入生产构建。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 
@@ -660,16 +660,16 @@ Tauri app_data_dir/
 
 #### 10.4.4 安全注销时序
 
-旧 `SocialOperationsRuntime::logout_account` 不可提取：它先在内存改状态，却会在检查 `stop_result` 前立即计算 Cookie/Profile 删除结果，因此即使停止执行失败也可能已经删除 Profile；旧测试也没有覆盖该故障。`BrowserProfile::remove` 的路径检查与 `remove_dir_all` 之间同样存在替换窗口。`B5-14` 必须按以下持久、可恢复时序重写：
+旧 `SocialOperationsRuntime::logout_account` 不可提取：它先在内存改状态，却会在检查 `stop_result` 前立即计算 Cookie/Profile 删除结果，因此即使停止执行失败也可能已经删除 Profile；旧测试也没有覆盖该故障。`BrowserProfile::remove` 的路径检查与 `remove_dir_all` 之间同样存在替换窗口。B5-14 已按以下持久、可恢复时序重写：
 
-1. 以 Profile ID 和期望 `session_revision` 原子打开熔断，在 Control Plane/本机账本阻止该 Profile 的新 Task 与新 command；
-2. 若关联动作已派发，先协作停止并等待安全 checkpoint；无法确认最终副作用时记录 `OUTCOME_UNCERTAIN`，不继续当作普通注销成功；
-3. 关闭该 Profile 的 headed persistent context 和完整浏览器进程树，确认退出后释放 `B5-06` 单实例锁；停止失败时保持熔断和数据，不删除目录；
-4. 从 Rust 内部固定根重新解析 canonical `profile_id`，拒绝 symlink、reparse point、非目录、identity 变化和仍被占用的目录；
-5. 只删除目标 `douyin/<profile_id>`，保留平台父目录、其他 Profile、Executor SQLite、设备凭据、Artifact 与设置；不存在时幂等成功；
-6. 持久递增 `session_revision` 并投影 `missing`。删除或上报失败保持“已熔断/待重试”诊断，不能伪报已注销，也不能恢复新任务。
+1. 以当前 Installation 和 `douyin` 原子创建或复用服务端 logout gate，revision 为当前投影 +1；门闩立即阻止新 Task 与新 offer；
+2. 通过唯一 Manager 紧停 Executor，先关闭 flow、headed persistent context 和完整浏览器进程树并释放 `B5-06` lease；停止失败时保持门闩和 Profile，不进入删除；
+3. 从 Rust 内部持有的平台/current marker/Profile 稳定句柄解析目标，拒绝 symlink、reparse point、非目录、identity 变化、活跃锁和原目录+tombstone 冲突；
+4. 将唯一目标原子改名为 `.removing-<profile_id>`、重新打开复验同一 identity 后删除；重试可续删 tombstone，不存在时幂等成功；
+5. 只清除 current marker 和目标 Profile，保留平台父目录、其他 Profile、Executor SQLite、设备凭据、Artifact 与设置；
+6. 重启 signed Executor 并发送不含路径/headless 的 `douyin.logout.complete`，持久递增本机 `session_revision`、经正式 WebSocket 投影 `missing`，再从服务端查询确认。删除或上报失败保持持久门闩，不能伪报已注销；只有更高 revision 的真实 `healthy` 才恢复新任务。
 
-注销的原始入口已经由 `B5-13` 平台状态页预留，但按钮保持禁用且明确标注下一任务启用；`B5-14` 必须从该真实页面激活固定 Gateway/Tauri Command，经正式 Executor、Profile 锁和 Control Plane 门禁完成。直接调用目录函数、只验证 Mock 页面或在完整时序完成前返回成功都不算验收。
+注销原始入口已由 B5-14 从真实平台状态页启用：确认后依次经过固定 Gateway/Tauri Command、Control Plane 持久门闩、唯一 Executor Manager 停机、Profile 锁释放、稳定句柄定向删除、path-free Executor 命令和权威 `missing` 查询。隐藏 App 验收还从生产 Task 创建入口证明门闩确实拒绝新任务，并检查 current Profile/删除 tombstone 不存在而 Executor SQLite 保留；没有用直接目录函数、Mock 页面或直接 HTTP 冒充通过。
 
 #### 10.4.5 强制删除的账号、RBAC 与 Cookie 边界
 

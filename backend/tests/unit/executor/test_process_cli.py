@@ -11,6 +11,10 @@ import pytest
 
 from automation_tool.executor import cli
 from automation_tool.executor.authentication import LocalSessionAuthenticationRejected
+from automation_tool.executor.platform_commands import (
+    PlatformCommandRejected,
+    PlatformCommandWorker,
+)
 from automation_tool.executor.runtime import LocalExecutorProcess
 
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
@@ -93,6 +97,36 @@ def test_cli_returns_success_after_the_runtime_stops(
     )
 
     assert status == 0
+
+
+def test_cli_stops_and_returns_fixed_error_when_platform_worker_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fail_worker(_self: PlatformCommandWorker, _stop: object) -> None:
+        raise PlatformCommandRejected
+
+    def wait_for_worker(_self: LocalExecutorProcess, stop: object) -> None:
+        assert hasattr(stop, "wait")
+        assert stop.wait(timeout=1) is True
+
+    monkeypatch.setattr(PlatformCommandWorker, "run", fail_worker)
+    monkeypatch.setattr(LocalExecutorProcess, "run", wait_for_worker)
+    error = StringIO()
+
+    status = cli.run_executor(
+        BytesIO(
+            source(
+                websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
+                state_directory=tmp_path / "executor-state",
+            )
+        ),
+        StringIO(),
+        error,
+    )
+
+    assert status == 1
+    assert error.getvalue() == "Local Executor process is unavailable\n"
 
 
 def test_cli_collapses_local_authenticator_failure_to_the_fixed_process_error(

@@ -115,6 +115,7 @@ dependencies = [
  "tauri-plugin-wdio",
  "tauri-plugin-wdio-webdriver",
  "time",
+ "tokio",
  "uuid",
  "walkdir",
  "windows-sys 0.61.2",

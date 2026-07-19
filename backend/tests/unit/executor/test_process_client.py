@@ -272,6 +272,30 @@ def test_process_drains_local_platform_health_queue_over_the_formal_socket(
     assert not thread.is_alive()
 
 
+def test_local_platform_health_queue_rejects_invalid_messages_and_socket_failures(
+    tmp_path: Path,
+) -> None:
+    class Socket:
+        def __init__(self, *, fail: bool = False) -> None:
+            self.fail = fail
+
+        def send(self, source: str) -> None:
+            if self.fail:
+                raise OSError("private socket failure")
+
+    invalid: queue.Queue[object] = queue.Queue()
+    invalid.put(object())
+    process, _ = process_for(9, tmp_path / "invalid-local-outbox", local_outbox=invalid)
+    with pytest.raises(ExecutorProcessRejected):
+        process._send_local_outbox(cast(object, Socket()))  # type: ignore[arg-type]
+
+    failing: queue.Queue[object] = queue.Queue()
+    failing.put(session_health())
+    process, _ = process_for(9, tmp_path / "failing-local-outbox", local_outbox=failing)
+    with pytest.raises(ExecutorProcessRejected):
+        process._send_local_outbox(cast(object, Socket(fail=True)))  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("server_message", ("{}", b"private-binary-command"))
 def test_process_rejects_invalid_post_hello_application_frame(
     server_message: str | bytes,
