@@ -8,16 +8,13 @@ async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
 }
 
-test("D6-06 candidate model is stable, minimal, versioned, and not wired early", async () => {
-  const [candidate, protocol, wire, scroll, pageObject, native] = await Promise.all([
+test("D6-06 candidate model stays stable, minimal, versioned, and not wired early", async () => {
+  const [candidate, protocol, wire, scroll, native] = await Promise.all([
     readRepositoryFile("backend/src/automation_tool/protocol/douyin_candidate.py"),
     readRepositoryFile("backend/src/automation_tool/protocol/__init__.py"),
     readRepositoryFile("contracts/protocol/executor-v1.schema.json"),
     readRepositoryFile(
       "backend/src/automation_tool/executor/rpa/douyin/bounded_scroll.py",
-    ),
-    readRepositoryFile(
-      "backend/src/automation_tool/executor/rpa/douyin/search_page.py",
     ),
     readRepositoryFile("frontend/src-tauri/src/lib.rs"),
   ]);
@@ -38,7 +35,6 @@ test("D6-06 candidate model is stable, minimal, versioned, and not wired early",
   );
   assert.doesNotMatch(candidate, /playwright|control_plane|sqlalchemy|database/iu);
   assert.doesNotMatch(scroll, /DouyinCandidate|display_name|public_handle|platform_target_id/u);
-  assert.doesNotMatch(pageObject, /display_name|public_handle|platform_target_id/u);
   assert.doesNotMatch(wire, /DouyinCandidate|dedupe_key|platform_target_id/u);
   assert.doesNotMatch(native, /tauri::command[\s\S]{0,300}DouyinCandidate/u);
 });

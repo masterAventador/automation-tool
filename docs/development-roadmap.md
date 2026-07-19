@@ -286,7 +286,7 @@
 | D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | 🟩 完成 |
 | D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | 🟩 完成 |
 | D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | 🟩 完成 |
-| D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | ⬜ 未开始 |
+| D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | 🟩 完成 |
 | D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | ⬜ 未开始 |
 | D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | ⬜ 未开始 |
 | D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | ⬜ 未开始 |
@@ -1959,10 +1959,22 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 `D6-07`，只从受控结果项字段构造 Candidate，裁掉非必要个人信息、页面原文和绝对链接/凭据
 
+### D6-07 目标隐私裁剪
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；Python 目标用例准确在收集期失败于 `candidate_extraction.py` 不存在，跨边界 Node 契约也因同一生产模块缺失失败，随后才实现页面字段裁剪与执行器
+- 单次提取：新增 Executor-only `douyin.candidate-extraction.v1`，只接受 Runtime-owned `BrowserWindow`、`1..100` 真整数上限和 `1..2^53-1` page revision，同一对象只运行一次。结果封闭为 completed/blocked/unknown 与固定 evidence，repr/异常不回显候选、源链接或 DOM
+- Page Object 边界：结果项、作者和作者名 selector 只存在于 D6-02 `search_page.py`；页面层只读取受控作者节点的 `data-user-id`、`href`、可选 `data-user-handle` 与专用名称节点。相对或官方 HTTPS 作者 href 在本机立即缩减为 path 中的规范目标 ID 并丢弃 query；跨域、scheme-relative、userinfo、fragment、多层路径、超限/控制字符和 data ID/href 冲突均拒绝
+- 隐私与一致性：输出只能是 D6-06 `DouyinCandidate` tuple，没有自由字典、绝对链接、query、页面正文、HTML、头像、简介或联系方式。任一字段不规范、节点消失、浏览器读取异常或读取期间页面版本/入口漂移都会丢弃整个快照，不返回部分结果；空结果是合法最小快照。该层不读取 Cookie/storage，不访问网络客户端/Control Plane，不持久化，也未提前修改 Executor v1 wire 或 Tauri IPC
+- 原调用方验收：生产 `BrowserRuntime` 以一次性 `0700` Profile、`headless=True` 系统 Chrome，在同一窗口先从 D6-04 公开入口真实完成搜索，再调用 D6-07 公开提取器得到两条 Candidate；隔离官方 origin 页面中故意放入的 token、头像 URL、联系方式、正文和完整作者链接均未进入结果。验收没有直调 Locator、没有启动可见 App、没有读取默认 Profile，结束后 Runtime/Chrome 进程树关闭；真实抖音 DOM 仍由 D6-16 承接，不把隔离页冒充线上证据
+- 测试：D6-02/D6-07 聚焦 71 项 Python 用例，383 条语句/112 个分支覆盖率 100%；Backend 全量 `1206 passed, 4 skipped in 86.31s`，7251 条语句/1496 个分支覆盖率 100%。230 个 Python 文件格式、Ruff、严格 Mypy 214 个源码文件、uv lock、OpenAPI 和 Executor Schema 漂移全绿。Frontend 78 项 Node 契约、145 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试及三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；D6-06 历史契约只移除“Page Object 尚未解析 Candidate”的阶段性断言，滚动层无解析和 wire/IPC 未接入门禁保持不变
+- 后续：进入 `D6-08`，只对本任务已裁剪 Candidate 做本任务去重、历史窗口去重和黑名单原因，不重新读取页面或扩展个人信息
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-07`：实现目标隐私裁剪，只保留 Candidate 必需字段并拒绝页面原文、绝对链接与凭据；
+1. `D6-08`：实现黑名单与去重，覆盖本任务重复、历史窗口重复和固定黑名单原因；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
 from typing import Protocol, cast
+from urllib.parse import urlsplit
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -16,7 +17,15 @@ from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageVersion,
     DouyinPageVersionModel,
 )
-from automation_tool.protocol import MAX_TASK_TARGET_LIMIT
+from automation_tool.protocol import (
+    MAX_TASK_TARGET_LIMIT,
+    DouyinCandidate,
+    DouyinCandidateRejected,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+)
+from automation_tool.protocol.limits import MAX_CROSS_RUNTIME_SEQUENCE
+from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 DOUYIN_SEARCH_PAGE_SELECTOR_VERSION = "douyin.search-page.v1"
 
@@ -40,6 +49,8 @@ _RESULT_ITEM_SELECTORS = (
     '[data-e2e="search-result-item"]',
     '[data-e2e="feed-item"]',
 )
+_CANDIDATE_AUTHOR_SELECTORS = ('[data-e2e="search-result-author"]',)
+_CANDIDATE_NAME_SELECTORS = ('[data-e2e="search-result-author-name"]',)
 _LOGIN_DIALOG_SELECTORS = (
     '[role="dialog"]:has-text("扫码登录")',
     '[data-e2e="login-modal"]',
@@ -50,6 +61,10 @@ _BLOCKING_DIALOG_SELECTORS = (
     '[data-e2e="modal"]',
 )
 _MAX_WAIT_MILLISECONDS = 60_000
+_CANDIDATE_FIELD_TIMEOUT_MILLISECONDS = 3_000
+_MAX_CANDIDATE_LINK_CHARACTERS = 2_048
+_DOUYIN_ORIGIN_HOST = "www.douyin.com"
+_DOUYIN_USER_PATH_PREFIX = "/user/"
 
 
 class DouyinSearchPageRejected(RuntimeError):
@@ -57,6 +72,13 @@ class DouyinSearchPageRejected(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("douyin search page is unavailable")
+
+
+class DouyinSearchPagePrivacyRejected(RuntimeError):
+    """A result item contains ambiguous or non-minimal candidate facts."""
+
+    def __init__(self) -> None:
+        super().__init__("douyin candidate page facts are unavailable")
 
 
 class DouyinSearchPageState(StrEnum):
@@ -189,6 +211,14 @@ class _Locator(Protocol):
 
     def count(self) -> int: ...
 
+    def nth(self, index: int) -> _Locator: ...
+
+    def locator(self, selector: str) -> _Locator: ...
+
+    def get_attribute(self, name: str, *, timeout: float) -> str | None: ...
+
+    def inner_text(self, *, timeout: float) -> str: ...
+
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
 
@@ -313,6 +343,39 @@ class DouyinSearchPage:
             raise DouyinSearchPageRejected from None
         return 0
 
+    def candidate_items(
+        self,
+        *,
+        maximum: int,
+        page_revision: int,
+    ) -> tuple[DouyinCandidate, ...]:
+        """Read only controlled author facts and discard all source links locally."""
+
+        if (
+            type(maximum) is not int
+            or not 1 <= maximum <= MAX_TASK_TARGET_LIMIT
+            or type(page_revision) is not int
+            or not 1 <= page_revision <= MAX_CROSS_RUNTIME_SEQUENCE
+        ):
+            raise DouyinSearchPageRejected
+        self._require_state(DouyinSearchPageState.RESULTS_READY)
+        locator, count = self._result_items()
+        candidates: list[DouyinCandidate] = []
+        for index in range(min(count, maximum)):
+            try:
+                candidate_item = locator.nth(index)
+                if not candidate_item.is_visible():
+                    raise DouyinSearchPagePrivacyRejected
+                candidates.append(_candidate_from_item(candidate_item, page_revision=page_revision))
+            except (DouyinSearchPagePrivacyRejected, DouyinSearchPageRejected):
+                raise
+            except DouyinCandidateRejected:
+                raise DouyinSearchPagePrivacyRejected from None
+            except Exception:
+                raise DouyinSearchPageRejected from None
+        self._require_state(DouyinSearchPageState.RESULTS_READY)
+        return tuple(candidates)
+
     def login_dialog(self) -> _Locator:
         observation = self.observe()
         if observation.evidence is not DouyinSearchPageEvidence.LOGIN_DIALOG:
@@ -361,6 +424,25 @@ class DouyinSearchPage:
         if locator is None:
             raise DouyinSearchPageRejected
         return locator
+
+    def _result_items(self) -> tuple[_Locator, int]:
+        try:
+            primary = self._page.locator(_RESULT_ITEM_SELECTORS[0])
+            primary_count = primary.count()
+            if type(primary_count) is not int or primary_count < 0:
+                raise ValueError
+            if primary_count:
+                return primary, primary_count
+            for selector in _RESULT_ITEM_SELECTORS[1:]:
+                locator = self._page.locator(selector)
+                count = locator.count()
+                if type(count) is not int or count < 0:
+                    raise ValueError
+                if count:
+                    return locator, count
+            return primary, 0
+        except Exception:
+            raise DouyinSearchPageRejected from None
 
     def _wait_for_state(
         self,
@@ -421,6 +503,97 @@ def _visible_locator(page: _Page, selectors: tuple[str, ...]) -> _Locator | None
     return None
 
 
+def _candidate_from_item(item: _Locator, *, page_revision: int) -> DouyinCandidate:
+    author = _required_nested_locator(item, _CANDIDATE_AUTHOR_SELECTORS)
+    name = _read_required_text(item, _CANDIDATE_NAME_SELECTORS).strip()
+    raw_target_id = _read_optional_attribute(author, "data-user-id")
+    raw_href = _read_optional_attribute(author, "href")
+    href_target_id = None if raw_href is None else _target_id_from_author_href(raw_href)
+    if raw_target_id is None:
+        if href_target_id is None:
+            raise DouyinSearchPagePrivacyRejected
+        target_id = href_target_id
+    else:
+        target_id = raw_target_id
+        if href_target_id is not None and href_target_id != target_id:
+            raise DouyinSearchPagePrivacyRejected
+    raw_handle = _read_optional_attribute(author, "data-user-handle")
+    public_handle = None if raw_handle in {None, ""} else raw_handle
+    return DouyinCandidate(
+        platform_target_id=target_id,
+        summary=DouyinCandidateSummary(
+            display_name=name,
+            public_handle=public_handle,
+        ),
+        source=DouyinCandidateSource.GENERAL_SEARCH_AUTHOR,
+        page_revision=page_revision,
+    )
+
+
+def _required_nested_locator(item: _Locator, selectors: tuple[str, ...]) -> _Locator:
+    try:
+        for selector in selectors:
+            locator = item.locator(selector).first
+            if locator.is_visible():
+                return locator
+    except Exception:
+        raise DouyinSearchPageRejected from None
+    raise DouyinSearchPagePrivacyRejected
+
+
+def _read_required_text(item: _Locator, selectors: tuple[str, ...]) -> str:
+    locator = _required_nested_locator(item, selectors)
+    try:
+        value = locator.inner_text(timeout=_CANDIDATE_FIELD_TIMEOUT_MILLISECONDS)
+    except Exception:
+        raise DouyinSearchPageRejected from None
+    if type(value) is not str:
+        raise DouyinSearchPagePrivacyRejected
+    return value
+
+
+def _read_optional_attribute(locator: _Locator, name: str) -> str | None:
+    try:
+        value = locator.get_attribute(name, timeout=_CANDIDATE_FIELD_TIMEOUT_MILLISECONDS)
+    except Exception:
+        raise DouyinSearchPageRejected from None
+    if value is not None and type(value) is not str:
+        raise DouyinSearchPagePrivacyRejected
+    return value
+
+
+def _target_id_from_author_href(source: str) -> str:
+    if (
+        not source
+        or len(source) > _MAX_CANDIDATE_LINK_CHARACTERS
+        or contains_control_or_bidi(source)
+    ):
+        raise DouyinSearchPagePrivacyRejected
+    try:
+        parsed = urlsplit(source)
+        if parsed.fragment:
+            raise DouyinSearchPagePrivacyRejected
+        if parsed.scheme or parsed.netloc:
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname != _DOUYIN_ORIGIN_HOST
+                or parsed.port not in {None, 443}
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                raise DouyinSearchPagePrivacyRejected
+        elif not source.startswith("/") or source.startswith("//"):
+            raise DouyinSearchPagePrivacyRejected
+    except (TypeError, ValueError):
+        raise DouyinSearchPagePrivacyRejected from None
+    if not parsed.path.startswith(_DOUYIN_USER_PATH_PREFIX):
+        raise DouyinSearchPagePrivacyRejected
+    target_id = parsed.path.removeprefix(_DOUYIN_USER_PATH_PREFIX)
+    if not target_id or "/" in target_id:
+        raise DouyinSearchPagePrivacyRejected
+    return target_id
+
+
 def _can_wait(
     observation: DouyinSearchPageObservation,
     expected: DouyinSearchPageState,
@@ -459,6 +632,7 @@ __all__ = [
     "DouyinSearchPage",
     "DouyinSearchPageEvidence",
     "DouyinSearchPageObservation",
+    "DouyinSearchPagePrivacyRejected",
     "DouyinSearchPageRejected",
     "DouyinSearchPageState",
 ]
