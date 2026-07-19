@@ -300,6 +300,8 @@ D6-04 新增 Executor-only `douyin.search-execution.v1` 单次状态机。输入
 
 D6-05 在同一 Executor 页面边界新增 `douyin.bounded-scroll.v1` 单次控制器。它必须同时拿到 D6-04 成功观察与当前结果页的 D6-02 权威事实，不能仅凭 URL 或调用方布尔值开始。滚动上限固定 20 轮，每轮仅发送一次纵向 800 像素 wheel；Page Object 用版本化结果项 selector 只返回裁剪至 D6-03 `target_limit` 的节点数，控制器在每轮 3 秒总窗口内按 100ms 间隔等待增长。达到目标、一轮无新增或 20 轮持续增长分别形成三个完成 evidence；开始、每轮前、等待循环和增长后均调用无参数取消检查点。取消源异常/非 bool、计数倒退、登录/弹窗、页面/版本漂移与 Playwright 失败均保持熔断，不增加下一轮。该层仍不读取候选字段或正文；D6-06 才定义稳定 Candidate 和累计去重语义。
 
+D6-06 把候选事实定义在公共 `protocol/douyin_candidate.py`，但尚不加入通用 Executor Envelope。`DouyinCandidate` 只持有规范平台目标 ID、`display_name/public_handle` 最小摘要、唯一 `general_search_author` 来源和 I2-10 同范围的 page revision；构造时确定性生成不可由调用方覆盖的去重键。键算法固定为 `SHA-256("automation-tool.douyin.candidate-key.v1\0" + ASCII target id)` 后 Base64URL 无 padding，并加 `atdck1_` 前缀；名称、handle、来源展示或 revision 变化不影响键。所有值不可变且 repr/error 脱敏，模型不提供头像、简介、联系方式、页面原文或 URL 字段；D6-07 负责从页面提取到该模型时的隐私裁剪，D6-08/D6-09 再做集合策略与持久化。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

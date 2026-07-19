@@ -285,7 +285,7 @@
 | D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | 🟩 完成 |
 | D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | 🟩 完成 |
 | D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | 🟩 完成 |
-| D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | ⬜ 未开始 |
+| D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | 🟩 完成 |
 | D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | ⬜ 未开始 |
 | D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | ⬜ 未开始 |
 | D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | ⬜ 未开始 |
@@ -1946,10 +1946,23 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 `D6-06`，在当前有限结果页上建立稳定去重键、最小摘要、来源与 page revision，不把节点计数冒充可持久化 Candidate
 
+### D6-06 Candidate 模型
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；42 项 Backend 目标用例准确失败于公共 Candidate 导出不存在，跨边界 Node 契约同时因 `protocol/douyin_candidate.py` 缺失失败；随后才加入最小模型与公共入口
+- 最小模型：新增不可变 `douyin.candidate.v1`。Candidate 只含规范平台目标 ID、`DouyinCandidateSummary(display_name, public_handle?)`、唯一 MVP 来源 `general_search_author`、page revision 与派生去重键；没有头像、简介、联系方式、页面正文、HTML、绝对/个人链接或任意扩展字典
+- 输入边界：目标 ID 为 `1..128` 位 ASCII 字母数字起始、后续只允许字母数字/点/下划线/连字符；展示名为原样非空 `1..80` Unicode 字符，拒绝首尾空白及共享控制/Bidi/secret/path/inline-data 违规；可选公开号为 `1..64` 位同类规范 ASCII；page revision 复用 I2-10 `1..2^53-1` 真整数范围。字符串枚举、bool/float 冒充、URL/path/query 与伪造对象全部拒绝
+- 稳定去重键：构造器不接受外部 key，而是以固定域 `automation-tool.douyin.candidate-key.v1\0` + 原始规范目标 ID 做 SHA-256，输出 `atdck1_` + 43 位无 padding Base64URL。固定 golden vector 防算法漂移；同一目标跨名称、公开号和 page revision 变化保持同键，不同目标分离。Key 支持精确 parse，非 canonical 大小写/字符/长度拒绝
+- 边界：Candidate/摘要/key 和错误均不回显平台 ID、名称或公开号；模块不依赖 Playwright/RPA、Control Plane、数据库或 Tauri。当前只通过 `automation_tool.protocol` 供后续消费，明确不修改 Executor v1 Schema、不进入 IPC、不持久化；D6-07 才实现页面事实到此模型的隐私裁剪
+- 原调用方验收：本任务产物是纯不可变协议值和确定性 key 算法，没有网络、App、浏览器、数据库或外部副作用；直接通过公开构造器/parse、固定 golden vector、跨 revision 等价与拒绝矩阵验收原调用方式，不启动无意义的隐藏 App 或浏览器空壳
+- 测试：42 项聚焦 Python 用例，75 条语句/10 个分支覆盖率 100%；跨边界 Node 契约验证字段最小化、依赖隔离和未提前入 wire。Backend 全量 `1163 passed, 4 skipped in 86.27s`，7048 条语句/1436 个分支覆盖率 100%；Ruff/格式 227 个文件、严格 Mypy 211 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 77 项 Node 契约、145 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-07`，只从受控结果项字段构造 Candidate，裁掉非必要个人信息、页面原文和绝对链接/凭据
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-06`：建立 Candidate 稳定去重键、最小摘要、来源与 page revision；
+1. `D6-07`：实现目标隐私裁剪，只保留 Candidate 必需字段并拒绝页面原文、绝对链接与凭据；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。

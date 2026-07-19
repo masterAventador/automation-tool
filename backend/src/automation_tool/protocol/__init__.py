@@ -1,5 +1,16 @@
 """Versioned public protocol shared by Control Plane and Local Executor."""
 
+from automation_tool.protocol.douyin_candidate import (
+    DOUYIN_CANDIDATE_VERSION,
+    MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
+    MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS,
+    MAX_DOUYIN_TARGET_ID_CHARACTERS,
+    DouyinCandidate,
+    DouyinCandidateKey,
+    DouyinCandidateRejected,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+)
 from automation_tool.protocol.douyin_search import (
     DOUYIN_SEARCH_INPUT_VERSION,
     MAX_SEARCH_KEYWORD_CHARACTERS,
@@ -41,16 +52,25 @@ from automation_tool.protocol.version import (
 __all__ = [
     "API_VERSION",
     "CURRENT_EXECUTOR_PROTOCOL",
+    "DOUYIN_CANDIDATE_VERSION",
     "DOUYIN_SEARCH_INPUT_VERSION",
     "EXECUTOR_PROTOCOL_VERSION",
     "EXECUTOR_WEBSOCKET_SUBPROTOCOL",
     "MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
+    "MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS",
+    "MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS",
+    "MAX_DOUYIN_TARGET_ID_CHARACTERS",
     "MAX_EXECUTOR_MESSAGE_BYTES",
     "MAX_EXECUTOR_SEQUENCE",
     "MAX_SEARCH_KEYWORD_CHARACTERS",
     "MAX_TASK_TARGET_LIMIT",
     "MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "CorrelationId",
+    "DouyinCandidate",
+    "DouyinCandidateKey",
+    "DouyinCandidateRejected",
+    "DouyinCandidateSource",
+    "DouyinCandidateSummary",
     "DouyinSearchInput",
     "DouyinSearchInputRejected",
     "ExecutorEnvelope",

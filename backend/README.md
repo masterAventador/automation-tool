@@ -114,6 +114,8 @@ D6-04 的 `executor/rpa/douyin/search.py` 是搜索动作的单次执行边界�
 
 D6-05 的 `executor/rpa/douyin/bounded_scroll.py` 只接受 D6-04 成功观察、同一 Runtime-owned 窗口、公共搜索输入和无参数取消探针。它最多执行 20 轮固定 `mouse.wheel(0, 800)`，每轮最多 3 秒、每 100ms 只经 Page Object 复验页面并读取裁剪到 `target_limit` 的结果项数量；达到目标、一轮无新增或轮次上限即封闭完成。取消在开始、滚动前、增长等待期间和增长后检查，异常/非 bool 探针、计数倒退、登录/弹窗、页面漂移或浏览器失败均开路停止。结果项 selector 仍只在 `search_page.py`，滚动模块不读取候选内容、不执行脚本、不点击、不评论/私信、不调用 Control Plane；D6-06 再定义可持久化 Candidate。
 
+D6-06 的 `protocol/douyin_candidate.py` 是 Control Plane 与 Local Executor 后续共同消费的纯 `douyin.candidate.v1` 模型。平台目标 ID 只接受 `1..128` 位规范 ASCII identifier，最小摘要只允许 `1..80` 位安全展示名和可选 `1..64` 位规范公开号；来源当前唯一允许 `general_search_author`，page revision 为 `1..2^53-1` 真整数。去重键以固定域和原始平台目标 ID 做 SHA-256，再编码为 `atdck1_` + 43 位 Base64URL，因此同一目标跨名称/revision 稳定且不同目标分离。模型不可变、异常和对象表示脱敏，不含头像、简介、联系方式、页面正文或 URL；D6-07 继续收紧提取/上传裁剪，D6-09/D6-10 才分别接入数据库和 wire。
+
 B5-11 把 flow 契约升级为 `douyin.qr-login.v2`，当前状态固定为 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/handoff_required/unknown`。B5-09 发现 ByteDance 验证中心外层挑战后只投影 `handoff_required/risk_challenge`，不读取跨源挑战内容，也没有点击、填写、拖拽、验证码识别或绕过路径；同一个可见窗口留给用户处理。无参数 `recheck()` 只有重新观察到 `healthy` 才关闭熔断，挑战仍在、页面未知或登录失效都继续阻止副作用。代码不调用 Cookie/storage-state API，页面、二维码、验证码、Profile 路径和账号信息不进入协议、Tauri IPC 或日志。B5-13 已提供平台状态与重新检查，B5-14 已启用带二次确认的安全注销。
 
 B5-12 的 `executor/rpa/douyin/health.py` 把生产 detector 事实写入 SQLite v2 平台 Session 表，再构造 Executor-scoped `platform.session_health`。首次观察建立 revision 1；倒序观察、较低 revision 和同 epoch 非健康→健康全部拒绝，只有显式恢复/重新登录推进 epoch。Control Plane 在认证 WebSocket 上复验 Installation/Executor scope，PostgreSQL 表只保留 `installation_id/platform/state/session_revision/observed_at/updated_at`；Cookie、Profile、二维码、验证码、页面原文、message/executor ID 均不持久化。
