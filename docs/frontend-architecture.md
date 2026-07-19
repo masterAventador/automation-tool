@@ -248,6 +248,10 @@ Rust 负责：
 
 Executor 连接本机或云端 Control Plane 时使用独立设备通道；React 不持有该通道凭据。
 
+E4-05 已实现 `executor_package.rs` 原生 verifier。信任输入只允许来自 Rust 装配层：32 字节 Ed25519 公钥、非通配的 `semver::VersionReq` 和可选已安装版本；React、Tauri Command、Control Plane、argv、运行时环境变量和远程 URL 都没有设置公钥、版本策略或包路径的接口。当前模块不下载、不安装、不启动进程，E4-07 才从 App 自有 resource/app-data 边界装配固定路径和受信公钥。
+
+验证顺序固定为：拒绝根/祖先 symlink → 有界稳定读取 Manifest/签名 → `verify_strict` 验签 → exact-field 反序列化并逐字节重建 canonical JSON → 绑定 manifest 版本、build ID、当前 OS/架构和平台精确入口 → 执行 App 允许范围与已安装版本防降级 → 拒绝目录 symlink/非普通文件并取得排序后的完整 payload 集合 → 以安全打开的文件句柄逐项复算大小/SHA-256 和目录摘要 → 再枚举一次目录确认验证窗口内没有成员增删。打开文件在读前、读后及按路径重开时核对平台稳定 identity；Unix 使用 `O_NOFOLLOW + dev/inode`，Windows 实现使用 reparse-point 打开约束和 volume/file index。失败只返回固定错误码和 `executor package is rejected`，不反射路径、Manifest 或签名。由于进程尚未接入，验证返回值仅是 Rust 内部的版本、build、入口和资源统计，不暴露给 WebView。
+
 ## 7. 页面与导航
 
 MVP 导航：

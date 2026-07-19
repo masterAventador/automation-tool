@@ -60,6 +60,7 @@
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Executor onedir PoC | `🔍` macOS arm64 冻结实包已启动且未包含 Playwright；Windows 同测试已配置，但 GitHub Hosted Runner 因账户 Billing/Actions spending limit 未启动，待 Windows 环境补验收 |
 | Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS 冻结实包验证 |
+| Rust Executor package verifier | `🔍` macOS arm64 已用当前目标包与 Python 签名 fixture 验证签名、完整目录、平台/架构、SemVer 范围和防降级；Windows 原生代码已进入同一 CI，但 runner 仍受 GitHub Billing 阻塞 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -225,7 +226,7 @@
 | E4-02 | Executor Python 入口 | stdin bootstrap、健康、信号和出站连接最小进程 | E4-01,I2-13 | ✅ 已完成 |
 | E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | 🔍 待验收 |
 | E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ✅ 已完成 |
-| E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | ⬜ 未开始 |
+| E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | 🔍 待验收 |
 | E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ⬜ 未开始 |
 | E4-07 | Rust ExecutorManager | start/status/invoke/stop，单实例和并发线性化 | E4-05,E4-06 | ⬜ 未开始 |
 | E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | ⬜ 未开始 |
@@ -1396,11 +1397,29 @@
 - 门禁：聚焦 25 项达到新模块 138 条语句/32 分支 100%；真实 onedir 聚焦共 19 项通过；Backend 全量 `840 passed in 78.21s`，4516 条语句/870 个分支 100%；Ruff、Mypy 161 文件、uv lock 和 Actionlint 全绿。macOS/Windows Executor CI 矩阵已纳入同一 Manifest 单元、真实 CLI 与冻结实包测试；Windows runner 仍继承 E4-03 的 GitHub Billing 外部阻塞，不冒充通过
 - 密钥、App 与清理：发布签发私钥不进入仓库、argv、env、日志、构建产物、用户 App 或系统钥匙串；App 用户密钥策略未改变，仍只在 Rust `app_data_dir`。测试 fixture 不是秘密。真实构建使用 pytest 临时目录；另行检查目录已删除，无 PyInstaller/Executor/App/Uvicorn/Docker 进程残留
 - 文档：同步根/Backend README、后端架构、工程结构、公共 Schema/fixture 和唯一开发台账；未新增第二份计划文档
-- 后续：E4-05 使用编译期可信公钥和同一 fixture，在 Rust/Tauri 中 exact-field 解析并复算完整目录，加入平台/架构、SemVer 允许范围、防降级、私有目录与 TOCTOU 防护；E4-04 不提前宣称运行时可信
+- 后续：E4-05 使用 Rust 装配层提供的可信公钥和同一 fixture，在 Rust/Tauri 中 exact-field 解析并复算完整目录，加入平台/架构、SemVer 允许范围、防降级与 TOCTOU 防护；E4-04 不提前宣称运行时可信
+
+### E4-05 Rust 包验证
+
+- 状态：🔍 待 Windows 原生验收
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：在 Tauri/Rust 原生层验证 E4-04 signed `onedir`，把可信公钥、当前平台/架构、App 允许版本范围和已安装版本共同纳入判断；任何错误包 fail closed，不向 React/服务端暴露信任参数，不提前启动 Executor
+- RED：先新增真实 Rust 集成测试和 Node 原生边界契约；Rust 编译精确失败于 `automation_tool_desktop_lib::executor_package` 与 `sha2` 不存在，Node 首次因测试误引用不存在的 helper 失败，修正测试自身后再精确锁定缺少 verifier 文件/依赖，没有把测试错误冒充产品 RED
+- 实现：新增 `executor_package.rs`，直接依赖锁定 `ed25519-dalek 3.0.0`、`sha2 0.11.0`、`semver 1.0.28`、`walkdir 2.5.0` 和既有 `base64`；Unix/Windows 文件 identity 分别使用已锁定 `libc 0.2.186` 与 `windows-sys 0.61.2`。构造器拒绝无法解压或 weak 公钥、通配/非法版本要求和非法已安装版本
+- 验证顺序：先拒绝根与祖先 symlink，有界稳定读取 Manifest/签名并 `verify_strict`；再 exact-field 解析并重建 compact canonical JSON+LF，重复、未知、缺失、空白或非 canonical 即使由可信 key 签名也拒绝；随后绑定 v1、build ID、当前 `macos|windows`、`aarch64|x86_64` 和平台精确入口
+- 版本策略：使用受维护 `semver` crate；候选必须匹配 App 显式允许范围且不得低于已安装版本，默认稳定范围不会意外接纳 prerelease，只有显式包含对应 prerelease comparator 才允许；相等版本允许复验，非法/非规范 SemVer 拒绝
+- 完整目录：`walkdir` 不跟随链接并取得排序后的全部 payload，Manifest 文件列表必须严格递增且与实际集合完全相等；每个文件使用 `O_NOFOLLOW` 或 Windows reparse-point 约束安全打开，读前/读后/按路径重开核对 dev+inode 或 volume+file index，复算逐文件大小/SHA-256、总大小和固定域目录摘要。完成后再次枚举目录，验证窗口内成员增删也拒绝
+- 失败矩阵：覆盖 current target 成功、Python E4-04 fixture 跨语言验签、显式 prerelease、范围越界、回退、平台/架构错配、错误 signer、weak key、签名 prefix/换行/padding/字符集/长度、可信 signer 下的 unknown/duplicate/noncanonical/非法版本/build/入口、payload 篡改、目录增删和 symlink；错误只返回固定 code/文案，不回显路径或输入
+- 本机门禁：Rust 包定向 10 组全绿；默认、`desktop-e2e`、`control-plane-e2e` 三种独立配置均为 40 单元 + 10 package + 3 协议 fixture + 14 安全配置，共 67 项通过；Clippy `--all-targets --all-features -D warnings` 与 Rustfmt 全绿。Frontend 41 项 Node 工程契约、112 项 Vitest、ESLint、TypeScript、正式 Vite/production boundary 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功产出正式 App 二进制但未启动。Backend 共享 contract 回归 `840 passed in 76.64s`，4516 条语句/870 个分支 100%
+- Windows 真实边界：正式 `.github/workflows/desktop.yml` 已因 `frontend/**` 在 macOS/Windows runner 执行 `pnpm test:rust` 和桌面构建，Windows 专属 reparse point/file identity 代码会在原生 target 编译运行。本机现有 Homebrew Rust 不含 `rustup`，不为一次交叉检查再安装并保留第二套 Rust；临时分支运行 `29670987419` 的四个 job 均为 0 step、未分配 runner，Windows Rust/Tauri 与 macOS job 注解都再次明确为账户近期付款失败或 Actions spending limit。当前不能声明 Windows 已通过，失败运行保留证据，临时分支在 main 提交后删除
+- App、密钥与清理：本任务没有 Tauri Command、页面、网络或 App API，正式消费者是 E4-07 Rust 进程生命周期，故不启动/弹出 App；测试从公开 Rust verifier 原入口调用，不用 mock。发布公钥尚未由 E4-07 装配，测试 seed 只存在测试/fixture；设备私钥与长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。临时目录由 RAII 清理，无子进程、服务、容器或 App 残留
+- 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：E4-06 实现 Rust 生成 256-bit stdin 一次性认证并与 Python bootstrap 绑定；E4-07 再从 App 受信资源与编译配置提供固定公钥/版本策略/包路径，验证后监管真实 Executor。E4-05 Windows 原生验收恢复后补齐，不阻塞无设备依赖开发
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-05`：在 Rust/Tauri 中验证 Manifest 签名、完整目录摘要、平台/架构、SemVer 允许范围与防降级，任何错误包 fail closed；
-2. E4-03 Windows 实包启动在 GitHub Billing/Windows 设备恢复后补验收；不降低门禁，也不阻塞 E4-05～Wave 10 的无设备依赖任务。
+1. `E4-06`：由 Rust 生成 256-bit 一次性会话令牌，经 stdin bootstrap 传给正式 Executor，令牌不进入 argv、环境、日志或响应；
+2. E4-03/E4-05 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-06～Wave 10 的无设备依赖任务。

@@ -124,11 +124,13 @@ frontend/
 │   │   ├── control_plane.rs       # 固定 origin、operation allowlist、凭据注入与 SSE 严格解析
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
+│   │   ├── executor_package.rs    # signed onedir 验签、完整目录复算与防降级
 │   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
 │   │   ├── lib.rs
 │   │   └── main.rs
 │   ├── tests/
+│   │   ├── executor_package.rs    # 当前目标包、Python fixture 与失败矩阵
 │   │   └── executor_protocol_fixtures.rs # 回放三端共享原始 wire
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
 │   ├── capabilities/              # 正式最小权限
@@ -277,6 +279,8 @@ E4-02 的正式进程入口固定为 `automation-tool-executor`。`bootstrap.py`
 E4-03 使用 `automation-tool-executor.spec` 从同一 `executor/__main__.py` 构建 console `onedir`，不维护第二份 Python 入口。PyInstaller 只在 uv 开发依赖组锁定，正式运行依赖和 spec 均不包含 Playwright；集成测试从临时目录构建后清空 PATH，直接启动冻结可执行文件并验证 bootstrap 拒绝、WebSocket 不可用的固定退出契约和分析清单。`.github/workflows/desktop.yml` 已为 macOS/Windows 配置同一实包测试，只验证构建和启动，不上传、发布或签名产物；macOS 已在本机通过，Windows Hosted Runner 当前因 GitHub 账户 Billing/Actions spending limit 未启动，不能冒充目标平台已验收。目录签名与可信安装由 E4-04/E4-05 承接。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
+
+E4-05 的 `src-tauri/src/executor_package.rs` 直接消费同一 Manifest/`atems1` fixture，不复制 Python 签发逻辑。它以 `ed25519-dalek::verify_strict`、`sha2`、受维护的 `semver` 和 `walkdir` 完成验签、canonical/exact-field 解析、当前平台/架构/入口绑定、允许范围、已安装版本防降级和完整目录双枚举；每个 payload 由拒绝 symlink 的稳定文件句柄读取并核对 Unix dev/inode 或 Windows volume/file index。公开 Rust API 只返回验证后的版本/build/入口/统计和固定错误码，没有 Tauri Command、React、URL 或远程信任配置。E4-07 只能从 Rust 受信资源边界装配该 verifier 并在启动前使用，不能把路径、公钥或版本策略扩成 IPC。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
