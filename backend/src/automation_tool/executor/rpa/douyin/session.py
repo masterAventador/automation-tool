@@ -25,7 +25,7 @@ _EXPIRED_SELECTORS = (
     'text="登录已过期"',
     'text="登录状态已失效"',
 )
-_HEALTHY_SELECTORS = (
+DOUYIN_SESSION_HEALTHY_SELECTORS = (
     '[data-e2e="user-avatar"]',
     '[data-e2e="user-info"]',
 )
@@ -122,7 +122,7 @@ class DouyinSessionDetector:
                 for selectors, evidence in (
                     (_RISK_SELECTORS, DouyinSessionEvidence.RISK_CHALLENGE),
                     (_EXPIRED_SELECTORS, DouyinSessionEvidence.LOGIN_EXPIRED),
-                    (_HEALTHY_SELECTORS, DouyinSessionEvidence.AUTHENTICATED_SHELL),
+                    (DOUYIN_SESSION_HEALTHY_SELECTORS, DouyinSessionEvidence.AUTHENTICATED_SHELL),
                     (_MISSING_SELECTORS, DouyinSessionEvidence.LOGIN_ENTRY),
                 )
                 if _any_visible(page, selectors)
@@ -192,6 +192,7 @@ def _observation(
 
 
 __all__ = [
+    "DOUYIN_SESSION_HEALTHY_SELECTORS",
     "DOUYIN_SESSION_PROBE_URL",
     "DOUYIN_SESSION_SELECTOR_VERSION",
     "DouyinSessionDetectionRejected",

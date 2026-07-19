@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Douyin QR login evidence fixture</title>
+    <style>
+      body { font-family: sans-serif; }
+      iframe, img, [data-e2e], .fact { display: block; width: 320px; min-height: 48px; }
+    </style>
+  </head>
+  <body>
+    <main id="evidence"></main>
+    <script>
+      const evidence = document.querySelector("#evidence");
+      const marker = (name) => {
+        const node = document.createElement("div");
+        node.dataset.e2e = name;
+        node.textContent = name;
+        evidence.append(node);
+      };
+      const text = (value) => {
+        const node = document.createElement("div");
+        node.className = "fact";
+        node.textContent = value;
+        evidence.append(node);
+      };
+      window.setState = (state) => {
+        evidence.replaceChildren();
+        if (["qr", "confirmation", "qr-expired", "conflicting"].includes(state)) {
+          marker("login-button");
+        }
+        if (state === "qr") {
+          text("扫码登录");
+          text("如何扫码");
+          const image = document.createElement("img");
+          image.alt = "二维码";
+          evidence.append(image);
+        } else if (state === "confirmation") {
+          text("扫码成功，请在手机上确认登录");
+        } else if (state === "qr-expired") {
+          text("二维码已失效，请重新获取");
+        } else if (state === "healthy") {
+          marker("user-info");
+        } else if (state === "risk") {
+          const frame = document.createElement("iframe");
+          frame.src = "https://rmc.bytedance.com/verifycenter/captcha/v2";
+          frame.srcdoc = "<!doctype html><p>challenge</p>";
+          evidence.append(frame);
+        } else if (state === "conflicting") {
+          text("扫码成功，请在手机上确认登录");
+          text("二维码已过期");
+        }
+      };
+      window.setState("qr");
+    </script>
+  </body>
+</html>

@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime 及抖音 Session 页面证据，下一项为扫码流程 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright、正式 BrowserRuntime、抖音 Session 页面证据及真实扫码流程，下一项为人工接管 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -263,7 +263,7 @@
 | B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | 🔍 待 Windows 原生验收 |
 | B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | 🔍 待 Windows 原生验收 |
 | B5-09 | 抖音 Session 检测 | healthy/expired/missing/risk/unknown；使用页面状态而非 Cookie 上传 | B5-08 | ✅ 已完成 |
-| B5-10 | 抖音扫码流程 | login_required、外部窗口、二维码过期、重新检查 | B5-09 | ⬜ 未开始 |
+| B5-10 | 抖音扫码流程 | login_required、外部窗口、二维码过期、重新检查 | B5-09 | ✅ 已完成 |
 | B5-11 | 人工接管 | 验证码/滑块/风控进入 handoff，不自动处理 | B5-10 | ⬜ 未开始 |
 | B5-12 | Session 健康上报 | Control Plane 只存平台/状态/revision/时间，不存 Cookie | B5-09,T3-11 | ⬜ 未开始 |
 | B5-13 | 平台状态页面 | 查看登录健康、打开处理、重新检查和注销 | B5-10,B5-12 | ⬜ 未开始 |
@@ -1744,17 +1744,36 @@
 - RED：先把台账置为 `🧪 RED`；Python 单元测试在收集阶段准确失败于 `ModuleNotFoundError: automation_tool.executor.rpa`，Node 边界准确失败于生产 `executor/rpa/douyin/session.py` 不存在。没有用 Fake Cookie、storage state、协议 Mock 或测试页结果冒充真实账号状态
 - 页面边界：生产模块固定官方 `https://www.douyin.com/user/self` 作为受保护探测入口，只接受精确 HTTPS `www.douyin.com` 与默认/443 端口。版本化选择器把 ByteDance 验证中心 iframe、登录过期、用户资料壳和登录入口分别映射为 `risk/expired/healthy/missing`；多个来源冲突、无证据、DOM/页面异常或非官方 origin 一律 `unknown`，页面异常不保留底层 cause
 - 真实页面证据：先用隔离浏览器访问抖音公开页观察到实际 `rmc.bytedance.com/verifycenter/captcha` 风控 iframe；再在用户明确授权下使用 App 沙盒内独立持久 Profile 和系统 Chrome 150.0.7871.128。首页在登录后因内容结构只返回 `unknown`，检测器没有误报；已登录与空白 Profile 对同一官方 `/user/self` 做非个人化结构差分后，正式 detector 从加载期 `unknown` 收敛为 `healthy` 并输出 `ready`，空白 Profile 同一入口保持登录熔断。平台为 macOS 26.4.1 arm64；未记录账号名、二维码、页面原文或 Profile 路径
-- 原始调用边界：隔离六态 HTML 通过 Playwright route 绑定到官方 origin 后，由真实系统 Chrome→生产 `BrowserRuntime`→生产 `DouyinSessionDetector` 逐态检查；公开未登录抖音页另以同一路径实跑。真实账号 probe 只装配这两个生产对象并轮询状态，不调用 detector 内部函数。B5-09 尚无用户可调用的 Tauri/App 功能，因此不启动隐藏 App 空壳；B5-10 才从扫码 UI/Command 复用此入口
+- 原始调用边界：隔离六态 HTML 通过 Playwright route 绑定到官方 origin 后，由真实系统 Chrome→生产 `BrowserRuntime`→生产 `DouyinSessionDetector` 逐态检查；公开未登录抖音页另以同一路径实跑。真实账号 probe 只装配这两个生产对象并轮询状态，不调用 detector 内部函数。B5-09 尚无用户可调用的 Tauri/App 功能，因此不启动隐藏 App 空壳；B5-10 在 Local Executor 内组合扫码流程，B5-13 再提供 App 原入口
 - 隐私与失败矩阵：覆盖 risk/expired/healthy/missing/unknown/conflicting、错误 origin、userinfo/端口/控制与 Bidi URL、页面访问异常、非法观察对象/版本、外来窗口与 absent evidence；源码和跨端边界明确拒绝 `context.cookies`、`document.cookie`、`storage_state`，协议/Tauri Command 不出现 Page、Profile 路径或 Cookie。所有对象 repr 和输出只含固定状态/evidence/version
 - 门禁：聚焦真实系统 Chrome 与 live public 对照 `16 passed`；Backend 全量 `908 passed, 1 skipped`，5406 条语句/1046 个分支覆盖率 100%，uv lock、Ruff/格式、严格 Mypy 181 个源码文件、OpenAPI/Executor Schema 全绿。Frontend 65 项 Node 契约、123 项 Vitest、ESLint、TypeScript、production boundary 全绿；Rust 默认与 desktop-e2e 各 120 项、control-plane-e2e 121 项通过，三套 Clippy/Rustfmt 与 Actionlint 全绿。两条既有 Executor 3 秒进程等待在 PyInstaller/并行负载下各波动一次，均按原参数单测及默认并行整套复跑通过，未修改测试、超时或生产代码
 - 资源与清理：任务未启动 Backend、PostgreSQL、Docker、App、测试服务器或监听端口；真实/隔离验收只短暂启动系统 Chrome。空白对照 Profile 已按唯一精确路径删除，浏览器与 probe 无残留；用户已登录的 App 私有持久 Profile 按用途保留且目录权限为 `0700`，未触碰默认 Chrome Profile、其他项目资源或系统钥匙串
 - 文档：同步根/Backend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
-- 后续：B5-10 把 Profile 创建/重开、受信浏览器、锁、`/user/self` 检测、二维码过期和重新检查组合为可从 App 发起的真实扫码流程
+- 后续：B5-10 把受信浏览器、私有 Profile、`/user/self` 检测、二维码页面事实和重新检查组合为 Local Executor 内部扫码流程；B5-13 再从 App 平台状态页接入
+
+### B5-10 抖音扫码流程
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：复用生产 `BrowserRuntime` 和 B5-09 Session detector，在一个专用可见外部浏览器窗口中封闭产生 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/risk/unknown`，并由无参数 `recheck()` 重新读取真实页面事实
+- RED：先把台账置为 `🧪 RED`；执行 `uv run pytest tests/unit/executor/test_douyin_qr_login.py -q` 在收集阶段准确失败于 `ModuleNotFoundError: automation_tool.executor.rpa.douyin.login`，`node --test tests/douyin-qr-login-boundary.test.mjs` 则准确失败于生产 `login.py` 不存在；随后才实现生产模块
+- 生产接口：`DouyinQrLoginFlow.begin()` 只从同一个 Runtime 打开一个专用 headed 窗口并固定导航到官方 `/user/self`；首次页面仍在异步加载时最多等待 10 秒的健康/二维码共享就绪事实。`recheck()` 不接受 `QrScanned`、`Authenticated` 或布尔结果，只重新观察当前页面；仅在非冲突 `unknown` 时回到受保护入口复验。`close()` 只关闭本 flow 所属窗口且幂等
+- 页面事实：二维码必须同时出现“扫码登录”“如何扫码”和语义图片，实际页面使用 `aria-label="二维码"`；实现不读取图片 `src`。扫码成功/手机确认与二维码失效使用有界前缀文本，Session healthy/risk 继续由 B5-09 detector 唯一判断；确认与过期同时存在、页面异常、未知 DOM 或导航失败均 fail closed，只有 `healthy` 关闭熔断
+- 真实平台：系统 Chrome 150.0.7871.128 在 macOS 26.4.1 arm64 上沿生产 Runtime/flow 验证空白 Profile 进入 `awaiting_scan`；用户授权扫码后同一临时 Profile 从 `awaiting_scan` 收敛到 `healthy` 并输出 `ready`；原 App 私有持久 Profile 重开后直接为 `healthy`，证明首次登录态仍可复用。当前抖音未扫码二维码会自动刷新，本轮没有把平台未出现的“已过期”文案冒充为真实现象
+- 隔离故障注入：真实系统 Chrome 通过 Playwright route 把测试 HTML 绑定到官方 origin，再从生产 `BrowserRuntime`→`DouyinQrLoginFlow` 原入口验证扫码、手机确认、健康、二维码失效、冲突、风险、专用窗口关闭和 Profile `0700`；route 证据只覆盖平台本轮无法自然触发的确定性分支，不冒充真实抖音最终状态
+- 隐私与失败矩阵：覆盖未开始/重复 begin、close 前后使用、开关窗失败、导航/等待/定位失败、异步健康、无证据复验、冲突不刷新、风险、过期、确认和类型/版本篡改；源码及跨端契约拒绝 Cookie、`document.cookie`、storage state、页面/Profile 注入和 Tauri 页面句柄。对象表示、异常和 probe 只输出固定状态/evidence/version
+- 门禁：B5-09/B5-10 聚焦套件 `35 passed, 3 skipped`，两份生产模块 241 条语句/50 个分支覆盖率 100%；Backend 全量 `928 passed, 3 skipped`，5564 条语句/1084 个分支覆盖率 100%，uv lock、Ruff/格式、严格 Mypy 185 个源码文件、OpenAPI/Executor Schema 全绿。Frontend 66 项 Node 契约、123 项 Vitest、冻结安装、ESLint、严格 TypeScript、API/production boundary 全绿；Rust 默认与 desktop-e2e 各 120 项、control-plane-e2e 121 项通过，三套 Clippy、Rustfmt 与 Actionlint 全绿
+- 回归波动：首次连续执行第三套 Rust 测试时，两项既有 E4-13 测试的纳秒命名临时目录发生一次碰撞；未修改 B5-10 或既有测试，按原并行参数单独复跑 2 项和完整 control-plane-e2e 均通过。该波动不涉及运行中产品资源，但后续若再现应独立建账修复测试唯一标识
+- 原始调用边界：本任务交付 Local Executor 内部生产页面工作流，没有 Control Plane HTTP、Tauri Command 或 React 用户入口，因此不启动隐藏 App 空壳。B5-13 必须从正式 PlatformAdapter 复用该 flow 提供平台状态、打开处理和重新检查，不得把 Python 选择器复制到 Rust/React 或以 UI Harness 代替浏览器链路
+- 资源与清理：没有启动 Backend、PostgreSQL、Docker、App、测试服务器或固定监听端口；真实/隔离验收只短暂启动系统 Chrome。第二次扫码使用的临时 Profile、空白对照 Profile、路由夹具窗口和 probe 进程均已精确清理；首次用户授权的 App 私有持久 Profile 保留且目录权限为 `0700`，未触碰默认 Chrome Profile、其他项目资源或系统钥匙串
+- 文档：同步根/Backend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
+- 后续：B5-11 将 `risk` 扩为显式人工接管生命周期，验证码、滑块和安全校验只允许暂停、引导用户处理和重新检查，禁止自动绕过
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-10`：建立抖音扫码、二维码过期和重新检查流程；
-2. `B5-11`：让验证码、滑块和风控进入人工接管而非自动绕过；
+1. `B5-11`：让验证码、滑块和风控进入人工接管而非自动绕过；
+2. `B5-12`：把平台 Session 健康以最小状态投影上报 Control Plane，禁止 Cookie 和页面原文离开本机；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。

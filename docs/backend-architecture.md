@@ -286,7 +286,9 @@ B5-04 的浏览器选择是纯本机 App 设置：Control Plane 没有查询、�
 
 B5-08 的正式 `BrowserRuntime` 位于 Python Local Executor，不在 Control Plane 或 React。一个实例只能在创建它的线程拥有一个 headed persistent context；默认动作/导航超时分别为 15/30 秒，捕获新窗口只接受 1～60000 ms 显式上限。主窗口、当前窗口、新窗口和触发式弹窗都包装为 Runtime-owned `BrowserWindow`，外来/已关闭窗口、跨线程调用、重复启动和关闭后调用全部 fail closed。Runtime 在每次启动前重验 B5-07 路径形状，正常关闭先关闭 context 再停 driver；即使任一关闭失败也执行另一项。macOS 冻结实包已用 B5-02 受信 Chrome、B5-05 Profile 与 B5-06 锁验证双窗口和完整 process-group 强杀；Windows 由现有 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 组合承担整树清理并保留原生待验收。页面原始对象仅在 Python 平台 Adapter 内可见，不能通过 WebSocket payload 或 Tauri IPC 传路径/页面句柄。
 
-B5-09 在同一 Python 边界新增抖音 Session detector：调用方先把 Runtime-owned 页面导航到固定受保护入口 `https://www.douyin.com/user/self`，检测器再用版本化、有界的页面选择器产生 `healthy/expired/missing/risk/unknown` 和固定 evidence。官方 origin 采用精确 HTTPS host/port 校验；ByteDance 验证中心 iframe、登录过期、用户资料壳和登录入口分别映射到 `risk/expired/healthy/missing`，来源冲突、DOM 漂移、页面异常和非官方来源统一 `unknown`。`circuit_open` 只在 `healthy` 时为 false。真实 macOS Chrome 已用用户授权的已登录持久 Profile 验证 `unknown → healthy`，并用空白 Profile 和实际风控页验证未登录/风险边界；检测过程不读取 Cookie、Local Storage 或 storage state，不返回页面原文、账号或 Profile 路径。扫码、轮询和 App 原入口仍由 B5-10 组合。
+B5-09 在同一 Python 边界新增抖音 Session detector：调用方先把 Runtime-owned 页面导航到固定受保护入口 `https://www.douyin.com/user/self`，检测器再用版本化、有界的页面选择器产生 `healthy/expired/missing/risk/unknown` 和固定 evidence。官方 origin 采用精确 HTTPS host/port 校验；ByteDance 验证中心 iframe、登录过期、用户资料壳和登录入口分别映射到 `risk/expired/healthy/missing`，来源冲突、DOM 漂移、页面异常和非官方来源统一 `unknown`。`circuit_open` 只在 `healthy` 时为 false。真实 macOS Chrome 已用用户授权的已登录持久 Profile 验证 `unknown → healthy`，并用空白 Profile 和实际风控页验证未登录/风险边界；检测过程不读取 Cookie、Local Storage 或 storage state，不返回页面原文、账号或 Profile 路径。B5-10 组合本机扫码页面工作流，B5-13 再建立 App 原入口。
+
+B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认、风险和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。当前任务是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；B5-13 才从 App 平台页触发，且不得复制 Python 选择器。
 
 ### 8.3 页面定位
 
