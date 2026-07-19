@@ -64,6 +64,7 @@
 | Executor stdin 认证 | `✅` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
 | Rust ExecutorManager | `🔍` macOS 已从公开 Rust 生命周期入口完成签名 PyInstaller onedir→stdin 认证→真实 Uvicorn→健康/停止证明全链路；单实例、并发启动、后台崩溃检测、两次重启预算、显式停止不重启和 fail closed 已验证，Windows 原生仍随 Billing 阻塞待验收 |
 | 正式桌面制品隔离 | `🔍` macOS release 实际二进制、正式资产/配置和无默认特性依赖树已确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed，Windows 原生仍待 runner |
+| macOS 浏览器受信发现 | `🔍` Rust 生产 API 已用 Apple Security.framework 验证标准路径 Chrome 的签名、Bundle ID、Team ID、全架构/嵌套代码和路径 identity；Edge allowlist/失败矩阵已实现，本机未安装 Edge，保留真实 Edge 实机验收 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -250,7 +251,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | B5-01 | 审计旧 browser_session | 提取私有目录、Profile、状态机和注销逻辑；排除旧账号/RBAC | R0-12,E4-11 | ✅ 已完成 |
-| B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | ⬜ 未开始 |
+| B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
 | B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | ⬜ 未开始 |
 | B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | ⬜ 未开始 |
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ⬜ 未开始 |
@@ -1618,10 +1619,27 @@
 - 本地隔离：全程未监听端口、未创建 Compose/容器/网络/Volume/SQLite/Profile，没有读取或清理其他项目运行资源；后续 B5-02 起继续在任何探测/测试服务前检查端口与精确资源归属
 - 后续：B5-02 实现 macOS Chrome/Edge 受信发现，固定标准应用、签名/Bundle ID allowlist、路径失效和任意可执行文件拒绝边界
 
+### B5-02 macOS 浏览器受信发现
+
+- 状态：🔍 待 Edge 实机验收；本机真实 Google Chrome 已从公开 Rust 生产 API 完成 Security.framework 验签与路径复验，Edge 代码/契约/失败矩阵已完成但当前机器未安装，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：只发现 macOS `/Applications` 下正式 Google Chrome/Microsoft Edge，使用 Apple 原生代码签名 API 同时约束签名有效性、Bundle signing identifier、Developer Team 和固定主可执行文件；返回的候选在后续使用前必须重验，不能让 React、服务端或用户输入任意可执行路径
+- RED：先新增 Node 原生边界契约和 Rust 生产 API 集成测试；分别准确失败于 `browser_discovery.rs` 文件不存在与 crate 没有公开 `browser_discovery` 模块，没有用 shell `codesign`、假 App 或静态字符串扫描冒充生产发现成功
+- 固定 allowlist：Chrome 只认 `/Applications/Google Chrome.app`、`Contents/MacOS/Google Chrome`、identifier `com.google.Chrome`、Team `EQHXZ8M8AV`；Edge 只认 `/Applications/Microsoft Edge.app`、`Contents/MacOS/Microsoft Edge`、identifier `com.microsoft.edgemac`、Team `UBF8T346G9`。缺失应用正常不返回，标准位置存在但不完整/不可信则整个候选 fail closed；`~/Applications`、PATH、LaunchServices 搜索结果和任意 `.app` 不进入发现面
+- 原生验签：macOS 目标精确依赖已锁定的 `security-framework 3.7.0`/`core-foundation 0.10.1`，直接调用 `SecStaticCodeCheckValidity` 等价安全封装。每个 vendor requirement 同时要求 `anchor apple generic`、Developer ID 中间证书/叶证书 OID、精确 identifier 和 leaf OU；校验启用 all architectures、nested code、restrict symlinks 与 no-network，不解析本地化命令输出、不启动 shell
+- 严格度实测：本机 Chrome 的默认 sealed-code/Designated Requirement 校验有效；`codesign --strict` 因 Chrome Framework 上已有 FinderInfo xattr 报 sideband metadata 错误。生产实现没有为了追求表面“strict”而拒绝用户当前可正常验证的官方浏览器，也没有降级到只读 Info.plist：仍由 Security.framework 验主程序、sealed resources、嵌套代码、所有架构和精确 vendor requirement
+- 路径身份：发现前逐级拒绝 symlink，只把 macOS 固定 `/var|/tmp|/etc` 系统别名规范到 `/private`；App 必须为目录，主入口必须为带执行位普通文件。签名前后读取 dev/inode，`TrustedBrowser` 保存两者；`revalidate_macos_browser` 再要求标准绝对路径、原 identity 和重新验签，缺失、替换、symlink 或签名变化统一 `PathInvalidated`。B5-07 启动前必须调用该复验并在进程启动后继续核对运行代码身份
+- 失败矩阵：5 项 macOS 单元测试覆盖固定顺序 Chrome/Edge、缺失与任意 App 忽略、坏签名/不完整 bundle、App/可执行 symlink、发现后替换和路径消失；测试临时目录带 PID/纳秒/原子序号并只删除本次精确目录。跨平台集成在非 macOS 明确返回 `UnsupportedPlatform`，不会误走 Unix 近似实现
+- 真实原入口：`frontend/src-tauri/tests/browser_discovery.rs` 只调用公开 `discover_macos_browsers`，本机实际 Chrome 经过生产 Security.framework verifier 被发现为固定路径/identifier/team，再调用公开 `revalidate_macos_browser` 成功；没有通过依赖注入或直接调用内部 verifier。Microsoft Edge 当前未安装，真实 Edge 仍明确保持待验收
+- 门禁：B5-02 Node 定向契约、5 项 Rust 单元和 1 项真实 macOS 集成通过；完整 Frontend Node 契约 58 项、ESLint、严格 TypeScript、Rustfmt 全绿。Rust 默认配置共 98 项通过、1 项既有 PyInstaller 编排 ignored，且全目标/全特性 Clippy `-D warnings` 通过；Cargo lock 只增加当前 crate 对锁内既有 Security.framework/CoreFoundation 的 macOS 目标直接依赖
+- App 与资源：当前生产消费者是供 B5-04/B5-07 使用的 Rust 原生 API，尚无平台选择页面或 Tauri Command，因此本任务不启动 App，不宣称用户功能已完成；没有前后端、Docker、测试服务器、浏览器进程、端口、SQLite、Profile 或系统钥匙串操作，只读校验已安装应用
+- 后续：B5-03 实现 Windows 注册表/标准路径和 Authenticode/产品 allowlist；Edge macOS 安装或受控设备可用时从同一公开 API补真实验收，不阻塞无 Edge 依赖任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-02`：实现 macOS Chrome/Edge 受信发现与路径失效失败矩阵；
-2. `B5-03`：实现 Windows 注册表/标准路径、签名/产品 allowlist 与路径失效失败矩阵；
+1. `B5-03`：实现 Windows 注册表/标准路径、签名/产品 allowlist 与路径失效失败矩阵；
+2. `B5-04`：只允许用户在已发现的受支持浏览器枚举中选择，不接受任意可执行路径；
 3. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。

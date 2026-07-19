@@ -1,3 +1,4 @@
+pub mod browser_discovery;
 pub mod control_plane;
 pub mod device_credentials;
 pub mod device_identity;

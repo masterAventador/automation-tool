@@ -69,6 +69,8 @@ backend/.venv/bin/python scripts/run_e4_15_acceptance.py
 
 该脚本先实证缺失/畸形公钥的 release 构建失败，再用验收专用公开公钥在唯一临时 Cargo target 构建真实 production-mode Tauri binary；`audit-production-package.mjs` 扫描二进制、正式 Vite 资产、Tauri 配置和 `cargo tree --no-default-features`，拒绝 WebDriver/WDIO、所有验收 Command、测试 origin/资源/Sidecar、开发验证公钥和 1420 调试端口，并确认制品确实绑定本次预期发布公钥。App 不会启动，临时制品结束即删除。
 
+B5-02 的 `src-tauri/src/browser_discovery.rs` 只在 Rust 原生层发现 macOS 标准 `/Applications` Chrome/Edge。它通过 Security.framework 绑定正式 Bundle signing identifier、Developer Team、所有架构、嵌套代码和固定主可执行文件，并保存 App/入口 dev+inode 供启动前重新验签；React、Tauri IPC、Control Plane 和普通设置均没有任意路径入口。本机真实 Chrome 已经公开生产 API发现/复验通过，Microsoft Edge 因未安装保持真实验收待办；当前模块只发现不启动浏览器，也不读取用户默认 Profile。
+
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。

@@ -129,6 +129,7 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
+│   │   ├── browser_discovery.rs  # macOS/Windows 标准浏览器原生发现、签名与路径 identity
 │   │   ├── control_plane.rs       # 固定 origin、operation allowlist、凭据注入与 SSE 严格解析
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
@@ -142,6 +143,7 @@ frontend/
 │   │   ├── lib.rs
 │   │   └── main.rs
 │   ├── tests/
+│   │   ├── browser_discovery.rs  # 真实系统浏览器的生产 API 发现与复验
 │   │   ├── executor_bootstrap.rs  # 随机令牌、stdin 文档、常量时间证明与失败矩阵
 │   │   ├── executor_manager.rs    # 单实例、监管、超时、进程树与真实包入口
 │   │   ├── executor_package.rs    # 当前目标包、Python fixture 与失败矩阵
@@ -203,6 +205,8 @@ app
 Tauri implementation ──implements──> platform interface
 Test harness implementation ────────> platform interface
 ```
+
+B5-02 的 `src-tauri/src/browser_discovery.rs` 是系统浏览器信任根，不是 React Adapter。macOS 只枚举 `/Applications/Google Chrome.app` 与 `/Applications/Microsoft Edge.app`，用 Security.framework 对完整签名、所有 Mach-O 架构、嵌套代码、精确 Bundle signing identifier 和 Developer Team requirement 做验证；同时固定主可执行文件相对路径并在验签前后保存 App/入口的 dev+inode。公开复验 API 只接受模块自己产生的 `TrustedBrowser`，使用前路径缺失、替换、symlink 或签名变化都会 fail closed。B5-04 才把安全浏览器枚举投影给 UI，路径和 identity 永不进入 React。
 
 规则：
 

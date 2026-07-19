@@ -274,6 +274,8 @@ B5-01 已冻结外部浏览器会话的迁移边界。当前 Profile 只能从 T
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
 
+B5-02 新增 Rust `browser_discovery.rs`，但暂不增加 Tauri Command。macOS 固定扫描 `/Applications` 下正式 Chrome/Edge，以 Security.framework 验证所有架构、嵌套代码和精确 vendor designated requirement，并固定 Bundle signing identifier、Developer Team 与 `Contents/MacOS` 主入口；不执行 `codesign` 子进程、不解析 Info.plist 后自行猜测可信度。返回对象保存 App/入口 dev+inode，`revalidate_macos_browser` 在后续启动前要求标准路径未变并重新验签。React、服务端和用户设置只能在 B5-04 选择受支持枚举，永远不能提交可执行路径。
+
 ## 7. 页面与导航
 
 MVP 导航：

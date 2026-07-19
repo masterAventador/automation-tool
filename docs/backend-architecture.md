@@ -280,6 +280,8 @@ B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC�
 - 路径必须解析为允许的浏览器应用/签名，不能执行任意文件；
 - 未安装受支持浏览器时返回明确诊断，不静默下载未知程序。
 
+B5-02 已实现 Rust macOS 原生信任边界：只检查 `/Applications/Google Chrome.app` 与 `/Applications/Microsoft Edge.app`，分别绑定固定内部可执行文件、`com.google.Chrome/EQHXZ8M8AV` 与 `com.microsoft.edgemac/UBF8T346G9`。Apple Security.framework 直接验证 vendor requirement、sealed resources、所有架构和嵌套代码；应用与入口的 dev/inode 在验证前后保持一致，并在实际使用前通过公开 API重新验签。不存在的标准应用不返回，存在但坏签名、错误 Bundle/Team、不完整、symlink 或路径被替换则 fail closed。当前本机真实 Chrome 已通过，Edge 未安装仍保留真实验收；该模块不调用浏览器、不读取默认 Profile，也不把路径暴露给 React 或 Control Plane。
+
 ### 8.3 页面定位
 
 定位策略按优先级：

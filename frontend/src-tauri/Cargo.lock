@@ -98,12 +98,14 @@ name = "automation-tool-desktop"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "core-foundation 0.10.1",
  "ed25519-dalek",
  "getrandom 0.4.3",
  "hmac",
  "libc",
  "regex",
  "reqwest",
+ "security-framework",
  "semver",
  "serde",
  "serde_json",
