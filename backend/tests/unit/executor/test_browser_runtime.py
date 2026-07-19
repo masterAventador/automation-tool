@@ -62,7 +62,7 @@ class FakeChromium:
 
 class FakePlaywright:
     def __init__(self, chromium: FakeChromium, *, fail_stop: bool = False) -> None:
-        self.chromium = chromium
+        self.chromium: Any = chromium
         self.stop_calls = 0
         self.fail_stop = fail_stop
 

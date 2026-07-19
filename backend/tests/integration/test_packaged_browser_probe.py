@@ -74,8 +74,6 @@ def test_frozen_runtime_launches_a_rust_authorized_system_browser(tmp_path: Path
             "browser_packaged_runtime",
             "--",
             "--ignored",
-            "--exact",
-            "packaged_runtime_launches_a_trusted_browser_with_a_locked_private_profile",
             "--nocapture",
         ],
         cwd=REPOSITORY_ROOT,

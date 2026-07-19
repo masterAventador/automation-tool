@@ -75,7 +75,7 @@ B5-04 已把浏览器枚举接入“设置与诊断”。WebView 只接收 `goog
 
 B5-05 新增原生 `BrowserProfileStore`：Tauri setup 从自身 AppData 管理唯一实例，只生成 `browser-profiles/douyin/<canonical UUIDv4>`，不接受 WebView、服务端、昵称、账号或任意路径输入。Unix 以父目录句柄相对 `openat/mkdirat` 创建并固定 `0700`，Windows 以父 HANDLE 相对 `NtCreateFile` 创建并设置当前用户 protected DACL；两端都持有并复验稳定目录 identity，symlink/reparse、普通文件和路径替换全部 fail closed。当前没有 Profile Tauri Command，也不会启动浏览器；B5-06/B5-07 将直接消费这一 Rust 对象。
 
-B5-06 已为该 Profile 对象加入跨进程单实例锁和崩溃恢复标记；B5-07 的测试专用冻结探针从同一 Rust 受信浏览器/Profile/锁链路调用生产 Playwright primitive，已在 macOS 启动并关闭系统 Chrome headed persistent context。Playwright driver 进入 Executor onedir，但不下载或捆绑浏览器；探针、路径和 Profile identity 均不进入正式 React/IPC 面，B5-08 才提供正式 BrowserRuntime。
+B5-06 已为该 Profile 对象加入跨进程单实例锁和崩溃恢复标记；Playwright driver 进入 Executor onedir，但不下载或捆绑浏览器。B5-08 的正式 BrowserRuntime 只存在于 Python Executor，提供单 context、线程约束、页面/窗口、有界超时和确定关闭；macOS 冻结验收从同一 Rust 受信浏览器/Profile/锁链路完成系统 Chrome 双窗口正常关闭及 process-group 整树强杀。探针、路径、原始 Page 和 Profile identity 均不进入正式 React/IPC 面，B5-09 才消费页面证据。
 
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 

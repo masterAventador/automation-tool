@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁及冻结 Playwright 系统浏览器 PoC，正式 BrowserRuntime 与真实平台页面动作尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile/单实例锁、冻结 Playwright 及正式 BrowserRuntime，抖音页面证据尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -68,6 +68,7 @@
 | 运营浏览器选择 | `🔍` macOS 隐藏真实 App 已从设置页保存、刷新并读回受信 Chrome 枚举；WebView/IPC/沙盒文件无路径，Windows 生产模块与测试已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | 私有浏览器 Profile | `🔍` macOS/Unix 已从公开 Rust Store 原入口完成本机 UUIDv4 Profile 原子创建、重开、权限、symlink、identity 替换与并发矩阵；Windows handle-relative/私有 ACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | Profile 单实例锁 | `🔍` macOS/Unix 已从公开 Rust Profile 原入口验证同 Profile 跨进程排他、不同 Profile 并行、显式释放及真实子进程被 kill 后需恢复；Windows HANDLE-relative/LockFileEx/私有 DACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
+| BrowserRuntime | `🔍` macOS 冻结生产模块已用受信系统 Chrome/私有 Profile/原生锁验证单 context、双窗口正常关闭和 process-group 整树强杀；Windows 复用 Job Object 组合，待原生 runner 实际执行 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -260,7 +261,7 @@
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | 🔍 待 Windows 原生验收 |
 | B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | 🔍 待 Windows 原生验收 |
 | B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | 🔍 待 Windows 原生验收 |
-| B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | ⬜ 未开始 |
+| B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | 🔍 待 Windows 原生验收 |
 | B5-09 | 抖音 Session 检测 | healthy/expired/missing/risk/unknown；使用页面状态而非 Cookie 上传 | B5-08 | ⬜ 未开始 |
 | B5-10 | 抖音扫码流程 | login_required、外部窗口、二维码过期、重新检查 | B5-09 | ⬜ 未开始 |
 | B5-11 | 人工接管 | 验证码/滑块/风控进入 handoff，不自动处理 | B5-10 | ⬜ 未开始 |
@@ -1715,12 +1716,29 @@
 - 失败矩阵：覆盖相对/缺失/目录/不可执行浏览器、相对/缺失/普通文件 Profile、浏览器/Profile symlink、starter/launch/close/driver-stop 异常、幂等/上下文关闭和 repr 脱敏；正式包继续覆盖无项目 Python PATH、bootstrap 拒绝和 WebSocket 不可用。Windows Chrome/Edge 启动、路径语义和进程退出实际行为保留给原生 runner，不以 macOS 或静态检查冒充通过
 - 门禁：B5-07 聚焦 Python 11 项通过；Backend 全量 884 项、5169 条语句/1010 个分支覆盖率 100%，uv lock、Ruff/格式、严格 Mypy 174 个源码文件、OpenAPI/Executor Schema 和 Actionlint 全绿；Frontend 63 项 Node 契约、123 项 Vitest、ESLint、严格 TypeScript、API/production boundary 全绿；macOS Rust 120 项通过、B5-07/E4-07 两项显式编排测试默认 ignored，Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿
 - 资源隔离与清理：任务未启动 Backend、PostgreSQL、Docker、App、测试服务器或监听端口；只短暂启动受信系统 Chrome，使用本任务唯一临时 AppData/Profile 和 PyInstaller 目录，验收后关闭 context/driver、释放锁并精确删除临时目录。进程复查无 frozen probe、Chrome/Profile 或 Playwright driver 残留，没有读取、停止、复用或清理另一个项目的资源
-- 后续：B5-08 将 B5-02/B5-03 复验、B5-05 Profile、B5-06 lock guard、Python context 和完整浏览器进程树绑定为一个确定性 BrowserRuntime，并从正式任务执行入口验收启动、页面、窗口、超时、关闭和崩溃清理
+- 后续：B5-08 将 B5-02/B5-03 复验、B5-05 Profile、B5-06 lock guard、Python context 和完整浏览器进程树绑定为一个确定性 BrowserRuntime；B5-09 再从抖音页面对象的正式调用入口消费该 Runtime
+
+### B5-08 BrowserRuntime
+
+- 状态：🔍 待 Windows 原生验收；macOS arm64 冻结生产模块已沿受信系统 Chrome、私有 Profile、真实原生锁完成主窗口/第二窗口正常关闭和独立 process group 整树强杀，Windows 正式 Manager 的 Job Object 组合已存在但 Hosted Runner 仍因账户 Billing/Actions spending limit 无法启动
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：在 Python Local Executor 内建立一个窄、确定、可由后续抖音 Adapter 消费的 BrowserRuntime；同时只拥有一个 thread-confined Playwright persistent context，并把启动、主窗口、窗口集合、新窗口、触发式弹窗、有界超时、定向关窗、正常关闭和进程级硬清理边界固定下来
+- RED：先把台账置为 `🧪 RED`；新增 Python 生命周期/失败矩阵在收集阶段精确失败于无法导入 `BrowserRuntime`，Node 原生边界契约精确失败于生产模块缺少该类；没有用 Mock 浏览器、下载 Chromium、默认用户 Profile 或空 Tauri Command 冒充真实运行
+- 生产接口：`BrowserRuntime.start` 启动前再次复验冻结 B5-07 请求的浏览器/Profile 路径，同时只允许一个 context；Runtime 记录创建线程，跨线程、重复启动、关闭后使用全部固定拒绝。context 固定 headed、显式 executable/Profile、禁止下载，动作/导航默认超时分别 15/30 秒；`capture_window` 只接受 1～60000 ms 显式上限并把 Playwright timeout 映射为独立固定 `BrowserRuntimeTimedOut`
+- 页面与窗口：`primary_window` 在已有首窗时复用、没有页面时显式新建；`windows`、`open_window` 和 `capture_window` 只返回带所属 Runtime identity 的 `BrowserWindow`。定向关闭拒绝外来或已关闭 Page，固定 `run_before_unload=False`；原始 `playwright_page` 只供同一 Python Executor 的平台页面对象，不能序列化到协议、Tauri IPC 或 React
+- 关闭与硬清理：`close` 先清除可用状态，再尝试关闭 context 和停止 Playwright driver；任一失败不阻止另一项，重复关闭幂等。正常关闭依靠 Playwright persistent context 关闭浏览器；Executor 异常/挂起继续由 E4-09 同一个 `RunningExecutor` 进程树负责，Unix 独立 process group、Windows kill-on-close Job Object，不新增第二 Manager
+- 真实冻结验收：测试专用 PyInstaller onedir 仍从生产 `browser_runtime.py` 启动本机受信 Chrome，不含 Playwright 浏览器缓存。正常路径创建主窗口、打开/关闭第二窗口后退出；崩溃路径在 ready 后保持 context，Rust 持有 Profile 锁并以生产 Manager 相同 `process_group(0)` + 负 PGID `SIGKILL` 强停，确认组内后代消失、Profile identity 仍有效并显式释放锁。探针不进入正式 Executor 包或发布物
+- 失败矩阵：15 项聚焦 Python 测试覆盖非法 starter/request、启动前浏览器/Profile 替换、超时配置半失败、窗口枚举/主窗/新窗异常、触发器失败/超时、非法超时、外来/失效窗口、Page close 失败、跨线程、重复启动、use-after-close、context/driver 单独及同时关闭失败、上下文异常退出和重启；生产模块 247 条语句、48 个分支覆盖率 100%
+- 门禁：Backend 全量 893 项、5323 条语句/1034 个分支覆盖率 100%，uv lock、Ruff/格式、严格 Mypy 189 个源码文件和 OpenAPI/Executor Schema 全绿；Frontend 64 项 Node 契约、123 项 Vitest、ESLint、严格 TypeScript、API/production boundary 全绿；macOS Rust 120 项通过，B5-07/B5-08/E4-07 三项真实编排默认 ignored，Rustfmt、全目标/全特性 Clippy `-D warnings` 与 Actionlint 全绿
+- 原始调用边界：B5-08 交付的是 Local Executor 内部生产 API，没有用户可直接触发的 App 功能或服务端接口；真实入口是冻结模块经 Rust 受信浏览器/Profile/锁组合调用，不启动隐藏 App 空壳。B5-09 从真实抖音页面对象消费 `BrowserWindow.playwright_page`，B5-10/B5-13 再建立用户扫码/处理入口；相关任务不得回退到 Mock 或从 Control Plane 下发路径
+- 资源隔离：验收未启动 Backend、PostgreSQL、Docker、App、测试服务器或监听端口，只短暂启动本机受信 Chrome；每轮使用唯一临时 PyInstaller/AppData/Profile，正常退出或整树强停后复验 Profile、释放锁并由 fixture 精确清理。没有读取、停止、复用或清理另一个项目的资源
+- 后续：B5-09 建立抖音页面对象与真实页面证据，将 Session 健康封闭为 healthy/expired/missing/risk/unknown；真实账号不可用时用本地隔离测试页完成自动化层并保持真实账号待验收，不阻塞后续任务
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-08`：建立持有 Profile 锁的 BrowserRuntime 启动、窗口、超时、关闭和进程清理边界；
-2. `B5-09`：从真实页面证据检测抖音 Session 的 healthy/expired/missing/risk/unknown；
-3. B5-03/B5-04/B5-05/B5-06/B5-07 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-09`：从真实页面证据检测抖音 Session 的 healthy/expired/missing/risk/unknown；
+2. `B5-10`：建立抖音扫码、二维码过期和重新检查流程；
+3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
