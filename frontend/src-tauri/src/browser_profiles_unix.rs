@@ -1,11 +1,15 @@
 use super::{BrowserProfileError, CreateProfileError};
 use std::ffi::{CString, OsStr};
 use std::fs::{File, OpenOptions};
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
+
+const PROFILE_LOCK_FILE: &str = ".automation-tool-profile-lock-v1";
+const ACTIVE_LOCK_MARKER: &[u8] = br#"{"state":"active","version":1}"#;
+const MAX_LOCK_STATE_BYTES: usize = 64;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct DirectoryIdentity {
@@ -36,6 +40,92 @@ pub(super) struct PlatformProfileStore {
 
 pub(super) struct PlatformProfile {
     directory: DirectoryHandle,
+}
+
+pub(super) struct PlatformProfileLock {
+    file: File,
+    file_identity: FileIdentity,
+    profile_directory: File,
+    profile_identity: DirectoryIdentity,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+impl PlatformProfile {
+    pub(super) fn try_acquire_lock(&self) -> Result<PlatformProfileLock, BrowserProfileError> {
+        if directory_identity(&self.directory.file)? != self.directory.identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        require_private_directory(&self.directory.file)?;
+        let profile_directory = self
+            .directory
+            .file
+            .try_clone()
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        let name = safe_name(PROFILE_LOCK_FILE)?;
+        let mut file = open_lock_file(&profile_directory, &name, true)?;
+        let file_identity = lock_file_identity(&file)?;
+        let lock_result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if lock_result != 0 {
+            let error = std::io::Error::last_os_error();
+            let raw_error = error.raw_os_error();
+            return Err(
+                if raw_error == Some(libc::EWOULDBLOCK) || raw_error == Some(libc::EAGAIN) {
+                    BrowserProfileError::profile_in_use()
+                } else {
+                    BrowserProfileError::storage_unavailable()
+                },
+            );
+        }
+        let reopened = open_lock_file(&profile_directory, &name, false)?;
+        if lock_file_identity(&reopened)? != file_identity
+            || directory_identity(&profile_directory)? != self.directory.identity
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        let state = read_lock_state(&mut file)?;
+        if !state.is_empty() {
+            return Err(BrowserProfileError::recovery_required());
+        }
+        write_lock_state(&mut file, ACTIVE_LOCK_MARKER)?;
+        let reopened = open_lock_file(&profile_directory, &name, false)?;
+        if lock_file_identity(&reopened)? != file_identity
+            || directory_identity(&profile_directory)? != self.directory.identity
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        sync_directory_handle(&profile_directory)?;
+        Ok(PlatformProfileLock {
+            file,
+            file_identity,
+            profile_directory,
+            profile_identity: self.directory.identity,
+        })
+    }
+}
+
+impl PlatformProfileLock {
+    pub(super) fn release(mut self) -> Result<(), BrowserProfileError> {
+        if directory_identity(&self.profile_directory)? != self.profile_identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        let name = safe_name(PROFILE_LOCK_FILE)?;
+        let reopened = open_lock_file(&self.profile_directory, &name, false)?;
+        if lock_file_identity(&self.file)? != self.file_identity
+            || lock_file_identity(&reopened)? != self.file_identity
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        if read_lock_state(&mut self.file)? != ACTIVE_LOCK_MARKER {
+            return Err(BrowserProfileError::recovery_required());
+        }
+        write_lock_state(&mut self.file, b"")?;
+        sync_directory_handle(&self.profile_directory)
+    }
 }
 
 impl PlatformProfileStore {
@@ -282,6 +372,76 @@ fn require_private_directory(file: &File) -> Result<(), BrowserProfileError> {
         return Err(BrowserProfileError::unsafe_directory());
     }
     Ok(())
+}
+
+fn open_lock_file(
+    profile_directory: &File,
+    name: &CString,
+    create: bool,
+) -> Result<File, BrowserProfileError> {
+    let mut flags = libc::O_RDWR | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    if create {
+        flags |= libc::O_CREAT;
+    }
+    let descriptor =
+        unsafe { libc::openat(profile_directory.as_raw_fd(), name.as_ptr(), flags, 0o600) };
+    if descriptor < 0 {
+        let error = std::io::Error::last_os_error();
+        return Err(match error.kind() {
+            ErrorKind::NotFound => BrowserProfileError::identity_changed(),
+            _ if matches!(error.raw_os_error(), Some(libc::ELOOP) | Some(libc::EISDIR)) => {
+                BrowserProfileError::unsafe_directory()
+            }
+            _ => BrowserProfileError::storage_unavailable(),
+        });
+    }
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    lock_file_identity(&file)?;
+    Ok(file)
+}
+
+fn lock_file_identity(file: &File) -> Result<FileIdentity, BrowserProfileError> {
+    let metadata = file
+        .metadata()
+        .map_err(|_| BrowserProfileError::storage_unavailable())?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o777 != 0o600
+    {
+        return Err(BrowserProfileError::unsafe_directory());
+    }
+    Ok(FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+fn read_lock_state(file: &mut File) -> Result<Vec<u8>, BrowserProfileError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| BrowserProfileError::storage_unavailable())?;
+    let mut state = Vec::with_capacity(MAX_LOCK_STATE_BYTES + 1);
+    file.take((MAX_LOCK_STATE_BYTES + 1) as u64)
+        .read_to_end(&mut state)
+        .map_err(|_| BrowserProfileError::storage_unavailable())?;
+    if state.len() > MAX_LOCK_STATE_BYTES {
+        return Err(BrowserProfileError::recovery_required());
+    }
+    Ok(state)
+}
+
+fn write_lock_state(file: &mut File, state: &[u8]) -> Result<(), BrowserProfileError> {
+    file.set_len(0)
+        .and_then(|()| file.seek(SeekFrom::Start(0)).map(|_| ()))
+        .and_then(|()| file.write_all(state))
+        .and_then(|()| file.sync_all())
+        .map_err(|_| BrowserProfileError::storage_unavailable())
+}
+
+fn sync_directory_handle(directory: &File) -> Result<(), BrowserProfileError> {
+    directory
+        .sync_all()
+        .map_err(|_| BrowserProfileError::storage_unavailable())
 }
 
 fn directory_identity(file: &File) -> Result<DirectoryIdentity, BrowserProfileError> {

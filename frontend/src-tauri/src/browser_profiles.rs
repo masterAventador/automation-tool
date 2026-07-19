@@ -11,7 +11,7 @@ mod browser_profiles_platform;
 #[path = "browser_profiles_windows.rs"]
 mod browser_profiles_platform;
 
-use browser_profiles_platform::{PlatformProfile, PlatformProfileStore};
+use browser_profiles_platform::{PlatformProfile, PlatformProfileLock, PlatformProfileStore};
 
 const PROFILE_ROOT_DIRECTORY: &str = "browser-profiles";
 const DOUYIN_DIRECTORY: &str = "douyin";
@@ -28,6 +28,8 @@ pub enum BrowserProfileErrorCode {
     ProfileNotFound,
     UnsafeDirectory,
     IdentityChanged,
+    ProfileInUse,
+    RecoveryRequired,
     StorageUnavailable,
 }
 
@@ -62,6 +64,18 @@ impl BrowserProfileError {
     pub(super) fn identity_changed() -> Self {
         Self {
             code: BrowserProfileErrorCode::IdentityChanged,
+        }
+    }
+
+    pub(super) fn profile_in_use() -> Self {
+        Self {
+            code: BrowserProfileErrorCode::ProfileInUse,
+        }
+    }
+
+    pub(super) fn recovery_required() -> Self {
+        Self {
+            code: BrowserProfileErrorCode::RecoveryRequired,
         }
     }
 
@@ -172,6 +186,16 @@ impl BrowserProfile {
         self.platform
             .revalidate_profile(&self.profile_id, &self.handle)
     }
+
+    pub fn try_acquire_lock(&self) -> Result<BrowserProfileLock<'_>, BrowserProfileError> {
+        self.revalidate()?;
+        let handle = self.handle.try_acquire_lock()?;
+        self.revalidate()?;
+        Ok(BrowserProfileLock {
+            profile: self,
+            handle: Some(handle),
+        })
+    }
 }
 
 impl Debug for BrowserProfile {
@@ -180,6 +204,43 @@ impl Debug for BrowserProfile {
             .debug_struct("BrowserProfile")
             .field("platform", &SocialPlatform::Douyin)
             .field("profile_id", &self.profile_id)
+            .finish_non_exhaustive()
+    }
+}
+
+pub struct BrowserProfileLock<'profile> {
+    profile: &'profile BrowserProfile,
+    handle: Option<PlatformProfileLock>,
+}
+
+impl BrowserProfileLock<'_> {
+    pub fn platform(&self) -> SocialPlatform {
+        self.profile.platform()
+    }
+
+    pub fn profile_id(&self) -> &str {
+        self.profile.profile_id()
+    }
+
+    pub fn directory(&self) -> &Path {
+        self.profile.directory()
+    }
+
+    pub fn release(mut self) -> Result<(), BrowserProfileError> {
+        self.profile.revalidate()?;
+        self.handle
+            .take()
+            .ok_or_else(BrowserProfileError::storage_unavailable)?
+            .release()
+    }
+}
+
+impl Debug for BrowserProfileLock<'_> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrowserProfileLock")
+            .field("platform", &self.platform())
+            .field("profile_id", &self.profile_id())
             .finish_non_exhaustive()
     }
 }

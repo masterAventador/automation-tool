@@ -1,6 +1,7 @@
 use super::{BrowserProfileError, CreateProfileError};
 use std::ffi::{c_void, OsStr};
 use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::fs::OpenOptionsExt;
@@ -9,13 +10,14 @@ use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_FOR_BACKUP_INTENT,
-    FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT,
+    NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
+    FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE, HLOCAL, INVALID_HANDLE_VALUE,
-    OBJ_CASE_INSENSITIVE, STATUS_NOT_A_DIRECTORY, STATUS_OBJECT_NAME_COLLISION,
-    STATUS_OBJECT_NAME_NOT_FOUND, STATUS_REPARSE_POINT_ENCOUNTERED, STATUS_SUCCESS, UNICODE_STRING,
+    CloseHandle, GetLastError, LocalFree, ERROR_LOCK_VIOLATION, ERROR_SUCCESS, HANDLE, HLOCAL,
+    INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE, STATUS_FILE_IS_A_DIRECTORY, STATUS_NOT_A_DIRECTORY,
+    STATUS_OBJECT_NAME_COLLISION, STATUS_OBJECT_NAME_NOT_FOUND, STATUS_REPARSE_POINT_ENCOUNTERED,
+    STATUS_SUCCESS, UNICODE_STRING,
 };
 use windows_sys::Win32::Security::Authorization::{
     GetSecurityInfo, SetSecurityInfo, SE_FILE_OBJECT,
@@ -28,16 +30,22 @@ use windows_sys::Win32::Security::{
     SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    GetFileAttributesW, GetFileInformationByHandle, GetFinalPathNameByHandleW,
+    GetFileAttributesW, GetFileInformationByHandle, GetFinalPathNameByHandleW, LockFileEx,
     BY_HANDLE_FILE_INFORMATION, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_GENERIC_READ, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    INVALID_FILE_ATTRIBUTES, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, INVALID_FILE_ATTRIBUTES, LOCKFILE_EXCLUSIVE_LOCK,
+    LOCKFILE_FAIL_IMMEDIATELY, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+use windows_sys::Win32::System::IO::{IO_STATUS_BLOCK, OVERLAPPED};
 
 const MAX_WINDOWS_PATH_UNITS: usize = 32_768;
+const PROFILE_LOCK_FILE: &str = ".automation-tool-profile-lock-v1";
+const ACTIVE_LOCK_MARKER: &[u8] = br#"{"state":"active","version":1}"#;
+const MAX_LOCK_STATE_BYTES: usize = 64;
+const DIRECTORY_ACE_FLAGS: u32 = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+const FILE_ACE_FLAGS: u32 = 0;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct DirectoryIdentity {
@@ -68,6 +76,127 @@ pub(super) struct PlatformProfileStore {
 
 pub(super) struct PlatformProfile {
     directory: DirectoryHandle,
+}
+
+pub(super) struct PlatformProfileLock {
+    file: File,
+    file_identity: FileIdentity,
+    profile_directory: DirectoryHandle,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct FileIdentity {
+    volume: u64,
+    index: u64,
+}
+
+impl PlatformProfile {
+    pub(super) fn try_acquire_lock(&self) -> Result<PlatformProfileLock, BrowserProfileError> {
+        if directory_identity(&self.directory.file)? != self.directory.identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        verify_private_acl(&self.directory.file)?;
+        let profile_directory = DirectoryHandle {
+            file: self
+                .directory
+                .file
+                .try_clone()
+                .map_err(|_| BrowserProfileError::storage_unavailable())?,
+            identity: self.directory.identity,
+            path: self.directory.path.clone(),
+        };
+        let mut file = match open_relative_lock_file(
+            &profile_directory,
+            PROFILE_LOCK_FILE,
+            FILE_CREATE,
+            AclPolicy::Repair,
+        ) {
+            Ok(file) => file,
+            Err(error) if error.code() == super::BrowserProfileErrorCode::ProfileNotFound => {
+                open_relative_lock_file(
+                    &profile_directory,
+                    PROFILE_LOCK_FILE,
+                    FILE_OPEN,
+                    AclPolicy::Require,
+                )?
+            }
+            Err(error) => return Err(error),
+        };
+        let file_identity = lock_file_identity(&file)?;
+        let mut overlapped = OVERLAPPED::default();
+        let locked = unsafe {
+            LockFileEx(
+                file.as_raw_handle() as HANDLE,
+                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                0,
+                u32::MAX,
+                u32::MAX,
+                &mut overlapped,
+            )
+        };
+        if locked == 0 {
+            return Err(if unsafe { GetLastError() } == ERROR_LOCK_VIOLATION {
+                BrowserProfileError::profile_in_use()
+            } else {
+                BrowserProfileError::storage_unavailable()
+            });
+        }
+        let reopened = open_relative_lock_file(
+            &profile_directory,
+            PROFILE_LOCK_FILE,
+            FILE_OPEN,
+            AclPolicy::Require,
+        )?;
+        if lock_file_identity(&reopened)? != file_identity
+            || directory_identity(&profile_directory.file)? != profile_directory.identity
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        let state = read_lock_state(&mut file)?;
+        if !state.is_empty() {
+            return Err(BrowserProfileError::recovery_required());
+        }
+        write_lock_state(&mut file, ACTIVE_LOCK_MARKER)?;
+        let reopened = open_relative_lock_file(
+            &profile_directory,
+            PROFILE_LOCK_FILE,
+            FILE_OPEN,
+            AclPolicy::Require,
+        )?;
+        if lock_file_identity(&reopened)? != file_identity
+            || directory_identity(&profile_directory.file)? != profile_directory.identity
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        Ok(PlatformProfileLock {
+            file,
+            file_identity,
+            profile_directory,
+        })
+    }
+}
+
+impl PlatformProfileLock {
+    pub(super) fn release(mut self) -> Result<(), BrowserProfileError> {
+        if directory_identity(&self.profile_directory.file)? != self.profile_directory.identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        let reopened = open_relative_lock_file(
+            &self.profile_directory,
+            PROFILE_LOCK_FILE,
+            FILE_OPEN,
+            AclPolicy::Require,
+        )?;
+        if lock_file_identity(&self.file)? != self.file_identity
+            || lock_file_identity(&reopened)? != self.file_identity
+        {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        if read_lock_state(&mut self.file)? != ACTIVE_LOCK_MARKER {
+            return Err(BrowserProfileError::recovery_required());
+        }
+        write_lock_state(&mut self.file, b"")
+    }
 }
 
 impl PlatformProfileStore {
@@ -316,6 +445,78 @@ fn open_relative_directory(
     })
 }
 
+fn open_relative_lock_file(
+    parent: &DirectoryHandle,
+    name: &str,
+    disposition: u32,
+    acl_policy: AclPolicy,
+) -> Result<File, BrowserProfileError> {
+    require_safe_name(name)?;
+    if directory_identity(&parent.file)? != parent.identity {
+        return Err(BrowserProfileError::identity_changed());
+    }
+    let mut name_units = OsStr::new(name).encode_wide().collect::<Vec<_>>();
+    let byte_length = name_units
+        .len()
+        .checked_mul(2)
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(BrowserProfileError::unsafe_directory)?;
+    let object_name = UNICODE_STRING {
+        Length: byte_length,
+        MaximumLength: byte_length,
+        Buffer: name_units.as_mut_ptr(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: parent.file.as_raw_handle() as HANDLE,
+        ObjectName: &object_name,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: null(),
+        SecurityQualityOfService: null(),
+    };
+    let mut io_status = IO_STATUS_BLOCK::default();
+    let mut handle = INVALID_HANDLE_VALUE;
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            FILE_GENERIC_READ | FILE_GENERIC_WRITE | READ_CONTROL | WRITE_DAC,
+            &attributes,
+            &mut io_status,
+            null(),
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            disposition,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT,
+            null(),
+            0,
+        )
+    };
+    if status != STATUS_SUCCESS {
+        return Err(match status {
+            STATUS_OBJECT_NAME_NOT_FOUND => BrowserProfileError::profile_not_found(),
+            STATUS_OBJECT_NAME_COLLISION if disposition == FILE_CREATE => {
+                BrowserProfileError::profile_not_found()
+            }
+            STATUS_REPARSE_POINT_ENCOUNTERED | STATUS_FILE_IS_A_DIRECTORY => {
+                BrowserProfileError::unsafe_directory()
+            }
+            _ => BrowserProfileError::storage_unavailable(),
+        });
+    }
+    let file = unsafe { File::from_raw_handle(handle as _) };
+    let identity = lock_file_identity(&file)?;
+    if final_path(&file)? != normalized_path_key(&parent.path.join(name)) {
+        return Err(BrowserProfileError::unsafe_directory());
+    }
+    enforce_file_acl_policy(&file, acl_policy)?;
+    if directory_identity(&parent.file)? != parent.identity
+        || lock_file_identity(&file)? != identity
+    {
+        return Err(BrowserProfileError::identity_changed());
+    }
+    Ok(file)
+}
+
 fn enforce_acl_policy(file: &File, policy: AclPolicy) -> Result<(), BrowserProfileError> {
     match policy {
         AclPolicy::Ignore => Ok(()),
@@ -324,6 +525,17 @@ fn enforce_acl_policy(file: &File, policy: AclPolicy) -> Result<(), BrowserProfi
             verify_private_acl(file)
         }
         AclPolicy::Require => verify_private_acl(file),
+    }
+}
+
+fn enforce_file_acl_policy(file: &File, policy: AclPolicy) -> Result<(), BrowserProfileError> {
+    match policy {
+        AclPolicy::Ignore => Ok(()),
+        AclPolicy::Repair => {
+            apply_private_file_acl(file)?;
+            verify_private_file_acl(file)
+        }
+        AclPolicy::Require => verify_private_file_acl(file),
     }
 }
 
@@ -344,7 +556,33 @@ fn directory_identity(file: &File) -> Result<DirectoryIdentity, BrowserProfileEr
     })
 }
 
+fn lock_file_identity(file: &File) -> Result<FileIdentity, BrowserProfileError> {
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut information) } == 0
+    {
+        return Err(BrowserProfileError::storage_unavailable());
+    }
+    if information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0
+        || information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || information.nNumberOfLinks != 1
+    {
+        return Err(BrowserProfileError::unsafe_directory());
+    }
+    Ok(FileIdentity {
+        volume: u64::from(information.dwVolumeSerialNumber),
+        index: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
+    })
+}
+
 fn apply_private_acl(file: &File) -> Result<(), BrowserProfileError> {
+    apply_private_acl_with_flags(file, DIRECTORY_ACE_FLAGS)
+}
+
+fn apply_private_file_acl(file: &File) -> Result<(), BrowserProfileError> {
+    apply_private_acl_with_flags(file, FILE_ACE_FLAGS)
+}
+
+fn apply_private_acl_with_flags(file: &File, ace_flags: u32) -> Result<(), BrowserProfileError> {
     let user = CurrentUserSid::load()?;
     let sid = user.sid();
     let sid_length = unsafe { GetLengthSid(sid) } as usize;
@@ -359,15 +597,7 @@ fn apply_private_acl(file: &File) -> Result<(), BrowserProfileError> {
     let mut acl_buffer = vec![0_u32; acl_length.div_ceil(size_of::<u32>())];
     let acl = acl_buffer.as_mut_ptr().cast::<ACL>();
     if unsafe { InitializeAcl(acl, acl_length as u32, ACL_REVISION) } == 0
-        || unsafe {
-            AddAccessAllowedAceEx(
-                acl,
-                ACL_REVISION,
-                OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE,
-                FILE_ALL_ACCESS,
-                sid,
-            )
-        } == 0
+        || unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, ace_flags, FILE_ALL_ACCESS, sid) } == 0
     {
         return Err(BrowserProfileError::storage_unavailable());
     }
@@ -389,6 +619,17 @@ fn apply_private_acl(file: &File) -> Result<(), BrowserProfileError> {
 }
 
 fn verify_private_acl(file: &File) -> Result<(), BrowserProfileError> {
+    verify_private_acl_with_flags(file, DIRECTORY_ACE_FLAGS as u8)
+}
+
+fn verify_private_file_acl(file: &File) -> Result<(), BrowserProfileError> {
+    verify_private_acl_with_flags(file, FILE_ACE_FLAGS as u8)
+}
+
+fn verify_private_acl_with_flags(
+    file: &File,
+    expected_ace_flags: u8,
+) -> Result<(), BrowserProfileError> {
     let user = CurrentUserSid::load()?;
     let mut owner: PSID = null_mut();
     let mut dacl: *mut ACL = null_mut();
@@ -408,7 +649,7 @@ fn verify_private_acl(file: &File) -> Result<(), BrowserProfileError> {
     if status != ERROR_SUCCESS || descriptor.is_null() {
         return Err(BrowserProfileError::storage_unavailable());
     }
-    let result = verify_private_acl_parts(descriptor, owner, dacl, user.sid());
+    let result = verify_private_acl_parts(descriptor, owner, dacl, user.sid(), expected_ace_flags);
     unsafe {
         LocalFree(descriptor as HLOCAL);
     }
@@ -420,6 +661,7 @@ fn verify_private_acl_parts(
     owner: PSID,
     dacl: *mut ACL,
     user: PSID,
+    expected_ace_flags: u8,
 ) -> Result<(), BrowserProfileError> {
     if owner.is_null() || dacl.is_null() || unsafe { EqualSid(owner, user) } == 0 {
         return Err(BrowserProfileError::unsafe_directory());
@@ -454,14 +696,34 @@ fn verify_private_acl_parts(
         .cast::<c_void>();
     if allowed.Header.AceType
         != windows_sys::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE as u8
-        || allowed.Header.AceFlags & (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8
-            != (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8
+        || allowed.Header.AceFlags != expected_ace_flags
         || allowed.Mask != FILE_ALL_ACCESS
         || unsafe { EqualSid(ace_sid, user) } == 0
     {
         return Err(BrowserProfileError::unsafe_directory());
     }
     Ok(())
+}
+
+fn read_lock_state(file: &mut File) -> Result<Vec<u8>, BrowserProfileError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| BrowserProfileError::storage_unavailable())?;
+    let mut state = Vec::with_capacity(MAX_LOCK_STATE_BYTES + 1);
+    file.take((MAX_LOCK_STATE_BYTES + 1) as u64)
+        .read_to_end(&mut state)
+        .map_err(|_| BrowserProfileError::storage_unavailable())?;
+    if state.len() > MAX_LOCK_STATE_BYTES {
+        return Err(BrowserProfileError::recovery_required());
+    }
+    Ok(state)
+}
+
+fn write_lock_state(file: &mut File, state: &[u8]) -> Result<(), BrowserProfileError> {
+    file.set_len(0)
+        .and_then(|()| file.seek(SeekFrom::Start(0)).map(|_| ()))
+        .and_then(|()| file.write_all(state))
+        .and_then(|()| file.sync_all())
+        .map_err(|_| BrowserProfileError::storage_unavailable())
 }
 
 struct CurrentUserSid {

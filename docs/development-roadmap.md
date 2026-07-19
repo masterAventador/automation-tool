@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择及私有 Profile 目录，真实平台页面动作尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择、私有 Profile 目录及单实例锁，真实平台页面动作尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -67,6 +67,7 @@
 | macOS 浏览器受信发现 | `🔍` Rust 生产 API 已用 Apple Security.framework 验证标准路径 Chrome 的签名、Bundle ID、Team ID、全架构/嵌套代码和路径 identity；Edge allowlist/失败矩阵已实现，本机未安装 Edge，保留真实 Edge 实机验收 |
 | 运营浏览器选择 | `🔍` macOS 隐藏真实 App 已从设置页保存、刷新并读回受信 Chrome 枚举；WebView/IPC/沙盒文件无路径，Windows 生产模块与测试已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | 私有浏览器 Profile | `🔍` macOS/Unix 已从公开 Rust Store 原入口完成本机 UUIDv4 Profile 原子创建、重开、权限、symlink、identity 替换与并发矩阵；Windows handle-relative/私有 ACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
+| Profile 单实例锁 | `🔍` macOS/Unix 已从公开 Rust Profile 原入口验证同 Profile 跨进程排他、不同 Profile 并行、显式释放及真实子进程被 kill 后需恢复；Windows HANDLE-relative/LockFileEx/私有 DACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -257,7 +258,7 @@
 | B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | 🔍 待 Windows 原生验收 |
 | B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | 🔍 待 Windows 原生验收 |
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | 🔍 待 Windows 原生验收 |
-| B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | ⬜ 未开始 |
+| B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | 🔍 待 Windows 原生验收 |
 | B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | ⬜ 未开始 |
 | B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | ⬜ 未开始 |
 | B5-09 | 抖音 Session 检测 | healthy/expired/missing/risk/unknown；使用页面状态而非 Cookie 上传 | B5-08 | ⬜ 未开始 |
@@ -1684,10 +1685,26 @@
 - 原始入口与隔离：B5-05 的正式消费者是 B5-06/B5-07 Rust/Executor 运行链，当前没有用户可调用功能；唯一后台隐藏 App 已从正式 Tauri setup 初始化 Store，叶子创建/重开则从公开生产 Store 调用真实 OS 文件系统。验收不启动 Backend、PostgreSQL、Docker、Executor 或运营浏览器；隐藏 App 只使用动态已检查 WebDriver 端口和独立 B5-04 AppData，其他测试数据使用本任务唯一临时 AppData，结束全部精确删除，没有读取、停止、复用或清理另一个项目的资源
 - 后续：B5-06 在任何 persistent browser context 之前基于同一稳定 Profile identity 建立跨进程单实例锁；B5-05 Windows 原生验收在 runner 恢复时自动补齐，不阻塞锁的跨平台实现
 
+### B5-06 Profile 单实例锁
+
+- 状态：🔍 待 Windows 原生验收；macOS/Unix 公开生产 API、真实文件系统、跨进程争用和子进程崩溃恢复矩阵全部通过，Windows 生产模块已经 MSVC 目标类型检查，GitHub Hosted Windows 仍因账户 Billing/Actions spending limit 无法启动
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：任何 BrowserRuntime 或 persistent context 使用 Profile 前都必须持有本机原生排他锁；同一 Profile 的同进程/跨进程竞争必须立即返回 `ProfileInUse`，不同 Profile 可并行，未明确证明安全退出的上次持有者必须返回 `RecoveryRequired`
+- RED：先把台账置为 `🧪 RED`；新增 Rust 公开 Profile 集成测试与 Node 原生边界契约，分别精确失败于缺少 `try_acquire_lock`/`ProfileInUse`/`RecoveryRequired` 和缺少平台锁实现；没有先放空方法、进程内 Mutex 或 Mock 文件系统让测试假绿
+- 公开边界：`BrowserProfile::try_acquire_lock` 只能基于 B5-05 已持有的稳定 Profile identity 获取锁，返回借用 Profile 生命周期的 `BrowserProfileLock`；只有显式 `release(self)` 才清除活跃标记。Drop、panic、kill 或意外退出只由 OS 释放内核锁，保留活跃标记并在下次返回 `RecoveryRequired`；本任务故意不暴露 WebView/Tauri 锁、解锁或强制恢复 Command
+- 状态文件：每个 Profile 固定一个 `.automation-tool-profile-lock-v1`，空文件代表上次明确释放，持有者在内核锁后持久化 exact canonical `{"state":"active","version":1}`。非空、过大、破损或未知状态均不自动覆盖；只有 identity、权限/所有者和 exact marker 仍一致时才能在显式释放中原地清空
+- Unix 原生语义：固定文件通过 Profile 目录 fd 的 `openat(O_NOFOLLOW|O_CLOEXEC)` 打开，要求当前 euid、`0600`、普通文件且硬链接数为 1；保存 dev+inode 并在写入/清空前后重开比对，使用 `flock(LOCK_EX|LOCK_NB)` 立即排他。路径被 rename/替换、symlink、过宽权限或状态损坏全部 fail closed
+- Windows 原生语义：固定文件使用 Profile 目录 HANDLE 作为 `NtCreateFile` RootDirectory，带 `FILE_NON_DIRECTORY_FILE|FILE_OPEN_REPARSE_POINT`，且不分享 delete 来阻止持锁时改名/删除；要求非 reparse、非目录、硬链接数为 1、稳定 volume/file index、精确最终路径和当前用户唯一 ACE 的 protected DACL。`LockFileEx(LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY)` 完成非阻塞内核排他，显式释放后由 HANDLE Drop 释放锁
+- 失败矩阵：6 项真实文件系统/进程集成测试覆盖同 Profile 争用、不同 Profile 并行、显式释放后重获取、真实子进程持锁争用、持锁子进程被 kill、Drop 未释放、symlink/过宽权限/破损状态/文件替换。Windows reparse/DACL/竞争/崩溃实际行为仍保留给原生 runner，不以 MSVC 类型检查冒充通过
+- 门禁：完整 Frontend Node 契约 62 项、Vitest 123 项、ESLint、严格 TypeScript、OpenAPI 无漂移、production boundary、Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿；macOS 默认 Rust 共 120 项通过、1 项既有 PyInstaller 编排 ignored。用现有 Homebrew `rust-src` 对直接引用生产 common/Windows Profile 模块的最小临时 crate 完成 `x86_64-pc-windows-msvc` 类型检查，临时 crate/target 已删除
+- 原始入口与资源：B5-06 当前的正式消费者是 B5-08 BrowserRuntime，尚无用户可调用的 App 功能；验收从公开 `BrowserProfileStore` 创建/重开 Profile 并调用公开 `BrowserProfile::try_acquire_lock`，使用真实 OS 文件系统和真实测试子进程，没有直接调下层、Mock 或隐藏 App 空壳。任务未启动 App、Backend、PostgreSQL、Docker、Executor、浏览器或任何监听端口；临时 AppData 只按本任务唯一精确路径创建并清理，没有读取、停止、复用或清理另一个项目的资源
+- 后续：B5-07 在正式 PyInstaller Executor 中加入 Playwright 并启动受信系统 Chrome/Edge headed persistent context；B5-08 将浏览器进程生命周期与本锁 guard 绑定
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-06`：为同一 Profile 建立跨进程单实例锁；
-2. `B5-07`：在正式 PyInstaller Executor 中启动系统 Chrome/Edge headed persistent context；
-3. B5-03/B5-04/B5-05 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-07`：在正式 PyInstaller Executor 中启动系统 Chrome/Edge headed persistent context；
+2. `B5-08`：建立持有 Profile 锁的 BrowserRuntime 启动、窗口、超时、关闭和进程清理边界；
+3. B5-03/B5-04/B5-05/B5-06 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
