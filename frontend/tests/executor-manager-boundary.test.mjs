@@ -35,3 +35,18 @@ test("E4-08 supervises only the fixed Executor with an explicit bounded restart 
   assert.match(manager, /RestartPending/);
   assert.doesNotMatch(manager, /loop\s*\{[^}]*Command::new/s);
 });
+
+test("E4-09 isolates and terminates the complete Executor process tree on each platform", async () => {
+  const [cargo, manager] = await Promise.all([
+    readFile(new URL("src-tauri/Cargo.toml", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
+  ]);
+
+  assert.match(manager, /process_group\(0\)/);
+  assert.match(manager, /CREATE_SUSPENDED/);
+  assert.match(manager, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(manager, /TerminateJobObject/);
+  assert.match(cargo, /Win32_System_JobObjects/);
+  assert.match(cargo, /Win32_System_Threading/);
+  assert.match(cargo, /Win32_System_Diagnostics_ToolHelp/);
+});

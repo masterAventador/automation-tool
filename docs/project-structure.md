@@ -125,7 +125,7 @@ frontend/
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
 │   │   ├── executor_bootstrap.rs  # 256-bit stdin 启动令牌与 HMAC 健康证明校验
-│   │   ├── executor_manager.rs    # signed Executor 固定 start/status/stop 生命周期
+│   │   ├── executor_manager.rs    # signed Executor 生命周期、监管与跨平台进程树
 │   │   ├── executor_package.rs    # signed onedir 验签、完整目录复算与防降级
 │   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
@@ -133,7 +133,7 @@ frontend/
 │   │   └── main.rs
 │   ├── tests/
 │   │   ├── executor_bootstrap.rs  # 随机令牌、stdin 文档、常量时间证明与失败矩阵
-│   │   ├── executor_manager.rs    # 单实例、并发、超时、坏包/证明与真实包入口
+│   │   ├── executor_manager.rs    # 单实例、监管、超时、进程树与真实包入口
 │   │   ├── executor_package.rs    # 当前目标包、Python fixture 与失败矩阵
 │   │   └── executor_protocol_fixtures.rs # 回放三端共享原始 wire
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
@@ -291,7 +291,9 @@ E4-06 的 `src-tauri/src/executor_bootstrap.rs` 只提供 Rust 内部 `LocalSess
 
 E4-07 的 `src-tauri/src/executor_manager.rs` 组合 E4-05/E4-06，但不复制两者规则：Manager 每次 start 复验固定包根并只启动验证后的 Manifest 入口，stdin 一次写入 bootstrap，stdout 只消费认证 lifecycle 事件；一个 Mutex 线性化 start/status/stop，错误、超时与 Drop 回收直接子进程。它不含旧 stdio task invoke、`serde_json::Value`、capability、任意路径/URL/命令或 Tauri Command。`scripts/run_e4_07_acceptance.py` 使用真实 Manifest CLI、PyInstaller onedir、本地 Uvicorn/Session/Registry 和公开 Rust Manager 原入口证明 `registered → heartbeat → unregistered`；私有配置只以 `0600` 临时文件存在并删除。后台退出监管、进程树、stderr 诊断和桌面 PlatformAdapter 分别留给 E4-08～E4-10/E4-13。
 
-E4-08 不新增 supervisor 文件或第二生命周期源，而是在同一 `executor_manager.rs` 中加入显式 `ExecutorRestartPolicy`、唯一命名后台线程和 running/restarting/stopped 内部状态机。只有 OS crash 能在预算内转入 pending restart；每次恢复仍复用 E4-05/E4-06 的原始公开边界重新验包和生成令牌。显式 stop 先移除 pending/running，正常或固定失败退出直接停止，Drop 先 join supervisor；公开状态仅增加 `restartCount`。测试用已签名真实进程和 OS SIGKILL 证明初次+两次恢复的硬事实，临时计数位于包外并由 RAII 删除；PyInstaller/Uvicorn 正式链路另行回归。完整进程树和 Windows 原生恢复仍归 E4-09/待 runner 验收。
+E4-08 不新增 supervisor 文件或第二生命周期源，而是在同一 `executor_manager.rs` 中加入显式 `ExecutorRestartPolicy`、唯一命名后台线程和 running/restarting/stopped 内部状态机。只有 OS crash 能在预算内转入 pending restart；每次恢复仍复用 E4-05/E4-06 的原始公开边界重新验包和生成令牌。显式 stop 先移除 pending/running，正常或固定失败退出直接停止，Drop 先 join supervisor；公开状态仅增加 `restartCount`。测试用已签名真实进程和 OS SIGKILL 证明初次+两次恢复的硬事实，临时计数位于包外并由 RAII 删除；PyInstaller/Uvicorn 正式链路另行回归。完整进程树现已由 E4-09 接入，Windows 原生恢复仍待 runner 验收。
+
+E4-09 仍不新建进程服务：`RunningExecutor` 直接拥有跨平台 `ProcessTree`。Unix 在 spawn 前建立独立 process group，Windows 在 suspended child 上先配置并挂入 kill-on-close Job Object 再恢复；所有 setup 失败、启动/停止超时、显式停止后的剩余后代、异常退出准备恢复和 Manager Drop 都复用同一树终止原语。Rust 测试让真实签名主进程生成忽略 `SIGTERM` 的孙进程并核对 PID 消失，未使用 Mock 或 shell 进程列表冒充；Windows 原生仍待 runner，不把 macOS 或静态契约算作通过。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

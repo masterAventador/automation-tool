@@ -56,6 +56,113 @@ json.loads(sys.stdin.readline())
 time.sleep(30)
 "#;
 
+struct DescendantMarker {
+    path: PathBuf,
+}
+
+impl DescendantMarker {
+    fn new() -> Self {
+        Self {
+            path: std::env::temp_dir().join(format!(
+                "automation-tool-e4-09-descendant-{}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system time")
+                    .as_nanos(),
+                TEMPORARY_PACKAGE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            )),
+        }
+    }
+
+    fn wait_for_pid(&self) -> i32 {
+        self.wait_for_count(1)[0]
+    }
+
+    fn wait_for_count(&self, expected: usize) -> Vec<i32> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while self.pids().len() < expected && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let process_ids = self.pids();
+        assert_eq!(process_ids.len(), expected, "descendant marker count");
+        process_ids
+    }
+
+    fn pids(&self) -> Vec<i32> {
+        fs::read_to_string(&self.path)
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|value| value.parse().ok())
+            .collect()
+    }
+
+    fn wait_for_exit(&self, process_id: i32) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while process_exists(process_id) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !process_exists(process_id),
+            "descendant process must be terminated"
+        );
+    }
+}
+
+impl Drop for DescendantMarker {
+    fn drop(&mut self) {
+        for process_id in self.pids() {
+            unsafe {
+                libc::kill(process_id, libc::SIGKILL);
+            }
+        }
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn process_exists(process_id: i32) -> bool {
+    if unsafe { libc::kill(process_id, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+fn process_tree_fixture(marker: &DescendantMarker, after_spawn: &str) -> String {
+    let marker_path = serde_json::to_string(&marker.path.to_string_lossy()).expect("marker path");
+    format!(
+        r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, signal, subprocess, sys, time
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+stopping = False
+def proof(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    return "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def emit(event):
+    print(json.dumps({{"authenticationProof": proof(event), "event": event, "protocolVersion": "1.0"}}, separators=(",", ":")), flush=True)
+def stop(_signum, _frame):
+    global stopping
+    stopping = True
+signal.signal(signal.SIGTERM, stop)
+descendant_source = "import os,pathlib,signal,sys,time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+subprocess.Popen([sys.executable, "-c", descendant_source, {marker_path}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+{after_spawn}
+"#,
+    )
+}
+
+fn silent_process_tree_fixture(marker: &DescendantMarker) -> String {
+    let marker_path = marker.path.to_string_lossy().replace('\'', "'\"'\"'");
+    format!(
+        r#"#!/bin/sh
+IFS= read -r bootstrap
+/bin/sh -c 'trap "" TERM; sleep 30' </dev/null >/dev/null 2>&1 &
+printf "%s\n" "$!" > '{marker_path}'
+sleep 30
+"#,
+    )
+}
+
 struct TemporaryPackage {
     root: PathBuf,
 }
@@ -315,6 +422,84 @@ fn startup_timeout_force_stops_the_child_and_leaves_the_manager_stopped() {
     );
 }
 
+#[test]
+fn explicit_stop_terminates_the_complete_executor_process_tree() {
+    let marker = DescendantMarker::new();
+    let package = TemporaryPackage::new(&process_tree_fixture(
+        &marker,
+        r#"emit("executor.healthy")
+while not stopping:
+    time.sleep(0.01)
+emit("executor.stopped")"#,
+    ));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("start process tree");
+    let descendant_id = marker.wait_for_pid();
+    manager.stop().expect("stop process tree");
+
+    marker.wait_for_exit(descendant_id);
+}
+
+#[test]
+fn hung_stop_times_out_and_terminates_the_complete_executor_process_tree() {
+    let marker = DescendantMarker::new();
+    let package = TemporaryPackage::new(&process_tree_fixture(
+        &marker,
+        r#"signal.signal(signal.SIGTERM, signal.SIG_IGN)
+emit("executor.healthy")
+time.sleep(30)"#,
+    ));
+    let manager = manager_for_root_with_timeouts(
+        package.root.clone(),
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    );
+
+    manager.start(launch()).expect("start hung process tree");
+    let descendant_id = marker.wait_for_pid();
+    let error = manager.stop().expect_err("hung stop must time out");
+
+    assert_eq!(error.code(), ExecutorManagerErrorCode::TimedOut);
+    marker.wait_for_exit(descendant_id);
+}
+
+#[test]
+fn startup_timeout_terminates_the_complete_executor_process_tree() {
+    let marker = DescendantMarker::new();
+    let package = TemporaryPackage::new(&silent_process_tree_fixture(&marker));
+    let manager = manager_for_root_with_timeouts(
+        package.root.clone(),
+        Duration::from_secs(3),
+        Duration::from_secs(1),
+    );
+
+    let error = manager.start(launch()).expect_err("silent process tree");
+    let descendant_id = marker.wait_for_pid();
+
+    assert_eq!(error.code(), ExecutorManagerErrorCode::TimedOut);
+    marker.wait_for_exit(descendant_id);
+}
+
+#[test]
+fn dropping_the_manager_terminates_the_complete_executor_process_tree() {
+    let marker = DescendantMarker::new();
+    let package = TemporaryPackage::new(&process_tree_fixture(
+        &marker,
+        r#"emit("executor.healthy")
+while not stopping:
+    time.sleep(0.01)
+emit("executor.stopped")"#,
+    ));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("start process tree");
+    let descendant_id = marker.wait_for_pid();
+    drop(manager);
+
+    marker.wait_for_exit(descendant_id);
+}
+
 struct LaunchCounter {
     path: PathBuf,
 }
@@ -386,6 +571,43 @@ emit("executor.stopped")
     )
 }
 
+fn supervised_process_tree_fixture(counter: &LaunchCounter, marker: &DescendantMarker) -> String {
+    let counter_path =
+        serde_json::to_string(&counter.path.to_string_lossy()).expect("counter path");
+    let marker_path = serde_json::to_string(&marker.path.to_string_lossy()).expect("marker path");
+    format!(
+        r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, os, pathlib, signal, subprocess, sys, time
+counter = pathlib.Path({counter_path})
+count = int(counter.read_text()) + 1 if counter.exists() else 1
+counter.write_text(str(count))
+marker = pathlib.Path({marker_path})
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+stopping = False
+def proof(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    return "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def emit(event):
+    print(json.dumps({{"authenticationProof": proof(event), "event": event, "protocolVersion": "1.0"}}, separators=(",", ":")), flush=True)
+def stop(_signum, _frame):
+    global stopping
+    stopping = True
+signal.signal(signal.SIGTERM, stop)
+descendant_source = "import os,pathlib,signal,sys,time; pathlib.Path(sys.argv[1]).open('a').write(str(os.getpid()) + '\\n'); signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+subprocess.Popen([sys.executable, "-c", descendant_source, {marker_path}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+while not marker.exists() or len(marker.read_text().splitlines()) < count:
+    time.sleep(0.01)
+emit("executor.healthy")
+if count == 1:
+    os.kill(os.getpid(), signal.SIGKILL)
+while not stopping:
+    time.sleep(0.01)
+emit("executor.stopped")
+"#,
+    )
+}
+
 fn wait_for_state(manager: &ExecutorManager, expected: ExecutorManagerState) {
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     while manager.status().expect("supervised status").state() != expected
@@ -419,6 +641,24 @@ fn background_supervisor_recovers_two_crashes_and_reports_the_consumed_budget() 
     manager.stop().expect("explicit stop after recovery");
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(counter.value(), 3);
+}
+
+#[test]
+fn crash_recovery_cleans_the_previous_process_tree_before_relaunching() {
+    let counter = LaunchCounter::new();
+    let marker = DescendantMarker::new();
+    let package = TemporaryPackage::new(&supervised_process_tree_fixture(&counter, &marker));
+    let manager = manager(&package);
+
+    manager.start(launch()).expect("initial process tree");
+    counter.wait_for(2);
+    let process_ids = marker.wait_for_count(2);
+    wait_for_state(&manager, ExecutorManagerState::Running);
+
+    marker.wait_for_exit(process_ids[0]);
+    assert!(process_exists(process_ids[1]), "restarted descendant runs");
+    manager.stop().expect("stop restarted process tree");
+    marker.wait_for_exit(process_ids[1]);
 }
 
 #[test]

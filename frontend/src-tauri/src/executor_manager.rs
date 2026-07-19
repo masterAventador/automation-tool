@@ -357,6 +357,7 @@ impl Drop for ExecutorManager {
 
 struct RunningExecutor {
     child: Child,
+    process_tree: ProcessTree,
     token: LocalSessionToken,
     lifecycle_events: Receiver<Result<String, ()>>,
     stdout_thread: Option<JoinHandle<()>>,
@@ -372,6 +373,206 @@ struct ExecutorLifecycleEvent {
     protocol_version: String,
 }
 
+struct ProcessTree {
+    termination_requested: bool,
+    #[cfg(unix)]
+    process_group_id: i32,
+    #[cfg(windows)]
+    job: WindowsJob,
+}
+
+impl ProcessTree {
+    #[cfg(unix)]
+    fn attach(child: &Child) -> Result<Self, ExecutorManagerError> {
+        let process_group_id = i32::try_from(child.id()).map_err(|_| process_unavailable())?;
+        if process_group_id <= 0 {
+            return Err(process_unavailable());
+        }
+        Ok(Self {
+            termination_requested: false,
+            process_group_id,
+        })
+    }
+
+    #[cfg(windows)]
+    fn attach(child: &Child) -> Result<Self, ExecutorManagerError> {
+        Ok(Self {
+            termination_requested: false,
+            job: WindowsJob::attach(child)?,
+        })
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
+    fn attach(_child: &Child) -> Result<Self, ExecutorManagerError> {
+        Err(process_unavailable())
+    }
+
+    #[cfg(unix)]
+    fn terminate(&mut self) -> Result<(), ExecutorManagerError> {
+        if self.termination_requested {
+            return Ok(());
+        }
+        let result = unsafe { libc::kill(-self.process_group_id, libc::SIGKILL) };
+        if result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            self.termination_requested = true;
+            Ok(())
+        } else {
+            Err(process_unavailable())
+        }
+    }
+
+    #[cfg(windows)]
+    fn terminate(&mut self) -> Result<(), ExecutorManagerError> {
+        if self.termination_requested {
+            return Ok(());
+        }
+        self.job.terminate()?;
+        self.termination_requested = true;
+        Ok(())
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
+    fn terminate(&mut self) -> Result<(), ExecutorManagerError> {
+        Err(process_unavailable())
+    }
+}
+
+#[cfg(unix)]
+fn configure_process_isolation(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+fn configure_process_isolation(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+    command.creation_flags(CREATE_SUSPENDED);
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn configure_process_isolation(_command: &mut Command) {}
+
+#[cfg(windows)]
+struct WindowsJob {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+unsafe impl Send for WindowsJob {}
+
+#[cfg(windows)]
+impl WindowsJob {
+    fn attach(child: &Child) -> Result<Self, ExecutorManagerError> {
+        use std::mem::{size_of, zeroed};
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(process_unavailable());
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                &limits as *const _ as _,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        let assigned = configured != FALSE
+            && unsafe { AssignProcessToJobObject(handle, child.as_raw_handle() as _) } != FALSE;
+        if !assigned || resume_suspended_process(child.id()).is_err() {
+            unsafe {
+                windows_sys::Win32::System::JobObjects::TerminateJobObject(handle, 1);
+                CloseHandle(handle);
+            }
+            return Err(process_unavailable());
+        }
+        Ok(Self { handle })
+    }
+
+    fn terminate(&mut self) -> Result<(), ExecutorManagerError> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+        if self.handle.is_null() {
+            return Ok(());
+        }
+        let terminated = unsafe { TerminateJobObject(self.handle, 1) } != 0;
+        let closed = unsafe { CloseHandle(self.handle) } != 0;
+        self.handle = std::ptr::null_mut();
+        if terminated || closed {
+            Ok(())
+        } else {
+            Err(process_unavailable())
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJob {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.handle);
+            }
+            self.handle = std::ptr::null_mut();
+        }
+    }
+}
+
+#[cfg(windows)]
+fn resume_suspended_process(process_id: u32) -> Result<(), ExecutorManagerError> {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(process_unavailable());
+    }
+    let mut entry: THREADENTRY32 = unsafe { zeroed() };
+    entry.dwSize = size_of::<THREADENTRY32>() as u32;
+    let mut resumed = false;
+    let mut has_entry = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    while has_entry {
+        if entry.th32OwnerProcessID == process_id {
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if !thread.is_null() {
+                let previous_count = unsafe { ResumeThread(thread) };
+                unsafe {
+                    CloseHandle(thread);
+                }
+                if previous_count != u32::MAX {
+                    resumed = true;
+                }
+            }
+        }
+        has_entry = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+    }
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    if resumed {
+        Ok(())
+    } else {
+        Err(process_unavailable())
+    }
+}
+
 fn spawn_executor(
     package: VerifiedExecutorPackage,
     launch: &ExecutorLaunchConfiguration,
@@ -380,12 +581,23 @@ fn spawn_executor(
 ) -> Result<RunningExecutor, ExecutorManagerError> {
     let token = LocalSessionToken::generate()
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))?;
-    let mut child = Command::new(package.entrypoint_path())
+    let mut command = Command::new(package.entrypoint_path());
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_process_isolation(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))?;
+    let mut process_tree = match ProcessTree::attach(&child) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
     let setup = (|| {
         let mut stdin = child.stdin.take().ok_or_else(process_unavailable)?;
         let stdout = child.stdout.take().ok_or_else(process_unavailable)?;
@@ -401,14 +613,14 @@ fn spawn_executor(
     let (lifecycle_events, stdout_thread, stderr_thread) = match setup {
         Ok(value) => value,
         Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
+            force_stop_child(&mut process_tree, &mut child);
             return Err(error);
         }
     };
     let status = ExecutorManagerStatus::running(&package, restart_count);
     let mut running = RunningExecutor {
         child,
+        process_tree,
         token,
         lifecycle_events,
         stdout_thread: Some(stdout_thread),
@@ -530,6 +742,7 @@ fn stop_executor(
             }
         }
     }
+    running.process_tree.terminate()?;
     join_readers(running);
     Ok(())
 }
@@ -587,8 +800,13 @@ fn reconcile_supervision(
                     return Err(process_unavailable());
                 }
             };
+            let process_tree_result = managed.process.process_tree.terminate();
             join_readers(&mut managed.process);
             let restart_count = managed.process.status.restart_count();
+            if process_tree_result.is_err() {
+                slot.status = ExecutorManagerStatus::stopped(restart_count);
+                return Err(process_unavailable());
+            }
             if restartable_exit(exit_status) && restart_count < core.restart_policy.maximum_restarts
             {
                 let next_restart_count = restart_count + 1;
@@ -657,9 +875,14 @@ fn restartable_exit(_status: ExitStatus) -> bool {
 }
 
 fn force_stop(running: &mut RunningExecutor) {
-    let _ = running.child.kill();
-    let _ = running.child.wait();
+    force_stop_child(&mut running.process_tree, &mut running.child);
     join_readers(running);
+}
+
+fn force_stop_child(process_tree: &mut ProcessTree, child: &mut Child) {
+    let _ = process_tree.terminate();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn join_readers(running: &mut RunningExecutor) {
