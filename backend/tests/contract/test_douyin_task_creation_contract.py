@@ -133,6 +133,27 @@ def test_valid_definition_reaches_the_service_as_canonical_typed_fields() -> Non
     assert "内容很有启发" not in response.text
 
 
+def test_http_caller_uses_unicode_code_points_and_the_exact_target_cap() -> None:
+    app_client, repository = client()
+    keyword = "😀" * 80
+
+    response = app_client.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "task:create:unicode-boundary"},
+        json={
+            **VALID_DEFINITION,
+            "searchKeyword": keyword,
+            "targetLimit": 100,
+        },
+    )
+
+    assert response.status_code == 201
+    assert repository.definition is not None
+    assert repository.definition.search_keyword == keyword
+    assert repository.definition.target_limit == 100
+    assert keyword not in response.text
+
+
 def test_definition_validation_is_closed_consistent_and_secret_safe() -> None:
     app_client, _ = client()
     invalid: tuple[dict[str, Any], ...] = (
@@ -140,6 +161,7 @@ def test_definition_validation_is_closed_consistent_and_secret_safe() -> None:
         {**VALID_DEFINITION, "searchKeyword": ""},
         {**VALID_DEFINITION, "searchKeyword": " leading"},
         {**VALID_DEFINITION, "searchKeyword": "line\nbreak"},
+        {**VALID_DEFINITION, "searchKeyword": "control\u0085character"},
         {**VALID_DEFINITION, "searchKeyword": "词" * 81},
         {**VALID_DEFINITION, "action": "like"},
         {**VALID_DEFINITION, "action": "browse", "messageTemplate": "must be absent"},

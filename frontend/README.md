@@ -26,6 +26,8 @@ pnpm tauri:dev
 
 正式 `TauriControlPlaneTransport` 只调用注册过的 `check_control_plane_health` Command；Task 服务端状态由 `TauriTaskProjectionSource` 通过固定 `get_task_snapshot`、`list_task_snapshots` 和 `stream_task_projection_events` 消费。工作台以固定 `get_workbench_status` 与 `emergency_stop_workbench_task` 读取运行状态并提交紧停；新建页只通过 `TauriTaskCreationGateway` 调用 `create_douyin_search_exposure_task`，发送经 Zod 和 Rust 双重校验的封闭任务定义。运行详情通过 `TauriTaskRunControlGateway` 的四个固定 Command 提交暂停、恢复、取消与紧停，并以权威快照和持久事件展示状态、进度、时间线及已有 Action 结果。请求由 Rust `reqwest` 客户端从固定 local origin 发出，禁止 React 传入任意 URL、Header 或 bearer。Task 快照严格校验 `status/revision/lastEventSequence`、UTC 时间、降序稳定性和 opaque cursor；SSE 通过 Rust Tauri Channel 推送。TanStack Query 维护权威快照和创建/控制后失效，不建立 WebView EventSource 或第二事实源。请求禁止系统代理和重定向；设备签名及凭据注入只在 Rust 内完成。
 
+D6-03 将关键词和目标上限固定为桌面端唯一公开常量与 `douyinSearchKeywordSchema`：关键词按 Unicode code point 计数而不是 UTF-16 code unit，接受 80 个非 BMP 字符并拒绝第 81 个；空值、首尾空白、C0/C1/DEL、Bidi 和安全文本违规在表单调用 Gateway 前拒绝，Gateway 与 Rust 仍再次 fail closed。目标数固定 `1..100`；这些值由跨语言契约与 OpenAPI/Python 公共策略逐项核对，React 不能自行放宽。
+
 API DTO 只能由 `../contracts/openapi/control-plane.v1.json` 生成：
 
 ```bash

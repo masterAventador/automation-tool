@@ -1,5 +1,12 @@
 """Versioned public protocol shared by Control Plane and Local Executor."""
 
+from automation_tool.protocol.douyin_search import (
+    DOUYIN_SEARCH_INPUT_VERSION,
+    MAX_SEARCH_KEYWORD_CHARACTERS,
+    MAX_TASK_TARGET_LIMIT,
+    DouyinSearchInput,
+    DouyinSearchInputRejected,
+)
 from automation_tool.protocol.executor_envelope import (
     EXECUTOR_PROTOCOL_VERSION,
     MAX_EXECUTOR_MESSAGE_BYTES,
@@ -34,13 +41,18 @@ from automation_tool.protocol.version import (
 __all__ = [
     "API_VERSION",
     "CURRENT_EXECUTOR_PROTOCOL",
+    "DOUYIN_SEARCH_INPUT_VERSION",
     "EXECUTOR_PROTOCOL_VERSION",
     "EXECUTOR_WEBSOCKET_SUBPROTOCOL",
     "MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "MAX_EXECUTOR_MESSAGE_BYTES",
     "MAX_EXECUTOR_SEQUENCE",
+    "MAX_SEARCH_KEYWORD_CHARACTERS",
+    "MAX_TASK_TARGET_LIMIT",
     "MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "CorrelationId",
+    "DouyinSearchInput",
+    "DouyinSearchInputRejected",
     "ExecutorEnvelope",
     "ExecutorLifecycleEnvelope",
     "ExecutorMessage",

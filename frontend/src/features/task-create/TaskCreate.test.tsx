@@ -81,6 +81,37 @@ describe("Douyin search exposure Task creation", () => {
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
   });
 
+  it("submits an 80-code-point keyword through the original form caller", async () => {
+    const user = userEvent.setup();
+    const { taskCreationGateway } = renderForm();
+    const keyword = "😀".repeat(80);
+
+    await user.type(screen.getByLabelText("搜索关键词"), keyword);
+    await user.click(screen.getByRole("button", { name: "创建任务" }));
+
+    await waitFor(() =>
+      expect(taskCreationGateway.createDouyinSearchExposureTask).toHaveBeenCalledTimes(1),
+    );
+    expect(
+      vi.mocked(taskCreationGateway.createDouyinSearchExposureTask).mock.calls[0]?.[0]
+        .searchKeyword,
+    ).toBe(keyword);
+  });
+
+  it.each([" leading", "control\u0085character", "😀".repeat(81)])(
+    "rejects an invalid keyword before the production gateway: %s",
+    async (keyword) => {
+      const user = userEvent.setup();
+      const { taskCreationGateway } = renderForm();
+
+      await user.type(screen.getByLabelText("搜索关键词"), keyword);
+      await user.click(screen.getByRole("button", { name: "创建任务" }));
+
+      expect(await screen.findByText("请输入有效的搜索关键词")).toBeInTheDocument();
+      expect(taskCreationGateway.createDouyinSearchExposureTask).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps the creation receipt visible until the operator opens run details", async () => {
     const onCreated = vi.fn();
     const user = userEvent.setup();

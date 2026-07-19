@@ -186,6 +186,7 @@ async def test_database_enforces_closed_definition_shape_and_task_binding(
             {"template": "unknown.template"},
             {"search_keyword": " leading"},
             {"search_keyword": "line\nbreak"},
+            {"search_keyword": "control\u0085character"},
             {"search_keyword": "词" * 81},
             {"action": "like"},
             {"action": "browse", "message_template": "not allowed"},

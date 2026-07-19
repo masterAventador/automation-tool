@@ -76,6 +76,8 @@ App 启动边界已实现 ready、checking、unavailable、revoked 四态和安�
 
 T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation；T3-17 已以 `create_douyin_search_exposure_task` 固定 Command 接入窄任务表单。React 只能提交 `douyin.search_exposure.v1` 的明确字段，Zod 先校验，Rust 再校验安全文本、动作/消息关系、数量、间隔和强制确认，然后自行从 App 私有 vault 换取 `app.control-plane` Session 并注入受限幂等键。WebView 不接触 bearer、Header 或任意 URL。完成证据来自 `visible=false` 真实 Tauri App 点击表单并核对 PostgreSQL 最终定义，而不是浏览器 Harness 或直接 HTTP。
 
+D6-03 将表单和 Gateway 的关键词约束收敛到同一个 `douyinSearchKeywordSchema`，并导出只读 `80` 字符/`100` 目标上限给表单控件；长度使用 `Array.from` 的 Unicode code point 语义，与 Python `len`、Rust `chars().count()` 和 PostgreSQL `char_length` 一致，不再用 UTF-16 code unit 误拒非 BMP 文本。C0/C1/DEL、Bidi、首尾空白和安全文本违规在表单调用 Gateway 前显示固定校验错误，生产 Gateway 与 Rust 仍做第二、第三次复验；React 没有 trim、截断或自动改写用户输入。
+
 T3-07 在该 Rust client 中增加 `ListTasks` 与 `GetTask` 两个封闭 operation。列表只允许固定 `/api/v1/tasks`、`1..100` limit 和长度受限的 canonical Base64URL cursor；详情先把 Task ID 验证为规范 UUIDv4 才构造固定路径。T3-15 将既有数据库水位加入同一公开快照，当前 DTO 为 taskId/status/revision/lastEventSequence/createdAt/updatedAt；Rust 复核 16 态枚举、正 revision、安全水位、UTC 时间、列表降序及 cursor 形状，跨 Installation 详情只得到统一拒绝。生产 React 只通过窄 `TauriTaskProjectionSource` 消费，不存在通用 URL/请求代理。
 
 T3-12 在同一个正式 Rust client 中增加 `StreamTaskEvents`：路径只能由规范 Task UUID 构造，Rust 自行从 App 私有 vault 换取 `app.control-plane` Session 并注入 Bearer，支持标准 `Last-Event-ID`，限制单连接 512 KiB、单帧 64 KiB 和验收用有界停止数。解析器要求 `text/event-stream`、匹配 request ID、`no-store/no-transform`、禁代理缓冲，以及唯一 id/event/data 字段；公开 DTO 再核对连续安全整数序号、`1.0` 版本、封闭事件/Task 状态、UUIDv4、UTC 时间、进度与消息边界。React/IPC 不接触 Session、Header 或原始 SSE 文本。T3-15 已在同一解析循环逐条调用回调并推送 Tauri Channel，不等整条 SSE 结束，也没有重新用 WebView EventSource。

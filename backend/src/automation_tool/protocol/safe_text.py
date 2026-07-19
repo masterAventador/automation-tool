@@ -2,7 +2,7 @@
 
 import re
 
-_CONTROL_OR_BIDI_PATTERN = re.compile(r"[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
+_CONTROL_OR_BIDI_PATTERN = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 _PRIVATE_POSIX_PATH_PATTERN = re.compile(
     r"(?:^|[\s\"'=])/(?:users|home|root|tmp|var/folders)(?:/|$)",
     re.IGNORECASE,

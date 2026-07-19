@@ -14,6 +14,10 @@ import {
 import { useRef, useState } from "react";
 
 import { taskProjectionKeys } from "../../api/control-plane/task-projections";
+import {
+  MAX_TASK_TARGET_LIMIT,
+  douyinSearchKeywordSchema,
+} from "./task-creation-gateway";
 import type {
   DouyinSearchExposureTaskDefinition,
   TaskCreationGateway,
@@ -108,7 +112,14 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
             name="searchKeyword"
             rules={[
               { required: true, message: "请输入搜索关键词" },
-              { max: 80, message: "搜索关键词不能超过 80 个字符" },
+              {
+                validator: async (_, value: string | undefined) => {
+                  if (value === undefined || douyinSearchKeywordSchema.safeParse(value).success) {
+                    return;
+                  }
+                  throw new Error("请输入有效的搜索关键词");
+                },
+              },
             ]}
           >
             <Input placeholder="例如：新能源汽车" autoComplete="off" />
@@ -143,7 +154,7 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
               name="targetLimit"
               rules={[{ required: true }]}
             >
-              <InputNumber min={1} max={100} precision={0} />
+              <InputNumber min={1} max={MAX_TASK_TARGET_LIMIT} precision={0} />
             </Form.Item>
             <Form.Item
               label="最小间隔（秒）"

@@ -3012,6 +3012,34 @@ mod tests {
             })
         );
 
+        DouyinSearchExposureTaskDefinition::new(
+            "😀".repeat(80),
+            DouyinSearchExposureAction::Browse,
+            None,
+            100,
+            30,
+            90,
+        )
+        .expect("80 Unicode code points and the maximum target count remain valid");
+        assert!(DouyinSearchExposureTaskDefinition::new(
+            "😀".repeat(81),
+            DouyinSearchExposureAction::Browse,
+            None,
+            10,
+            30,
+            90,
+        )
+        .is_err());
+        assert!(DouyinSearchExposureTaskDefinition::new(
+            "control\u{85}character".to_owned(),
+            DouyinSearchExposureAction::Browse,
+            None,
+            10,
+            30,
+            90,
+        )
+        .is_err());
+
         let base = serde_json::to_value(&definition).expect("definition JSON");
         for (field, invalid) in [
             ("template", serde_json::json!("private.template")),

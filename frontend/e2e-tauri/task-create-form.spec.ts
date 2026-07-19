@@ -10,7 +10,7 @@ const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe("Task form production-path acceptance", () => {
-  it("creates one typed Task by clicking the hidden real App UI", async () => {
+  it("validates and creates one Unicode-boundary Task from the hidden real App UI", async () => {
     await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_create_form_for_acceptance"),
@@ -23,11 +23,20 @@ describe("Task form production-path acceptance", () => {
     await newTaskMenu.click();
     await expect(await browser.$("h2")).toHaveText("新建运营任务");
 
-    await browser.$("#searchKeyword").setValue("新能源汽车");
-    await browser.$("#targetLimit").setValue("12");
+    const keyword = await browser.$("#searchKeyword");
+    await keyword.setValue("control\u0085character");
     await browser.$("button=创建任务").click();
 
     const body = await browser.$("body");
+    await browser.waitUntil(
+      async () => (await body.getText()).includes("请输入有效的搜索关键词"),
+      { timeout: 20_000, timeoutMsg: "Task form accepted a control character" },
+    );
+
+    await keyword.setValue("😀".repeat(80));
+    await browser.$("#targetLimit").setValue("100");
+    await browser.$("button=创建任务").click();
+
     await browser.waitUntil(
       async () => (await body.getText()).includes("任务已创建："),
       { timeout: 60_000, timeoutMsg: "Task form did not expose its creation receipt" },

@@ -5,12 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from automation_tool.protocol import (
+    MAX_SEARCH_KEYWORD_CHARACTERS,
+    MAX_TASK_TARGET_LIMIT,
+    DouyinSearchInput,
+    DouyinSearchInputRejected,
+)
 from automation_tool.protocol.safe_text import is_unsafe_text
 
 DOUYIN_SEARCH_EXPOSURE_TEMPLATE = "douyin.search_exposure.v1"
-MAX_SEARCH_KEYWORD_CHARACTERS = 80
 MAX_MESSAGE_TEMPLATE_CHARACTERS = 500
-MAX_TASK_TARGET_LIMIT = 100
 MAX_TASK_INTERVAL_SECONDS = 3600
 
 
@@ -54,10 +58,13 @@ class DouyinSearchExposureDefinition:
         return DOUYIN_SEARCH_EXPOSURE_TEMPLATE
 
     def __post_init__(self) -> None:
-        _safe_exact_text(
-            self.search_keyword,
-            maximum_characters=MAX_SEARCH_KEYWORD_CHARACTERS,
-        )
+        try:
+            DouyinSearchInput(
+                keyword=self.search_keyword,
+                target_limit=self.target_limit,
+            )
+        except DouyinSearchInputRejected:
+            raise InvalidTaskDefinition from None
         if not isinstance(self.action, DouyinSearchExposureAction):
             raise InvalidTaskDefinition
         if self.action is DouyinSearchExposureAction.BROWSE:
@@ -71,9 +78,7 @@ class DouyinSearchExposureDefinition:
                 maximum_characters=MAX_MESSAGE_TEMPLATE_CHARACTERS,
             )
         if (
-            type(self.target_limit) is not int
-            or not 1 <= self.target_limit <= MAX_TASK_TARGET_LIMIT
-            or type(self.minimum_interval_seconds) is not int
+            type(self.minimum_interval_seconds) is not int
             or not 1 <= self.minimum_interval_seconds <= MAX_TASK_INTERVAL_SECONDS
             or type(self.maximum_interval_seconds) is not int
             or not self.minimum_interval_seconds

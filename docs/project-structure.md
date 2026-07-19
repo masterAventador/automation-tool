@@ -285,6 +285,7 @@ backend/
 │       │       ├── desktop/
 │       │       └── logging/
 │       ├── protocol/              # Control Plane ↔ Executor 版本化协议
+│       │   ├── douyin_search.py   # 双端共享关键词/目标上限与脱敏输入对象
 │       │   ├── executor_envelope.py # v1 判别联合、ID/时限/幂等/序号和安全 payload
 │       │   ├── json_object.py     # Bootstrap/Envelope 共用的有界无重复 key JSON 解码
 │       │   ├── schema.py          # Draft 2020-12 确定性导出与漂移检查
@@ -317,6 +318,8 @@ T3-12 的 `application/task_event_stream.py` 定义公开事件记录、batch/wa
 T3-15 的 `frontend/src/api/control-plane/task-projections.ts` 定义严格公开 DTO、TanStack Query Key/options 与 source 契约；`features/task-runs/task-projection-reducer.ts` 只合并服务端快照和事件 post-state，`task-projection-controller.ts` 负责快照优先、续订、缺口回拉与有限降级；`platform/tauri/task-projection-source.ts` 只调用固定 Task Command 并接收 Tauri Channel。Rust `stream_task_events_with` 在正式 SSE 解析循环逐条推送，不把 Session/Header/原始帧交给 WebView。`tauri.task-projection-e2e.conf.json`、对应 WDIO spec/runner 和 `scripts/run_t3_15_acceptance.py` 仅存在于 `control-plane-e2e` 隐藏 App 验收，不进入生产资产。
 
 T3-17 的 `domain/task_definitions.py` 定义唯一 `douyin.search_exposure.v1` 领域对象，迁移 `20260718_0013` 与既有 Task 复合 scope 绑定明确列定义；`api/tasks.py`、`application/tasks.py` 和 `infrastructure/database/task_repository.py` 沿同一正式创建链原子保存并校验幂等重放。桌面侧 `features/task-create/` 只处理封闭表单，`platform/tauri/task-creation-gateway.ts` 只调用固定 Rust Command；专用隐藏 Tauri 配置、WDIO spec 与 `scripts/run_t3_17_acceptance.py` 只承担真实 App→API→PostgreSQL 最终状态验收。
+
+D6-03 的 `protocol/douyin_search.py` 是 Control Plane 与 Local Executor 之间唯一 Python 输入策略，公开版本化不可变值、80 个 Unicode code point 和 100 个目标的硬上限；`domain/task_definitions.py` 只消费并转译固定错误。桌面 `task-creation-gateway.ts`/`TaskCreate.tsx` 共享同一 Zod 关键词 Schema 和边界常量，Rust/OpenAPI/PostgreSQL 保留信任边界复验；`frontend/tests/douyin-search-input-boundary.test.mjs` 防止各层数值、Unicode 计数和引用关系漂移。D6-04 必须从公共 protocol 输入对象开始搜索，不得再写 Executor 私有关键词规则。
 
 T3-18 的 `features/task-runs/TaskRunDetails.tsx` 组合权威 Task 快照、持久事件时间线、已有 Action 结果与状态相容控制；`platform/tauri/task-run-control-gateway.ts` 只映射四个固定 Rust Command，不提供通用 operation。专用隐藏 Tauri 配置、WDIO spec 与 `scripts/run_t3_18_acceptance.py` 从真实页面发起暂停、恢复、取消、紧停，并核对 PostgreSQL 命令、事件和终态。
 

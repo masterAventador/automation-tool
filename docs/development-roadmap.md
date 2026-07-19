@@ -282,7 +282,7 @@
 | --- | --- | --- | --- | --- |
 | D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | 🟩 完成 |
 | D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | 🟩 完成 |
-| D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | ⬜ 未开始 |
+| D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | 🟩 完成 |
 | D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | ⬜ 未开始 |
 | D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | ⬜ 未开始 |
 | D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | ⬜ 未开始 |
@@ -1907,10 +1907,23 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 `D6-03`，把关键词长度、空白、控制字符、任务上限和服务端一致规则收敛为唯一领域约束
 
+### D6-03 关键词校验
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`。Backend 新测试准确失败于公共 `protocol.douyin_search` 不存在；Frontend 明确复现 Zod 按 UTF-16 code unit 误拒服务端可接收的 80 个 emoji，同时放过 C1 `U+0085`。表单原调用方又证明首尾空白/C1 会调用 Gateway、81 个非 BMP 字符虽被旧长度规则拦截但没有统一错误；公共协议导出测试也在实现前准确失败
+- Python 唯一策略：新增公共 `douyin.search-input.v1` 不可变值，`MAX_SEARCH_KEYWORD_CHARACTERS=80` 与 `MAX_TASK_TARGET_LIMIT=100` 只在该模块赋值。关键词必须是原样非空字符串、按 Unicode code point 最多 80 个、首尾无 Unicode 空白，并拒绝 C0/C1/DEL、Bidi、敏感赋值、私有路径、inline data；目标上限只接受真整数 `1..100`。对象和固定错误不回显关键词
+- 双端复用：T3-17 `DouyinSearchExposureDefinition` 改为先构造公共输入值，Control Plane 与后续 Local Executor 都只能从 `automation_tool.protocol` 稳定入口导入，不再复制 Python 校验。FastAPI/Pydantic/OpenAPI 与 PostgreSQL 保留入口/持久层复验；数据库故障注入确认 C1 直接写入也被 check constraint 拒绝
+- 桌面一致性：React 导出并复用 `douyinSearchKeywordSchema`、80 字符和 100 目标上限；`Array.from` 统一 Unicode code point 计数，表单在调用 Gateway 前拒绝空白、C1/Bidi、过长和安全文本违规，不 trim、截断或改写输入。生产 Gateway、Rust `chars().count()` 与服务端继续逐层 fail closed；跨语言 Node 契约逐项核对 Python、OpenAPI、React、Rust 与隐藏 App 验收边界
+- 原调用方验收：扩展 `scripts/run_t3_17_acceptance.py` 的唯一 `visible=false` App。真实页面先输入含 `U+0085` 的关键词并确认只显示校验错误，再输入 80 个非 BMP 字符、目标上限 100，从正式 React 表单→TypeScript Gateway→Tauri IPC→Rust 网络桥→真实 Uvicorn/FastAPI→PostgreSQL 只持久化一条 exact draft 定义；测试没有直接调用下层函数或用 Harness 冒充 App
+- 测试：聚焦 28 项 Python 用例，共享策略 22 条语句/2 个分支覆盖率 100%；数据库 C1 故障注入、16 项前端策略/组件用例、Rust Unicode/C1/上限用例和跨语言契约全绿。Backend 全量 `1082 passed, 4 skipped in 93.32s`，6631 条语句/1340 个分支覆盖率 100%；Ruff/格式 219 个文件、严格 Mypy 203 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 74 项 Node 契约、145 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 隔离与清理：隐藏 App 全程后台，未启动外部浏览器；固定 Control Plane 端口启动前为空。验收使用唯一 Compose project/App identifier/动态 PostgreSQL 端口，结束后复核 App、WDIO/Tauri、Uvicorn、固定/动态端口、容器、网络、Volume 与 App 私有测试数据无残留，没有触碰正在运行的其他项目资源
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-04`，只通过 D6-02 Page Object 和本任务公共输入执行打开首页、输入、提交、等待结果；网络慢、超时、登录/弹窗与未知页面继续失败关闭
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-03`：收敛关键词长度、空白、控制字符、任务上限和服务端一致规则；
+1. `D6-04`：复用页面对象与公共输入实现打开页面、输入、提交、等待结果，并覆盖网络慢/超时；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。
