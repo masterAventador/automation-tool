@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 3 已完成，Wave 4 的 macOS 工程与正式包门禁已跑通，正在进入 Wave 5 外部浏览器运行时。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 3 已完成，Wave 4 的 macOS 工程与正式包门禁已跑通；Wave 5 已完成旧浏览器会话边界审计，当前进入 macOS Chrome/Edge 受信发现。
 
 ## 第一阶段
 

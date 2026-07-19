@@ -266,6 +266,10 @@ Playwright headed persistent context
 - 首次扫码后复用独立 Profile 登录态；
 - Executor 只上报平台、健康、过期和 revision，不上传 Cookie。
 
+B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC、Entitlement 或云端账号模型。当前 Profile ID 是 App 本机生成的 canonical UUIDv4，不是产品账号；Session 健康由真实页面封闭为 `missing/healthy/expired/risk/unknown`，只有 `healthy` 允许后续动作。Control Plane 只保存 Installation-scoped 的平台、状态、`session_revision` 和观察时间，不保存 Cookie、二维码、验证码、页面原文或 Profile 路径。
+
+安全注销由后续 B5-14 跨边界协调：先打开熔断并拒绝新任务，停止关联动作和浏览器、释放 Profile 锁，再由本机定向删除目标目录，最后递增 revision 并上报 `missing`。停止失败或外部最终状态无法确认时不得删 Profile 或自动重试，必须保留阻断状态并按 `OUTCOME_UNCERTAIN` 处理。
+
 ### 8.2 浏览器发现
 
 按平台检测稳定路径：

@@ -425,7 +425,7 @@ app-data/
 │   ├── installation.json
 │   └── executor-state.db
 ├── browser-profiles/
-│   └── douyin/default/
+│   └── douyin/<canonical-profile-uuid>/
 ├── artifacts/
 │   ├── evidence/
 │   └── exports/
@@ -562,18 +562,96 @@ ActorContext + tenant/RBAC/Entitlement + Core Approval/Audit/Artifact
 
 ### 10.4 `browser_session.rs` 逐项清单
 
+本轮 B5-01 继续使用 R0-12 固定的旧提交
+`a01cfc9aa93e87e71b78b73eee3e07a3b9d31061`，重新核对完整模块、直接测试、聚合运行时和服务端账号契约。结论只冻结迁移语义与后续任务归属，不把旧仓库加入当前构建，也不提前实现 B5-02 之后的浏览器能力。
+
+#### 10.4.1 B5-01 来源文件与测试证据
+
+| 旧仓库来源 | 已核对事实 | 当前判定 |
+| --- | --- | --- |
+| `frontend/src-tauri/src/browser_session.rs` | 556 行；Profile 在 60～99 行，独立 Cookie Vault 在 101～324 行，目录/权限防护在 326～452 行，`QrLoginSession` 在 454～556 行 | 只保留私有目录、规范身份、熔断/人工恢复和定向清理意图；公开类型、路径、状态与文件操作全部按当前契约重写 |
+| `frontend/src-tauri/tests/browser_session.rs` | 9 项旧测试覆盖路径逃逸、祖先 symlink、Unix 私有目录、Cookie 密文/AAD/重开、状态转换与 Profile 定向删除；R0-12 已在固定提交实跑 9 项通过 | 测试是行为样本，不复制为当前 GREEN；没有覆盖目录创建/删除竞态、Windows reparse point、Profile 锁、浏览器仍持有目录、停止失败或真实页面状态 |
+| `frontend/src-tauri/src/social_operations_runtime.rs` | 58～71 行把 Profile、登录状态、Cookie、Sidecar 和进程内 `HashMap`/`active_account` 聚合；294～323 行实现注销 | `SocialOperationsRuntime` 整体删除；Profile、锁、浏览器进程、Session 检测、任务门禁与注销协调分别归属，禁止恢复成新的万能 Runtime |
+| `backend/src/agent_platform/capabilities/social_operations/device_account_service.py` | `ActorContext`/`PlatformAccount` 绑定 `tenant_id`、`owner_user_id`、设备、权限和账号；注销依赖 `social.manage`、内存账号表与 Core audit | 旧产品账号/RBAC 服务删除；当前只有 Installation/Executor/Task 权威模型和非敏感平台 Session 健康投影 |
+| `contracts/capabilities/social-operations/device-account-v1.md` | 契约要求 tenant/owner、`social.read/execute/manage`、五平台枚举、Entitlement/Core Audit，并规定独立 Cookie 密文文件 | 不兼容、不复制；第一期无产品账号/RBAC/Entitlement，MVP 只启用抖音，登录态只存在持久浏览器 Profile |
+
+旧模块 9 项通过只能说明样本内部自洽。当前三个 Manifest 均不依赖旧仓库、`social-operations` 包或 `chacha20poly1305` Cookie Vault；后续每项仍须在当前仓库重新 RED/GREEN，并从真实 App/Executor/外部浏览器原入口验收。
+
+原能力迁移矩阵固定如下：
+
 | 旧能力 | 决策 | 当前项目落点 | 迁移要求 |
 | --- | --- | --- | --- |
-| App-owned `platform/UUID` Profile 目录 | 提取迁移 | `B5-05` | 根目录改为当前 App 标识；只创建路线图已经启用的平台，不预建五平台目录 |
+| App-owned `platform/UUID` Profile 目录 | 提取迁移 | `B5-02`、`B5-03`、`B5-05` | 根目录改为当前 App 标识；浏览器发现不接收任意路径，只创建路线图已启用的平台 |
 | UUID 规范化和路径逃逸拒绝 | 提取迁移 | `B5-05` | 使用 `profile_id`，不能用昵称、手机号或平台账号作为目录名 |
-| 祖先 symlink 防护和私有权限 | 提取迁移 | `B5-05` | 补目录竞争、权限修复失败和 Windows reparse point 测试 |
-| Profile 定向删除 | 按新契约重写 | `B5-14` | 先阻止新任务、停止关联运行并释放锁，再只删除目标 Profile；失败可诊断、可重试 |
-| `QrLoginSession` 状态机、revision 和 circuit open | 按新契约重写 | `B5-09`～`B5-12` | 状态来自真实页面检测并持久化到本机账本/Control Plane；风险、验证码必须人工恢复 |
+| 祖先 symlink 防护和私有权限 | 提取迁移 | `B5-05` | 补目录竞争、稳定 identity、权限修复失败和 Windows reparse point 测试 |
+| Profile 单实例与浏览器资源所有权 | 新建 | `B5-06`、`B5-07` | 旧模块没有锁和真实浏览器进程；必须先持锁再启动 headed persistent context，并由确定的运行实例释放 |
+| Profile 定向删除 | 按新契约重写 | `B5-14` | 先阻止新任务、停止关联运行并释放 `B5-06` 锁，再只删除目标 Profile；失败可诊断、可重试 |
+| `QrLoginSession` 状态机、revision 和 circuit open | 按新契约重写 | `B5-08`、`B5-09`、`B5-10`、`B5-11`、`B5-12` | 状态来自真实页面检测而非调用方信号；风险、验证码、过期和未知状态必须打开熔断并人工恢复 |
 | 进程内 `HashMap` 账号和单 active account | 删除 | — | 账号/Profile 事实不能只在 Tauri 内存；并发由 Profile 锁和任务账本决定 |
 | `EncryptedCookieVault` 和 Cookie 导入导出 | 删除 | — | Playwright 持久 Profile 是会话唯一来源；Cookie 不复制到独立文件、不上传 Control Plane |
 | 普通文件 `.cookie-key` | 删除 | — | 不再单独保存 Cookie；设备密钥只允许进入 Rust 管理的 `app_data_dir` 固定私有文件，不能形成第二份配置或导出文件 |
 | ChaCha20Poly1305 Cookie 文件格式 `SOC1` | 删除 | — | 与当前持久 Profile 方案重复，避免形成第二份登录态 |
-| Douyin/Xiaohongshu/Kuaishou/Wechat 等一次性枚举 | 按阶段重写 | `B5-01` 及后续平台任务 | MVP 只实现抖音 Adapter；新增平台必须有独立页面对象、契约和真实验收 |
+| Douyin/Xiaohongshu/Kuaishou/Wechat 等一次性枚举 | 按阶段重写 | `B5-08` 及后续平台任务 | MVP 只实现抖音 Adapter；新增平台必须有独立页面对象、契约和真实验收 |
+
+#### 10.4.2 当前 Profile 与私有目录契约
+
+当前唯一计划路径为：
+
+```text
+Tauri app_data_dir/
+└── browser-profiles/
+    └── douyin/
+        └── <canonical UUIDv4 profile_id>/
+```
+
+- `app_data_dir` 只能由 Tauri Rust 组合根解析；React、Control Plane、任务 payload 和用户输入都不能提交根目录、Profile 路径或可执行文件路径。
+- `profile_id` 是本机生成并持久的 canonical UUIDv4，只表示运营 Profile，不是产品 `account_id`，也不能由昵称、手机号、抖音号或目录片段派生。MVP 不预建小红书、快手或微信目录。
+- `B5-05` 必须逐级拒绝 symlink/非目录，macOS/Unix 固定目录 `0700`；Windows 必须拒绝 reparse point 并应用当前用户私有 ACL。创建、打开和删除前后都要校验稳定 identity，不能照搬旧实现的 `metadata → create/remove_dir_all` 竞态窗口。
+- `B5-06` 在任何 persistent context 启动前取得跨进程 Profile 单实例锁；`B5-07` 让具体浏览器运行实例拥有 context、进程和锁。App/Executor 崩溃恢复不能把仍被浏览器占用的 Profile 当成空闲。
+- `B5-02`/`B5-03` 只发现签名/产品 allowlist 内的系统 Chrome/Edge，`B5-07` 始终传独立 Profile；任何代码都不得读取、复制或迁移用户默认 Chrome/Edge `User Data`。
+- Profile 内由浏览器自行管理 Cookie、Local Storage 和站点数据；应用没有 Cookie 导入、导出、查看、上传或第二份加密文件 API。日志、事件、诊断和 Control Plane 数据都不能包含 Profile 绝对路径或内容。
+
+#### 10.4.3 当前 Session 状态契约
+
+旧 `LoginSignal` 是调用方可直接注入的内存信号，不能作为真实状态来源。当前 `B5-08`、`B5-09`、`B5-10`、`B5-11`、`B5-12` 必须由抖音页面对象观察得到封闭 Session 健康：
+
+| 当前状态 | 事实与门禁 |
+| --- | --- |
+| `missing` | 未发现可用登录；允许进入本地 `awaiting_scan/awaiting_confirmation` 登录流程，但禁止业务副作用 |
+| `healthy` | 真实页面确认已登录且没有风险/验证码；唯一令 `circuit_open=false` 的状态 |
+| `expired` | 页面明确显示登录过期或重新登录；`circuit_open=true`，停止新副作用并请求重新扫码 |
+| `risk` | 验证码、滑块、风控或权限异常；`circuit_open=true`，只能由用户在可见外部浏览器处理后显式重新检查 |
+| `unknown` | 页面版本、网络或证据不足，不能猜测健康；`circuit_open=true` 并保存最小脱敏诊断 |
+
+`circuit_open` 是由上述状态派生的安全门禁，不提供独立“强制关闭”接口。`session_revision` 是本机持久单调正整数：新 Profile 建立初始 epoch，注销、重新登录、风险/过期后的显式恢复都创建新 revision；旧 revision 的任务、页面观察或健康上报不能重新打开执行。`B5-12` 向 Control Plane 只上报平台、状态、`session_revision` 和观察时间，不上传 Cookie、Profile 路径、二维码、验证码或页面原文。
+
+`B5-10`/`B5-11` 的二维码等待和人工接管是本地工作流，不是产品登录或账号体系。任何风险/过期/未知都必须保留旧实现“人工恢复前不能被 authenticated 绕过”的语义。如果外部动作已经发出但在最终页面确认前观察到会话异常，后续动作必须停止，Attempt 进入 `OUTCOME_UNCERTAIN`，不能自动重试造成重复副作用。
+
+#### 10.4.4 安全注销时序
+
+旧 `SocialOperationsRuntime::logout_account` 不可提取：它先在内存改状态，却会在检查 `stop_result` 前立即计算 Cookie/Profile 删除结果，因此即使停止执行失败也可能已经删除 Profile；旧测试也没有覆盖该故障。`BrowserProfile::remove` 的路径检查与 `remove_dir_all` 之间同样存在替换窗口。`B5-14` 必须按以下持久、可恢复时序重写：
+
+1. 以 Profile ID 和期望 `session_revision` 原子打开熔断，在 Control Plane/本机账本阻止该 Profile 的新 Task 与新 command；
+2. 若关联动作已派发，先协作停止并等待安全 checkpoint；无法确认最终副作用时记录 `OUTCOME_UNCERTAIN`，不继续当作普通注销成功；
+3. 关闭该 Profile 的 headed persistent context 和完整浏览器进程树，确认退出后释放 `B5-06` 单实例锁；停止失败时保持熔断和数据，不删除目录；
+4. 从 Rust 内部固定根重新解析 canonical `profile_id`，拒绝 symlink、reparse point、非目录、identity 变化和仍被占用的目录；
+5. 只删除目标 `douyin/<profile_id>`，保留平台父目录、其他 Profile、Executor SQLite、设备凭据、Artifact 与设置；不存在时幂等成功；
+6. 持久递增 `session_revision` 并投影 `missing`。删除或上报失败保持“已熔断/待重试”诊断，不能伪报已注销，也不能恢复新任务。
+
+注销的原始入口最终必须由 `B5-13` 平台状态页触发，经固定 PlatformAdapter/Tauri Command、正式 Executor、Profile 锁和 Control Plane 门禁完成；直接调用目录函数或只验证 Mock 页面不算验收。
+
+#### 10.4.5 强制删除的账号、RBAC 与 Cookie 边界
+
+| 旧构造 | 处理 | 当前唯一替代 |
+| --- | --- | --- |
+| `HashMap<String, ManagedAccount>`、`active_account` | 删除 | Profile 锁决定本机互斥；Task/Attempt/Action 与 Executor 账本保存运行事实，不能由 Tauri 内存账号表决定 |
+| `SocialOperationsRuntime` 聚合对象与通用账号 invoke | 删除 | 浏览器发现、Profile store、process/session detector、平台 Adapter 和 logout coordinator 各自窄接口；React 无任意 payload/路径命令 |
+| `EncryptedCookieVault`、`.cookie-key`、`SOC1`、Cookie store/load/logout | 删除 | 浏览器持久 Profile 是登录态唯一来源；没有可调用的 Cookie API，也不新增 `chacha20poly1305` 依赖 |
+| `ActorContext.tenant_id/user_id/permissions`、`owner_user_id`、`social.read/execute/manage` RBAC | 删除 | 第一期无产品账号；App 使用 Installation 身份，Executor 使用独立 Session 能力，平台登录只表示本机 Profile 的抖音状态 |
+| DeviceAccountService 的五平台账号、设备 owner、Entitlement 与 Core Audit | 删除 | MVP 只做抖音 Session 健康；Control Plane 只接收当前 Installation-scoped 的非敏感状态/任务事实 |
+| 云端平台 Cookie/账号密文、导入导出或跨设备同步 | 禁止 | 平台秘密永不离开 App 私有 Profile；未来即使增加产品账号，也不能静默扩大这一隐私边界 |
+
+“无产品账号”和“需要抖音登录”是两个独立事实：用户打开 App 不登录 automation-tool，但首次使用抖音仍要在 App 管理的可见外部浏览器完成平台登录。后续 B5 任务不得为了复用旧代码重新引入注册页、账号中心、tenant、RBAC、Entitlement 或云端 Cookie。
 
 ### 10.5 跨模块保留与明确排除
 

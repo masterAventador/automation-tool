@@ -270,6 +270,10 @@ E4-15 把测试隔离从源码约束扩展到实际 release 字节。`build.rs` 
 
 真实 release 审计最初发现 `tauri.conf.json` 的 `devUrl`/devCSP 即使 release 不使用仍会进入二进制，因此现已拆到只由 `pnpm tauri:dev` 显式合并的 `tauri.dev.conf.json`。自动化配置继续只用于各自 `--config` 测试构建；正式配置保持唯一可见主窗口、`withGlobalTauri=false`、唯一 `main` Capability 与生产 CSP。E4-15 临时 release target 每次唯一且结束删除，不启动 App、不绑定端口。
 
+B5-01 已冻结外部浏览器会话的迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
+
+旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
+
 ## 7. 页面与导航
 
 MVP 导航：
