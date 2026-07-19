@@ -280,6 +280,8 @@ B5-04 将该信任根收口到两个无路径 Tauri Command：`get_browser_setti
 
 `scripts/run_b5_04_acceptance.py` 使用专属 `com.aventador.automationtool.b504acceptance` AppData 和启动前检查过的动态 loopback WebDriver 端口，运行唯一 `visible=false` Tauri App；真实页面经正式 `TauriPlatformAdapter` 保存本机受信浏览器，刷新 WebView 后再次从正式 Command 读回。runner 同时核对 canonical 文件内容、Unix `0700/0600` 权限、UI/IPC 不含路径，finally 只删除本次 AppData、恢复生产 Vite 资产并确认端口释放；该验收不启动 Backend、Executor 进程、运营浏览器或用户 Profile。
 
+B5-05 新增纯 Rust `BrowserProfileStore`，由 Tauri setup 从自身 `app.path().app_data_dir()` 管理唯一实例，只固定派生 `browser-profiles/douyin/<canonical UUIDv4>`，Profile ID 由本机 CSPRNG 生成；当前没有 Tauri Command、React DTO、Control Plane 接口或其他平台目录。Unix 逐级使用目录句柄、`openat(O_NOFOLLOW)`、`mkdirat` 和 dev+inode，Windows 固定子目录使用父 HANDLE 相对 `NtCreateFile(FILE_OPEN_REPARSE_POINT)`、volume/file index、最终路径和当前用户 protected DACL。Store/Profile 持有打开的目录身份并在创建、重开与交给后续浏览器前复验；路径被 symlink/reparse、普通文件或 rename 后同名替换时 fail closed。B5-06 只能在该身份上增加跨进程锁，B5-07 才能在持锁后把私有目录交给系统浏览器。
+
 ## 7. 页面与导航
 
 MVP 导航：

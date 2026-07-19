@@ -130,6 +130,9 @@ frontend/
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
 │   │   ├── browser_discovery.rs  # macOS/Windows 标准浏览器原生发现、签名与路径 identity
+│   │   ├── browser_profiles.rs   # 固定抖音 UUIDv4 Profile、稳定 identity 与跨平台组合根
+│   │   ├── browser_profiles_unix.rs # openat/mkdirat、0700 与 symlink 防护
+│   │   ├── browser_profiles_windows.rs # NtCreateFile、reparse 防护与当前用户私有 ACL
 │   │   ├── browser_settings.rs   # 受信浏览器枚举选择与 App 私有原子持久化
 │   │   ├── control_plane.rs       # 固定 origin、operation allowlist、凭据注入与 SSE 严格解析
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
@@ -145,6 +148,7 @@ frontend/
 │   │   └── main.rs
 │   ├── tests/
 │   │   ├── browser_discovery.rs  # 真实系统浏览器的生产 API 发现与复验
+│   │   ├── browser_profiles.rs   # UUID、权限、symlink、identity 替换与并发创建
 │   │   ├── browser_settings.rs   # 真实发现、枚举保存、损坏与不可用失败矩阵
 │   │   ├── executor_bootstrap.rs  # 随机令牌、stdin 文档、常量时间证明与失败矩阵
 │   │   ├── executor_manager.rs    # 单实例、监管、超时、进程树与真实包入口
@@ -213,6 +217,8 @@ Test harness implementation ────────> platform interface
 B5-02 的 `src-tauri/src/browser_discovery.rs` 是系统浏览器信任根，不是 React Adapter。macOS 只枚举 `/Applications/Google Chrome.app` 与 `/Applications/Microsoft Edge.app`，用 Security.framework 对完整签名、所有 Mach-O 架构、嵌套代码、精确 Bundle signing identifier 和 Developer Team requirement 做验证；同时固定主可执行文件相对路径并在验签前后保存 App/入口的 dev+inode。公开复验 API 只接受模块自己产生的 `TrustedBrowser`，使用前路径缺失、替换、symlink 或签名变化都会 fail closed。B5-04 才把安全浏览器枚举投影给 UI，路径和 identity 永不进入 React。
 
 B5-04 的 `browser_settings.rs` 是选择边界而不是第二套发现逻辑。Tauri setup 从自身 AppData 初始化唯一 service；`get_browser_settings`/`select_browser` 只投影和接收固定枚举，每次保存前调用 B5-02/B5-03 真实发现。canonical v1 选择以私有目录和原子替换保存，React 没有路径 DTO、文本框、文件选择器或服务端回退。专用隐藏 App 验收使用动态已检查 WebDriver 端口和独立标识，刷新后从同一产品页面读回选择，再精确清理 AppData 与端口；测试配置、WDIO 入口和标识继续被 E4-15 正式包扫描拒绝。
+
+B5-05 的 `browser_profiles.rs` 是后续浏览器运行时唯一 Profile 组合根。Tauri setup 从自身 AppData 管理唯一 Store；它当前只允许本机生成/打开 canonical UUIDv4 抖音 Profile，未注册 WebView Command。Unix 用父目录 fd 相对创建/打开并保持 dev+inode，Windows 用父 HANDLE 相对 `NtCreateFile` 并保持 volume/file index；每层私有权限、symlink/reparse、最终路径和重开 identity 均 fail closed。B5-06/B5-07 必须继续使用该对象，不能重新从字符串路径构造 Profile。
 
 规则：
 
@@ -616,7 +622,7 @@ Tauri app_data_dir/
 
 - `app_data_dir` 只能由 Tauri Rust 组合根解析；React、Control Plane、任务 payload 和用户输入都不能提交根目录、Profile 路径或可执行文件路径。
 - `profile_id` 是本机生成并持久的 canonical UUIDv4，只表示运营 Profile，不是产品 `account_id`，也不能由昵称、手机号、抖音号或目录片段派生。MVP 不预建小红书、快手或微信目录。
-- `B5-05` 必须逐级拒绝 symlink/非目录，macOS/Unix 固定目录 `0700`；Windows 必须拒绝 reparse point 并应用当前用户私有 ACL。创建、打开和删除前后都要校验稳定 identity，不能照搬旧实现的 `metadata → create/remove_dir_all` 竞态窗口。
+- `B5-05` 已逐级拒绝 symlink/非目录，macOS/Unix 固定目录 `0700`；Windows 使用 handle-relative 创建、拒绝 reparse point 并应用当前用户 protected DACL。创建、打开和交给后续消费者前后都校验稳定 identity；B5-14 删除仍须沿用句柄/identity 语义，不能退回旧实现的 `metadata → remove_dir_all` 竞态窗口。
 - `B5-06` 在任何 persistent context 启动前取得跨进程 Profile 单实例锁；`B5-07` 让具体浏览器运行实例拥有 context、进程和锁。App/Executor 崩溃恢复不能把仍被浏览器占用的 Profile 当成空闲。
 - `B5-02`/`B5-03` 只发现签名/产品 allowlist 内的系统 Chrome/Edge，`B5-07` 始终传独立 Profile；任何代码都不得读取、复制或迁移用户默认 Chrome/Edge `User Data`。
 - Profile 内由浏览器自行管理 Cookie、Local Storage 和站点数据；应用没有 Cookie 导入、导出、查看、上传或第二份加密文件 API。日志、事件、诊断和 Control Plane 数据都不能包含 Profile 绝对路径或内容。

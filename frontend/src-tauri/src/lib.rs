@@ -1,4 +1,5 @@
 pub mod browser_discovery;
+pub mod browser_profiles;
 pub mod browser_settings;
 pub mod control_plane;
 pub mod device_credentials;
@@ -1394,6 +1395,9 @@ pub fn run() {
         app.manage(control_plane::ControlPlaneClient::local()?);
         let app_data_directory = app.path().app_data_dir()?;
         app.manage(browser_settings::BrowserSettingsService::initialize(
+            &app_data_directory,
+        )?);
+        app.manage(browser_profiles::BrowserProfileStore::initialize(
             &app_data_directory,
         )?);
         app.manage(executor_platform::ExecutorPlatformService::initialize(

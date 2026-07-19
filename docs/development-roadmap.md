@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 4 Tauri 与 Local Executor 生命周期
+> 当前阶段：Wave 5 外部浏览器与抖音登录
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-20 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台、受约束新建表单、权威运行详情、刷新及 Control Plane 重启恢复可用；真实 RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2、T3-01～T3-20 与 Wave 4 工程前置已完成；Wave 5 已完成旧会话审计、受信浏览器发现/选择及私有 Profile 目录，真实平台页面动作尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -66,6 +66,7 @@
 | 正式桌面制品隔离 | `🔍` macOS release 实际二进制、正式资产/配置和无默认特性依赖树已确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed，Windows 原生仍待 runner |
 | macOS 浏览器受信发现 | `🔍` Rust 生产 API 已用 Apple Security.framework 验证标准路径 Chrome 的签名、Bundle ID、Team ID、全架构/嵌套代码和路径 identity；Edge allowlist/失败矩阵已实现，本机未安装 Edge，保留真实 Edge 实机验收 |
 | 运营浏览器选择 | `🔍` macOS 隐藏真实 App 已从设置页保存、刷新并读回受信 Chrome 枚举；WebView/IPC/沙盒文件无路径，Windows 生产模块与测试已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
+| 私有浏览器 Profile | `🔍` macOS/Unix 已从公开 Rust Store 原入口完成本机 UUIDv4 Profile 原子创建、重开、权限、symlink、identity 替换与并发矩阵；Windows handle-relative/私有 ACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -255,7 +256,7 @@
 | B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
 | B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | 🔍 待 Windows 原生验收 |
 | B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | 🔍 待 Windows 原生验收 |
-| B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ⬜ 未开始 |
+| B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | 🔍 待 Windows 原生验收 |
 | B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | ⬜ 未开始 |
 | B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | ⬜ 未开始 |
 | B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | ⬜ 未开始 |
@@ -1668,10 +1669,25 @@
 - 本地隔离与清理：验收不启动 Backend、PostgreSQL、Docker、Executor 进程或运营浏览器，只启动后台隐藏 App 和动态嵌入式 WebDriver；启动前检查端口，结束确认端口关闭、App/WDIO/runner 进程退出、专属 AppData 删除且生产资产恢复。没有读取、停止、复用或清理另一个项目的端口、进程、容器、网络、Volume、SQLite 或文件
 - 后续：B5-05 建立 App 沙盒内 `browser-profiles/douyin/<UUIDv4>` 私有目录与稳定路径身份；B5-04 Windows 原生验收在 runner 恢复时自动补齐，不阻塞 Profile 的平台无关实现
 
+### B5-05 私有浏览器 Profile 目录
+
+- 状态：🔍 待 Windows 原生验收；macOS/Unix 已从公开生产 `BrowserProfileStore` 原入口完成真实文件系统创建、重开、稳定 identity 和失败矩阵，Windows 生产模块已通过 `x86_64-pc-windows-msvc` 目标类型检查，但 GitHub Hosted Windows 仍因 Billing 零步失败而没有实际运行
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：只在 Tauri App 私有数据根下建立 `browser-profiles/douyin/<canonical UUIDv4>`；Profile ID 必须由本机 CSPRNG 生成，不接收昵称、手机号、平台账号、路径片段或其他平台枚举，也不读取/迁移用户默认 Chrome/Edge Profile
+- RED：先把台账置为 `🧪 RED`；新增真实 Rust 文件系统集成测试和 Node 原生边界契约，分别准确失败于 `automation_tool_desktop_lib::browser_profiles` 与生产 `browser_profiles.rs` 不存在。没有复用旧仓库实现、Mock 文件系统或先写空模块让测试假绿
+- Rust 边界：Tauri setup 已从自身 `app.path().app_data_dir()` 管理唯一 `BrowserProfileStore`；公开原生能力仅为本机生成抖音 Profile、按 canonical UUIDv4 重开和对已持有 Profile 做 identity 复验。`SocialPlatform` 当前只有 `Douyin`；没有 Tauri Command、React DTO、Control Plane API、Cookie API、任意路径输入或其他平台目录
+- Unix 原子语义：从文件系统根逐级以 `openat(O_DIRECTORY|O_NOFOLLOW)` 打开既有祖先，固定子目录和 Profile 叶子通过父目录句柄的 `mkdirat` 原子创建；AppData、`browser-profiles`、`douyin` 和 Profile 均由已打开句柄 `fchmod(0700)` 并复核。Store/Profile 始终持有目录句柄与 dev+inode，创建、重开和使用前后从同一父句柄重开比较 identity，路径被 rename/替换后 fail closed
+- Windows 原子语义：AppData 全链拒绝 reparse point，固定子目录和 Profile 使用父目录 HANDLE 作为 `OBJECT_ATTRIBUTES.RootDirectory` 的 `NtCreateFile(FILE_DIRECTORY_FILE|FILE_OPEN_REPARSE_POINT)` 原子创建/打开，不走 `create_dir_all` 或路径跟随。每层验证 volume/file index、最终规范路径和非 reparse 属性，并在 HANDLE 上应用/复核 protected DACL：owner 为当前用户、唯一继承 ACE 为当前用户 `FILE_ALL_ACCESS`
+- 失败矩阵：集成测试覆盖 canonical UUIDv4/精确路径、非法版本/大小写/无连字符/逃逸、缺失 Profile、普通文件冒充目录、AppData/固定子目录/叶子 symlink、过宽权限修复、目录被 rename 后同名替换、8 路并发创建不复用 ID；Unix 单元另覆盖绝对路径祖先 symlink。Windows reparse point、ACL、并发和 identity 运行时矩阵保留给原生 runner，不以 MSVC 类型检查冒充通过
+- 门禁：完整 Frontend Node 契约 61 项、Vitest 123 项、ESLint、严格 TypeScript、production boundary、Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿；macOS 默认 Rust 共 114 项通过、1 项既有 PyInstaller 编排 ignored。用现有 Homebrew `rust-src` 对直接引用生产 common/Windows Profile 模块的最小临时 crate 完成 `x86_64-pc-windows-msvc` 类型检查，实抓并修复 Win32 feature 与 SID/ACL 缓冲区对齐问题，临时 crate/target 已删除
+- 原始入口与隔离：B5-05 的正式消费者是 B5-06/B5-07 Rust/Executor 运行链，当前没有用户可调用功能；唯一后台隐藏 App 已从正式 Tauri setup 初始化 Store，叶子创建/重开则从公开生产 Store 调用真实 OS 文件系统。验收不启动 Backend、PostgreSQL、Docker、Executor 或运营浏览器；隐藏 App 只使用动态已检查 WebDriver 端口和独立 B5-04 AppData，其他测试数据使用本任务唯一临时 AppData，结束全部精确删除，没有读取、停止、复用或清理另一个项目的资源
+- 后续：B5-06 在任何 persistent browser context 之前基于同一稳定 Profile identity 建立跨进程单实例锁；B5-05 Windows 原生验收在 runner 恢复时自动补齐，不阻塞锁的跨平台实现
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-05`：建立 App 沙盒内按平台/UUID 隔离的私有 Profile 目录；
-2. `B5-06`：为同一 Profile 建立跨进程单实例锁；
-3. B5-03/B5-04 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-06`：为同一 Profile 建立跨进程单实例锁；
+2. `B5-07`：在正式 PyInstaller Executor 中启动系统 Chrome/Edge headed persistent context；
+3. B5-03/B5-04/B5-05 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
