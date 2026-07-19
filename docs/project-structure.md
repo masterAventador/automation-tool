@@ -428,6 +428,24 @@ R0-12 审计基于旧仓库 `/Users/aventador/code/agent-platform` 的提交
 
 ### 10.2 `local_executor.rs` 逐项清单
 
+#### 10.2.1 来源文件覆盖表
+
+本轮 E4-01 在旧提交 `a01cfc9aa93e87e71b78b73eee3e07a3b9d31061` 上逐文件只读审计。下表中的“迁移”只表示保留可验证的失败语义；旧仓库不会成为当前项目的构建、运行或协议依赖。
+
+| 旧仓库来源 | 已核对事实 | 当前判定与落点 |
+| --- | --- | --- |
+| `frontend/src-tauri/src/local_executor.rs` | `LocalExecutorManager` 同时承担启动互斥、stdin token、同步 stdio 调用、watchdog、重启、stderr 和跨平台进程树终止 | 拆分后重写：bootstrap 到 `E4-02`，随机认证到 `E4-06`，生命周期到 `E4-07`，监管到 `E4-08`，进程树到 `E4-09`，诊断到 `E4-10` |
+| `frontend/src-tauri/tests/local_executor.rs` | 14 项旧测试实跑全绿，覆盖认证、协议拒绝、并发启动、两次崩溃恢复、调用超时、停止抢占、进程树、stderr 限界/脱敏和路径替换 | 将行为拆到对应 E4 任务重新 RED/GREEN；旧测试不能复制后直接算当前实现通过 |
+| `frontend/src-tauri/src/main.rs` | 用 `current_exe` 参数 `--social-operations-sidecar` 把 App 自身分叉成假 Sidecar | 删除该入口；`E4-02` 使用独立 Python 入口，`E4-03` 生成 PyInstaller `onedir` |
+| `frontend/src-tauri/src/lib.rs` | 全局管理旧 Manager 与 `SocialOperationsRuntime`，并注册面向 capability 的宽 Tauri Commands | 删除聚合运行时和通用命令；`E4-07` 只暴露固定 allowlist 的生命周期操作，`E4-13` 经 `PlatformAdapter` 使用 |
+| `frontend/src/platform/tauri.ts` | React 发送 `capabilityId: social-operations` 并调用 `local_executor_*` 原始命令 | 不迁移；页面不能选择 capability、进程、路径或任意 payload，只能调用当前项目固定适配器方法 |
+| `frontend/src-tauri/src/social_operations_runtime.rs` | 把账号内存表、浏览器 Profile、Cookie vault、Sidecar 安装和 Executor 聚成一个对象；旧定向测试本轮 7/8 通过，闭环用例在 `invoke` 返回 `ExecutorUnavailable` | `SocialOperationsRuntime` 整体删除；E4 只管进程，Profile/平台登录归 Wave 5，平台动作归 Wave 6/7，不能为了让废弃实现全绿而修改旧仓库 |
+| `backend/src/agent_platform/capabilities/social_operations/local_executor_protocol.py` | 旧 `task.request/cancel/response/error`、`step.progress`、`handoff.requested`、`diagnostic.event` 协议携带 tenant、capability、设备和 Core 治理引用 | 不做兼容 Adapter；当前 I2-10～I2-13 Executor v1 是唯一 wire 契约，E4-02 直接消费当前 fixtures |
+| `backend/src/agent_platform/capabilities/social_operations/device_account_service.py` | `ActorContext`、tenant/owner、RBAC、Entitlement、Core audit 与设备/账号/任务仓储耦合 | 全部删除，不迁入 Executor；当前 MVP 用 Installation 强 ID 和既有 Control Plane Task/Attempt/Action 领域 |
+| `contracts/capabilities/social-operations/local-executor-v1.schema.json` | 旧生成 Schema 固化 `tenant_id`、`approval_id`、`audit_correlation_id`、Core Artifact 引用和任意业务扩展；两项协议 suite 本轮 148 项通过 | 只说明旧协议内部自洽，不说明与当前产品兼容；不得复制 Schema、fixtures 或 Markdown 到当前 `contracts/executor/` |
+
+#### 10.2.2 能力迁移矩阵
+
 | 旧能力 | 决策 | 当前项目落点 | 迁移要求 |
 | --- | --- | --- | --- |
 | Unix process group、Windows Job Object | 提取迁移 | `E4-09` | 保留整棵进程树终止、重复停止幂等和挂起调用清理测试；Windows 必须在真实打包产物复验 |
@@ -442,6 +460,32 @@ R0-12 审计基于旧仓库 `/Users/aventador/code/agent-platform` 的提交
 | 硬编码 `CAPABILITY_ID` 和通用 Tauri invoke | 删除 | — | React 只能调用 allowlist 后的 `PlatformAdapter`/ControlPlaneTransport 操作 |
 | `run_sidecar_io` 固定 ACK 假执行器 | 删除 | — | 无副作用联调统一使用 `T3-10 FakeExecutor`；不得混入正式 Executor |
 | 已验证字节再执行的 TOCTOU 防护思路 | 按新契约重写 | `E4-05`、`E4-07` | 适配 PyInstaller 目录包和平台签名；不能只验证入口单文件后信任其余目录 |
+
+#### 10.2.3 强制删除的 tenant/Core 依赖图
+
+```text
+旧 React capabilityId / serde_json::Value
+        ↓
+旧 Tauri Commands / SocialOperationsRuntime
+        ↓
+旧 Local Executor stdio 协议
+        ↓
+ActorContext + tenant/RBAC/Entitlement + Core Approval/Audit/Artifact
+```
+
+这条链不能通过兼容层保留。字段和替代边界固定如下：
+
+| 旧依赖 | 处理 | 当前唯一边界 |
+| --- | --- | --- |
+| `tenant_id`、owner、企业与 RBAC | 删除 | 第一期没有产品账号或租户；资源以强类型 `installation_id` 归属，不能引入隐式默认 tenant |
+| `approval_id`、`audit_correlation_id`、Core Approval/Audit | 删除 | MVP 的确认、人工接管、事件和安全结果使用当前 Task/Attempt/Action/Event 明确事实，不伪造旧治理资源 |
+| Core Artifact 引用和 `artifact_refs` | 删除旧模型 | 本机 Artifact 等到 `H8-09` 按当前稳定 ID、摘要、相对路径和最小元数据实现；Executor/Control Plane 都不接收旧 Core 对象 |
+| `capability_id=social-operations`、`target_device_id` | 删除 | 当前连接身份是 Installation/Executor，任务类型由当前判别联合决定；React 不选择设备或 capability |
+| 任意 `extensions`、任意 input/result 和 Rust `serde_json::Value` | 删除 | 只接受 Pydantic 生成并由 Python/TypeScript/Rust 共享 fixtures 验证的封闭类型，未知字段 fail closed |
+| 同步逐行 stdio 任务通道 | 删除 | stdin 只在 `E4-02`/`E4-06` 传一次性 bootstrap；正式命令、ACK 和事件走当前出站 WebSocket |
+| 旧账号/设备服务与 `SocialOperationsRuntime` | 删除 | Executor 进程监管、Profile/登录、平台 Adapter 和 Control Plane 领域分别归属，不再由一个内存聚合对象掌权 |
+
+迁移执行顺序是 `E4-02` 入口与 bootstrap → `E4-06` 会话认证 → `E4-07` 生命周期 → `E4-08` 监管 → `E4-09` 进程树 → `E4-10` 诊断。`E4-11` 新建的是当前 Executor 本机幂等账本，不从旧 `device_account_service.py` 搬运 tenant、账号或 Core 数据模型。
 
 ### 10.3 `sidecar_package.rs` 逐项清单
 

@@ -113,6 +113,18 @@ Local Executor 不负责：
 - 直接信任网页文案为最终成功；
 - 在无法确认外部结果时自动重放。
 
+### 5.1 旧 Executor 迁移边界
+
+E4-01 对旧仓库提交 `a01cfc9aa93e87e71b78b73eee3e07a3b9d31061` 的结论是：只重用可由测试证明的失败语义，不复用旧产品协议或聚合架构。
+
+- 可按当前契约重写的只有进程生命周期、stdin 高熵 bootstrap、后台退出检测、有界重启、超时终止、跨平台进程树清理和 stderr 脱敏限界；分别由 E4-02、E4-06～E4-10 承接；
+- `current_exe + --social-operations-sidecar`、同步逐行 JSON 任务通道、任意 `serde_json::Value`、通用 capability Command 和固定 ACK 假 Sidecar 全部删除；
+- 旧协议的 `tenant_id`、`approval_id`、`audit_correlation_id`、Core Artifact、RBAC、Entitlement 和 `SocialOperationsRuntime` 不进入当前仓库，也不建立兼容 Adapter；
+- 当前 I2-10～I2-13 Executor v1、Installation 作用域、Task/Attempt/Action/Event 和出站 WebSocket 是唯一正式边界；stdin 只传一次性本机 bootstrap；
+- E4-11 从当前需求新建 command/idempotency/checkpoint/outbox 账本，不能迁移旧账号或设备服务的数据模型。
+
+完整逐文件证据和删除映射以 `docs/project-structure.md` 第 10.2 节为准。
+
 ## 6. Control Plane 分层
 
 ```text

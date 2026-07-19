@@ -219,7 +219,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| E4-01 | 审计旧 local_executor | 列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖 | R0-12,I2-10 | ⬜ 未开始 |
+| E4-01 | 审计旧 local_executor | 列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖 | R0-12,I2-10 | ✅ 已完成 |
 | E4-02 | Executor Python 入口 | stdin bootstrap、健康、信号和出站连接最小进程 | E4-01,I2-13 | ⬜ 未开始 |
 | E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | ⬜ 未开始 |
 | E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ⬜ 未开始 |
@@ -1331,9 +1331,24 @@
 - 真实账号边界：本任务无社交平台副作用，不需要真实账号也不宣称平台最终状态。后续缺账号时继续使用自建测试页/隔离 Adapter，平台最终状态保留 `🔍 待真实账号` 而不阻塞 Wave 4～10
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构与本路线图；没有新增重复规划文档
 
+### E4-01 审计旧 local_executor
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：只读审计 `/Users/aventador/code/agent-platform` 的旧 Local Executor 进程、协议、监管、凭据、配置和 tenant/Core 耦合，形成带来源文件证据的提取/重写/删除/延后清单，作为 E4-02～E4-11 的实现输入
+- 边界：本任务不复制旧源码、不修改旧仓库、不提前实现 Executor；当前项目的 Executor v1、无产品账号、单设备、Tauri `app_data_dir` 秘密边界和云端 Control Plane 架构优先于旧项目语义
+- RED：先新增 `local-executor-audit.test.mjs` 并实跑；测试准确失败于 `docs/project-structure.md` 缺少 `10.2.1 来源文件覆盖表`，证明原有能力级摘要尚不能逐项锁住旧入口、协议、运行时和 tenant/Core 删除边界
+- 来源与旧证据：旧仓库保持在干净提交 `a01cfc9aa93e87e71b78b73eee3e07a3b9d31061`。逐项核对 Rust `local_executor`/测试/`main`/`lib`/React bridge/`SocialOperationsRuntime`、Python 协议/设备账号服务和生成 Schema；旧 `local_executor` 14 项测试全绿，旧协议两项 suite 148 项全绿。`SocialOperationsRuntime` 定向 suite 为 7/8，通过项只作样本，失败闭环在 `invoke` 返回 `ExecutorUnavailable`，未修改废弃仓库掩盖失败
+- 迁移结论：只保留可重新测试的进程失败语义；E4-02、E4-06～E4-10 分别重写 bootstrap、一次性 stdin 认证、生命周期、监管、进程树和诊断。旧 `current_exe` 自分叉、同步 stdio 任务通道、任意 `serde_json::Value`、固定 ACK 假 Sidecar、宽 capability Command 与聚合运行时全部删除
+- tenant/Core 删除：旧 `tenant_id`、owner/RBAC/Entitlement、`approval_id`、`audit_correlation_id`、Core Artifact、capability/device 选择和旧账号/设备服务不做兼容 Adapter；当前 Installation、Executor v1、Task/Attempt/Action/Event 和出站 WebSocket 是唯一边界。E4-11 从当前需求新建本机账本，不迁旧数据模型
+- GREEN：审计合同 1/1 通过；Frontend 全量 40 项 Node 工程契约和 112 项 Vitest 通过，ESLint、TypeScript 与 production boundary/正式 Vite 构建通过。正式产物扫描继续证明审计测试与旧仓库标记没有进入用户构建
+- 生产同路径与账号边界：本任务是只读架构审计，没有新增 App 接口、用户功能或平台副作用，因此不启动 Tauri App、不需要真实平台账号，也不把旧测试当当前产品验收；E4-02/E4-12 才用正式 Executor 进程和真实 Control Plane WebSocket 完成纵向链路
+- 清理与文档：没有启动本地服务、数据库、浏览器或 App，无运行资源需要回收；旧仓库保持未修改。同步后端架构、工程结构和本路线图，没有新增重复规划文档
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-01`：审计旧 `local_executor`，列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖；
-2. 按台账与 TaskList 顺序持续执行 E4-02～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
+1. `E4-02`：实现 Executor Python 入口、stdin bootstrap、健康/信号和最小出站连接；
+2. 按台账与 TaskList 顺序持续执行 E4-03～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
