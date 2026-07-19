@@ -15,6 +15,7 @@ from automation_tool.executor.package_manifest import (
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_NAME = "automation-tool-executor"
 PRIVATE_SESSION = "private-packaged-session"
+LOCAL_SESSION_TOKEN = "06" * 32
 TEST_SIGNING_KEY = bytes(range(32))
 
 
@@ -24,6 +25,7 @@ def bootstrap() -> bytes:
             {
                 "bootstrap_version": "1",
                 "websocket_url": "ws://127.0.0.1:9/api/v1/executors/connect",
+                "local_session_token": LOCAL_SESSION_TOKEN,
                 "session_token": PRIVATE_SESSION,
                 "installation_id": "123e4567-e89b-42d3-a456-426614174003",
                 "executor_id": "123e4567-e89b-42d3-a456-426614174004",

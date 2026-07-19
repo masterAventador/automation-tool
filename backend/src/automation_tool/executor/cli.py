@@ -10,6 +10,10 @@ from contextlib import contextmanager
 from types import FrameType
 from typing import BinaryIO, TextIO
 
+from automation_tool.executor.authentication import (
+    LocalSessionAuthenticationRejected,
+    LocalSessionAuthenticator,
+)
 from automation_tool.executor.bootstrap import ExecutorBootstrapRejected, read_executor_bootstrap
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
@@ -56,14 +60,18 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
         _fixed_error(stderr, "Local Executor bootstrap is rejected")
         return 2
     try:
-        process = LocalExecutorProcess(
-            bootstrap=bootstrap,
-            metadata=RuntimeMetadata.detect(),
-            reporter=ExecutorProcessReporter(stdout),
-        )
-        with stop_signal_event() as stop:
-            process.run(stop)
-    except ExecutorProcessRejected:
+        authenticator = LocalSessionAuthenticator(bootstrap.local_session_token)
+        try:
+            process = LocalExecutorProcess(
+                bootstrap=bootstrap,
+                metadata=RuntimeMetadata.detect(),
+                reporter=ExecutorProcessReporter(stdout, authenticator),
+            )
+            with stop_signal_event() as stop:
+                process.run(stop)
+        finally:
+            authenticator.close()
+    except (ExecutorProcessRejected, LocalSessionAuthenticationRejected):
         _fixed_error(stderr, "Local Executor process is unavailable")
         return 1
     return 0

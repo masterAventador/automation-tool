@@ -22,7 +22,7 @@ test("E4-05 keeps Executor package trust inside Rust with fixed cross-language c
 
   assert.match(rustEntry, /pub mod executor_package;/);
   assert.match(cargo, /semver\s*=\s*"=1\.0\.28"/);
-  assert.match(cargo, /sha2\s*=\s*"=0\.11\.0"/);
+  assert.match(cargo, /sha2\s*=\s*\{[^}]*version\s*=\s*"=0\.11\.0"/);
   assert.match(cargo, /walkdir\s*=\s*"=2\.5\.0"/);
   assert.match(verifier, /VerifyingKey/);
   assert.match(verifier, /verify_strict/);

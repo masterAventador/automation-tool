@@ -5,12 +5,20 @@ from datetime import UTC, datetime
 from io import StringIO
 
 import pytest
+from pydantic import SecretStr
 
+from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
     ExecutorProcessReporter,
     RuntimeMetadata,
 )
+
+LOCAL_SESSION_TOKEN = "03" * 32
+
+
+def authenticator() -> LocalSessionAuthenticator:
+    return LocalSessionAuthenticator(SecretStr(LOCAL_SESSION_TOKEN))
 
 
 def test_runtime_metadata_normalizes_only_supported_packaging_targets() -> None:
@@ -41,22 +49,25 @@ def test_runtime_metadata_normalizes_only_supported_packaging_targets() -> None:
 
 def test_reporter_writes_only_fixed_bounded_health_events() -> None:
     output = StringIO()
-    reporter = ExecutorProcessReporter(output)
+    reporter = ExecutorProcessReporter(output, authenticator())
 
     reporter.healthy()
     reporter.stopped()
 
     lines = [json.loads(line) for line in output.getvalue().splitlines()]
-    assert lines == [
-        {"event": "executor.healthy", "protocolVersion": "1.0"},
-        {"event": "executor.stopped", "protocolVersion": "1.0"},
-    ]
-    assert all(set(line) == {"event", "protocolVersion"} for line in lines)
+    assert [line["event"] for line in lines] == ["executor.healthy", "executor.stopped"]
+    assert all(line["protocolVersion"] == "1.0" for line in lines)
+    assert all(line["authenticationProof"].startswith("atlep1.") for line in lines)
+    assert lines[0]["authenticationProof"] != lines[1]["authenticationProof"]
+    assert all(set(line) == {"authenticationProof", "event", "protocolVersion"} for line in lines)
+    assert LOCAL_SESSION_TOKEN not in output.getvalue()
 
 
 def test_reporter_and_runtime_fail_closed_on_invalid_dependencies() -> None:
     with pytest.raises(ExecutorProcessRejected):
-        ExecutorProcessReporter(object())  # type: ignore[arg-type]
+        ExecutorProcessReporter(object(), authenticator())  # type: ignore[arg-type]
+    with pytest.raises(ExecutorProcessRejected):
+        ExecutorProcessReporter(StringIO(), object())  # type: ignore[arg-type]
     with pytest.raises(ExecutorProcessRejected):
         RuntimeMetadata(
             executor_version="private-invalid",
@@ -72,7 +83,7 @@ def test_reporter_and_runtime_fail_closed_on_invalid_dependencies() -> None:
         ExecutorProcessRejected,
         match=r"^Local Executor process is unavailable$",
     ) as captured:
-        ExecutorProcessReporter(FailingOutput()).healthy()
+        ExecutorProcessReporter(FailingOutput(), authenticator()).healthy()
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
 

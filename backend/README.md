@@ -92,7 +92,7 @@ PyInstaller 产物固定为 `dist/automation-tool-executor/` 的 `onedir` 目录
 
 Manifest 工具在 `onedir` 根内写入 `executor-manifest.v1.json` 和 `executor-manifest.v1.sig`。Manifest 使用 compact、键排序的 ASCII JSON 加单个 LF，签名覆盖这些原始字节；签名文件固定为无 padding Base64URL 的 `atems1` envelope。Manifest 绑定 SemVer、构建 ID、平台、架构、平台精确入口、总大小、目录摘要和每个 payload 普通文件的相对路径/大小/SHA-256；metadata 自身不进入清单。离线 Ed25519 私钥必须是 stdin 中精确 32 字节，不能放入 argv、环境、日志、仓库、构建产物或 App；仓库固定 fixture 使用的 `00..1f` 只是假测试种子，不能用于发布。
 
-`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。构建目录和产物均被 Git 忽略；E4-04 只负责离线生成完整目录 Manifest 与签名，Rust 侧可信公钥、目录复验、平台/架构检查、私有安装和防降级由 E4-05 实现。
+`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。E4-06 在 Control Plane `session_token` 之外增加用途隔离的 `local_session_token`：Rust 每次用系统 CSPRNG 生成精确 32 字节并编码为 64 位小写十六进制，Python 只在 `SecretStr`/可清零认证器中持有。stdout 的 `executor.healthy`/`executor.stopped` 只携带按事件和协议版本域隔离的 `atlep1` HMAC-SHA-256 证明，不回传令牌；E4-07 的 Rust Manager 必须以现有常量时间 verifier 校验后才接受进程健康。构建目录和产物均被 Git 忽略；E4-04/E4-05 分别负责完整目录签名与 Rust 可信复验。
 
 后端 Pydantic/FastAPI 是跨端 DTO 的唯一来源。路由契约变化后先去掉 `--check` 重新导出快照，再到 `frontend/` 执行 `pnpm generate:api`；提交前两侧都必须通过各自漂移检查。
 

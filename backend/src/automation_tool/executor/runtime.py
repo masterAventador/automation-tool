@@ -14,6 +14,7 @@ from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
 from automation_tool import __version__
+from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import ExecutorBootstrap
 from automation_tool.executor.transport import (
     ExecutorTransportRejected,
@@ -88,16 +89,23 @@ class RuntimeMetadata:
 class ExecutorProcessReporter:
     """Write a tiny fixed stdout protocol consumed by the future Rust manager."""
 
-    def __init__(self, output: TextIO) -> None:
-        if not isinstance(output, TextIOBase):
+    def __init__(self, output: TextIO, authenticator: LocalSessionAuthenticator) -> None:
+        if not isinstance(output, TextIOBase) or not isinstance(
+            authenticator, LocalSessionAuthenticator
+        ):
             raise ExecutorProcessRejected
         self._output = output
+        self._authenticator = authenticator
 
     def _write(self, event: str) -> None:
         failed = False
         try:
             source = json.dumps(
-                {"event": event, "protocolVersion": EXECUTOR_PROTOCOL_VERSION},
+                {
+                    "authenticationProof": self._authenticator.proof_for(event),
+                    "event": event,
+                    "protocolVersion": EXECUTOR_PROTOCOL_VERSION,
+                },
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,

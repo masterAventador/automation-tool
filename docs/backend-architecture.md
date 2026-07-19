@@ -196,7 +196,7 @@ browser/desktop infrastructure
 - 安装信号处理和有界停止；
 - 令牌、私有路径和原始异常不进入日志。
 
-E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、短期 `executor.connect` Session、Installation/Executor UUIDv4 和心跳间隔。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`，Session 只驻留在 `SecretStr`/Authorization Header，不进入 argv、环境、stdout、stderr 或异常。
+E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、本机启动令牌、短期 `executor.connect` Session、Installation/Executor UUIDv4 和心跳间隔。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`；两个 Session 用途隔离并分别只驻留在秘密类型中，不进入 argv、环境、stderr 或异常。
 
 进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。当前任何 Task Command 或其他应用帧都 fail closed，不提前伪造 ACK/事件；E4-12 在本机幂等账本和监管完成后才接入无副作用命令回放。
 
@@ -205,6 +205,8 @@ E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `execut
 E4-04 增加唯一离线构建入口 `automation-tool-build-executor-manifest`。它只从 stdin 读取精确 32 字节 Ed25519 seed，拒绝把发布私钥放入 argv、环境、输出、仓库或 App；输出是 `onedir` 根内的 `executor-manifest.v1.json` 与 `executor-manifest.v1.sig`。Manifest v1 精确绑定 SemVer、受限 build ID、`macos|windows`、`aarch64|x86_64`、平台精确入口、payload 总大小、目录摘要，以及按 ASCII 相对路径排序的全部普通文件路径/大小/SHA-256；Manifest/签名 metadata 自身不参与 payload 清单。
 
 目录摘要以 `automation-tool.executor-package.v1\0` 起始，随后对每个已排序文件依次加入 4 字节大端路径长度、ASCII 路径、8 字节大端文件大小和 32 字节原始 SHA-256。Manifest 是键排序、compact ASCII JSON 加一个 LF；Ed25519 签名覆盖其完整原始字节，签名 envelope 固定为 `atems1.<unpadded-base64url>\n`。构建器拒绝非规范/过长路径、symlink、非普通文件、超过 10,000 个文件或 8 GiB、空/错误入口，并在读取前后核对文件 identity，避免把验证期间被替换的文件写入可信清单。Draft 2020-12 Schema 和固定测试 seed 生成的 inert 跨语言 fixture 已提交；测试 seed 不是发布密钥。E4-05 仍必须在 Rust 中用编译期可信公钥解析 exact fields、复算全部摘要、绑定当前平台/架构、执行防降级并 fail closed，不能把 E4-04 的离线生成当成运行时信任。
+
+E4-06 把本机启动认证与 Control Plane 设备认证彻底分开。Rust `executor_bootstrap.rs` 使用系统 CSPRNG 生成精确 256-bit、不可克隆且 Drop 清零的 `LocalSessionToken`，其 canonical 小写十六进制只随完整 JSON 写入子进程 stdin；模块没有 argv、环境、日志、Tauri Command 或网络发送入口。Python `authentication.py` 严格解析 64 位小写十六进制到可清零 bytearray，并为 `executor.healthy`/`executor.stopped` 生成 `atlep1` HMAC-SHA-256：输入以固定域、事件名和 `1.0` 协议版本绑定，响应从不包含原令牌。Rust 使用同一固定跨语言向量和 `hmac::Mac::verify_slice` 常量时间校验；E4-07 Manager 必须持有每次启动对应的令牌并在接受健康状态前验签，旧进程证明不能跨启动或跨事件复用。
 
 ### 7.2 Application
 

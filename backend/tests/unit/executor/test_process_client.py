@@ -12,9 +12,11 @@ from typing import cast
 from uuid import UUID
 
 import pytest
+from pydantic import SecretStr
 from websockets.sync.server import Server, ServerConnection, serve
 from websockets.typing import Subprotocol
 
+from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
@@ -31,6 +33,14 @@ from automation_tool.protocol import (
 NOW = datetime(2026, 7, 19, 9, 0, tzinfo=UTC)
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
 EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
+LOCAL_SESSION_TOKEN = "04" * 32
+
+
+def reporter(output: StringIO) -> ExecutorProcessReporter:
+    return ExecutorProcessReporter(
+        output,
+        LocalSessionAuthenticator(SecretStr(LOCAL_SESSION_TOKEN)),
+    )
 
 
 class FixedClock:
@@ -66,6 +76,7 @@ def bootstrap(port: int) -> object:
         {
             "bootstrap_version": "1",
             "websocket_url": f"ws://127.0.0.1:{port}/api/v1/executors/connect",
+            "local_session_token": LOCAL_SESSION_TOKEN,
             "session_token": "private-session",
             "installation_id": INSTALLATION_ID,
             "executor_id": EXECUTOR_ID,
@@ -91,7 +102,7 @@ def process_for(
             platform="macos",
             architecture="arm64",
         ),
-        "reporter": ExecutorProcessReporter(target),
+        "reporter": reporter(target),
         "clock": clock,
         "open_timeout": timedelta(milliseconds=100),
         "close_timeout": timedelta(milliseconds=100),
@@ -218,7 +229,7 @@ def test_process_rejects_transport_clock_ids_and_constructor_values_without_leak
         arguments: dict[str, object] = {
             "bootstrap": valid.bootstrap,
             "metadata": valid.metadata,
-            "reporter": ExecutorProcessReporter(output),
+            "reporter": reporter(output),
             "clock": FixedClock(),
             "id_source": DeterministicIds(),
             "open_timeout": timedelta(milliseconds=10),

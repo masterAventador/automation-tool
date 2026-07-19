@@ -39,6 +39,8 @@ Executor v1 使用 `src/api/protocol/executor-envelope.ts` 的 Zod 判别联合�
 
 E4-05 的 `src-tauri/src/executor_package.rs` 是签名 `onedir` 的唯一运行时信任边界。验证器只接受 Rust 原生调用方提供的可信 Ed25519 公钥、显式 `semver` 允许范围和可选已安装版本，没有 Tauri Command、React 参数、服务端 key、URL 或在线下载入口。它先严格验证 `atems1` 对 Manifest 原始字节的签名，再拒绝非 canonical/重复/未知字段，绑定当前 macOS/Windows 与 aarch64/x86_64，最后两次枚举完整目录并以稳定文件 identity 逐项复算大小、SHA-256 和目录摘要；弱公钥、版本越界/回退、symlink、非普通文件、目录增删和 payload 篡改均只返回固定错误。E4-07 装配进程监管时必须从 App 自己的受信资源/编译配置提供公钥和路径，不能新增 IPC 信任参数。
 
+E4-06 的 `src-tauri/src/executor_bootstrap.rs` 是本机进程启动认证边界。它用系统 CSPRNG 每次生成不可克隆、Drop 时清零的 32 字节 `LocalSessionToken`，只把其 64 位小写十六进制编码写入单行 stdin bootstrap；Control Plane `executor.connect` Session 是另一个字段和用途。Python 健康/停止事件只返回 `atlep1` HMAC-SHA-256 证明，Rust 以受维护的 `hmac` crate 做常量时间校验并绑定事件名和 Executor 协议版本。模块没有 Tauri Command、argv、环境变量、日志、任意进程或 React 接口；E4-07 只能在包验证通过后由 Rust Manager 使用它启动正式 Executor。
+
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。

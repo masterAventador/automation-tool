@@ -61,6 +61,7 @@
 | Executor onedir PoC | `🔍` macOS arm64 冻结实包已启动且未包含 Playwright；Windows 同测试已配置，但 GitHub Hosted Runner 因账户 Billing/Actions spending limit 未启动，待 Windows 环境补验收 |
 | Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS 冻结实包验证 |
 | Rust Executor package verifier | `🔍` macOS arm64 已用当前目标包与 Python 签名 fixture 验证签名、完整目录、平台/架构、SemVer 范围和防降级；Windows 原生代码已进入同一 CI，但 runner 仍受 GitHub Billing 阻塞 |
+| Executor stdin 认证 | `✅` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -227,7 +228,7 @@
 | E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | 🔍 待验收 |
 | E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ✅ 已完成 |
 | E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | 🔍 待验收 |
-| E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ⬜ 未开始 |
+| E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ✅ 已完成 |
 | E4-07 | Rust ExecutorManager | start/status/invoke/stop，单实例和并发线性化 | E4-05,E4-06 | ⬜ 未开始 |
 | E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | ⬜ 未开始 |
 | E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | ⬜ 未开始 |
@@ -1413,13 +1414,30 @@
 - 失败矩阵：覆盖 current target 成功、Python E4-04 fixture 跨语言验签、显式 prerelease、范围越界、回退、平台/架构错配、错误 signer、weak key、签名 prefix/换行/padding/字符集/长度、可信 signer 下的 unknown/duplicate/noncanonical/非法版本/build/入口、payload 篡改、目录增删和 symlink；错误只返回固定 code/文案，不回显路径或输入
 - 本机门禁：Rust 包定向 10 组全绿；默认、`desktop-e2e`、`control-plane-e2e` 三种独立配置均为 40 单元 + 10 package + 3 协议 fixture + 14 安全配置，共 67 项通过；Clippy `--all-targets --all-features -D warnings` 与 Rustfmt 全绿。Frontend 41 项 Node 工程契约、112 项 Vitest、ESLint、TypeScript、正式 Vite/production boundary 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功产出正式 App 二进制但未启动。Backend 共享 contract 回归 `840 passed in 76.64s`，4516 条语句/870 个分支 100%
 - Windows 真实边界：正式 `.github/workflows/desktop.yml` 已因 `frontend/**` 在 macOS/Windows runner 执行 `pnpm test:rust` 和桌面构建，Windows 专属 reparse point/file identity 代码会在原生 target 编译运行。本机现有 Homebrew Rust 不含 `rustup`，不为一次交叉检查再安装并保留第二套 Rust；临时分支运行 `29670987419` 的四个 job 均为 0 step、未分配 runner，Windows Rust/Tauri 与 macOS job 注解都再次明确为账户近期付款失败或 Actions spending limit。当前不能声明 Windows 已通过，失败运行保留证据，临时分支在 main 提交后删除
+- Windows 重试：按用户要求从 `main` 手工触发正式矩阵运行 `29671164126`；两个 Windows job 与两个 macOS job 仍全部 0 step，check-run 原文仍为近期付款失败或需提高 spending limit，证明限制尚未恢复而非产品测试失败。E4-03/E4-05 继续保留 `🔍`，不阻塞后续无设备任务
 - App、密钥与清理：本任务没有 Tauri Command、页面、网络或 App API，正式消费者是 E4-07 Rust 进程生命周期，故不启动/弹出 App；测试从公开 Rust verifier 原入口调用，不用 mock。发布公钥尚未由 E4-07 装配，测试 seed 只存在测试/fixture；设备私钥与长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。临时目录由 RAII 清理，无子进程、服务、容器或 App 残留
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：E4-06 实现 Rust 生成 256-bit stdin 一次性认证并与 Python bootstrap 绑定；E4-07 再从 App 受信资源与编译配置提供固定公钥/版本策略/包路径，验证后监管真实 Executor。E4-05 Windows 原生验收恢复后补齐，不阻塞无设备依赖开发
+
+### E4-06 stdin 随机认证
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：为每次 Rust→Python Local Executor 启动建立独立 256-bit 本机会话，令牌只经现有单行 stdin bootstrap 传递，不进入 argv、环境、日志、错误或响应；不能把 Control Plane `executor.connect` Session 冒充本机认证
+- RED：先新增 Python 认证/严格 bootstrap 测试和 Rust 公共边界集成测试；Python 收集准确失败于 `automation_tool.executor.authentication` 不存在，Rust 编译准确失败于 `executor_bootstrap` 模块与 `hmac` 依赖不存在，证明没有复用旧 Sidecar 或云端 Session 路径让测试假绿
+- Rust：新增 `executor_bootstrap.rs`，锁定 `hmac 0.13.0` 并为 HMAC/SHA-256 打开 `zeroize` feature；`LocalSessionToken::generate` 直接使用既有系统 `getrandom` 取得 32 字节，不实现 Clone，Debug 固定脱敏，Drop 通过 `zeroize` 清除。`ExecutorBootstrapInput` 先限制 loopback `ws`/标准端口 `wss`、UUIDv4、心跳和 Control Plane Session，再把两个用途隔离的 Session 写成一条不超过 16 KiB 的 JSON+LF；没有进程、argv、env、日志、网络或 Tauri Command API
+- Python：新增 `authentication.py`，只接受 64 位小写十六进制 `local_session_token` 并保留在 `SecretStr`/可清零 bytearray。健康与停止响应增加 `authenticationProof`，固定为 `atlep1.<base64url HMAC-SHA-256>`；MAC 输入绑定 `automation-tool.local-executor-event.v1` 域、精确事件名和 Executor `1.0` 协议，原令牌永不进入 stdout。CLI 无论 bootstrap、认证、网络或输出失败都映射既有固定错误并在退出时清零认证器
+- 常量时间与重放边界：Rust 使用 `hmac::Mac::verify_slice` 校验 32 字节证明，先做严格 envelope/base64url 长度检查；每次启动随机 key 使旧进程证明不能跨启动复用，事件名与协议绑定使 healthy 证明不能冒充 stopped。Python/Rust 固定 `00..1f` 测试向量逐字一致；该向量只存在测试，不是发布或设备秘密
+- 验收：Python 聚焦 68 项含已安装控制台脚本→真实 Uvicorn/Session/Registry→信号退出的独立子进程链路；新认证模块 39 条语句/8 分支 100%；Backend 全量 `855 passed in 76.21s`，4571 条语句/878 个分支 100%。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置均为 42 单元 + 3 bootstrap + 10 package + 3 协议 fixture + 14 安全配置，各 72 项；固定向量、随机唯一性、stdin framing、错误写入、错事件/错 proof 和非反射均通过。Frontend 42 项 Node 契约、112 项 Vitest、ESLint、TypeScript、OpenAPI 和 production boundary 全绿；Ruff、Mypy 84 个源码文件、uv lock、Clippy all-targets/all-features 与 Rustfmt 全绿。不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功产出正式二进制且未启动 App
+- App 与原始入口：本任务是 E4-07 的 Rust/Python 启动认证原语，没有新增页面、Tauri Command 或用户可调用功能，因此不启动 App、不用 Mock 冒充桌面验收。真实 Python Executor 已从安装后的正式控制台入口验证证明和秘密不反射；E4-07 必须再由隐藏真实 App 经正式 Manager 生成同一 bootstrap、启动签名包并验证健康 proof，完成跨端产品入口验收
+- 密钥与清理：本机会话只在进程内存和 OS pipe 中短暂存在，不写 `app_data_dir`、系统钥匙串、仓库或服务器；它不是用户配置密钥。测试无 App、容器或遗留 Executor 进程；PyInstaller 临时目录由 pytest 回收
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
+- 后续：E4-07 组合 E4-05 包 verifier 与本模块，实现 `ExecutorManager start/status/invoke/stop`、单实例和并发线性化，并从隐藏真实 App 的正式入口验收 Rust→stdin→真实 Python→HMAC proof 全链路
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-06`：由 Rust 生成 256-bit 一次性会话令牌，经 stdin bootstrap 传给正式 Executor，令牌不进入 argv、环境、日志或响应；
+1. `E4-07`：组合签名包验证与 256-bit stdin 认证，实现 Rust `ExecutorManager start/status/invoke/stop`、单实例和并发线性化，并由隐藏真实 App 验收；
 2. E4-03/E4-05 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-06～Wave 10 的无设备依赖任务。

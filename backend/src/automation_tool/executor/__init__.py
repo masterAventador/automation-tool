@@ -1,5 +1,10 @@
 """Local Executor components that depend only on the shared protocol."""
 
+from automation_tool.executor.authentication import (
+    LocalSessionAuthenticationRejected,
+    LocalSessionAuthenticator,
+    require_local_session_token,
+)
 from automation_tool.executor.bootstrap import (
     ExecutorBootstrap,
     ExecutorBootstrapRejected,
@@ -34,6 +39,9 @@ __all__ = [
     "FakeExecutorScenario",
     "FakeExecutorTransportRejected",
     "LocalExecutorProcess",
+    "LocalSessionAuthenticationRejected",
+    "LocalSessionAuthenticator",
     "RuntimeMetadata",
     "read_executor_bootstrap",
+    "require_local_session_token",
 ]

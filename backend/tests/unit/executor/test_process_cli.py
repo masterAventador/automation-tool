@@ -9,10 +9,12 @@ from io import BytesIO, StringIO, TextIOWrapper
 import pytest
 
 from automation_tool.executor import cli
+from automation_tool.executor.authentication import LocalSessionAuthenticationRejected
 from automation_tool.executor.runtime import LocalExecutorProcess
 
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
 EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
+LOCAL_SESSION_TOKEN = "02" * 32
 
 
 def source(*, websocket_url: str, token: str = "private-session") -> bytes:
@@ -21,6 +23,7 @@ def source(*, websocket_url: str, token: str = "private-session") -> bytes:
             {
                 "bootstrap_version": "1",
                 "websocket_url": websocket_url,
+                "local_session_token": LOCAL_SESSION_TOKEN,
                 "session_token": token,
                 "installation_id": INSTALLATION_ID,
                 "executor_id": EXECUTOR_ID,
@@ -74,6 +77,27 @@ def test_cli_returns_success_after_the_runtime_stops(monkeypatch: pytest.MonkeyP
     )
 
     assert status == 0
+
+
+def test_cli_collapses_local_authenticator_failure_to_the_fixed_process_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_authenticator(_token: object) -> object:
+        raise LocalSessionAuthenticationRejected
+
+    monkeypatch.setattr(cli, "LocalSessionAuthenticator", reject_authenticator)
+    output = StringIO()
+    error = StringIO()
+
+    status = cli.run_executor(
+        BytesIO(source(websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect")),
+        output,
+        error,
+    )
+
+    assert status == 1
+    assert output.getvalue() == ""
+    assert error.getvalue() == "Local Executor process is unavailable\n"
 
 
 def test_signal_scope_sets_one_event_and_restores_process_handlers() -> None:

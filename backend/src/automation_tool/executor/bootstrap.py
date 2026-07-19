@@ -6,6 +6,10 @@ from typing import Annotated, BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
+from automation_tool.executor.authentication import (
+    LocalSessionAuthenticationRejected,
+    require_local_session_token,
+)
 from automation_tool.executor.transport import (
     ExecutorTransportRejected,
     parse_executor_websocket_url,
@@ -31,6 +35,7 @@ class ExecutorBootstrap(BaseModel):
 
     bootstrap_version: Literal["1"]
     websocket_url: Annotated[str, Field(min_length=1, max_length=2048)]
+    local_session_token: SecretStr
     session_token: SecretStr
     installation_id: ProtocolInstallationId
     executor_id: ProtocolExecutorId
@@ -61,6 +66,14 @@ class ExecutorBootstrap(BaseModel):
             return require_executor_session_token(value)
         except ExecutorTransportRejected:
             raise ValueError("invalid Executor session") from None
+
+    @field_validator("local_session_token", mode="before")
+    @classmethod
+    def require_safe_local_session(cls, value: object) -> object:
+        try:
+            return require_local_session_token(value)
+        except LocalSessionAuthenticationRejected:
+            raise ValueError("invalid local Executor session") from None
 
 
 def read_executor_bootstrap(stream: BinaryIO) -> ExecutorBootstrap:

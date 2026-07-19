@@ -41,6 +41,7 @@ from automation_tool.control_plane.application.executor_connections import (
 NOW = datetime(2026, 7, 19, 8, 0, tzinfo=UTC)
 INSTALLATION_ID = UUID("123e4567-e89b-42d3-a456-426614174003")
 EXECUTOR_ID = UUID("123e4567-e89b-42d3-a456-426614174004")
+LOCAL_SESSION_TOKEN = "05" * 32
 CREDENTIAL_ID = UUID("123e4567-e89b-42d3-a456-426614174007")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 EXECUTOR_ENTRY = Path(sys.executable).with_name("automation-tool-executor")
@@ -188,6 +189,7 @@ def start_executor(control_plane: RunningControlPlane) -> tuple[subprocess.Popen
         {
             "bootstrap_version": "1",
             "websocket_url": (f"ws://127.0.0.1:{control_plane.port}/api/v1/executors/connect"),
+            "local_session_token": LOCAL_SESSION_TOKEN,
             "session_token": control_plane.session_token,
             "installation_id": str(INSTALLATION_ID),
             "executor_id": str(EXECUTOR_ID),
@@ -235,15 +237,22 @@ def test_real_process_bootstraps_over_stdin_heartbeats_to_control_plane_and_stop
 
         stdout, stderr = stop_process(process)
         assert process.returncode == 0
-        assert [json.loads(line) for line in stdout.splitlines()] == [
-            {"event": "executor.healthy", "protocolVersion": "1.0"},
-            {"event": "executor.stopped", "protocolVersion": "1.0"},
+        events = [json.loads(line) for line in stdout.splitlines()]
+        assert [event["event"] for event in events] == [
+            "executor.healthy",
+            "executor.stopped",
         ]
+        assert all(event["authenticationProof"].startswith("atlep1.") for event in events)
+        assert events[0]["authenticationProof"] != events[1]["authenticationProof"]
         assert stderr == ""
         assert control_plane.session_token not in stdout
         assert control_plane.session_token not in stderr
         assert control_plane.session_token not in repr(process.args)
+        assert LOCAL_SESSION_TOKEN not in stdout
+        assert LOCAL_SESSION_TOKEN not in stderr
+        assert LOCAL_SESSION_TOKEN not in repr(process.args)
         assert control_plane.session_token in bootstrap
+        assert LOCAL_SESSION_TOKEN in bootstrap
         event, removed = control_plane.registry.events.get(timeout=5)
         assert (event, removed) == ("unregistered", True)
     finally:
@@ -262,6 +271,7 @@ def test_invalid_bootstrap_exits_with_one_fixed_error_and_never_reflects_secret(
             {
                 "bootstrap_version": "1",
                 "websocket_url": "wss://user@invalid.example/api/v1/executors/connect",
+                "local_session_token": LOCAL_SESSION_TOKEN,
                 "session_token": private,
                 "installation_id": str(INSTALLATION_ID),
                 "executor_id": str(EXECUTOR_ID),
