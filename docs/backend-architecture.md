@@ -282,6 +282,8 @@ B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC�
 
 B5-02 已实现 Rust macOS 原生信任边界：只检查 `/Applications/Google Chrome.app` 与 `/Applications/Microsoft Edge.app`，分别绑定固定内部可执行文件、`com.google.Chrome/EQHXZ8M8AV` 与 `com.microsoft.edgemac/UBF8T346G9`。Apple Security.framework 直接验证 vendor requirement、sealed resources、所有架构和嵌套代码；应用与入口的 dev/inode 在验证前后保持一致，并在实际使用前通过公开 API重新验签。不存在的标准应用不返回，存在但坏签名、错误 Bundle/Team、不完整、symlink 或路径被替换则 fail closed。当前本机真实 Chrome 已通过，Edge 未安装仍保留真实验收；该模块不调用浏览器、不读取默认 Profile，也不把路径暴露给 React 或 Control Plane。
 
+B5-04 的浏览器选择是纯本机 App 设置：Control Plane 没有查询、写入或同步接口，也不会接收浏览器枚举、安装路径、Profile 路径或本机选择。Tauri Command 只在本机受信发现结果中保存一个固定枚举，后续 Executor/BrowserRuntime 使用前仍必须重新发现和复验，服务端下发任务不能覆盖该设置。
+
 ### 8.3 页面定位
 
 定位策略按优先级：

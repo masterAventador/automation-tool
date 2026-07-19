@@ -276,6 +276,10 @@ B5-01 已冻结外部浏览器会话的迁移边界。当前 Profile 只能从 T
 
 B5-02 新增 Rust `browser_discovery.rs`，但暂不增加 Tauri Command。macOS 固定扫描 `/Applications` 下正式 Chrome/Edge，以 Security.framework 验证所有架构、嵌套代码和精确 vendor designated requirement，并固定 Bundle signing identifier、Developer Team 与 `Contents/MacOS` 主入口；不执行 `codesign` 子进程、不解析 Info.plist 后自行猜测可信度。返回对象保存 App/入口 dev+inode，`revalidate_macos_browser` 在后续启动前要求标准路径未变并重新验签。React、服务端和用户设置只能在 B5-04 选择受支持枚举，永远不能提交可执行路径。
 
+B5-04 将该信任根收口到两个无路径 Tauri Command：`get_browser_settings` 返回固定浏览器枚举和当前选择，`select_browser` 只接受 `google_chrome` / `microsoft_edge`，并在写入前重新执行当前平台真实发现；路径、签名 requirement、证书、identity 和 AppData 根均不序列化到 WebView。`BrowserSettingsService` 只在 Tauri setup 中从 `app.path().app_data_dir()` 构造，选择以 canonical v1 JSON 原子写入 `settings/browser-selection-v1`，缺失、损坏、非 canonical、已卸载或未受信浏览器均 fail closed，绝不回退到用户提供路径。设置页只渲染 Rust 返回的可用枚举，没有文本框或文件选择器。
+
+`scripts/run_b5_04_acceptance.py` 使用专属 `com.aventador.automationtool.b504acceptance` AppData 和启动前检查过的动态 loopback WebDriver 端口，运行唯一 `visible=false` Tauri App；真实页面经正式 `TauriPlatformAdapter` 保存本机受信浏览器，刷新 WebView 后再次从正式 Command 读回。runner 同时核对 canonical 文件内容、Unix `0700/0600` 权限、UI/IPC 不含路径，finally 只删除本次 AppData、恢复生产 Vite 资产并确认端口释放；该验收不启动 Backend、Executor 进程、运营浏览器或用户 Profile。
+
 ## 7. 页面与导航
 
 MVP 导航：

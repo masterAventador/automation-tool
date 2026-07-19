@@ -130,6 +130,7 @@ frontend/
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
 │   │   ├── browser_discovery.rs  # macOS/Windows 标准浏览器原生发现、签名与路径 identity
+│   │   ├── browser_settings.rs   # 受信浏览器枚举选择与 App 私有原子持久化
 │   │   ├── control_plane.rs       # 固定 origin、operation allowlist、凭据注入与 SSE 严格解析
 │   │   ├── device_identity.rs     # Ed25519 设备身份与 App 私有存储
 │   │   ├── device_credentials.rs  # 长期设备凭据的校验、替换与删除
@@ -144,6 +145,7 @@ frontend/
 │   │   └── main.rs
 │   ├── tests/
 │   │   ├── browser_discovery.rs  # 真实系统浏览器的生产 API 发现与复验
+│   │   ├── browser_settings.rs   # 真实发现、枚举保存、损坏与不可用失败矩阵
 │   │   ├── executor_bootstrap.rs  # 随机令牌、stdin 文档、常量时间证明与失败矩阵
 │   │   ├── executor_manager.rs    # 单实例、监管、超时、进程树与真实包入口
 │   │   ├── executor_package.rs    # 当前目标包、Python fixture 与失败矩阵
@@ -155,6 +157,7 @@ frontend/
 │   ├── tauri.dev.conf.json        # 只由 tauri:dev 合并的 loopback URL/devCSP
 │   ├── tauri.test.conf.json       # 后台隐藏的通用桌面测试配置
 │   ├── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
+│   ├── tauri.browser-settings-e2e.conf.json # 后台隐藏的浏览器选择真实入口验收
 │   ├── tauri.installation-revocation-e2e.conf.json # 后台隐藏的吊销验收
 │   ├── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
 │   ├── tauri.task-create-form-e2e.conf.json # 后台隐藏的新建表单真实入口验收
@@ -175,6 +178,7 @@ frontend/
 ├── playwright.config.ts
 ├── wdio.conf.ts
 ├── wdio.control-plane.conf.ts
+├── wdio.browser-settings.conf.ts
 ├── wdio.installation-revocation.conf.ts
 ├── wdio.task-creation.conf.ts
 ├── wdio.task-create-form.conf.ts
@@ -207,6 +211,8 @@ Test harness implementation ────────> platform interface
 ```
 
 B5-02 的 `src-tauri/src/browser_discovery.rs` 是系统浏览器信任根，不是 React Adapter。macOS 只枚举 `/Applications/Google Chrome.app` 与 `/Applications/Microsoft Edge.app`，用 Security.framework 对完整签名、所有 Mach-O 架构、嵌套代码、精确 Bundle signing identifier 和 Developer Team requirement 做验证；同时固定主可执行文件相对路径并在验签前后保存 App/入口的 dev+inode。公开复验 API 只接受模块自己产生的 `TrustedBrowser`，使用前路径缺失、替换、symlink 或签名变化都会 fail closed。B5-04 才把安全浏览器枚举投影给 UI，路径和 identity 永不进入 React。
+
+B5-04 的 `browser_settings.rs` 是选择边界而不是第二套发现逻辑。Tauri setup 从自身 AppData 初始化唯一 service；`get_browser_settings`/`select_browser` 只投影和接收固定枚举，每次保存前调用 B5-02/B5-03 真实发现。canonical v1 选择以私有目录和原子替换保存，React 没有路径 DTO、文本框、文件选择器或服务端回退。专用隐藏 App 验收使用动态已检查 WebDriver 端口和独立标识，刷新后从同一产品页面读回选择，再精确清理 AppData 与端口；测试配置、WDIO 入口和标识继续被 E4-15 正式包扫描拒绝。
 
 规则：
 

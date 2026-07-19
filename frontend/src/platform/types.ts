@@ -7,7 +7,16 @@ export interface ExecutorManagerStatus {
   readonly restartCount: number;
 }
 
+export type SupportedBrowserId = "google_chrome" | "microsoft_edge";
+
+export interface BrowserSettingsSnapshot {
+  readonly availableBrowsers: readonly SupportedBrowserId[];
+  readonly selectedBrowser: SupportedBrowserId | null;
+}
+
 export interface PlatformAdapter {
+  getBrowserSettings(): Promise<BrowserSettingsSnapshot>;
+  selectBrowser(browser: SupportedBrowserId): Promise<BrowserSettingsSnapshot>;
   getExecutorStatus(): Promise<ExecutorManagerStatus>;
   restartExecutor(): Promise<ExecutorManagerStatus>;
   getExecutorDiagnostics(): Promise<readonly string[]>;
@@ -17,6 +26,8 @@ export interface PlatformAdapter {
 export type PlatformAdapterErrorCode =
   | "already_running"
   | "authentication_rejected"
+  | "browser_discovery_unavailable"
+  | "browser_unavailable"
   | "configuration_invalid"
   | "credential_missing"
   | "installation_access_denied"

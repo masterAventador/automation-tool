@@ -211,7 +211,43 @@ fn write_and_replace(
         .and_then(|()| temporary.sync_all())
         .map_err(|_| SecureStoreError::Unavailable)?;
     drop(temporary);
+    atomic_replace(temporary_path, destination)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn atomic_replace(temporary_path: &Path, destination: &Path) -> Result<(), SecureStoreError> {
     fs::rename(temporary_path, destination).map_err(|_| SecureStoreError::Unavailable)
+}
+
+#[cfg(target_os = "windows")]
+fn atomic_replace(temporary_path: &Path, destination: &Path) -> Result<(), SecureStoreError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    fn wide_null(path: &Path) -> Result<Vec<u16>, SecureStoreError> {
+        let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        if units.is_empty() || units.len() >= 32_768 || units.contains(&0) {
+            return Err(SecureStoreError::Unavailable);
+        }
+        Ok(units.into_iter().chain(std::iter::once(0)).collect())
+    }
+
+    let temporary = wide_null(temporary_path)?;
+    let destination = wide_null(destination)?;
+    if unsafe {
+        MoveFileExW(
+            temporary.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(SecureStoreError::Unavailable)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(unix)]

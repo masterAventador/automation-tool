@@ -192,6 +192,24 @@ body {
   box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
 }
 
+.settings-stack,
+.browser-settings-stack {
+  width: 100%;
+}
+
+.settings-stack {
+  margin-top: 20px;
+}
+
+.browser-settings-card {
+  border-color: #e7ebf2;
+  box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
+}
+
+.browser-settings-loading {
+  min-height: 100px;
+}
+
 .task-create-stack {
   width: 100%;
 }

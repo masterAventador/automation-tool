@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 
 const desktopE2EMode = "desktop-e2e";
 const controlPlaneE2EMode = "control-plane-e2e";
+const browserSettingsE2EMode = "browser-settings-e2e";
 
 export default defineConfig(({ mode }) => ({
   plugins: [
@@ -12,8 +13,18 @@ export default defineConfig(({ mode }) => ({
       transformIndexHtml: {
         order: "pre",
         handler(html) {
-          if (mode !== desktopE2EMode && mode !== controlPlaneE2EMode) {
+          if (
+            mode !== desktopE2EMode &&
+            mode !== controlPlaneE2EMode &&
+            mode !== browserSettingsE2EMode
+          ) {
             return html;
+          }
+          if (mode === browserSettingsE2EMode) {
+            return html.replace(
+              "/src/main.tsx",
+              "/src/test-browser-settings-main.tsx",
+            );
           }
           if (mode === controlPlaneE2EMode) {
             return html.replace(

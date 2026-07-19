@@ -18,6 +18,7 @@ import {
 import { Workbench } from "../features/workbench/Workbench";
 import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
+import { BrowserSettings } from "../features/settings/BrowserSettings";
 import type { PlatformAdapter } from "../platform/types";
 
 const navigationItems = [
@@ -75,6 +76,12 @@ const shellTaskRunControlGateway: TaskRunControlGateway = {
 };
 
 const shellPlatformAdapter: PlatformAdapter = {
+  async getBrowserSettings() {
+    return { availableBrowsers: [], selectedBrowser: null };
+  },
+  async selectBrowser() {
+    throw new Error("Browser selection is unavailable");
+  },
   async getExecutorStatus() {
     return { state: "stopped", version: null, buildId: null, restartCount: 0 };
   },
@@ -171,7 +178,7 @@ export function WorkbenchShell({
                   {creatingTask
                     ? "配置一个可预览、可确认的抖音搜索曝光任务。"
                     : showingDiagnostics
-                      ? "查看、重启和紧急停止 App 管理的本地执行器。"
+                      ? "选择受信运营浏览器，并管理 App 自己的本地执行器。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
@@ -194,7 +201,10 @@ export function WorkbenchShell({
                 onCreated={openTask}
               />
             ) : showingDiagnostics ? (
-              <Diagnostics platform={platformAdapter} />
+              <Space orientation="vertical" size="large" className="settings-stack">
+                <BrowserSettings platform={platformAdapter} />
+                <Diagnostics platform={platformAdapter} />
+              </Space>
             ) : showingTaskRun && selectedTaskId !== null ? (
               <TaskRunDetails
                 taskId={selectedTaskId}

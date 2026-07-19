@@ -22,7 +22,8 @@ const GOOGLE_CHROME_REQUIREMENT: &str = "identifier \"com.google.Chrome\" and an
 #[cfg(target_os = "macos")]
 const MICROSOFT_EDGE_REQUIREMENT: &str = "identifier \"com.microsoft.edgemac\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"UBF8T346G9\"";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SupportedBrowser {
     GoogleChrome,
     MicrosoftEdge,

@@ -108,6 +108,7 @@ test("E4-15 rejects test commands, drivers, sidecars, origins, and debug ports i
     "inject_executor_crash_for_acceptance",
     "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN",
     "com.aventador.automationtool.e414acceptance",
+    "com.aventador.automationtool.b504acceptance",
     "e4-14-hidden-app",
     "http://127.0.0.1:1420",
   ];

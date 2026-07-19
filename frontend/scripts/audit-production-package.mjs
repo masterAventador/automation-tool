@@ -36,6 +36,7 @@ const forbiddenBinaryMarkers = [
   "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN",
   "AUTOMATION_TOOL_E414_BOOTSTRAP_TOKEN",
   "com.aventador.automationtool.e414acceptance",
+  "com.aventador.automationtool.b504acceptance",
   "e4-14-hidden-app",
   "automation-tool-test-harness",
   "http://127.0.0.1:1420",

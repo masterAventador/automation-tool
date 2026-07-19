@@ -75,6 +75,11 @@ describe("desktop startup", () => {
       check: vi.fn().mockResolvedValue({ status: "ready" as const }),
     };
     const platformAdapter: PlatformAdapter = {
+      getBrowserSettings: vi.fn().mockResolvedValue({
+        availableBrowsers: ["google_chrome"],
+        selectedBrowser: "google_chrome",
+      }),
+      selectBrowser: vi.fn(),
       getExecutorStatus: vi.fn().mockResolvedValue({
         state: "running",
         version: "0.1.0",

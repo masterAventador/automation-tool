@@ -1,4 +1,5 @@
 pub mod browser_discovery;
+pub mod browser_settings;
 pub mod control_plane;
 pub mod device_credentials;
 pub mod device_identity;
@@ -38,6 +39,46 @@ struct ExecutorPlatformCommandError {
 #[derive(serde::Serialize)]
 struct ExecutorDiagnosticsSnapshot {
     lines: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSettingsCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+fn map_browser_settings_error(
+    error: browser_settings::BrowserSettingsError,
+) -> BrowserSettingsCommandError {
+    let code = match error.code() {
+        browser_settings::BrowserSettingsErrorCode::BrowserUnavailable => "browser_unavailable",
+        browser_settings::BrowserSettingsErrorCode::DiscoveryUnavailable => {
+            "browser_discovery_unavailable"
+        }
+        browser_settings::BrowserSettingsErrorCode::StorageUnavailable => "storage_unavailable",
+    };
+    BrowserSettingsCommandError {
+        code,
+        retryable: false,
+    }
+}
+
+#[tauri::command]
+fn get_browser_settings(
+    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+) -> Result<browser_settings::BrowserSettingsSnapshot, BrowserSettingsCommandError> {
+    settings.snapshot().map_err(map_browser_settings_error)
+}
+
+#[tauri::command]
+fn select_browser(
+    browser: browser_discovery::SupportedBrowser,
+    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+) -> Result<browser_settings::BrowserSettingsSnapshot, BrowserSettingsCommandError> {
+    settings
+        .select_browser(browser)
+        .map_err(map_browser_settings_error)
 }
 
 fn map_executor_platform_error(
@@ -1352,6 +1393,9 @@ pub fn run() {
     let builder = tauri::Builder::default().setup(|app| {
         app.manage(control_plane::ControlPlaneClient::local()?);
         let app_data_directory = app.path().app_data_dir()?;
+        app.manage(browser_settings::BrowserSettingsService::initialize(
+            &app_data_directory,
+        )?);
         app.manage(executor_platform::ExecutorPlatformService::initialize(
             &app_data_directory,
         )?);
@@ -1387,7 +1431,9 @@ pub fn run() {
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
-        emergency_stop_executor
+        emergency_stop_executor,
+        get_browser_settings,
+        select_browser
     ]);
     #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1405,7 +1451,9 @@ pub fn run() {
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
-        emergency_stop_executor
+        emergency_stop_executor,
+        get_browser_settings,
+        select_browser
     ]);
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1440,7 +1488,9 @@ pub fn run() {
         emergency_stop_executor,
         inject_executor_crash_for_acceptance,
         inject_executor_hang_for_acceptance,
-        exit_app_for_acceptance
+        exit_app_for_acceptance,
+        get_browser_settings,
+        select_browser
     ]);
 
     let app = builder

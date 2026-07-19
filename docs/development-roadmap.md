@@ -65,6 +65,7 @@
 | Rust ExecutorManager | `🔍` macOS 已从公开 Rust 生命周期入口完成签名 PyInstaller onedir→stdin 认证→真实 Uvicorn→健康/停止证明全链路；单实例、并发启动、后台崩溃检测、两次重启预算、显式停止不重启和 fail closed 已验证，Windows 原生仍随 Billing 阻塞待验收 |
 | 正式桌面制品隔离 | `🔍` macOS release 实际二进制、正式资产/配置和无默认特性依赖树已确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed，Windows 原生仍待 runner |
 | macOS 浏览器受信发现 | `🔍` Rust 生产 API 已用 Apple Security.framework 验证标准路径 Chrome 的签名、Bundle ID、Team ID、全架构/嵌套代码和路径 identity；Edge allowlist/失败矩阵已实现，本机未安装 Edge，保留真实 Edge 实机验收 |
+| 运营浏览器选择 | `🔍` macOS 隐藏真实 App 已从设置页保存、刷新并读回受信 Chrome 枚举；WebView/IPC/沙盒文件无路径，Windows 生产模块与测试已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -253,7 +254,7 @@
 | B5-01 | 审计旧 browser_session | 提取私有目录、Profile、状态机和注销逻辑；排除旧账号/RBAC | R0-12,E4-11 | ✅ 已完成 |
 | B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
 | B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | 🔍 待 Windows 原生验收 |
-| B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | ⬜ 未开始 |
+| B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | 🔍 待 Windows 原生验收 |
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ⬜ 未开始 |
 | B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | ⬜ 未开始 |
 | B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | ⬜ 未开始 |
@@ -1651,10 +1652,26 @@
 - App 与本地隔离：本任务提供 B5-04/B5-07 将消费的 Rust 原生能力，尚无 Tauri Command 或用户界面，因此未启动 App、浏览器、Backend、Docker、测试服务器、端口、Profile、SQLite 或系统钥匙串；没有读取、停止或清理其他项目任何进程和资源
 - 后续：B5-04 只允许从受信发现结果中选择 Chrome/Edge；GitHub Windows runner 恢复时自动补本任务与此前 E4 系列 Windows 原生门禁，不阻塞无 Windows 设备依赖实现
 
+### B5-04 受信浏览器选择设置
+
+- 状态：🔍 待 Windows 原生验收；macOS 已从唯一隐藏真实 App 的产品设置页完成受信 Chrome 发现、选择、沙盒持久化、WebView 刷新与重新读取，Windows 生产模块和单元测试已通过 `x86_64-pc-windows-msvc` 目标类型检查，但 GitHub Hosted Windows 仍因 Billing 零步失败而没有实际运行
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：用户只能在 Rust 当前真实发现的 Chrome/Edge 枚举中选择运营浏览器；React、Tauri 参数、持久化文件和 Control Plane 均不能接收或看到应用/可执行文件路径、签名信息或 identity，已卸载或失去信任的选择不能继续投影为可用
+- RED：先把台账置为 `🧪 RED`；新增 Rust 生产 service 集成测试、React 设置组件测试和 Node 原生边界契约，分别准确失败于缺少 `browser_settings` 模块、缺少 `BrowserSettings.tsx` 和缺少生产/隐藏 App 文件。随后再扩展同一契约，准确失败于缺少专用隐藏 Tauri 配置，未用 Mock 页面或下层存储测试冒充 App 验收
+- 原生服务：`BrowserSettingsService` 只由 Tauri setup 的 `app.path().app_data_dir()` 初始化；`snapshot` 每次调用 B5-02/B5-03 平台生产发现，`select_browser` 只接收 serde 固定枚举并在保存前重新发现。返回 DTO 只有 `availableBrowsers`/`selectedBrowser`；两条 Command 没有路径、URL、账号或任意 JSON 参数，服务端没有对应接口
+- 沙盒持久化：选择是 exact canonical `{"browser":"google_chrome|microsoft_edge","version":1}`，经既有 App 私有 `AppDataSecretStore` 原子写入 `settings/browser-selection-v1`；Unix 目录/文件为 `0700/0600`。未知字段、字段顺序/编码不 canonical、版本错误、损坏文件或存储锁异常均 fail closed 且不自动覆盖；存储值已卸载时保留磁盘事实但对 UI 投影 `selectedBrowser=null`
+- Windows 更新语义：本任务审计出标准 `fs::rename` 在 Windows 不能覆盖既有目标，已把共享私有存储的 Windows 原子替换改为 `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`；生产 discovery/settings/secure_store 及其 `cfg(test)` 已共同通过现有 Homebrew `rust-src` 的 MSVC 目标类型检查。真实 Windows 文件系统行为仍只由 Windows runner 计入验收
+- WebView 边界：正式 `TauriPlatformAdapter` 对两个枚举、顺序、去重、selected 必须属于 available 和 exact response keys 做 fail-closed 解析；设置页只有 Rust 返回项组成的 Radio 与保存按钮，没有文本框、文件选择器或路径回显。无浏览器、原生失败和带路径/未知字段响应均只显示固定安全状态，不反射底层异常
+- 真实 App 原入口：`scripts/run_b5_04_acceptance.py` 先动态选择并检查空闲 loopback WebDriver 端口，使用独立 `com.aventador.automationtool.b504acceptance` AppData 和唯一 `visible=false` Tauri App。真实页面进入“设置与诊断”，选择本机受信浏览器并点击保存，调用正式 `TauriPlatformAdapter → get/select Command → Rust discovery/settings → AppData`；刷新 WebView 后再次从同一页面读回，WDIO 1 项通过。runner 随后核对 canonical 文件、无路径和 Unix 权限，恢复 production Vite 资产
+- 失败矩阵与门禁：Rust 单元覆盖 canonical round-trip、损坏/非 canonical 不重写和已卸载选择不投影；真实 service 集成覆盖发现、保存、重开与不可用枚举不覆盖；Vitest 覆盖 UI 保存/空态/错误脱敏及 Adapter Edge-only/带路径响应；Node 契约固定无路径 Command、隐藏配置、刷新验收、动态端口和正式包排除标识。完整 Frontend Node 60 项、Vitest 123 项、ESLint、严格 TypeScript、Ruff、Rustfmt 与全目标/全特性 Clippy `-D warnings` 全绿；默认 Rust 共 105 项通过、1 项既有 PyInstaller 编排 ignored
+- 本地隔离与清理：验收不启动 Backend、PostgreSQL、Docker、Executor 进程或运营浏览器，只启动后台隐藏 App 和动态嵌入式 WebDriver；启动前检查端口，结束确认端口关闭、App/WDIO/runner 进程退出、专属 AppData 删除且生产资产恢复。没有读取、停止、复用或清理另一个项目的端口、进程、容器、网络、Volume、SQLite 或文件
+- 后续：B5-05 建立 App 沙盒内 `browser-profiles/douyin/<UUIDv4>` 私有目录与稳定路径身份；B5-04 Windows 原生验收在 runner 恢复时自动补齐，不阻塞 Profile 的平台无关实现
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-04`：只允许用户在已发现的受支持浏览器枚举中选择，不接受任意可执行路径；
-2. `B5-05`：建立 App 沙盒内按平台/UUID 隔离的私有 Profile 目录；
-3. B5-03 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-05`：建立 App 沙盒内按平台/UUID 隔离的私有 Profile 目录；
+2. `B5-06`：为同一 Profile 建立跨进程单实例锁；
+3. B5-03/B5-04 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
