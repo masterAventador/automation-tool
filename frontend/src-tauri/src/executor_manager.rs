@@ -370,6 +370,28 @@ impl ExecutorManager {
         Ok(slot.status.clone())
     }
 
+    #[cfg(feature = "control-plane-e2e")]
+    pub fn inject_crash_for_acceptance(&self) -> Result<(), ExecutorManagerError> {
+        let mut slot = self.lock_slot()?;
+        reconcile_supervision(&self.core, &mut slot)?;
+        let Some(ManagedExecutorLifecycle::Running(managed)) = slot.lifecycle.as_mut() else {
+            return Err(process_unavailable());
+        };
+        inject_abnormal_process_exit(&mut managed.process.child)?;
+        let _ = self.supervisor_wake.send(());
+        Ok(())
+    }
+
+    #[cfg(feature = "control-plane-e2e")]
+    pub fn inject_hang_for_acceptance(&self) -> Result<(), ExecutorManagerError> {
+        let mut slot = self.lock_slot()?;
+        reconcile_supervision(&self.core, &mut slot)?;
+        let Some(ManagedExecutorLifecycle::Running(managed)) = slot.lifecycle.as_mut() else {
+            return Err(process_unavailable());
+        };
+        suspend_process_for_acceptance(&managed.process.child)
+    }
+
     fn lock_slot(&self) -> Result<MutexGuard<'_, ExecutorManagerSlot>, ExecutorManagerError> {
         self.core
             .slot
@@ -943,6 +965,94 @@ fn restartable_exit(status: ExitStatus) -> bool {
     use std::os::unix::process::ExitStatusExt;
 
     status.signal().is_some()
+}
+
+#[cfg(all(feature = "control-plane-e2e", unix))]
+fn inject_abnormal_process_exit(child: &mut Child) -> Result<(), ExecutorManagerError> {
+    let process_id = i32::try_from(child.id()).map_err(|_| process_unavailable())?;
+    if unsafe { libc::kill(process_id, libc::SIGKILL) } == 0 {
+        Ok(())
+    } else {
+        Err(process_unavailable())
+    }
+}
+
+#[cfg(all(feature = "control-plane-e2e", unix))]
+fn suspend_process_for_acceptance(child: &Child) -> Result<(), ExecutorManagerError> {
+    let process_id = i32::try_from(child.id()).map_err(|_| process_unavailable())?;
+    if unsafe { libc::kill(process_id, libc::SIGSTOP) } == 0 {
+        Ok(())
+    } else {
+        Err(process_unavailable())
+    }
+}
+
+#[cfg(all(feature = "control-plane-e2e", windows))]
+fn inject_abnormal_process_exit(child: &mut Child) -> Result<(), ExecutorManagerError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Threading::TerminateProcess;
+
+    const ACCESS_VIOLATION_STATUS: u32 = 0xc000_0005;
+    if unsafe { TerminateProcess(child.as_raw_handle() as _, ACCESS_VIOLATION_STATUS) } != 0 {
+        Ok(())
+    } else {
+        Err(process_unavailable())
+    }
+}
+
+#[cfg(all(feature = "control-plane-e2e", windows))]
+fn suspend_process_for_acceptance(child: &Child) -> Result<(), ExecutorManagerError> {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, SuspendThread, THREAD_SUSPEND_RESUME};
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(process_unavailable());
+    }
+    let mut entry: THREADENTRY32 = unsafe { zeroed() };
+    entry.dwSize = size_of::<THREADENTRY32>() as u32;
+    let mut found_thread = false;
+    let mut suspended_all = true;
+    let mut has_entry = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    while has_entry {
+        if entry.th32OwnerProcessID == child.id() {
+            found_thread = true;
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if thread.is_null() {
+                suspended_all = false;
+            } else {
+                if unsafe { SuspendThread(thread) } == u32::MAX {
+                    suspended_all = false;
+                }
+                unsafe {
+                    CloseHandle(thread);
+                }
+            }
+        }
+        has_entry = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+    }
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    if found_thread && suspended_all {
+        Ok(())
+    } else {
+        Err(process_unavailable())
+    }
+}
+
+#[cfg(all(feature = "control-plane-e2e", not(any(unix, windows))))]
+fn inject_abnormal_process_exit(_child: &mut Child) -> Result<(), ExecutorManagerError> {
+    Err(process_unavailable())
+}
+
+#[cfg(all(feature = "control-plane-e2e", not(any(unix, windows))))]
+fn suspend_process_for_acceptance(_child: &Child) -> Result<(), ExecutorManagerError> {
+    Err(process_unavailable())
 }
 
 #[cfg(windows)]

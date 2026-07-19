@@ -196,7 +196,9 @@ browser/desktop infrastructure
 - 安装信号处理和有界停止；
 - 令牌、私有路径和原始异常不进入日志。
 
-E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、本机启动令牌、短期 `executor.connect` Session、Installation/Executor UUIDv4、心跳间隔和 Rust 提供的 App 私有 Executor 状态目录。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`；两个 Session 用途隔离并分别只驻留在秘密类型中，不进入 argv、环境、stderr 或异常。状态目录只允许绝对、非根、无 `..`/控制字符的有界路径，E4-13 必须从 Tauri `app_data_dir` 固定派生，不能相信 React 输入。
+E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、本机启动令牌、短期 `executor.connect` Session、Installation/Executor UUIDv4、心跳间隔和 Rust 提供的 App 私有 Executor 状态目录。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`；两个 Session 用途隔离并分别只驻留在秘密类型中，不进入 argv、环境、stderr 或异常。状态目录只允许绝对、非根、无 `..`/控制字符的有界路径；E4-13 已从 Tauri `app_data_dir/local-executor/state` 固定派生，完全不相信 React 输入。
+
+E4-14 已用唯一隐藏 Tauri App 经正式 Rust client 连接动态 loopback Control Plane，并以真实 PostgreSQL、短期 Session、WebSocket 和 signed PyInstaller Executor 验证启动、异常恢复、挂起停止、再次启动及 App 退出清理。动态 origin 和 OS 故障注入只存在于 `control-plane-e2e` 编译，不改变服务端生产协议或部署拓扑；生产仍由固定 Profile/BaseUrl 连接独立部署的同一 Control Plane。最终数据库只出现 `app.control-plane` 与 `executor.connect` 两类最小能力，秘密不进入 Executor SQLite 或服务端日志。
 
 E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-diagnostics-v1` fixtures，固定清除凭据/Cookie、URL userinfo/query、data/file URL、私有路径和控制/Bidi 字符。该模块为后续 Executor 结构化安全消息提供单一规则，但不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。Python 当前正式 CLI 仍只输出既有固定错误，不新增任意异常或秘密日志。
 

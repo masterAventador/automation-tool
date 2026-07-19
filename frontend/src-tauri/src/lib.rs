@@ -984,6 +984,65 @@ async fn prepare_task_lifecycle_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_executor_lifecycle_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskCreateFormAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_E414_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_E414_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(TaskCreateFormAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inject_executor_crash_for_acceptance(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<(), ExecutorPlatformCommandError> {
+    platform
+        .inject_crash_for_acceptance()
+        .map_err(map_executor_platform_error)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inject_executor_hang_for_acceptance(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<(), ExecutorPlatformCommandError> {
+    platform
+        .inject_hang_for_acceptance()
+        .map_err(map_executor_platform_error)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn exit_app_for_acceptance(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        app.exit(0);
+    });
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 async fn prepare_task_restart_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
@@ -1369,6 +1428,7 @@ pub fn run() {
         prepare_task_create_form_for_acceptance,
         prepare_task_run_for_acceptance,
         prepare_task_lifecycle_for_acceptance,
+        prepare_executor_lifecycle_for_acceptance,
         prepare_task_restart_for_acceptance,
         prepare_workbench_for_acceptance,
         control_task_for_acceptance,
@@ -1376,10 +1436,25 @@ pub fn run() {
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
-        emergency_stop_executor
+        emergency_stop_executor,
+        inject_executor_crash_for_acceptance,
+        inject_executor_hang_for_acceptance,
+        exit_app_for_acceptance
     ]);
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("failed to run desktop application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("failed to build desktop application");
+    app.run(|app_handle, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+        ) {
+            if let Some(platform) =
+                app_handle.try_state::<executor_platform::ExecutorPlatformService>()
+            {
+                platform.shutdown_for_app_exit();
+            }
+        }
+    });
 }

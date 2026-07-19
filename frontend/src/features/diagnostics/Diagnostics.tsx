@@ -71,6 +71,23 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
     }
   };
 
+  const refresh = async () => {
+    setBusy(true);
+    setFailure(false);
+    try {
+      const [nextStatus, nextDiagnostics] = await Promise.all([
+        platform.getExecutorStatus(),
+        platform.getExecutorDiagnostics(),
+      ]);
+      setStatus(nextStatus);
+      setDiagnostics(nextDiagnostics);
+    } catch {
+      setFailure(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const emergencyStop = async () => {
     setBusy(true);
     setFailure(false);
@@ -111,6 +128,9 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
             <Flex gap={12} wrap>
               <Button type="primary" loading={busy} onClick={() => void restart()}>
                 {status.state === "stopped" ? "启动执行器" : "重启执行器"}
+              </Button>
+              <Button disabled={busy} onClick={() => void refresh()}>
+                刷新状态
               </Button>
               <Button danger disabled={busy} onClick={() => setConfirmingStop(true)}>
                 本地紧急停止

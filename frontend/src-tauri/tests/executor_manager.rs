@@ -756,6 +756,51 @@ fn wait_for_state(manager: &ExecutorManager, expected: ExecutorManagerState) {
     );
 }
 
+#[cfg(feature = "control-plane-e2e")]
+fn wait_for_restart_count(manager: &ExecutorManager, expected: u8) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let status = manager.status().expect("supervised status");
+        if status.state() == ExecutorManagerState::Running && status.restart_count() == expected {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Executor did not finish its supervised restart"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[test]
+fn acceptance_fault_injection_crashes_recovers_and_hangs_the_real_process() {
+    let package = TemporaryPackage::new(HEALTHY_FIXTURE);
+    let manager = manager_for_root_with_timeouts(
+        package.root.clone(),
+        Duration::from_secs(1),
+        Duration::from_millis(100),
+    );
+
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start acceptance process");
+    manager
+        .inject_crash_for_acceptance()
+        .expect("inject abnormal process exit");
+    wait_for_restart_count(&manager, 1);
+
+    manager
+        .inject_hang_for_acceptance()
+        .expect("suspend the real process");
+    let error = manager.stop().expect_err("hung process stop must time out");
+    assert_eq!(error.code(), ExecutorManagerErrorCode::TimedOut);
+    assert_eq!(
+        manager.status().expect("stopped after timeout").state(),
+        ExecutorManagerState::Stopped,
+    );
+}
+
 #[test]
 fn background_supervisor_recovers_two_crashes_and_reports_the_consumed_budget() {
     let counter = LaunchCounter::new();

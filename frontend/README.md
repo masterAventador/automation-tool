@@ -41,7 +41,7 @@ E4-05 的 `src-tauri/src/executor_package.rs` 是签名 `onedir` 的唯一运行
 
 E4-06 的 `src-tauri/src/executor_bootstrap.rs` 是本机进程启动认证边界。它用系统 CSPRNG 每次生成不可克隆、Drop 时清零的 32 字节 `LocalSessionToken`，只把其 64 位小写十六进制编码写入单行 stdin bootstrap；Control Plane `executor.connect` Session 是另一个字段和用途。Python 健康/停止事件只返回 `atlep1` HMAC-SHA-256 证明，Rust 以受维护的 `hmac` crate 做常量时间校验并绑定事件名和 Executor 协议版本。模块没有 Tauri Command、argv、环境变量、日志、任意进程或 React 接口；E4-07 只能在包验证通过后由 Rust Manager 使用它启动正式 Executor。
 
-E4-07 的 `src-tauri/src/executor_manager.rs` 是固定 start/status/stop 生命周期边界。它在每次 start 前复验 signed onedir，从 Manifest 精确入口无参数启动单一子进程，经 stdin 写入并关闭 E4-06 bootstrap，只接受有界且认证的 healthy/stopped stdout 事件；并发 start 由 Mutex 线性化，超时、坏包、坏证明和 Drop 均 fail closed 并回收直接子进程。模块不提供旧 stdio `invoke`、任意 payload 或 capability 命令；E4-13 已从固定 PlatformAdapter 接入，E4-14 再由隐藏真实 App 验收。`../scripts/run_e4_07_acceptance.py` 已从公开 Rust Manager 原入口完成真实签名 PyInstaller→Uvicorn 的 macOS 全链路，Windows 原生仍随 GitHub Billing 阻塞待验收。
+E4-07 的 `src-tauri/src/executor_manager.rs` 是固定 start/status/stop 生命周期边界。它在每次 start 前复验 signed onedir，从 Manifest 精确入口无参数启动单一子进程，经 stdin 写入并关闭 E4-06 bootstrap，只接受有界且认证的 healthy/stopped stdout 事件；并发 start 由 Mutex 线性化，超时、坏包、坏证明和 Drop 均 fail closed 并回收直接子进程。模块不提供旧 stdio `invoke`、任意 payload 或 capability 命令；E4-13 已从固定 PlatformAdapter 接入，E4-14 已由隐藏真实 App 完成 macOS 纵向验收。`../scripts/run_e4_07_acceptance.py` 已从公开 Rust Manager 原入口完成真实签名 PyInstaller→Uvicorn 的 macOS 全链路，Windows 原生仍随 GitHub Billing 阻塞待验收。
 
 E4-08 在同一 Manager 内增加唯一命名 supervisor thread 和显式 `ExecutorRestartPolicy`。状态机公开 running/restarting/stopped 与已消耗 `restartCount`；当前 MVP 预算为 2。只有 OS 异常崩溃进入延迟恢复，每次恢复重新验包、生成新 stdin 本机会话并验证 healthy；显式 stop、正常退出、固定失败退出、坏包/坏认证不会重启。Manager Drop 先关闭并 join supervisor，再回收子进程。macOS 已用真实签名进程、SIGKILL 与公开 Manager 入口验证两次恢复和预算耗尽；完整 PyInstaller 路径也已回归。Windows 原生仍待 runner。
 
@@ -51,7 +51,15 @@ E4-10 的 `src-tauri/src/executor_diagnostics.rs` 是 stderr 的第二道信任�
 
 E4-11 扩展同一个 `executor_bootstrap.rs`/`executor_manager.rs`，由 Rust 持有并验证绝对 `state_directory: PathBuf`，只经一次性 stdin 交给正式 Executor；路径不会来自 React 或通用 Tauri Command。Python CLI 在联网前于该目录创建固定 `executor-ledger.sqlite3`，完成 v1 迁移和 Installation/Executor 绑定。账本保存 command/idempotency 指纹、Attempt checkpoint 和待发送协议 outbox，不保存 Control Plane/本机会话、Cookie、密钥或任意配置，也不使用钥匙串。E4-12 已让正式 Executor 从真实 Control Plane 消费 `task.offer` 并精确重放持久 ACK/Event；E4-13 已从 App 私有 `app_data_dir/local-executor/state` 固定装配，仍没有 React/Tauri 账本 API。
 
-E4-13 的 `src-tauri/src/executor_platform.rs` 从 Tauri `app_data_dir` 固定派生 `local-executor/package`、`state` 和 `executor-id-v1`。Executor UUIDv4 在 App 私有 `0700/0600` 边界原子持久且重启复用；React 不能提交路径、URL、身份或 Session。正式 `TauriPlatformAdapter` 只有状态、重启、脱敏诊断和本机进程树紧停四个无参数 invoke；“设置与诊断”页面严格校验公开 DTO，并明确本机硬停止不等于业务 Task 已停止。Rust 重启链自行换取当前 Installation 与独立短期 `executor.connect` Session，秘密仍只在清零内存/stdin 中。E4-14 将用 `visible=false` App 做生产同路径生命周期验收，当前分层测试不能替代该证据。
+E4-13 的 `src-tauri/src/executor_platform.rs` 从 Tauri `app_data_dir` 固定派生 `local-executor/package`、`state` 和 `executor-id-v1`。Executor UUIDv4 在 App 私有 `0700/0600` 边界原子持久且重启复用；React 不能提交路径、URL、身份或 Session。正式 `TauriPlatformAdapter` 只有状态、重启、脱敏诊断和本机进程树紧停四个无参数 invoke；“设置与诊断”页面严格校验公开 DTO，并明确本机硬停止不等于业务 Task 已停止。Rust 重启链自行换取当前 Installation 与独立短期 `executor.connect` Session，秘密仍只在清零内存/stdin 中。
+
+E4-14 已用唯一 `visible=false` 真实 App 从诊断页完成启动、状态刷新、本机紧停和再次启动。链路经过正式 TypeScript Adapter、Tauri IPC、Rust Control Plane client、真实 PostgreSQL/Uvicorn 与 signed PyInstaller Executor；实际 `SIGKILL` 验证 supervisor 恢复，实际挂起验证超时后的完整进程树回收，App 正常退出则由生产 `RunEvent::ExitRequested/Exit` 路径显式停止 Executor。测试专用动态 loopback origin 与故障注入只在 `control-plane-e2e` 构建存在；App 私有 UUID/SQLite 和 `0700/0600` 权限均已核对，凭据不入 SQLite，也不调用系统钥匙串。
+
+```bash
+backend/.venv/bin/python scripts/run_e4_14_acceptance.py
+```
+
+该编排先检查并选取动态端口，使用 `automation-tool-e414-<pid>` 专属 Compose project、独立 AppData 和临时目录，结束时只清理本次资源。嵌入式 WebDriver 在 App 正常退出后关闭会话时会固定收到 `ECONNREFUSED`；runner 只接受没有测试断言错误的这一精确退出签名，并额外检查 Executor 进程已消失。
 
 `harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 

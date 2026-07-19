@@ -167,3 +167,56 @@ test("E4-13 exposes only fixed Executor lifecycle Commands through PlatformAdapt
   assert.doesNotMatch(tauriAdapter, /https?:|wss?:|session|token|packageRoot|stateDirectory/i);
   assert.doesNotMatch(nativePlatform, /#\[tauri::command\]/);
 });
+
+test("E4-14 drives the signed Executor lifecycle through one isolated hidden App", async () => {
+  const [
+    packageJson,
+    tauriConfig,
+    wdioConfig,
+    spec,
+    orchestrator,
+    controlPlane,
+    executorPlatform,
+    entry,
+  ] =
+    await Promise.all([
+      readFile(new URL("package.json", frontendRoot), "utf8"),
+      readFile(
+        new URL("src-tauri/tauri.executor-lifecycle-e2e.conf.json", frontendRoot),
+        "utf8",
+      ),
+      readFile(new URL("wdio.executor-lifecycle.conf.ts", frontendRoot), "utf8"),
+      readFile(new URL("e2e-tauri/executor-lifecycle.spec.ts", frontendRoot), "utf8"),
+      readFile(new URL("../scripts/run_e4_14_acceptance.py", frontendRoot), "utf8"),
+      readFile(new URL("src-tauri/src/control_plane.rs", frontendRoot), "utf8"),
+      readFile(new URL("src-tauri/src/executor_platform.rs", frontendRoot), "utf8"),
+      readFile(new URL("src-tauri/src/lib.rs", frontendRoot), "utf8"),
+    ]);
+
+  assert.match(packageJson, /test:executor-lifecycle-tauri/);
+  assert.match(packageJson, /build:tauri:executor-lifecycle-test/);
+  assert.match(tauriConfig, /"visible": false/);
+  assert.match(tauriConfig, /com\.aventador\.automationtool\.e414acceptance/);
+  assert.match(wdioConfig, /executor-lifecycle\.spec\.ts/);
+  assert.match(spec, /button=启动执行器/);
+  assert.match(spec, /button=本地紧急停止/);
+  assert.match(spec, /inject_executor_crash_for_acceptance/);
+  assert.match(spec, /inject_executor_hang_for_acceptance/);
+  assert.match(orchestrator, /build_signed_executor/);
+  assert.match(orchestrator, /automation-tool-e414-/);
+  assert.match(orchestrator, /require_port_available/);
+  assert.match(orchestrator, /assert_no_executor_process/);
+  assert.match(orchestrator, /graceful_app_exit_observed/);
+  assert.match(orchestrator, /executor-ledger\.sqlite3/);
+  assert.match(controlPlane, /AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN/);
+  assert.match(spec, /exit_app_for_acceptance/);
+  assert.match(entry, /fn exit_app_for_acceptance/);
+  assert.match(entry, /RunEvent::ExitRequested/);
+  assert.match(entry, /shutdown_for_app_exit/);
+  assert.match(executorPlatform, /EXECUTOR_START_TIMEOUT_SECONDS:\s*u64\s*=\s*30/);
+  assert.match(
+    executorPlatform,
+    /Duration::from_secs\(EXECUTOR_START_TIMEOUT_SECONDS\)/,
+  );
+  assert.doesNotMatch(spec, /get_executor_status|restart_executor|get_executor_diagnostics|emergency_stop_executor/);
+});

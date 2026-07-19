@@ -58,6 +58,32 @@ describe("Executor diagnostics", () => {
     expect(adapter.emergencyStopExecutor).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes the native status without reloading the desktop window", async () => {
+    const adapter = platformAdapter();
+    vi.mocked(adapter.getExecutorStatus)
+      .mockResolvedValueOnce({
+        state: "stopped",
+        version: null,
+        buildId: null,
+        restartCount: 0,
+      })
+      .mockResolvedValueOnce({
+        state: "running",
+        version: "0.1.0",
+        buildId: "recovered-build",
+        restartCount: 1,
+      });
+    const user = userEvent.setup();
+
+    render(<Diagnostics platform={adapter} />);
+
+    expect(await screen.findByText("本地执行器已停止")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "刷新状态" }));
+    expect(await screen.findByText("本地执行器运行中")).toBeVisible();
+    expect(screen.getByText("recovered-build")).toBeVisible();
+    expect(adapter.getExecutorStatus).toHaveBeenCalledTimes(2);
+  });
+
   it("shows only a fixed safe message when native calls fail", async () => {
     const adapter = platformAdapter();
     vi.mocked(adapter.getExecutorStatus).mockRejectedValue(

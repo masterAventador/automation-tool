@@ -28,6 +28,7 @@ const EXECUTOR_DIRECTORY: &str = "local-executor";
 const EXECUTOR_IDENTITY_FILE: &str = "executor-id-v1";
 const EXECUTOR_PACKAGE_DIRECTORY: &str = "package";
 const EXECUTOR_STATE_DIRECTORY: &str = "state";
+const EXECUTOR_START_TIMEOUT_SECONDS: u64 = 30;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 const HEARTBEAT_INTERVAL_SECONDS: u8 = 15;
 const ALLOWED_EXECUTOR_VERSION: &str = "=0.1.0";
@@ -160,7 +161,7 @@ impl ExecutorPlatformService {
         let manager = ExecutorManager::new(
             paths.package_root().to_path_buf(),
             verifier,
-            Duration::from_secs(10),
+            Duration::from_secs(EXECUTOR_START_TIMEOUT_SECONDS),
             Duration::from_secs(10),
             restart_policy,
         )
@@ -184,6 +185,24 @@ impl ExecutorPlatformService {
 
     pub fn emergency_stop(&self) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
         self.manager.stop().map_err(map_manager_error)
+    }
+
+    pub fn shutdown_for_app_exit(&self) {
+        let _ = self.manager.stop();
+    }
+
+    #[cfg(feature = "control-plane-e2e")]
+    pub fn inject_crash_for_acceptance(&self) -> Result<(), ExecutorPlatformError> {
+        self.manager
+            .inject_crash_for_acceptance()
+            .map_err(map_manager_error)
+    }
+
+    #[cfg(feature = "control-plane-e2e")]
+    pub fn inject_hang_for_acceptance(&self) -> Result<(), ExecutorPlatformError> {
+        self.manager
+            .inject_hang_for_acceptance()
+            .map_err(map_manager_error)
     }
 
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]

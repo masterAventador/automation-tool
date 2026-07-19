@@ -250,7 +250,7 @@ E4-05 已实现 `executor_package.rs` 原生 verifier。信任输入只允许来
 
 E4-06 已实现 `executor_bootstrap.rs` 本机认证原语。它把每次启动的 32 字节本机会话与 Control Plane `executor.connect` Session 分成两个字段，只通过受限 stdin JSON 写入；本机会话的 Rust 内存 Drop 清零，Python 认证器在退出时清零，所有错误与 Debug 输出固定脱敏。Python stdout 不回传令牌，只返回按事件/协议域隔离的 `atlep1` HMAC 证明；Rust 使用常量时间 MAC 校验。该模块本身没有进程、页面、Tauri Command 或 IPC。
 
-E4-07 已实现 `executor_manager.rs` 固定生命周期。Manager 的受信装配项只有包根、E4-05 verifier 和 60 秒内的 start/stop timeout；每次 start 都先复验完整目录，再从 Manifest 精确入口无参数 spawn，唯一 stdin 写入 E4-06 bootstrap 后关闭。stdout reader 只接受 4096 字节内的严格 healthy/stopped JSON+LF 并验证事件 proof；stderr 由 E4-10 的独立限界脱敏模块处理。一个 Mutex 使 start/status/stop 线性化，8 路并发 start 只产生一个子进程，超时/坏证明/Drop 都强制回收直接子进程。E4-13 已从固定 Tauri Command/PlatformAdapter 装配，E4-14 再做隐藏 App 生命周期纵向验收。macOS 已从公开 Rust Manager 原入口跑通真实 signed PyInstaller Executor→Uvicorn→Heartbeat→停止，Windows 原生仍待 runner。
+E4-07 已实现 `executor_manager.rs` 固定生命周期。Manager 的受信装配项只有包根、E4-05 verifier 和 60 秒内的 start/stop timeout；每次 start 都先复验完整目录，再从 Manifest 精确入口无参数 spawn，唯一 stdin 写入 E4-06 bootstrap 后关闭。stdout reader 只接受 4096 字节内的严格 healthy/stopped JSON+LF 并验证事件 proof；stderr 由 E4-10 的独立限界脱敏模块处理。一个 Mutex 使 start/status/stop 线性化，8 路并发 start 只产生一个子进程，超时/坏证明/Drop 都强制回收直接子进程。E4-13 已从固定 Tauri Command/PlatformAdapter 装配，E4-14 已完成 macOS 隐藏 App 生命周期纵向验收。macOS 已从公开 Rust Manager 原入口和真实 App 页面两条原入口跑通 signed PyInstaller Executor→Uvicorn→Heartbeat→停止，Windows 原生仍待 runner。
 
 E4-08 的监管仍在同一个 Manager：调用方必须显式提供最大重启次数、monitor interval 和 restart delay，模块再以 8 次/60 秒硬上限约束；MVP 预算为 2。唯一 supervisor thread 通过 channel 唤醒和有界轮询观察 Child，Mutex 内状态机为 running/restarting/stopped。Unix 只对 signal crash、Windows 只计划对负 NT 异常码重启；正常/固定失败退出、显式 stop、坏包或启动认证失败直接 stopped。恢复前重新执行完整包验证并生成新的本机会话，公开状态只增加 `restartCount`。显式 stop 会先从状态机移除 running/pending，Drop 先关闭/join supervisor，因此不会与后台线程形成复活竞态；E4-09 已把直接 Child 清理扩展成完整进程树。
 
@@ -262,7 +262,9 @@ E4-11 仍不新增第二 Manager 或账本 WebView API。`ExecutorLaunchConfigur
 
 E4-12 没有给 WebView 增加通用命令通道：Rust Manager 仍只监管正式 Python Executor，由 Python 在 Control Plane WebSocket 内消费 `task.offer` 并从同一 SQLite 精确重放 ACK/Event。macOS 已从公开 Manager 原入口两次启动 signed PyInstaller 产物验证同一状态目录恢复；React 不读取账本、不提交路径，也不能直接调用 Executor。
 
-E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.path().app_data_dir()` 派生 `local-executor/package`、`local-executor/state` 和 `executor-id-v1`；稳定 Executor UUIDv4 使用既有 App 私有原子存储，Unix 目录/文件为 `0700/0600`。重启时 Rust 依次换取 `app.control-plane` Session、校验当前 Installation，再换取独立 `executor.connect` Session 并启动 Manager；React 只能调用四个无参数 Command，不能传 URL、Session、路径、包根或身份。`emergency_stop_executor` 是本机完整进程树硬停止，与 T3-16/T3-18 的业务 Task 协作式紧停严格分离。诊断页已经接入正式 Adapter，但真实 WebView→IPC→Control Plane→signed Executor→退出清理的完成证据归 E4-14 `visible=false` App。
+E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.path().app_data_dir()` 派生 `local-executor/package`、`local-executor/state` 和 `executor-id-v1`；稳定 Executor UUIDv4 使用既有 App 私有原子存储，Unix 目录/文件为 `0700/0600`。重启时 Rust 依次换取 `app.control-plane` Session、校验当前 Installation，再换取独立 `executor.connect` Session 并启动 Manager；React 只能调用四个无参数 Command，不能传 URL、Session、路径、包根或身份。`emergency_stop_executor` 是本机完整进程树硬停止，与 T3-16/T3-18 的业务 Task 协作式紧停严格分离。E4-14 已从唯一 `visible=false` App 的诊断页面完成 WebView→IPC→Control Plane→signed Executor→退出清理的 macOS 生产同路径验收。
+
+E4-14 专用配置只在 `control-plane-e2e` 编译中允许 runner 注入规范动态 loopback origin，并只在该特性注册真实 OS crash/hang 与正常退出验收 Command；默认和 `desktop-e2e` 构建没有这些入口。真实链路发现首个健康心跳为 15 秒而原启动预算为 10 秒，现将 App 组合根启动预算固定为 30 秒。生产 Tauri event loop 在 `RunEvent::ExitRequested` 或 `RunEvent::Exit` 上显式调用唯一 Platform service 停止 Executor，Manager Drop 仍是兜底，不能依赖测试驱动杀进程触发析构。验收核对 App 私有稳定 UUID、SQLite v1 identity、Unix 权限和凭据不入库；所有服务、进程、端口与数据均按本次专属标识清理。
 
 ## 7. 页面与导航
 
@@ -446,11 +448,11 @@ Playwright 使用受控窄 Adapter 驱动真实 React 页面交互；T3-19 的�
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 
-当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描测试标记并 fail closed。所有自动化 Tauri 配置（包括 T3-15 Task 投影、T3-16 工作台、T3-19 生命周期与 T3-20 重启验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
+当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描测试标记并 fail closed。所有自动化 Tauri 配置（包括 T3-15 Task 投影、T3-16 工作台、T3-19 生命周期、T3-20 重启与 E4-14 Executor 生命周期验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
 
 I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 
-`pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。通用桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用；I2-09 验证认证纵向链路，T3-19 验证完整任务交互，T3-20 的 `scripts/run_t3_20_acceptance.py` 再让同一隐藏 App 保持运行，真实停止 Control Plane、整页刷新显示不可用、以同一 PostgreSQL 重启服务并点击“重新检查”，最终从工作台/详情读取 Executor 重连后的取消终态。这些通用证据本身不证明 Local Executor、外部运营浏览器或 RPA；E4-07/E4-08 已用独立 Rust/真实进程链验证 Manager 生命周期和重启预算，隐藏 App、完整进程树、外部浏览器与平台最终状态仍分别由 E4-09/E4-14 和 Wave 5～7 补自己的验收。
+`pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。通用桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用；I2-09 验证认证纵向链路，T3-19 验证完整任务交互，T3-20 的 `scripts/run_t3_20_acceptance.py` 再让同一隐藏 App 保持运行，真实停止 Control Plane、整页刷新显示不可用、以同一 PostgreSQL 重启服务并点击“重新检查”，最终从工作台/详情读取 Executor 重连后的取消终态。E4-14 的 `scripts/run_e4_14_acceptance.py` 则从隐藏 App 诊断页驱动正式 signed Executor 启停、崩溃恢复、挂起超时和 App 退出清理。这些证据仍不证明外部运营浏览器或真实平台 RPA，相关最终状态由 Wave 5～7 各自验收。
 
 ## 14. 构建和配置
 

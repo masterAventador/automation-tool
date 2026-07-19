@@ -18,9 +18,7 @@ use crate::device_credentials::{
 use crate::device_identity::ProductionDeviceIdentity;
 use crate::secure_store::SecretStore;
 
-const LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-const LOCAL_EXECUTOR_WEBSOCKET_URL: &str = "ws://127.0.0.1:8765/api/v1/executors/connect";
+const DEFAULT_LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -305,10 +303,46 @@ impl ControlPlaneHealth {
 
 pub struct ControlPlaneClient {
     client: reqwest::Client,
+    origin: String,
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    executor_websocket_url: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+fn configured_local_control_plane_origin() -> &'static str {
+    option_env!("AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN")
+        .unwrap_or(DEFAULT_LOCAL_CONTROL_PLANE_ORIGIN)
+}
+
+#[cfg(not(feature = "control-plane-e2e"))]
+const fn configured_local_control_plane_origin() -> &'static str {
+    DEFAULT_LOCAL_CONTROL_PLANE_ORIGIN
+}
+
+fn validated_loopback_origin(source: &str) -> Result<(String, String), ControlPlaneError> {
+    let parsed = reqwest::Url::parse(source).map_err(|_| protocol_invalid())?;
+    let port = parsed.port().ok_or_else(protocol_invalid)?;
+    let canonical = format!("http://127.0.0.1:{port}");
+    if parsed.scheme() != "http"
+        || parsed.host_str() != Some("127.0.0.1")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || source != canonical
+    {
+        return Err(protocol_invalid());
+    }
+    Ok((
+        canonical,
+        format!("ws://127.0.0.1:{port}/api/v1/executors/connect"),
+    ))
 }
 
 impl ControlPlaneClient {
     pub fn local() -> Result<Self, ControlPlaneError> {
+        let configured = validated_loopback_origin(configured_local_control_plane_origin())?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(10))
@@ -319,7 +353,12 @@ impl ControlPlaneClient {
             .map_err(|_| {
                 ControlPlaneError::new(ControlPlaneErrorCode::TransportUnavailable, true)
             })?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            origin: configured.0,
+            #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+            executor_websocket_url: configured.1,
+        })
     }
 
     pub async fn check_health(&self) -> Result<ControlPlaneHealth, ControlPlaneError> {
@@ -385,7 +424,7 @@ impl ControlPlaneClient {
             .exchange_device_session(vault, DeviceSessionCapability::ExecutorConnect)
             .await?;
         Ok(ExecutorConnectionMaterial {
-            websocket_url: LOCAL_EXECUTOR_WEBSOCKET_URL.to_owned(),
+            websocket_url: self.executor_websocket_url.clone(),
             session_token: executor_session.into_token(),
             installation_id,
         })
@@ -788,7 +827,7 @@ impl ControlPlaneClient {
         )?;
         let mut request = self
             .client
-            .get(format!("{LOCAL_CONTROL_PLANE_ORIGIN}{path}"))
+            .get(format!("{}{path}", self.origin))
             .timeout(Duration::from_secs(60))
             .header(ACCEPT, "text/event-stream")
             .header(REQUEST_ID_HEADER, &request_id)
@@ -880,7 +919,7 @@ impl ControlPlaneClient {
     ) -> Result<Zeroizing<Vec<u8>>, ControlPlaneError> {
         let request_id = new_request_id()?;
         let path = request_path(operation, target)?;
-        let url = format!("{LOCAL_CONTROL_PLANE_ORIGIN}{path}");
+        let url = format!("{}{path}", self.origin);
         let mut request = match operation.method() {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
@@ -2087,9 +2126,10 @@ mod tests {
         parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
         parse_task_list, parse_task_snapshot_body, parse_workbench_status, request_path,
         require_idempotency_key, require_list_cursor, required_credential, sse_frame_end,
-        transport_error, validate_response_metadata, ControlPlaneErrorCode, ControlPlaneOperation,
-        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
-        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
+        transport_error, validate_response_metadata, validated_loopback_origin,
+        ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
+        DeviceSessionCapability, DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition,
+        ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -2257,6 +2297,27 @@ mod tests {
             assert_eq!(operation.method(), method);
             assert_eq!(operation.path(), path);
             assert_eq!(operation.success_status(), success_status);
+        }
+    }
+
+    #[test]
+    fn configurable_test_origin_accepts_only_a_canonical_loopback_http_origin() {
+        assert_eq!(
+            validated_loopback_origin("http://127.0.0.1:43123").expect("canonical loopback origin"),
+            (
+                "http://127.0.0.1:43123".to_owned(),
+                "ws://127.0.0.1:43123/api/v1/executors/connect".to_owned(),
+            )
+        );
+        for invalid in [
+            "https://127.0.0.1:43123",
+            "http://localhost:43123",
+            "http://127.0.0.1",
+            "http://127.0.0.1:43123/extra",
+            "http://user@127.0.0.1:43123",
+            "http://127.0.0.1:43123?private=value",
+        ] {
+            assert!(validated_loopback_origin(invalid).is_err(), "{invalid}");
         }
     }
 

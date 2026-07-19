@@ -61,7 +61,10 @@ automation-tool/
 │   ├── run_t3_17_acceptance.py   # 隐藏 Tauri 新建表单→API→定义持久化验收
 │   ├── run_t3_18_acceptance.py   # 隐藏 Tauri 运行详情→四类控制→事件终态验收
 │   ├── run_t3_19_acceptance.py   # 隐藏 Tauri 创建/控制/成功→整页刷新恢复验收
-│   └── run_t3_20_acceptance.py   # 隐藏 Tauri→Control Plane 同库重启→Executor 恢复验收
+│   ├── run_t3_20_acceptance.py   # 隐藏 Tauri→Control Plane 同库重启→Executor 恢复验收
+│   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
+│   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
+│   └── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -157,6 +160,7 @@ frontend/
 │   ├── tauri.task-run-e2e.conf.json # 后台隐藏的运行详情四类控制验收
 │   ├── tauri.task-lifecycle-e2e.conf.json # 后台隐藏的完整生命周期与刷新验收
 │   ├── tauri.task-restart-e2e.conf.json # 后台隐藏的 Control Plane 重启恢复验收
+│   ├── tauri.executor-lifecycle-e2e.conf.json # 后台隐藏的 signed Executor 生命周期验收
 │   └── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
 ├── public/
 ├── package.json
@@ -176,6 +180,7 @@ frontend/
 ├── wdio.task-run.conf.ts
 ├── wdio.task-lifecycle.conf.ts
 ├── wdio.task-restart.conf.ts
+├── wdio.executor-lifecycle.conf.ts
 ├── wdio.workbench.conf.ts
 ├── tsconfig.json
 └── README.md
@@ -306,9 +311,11 @@ E4-10 新建的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承
 
 E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3` 和 v1 identity/commands/attempt checkpoints/outbox 四表。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS 和协议 outbox 重放均在该模块内事务化；测试覆盖真实并发、重开恢复、迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
 
-E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 再做隐藏 App 验收。
+E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 已完成隐藏 App 验收。
 
-E4-13 的 `src-tauri/src/executor_platform.rs` 是唯一 App 组合根：包、SQLite 状态和稳定 Executor UUID 都从 Tauri `app_data_dir/local-executor` 固定派生，不接受 WebView 路径；重启所需 Installation 和短期 `executor.connect` Session 只由 Rust Control Plane client 换取。`src/platform/tauri/platform-adapter.ts` 只 invoke 四个无参数生命周期 Command，并对状态和诊断 DTO fail closed；`features/diagnostics` 只消费该接口。账本、Session、PID、路径、包信任参数和原始 stderr 都不进入 React。E4-14 再用隐藏真实 App 完成纵向生命周期验收。
+E4-13 的 `src-tauri/src/executor_platform.rs` 是唯一 App 组合根：包、SQLite 状态和稳定 Executor UUID 都从 Tauri `app_data_dir/local-executor` 固定派生，不接受 WebView 路径；重启所需 Installation 和短期 `executor.connect` Session 只由 Rust Control Plane client 换取。`src/platform/tauri/platform-adapter.ts` 只 invoke 四个无参数生命周期 Command，并对状态和诊断 DTO fail closed；`features/diagnostics` 只消费该接口。账本、Session、PID、路径、包信任参数和原始 stderr 都不进入 React。
+
+E4-14 的 `tauri.executor-lifecycle-e2e.conf.json`、`wdio.executor-lifecycle.conf.ts`、对应 spec 与 `scripts/run_e4_14_acceptance.py` 只服务于 `control-plane-e2e` 隐藏 App 验收。它们从真实诊断页驱动正式 PlatformAdapter，使用专属动态端口、Compose project、AppData 和 signed PyInstaller 包，实际注入 OS crash/hang 后验证 supervisor、进程树和私有 SQLite；测试 origin、故障与退出 Command 不进入默认构建。生产 `lib.rs` 的 event loop 在 `ExitRequested/Exit` 显式停止唯一 Executor，避免依赖测试驱动或析构时机回收。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
