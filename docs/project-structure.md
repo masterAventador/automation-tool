@@ -29,10 +29,11 @@ automation-tool/
 ├── backend/                       # Python 可部署业务后端和本地执行器
 ├── contracts/                     # 跨 Rust/TypeScript/Python 的生成协议
 │   ├── openapi/                   # FastAPI OpenAPI 快照
-│   ├── protocol/                  # Executor 等跨进程 JSON Schema 快照
+│   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
 │   └── fixtures/
-│       └── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
+│       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
+│       └── executor-package-v1/   # Python 生成、Rust 复验的 inert 签名目录样例
 ├── docs/
 │   ├── dt-ai-helper-competitive-analysis.md
 │   ├── product-plan.md
@@ -212,6 +213,7 @@ backend/
 │       │   ├── __main__.py        # 源码模式与 PyInstaller 共用的模块入口
 │       │   ├── bootstrap.py       # 一次性 stdin bootstrap、端点/Session/身份严格校验
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
+│       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
 │       │   ├── runtime.py         # Hello/Heartbeat、固定健康投影和有界停止
 │       │   ├── transport.py       # Fake/正式 Executor 共用的受认证 WebSocket 传输
 │       │   ├── fake.py            # 无 I/O 场景引擎；复用正式 parser/envelope/幂等规则
@@ -273,6 +275,8 @@ T3-20 的 `FakeExecutorClient.run_reconnecting` 只扩展无副作用测试 Exec
 E4-02 的正式进程入口固定为 `automation-tool-executor`。`bootstrap.py` 只读一条受限 stdin JSON，`runtime.py` 只发送 Executor v1 Hello/Heartbeat 并输出固定健康事件，`transport.py` 是正式进程和 Fake 客户端唯一共享的网络零件，`cli.py` 只安装 SIGINT/SIGTERM 并映射固定退出码。真实集成测试从安装后的控制台脚本启动独立子进程，连接真实 Uvicorn/正式 Session/Registry 后再发信号退出；没有调用内部函数冒充进程验收，也没有引入旧 stdio 任务协议。任务帧处理、本机账本、PyInstaller 和 Tauri 监管仍分别由 E4-12、E4-11、E4-03、E4-07 承接。
 
 E4-03 使用 `automation-tool-executor.spec` 从同一 `executor/__main__.py` 构建 console `onedir`，不维护第二份 Python 入口。PyInstaller 只在 uv 开发依赖组锁定，正式运行依赖和 spec 均不包含 Playwright；集成测试从临时目录构建后清空 PATH，直接启动冻结可执行文件并验证 bootstrap 拒绝、WebSocket 不可用的固定退出契约和分析清单。`.github/workflows/desktop.yml` 已为 macOS/Windows 配置同一实包测试，只验证构建和启动，不上传、发布或签名产物；macOS 已在本机通过，Windows Hosted Runner 当前因 GitHub 账户 Billing/Actions spending limit 未启动，不能冒充目标平台已验收。目录签名与可信安装由 E4-04/E4-05 承接。
+
+E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

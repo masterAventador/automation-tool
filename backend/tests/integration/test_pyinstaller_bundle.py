@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
 
+from automation_tool.executor.package_manifest import (
+    EXECUTOR_MANIFEST_FILE_NAME,
+    EXECUTOR_SIGNATURE_FILE_NAME,
+)
+
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_NAME = "automation-tool-executor"
 PRIVATE_SESSION = "private-packaged-session"
+TEST_SIGNING_KEY = bytes(range(32))
 
 
 def bootstrap() -> bytes:
@@ -55,6 +62,33 @@ def test_pyinstaller_onedir_bundle_starts_without_python_or_playwright(tmp_path:
     suffix = ".exe" if sys.platform == "win32" else ""
     executable = distribution_root / BUNDLE_NAME / f"{BUNDLE_NAME}{suffix}"
     assert executable.is_file()
+
+    manifest = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "automation_tool.executor.package_manifest",
+            "--bundle-dir",
+            os.fspath(executable.parent),
+            "--executor-version",
+            "0.1.0",
+            "--build-id",
+            "pyinstaller-integration",
+            "--platform",
+            "windows" if sys.platform == "win32" else "macos",
+            "--architecture",
+            "x86_64" if platform.machine().lower() in {"x86_64", "amd64"} else "aarch64",
+        ],
+        input=TEST_SIGNING_KEY,
+        capture_output=True,
+        check=False,
+        timeout=20,
+    )
+    assert manifest.returncode == 0, manifest.stderr
+    manifest_document = json.loads((executable.parent / EXECUTOR_MANIFEST_FILE_NAME).read_bytes())
+    assert manifest_document["entrypoint"] == executable.name
+    assert manifest_document["package_size"] > executable.stat().st_size
+    assert (executable.parent / EXECUTOR_SIGNATURE_FILE_NAME).read_bytes().startswith(b"atems1.")
 
     startup = subprocess.run(
         [os.fspath(executable)],

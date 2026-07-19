@@ -16,6 +16,10 @@ def test_pyinstaller_is_locked_as_a_development_only_dependency() -> None:
     assert "pyinstaller" not in project["project"]["dependencies"]
     assert "playwright" not in project["project"]["dependencies"]
     assert "playwright" not in development_dependencies
+    assert (
+        project["project"]["scripts"]["automation-tool-build-executor-manifest"]
+        == "automation_tool.executor.package_manifest:main"
+    )
 
 
 def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() -> None:
@@ -36,5 +40,8 @@ def test_desktop_ci_smokes_the_executor_bundle_on_both_supported_platforms() -> 
     assert "executor-bundle:" in source
     assert "runner: [macos-latest, windows-latest]" in source
     assert "uv sync --locked --dev" in source
+    assert "test_package_manifest.py" in source
+    assert "test_executor_manifest_cli.py" in source
     assert "test_pyinstaller_bundle.py" in source
     assert "backend/automation-tool-executor.spec" in source
+    assert "contracts/fixtures/executor-package-v1/**" in source

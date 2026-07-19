@@ -202,6 +202,10 @@ E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bo
 
 E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python。构建依赖只在 uv dev group，当前未加入 Python Playwright；macOS 本机已从冻结入口验证 bootstrap 与网络失败的固定退出契约，GitHub macOS/Windows 矩阵使用同一测试，但当前 Hosted Runner 因账户 Billing/Actions spending limit 在启动前被拒绝，因此 Windows 仍是明确待验收项。该 PoC 不承担目录 Manifest、签名、完整性或防降级，以上边界继续由 E4-04/E4-05 实现。
 
+E4-04 增加唯一离线构建入口 `automation-tool-build-executor-manifest`。它只从 stdin 读取精确 32 字节 Ed25519 seed，拒绝把发布私钥放入 argv、环境、输出、仓库或 App；输出是 `onedir` 根内的 `executor-manifest.v1.json` 与 `executor-manifest.v1.sig`。Manifest v1 精确绑定 SemVer、受限 build ID、`macos|windows`、`aarch64|x86_64`、平台精确入口、payload 总大小、目录摘要，以及按 ASCII 相对路径排序的全部普通文件路径/大小/SHA-256；Manifest/签名 metadata 自身不参与 payload 清单。
+
+目录摘要以 `automation-tool.executor-package.v1\0` 起始，随后对每个已排序文件依次加入 4 字节大端路径长度、ASCII 路径、8 字节大端文件大小和 32 字节原始 SHA-256。Manifest 是键排序、compact ASCII JSON 加一个 LF；Ed25519 签名覆盖其完整原始字节，签名 envelope 固定为 `atems1.<unpadded-base64url>\n`。构建器拒绝非规范/过长路径、symlink、非普通文件、超过 10,000 个文件或 8 GiB、空/错误入口，并在读取前后核对文件 identity，避免把验证期间被替换的文件写入可信清单。Draft 2020-12 Schema 和固定测试 seed 生成的 inert 跨语言 fixture 已提交；测试 seed 不是发布密钥。E4-05 仍必须在 Rust 中用编译期可信公钥解析 exact fields、复算全部摘要、绑定当前平台/架构、执行防降级并 fail closed，不能把 E4-04 的离线生成当成运行时信任。
+
 ### 7.2 Application
 
 - 领取并校验命令；

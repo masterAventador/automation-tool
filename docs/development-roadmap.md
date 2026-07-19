@@ -59,6 +59,7 @@
 | Executor v1 协议 | `✅` 24 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 31 个公共 fixtures 已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Executor onedir PoC | `🔍` macOS arm64 冻结实包已启动且未包含 Playwright；Windows 同测试已配置，但 GitHub Hosted Runner 因账户 Billing/Actions spending limit 未启动，待 Windows 环境补验收 |
+| Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS 冻结实包验证 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
@@ -223,7 +224,7 @@
 | E4-01 | 审计旧 local_executor | 列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖 | R0-12,I2-10 | ✅ 已完成 |
 | E4-02 | Executor Python 入口 | stdin bootstrap、健康、信号和出站连接最小进程 | E4-01,I2-13 | ✅ 已完成 |
 | E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | 🔍 待验收 |
-| E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ⬜ 未开始 |
+| E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ✅ 已完成 |
 | E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | ⬜ 未开始 |
 | E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ⬜ 未开始 |
 | E4-07 | Rust ExecutorManager | start/status/invoke/stop，单实例和并发线性化 | E4-05,E4-06 | ⬜ 未开始 |
@@ -1380,9 +1381,26 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增第二份打包或实施文档
 - 后续：E4-04 所需的稳定 `onedir` 目录与入口工程依赖已经具备，可继续生成跨平台 Manifest；E4-03 保持 `🔍`，在 GitHub Billing 恢复或取得 Windows 设备后补同一实包测试，不阻塞无设备依赖任务
 
+### E4-04 Executor Manifest
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：为整个 PyInstaller `onedir` 建立唯一、确定性、可由下一任务 Rust 独立复验的签名清单；覆盖版本、构建、平台、架构、入口、大小和 SHA-256，不把离线签发私钥或运行时信任职责塞进 App/Python Executor
+- 旧代码边界：完整复查旧 `sidecar_package.rs` 799 行；仅迁移 Ed25519、SHA-256、大小、平台/架构绑定和稳定文件 identity 思路，删除旧在线下载器、redirect、`social-operations-sidecar` 名称、自制版本比较与 CrashRecovery 耦合。新模型从单文件改为完整 `onedir` 文件清单
+- RED：先加入 Manifest 行为/失败矩阵、真实 CLI、真实 PyInstaller 扩展、双平台 CI 契约和 inert 跨语言 fixture；首跑 3 个模块在收集阶段精确失败为 `No module named automation_tool.executor.package_manifest`，证明没有借用 mock 或旧实现冒充
+- 实现：新增唯一 `automation-tool-build-executor-manifest`；离线 Ed25519 seed 只从 stdin 读取精确 32 字节。Manifest v1 使用 compact、键排序 ASCII JSON 加 LF，绑定严格 SemVer、受限 build ID、`macos|windows`、`aarch64|x86_64`、平台精确入口、总大小、目录 SHA-256 和全部普通文件的相对路径/大小/SHA-256；独立签名文件固定 `atems1.<unpadded-base64url>`，签名覆盖 Manifest 原始字节
+- 目录摘要：固定域 `automation-tool.executor-package.v1\0`，每个按 ASCII 路径排序的文件依次加入 4 字节大端路径长度、路径、8 字节大端大小和 32 字节原始 SHA-256；metadata 自身不进入 payload，重复运行输出和 Ed25519 签名逐字节一致
+- fail closed：拒绝缺失/非目录根、非规范或非 ASCII 路径、Windows 保留字符、symlink、FIFO 等非普通文件、错误/空入口、非法版本/build/platform/arch、非 32 字节私钥、超过 10,000 文件或 8 GiB，以及读取前后 identity 变化；错误只返回固定文案，不回显密钥或私有路径
+- 契约与真实边界：Draft 2020-12 Schema 固化 exact fields；固定 `00..1f` 测试 seed 只签 inert fixture，明确禁止发布使用。真实 CLI 子进程从 stdin 签发；真实 PyInstaller macOS arm64 `onedir` 完整清点、签名后仍在无项目 Python PATH 下启动并返回既定错误。实际包无 symlink，因此维持强拒绝边界；不做隐式解引用
+- 门禁：聚焦 25 项达到新模块 138 条语句/32 分支 100%；真实 onedir 聚焦共 19 项通过；Backend 全量 `840 passed in 78.21s`，4516 条语句/870 个分支 100%；Ruff、Mypy 161 文件、uv lock 和 Actionlint 全绿。macOS/Windows Executor CI 矩阵已纳入同一 Manifest 单元、真实 CLI 与冻结实包测试；Windows runner 仍继承 E4-03 的 GitHub Billing 外部阻塞，不冒充通过
+- 密钥、App 与清理：发布签发私钥不进入仓库、argv、env、日志、构建产物、用户 App 或系统钥匙串；App 用户密钥策略未改变，仍只在 Rust `app_data_dir`。测试 fixture 不是秘密。真实构建使用 pytest 临时目录；另行检查目录已删除，无 PyInstaller/Executor/App/Uvicorn/Docker 进程残留
+- 文档：同步根/Backend README、后端架构、工程结构、公共 Schema/fixture 和唯一开发台账；未新增第二份计划文档
+- 后续：E4-05 使用编译期可信公钥和同一 fixture，在 Rust/Tauri 中 exact-field 解析并复算完整目录，加入平台/架构、SemVer 允许范围、防降级、私有目录与 TOCTOU 防护；E4-04 不提前宣称运行时可信
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-04`：为稳定 `onedir` 目录生成包含版本、平台、架构、大小、SHA-256 和 Ed25519 签名的 Executor Manifest；
-2. E4-03 Windows 实包启动在 GitHub Billing/Windows 设备恢复后补验收；不降低门禁，也不阻塞 E4-04～Wave 10 的无设备依赖任务。
+1. `E4-05`：在 Rust/Tauri 中验证 Manifest 签名、完整目录摘要、平台/架构、SemVer 允许范围与防降级，任何错误包 fail closed；
+2. E4-03 Windows 实包启动在 GitHub Billing/Windows 设备恢复后补验收；不降低门禁，也不阻塞 E4-05～Wave 10 的无设备依赖任务。

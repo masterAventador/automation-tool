@@ -79,11 +79,20 @@ uv run mypy
 uv run automation-tool-export-openapi --output ../contracts/openapi/control-plane.v1.json --check
 uv run automation-tool-export-executor-schema --output ../contracts/protocol/executor-v1.schema.json --check
 uv run pyinstaller --noconfirm --clean automation-tool-executor.spec
+uv run automation-tool-build-executor-manifest \
+  --bundle-dir dist/automation-tool-executor \
+  --executor-version 0.1.0 \
+  --build-id local-build-1 \
+  --platform macos \
+  --architecture aarch64 \
+  < /path/to/offline-32-byte-ed25519-seed
 ```
 
 PyInstaller 产物固定为 `dist/automation-tool-executor/` 的 `onedir` 目录；macOS 入口为同名可执行文件，Windows 入口为 `automation-tool-executor.exe`。`pyinstaller` 只锁在开发依赖组，当前包不引入 Playwright；双平台 CI 已配置从冻结产物启动入口并验证 bootstrap/连接失败的固定退出契约。当前 macOS 实包已通过，Windows Hosted Runner 因 GitHub 账户 Billing/Actions spending limit 在分配 runner 前被拒绝，仍需在可用 Windows runner 或实体机补验收。
 
-`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。构建目录和产物均被 Git 忽略，后续由 E4-04/E4-05 增加 Manifest、签名和 Rust 侧完整目录验证。
+Manifest 工具在 `onedir` 根内写入 `executor-manifest.v1.json` 和 `executor-manifest.v1.sig`。Manifest 使用 compact、键排序的 ASCII JSON 加单个 LF，签名覆盖这些原始字节；签名文件固定为无 padding Base64URL 的 `atems1` envelope。Manifest 绑定 SemVer、构建 ID、平台、架构、平台精确入口、总大小、目录摘要和每个 payload 普通文件的相对路径/大小/SHA-256；metadata 自身不进入清单。离线 Ed25519 私钥必须是 stdin 中精确 32 字节，不能放入 argv、环境、日志、仓库、构建产物或 App；仓库固定 fixture 使用的 `00..1f` 只是假测试种子，不能用于发布。
+
+`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。构建目录和产物均被 Git 忽略；E4-04 只负责离线生成完整目录 Manifest 与签名，Rust 侧可信公钥、目录复验、平台/架构检查、私有安装和防降级由 E4-05 实现。
 
 后端 Pydantic/FastAPI 是跨端 DTO 的唯一来源。路由契约变化后先去掉 `--check` 重新导出快照，再到 `frontend/` 执行 `pnpm generate:api`；提交前两侧都必须通过各自漂移检查。
 
