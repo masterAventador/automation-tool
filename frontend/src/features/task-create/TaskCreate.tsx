@@ -58,7 +58,6 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
       idempotencyKey.current = null;
       setCreatedTaskId(task.taskId);
       await queryClient.invalidateQueries({ queryKey: taskProjectionKeys.all });
-      onCreated(task.taskId);
     },
   });
 
@@ -189,6 +188,11 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
               type="success"
               showIcon
               title={`任务已创建：${createdTaskId}`}
+              action={
+                <Button size="small" onClick={() => onCreated(createdTaskId)}>
+                  查看运行详情
+                </Button>
+              }
             />
           ) : null}
 

@@ -21,7 +21,10 @@ function gateway(): TaskCreationGateway {
   };
 }
 
-function renderForm(taskCreationGateway = gateway()) {
+function renderForm(
+  taskCreationGateway = gateway(),
+  onCreated: (taskId: string) => void = () => undefined,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -29,7 +32,7 @@ function renderForm(taskCreationGateway = gateway()) {
     taskCreationGateway,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <TaskCreate gateway={taskCreationGateway} onCreated={() => undefined} />
+        <TaskCreate gateway={taskCreationGateway} onCreated={onCreated} />
       </QueryClientProvider>,
     ),
   };
@@ -76,5 +79,19 @@ describe("Douyin search exposure Task creation", () => {
     await waitFor(() => expect(screen.getByText("请输入搜索关键词")).toBeVisible());
     expect(taskCreationGateway.createDouyinSearchExposureTask).not.toHaveBeenCalled();
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
+  });
+
+  it("keeps the creation receipt visible until the operator opens run details", async () => {
+    const onCreated = vi.fn();
+    const user = userEvent.setup();
+    renderForm(gateway(), onCreated);
+
+    await user.type(screen.getByLabelText("搜索关键词"), "刷新恢复验收");
+    await user.click(screen.getByRole("button", { name: "创建任务" }));
+
+    expect(await screen.findByText(`任务已创建：${TASK_ID}`)).toBeVisible();
+    expect(onCreated).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查看运行详情" }));
+    expect(onCreated).toHaveBeenCalledExactlyOnceWith(TASK_ID);
   });
 });

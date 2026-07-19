@@ -37,7 +37,7 @@ pnpm check:api
 
 Executor v1 使用 `src/api/protocol/executor-envelope.ts` 的 Zod 判别联合和 `src-tauri/src/executor_protocol.rs` 的 Rust 解析器。两者与 Python `parse_executor_message` 回放 `../contracts/fixtures/executor-v1/` 的同一组 6 个 valid、25 个 invalid 原始 wire 文件；未知字段/类型、重复 key、非规范 UUIDv4、非 UTC 或微秒倒序 deadline、超出 JavaScript 安全整数的 sequence、任务作用域混淆、资源滥用和敏感 payload 都 fail closed。TypeScript/Rust 解析错误只返回固定公开信息，不反射原始输入；I2-13 已在 Control Plane 侧让真实 WebSocket 帧经过 Python 正式入口，E4-02/E4-12 再接入 Local Executor 进程，React 只消费公开投影。
 
-`harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
+`harness.html` 和 `src/test-harness/` 只供 Playwright 本机 UI 测试。任务生命周期场景使用窄测试 Adapter 与 `sessionStorage` 模拟创建、暂停、恢复、取消、成功和整页刷新恢复。正式 Vite 构建只以 `index.html` 为入口；`pnpm check:production-boundaries` 会重新构建并扫描产物，若发现 Harness 页面、运行标记或测试 Adapter 标记立即失败。UI Harness 通过只代表 React 交互，不代表 Tauri IPC、Rust、Sidecar 或 RPA 可用。
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。
 
@@ -69,6 +69,8 @@ T3-16 的工作台纵向验收执行 `uv run python ../scripts/run_t3_16_accepta
 T3-17 的新建任务纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`。唯一 `visible=false` 真实 App 从页面进入“新建任务”，填写关键词和数量后点击创建，经正式 `TauriTaskCreationGateway`、固定 Rust Command、真实 Uvicorn/PostgreSQL 写入精确 `douyin.search_exposure.v1` 定义。App 不弹窗、不读取系统钥匙串，验收结束清理隔离 App 数据和后端资源。
 
 T3-18 的运行详情纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_18_acceptance.py`。唯一 `visible=false` 真实 App 打开两个有持久事件的 Task，从页面依次真实点击暂停、恢复、取消和紧急停止；正式 gateway/Rust/后端 Outbox/HOLD FakeExecutor 链路将命令全部 ACK，并把两个任务分别收敛为 `cancelled` 与 `outcome_uncertain`。验收不操作社交平台，结束后清理隔离 App 数据、服务、端口和 PostgreSQL 资源。
+
+T3-19 的完整生命周期纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_19_acceptance.py`。唯一 `visible=false` 真实 App 从页面创建两个 Task：首个依次真实点击暂停、恢复、取消，第二个由受控 Executor 收敛为成功；随后整页刷新并从工作台重新进入成功详情。正式 TypeScript gateway、固定 Rust Command、真实 Uvicorn/PostgreSQL、Outbox 和 Executor 链路全部参与，最终核对命令 ACK、事件、revision、水位与两个页面创建的定义；设备秘密只在隔离 `app_data_dir`，结束后精确清理。
 
 `@wdio/tauri-service 1.2.0` 的发布清单仍将 `@wdio/native-utils` 固定在缺少其已调用导出的 2.4.0，因此 `pnpm-workspace.yaml` 通过官方依赖 override 固定到已提供该导出的 2.5.0；未修改任何第三方源码。当前 embedded provider 的成功测试仍会输出两条上游诊断噪声：误检查外部 `tauri-driver`，以及会话销毁后清理空 mock；两者不影响真实 WKWebView 会话和测试结果，项目不会因此安装未使用的外部驱动。
 

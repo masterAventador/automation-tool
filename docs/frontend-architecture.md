@@ -201,7 +201,7 @@ interface PlatformAdapter {
 - SSE/事件流由 Rust 建立并通过 Tauri Channel 传给 React；
 - 网络断开时关闭旧流，恢复后先拉任务快照，再从最后序号继续订阅。
 
-测试专用 UI Harness 使用同一个 TypeScript `ControlPlaneTransport` 接口，但可直接通过 Axios 访问本机测试后端。它不能进入正式包。
+测试专用 UI Harness 只实现 Feature 已有的窄 TypeScript gateway/source 接口；生命周期场景用测试 Adapter 和 `sessionStorage` 模拟任务事实，不访问产品凭据或任意网络 operation。它不能进入正式包，也不能替代正式 App/Rust/后端验收。
 
 当前生产 TypeScript 健康 Transport 只暴露 `checkHealth`；Task 状态另由窄 `TaskProjectionSource` 暴露列表、详情和事件订阅，两者都不接受 URL、Header、凭据或任意 operation。Rust 使用 `reqwest` 从固定 local origin 发起请求，封闭 allowlist 覆盖 Health、Installation/凭据/Session 和固定 Task 路径；请求禁止系统代理与重定向，并严格校验状态、响应头、关联 ID、UUIDv4、UTC 时间、公开快照、事件和分页游标。底层异常只映射固定安全错误，React 不得到原始网络原因或秘密。
 
@@ -209,7 +209,7 @@ interface PlatformAdapter {
 
 I2-04 建立的设备密钥边界已在 I2-08 按当前产品决策迁移到统一 App 私有存储：Rust 1.88 基线使用 `ed25519-dalek 3.0.0`、`getrandom 0.4.3` 和 `zeroize 1.9.0` 生成、派生并及时清零临时私钥缓冲；私钥与长期凭据分别使用 `device-identity-ed25519-v1` 和 `device-credential-v1` 固定文件，根目录由正式 Tauri 入口通过 `app.path().app_data_dir()` 解析。Unix 目录/文件权限固定为 `0700`/`0600`，Windows 继承当前用户 AppData ACL；存储拒绝符号链接、非普通文件、超限内容和不安全文件名，写入经同目录独占临时文件、同步及原子替换完成。正式入口只托管公钥和 Rust 凭据仓，不提供序列化、Command 或 React 接口，也不调用系统钥匙串。私钥缺项时首启生成并保存，已有值必须精确为 32 字节；长期凭据必须是 canonical `atdc1` 且允许原子替换和幂等删除。权限拒绝、随机源失败、损坏和非法凭据均 fail closed，并收敛为固定不泄密错误。
 
-当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky、revoked 健康/授权投影，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
+当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky、revoked 健康/授权投影，以及 `task-lifecycle` 的创建→暂停→恢复→取消、独立成功和整页刷新恢复，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
 
 ### 5.3 无登录页面下的安装实例认证
 
@@ -407,7 +407,7 @@ unknown
 - 后端断开和恢复；
 - 不渲染登录页或未实现菜单。
 
-Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，但不能证明真实浏览器或微信可用。
+Playwright 使用受控窄 Adapter 驱动真实 React 页面交互；T3-19 的生命周期 Adapter 将测试状态保存在当前 Harness 会话以验证整页恢复。它不能证明 Tauri IPC、Rust、真实网络、运营浏览器或微信可用，代表流程必须再由隐藏真实 App 从产品入口验收。
 
 ### 13.3 Rust 测试
 
@@ -430,11 +430,11 @@ Playwright 使用真实本地测试 Control Plane 和受控 Executor Adapter，�
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 
-当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描测试标记并 fail closed。所有自动化 Tauri 配置（包括 T3-15 Task 投影与 T3-16 工作台验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
+当前 F1-13 基线使用 `@wdio/tauri-service 1.2.0` embedded provider：`pnpm test:tauri` 构建带 `desktop-e2e` Cargo 特性的 debug App，并在真实 macOS WKWebView 中验证无登录工作台和 `main` 原生窗口。WDIO Rust/前端插件、`withGlobalTauri=true` 和测试 Capability 只存在于测试配置对应的构建；测试 Capability 以内联对象提供，不能放入 production 默认扫描的 `capabilities/` 目录。正常 Cargo 依赖树不启用两个可选 WDIO crate，生产 Vite 构建扫描测试标记并 fail closed。所有自动化 Tauri 配置（包括 T3-15 Task 投影、T3-16 工作台与 T3-19 生命周期验收）都把唯一测试主窗口固定为 `visible=false`，自动化 App 只在后台运行且不抢焦点；production `tauri.conf.json` 保持窗口可见。
 
 I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 
-`pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。通用桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用；I2-09 另由 `scripts/run_i2_09_acceptance.py` 启动隔离 PostgreSQL、正式 Alembic/FastAPI 和隐藏测试版真实 Tauri App，经正式 Rust 桥完成 Health → 注册 → App Session → 轮换 → Executor Session → 吊销，并核对 App 私有文件与数据库最终状态。该证据仍不证明 Local Executor、外部运营浏览器或 RPA 可用，这些能力必须在对应任务新增自己的桌面用例。
+`pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。通用桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用；I2-09 由 `scripts/run_i2_09_acceptance.py` 验证认证纵向链路，T3-19 由 `scripts/run_t3_19_acceptance.py` 启动隔离 PostgreSQL、正式 Alembic/FastAPI、受控 Executor 和隐藏真实 Tauri App，经页面创建两个 Task，完成暂停→恢复→取消、独立成功与整页刷新恢复，并核对 App 私有文件与数据库最终状态。这些证据仍不证明 Local Executor、外部运营浏览器或 RPA 可用，对应能力必须在后续任务新增自己的桌面用例。
 
 ## 14. 构建和配置
 

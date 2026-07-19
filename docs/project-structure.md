@@ -57,7 +57,8 @@ automation-tool/
 │   ├── run_t3_15_acceptance.py   # 隐藏 Tauri Query/Reducer/Channel 验收
 │   ├── run_t3_16_acceptance.py   # 隐藏 Tauri 工作台页面真实紧停验收
 │   ├── run_t3_17_acceptance.py   # 隐藏 Tauri 新建表单→API→定义持久化验收
-│   └── run_t3_18_acceptance.py   # 隐藏 Tauri 运行详情→四类控制→事件终态验收
+│   ├── run_t3_18_acceptance.py   # 隐藏 Tauri 运行详情→四类控制→事件终态验收
+│   └── run_t3_19_acceptance.py   # 隐藏 Tauri 创建/控制/成功→整页刷新恢复验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -108,6 +109,7 @@ frontend/
 │   ├── stores/                    # 少量纯客户端 Zustand 状态
 │   ├── styles/
 │   ├── test/
+│   ├── test-harness/              # 仅 Playwright 入口可达的窄测试 Adapter
 │   └── main.tsx
 ├── e2e/                           # Playwright 测试专用 UI Harness
 ├── e2e-tauri/                     # WebdriverIO 真实 Tauri E2E
@@ -140,6 +142,7 @@ frontend/
 │   ├── tauri.task-termination-e2e.conf.json # 后台隐藏的取消/紧停验收
 │   ├── tauri.task-projection-e2e.conf.json # 后台隐藏的 Query/Channel 验收
 │   ├── tauri.task-run-e2e.conf.json # 后台隐藏的运行详情四类控制验收
+│   ├── tauri.task-lifecycle-e2e.conf.json # 后台隐藏的完整生命周期与刷新验收
 │   └── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
 ├── public/
 ├── package.json
@@ -157,6 +160,7 @@ frontend/
 ├── wdio.task-termination.conf.ts
 ├── wdio.task-projection.conf.ts
 ├── wdio.task-run.conf.ts
+├── wdio.task-lifecycle.conf.ts
 ├── wdio.workbench.conf.ts
 ├── tsconfig.json
 └── README.md
@@ -253,6 +257,8 @@ T3-15 的 `frontend/src/api/control-plane/task-projections.ts` 定义严格公�
 T3-17 的 `domain/task_definitions.py` 定义唯一 `douyin.search_exposure.v1` 领域对象，迁移 `20260718_0013` 与既有 Task 复合 scope 绑定明确列定义；`api/tasks.py`、`application/tasks.py` 和 `infrastructure/database/task_repository.py` 沿同一正式创建链原子保存并校验幂等重放。桌面侧 `features/task-create/` 只处理封闭表单，`platform/tauri/task-creation-gateway.ts` 只调用固定 Rust Command；专用隐藏 Tauri 配置、WDIO spec 与 `scripts/run_t3_17_acceptance.py` 只承担真实 App→API→PostgreSQL 最终状态验收。
 
 T3-18 的 `features/task-runs/TaskRunDetails.tsx` 组合权威 Task 快照、持久事件时间线、已有 Action 结果与状态相容控制；`platform/tauri/task-run-control-gateway.ts` 只映射四个固定 Rust Command，不提供通用 operation。专用隐藏 Tauri 配置、WDIO spec 与 `scripts/run_t3_18_acceptance.py` 从真实页面发起暂停、恢复、取消、紧停，并核对 PostgreSQL 命令、事件和终态。
+
+T3-19 的 `src/test-harness/task-lifecycle.ts` 只实现 Feature 已有的窄 gateway/source 契约，以 `sessionStorage` 支持 Playwright 创建、控制、独立成功和整页刷新恢复；正式构建扫描继续拒绝任何 Harness 标记。`tauri.task-lifecycle-e2e.conf.json`、对应 WDIO spec 和 `scripts/run_t3_19_acceptance.py` 则从唯一隐藏真实 App 页面创建两个 Task，经正式 TypeScript/Rust/FastAPI/PostgreSQL/Executor 链完成取消与成功，再刷新 WebView 并核对数据库事实；Harness 不能替代该产品入口证据。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

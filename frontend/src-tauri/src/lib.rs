@@ -835,6 +835,36 @@ async fn prepare_task_run_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_task_lifecycle_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskCreateFormAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_T319_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_T319_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(TaskCreateFormAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 async fn query_tasks_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
@@ -1176,6 +1206,7 @@ pub fn run() {
         prepare_task_projection_for_acceptance,
         prepare_task_create_form_for_acceptance,
         prepare_task_run_for_acceptance,
+        prepare_task_lifecycle_for_acceptance,
         prepare_workbench_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance

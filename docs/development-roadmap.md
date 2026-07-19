@@ -32,7 +32,7 @@
 
 ## 3. 当前进度快照
 
-快照日期：2026-07-18。
+快照日期：2026-07-19。
 
 | 范围 | 当前结果 |
 | --- | --- |
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-18 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台、受约束新建表单和权威运行详情可用；真实 RPA 功能尚未开始 |
+| 产品代码 | `🚧` Wave 1、Wave 2 与 T3-01～T3-19 已完成；Task 创建/查询/SSE/四种控制、Executor WebSocket、FakeExecutor、持久命令、事件闭环、工作台、受约束新建表单、权威运行详情和刷新恢复 E2E 可用；真实 RPA 功能尚未开始 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
 | 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
@@ -71,7 +71,7 @@
 | 暂停/恢复 API | `✅` Installation-scoped 幂等控制命令、原子 sequence、ACK 后事件门禁与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
 | 取消/紧停 API | `✅` 原子 CANCELLING、幂等重放、ACK 后终态、完成竞态、结果不确定与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
 | Task 桌面投影 | `✅` TanStack Query 权威快照、严格 DTO、事件去重、缺口/版本回拉、有限降级及 Rust SSE→Tauri Channel 已由隐藏 App 生产同路径验证 |
-| UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky；正式 dist 排除 Harness 与测试 Adapter 已验证 |
+| UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 dist 排除 Harness 与测试 Adapter 已验证 |
 | 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
@@ -208,7 +208,7 @@
 | T3-16 | 工作台页面 | 当前任务、最近任务、后端/Executor 状态和全局紧停 | T3-15 | ✅ 已完成 |
 | T3-17 | 新建任务骨架 | 抖音搜索曝光模板字段和客户端/服务端一致校验 | T3-06,T3-15 | ✅ 已完成 |
 | T3-18 | 运行详情页面 | 状态、进度、时间线、目标结果和控制按钮 | T3-13,T3-15 | ✅ 已完成 |
-| T3-19 | UI Harness E2E | 创建→运行→暂停→恢复→取消/成功→刷新恢复 | T3-16,T3-17,T3-18 | ⬜ 未开始 |
+| T3-19 | UI Harness E2E | 创建→运行→暂停→恢复→取消/成功→刷新恢复 | T3-16,T3-17,T3-18 | ✅ 已完成 |
 | T3-20 | Control Plane 重启恢复 | PostgreSQL 保持任务/命令/事件，FakeExecutor 重连收敛 | T3-11,T3-19 | ⬜ 未开始 |
 
 ## 9. Wave 4：Tauri 与 Local Executor 生命周期
@@ -1293,10 +1293,28 @@
 - 真实账号边界：本任务只验证桌面控制面和受控 Executor，无社交平台副作用，不需要真实平台账号也不宣称平台验收。后续真实抖音/小红书行为若暂缺账号，继续用自建测试页/适配器完成工程验收并将平台项保留为 `🔍 待真实账号`，不得阻塞后续任务
 - 文档：同步根/Backend/Frontend README、前端架构、工程结构与本路线图；没有新增重复规划文档
 
+### T3-19 UI Harness E2E
+
+- 状态：✅ 已完成
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：在 Playwright 测试专用 UI Harness 覆盖创建→运行→暂停→恢复→取消、独立成功任务和页面刷新恢复；同时以唯一 `visible=false` 真实 Tauri App 经正式 TypeScript/Rust/真实后端/Executor 链路重放同一代表流程，Harness 不替代产品入口证据
+- 边界：继续使用无平台副作用的受控 Executor，不操作抖音/小红书，不需要真实账号；真实平台最终状态仍不在本任务宣称
+- RED：新增显式进入运行详情、Playwright 完整生命周期、隐藏 App 工程契约和安全配置测试。组件测试准确证明当前创建成功会立即调用 `onCreated`；Harness 因没有 Task 测试 Adapter 无法产生创建回执；Node/Rust 分别因 T3-19 隐藏配置、WDIO spec/runner 和注册入口不存在而失败
+- 创建交互：创建成功后保留服务端回执，不再自动离开；用户点击“查看运行详情”才进入详情。T3-17 隐藏 App 纵向验收已回归通过，原创建表单→Rust Command→真实 API/PostgreSQL 链路未被破坏
+- Harness：新增窄 `TestHarnessTaskLifecycle`，只在 `?scenario=task-lifecycle` 注入，以 `sessionStorage` 保存测试事实。首个任务按页面真实点击暂停、恢复、取消，第二个任务确定性成功；整页刷新后重新进入成功任务，状态与历史仍可恢复
+- 生产隔离：正式 Vite 构建仍只有 `index.html`，production boundary 扫描证明不含 Harness 页面、运行标记或测试 Adapter。Harness 只证明 React 交互，不代表 Tauri IPC、Rust、真实网络或 Executor 已通过
+- 产品同路径：`backend/.venv/bin/python scripts/run_t3_19_acceptance.py` 启动隔离 PostgreSQL、完整 Alembic、真实 Uvicorn、HOLD/SUCCEED FakeExecutor 与唯一 `visible=false` Tauri/WKWebView。页面真实创建两个定义，首个任务依次点击暂停、恢复、取消，第二个任务成功，再执行整页 WebView refresh 并从工作台/数据库重新读取成功状态
+- 最终事实：受控任务的 offer/pause/resume/cancel 命令全部 acknowledged，持久事件为 started、step started、paused、resumed、cancelled，Task 为 `cancelled`、revision 7、watermark 5；成功任务 offer acknowledged，事件为 started、step started、step progress、step completed、task completed，Task 为 `succeeded`、revision 6、watermark 5。两个定义均由同一 Installation 的 App 页面创建，Executor 使用两张精确 `executor.connect` Session
+- 失败矩阵：第一次隐藏 App 构建因引用不存在的 `wdio:allow-wdio` 权限而按 Tauri ACL fail closed；第二次因继承 `browserName: webkit` 被 embedded provider 拒绝。最终改为仓库已存在的最小权限集合和 `browserName: tauri`，没有改生产 Capability 或绕过产品路径
+- 分层验证：Backend `753 passed`，4045 条语句/772 个分支覆盖率 100%；Frontend 38 项 Node 工程契约、112 项 Vitest、5 项 Playwright 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置均为 40 项单元、3 项共享协议、13 项安全配置全绿。Ruff/格式、严格 Mypy、uv lock/sync、ESLint、TypeScript、peer dependency、OpenAPI 漂移、production boundary、Cargo fmt 与三种配置 Clippy 零警告全部通过
+- App、账号与清理：隐藏 App 全程不弹窗、不抢焦点；设备私钥与长期凭据只进入隔离 `app_data_dir` 私有文件，不使用系统钥匙串。T3-17/T3-19 结束均已回收 App、服务、8765 端口、容器、网络、卷和测试目录
+- 真实账号边界：本任务无社交平台副作用，不需要真实账号也不宣称抖音/小红书最终状态。后续缺真实账号时继续用自建测试页/隔离 Adapter 完成工程验收，仅把平台最终状态标记为 `🔍 待真实账号`，不阻塞后续 Wave
+- 文档：同步根/Backend/Frontend README、前端架构、工程结构与本路线图；没有增加重复规划文档
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `T3-19`：完成创建→运行→暂停→恢复→取消/成功→刷新恢复的 UI Harness E2E；
-2. `T3-20`：完成 Control Plane 与 Executor 重启恢复；
-3. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。
+1. `T3-20`：完成 Control Plane 与 Executor 重启恢复；
+2. 按台账与 TaskList 顺序持续执行 Wave 4～Wave 10；外部真实账号/设备验收在条件到位时补齐，不在单个工程任务后停止。

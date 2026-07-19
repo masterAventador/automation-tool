@@ -60,3 +60,50 @@ test("revoked Harness shows the distinct Installation diagnostic", async ({ page
   await expect(page.getByRole("button", { name: /登录|注册/ })).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
 });
+
+test("Task lifecycle Harness covers control, success, and refresh recovery", async ({
+  page,
+}) => {
+  const consoleErrors = failOnConsoleErrors(page);
+  await page.goto("/harness.html?health=available&scenario=task-lifecycle");
+
+  await page.getByRole("menuitem", { name: "新建任务" }).click();
+  await page.getByLabel("搜索关键词").fill("T3-19 取消链路");
+  await page.getByLabel("单任务目标上限").fill("3");
+  await page.getByRole("button", { name: "创建任务" }).click();
+  const controlledReceipt = page.getByText(/任务已创建：[0-9a-f-]{36}/);
+  await expect(controlledReceipt).toBeVisible();
+  await page.getByRole("button", { name: "查看运行详情" }).click();
+  await expect(page.getByRole("heading", { name: "任务运行详情" })).toBeVisible();
+  await expect(page.getByText("任务开始")).toBeVisible();
+
+  await page.getByRole("button", { name: /暂.*停/ }).click();
+  await expect(page.getByText("任务已暂停")).toBeVisible();
+  await page.getByRole("button", { name: /恢.*复/ }).click();
+  await expect(page.getByText("任务已恢复")).toBeVisible();
+  await page.getByRole("button", { name: "取消任务" }).click();
+  await page.getByRole("button", { name: "确认取消" }).click();
+  await expect(page.getByText("任务已取消")).toBeVisible();
+
+  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.getByRole("menuitem", { name: "新建任务" }).click();
+  await page.getByLabel("搜索关键词").fill("T3-19 成功链路");
+  await page.getByRole("button", { name: "创建任务" }).click();
+  const succeededReceipt = page.getByText(/任务已创建：[0-9a-f-]{36}/);
+  await expect(succeededReceipt).toBeVisible();
+  const succeededTaskId = (await succeededReceipt.textContent())?.match(
+    /[0-9a-f-]{36}/,
+  )?.[0];
+  expect(succeededTaskId).toBeTruthy();
+  await page.getByRole("button", { name: "查看运行详情" }).click();
+  await expect(page.getByText("任务完成")).toBeVisible();
+  await expect(page.getByText("100%")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+  await page.getByRole("button", { name: succeededTaskId! }).click();
+  await expect(page.getByRole("heading", { name: "任务运行详情" })).toBeVisible();
+  await expect(page.getByText("任务完成")).toBeVisible();
+  await expect(page.getByText("已成功").first()).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+});
