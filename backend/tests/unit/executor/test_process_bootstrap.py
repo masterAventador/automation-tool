@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -17,6 +18,7 @@ INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
 EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
 SESSION_TOKEN = "atds1.private-session-material"
 LOCAL_SESSION_TOKEN = "01" * 32
+STATE_DIRECTORY = str((Path.cwd() / ".automation-tool-executor-test").resolve())
 
 
 def bootstrap_source(**overrides: object) -> bytes:
@@ -28,7 +30,7 @@ def bootstrap_source(**overrides: object) -> bytes:
         "installation_id": INSTALLATION_ID,
         "executor_id": EXECUTOR_ID,
         "heartbeat_interval_seconds": 1,
-        "state_directory": "/private/tmp/automation-tool-executor-test",
+        "state_directory": STATE_DIRECTORY,
     }
     payload.update(overrides)
     return (json.dumps(payload, separators=(",", ":")) + "\n").encode()
@@ -48,7 +50,7 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
     assert str(bootstrap.installation_id) == INSTALLATION_ID
     assert str(bootstrap.executor_id) == EXECUTOR_ID
     assert bootstrap.heartbeat_interval_seconds == 1
-    assert bootstrap.state_directory == "/private/tmp/automation-tool-executor-test"
+    assert bootstrap.state_directory == STATE_DIRECTORY
     assert stream.readline() == b"second-line-is-not-consumed\n"
     assert SESSION_TOKEN not in repr(bootstrap)
     assert SESSION_TOKEN not in bootstrap.model_dump_json()

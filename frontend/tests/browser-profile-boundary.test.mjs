@@ -9,9 +9,10 @@ async function readRepositoryFile(path) {
 }
 
 test("B5-05 keeps Profile creation inside Rust without a WebView path command", async () => {
-  const [library, profiles] = await Promise.all([
+  const [library, profiles, windowsProfiles] = await Promise.all([
     readRepositoryFile("frontend/src-tauri/src/lib.rs"),
     readRepositoryFile("frontend/src-tauri/src/browser_profiles.rs"),
+    readRepositoryFile("frontend/src-tauri/src/browser_profiles_windows.rs"),
   ]);
 
   assert.match(library, /pub mod browser_profiles;/u);
@@ -24,4 +25,8 @@ test("B5-05 keeps Profile creation inside Rust without a WebView path command", 
   assert.match(profiles, /const DOUYIN_DIRECTORY: &str = "douyin";/u);
   assert.doesNotMatch(profiles, /create_dir_all|remove_dir_all|canonicalize/u);
   assert.doesNotMatch(profiles, /xiaohongshu|kuaishou|wechat|cookie|account_id/u);
+  assert.match(windowsProfiles, /PrivateSecurityDescriptor::new\(DIRECTORY_ACE_FLAGS\)/u);
+  assert.match(windowsProfiles, /map_or\(null\(\), PrivateSecurityDescriptor::as_ptr\)/u);
+  assert.match(windowsProfiles, /SecurityDescriptor: security_descriptor/u);
+  assert.match(windowsProfiles, /SetSecurityDescriptorControl/u);
 });

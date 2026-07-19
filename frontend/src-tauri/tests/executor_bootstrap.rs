@@ -9,6 +9,10 @@ use std::path::Path;
 
 const CONTROL_PLANE_SESSION: &str = "atds1.private-control-plane-session";
 const AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-event.v1\0";
+#[cfg(not(windows))]
+const STATE_DIRECTORY: &str = "/private/tmp/automation-tool-executor-bootstrap-test";
+#[cfg(windows)]
+const STATE_DIRECTORY: &str = r"C:\private\tmp\automation-tool-executor-bootstrap-test";
 
 fn input() -> ExecutorBootstrapInput<'static> {
     ExecutorBootstrapInput::new(
@@ -16,7 +20,7 @@ fn input() -> ExecutorBootstrapInput<'static> {
         CONTROL_PLANE_SESSION,
         "123e4567-e89b-42d3-a456-426614174003",
         "123e4567-e89b-42d3-a456-426614174004",
-        Path::new("/private/tmp/automation-tool-executor-bootstrap-test"),
+        Path::new(STATE_DIRECTORY),
         1,
     )
     .expect("valid bootstrap input")
@@ -81,10 +85,7 @@ fn bootstrap_writes_a_fresh_256_bit_token_only_to_the_stdin_document() {
     assert_ne!(first_token, second_token);
     assert_eq!(first_document["session_token"], CONTROL_PLANE_SESSION);
     assert_ne!(first_token, CONTROL_PLANE_SESSION);
-    assert_eq!(
-        first_document["state_directory"],
-        "/private/tmp/automation-tool-executor-bootstrap-test"
-    );
+    assert_eq!(first_document["state_directory"], STATE_DIRECTORY);
     assert!(!format!("{first:?}").contains(first_token));
     assert!(!format!("{first:?}").contains(CONTROL_PLANE_SESSION));
 }
@@ -121,7 +122,7 @@ fn bootstrap_rejects_invalid_inputs_and_failed_writes_without_secret_reflection(
         CONTROL_PLANE_SESSION,
         "not-an-installation",
         "123e4567-e89b-42d3-a456-426614174004",
-        Path::new("/private/tmp/automation-tool-executor-bootstrap-test"),
+        Path::new(STATE_DIRECTORY),
         1,
     )
     .is_err());

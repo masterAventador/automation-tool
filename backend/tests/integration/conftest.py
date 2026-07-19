@@ -2,6 +2,7 @@ import os
 import secrets
 import socket
 import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,11 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPOSITORY_ROOT / "compose.yaml"
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+
+sys.path.insert(0, os.fspath(REPOSITORY_ROOT))
+from scripts.acceptance_postgres import (  # type: ignore[import-not-found]  # noqa: E402
+    managed_test_postgres,
+)
 
 
 class AlembicRunner(Protocol):
@@ -68,24 +74,15 @@ def postgresql_url() -> Iterator[str]:
         str(COMPOSE_FILE),
     ]
 
-    try:
-        subprocess.run(
-            [*command, "up", "--detach", "--wait", "postgres-test"],
-            check=True,
-            capture_output=True,
-            env=environment,
-            text=True,
-        )
-        password = environment["AUTOMATION_TOOL_TEST_DB_PASSWORD"]
-        yield (
-            "postgresql+asyncpg://automation_tool_test:"
-            f"{password}@127.0.0.1:{test_port}/automation_tool_test"
-        )
-    finally:
-        subprocess.run(
-            [*command, "down", "--volumes", "--remove-orphans"],
-            check=False,
-            capture_output=True,
-            env=environment,
-            text=True,
-        )
+    password = environment["AUTOMATION_TOOL_TEST_DB_PASSWORD"]
+    database_url = (
+        "postgresql+asyncpg://automation_tool_test:"
+        f"{password}@127.0.0.1:{test_port}/automation_tool_test"
+    )
+    with managed_test_postgres(
+        compose=command,
+        database_port=test_port,
+        environment=environment,
+        repository_root=REPOSITORY_ROOT,
+    ):
+        yield database_url

@@ -12,8 +12,22 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
+from acceptance_postgres import managed_test_postgres
+from automation_tool.control_plane.application.device_sessions import (
+    DeviceSessionCapability,
+)
+from automation_tool.control_plane.application.task_command_delivery import (
+    TaskCommandRecord,
+)
+from automation_tool.control_plane.infrastructure.database import (
+    Database,
+    task_commands,
+    task_events,
+)
+from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 from run_e4_07_acceptance import RUST_ROOT, build_signed_executor
 from run_i2_13_acceptance import (
     BACKEND_ROOT,
@@ -28,25 +42,10 @@ from run_i2_13_acceptance import (
 from run_t3_11_acceptance import seed_attempt_and_offer, wait_for_convergence
 from sqlalchemy import select
 
-from automation_tool.control_plane.application.device_sessions import (
-    DeviceSessionCapability,
-)
-from automation_tool.control_plane.application.task_command_delivery import (
-    TaskCommandRecord,
-)
-from automation_tool.control_plane.infrastructure.database import (
-    Database,
-    task_commands,
-    task_events,
-)
-from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
-
 
 def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
     environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("AUTOMATION_TOOL_")
+        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
     }
     database_password = secrets.token_hex(24)
     database_url = (
@@ -128,9 +127,7 @@ def run_rust_manager(
         json.dumps(
             {
                 "packageRoot": os.fspath(package_root),
-                "websocketUrl": (
-                    f"ws://127.0.0.1:{control_plane_port}/api/v1/executors/connect"
-                ),
+                "websocketUrl": (f"ws://127.0.0.1:{control_plane_port}/api/v1/executors/connect"),
                 "sessionToken": session_token,
                 "installationId": installation_id,
                 "executorId": executor_id,
@@ -149,7 +146,7 @@ def run_rust_manager(
             "test",
             "--locked",
             "--test",
-            "executor_manager",
+            "executor_manager_packaged",
             "real_packaged_executor_uses_the_public_manager_lifecycle",
             "--",
             "--ignored",
@@ -164,7 +161,7 @@ def run_rust_manager(
     )
     if session_token in completed.stdout or session_token in completed.stderr:
         raise RuntimeError("E4-12 Rust Manager reflected the Control Plane Session")
-    if completed.returncode != 0:
+    if completed.returncode != 0 or "1 passed; 0 failed" not in completed.stdout:
         diagnostic = (completed.stdout + "\n" + completed.stderr).replace(
             session_token,
             "[REDACTED]",
@@ -176,7 +173,7 @@ def ledger_snapshot(workspace: Path, original: TaskCommandRecord) -> tuple[objec
     ledger_path = workspace / "executor-state" / "executor-ledger.sqlite3"
     if not ledger_path.is_file():
         raise RuntimeError("E4-12 packaged Executor did not create its durable ledger")
-    with sqlite3.connect(ledger_path) as connection:
+    with closing(sqlite3.connect(ledger_path)) as connection:
         commands = connection.execute(
             "SELECT message_id, idempotency_key FROM executor_commands ORDER BY message_id"
         ).fetchall()
@@ -193,9 +190,7 @@ def ledger_snapshot(workspace: Path, original: TaskCommandRecord) -> tuple[objec
             """
         ).fetchall()
     if commands != [(str(original.message_id), original.idempotency_key)]:
-        raise RuntimeError(
-            "E4-12 command receipt is not the original Control Plane command"
-        )
+        raise RuntimeError("E4-12 command receipt is not the original Control Plane command")
     if checkpoints != [(str(original.execution_attempt_id), "terminal", 1, 5, 2)]:
         raise RuntimeError("E4-12 Attempt checkpoint did not converge atomically")
     if len(outbox) != 6 or any(row[3] != 1 for row in outbox):
@@ -209,9 +204,7 @@ def ledger_snapshot(workspace: Path, original: TaskCommandRecord) -> tuple[objec
         "step.completed",
         "task.completed",
     ]:
-        raise RuntimeError(
-            "E4-12 durable outcome batch is not the fixed success sequence"
-        )
+        raise RuntimeError("E4-12 durable outcome batch is not the fixed success sequence")
     return commands, checkpoints, outbox
 
 
@@ -255,13 +248,9 @@ async def control_plane_snapshot(
     finally:
         await database.close()
     if len(events) != 5 or [row[0] for row in events] != [1, 2, 3, 4, 5]:
-        raise RuntimeError(
-            "E4-12 Control Plane did not retain one contiguous event timeline"
-        )
+        raise RuntimeError("E4-12 Control Plane did not retain one contiguous event timeline")
     if events[2][3] != 100:
-        raise RuntimeError(
-            "E4-12 Control Plane did not retain the real progress payload"
-        )
+        raise RuntimeError("E4-12 Control Plane did not retain the real progress payload")
     return command, tuple(events)
 
 
@@ -277,8 +266,8 @@ def stop_process(process: subprocess.Popen[bytes] | None) -> None:
 
 
 def main() -> None:
-    if platform.system() != "Darwin":
-        raise RuntimeError("E4-12 local packaged acceptance currently requires macOS")
+    if platform.system() not in {"Darwin", "Windows"}:
+        raise RuntimeError("E4-12 local packaged acceptance requires macOS or Windows")
     project_name = f"automation-tool-e412-{os.getpid()}"
     database_port = unused_loopback_port()
     control_plane_port = unused_loopback_port()
@@ -287,79 +276,78 @@ def main() -> None:
     server: subprocess.Popen[bytes] | None = None
     try:
         print("[E4-12] Starting isolated PostgreSQL")
-        subprocess.run(
-            [*compose, "up", "--detach", "--wait", "postgres-test"],
-            check=True,
-            cwd=REPOSITORY_ROOT,
-            env=environment,
-        )
-        print("[E4-12] Applying the production Alembic migration chain")
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            check=True,
-            cwd=BACKEND_ROOT,
-            env=environment,
-        )
-        credential, installation_id = asyncio.run(seed_active_credential(database_url))
-        original = asyncio.run(seed_attempt_and_offer(database_url, installation_id))
-        server = start_control_plane(port=control_plane_port, environment=environment)
-        session_token = issue_executor_session(control_plane_port, credential)
-        with tempfile.TemporaryDirectory(prefix="automation-tool-e4-12-") as directory:
-            workspace = Path(directory).resolve(strict=True)
-            print("[E4-12] Building and signing the real PyInstaller Executor")
-            package_root = build_signed_executor(workspace, build_id="e4-12-real")
-            arguments = {
-                "package_root": package_root,
-                "workspace": workspace,
-                "control_plane_port": control_plane_port,
-                "session_token": session_token,
-                "installation_id": str(installation_id),
-                "executor_id": "123e4567-e89b-42d3-a456-426614174004",
-            }
-            print("[E4-12] Dispatching through Rust Manager and the packaged Executor")
-            run_rust_manager(**arguments)
-            asyncio.run(wait_for_convergence(database_url, original))
-            first_ledger = ledger_snapshot(workspace, original)
-            first_control_plane = asyncio.run(
-                control_plane_snapshot(database_url, original)
-            )
-            print("[E4-12] Restarting against the same ledger for exact replay")
-            run_rust_manager(**arguments)
-            asyncio.run(wait_for_convergence(database_url, original))
-            second_ledger = ledger_snapshot(workspace, original)
-            second_control_plane = asyncio.run(
-                control_plane_snapshot(database_url, original)
-            )
-            if first_ledger != second_ledger:
-                raise RuntimeError(
-                    "E4-12 restart regenerated durable Executor messages"
+        with managed_test_postgres(
+            compose=compose,
+            database_port=database_port,
+            environment=environment,
+            repository_root=REPOSITORY_ROOT,
+        ):
+            try:
+                print("[E4-12] Applying the production Alembic migration chain")
+                subprocess.run(
+                    [sys.executable, "-m", "alembic", "upgrade", "head"],
+                    check=True,
+                    cwd=BACKEND_ROOT,
+                    env=environment,
                 )
-            if first_control_plane != second_control_plane:
-                raise RuntimeError(
-                    "E4-12 restart duplicated or advanced Control Plane facts"
+                credential, installation_id = asyncio.run(seed_active_credential(database_url))
+                original = asyncio.run(seed_attempt_and_offer(database_url, installation_id))
+                server = start_control_plane(
+                    port=control_plane_port,
+                    environment=environment,
                 )
-            ledger_bytes = (
-                workspace / "executor-state" / "executor-ledger.sqlite3"
-            ).read_bytes()
-            if session_token.encode() in ledger_bytes:
-                raise RuntimeError(
-                    "E4-12 persisted the Control Plane Session in SQLite"
+                session_token = issue_executor_session(
+                    control_plane_port,
+                    credential,
                 )
-        print(
-            "E4-12 acceptance passed: Control Plane -> Rust Manager -> packaged Executor "
-            "-> durable exact replay"
-        )
+                with tempfile.TemporaryDirectory(prefix="automation-tool-e4-12-") as directory:
+                    workspace = Path(directory).resolve(strict=True)
+                    print("[E4-12] Building and signing the real PyInstaller Executor")
+                    package_root = build_signed_executor(
+                        workspace,
+                        build_id="e4-12-real",
+                    )
+                    arguments = {
+                        "package_root": package_root,
+                        "workspace": workspace,
+                        "control_plane_port": control_plane_port,
+                        "session_token": session_token,
+                        "installation_id": str(installation_id),
+                        "executor_id": "123e4567-e89b-42d3-a456-426614174004",
+                    }
+                    print("[E4-12] Dispatching through Rust Manager and the packaged Executor")
+                    run_rust_manager(**arguments)
+                    asyncio.run(wait_for_convergence(database_url, original))
+                    first_ledger = ledger_snapshot(workspace, original)
+                    first_control_plane = asyncio.run(
+                        control_plane_snapshot(database_url, original)
+                    )
+                    print("[E4-12] Restarting against the same ledger for exact replay")
+                    run_rust_manager(**arguments)
+                    asyncio.run(wait_for_convergence(database_url, original))
+                    second_ledger = ledger_snapshot(workspace, original)
+                    second_control_plane = asyncio.run(
+                        control_plane_snapshot(database_url, original)
+                    )
+                    if first_ledger != second_ledger:
+                        raise RuntimeError("E4-12 restart regenerated durable Executor messages")
+                    if first_control_plane != second_control_plane:
+                        raise RuntimeError(
+                            "E4-12 restart duplicated or advanced Control Plane facts"
+                        )
+                    ledger_bytes = (
+                        workspace / "executor-state" / "executor-ledger.sqlite3"
+                    ).read_bytes()
+                    if session_token.encode() in ledger_bytes:
+                        raise RuntimeError("E4-12 persisted the Control Plane Session in SQLite")
+                print(
+                    "E4-12 acceptance passed: Control Plane -> Rust Manager -> "
+                    "packaged Executor -> durable exact replay"
+                )
+            finally:
+                stop_process(server)
+                require_port_closed(control_plane_port)
     finally:
-        stop_process(server)
-        subprocess.run(
-            [*compose, "down", "--volumes", "--remove-orphans"],
-            check=False,
-            cwd=REPOSITORY_ROOT,
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        require_port_closed(control_plane_port)
         require_port_closed(database_port)
 
 

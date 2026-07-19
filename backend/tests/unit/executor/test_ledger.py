@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -594,14 +595,47 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     with pytest.raises(ExecutorLedgerRejected):
         ledger(corrupt_state)
 
-    if not hasattr(os, "symlink"):
-        return
     real_directory = tmp_path / "real"
     real_directory.mkdir(mode=0o700)
     linked_directory = tmp_path / "linked"
-    linked_directory.symlink_to(real_directory, target_is_directory=True)
+    if os.name == "nt":
+        junction = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", linked_directory, real_directory],
+            capture_output=True,
+            check=False,
+        )
+        assert junction.returncode == 0, junction.stderr
+    elif hasattr(os, "symlink"):
+        linked_directory.symlink_to(real_directory, target_is_directory=True)
+    else:
+        return
     with pytest.raises(ExecutorLedgerRejected):
         ledger(linked_directory)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL boundary")
+def test_windows_broad_directory_and_database_acls_fail_closed(tmp_path: Path) -> None:
+    broad_directory = tmp_path / "broad-directory"
+    broad_directory.mkdir()
+    directory_acl = subprocess.run(
+        ["icacls.exe", broad_directory, "/grant", "*S-1-5-11:(M)"],
+        capture_output=True,
+        check=False,
+    )
+    assert directory_acl.returncode == 0, directory_acl.stderr
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger(broad_directory)
+
+    file_state = tmp_path / "broad-database"
+    opened = ledger(file_state)
+    file_acl = subprocess.run(
+        ["icacls.exe", opened.database_path, "/grant", "*S-1-5-11:(R)"],
+        capture_output=True,
+        check=False,
+    )
+    assert file_acl.returncode == 0, file_acl.stderr
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.get_checkpoint(ATTEMPT_ID)
 
 
 def test_invalid_identity_permissions_file_shapes_and_open_races_fail_closed(
@@ -622,17 +656,18 @@ def test_invalid_identity_permissions_file_shapes_and_open_races_fail_closed(
                 executor_id=EXECUTOR_ID,
             )
 
-    public_directory = tmp_path / "public-state"
-    public_directory.mkdir(mode=0o700)
-    public_directory.chmod(0o755)
-    with pytest.raises(ExecutorLedgerRejected):
-        ledger(public_directory)
+    if os.name != "nt":
+        public_directory = tmp_path / "public-state"
+        public_directory.mkdir(mode=0o700)
+        public_directory.chmod(0o755)
+        with pytest.raises(ExecutorLedgerRejected):
+            ledger(public_directory)
 
-    insecure_file_state = tmp_path / "insecure-file-state"
-    insecure = ledger(insecure_file_state)
-    insecure.database_path.chmod(0o644)
-    with pytest.raises(ExecutorLedgerRejected):
-        insecure.get_checkpoint(ATTEMPT_ID)
+        insecure_file_state = tmp_path / "insecure-file-state"
+        insecure = ledger(insecure_file_state)
+        insecure.database_path.chmod(0o644)
+        with pytest.raises(ExecutorLedgerRejected):
+            insecure.get_checkpoint(ATTEMPT_ID)
 
     non_file_state = tmp_path / "non-file-state"
     non_file = ledger(non_file_state)

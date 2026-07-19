@@ -258,8 +258,8 @@ def test_nonterminal_idle_stream_sends_comments_then_rotates_the_connection() ->
     response = stream_app(
         repository,
         task_event_stream_poll_interval_seconds=0.001,
-        task_event_stream_keepalive_interval_seconds=0.002,
-        task_event_stream_max_connection_seconds=0.006,
+        task_event_stream_keepalive_interval_seconds=0.01,
+        task_event_stream_max_connection_seconds=0.1,
     ).get(f"/api/v1/tasks/{TASK_ID}/events")
 
     assert response.status_code == 200

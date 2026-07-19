@@ -209,6 +209,7 @@ def start_executor(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
     )
     stdin = process.stdin
     assert stdin is not None
@@ -218,7 +219,7 @@ def start_executor(
 
 
 def stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
-    process.send_signal(signal.SIGTERM)
+    process.send_signal(signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGTERM)
     stdout, stderr = process.communicate(timeout=5)
     return stdout, stderr
 

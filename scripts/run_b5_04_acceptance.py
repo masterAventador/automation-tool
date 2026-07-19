@@ -23,6 +23,14 @@ CANONICAL_SELECTIONS = {
 }
 
 
+def pnpm_executable() -> str:
+    name = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+    executable = shutil.which(name)
+    if executable is None:
+        raise RuntimeError(f"B5-04 cannot find {name} on PATH")
+    return executable
+
+
 def app_data_directory() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
@@ -63,9 +71,7 @@ def require_port_closed(port: int) -> None:
 
 
 def isolated_environment(port: int) -> dict[str, str]:
-    environment = {
-        key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"
-    }
+    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
     return environment
 
@@ -76,9 +82,7 @@ def verify_persisted_selection(private_app_data: Path) -> None:
     document = settings_path.read_bytes()
     if document not in CANONICAL_SELECTIONS:
         raise RuntimeError("B5-04 persisted a non-canonical browser selection")
-    if any(
-        token in document for token in (b"/Applications", b"Program Files", b".exe")
-    ):
+    if any(token in document for token in (b"/Applications", b"Program Files", b".exe")):
         raise RuntimeError("B5-04 persisted a browser path")
     if os.name == "posix":
         if stat.S_IMODE(settings_directory.stat().st_mode) != 0o700:
@@ -96,14 +100,14 @@ def run() -> None:
     environment = isolated_environment(port)
     try:
         subprocess.run(
-            ["pnpm", "build:tauri:browser-settings-test"],
+            [pnpm_executable(), "build:tauri:browser-settings-test"],
             cwd=FRONTEND_ROOT,
             env=environment,
             check=True,
         )
         require_port_closed(port)
         subprocess.run(
-            ["pnpm", "exec", "wdio", "run", "wdio.browser-settings.conf.ts"],
+            [pnpm_executable(), "exec", "wdio", "run", "wdio.browser-settings.conf.ts"],
             cwd=FRONTEND_ROOT,
             env=environment,
             check=True,
@@ -112,7 +116,7 @@ def run() -> None:
         verify_persisted_selection(private_app_data)
     finally:
         restore = subprocess.run(
-            ["pnpm", "build"],
+            [pnpm_executable(), "build"],
             cwd=FRONTEND_ROOT,
             env=environment,
             check=False,

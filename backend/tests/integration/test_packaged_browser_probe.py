@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -9,16 +11,24 @@ import pytest
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
-PROBE_NAME = "automation-tool-browser-probe"
+PROBE_NAME = "automation-tool-executor"
 PROBE_ENVIRONMENT = "AUTOMATION_TOOL_B507_PACKAGED_PROBE"
 VISIBLE_BROWSER_ENVIRONMENT = "AUTOMATION_TOOL_ALLOW_VISIBLE_BROWSER_TESTS"
+TEST_SIGNING_SEED = bytes(range(32))
 
 
 @pytest.mark.skipif(
     os.environ.get(VISIBLE_BROWSER_ENVIRONMENT) != "1",
     reason="explicit visible-browser acceptance; routine local tests stay headless",
 )
-def test_frozen_runtime_launches_a_rust_authorized_system_browser(tmp_path: Path) -> None:
+def test_frozen_runtime_launches_a_rust_authorized_system_browser(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    def cleanup() -> None:
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path)
+
+    request.addfinalizer(cleanup)
     if sys.platform not in {"darwin", "win32"}:
         pytest.skip("B5-07 supports only the two desktop target platforms")
     distribution_root = tmp_path / "dist"
@@ -66,6 +76,30 @@ def test_frozen_runtime_launches_a_rust_authorized_system_browser(tmp_path: Path
         for name in directory_names
     )
 
+    architecture = "x86_64" if platform.machine().lower() in {"x86_64", "amd64"} else "aarch64"
+    manifest = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "automation_tool.executor.package_manifest",
+            "--bundle-dir",
+            os.fspath(probe.parent),
+            "--executor-version",
+            "0.1.0",
+            "--build-id",
+            "b5-08-browser-runtime",
+            "--platform",
+            "windows" if sys.platform == "win32" else "macos",
+            "--architecture",
+            architecture,
+        ],
+        cwd=BACKEND_ROOT,
+        input=TEST_SIGNING_SEED,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert manifest.returncode == 0, manifest.stderr
     environment = os.environ.copy()
     environment[PROBE_ENVIRONMENT] = os.fspath(probe)
     acceptance = subprocess.run(

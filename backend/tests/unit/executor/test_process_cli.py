@@ -75,6 +75,14 @@ def test_cli_maps_bootstrap_and_process_failures_to_fixed_exit_contracts(tmp_pat
     assert cli.run_executor(BytesIO(b"invalid\n"), StringIO(), FailingError()) == 2
 
 
+def test_fixed_errors_use_lf_bytes_when_text_stream_translates_newlines() -> None:
+    raw_error = BytesIO()
+    translated_error = TextIOWrapper(raw_error, encoding="utf-8", newline="\r\n")
+
+    assert cli.run_executor(BytesIO(b"invalid\n"), StringIO(), translated_error) == 2
+    assert raw_error.getvalue() == b"Local Executor bootstrap is rejected\n"
+
+
 def test_cli_returns_success_after_the_runtime_stops(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -125,15 +133,24 @@ def test_cli_collapses_local_authenticator_failure_to_the_fixed_process_error(
 def test_signal_scope_sets_one_event_and_restores_process_handlers() -> None:
     previous_int = signal.getsignal(signal.SIGINT)
     previous_term = signal.getsignal(signal.SIGTERM)
+    previous_break = signal.getsignal(signal.SIGBREAK) if sys.platform == "win32" else None
 
     with cli.stop_signal_event() as stop:
         handler = signal.getsignal(signal.SIGTERM)
         assert callable(handler)
         handler(signal.SIGTERM, None)
         assert stop.is_set()
+        if sys.platform == "win32":
+            stop.clear()
+            break_handler = signal.getsignal(signal.SIGBREAK)
+            assert callable(break_handler)
+            break_handler(signal.SIGBREAK, None)
+            assert stop.is_set()
 
     assert signal.getsignal(signal.SIGINT) == previous_int
     assert signal.getsignal(signal.SIGTERM) == previous_term
+    if sys.platform == "win32":
+        assert signal.getsignal(signal.SIGBREAK) == previous_break
 
 
 def test_main_uses_binary_stdin_and_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> None:

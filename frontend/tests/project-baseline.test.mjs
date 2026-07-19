@@ -61,4 +61,5 @@ test("strict TypeScript React entry and Vite configuration are present", async (
   assert.equal(JSON.parse(tsconfig).compilerOptions.strict, true);
   assert.match(viteConfig, /host: "127\.0\.0\.1"/);
   assert.match(viteConfig, /strictPort: true/);
+  assert.match(viteConfig, /ignored: \["\*\*\/src-tauri\/target\/\*\*"\]/);
 });

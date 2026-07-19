@@ -44,5 +44,8 @@ test("B5-04 exposes browser enums without executable paths", async () => {
   assert.match(runner, /TAURI_WEBDRIVER_PORT/u);
   assert.match(runner, /require_port_closed/u);
   assert.match(runner, /browser-selection-v1/u);
+  assert.match(runner, /"pnpm\.cmd" if sys\.platform == "win32" else "pnpm"/u);
+  assert.match(runner, /\[pnpm_executable\(\), "build:tauri:browser-settings-test"\]/u);
+  assert.match(runner, /\[pnpm_executable\(\), "exec", "wdio"/u);
   assert.match(packageJson, /test:browser-settings-tauri/u);
 });

@@ -2,6 +2,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "windows")]
+#[path = "browser_discovery_windows.rs"]
 mod browser_discovery_windows;
 
 #[cfg(target_os = "macos")]

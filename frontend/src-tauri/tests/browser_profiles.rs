@@ -174,6 +174,110 @@ fn every_created_directory_is_private_and_symlink_components_are_rejected() {
     fs::remove_dir(&outside).expect("remove outside fixture");
 }
 
+#[cfg(target_os = "windows")]
+fn create_junction(link: &std::path::Path, target: &std::path::Path) {
+    let output = std::process::Command::new("cmd.exe")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("run mklink");
+    assert!(
+        output.status.success(),
+        "mklink failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_reparse_components_and_regular_file_children_fail_closed() {
+    let app_data_link = TemporaryAppData::new();
+    let actual = app_data_link.path.join("actual");
+    let junction = app_data_link.path.join("junction");
+    fs::create_dir(&actual).expect("actual AppData directory");
+    create_junction(&junction, &actual);
+    assert_eq!(
+        BrowserProfileStore::initialize(&junction)
+            .expect_err("junction AppData must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+    fs::remove_dir(&junction).expect("remove AppData junction");
+
+    let fixed_child = TemporaryAppData::new();
+    let outside = fixed_child.path.join("outside");
+    fs::create_dir(&outside).expect("outside fixed child");
+    create_junction(&fixed_child.path.join("browser-profiles"), &outside);
+    assert_eq!(
+        BrowserProfileStore::initialize(&fixed_child.path)
+            .expect_err("junction fixed child must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+    fs::remove_dir(fixed_child.path.join("browser-profiles")).expect("remove fixed child junction");
+
+    let regular_child = TemporaryAppData::new();
+    fs::write(
+        regular_child.path.join("browser-profiles"),
+        b"not a directory",
+    )
+    .expect("regular fixed child");
+    assert_eq!(
+        BrowserProfileStore::initialize(&regular_child.path)
+            .expect_err("regular fixed child must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+
+    let profile_leaf = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&profile_leaf.path).expect("profile store");
+    let profile_id = "550e8400-e29b-41d4-a716-446655440000";
+    let outside = profile_leaf.path.join("outside");
+    fs::create_dir(&outside).expect("outside profile directory");
+    let junction = profile_leaf
+        .path
+        .join("browser-profiles/douyin")
+        .join(profile_id);
+    create_junction(&junction, &outside);
+    assert_eq!(
+        store
+            .open_douyin_profile(profile_id)
+            .expect_err("junction Profile leaf must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+    fs::remove_dir(&junction).expect("remove Profile junction");
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_private_dacl_is_applied_and_tampering_fails_closed() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("repair private AppData");
+    let profile = store
+        .create_douyin_profile()
+        .expect("create private Profile");
+    profile.revalidate().expect("private DACL validates");
+
+    let output = std::process::Command::new("icacls.exe")
+        .arg(profile.directory())
+        .args(["/grant", "*S-1-5-11:(OI)(CI)(M)"])
+        .output()
+        .expect("run icacls");
+    assert!(
+        output.status.success(),
+        "icacls failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        profile
+            .revalidate()
+            .expect_err("broadened Profile DACL must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+}
 #[test]
 fn replacing_a_profile_directory_invalidates_the_open_profile() {
     let app_data = TemporaryAppData::new();

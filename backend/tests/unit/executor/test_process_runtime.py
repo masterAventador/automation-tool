@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 
 import pytest
 from pydantic import SecretStr
@@ -61,6 +61,17 @@ def test_reporter_writes_only_fixed_bounded_health_events() -> None:
     assert lines[0]["authenticationProof"] != lines[1]["authenticationProof"]
     assert all(set(line) == {"authenticationProof", "event", "protocolVersion"} for line in lines)
     assert LOCAL_SESSION_TOKEN not in output.getvalue()
+
+
+def test_reporter_uses_lf_bytes_when_stdout_translates_newlines() -> None:
+    raw_output = BytesIO()
+    translated_output = TextIOWrapper(raw_output, encoding="utf-8", newline="\r\n")
+    reporter = ExecutorProcessReporter(translated_output, authenticator())
+
+    reporter.healthy()
+
+    assert raw_output.getvalue().endswith(b"\n")
+    assert not raw_output.getvalue().endswith(b"\r\n")
 
 
 def test_reporter_and_runtime_fail_closed_on_invalid_dependencies() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
@@ -17,6 +18,7 @@ from automation_tool.executor.bootstrap import (
 
 LOCAL_SESSION_TOKEN = "".join(f"{value:02x}" for value in range(32))
 EXPECTED_HEALTHY_PROOF = "atlep1.NOuvIGSTV1bPoAZcqjJCd4V0TtBvVdvc4nPHufoUpRY"
+STATE_DIRECTORY = str((Path.cwd() / ".automation-tool-executor-auth-test").resolve())
 
 
 def bootstrap_source(local_session_token: object = LOCAL_SESSION_TOKEN) -> bytes:
@@ -30,7 +32,7 @@ def bootstrap_source(local_session_token: object = LOCAL_SESSION_TOKEN) -> bytes
                 "installation_id": "123e4567-e89b-42d3-a456-426614174003",
                 "executor_id": "123e4567-e89b-42d3-a456-426614174004",
                 "heartbeat_interval_seconds": 1,
-                "state_directory": "/private/tmp/automation-tool-executor-auth-test",
+                "state_directory": STATE_DIRECTORY,
             },
             separators=(",", ":"),
         )

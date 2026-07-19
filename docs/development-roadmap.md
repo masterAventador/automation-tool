@@ -58,17 +58,17 @@
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
 | Executor v1 协议 | `✅` 25 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 33 个公共 fixtures 已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
-| Executor Playwright onedir | `🔍` macOS arm64 正式 onedir 已包含 Python Playwright driver 且无浏览器缓存，冻结生产 primitive 已用受信系统 Chrome + 私有 Profile + 原生锁启动 headed context；Windows 同测试已配置，但 GitHub Hosted Runner 因账户 Billing/Actions spending limit 未启动 |
-| Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS 冻结实包验证 |
-| Rust Executor package verifier | `🔍` macOS arm64 已用当前目标包与 Python 签名 fixture 验证签名、完整目录、平台/架构、SemVer 范围和防降级；Windows 原生代码已进入同一 CI，但 runner 仍受 GitHub Billing 阻塞 |
+| Executor Playwright onedir | `✅` macOS arm64 与 Windows x86_64 正式 onedir 均已包含 Python Playwright driver 且无浏览器缓存；冻结生产 primitive 已用受信系统浏览器、私有 Profile 与原生锁启动 headed context |
+| Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS/Windows 冻结实包验证 |
+| Rust Executor package verifier | `✅` macOS arm64 与 Windows x86_64 均已从公开 Rust verifier 验证签名、完整目录、平台/架构、SemVer 范围、防降级和原生路径 identity |
 | Executor stdin 认证 | `✅` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
-| Rust ExecutorManager | `🔍` macOS 已从公开 Rust 生命周期入口完成签名 PyInstaller onedir→stdin 认证→真实 Uvicorn→健康/停止证明全链路；单实例、并发启动、后台崩溃检测、两次重启预算、显式停止不重启和 fail closed 已验证，Windows 原生仍随 Billing 阻塞待验收 |
-| 正式桌面制品隔离 | `🔍` macOS release 实际二进制、正式资产/配置和无默认特性依赖树已确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed，Windows 原生仍待 runner |
+| Rust ExecutorManager | `✅` macOS 与 Windows 均已从公开 Rust 生命周期入口完成 signed PyInstaller onedir、stdin 认证、真实 Uvicorn、监管/重启、整树清理和 App 纵向验收 |
+| 正式桌面制品隔离 | `✅` macOS 与 Windows release 实际二进制、正式资产/配置和无默认特性依赖树均确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed |
 | macOS 浏览器受信发现 | `🔍` Rust 生产 API 已用 Apple Security.framework 验证标准路径 Chrome 的签名、Bundle ID、Team ID、全架构/嵌套代码和路径 identity；Edge allowlist/失败矩阵已实现，本机未安装 Edge，保留真实 Edge 实机验收 |
-| 运营浏览器选择 | `🔍` macOS 隐藏真实 App 已从设置页保存、刷新并读回受信 Chrome 枚举；WebView/IPC/沙盒文件无路径，Windows 生产模块与测试已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
-| 私有浏览器 Profile | `🔍` macOS/Unix 已从公开 Rust Store 原入口完成本机 UUIDv4 Profile 原子创建、重开、权限、symlink、identity 替换与并发矩阵；Windows handle-relative/私有 ACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
-| Profile 单实例锁 | `🔍` macOS/Unix 已从公开 Rust Profile 原入口验证同 Profile 跨进程排他、不同 Profile 并行、显式释放及真实子进程被 kill 后需恢复；Windows HANDLE-relative/LockFileEx/私有 DACL 生产模块已通过 MSVC 目标类型检查，待原生 runner 实际执行 |
-| BrowserRuntime | `🔍` macOS 冻结生产模块已用受信系统 Chrome/私有 Profile/原生锁验证单 context、双窗口正常关闭和 process-group 整树强杀；Windows 复用 Job Object 组合，待原生 runner 实际执行 |
+| 运营浏览器选择 | `✅` macOS 与 Windows 隐藏真实 App 均已从设置页保存、刷新并读回受信浏览器枚举；WebView/IPC/沙盒文件无可执行路径 |
+| 私有浏览器 Profile | `✅` macOS/Unix 与 Windows 均已从公开 Rust Store 完成 UUIDv4 Profile 原子创建、重开、私有权限/DACL、symlink/reparse、identity 替换与并发矩阵 |
+| Profile 单实例锁 | `✅` macOS/Unix 与 Windows 均已从公开 Rust Profile API 验证同 Profile 跨进程排他、不同 Profile 并行、显式释放、原生权限/链接及真实子进程崩溃恢复 |
+| BrowserRuntime | `✅` macOS 与 Windows 冻结生产模块均已用受信系统浏览器、私有 Profile 与原生锁验证单 context、双窗口正常关闭，并分别由 process group/正式 Manager Job Object 完成整树强杀 |
 | 平台 Session 健康投影 | `✅` 生产 detector→本机 SQLite v2 单调 epoch→认证 Executor WebSocket→PostgreSQL 六列最小投影已在后台无头系统 Chrome/真实网络边界验证 |
 | Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
 | Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
@@ -233,19 +233,19 @@
 | --- | --- | --- | --- | --- |
 | E4-01 | 审计旧 local_executor | 列出可迁移进程/协议逻辑和必须删除的 tenant/Core 依赖 | R0-12,I2-10 | ✅ 已完成 |
 | E4-02 | Executor Python 入口 | stdin bootstrap、健康、信号和出站连接最小进程 | E4-01,I2-13 | ✅ 已完成 |
-| E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | 🔍 待验收 |
+| E4-03 | PyInstaller onedir PoC | macOS/Windows 各能启动；Playwright 依赖暂不加入 | E4-02 | ✅ 已完成 |
 | E4-04 | Executor Manifest | 版本、平台、架构、大小、SHA-256 和 Ed25519 签名 | E4-03 | ✅ 已完成 |
-| E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | 🔍 待验收 |
+| E4-05 | Rust 包验证 | 签名/摘要/平台/架构/防降级；错误包 fail closed | E4-04 | ✅ 已完成 |
 | E4-06 | stdin 随机认证 | 256-bit 会话令牌不进 argv/env/log/响应 | E4-02,E4-05 | ✅ 已完成 |
-| E4-07 | Rust ExecutorManager | 固定 start/status/stop Rust 生命周期，单实例和并发线性化 | E4-05,E4-06 | 🔍 待验收 |
-| E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | 🔍 待验收 |
-| E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | 🔍 待验收 |
-| E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | 🔍 待验收 |
-| E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | 🔍 待验收 |
-| E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | 🔍 待验收 |
-| E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | 🔍 待 Windows 原生验收 |
-| E4-14 | Tauri 生命周期 E2E | 启动/调用/挂起/崩溃/重启/停止/退出清理 | E4-09,E4-13 | 🔍 待 Windows 原生验收 |
-| E4-15 | 正式包测试能力审计 | 生产包不含 WebDriver、测试命令、测试 Sidecar 或调试端口 | E4-14 | 🔍 待 Windows 原生验收 |
+| E4-07 | Rust ExecutorManager | 固定 start/status/stop Rust 生命周期，单实例和并发线性化 | E4-05,E4-06 | ✅ 已完成 |
+| E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | ✅ 已完成 |
+| E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | ✅ 已完成 |
+| E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | ✅ 已完成 |
+| E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | ✅ 已完成 |
+| E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | ✅ 已完成 |
+| E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | ✅ 已完成 |
+| E4-14 | Tauri 生命周期 E2E | 启动/调用/挂起/崩溃/重启/停止/退出清理 | E4-09,E4-13 | ✅ 已完成 |
+| E4-15 | 正式包测试能力审计 | 生产包不含 WebDriver、测试命令、测试 Sidecar 或调试端口 | E4-14 | ✅ 已完成 |
 
 ## 10. Wave 5：外部浏览器与抖音登录
 
@@ -257,12 +257,12 @@
 | --- | --- | --- | --- | --- |
 | B5-01 | 审计旧 browser_session | 提取私有目录、Profile、状态机和注销逻辑；排除旧账号/RBAC | R0-12,E4-11 | ✅ 已完成 |
 | B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
-| B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | 🔍 待 Windows 原生验收 |
-| B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | 🔍 待 Windows 原生验收 |
-| B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | 🔍 待 Windows 原生验收 |
-| B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | 🔍 待 Windows 原生验收 |
-| B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | 🔍 待 Windows 原生验收 |
-| B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | 🔍 待 Windows 原生验收 |
+| B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | ✅ 已完成 |
+| B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | ✅ 已完成 |
+| B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ✅ 已完成 |
+| B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | ✅ 已完成 |
+| B5-07 | Playwright 打包 PoC | PyInstaller Executor 中启动系统 Chrome/Edge headed context | E4-03,B5-04 | ✅ 已完成 |
+| B5-08 | BrowserRuntime | 启动、页面、窗口、超时、关闭和进程清理接口 | B5-06,B5-07 | ✅ 已完成 |
 | B5-09 | 抖音 Session 检测 | healthy/expired/missing/risk/unknown；使用页面状态而非 Cookie 上传 | B5-08 | ✅ 已完成 |
 | B5-10 | 抖音扫码流程 | login_required、外部窗口、二维码过期、重新检查 | B5-09 | ✅ 已完成 |
 | B5-11 | 人工接管 | 验证码/滑块/风控进入 handoff，不自动处理 | B5-10 | ✅ 已完成 |
@@ -1382,7 +1382,7 @@
 
 ### E4-03 PyInstaller onedir PoC
 
-- 状态：🔍 待 Windows 设备验收
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：用唯一正式模块入口构建 macOS/Windows PyInstaller `onedir`，证明用户无需另装 Python即可启动 Executor；本阶段不加入 Playwright，不提前承担 Manifest、签名或 Tauri 监管
@@ -1391,10 +1391,11 @@
 - macOS GREEN：macOS arm64 从临时目录真实构建冻结产物，使用不含项目 Python 的 PATH 启动；空 stdin 精确返回 bootstrap rejected/退出码 2，合法 bootstrap 连接不可用精确返回 process unavailable/退出码 1，Session 不泄漏。分析 TOC 和目录名均无 Playwright；冻结实包聚焦 9 项、静态/类型/锁文件门禁全绿
 - 全量门禁：Backend 最终 `815 passed in 76.80s`，4378 条语句/838 个分支 100%；Frontend 40 项工程契约与 Actionlint 全绿。第一次全量 814 项行为全过但 `__main__` 子进程覆盖未合并且 SSE 时序分支偶发未命中，明确把已由子进程/冻结包验收的入口标为覆盖排除，并用确定性单调时钟测试固定 SSE 分支后恢复 100%，未改业务语义掩盖失败
 - Windows 真实边界：`.github/workflows/desktop.yml` 已增加 macOS/Windows `executor-bundle` 矩阵，同一测试不上传、不发布产物。临时分支运行 `29669599452` 的四个桌面 job 均在 0 step、无 runner 阶段失败；GitHub 注解明确为账户近期付款失败或 Actions spending limit 需提高。只读检查确认本机没有 Parallels/VMware/VirtualBox/UTM/QEMU/Wine 或现成 Windows VM，因此不把 macOS、静态契约或 Wine 冒充 Windows 通过
-- 失败矩阵：覆盖缺入口/依赖/spec、源码与冻结入口、无 Python PATH、bootstrap 拒绝、WebSocket 连接失败、固定退出码/输出、Session 脱敏、Playwright 依赖与构建分析隔离、macOS/Windows job 配置和工作流只读/无发布；Windows 实际构建/启动待 runner 或实体机恢复
+- Windows 本机 GREEN（2026-07-20）：在 Windows x86_64 实体机用锁定环境真实构建 PyInstaller `onedir`，从仅含系统 `PATH` 的环境启动冻结 `.exe`；空 bootstrap 返回 2、连接不可用返回 1，stdout 为空且两类固定 stderr 均为 LF 字节。首次验收暴露 Windows 文本流自动输出 CRLF，已新增跨平台翻译流回归并让正式入口优先写二进制 stderr；单元 7 项与冻结实包 1 项复验全绿
+- 失败矩阵：覆盖缺入口/依赖/spec、源码与冻结入口、无 Python PATH、bootstrap 拒绝、WebSocket 连接失败、固定退出码/输出、Session 脱敏、Playwright 依赖与构建分析隔离、macOS/Windows job 配置和工作流只读/无发布；Windows 实际构建/启动已于 2026-07-20 在实体机完成并通过
 - 清理：PyInstaller 构建使用 pytest 临时目录并自动删除；无 Executor、PyInstaller、Uvicorn、Docker 或 App 进程残留，`backend/build`/`dist` 持续 Git 忽略。临时 CI 分支在主提交完成后删除；失败运行保留 GitHub 证据
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增第二份打包或实施文档
-- 后续：E4-04 所需的稳定 `onedir` 目录与入口工程依赖已经具备，可继续生成跨平台 Manifest；E4-03 保持 `🔍`，在 GitHub Billing 恢复或取得 Windows 设备后补同一实包测试，不阻塞无设备依赖任务
+- 后续：E4-04 所需的稳定 `onedir` 目录与入口工程依赖已经具备，可继续生成跨平台 Manifest；E4-03 Windows 同一实包测试已于 2026-07-20 在实体机补齐，不阻塞无设备依赖任务
 
 ### E4-04 Executor Manifest
 
@@ -1415,7 +1416,7 @@
 
 ### E4-05 Rust 包验证
 
-- 状态：🔍 待 Windows 原生验收
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：在 Tauri/Rust 原生层验证 E4-04 signed `onedir`，把可信公钥、当前平台/架构、App 允许版本范围和已安装版本共同纳入判断；任何错误包 fail closed，不向 React/服务端暴露信任参数，不提前启动 Executor
@@ -1426,11 +1427,12 @@
 - 完整目录：`walkdir` 不跟随链接并取得排序后的全部 payload，Manifest 文件列表必须严格递增且与实际集合完全相等；每个文件使用 `O_NOFOLLOW` 或 Windows reparse-point 约束安全打开，读前/读后/按路径重开核对 dev+inode 或 volume+file index，复算逐文件大小/SHA-256、总大小和固定域目录摘要。完成后再次枚举目录，验证窗口内成员增删也拒绝
 - 失败矩阵：覆盖 current target 成功、Python E4-04 fixture 跨语言验签、显式 prerelease、范围越界、回退、平台/架构错配、错误 signer、weak key、签名 prefix/换行/padding/字符集/长度、可信 signer 下的 unknown/duplicate/noncanonical/非法版本/build/入口、payload 篡改、目录增删和 symlink；错误只返回固定 code/文案，不回显路径或输入
 - 本机门禁：Rust 包定向 10 组全绿；默认、`desktop-e2e`、`control-plane-e2e` 三种独立配置均为 40 单元 + 10 package + 3 协议 fixture + 14 安全配置，共 67 项通过；Clippy `--all-targets --all-features -D warnings` 与 Rustfmt 全绿。Frontend 41 项 Node 工程契约、112 项 Vitest、ESLint、TypeScript、正式 Vite/production boundary 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功产出正式 App 二进制但未启动。Backend 共享 contract 回归 `840 passed in 76.64s`，4516 条语句/870 个分支 100%
-- Windows 真实边界：正式 `.github/workflows/desktop.yml` 已因 `frontend/**` 在 macOS/Windows runner 执行 `pnpm test:rust` 和桌面构建，Windows 专属 reparse point/file identity 代码会在原生 target 编译运行。本机现有 Homebrew Rust 不含 `rustup`，不为一次交叉检查再安装并保留第二套 Rust；临时分支运行 `29670987419` 的四个 job 均为 0 step、未分配 runner，Windows Rust/Tauri 与 macOS job 注解都再次明确为账户近期付款失败或 Actions spending limit。当前不能声明 Windows 已通过，失败运行保留证据，临时分支在 main 提交后删除
-- Windows 重试：按用户要求从 `main` 手工触发正式矩阵运行 `29671164126`；两个 Windows job 与两个 macOS job 仍全部 0 step，check-run 原文仍为近期付款失败或需提高 spending limit，证明限制尚未恢复而非产品测试失败。E4-03/E4-05 继续保留 `🔍`，不阻塞后续无设备任务
+- Windows 真实边界：正式 `.github/workflows/desktop.yml` 已因 `frontend/**` 在 macOS/Windows runner 执行 `pnpm test:rust` 和桌面构建，Windows 专属 reparse point/file identity 代码会在原生 target 编译运行。本机现有 Homebrew Rust 不含 `rustup`，不为一次交叉检查再安装并保留第二套 Rust；临时分支运行 `29670987419` 的四个 job 均为 0 step、未分配 runner，Windows Rust/Tauri 与 macOS job 注解都再次明确为账户近期付款失败或 Actions spending limit。该轮当时不能声明 Windows 已通过，失败运行保留证据；2026-07-20 已由本机原生实体环境补齐
+- Windows 重试：按用户要求从 `main` 手工触发正式矩阵运行 `29671164126`；两个 Windows job 与两个 macOS job 仍全部 0 step，check-run 原文仍为近期付款失败或需提高 spending limit，证明限制尚未恢复而非产品测试失败。E4-03/E4-05 在该轮当时继续保留 `🔍`；2026-07-20 本机原生验收现已补齐
+- Windows 本机 GREEN（2026-07-20）：Windows x86_64/MSVC 原生编译并运行 `executor_package` 8 项集成测试，当前平台/架构、签名、摘要、完整目录、SemVer 范围、防回退与失败关闭全部通过；`executor-package-boundary` 公开边界契约通过。验收 Cargo 产物使用项目内隔离目录，避免覆盖正在运行且被 Windows 锁定的桌面 `.exe`
 - App、密钥与清理：本任务没有 Tauri Command、页面、网络或 App API，正式消费者是 E4-07 Rust 进程生命周期，故不启动/弹出 App；测试从公开 Rust verifier 原入口调用，不用 mock。发布公钥尚未由 E4-07 装配，测试 seed 只存在测试/fixture；设备私钥与长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。临时目录由 RAII 清理，无子进程、服务、容器或 App 残留
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增重复计划
-- 后续：E4-06 实现 Rust 生成 256-bit stdin 一次性认证并与 Python bootstrap 绑定；E4-07 再从 App 受信资源与编译配置提供固定公钥/版本策略/包路径，验证后监管真实 Executor。E4-05 Windows 原生验收恢复后补齐，不阻塞无设备依赖开发
+- 后续：E4-06 实现 Rust 生成 256-bit stdin 一次性认证并与 Python bootstrap 绑定；E4-07 再从 App 受信资源与编译配置提供固定公钥/版本策略/包路径，验证后监管真实 Executor。E4-05 Windows 原生验收已于 2026-07-20 补齐
 
 ### E4-06 stdin 随机认证
 
@@ -1450,7 +1452,7 @@
 
 ### E4-07 Rust ExecutorManager
 
-- 状态：🔍 待 Windows 原生验收；macOS 正式边界通过，工程依赖可继续
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：组合 E4-05 signed onedir verifier 与 E4-06 一次性 stdin 认证，建立唯一 `ExecutorManager`；只提供固定 start/status/stop 生命周期、单实例与并发线性化，不恢复旧 stdio `invoke`、任意 JSON、capability 命令或可选子进程路径
@@ -1460,31 +1462,33 @@
 - 正式原入口验收：`scripts/run_e4_07_acceptance.py` 临时构建真实 PyInstaller onedir，使用正式 Manifest CLI 从 stdin 签名，启动真实本地 Uvicorn/Session/Registry，再把仅含配置文件路径的环境变量交给被忽略的公开 Rust Manager 测试；Manager 自己生成本机会话、启动冻结 Executor 并执行 start/status/stop。服务端最终事实严格为 `registered → heartbeat → unregistered`，Control Plane Session 不出现在 Cargo stdout/stderr。临时配置权限为 `0600` 且随临时目录删除
 - 门禁：Manager 4 项普通测试通过，真实 PyInstaller/Uvicorn 编排验收通过；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置均通过，新增并发夹具目录以 PID/时间/原子序号隔离；Clippy all-targets/all-features 与 Rustfmt 全绿。Backend 全量 `855 passed in 80.58s`、4571 条语句/878 个分支 100%；Ruff、Mypy 164 个源码文件、uv lock 全绿。Frontend 43 项 Node 契约、112 项 Vitest、ESLint、TypeScript、OpenAPI、生产边界与正式 `pnpm tauri build --debug --no-bundle` 全绿；构建 App 但未启动窗口
 - App 与验收边界：本任务新增的是 Rust 内部生命周期 API，没有注册 Tauri Command、页面或 App 可调用接口，所以正式原入口是公开 Rust Manager，不启动 App。E4-13 才通过固定 PlatformAdapter/Tauri Commands 暴露状态、重启、诊断和紧停，E4-14 再由唯一 `visible=false` App 完成桌面生命周期验收；不能把本任务的 Rust 测试冒充届时的 App 验收
-- Windows：本次重试 GitHub Actions run `29671164126`，macOS/Windows 四个 job 仍全部 0 step 失败，注解仍为账户近期付款失败或 spending limit；因此 Windows 原生包/Manager 启动不冒充通过并保持 `🔍`。该外部限制不阻塞 E4-08～Wave 10 的无 Windows 设备依赖实现
+- 历史 CI 状态（2026-07-19）：GitHub Actions run `29671164126` 的 macOS/Windows 四个 job 因账户付款或 spending limit 全部 0 step；当时未把 Windows 原生包/Manager 冒充为通过。2026-07-20 已由下述本机原生 GREEN 补齐，外部 Billing 不再影响本任务验收结论
+- Windows 本机 GREEN（2026-07-20）：正式脚本已支持 Windows/`AMD64` 并改用跨平台 `executor_manager_packaged` Rust 目标，且显式要求 `1 passed; 0 failed`，杜绝原 macOS-only 目标在 Windows 上 0 tests 假绿。真实 signed PyInstaller Executor 经公开 Manager 完成 start/status/stop，Control Plane 事实为 `registered → heartbeat → unregistered`，SQLite schema v2 身份与秘密不落库检查通过。修复了生命周期 stdout CRLF、Windows 强制终止后错误等待 stopped proof、SQLite 连接文件锁及脚本 schema v1 过期断言
 - 清理：Manager 失败/Drop 都回收直接子进程并 join stdout/stderr reader；验收 Uvicorn、线程、socket、临时 PyInstaller 包、签名、私有配置和测试子进程均在 finally/RAII 回收。正式生产构建未启动 App；进程检查无 Executor/Uvicorn/Cargo 测试残留
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增第二份计划
-- 后续：E4-08 在 Manager 上增加后台退出检测、有界重启预算与显式停止不重启；E4-03/E4-05/E4-07 Windows 原生验收待 GitHub Billing 或 Windows 设备恢复后补齐
+- 后续：E4-08 在 Manager 上增加后台退出检测、有界重启预算与显式停止不重启；E4-03/E4-05/E4-07 Windows 原生验收已于 2026-07-20 在本机补齐
 
 ### E4-08 进程监管
 
-- 状态：🔍 待 Windows 原生验收；macOS 监管行为通过，工程依赖可继续
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：在 E4-07 唯一 Manager 内后台发现 Executor 非预期退出，以显式有界策略最多恢复两次；显式 stop、正常退出、固定 bootstrap/process 失败、坏包或坏认证均不得形成重启循环，不新增第二 Supervisor 或宽进程接口
 - RED：先扩展公开 Rust Manager 测试与独立 Node 架构契约；Rust 准确失败于 `ExecutorRestartPolicy`、第五个 Manager 构造参数和 `restart_count` 不存在，Node 准确失败于缺少显式策略/监管线程，证明不是轮询测试代码或旧 Manager 让测试假绿
 - 实现：`ExecutorRestartPolicy` 显式接收 `maximum_restarts`、monitor interval 和 restart delay，拒绝超过 8 次、零时长或 60 秒以上配置；当前 MVP 测试/装配预算固定为 2。Manager 内部仅有一个命名 supervisor thread 和 Mutex 状态机，状态扩为 `running/restarting/stopped`，公开 `restartCount` 不暴露 PID、路径或 Session。每次恢复仍重新执行 E4-05 整包验证、生成新的 E4-06 本机会话并等待认证 healthy，不复用旧进程 proof
-- 重启判定：macOS/Unix 只把 signal 终止视为可重启崩溃；正常退出 0、固定 process failure 1 和 bootstrap failure 2 都停止且不消耗新预算。Windows 代码只把负 NT 异常状态视为崩溃，尚待真实原生验收。显式 stop 在同一线性化锁内先移除 running/pending 生命周期再终止进程，因此 supervisor 无目标可重启；Manager Drop 先关闭/join supervisor，再回收直接子进程
+- 重启判定：macOS/Unix 只把 signal 终止视为可重启崩溃；正常退出 0、固定 process failure 1 和 bootstrap failure 2 都停止且不消耗新预算。Windows 只把负 NT 异常状态视为崩溃，并已于 2026-07-20 用真实冻结进程连续异常退出验收。显式 stop 在同一线性化锁内先移除 running/pending 生命周期再终止进程，因此 supervisor 无目标可重启；Manager Drop 先关闭/join supervisor，再回收直接子进程
 - 失败矩阵与事实：真实签名测试进程前两次 healthy 后收到 SIGKILL，后台恰好启动第三个进程并报告 `restartCount=2`；持续 SIGKILL 也只产生初次+两次恢复，之后稳定 stopped。另行验证显式 stop 后启动次数保持 1、退出码 0/1 均不恢复、非法预算/时长拒绝、E4-07 并发/超时/坏包/坏 proof 全部继续通过。测试计数文件位于独立临时路径，不修改已签名包，RAII 删除
 - 正式路径回归：E4-07 的真实 Manifest CLI→signed PyInstaller onedir→公开 Rust Manager→真实 Uvicorn/Session/Registry 验收在加入 supervisor 后再次通过，事实仍为 `registered → heartbeat → unregistered`。本任务的崩溃预算从公开 Manager 原入口驱动真实 OS 子进程与 SIGKILL；正式 PyInstaller 崩溃、隐藏 App 与整棵进程树联合验收按路线图归 E4-14，不能以当前 fixture 冒充
 - 门禁：Manager 8 项普通测试通过、1 项 PyInstaller 编排项按专用脚本通过；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 42 单元 + 3 bootstrap + 8 manager + 10 package + 3 协议 fixture + 14 安全配置，共 80 项全绿。Frontend 44 项 Node 契约、112 项 Vitest 全绿；Backend 回归 `855 passed in 88.12s`、4571 条语句/878 个分支 100%；正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App。Clippy all-targets/all-features、Rustfmt、ESLint、TypeScript、OpenAPI、production boundary、Ruff、Mypy 和 uv lock 继续全绿
 - App、凭据与清理：本任务仍只有 Rust 内部生命周期 API，没有 Tauri Command/React 页面，因此不启动 App；E4-13/E4-14 才做固定桌面入口。Control Plane Session 为受监管重启仅保留在 `Zeroizing<String>` 内存，新的本机会话每次独立生成；不写系统钥匙串、`app_data_dir`、环境、argv 或日志。验收后无 Executor、supervisor、Cargo、Uvicorn、PyInstaller 或临时计数文件残留
-- Windows：Hosted Runner 的 Billing/Actions spending limit 未恢复，本任务不重复空跑 workflow；Windows crash code、强制停止和 Job Object 原生语义保持 `🔍`，E4-09 与恢复后的同一矩阵补齐，不阻塞后续无设备依赖实现
+- 历史 CI 状态（2026-07-19）：Hosted Runner 的 Billing/Actions spending limit 未恢复，因此未重复空跑 workflow；当时 Windows crash code、强制停止和 Job Object 原生语义未宣告通过。2026-07-20 已由下一条本机 GREEN 完成同一矩阵
+- Windows 本机 GREEN（2026-07-20）：新增非零测试保护的 `run_e4_08_acceptance.py`，对真实 signed PyInstaller Executor 连续注入三次 `0xc0000005` NT 异常退出；唯一 Supervisor 前两次重新验包、生成新本机会话并恢复到 running，`restartCount` 精确为 1/2，第三次稳定 stopped。Control Plane 三轮均为 `registered → heartbeat → unregistered`，Session 未反射，临时包和进程已回收
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：E4-09 给每次启动建立 Unix process group/Windows Job Object，超时、显式 stop、Manager Drop 和挂起边界必须清理完整进程树；之后 E4-10 做 stderr 限界脱敏
 
 ### E4-09 超时与进程树清理
 
-- 状态：🔍 待 Windows 原生验收；macOS 完整进程树行为通过，工程依赖可继续
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：每次启动时建立独立 OS 进程容器，使正常停止、停止超时、启动超时、异常退出和 Manager Drop 都能清理 Executor 及其全部后代；Unix 使用独立 process group，Windows 使用启动即挂入且关闭即杀的 Job Object
@@ -1496,13 +1500,14 @@
 - 门禁：Manager 13 项普通测试通过、1 项 PyInstaller 编排项由专用脚本通过；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 42 单元 + 3 bootstrap + 13 manager + 10 package + 3 协议 fixture + 14 安全配置，共 85 项全绿。Frontend 45 项 Node 契约、112 项 Vitest 全绿；Backend 回归 `855 passed in 79.83s`、4571 条语句/878 个分支 100%。正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App；Clippy all-targets/all-features、Rustfmt、ESLint、TypeScript、OpenAPI、production boundary、Ruff、Mypy 163 个源码文件和 uv lock 全绿
 - 挂起语义：当前 Manager 刻意没有旧 stdio task invoke，因此本任务只处理启动/停止生命周期挂起，不能声称已经处理 RPA 外部副作用超时；真实命令执行、取消和 `OUTCOME_UNCERTAIN` 由 E4-12 及后续 BrowserRuntime 原入口验收
 - 凭据与清理：进程树对象只保存 OS PGID/Job handle，不暴露 PID 给 WebView，也不新增 argv/env/日志/钥匙串或持久秘密；Control Plane Session 和每次本机会话仍只在清零内存/stdin pipe。测试孙进程、Executor、Uvicorn、PyInstaller 临时包、PID marker 与计数文件均由原入口/RAII 回收
-- Windows：GitHub Actions run `29671164126` 的 Hosted Runner 仍因 Billing/Actions spending limit 0 step 失败，本任务不重复烧空跑；Job Object 类型检查、打包进程树、正常/超时/Drop/崩溃矩阵保持 `🔍`，待 Billing 或真实 Windows 设备恢复后补齐
+- 历史 CI 状态（2026-07-19）：GitHub Actions run `29671164126` 因 Billing/Actions spending limit 0 step 失败，因此当时未宣告 Job Object 原生通过。2026-07-20 已由下一条本机 GREEN 补齐类型检查、打包进程树及正常/超时/Drop/崩溃矩阵
+- Windows 本机 GREEN（2026-07-20）：`run_e4_09_acceptance.py` 将测试专属 Python 探针冻结、签名为真实 Windows `.exe`，探针派生脱离 stdio 的长驻 PowerShell 后代。公开 Manager 在显式 stop、挂起后 stop、healthy 启动超时、Manager Drop、异常退出并恢复五条路径均清理完整 Job；崩溃首代后代在第二代 running 前消失，第二代停止后亦退出。严格 Clippy 通过，验收后无探针后代残留
 - 文档：同步根/Frontend README、前端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：E4-10 在现有 stderr reader 上实现凭据/私有路径脱敏与行数、单行、总大小三重限界；之后依次推进 E4-11～E4-15
 
 ### E4-10 stderr 脱敏限界
 
-- 状态：🔍 待 Windows 原生验收；macOS 真实 stderr 行为通过，工程依赖可继续
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：只从真实 Executor stderr 异步读取诊断，Rust 在信任边界再次脱敏并以 200 行、单行 4096 bytes、总计 64 KiB 三重上限保存在内存；超长/非法编码输入不能造成无界分配或以截断半段绕过秘密识别
@@ -1514,13 +1519,14 @@
 - 正式路径与 App：Backend 锁定环境的真实 Manifest CLI→signed PyInstaller onedir→公开 Rust Manager→Uvicorn/Session/Registry 再次通过 `registered → heartbeat → unregistered`。本任务只新增 Rust 内部安全副本 API，没有 Tauri Command/React 页面，因此构建但不启动 App；E4-13 才装配固定诊断展示，E4-14 再由唯一隐藏 App 验收
 - 门禁：Manager 15 项普通测试通过、1 项 PyInstaller 编排项由专用脚本通过；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 3 协议 fixture + 14 安全配置，共 89 项全绿。Frontend 46 项 Node 契约、112 项 Vitest 全绿；Backend `856 passed in 77.62s`、4609 条语句/878 个分支 100%。正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App；Clippy all-targets/all-features、Rustfmt、ESLint、TypeScript、OpenAPI、production boundary、Ruff、Mypy 165 个源码文件和 uv lock 全绿
 - 凭据与持久化：原始 stderr 只在 OS pipe/有界 reader buffer 短暂存在，安全诊断只在 Manager 内存；不写仓库、普通配置、`app_data_dir` 或系统钥匙串，也不上传 Control Plane。Python/Rust fixtures 只含明确测试秘密，没有真实账号、Cookie 或设备凭据
-- Windows：诊断算法和 Node 静态边界已实现，但本机 Homebrew Rust 无 Windows 标准库，GitHub Hosted Runner 仍受 Billing/Actions spending limit；Windows signed PyInstaller stderr、CRLF、超长无换行和 Manager 恢复共享缓冲矩阵保持 `🔍`，不以 macOS结果冒充
+- 历史 CI 状态（2026-07-19）：当时本机 Homebrew Rust 无 Windows 标准库且 Hosted Runner 受 Billing 限制，因此未以 macOS 结果冒充 Windows signed PyInstaller stderr 验收。2026-07-20 已由本机 GREEN 补齐 CRLF、超长无换行和 Manager 恢复共享缓冲矩阵
+- Windows 本机 GREEN（2026-07-20）：测试专属诊断探针冻结并签名为真实 Windows `.exe`，从真实 stderr pipe 写入共享 14 组敏感 fixture、CRLF、非法 UTF-8、400 行和 5000-byte 无界输入；Rust Manager 的输出逐字匹配共享 expected，并在异常退出恢复第二轮后保持 73 行、单行不超过 4096 bytes、总计不超过 64 KiB，包含固定 `[TRUNCATED]`/`[REDACTED]` 且 Session 消失。非零目标、Clippy 和 Node 边界全绿
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：E4-11 建立 Executor 本机 SQLite command/idempotency/checkpoint/outbox 最小账本与迁移，再由 E4-12 从真实 Control Plane 回放无副作用任务
 
 ### E4-11 Executor 本机 SQLite
 
-- 状态：🔍 待 Windows 原生验收；macOS 真实 signed Executor 创建、迁移和重开通过，工程依赖可继续
+- 状态：✅ 已完成
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：在 App 私有 Executor 状态目录内建立固定 `executor-ledger.sqlite3` v1，把正式命令双键幂等、Attempt checkpoint 与协议 outbox 持久化；Executor 崩溃/重启后可安全重放，但不能复制云端完整业务库或保存任何会话/平台秘密
@@ -1534,13 +1540,14 @@
 - 正式路径：安装后的 `automation-tool-executor` 独立子进程经 stdin→CLI 先创建 SQLite，再连接真实 Uvicorn/正式 Session/Registry，最终验证 Hello/Heartbeat、v1/identity、秘密不落库和 SIGTERM。`scripts/run_e4_07_acceptance.py` 另从真实 Manifest CLI→signed PyInstaller onedir→公开 Rust Manager→同一 Python CLI→Uvicorn 跑通 `registered → heartbeat → unregistered`，并在临时目录删除前直接读取 SQLite v1/identity
 - App 与验收口径：E4-11 的正式消费者仍是 Rust Manager/Python CLI，没有 Tauri Command、React 页面或用户可见功能，所以本任务不启动 App；接口验收来自真正启动该功能的 stdin/CLI/Manager 原入口，不用内部函数或 Mock 冒充。E4-12 才消费账本处理真实任务帧，E4-13/E4-14 再通过唯一 `visible=false` App 验收 `app_data_dir` 装配
 - 门禁：Backend `866 passed in 75.69s`，4899 条语句/946 个分支覆盖率 100%；Frontend 47 项 Node 契约、112 项 Vitest 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 3 协议 fixture + 14 安全配置，共 89 项全绿，1 项 PyInstaller 编排由专用脚本通过。Clippy all-targets/all-features、Rustfmt、Backend 正式范围 167 个文件 Ruff 格式/lint、严格 Mypy 167 个源码文件、uv lock、ESLint、TypeScript、OpenAPI 漂移和 production boundary 全绿；正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App
-- Windows：Python 路径与 reparse point 分支、Rust PathBuf bootstrap 和 PyInstaller spec 均已实现，但本机无 Windows 标准库，GitHub Hosted Runner 仍受 Billing/Actions spending limit；Windows 目录 ACL/reparse 竞态、SQLite frozen runtime、重开/CAS/outbox 和 Rust Manager 真链路保持 `🔍`，不以 macOS 或静态契约冒充
+- 历史 CI 状态（2026-07-19）：当时本机无 Windows 标准库且 Hosted Runner 受 Billing 限制，因此未以 macOS 或静态契约冒充目录 ACL/reparse、SQLite frozen runtime 与 Rust Manager 真链路。2026-07-20 已由本机 GREEN 补齐这些原生矩阵
+- Windows 本机 GREEN（2026-07-20）：账本 10 项覆盖空库/v1→v2 迁移、重开、双键幂等、CAS、outbox、未来/损坏 schema、Junction/reparse 与 identity race；新增 Win32 DACL 解析，目录和数据库向 Authenticated Users 授权时 fail closed。CLI/真实进程 9 项通过 `CREATE_NEW_PROCESS_GROUP + CTRL_BREAK_EVENT/SIGBREAK` 完成 authenticated stopped，SQLite v2 身份及两个 Session 原始字节均不落库；正式 signed PyInstaller→Rust Manager→Uvicorn 链路复验通过
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划或重复 implementation plan
 - 后续：E4-12 从真实 Control Plane 向同一正式 Executor 下发无副作用 Task Command，使用本账本生成/重放 ACK 与 Event，并验证崩溃恢复闭环
 
 ### E4-12 真实协议回放
 
-- 状态：🔍 待 Windows 原生验收；macOS 真实 PostgreSQL→Uvicorn→Rust Manager→signed PyInstaller Executor→SQLite→ACK/Event 及重启精确重放通过，工程依赖可继续
+- 状态：✅ 已完成；Windows x86_64 原生全链路已验收
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：让正式 Local Executor 从生产 WebSocket 接收 Control Plane 持久 `task.offer`，先落 E4-11 本机账本，再产生无平台副作用的固定成功 ACK/事件；进程重启后只能重放首次持久消息，不能重新生成身份、重复推进云端事实或保存 Session
@@ -1552,14 +1559,15 @@
 - 测试与失败矩阵：命令处理器和新增账本分支语句/分支覆盖率 100%；覆盖 atomic batch 参数/双键重复/来源错绑/旧 revision/事件倒退/已有 outbox、并发提交赢家、生成/时钟/UUID/账本错误、二进制/畸形/过期/错身份/effectful command、mark/requeue 失败，以及真实 WebSocket 收命令后六帧返回。现有独立 CLI→Uvicorn Hello/Heartbeat/SIGTERM 集成继续通过
 - 门禁：Backend `877 passed in 78.97s`、5076 条语句/全部分支覆盖率 100%；Frontend 48 项 Node 架构/契约、112 项 Vitest、ESLint、TypeScript、OpenAPI 与 production boundary 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 3 协议 fixture + 14 安全配置，共 89 项通过、1 项正式 PyInstaller 编排由 E4-12 专用脚本通过。Clippy all-targets/all-features、Rustfmt、Backend 172 文件 Ruff 格式/lint、严格 Mypy 170 个源码文件、uv lock 全绿；正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App
 - App 与账号边界：本任务正式入口是 Control Plane 持久 Outbox→真实 WebSocket→Rust 监管的 Executor，不新增 Tauri Command、React 页面或用户功能，因此不启动 App、不需要真实平台账号；E4-13 才从 Tauri `app_data_dir` 固定装配 Manager 和状态投影，E4-14 再由唯一 `visible=false` App 做桌面生命周期纵向验收
-- Windows：正式 Python/Rust/SQLite 路径均为跨平台实现，但 GitHub Hosted Runner 仍受 Billing/Actions spending limit，Windows signed PyInstaller→Job Object Manager→真实 Control Plane→SQLite 重放未冒充通过，保持 `🔍`；恢复后与 E4-03～E4-11 一并补齐
+- 历史 CI 状态（2026-07-19）：Hosted Runner 受 Billing 限制时未把跨平台实现冒充为 Windows signed PyInstaller→Job Object Manager→真实 Control Plane→SQLite 重放通过。2026-07-20 已由下一条本机 GREEN 与 E4-03～E4-11 一并补齐
+- Windows 本机 GREEN（2026-07-20）：Windows x86_64 使用全局 PostgreSQL 18.4 启动独立临时实例并跑完 14 段 Alembic 链，真实 Uvicorn、signed PyInstaller Executor、公开 Rust Manager 与 SQLite v2 两轮通过；首次验收分别暴露 `pg_ctl` 子进程继承捕获管道造成永久等待，以及 `sqlite3.Connection` 未显式关闭导致账本删除失败，均以回归契约修复。复验确认六条本机 ACK/事件全文不变、服务端 1 条 command/5 条事件快照不变、Session 不落库，临时数据库/端口/进程/工作目录全部回收
 - 清理：正式验收的 Uvicorn、PostgreSQL 容器/volume、Cargo 测试进程、PyInstaller 包、私有 `0600` 配置和 SQLite 状态均由 finally/临时目录回收；检查无容器、监听端口或 Executor 残留
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份 implementation plan
 - 后续：E4-13 建立固定 PlatformAdapter/Tauri Commands，从 Tauri 自身 `app_data_dir` 派生 Executor 状态目录，并向 React 只暴露受限状态、重启、脱敏诊断和紧停
 
 ### E4-13 PlatformAdapter 接入
 
-- 状态：🔍 待 Windows 原生验收；E4-14 已补齐 macOS 隐藏 App 生产同路径证据，工程依赖可继续
+- 状态：✅ 已完成；Windows x86_64 原生边界已验收
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：从 Tauri 自身 `app_data_dir` 固定装配唯一 Local Executor，把状态、重启、脱敏诊断和本机进程树紧停收敛为四个无参数 Command；React 只能经 `PlatformAdapter` 使用，不能提交 URL、Session、包根、状态目录或 Executor 身份
@@ -1568,16 +1576,17 @@
 - 会话与启动：`restart_executor` 先由 Rust 凭据仓换取 `app.control-plane` Session，读取当前 active Installation ID，再换取独立 `executor.connect` 短期 Session；Session 只在 `Zeroizing<String>` 与 stdin 启动链短暂存在。Manager 先停止旧进程树，再以固定 WebSocket endpoint、Installation/Executor ID、状态目录和 15 秒心跳启动签名包；E4-14 真实链路暴露原 10 秒启动预算必然早于首个健康心跳，现固定为 30 秒并由架构回归锁定。debug 只信任公开测试 signer；release 构建缺少打包流水线注入的 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY` 时 fail closed，不把测试 signer 当发布信任根
 - IPC 与 UI：正式 Command allowlist 只有 `get_executor_status`、`restart_executor`、`get_executor_diagnostics`、`emergency_stop_executor`。TypeScript Adapter 严格校验 exact-field 状态、SemVer/build ID、0..8 恢复次数和 200 行/4096-byte 安全诊断，原生异常只映射固定 allowlist 错误且不反射详情。“设置与诊断”页面可查看状态/版本/构建/恢复次数和安全 stderr、启动/重启，并在二次确认后执行本机硬停止；页面明确区分本机进程树停止与业务 Task 协作式紧停，不能宣称远端副作用已停止
 - 分层 GREEN：Frontend 49 项 Node 架构/契约、118 项 Vitest 全绿，ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 2 platform + 3 protocol fixture + 14 security，共 91 项通过，另有 1 项正式 PyInstaller 编排由专用脚本负责并在普通 suite 中 ignored。三套 Clippy `-D warnings` 与 Rustfmt 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功，App 未启动
-- 原始入口与待验收：E4-14 已用唯一 `visible=false` App 从真实诊断页面点击启动/紧停/再次启动，经正式 TypeScript Adapter、Tauri IPC、Rust 换票、真实 Control Plane/PostgreSQL 和 signed Executor 覆盖崩溃恢复、挂起超时、退出清理与数据库最终事实；macOS 不再依赖组件 Mock 证据。任务保持 `🔍` 仅因为 Windows AppData/Job Object/真实 WebView 链仍待原生 runner
+- 原始入口验收：E4-14 已用唯一 `visible=false` App 从真实诊断页面点击启动/紧停/再次启动，经正式 TypeScript Adapter、Tauri IPC、Rust 换票、真实 Control Plane/PostgreSQL 和 signed Executor 覆盖崩溃恢复、挂起超时、退出清理与数据库最终事实；macOS 不再依赖组件 Mock，Windows AppData/Job Object/真实 WebView 链也已于 2026-07-20 在本机完成，任务结论为 `✅`
 - 失败矩阵：覆盖恶意/未知原生 DTO、超长或控制/Bidi 诊断、原生秘密异常不反射、状态目录/身份损坏、相对路径、Unix 权限、重复启动先停旧树、缺凭据/安装授权/网络/协议、包拒绝、认证拒绝、超时与进程不可用的固定错误映射；E4-14 已补真实崩溃、挂起和正常退出竞态，Windows AppData ACL/Job Object/IPC 仍归原生 runner
 - 本地隔离与清理：本任务没有启动前端、后端、Docker、测试服务器或可见/隐藏 App，没有监听或占用端口；只执行编译和进程内测试，临时 App-data 目录由 RAII 删除。项目规则同时新增“启动前查端口、`automation-tool` 专属 Compose/容器/网络/Volume/SQLite/端口段、只清理本次实例”的强制隔离要求，后续 E4-14 起执行
 - 文档：同步根/Frontend README、前端架构、工程结构、Git 忽略边界和唯一开发台账；没有新增第二份 implementation plan
-- Windows：GitHub Hosted Runner 仍受 Billing/Actions spending limit，当前不空跑 workflow；四个 Command、AppData 身份/权限、签名包、Job Object 和隐藏 App 生命周期不得以 macOS 或静态契约冒充通过
+- 历史 CI 状态（2026-07-19）：Hosted Runner 受 Billing/Actions spending limit 时没有空跑 workflow，也未以 macOS 或静态契约冒充四个 Command、AppData 身份/权限、签名包、Job Object 和隐藏 App 生命周期通过；2026-07-20 已由下一条本机 GREEN 补齐
+- Windows 本机 GREEN（2026-07-20）：Windows x86_64/MSVC 下默认与 `control-plane-e2e` 两套公开 Rust `executor_platform` 各 2 项通过，验证绝对 AppData 派生、固定 package/state 路径、canonical UUIDv4 身份重开及损坏拒绝；四个无参数 Command 的 Node 边界 12 项、PlatformAdapter/诊断页 7 项通过。默认与 `control-plane-e2e` 两套 `cargo clippy --all-targets -D warnings` 通过；门禁首次发现打包验收目标无条件导入 Windows 专属错误码，已按 feature/cfg 收紧并复验
 - 后续：E4-15 审计正式包测试能力与发布验证公钥边界
 
 ### E4-14 Tauri 生命周期 E2E
 
-- 状态：🔍 待 Windows 原生验收；macOS 隐藏 Tauri App→正式 Rust/Control Plane→signed PyInstaller Executor 全生命周期通过，工程依赖可继续
+- 状态：✅ 已完成；Windows x86_64 隐藏 App 全生命周期已验收
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：只通过唯一后台隐藏 App 的真实诊断页面和正式 PlatformAdapter 验证 Executor 启动、状态/诊断调用、异常崩溃恢复、挂起停止超时、再次启动与 App 正常退出清理；不以组件 Mock、直接 Manager 调用或外层脚本杀进程冒充完成
@@ -1587,16 +1596,17 @@
 - 会话与网络：测试 origin 只在 `control-plane-e2e` 编译期接受规范 `http://127.0.0.1:<port>`，生产仍固定默认 origin；App 注册唯一 Installation，每次启动经正式 Rust client 换取 `app.control-plane` 与独立 `executor.connect` Session，真实 Executor 使用同端口 WebSocket。最终数据库只含预期能力类型，不回传或记录 token
 - 真实故障：验收专用 Command 只在 `control-plane-e2e` 构建注册。Unix 对实际子进程发送 `SIGKILL`/`SIGSTOP`，Windows 实现对应 `TerminateProcess`/线程 suspend；崩溃后正式 supervisor 重新验包、换本机会话并恢复为 running/restartCount 1，挂起后页面原紧停等待 10 秒、强制回收进程树并安全显示失败，再刷新为 stopped
 - 退出清理：生产 Tauri event loop 在 `ExitRequested` 或 `Exit` 上显式调用唯一 Platform service 停止 Executor，Manager `Drop` 继续作为兜底。测试末尾只请求正常 App 退出；嵌入式 WebDriver 随 App 关闭会让 WDIO 的最终 `DELETE session` 固定得到 `ECONNREFUSED`，编排器仅接受这一精确签名且要求没有测试断言错误，随后必须独立确认 signed Executor 绝对路径无进程，否则验收失败
-- 私有状态：验收核对稳定 canonical Executor UUIDv4、`executor-ledger.sqlite3` user_version 1、Installation/Executor 身份绑定和 Unix `0700/0600` 权限；长期设备凭据原始字节不得出现在 SQLite。测试数据只位于专用 App 沙盒，不调用系统钥匙串
+- 私有状态：验收核对稳定 canonical Executor UUIDv4、`executor-ledger.sqlite3` user_version 2、Installation/Executor 身份绑定和 Unix `0700/0600` 权限；长期设备凭据原始字节不得出现在 SQLite。测试数据只位于专用 App 沙盒，不调用系统钥匙串
 - 门禁：正式 E4-14 编排通过；Backend `877 passed`，Ruff/格式、严格 Mypy 170 个源码文件、uv lock、OpenAPI 与 Executor Schema 无漂移；Frontend 50 项 Node 契约、119 项 Vitest、5 项 Playwright、ESLint、TypeScript、API 与 production boundary 全绿；Rust 默认/`desktop-e2e` 各 92 项、`control-plane-e2e` 93 项通过，三套 Clippy `-D warnings` 与 Rustfmt 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功且未启动 App
 - 清理复核：每次失败和最终成功均确认专属 Compose 容器/网络/卷、动态端口、App 私有测试目录和 signed Executor 全部消失；并行存在的 `agent-platform-*` 容器始终未被修改
-- Windows：跨平台 Command、AppData 路径、Job Object crash/hang 实现和专用配置已编译，但 GitHub Hosted Windows Runner 仍受 Billing/Actions spending limit；Windows signed PyInstaller→隐藏 App→Job Object→正常退出全链路不得以 macOS 或静态检查冒充，保持 `🔍`
+- 历史 CI 状态（2026-07-19）：Hosted Windows Runner 受 Billing 限制时只完成跨平台编译，未以 macOS 或静态检查冒充 signed PyInstaller→隐藏 App→Job Object→正常退出全链路通过；2026-07-20 已由下一条本机 GREEN 完成原生验收
+- Windows 本机 GREEN（2026-07-20）：Windows x86_64 从唯一 `visible=false` Tauri App 的真实设置与诊断页面完成 signed PyInstaller Executor 启动、版本/build 展示、`TerminateProcess` 崩溃后 Job Object supervisor 自动恢复到 restartCount 1、线程挂起后本机同步强停、再次启动与 App 正常退出；随后独立验证 SQLite v2 身份绑定、唯一 Installation、仅 `app.control-plane`/`executor.connect` Session 能力和无长期凭据落库。首轮暴露 macOS 超时提示断言不适用于 Windows 同步强停，第二轮暴露验收仍锁定历史 SQLite v1，均以回归契约修复；最终 AppData、临时 PostgreSQL/端口、App/Executor/WebDriver 和工作目录无残留
 - 文档：同步根/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份 implementation plan
 - 后续：E4-15 审计正式包不含 WebDriver、验收 Command、测试 Sidecar、测试 origin 或调试端口，并固化 release 验证公钥 fail-closed 边界
 
 ### E4-15 正式包测试能力审计
 
-- 状态：🔍 待 Windows 原生验收；macOS production-mode Tauri release 实际二进制与依赖树审计通过，工程依赖可继续
+- 状态：✅ 已完成；Windows x86_64 release PE 已验收
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：不能只凭 Rust `cfg`、源码扫描或 debug build 推断安全；必须在实际 release 制品上证明没有 WebDriver、验收 Command、测试 Executor/Sidecar、测试 origin/标识、Harness 或调试端口，并保证发布 Executor 验证公钥在打包前 fail closed
@@ -1608,7 +1618,8 @@
 - 真实发现与稳定性：修复 1420 泄漏后同一真实 release 审计通过。全量 `control-plane-e2e` 并发测试曾让故障注入 fixture 的 1 秒测试启动预算超时；单线程原测试立即通过，随后把仅测试的启动预算提高到 10 秒并重跑整套 93 项通过，未改生产 30 秒预算，也没有以单项重跑掩盖不稳定
 - 门禁：E4-15 正式 release 编排通过；Frontend 56 项 Node 契约、119 项 Vitest、5 项 Playwright、ESLint、严格 TypeScript、API 和 production boundary 全绿；Rust 默认/`desktop-e2e` 各 92 项、`control-plane-e2e` 93 项通过，三套 Clippy `-D warnings` 与 Rustfmt 全绿；Python runner Ruff、格式与严格 Mypy 通过；唯一 `visible=false` 真实 Tauri/WKWebView 冒烟 1 项通过
 - 隔离与清理：任务未启动 Backend、PostgreSQL、Docker 或业务端口；Playwright 前先确认 automation-tool 专属 1420 空闲，结束后再次确认释放。release target 每次唯一并删除；隐藏 Tauri 冒烟结束确认无 App/WebDriver 进程，正式 Vite 资产已恢复，其他项目容器、端口和文件均未读取或修改
-- Windows：相同 runner、纯 Node binary scanner、Cargo tree 和 release build 已接入只读 macOS/Windows Desktop matrix；GitHub Hosted Windows 仍因账户 Billing/Actions spending limit 未启动，Windows PE 字节、可执行路径与 runner 原生结果不以 macOS 冒充，任务保持 `🔍`
+- 历史 CI 状态（2026-07-19）：只读 macOS/Windows Desktop matrix 已接入，但 Hosted Windows 因 Billing/Actions spending limit 未启动，因此当时未以 macOS 冒充 Windows PE 字节、可执行路径与 runner 原生结果；2026-07-20 已由本机 release 构建与审计 GREEN 补齐
+- Windows 本机 GREEN（2026-07-20）：Windows x86_64 在唯一临时 Cargo target 中先后证明 release 缺失、畸形和 weak Ed25519 验证公钥均在 `tauri_build::build()` 前 fail closed；随后以验收专用公钥构建真实 `automation-tool-desktop.exe`，扫描 PE 字节、正式 Vite assets、唯一 production Tauri capability/config 与无默认测试 feature 的 Cargo tree，确认不含 WebDriver/WDIO、验收 Command、测试 Sidecar/origin/build ID、开发公钥或 1420 调试 URL。首次验收暴露 Python `CreateProcess` 无法解析无扩展名 `pnpm`，已显式安全解析 `pnpm.cmd` 并以 Node runner 契约复验；临时 release target 自动删除，未启动 App 或监听端口
 - 文档：同步根/Frontend README、前后端架构、工程结构、开发命令、CI 与唯一开发台账；没有新增第二份 implementation plan
 - 后续：B5-01 审计旧 `browser_session`，锁定只迁移私有 Profile/状态机/清理语义并排除旧账号、RBAC、Cookie Vault 与聚合运行时
 
@@ -1648,7 +1659,7 @@
 
 ### B5-03 Windows 浏览器受信发现
 
-- 状态：🔍 待 Windows 原生验收；生产实现、跨平台公共 API、Windows 专属单元/真实集成入口和 CI 编译路径已完成，当前 macOS 门禁全绿；GitHub Hosted Windows 因账户 Billing/Actions spending limit 零步拒绝启动，未把静态扫描或非 Windows 测试冒充原生结果
+- 状态：✅ 已完成；Windows x86_64 真实 Chrome/Edge 已验收
 - 日期：2026-07-19
 - 提交：本任务提交
 - 目标：只发现 Windows 标准安装位置的正式 Google Chrome/Microsoft Edge，用系统 Authenticode、签名证书发布者、PE Version Resource 产品字段和稳定文件身份共同约束候选；调用方不能提交任意路径，发现结果在使用前必须再次复验
@@ -1658,13 +1669,14 @@
 - 路径与竞态：候选必须为绝对普通文件，逐级拒绝 reparse point；打开时使用 `FILE_FLAG_OPEN_REPARSE_POINT` 和只共享读取，阻止验证期间写入、替换或删除。`GetFinalPathNameByHandleW` 的规范 DOS 路径必须仍等于固定候选，句柄前后 volume serial/file index/length 和重新打开 identity 必须一致；`TrustedWindowsBrowser` 保存 identity，`revalidate_windows_browser` 再检查固定路径、原 identity、签名和产品，替换或路径漂移统一 `PathInvalidated`
 - 失败矩阵与入口：Windows 专属单元覆盖 Chrome/Edge 固定顺序、坏签名 fail closed 和发现后替换；`frontend/src-tauri/tests/browser_discovery.rs` 在 Windows runner 只调用公开生产 API，要求机器至少发现 Edge/Chrome并逐个复验。非 Windows 入口明确返回 `UnsupportedPlatform`，只能证明跨平台契约，不计 Windows 实机验收
 - 门禁：B5-03 定向 Node 契约 1 项、完整 Frontend Node 契约 59 项、Vitest 119 项、ESLint、严格 TypeScript、Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿；macOS 默认 Rust 共 99 项通过、1 项既有 PyInstaller 编排 ignored。另用现有 Homebrew `rust-src` 对直接引用生产 `browser_discovery.rs` 的最小 crate 完成 `x86_64-pc-windows-msvc` 类型检查，实抓并修复四项 FFI 模块/指针/flags 类型错误；整库交叉检查仍会先被本机缺少 Windows SDK 的第三方 `aws-lc-sys` C 编译阻断，原生 runner 实际编译/执行后才补验收
+- Windows 本机 GREEN（2026-07-20）：Windows x86_64 原生运行 2 项固定 Chrome/Edge 候选、坏 verifier fail closed 与发现后替换失效单元测试，以及 1 项公开生产 Authenticode 集成测试；真实发现并逐个复验标准安装的 Google Chrome `150.0.7871.125` 和 Microsoft Edge `150.0.4078.83`，产品/公司/发布者 allowlist 均匹配。首次原生单元测试暴露 `%TEMP%` 的 `AVENTA~1` 8.3 短路径与 `GetFinalPathNameByHandleW` 长路径被误判漂移；保持逐级 reparse 拒绝和稳定句柄前提下，改用 `std::fs::canonicalize` 后比较句柄最终路径，并以 Node 回归契约、Rustfmt、全 target/全 feature Clippy `-D warnings` 复验
 - App 与本地隔离：本任务提供 B5-04/B5-07 将消费的 Rust 原生能力，尚无 Tauri Command 或用户界面，因此未启动 App、浏览器、Backend、Docker、测试服务器、端口、Profile、SQLite 或系统钥匙串；没有读取、停止或清理其他项目任何进程和资源
 - 后续：B5-04 只允许从受信发现结果中选择 Chrome/Edge；GitHub Windows runner 恢复时自动补本任务与此前 E4 系列 Windows 原生门禁，不阻塞无 Windows 设备依赖实现
 
 ### B5-04 受信浏览器选择设置
 
-- 状态：🔍 待 Windows 原生验收；macOS 已从唯一隐藏真实 App 的产品设置页完成受信 Chrome 发现、选择、沙盒持久化、WebView 刷新与重新读取，Windows 生产模块和单元测试已通过 `x86_64-pc-windows-msvc` 目标类型检查，但 GitHub Hosted Windows 仍因 Billing 零步失败而没有实际运行
-- 日期：2026-07-19
+- 状态：✅ 已完成
+- 日期：2026-07-20
 - 提交：本任务提交
 - 目标：用户只能在 Rust 当前真实发现的 Chrome/Edge 枚举中选择运营浏览器；React、Tauri 参数、持久化文件和 Control Plane 均不能接收或看到应用/可执行文件路径、签名信息或 identity，已卸载或失去信任的选择不能继续投影为可用
 - RED：先把台账置为 `🧪 RED`；新增 Rust 生产 service 集成测试、React 设置组件测试和 Node 原生边界契约，分别准确失败于缺少 `browser_settings` 模块、缺少 `BrowserSettings.tsx` 和缺少生产/隐藏 App 文件。随后再扩展同一契约，准确失败于缺少专用隐藏 Tauri 配置，未用 Mock 页面或下层存储测试冒充 App 验收
@@ -1674,28 +1686,30 @@
 - WebView 边界：正式 `TauriPlatformAdapter` 对两个枚举、顺序、去重、selected 必须属于 available 和 exact response keys 做 fail-closed 解析；设置页只有 Rust 返回项组成的 Radio 与保存按钮，没有文本框、文件选择器或路径回显。无浏览器、原生失败和带路径/未知字段响应均只显示固定安全状态，不反射底层异常
 - 真实 App 原入口：`scripts/run_b5_04_acceptance.py` 先动态选择并检查空闲 loopback WebDriver 端口，使用独立 `com.aventador.automationtool.b504acceptance` AppData 和唯一 `visible=false` Tauri App。真实页面进入“设置与诊断”，选择本机受信浏览器并点击保存，调用正式 `TauriPlatformAdapter → get/select Command → Rust discovery/settings → AppData`；刷新 WebView 后再次从同一页面读回，WDIO 1 项通过。runner 随后核对 canonical 文件、无路径和 Unix 权限，恢复 production Vite 资产
 - 失败矩阵与门禁：Rust 单元覆盖 canonical round-trip、损坏/非 canonical 不重写和已卸载选择不投影；真实 service 集成覆盖发现、保存、重开与不可用枚举不覆盖；Vitest 覆盖 UI 保存/空态/错误脱敏及 Adapter Edge-only/带路径响应；Node 契约固定无路径 Command、隐藏配置、刷新验收、动态端口和正式包排除标识。完整 Frontend Node 60 项、Vitest 123 项、ESLint、严格 TypeScript、Ruff、Rustfmt 与全目标/全特性 Clippy `-D warnings` 全绿；默认 Rust 共 105 项通过、1 项既有 PyInstaller 编排 ignored
+- Windows 本机 GREEN（2026-07-20）：先以真实 runner 复现 Python `CreateProcess` 无法解析无扩展名 `pnpm`，新增 Node 契约后统一解析 `pnpm.cmd`，覆盖测试构建、WDIO 和 production 资产恢复三条路径。独立隐藏 Tauri App 通过 Edge `150.0.0.0` 的真实 WebDriver 会话完成选择、保存与刷新重开，磁盘只持久化 canonical 浏览器枚举且无可执行路径；随机端口关闭、专属 AppData 删除和 production 资产恢复均复核通过。
 - 本地隔离与清理：验收不启动 Backend、PostgreSQL、Docker、Executor 进程或运营浏览器，只启动后台隐藏 App 和动态嵌入式 WebDriver；启动前检查端口，结束确认端口关闭、App/WDIO/runner 进程退出、专属 AppData 删除且生产资产恢复。没有读取、停止、复用或清理另一个项目的端口、进程、容器、网络、Volume、SQLite 或文件
-- 后续：B5-05 建立 App 沙盒内 `browser-profiles/douyin/<UUIDv4>` 私有目录与稳定路径身份；B5-04 Windows 原生验收在 runner 恢复时自动补齐，不阻塞 Profile 的平台无关实现
+- 后续：B5-05 建立 App 沙盒内 `browser-profiles/douyin/<UUIDv4>` 私有目录与稳定路径身份；B5-04 Windows 原生验收已于 2026-07-20 补齐
 
 ### B5-05 私有浏览器 Profile 目录
 
-- 状态：🔍 待 Windows 原生验收；macOS/Unix 已从公开生产 `BrowserProfileStore` 原入口完成真实文件系统创建、重开、稳定 identity 和失败矩阵，Windows 生产模块已通过 `x86_64-pc-windows-msvc` 目标类型检查，但 GitHub Hosted Windows 仍因 Billing 零步失败而没有实际运行
-- 日期：2026-07-19
+- 状态：✅ 已完成；macOS/Unix 与 Windows 均已从公开生产 `BrowserProfileStore` 原入口完成真实文件系统创建、重开、稳定 identity、reparse point/symlink、私有权限/DACL 和并发矩阵
+- 日期：2026-07-20
 - 提交：本任务提交
 - 目标：只在 Tauri App 私有数据根下建立 `browser-profiles/douyin/<canonical UUIDv4>`；Profile ID 必须由本机 CSPRNG 生成，不接收昵称、手机号、平台账号、路径片段或其他平台枚举，也不读取/迁移用户默认 Chrome/Edge Profile
 - RED：先把台账置为 `🧪 RED`；新增真实 Rust 文件系统集成测试和 Node 原生边界契约，分别准确失败于 `automation_tool_desktop_lib::browser_profiles` 与生产 `browser_profiles.rs` 不存在。没有复用旧仓库实现、Mock 文件系统或先写空模块让测试假绿
 - Rust 边界：Tauri setup 已从自身 `app.path().app_data_dir()` 管理唯一 `BrowserProfileStore`；公开原生能力仅为本机生成抖音 Profile、按 canonical UUIDv4 重开和对已持有 Profile 做 identity 复验。`SocialPlatform` 当前只有 `Douyin`；没有 Tauri Command、React DTO、Control Plane API、Cookie API、任意路径输入或其他平台目录
 - Unix 原子语义：从文件系统根逐级以 `openat(O_DIRECTORY|O_NOFOLLOW)` 打开既有祖先，固定子目录和 Profile 叶子通过父目录句柄的 `mkdirat` 原子创建；AppData、`browser-profiles`、`douyin` 和 Profile 均由已打开句柄 `fchmod(0700)` 并复核。Store/Profile 始终持有目录句柄与 dev+inode，创建、重开和使用前后从同一父句柄重开比较 identity，路径被 rename/替换后 fail closed
 - Windows 原子语义：AppData 全链拒绝 reparse point，固定子目录和 Profile 使用父目录 HANDLE 作为 `OBJECT_ATTRIBUTES.RootDirectory` 的 `NtCreateFile(FILE_DIRECTORY_FILE|FILE_OPEN_REPARSE_POINT)` 原子创建/打开，不走 `create_dir_all` 或路径跟随。每层验证 volume/file index、最终规范路径和非 reparse 属性，并在 HANDLE 上应用/复核 protected DACL：owner 为当前用户、唯一继承 ACE 为当前用户 `FILE_ALL_ACCESS`
-- 失败矩阵：集成测试覆盖 canonical UUIDv4/精确路径、非法版本/大小写/无连字符/逃逸、缺失 Profile、普通文件冒充目录、AppData/固定子目录/叶子 symlink、过宽权限修复、目录被 rename 后同名替换、8 路并发创建不复用 ID；Unix 单元另覆盖绝对路径祖先 symlink。Windows reparse point、ACL、并发和 identity 运行时矩阵保留给原生 runner，不以 MSVC 类型检查冒充通过
+- 失败矩阵：集成测试覆盖 canonical UUIDv4/精确路径、非法版本/大小写/无连字符/逃逸、缺失 Profile、普通文件冒充目录、AppData/固定子目录/叶子 symlink、过宽权限修复、目录被 rename 后同名替换、8 路并发创建不复用 ID；Unix 单元另覆盖绝对路径祖先 symlink。Windows reparse point、ACL、并发和 identity 运行时矩阵已于 2026-07-20 在原生实体环境通过
 - 门禁：完整 Frontend Node 契约 61 项、Vitest 123 项、ESLint、严格 TypeScript、production boundary、Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿；macOS 默认 Rust 共 114 项通过、1 项既有 PyInstaller 编排 ignored。用现有 Homebrew `rust-src` 对直接引用生产 common/Windows Profile 模块的最小临时 crate 完成 `x86_64-pc-windows-msvc` 类型检查，实抓并修复 Win32 feature 与 SID/ACL 缓冲区对齐问题，临时 crate/target 已删除
+- Windows 本机 GREEN（2026-07-20）：公开生产集成首次运行 4 项时，8 路并发初始化稳定暴露 `NtCreateFile` 创建目录后才补 DACL 的窗口，另一个线程可见继承 ACL 并返回 `UnsafeDirectory`。新增回归契约后，以拥有 SID/ACL 生命周期的 `PrivateSecurityDescriptor` 在 `FILE_OPEN_IF/FILE_CREATE` 创建时原子提交当前用户唯一 ACE 和 protected DACL，创建后仍复核 ACL 与 identity；20 轮并发压力全绿。补齐此前被 `cfg(unix)` 排除的 Windows 矩阵后共 6 项通过，覆盖 AppData/固定子目录/Profile junction、普通文件、DACL 扩权篡改、目录替换和并发 UUID；严格 Clippy、Node 契约及临时资源清理复核通过。
 - 原始入口与隔离：B5-05 的正式消费者是 B5-06/B5-07 Rust/Executor 运行链，当前没有用户可调用功能；唯一后台隐藏 App 已从正式 Tauri setup 初始化 Store，叶子创建/重开则从公开生产 Store 调用真实 OS 文件系统。验收不启动 Backend、PostgreSQL、Docker、Executor 或运营浏览器；隐藏 App 只使用动态已检查 WebDriver 端口和独立 B5-04 AppData，其他测试数据使用本任务唯一临时 AppData，结束全部精确删除，没有读取、停止、复用或清理另一个项目的资源
-- 后续：B5-06 在任何 persistent browser context 之前基于同一稳定 Profile identity 建立跨进程单实例锁；B5-05 Windows 原生验收在 runner 恢复时自动补齐，不阻塞锁的跨平台实现
+- 后续：B5-06 在任何 persistent browser context 之前基于同一稳定 Profile identity 建立跨进程单实例锁；B5-05 Windows 原生验收已于 2026-07-20 补齐
 
 ### B5-06 Profile 单实例锁
 
-- 状态：🔍 待 Windows 原生验收；macOS/Unix 公开生产 API、真实文件系统、跨进程争用和子进程崩溃恢复矩阵全部通过，Windows 生产模块已经 MSVC 目标类型检查，GitHub Hosted Windows 仍因账户 Billing/Actions spending limit 无法启动
-- 日期：2026-07-19
+- 状态：✅ 已完成；macOS/Unix 与 Windows 均已从公开生产锁 API 完成真实文件系统、跨进程争用、原生权限/链接和子进程崩溃恢复矩阵
+- 日期：2026-07-20
 - 提交：本任务提交
 - 目标：任何 BrowserRuntime 或 persistent context 使用 Profile 前都必须持有本机原生排他锁；同一 Profile 的同进程/跨进程竞争必须立即返回 `ProfileInUse`，不同 Profile 可并行，未明确证明安全退出的上次持有者必须返回 `RecoveryRequired`
 - RED：先把台账置为 `🧪 RED`；新增 Rust 公开 Profile 集成测试与 Node 原生边界契约，分别精确失败于缺少 `try_acquire_lock`/`ProfileInUse`/`RecoveryRequired` 和缺少平台锁实现；没有先放空方法、进程内 Mutex 或 Mock 文件系统让测试假绿
@@ -1703,15 +1717,16 @@
 - 状态文件：每个 Profile 固定一个 `.automation-tool-profile-lock-v1`，空文件代表上次明确释放，持有者在内核锁后持久化 exact canonical `{"state":"active","version":1}`。非空、过大、破损或未知状态均不自动覆盖；只有 identity、权限/所有者和 exact marker 仍一致时才能在显式释放中原地清空
 - Unix 原生语义：固定文件通过 Profile 目录 fd 的 `openat(O_NOFOLLOW|O_CLOEXEC)` 打开，要求当前 euid、`0600`、普通文件且硬链接数为 1；保存 dev+inode 并在写入/清空前后重开比对，使用 `flock(LOCK_EX|LOCK_NB)` 立即排他。路径被 rename/替换、symlink、过宽权限或状态损坏全部 fail closed
 - Windows 原生语义：固定文件使用 Profile 目录 HANDLE 作为 `NtCreateFile` RootDirectory，带 `FILE_NON_DIRECTORY_FILE|FILE_OPEN_REPARSE_POINT`，且不分享 delete 来阻止持锁时改名/删除；要求非 reparse、非目录、硬链接数为 1、稳定 volume/file index、精确最终路径和当前用户唯一 ACE 的 protected DACL。`LockFileEx(LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY)` 完成非阻塞内核排他，显式释放后由 HANDLE Drop 释放锁
-- 失败矩阵：6 项真实文件系统/进程集成测试覆盖同 Profile 争用、不同 Profile 并行、显式释放后重获取、真实子进程持锁争用、持锁子进程被 kill、Drop 未释放、symlink/过宽权限/破损状态/文件替换。Windows reparse/DACL/竞争/崩溃实际行为仍保留给原生 runner，不以 MSVC 类型检查冒充通过
+- 失败矩阵：6 项真实文件系统/进程集成测试覆盖同 Profile 争用、不同 Profile 并行、显式释放后重获取、真实子进程持锁争用、持锁子进程被 kill、Drop 未释放、symlink/过宽权限/破损状态/文件替换。Windows reparse/DACL/竞争/崩溃实际行为已于 2026-07-20 在原生实体环境通过
 - 门禁：完整 Frontend Node 契约 62 项、Vitest 123 项、ESLint、严格 TypeScript、OpenAPI 无漂移、production boundary、Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿；macOS 默认 Rust 共 120 项通过、1 项既有 PyInstaller 编排 ignored。用现有 Homebrew `rust-src` 对直接引用生产 common/Windows Profile 模块的最小临时 crate 完成 `x86_64-pc-windows-msvc` 类型检查，临时 crate/target 已删除
+- Windows 本机 GREEN（2026-07-20）：首次运行 5 项主矩阵全部在首次获取锁失败；先定位并修复固定前导点文件名被目录名称校验器自拒绝，再定位并修复 `NtCreateFile` 未带 `FILE_SYNCHRONOUS_IO_NONALERT` 导致 Rust `File::read/write` 在异步句柄上返回 `StorageUnavailable`。固定名专用校验、同步句柄和创建时原子 DACL 均有 Node/Rust 回归；主矩阵与补齐的 Windows junction、硬链接、DACL 扩权、损坏 marker、强制字节锁和持锁改名拒绝共 6 项全绿，严格 Clippy 与临时进程/文件清理复核通过。
 - 原始入口与资源：B5-06 当前的正式消费者是 B5-08 BrowserRuntime，尚无用户可调用的 App 功能；验收从公开 `BrowserProfileStore` 创建/重开 Profile 并调用公开 `BrowserProfile::try_acquire_lock`，使用真实 OS 文件系统和真实测试子进程，没有直接调下层、Mock 或隐藏 App 空壳。任务未启动 App、Backend、PostgreSQL、Docker、Executor、浏览器或任何监听端口；临时 AppData 只按本任务唯一精确路径创建并清理，没有读取、停止、复用或清理另一个项目的资源
 - 后续：B5-07 在正式 PyInstaller Executor 中加入 Playwright 并启动受信系统 Chrome/Edge headed persistent context；B5-08 将浏览器进程生命周期与本锁 guard 绑定
 
 ### B5-07 Playwright 打包 PoC
 
-- 状态：🔍 待 Windows 原生验收；macOS arm64 正式 PyInstaller onedir、生产 Playwright primitive、受信系统 Chrome headed persistent context 与退出清理已通过，Windows 同一构建/探针已进入 CI，但 Hosted Runner 仍因账户 Billing/Actions spending limit 无法启动
-- 日期：2026-07-19
+- 状态：✅ 已完成；macOS arm64 与 Windows x86_64 均已完成正式 PyInstaller onedir、生产 Playwright primitive、受信系统浏览器 headed persistent context 与退出清理
+- 日期：2026-07-20
 - 提交：本任务提交
 - 目标：证明 Executor 正式冻结目录可以携带 Python Playwright driver，而不下载或捆绑 Playwright 浏览器；从 B5-02/B5-03 受信系统 Chrome/Edge、B5-05 私有 Profile 和 B5-06 排他锁的原始底层链路启动 headed persistent context，为 B5-08 正式资源所有权消除打包风险
 - RED：先把台账置为 `🧪 RED`；新增 Python 运行时单元测试和 Node 打包边界契约，分别在收集阶段精确失败于 `ModuleNotFoundError: automation_tool.executor.browser_runtime` 与生产模块文件不存在，没有用下载的 Playwright Chromium、默认用户 Profile、Mock 浏览器或空壳入口制造通过
@@ -1719,15 +1734,16 @@
 - 生产 primitive：`BrowserLaunchRequest` 只接受绝对 `Path`，拒绝超长、控制/Bidi 字符、symlink、非普通/不可执行浏览器和无效 Profile；`PackagedBrowserRuntime` 只用显式 `executable_path`、`headless=False`、`accept_downloads=False`、30 秒超时调用 `launch_persistent_context`，不允许 `channel`、安装 fallback 或自定义 flags。Lease 以幂等 close 先关 context 再停 Playwright driver，路径、底层异常和对象表示均固定脱敏
 - 原始 PoC 入口：macOS ignored 原生验收先由 Rust 生产 API 发现并复验系统 Chrome，再用公开 `BrowserProfileStore` 创建独立抖音 UUIDv4 Profile、取得真实 B5-06 锁，启动测试专用冻结探针；探针只负责调用生产 `browser_runtime.py` 并返回固定健康标记。context 关闭后 Rust 再复验浏览器/Profile 并显式释放锁，全程未触碰用户默认 Chrome `User Data`
 - 产品边界：冻结探针位于 `backend/tests/fixtures`，不进入正式 Executor onedir、React、Tauri Command、Control Plane 或发布物；B5-07 是内部打包/真实资源 PoC，不是 App 用户功能，因此没有可从 App 发出的接口，也不以隐藏 App 空壳冒充完成。B5-08 才会建立正式 BrowserRuntime、进程所有权和业务原始调用路径
-- 失败矩阵：覆盖相对/缺失/目录/不可执行浏览器、相对/缺失/普通文件 Profile、浏览器/Profile symlink、starter/launch/close/driver-stop 异常、幂等/上下文关闭和 repr 脱敏；正式包继续覆盖无项目 Python PATH、bootstrap 拒绝和 WebSocket 不可用。Windows Chrome/Edge 启动、路径语义和进程退出实际行为保留给原生 runner，不以 macOS 或静态检查冒充通过
+- 失败矩阵：覆盖相对/缺失/目录/不可执行浏览器、相对/缺失/普通文件 Profile、浏览器/Profile symlink、starter/launch/close/driver-stop 异常、幂等/上下文关闭和 repr 脱敏；正式包继续覆盖无项目 Python PATH、bootstrap 拒绝和 WebSocket 不可用。Windows 受信系统浏览器启动、路径语义和进程退出实际行为已于 2026-07-20 在原生实体环境通过
 - 门禁：B5-07 聚焦 Python 11 项通过；Backend 全量 884 项、5169 条语句/1010 个分支覆盖率 100%，uv lock、Ruff/格式、严格 Mypy 174 个源码文件、OpenAPI/Executor Schema 和 Actionlint 全绿；Frontend 63 项 Node 契约、123 项 Vitest、ESLint、严格 TypeScript、API/production boundary 全绿；macOS Rust 120 项通过、B5-07/E4-07 两项显式编排测试默认 ignored，Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿
+- Windows 本机 GREEN（2026-07-20）：正式 PyInstaller onedir 构建与公开 Rust 编排实际发现/复验受信系统浏览器，创建私有抖音 UUIDv4 Profile、取得原生排他锁并启动 headed persistent context，主窗口/第二窗口操作、正常关闭、浏览器复验与显式解锁全链通过；冻结目录含 Playwright driver 且无 `.local-browsers` 或 Chromium/Firefox/WebKit/ffmpeg 浏览器包。首次运行只因 Python 文本 stdout 在 Windows 输出 CRLF 破坏 canonical ready 字节失败，改为 binary stdout LF 并加 Node 契约后复验通过；随后发现 pytest 保留完整 PyInstaller `tmp_path`，增加成功/失败 finalizer 并第三次从零构建复验，9 项 Python 矩阵、Ruff/Node 门禁和探针/浏览器/Profile/冻结文件零残留检查全绿。
 - 资源隔离与清理：任务未启动 Backend、PostgreSQL、Docker、App、测试服务器或监听端口；只短暂启动受信系统 Chrome，使用本任务唯一临时 AppData/Profile 和 PyInstaller 目录，验收后关闭 context/driver、释放锁并精确删除临时目录。进程复查无 frozen probe、Chrome/Profile 或 Playwright driver 残留，没有读取、停止、复用或清理另一个项目的资源
 - 后续：B5-08 将 B5-02/B5-03 复验、B5-05 Profile、B5-06 lock guard、Python context 和完整浏览器进程树绑定为一个确定性 BrowserRuntime；B5-09 再从抖音页面对象的正式调用入口消费该 Runtime
 
 ### B5-08 BrowserRuntime
 
-- 状态：🔍 待 Windows 原生验收；macOS arm64 冻结生产模块已沿受信系统 Chrome、私有 Profile、真实原生锁完成主窗口/第二窗口正常关闭和独立 process group 整树强杀，Windows 正式 Manager 的 Job Object 组合已存在但 Hosted Runner 仍因账户 Billing/Actions spending limit 无法启动
-- 日期：2026-07-19
+- 状态：✅ 已完成；macOS arm64 与 Windows x86_64 均已完成冻结生产模块的窗口生命周期、异常退出和原生 process group/正式 Manager Job Object 整树强停
+- 日期：2026-07-20
 - 提交：本任务提交
 - 目标：在 Python Local Executor 内建立一个窄、确定、可由后续抖音 Adapter 消费的 BrowserRuntime；同时只拥有一个 thread-confined Playwright persistent context，并把启动、主窗口、窗口集合、新窗口、触发式弹窗、有界超时、定向关窗、正常关闭和进程级硬清理边界固定下来
 - RED：先把台账置为 `🧪 RED`；新增 Python 生命周期/失败矩阵在收集阶段精确失败于无法导入 `BrowserRuntime`，Node 原生边界契约精确失败于生产模块缺少该类；没有用 Mock 浏览器、下载 Chromium、默认用户 Profile 或空 Tauri Command 冒充真实运行
@@ -1738,6 +1754,7 @@
 - 失败矩阵：15 项聚焦 Python 测试覆盖非法 starter/request、启动前浏览器/Profile 替换、超时配置半失败、窗口枚举/主窗/新窗异常、触发器失败/超时、非法超时、外来/失效窗口、Page close 失败、跨线程、重复启动、use-after-close、context/driver 单独及同时关闭失败、上下文异常退出和重启；生产模块 247 条语句、48 个分支覆盖率 100%
 - 门禁：Backend 全量 893 项、5323 条语句/1034 个分支覆盖率 100%，uv lock、Ruff/格式、严格 Mypy 189 个源码文件和 OpenAPI/Executor Schema 全绿；Frontend 64 项 Node 契约、123 项 Vitest、ESLint、严格 TypeScript、API/production boundary 全绿；macOS Rust 120 项通过，B5-07/B5-08/E4-07 三项真实编排默认 ignored，Rustfmt、全目标/全特性 Clippy `-D warnings` 与 Actionlint 全绿
 - 原始调用边界：B5-08 交付的是 Local Executor 内部生产 API，没有用户可直接触发的 App 功能或服务端接口；真实入口是冻结模块经 Rust 受信浏览器/Profile/锁组合调用，不启动隐藏 App 空壳。B5-09 从真实抖音页面对象消费 `BrowserWindow.playwright_page`，B5-10/B5-13 再建立用户扫码/处理入口；相关任务不得回退到 Mock 或从 Control Plane 下发路径
+- Windows 本机 GREEN（2026-07-20）：同一测试专用 PyInstaller onedir 生成正式测试签名 Manifest；公开 Rust API 发现并复验标准安装浏览器、创建私有 Profile 与原生排他锁，先通过主窗口/第二窗口正常关闭，再由公开 `ExecutorManager` 以生产 suspended-attach `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 启动 held BrowserRuntime。冻结探针通过 `ctypes` Toolhelp32 原生快照记录 Node driver 与真实 Chrome/Edge 后代 PID，测试在强停前确认树内含受信浏览器进程，`manager.stop()` 后逐个确认全部 PID 消失，再复验浏览器/Profile 并显式解锁。首次 Manager 模式因 PowerShell/CIM 枚举超时失败，替换为毫秒级 Toolhelp32 后完整双路径通过；18 项 Python 聚焦矩阵、Ruff、Node、Rustfmt、全 target/feature Clippy 及专属进程/冻结目录零残留复核全绿。
 - 资源隔离：验收未启动 Backend、PostgreSQL、Docker、App、测试服务器或监听端口，只短暂启动本机受信 Chrome；每轮使用唯一临时 PyInstaller/AppData/Profile，正常退出或整树强停后复验 Profile、释放锁并由 fixture 精确清理。没有读取、停止、复用或清理另一个项目的资源
 - 后续：B5-09 建立抖音页面对象与真实页面证据，将 Session 健康封闭为 healthy/expired/missing/risk/unknown；真实账号不可用时用本地隔离测试页完成自动化层并保持真实账号待验收，不阻塞后续任务
 
@@ -1821,4 +1838,4 @@
 1. `B5-13`：从正式 App 平台状态页接入登录健康、打开处理、重新检查和注销入口；
 2. `B5-14`：在平台状态页完成先阻止新任务、停止关联执行、释放锁后再定向删除 Profile 的安全注销；
 3. `B5-15`：从真实 App/Executor/浏览器重启验证现有抖音登录态复用；真实自然失效不可控时先完成隔离接管矩阵且不破坏用户保留的持久 Profile；
-4. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+4. `B5-02`：在安装 Microsoft Edge 的 macOS 设备上补真实签名/Bundle ID/Team ID 发现与复验；其余本轮 Windows 原生验收已于 2026-07-20 全部补齐。

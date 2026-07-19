@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,14 @@ def release_binary(target_directory: Path) -> Path:
     return binary
 
 
+def pnpm_executable() -> str:
+    name = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+    executable = shutil.which(name)
+    if executable is None:
+        raise RuntimeError("E4-15 pnpm executable is unavailable")
+    return executable
+
+
 def run_checked(command: list[str], *, environment: dict[str, str]) -> None:
     subprocess.run(
         command,
@@ -99,7 +108,7 @@ def main() -> int:
         release_environment = dict(environment)
         release_environment[VERIFYING_KEY_ENVIRONMENT] = ACCEPTANCE_VERIFYING_KEY
         run_checked(
-            ["pnpm", "tauri", "build", "--no-bundle"],
+            [pnpm_executable(), "tauri", "build", "--no-bundle"],
             environment=release_environment,
         )
 
