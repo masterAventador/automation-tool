@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel
-from websockets.sync.client import ClientConnection, connect
-from websockets.typing import Subprotocol
+from websockets.sync.client import ClientConnection
 
 from automation_tool.executor.fake import FakeExecutorEngine
+from automation_tool.executor.transport import (
+    ExecutorTransportRejected,
+    connect_executor_websocket,
+    parse_executor_websocket_url,
+    positive_seconds,
+    require_executor_session_token,
+    serialize_executor_message,
+)
 from automation_tool.protocol import (
-    EXECUTOR_WEBSOCKET_SUBPROTOCOL,
-    MAX_EXECUTOR_MESSAGE_BYTES,
     TaskCommandEnvelope,
     parse_executor_message,
 )
-
-_EXECUTOR_PATH = "/api/v1/executors/connect"
 
 
 class FakeExecutorTransportRejected(ConnectionError):
@@ -36,49 +37,24 @@ class FakeExecutorClientConfiguration:
     session_token: str = field(repr=False)
 
     def __post_init__(self) -> None:
-        if (
-            type(self.websocket_url) is not str
-            or not 1 <= len(self.websocket_url) <= 2048
-            or type(self.session_token) is not str
-            or not 1 <= len(self.session_token) <= 4096
-            or any(character.isspace() for character in self.session_token)
-        ):
-            raise FakeExecutorTransportRejected
         try:
-            parsed = urlsplit(self.websocket_url)
-            _ = parsed.port
-        except ValueError:
+            parse_executor_websocket_url(self.websocket_url)
+            require_executor_session_token(self.session_token)
+        except ExecutorTransportRejected:
             raise FakeExecutorTransportRejected from None
-        if (
-            parsed.scheme not in {"ws", "wss"}
-            or parsed.hostname is None
-            or parsed.username is not None
-            or parsed.path != _EXECUTOR_PATH
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise FakeExecutorTransportRejected
 
 
 def _positive_seconds(value: object) -> float:
-    if not isinstance(value, timedelta):
-        raise FakeExecutorTransportRejected
-    seconds = value.total_seconds()
-    if seconds <= 0:
-        raise FakeExecutorTransportRejected
-    return seconds
+    try:
+        return positive_seconds(value)
+    except ExecutorTransportRejected:
+        raise FakeExecutorTransportRejected from None
 
 
 def _wire(message: BaseModel) -> str:
     try:
-        dumped = message.model_dump(mode="json")
-        return json.dumps(
-            dumped,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    except Exception:
+        return serialize_executor_message(message)
+    except ExecutorTransportRejected:
         raise FakeExecutorTransportRejected from None
 
 
@@ -103,17 +79,11 @@ class FakeExecutorClient:
         self._close_timeout = _positive_seconds(close_timeout)
 
     def _connect(self) -> ClientConnection:
-        return connect(
-            self._configuration.websocket_url,
-            subprotocols=[Subprotocol(EXECUTOR_WEBSOCKET_SUBPROTOCOL)],
-            additional_headers={
-                "Authorization": f"Bearer {self._configuration.session_token}",
-            },
-            compression=None,
-            proxy=None,
-            open_timeout=self._open_timeout,
-            close_timeout=self._close_timeout,
-            max_size=MAX_EXECUTOR_MESSAGE_BYTES,
+        return connect_executor_websocket(
+            websocket_url=self._configuration.websocket_url,
+            session_token=self._configuration.session_token,
+            open_timeout=timedelta(seconds=self._open_timeout),
+            close_timeout=timedelta(seconds=self._close_timeout),
         )
 
     def run(self, *, max_commands: int) -> int:

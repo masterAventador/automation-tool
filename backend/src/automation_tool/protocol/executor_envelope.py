@@ -22,6 +22,7 @@ from pydantic import (
 )
 from pydantic_core import CoreSchema, core_schema
 
+from automation_tool.protocol.json_object import decode_bounded_json_object
 from automation_tool.protocol.limits import MAX_CROSS_RUNTIME_SEQUENCE
 from automation_tool.protocol.safe_text import contains_control_or_bidi, is_unsafe_text
 from automation_tool.protocol.version import CURRENT_EXECUTOR_PROTOCOL
@@ -351,32 +352,11 @@ def _validate_payload_value(value: JsonValue, *, depth: int) -> None:
         raise ValueError("payload numbers must be finite")
 
 
-def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
-
-
 def parse_executor_message(value: str | bytes) -> ExecutorEnvelope:
     """Parse a bounded JSON object and collapse every failure to one safe error."""
 
     try:
-        if type(value) is bytes:
-            if len(value) > MAX_EXECUTOR_MESSAGE_BYTES:
-                raise ValueError("message too large")
-            source = value.decode("utf-8")
-        elif type(value) is str:
-            if len(value.encode("utf-8")) > MAX_EXECUTOR_MESSAGE_BYTES:
-                raise ValueError("message too large")
-            source = value
-        else:
-            raise TypeError("message must be text")
-        decoded = json.loads(source, object_pairs_hook=_reject_duplicate_keys)
-        if not isinstance(decoded, dict):
-            raise ValueError("message must be an object")
+        decoded = decode_bounded_json_object(value, maximum_bytes=MAX_EXECUTOR_MESSAGE_BYTES)
         return ExecutorMessage.model_validate(decoded).root
     except (TypeError, ValueError, UnicodeError, ValidationError):
         pass

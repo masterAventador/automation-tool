@@ -1,5 +1,10 @@
 """Local Executor components that depend only on the shared protocol."""
 
+from automation_tool.executor.bootstrap import (
+    ExecutorBootstrap,
+    ExecutorBootstrapRejected,
+    read_executor_bootstrap,
+)
 from automation_tool.executor.fake import (
     FakeExecutorEngine,
     FakeExecutorRejected,
@@ -10,12 +15,25 @@ from automation_tool.executor.fake_client import (
     FakeExecutorClientConfiguration,
     FakeExecutorTransportRejected,
 )
+from automation_tool.executor.runtime import (
+    ExecutorProcessRejected,
+    ExecutorProcessReporter,
+    LocalExecutorProcess,
+    RuntimeMetadata,
+)
 
 __all__ = [
+    "ExecutorBootstrap",
+    "ExecutorBootstrapRejected",
+    "ExecutorProcessRejected",
+    "ExecutorProcessReporter",
     "FakeExecutorClient",
     "FakeExecutorClientConfiguration",
     "FakeExecutorEngine",
     "FakeExecutorRejected",
     "FakeExecutorScenario",
     "FakeExecutorTransportRejected",
+    "LocalExecutorProcess",
+    "RuntimeMetadata",
+    "read_executor_bootstrap",
 ]

@@ -196,6 +196,10 @@ browser/desktop infrastructure
 - 安装信号处理和有界停止；
 - 令牌、私有路径和原始异常不进入日志。
 
+E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、短期 `executor.connect` Session、Installation/Executor UUIDv4 和心跳间隔。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`，Session 只驻留在 `SecretStr`/Authorization Header，不进入 argv、环境、stdout、stderr 或异常。
+
+进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。当前任何 Task Command 或其他应用帧都 fail closed，不提前伪造 ACK/事件；E4-12 在本机幂等账本和监管完成后才接入无副作用命令回放。
+
 ### 7.2 Application
 
 - 领取并校验命令；

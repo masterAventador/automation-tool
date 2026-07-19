@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。React 工作台已消费这些权威事实；正式 Local Executor 进程尚未提供。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 最小进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。React 工作台已消费 Control Plane 权威事实；正式 Executor 当前只完成 bootstrap、Hello/Heartbeat 和信号退出，不执行任务或平台动作。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -42,6 +42,10 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 `automation_tool.executor.fake` 是不依赖 Control Plane 内部实现的确定性协议引擎：严格复用正式 parser、身份、deadline、Attempt command sequence 和 task/attempt 绑定，按 message ID 与 idempotency key 双账本去重。它覆盖 accept/reject、成功、部分成功、失败、登录、人工接管、结果不确定和 hold 场景，并为 pause/resume/cancel/emergency-stop 生成正式 control ACK 与单调事件；生成中失败会原子回滚状态和事件水位。`fake_client` 只通过 `ws(s)://.../api/v1/executors/connect`、唯一正式子协议和 Bearer Session 出站连接，不执行 RPA、文件、子进程或数据库副作用。
 
+E4-02 增加正式控制台入口 `automation-tool-executor`。`executor/bootstrap.py` 只从 stdin 读取一条换行结尾、最多 16 KiB 的严格 JSON object，字段固定为 bootstrap 版本、Executor WebSocket URL、短期 `executor.connect` Session、Installation/Executor UUIDv4 和 `1..60` 秒心跳间隔；重复 key、未知字段、非法类型与超限统一拒绝。明文 `ws` 只允许带有效端口的 `127.0.0.1` 固定路径，远端只允许标准端口 `wss`，userinfo/query/fragment 全部拒绝。
+
+`executor/runtime.py` 从安装产物自身检测 macOS/Windows 与 arm64/x86_64，不相信 stdin 自报运行平台；它使用共享 `executor/transport.py` 的唯一子协议、Bearer Header、禁代理/压缩和 32 KiB 上限连接 Control Plane，发送正式 Hello，再以严格递增 sequence 发送 Heartbeat。第一条心跳存活后 stdout 只输出固定 `executor.healthy`，正常 SIGINT/SIGTERM 后输出固定 `executor.stopped`；Session、ID、URL、原始异常和服务端帧都不进入该投影或 stderr。E4-02 不处理任何 Task Command，收到应用帧或连接异常立即以固定错误退出；有界重启、命令账本和真实消息回放分别由 E4-08、E4-11、E4-12 实现。
+
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 
 `DemoBootstrapGrant` 的 claims 由离线 Ed25519 私钥签名为 `atb1` 凭据；Control Plane 只配置 32 字节公钥并验证签名，不持有签发私钥。claims 有效期最多 7 天，绑定一个规范 `DemoEnvironmentId`，唯一 `BootstrapPurpose` 为 `installation.register`。服务端签发最长 5 分钟且不超过 bootstrap 到期时间的一次性 challenge，绑定环境、bootstrap SHA-256 指纹和设备公钥；App 用设备 Ed25519 私钥签名后，PostgreSQL 在同一事务中锁定 challenge、验证证明、创建 Installation、签发初始设备凭据并标记消费。批次次数、撤销和审计仍由 C10-06 实现，不在本 API 中伪造。
@@ -58,7 +62,7 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 `GET /api/v1/workbench/status` 复用 `require_current_installation_access`，从 Registry 只投影 `ready`、Executor `online/offline` 与服务端最后心跳时间，统一 `no-store`，不返回 Installation、Executor、Connection ID 或底层异常。该状态是工作台只读在线事实，任务状态仍只来自 PostgreSQL 快照与事件。
 
-真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`；取消/紧停入口执行 `uv run python ../scripts/run_t3_14_acceptance.py`；Query/Reducer/Tauri Channel 入口执行 `uv run python ../scripts/run_t3_15_acceptance.py`；工作台真实页面入口执行 `uv run python ../scripts/run_t3_16_acceptance.py`；新建任务表单、运行详情、完整生命周期与 Control Plane 重启入口分别在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`、`backend/.venv/bin/python scripts/run_t3_18_acceptance.py`、`backend/.venv/bin/python scripts/run_t3_19_acceptance.py` 和 `backend/.venv/bin/python scripts/run_t3_20_acceptance.py`。T3-20 在隐藏 App 保持运行时停止首个 Uvicorn，以同一 PostgreSQL 重启第二个进程；App 刷新经历不可用页，同一 FakeExecutor/Session 自动重连并消费原 pending cancel。验收核对原 Task/Command/Event ID、定义、revision、水位与最终 `cancelled`，均使用隔离 PostgreSQL、完整 Alembic、真实 Uvicorn 与唯一 `visible=false` Tauri/WKWebView，结束后回收 App 数据、服务、端口、容器、网络和卷。
+真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`；取消/紧停入口执行 `uv run python ../scripts/run_t3_14_acceptance.py`；Query/Reducer/Tauri Channel 入口执行 `uv run python ../scripts/run_t3_15_acceptance.py`；工作台真实页面入口执行 `uv run python ../scripts/run_t3_16_acceptance.py`；新建任务表单、运行详情、完整生命周期与 Control Plane 重启入口分别在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`、`backend/.venv/bin/python scripts/run_t3_18_acceptance.py`、`backend/.venv/bin/python scripts/run_t3_19_acceptance.py` 和 `backend/.venv/bin/python scripts/run_t3_20_acceptance.py`。E4-02 的正式进程入口验收执行 `uv run pytest tests/integration/test_local_executor_process.py`：测试经安装后的 `automation-tool-executor`、stdin、真实 Uvicorn、正式 Session 认证和 Registry 验证 Hello/Heartbeat、固定健康输出与 SIGTERM 清理。T3-20 使用隔离 PostgreSQL、完整 Alembic 和唯一隐藏 App 验证同库重启；所有验收结束后回收对应 App、进程、端口、容器、网络和卷。
 
 真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询/事件端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名、凭据注入、任务定义复验与 SSE 严格解析，React 不接触任何秘密；T3-17 已由唯一 `visible=false` App 真实点击新建表单，经固定 Tauri Command、Uvicorn 和 PostgreSQL 原子创建匹配定义。
 
@@ -75,6 +79,8 @@ uv run mypy
 uv run automation-tool-export-openapi --output ../contracts/openapi/control-plane.v1.json --check
 uv run automation-tool-export-executor-schema --output ../contracts/protocol/executor-v1.schema.json --check
 ```
+
+`automation-tool-executor` 只由 Tauri/PyInstaller 入口通过 stdin 启动；不要把 bootstrap JSON、Session 或其他秘密放入命令行、环境变量、shell 历史或普通配置。E4-03 完成前，本地正式入口由测试和开发环境的安装脚本提供。
 
 后端 Pydantic/FastAPI 是跨端 DTO 的唯一来源。路由契约变化后先去掉 `--check` 重新导出快照，再到 `frontend/` 执行 `pnpm generate:api`；提交前两侧都必须通过各自漂移检查。
 
