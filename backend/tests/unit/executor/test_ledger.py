@@ -386,6 +386,126 @@ def test_outbox_replays_exact_protocol_messages_and_delivery_is_durable(tmp_path
         opened.pending_outbox(limit=10)
 
 
+def test_atomic_outcome_commit_and_recovery_reject_every_inconsistent_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_directory = tmp_path / "atomic-state"
+    opened = ledger(state_directory)
+    source = command(1)
+    opened.receive_command(source)
+    accepted = outbound(
+        message_id=_uuid(200),
+        idempotency_key="executor-ledger:atomic:accept",
+    )
+    started = outbound(
+        message_id=_uuid(201),
+        idempotency_key="executor-ledger:atomic:started",
+        message_type="task.started",
+    )
+    batch = (accepted, started)
+
+    committed = opened.commit_outcome(
+        source_message_id=str(source.message_id),
+        expected_checkpoint_revision=1,
+        checkpoint_state=AttemptCheckpointState.TERMINAL,
+        last_event_sequence=1,
+        messages=batch,
+    )
+
+    assert [entry.message for entry in committed] == list(batch)
+    assert all(entry.replayed is False for entry in committed)
+    assert [entry.message for entry in opened.outbox_for_command(str(source.message_id))] == list(
+        batch
+    )
+    assert opened.outbox_for_command(_uuid(999)) == ()
+    assert opened.requeue_delivered_outbox() == 0
+    assert opened.mark_outbox_delivered(str(accepted.message_id)) is True
+    assert opened.requeue_delivered_outbox() == 1
+    assert [entry.message for entry in opened.pending_outbox(limit=10)] == list(batch)
+
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.commit_outcome(
+            source_message_id=str(source.message_id),
+            expected_checkpoint_revision=2,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=1,
+            messages=batch,
+        )
+    invalid_arguments: tuple[dict[str, object], ...] = (
+        {"expected_checkpoint_revision": 0},
+        {"checkpoint_state": "terminal"},
+        {"last_event_sequence": -1},
+        {"messages": []},
+        {"messages": ()},
+    )
+    for invalid in invalid_arguments:
+        arguments: dict[str, object] = {
+            "source_message_id": str(source.message_id),
+            "expected_checkpoint_revision": 2,
+            "checkpoint_state": AttemptCheckpointState.TERMINAL,
+            "last_event_sequence": 1,
+            "messages": batch,
+        }
+        arguments.update(invalid)
+        with pytest.raises(ExecutorLedgerRejected):
+            opened.commit_outcome(**arguments)  # type: ignore[arg-type]
+
+    duplicate_state = tmp_path / "duplicate-state"
+    duplicate = ledger(duplicate_state)
+    duplicate.receive_command(source)
+    with pytest.raises(ExecutorLedgerRejected):
+        duplicate.commit_outcome(
+            source_message_id=str(source.message_id),
+            expected_checkpoint_revision=1,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=1,
+            messages=(accepted, accepted),
+        )
+    with pytest.raises(ExecutorLedgerRejected):
+        duplicate.commit_outcome(
+            source_message_id=_uuid(999),
+            expected_checkpoint_revision=1,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=1,
+            messages=batch,
+        )
+    mismatched = accepted.model_copy(update={"task_id": UUID(_uuid(998))})
+    with pytest.raises(ExecutorLedgerRejected):
+        duplicate.commit_outcome(
+            source_message_id=str(source.message_id),
+            expected_checkpoint_revision=1,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=1,
+            messages=(mismatched,),
+        )
+    with pytest.raises(ExecutorLedgerRejected):
+        duplicate.commit_outcome(
+            source_message_id=str(source.message_id),
+            expected_checkpoint_revision=2,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=1,
+            messages=batch,
+        )
+    with sqlite3.connect(duplicate.database_path) as connection:
+        connection.execute("UPDATE executor_attempt_checkpoints SET last_event_sequence = 2")
+    with pytest.raises(ExecutorLedgerRejected):
+        duplicate.commit_outcome(
+            source_message_id=str(source.message_id),
+            expected_checkpoint_revision=1,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=1,
+            messages=batch,
+        )
+
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.outbox_for_command("not-a-command")
+    with monkeypatch.context() as scoped:
+        scoped.setattr(opened, "_connect", lambda: (_ for _ in ()).throw(OSError()))
+        with pytest.raises(ExecutorLedgerRejected):
+            opened.requeue_delivered_outbox()
+
+
 def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -> None:
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)

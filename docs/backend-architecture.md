@@ -202,7 +202,9 @@ E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-
 
 E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在正式 CLI 联网前打开。固定 `PRAGMA user_version=1` 迁移一次创建 identity、commands、attempt checkpoints、outbox 四表；数据库绑定唯一 Installation/Executor，未来版本、缺表/损坏、身份错绑、symlink/reparse point、宽权限、非普通文件和打开 identity 变化全部 fail closed。命令以 message ID、idempotency key、32 字节意图 SHA-256 和 Attempt 连续 sequence 去重；checkpoint 以 revision/CAS 和单调 event sequence 更新；outbox 只接受正式 `TaskCommandResultEnvelope`/`TaskEventEnvelope` 并保留精确 wire 重放身份。SQLite 不保存 bootstrap Session、本机会话、Cookie、平台登录态、密钥或任意配置，不调用系统钥匙串，也不替代云端 PostgreSQL 权威状态。
 
-进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。当前任何 Task Command 或其他应用帧都 fail closed，不提前伪造 ACK/事件；E4-12 在本机幂等账本和监管完成后才接入无副作用命令回放。
+进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。E4-12 已接入无副作用命令回放：只接受身份/deadline 合法的 `task.offer`，先持久 receipt，再以一个 SQLite 事务提交 terminal checkpoint 与固定 `task.accept` 加五条 success Event；其他命令和非法帧继续 fail closed。
+
+`executor/command_processor.py` 不复用 FakeExecutor 内存状态。message/idempotency 命中同一意图时读取首次持久 outbox；生成中断只保留 received checkpoint；并发提交失败时只接受已出现的赢家 outbox。runtime 在每次 Hello 后把已发送 outbox 重新排队并按 ordinal 发送，每帧成功写入 WebSocket 后才标 delivered，所以崩溃/部分发送只会重放原 ID/幂等键/正文。正式 E4-12 编排已用同一 SQLite 状态目录两次启动 signed PyInstaller Executor，Control Plane 的 acknowledged command 与五条 PostgreSQL Event 快照保持不变。该路径仍不执行浏览器、微信或平台账号副作用，后续 Adapter 才接入真实动作。
 
 E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python。构建依赖只在 uv dev group，当前未加入 Python Playwright；macOS 本机已从冻结入口验证 bootstrap 与网络失败的固定退出契约，GitHub macOS/Windows 矩阵使用同一测试，但当前 Hosted Runner 因账户 Billing/Actions spending limit 在启动前被拒绝，因此 Windows 仍是明确待验收项。该 PoC 不承担目录 Manifest、签名、完整性或防降级，以上边界继续由 E4-04/E4-05 实现。
 

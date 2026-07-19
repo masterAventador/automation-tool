@@ -13,9 +13,15 @@ from io import TextIOBase
 from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
+from websockets.sync.client import ClientConnection
+
 from automation_tool import __version__
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import ExecutorBootstrap
+from automation_tool.executor.command_processor import (
+    ExecutorCommandProcessor,
+    ExecutorOutboundMessage,
+)
 from automation_tool.executor.transport import (
     ExecutorTransportRejected,
     connect_executor_websocket,
@@ -143,7 +149,7 @@ def _positive_duration(value: object) -> timedelta:
 
 
 class LocalExecutorProcess:
-    """Connect, prove health with heartbeats, and stop without executing commands."""
+    """Connect, replay durable outcomes, and consume no-side-effect commands."""
 
     def __init__(
         self,
@@ -151,6 +157,7 @@ class LocalExecutorProcess:
         bootstrap: ExecutorBootstrap,
         metadata: RuntimeMetadata,
         reporter: ExecutorProcessReporter,
+        command_processor: ExecutorCommandProcessor,
         clock: ExecutorClock | None = None,
         id_source: Callable[[], object] = uuid4,
         open_timeout: timedelta = timedelta(seconds=5),
@@ -161,6 +168,7 @@ class LocalExecutorProcess:
             not isinstance(bootstrap, ExecutorBootstrap)
             or not isinstance(metadata, RuntimeMetadata)
             or not isinstance(reporter, ExecutorProcessReporter)
+            or not isinstance(command_processor, ExecutorCommandProcessor)
             or not isinstance(resolved_clock, ExecutorClock)
             or not callable(id_source)
         ):
@@ -168,6 +176,7 @@ class LocalExecutorProcess:
         self._bootstrap = bootstrap
         self._metadata = metadata
         self._reporter = reporter
+        self._command_processor = command_processor
         self._clock = resolved_clock
         self._id_source = id_source
         self._open_timeout = _positive_duration(open_timeout)
@@ -233,6 +242,18 @@ class LocalExecutorProcess:
         except Exception:
             raise ExecutorProcessRejected from None
 
+    def _send_outbox(
+        self,
+        websocket: ClientConnection,
+        messages: tuple[ExecutorOutboundMessage, ...],
+    ) -> None:
+        try:
+            for message in messages:
+                websocket.send(serialize_executor_message(message))
+                self._command_processor.mark_delivered(str(message.message_id))
+        except Exception:
+            raise ExecutorProcessRejected from None
+
     def run(self, stop: threading.Event) -> None:
         if not isinstance(stop, threading.Event):
             raise ExecutorProcessRejected
@@ -252,11 +273,12 @@ class LocalExecutorProcess:
                         self._lifecycle(message_type="executor.hello", sequence=1)
                     )
                 )
+                self._send_outbox(websocket, self._command_processor.recover_outbox())
                 sequence = 1
                 healthy = False
                 while not stop.is_set():
                     try:
-                        websocket.recv(timeout=self._bootstrap.heartbeat_interval_seconds)
+                        source = websocket.recv(timeout=self._bootstrap.heartbeat_interval_seconds)
                     except TimeoutError:
                         if stop.is_set():
                             break
@@ -279,7 +301,7 @@ class LocalExecutorProcess:
                         raise
                     if stop.is_set():
                         break
-                    raise ExecutorProcessRejected
+                    self._send_outbox(websocket, self._command_processor.handle(source))
         except Exception:
             failed = True
         if failed:

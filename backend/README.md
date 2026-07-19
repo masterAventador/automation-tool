@@ -44,7 +44,7 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 E4-02 增加正式控制台入口 `automation-tool-executor`。`executor/bootstrap.py` 只从 stdin 读取一条换行结尾、最多 16 KiB 的严格 JSON object，字段固定为 bootstrap 版本、Executor WebSocket URL、短期 `executor.connect` Session、Installation/Executor UUIDv4、`1..60` 秒心跳间隔和由 Rust 提供的 App 私有 Executor 状态目录；重复 key、未知字段、非法类型、相对/根/含 `..` 或控制字符的路径与超限统一拒绝。明文 `ws` 只允许带有效端口的 `127.0.0.1` 固定路径，远端只允许标准端口 `wss`，userinfo/query/fragment 全部拒绝。
 
-`executor/runtime.py` 从安装产物自身检测 macOS/Windows 与 arm64/x86_64，不相信 stdin 自报运行平台；它使用共享 `executor/transport.py` 的唯一子协议、Bearer Header、禁代理/压缩和 32 KiB 上限连接 Control Plane，发送正式 Hello，再以严格递增 sequence 发送 Heartbeat。第一条心跳存活后 stdout 只输出固定 `executor.healthy`，正常 SIGINT/SIGTERM 后输出固定 `executor.stopped`；Session、ID、URL、原始异常和服务端帧都不进入该投影或 stderr。E4-02 不处理任何 Task Command，收到应用帧或连接异常立即以固定错误退出；有界重启和本机命令账本已分别由 E4-08/E4-11 实现，真实消息回放由 E4-12 接入。
+`executor/runtime.py` 从安装产物自身检测 macOS/Windows 与 arm64/x86_64，不相信 stdin 自报运行平台；它使用共享 `executor/transport.py` 的唯一子协议、Bearer Header、禁代理/压缩和 32 KiB 上限连接 Control Plane，发送正式 Hello，再以严格递增 sequence 发送 Heartbeat。第一条心跳存活后 stdout 只输出固定 `executor.healthy`，正常 SIGINT/SIGTERM 后输出固定 `executor.stopped`；Session、ID、URL、原始异常和服务端帧都不进入该投影或 stderr。E4-12 的 `command_processor.py` 已接入正式 `task.offer`：先写 E4-11 SQLite，再原子提交固定无副作用 ACK/Event outbox；重启只重放原消息，其他命令与非法帧固定拒绝。
 
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 

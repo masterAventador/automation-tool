@@ -283,7 +283,7 @@ T3-19 的 `src/test-harness/task-lifecycle.ts` 只实现 Feature 已有的窄 ga
 
 T3-20 的 `FakeExecutorClient.run_reconnecting` 只扩展无副作用测试 Executor 的有界连接恢复，不成为正式 Local Executor 生命周期实现。`tauri.task-restart-e2e.conf.json`、对应 WDIO spec 与 `scripts/run_t3_20_acceptance.py` 协调唯一隐藏 App、两个先后启动的 Uvicorn 进程和同一 PostgreSQL：页面在 Executor 离线时留下 pending cancel，停服刷新验证不可用，再由同一 FakeExecutor/Session 重连消费并从 App 读取取消终态；专用文件和信号目录均不进入生产资产。
 
-E4-02 的正式进程入口固定为 `automation-tool-executor`。`bootstrap.py` 只读一条受限 stdin JSON，`runtime.py` 只发送 Executor v1 Hello/Heartbeat 并输出固定健康事件，`transport.py` 是正式进程和 Fake 客户端唯一共享的网络零件，`cli.py` 只安装 SIGINT/SIGTERM 并映射固定退出码。真实集成测试从安装后的控制台脚本启动独立子进程，连接真实 Uvicorn/正式 Session/Registry 后再发信号退出；没有调用内部函数冒充进程验收，也没有引入旧 stdio 任务协议。PyInstaller、Tauri 监管与本机账本现已分别由 E4-03、E4-07、E4-11 接入；任务帧处理继续由 E4-12 承接。
+E4-02 的正式进程入口固定为 `automation-tool-executor`。`bootstrap.py` 只读一条受限 stdin JSON，`runtime.py` 发送 Executor v1 Hello/Heartbeat、消费 E4-12 正式任务帧并输出固定健康事件，`transport.py` 是正式进程和 Fake 客户端唯一共享的网络零件，`cli.py` 只装配账本/处理器、安装 SIGINT/SIGTERM 并映射固定退出码。真实集成测试从安装后的控制台脚本启动独立子进程，连接真实 Uvicorn/正式 Session/Registry 后再发信号退出；没有调用内部函数冒充进程验收，也没有引入旧 stdio 任务协议。PyInstaller、Tauri 监管、本机账本与无副作用协议回放现已分别由 E4-03、E4-07、E4-11、E4-12 接入。
 
 E4-03 使用 `automation-tool-executor.spec` 从同一 `executor/__main__.py` 构建 console `onedir`，不维护第二份 Python 入口。PyInstaller 只在 uv 开发依赖组锁定，正式运行依赖和 spec 均不包含 Playwright；集成测试从临时目录构建后清空 PATH，直接启动冻结可执行文件并验证 bootstrap 拒绝、WebSocket 不可用的固定退出契约和分析清单。`.github/workflows/desktop.yml` 已为 macOS/Windows 配置同一实包测试，只验证构建和启动，不上传、发布或签名产物；macOS 已在本机通过，Windows Hosted Runner 当前因 GitHub 账户 Billing/Actions spending limit 未启动，不能冒充目标平台已验收。目录签名与可信安装由 E4-04/E4-05 承接。
 
@@ -301,7 +301,9 @@ E4-09 仍不新建进程服务：`RunningExecutor` 直接拥有跨平台 `Proces
 
 E4-10 新建的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承担生命周期或业务日志。Manager Core 持有唯一内存队列，各次启动的 reader 共享它；输入以固定容量流式消费，超长/非法编码 fail closed，再按 `contracts/fixtures/executor-diagnostics-v1.json` 规则脱敏并执行行数/单行/总字节上限。Python `executor/diagnostics.py` 回放同一 fixtures，为未来 Executor 自身安全消息提供一致策略，但 Rust 仍对原始 stderr 独立重做脱敏，不能信任进程内结论。真实 signed 进程测试证明公开 Manager `diagnostics()` 原入口，不新增 Tauri Command 或持久日志。
 
-E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3` 和 v1 identity/commands/attempt checkpoints/outbox 四表。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS 和协议 outbox 重放均在该模块内事务化；测试覆盖真实并发、重开恢复、迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。当前没有 Tauri Command/React API，E4-12 才接入真实任务帧，E4-13/E4-14 才从 App `app_data_dir` 装配并做隐藏 App 验收。
+E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3` 和 v1 identity/commands/attempt checkpoints/outbox 四表。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS 和协议 outbox 重放均在该模块内事务化；测试覆盖真实并发、重开恢复、迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
+
+E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。当前仍没有 Tauri Command/React API，E4-13/E4-14 才从 App `app_data_dir` 装配并做隐藏 App 验收。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

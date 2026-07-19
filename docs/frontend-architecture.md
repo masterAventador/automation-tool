@@ -135,7 +135,7 @@ features/
 - SSE/事件快照的合并与恢复；
 - Zod 校验关键边界。
 
-Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.ts` 的 `parseExecutorMessage`；Rust 正式入口是 `src-tauri/src/executor_protocol.rs` 的 `parse_executor_message`。两者不从 UI、IPC 或网络输入推断类型，而是与 Python 权威模型共同回放 `contracts/fixtures/executor-v1` 的原始 UTF-8 wire：判别类型、任务作用域、UUIDv4、UTC 微秒 deadline、安全整数、重复 key、资源上限和 payload 隐私规则均 fail closed，失败只返回固定错误。解析器当前不暴露新 Tauri Command；I2-13 已在 Control Plane 网络入口复用 Python 正式 parser，E4-02 已让独立 Local Executor 进程沿同一入口发送 Hello/Heartbeat，E4-12 再接入任务帧，React 只消费经过边界验证的公开投影。
+Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.ts` 的 `parseExecutorMessage`；Rust 正式入口是 `src-tauri/src/executor_protocol.rs` 的 `parse_executor_message`。两者不从 UI、IPC 或网络输入推断类型，而是与 Python 权威模型共同回放 `contracts/fixtures/executor-v1` 的原始 UTF-8 wire：判别类型、任务作用域、UUIDv4、UTC 微秒 deadline、安全整数、重复 key、资源上限和 payload 隐私规则均 fail closed，失败只返回固定错误。解析器当前不暴露新 Tauri Command；I2-13 已在 Control Plane 网络入口复用 Python 正式 parser，E4-02 已让独立 Local Executor 发送 Hello/Heartbeat，E4-12 已沿同一 WebSocket 接入持久无副作用任务回放，React 只消费经过边界验证的公开投影。
 
 当前 FastAPI OpenAPI 3.1 快照固定在 `contracts/openapi/control-plane.v1.json`，系统 operationId 为 `getSystemHealth`、`getSystemVersion`。`frontend/scripts/openapi.mjs` 使用锁定的 `openapi-typescript` 从快照机械生成 `src/api/generated/control-plane.ts`，`--check` 在系统临时目录重新生成并逐字比较；生成文件禁止手改。
 
@@ -262,7 +262,9 @@ E4-09 把完整进程树所有权收回同一个 `RunningExecutor`，不引入�
 
 E4-10 将所有代次共享的 `ExecutorDiagnostics` 放在 Manager Core，重启不会创建第二日志源。stderr reader 用 `BufRead::fill_buf/consume` 在输入阶段限制捕获，不会因未换行恶意输出无界分配；超长和非法 UTF-8 行只产生固定 `[TRUNCATED]`/`[REDACTED]`。其余行先清除控制/Bidi 字符，再按三端共享 fixtures 依次移除认证 Header、Bearer、设备/本机会话 envelope、64 位本机令牌、平台 Cookie、敏感 JSON/assignment、URL userinfo/全部 query、file/data URL 和私有路径；最终以 200 行、单行 4096 bytes、总计 64 KiB 三重上限滚动淘汰。公开 `diagnostics()` 只克隆安全内存，不提供原始数据、持久化或 WebView 命令；E4-13 才通过固定 PlatformAdapter 展示。macOS 真实 signed 子进程 stderr 已通过，Windows 实包仍待 runner。
 
-E4-11 仍不新增第二 Manager 或 WebView API。`ExecutorLaunchConfiguration` 持有经过绝对路径/长度/组件校验的 `state_directory: PathBuf`；后续 E4-13 必须从 Tauri 自身解析的 `app_data_dir` 派生固定 Executor 子目录，React 不能提交路径。Rust 只把它放入受限 stdin bootstrap，Python CLI 在任何网络连接前完成 `executor-ledger.sqlite3` v1 迁移和 Installation/Executor 身份绑定。该数据库属于 Executor 的本机恢复边界，不是 Control Plane 副本：只保存正式协议命令身份/意图指纹、Attempt checkpoint 和 outbox，不保存 Session、Cookie、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串。E4-12 才让真实任务帧消费该账本；E4-13/E4-14 再通过固定 PlatformAdapter 与隐藏 App 验收 `app_data_dir` 装配。
+E4-11 仍不新增第二 Manager 或 WebView API。`ExecutorLaunchConfiguration` 持有经过绝对路径/长度/组件校验的 `state_directory: PathBuf`；后续 E4-13 必须从 Tauri 自身解析的 `app_data_dir` 派生固定 Executor 子目录，React 不能提交路径。Rust 只把它放入受限 stdin bootstrap，Python CLI 在任何网络连接前完成 `executor-ledger.sqlite3` v1 迁移和 Installation/Executor 身份绑定。该数据库属于 Executor 的本机恢复边界，不是 Control Plane 副本：只保存正式协议命令身份/意图指纹、Attempt checkpoint 和 outbox，不保存 Session、Cookie、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串。
+
+E4-12 没有给 WebView 增加通用命令通道：Rust Manager 仍只监管正式 Python Executor，由 Python 在 Control Plane WebSocket 内消费 `task.offer` 并从同一 SQLite 精确重放 ACK/Event。macOS 已从公开 Manager 原入口两次启动 signed PyInstaller 产物验证同一状态目录恢复；React 不读取账本、不提交路径，也不能直接调用 Executor。E4-13/E4-14 再通过固定 PlatformAdapter 与隐藏 App 验收 `app_data_dir` 装配。
 
 ## 7. 页面与导航
 

@@ -197,7 +197,7 @@ def start_control_plane() -> RunningControlPlane:
     return RunningControlPlane(server, thread, port, registry, material.session_token)
 
 
-def build_signed_executor(workspace: Path) -> Path:
+def build_signed_executor(workspace: Path, *, build_id: str = "e4-07-real") -> Path:
     distribution = workspace / "dist"
     work = workspace / "build"
     completed = subprocess.run(
@@ -233,7 +233,7 @@ def build_signed_executor(workspace: Path) -> Path:
             "--executor-version",
             "0.1.0",
             "--build-id",
-            "e4-07-real",
+            build_id,
             "--platform",
             "macos",
             "--architecture",

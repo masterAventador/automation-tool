@@ -16,6 +16,10 @@ from automation_tool.executor.authentication import (
     LocalSessionAuthenticator,
 )
 from automation_tool.executor.bootstrap import ExecutorBootstrapRejected, read_executor_bootstrap
+from automation_tool.executor.command_processor import (
+    ExecutorCommandProcessor,
+    ExecutorCommandRejected,
+)
 from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
@@ -64,8 +68,13 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
     try:
         authenticator = LocalSessionAuthenticator(bootstrap.local_session_token)
         try:
-            ExecutorLedger(
+            ledger = ExecutorLedger(
                 state_directory=Path(bootstrap.state_directory),
+                installation_id=str(bootstrap.installation_id),
+                executor_id=str(bootstrap.executor_id),
+            )
+            command_processor = ExecutorCommandProcessor(
+                ledger=ledger,
                 installation_id=str(bootstrap.installation_id),
                 executor_id=str(bootstrap.executor_id),
             )
@@ -73,6 +82,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 bootstrap=bootstrap,
                 metadata=RuntimeMetadata.detect(),
                 reporter=ExecutorProcessReporter(stdout, authenticator),
+                command_processor=command_processor,
             )
             with stop_signal_event() as stop:
                 process.run(stop)
@@ -80,6 +90,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
             authenticator.close()
     except (
         ExecutorLedgerRejected,
+        ExecutorCommandRejected,
         ExecutorProcessRejected,
         LocalSessionAuthenticationRejected,
     ):

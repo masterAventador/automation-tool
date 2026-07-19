@@ -343,6 +343,166 @@ class ExecutorLedger:
         except Exception:
             raise ExecutorLedgerRejected from None
 
+    def commit_outcome(
+        self,
+        *,
+        source_message_id: str,
+        expected_checkpoint_revision: int,
+        checkpoint_state: AttemptCheckpointState,
+        last_event_sequence: int,
+        messages: tuple[OutboundExecutorMessage, ...],
+    ) -> tuple[OutboxEntry, ...]:
+        """Atomically advance one Attempt checkpoint and append its complete outbound batch."""
+
+        try:
+            canonical_source_id = _canonical_uuid_v4(source_message_id)
+            if (
+                type(expected_checkpoint_revision) is not int
+                or expected_checkpoint_revision <= 0
+                or not isinstance(checkpoint_state, AttemptCheckpointState)
+                or type(last_event_sequence) is not int
+                or not 0 <= last_event_sequence <= _MAX_CROSS_RUNTIME_SEQUENCE
+                or type(messages) is not tuple
+                or not 1 <= len(messages) <= 100
+            ):
+                raise ValueError
+            prepared: list[tuple[OutboundExecutorMessage, str, bytes]] = []
+            message_ids: set[str] = set()
+            idempotency_keys: set[str] = set()
+            for message in messages:
+                self._require_outbound_identity(message)
+                envelope = _canonical_message(message)
+                fingerprint = hashlib.sha256(envelope.encode("utf-8")).digest()
+                message_id = str(message.message_id)
+                idempotency_key = str(message.idempotency_key)
+                if message_id in message_ids or idempotency_key in idempotency_keys:
+                    raise ValueError
+                message_ids.add(message_id)
+                idempotency_keys.add(idempotency_key)
+                prepared.append((message, envelope, fingerprint))
+
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                source = connection.execute(
+                    """
+                    SELECT task_id, attempt_id, correlation_id
+                    FROM executor_commands
+                    WHERE message_id = ?
+                    """,
+                    (canonical_source_id,),
+                ).fetchone()
+                if source is None:
+                    raise ValueError
+                for message, _envelope, _fingerprint in prepared:
+                    if (
+                        str(source[0]) != str(message.task_id)
+                        or str(source[1]) != str(message.execution_attempt_id)
+                        or str(source[2]) != str(message.correlation_id)
+                    ):
+                        raise ValueError
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM executor_outbox WHERE source_message_id = ? LIMIT 1",
+                        (canonical_source_id,),
+                    ).fetchone()
+                    is not None
+                ):
+                    raise ValueError
+                checkpoint = connection.execute(
+                    """
+                    SELECT last_event_sequence
+                    FROM executor_attempt_checkpoints
+                    WHERE attempt_id = ? AND revision = ?
+                    """,
+                    (str(source[1]), expected_checkpoint_revision),
+                ).fetchone()
+                if checkpoint is None or not 0 <= int(checkpoint[0]) <= last_event_sequence:
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_attempt_checkpoints
+                    SET state = ?, last_event_sequence = ?, revision = revision + 1
+                    WHERE attempt_id = ? AND revision = ?
+                    """,
+                    (
+                        checkpoint_state.value,
+                        last_event_sequence,
+                        str(source[1]),
+                        expected_checkpoint_revision,
+                    ),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - same locked revision selected above
+                    raise ValueError
+                next_ordinal = int(
+                    connection.execute(
+                        "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM executor_outbox"
+                    ).fetchone()[0]
+                )
+                for offset, (message, envelope, fingerprint) in enumerate(prepared):
+                    connection.execute(
+                        """
+                        INSERT INTO executor_outbox (
+                            ordinal, message_id, idempotency_key, intent_sha256,
+                            envelope, source_message_id, delivered
+                        ) VALUES (?, ?, ?, ?, ?, ?, 0)
+                        """,
+                        (
+                            next_ordinal + offset,
+                            str(message.message_id),
+                            str(message.idempotency_key),
+                            fingerprint,
+                            envelope,
+                            canonical_source_id,
+                        ),
+                    )
+                connection.commit()
+            return tuple(
+                OutboxEntry(
+                    message=message,
+                    source_message_id=canonical_source_id,
+                    replayed=False,
+                )
+                for message, _envelope, _fingerprint in prepared
+            )
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def outbox_for_command(self, source_message_id: str) -> tuple[OutboxEntry, ...]:
+        try:
+            canonical_source_id = _canonical_uuid_v4(source_message_id)
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT envelope, source_message_id
+                    FROM executor_outbox
+                    WHERE source_message_id = ?
+                    ORDER BY ordinal
+                    """,
+                    (canonical_source_id,),
+                ).fetchall()
+            return tuple(
+                OutboxEntry(
+                    message=_parse_outbound(str(row[0])),
+                    source_message_id=str(row[1]),
+                    replayed=True,
+                )
+                for row in rows
+            )
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def requeue_delivered_outbox(self) -> int:
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                updated = connection.execute(
+                    "UPDATE executor_outbox SET delivered = 0 WHERE delivered = 1"
+                )
+                connection.commit()
+                return updated.rowcount
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
     def pending_outbox(self, *, limit: int) -> tuple[OutboxEntry, ...]:
         try:
             if type(limit) is not int or not 1 <= limit <= _MAX_OUTBOX_BATCH:

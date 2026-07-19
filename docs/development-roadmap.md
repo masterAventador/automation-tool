@@ -235,7 +235,7 @@
 | E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | 🔍 待验收 |
 | E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | 🔍 待验收 |
 | E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | 🔍 待验收 |
-| E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | ⬜ 未开始 |
+| E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | 🔍 待验收 |
 | E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | ⬜ 未开始 |
 | E4-14 | Tauri 生命周期 E2E | 启动/调用/挂起/崩溃/重启/停止/退出清理 | E4-09,E4-13 | ⬜ 未开始 |
 | E4-15 | 正式包测试能力审计 | 生产包不含 WebDriver、测试命令、测试 Sidecar 或调试端口 | E4-14 | ⬜ 未开始 |
@@ -1526,9 +1526,28 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划或重复 implementation plan
 - 后续：E4-12 从真实 Control Plane 向同一正式 Executor 下发无副作用 Task Command，使用本账本生成/重放 ACK 与 Event，并验证崩溃恢复闭环
 
+### E4-12 真实协议回放
+
+- 状态：🔍 待 Windows 原生验收；macOS 真实 PostgreSQL→Uvicorn→Rust Manager→signed PyInstaller Executor→SQLite→ACK/Event 及重启精确重放通过，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：让正式 Local Executor 从生产 WebSocket 接收 Control Plane 持久 `task.offer`，先落 E4-11 本机账本，再产生无平台副作用的固定成功 ACK/事件；进程重启后只能重放首次持久消息，不能重新生成身份、重复推进云端事实或保存 Session
+- RED：先新增 `test_command_processor.py` 并实跑，测试收集准确失败于 `automation_tool.executor.command_processor` 不存在；覆盖首次处理、同 message/idempotency 重试、重开恢复、过期/错身份/控制命令拒绝及 ID 生成中断。没有调用 FakeExecutor、内部 Mock WebSocket 或直接写 Control Plane 数据库让验收假绿
+- 原子处理：`ExecutorCommandProcessor` 只接受匹配 Installation/Executor、deadline 未过期的正式 `task.offer`。`receive_command` 先提交 received checkpoint；随后在一个 `BEGIN IMMEDIATE` 事务内把 checkpoint 推进到 terminal/revision 2/event sequence 5，并按全局 ordinal 写入 `task.accept → task.started → step.started → step.progress(100) → step.completed → task.completed` 六条 outbox。生成失败只留下可恢复 received；事务失败若发现并发赢家则读取赢家的原始 outbox
+- 精确重放：message ID 或 idempotency key 命中同一 canonical intent 时直接返回首次持久 envelope；runtime 在 Hello 后先把历史 delivered 重新排队，逐条通过正式 WebSocket 发送，只有 `send` 成功后才标记 delivered。部分发送、连接中断或进程重启会重放原 message ID/idempotency/wire，依赖服务端既有 T3-20 幂等收敛，不在本机伪造新业务事实
+- 安全边界：本任务刻意不执行浏览器、微信、平台账号、文件或桌面副作用，只证明协议/持久化/恢复骨架；`task.pause/resume/cancel/emergency-stop` 在真实执行层尚未实现前固定拒绝。SQLite 仍只保存 command/checkpoint/outbox，不保存 Control Plane Session、本机会话、Cookie、账号、密钥、浏览器 Profile 或配置，也不调用系统钥匙串
+- 正式原入口验收：`scripts/run_e4_12_acceptance.py` 启动隔离 PostgreSQL、完整生产 Alembic 链和真实 Uvicorn，签发正式 Device Session、落一条持久 offer，再临时构建/签名 PyInstaller onedir，由公开 Rust Manager 启动正式 Executor。第一次启动把 PostgreSQL 收敛为 1 条 acknowledged command、5 条连续事件和 succeeded Task；第二次以同一 SQLite 状态目录重启，六条本机消息全文/ID/幂等键不变，服务端 command/event 快照也完全不变，Session 原始字节不在 SQLite
+- 测试与失败矩阵：命令处理器和新增账本分支语句/分支覆盖率 100%；覆盖 atomic batch 参数/双键重复/来源错绑/旧 revision/事件倒退/已有 outbox、并发提交赢家、生成/时钟/UUID/账本错误、二进制/畸形/过期/错身份/effectful command、mark/requeue 失败，以及真实 WebSocket 收命令后六帧返回。现有独立 CLI→Uvicorn Hello/Heartbeat/SIGTERM 集成继续通过
+- 门禁：Backend `877 passed in 78.97s`、5076 条语句/全部分支覆盖率 100%；Frontend 48 项 Node 架构/契约、112 项 Vitest、ESLint、TypeScript、OpenAPI 与 production boundary 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 3 协议 fixture + 14 安全配置，共 89 项通过、1 项正式 PyInstaller 编排由 E4-12 专用脚本通过。Clippy all-targets/all-features、Rustfmt、Backend 172 文件 Ruff 格式/lint、严格 Mypy 170 个源码文件、uv lock 全绿；正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App
+- App 与账号边界：本任务正式入口是 Control Plane 持久 Outbox→真实 WebSocket→Rust 监管的 Executor，不新增 Tauri Command、React 页面或用户功能，因此不启动 App、不需要真实平台账号；E4-13 才从 Tauri `app_data_dir` 固定装配 Manager 和状态投影，E4-14 再由唯一 `visible=false` App 做桌面生命周期纵向验收
+- Windows：正式 Python/Rust/SQLite 路径均为跨平台实现，但 GitHub Hosted Runner 仍受 Billing/Actions spending limit，Windows signed PyInstaller→Job Object Manager→真实 Control Plane→SQLite 重放未冒充通过，保持 `🔍`；恢复后与 E4-03～E4-11 一并补齐
+- 清理：正式验收的 Uvicorn、PostgreSQL 容器/volume、Cargo 测试进程、PyInstaller 包、私有 `0600` 配置和 SQLite 状态均由 finally/临时目录回收；检查无容器、监听端口或 Executor 残留
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份 implementation plan
+- 后续：E4-13 建立固定 PlatformAdapter/Tauri Commands，从 Tauri 自身 `app_data_dir` 派生 Executor 状态目录，并向 React 只暴露受限状态、重启、脱敏诊断和紧停
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-12`：从真实 Control Plane 向正式 Executor 回放无副作用 Task Command，经 E4-11 账本持久生成 ACK/Event 并验证重启恢复；
-2. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-12～Wave 10 的无设备依赖任务。
+1. `E4-13`：建立固定 PlatformAdapter/Tauri Commands，从 App 私有数据目录装配 Executor，并向 React 暴露受限状态、重启、诊断和紧停；
+2. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-13～Wave 10 的无设备依赖任务。

@@ -103,3 +103,39 @@ test("E4-11 keeps the durable command ledger inside the private Executor state d
   assert.doesNotMatch(ledger, /keyring|keychain|session_token|cookie|password/i);
   assert.doesNotMatch(ledger, /control_plane|FakeExecutor|:memory:/);
 });
+
+test("E4-12 consumes real offers only through the durable no-side-effect protocol path", async () => {
+  const [cli, processor, runtime, acceptance] = await Promise.all([
+    readFile(
+      new URL("../backend/src/automation_tool/executor/cli.py", frontendRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../backend/src/automation_tool/executor/command_processor.py",
+        frontendRoot,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../backend/src/automation_tool/executor/runtime.py", frontendRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL("../scripts/run_e4_12_acceptance.py", frontendRoot),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(cli, /ExecutorCommandProcessor\(/);
+  assert.match(processor, /command\.message_type != "task\.offer"/);
+  assert.match(processor, /commit_outcome\(/);
+  assert.match(processor, /AttemptCheckpointState\.TERMINAL/);
+  assert.match(runtime, /recover_outbox\(\)/);
+  assert.match(runtime, /command_processor\.handle\(source\)/);
+  assert.match(acceptance, /build_signed_executor/);
+  assert.match(acceptance, /wait_for_convergence/);
+  assert.match(acceptance, /Restarting against the same ledger for exact replay/);
+  assert.doesNotMatch(processor, /FakeExecutor|playwright|selenium|keyring|keychain/i);
+  assert.doesNotMatch(runtime, /#\[tauri::command\]/);
+});

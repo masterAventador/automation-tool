@@ -10,6 +10,10 @@ from automation_tool.executor.bootstrap import (
     ExecutorBootstrapRejected,
     read_executor_bootstrap,
 )
+from automation_tool.executor.command_processor import (
+    ExecutorCommandProcessor,
+    ExecutorCommandRejected,
+)
 from automation_tool.executor.fake import (
     FakeExecutorEngine,
     FakeExecutorRejected,
@@ -30,6 +34,8 @@ from automation_tool.executor.runtime import (
 __all__ = [
     "ExecutorBootstrap",
     "ExecutorBootstrapRejected",
+    "ExecutorCommandProcessor",
+    "ExecutorCommandRejected",
     "ExecutorProcessRejected",
     "ExecutorProcessReporter",
     "FakeExecutorClient",

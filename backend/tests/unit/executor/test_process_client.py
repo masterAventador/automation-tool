@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from io import BytesIO, StringIO
 from itertools import count
+from pathlib import Path
 from typing import cast
 from uuid import UUID
 
@@ -18,6 +20,8 @@ from websockets.typing import Subprotocol
 
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
+from automation_tool.executor.command_processor import ExecutorCommandProcessor
+from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
     ExecutorProcessReporter,
@@ -26,7 +30,9 @@ from automation_tool.executor.runtime import (
 )
 from automation_tool.protocol import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
+    ExecutorEnvelope,
     ExecutorLifecycleEnvelope,
+    TaskCommandEnvelope,
     parse_executor_message,
 )
 
@@ -71,7 +77,7 @@ def run_server(
     return server, thread, int(server.socket.getsockname()[1])
 
 
-def bootstrap(port: int) -> object:
+def bootstrap(port: int, state_directory: Path) -> object:
     source = json.dumps(
         {
             "bootstrap_version": "1",
@@ -81,7 +87,7 @@ def bootstrap(port: int) -> object:
             "installation_id": INSTALLATION_ID,
             "executor_id": EXECUTOR_ID,
             "heartbeat_interval_seconds": 1,
-            "state_directory": "/private/tmp/automation-tool-executor-client-test",
+            "state_directory": str(state_directory),
         },
         separators=(",", ":"),
     )
@@ -90,6 +96,7 @@ def bootstrap(port: int) -> object:
 
 def process_for(
     port: int,
+    state_directory: Path,
     *,
     output: StringIO | None = None,
     clock: object = FixedClock(),
@@ -97,13 +104,24 @@ def process_for(
 ) -> tuple[LocalExecutorProcess, StringIO]:
     target = output or StringIO()
     values: dict[str, object] = {
-        "bootstrap": bootstrap(port),
+        "bootstrap": bootstrap(port, state_directory),
         "metadata": RuntimeMetadata(
             executor_version="0.1.0",
             platform="macos",
             architecture="arm64",
         ),
         "reporter": reporter(target),
+        "command_processor": ExecutorCommandProcessor(
+            ledger=ExecutorLedger(
+                state_directory=state_directory,
+                installation_id=INSTALLATION_ID,
+                executor_id=EXECUTOR_ID,
+            ),
+            installation_id=INSTALLATION_ID,
+            executor_id=EXECUTOR_ID,
+            clock=FixedClock(),
+            id_source=DeterministicIds(),
+        ),
         "clock": clock,
         "open_timeout": timedelta(milliseconds=100),
         "close_timeout": timedelta(milliseconds=100),
@@ -113,7 +131,29 @@ def process_for(
     return LocalExecutorProcess(**values), target  # type: ignore[arg-type]
 
 
-def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly() -> None:
+def offer() -> TaskCommandEnvelope:
+    return TaskCommandEnvelope.model_validate(
+        {
+            "protocol_version": "1.0",
+            "message_id": "323e4567-e89b-42d3-a456-426614174001",
+            "message_type": "task.offer",
+            "sent_at": NOW,
+            "deadline_at": NOW + timedelta(minutes=5),
+            "installation_id": INSTALLATION_ID,
+            "executor_id": EXECUTOR_ID,
+            "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
+            "idempotency_key": "executor-real:offer:1",
+            "sequence": 1,
+            "payload": {},
+            "task_id": "123e4567-e89b-42d3-a456-426614174005",
+            "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
+        }
+    )
+
+
+def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly(
+    tmp_path: Path,
+) -> None:
     captured: queue.Queue[object] = queue.Queue()
     stop = threading.Event()
 
@@ -131,7 +171,11 @@ def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly() -> None:
 
     server, thread, port = run_server(handler)
     try:
-        process, output = process_for(port, id_source=DeterministicIds())
+        process, output = process_for(
+            port,
+            tmp_path / "executor-state",
+            id_source=DeterministicIds(),
+        )
         process.run(stop)
         messages = captured.get(timeout=2)
         if isinstance(messages, Exception):
@@ -166,7 +210,10 @@ def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly() -> None:
 
 
 @pytest.mark.parametrize("server_message", ("{}", b"private-binary-command"))
-def test_process_rejects_every_post_hello_application_frame(server_message: str | bytes) -> None:
+def test_process_rejects_invalid_post_hello_application_frame(
+    server_message: str | bytes,
+    tmp_path: Path,
+) -> None:
     observed: queue.Queue[object] = queue.Queue()
 
     def handler(connection: ServerConnection) -> None:
@@ -179,7 +226,7 @@ def test_process_rejects_every_post_hello_application_frame(server_message: str 
 
     server, thread, port = run_server(handler)
     try:
-        process, output = process_for(port)
+        process, output = process_for(port, tmp_path / "executor-state")
         with pytest.raises(
             ExecutorProcessRejected,
             match=r"^Local Executor process is unavailable$",
@@ -195,8 +242,85 @@ def test_process_rejects_every_post_hello_application_frame(server_message: str 
     assert not thread.is_alive()
 
 
-def test_process_rejects_transport_clock_ids_and_constructor_values_without_leakage() -> None:
-    process, _ = process_for(9)
+def test_process_consumes_a_formal_offer_and_sends_the_durable_outcome_batch(
+    tmp_path: Path,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    offered = offer()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.send(offered.model_dump_json())
+            batch = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(6))
+            observed.put(batch)
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(port, tmp_path / "executor-state")
+        process.run(stop)
+        batch = observed.get(timeout=2)
+        if isinstance(batch, Exception):
+            raise batch
+        messages = cast(tuple[ExecutorEnvelope, ...], batch)
+        assert [message.message_type for message in messages] == [
+            "task.accept",
+            "task.started",
+            "step.started",
+            "step.progress",
+            "step.completed",
+            "task.completed",
+        ]
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.stopped"
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_process_collapses_outbox_delivery_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.send(offer().model_dump_json())
+            observed.put(parse_executor_message(connection.recv(timeout=2)))
+        except Exception as error:
+            observed.put(error)
+
+    def reject_delivery(_self: object, _message_id: str) -> bool:
+        raise RuntimeError("private delivery failure")
+
+    monkeypatch.setattr(ExecutorCommandProcessor, "mark_delivered", reject_delivery)
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(port, tmp_path / "executor-state")
+        with pytest.raises(ExecutorProcessRejected) as captured:
+            process.run(threading.Event())
+        assert captured.value.__context__ is None
+        assert output.getvalue() == ""
+        message = cast(ExecutorEnvelope, observed.get(timeout=2))
+        assert message.message_type == "task.accept"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_process_rejects_transport_clock_ids_and_constructor_values_without_leakage(
+    tmp_path: Path,
+) -> None:
+    process, _ = process_for(9, tmp_path / "transport-state")
     with pytest.raises(ExecutorProcessRejected) as transport:
         process.run(threading.Event())
     assert transport.value.__cause__ is None
@@ -211,17 +335,23 @@ def test_process_rejects_transport_clock_ids_and_constructor_values_without_leak
         (FailingClock(), DeterministicIds()),
         (FixedClock(), lambda: object()),
     ):
-        broken, _ = process_for(9, clock=clock, id_source=id_source)
+        broken, _ = process_for(
+            9,
+            tmp_path / f"broken-{id(clock)}",
+            clock=clock,
+            id_source=id_source,
+        )
         with pytest.raises(ExecutorProcessRejected):
             broken.run(threading.Event())
 
-    valid, output = process_for(9)
+    valid, output = process_for(9, tmp_path / "valid-state")
     with pytest.raises(ExecutorProcessRejected):
         valid.run(cast(threading.Event, object()))
     for values in (
         {"bootstrap": object()},
         {"metadata": object()},
         {"reporter": object()},
+        {"command_processor": object()},
         {"clock": object()},
         {"id_source": object()},
         {"open_timeout": timedelta(0)},
@@ -231,6 +361,15 @@ def test_process_rejects_transport_clock_ids_and_constructor_values_without_leak
             "bootstrap": valid.bootstrap,
             "metadata": valid.metadata,
             "reporter": reporter(output),
+            "command_processor": ExecutorCommandProcessor(
+                ledger=ExecutorLedger(
+                    state_directory=tmp_path / "constructor-state",
+                    installation_id=INSTALLATION_ID,
+                    executor_id=EXECUTOR_ID,
+                ),
+                installation_id=INSTALLATION_ID,
+                executor_id=EXECUTOR_ID,
+            ),
             "clock": FixedClock(),
             "id_source": DeterministicIds(),
             "open_timeout": timedelta(milliseconds=10),
@@ -268,6 +407,7 @@ def test_process_rejects_transport_clock_ids_and_constructor_values_without_leak
 def test_process_rejects_invalid_clock_or_ids_after_real_connection(
     clock: object,
     id_source: object,
+    tmp_path: Path,
 ) -> None:
     observed: queue.Queue[object] = queue.Queue()
 
@@ -279,7 +419,12 @@ def test_process_rejects_invalid_clock_or_ids_after_real_connection(
 
     server, thread, port = run_server(handler)
     try:
-        process, _ = process_for(port, clock=clock, id_source=id_source)
+        process, _ = process_for(
+            port,
+            tmp_path / "executor-state",
+            clock=clock,
+            id_source=id_source,
+        )
         with pytest.raises(ExecutorProcessRejected):
             process.run(threading.Event())
         assert observed.get(timeout=2) is True
@@ -289,19 +434,30 @@ def test_process_rejects_invalid_clock_or_ids_after_real_connection(
     assert not thread.is_alive()
 
 
-def test_invalid_lifecycle_shape_is_collapsed_to_the_process_error() -> None:
-    process, _ = process_for(9, id_source=DeterministicIds())
+def test_invalid_lifecycle_shape_is_collapsed_to_the_process_error(tmp_path: Path) -> None:
+    process, _ = process_for(
+        9,
+        tmp_path / "executor-state",
+        id_source=DeterministicIds(),
+    )
 
     with pytest.raises(ExecutorProcessRejected):
         process._lifecycle(message_type="private.invalid", sequence=1)
 
 
-def test_explicit_falsy_clock_is_not_silently_replaced_by_the_system_clock() -> None:
+def test_explicit_falsy_clock_is_not_silently_replaced_by_the_system_clock(
+    tmp_path: Path,
+) -> None:
     class FalsyClock(FixedClock):
         def __bool__(self) -> bool:
             return False
 
-    process, _ = process_for(9, clock=FalsyClock(), id_source=DeterministicIds())
+    process, _ = process_for(
+        9,
+        tmp_path / "executor-state",
+        clock=FalsyClock(),
+        id_source=DeterministicIds(),
+    )
 
     hello = process._lifecycle(message_type="executor.hello", sequence=1)
 
@@ -312,7 +468,10 @@ def test_explicit_falsy_clock_is_not_silently_replaced_by_the_system_clock() -> 
     "mode",
     ("already-stopped", "stop-during-timeout", "close-after-stop", "frame-after-stop"),
 )
-def test_stop_races_are_graceful_without_claiming_health(mode: str) -> None:
+def test_stop_races_are_graceful_without_claiming_health(
+    mode: str,
+    tmp_path: Path,
+) -> None:
     stop = threading.Event()
     observed: queue.Queue[object] = queue.Queue()
     if mode == "already-stopped":
@@ -322,7 +481,10 @@ def test_stop_races_are_graceful_without_claiming_health(mode: str) -> None:
         try:
             hello = parse_executor_message(connection.recv(timeout=2))
             observed.put(hello)
-            if mode != "already-stopped":
+            if mode == "stop-during-timeout":
+                threading.Timer(0.05, stop.set).start()
+            elif mode != "already-stopped":
+                time.sleep(0.05)
                 stop.set()
             if mode == "close-after-stop":
                 connection.close(code=1000, reason="controlled stop")
@@ -336,7 +498,7 @@ def test_stop_races_are_graceful_without_claiming_health(mode: str) -> None:
 
     server, thread, port = run_server(handler)
     try:
-        process, output = process_for(port)
+        process, output = process_for(port, tmp_path / "executor-state")
         process.run(stop)
         hello = observed.get(timeout=2)
         if isinstance(hello, Exception):
@@ -351,7 +513,7 @@ def test_stop_races_are_graceful_without_claiming_health(mode: str) -> None:
     assert not thread.is_alive()
 
 
-def test_server_close_without_stop_is_a_fixed_failure() -> None:
+def test_server_close_without_stop_is_a_fixed_failure(tmp_path: Path) -> None:
     observed: queue.Queue[object] = queue.Queue()
 
     def handler(connection: ServerConnection) -> None:
@@ -364,7 +526,7 @@ def test_server_close_without_stop_is_a_fixed_failure() -> None:
 
     server, thread, port = run_server(handler)
     try:
-        process, _ = process_for(port)
+        process, _ = process_for(port, tmp_path / "executor-state")
         with pytest.raises(ExecutorProcessRejected):
             process.run(threading.Event())
         assert observed.get(timeout=2) is True
