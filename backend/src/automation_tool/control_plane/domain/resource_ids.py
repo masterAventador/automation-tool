@@ -94,6 +94,14 @@ class TaskId(ResourceId):
 
 
 @final
+class TargetId(ResourceId):
+    """A stable identifier for one persisted Task target row."""
+
+    __slots__ = ()
+    _resource = "target"
+
+
+@final
 class ExecutionAttemptId(ResourceId):
     """A stable identifier for one execution attempt."""
 
@@ -126,5 +134,6 @@ __all__ = [
     "InstallationId",
     "InvalidResourceId",
     "ResourceId",
+    "TargetId",
     "TaskId",
 ]

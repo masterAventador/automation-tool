@@ -39,6 +39,7 @@ from automation_tool.control_plane.domain.resource_ids import (
     InstallationId,
     InvalidResourceId,
     ResourceId,
+    TargetId,
     TaskId,
 )
 from automation_tool.control_plane.domain.task_commands import (
@@ -118,6 +119,7 @@ __all__ = [
     "InvalidTaskTransition",
     "ResourceId",
     "SafeTaskEventMessage",
+    "TargetId",
     "TaskCommandResponseType",
     "TaskCommandStatus",
     "TaskCommandType",

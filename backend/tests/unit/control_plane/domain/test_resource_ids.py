@@ -12,6 +12,7 @@ from automation_tool.control_plane.domain import (
     InstallationId,
     InvalidResourceId,
     ResourceId,
+    TargetId,
     TaskId,
 )
 
@@ -21,6 +22,7 @@ RESOURCE_ID_TYPES: tuple[type[ResourceId], ...] = (
     InstallationId,
     ExecutorId,
     TaskId,
+    TargetId,
     ExecutionAttemptId,
     ActionId,
     ArtifactId,
@@ -29,6 +31,7 @@ RESOURCE_NAMES: dict[type[ResourceId], str] = {
     InstallationId: "installation",
     ExecutorId: "executor",
     TaskId: "task",
+    TargetId: "target",
     ExecutionAttemptId: "execution attempt",
     ActionId: "action",
     ArtifactId: "artifact",

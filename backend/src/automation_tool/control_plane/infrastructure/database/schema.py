@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 from automation_tool.control_plane.domain import (
+    DOUYIN_CANDIDATE_POLICY_VERSION,
     DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
     MAX_MESSAGE_TEMPLATE_CHARACTERS,
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
@@ -29,6 +30,7 @@ from automation_tool.control_plane.domain import (
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionOutcome,
     ActionStatus,
+    DouyinCandidateDisposition,
     DouyinSearchExposureAction,
     ExecutionAttemptStatus,
     InstallationStatus,
@@ -37,6 +39,13 @@ from automation_tool.control_plane.domain import (
     TaskEventType,
     TaskEventVersion,
     TaskStatus,
+)
+from automation_tool.protocol import (
+    MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
+    MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS,
+    MAX_DOUYIN_TARGET_ID_CHARACTERS,
+    MAX_EXECUTOR_SEQUENCE,
+    DouyinCandidateSource,
 )
 
 metadata = MetaData()
@@ -470,6 +479,126 @@ douyin_search_exposure_definitions = Table(
         "installation_id",
         name="uq_douyin_search_exposure_binding",
     ),
+)
+
+task_targets = Table(
+    "task_targets",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("ordinal", BigInteger(), nullable=False),
+    Column("platform_target_id", String(length=MAX_DOUYIN_TARGET_ID_CHARACTERS), nullable=False),
+    Column("dedupe_key", String(length=50), nullable=False),
+    Column("display_name", String(length=MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS), nullable=False),
+    Column(
+        "public_handle",
+        String(length=MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS),
+        nullable=True,
+    ),
+    Column("source", String(length=32), nullable=False),
+    Column("page_revision", BigInteger(), nullable=False),
+    Column("disposition", String(length=32), nullable=False),
+    Column("policy_version", String(length=64), nullable=False),
+    Column("evaluated_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_task_targets_id_uuid_v4",
+    ),
+    CheckConstraint(
+        f"ordinal between 1 and {MAX_TASK_TARGET_LIMIT}",
+        name="ck_task_targets_ordinal_range",
+    ),
+    CheckConstraint(
+        "platform_target_id ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$'",
+        name="ck_task_targets_platform_target_id",
+    ),
+    CheckConstraint(
+        "dedupe_key ~ '^atdck1_[A-Za-z0-9_-]{43}$'",
+        name="ck_task_targets_candidate_key",
+    ),
+    CheckConstraint(
+        f"char_length(display_name) between 1 and {MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS} "
+        f"and octet_length(display_name) <= {MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS * 4} "
+        "and btrim(display_name) = display_name "
+        "and display_name !~ '[[:cntrl:]]' "
+        "and lower(display_name) not like '%bearer %' "
+        "and lower(display_name) not like '%file://%' "
+        "and lower(display_name) not like '%data:%;base64,%' "
+        "and lower(display_name) !~ "
+        "'(access[_-]?token|api[_-]?key|authorization|cookie|credential|password|"
+        "private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)"
+        "[[:space:]]*[:=]'",
+        name="ck_task_targets_display_name",
+    ),
+    CheckConstraint(
+        "public_handle is null or public_handle ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'",
+        name="ck_task_targets_public_handle",
+    ),
+    CheckConstraint(
+        "source in (" + ", ".join(f"'{source.value}'" for source in DouyinCandidateSource) + ")",
+        name="ck_task_targets_source",
+    ),
+    CheckConstraint(
+        f"page_revision between 1 and {MAX_EXECUTOR_SEQUENCE}",
+        name="ck_task_targets_page_revision_range",
+    ),
+    CheckConstraint(
+        "disposition in ("
+        + ", ".join(f"'{value.value}'" for value in DouyinCandidateDisposition)
+        + ")",
+        name="ck_task_targets_disposition",
+    ),
+    CheckConstraint(
+        f"policy_version = '{DOUYIN_CANDIDATE_POLICY_VERSION}'",
+        name="ck_task_targets_policy_version",
+    ),
+    CheckConstraint(
+        "created_at >= evaluated_at",
+        name="ck_task_targets_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["task_id", "installation_id"],
+        ["tasks.id", "tasks.installation_id"],
+        name="fk_task_targets_task_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_task_targets"),
+    UniqueConstraint(
+        "id",
+        "task_id",
+        "installation_id",
+        name="uq_task_targets_binding",
+    ),
+    UniqueConstraint(
+        "task_id",
+        "installation_id",
+        "ordinal",
+        name="uq_task_targets_task_ordinal",
+    ),
+)
+
+Index(
+    "ix_task_targets_installation_task_page",
+    task_targets.c.installation_id,
+    task_targets.c.task_id,
+    task_targets.c.page_revision,
+    task_targets.c.ordinal,
+    task_targets.c.id,
+)
+
+Index(
+    "ix_task_targets_installation_history",
+    task_targets.c.installation_id,
+    task_targets.c.dedupe_key,
+    task_targets.c.evaluated_at,
 )
 
 _terminal_attempt_values = ", ".join(
@@ -1068,5 +1197,6 @@ __all__ = [
     "task_actions",
     "task_commands",
     "task_events",
+    "task_targets",
     "tasks",
 ]

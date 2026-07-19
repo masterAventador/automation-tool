@@ -15,12 +15,14 @@ from .schema import (
     task_actions,
     task_commands,
     task_events,
+    task_targets,
     tasks,
 )
 from .session import Database
 from .task_command_repository import SqlAlchemyTaskCommandRepository
 from .task_event_convergence_repository import SqlAlchemyTaskEventConvergenceRepository
 from .task_event_stream_repository import SqlAlchemyTaskEventStreamRepository
+from .task_target_repository import SqlAlchemyTaskTargetRepository
 
 __all__ = [
     "Database",
@@ -29,6 +31,7 @@ __all__ = [
     "SqlAlchemyTaskCommandRepository",
     "SqlAlchemyTaskEventConvergenceRepository",
     "SqlAlchemyTaskEventStreamRepository",
+    "SqlAlchemyTaskTargetRepository",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
@@ -41,5 +44,6 @@ __all__ = [
     "task_actions",
     "task_commands",
     "task_events",
+    "task_targets",
     "tasks",
 ]
