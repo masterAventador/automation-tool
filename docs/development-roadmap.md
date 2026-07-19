@@ -284,7 +284,7 @@
 | D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | 🟩 完成 |
 | D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | 🟩 完成 |
 | D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | 🟩 完成 |
-| D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | ⬜ 未开始 |
+| D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | 🟩 完成 |
 | D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | ⬜ 未开始 |
 | D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | ⬜ 未开始 |
 | D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | ⬜ 未开始 |
@@ -1933,10 +1933,23 @@
 - 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
 - 后续：进入 `D6-05`，只在 D6-04 成功且结果列表已复验的页面上实现最大轮次、最大目标、无新增停止和取消检查点
 
+### D6-05 有界滚动
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；Backend 新用例准确失败于 `bounded_scroll` 生产模块不存在，跨边界 Node 契约同时因同一文件缺失失败，随后才实现最小控制层。首轮覆盖审计继续暴露滚动后页面切换/计数失败、下一轮前取消、增长后取消和备用 selector 等遗漏分支，全部补齐后才达到 100%
+- 固定边界：新增 Executor-only `douyin.bounded-scroll.v1`，只接受 Runtime-owned `BrowserWindow`、D6-03 公共 `DouyinSearchInput`、D6-04 成功观察和无参数取消探针；同一实例只运行一次。D6-04 非成功事实、原始字符串/伪对象或不可调用取消源在构造时拒绝
+- 有界推进：最多 20 轮，每轮只发一次 `mouse.wheel(0, 800)`；每轮结果增长等待总预算 3 秒、固定 100ms 轮询。初始或后续节点数达到 `target_limit`、一整个窗口无新增、或持续增长达到轮次上限时分别以固定 evidence 完成，不存在无限滚动
+- Page Object 与计数：结果项的语义优先/`data-e2e` 兜底 selectors 只新增在 D6-02 `search_page.py`；公开方法只返回 `0..target_limit` 的节点数量，不读取昵称、文案、链接、图片或页面正文。非法上限、负数/bool 计数、定位异常、错误页面和 fallback 漂移均拒绝；D6-05 模块没有 selector 或任意 locator
+- 取消与失败关闭：开始、每轮滚动前、滚动后的增长等待中和确认增长后均检查取消。明确 `True` 返回 cancelled；抛错或非 bool 返回 cancellation unavailable。登录、阻塞弹窗、结果页消失、页面观察/节点计数/真实 wheel 异常与计数倒退全部熔断且不再增加滚动轮次；模块不点击、不评论、不私信、不执行脚本、不读 Cookie/storage，也不连接 Control Plane
+- 原调用方验收：生产 `BrowserRuntime` 以 `headless=True` 系统 Chrome 和一次性 `0700` Profile，在同一个窗口先经 D6-04 公开入口完成导航/输入/提交/结果确认，再经 D6-05 发送两个真实 wheel，使隔离官方 origin 测试页从 1 个增长到目标 3 个后停止。没有直调 Page Object/Locator，没有启动空壳 App，不读取默认 Profile；结束后 Runtime 和 Chrome 进程树关闭。真实抖音 DOM/账号仍留给 D6-16
+- 测试：聚焦 60 项 Python 用例，D6-02/D6-05 两个变更模块共 347 条语句/102 个分支覆盖率 100%；跨边界 Node 契约锁定轮次、取消、Page Object selector 所有权和无副作用边界。Backend 全量 `1121 passed, 4 skipped in 86.15s`，6972 条语句/1426 个分支覆盖率 100%；Ruff/格式 225 个文件、严格 Mypy 209 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 76 项 Node 契约、145 项 Vitest、5 项 Playwright 无头 UI、peer dependency、ESLint、严格 TypeScript、API 与生产构建边界全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试与三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿
+- 文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；没有新增重复计划
+- 后续：进入 `D6-06`，在当前有限结果页上建立稳定去重键、最小摘要、来源与 page revision，不把节点计数冒充可持久化 Candidate
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-05`：在已确认结果页实现有界滚动，锁定最大轮次、最大目标、无新增停止和取消检查点；
+1. `D6-06`：建立 Candidate 稳定去重键、最小摘要、来源与 page revision；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. B5-03/B5-04/B5-05/B5-06/B5-07/B5-08 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 6～Wave 10 的无设备依赖任务。

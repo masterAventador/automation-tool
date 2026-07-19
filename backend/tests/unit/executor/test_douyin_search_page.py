@@ -28,6 +28,8 @@ SEARCH_RESULTS_URL = f"{DOUYIN_SEARCH_ENTRY_URL}/keyword?type=general"
 SEARCH_INPUT = 'input[aria-label="搜索"]'
 SEARCH_BUTTON = 'button[aria-label="搜索"]'
 RESULT_LIST = '[role="feed"]'
+RESULT_ITEM = '[role="feed"] > article'
+RESULT_ITEM_FALLBACK = '[data-e2e="search-result-item"]'
 LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
 
@@ -41,12 +43,18 @@ class FakeLocator:
         fail: bool = False,
         wait_callback: Callable[[], None] | None = None,
         wait_failure: bool = False,
+        selector_counts: dict[str, object] | None = None,
+        failed_count_selectors: set[str] | None = None,
     ) -> None:
         self.selector = selector
         self.visible = visible
         self.fail = fail
         self.wait_callback = wait_callback
         self.wait_failure = wait_failure
+        self._selector_counts = {} if selector_counts is None else selector_counts
+        self._failed_count_selectors = (
+            set() if failed_count_selectors is None else failed_count_selectors
+        )
 
     @property
     def first(self) -> FakeLocator:
@@ -68,6 +76,11 @@ class FakeLocator:
         if not self.visible:
             raise PlaywrightTimeoutError("private wait timeout")
 
+    def count(self) -> int:
+        if self.selector in self._failed_count_selectors:
+            raise RuntimeError("private count failure")
+        return cast(int, self._selector_counts.get(self.selector, 0))
+
 
 class FakePage:
     def __init__(
@@ -83,6 +96,8 @@ class FakePage:
         self.requested_selectors: list[str] = []
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
         self.wait_failure_selectors: set[str] = set()
+        self.selector_counts: dict[str, object] = {}
+        self.failed_count_selectors: set[str] = set()
 
     def locator(self, selector: str) -> FakeLocator:
         self.requested_selectors.append(selector)
@@ -93,6 +108,8 @@ class FakePage:
             fail=selector in self.failed_selectors,
             wait_callback=self.wait_callbacks.get(selector),
             wait_failure=selector in self.wait_failure_selectors,
+            selector_counts=self.selector_counts,
+            failed_count_selectors=self.failed_count_selectors,
         )
 
 
@@ -349,6 +366,41 @@ def test_page_object_repr_is_redacted() -> None:
 
     assert repr(search_page) == "DouyinSearchPage(<redacted>)"
     assert "private-value" not in repr(search_page.observe())
+
+
+def test_result_item_count_is_bounded_and_uses_versioned_fallbacks() -> None:
+    page = FakePage(url=SEARCH_RESULTS_URL, visible_selectors={RESULT_LIST})
+    search_page = DouyinSearchPage(window(page))
+    assert search_page.result_item_count(maximum=20) == 0
+
+    page.selector_counts[RESULT_ITEM_FALLBACK] = 12
+    assert search_page.result_item_count(maximum=5) == 5
+    assert RESULT_ITEM in page.requested_selectors
+    assert RESULT_ITEM_FALLBACK in page.requested_selectors
+
+
+def test_result_item_count_rejects_invalid_bounds_counts_or_page_state() -> None:
+    result_page = FakePage(url=SEARCH_RESULTS_URL, visible_selectors={RESULT_LIST})
+    search_page = DouyinSearchPage(window(result_page))
+    for maximum in (0, 101, True):
+        with pytest.raises(DouyinSearchPageRejected):
+            search_page.result_item_count(maximum=maximum)
+
+    for invalid_count in (True, -1):
+        result_page.selector_counts[RESULT_ITEM] = invalid_count
+        with pytest.raises(DouyinSearchPageRejected):
+            search_page.result_item_count(maximum=20)
+    result_page.selector_counts.clear()
+    result_page.failed_count_selectors.add(RESULT_ITEM)
+    with pytest.raises(DouyinSearchPageRejected):
+        search_page.result_item_count(maximum=20)
+
+    home_page = DouyinSearchPage(window(FakePage(visible_selectors={SEARCH_INPUT, SEARCH_BUTTON})))
+    with pytest.raises(DouyinSearchPageRejected):
+        home_page.result_item_count(maximum=20)
+
+    ready = search_page.wait_for_results_ready(timeout_milliseconds=1_000)
+    assert ready.state is DouyinSearchPageState.RESULTS_READY
 
 
 def test_bounded_waits_reject_invalid_timeout_and_return_ready_or_timeout_fact() -> None:

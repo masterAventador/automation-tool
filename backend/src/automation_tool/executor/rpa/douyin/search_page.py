@@ -16,6 +16,7 @@ from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageVersion,
     DouyinPageVersionModel,
 )
+from automation_tool.protocol import MAX_TASK_TARGET_LIMIT
 
 DOUYIN_SEARCH_PAGE_SELECTOR_VERSION = "douyin.search-page.v1"
 
@@ -33,6 +34,11 @@ _RESULT_LIST_SELECTORS = (
     '[role="feed"]',
     '[data-e2e="search-result-list"]',
     '[data-e2e="scroll-list"]',
+)
+_RESULT_ITEM_SELECTORS = (
+    '[role="feed"] > article',
+    '[data-e2e="search-result-item"]',
+    '[data-e2e="feed-item"]',
 )
 _LOGIN_DIALOG_SELECTORS = (
     '[role="dialog"]:has-text("扫码登录")',
@@ -181,6 +187,8 @@ class _Locator(Protocol):
 
     def is_visible(self) -> bool: ...
 
+    def count(self) -> int: ...
+
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
 
@@ -287,6 +295,23 @@ class DouyinSearchPage:
     def result_list(self) -> _Locator:
         self._require_state(DouyinSearchPageState.RESULTS_READY)
         return self._require_locator(_RESULT_LIST_SELECTORS)
+
+    def result_item_count(self, *, maximum: int) -> int:
+        """Return only a bounded count; candidate contents remain a later concern."""
+
+        if type(maximum) is not int or not 1 <= maximum <= MAX_TASK_TARGET_LIMIT:
+            raise DouyinSearchPageRejected
+        self._require_state(DouyinSearchPageState.RESULTS_READY)
+        try:
+            for selector in _RESULT_ITEM_SELECTORS:
+                count = self._page.locator(selector).count()
+                if type(count) is not int or count < 0:
+                    raise ValueError
+                if count:
+                    return min(count, maximum)
+        except Exception:
+            raise DouyinSearchPageRejected from None
+        return 0
 
     def login_dialog(self) -> _Locator:
         observation = self.observe()
