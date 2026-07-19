@@ -19,7 +19,7 @@ LOCAL_SESSION_TOKEN = "06" * 32
 TEST_SIGNING_KEY = bytes(range(32))
 
 
-def bootstrap() -> bytes:
+def bootstrap(state_directory: Path) -> bytes:
     return (
         json.dumps(
             {
@@ -30,6 +30,7 @@ def bootstrap() -> bytes:
                 "installation_id": "123e4567-e89b-42d3-a456-426614174003",
                 "executor_id": "123e4567-e89b-42d3-a456-426614174004",
                 "heartbeat_interval_seconds": 1,
+                "state_directory": str(state_directory),
             },
             separators=(",", ":"),
         )
@@ -107,7 +108,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_or_playwright(tmp_path:
 
     unavailable = subprocess.run(
         [os.fspath(executable)],
-        input=bootstrap(),
+        input=bootstrap(tmp_path / "executor-state"),
         capture_output=True,
         check=False,
         timeout=20,

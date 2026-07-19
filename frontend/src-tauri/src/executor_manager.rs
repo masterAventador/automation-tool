@@ -131,6 +131,7 @@ pub struct ExecutorLaunchConfiguration {
     control_plane_session: Zeroizing<String>,
     installation_id: String,
     executor_id: String,
+    state_directory: PathBuf,
     heartbeat_interval_seconds: u8,
 }
 
@@ -140,6 +141,7 @@ impl ExecutorLaunchConfiguration {
         control_plane_session: String,
         installation_id: String,
         executor_id: String,
+        state_directory: PathBuf,
         heartbeat_interval_seconds: u8,
     ) -> Result<Self, ExecutorManagerError> {
         ExecutorBootstrapInput::new(
@@ -147,6 +149,7 @@ impl ExecutorLaunchConfiguration {
             &control_plane_session,
             &installation_id,
             &executor_id,
+            &state_directory,
             heartbeat_interval_seconds,
         )
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))?;
@@ -155,6 +158,7 @@ impl ExecutorLaunchConfiguration {
             control_plane_session: Zeroizing::new(control_plane_session),
             installation_id,
             executor_id,
+            state_directory,
             heartbeat_interval_seconds,
         })
     }
@@ -165,6 +169,7 @@ impl ExecutorLaunchConfiguration {
             &self.control_plane_session,
             &self.installation_id,
             &self.executor_id,
+            &self.state_directory,
             self.heartbeat_interval_seconds,
         )
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))

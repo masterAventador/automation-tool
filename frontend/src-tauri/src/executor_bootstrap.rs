@@ -7,6 +7,7 @@ use serde::Serialize;
 use sha2::Sha256;
 use std::fmt;
 use std::io::Write;
+use std::path::{Component, Path};
 use uuid::{Uuid, Variant};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -17,6 +18,7 @@ const LOCAL_SESSION_TOKEN_BYTES: usize = 32;
 const MAX_BOOTSTRAP_BYTES: usize = 16 * 1024;
 const MAX_ENDPOINT_BYTES: usize = 2048;
 const MAX_CONTROL_PLANE_SESSION_BYTES: usize = 4096;
+const MAX_STATE_DIRECTORY_BYTES: usize = 4096;
 const PROOF_PREFIX: &str = "atlep1.";
 const AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-event.v1\0";
 
@@ -124,6 +126,7 @@ impl LocalSessionToken {
             installation_id: input.installation_id.hyphenated().to_string(),
             executor_id: input.executor_id.hyphenated().to_string(),
             heartbeat_interval_seconds: input.heartbeat_interval_seconds,
+            state_directory: input.state_directory,
         };
         let mut serialized = Zeroizing::new(
             serde_json::to_vec(&document)
@@ -183,6 +186,7 @@ pub struct ExecutorBootstrapInput<'a> {
     installation_id: Uuid,
     executor_id: Uuid,
     heartbeat_interval_seconds: u8,
+    state_directory: &'a Path,
 }
 
 impl<'a> ExecutorBootstrapInput<'a> {
@@ -191,6 +195,7 @@ impl<'a> ExecutorBootstrapInput<'a> {
         control_plane_session: &'a str,
         installation_id: &str,
         executor_id: &str,
+        state_directory: &'a Path,
         heartbeat_interval_seconds: u8,
     ) -> Result<Self, ExecutorBootstrapError> {
         require_endpoint(websocket_url)?;
@@ -203,12 +208,14 @@ impl<'a> ExecutorBootstrapInput<'a> {
         }
         let installation_id = require_uuid_v4(installation_id)?;
         let executor_id = require_uuid_v4(executor_id)?;
+        require_state_directory(state_directory)?;
         Ok(Self {
             websocket_url,
             control_plane_session,
             installation_id,
             executor_id,
             heartbeat_interval_seconds,
+            state_directory,
         })
     }
 }
@@ -222,6 +229,7 @@ struct ExecutorBootstrapDocument<'a> {
     installation_id: String,
     executor_id: String,
     heartbeat_interval_seconds: u8,
+    state_directory: &'a Path,
 }
 
 fn require_uuid_v4(source: &str) -> Result<Uuid, ExecutorBootstrapError> {
@@ -257,6 +265,29 @@ fn require_endpoint(source: &str) -> Result<(), ExecutorBootstrapError> {
         _ => false,
     };
     if !endpoint_allowed {
+        return Err(ExecutorBootstrapError::bootstrap_rejected());
+    }
+    Ok(())
+}
+
+fn require_state_directory(source: &Path) -> Result<(), ExecutorBootstrapError> {
+    let encoded = source
+        .to_str()
+        .ok_or_else(ExecutorBootstrapError::bootstrap_rejected)?;
+    if !source.is_absolute()
+        || source.parent().is_none()
+        || encoded.is_empty()
+        || encoded.len() > MAX_STATE_DIRECTORY_BYTES
+        || encoded.chars().any(|character| {
+            let codepoint = character as u32;
+            character.is_control()
+                || (0x202a..=0x202e).contains(&codepoint)
+                || (0x2066..=0x2069).contains(&codepoint)
+        })
+        || source
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
         return Err(ExecutorBootstrapError::bootstrap_rejected());
     }
     Ok(())
@@ -307,6 +338,7 @@ mod tests {
                 "atds1.private-session",
                 "123e4567-e89b-42d3-a456-426614174003",
                 "123e4567-e89b-42d3-a456-426614174004",
+                Path::new("/private/tmp/automation-tool-executor-test"),
                 1,
             )
             .is_err());

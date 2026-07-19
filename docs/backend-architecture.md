@@ -196,9 +196,11 @@ browser/desktop infrastructure
 - 安装信号处理和有界停止；
 - 令牌、私有路径和原始异常不进入日志。
 
-E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、本机启动令牌、短期 `executor.connect` Session、Installation/Executor UUIDv4 和心跳间隔。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`；两个 Session 用途隔离并分别只驻留在秘密类型中，不进入 argv、环境、stderr 或异常。
+E4-02 已实现该层的最小正式入口 `automation-tool-executor`。stdin bootstrap 只允许一条换行结尾、最多 16 KiB、无重复 key/未知字段的 JSON object；字段固定为 bootstrap 版本、受控 WebSocket URL、本机启动令牌、短期 `executor.connect` Session、Installation/Executor UUIDv4、心跳间隔和 Rust 提供的 App 私有 Executor 状态目录。`ws` 只允许 `127.0.0.1` 有效端口，远端只允许标准端口 `wss`；两个 Session 用途隔离并分别只驻留在秘密类型中，不进入 argv、环境、stderr 或异常。状态目录只允许绝对、非根、无 `..`/控制字符的有界路径，E4-13 必须从 Tauri `app_data_dir` 固定派生，不能相信 React 输入。
 
 E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-diagnostics-v1` fixtures，固定清除凭据/Cookie、URL userinfo/query、data/file URL、私有路径和控制/Bidi 字符。该模块为后续 Executor 结构化安全消息提供单一规则，但不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。Python 当前正式 CLI 仍只输出既有固定错误，不新增任意异常或秘密日志。
+
+E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在正式 CLI 联网前打开。固定 `PRAGMA user_version=1` 迁移一次创建 identity、commands、attempt checkpoints、outbox 四表；数据库绑定唯一 Installation/Executor，未来版本、缺表/损坏、身份错绑、symlink/reparse point、宽权限、非普通文件和打开 identity 变化全部 fail closed。命令以 message ID、idempotency key、32 字节意图 SHA-256 和 Attempt 连续 sequence 去重；checkpoint 以 revision/CAS 和单调 event sequence 更新；outbox 只接受正式 `TaskCommandResultEnvelope`/`TaskEventEnvelope` 并保留精确 wire 重放身份。SQLite 不保存 bootstrap Session、本机会话、Cookie、平台登录态、密钥或任意配置，不调用系统钥匙串，也不替代云端 PostgreSQL 权威状态。
 
 进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。当前任何 Task Command 或其他应用帧都 fail closed，不提前伪造 ACK/事件；E4-12 在本机幂等账本和监管完成后才接入无副作用命令回放。
 
@@ -588,14 +590,14 @@ Outbox 不保存任意 payload。T3-09 的 task.offer 当前仍发送空 object 
 - Cookie、Token、页面原文、聊天全文和本机绝对路径不入库；
 - 删除任务不立即删除审计；Artifact 按保留策略异步清理。
 
-Executor 本机 SQLite 只保存：
+E4-11 已实现的 Executor 本机 SQLite v1 只保存：
 
-- 已接收命令和幂等结果；
-- 当前执行尝试和安全检查点；
-- action 副作用账本；
-- 待上传事件和 Artifact spool；
-- Profile revision 与非敏感会话健康；
+- 已接收正式命令的封闭 envelope、message/idempotency 双键与意图 SHA-256；
+- 当前 Attempt 的 task 绑定、连续 command sequence、单调 event sequence、封闭 checkpoint state 和 revision；
+- 与来源命令、Task/Attempt/correlation 严格绑定的待发送正式回执/事件及 delivered 标记；
 - 不保存可由 Control Plane 恢复的第二套完整业务数据库。
+
+action 副作用账本、Artifact spool、Profile revision 与非敏感会话健康仍是后续 E4/B5/A7 任务，不能在 E4-11 的通用表中提前塞任意 JSON。任何 Session、Cookie、浏览器登录态、密钥和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
 ## 15. API 基线
 

@@ -234,7 +234,7 @@
 | E4-08 | 进程监管 | 后台检测退出、有界重启预算、显式停止不重启 | E4-07 | 🔍 待验收 |
 | E4-09 | 超时与进程树清理 | Unix process group、Windows Job Object、挂起调用终止 | E4-07 | 🔍 待验收 |
 | E4-10 | stderr 脱敏限界 | 凭据/私有路径脱敏；行数、单行和总大小上限 | E4-07 | 🔍 待验收 |
-| E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | ⬜ 未开始 |
+| E4-11 | Executor 本机 SQLite | command/idempotency/checkpoint/outbox 最小账本与迁移 | E4-02 | 🔍 待验收 |
 | E4-12 | 真实协议回放 | Control Plane 向真实 Executor 下发无副作用任务并收事件 | E4-08,E4-11,T3-20 | ⬜ 未开始 |
 | E4-13 | PlatformAdapter 接入 | React 能看状态、重启、诊断和紧停，不直接连 Executor | E4-07,T3-16 | ⬜ 未开始 |
 | E4-14 | Tauri 生命周期 E2E | 启动/调用/挂起/崩溃/重启/停止/退出清理 | E4-09,E4-13 | ⬜ 未开始 |
@@ -1506,9 +1506,29 @@
 - 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划
 - 后续：E4-11 建立 Executor 本机 SQLite command/idempotency/checkpoint/outbox 最小账本与迁移，再由 E4-12 从真实 Control Plane 回放无副作用任务
 
+### E4-11 Executor 本机 SQLite
+
+- 状态：🔍 待 Windows 原生验收；macOS 真实 signed Executor 创建、迁移和重开通过，工程依赖可继续
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：在 App 私有 Executor 状态目录内建立固定 `executor-ledger.sqlite3` v1，把正式命令双键幂等、Attempt checkpoint 与协议 outbox 持久化；Executor 崩溃/重启后可安全重放，但不能复制云端完整业务库或保存任何会话/平台秘密
+- RED：先新增正式 `ExecutorLedger` 测试并实跑，收集阶段准确失败于 `automation_tool.executor.ledger` 不存在；没有借用 FakeExecutor 的进程内字典、Control Plane PostgreSQL 仓储或 Mock SQLite 让用例假绿。首版 GREEN 后再从 Rust/CLI 原入口补状态目录和真实独立进程事实
+- Bootstrap 与装配：Rust `ExecutorBootstrapInput`/`ExecutorLaunchConfiguration` 增加受限绝对 `state_directory: PathBuf`，同一次性 stdin JSON 传给 Python；相对、根、含 `..`、控制字符、非 UTF-8 或超长路径拒绝。Python CLI 在建立 WebSocket 前完成账本打开/迁移，失败只返回固定 process unavailable。当前没有 Tauri Command/React 路径参数；E4-13 必须从 Tauri `app_data_dir` 派生固定子目录
+- v1 schema：`PRAGMA user_version=1` 原子创建且只创建 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints`、`executor_outbox`。数据库绑定唯一 Installation/Executor；未来版本、缺表、身份错绑和迁移损坏 fail closed。使用 Python 内置 `sqlite3`，没有增加 ORM、Alembic 或第二数据库服务
+- command/idempotency：正式 `TaskCommandEnvelope` 才能入账；message ID 与 idempotency key 各自唯一，去除 wire 重试身份后的 canonical intent 计算 32 字节 SHA-256。同一意图重放返回首次 receipt，任一双键碰撞但意图改变立即拒绝；Attempt 绑定唯一 Task，command sequence 必须从 1 连续递增
+- checkpoint/outbox：每个 Attempt 保存连续 command sequence、单调 event sequence、封闭 received/running/paused/terminal/outcome_uncertain 状态和正 revision；`BEGIN IMMEDIATE`+revision CAS 的两个真实连接同时更新只有一个赢家。outbox 只接受正式 Result/Event envelope，必须匹配来源 command 的 Task/Attempt/correlation，按 ordinal 精确回放；delivered 标记持久且幂等，未知 message 不伪成功
+- 文件与秘密边界：固定数据库文件与状态目录在 Unix 分别为 `0600`/`0700`，所有祖先 symlink、Windows reparse point、非普通 leaf、宽权限和打开前后 directory/file identity 变化均拒绝。SQLite 不保存 Control Plane Session、本机 256-bit 会话、Cookie、平台登录态、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串；真实进程验收扫描数据库原始字节确认 Session 不存在
+- 失败矩阵：覆盖空库迁移/重开、身份再绑定拒绝、未来/缺表 schema、双键双行冲突、首次 sequence 非 1/缺口/Task 混用、非法身份和类型、真实并发 CAS/旧 revision/事件倒退、outbox 来源/身份/碰撞/损坏/非法 batch/未知 delivery，以及目录/文件权限、symlink、非普通文件和 identity 替换竞态。`ledger.py` focused 语句/分支覆盖率 100%
+- 正式路径：安装后的 `automation-tool-executor` 独立子进程经 stdin→CLI 先创建 SQLite，再连接真实 Uvicorn/正式 Session/Registry，最终验证 Hello/Heartbeat、v1/identity、秘密不落库和 SIGTERM。`scripts/run_e4_07_acceptance.py` 另从真实 Manifest CLI→signed PyInstaller onedir→公开 Rust Manager→同一 Python CLI→Uvicorn 跑通 `registered → heartbeat → unregistered`，并在临时目录删除前直接读取 SQLite v1/identity
+- App 与验收口径：E4-11 的正式消费者仍是 Rust Manager/Python CLI，没有 Tauri Command、React 页面或用户可见功能，所以本任务不启动 App；接口验收来自真正启动该功能的 stdin/CLI/Manager 原入口，不用内部函数或 Mock 冒充。E4-12 才消费账本处理真实任务帧，E4-13/E4-14 再通过唯一 `visible=false` App 验收 `app_data_dir` 装配
+- 门禁：Backend `866 passed in 75.69s`，4899 条语句/946 个分支覆盖率 100%；Frontend 47 项 Node 契约、112 项 Vitest 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三种配置各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 3 协议 fixture + 14 安全配置，共 89 项全绿，1 项 PyInstaller 编排由专用脚本通过。Clippy all-targets/all-features、Rustfmt、Backend 正式范围 167 个文件 Ruff 格式/lint、严格 Mypy 167 个源码文件、uv lock、ESLint、TypeScript、OpenAPI 漂移和 production boundary 全绿；正式 `pnpm tauri build --debug --no-bundle` 成功且未启动 App
+- Windows：Python 路径与 reparse point 分支、Rust PathBuf bootstrap 和 PyInstaller spec 均已实现，但本机无 Windows 标准库，GitHub Hosted Runner 仍受 Billing/Actions spending limit；Windows 目录 ACL/reparse 竞态、SQLite frozen runtime、重开/CAS/outbox 和 Rust Manager 真链路保持 `🔍`，不以 macOS 或静态契约冒充
+- 文档：同步根/Backend/Frontend README、前后端架构、工程结构和唯一开发台账；没有新增第二份计划或重复 implementation plan
+- 后续：E4-12 从真实 Control Plane 向同一正式 Executor 下发无副作用 Task Command，使用本账本生成/重放 ACK 与 Event，并验证崩溃恢复闭环
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `E4-11`：建立 Executor 本机 SQLite command/idempotency/checkpoint/outbox 最小账本与迁移；
-2. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-11～Wave 10 的无设备依赖任务。
+1. `E4-12`：从真实 Control Plane 向正式 Executor 回放无副作用 Task Command，经 E4-11 账本持久生成 ACK/Event 并验证重启恢复；
+2. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 E4-12～Wave 10 的无设备依赖任务。

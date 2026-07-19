@@ -8,6 +8,7 @@ import os
 import platform
 import queue
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,9 @@ from uuid import UUID, uuid4
 import uvicorn
 
 from automation_tool.control_plane import create_app
-from automation_tool.control_plane.application.device_credentials import ParsedDeviceCredential
+from automation_tool.control_plane.application.device_credentials import (
+    ParsedDeviceCredential,
+)
 from automation_tool.control_plane.application.device_sessions import (
     AuthenticatedDeviceSession,
     DeviceSessionCapability,
@@ -176,7 +179,9 @@ def start_control_plane() -> RunningControlPlane:
     listener.listen()
     port = int(listener.getsockname()[1])
     server = uvicorn.Server(
-        uvicorn.Config(app, log_level="critical", access_log=False, ws="websockets-sansio")
+        uvicorn.Config(
+            app, log_level="critical", access_log=False, ws="websockets-sansio"
+        )
     )
     thread = threading.Thread(
         target=server.run,
@@ -253,10 +258,13 @@ def run_rust_manager(
         json.dumps(
             {
                 "packageRoot": os.fspath(package_root),
-                "websocketUrl": (f"ws://127.0.0.1:{control_plane.port}/api/v1/executors/connect"),
+                "websocketUrl": (
+                    f"ws://127.0.0.1:{control_plane.port}/api/v1/executors/connect"
+                ),
                 "sessionToken": control_plane.session_token,
                 "installationId": str(INSTALLATION_ID),
                 "executorId": str(EXECUTOR_ID),
+                "stateDirectory": os.fspath(workspace / "executor-state"),
             },
             separators=(",", ":"),
         ),
@@ -296,6 +304,22 @@ def run_rust_manager(
         )[-4000:]
         raise RuntimeError(f"E4-07 Rust manager acceptance failed\n{diagnostic}")
 
+    ledger_path = workspace / "executor-state" / "executor-ledger.sqlite3"
+    if not ledger_path.is_file():
+        raise RuntimeError("E4-11 Rust manager did not create the Executor ledger")
+    with sqlite3.connect(ledger_path) as connection:
+        version = connection.execute("PRAGMA user_version").fetchone()
+        identity = connection.execute(
+            "SELECT installation_id, executor_id FROM executor_identity"
+        ).fetchone()
+    if version != (1,) or identity != (str(INSTALLATION_ID), str(EXECUTOR_ID)):
+        raise RuntimeError(
+            "E4-11 Executor ledger migration or identity binding is invalid"
+        )
+    ledger_bytes = ledger_path.read_bytes()
+    if control_plane.session_token.encode() in ledger_bytes:
+        raise RuntimeError("E4-11 Executor ledger persisted the Control Plane session")
+
 
 def main() -> None:
     if platform.system() != "Darwin":
@@ -303,7 +327,7 @@ def main() -> None:
     control_plane = start_control_plane()
     try:
         with tempfile.TemporaryDirectory(prefix="automation-tool-e4-07-") as directory:
-            workspace = Path(directory)
+            workspace = Path(directory).resolve(strict=True)
             package_root = build_signed_executor(workspace)
             run_rust_manager(package_root, control_plane, workspace)
         observed = [control_plane.registry.events.get(timeout=5) for _ in range(3)]
@@ -314,7 +338,9 @@ def main() -> None:
         raise RuntimeError(f"{error}\nControl Plane events: {observed!r}") from None
     finally:
         control_plane.stop()
-    print("E4-07 acceptance passed: Rust Manager -> signed PyInstaller Executor -> Uvicorn")
+    print(
+        "E4-07 acceptance passed: Rust Manager -> signed PyInstaller Executor -> Uvicorn"
+    )
 
 
 if __name__ == "__main__":

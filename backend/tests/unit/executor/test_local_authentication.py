@@ -30,6 +30,7 @@ def bootstrap_source(local_session_token: object = LOCAL_SESSION_TOKEN) -> bytes
                 "installation_id": "123e4567-e89b-42d3-a456-426614174003",
                 "executor_id": "123e4567-e89b-42d3-a456-426614174004",
                 "heartbeat_interval_seconds": 1,
+                "state_directory": "/private/tmp/automation-tool-executor-auth-test",
             },
             separators=(",", ":"),
         )

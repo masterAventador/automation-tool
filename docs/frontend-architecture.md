@@ -240,7 +240,7 @@ React
 Rust 负责：
 
 - 启动已签名、版本匹配的 Executor；
-- 通过 stdin bootstrap 传入一次性会话令牌和必要配置；
+- 通过 stdin bootstrap 传入一次性会话令牌、受控端点/身份和 App 私有 Executor 状态目录；
 - 监管 stdout/stderr、健康、超时、崩溃和重启预算；
 - 限界保存脱敏诊断；
 - App 退出、注销、任务取消和紧停时清理完整进程树；
@@ -261,6 +261,8 @@ E4-08 的监管仍在同一个 Manager：调用方必须显式提供最大重启
 E4-09 把完整进程树所有权收回同一个 `RunningExecutor`，不引入第二 Manager。Unix `CommandExt::process_group(0)` 在 exec 前创建独立 PGID，强制清理只向该负 PGID 发 `SIGKILL`，`ESRCH` 作为已清理处理；正常 stop 仍只向主进程发 `SIGTERM` 以取得认证 stopped proof，但主进程退出后必须再次终止组内剩余后代再 join reader。Windows 进程以 `CREATE_SUSPENDED` 启动，在任何业务代码运行前配置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`、挂入 Job Object 并恢复初始线程；配置、挂载或恢复失败均关闭 Job/终止 suspended child。启动/停止超时、显式 stop、异常退出准备重启和 Manager Drop 都走同一树清理原语。macOS 已用真实签名进程和忽略 `SIGTERM` 的孙进程验证全部边界；Windows 原生行为仍因 runner 计费限制保持待验收。当前仍无 task invoke API，因此 E4-09 的“挂起”指进程生命周期挂起；任务副作用超时与 `OUTCOME_UNCERTAIN` 归 E4-12/后续 RPA 执行层。
 
 E4-10 将所有代次共享的 `ExecutorDiagnostics` 放在 Manager Core，重启不会创建第二日志源。stderr reader 用 `BufRead::fill_buf/consume` 在输入阶段限制捕获，不会因未换行恶意输出无界分配；超长和非法 UTF-8 行只产生固定 `[TRUNCATED]`/`[REDACTED]`。其余行先清除控制/Bidi 字符，再按三端共享 fixtures 依次移除认证 Header、Bearer、设备/本机会话 envelope、64 位本机令牌、平台 Cookie、敏感 JSON/assignment、URL userinfo/全部 query、file/data URL 和私有路径；最终以 200 行、单行 4096 bytes、总计 64 KiB 三重上限滚动淘汰。公开 `diagnostics()` 只克隆安全内存，不提供原始数据、持久化或 WebView 命令；E4-13 才通过固定 PlatformAdapter 展示。macOS 真实 signed 子进程 stderr 已通过，Windows 实包仍待 runner。
+
+E4-11 仍不新增第二 Manager 或 WebView API。`ExecutorLaunchConfiguration` 持有经过绝对路径/长度/组件校验的 `state_directory: PathBuf`；后续 E4-13 必须从 Tauri 自身解析的 `app_data_dir` 派生固定 Executor 子目录，React 不能提交路径。Rust 只把它放入受限 stdin bootstrap，Python CLI 在任何网络连接前完成 `executor-ledger.sqlite3` v1 迁移和 Installation/Executor 身份绑定。该数据库属于 Executor 的本机恢复边界，不是 Control Plane 副本：只保存正式协议命令身份/意图指纹、Attempt checkpoint 和 outbox，不保存 Session、Cookie、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串。E4-12 才让真实任务帧消费该账本；E4-13/E4-14 再通过固定 PlatformAdapter 与隐藏 App 验收 `app_data_dir` 装配。
 
 ## 7. 页面与导航
 

@@ -81,6 +81,7 @@ def bootstrap(port: int) -> object:
             "installation_id": INSTALLATION_ID,
             "executor_id": EXECUTOR_ID,
             "heartbeat_interval_seconds": 1,
+            "state_directory": "/private/tmp/automation-tool-executor-client-test",
         },
         separators=(",", ":"),
     )

@@ -5,6 +5,7 @@ import queue
 import secrets
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -184,7 +185,10 @@ def start_control_plane() -> RunningControlPlane:
     return RunningControlPlane(server, thread, port, registry, material.session_token)
 
 
-def start_executor(control_plane: RunningControlPlane) -> tuple[subprocess.Popen[str], str]:
+def start_executor(
+    control_plane: RunningControlPlane,
+    state_directory: Path,
+) -> tuple[subprocess.Popen[str], str]:
     bootstrap = json.dumps(
         {
             "bootstrap_version": "1",
@@ -194,6 +198,7 @@ def start_executor(control_plane: RunningControlPlane) -> tuple[subprocess.Popen
             "installation_id": str(INSTALLATION_ID),
             "executor_id": str(EXECUTOR_ID),
             "heartbeat_interval_seconds": 1,
+            "state_directory": str(state_directory),
         },
         separators=(",", ":"),
     )
@@ -218,11 +223,14 @@ def stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
     return stdout, stderr
 
 
-def test_real_process_bootstraps_over_stdin_heartbeats_to_control_plane_and_stops() -> None:
+def test_real_process_bootstraps_over_stdin_heartbeats_to_control_plane_and_stops(
+    tmp_path: Path,
+) -> None:
     control_plane = start_control_plane()
     process: subprocess.Popen[str] | None = None
     try:
-        process, bootstrap = start_executor(control_plane)
+        state_directory = tmp_path / "executor-state"
+        process, bootstrap = start_executor(control_plane, state_directory)
         event, registered_value = control_plane.registry.events.get(timeout=5)
         assert event == "registered"
         assert isinstance(registered_value, OnlineExecutorConnection)
@@ -253,6 +261,16 @@ def test_real_process_bootstraps_over_stdin_heartbeats_to_control_plane_and_stop
         assert LOCAL_SESSION_TOKEN not in repr(process.args)
         assert control_plane.session_token in bootstrap
         assert LOCAL_SESSION_TOKEN in bootstrap
+        ledger_path = state_directory / "executor-ledger.sqlite3"
+        assert ledger_path.is_file()
+        with sqlite3.connect(ledger_path) as connection:
+            assert connection.execute("PRAGMA user_version").fetchone() == (1,)
+            assert connection.execute(
+                "SELECT installation_id, executor_id FROM executor_identity"
+            ).fetchone() == (str(INSTALLATION_ID), str(EXECUTOR_ID))
+        ledger_bytes = ledger_path.read_bytes()
+        assert control_plane.session_token.encode() not in ledger_bytes
+        assert LOCAL_SESSION_TOKEN.encode() not in ledger_bytes
         event, removed = control_plane.registry.events.get(timeout=5)
         assert (event, removed) == ("unregistered", True)
     finally:

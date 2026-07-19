@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 from io import BytesIO, StringIO, TextIOWrapper
+from pathlib import Path
 
 import pytest
 
@@ -17,7 +18,12 @@ EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
 LOCAL_SESSION_TOKEN = "02" * 32
 
 
-def source(*, websocket_url: str, token: str = "private-session") -> bytes:
+def source(
+    *,
+    websocket_url: str,
+    state_directory: Path,
+    token: str = "private-session",
+) -> bytes:
     return (
         json.dumps(
             {
@@ -28,6 +34,7 @@ def source(*, websocket_url: str, token: str = "private-session") -> bytes:
                 "installation_id": INSTALLATION_ID,
                 "executor_id": EXECUTOR_ID,
                 "heartbeat_interval_seconds": 1,
+                "state_directory": str(state_directory),
             },
             separators=(",", ":"),
         )
@@ -35,7 +42,7 @@ def source(*, websocket_url: str, token: str = "private-session") -> bytes:
     ).encode()
 
 
-def test_cli_maps_bootstrap_and_process_failures_to_fixed_exit_contracts() -> None:
+def test_cli_maps_bootstrap_and_process_failures_to_fixed_exit_contracts(tmp_path: Path) -> None:
     output = StringIO()
     error = StringIO()
     assert cli.run_executor(BytesIO(b"private-invalid\n"), output, error) == 2
@@ -49,6 +56,7 @@ def test_cli_maps_bootstrap_and_process_failures_to_fixed_exit_contracts() -> No
             BytesIO(
                 source(
                     websocket_url="ws://127.0.0.1:9/api/v1/executors/connect",
+                    state_directory=tmp_path / "executor-state",
                 )
             ),
             output,
@@ -67,11 +75,19 @@ def test_cli_maps_bootstrap_and_process_failures_to_fixed_exit_contracts() -> No
     assert cli.run_executor(BytesIO(b"invalid\n"), StringIO(), FailingError()) == 2
 
 
-def test_cli_returns_success_after_the_runtime_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_returns_success_after_the_runtime_stops(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.setattr(LocalExecutorProcess, "run", lambda _self, _stop: None)
 
     status = cli.run_executor(
-        BytesIO(source(websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect")),
+        BytesIO(
+            source(
+                websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
+                state_directory=tmp_path / "executor-state",
+            )
+        ),
         StringIO(),
         StringIO(),
     )
@@ -81,6 +97,7 @@ def test_cli_returns_success_after_the_runtime_stops(monkeypatch: pytest.MonkeyP
 
 def test_cli_collapses_local_authenticator_failure_to_the_fixed_process_error(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def reject_authenticator(_token: object) -> object:
         raise LocalSessionAuthenticationRejected
@@ -90,7 +107,12 @@ def test_cli_collapses_local_authenticator_failure_to_the_fixed_process_error(
     error = StringIO()
 
     status = cli.run_executor(
-        BytesIO(source(websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect")),
+        BytesIO(
+            source(
+                websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
+                state_directory=tmp_path / "executor-state",
+            )
+        ),
         output,
         error,
     )

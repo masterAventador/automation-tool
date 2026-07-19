@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
@@ -17,6 +18,7 @@ from automation_tool.executor.transport import (
 )
 from automation_tool.protocol import ProtocolExecutorId, ProtocolInstallationId
 from automation_tool.protocol.json_object import decode_bounded_json_object
+from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 MAX_EXECUTOR_BOOTSTRAP_BYTES = 16 * 1024
 
@@ -40,6 +42,7 @@ class ExecutorBootstrap(BaseModel):
     installation_id: ProtocolInstallationId
     executor_id: ProtocolExecutorId
     heartbeat_interval_seconds: Annotated[int, Field(ge=1, le=60)]
+    state_directory: Annotated[str, Field(min_length=1, max_length=4096)]
 
     @field_validator("websocket_url")
     @classmethod
@@ -74,6 +77,19 @@ class ExecutorBootstrap(BaseModel):
             return require_local_session_token(value)
         except LocalSessionAuthenticationRejected:
             raise ValueError("invalid local Executor session") from None
+
+    @field_validator("state_directory")
+    @classmethod
+    def require_private_state_directory_shape(cls, value: str) -> str:
+        path = Path(value)
+        if (
+            contains_control_or_bidi(value)
+            or not path.is_absolute()
+            or path.parent == path
+            or any(part in {".", ".."} for part in path.parts)
+        ):
+            raise ValueError("invalid Local Executor state directory")
+        return value
 
 
 def read_executor_bootstrap(stream: BinaryIO) -> ExecutorBootstrap:

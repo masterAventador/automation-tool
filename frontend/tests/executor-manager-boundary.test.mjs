@@ -71,3 +71,35 @@ test("E4-10 bounds and redacts stderr before diagnostics leave the Rust manager"
   assert.doesNotMatch(manager, /BufReader::new\(stderr\)\.lines\(\)/);
   assert.equal(JSON.parse(fixture).fixtureVersion, "1");
 });
+
+test("E4-11 keeps the durable command ledger inside the private Executor state directory", async () => {
+  const [bootstrap, cli, ledger, manager] = await Promise.all([
+    readFile(new URL("src-tauri/src/executor_bootstrap.rs", frontendRoot), "utf8"),
+    readFile(
+      new URL("../backend/src/automation_tool/executor/cli.py", frontendRoot),
+      "utf8",
+    ),
+    readFile(
+      new URL("../backend/src/automation_tool/executor/ledger.py", frontendRoot),
+      "utf8",
+    ),
+    readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
+  ]);
+
+  assert.match(bootstrap, /state_directory/);
+  assert.match(manager, /state_directory:\s*PathBuf/);
+  assert.match(cli, /ExecutorLedger\(/);
+  assert.ok(cli.indexOf("ExecutorLedger(") < cli.indexOf("LocalExecutorProcess("));
+  assert.match(ledger, /EXECUTOR_LEDGER_FILE_NAME.*executor-ledger\.sqlite3/);
+  assert.match(ledger, /PRAGMA user_version = 1/);
+  for (const table of [
+    "executor_identity",
+    "executor_commands",
+    "executor_attempt_checkpoints",
+    "executor_outbox",
+  ]) {
+    assert.match(ledger, new RegExp(`CREATE TABLE ${table}`));
+  }
+  assert.doesNotMatch(ledger, /keyring|keychain|session_token|cookie|password/i);
+  assert.doesNotMatch(ledger, /control_plane|FakeExecutor|:memory:/);
+});

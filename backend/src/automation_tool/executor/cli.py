@@ -7,6 +7,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from types import FrameType
 from typing import BinaryIO, TextIO
 
@@ -15,6 +16,7 @@ from automation_tool.executor.authentication import (
     LocalSessionAuthenticator,
 )
 from automation_tool.executor.bootstrap import ExecutorBootstrapRejected, read_executor_bootstrap
+from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
     ExecutorProcessReporter,
@@ -62,6 +64,11 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
     try:
         authenticator = LocalSessionAuthenticator(bootstrap.local_session_token)
         try:
+            ExecutorLedger(
+                state_directory=Path(bootstrap.state_directory),
+                installation_id=str(bootstrap.installation_id),
+                executor_id=str(bootstrap.executor_id),
+            )
             process = LocalExecutorProcess(
                 bootstrap=bootstrap,
                 metadata=RuntimeMetadata.detect(),
@@ -71,7 +78,11 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 process.run(stop)
         finally:
             authenticator.close()
-    except (ExecutorProcessRejected, LocalSessionAuthenticationRejected):
+    except (
+        ExecutorLedgerRejected,
+        ExecutorProcessRejected,
+        LocalSessionAuthenticationRejected,
+    ):
         _fixed_error(stderr, "Local Executor process is unavailable")
         return 1
     return 0

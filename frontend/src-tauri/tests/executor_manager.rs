@@ -365,14 +365,16 @@ struct RealAcceptanceConfiguration {
     session_token: String,
     installation_id: String,
     executor_id: String,
+    state_directory: PathBuf,
 }
 
-fn launch() -> ExecutorLaunchConfiguration {
+fn launch(state_directory: PathBuf) -> ExecutorLaunchConfiguration {
     ExecutorLaunchConfiguration::new(
         "ws://127.0.0.1:8765/api/v1/executors/connect".to_owned(),
         "atds1.private-control-plane-session".to_owned(),
         "123e4567-e89b-42d3-a456-426614174003".to_owned(),
         "123e4567-e89b-42d3-a456-426614174004".to_owned(),
+        state_directory,
         1,
     )
     .expect("launch configuration")
@@ -383,7 +385,9 @@ fn verified_process_starts_reports_status_and_stops_with_authenticated_events() 
     let package = TemporaryPackage::new(HEALTHY_FIXTURE);
     let manager = manager(&package);
 
-    let started = manager.start(launch()).expect("start");
+    let started = manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start");
     assert_eq!(started.state(), ExecutorManagerState::Running);
     assert_eq!(started.version(), Some("0.1.0"));
     assert_eq!(started.build_id(), Some("e4-07-test"));
@@ -399,13 +403,15 @@ fn concurrent_start_is_linearized_to_one_process() {
     let package = TemporaryPackage::new(HEALTHY_FIXTURE);
     let manager = manager(&package);
     let barrier = Arc::new(Barrier::new(8));
+    let state_directory = package.root.join("executor-state");
     let threads = (0..8)
         .map(|_| {
             let manager = Arc::clone(&manager);
             let barrier = Arc::clone(&barrier);
+            let state_directory = state_directory.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                manager.start(launch())
+                manager.start(launch(state_directory))
             })
         })
         .collect::<Vec<_>>();
@@ -432,14 +438,16 @@ fn invalid_package_configuration_and_health_proof_fail_closed_without_leaks() {
     let missing = TemporaryPackage::new(HEALTHY_FIXTURE);
     fs::write(missing.root.join("automation-tool-executor"), b"tampered").expect("tamper package");
     let error = manager(&missing)
-        .start(launch())
+        .start(launch(missing.root.join("executor-state")))
         .expect_err("tampered package");
     assert_eq!(error.code(), ExecutorManagerErrorCode::PackageRejected);
     assert_eq!(error.to_string(), "Local Executor lifecycle is unavailable");
     assert!(!format!("{error:?}").contains("private"));
 
     let bad_proof = TemporaryPackage::new(BAD_PROOF_FIXTURE);
-    let error = manager(&bad_proof).start(launch()).expect_err("bad proof");
+    let error = manager(&bad_proof)
+        .start(launch(bad_proof.root.join("executor-state")))
+        .expect_err("bad proof");
     assert_eq!(
         error.code(),
         ExecutorManagerErrorCode::AuthenticationRejected
@@ -451,6 +459,7 @@ fn invalid_package_configuration_and_health_proof_fail_closed_without_leaks() {
         "private session".to_owned(),
         "invalid".to_owned(),
         "invalid".to_owned(),
+        PathBuf::from("relative-state"),
         0,
     )
     .is_err());
@@ -476,7 +485,9 @@ fn startup_timeout_force_stops_the_child_and_leaves_the_manager_stopped() {
         Duration::from_secs(1),
     );
 
-    let error = manager.start(launch()).expect_err("silent startup timeout");
+    let error = manager
+        .start(launch(package.root.join("executor-state")))
+        .expect_err("silent startup timeout");
     assert_eq!(error.code(), ExecutorManagerErrorCode::TimedOut);
     assert_eq!(
         manager.status().expect("status after timeout").state(),
@@ -496,7 +507,9 @@ emit("executor.stopped")"#,
     ));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("start process tree");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start process tree");
     let descendant_id = marker.wait_for_pid();
     manager.stop().expect("stop process tree");
 
@@ -518,7 +531,9 @@ time.sleep(30)"#,
         Duration::from_millis(100),
     );
 
-    manager.start(launch()).expect("start hung process tree");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start hung process tree");
     let descendant_id = marker.wait_for_pid();
     let error = manager.stop().expect_err("hung stop must time out");
 
@@ -536,7 +551,9 @@ fn startup_timeout_terminates_the_complete_executor_process_tree() {
         Duration::from_secs(1),
     );
 
-    let error = manager.start(launch()).expect_err("silent process tree");
+    let error = manager
+        .start(launch(package.root.join("executor-state")))
+        .expect_err("silent process tree");
     let descendant_id = marker.wait_for_pid();
 
     assert_eq!(error.code(), ExecutorManagerErrorCode::TimedOut);
@@ -555,7 +572,9 @@ emit("executor.stopped")"#,
     ));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("start process tree");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start process tree");
     let descendant_id = marker.wait_for_pid();
     drop(manager);
 
@@ -577,7 +596,9 @@ fn real_executor_stderr_is_redacted_by_the_manager_before_diagnostics_are_expose
     )));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("start diagnostic fixture");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start diagnostic fixture");
     let diagnostics = wait_for_diagnostic(
         &manager,
         &document.cases.last().expect("last case").expected,
@@ -600,7 +621,9 @@ print("diagnostic-complete", file=sys.stderr, flush=True)"#,
     ));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("start bounded diagnostics");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start bounded diagnostics");
     let diagnostics = wait_for_diagnostic(&manager, "diagnostic-complete");
     manager.stop().expect("stop bounded diagnostics");
 
@@ -742,7 +765,9 @@ fn background_supervisor_recovers_two_crashes_and_reports_the_consumed_budget() 
     ));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("initial start");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("initial start");
     counter.wait_for(3);
     wait_for_state(&manager, ExecutorManagerState::Running);
     assert_eq!(
@@ -762,7 +787,9 @@ fn crash_recovery_cleans_the_previous_process_tree_before_relaunching() {
     let package = TemporaryPackage::new(&supervised_process_tree_fixture(&counter, &marker));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("initial process tree");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("initial process tree");
     counter.wait_for(2);
     let process_ids = marker.wait_for_count(2);
     wait_for_state(&manager, ExecutorManagerState::Running);
@@ -782,7 +809,9 @@ fn exhausted_restart_budget_converges_to_stopped_without_a_crash_loop() {
     ));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("initial start");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("initial start");
     counter.wait_for(3);
     wait_for_state(&manager, ExecutorManagerState::Stopped);
     std::thread::sleep(Duration::from_millis(100));
@@ -795,7 +824,9 @@ fn explicit_stop_never_consumes_restart_budget_or_relaunches() {
     let package = TemporaryPackage::new(&supervised_fixture(&counter, ""));
     let manager = manager(&package);
 
-    manager.start(launch()).expect("initial start");
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("initial start");
     counter.wait_for(1);
     manager.stop().expect("explicit stop");
     std::thread::sleep(Duration::from_millis(100));
@@ -811,7 +842,9 @@ fn normal_and_fixed_failure_exits_are_not_restartable() {
         let package = TemporaryPackage::new(&supervised_fixture(&counter, exit));
         let manager = manager(&package);
 
-        manager.start(launch()).expect("initial start");
+        manager
+            .start(launch(package.root.join("executor-state")))
+            .expect("initial start");
         counter.wait_for(1);
         wait_for_state(&manager, ExecutorManagerState::Stopped);
         std::thread::sleep(Duration::from_millis(100));
@@ -835,6 +868,7 @@ fn real_packaged_executor_uses_the_public_manager_lifecycle() {
         configuration.session_token,
         configuration.installation_id,
         configuration.executor_id,
+        configuration.state_directory,
         1,
     )
     .expect("real launch configuration");

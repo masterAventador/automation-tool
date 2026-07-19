@@ -28,6 +28,7 @@ def bootstrap_source(**overrides: object) -> bytes:
         "installation_id": INSTALLATION_ID,
         "executor_id": EXECUTOR_ID,
         "heartbeat_interval_seconds": 1,
+        "state_directory": "/private/tmp/automation-tool-executor-test",
     }
     payload.update(overrides)
     return (json.dumps(payload, separators=(",", ":")) + "\n").encode()
@@ -47,6 +48,7 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
     assert str(bootstrap.installation_id) == INSTALLATION_ID
     assert str(bootstrap.executor_id) == EXECUTOR_ID
     assert bootstrap.heartbeat_interval_seconds == 1
+    assert bootstrap.state_directory == "/private/tmp/automation-tool-executor-test"
     assert stream.readline() == b"second-line-is-not-consumed\n"
     assert SESSION_TOKEN not in repr(bootstrap)
     assert SESSION_TOKEN not in bootstrap.model_dump_json()
@@ -90,6 +92,10 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
         bootstrap_source(heartbeat_interval_seconds=cast(int, True)),
         bootstrap_source(heartbeat_interval_seconds=0),
         bootstrap_source(heartbeat_interval_seconds=61),
+        bootstrap_source(state_directory="relative/executor-state"),
+        bootstrap_source(state_directory="/"),
+        bootstrap_source(state_directory="/tmp/../private-state"),
+        bootstrap_source(state_directory="/tmp/private\nstate"),
     ),
 )
 def test_bootstrap_rejects_malformed_or_unsafe_input_without_reflection(source: bytes) -> None:
