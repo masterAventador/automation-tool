@@ -61,6 +61,21 @@ def test_local_authenticator_emits_domain_bound_non_reflective_proofs() -> None:
     assert LOCAL_SESSION_TOKEN not in stopped
     assert LOCAL_SESSION_TOKEN not in repr(authenticator)
 
+    command = authenticator.proof_for_command(
+        command_id="123e4567-e89b-42d3-a456-426614174005",
+        command_type="douyin.login.open",
+        executable_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        profile_directory="/private/tmp/automation-tool-profile",
+        headless=True,
+    )
+    result = authenticator.proof_for_command_result(
+        command_id="123e4567-e89b-42d3-a456-426614174005",
+        state="awaiting_scan",
+    )
+    assert command.startswith("atlcp1.")
+    assert result.startswith("atlcp1.")
+    assert command != result
+
 
 @pytest.mark.parametrize(
     "local_session_token",

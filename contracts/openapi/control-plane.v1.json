@@ -233,6 +233,50 @@
         "title": "IssuedDeviceCredentialResponse",
         "type": "object"
       },
+      "PlatformSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "observedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observedat"
+          },
+          "platform": {
+            "const": "douyin",
+            "title": "Platform",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PlatformSessionState"
+          }
+        },
+        "required": [
+          "platform",
+          "state",
+          "observedAt"
+        ],
+        "title": "PlatformSessionResponse",
+        "type": "object"
+      },
+      "PlatformSessionState": {
+        "description": "Closed platform-login health state; only healthy closes the circuit.",
+        "enum": [
+          "healthy",
+          "expired",
+          "missing",
+          "risk",
+          "unknown"
+        ],
+        "title": "PlatformSessionState",
+        "type": "string"
+      },
       "RegistrationChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -938,6 +982,32 @@
         "summary": "Issue Registration Challenge",
         "tags": [
           "installations"
+        ]
+      }
+    },
+    "/api/v1/platform-sessions/douyin": {
+      "get": {
+        "operationId": "getDouyinPlatformSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Douyin Platform Session",
+        "tags": [
+          "platform-sessions"
         ]
       }
     },

@@ -8,6 +8,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from queue import Queue
 from types import FrameType
 from typing import BinaryIO, TextIO
 
@@ -21,6 +22,12 @@ from automation_tool.executor.command_processor import (
     ExecutorCommandRejected,
 )
 from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
+from automation_tool.executor.platform_commands import (
+    DouyinLoginCommandOperation,
+    PlatformCommandRejected,
+    PlatformCommandWorker,
+)
+from automation_tool.executor.rpa.douyin.health import DouyinSessionHealthReporter
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
     ExecutorProcessReporter,
@@ -78,14 +85,43 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 installation_id=str(bootstrap.installation_id),
                 executor_id=str(bootstrap.executor_id),
             )
+            local_outbox: Queue[object] = Queue()
+            reporter = ExecutorProcessReporter(stdout, authenticator)
+            platform_worker = PlatformCommandWorker(
+                input_stream=stdin,
+                authenticator=authenticator,
+                operation=DouyinLoginCommandOperation(
+                    health_reporter=DouyinSessionHealthReporter(ledger=ledger),
+                    outbound=local_outbox,
+                ),
+                result_writer=reporter.platform_command_result,
+            )
             process = LocalExecutorProcess(
                 bootstrap=bootstrap,
                 metadata=RuntimeMetadata.detect(),
-                reporter=ExecutorProcessReporter(stdout, authenticator),
+                reporter=reporter,
                 command_processor=command_processor,
+                local_outbox=local_outbox,
             )
             with stop_signal_event() as stop:
+                worker_failed = threading.Event()
+
+                def run_platform_worker() -> None:
+                    try:
+                        platform_worker.run(stop)
+                    except PlatformCommandRejected:
+                        worker_failed.set()
+                        stop.set()
+
+                worker = threading.Thread(
+                    target=run_platform_worker,
+                    name="automation-tool-platform-command-worker",
+                    daemon=True,
+                )
+                worker.start()
                 process.run(stop)
+                if worker_failed.is_set():
+                    raise PlatformCommandRejected
         finally:
             authenticator.close()
     except (
@@ -93,6 +129,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
         ExecutorCommandRejected,
         ExecutorProcessRejected,
         LocalSessionAuthenticationRejected,
+        PlatformCommandRejected,
     ):
         _fixed_error(stderr, "Local Executor process is unavailable")
         return 1

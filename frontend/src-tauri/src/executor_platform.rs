@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 #[cfg(not(debug_assertions))]
@@ -13,8 +14,12 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use uuid::{Uuid, Variant};
 
+use crate::browser_profiles::{
+    BrowserProfile, BrowserProfileError, BrowserProfileErrorCode, BrowserProfileLease,
+};
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::control_plane::ExecutorConnectionMaterial;
+use crate::executor_bootstrap::{LocalPlatformCommand, LocalPlatformCommandResult};
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::executor_manager::ExecutorLaunchConfiguration;
 use crate::executor_manager::{
@@ -138,6 +143,7 @@ impl LocalExecutorIdentity {
 #[derive(Clone)]
 pub struct ExecutorPlatformService {
     manager: Arc<ExecutorManager>,
+    platform_profile_lease: Arc<Mutex<Option<BrowserProfileLease>>>,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     paths: ExecutorPlatformPaths,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -168,6 +174,7 @@ impl ExecutorPlatformService {
         .map_err(map_manager_error)?;
         Ok(Self {
             manager: Arc::new(manager),
+            platform_profile_lease: Arc::new(Mutex::new(None)),
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
             paths,
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -184,11 +191,59 @@ impl ExecutorPlatformService {
     }
 
     pub fn emergency_stop(&self) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
-        self.manager.stop().map_err(map_manager_error)
+        let result = self.manager.stop().map_err(map_manager_error);
+        let release = self.release_platform_profile();
+        match (result, release) {
+            (Ok(status), Ok(())) => Ok(status),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
     }
 
     pub fn shutdown_for_app_exit(&self) {
         let _ = self.manager.stop();
+        let _ = self.release_platform_profile();
+    }
+
+    pub fn execute_platform_command(
+        &self,
+        command: LocalPlatformCommand,
+        executable_path: PathBuf,
+        profile: BrowserProfile,
+        headless: bool,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        let profile_id = profile.profile_id().to_owned();
+        let profile_directory = profile.directory().to_path_buf();
+        let mut lease = self
+            .platform_profile_lease
+            .lock()
+            .map_err(|_| storage_unavailable())?;
+        if let Some(current) = lease.as_ref() {
+            if current.profile_id() != profile_id || current.directory() != profile_directory {
+                return Err(configuration_invalid());
+            }
+        } else {
+            *lease = Some(
+                profile
+                    .try_acquire_owned_lock()
+                    .map_err(map_profile_error)?,
+            );
+        }
+        let result = self
+            .manager
+            .execute_platform_command(command, executable_path, profile_directory, headless)
+            .map_err(map_manager_error);
+        let release = result.is_err()
+            || result
+                .as_ref()
+                .is_ok_and(|value| value.state() == "healthy");
+        if release {
+            let held = lease.take();
+            drop(lease);
+            if let Some(held) = held {
+                held.release().map_err(map_profile_error)?;
+            }
+        }
+        result
     }
 
     #[cfg(feature = "control-plane-e2e")]
@@ -211,6 +266,7 @@ impl ExecutorPlatformService {
         connection: ExecutorConnectionMaterial,
     ) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
         self.manager.stop().map_err(map_manager_error)?;
+        self.release_platform_profile()?;
         let (websocket_url, session_token, installation_id) = connection.into_parts();
         let launch = ExecutorLaunchConfiguration::new_with_secret(
             websocket_url,
@@ -222,6 +278,32 @@ impl ExecutorPlatformService {
         )
         .map_err(map_manager_error)?;
         self.manager.start(launch).map_err(map_manager_error)
+    }
+
+    fn release_platform_profile(&self) -> Result<(), ExecutorPlatformError> {
+        let held = self
+            .platform_profile_lease
+            .lock()
+            .map_err(|_| storage_unavailable())?
+            .take();
+        if let Some(held) = held {
+            held.release().map_err(map_profile_error)?;
+        }
+        Ok(())
+    }
+}
+
+fn map_profile_error(error: BrowserProfileError) -> ExecutorPlatformError {
+    match error.code() {
+        BrowserProfileErrorCode::ProfileInUse => {
+            ExecutorPlatformError::new(ExecutorPlatformErrorCode::AlreadyRunning)
+        }
+        BrowserProfileErrorCode::InvalidProfileId
+        | BrowserProfileErrorCode::ProfileNotFound
+        | BrowserProfileErrorCode::UnsafeDirectory
+        | BrowserProfileErrorCode::IdentityChanged
+        | BrowserProfileErrorCode::RecoveryRequired
+        | BrowserProfileErrorCode::StorageUnavailable => storage_unavailable(),
     }
 }
 

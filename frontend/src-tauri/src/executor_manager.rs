@@ -1,7 +1,8 @@
 //! Linearized lifecycle for one verified Local Executor process.
 
 use crate::executor_bootstrap::{
-    ExecutorBootstrapErrorCode, ExecutorBootstrapInput, LocalExecutorEvent, LocalSessionToken,
+    ExecutorBootstrapErrorCode, ExecutorBootstrapInput, LocalExecutorEvent, LocalPlatformCommand,
+    LocalPlatformCommandResult, LocalSessionToken,
 };
 use crate::executor_diagnostics::{ExecutorDiagnostics, MAX_DIAGNOSTIC_LINE_BYTES};
 use crate::executor_package::{ExecutorPackageVerifier, VerifiedExecutorPackage};
@@ -9,18 +10,20 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::PathBuf;
-use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 const EXECUTOR_PROTOCOL_VERSION: &str = "1.0";
 const MAX_LIFECYCLE_LINE_BYTES: usize = 4096;
 const MAX_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_RESTARTS: u8 = 8;
+const PLATFORM_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutorManagerErrorCode {
@@ -342,6 +345,49 @@ impl ExecutorManager {
         Ok(status)
     }
 
+    pub fn execute_platform_command(
+        &self,
+        command: LocalPlatformCommand,
+        executable_path: PathBuf,
+        profile_directory: PathBuf,
+        headless: bool,
+    ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
+        let mut slot = self.lock_slot()?;
+        reconcile_supervision(&self.core, &mut slot)?;
+        let outcome = (|| {
+            let Some(ManagedExecutorLifecycle::Running(managed)) = slot.lifecycle.as_mut() else {
+                return Err(process_unavailable());
+            };
+            let command_id = generate_uuid_v4()?;
+            let stdin = managed
+                .process
+                .stdin
+                .as_mut()
+                .ok_or_else(process_unavailable)?;
+            managed
+                .process
+                .token
+                .write_platform_command(
+                    stdin,
+                    &command_id,
+                    command,
+                    &executable_path,
+                    &profile_directory,
+                    headless,
+                )
+                .map_err(map_bootstrap_error)?;
+            receive_platform_command_result(&managed.process, &command_id, PLATFORM_COMMAND_TIMEOUT)
+        })();
+        if outcome.is_err() {
+            let restart_count = slot.status.restart_count();
+            if let Some(ManagedExecutorLifecycle::Running(mut managed)) = slot.lifecycle.take() {
+                force_stop(&mut managed.process);
+            }
+            slot.status = ExecutorManagerStatus::stopped(restart_count);
+        }
+        outcome
+    }
+
     pub fn status(&self) -> Result<ExecutorManagerStatus, ExecutorManagerError> {
         let mut slot = self.lock_slot()?;
         reconcile_supervision(&self.core, &mut slot)?;
@@ -418,6 +464,7 @@ impl Drop for ExecutorManager {
 
 struct RunningExecutor {
     child: Child,
+    stdin: Option<ChildStdin>,
     process_tree: ProcessTree,
     token: LocalSessionToken,
     lifecycle_events: Receiver<Result<String, ()>>,
@@ -669,10 +716,9 @@ fn spawn_executor(
         token
             .write_bootstrap(&mut stdin, &launch.bootstrap_input()?)
             .map_err(map_bootstrap_error)?;
-        drop(stdin);
-        Ok((lifecycle_events, stdout_thread, stderr_thread))
+        Ok((stdin, lifecycle_events, stdout_thread, stderr_thread))
     })();
-    let (lifecycle_events, stdout_thread, stderr_thread) = match setup {
+    let (stdin, lifecycle_events, stdout_thread, stderr_thread) = match setup {
         Ok(value) => value,
         Err(error) => {
             force_stop_child(&mut process_tree, &mut child);
@@ -682,6 +728,7 @@ fn spawn_executor(
     let status = ExecutorManagerStatus::running(&package, restart_count);
     let mut running = RunningExecutor {
         child,
+        stdin: Some(stdin),
         process_tree,
         token,
         lifecycle_events,
@@ -812,10 +859,32 @@ fn receive_event(
         .map_err(map_bootstrap_error)
 }
 
+fn receive_platform_command_result(
+    running: &RunningExecutor,
+    command_id: &str,
+    timeout: Duration,
+) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
+    let line = running
+        .lifecycle_events
+        .recv_timeout(timeout)
+        .map_err(|error| match error {
+            mpsc::RecvTimeoutError::Timeout => {
+                ExecutorManagerError::new(ExecutorManagerErrorCode::TimedOut)
+            }
+            mpsc::RecvTimeoutError::Disconnected => process_unavailable(),
+        })?
+        .map_err(|()| process_unavailable())?;
+    running
+        .token
+        .parse_platform_command_result(command_id, &line)
+        .map_err(map_bootstrap_error)
+}
+
 fn stop_executor(
     running: &mut RunningExecutor,
     stop_timeout: Duration,
 ) -> Result<(), ExecutorManagerError> {
+    running.stdin.take();
     if let Err(error) = request_graceful_stop(&mut running.child) {
         force_stop(running);
         return Err(error);
@@ -1066,6 +1135,7 @@ fn restartable_exit(_status: ExitStatus) -> bool {
 }
 
 fn force_stop(running: &mut RunningExecutor) {
+    running.stdin.take();
     force_stop_child(&mut running.process_tree, &mut running.child);
     join_readers(running);
 }
@@ -1101,4 +1171,12 @@ fn map_bootstrap_error(
 
 const fn process_unavailable() -> ExecutorManagerError {
     ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable)
+}
+
+fn generate_uuid_v4() -> Result<String, ExecutorManagerError> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| process_unavailable())?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(Uuid::from_bytes(bytes).hyphenated().to_string())
 }

@@ -18,6 +18,11 @@ import {
 import { Workbench } from "../features/workbench/Workbench";
 import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
+import { PlatformSessions } from "../features/platform-sessions/PlatformSessions";
+import {
+  PlatformSessionGatewayError,
+  type PlatformSessionGateway,
+} from "../features/platform-sessions/platform-session-gateway";
 import { BrowserSettings } from "../features/settings/BrowserSettings";
 import type { PlatformAdapter } from "../platform/types";
 
@@ -25,7 +30,7 @@ const navigationItems = [
   { key: "workbench", label: "工作台" },
   { key: "task-create", label: "新建任务" },
   { key: "task-runs", label: "任务记录" },
-  { key: "platform", label: "平台状态", disabled: true },
+  { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
 ];
 
@@ -96,12 +101,25 @@ const shellPlatformAdapter: PlatformAdapter = {
   },
 };
 
+const shellPlatformSessionGateway: PlatformSessionGateway = {
+  async getDouyinSession() {
+    throw new PlatformSessionGatewayError("transport_unavailable", true);
+  },
+  async openDouyinLogin() {
+    throw new PlatformSessionGatewayError("operation_unavailable", false);
+  },
+  async recheckDouyinLogin() {
+    throw new PlatformSessionGatewayError("operation_unavailable", false);
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
   readonly taskCreationGateway?: TaskCreationGateway | undefined;
   readonly taskRunControlGateway?: TaskRunControlGateway | undefined;
   readonly platformAdapter?: PlatformAdapter | undefined;
+  readonly platformSessionGateway?: PlatformSessionGateway | undefined;
 }
 
 export function WorkbenchShell({
@@ -110,12 +128,14 @@ export function WorkbenchShell({
   taskCreationGateway = shellTaskCreationGateway,
   taskRunControlGateway = shellTaskRunControlGateway,
   platformAdapter = shellPlatformAdapter,
+  platformSessionGateway = shellPlatformSessionGateway,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const creatingTask = activePage === "task-create";
   const showingTaskRun = activePage === "task-runs";
   const showingDiagnostics = activePage === "diagnostics";
+  const showingPlatform = activePage === "platform";
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -144,7 +164,8 @@ export function WorkbenchShell({
                 key === "workbench" ||
                 key === "task-create" ||
                 key === "task-runs" ||
-                key === "diagnostics"
+                key === "diagnostics" ||
+                key === "platform"
               ) {
                 setActivePage(key);
               }
@@ -168,6 +189,8 @@ export function WorkbenchShell({
                 <Typography.Title level={2}>
                   {creatingTask
                     ? "新建运营任务"
+                    : showingPlatform
+                      ? "平台状态"
                     : showingDiagnostics
                       ? "设置与诊断"
                     : showingTaskRun
@@ -177,6 +200,8 @@ export function WorkbenchShell({
                 <Typography.Text type="secondary">
                   {creatingTask
                     ? "配置一个可预览、可确认的抖音搜索曝光任务。"
+                    : showingPlatform
+                      ? "查看抖音登录健康，并在系统运营浏览器中完成人工处理。"
                     : showingDiagnostics
                       ? "选择受信运营浏览器，并管理 App 自己的本地执行器。"
                     : showingTaskRun
@@ -187,6 +212,8 @@ export function WorkbenchShell({
               <Tag variant="filled" color="green">
                 {creatingTask
                   ? "任务模板已就绪"
+                  : showingPlatform
+                    ? "登录边界"
                   : showingDiagnostics
                     ? "本地边界"
                   : showingTaskRun
@@ -200,6 +227,10 @@ export function WorkbenchShell({
                 gateway={taskCreationGateway}
                 onCreated={openTask}
               />
+            ) : showingPlatform ? (
+              <div className="platform-session-content">
+                <PlatformSessions gateway={platformSessionGateway} />
+              </div>
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <BrowserSettings platform={platformAdapter} />

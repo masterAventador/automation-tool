@@ -69,6 +69,35 @@ fn same_profile_is_exclusive_and_explicit_release_allows_reacquire() {
 }
 
 #[test]
+fn owned_profile_lease_keeps_the_profile_exclusive_until_explicit_release() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let profile = store.current_douyin_profile().expect("current profile");
+    let profile_id = profile.profile_id().to_owned();
+    let competing = store
+        .open_douyin_profile(&profile_id)
+        .expect("competing profile handle");
+
+    let lease = profile
+        .try_acquire_owned_lock()
+        .expect("owned Profile lease");
+    assert_eq!(lease.profile_id(), profile_id);
+    assert_eq!(
+        competing
+            .try_acquire_lock()
+            .expect_err("owned lease must remain exclusive")
+            .code(),
+        BrowserProfileErrorCode::ProfileInUse,
+    );
+    lease.release().expect("release owned lease");
+    competing
+        .try_acquire_lock()
+        .expect("reacquire after owned release")
+        .release()
+        .expect("release competing lock");
+}
+
+#[test]
 fn different_profiles_may_be_locked_at_the_same_time() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");

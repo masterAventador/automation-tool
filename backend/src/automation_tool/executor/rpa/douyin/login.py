@@ -180,6 +180,11 @@ class DouyinQrLoginFlow:
             )
         return self._observe(window)
 
+    def active_window(self) -> BrowserWindow:
+        """Expose the opaque active window only to Executor-side health reporting."""
+
+        return self._require_active_window()
+
     def close(self) -> None:
         if self._closed:
             return

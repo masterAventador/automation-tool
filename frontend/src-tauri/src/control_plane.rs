@@ -37,6 +37,7 @@ enum ControlPlaneOperation {
     GetSystemHealth,
     GetCurrentInstallationAccess,
     GetWorkbenchStatus,
+    GetDouyinPlatformSession,
     IssueInstallationRegistrationChallenge,
     CompleteInstallationRegistration,
     RotateDeviceCredential,
@@ -58,6 +59,7 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
+            | Self::GetDouyinPlatformSession
             | Self::ListTasks
             | Self::GetTask
             | Self::StreamTaskEvents => "GET",
@@ -79,6 +81,7 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth => "/api/v1/health",
             Self::GetCurrentInstallationAccess => "/api/v1/installations/current",
             Self::GetWorkbenchStatus => "/api/v1/workbench/status",
+            Self::GetDouyinPlatformSession => "/api/v1/platform-sessions/douyin",
             Self::IssueInstallationRegistrationChallenge => {
                 "/api/v1/installations/registration-challenges"
             }
@@ -102,6 +105,7 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
+            | Self::GetDouyinPlatformSession
             | Self::RevokeDeviceCredential
             | Self::ListTasks
             | Self::GetTask
@@ -626,6 +630,28 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_workbench_status(&response_body)
+    }
+
+    pub async fn get_douyin_platform_session<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<PlatformSessionStatus, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::GetDouyinPlatformSession,
+                Some(session.token()),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_douyin_platform_session(&response_body)
     }
 
     pub async fn list_tasks<S>(
@@ -1374,6 +1400,14 @@ struct WorkbenchStatusResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PlatformSessionResponse {
+    platform: String,
+    state: String,
+    observed_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskControlResponse {
     command_id: String,
     task_id: String,
@@ -1471,6 +1505,14 @@ pub struct WorkbenchRuntimeStatus {
     control_plane_status: String,
     executor_status: String,
     executor_last_heartbeat_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformSessionStatus {
+    platform: String,
+    state: String,
+    observed_at: Option<String>,
 }
 
 impl TaskControlCommand {
@@ -1702,6 +1744,27 @@ fn parse_workbench_status(body: &[u8]) -> Result<WorkbenchRuntimeStatus, Control
         control_plane_status: response.control_plane_status,
         executor_status: response.executor_status,
         executor_last_heartbeat_at: response.executor_last_heartbeat_at,
+    })
+}
+
+fn parse_douyin_platform_session(body: &[u8]) -> Result<PlatformSessionStatus, ControlPlaneError> {
+    let response: PlatformSessionResponse = parse_exact_json(body)?;
+    if response.platform != "douyin"
+        || !matches!(
+            response.state.as_str(),
+            "healthy" | "expired" | "missing" | "risk" | "unknown"
+        )
+        || response.observed_at.is_none() && response.state != "unknown"
+    {
+        return Err(protocol_invalid());
+    }
+    if let Some(timestamp) = response.observed_at.as_deref() {
+        require_bounded_timestamp(timestamp)?;
+    }
+    Ok(PlatformSessionStatus {
+        platform: response.platform,
+        state: response.state,
+        observed_at: response.observed_at,
     })
 }
 
@@ -2121,15 +2184,15 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        new_request_id, parse_created_task, parse_device_session, parse_health_response,
-        parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
-        parse_task_list, parse_task_snapshot_body, parse_workbench_status, request_path,
-        require_idempotency_key, require_list_cursor, required_credential, sse_frame_end,
-        transport_error, validate_response_metadata, validated_loopback_origin,
-        ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
-        DeviceSessionCapability, DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition,
-        ResponseMetadata,
+        new_request_id, parse_created_task, parse_device_session, parse_douyin_platform_session,
+        parse_health_response, parse_installation_access, parse_installation_registration,
+        parse_registration_challenge, parse_revoked_credential, parse_rotated_credential,
+        parse_sse_frame, parse_task_control, parse_task_list, parse_task_snapshot_body,
+        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
+        required_credential, sse_frame_end, transport_error, validate_response_metadata,
+        validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
+        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -2211,6 +2274,12 @@ mod tests {
                 ControlPlaneOperation::GetWorkbenchStatus,
                 "GET",
                 "/api/v1/workbench/status",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetDouyinPlatformSession,
+                "GET",
+                "/api/v1/platform-sessions/douyin",
                 200,
             ),
             (
@@ -3002,6 +3071,62 @@ mod tests {
         ] {
             assert!(parse_workbench_status(
                 &serde_json::to_vec(&invalid).expect("invalid workbench status JSON")
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn platform_session_parser_accepts_only_exact_non_sensitive_health() {
+        let healthy = serde_json::json!({
+            "platform": "douyin",
+            "state": "healthy",
+            "observedAt": "2026-07-19T14:30:00.000000Z"
+        });
+        let parsed = parse_douyin_platform_session(
+            &serde_json::to_vec(&healthy).expect("platform Session JSON"),
+        )
+        .expect("valid platform Session");
+        assert_eq!(
+            serde_json::to_value(parsed).expect("public platform Session JSON"),
+            healthy
+        );
+
+        let unknown = serde_json::json!({
+            "platform": "douyin",
+            "state": "unknown",
+            "observedAt": null
+        });
+        assert!(parse_douyin_platform_session(
+            &serde_json::to_vec(&unknown).expect("unknown platform Session JSON")
+        )
+        .is_ok());
+
+        for invalid in [
+            serde_json::json!({
+                "platform": "private",
+                "state": "healthy",
+                "observedAt": "2026-07-19T14:30:00Z"
+            }),
+            serde_json::json!({
+                "platform": "douyin",
+                "state": "healthy",
+                "observedAt": null
+            }),
+            serde_json::json!({
+                "platform": "douyin",
+                "state": "missing",
+                "observedAt": null
+            }),
+            serde_json::json!({
+                "platform": "douyin",
+                "state": "unknown",
+                "observedAt": null,
+                "profilePath": "/private/path"
+            }),
+        ] {
+            assert!(parse_douyin_platform_session(
+                &serde_json::to_vec(&invalid).expect("invalid platform Session JSON")
             )
             .is_err());
         }

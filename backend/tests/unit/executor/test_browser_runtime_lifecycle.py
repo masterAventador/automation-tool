@@ -157,6 +157,7 @@ def test_runtime_owns_one_headed_context_and_applies_bounded_timeouts(tmp_path: 
     runtime.start(request(tmp_path))
 
     assert runtime.is_running
+    assert playwright.chromium.calls[0][1]["headless"] is False
     assert repr(runtime) == "BrowserRuntime(<redacted>)"
     assert context.default_timeout == 15_000
     assert context.navigation_timeout == 30_000
@@ -171,6 +172,25 @@ def test_runtime_owns_one_headed_context_and_applies_bounded_timeouts(tmp_path: 
     assert not runtime.is_running
     assert context.close_calls == 1
     assert playwright.stop_calls == 1
+
+
+def test_runtime_honors_only_the_rust_authorized_background_launch_flag(
+    tmp_path: Path,
+) -> None:
+    executable, profile = launch_paths(tmp_path)
+    playwright = FakePlaywright(FakeContext())
+    runtime = BrowserRuntime(starter=lambda: playwright)
+
+    runtime.start(
+        BrowserLaunchRequest(
+            executable_path=executable,
+            profile_directory=profile,
+            headless=True,
+        )
+    )
+
+    assert playwright.chromium.calls[0][1]["headless"] is True
+    runtime.close()
 
     restarted_context = FakeContext()
     restarted = FakePlaywright(restarted_context)

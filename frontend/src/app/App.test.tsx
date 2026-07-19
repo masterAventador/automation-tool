@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { StartupCheck } from "./startup";
 import type { PlatformAdapter } from "../platform/types";
+import type { PlatformSessionGateway } from "../features/platform-sessions/platform-session-gateway";
 
 describe("desktop startup", () => {
   it("opens the RPA workbench without any product login route", async () => {
@@ -100,5 +101,34 @@ describe("desktop startup", () => {
     expect(await screen.findByText("本地执行器运行中")).toBeVisible();
     expect(screen.getByText("safe app diagnostic")).toBeVisible();
     expect(platformAdapter.getExecutorStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the enabled platform status page through the injected real gateway boundary", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({ status: "ready" as const }),
+    };
+    const platformSessionGateway: PlatformSessionGateway = {
+      getDouyinSession: vi.fn().mockResolvedValue({
+        platform: "douyin",
+        state: "healthy",
+        observedAt: "2026-07-19T14:30:00Z",
+      }),
+      openDouyinLogin: vi.fn(),
+      recheckDouyinLogin: vi.fn(),
+    };
+    const user = userEvent.setup();
+
+    render(
+      <App
+        startupCheck={startupCheck}
+        platformSessionGateway={platformSessionGateway}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "RPA 运营工作台" });
+    await user.click(screen.getByRole("menuitem", { name: "平台状态" }));
+    expect(await screen.findByRole("heading", { name: "平台状态" })).toBeVisible();
+    expect(await screen.findByText("登录正常")).toBeVisible();
+    expect(platformSessionGateway.getDouyinSession).toHaveBeenCalledOnce();
   });
 });

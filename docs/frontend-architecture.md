@@ -99,7 +99,7 @@ features/
 ├── workbench/              # 运营总览和当前任务
 ├── task-create/            # 抖音任务表单和目标预览
 ├── task-runs/              # 快照、事件、控制和结果
-├── platform-sessions/      # 抖音登录态、重新登录和清理
+├── platform-sessions/      # 抖音服务端健康、本机处理与后续安全注销
 ├── diagnostics/            # 后端、Executor、浏览器和权限诊断
 └── settings/               # 本地保留、浏览器选择和诊断导出
 ```
@@ -135,7 +135,7 @@ features/
 - SSE/事件快照的合并与恢复；
 - Zod 校验关键边界。
 
-Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.ts` 的 `parseExecutorMessage`；Rust 正式入口是 `src-tauri/src/executor_protocol.rs` 的 `parse_executor_message`。两者不从 UI、IPC 或网络输入推断类型，而是与 Python 权威模型共同回放 `contracts/fixtures/executor-v1` 的原始 UTF-8 wire：判别类型、任务作用域、UUIDv4、UTC 微秒 deadline、安全整数、重复 key、资源上限和 payload 隐私规则均 fail closed，失败只返回固定错误。B5-12 新增 Executor-scoped `platform.session_health`，payload 只能包含平台、封闭状态、正 revision 和 UTC 观察时间，不能携带 task scope 或任意附加页面/Profile 字段。解析器当前不暴露新 Tauri Command；I2-13 已在 Control Plane 网络入口复用 Python 正式 parser，E4-02 已让独立 Local Executor 发送 Hello/Heartbeat，E4-12 已沿同一 WebSocket 接入持久无副作用任务回放，React 只消费经过边界验证的公开投影。
+Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.ts` 的 `parseExecutorMessage`；Rust 正式入口是 `src-tauri/src/executor_protocol.rs` 的 `parse_executor_message`。两者不从 UI、IPC 或网络输入推断类型，而是与 Python 权威模型共同回放 `contracts/fixtures/executor-v1` 的原始 UTF-8 wire：判别类型、任务作用域、UUIDv4、UTC 微秒 deadline、安全整数、重复 key、资源上限和 payload 隐私规则均 fail closed，失败只返回固定错误。B5-12 新增 Executor-scoped `platform.session_health`，payload 只能包含平台、封闭状态、正 revision 和 UTC 观察时间，不能携带 task scope 或任意附加页面/Profile 字段。B5-13 只在 React 侧消费 Control Plane 已验证的 `{platform,state,observedAt}` 公开投影；打开处理/重新检查结果是独立本机 flow 事实，页面不得用它伪造服务端状态或观察时间。I2-13 已在 Control Plane 网络入口复用 Python 正式 parser，E4-02 已让独立 Local Executor 发送 Hello/Heartbeat，E4-12/B5-13 已沿同一 WebSocket 接入持久命令回放与平台投影。
 
 当前 FastAPI OpenAPI 3.1 快照固定在 `contracts/openapi/control-plane.v1.json`，系统 operationId 为 `getSystemHealth`、`getSystemVersion`。`frontend/scripts/openapi.mjs` 使用锁定的 `openapi-typescript` 从快照机械生成 `src/api/generated/control-plane.ts`，`--check` 在系统临时目录重新生成并逐字比较；生成文件禁止手改。
 
@@ -143,7 +143,7 @@ Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.t
 
 ### 4.5 Platform 层
 
-E4-13 当前已经实现的 `PlatformAdapter` 只覆盖已有产品能力：
+Executor 生命周期继续使用 E4-13 的 `PlatformAdapter`：
 
 ```ts
 interface PlatformAdapter {
@@ -154,7 +154,17 @@ interface PlatformAdapter {
 }
 ```
 
-浏览器发现、人工接管、文件、诊断导出、通知和外部 URL 等尚未实现的能力在对应 Wave 按真实需求扩展，不在当前接口预留不可用占位方法。
+平台会话使用独立的窄 `PlatformSessionGateway`，不把页面动作塞进 Executor 通用生命周期接口：
+
+```ts
+interface PlatformSessionGateway {
+  getDouyinSession(): Promise<PlatformSessionSnapshot>
+  openDouyinLogin(): Promise<PlatformSessionAction>
+  recheckDouyinLogin(): Promise<PlatformSessionAction>
+}
+```
+
+`TauriPlatformSessionGateway` 只 invoke 三个固定无参数 Command 并对返回值做 exact Zod 校验。查询经 Rust 固定 Control Plane operation 取得服务端投影；两个动作经本机 Rust→signed Executor 处理，React 不能提供 URL、浏览器、Profile、headless、页面事实或“已登录”布尔值。B5-14 完成前“安全注销”保持禁用，不预留会静默成功的空方法。文件、诊断导出、通知和其他平台能力仍在对应 Wave 按真实需求增加。
 
 强制约束：
 
@@ -266,6 +276,8 @@ E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.pa
 
 E4-14 专用配置只在 `control-plane-e2e` 编译中允许 runner 注入规范动态 loopback origin，并只在该特性注册真实 OS crash/hang 与正常退出验收 Command；默认和 `desktop-e2e` 构建没有这些入口。真实链路发现首个健康心跳为 15 秒而原启动预算为 10 秒，现将 App 组合根启动预算固定为 30 秒。生产 Tauri event loop 在 `RunEvent::ExitRequested` 或 `RunEvent::Exit` 上显式调用唯一 Platform service 停止 Executor，Manager Drop 仍是兜底，不能依赖测试驱动杀进程触发析构。验收核对 App 私有稳定 UUID、SQLite identity/版本迁移、Unix 权限和凭据不入库；所有服务、进程、端口与数据均按本次专属标识清理。
 
+B5-13 在同一组合根增加平台状态纵向链路。`get_douyin_platform_session` 由 Rust 自行换 `app.control-plane` Session 并调用固定 `/api/v1/platform-sessions/douyin`；`open_douyin_login`/`recheck_douyin_login` 在 Executor 停止时先按 E4-13 原路径自动启动，再从 `BrowserSettingsService` 重新发现受信浏览器、从 `BrowserProfileStore.current_douyin_profile()` 取得稳定 App 私有 Profile 并持有 owned lease。Manager 在现有 stdin/stdout 上发送/验签动作，不创建第二 Executor 或第二浏览器 Manager；生产 headed，只有 B5-13 专用 `visible=false`、唯一标识的 `control-plane-e2e` 构建硬编码 headless。真实验收从页面点击出发并在 App 正常退出后确认 signed Executor、Chrome、Profile 锁和隔离服务全部清理。
+
 E4-15 把测试隔离从源码约束扩展到实际 release 字节。`build.rs` 在 `PROFILE=release` 时先验证编译期 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY` 是 canonical 32 字节、有效且非弱 Ed25519 公钥，失败发生在 `tauri_build::build()` 之前且错误不回显输入；公开开发 fixture key 只存在于 debug 分支。生产二进制审计同时读取无默认特性的 Cargo 依赖树、正式 Tauri 配置和 Vite 资产，拒绝 WDIO/WebDriver、验收 Command、测试 origin/标识/Sidecar、Harness、开发验证公钥和 1420 调试端口，并要求实际制品包含预期发布公钥。
 
 真实 release 审计最初发现 `tauri.conf.json` 的 `devUrl`/devCSP 即使 release 不使用仍会进入二进制，因此现已拆到只由 `pnpm tauri:dev` 显式合并的 `tauri.dev.conf.json`。自动化配置继续只用于各自 `--config` 测试构建；正式配置保持唯一可见主窗口、`withGlobalTauri=false`、唯一 `main` Capability 与生产 CSP。E4-15 临时 release target 每次唯一且结束删除，不启动 App、不绑定端口。
@@ -282,7 +294,7 @@ B5-04 将该信任根收口到两个无路径 Tauri Command：`get_browser_setti
 
 B5-05 新增纯 Rust `BrowserProfileStore`，由 Tauri setup 从自身 `app.path().app_data_dir()` 管理唯一实例，只固定派生 `browser-profiles/douyin/<canonical UUIDv4>`，Profile ID 由本机 CSPRNG 生成；当前没有 Tauri Command、React DTO、Control Plane 接口或其他平台目录。Unix 逐级使用目录句柄、`openat(O_NOFOLLOW)`、`mkdirat` 和 dev+inode，Windows 固定子目录使用父 HANDLE 相对 `NtCreateFile(FILE_OPEN_REPARSE_POINT)`、volume/file index、最终路径和当前用户 protected DACL。Store/Profile 持有打开的目录身份并在创建、重开与交给后续浏览器前复验；路径被 symlink/reparse、普通文件或 rename 后同名替换时 fail closed。B5-06 只能在该身份上增加跨进程锁，B5-07 才能在持锁后把私有目录交给系统浏览器。
 
-B5-06 已在同一稳定 Profile identity 上加入原生跨进程非阻塞排他锁和崩溃标记：同 Profile 竞争拒绝，不同 Profile 可并行，只有显式释放清除标记，意外退出要求后续恢复流程。B5-07 证明正式 PyInstaller onedir 可携带 Python Playwright driver 而不携带浏览器。B5-08 已在 Python Executor 建立单 context、线程约束、页面/窗口、有界超时和确定关闭接口；macOS 冻结验收从 Rust 受信浏览器复验、私有 Profile 与锁链路完成系统 Chrome 双窗口正常关闭，并按生产 Manager 相同 process-group 语义强杀完整后代树。Windows 继续复用 Executor Job Object、待原生 runner 验收；冻结探针仅用于验收，不是 App Command 或用户功能。B5-09 已在 Python 平台层固定官方 `/user/self` 探测入口和 `healthy/expired/missing/risk/unknown` 页面证据，只有 `healthy` 解除熔断；B5-10 用专用 headed 窗口、异步就绪上限和无参数 `recheck()` 封闭扫码/手机确认/二维码过期状态，B5-11 再把所有外层验证挑战投影为 `handoff_required`。B5-12 由同一 detector 生成最小 `platform.session_health` 并经正式 Executor WebSocket 投影到 Control Plane，React 仍不能接触 Cookie、Profile 或页面事实；真实空白二维码、实际扫码到健康态与持久 Profile 重开复用均已通过。验证码、滑块和风控窗口只留给用户处理；用户可触发的平台状态页和“我已处理，重新检查”按钮归 B5-13。
+B5-06 已在同一稳定 Profile identity 上加入原生跨进程非阻塞排他锁和崩溃标记：同 Profile 竞争拒绝，不同 Profile 可并行，只有显式释放清除标记，意外退出要求后续恢复流程。B5-07 证明正式 PyInstaller onedir 可携带 Python Playwright driver 而不携带浏览器。B5-08 已在 Python Executor 建立单 context、线程约束、页面/窗口、有界超时和确定关闭接口；macOS 冻结验收从 Rust 受信浏览器复验、私有 Profile 与锁链路完成系统 Chrome 双窗口正常关闭，并按生产 Manager 相同 process-group 语义强杀完整后代树。Windows 继续复用 Executor Job Object、待原生 runner 验收；冻结探针仅用于验收，不是 App Command 或用户功能。B5-09 已在 Python 平台层固定官方 `/user/self` 探测入口和 `healthy/expired/missing/risk/unknown` 页面证据，只有 `healthy` 解除熔断；B5-10 用专用 headed 窗口、异步就绪上限和无参数 `recheck()` 封闭扫码/手机确认/二维码过期状态，B5-11 再把所有外层验证挑战投影为 `handoff_required`。B5-12 由同一 detector 生成最小 `platform.session_health` 并经正式 Executor WebSocket 投影到 Control Plane；B5-13 已让用户从真实平台状态页查询该投影，并通过同一 Executor 打开处理和无参数重新检查。React 仍不能接触 Cookie、Profile、路径或页面事实，动作结果不能覆盖服务端快照；真实空白二维码、实际扫码到健康态、持久 Profile 重开复用和隐藏 App 无头纵向链路均已通过。验证码、滑块和风控窗口只留给用户处理，安全注销归 B5-14。
 
 ## 7. 页面与导航
 

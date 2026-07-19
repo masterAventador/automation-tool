@@ -3,7 +3,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::Url;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::fmt;
 use std::io::Write;
@@ -21,6 +21,10 @@ const MAX_CONTROL_PLANE_SESSION_BYTES: usize = 4096;
 const MAX_STATE_DIRECTORY_BYTES: usize = 4096;
 const PROOF_PREFIX: &str = "atlep1.";
 const AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-event.v1\0";
+const COMMAND_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-command.v1\0";
+const COMMAND_RESULT_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-result.v1\0";
+const COMMAND_PROOF_PREFIX: &str = "atlcp1.";
+const MAX_PLATFORM_COMMAND_BYTES: usize = 16 * 1024;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -80,6 +84,59 @@ impl std::error::Error for ExecutorBootstrapError {}
 pub enum LocalExecutorEvent {
     Healthy,
     Stopped,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalPlatformCommand {
+    OpenDouyinLogin,
+    RecheckDouyinLogin,
+}
+
+impl LocalPlatformCommand {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenDouyinLogin => "douyin.login.open",
+            Self::RecheckDouyinLogin => "douyin.login.recheck",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPlatformCommandResult {
+    platform: String,
+    state: String,
+    flow_version: String,
+}
+
+impl LocalPlatformCommandResult {
+    pub fn state(&self) -> &str {
+        &self.state
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPlatformCommandDocument<'a> {
+    authentication_proof: &'a str,
+    command_id: &'a str,
+    command_type: &'static str,
+    executable_path: &'a Path,
+    headless: bool,
+    profile_directory: &'a Path,
+    protocol_version: &'static str,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LocalPlatformCommandResultDocument {
+    authentication_proof: String,
+    command_id: String,
+    event: String,
+    flow_version: String,
+    platform: String,
+    protocol_version: String,
+    state: String,
 }
 
 impl LocalExecutorEvent {
@@ -166,6 +223,179 @@ impl LocalSessionToken {
             .verify_slice(&presented)
             .map_err(|_| ExecutorBootstrapError::authentication_rejected())
     }
+
+    pub fn write_platform_command(
+        &self,
+        writer: &mut impl Write,
+        command_id: &str,
+        command: LocalPlatformCommand,
+        executable_path: &Path,
+        profile_directory: &Path,
+        headless: bool,
+    ) -> Result<(), ExecutorBootstrapError> {
+        require_uuid_v4(command_id)?;
+        require_local_path(executable_path)?;
+        require_local_path(profile_directory)?;
+        let executable = executable_path
+            .to_str()
+            .ok_or_else(ExecutorBootstrapError::bootstrap_rejected)?;
+        let profile = profile_directory
+            .to_str()
+            .ok_or_else(ExecutorBootstrapError::bootstrap_rejected)?;
+        let proof = self.command_proof(
+            COMMAND_AUTHENTICATION_DOMAIN,
+            &[
+                command_id,
+                command.as_str(),
+                executable,
+                profile,
+                if headless { "1" } else { "0" },
+                EXECUTOR_PROTOCOL_VERSION,
+            ],
+        )?;
+        let document = LocalPlatformCommandDocument {
+            authentication_proof: &proof,
+            command_id,
+            command_type: command.as_str(),
+            executable_path,
+            headless,
+            profile_directory,
+            protocol_version: EXECUTOR_PROTOCOL_VERSION,
+        };
+        let mut serialized = Zeroizing::new(
+            serde_json::to_vec(&document)
+                .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
+        );
+        serialized.push(b'\n');
+        if serialized.len() > MAX_PLATFORM_COMMAND_BYTES {
+            return Err(ExecutorBootstrapError::bootstrap_rejected());
+        }
+        writer
+            .write_all(&serialized)
+            .and_then(|()| writer.flush())
+            .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())
+    }
+
+    pub fn parse_platform_command_result(
+        &self,
+        expected_command_id: &str,
+        source: &str,
+    ) -> Result<LocalPlatformCommandResult, ExecutorBootstrapError> {
+        require_uuid_v4(expected_command_id)?;
+        if source.is_empty() || source.len() > MAX_LIFECYCLE_LINE_BYTES_COMPAT {
+            return Err(ExecutorBootstrapError::authentication_rejected());
+        }
+        let document: LocalPlatformCommandResultDocument = serde_json::from_str(source)
+            .map_err(|_| ExecutorBootstrapError::authentication_rejected())?;
+        if document.command_id != expected_command_id
+            || document.event != "platform.command.completed"
+            || document.flow_version != "douyin.qr-login.v2"
+            || document.platform != "douyin"
+            || document.protocol_version != EXECUTOR_PROTOCOL_VERSION
+            || !valid_platform_command_state(&document.state)
+        {
+            return Err(ExecutorBootstrapError::authentication_rejected());
+        }
+        self.verify_command_proof(
+            COMMAND_RESULT_AUTHENTICATION_DOMAIN,
+            &[
+                expected_command_id,
+                &document.state,
+                EXECUTOR_PROTOCOL_VERSION,
+            ],
+            &document.authentication_proof,
+        )?;
+        Ok(LocalPlatformCommandResult {
+            platform: document.platform,
+            state: document.state,
+            flow_version: document.flow_version,
+        })
+    }
+
+    fn command_proof(
+        &self,
+        domain: &[u8],
+        parts: &[&str],
+    ) -> Result<Zeroizing<String>, ExecutorBootstrapError> {
+        let mut authenticator = HmacSha256::new_from_slice(&self.bytes)
+            .map_err(|_| ExecutorBootstrapError::authentication_rejected())?;
+        authenticator.update(domain);
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                authenticator.update(b"\0");
+            }
+            authenticator.update(part.as_bytes());
+        }
+        let encoded = URL_SAFE_NO_PAD.encode(authenticator.finalize().into_bytes());
+        Ok(Zeroizing::new(format!("{COMMAND_PROOF_PREFIX}{encoded}")))
+    }
+
+    fn verify_command_proof(
+        &self,
+        domain: &[u8],
+        parts: &[&str],
+        presented: &str,
+    ) -> Result<(), ExecutorBootstrapError> {
+        let encoded = presented
+            .strip_prefix(COMMAND_PROOF_PREFIX)
+            .ok_or_else(ExecutorBootstrapError::authentication_rejected)?;
+        let presented = URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| ExecutorBootstrapError::authentication_rejected())?;
+        if presented.len() != 32 || encoded.len() != 43 {
+            return Err(ExecutorBootstrapError::authentication_rejected());
+        }
+        let mut authenticator = HmacSha256::new_from_slice(&self.bytes)
+            .map_err(|_| ExecutorBootstrapError::authentication_rejected())?;
+        authenticator.update(domain);
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                authenticator.update(b"\0");
+            }
+            authenticator.update(part.as_bytes());
+        }
+        authenticator
+            .verify_slice(&presented)
+            .map_err(|_| ExecutorBootstrapError::authentication_rejected())
+    }
+}
+
+const MAX_LIFECYCLE_LINE_BYTES_COMPAT: usize = 4096;
+
+fn valid_platform_command_state(value: &str) -> bool {
+    matches!(
+        value,
+        "login_required"
+            | "awaiting_scan"
+            | "awaiting_confirmation"
+            | "qr_expired"
+            | "healthy"
+            | "handoff_required"
+            | "unknown"
+    )
+}
+
+fn require_local_path(source: &Path) -> Result<(), ExecutorBootstrapError> {
+    let encoded = source
+        .to_str()
+        .ok_or_else(ExecutorBootstrapError::bootstrap_rejected)?;
+    if !source.is_absolute()
+        || source.parent().is_none()
+        || encoded.is_empty()
+        || encoded.len() > MAX_STATE_DIRECTORY_BYTES
+        || encoded.chars().any(|character| {
+            let codepoint = character as u32;
+            character.is_control()
+                || (0x202a..=0x202e).contains(&codepoint)
+                || (0x2066..=0x2069).contains(&codepoint)
+        })
+        || source
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(ExecutorBootstrapError::bootstrap_rejected());
+    }
+    Ok(())
 }
 
 impl fmt::Debug for LocalSessionToken {
@@ -308,6 +538,37 @@ mod tests {
                 "atlep1.NOuvIGSTV1bPoAZcqjJCd4V0TtBvVdvc4nPHufoUpRY",
             )
             .expect("Python and Rust HMAC vector must match");
+    }
+
+    #[test]
+    fn fixed_platform_command_vectors_stay_cross_language_compatible() {
+        let token = LocalSessionToken {
+            bytes: std::array::from_fn(|index| index as u8),
+        };
+        let mut stdin = Vec::new();
+        token
+            .write_platform_command(
+                &mut stdin,
+                "123e4567-e89b-42d3-a456-426614174005",
+                LocalPlatformCommand::OpenDouyinLogin,
+                Path::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                Path::new("/private/tmp/automation-tool-profile"),
+                true,
+            )
+            .expect("valid platform command");
+        let command: serde_json::Value =
+            serde_json::from_slice(&stdin).expect("platform command JSON");
+        assert_eq!(
+            command["authenticationProof"],
+            "atlcp1.4RcHva0oy2FBj2BQ7G3_NwYDT9CS0u3mEsF938YBX5E"
+        );
+        let result = token
+            .parse_platform_command_result(
+                "123e4567-e89b-42d3-a456-426614174005",
+                r#"{"authenticationProof":"atlcp1.RSBSCseDm8EcwHuenH2QWdQOMjD6L5X1J_mwPqoqd_s","commandId":"123e4567-e89b-42d3-a456-426614174005","event":"platform.command.completed","flowVersion":"douyin.qr-login.v2","platform":"douyin","protocolVersion":"1.0","state":"awaiting_scan"}"#,
+            )
+            .expect("valid platform command result");
+        assert_eq!(result.state(), "awaiting_scan");
     }
 
     #[test]

@@ -9,6 +9,7 @@ import { TauriTaskCreationGateway } from "./platform/tauri/task-creation-gateway
 import { TauriTaskRunControlGateway } from "./platform/tauri/task-run-control-gateway";
 import { TauriWorkbenchGateway } from "./platform/tauri/workbench-gateway";
 import { TauriPlatformAdapter } from "./platform/tauri/platform-adapter";
+import { TauriPlatformSessionGateway } from "./platform/tauri/platform-session-gateway";
 import "./styles/global.css";
 
 const root = document.getElementById("root");
@@ -23,6 +24,7 @@ const taskCreationGateway = new TauriTaskCreationGateway();
 const taskRunControlGateway = new TauriTaskRunControlGateway();
 const workbenchGateway = new TauriWorkbenchGateway();
 const platformAdapter = new TauriPlatformAdapter();
+const platformSessionGateway = new TauriPlatformSessionGateway();
 
 createRoot(root).render(
   <StrictMode>
@@ -33,6 +35,7 @@ createRoot(root).render(
       taskRunControlGateway={taskRunControlGateway}
       workbenchGateway={workbenchGateway}
       platformAdapter={platformAdapter}
+      platformSessionGateway={platformSessionGateway}
     />
   </StrictMode>,
 );

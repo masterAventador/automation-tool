@@ -22,7 +22,9 @@ test("B5-07 packages Playwright for an explicit system browser without a WebView
   assert.match(spec, /automation_tool\.executor\.browser_runtime/u);
   assert.match(runtime, /launch_persistent_context/u);
   assert.match(runtime, /executable_path/u);
-  assert.match(runtime, /headless\s*=\s*False/u);
+  assert.match(runtime, /headless:\s*bool\s*=\s*False/u);
+  assert.match(runtime, /headless=request\.headless/u);
+  assert.match(native, /cfg!\(feature\s*=\s*"control-plane-e2e"\)/u);
   assert.match(runtime, /accept_downloads\s*=\s*False/u);
   assert.doesNotMatch(runtime, /playwright\s+install|install\s+chromium|channel\s*=/u);
   assert.match(acceptance, /try_acquire_lock/u);

@@ -71,6 +71,33 @@ fn creates_and_reopens_only_the_fixed_douyin_uuid_profile() {
 }
 
 #[test]
+fn current_douyin_profile_is_created_once_and_reused_across_app_restarts() {
+    let app_data = TemporaryAppData::new();
+    let first_store = BrowserProfileStore::initialize(&app_data.path).expect("first store");
+    let first = first_store
+        .current_douyin_profile()
+        .expect("create current Profile");
+    let profile_id = first.profile_id().to_owned();
+    drop(first);
+    drop(first_store);
+
+    let reopened = BrowserProfileStore::initialize(&app_data.path).expect("reopened store");
+    let current = reopened
+        .current_douyin_profile()
+        .expect("reopen current Profile");
+
+    assert_eq!(current.profile_id(), profile_id);
+    assert_eq!(
+        fs::read_dir(app_data.path.join("browser-profiles/douyin"))
+            .expect("profile directory")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .count(),
+        1,
+    );
+}
+
+#[test]
 fn rejects_noncanonical_or_non_v4_profile_identifiers_without_path_escape() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");

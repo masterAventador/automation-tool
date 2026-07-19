@@ -206,6 +206,24 @@ body {
   box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
 }
 
+.platform-session-content {
+  margin-top: 20px;
+}
+
+.platform-session-card,
+.platform-session-stack {
+  width: 100%;
+}
+
+.platform-session-card {
+  border-color: #e7ebf2;
+  box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
+}
+
+.platform-session-loading {
+  min-height: 100px;
+}
+
 .browser-settings-loading {
   min-height: 100px;
 }

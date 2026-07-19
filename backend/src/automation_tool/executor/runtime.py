@@ -6,10 +6,12 @@ import json
 import platform as host_platform
 import re
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import TextIOBase
+from queue import Empty, Queue
 from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
@@ -28,7 +30,11 @@ from automation_tool.executor.transport import (
     positive_seconds,
     serialize_executor_message,
 )
-from automation_tool.protocol import EXECUTOR_PROTOCOL_VERSION, ExecutorLifecycleEnvelope
+from automation_tool.protocol import (
+    EXECUTOR_PROTOCOL_VERSION,
+    ExecutorLifecycleEnvelope,
+    PlatformSessionHealthEnvelope,
+)
 
 _VERSION_PATTERN = re.compile(
     r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
@@ -102,6 +108,7 @@ class ExecutorProcessReporter:
             raise ExecutorProcessRejected
         self._output = output
         self._authenticator = authenticator
+        self._lock = threading.Lock()
 
     def _write(self, event: str) -> None:
         failed = False
@@ -116,8 +123,9 @@ class ExecutorProcessReporter:
                 separators=(",", ":"),
                 sort_keys=True,
             )
-            self._output.write(source + "\n")
-            self._output.flush()
+            with self._lock:
+                self._output.write(source + "\n")
+                self._output.flush()
         except Exception:
             failed = True
         if failed:
@@ -128,6 +136,22 @@ class ExecutorProcessReporter:
 
     def stopped(self) -> None:
         self._write("executor.stopped")
+
+    def platform_command_result(self, *, command_id: str, state: str) -> None:
+        from automation_tool.executor.platform_commands import (
+            write_platform_command_result,
+        )
+
+        try:
+            with self._lock:
+                write_platform_command_result(
+                    self._output,
+                    self._authenticator,
+                    command_id=command_id,
+                    state=state,
+                )
+        except Exception:
+            raise ExecutorProcessRejected from None
 
 
 @runtime_checkable
@@ -162,6 +186,7 @@ class LocalExecutorProcess:
         id_source: Callable[[], object] = uuid4,
         open_timeout: timedelta = timedelta(seconds=5),
         close_timeout: timedelta = timedelta(seconds=2),
+        local_outbox: Queue[object] | None = None,
     ) -> None:
         resolved_clock = metadata if clock is None else clock
         if (
@@ -171,6 +196,7 @@ class LocalExecutorProcess:
             or not isinstance(command_processor, ExecutorCommandProcessor)
             or not isinstance(resolved_clock, ExecutorClock)
             or not callable(id_source)
+            or (local_outbox is not None and not isinstance(local_outbox, Queue))
         ):
             raise ExecutorProcessRejected
         self._bootstrap = bootstrap
@@ -181,6 +207,7 @@ class LocalExecutorProcess:
         self._id_source = id_source
         self._open_timeout = _positive_duration(open_timeout)
         self._close_timeout = _positive_duration(close_timeout)
+        self._local_outbox = local_outbox
 
     @property
     def bootstrap(self) -> ExecutorBootstrap:
@@ -254,6 +281,20 @@ class LocalExecutorProcess:
         except Exception:
             raise ExecutorProcessRejected from None
 
+    def _send_local_outbox(self, websocket: ClientConnection) -> None:
+        if self._local_outbox is None:
+            return
+        try:
+            while True:
+                message = self._local_outbox.get_nowait()
+                if not isinstance(message, PlatformSessionHealthEnvelope):
+                    raise ValueError
+                websocket.send(serialize_executor_message(message))
+        except Empty:
+            return
+        except Exception:
+            raise ExecutorProcessRejected from None
+
     def run(self, stop: threading.Event) -> None:
         if not isinstance(stop, threading.Event):
             raise ExecutorProcessRejected
@@ -276,12 +317,19 @@ class LocalExecutorProcess:
                 self._send_outbox(websocket, self._command_processor.recover_outbox())
                 sequence = 1
                 healthy = False
+                heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
+                heartbeat_deadline = time.monotonic() + heartbeat_interval
                 while not stop.is_set():
+                    self._send_local_outbox(websocket)
+                    remaining = heartbeat_deadline - time.monotonic()
+                    receive_timeout = max(0.001, min(0.25, remaining))
                     try:
-                        source = websocket.recv(timeout=self._bootstrap.heartbeat_interval_seconds)
+                        source = websocket.recv(timeout=receive_timeout)
                     except TimeoutError:
                         if stop.is_set():
                             break
+                        if time.monotonic() < heartbeat_deadline:
+                            continue
                         sequence += 1
                         websocket.send(
                             serialize_executor_message(
@@ -294,6 +342,7 @@ class LocalExecutorProcess:
                         if not healthy:
                             self._reporter.healthy()
                             healthy = True
+                        heartbeat_deadline = time.monotonic() + heartbeat_interval
                         continue
                     except Exception:
                         if stop.is_set():

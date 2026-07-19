@@ -31,9 +31,12 @@ test("B5-04 exposes browser enums without executable paths", async () => {
   assert.match(native, /fn select_browser\(\s*browser: browser_discovery::SupportedBrowser/u);
   assert.match(component, /保存浏览器选择/u);
 
-  for (const source of [settings, adapter, native, component]) {
+  for (const source of [adapter, component]) {
     assert.doesNotMatch(source, /executablePath|executable_path|applicationPath|application_path/u);
   }
+  assert.match(settings, /pub struct BrowserSettingsSnapshot[\s\S]*available_browsers[\s\S]*selected_browser/u);
+  assert.doesNotMatch(settings, /pub struct BrowserSettingsSnapshot[\s\S]{0,240}executable_path/u);
+  assert.doesNotMatch(native, /fn (?:get_browser_settings|select_browser)\([^)]*(?:Path|String)/u);
   assert.doesNotMatch(adapter, /selectBrowser\([^)]*path/u);
   assert.doesNotMatch(component, /type=["']file["']|type=["']text["']/u);
 

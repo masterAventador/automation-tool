@@ -65,7 +65,9 @@ automation-tool/
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
-│   └── run_e4_15_acceptance.py   # 临时 release→实际二进制/依赖树安全审计
+│   ├── run_e4_15_acceptance.py   # 临时 release→实际二进制/依赖树安全审计
+│   ├── run_b5_12_acceptance.py   # 无头浏览器→Executor WebSocket→平台投影验收
+│   └── run_b5_13_acceptance.py   # 隐藏 App→signed Executor→无头浏览器→平台页面验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -110,6 +112,7 @@ frontend/
 │   │   │   ├── task-projection-source.ts  # 固定 Task 快照/列表/Channel source
 │   │   │   ├── task-run-control-gateway.ts # 固定暂停/恢复/取消/紧停 Command
 │   │   │   ├── platform-adapter.ts         # 固定 Executor 状态/重启/诊断/本机紧停 Command
+│   │   │   ├── platform-session-gateway.ts # 固定抖音状态查询/打开处理/重新检查 Command
 │   │   │   └── workbench-gateway.ts       # 固定运行状态与全局紧停 gateway
 │   │   ├── types.ts               # PlatformAdapter 公共接口
 │   │   └── test-harness.ts        # 仅测试构建可用
@@ -174,6 +177,7 @@ frontend/
 │   ├── tauri.task-lifecycle-e2e.conf.json # 后台隐藏的完整生命周期与刷新验收
 │   ├── tauri.task-restart-e2e.conf.json # 后台隐藏的 Control Plane 重启恢复验收
 │   ├── tauri.executor-lifecycle-e2e.conf.json # 后台隐藏的 signed Executor 生命周期验收
+│   ├── tauri.platform-session-e2e.conf.json # 后台隐藏的平台状态与无头浏览器验收
 │   └── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
 ├── public/
 ├── package.json
@@ -195,6 +199,7 @@ frontend/
 ├── wdio.task-lifecycle.conf.ts
 ├── wdio.task-restart.conf.ts
 ├── wdio.executor-lifecycle.conf.ts
+├── wdio.platform-session.conf.ts
 ├── wdio.workbench.conf.ts
 ├── tsconfig.json
 └── README.md
@@ -253,6 +258,7 @@ backend/
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
 │       │   ├── ledger.py          # 本机 SQLite v2 命令/checkpoint/outbox/平台 Session 账本
+│       │   ├── platform_commands.py # 认证本机平台命令、扫码 flow 与健康队列
 │       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
 │       │   ├── runtime.py         # Hello/Heartbeat、固定健康投影和有界停止
 │       │   ├── transport.py       # Fake/正式 Executor 共用的受认证 WebSocket 传输
@@ -321,6 +327,8 @@ B5-08 的 `BrowserRuntime` 是 Local Executor 内部窄服务，不新增第二 
 B5-09 的 `executor/rpa/douyin/session.py` 是首个正式页面对象边界。它公开固定 `/user/self` 探测 URL、版本化 selector、五态枚举、固定 evidence 与派生熔断，只接受 `BrowserRuntime` 所属窗口；非官方 origin、冲突/缺失证据和页面异常 fail closed 为 `unknown`。测试专用 live probe 只输出状态变化与 `ready`，不输出 DOM、账号、Cookie 或 Profile 路径，也不进入产品 UI；B5-10 必须复用该模块，不能在 Rust/React 复制页面选择器。
 
 B5-10 的 `executor/rpa/douyin/login.py` 是 detector 的窄工作流组合，不是第二 BrowserRuntime。它创建一个 Runtime-owned 专用窗口，固定打开 `/user/self`，以最多 10 秒的 Playwright 页面事实等待吸收异步二维码/用户资料加载，再由无参数 `recheck()` 投影扫码、手机确认、过期、健康、人工接管和未知状态。B5-11 将契约升级到 `douyin.qr-login.v2`，Session `risk` 只能成为 `handoff_required/risk_challenge`；生产模块不读取跨源挑战内部内容，也没有点击、填写、拖拽、识别或绕过方法。调用方没有 `QrScanned`、`Authenticated` 或任意页面状态注入面；冲突、等待/页面失败和未知 DOM 保持熔断，人工处理后只有页面重新成为 `healthy` 才恢复。测试 live probe 仅输出固定状态变化，二维码、验证码、Page、Profile 路径和账号均不输出；B5-13 组合 App 原入口时必须复用该对象，不能把选择器迁到 WebView。
+
+B5-13 的服务端查询落在 `control_plane/api/platform_sessions.py`、既有 application service 和 PostgreSQL repository，只返回 current Installation 的最小公开投影。桌面页面落在 `features/platform-sessions/`，Tauri 适配器落在 `platform/tauri/platform-session-gateway.ts`；三个方法分别映射固定查询、打开处理和重新检查 Command，不提供 URL、路径、Header 或任意 invoke。Rust `executor_bootstrap.rs`/`executor_manager.rs` 在同一个已运行 Executor stdin/stdout 上发送和验证 `atlcp1` 本机命令，`executor_platform.rs` 只从 AppData 解析 current Profile、owned lease 与重新受信的浏览器。Python `executor/platform_commands.py` 在线程内复用 `DouyinQrLoginFlow`，健康消息仍由 `runtime.py` 经正式 WebSocket 发送。`scripts/run_b5_13_acceptance.py` 以唯一隐藏 App、隔离 Control Plane/PostgreSQL/signed package 和无头系统浏览器验收整个链路并审计零残留；测试专用 headless 与动态 origin 不进入生产构建。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 
@@ -661,7 +669,7 @@ Tauri app_data_dir/
 5. 只删除目标 `douyin/<profile_id>`，保留平台父目录、其他 Profile、Executor SQLite、设备凭据、Artifact 与设置；不存在时幂等成功；
 6. 持久递增 `session_revision` 并投影 `missing`。删除或上报失败保持“已熔断/待重试”诊断，不能伪报已注销，也不能恢复新任务。
 
-注销的原始入口最终必须由 `B5-13` 平台状态页触发，经固定 PlatformAdapter/Tauri Command、正式 Executor、Profile 锁和 Control Plane 门禁完成；直接调用目录函数或只验证 Mock 页面不算验收。
+注销的原始入口已经由 `B5-13` 平台状态页预留，但按钮保持禁用且明确标注下一任务启用；`B5-14` 必须从该真实页面激活固定 Gateway/Tauri Command，经正式 Executor、Profile 锁和 Control Plane 门禁完成。直接调用目录函数、只验证 Mock 页面或在完整时序完成前返回成功都不算验收。
 
 #### 10.4.5 强制删除的账号、RBAC 与 Cookie 边界
 

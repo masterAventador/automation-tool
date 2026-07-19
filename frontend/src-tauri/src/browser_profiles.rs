@@ -2,7 +2,10 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use uuid::{Uuid, Variant};
+
+use crate::secure_store::{AppDataSecretStore, SecretStore};
 
 #[cfg(unix)]
 #[path = "browser_profiles_unix.rs"]
@@ -16,6 +19,7 @@ use browser_profiles_platform::{PlatformProfile, PlatformProfileLock, PlatformPr
 const PROFILE_ROOT_DIRECTORY: &str = "browser-profiles";
 const DOUYIN_DIRECTORY: &str = "douyin";
 const PROFILE_ID_GENERATION_ATTEMPTS: usize = 32;
+const CURRENT_DOUYIN_PROFILE_FILE: &str = "current-douyin-profile-v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SocialPlatform {
@@ -102,6 +106,7 @@ pub(super) enum CreateProfileError {
 pub struct BrowserProfileStore {
     platform: Arc<PlatformProfileStore>,
     app_data_directory: PathBuf,
+    current_profile_store: Mutex<AppDataSecretStore>,
 }
 
 impl BrowserProfileStore {
@@ -112,10 +117,38 @@ impl BrowserProfileStore {
             PROFILE_ROOT_DIRECTORY,
             DOUYIN_DIRECTORY,
         )?;
+        let current_profile_store = AppDataSecretStore::new(
+            &app_data_directory.join(PROFILE_ROOT_DIRECTORY),
+            CURRENT_DOUYIN_PROFILE_FILE,
+        )
+        .map_err(|_| BrowserProfileError::storage_unavailable())?;
         Ok(Self {
             platform: Arc::new(platform),
             app_data_directory: app_data_directory.to_path_buf(),
+            current_profile_store: Mutex::new(current_profile_store),
         })
+    }
+
+    pub fn current_douyin_profile(&self) -> Result<BrowserProfile, BrowserProfileError> {
+        let store = self
+            .current_profile_store
+            .lock()
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        let stored = store
+            .load()
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        if let Some(stored) = stored {
+            let profile_id = std::str::from_utf8(&stored)
+                .map_err(|_| BrowserProfileError::storage_unavailable())?;
+            require_canonical_profile_id(profile_id)
+                .map_err(|_| BrowserProfileError::storage_unavailable())?;
+            return self.open_douyin_profile(profile_id);
+        }
+        let profile = self.create_douyin_profile()?;
+        store
+            .save(profile.profile_id().as_bytes())
+            .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        Ok(profile)
     }
 
     pub fn create_douyin_profile(&self) -> Result<BrowserProfile, BrowserProfileError> {
@@ -195,6 +228,49 @@ impl BrowserProfile {
             profile: self,
             handle: Some(handle),
         })
+    }
+
+    pub fn try_acquire_owned_lock(self) -> Result<BrowserProfileLease, BrowserProfileError> {
+        self.revalidate()?;
+        let handle = self.handle.try_acquire_lock()?;
+        self.revalidate()?;
+        Ok(BrowserProfileLease {
+            profile: self,
+            handle: Some(handle),
+        })
+    }
+}
+
+pub struct BrowserProfileLease {
+    profile: BrowserProfile,
+    handle: Option<PlatformProfileLock>,
+}
+
+impl BrowserProfileLease {
+    pub fn profile_id(&self) -> &str {
+        self.profile.profile_id()
+    }
+
+    pub fn directory(&self) -> &Path {
+        self.profile.directory()
+    }
+
+    pub fn release(mut self) -> Result<(), BrowserProfileError> {
+        self.profile.revalidate()?;
+        self.handle
+            .take()
+            .ok_or_else(BrowserProfileError::storage_unavailable)?
+            .release()
+    }
+}
+
+impl Debug for BrowserProfileLease {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrowserProfileLease")
+            .field("platform", &self.profile.platform())
+            .field("profile_id", &self.profile.profile_id())
+            .finish_non_exhaustive()
     }
 }
 

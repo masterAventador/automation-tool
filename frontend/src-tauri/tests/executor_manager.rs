@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use automation_tool_desktop_lib::executor_bootstrap::LocalPlatformCommand;
 use automation_tool_desktop_lib::executor_manager::{
     ExecutorLaunchConfiguration, ExecutorManager, ExecutorManagerErrorCode, ExecutorManagerState,
     ExecutorRestartPolicy,
@@ -54,6 +55,29 @@ const SILENT_FIXTURE: &str = r#"#!/usr/bin/env python3
 import json, sys, time
 json.loads(sys.stdin.readline())
 time.sleep(30)
+"#;
+
+const PLATFORM_COMMAND_FIXTURE: &str = r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, signal, sys
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+def encoded(domain, parts):
+    message = domain + b"\0".join(part.encode() for part in parts)
+    return "atlcp1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def lifecycle(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    proof = "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+    print(json.dumps({"authenticationProof": proof, "event": event, "protocolVersion": "1.0"}, separators=(",", ":")), flush=True)
+signal.signal(signal.SIGTERM, lambda _signum, _frame: None)
+lifecycle("executor.healthy")
+for line in sys.stdin:
+    command = json.loads(line)
+    parts = [command["commandId"], command["commandType"], command["executablePath"], command["profileDirectory"], "1" if command["headless"] else "0", command["protocolVersion"]]
+    assert hmac.compare_digest(command["authenticationProof"], encoded(b"automation-tool.local-executor-command.v1\0", parts))
+    state = "awaiting_scan" if command["commandType"] == "douyin.login.open" else "healthy"
+    result = {"authenticationProof": encoded(b"automation-tool.local-executor-result.v1\0", [command["commandId"], state, "1.0"]), "commandId": command["commandId"], "event": "platform.command.completed", "flowVersion": "douyin.qr-login.v2", "platform": "douyin", "protocolVersion": "1.0", "state": state}
+    print(json.dumps(result, separators=(",", ":"), sort_keys=True), flush=True)
+lifecycle("executor.stopped")
 "#;
 
 struct DescendantMarker {
@@ -396,6 +420,36 @@ fn verified_process_starts_reports_status_and_stops_with_authenticated_events() 
     let stopped = manager.stop().expect("stop");
     assert_eq!(stopped.state(), ExecutorManagerState::Stopped);
     assert_eq!(manager.stop().expect("idempotent stop"), stopped);
+}
+
+#[test]
+fn authenticated_platform_commands_reuse_the_running_executor_stdio_channel() {
+    let package = TemporaryPackage::new(PLATFORM_COMMAND_FIXTURE);
+    let manager = manager(&package);
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start platform command fixture");
+
+    let opened = manager
+        .execute_platform_command(
+            LocalPlatformCommand::OpenDouyinLogin,
+            package.root.join("automation-tool-executor"),
+            package.root.clone(),
+            true,
+        )
+        .expect("open login command");
+    let healthy = manager
+        .execute_platform_command(
+            LocalPlatformCommand::RecheckDouyinLogin,
+            package.root.join("automation-tool-executor"),
+            package.root.clone(),
+            true,
+        )
+        .expect("recheck login command");
+
+    assert_eq!(opened.state(), "awaiting_scan");
+    assert_eq!(healthy.state(), "healthy");
+    manager.stop().expect("stop platform command fixture");
 }
 
 #[test]

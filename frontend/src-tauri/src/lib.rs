@@ -174,6 +174,109 @@ async fn restart_executor(
         .map_err(map_executor_platform_error)
 }
 
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+async fn execute_douyin_login_command(
+    command: executor_bootstrap::LocalPlatformCommand,
+    client: &control_plane::ControlPlaneClient,
+    vault: &ProductionDeviceCredentialVault,
+    platform: &executor_platform::ExecutorPlatformService,
+    settings: &browser_settings::BrowserSettingsService,
+    profiles: &browser_profiles::BrowserProfileStore,
+) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
+    let status = platform.status().map_err(map_executor_platform_error)?;
+    match status.state() {
+        executor_manager::ExecutorManagerState::Stopped => {
+            let connection = client
+                .issue_executor_connection(vault)
+                .await
+                .map_err(map_executor_connection_error)?;
+            let service = platform.clone();
+            tauri::async_runtime::spawn_blocking(move || service.restart(connection))
+                .await
+                .map_err(|_| ExecutorPlatformCommandError {
+                    code: "process_unavailable",
+                    retryable: true,
+                })?
+                .map_err(map_executor_platform_error)?;
+        }
+        executor_manager::ExecutorManagerState::Restarting => {
+            return Err(ExecutorPlatformCommandError {
+                code: "process_unavailable",
+                retryable: true,
+            });
+        }
+        executor_manager::ExecutorManagerState::Running => {}
+    }
+    let executable_path = settings
+        .selected_executable_path()
+        .map_err(map_browser_settings_error)
+        .map_err(|error| ExecutorPlatformCommandError {
+            code: error.code,
+            retryable: error.retryable,
+        })?;
+    let profile = profiles
+        .current_douyin_profile()
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "storage_unavailable",
+            retryable: false,
+        })?;
+    let service = platform.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.execute_platform_command(
+            command,
+            executable_path,
+            profile,
+            cfg!(feature = "control-plane-e2e"),
+        )
+    })
+    .await
+    .map_err(|_| ExecutorPlatformCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?
+    .map_err(map_executor_platform_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn open_douyin_login(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+    profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
+) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
+    execute_douyin_login_command(
+        executor_bootstrap::LocalPlatformCommand::OpenDouyinLogin,
+        &client,
+        &vault,
+        &platform,
+        &settings,
+        &profiles,
+    )
+    .await
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn recheck_douyin_login(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+    profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
+) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
+    execute_douyin_login_command(
+        executor_bootstrap::LocalPlatformCommand::RecheckDouyinLogin,
+        &client,
+        &vault,
+        &platform,
+        &settings,
+        &profiles,
+    )
+    .await
+}
+
 #[tauri::command]
 #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
 async fn restart_executor(
@@ -244,6 +347,18 @@ async fn get_workbench_status(
 ) -> Result<control_plane::WorkbenchRuntimeStatus, ControlPlaneCommandError> {
     client
         .get_workbench_status(&vault)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_douyin_platform_session(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::PlatformSessionStatus, ControlPlaneCommandError> {
+    client
+        .get_douyin_platform_session(&vault)
         .await
         .map_err(map_control_plane_error)
 }
@@ -919,6 +1034,36 @@ async fn prepare_workbench_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_platform_session_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskCreateFormAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_B513_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_B513_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(TaskCreateFormAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 async fn prepare_task_create_form_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
@@ -1443,7 +1588,10 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         create_douyin_search_exposure_task,
+        get_douyin_platform_session,
         get_workbench_status,
+        open_douyin_login,
+        recheck_douyin_login,
         emergency_stop_workbench_task,
         pause_task_run,
         resume_task_run,
@@ -1463,7 +1611,10 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         create_douyin_search_exposure_task,
+        get_douyin_platform_session,
         get_workbench_status,
+        open_douyin_login,
+        recheck_douyin_login,
         emergency_stop_workbench_task,
         pause_task_run,
         resume_task_run,
@@ -1484,6 +1635,7 @@ pub fn run() {
         prepare_executor_lifecycle_for_acceptance,
         prepare_task_restart_for_acceptance,
         prepare_workbench_for_acceptance,
+        prepare_platform_session_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance,
         get_executor_status,

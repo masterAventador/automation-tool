@@ -51,6 +51,11 @@ fn production_service_persists_only_an_available_browser_enum() {
     let persisted = reopened.snapshot().expect("reload selection");
     assert_eq!(persisted.selected_browser(), Some(selected));
     assert!(persisted.available_browsers().contains(&selected));
+    let executable = reopened
+        .selected_executable_path()
+        .expect("selected trusted executable");
+    assert!(executable.is_absolute());
+    assert!(executable.is_file());
 
     #[cfg(target_os = "macos")]
     assert!(!discover_macos_browsers()

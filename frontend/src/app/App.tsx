@@ -7,6 +7,7 @@ import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 import type { TaskCreationGateway } from "../features/task-create/task-creation-gateway";
 import type { TaskRunControlGateway } from "../features/task-runs/task-run-controls";
 import type { PlatformAdapter } from "../platform/types";
+import type { PlatformSessionGateway } from "../features/platform-sessions/platform-session-gateway";
 import { StartupGate } from "./StartupGate";
 import { desktopShellStartupCheck, type StartupCheck } from "./startup";
 import { WorkbenchShell } from "./WorkbenchShell";
@@ -19,6 +20,7 @@ interface AppProps {
   taskCreationGateway?: TaskCreationGateway;
   taskRunControlGateway?: TaskRunControlGateway;
   platformAdapter?: PlatformAdapter;
+  platformSessionGateway?: PlatformSessionGateway;
 }
 
 export function App({
@@ -29,6 +31,7 @@ export function App({
   taskCreationGateway,
   taskRunControlGateway,
   platformAdapter,
+  platformSessionGateway,
 }: AppProps) {
   return (
     <QueryClientProvider client={queryClient}>
@@ -50,6 +53,7 @@ export function App({
               taskCreationGateway={taskCreationGateway}
               taskRunControlGateway={taskRunControlGateway}
               platformAdapter={platformAdapter}
+              platformSessionGateway={platformSessionGateway}
             />
           </StartupGate>
         </AntDesignApp>

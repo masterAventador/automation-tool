@@ -35,7 +35,8 @@ test("B5-10 opens a dedicated external window and rechecks only real page facts"
   assert.match(login, /def recheck\(self\)/u);
   assert.match(session, /https:\/\/www\.douyin\.com\/user\/self/u);
   assert.match(protocol, /session\.login_required/u);
-  assert.match(runtime, /headless=False/u);
+  assert.match(runtime, /headless:\s*bool\s*=\s*False/u);
+  assert.match(runtime, /headless=request\.headless/u);
   assert.doesNotMatch(login, /LoginSignal|QrScanned|Authenticated|qr_scanned\s*[:=]|authenticated: bool/u);
   assert.doesNotMatch(login, /context\.cookies|document\.cookie|storage_state/u);
   assert.doesNotMatch(native, /tauri::command[\s\S]{0,300}(playwright_page|profile_directory)/u);

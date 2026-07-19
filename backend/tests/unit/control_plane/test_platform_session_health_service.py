@@ -59,6 +59,24 @@ class Repository:
             duplicate=False,
         )
 
+    async def get(
+        self,
+        installation_id: InstallationId,
+        platform: str,
+    ) -> PlatformSessionHealthProjection | None:
+        assert installation_id == InstallationId.parse(INSTALLATION_ID)
+        assert platform == "douyin"
+        if self.failure is not None:
+            raise self.failure
+        return PlatformSessionHealthProjection(
+            installation_id=installation_id,
+            platform=platform,
+            state=PlatformSessionState.HEALTHY,
+            session_revision=7,
+            observed_at=OBSERVED_AT,
+            updated_at=NOW,
+        )
+
 
 def message(
     *,
@@ -116,6 +134,40 @@ async def test_receive_projects_only_the_closed_non_sensitive_session_fact() -> 
     )
     assert "cookie" not in repr(repository.pending).lower()
     assert "profile" not in repr(repository.pending).lower()
+
+
+@pytest.mark.asyncio
+async def test_get_returns_only_the_current_installation_projection() -> None:
+    repository = Repository()
+    service = PlatformSessionHealthService(repository=repository, clock=FixedClock())
+
+    projection = await service.get(
+        InstallationId.parse(INSTALLATION_ID),
+        platform="douyin",
+    )
+
+    assert projection == PlatformSessionHealthProjection(
+        installation_id=InstallationId.parse(INSTALLATION_ID),
+        platform="douyin",
+        state=PlatformSessionState.HEALTHY,
+        session_revision=7,
+        observed_at=OBSERVED_AT,
+        updated_at=NOW,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_rejects_invalid_scope_and_maps_repository_failure() -> None:
+    repository = Repository()
+    service = PlatformSessionHealthService(repository=repository, clock=FixedClock())
+
+    with pytest.raises(PlatformSessionHealthRejected):
+        await service.get(InstallationId.parse(INSTALLATION_ID), platform="private")
+
+    repository.failure = RuntimeError("private database detail")
+    with pytest.raises(PlatformSessionHealthUnavailable) as captured:
+        await service.get(InstallationId.parse(INSTALLATION_ID), platform="douyin")
+    assert "private database detail" not in str(captured.value)
 
 
 @pytest.mark.asyncio

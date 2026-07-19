@@ -88,6 +88,12 @@ class PlatformSessionHealthRepository(Protocol):
         pending: PendingPlatformSessionHealth,
     ) -> PlatformSessionHealthConvergenceResult: ...
 
+    async def get(
+        self,
+        installation_id: InstallationId,
+        platform: str,
+    ) -> PlatformSessionHealthProjection | None: ...
+
 
 class PlatformSessionHealthClock(Protocol):
     def now(self) -> datetime: ...
@@ -150,6 +156,30 @@ class PlatformSessionHealthService:
             raise
         except Exception:
             raise PlatformSessionHealthUnavailable from None
+
+    async def get(
+        self,
+        installation_id: InstallationId,
+        *,
+        platform: str,
+    ) -> PlatformSessionHealthProjection | None:
+        if not isinstance(installation_id, InstallationId) or platform != "douyin":
+            raise PlatformSessionHealthRejected
+        try:
+            projection = await self._repository.get(installation_id, platform)
+        except PlatformSessionHealthRejected:
+            raise
+        except PlatformSessionHealthUnavailable:
+            raise
+        except Exception:
+            raise PlatformSessionHealthUnavailable from None
+        if projection is not None and (
+            not isinstance(projection, PlatformSessionHealthProjection)
+            or projection.installation_id != installation_id
+            or projection.platform != platform
+        ):
+            raise PlatformSessionHealthUnavailable
+        return projection
 
 
 def _validate_projection_fields(

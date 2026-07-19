@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 const SETTINGS_DIRECTORY: &str = "settings";
@@ -130,6 +131,13 @@ impl BrowserSettingsService {
         })
     }
 
+    pub fn selected_executable_path(&self) -> Result<PathBuf, BrowserSettingsError> {
+        let selected = self
+            .load_selection()?
+            .ok_or_else(BrowserSettingsError::browser_unavailable)?;
+        selected_executable_path(selected)
+    }
+
     fn snapshot_with_available(
         &self,
         available_browsers: Vec<SupportedBrowser>,
@@ -163,6 +171,31 @@ impl BrowserSettingsService {
         }
         Ok(Some(document.browser))
     }
+}
+
+#[cfg(target_os = "macos")]
+fn selected_executable_path(selected: SupportedBrowser) -> Result<PathBuf, BrowserSettingsError> {
+    discover_macos_browsers()
+        .map_err(|_| BrowserSettingsError::discovery_unavailable())?
+        .into_iter()
+        .find(|browser| browser.browser() == selected)
+        .map(|browser| browser.executable_path().to_path_buf())
+        .ok_or_else(BrowserSettingsError::browser_unavailable)
+}
+
+#[cfg(target_os = "windows")]
+fn selected_executable_path(selected: SupportedBrowser) -> Result<PathBuf, BrowserSettingsError> {
+    discover_windows_browsers()
+        .map_err(|_| BrowserSettingsError::discovery_unavailable())?
+        .into_iter()
+        .find(|browser| browser.browser() == selected)
+        .map(|browser| browser.executable_path().to_path_buf())
+        .ok_or_else(BrowserSettingsError::browser_unavailable)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn selected_executable_path(_selected: SupportedBrowser) -> Result<PathBuf, BrowserSettingsError> {
+    Err(BrowserSettingsError::discovery_unavailable())
 }
 
 #[cfg(target_os = "macos")]

@@ -123,6 +123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform-sessions/douyin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Douyin Platform Session */
+        get: operations["getDouyinPlatformSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks": {
         parameters: {
             query?: never;
@@ -388,6 +405,23 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** PlatformSessionResponse */
+        PlatformSessionResponse: {
+            /** Observedat */
+            observedAt: string | null;
+            /**
+             * Platform
+             * @constant
+             */
+            platform: "douyin";
+            state: components["schemas"]["PlatformSessionState"];
+        };
+        /**
+         * PlatformSessionState
+         * @description Closed platform-login health state; only healthy closes the circuit.
+         * @enum {string}
+         */
+        PlatformSessionState: "healthy" | "expired" | "missing" | "risk" | "unknown";
         /** RegistrationChallengeRequest */
         RegistrationChallengeRequest: {
             /** Devicepublickey */
@@ -751,6 +785,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getDouyinPlatformSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSessionResponse"];
                 };
             };
         };

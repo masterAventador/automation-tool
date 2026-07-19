@@ -41,8 +41,11 @@ class BrowserLaunchRequest:
 
     executable_path: Path
     profile_directory: Path
+    headless: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.headless) is not bool:
+            raise BrowserRuntimeRejected
         self.revalidate()
 
     def revalidate(self) -> None:
@@ -328,7 +331,7 @@ def _launch_context(
             request.profile_directory,
             accept_downloads=False,
             executable_path=request.executable_path,
-            headless=False,
+            headless=request.headless,
             timeout=_START_TIMEOUT_MILLISECONDS,
         )
         return playwright, context

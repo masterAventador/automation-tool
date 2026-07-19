@@ -32,6 +32,7 @@ from automation_tool.protocol import (
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorEnvelope,
     ExecutorLifecycleEnvelope,
+    PlatformSessionHealthEnvelope,
     TaskCommandEnvelope,
     parse_executor_message,
 )
@@ -101,6 +102,7 @@ def process_for(
     output: StringIO | None = None,
     clock: object = FixedClock(),
     id_source: object = None,
+    local_outbox: queue.Queue[object] | None = None,
 ) -> tuple[LocalExecutorProcess, StringIO]:
     target = output or StringIO()
     values: dict[str, object] = {
@@ -128,7 +130,32 @@ def process_for(
     }
     if id_source is not None:
         values["id_source"] = id_source
+    if local_outbox is not None:
+        values["local_outbox"] = local_outbox
     return LocalExecutorProcess(**values), target  # type: ignore[arg-type]
+
+
+def session_health() -> PlatformSessionHealthEnvelope:
+    return PlatformSessionHealthEnvelope.model_validate(
+        {
+            "protocol_version": "1.0",
+            "message_id": "723e4567-e89b-42d3-a456-426614174001",
+            "message_type": "platform.session_health",
+            "sent_at": NOW,
+            "deadline_at": NOW + timedelta(seconds=30),
+            "installation_id": INSTALLATION_ID,
+            "executor_id": EXECUTOR_ID,
+            "correlation_id": "723e4567-e89b-42d3-a456-426614174002",
+            "idempotency_key": "platform:douyin:session:1:1",
+            "sequence": 41,
+            "payload": {
+                "platform": "douyin",
+                "state": "missing",
+                "session_revision": 1,
+                "observed_at": NOW,
+            },
+        }
+    )
 
 
 def offer() -> TaskCommandEnvelope:
@@ -203,6 +230,42 @@ def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly(
             "executor.healthy",
             "executor.stopped",
         ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_process_drains_local_platform_health_queue_over_the_formal_socket(
+    tmp_path: Path,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    local_outbox: queue.Queue[object] = queue.Queue()
+    local_outbox.put(session_health())
+    stop = threading.Event()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            observed.put(parse_executor_message(connection.recv(timeout=2)))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        process, _ = process_for(
+            port,
+            tmp_path / "executor-state",
+            local_outbox=local_outbox,
+        )
+        process.run(stop)
+        message = observed.get(timeout=2)
+        if isinstance(message, Exception):
+            raise message
+        assert isinstance(message, PlatformSessionHealthEnvelope)
+        assert message.payload.state.value == "missing"
+        assert local_outbox.empty()
     finally:
         server.shutdown()
         thread.join(timeout=2)

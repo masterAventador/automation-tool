@@ -268,6 +268,8 @@ Playwright headed persistent context
 
 B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC、Entitlement 或云端账号模型。当前 Profile ID 是 App 本机生成的 canonical UUIDv4，不是产品账号；Session 健康由真实页面封闭为 `missing/healthy/expired/risk/unknown`，只有 `healthy` 允许后续动作。B5-12 已把该事实接入正式 Executor WebSocket：本机 SQLite v2 为每个平台持久化正数、单调递增的 `session_revision`，同 epoch 的旧观察或从非健康状态直接回到健康均拒绝，重新登录或显式恢复必须推进 epoch。Control Plane 只在 `platform_session_health` 保存 Installation、平台、状态、revision、观察时间和更新时间六列；较低 revision、倒序观察和同 epoch 非健康→健康同样 fail closed，不保存 Cookie、二维码、验证码、页面原文、Executor/message ID 或 Profile 路径。
 
+B5-13 在该投影上增加唯一已实现的查询 `GET /api/v1/platform-sessions/douyin`。路由复用 `require_current_installation_access` 和 `app.control-plane` Session，只读取当前 Installation 的 PostgreSQL 记录；缺项返回 `unknown/null`，有记录只返回平台、封闭状态和观察时间，并固定 `no-store`。打开登录处理和重新检查不是云端 HTTP 动作：Tauri Rust 在本机重新解析受信浏览器、稳定 current Profile 与独占 lease，经同一个 signed Executor 的认证 stdin/stdout 命令调用 Python `DouyinQrLoginFlow`，再由该进程的正式 WebSocket 上报投影。Control Plane 不能下发可执行文件、Profile 路径、`headless`、页面句柄或扫码结果，React 也不能直接连接 Executor。
+
 安全注销由后续 B5-14 跨边界协调：先打开熔断并拒绝新任务，停止关联动作和浏览器、释放 Profile 锁，再由本机定向删除目标目录，最后递增 revision 并上报 `missing`。停止失败或外部最终状态无法确认时不得删 Profile 或自动重试，必须保留阻断状态并按 `OUTCOME_UNCERTAIN` 处理。
 
 ### 8.2 浏览器发现
@@ -291,6 +293,8 @@ B5-09 在同一 Python 边界新增抖音 Session detector：调用方先把 Run
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。
+
+B5-13 的本机命令复用 E4-06 的每次启动 256-bit 本机会话，但使用独立 `automation-tool.local-executor-command.v1` / `result.v1` HMAC 域和固定 `atlcp1` envelope；command ID、动作类型、生产内部解析的浏览器/Profile 路径和验收专用 headless 位全部签名，Python 只接受 `douyin.login.open|recheck` exact object，Rust 只接受匹配 command ID、平台、flow 版本和封闭状态的 exact result。同一个 CLI 同时运行 stdin worker 与 WebSocket runtime，二者通过有界本机队列连接；命令认证失败、超时、畸形结果、App 退出或 Manager stop 都关闭 stdin 并终止完整 Executor/浏览器进程树。正式构建始终 headed，只有 `control-plane-e2e` 隐藏验收在 Rust 内硬编码 headless。
 
 ### 8.3 页面定位
 
@@ -660,11 +664,11 @@ GET  /api/v1/tasks/{task_id}/events
 ### 平台状态与诊断
 
 ```text
-GET  /api/v1/platform-sessions
-POST /api/v1/platform-sessions/{platform}/login
-POST /api/v1/platform-sessions/{platform}/logout
+GET  /api/v1/platform-sessions/douyin
 GET  /api/v1/diagnostics
 ```
+
+当前机器契约只实现 `GET /api/v1/platform-sessions/douyin`；登录处理与重新检查固定走本机 Tauri→Executor 链路，B5-14 的安全注销须先锁定跨 Control Plane/Executor/Profile 的失败语义后再增加入口，不能从本清单生成空壳 HTTP API。
 
 ### Executor
 
@@ -676,7 +680,7 @@ POST /api/v1/executors/{executor_id}/artifacts/complete
 
 具体请求体在实现前通过契约测试锁定，不以本清单代替 OpenAPI。
 
-当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换和 Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
+当前权威机器契约为 `contracts/openapi/control-plane.v1.json`，只包含已经实现的 Health/Version、两个 Installation 注册 operation、Installation 当前访问、设备凭据轮换/吊销、短期 Session 交换、Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，以及 B5-13 抖音平台 Session 查询，不为其他规划路由生成空壳。后端用 `automation-tool-export-openapi` 从 `create_app(database=None)` 确定性导出并检查漂移；前端 DTO 只能从该快照生成。每个后续 API 任务必须固定 operationId，并在同一提交更新快照和生成类型。
 
 ## 16. 事件与实时连接
 

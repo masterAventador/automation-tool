@@ -46,6 +46,37 @@ class SqlAlchemyPlatformSessionHealthRepository:
             raise PlatformSessionHealthRejected
         self._database = database
 
+    async def get(
+        self,
+        installation_id: object,
+        platform: str,
+    ) -> PlatformSessionHealthProjection | None:
+        from automation_tool.control_plane.domain import InstallationId
+
+        if not isinstance(installation_id, InstallationId) or platform != "douyin":
+            raise PlatformSessionHealthRejected
+        try:
+            async with self._database.session() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(platform_session_health).where(
+                                platform_session_health.c.installation_id == installation_id.uuid,
+                                platform_session_health.c.platform == platform,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return None if row is None else _projection(row)
+        except SQLAlchemyError:
+            raise PlatformSessionHealthUnavailable from None
+        except PlatformSessionHealthRejected:
+            raise
+        except Exception:
+            raise PlatformSessionHealthUnavailable from None
+
     async def converge(
         self,
         pending: PendingPlatformSessionHealth,
