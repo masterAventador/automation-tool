@@ -1,7 +1,7 @@
-#[cfg(not(target_os = "macos"))]
 use automation_tool_desktop_lib::browser_discovery::BrowserDiscoveryErrorCode;
 use automation_tool_desktop_lib::browser_discovery::{
-    discover_macos_browsers, revalidate_macos_browser, SupportedBrowser,
+    discover_macos_browsers, discover_windows_browsers, revalidate_macos_browser,
+    revalidate_windows_browser, SupportedBrowser,
 };
 
 #[cfg(target_os = "macos")]
@@ -41,6 +41,48 @@ fn real_installed_macos_browsers_use_the_production_signature_path() {
             .iter()
             .any(|browser| browser.browser() == SupportedBrowser::MicrosoftEdge));
     }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn real_installed_windows_browsers_use_the_production_authenticode_path() {
+    let discovered = discover_windows_browsers().expect("discover trusted standard browsers");
+
+    for browser in &discovered {
+        let (file_name, product, publisher) = match browser.browser() {
+            SupportedBrowser::GoogleChrome => ("chrome.exe", "Google Chrome", "Google LLC"),
+            SupportedBrowser::MicrosoftEdge => {
+                ("msedge.exe", "Microsoft Edge", "Microsoft Corporation")
+            }
+        };
+        assert_eq!(
+            browser
+                .executable_path()
+                .file_name()
+                .and_then(|value| value.to_str()),
+            Some(file_name)
+        );
+        assert_eq!(browser.product_name(), product);
+        assert_eq!(browser.publisher(), publisher);
+        revalidate_windows_browser(browser).expect("revalidate unchanged trusted browser");
+    }
+
+    assert!(
+        !discovered.is_empty(),
+        "Windows runner must provide Chrome or Edge"
+    );
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn real_installed_windows_browsers_use_the_production_authenticode_path() {
+    assert_eq!(
+        discover_windows_browsers()
+            .expect_err("non-Windows target must reject Windows discovery")
+            .code(),
+        BrowserDiscoveryErrorCode::UnsupportedPlatform
+    );
+    let _ = revalidate_windows_browser;
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -252,7 +252,7 @@
 | --- | --- | --- | --- | --- |
 | B5-01 | 审计旧 browser_session | 提取私有目录、Profile、状态机和注销逻辑；排除旧账号/RBAC | R0-12,E4-11 | ✅ 已完成 |
 | B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
-| B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | ⬜ 未开始 |
+| B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | 🔍 待 Windows 原生验收 |
 | B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | ⬜ 未开始 |
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ⬜ 未开始 |
 | B5-06 | Profile 单实例锁 | 同一 Profile 多任务/多进程竞争必须拒绝 | B5-05 | ⬜ 未开始 |
@@ -1636,10 +1636,25 @@
 - App 与资源：当前生产消费者是供 B5-04/B5-07 使用的 Rust 原生 API，尚无平台选择页面或 Tauri Command，因此本任务不启动 App，不宣称用户功能已完成；没有前后端、Docker、测试服务器、浏览器进程、端口、SQLite、Profile 或系统钥匙串操作，只读校验已安装应用
 - 后续：B5-03 实现 Windows 注册表/标准路径和 Authenticode/产品 allowlist；Edge macOS 安装或受控设备可用时从同一公开 API补真实验收，不阻塞无 Edge 依赖任务
 
+### B5-03 Windows 浏览器受信发现
+
+- 状态：🔍 待 Windows 原生验收；生产实现、跨平台公共 API、Windows 专属单元/真实集成入口和 CI 编译路径已完成，当前 macOS 门禁全绿；GitHub Hosted Windows 因账户 Billing/Actions spending limit 零步拒绝启动，未把静态扫描或非 Windows 测试冒充原生结果
+- 日期：2026-07-19
+- 提交：本任务提交
+- 目标：只发现 Windows 标准安装位置的正式 Google Chrome/Microsoft Edge，用系统 Authenticode、签名证书发布者、PE Version Resource 产品字段和稳定文件身份共同约束候选；调用方不能提交任意路径，发现结果在使用前必须再次复验
+- RED：先把台账置为 `🧪 RED`，新增 B5-03 Node 边界契约和公开 Rust 集成入口；分别准确失败于缺少 `browser_discovery_windows.rs` 以及缺少 `discover_windows_browsers`/`revalidate_windows_browser`，没有用虚构注册表、Mock 签名或 macOS 结果宣告 Windows 完成
+- 固定发现面：根目录只由 `SHGetKnownFolderPath` 读取 Program Files、Program Files (x86) 和 Local AppData；App Paths 只读 HKLM/HKCU 的 32/64 位视图，且注册表值必须与上述已知根拼出的 `Google\\Chrome\\Application\\chrome.exe` 或 `Microsoft\\Edge\\Application\\msedge.exe` 完全一致才进入候选。环境变量、PATH、PowerShell、`cmd.exe`、Shell 搜索结果和任意可执行文件均不进入接口
+- 原生信任：`WinVerifyTrust` 使用 Generic Verify V2、无 UI、cache-only URL retrieval，并把已打开的稳定文件句柄传给 `WINTRUST_FILE_INFO.hFile`；随后从同一验证 state 提取 leaf 证书 CN。Chrome 只接受发布者 `Google LLC`、ProductName `Google Chrome`、CompanyName `Google LLC`、OriginalFilename `chrome.exe`；Edge 对应 `Microsoft Corporation`、`Microsoft Edge`、`Microsoft Corporation`、`msedge.exe`，未知/缺失/过长/包含控制字符的资源一律拒绝
+- 路径与竞态：候选必须为绝对普通文件，逐级拒绝 reparse point；打开时使用 `FILE_FLAG_OPEN_REPARSE_POINT` 和只共享读取，阻止验证期间写入、替换或删除。`GetFinalPathNameByHandleW` 的规范 DOS 路径必须仍等于固定候选，句柄前后 volume serial/file index/length 和重新打开 identity 必须一致；`TrustedWindowsBrowser` 保存 identity，`revalidate_windows_browser` 再检查固定路径、原 identity、签名和产品，替换或路径漂移统一 `PathInvalidated`
+- 失败矩阵与入口：Windows 专属单元覆盖 Chrome/Edge 固定顺序、坏签名 fail closed 和发现后替换；`frontend/src-tauri/tests/browser_discovery.rs` 在 Windows runner 只调用公开生产 API，要求机器至少发现 Edge/Chrome并逐个复验。非 Windows 入口明确返回 `UnsupportedPlatform`，只能证明跨平台契约，不计 Windows 实机验收
+- 门禁：B5-03 定向 Node 契约 1 项、完整 Frontend Node 契约 59 项、Vitest 119 项、ESLint、严格 TypeScript、Rustfmt 和全目标/全特性 Clippy `-D warnings` 全绿；macOS 默认 Rust 共 99 项通过、1 项既有 PyInstaller 编排 ignored。另用现有 Homebrew `rust-src` 对直接引用生产 `browser_discovery.rs` 的最小 crate 完成 `x86_64-pc-windows-msvc` 类型检查，实抓并修复四项 FFI 模块/指针/flags 类型错误；整库交叉检查仍会先被本机缺少 Windows SDK 的第三方 `aws-lc-sys` C 编译阻断，原生 runner 实际编译/执行后才补验收
+- App 与本地隔离：本任务提供 B5-04/B5-07 将消费的 Rust 原生能力，尚无 Tauri Command 或用户界面，因此未启动 App、浏览器、Backend、Docker、测试服务器、端口、Profile、SQLite 或系统钥匙串；没有读取、停止或清理其他项目任何进程和资源
+- 后续：B5-04 只允许从受信发现结果中选择 Chrome/Edge；GitHub Windows runner 恢复时自动补本任务与此前 E4 系列 Windows 原生门禁，不阻塞无 Windows 设备依赖实现
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `B5-03`：实现 Windows 注册表/标准路径、签名/产品 allowlist 与路径失效失败矩阵；
-2. `B5-04`：只允许用户在已发现的受支持浏览器枚举中选择，不接受任意可执行路径；
-3. E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。
+1. `B5-04`：只允许用户在已发现的受支持浏览器枚举中选择，不接受任意可执行路径；
+2. `B5-05`：建立 App 沙盒内按平台/UUID 隔离的私有 Profile 目录；
+3. B5-03 与 E4-03/E4-05/E4-07/E4-08/E4-09/E4-10/E4-11/E4-12/E4-13/E4-14/E4-15 Windows 原生验收在 GitHub Billing/Windows 设备恢复后补齐；不降低门禁，也不阻塞 Wave 5～Wave 10 的无设备依赖任务。

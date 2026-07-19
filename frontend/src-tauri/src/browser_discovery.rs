@@ -1,6 +1,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "windows")]
+mod browser_discovery_windows;
+
 #[cfg(target_os = "macos")]
 const MACOS_APPLICATIONS_DIRECTORY: &str = "/Applications";
 #[cfg(target_os = "macos")]
@@ -28,6 +31,7 @@ pub enum SupportedBrowser {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserDiscoveryErrorCode {
     CandidateRejected,
+    DiscoveryUnavailable,
     PathInvalidated,
     UnsupportedPlatform,
 }
@@ -47,7 +51,7 @@ impl BrowserDiscoveryError {
         self.browser
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn candidate_rejected(browser: SupportedBrowser) -> Self {
         Self {
             code: BrowserDiscoveryErrorCode::CandidateRejected,
@@ -55,7 +59,7 @@ impl BrowserDiscoveryError {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn path_invalidated(browser: SupportedBrowser) -> Self {
         Self {
             code: BrowserDiscoveryErrorCode::PathInvalidated,
@@ -63,10 +67,17 @@ impl BrowserDiscoveryError {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
     fn unsupported_platform() -> Self {
         Self {
             code: BrowserDiscoveryErrorCode::UnsupportedPlatform,
+            browser: None,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn discovery_unavailable() -> Self {
+        Self {
+            code: BrowserDiscoveryErrorCode::DiscoveryUnavailable,
             browser: None,
         }
     }
@@ -76,6 +87,7 @@ impl fmt::Display for BrowserDiscoveryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self.code {
             BrowserDiscoveryErrorCode::CandidateRejected => "browser candidate is rejected",
+            BrowserDiscoveryErrorCode::DiscoveryUnavailable => "browser discovery is unavailable",
             BrowserDiscoveryErrorCode::PathInvalidated => "browser path is no longer trusted",
             BrowserDiscoveryErrorCode::UnsupportedPlatform => {
                 "browser discovery is unsupported on this platform"
@@ -91,6 +103,8 @@ impl std::error::Error for BrowserDiscoveryError {}
 struct PathIdentity {
     device: u64,
     inode: u64,
+    #[cfg(target_os = "windows")]
+    length: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +116,33 @@ pub struct TrustedBrowser {
     team_identifier: &'static str,
     application_identity: PathIdentity,
     executable_identity: PathIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustedWindowsBrowser {
+    browser: SupportedBrowser,
+    executable_path: PathBuf,
+    product_name: &'static str,
+    publisher: &'static str,
+    executable_identity: PathIdentity,
+}
+
+impl TrustedWindowsBrowser {
+    pub fn browser(&self) -> SupportedBrowser {
+        self.browser
+    }
+
+    pub fn executable_path(&self) -> &Path {
+        &self.executable_path
+    }
+
+    pub fn product_name(&self) -> &'static str {
+        self.product_name
+    }
+
+    pub fn publisher(&self) -> &'static str {
+        self.publisher
+    }
 }
 
 impl TrustedBrowser {
@@ -214,6 +255,30 @@ pub fn revalidate_macos_browser(browser: &TrustedBrowser) -> Result<(), BrowserD
 
 #[cfg(not(target_os = "macos"))]
 pub fn revalidate_macos_browser(_browser: &TrustedBrowser) -> Result<(), BrowserDiscoveryError> {
+    Err(BrowserDiscoveryError::unsupported_platform())
+}
+
+#[cfg(target_os = "windows")]
+pub fn discover_windows_browsers() -> Result<Vec<TrustedWindowsBrowser>, BrowserDiscoveryError> {
+    browser_discovery_windows::discover()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn discover_windows_browsers() -> Result<Vec<TrustedWindowsBrowser>, BrowserDiscoveryError> {
+    Err(BrowserDiscoveryError::unsupported_platform())
+}
+
+#[cfg(target_os = "windows")]
+pub fn revalidate_windows_browser(
+    browser: &TrustedWindowsBrowser,
+) -> Result<(), BrowserDiscoveryError> {
+    browser_discovery_windows::revalidate(browser)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn revalidate_windows_browser(
+    _browser: &TrustedWindowsBrowser,
+) -> Result<(), BrowserDiscoveryError> {
     Err(BrowserDiscoveryError::unsupported_platform())
 }
 
