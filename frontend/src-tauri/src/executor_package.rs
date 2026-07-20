@@ -523,7 +523,7 @@ fn ensure_safe_package_root(package_root: &Path) -> Result<(), ExecutorPackageEr
 }
 
 fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> {
-    let mut absolute = if path.is_absolute() {
+    let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()
@@ -531,13 +531,17 @@ fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> 
             .join(path)
     };
     #[cfg(target_os = "macos")]
-    for alias in ["var", "tmp", "etc"] {
-        let prefix = Path::new("/").join(alias);
-        if let Ok(suffix) = absolute.strip_prefix(&prefix) {
-            absolute = Path::new("/private").join(alias).join(suffix);
-            break;
+    let absolute = {
+        let mut normalized = absolute;
+        for alias in ["var", "tmp", "etc"] {
+            let prefix = Path::new("/").join(alias);
+            if let Ok(suffix) = normalized.strip_prefix(&prefix) {
+                normalized = Path::new("/private").join(alias).join(suffix);
+                break;
+            }
         }
-    }
+        normalized
+    };
     let mut current = PathBuf::new();
     for component in absolute.components() {
         current.push(component.as_os_str());

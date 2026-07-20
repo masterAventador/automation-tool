@@ -20,7 +20,6 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import uvicorn
-
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.application.device_credentials import (
     ParsedDeviceCredential,
@@ -230,7 +229,8 @@ def build_signed_executor(
     if completed.returncode != 0:
         raise RuntimeError("E4-07 PyInstaller build failed")
     package_root = distribution / "automation-tool-executor"
-    architecture = "x86_64" if platform.machine().lower() == "x86_64" else "aarch64"
+    architecture = "x86_64" if platform.machine().lower() in {"x86_64", "amd64"} else "aarch64"
+    manifest_platform = "windows" if platform.system() == "Windows" else "macos"
     manifest = subprocess.run(
         [
             sys.executable,
@@ -243,7 +243,7 @@ def build_signed_executor(
             "--build-id",
             build_id,
             "--platform",
-            "macos",
+            manifest_platform,
             "--architecture",
             architecture,
         ],
@@ -285,7 +285,7 @@ def run_rust_manager(
             "test",
             "--locked",
             "--test",
-            "executor_manager",
+            "executor_manager_packaged",
             "real_packaged_executor_uses_the_public_manager_lifecycle",
             "--",
             "--ignored",
@@ -303,7 +303,7 @@ def run_rust_manager(
         or control_plane.session_token in completed.stderr
     ):
         raise RuntimeError("E4-07 acceptance reflected the Control Plane session")
-    if completed.returncode != 0:
+    if completed.returncode != 0 or "1 passed; 0 failed" not in completed.stdout:
         diagnostic = (completed.stdout + "\n" + completed.stderr).replace(
             control_plane.session_token,
             "[REDACTED]",
@@ -313,12 +313,15 @@ def run_rust_manager(
     ledger_path = workspace / "executor-state" / "executor-ledger.sqlite3"
     if not ledger_path.is_file():
         raise RuntimeError("E4-11 Rust manager did not create the Executor ledger")
-    with sqlite3.connect(ledger_path) as connection:
+    connection = sqlite3.connect(ledger_path)
+    try:
         version = connection.execute("PRAGMA user_version").fetchone()
         identity = connection.execute(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchone()
-    if version != (1,) or identity != (str(INSTALLATION_ID), str(EXECUTOR_ID)):
+    finally:
+        connection.close()
+    if version != (2,) or identity != (str(INSTALLATION_ID), str(EXECUTOR_ID)):
         raise RuntimeError("E4-11 Executor ledger migration or identity binding is invalid")
     ledger_bytes = ledger_path.read_bytes()
     if control_plane.session_token.encode() in ledger_bytes:
@@ -326,8 +329,8 @@ def run_rust_manager(
 
 
 def main() -> None:
-    if platform.system() != "Darwin":
-        raise RuntimeError("E4-07 local acceptance currently requires macOS")
+    if platform.system() not in {"Darwin", "Windows"}:
+        raise RuntimeError("E4-07 local acceptance requires macOS or Windows")
     control_plane = start_control_plane()
     try:
         with tempfile.TemporaryDirectory(prefix="automation-tool-e4-07-") as directory:

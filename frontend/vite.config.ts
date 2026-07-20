@@ -42,6 +42,9 @@ export default defineConfig(({ mode }) => ({
     host: "127.0.0.1",
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/target/**"],
+    },
   },
   build: {
     target: "es2022",

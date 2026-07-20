@@ -71,8 +71,7 @@ def upgrade() -> None:
             name="ck_task_targets_display_name",
         ),
         sa.CheckConstraint(
-            "public_handle is null or "
-            "public_handle ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'",
+            "public_handle is null or public_handle ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'",
             name="ck_task_targets_public_handle",
         ),
         sa.CheckConstraint(

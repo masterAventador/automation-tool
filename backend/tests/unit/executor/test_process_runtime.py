@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 
 import pytest
 from pydantic import SecretStr
@@ -85,6 +85,17 @@ def test_reporter_writes_authenticated_platform_results_and_fails_closed() -> No
             command_id="123e4567-e89b-42d3-a456-426614174005",
             state="logged_out",
         )
+
+
+def test_reporter_uses_lf_bytes_when_stdout_translates_newlines() -> None:
+    raw_output = BytesIO()
+    translated_output = TextIOWrapper(raw_output, encoding="utf-8", newline="\r\n")
+    reporter = ExecutorProcessReporter(translated_output, authenticator())
+
+    reporter.healthy()
+
+    assert raw_output.getvalue().endswith(b"\n")
+    assert not raw_output.getvalue().endswith(b"\r\n")
 
 
 def test_reporter_and_runtime_fail_closed_on_invalid_dependencies() -> None:

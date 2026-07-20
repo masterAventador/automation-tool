@@ -16,6 +16,8 @@ test("B5-03 keeps Windows browser discovery behind Win32 trust APIs and fixed pr
     readRepositoryFile("frontend/src-tauri/tests/browser_discovery.rs"),
   ]);
 
+  assert.match(common, /#\[path = "browser_discovery_windows\.rs"\]\s*mod browser_discovery_windows;/u);
+
   for (const api of [
     "discover_windows_browsers",
     "revalidate_windows_browser",
@@ -65,6 +67,7 @@ test("B5-03 keeps Windows browser discovery behind Win32 trust APIs and fixed pr
 
   assert.doesNotMatch(windows, /std::process::Command|powershell|cmd\.exe|HOME|USERPROFILE/u);
   assert.match(windows, /hFile:\s*file\.as_raw_handle\(\) as HANDLE/u);
+  assert.match(windows, /std::fs::canonicalize\(path\)/u);
   assert.match(integration, /real_installed_windows_browsers_use_the_production_authenticode_path/u);
   assert.match(integration, /revalidate_windows_browser/u);
 });

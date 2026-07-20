@@ -22,6 +22,22 @@ test("E4-07 keeps Executor lifecycle in a fixed Rust manager without restoring s
   assert.doesNotMatch(manager, /std::env::var|https?:\/\//);
 });
 
+test("E4-07 acceptance uses the native macOS or Windows package identity", async () => {
+  const acceptance = await readFile(
+    new URL("../scripts/run_e4_07_acceptance.py", frontendRoot),
+    "utf8",
+  );
+
+  assert.match(acceptance, /platform\.system\(\) not in \{"Darwin", "Windows"\}/);
+  assert.match(acceptance, /\{"x86_64", "amd64"\}/);
+  assert.match(
+    acceptance,
+    /"windows" if platform\.system\(\) == "Windows" else "macos"/,
+  );  assert.match(acceptance, /"executor_manager_packaged"/);
+  assert.match(acceptance, /"1 passed; 0 failed"/);
+
+});
+
 test("E4-08 supervises only the fixed Executor with an explicit bounded restart policy", async () => {
   const manager = await readFile(
     new URL("src-tauri/src/executor_manager.rs", frontendRoot),
@@ -34,6 +50,18 @@ test("E4-08 supervises only the fixed Executor with an explicit bounded restart 
   assert.match(manager, /std::thread::Builder/);
   assert.match(manager, /RestartPending/);
   assert.doesNotMatch(manager, /loop\s*\{[^}]*Command::new/s);
+});
+
+test("E4-08 acceptance crashes a real packaged Executor through the bounded Windows supervisor", async () => {
+  const acceptance = await readFile(
+    new URL("../scripts/run_e4_08_acceptance.py", frontendRoot),
+    "utf8",
+  );
+
+  assert.match(acceptance, /"executor_manager_packaged"/);
+  assert.match(acceptance, /"real_packaged_executor_enforces_bounded_restart_policy"/);
+  assert.match(acceptance, /"control-plane-e2e"/);
+  assert.match(acceptance, /"1 passed; 0 failed"/);
 });
 
 test("E4-09 isolates and terminates the complete Executor process tree on each platform", async () => {
@@ -49,6 +77,20 @@ test("E4-09 isolates and terminates the complete Executor process tree on each p
   assert.match(cargo, /Win32_System_JobObjects/);
   assert.match(cargo, /Win32_System_Threading/);
   assert.match(cargo, /Win32_System_Diagnostics_ToolHelp/);
+});
+
+test("E4-09 acceptance proves Windows Job Object cleanup with a real packaged descendant", async () => {
+  const acceptance = await readFile(
+    new URL("../scripts/run_e4_09_acceptance.py", frontendRoot),
+    "utf8",
+  );
+
+  assert.match(acceptance, /executor_process_tree_probe\.py/);
+  assert.match(acceptance, /cwd=workspace/);
+  assert.match(acceptance, /"executor_manager_packaged"/);
+  assert.match(acceptance, /"real_packaged_executor_cleans_its_windows_job_tree"/);
+  assert.match(acceptance, /"control-plane-e2e"/);
+  assert.match(acceptance, /"1 passed; 0 failed"/);
 });
 
 test("E4-10 bounds and redacts stderr before diagnostics leave the Rust manager", async () => {
@@ -70,6 +112,20 @@ test("E4-10 bounds and redacts stderr before diagnostics leave the Rust manager"
   assert.match(diagnostics, /\[TRUNCATED\]/);
   assert.doesNotMatch(manager, /BufReader::new\(stderr\)\.lines\(\)/);
   assert.equal(JSON.parse(fixture).fixtureVersion, "1");
+});
+
+test("E4-10 acceptance streams real packaged Windows stderr through every diagnostic bound", async () => {
+  const acceptance = await readFile(
+    new URL("../scripts/run_e4_10_acceptance.py", frontendRoot),
+    "utf8",
+  );
+
+  assert.match(acceptance, /executor_diagnostics_probe\.py/);
+  assert.match(acceptance, /cwd=workspace/);
+  assert.match(acceptance, /"executor_manager_packaged"/);
+  assert.match(acceptance, /"real_packaged_executor_bounds_and_redacts_windows_stderr"/);
+  assert.match(acceptance, /"control-plane-e2e"/);
+  assert.match(acceptance, /"1 passed; 0 failed"/);
 });
 
 test("E4-11 keeps the durable command ledger inside the private Executor state directory", async () => {
@@ -134,6 +190,11 @@ test("E4-12 consumes real offers only through the durable no-side-effect protoco
   assert.match(runtime, /recover_outbox\(\)/);
   assert.match(runtime, /command_processor\.handle\(source\)/);
   assert.match(acceptance, /build_signed_executor/);
+  assert.match(acceptance, /platform\.system\(\) not in \{"Darwin", "Windows"\}/);
+  assert.match(acceptance, /managed_test_postgres/);
+  assert.match(acceptance, /closing\(sqlite3\.connect/);
+  assert.match(acceptance, /"executor_manager_packaged"/);
+  assert.match(acceptance, /"1 passed; 0 failed"/);
   assert.match(acceptance, /wait_for_convergence/);
   assert.match(acceptance, /Restarting against the same ledger for exact replay/);
   assert.doesNotMatch(processor, /FakeExecutor|playwright|selenium|keyring|keychain/i);
@@ -202,7 +263,12 @@ test("E4-14 drives the signed Executor lifecycle through one isolated hidden App
   assert.match(spec, /button=本地紧急停止/);
   assert.match(spec, /inject_executor_crash_for_acceptance/);
   assert.match(spec, /inject_executor_hang_for_acceptance/);
+  assert.match(spec, /process\.platform === "win32"/);
   assert.match(orchestrator, /build_signed_executor/);
+  assert.match(orchestrator, /managed_test_postgres/);
+  assert.match(orchestrator, /"pnpm.cmd" if sys.platform == "win32" else "pnpm"/);
+  assert.match(orchestrator, /closing\(sqlite3\.connect/);
+  assert.match(orchestrator, /!= \(2,\):/);
   assert.match(orchestrator, /automation-tool-e414-/);
   assert.match(orchestrator, /require_port_available/);
   assert.match(orchestrator, /assert_no_executor_process/);

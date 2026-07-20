@@ -33,13 +33,14 @@ test("E4-15 formal runner builds an ephemeral release artifact and audits it in 
   ]);
   assert.match(packageJson, /audit:production-package/);
   assert.match(packageJson, /test:e4-15/);
-  assert.match(runner, /TemporaryDirectory\(prefix="automation-tool-e415-target-"/);
+  assert.match(runner, /TemporaryDirectory\(\s*prefix="automation-tool-e415-target-"/);
   assert.match(runner, /cargo["'],\s*["']check/);
   assert.match(runner, /--release/);
   assert.match(runner, /release Executor verification key is required/);
   assert.match(runner, /release Executor verification key is invalid/);
   assert.match(runner, /WEAK_VERIFYING_KEY/);
-  assert.match(runner, /pnpm["'],\s*["']tauri["'],\s*["']build["'],\s*["']--no-bundle/);
+  assert.match(runner, /pnpm_executable\(\),\s*["']tauri["'],\s*["']build["'],\s*["']--no-bundle/);
+  assert.match(runner, /"pnpm.cmd" if sys.platform == "win32" else "pnpm"/);
   assert.match(runner, /audit-production-package\.mjs/);
   assert.match(workflow, /run_e4_15_acceptance\.py/);
   assert.doesNotMatch(runner, /tauri dev|open\(|Popen/);

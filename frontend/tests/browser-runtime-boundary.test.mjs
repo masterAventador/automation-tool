@@ -31,6 +31,11 @@ test("B5-08 owns one thread-confined browser context with bounded window operati
   assert.match(native, /process_group\(0\)/u);
   assert.match(native, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/u);
   assert.match(acceptance, /SIGKILL/u);
+  assert.match(acceptance, /ExecutorManager/u);
+  assert.match(
+    acceptance,
+    /#\[cfg\(target_os = "windows"\)\][\s\S]*packaged_runtime_hard_stop_terminates_the_complete_browser_process_tree/u,
+  );
   assert.match(acceptance, /profile\.revalidate/u);
   assert.match(architecture, /Local Executor[\s\S]*Playwright/u);
   assert.doesNotMatch(runtime, /tauri|Control Plane|cookie/u);

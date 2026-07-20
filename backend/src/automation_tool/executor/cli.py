@@ -43,21 +43,32 @@ def stop_signal_event() -> Iterator[threading.Event]:
     stop = threading.Event()
     previous_int = signal.getsignal(signal.SIGINT)
     previous_term = signal.getsignal(signal.SIGTERM)
+    break_signal = getattr(signal, "SIGBREAK", None)
+    previous_break = signal.getsignal(break_signal) if isinstance(break_signal, int) else None
 
     def request_stop(_signum: int, _frame: FrameType | None) -> None:
         stop.set()
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
+    if isinstance(break_signal, int):
+        signal.signal(break_signal, request_stop)
     try:
         yield stop
     finally:
         signal.signal(signal.SIGINT, previous_int)
         signal.signal(signal.SIGTERM, previous_term)
+        if isinstance(break_signal, int) and previous_break is not None:
+            signal.signal(break_signal, previous_break)
 
 
 def _fixed_error(error: TextIO, message: str) -> None:
     try:
+        binary_error = getattr(error, "buffer", None)
+        if binary_error is not None:
+            binary_error.write((message + "\n").encode("utf-8"))
+            binary_error.flush()
+            return
         error.write(message + "\n")
         error.flush()
     except Exception:

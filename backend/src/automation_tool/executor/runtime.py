@@ -124,8 +124,13 @@ class ExecutorProcessReporter:
                 sort_keys=True,
             )
             with self._lock:
-                self._output.write(source + "\n")
-                self._output.flush()
+                binary_output = getattr(self._output, "buffer", None)
+                if binary_output is not None:
+                    binary_output.write((source + "\n").encode("utf-8"))
+                    binary_output.flush()
+                else:
+                    self._output.write(source + "\n")
+                    self._output.flush()
         except Exception:
             failed = True
         if failed:

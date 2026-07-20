@@ -283,6 +283,120 @@ fn dropping_without_explicit_release_preserves_recovery_required_marker() {
     );
 }
 
+#[cfg(target_os = "windows")]
+fn create_lock_junction(link: &std::path::Path, target: &std::path::Path) {
+    let output = Command::new("cmd.exe")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("run mklink");
+    assert!(
+        output.status.success(),
+        "mklink failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_lock_links_dacl_corruption_and_replacement_fail_closed() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+
+    let junction_profile = store.create_douyin_profile().expect("junction profile");
+    let outside_directory = app_data.path.join("outside-lock-directory");
+    fs::create_dir(&outside_directory).expect("outside lock directory");
+    let junction_path = junction_profile.directory().join(LOCK_FILE_NAME);
+    create_lock_junction(&junction_path, &outside_directory);
+    assert_eq!(
+        junction_profile
+            .try_acquire_lock()
+            .expect_err("lock junction must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+    fs::remove_dir(&junction_path).expect("remove lock junction");
+
+    let hard_link_profile = store.create_douyin_profile().expect("hard-link profile");
+    let outside_file = app_data.path.join("outside-lock-file");
+    fs::write(&outside_file, b"").expect("outside lock file");
+    fs::hard_link(
+        &outside_file,
+        hard_link_profile.directory().join(LOCK_FILE_NAME),
+    )
+    .expect("hard-link lock file");
+    assert_eq!(
+        hard_link_profile
+            .try_acquire_lock()
+            .expect_err("multi-link lock file must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+
+    let dacl_profile = store.create_douyin_profile().expect("DACL profile");
+    let dacl_path = dacl_profile.directory().join(LOCK_FILE_NAME);
+    dacl_profile
+        .try_acquire_lock()
+        .expect("create private lock file")
+        .release()
+        .expect("release private lock file");
+    let output = Command::new("icacls.exe")
+        .arg(&dacl_path)
+        .args(["/grant", "*S-1-5-11:(R)"])
+        .output()
+        .expect("run icacls");
+    assert!(
+        output.status.success(),
+        "icacls failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        dacl_profile
+            .try_acquire_lock()
+            .expect_err("broadened lock DACL must fail")
+            .code(),
+        BrowserProfileErrorCode::UnsafeDirectory
+    );
+
+    let corrupt_profile = store.create_douyin_profile().expect("corrupt profile");
+    let corrupt_path = corrupt_profile.directory().join(LOCK_FILE_NAME);
+    corrupt_profile
+        .try_acquire_lock()
+        .expect("create corrupt fixture lock")
+        .release()
+        .expect("release corrupt fixture lock");
+    fs::write(&corrupt_path, b"corrupt").expect("corrupt lock state");
+    assert_eq!(
+        corrupt_profile
+            .try_acquire_lock()
+            .expect_err("corrupt state must require recovery")
+            .code(),
+        BrowserProfileErrorCode::RecoveryRequired
+    );
+    assert_eq!(fs::read(&corrupt_path).expect("corrupt bytes"), b"corrupt");
+
+    let replacement_profile = store.create_douyin_profile().expect("replacement profile");
+    let replacement_path = replacement_profile.directory().join(LOCK_FILE_NAME);
+    let replacement_lock = replacement_profile
+        .try_acquire_lock()
+        .expect("lock replacement profile");
+    let original_path = replacement_path.with_extension("original");
+    assert!(
+        fs::rename(&replacement_path, &original_path).is_err(),
+        "Windows lock handle must deny rename/delete replacement"
+    );
+    assert_eq!(
+        fs::read(&replacement_path)
+            .expect_err("byte-range lock must reject another handle")
+            .raw_os_error(),
+        Some(33)
+    );
+    replacement_lock
+        .release()
+        .expect("release replacement profile");
+    assert_eq!(fs::read(&replacement_path).expect("released marker"), b"");
+}
 #[cfg(unix)]
 #[test]
 fn lock_file_symlinks_permissions_corruption_and_replacement_fail_closed() {

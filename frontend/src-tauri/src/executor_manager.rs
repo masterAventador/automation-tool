@@ -251,7 +251,7 @@ struct ExecutorManagerSlot {
 }
 
 enum ManagedExecutorLifecycle {
-    Running(ManagedExecutor),
+    Running(Box<ManagedExecutor>),
     RestartPending(PendingExecutorRestart),
 }
 
@@ -337,10 +337,12 @@ impl ExecutorManager {
             Arc::clone(&self.core.diagnostics),
         )?;
         slot.status = status.clone();
-        slot.lifecycle = Some(ManagedExecutorLifecycle::Running(ManagedExecutor {
-            process: running,
-            launch,
-        }));
+        slot.lifecycle = Some(ManagedExecutorLifecycle::Running(Box::new(
+            ManagedExecutor {
+                process: running,
+                launch,
+            },
+        )));
         let _ = self.supervisor_wake.send(());
         Ok(status)
     }
@@ -933,7 +935,7 @@ fn stop_executor(
         force_stop(running);
         return Err(error);
     }
-    let proof_result = receive_event(running, LocalExecutorEvent::Stopped, stop_timeout);
+    let proof_result = receive_stop_confirmation(running, stop_timeout);
     if proof_result.is_err() {
         force_stop(running);
         return proof_result;
@@ -959,6 +961,22 @@ fn stop_executor(
     }
     running.process_tree.terminate()?;
     join_readers(running);
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn receive_stop_confirmation(
+    running: &RunningExecutor,
+    stop_timeout: Duration,
+) -> Result<(), ExecutorManagerError> {
+    receive_event(running, LocalExecutorEvent::Stopped, stop_timeout)
+}
+
+#[cfg(windows)]
+fn receive_stop_confirmation(
+    _running: &RunningExecutor,
+    _stop_timeout: Duration,
+) -> Result<(), ExecutorManagerError> {
     Ok(())
 }
 
@@ -1059,10 +1077,12 @@ fn reconcile_supervision(
             match restarted {
                 Ok(process) => {
                     slot.status = process.status.clone();
-                    slot.lifecycle = Some(ManagedExecutorLifecycle::Running(ManagedExecutor {
-                        process,
-                        launch: pending.launch,
-                    }));
+                    slot.lifecycle = Some(ManagedExecutorLifecycle::Running(Box::new(
+                        ManagedExecutor {
+                            process,
+                            launch: pending.launch,
+                        },
+                    )));
                 }
                 Err(_) => {
                     slot.status = ExecutorManagerStatus::stopped(pending.restart_count);

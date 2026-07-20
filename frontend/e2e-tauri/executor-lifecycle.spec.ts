@@ -79,8 +79,12 @@ describe("E4-14 hidden App Executor lifecycle acceptance", () => {
     );
     await browser.$("button=本地紧急停止").click();
     await browser.$("button=确认停止").click();
-    await waitForText("暂时无法读取本地执行器状态。请稍后重试。");
-    await refreshUntil("本地执行器已停止");
+    if (process.platform === "win32") {
+      await waitForText("本地执行器已停止");
+    } else {
+      await waitForText("暂时无法读取本地执行器状态。请稍后重试。");
+      await refreshUntil("本地执行器已停止");
+    }
 
     await browser.$("button=启动执行器").click();
     await waitForText("本地执行器运行中", "e4-14-hidden-app");

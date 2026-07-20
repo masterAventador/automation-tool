@@ -273,9 +273,11 @@ def main() -> None:  # pragma: no cover - verified through the real CLI
             signing_private_key=signing_key,
         )
     except ExecutorManifestRejected:
-        sys.stderr.write("Executor manifest generation failed\n")
+        sys.stderr.buffer.write(b"Executor manifest generation failed\n")
+        sys.stderr.buffer.flush()
         raise SystemExit(2) from None
-    sys.stdout.write("Executor manifest generated\n")
+    sys.stdout.buffer.write(b"Executor manifest generated\n")
+    sys.stdout.buffer.flush()
 
 
 if __name__ == "__main__":  # pragma: no cover - verified through the real CLI

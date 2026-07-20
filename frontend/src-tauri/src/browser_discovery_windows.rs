@@ -259,7 +259,8 @@ fn open_stable_executable(path: &Path) -> Result<(File, PathIdentity), ()> {
         .open(path)
         .map_err(|_| ())?;
     let identity = file_identity(&file)?;
-    if final_path(&file)? != normalized_path_key(path) {
+    let canonical_path = std::fs::canonicalize(path).map_err(|_| ())?;
+    if final_path(&file)? != normalized_path_key(&canonical_path) {
         return Err(());
     }
     ensure_no_reparse_components(path)?;
@@ -456,9 +457,8 @@ fn version_translations(data: &[u8]) -> Result<Vec<(u16, u16)>, ()> {
         )
     } == 0
         || pointer.is_null()
-        || length < 4
-        || length > 256
-        || length % 4 != 0
+        || !(4..=256).contains(&length)
+        || !length.is_multiple_of(4)
     {
         return Err(());
     }
@@ -539,9 +539,8 @@ fn read_registry_string(root: HKEY, subkey: &str, view: u32) -> Option<PathBuf> 
         )
     };
     if first != ERROR_SUCCESS
-        || byte_count < 2
-        || byte_count > MAX_REGISTRY_VALUE_BYTES
-        || byte_count % 2 != 0
+        || !(2..=MAX_REGISTRY_VALUE_BYTES).contains(&byte_count)
+        || !byte_count.is_multiple_of(2)
     {
         return None;
     }

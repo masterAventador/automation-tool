@@ -16,11 +16,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import suppress
+from contextlib import closing, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from acceptance_postgres import managed_test_postgres
+from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from run_e4_07_acceptance import build_signed_executor
 from run_i2_13_acceptance import (
@@ -34,8 +36,6 @@ from run_i2_13_acceptance import (
 from run_t3_06_acceptance import FRONTEND_ROOT, base64url, verify_app_private_data
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.executor-lifecycle-e2e.conf.json"
 APP_IDENTIFIER = "com.aventador.automationtool.e414acceptance"
@@ -281,9 +281,9 @@ def verify_executor_app_data(private_app_data: Path, installation_id: str) -> No
     executor_id = UUID(executor_id_text)
     if executor_id.version != 4 or str(executor_id) != executor_id_text:
         raise RuntimeError("E4-14 stable Executor identity is not canonical UUIDv4")
-    with sqlite3.connect(ledger_path) as connection:
-        if connection.execute("PRAGMA user_version").fetchone() != (1,):
-            raise RuntimeError("E4-14 Executor ledger did not migrate to v1")
+    with closing(sqlite3.connect(ledger_path)) as connection:
+        if connection.execute("PRAGMA user_version").fetchone() != (2,):
+            raise RuntimeError("E4-14 Executor ledger did not migrate to v2")
         identity = connection.execute(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchone()
@@ -350,6 +350,14 @@ async def acceptance_fact_summary(database_url: str) -> dict[str, object]:
     }
 
 
+def pnpm_executable() -> str:
+    name = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+    executable = shutil.which(name)
+    if executable is None:
+        raise RuntimeError("E4-14 pnpm executable is unavailable")
+    return executable
+
+
 def main() -> None:
     require_hidden_tauri_configuration()
     control_plane_port, database_port = isolated_ports()
@@ -362,6 +370,13 @@ def main() -> None:
         database_port=database_port,
     )
     compose = compose_command(project_name)
+    postgres_context = managed_test_postgres(
+        compose=compose,
+        database_port=database_port,
+        environment=environment,
+        repository_root=REPOSITORY_ROOT,
+    )
+    postgres_started = False
     server: subprocess.Popen[bytes] | None = None
     app_process: subprocess.Popen[bytes] | None = None
     package_entrypoint: Path | None = None
@@ -370,18 +385,20 @@ def main() -> None:
         workspace = Path(temporary)
         try:
             print("[E4-14] Building the real signed PyInstaller Executor")
-            package_source = build_signed_executor(workspace, build_id=EXECUTOR_BUILD_ID)
-            package_root = install_executor_package(package_source, private_app_data)
+            package_source = build_signed_executor(
+                workspace,
+                build_id=EXECUTOR_BUILD_ID,
+            )
+            package_root = install_executor_package(
+                package_source,
+                private_app_data,
+            )
             package_entrypoint = executor_entrypoint(package_root)
 
             require_port_available(database_port)
             print(f"[E4-14] Starting isolated PostgreSQL as {project_name}")
-            subprocess.run(
-                [*compose, "up", "--detach", "--wait", "postgres-test"],
-                check=True,
-                cwd=REPOSITORY_ROOT,
-                env=environment,
-            )
+            postgres_context.__enter__()
+            postgres_started = True
             print("[E4-14] Applying the production Alembic migration chain")
             subprocess.run(
                 [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -390,11 +407,14 @@ def main() -> None:
                 env=environment,
             )
             print(f"[E4-14] Starting Control Plane on isolated port {control_plane_port}")
-            server = start_control_plane(port=control_plane_port, environment=environment)
+            server = start_control_plane(
+                port=control_plane_port,
+                environment=environment,
+            )
 
             print("[E4-14] Running one real Tauri App with visible=false")
             app_process = subprocess.Popen(
-                ["pnpm", "test:executor-lifecycle-tauri"],
+                [pnpm_executable(), "test:executor-lifecycle-tauri"],
                 cwd=FRONTEND_ROOT,
                 env=environment,
                 stdout=subprocess.PIPE,
@@ -407,7 +427,10 @@ def main() -> None:
             app_exit = app_process.returncode
             app_output = app_output_bytes.decode("utf-8", errors="replace")
             print(app_output, end="")
-            if app_exit != 0 and not graceful_app_exit_observed(app_exit, app_output):
+            if app_exit != 0 and not graceful_app_exit_observed(
+                app_exit,
+                app_output,
+            ):
                 facts = asyncio.run(acceptance_fact_summary(database_url))
                 raise RuntimeError(f"E4-14 hidden App lifecycle acceptance failed: {facts}")
             app_process = None
@@ -437,14 +460,8 @@ def main() -> None:
                 except subprocess.TimeoutExpired:
                     server.kill()
                     server.wait(timeout=5)
-            subprocess.run(
-                [*compose, "down", "--volumes", "--remove-orphans"],
-                check=False,
-                cwd=REPOSITORY_ROOT,
-                env=environment,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            if postgres_started:
+                postgres_context.__exit__(None, None, None)
             if private_app_data.exists():
                 shutil.rmtree(private_app_data)
             require_port_closed(control_plane_port)

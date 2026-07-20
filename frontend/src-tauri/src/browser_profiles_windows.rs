@@ -12,6 +12,7 @@ use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
     NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
     FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT,
+    FILE_SYNCHRONOUS_IO_NONALERT,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, LocalFree, ERROR_LOCK_VIOLATION, ERROR_SUCCESS, HANDLE, HLOCAL,
@@ -24,10 +25,11 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::{
     AclSizeInformation, AddAccessAllowedAceEx, EqualSid, GetAce, GetAclInformation, GetLengthSid,
-    GetSecurityDescriptorControl, GetTokenInformation, InitializeAcl, TokenUser,
+    GetSecurityDescriptorControl, GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor,
+    SetSecurityDescriptorControl, SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser,
     ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE,
     DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PROTECTED_DACL_SECURITY_INFORMATION, PSID,
-    SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+    SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileAttributesW, GetFileInformationByHandle, GetFinalPathNameByHandleW, LockFileEx,
@@ -37,6 +39,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_READ, FILE_SHARE_WRITE, INVALID_FILE_ATTRIBUTES, LOCKFILE_EXCLUSIVE_LOCK,
     LOCKFILE_FAIL_IMMEDIATELY, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
 };
+use windows_sys::Win32::System::SystemServices::SECURITY_DESCRIPTOR_REVISION;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows_sys::Win32::System::IO::{IO_STATUS_BLOCK, OVERLAPPED};
 
@@ -46,6 +49,74 @@ const ACTIVE_LOCK_MARKER: &[u8] = br#"{"state":"active","version":1}"#;
 const MAX_LOCK_STATE_BYTES: usize = 64;
 const DIRECTORY_ACE_FLAGS: u32 = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
 const FILE_ACE_FLAGS: u32 = 0;
+
+struct PrivateSecurityDescriptor {
+    descriptor: SECURITY_DESCRIPTOR,
+    _acl_buffer: Vec<u32>,
+    _user: CurrentUserSid,
+}
+
+impl PrivateSecurityDescriptor {
+    fn new(ace_flags: u32) -> Result<Self, BrowserProfileError> {
+        let user = CurrentUserSid::load()?;
+        let sid = user.sid();
+        let sid_length = unsafe { GetLengthSid(sid) } as usize;
+        if sid_length == 0 {
+            return Err(BrowserProfileError::storage_unavailable());
+        }
+        let acl_length = size_of::<ACL>()
+            .checked_add(size_of::<ACCESS_ALLOWED_ACE>())
+            .and_then(|value| value.checked_sub(size_of::<u32>()))
+            .and_then(|value| value.checked_add(sid_length))
+            .ok_or_else(BrowserProfileError::storage_unavailable)?;
+        let mut acl_buffer = vec![0_u32; acl_length.div_ceil(size_of::<u32>())];
+        let acl = acl_buffer.as_mut_ptr().cast::<ACL>();
+        let mut descriptor = SECURITY_DESCRIPTOR::default();
+        if unsafe { InitializeAcl(acl, acl_length as u32, ACL_REVISION) } == 0
+            || unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, ace_flags, FILE_ALL_ACCESS, sid) }
+                == 0
+            || unsafe {
+                InitializeSecurityDescriptor(
+                    (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+                    SECURITY_DESCRIPTOR_REVISION,
+                )
+            } == 0
+            || unsafe {
+                SetSecurityDescriptorOwner(
+                    (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+                    sid,
+                    0,
+                )
+            } == 0
+            || unsafe {
+                SetSecurityDescriptorDacl(
+                    (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+                    1,
+                    acl,
+                    0,
+                )
+            } == 0
+            || unsafe {
+                SetSecurityDescriptorControl(
+                    (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+                    SE_DACL_PROTECTED,
+                    SE_DACL_PROTECTED,
+                )
+            } == 0
+        {
+            return Err(BrowserProfileError::storage_unavailable());
+        }
+        Ok(Self {
+            descriptor,
+            _acl_buffer: acl_buffer,
+            _user: user,
+        })
+    }
+
+    fn as_ptr(&self) -> *const SECURITY_DESCRIPTOR {
+        &self.descriptor
+    }
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct DirectoryIdentity {
@@ -447,12 +518,19 @@ fn open_relative_directory(
         MaximumLength: byte_length,
         Buffer: name_units.as_mut_ptr(),
     };
+    let private_security = match acl_policy {
+        AclPolicy::Repair => Some(PrivateSecurityDescriptor::new(DIRECTORY_ACE_FLAGS)?),
+        AclPolicy::Ignore | AclPolicy::Require => None,
+    };
+    let security_descriptor = private_security
+        .as_ref()
+        .map_or(null(), PrivateSecurityDescriptor::as_ptr);
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
         RootDirectory: parent.file.as_raw_handle() as HANDLE,
         ObjectName: &object_name,
         Attributes: OBJ_CASE_INSENSITIVE,
-        SecurityDescriptor: null(),
+        SecurityDescriptor: security_descriptor,
         SecurityQualityOfService: null(),
     };
     let mut io_status = IO_STATUS_BLOCK::default();
@@ -520,7 +598,9 @@ fn open_relative_lock_file(
     disposition: u32,
     acl_policy: AclPolicy,
 ) -> Result<File, BrowserProfileError> {
-    require_safe_name(name)?;
+    if name != PROFILE_LOCK_FILE {
+        return Err(BrowserProfileError::unsafe_directory());
+    }
     if directory_identity(&parent.file)? != parent.identity {
         return Err(BrowserProfileError::identity_changed());
     }
@@ -535,12 +615,19 @@ fn open_relative_lock_file(
         MaximumLength: byte_length,
         Buffer: name_units.as_mut_ptr(),
     };
+    let private_security = match acl_policy {
+        AclPolicy::Repair => Some(PrivateSecurityDescriptor::new(FILE_ACE_FLAGS)?),
+        AclPolicy::Ignore | AclPolicy::Require => None,
+    };
+    let security_descriptor = private_security
+        .as_ref()
+        .map_or(null(), PrivateSecurityDescriptor::as_ptr);
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
         RootDirectory: parent.file.as_raw_handle() as HANDLE,
         ObjectName: &object_name,
         Attributes: OBJ_CASE_INSENSITIVE,
-        SecurityDescriptor: null(),
+        SecurityDescriptor: security_descriptor,
         SecurityQualityOfService: null(),
     };
     let mut io_status = IO_STATUS_BLOCK::default();
@@ -555,7 +642,10 @@ fn open_relative_lock_file(
             FILE_ATTRIBUTE_NORMAL,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             disposition,
-            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT,
+            FILE_NON_DIRECTORY_FILE
+                | FILE_OPEN_REPARSE_POINT
+                | FILE_OPEN_FOR_BACKUP_INTENT
+                | FILE_SYNCHRONOUS_IO_NONALERT,
             null(),
             0,
         )

@@ -6,7 +6,9 @@ import json
 import os
 import shutil
 import stat
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -284,7 +286,7 @@ def test_manifest_rejects_non_regular_directory_members(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "automation-tool-executor").write_bytes(b"entrypoint")
-    os.mkfifo(bundle / "named-pipe")
+    cast(Callable[[Path], None], vars(os)["mkfifo"])(bundle / "named-pipe")
 
     with pytest.raises(ExecutorManifestRejected):
         write_signed_executor_manifest(

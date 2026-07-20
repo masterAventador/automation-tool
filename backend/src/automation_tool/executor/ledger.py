@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import stat
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -706,29 +707,25 @@ class ExecutorLedger:
         self._state_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._reject_linked_ancestors(self._state_directory)
         metadata = self._state_directory.stat()
-        if not stat.S_ISDIR(metadata.st_mode) or _is_reparse_point(metadata):
-            raise ValueError
-        if os.name != "nt" and (
-            metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077
-        ):
-            raise ValueError
+        self._validate_private_directory_metadata(metadata)
+        _validate_windows_private_acl(self._state_directory)
 
     def _prepare_private_database_file(self) -> None:
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(self._database_path, flags, 0o600)
         try:
             if os.name != "nt":  # pragma: no branch - mutually exclusive native platform path
-                os.fchmod(descriptor, 0o600)
+                cast(Callable[[int, int], None], vars(os)["fchmod"])(descriptor, 0o600)
             self._validate_private_database_metadata(os.fstat(descriptor))
         finally:
             os.close(descriptor)
 
     def _connect(self) -> sqlite3.Connection:
-        before_directory = _identity(self._state_directory.stat())
+        before_directory = self._secure_directory_identity()
         before_database = self._secure_database_identity()
         connection = sqlite3.connect(self._database_path, timeout=5, isolation_level=None)
         try:
-            after_directory = _identity(self._state_directory.stat())
+            after_directory = self._secure_directory_identity()
             after_database = self._secure_database_identity()
             if after_directory != before_directory or after_database != before_database:
                 raise ValueError
@@ -740,17 +737,35 @@ class ExecutorLedger:
             connection.close()
             raise
 
+    def _secure_directory_identity(self) -> tuple[int, int]:
+        metadata = self._state_directory.stat()
+        self._validate_private_directory_metadata(metadata)
+        _validate_windows_private_acl(self._state_directory)
+        return _identity(metadata)
+
     def _secure_database_identity(self) -> tuple[int, int]:
         metadata = self._database_path.lstat()
         self._validate_private_database_metadata(metadata)
+        _validate_windows_private_acl(self._database_path)
         return _identity(metadata)
+
+    @staticmethod
+    def _validate_private_directory_metadata(metadata: os.stat_result) -> None:
+        if not stat.S_ISDIR(metadata.st_mode) or _is_reparse_point(metadata):
+            raise ValueError
+        if os.name != "nt" and (
+            metadata.st_uid != cast(Callable[[], int], vars(os)["getuid"])()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
+        ):
+            raise ValueError
 
     @staticmethod
     def _validate_private_database_metadata(metadata: os.stat_result) -> None:
         if not stat.S_ISREG(metadata.st_mode) or _is_reparse_point(metadata):
             raise ValueError
         if os.name != "nt" and (
-            metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077
+            metadata.st_uid != cast(Callable[[], int], vars(os)["getuid"])()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
         ):
             raise ValueError
 
@@ -963,6 +978,13 @@ def _parse_outbound(source: str) -> OutboundExecutorMessage:
 
 def _identity(metadata: os.stat_result) -> tuple[int, int]:
     return metadata.st_dev, metadata.st_ino
+
+
+def _validate_windows_private_acl(path: Path) -> None:
+    if os.name == "nt":
+        from automation_tool.executor.windows_acl import validate_private_acl
+
+        validate_private_acl(path)
 
 
 def _is_reparse_point(metadata: os.stat_result) -> bool:
