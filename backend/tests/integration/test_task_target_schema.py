@@ -18,7 +18,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0015"
-HEAD_REVISION = "20260720_0017"
+HEAD_REVISION = "20260720_0018"
 NOW = datetime(2026, 7, 19, 0, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "id",

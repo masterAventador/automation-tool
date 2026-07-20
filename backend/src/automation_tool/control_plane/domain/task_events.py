@@ -30,6 +30,8 @@ class TaskEventType(StrEnum):
     TASK_AWAITING_PLATFORM_LOGIN = "task.awaiting_platform_login"
     TASK_DISCOVERY_STARTED = "task.discovery_started"
     TASK_AWAITING_CONFIRMATION = "task.awaiting_confirmation"
+    TASK_TARGET_SELECTION_UPDATED = "task.target_selection_updated"
+    TASK_TARGETS_CONFIRMED = "task.targets_confirmed"
     TASK_STARTED = "task.started"
     STEP_STARTED = "step.started"
     STEP_PROGRESS = "step.progress"

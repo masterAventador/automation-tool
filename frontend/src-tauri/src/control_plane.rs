@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
@@ -31,6 +32,8 @@ const MAX_SEARCH_KEYWORD_CHARACTERS: usize = 80;
 const MAX_MESSAGE_TEMPLATE_CHARACTERS: usize = 500;
 const MAX_TASK_TARGET_LIMIT: u16 = 100;
 const MAX_TASK_INTERVAL_SECONDS: u16 = 3600;
+const MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS: usize = 80;
+const MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS: usize = 64;
 
 #[derive(Clone, Copy)]
 enum ControlPlaneOperation {
@@ -46,6 +49,9 @@ enum ControlPlaneOperation {
     ExchangeDeviceSession,
     CreateTask,
     StartTaskDiscovery,
+    GetTaskTargetPreview,
+    ReplaceTaskTargetExclusions,
+    ConfirmTaskTargetPreview,
     ListTasks,
     GetTask,
     StreamTaskEvents,
@@ -62,6 +68,7 @@ impl ControlPlaneOperation {
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
             | Self::GetDouyinPlatformSession
+            | Self::GetTaskTargetPreview
             | Self::ListTasks
             | Self::GetTask
             | Self::StreamTaskEvents => "GET",
@@ -73,10 +80,12 @@ impl ControlPlaneOperation {
             | Self::PrepareDouyinPlatformSessionLogout
             | Self::CreateTask
             | Self::StartTaskDiscovery
+            | Self::ConfirmTaskTargetPreview
             | Self::PauseTask
             | Self::ResumeTask
             | Self::CancelTask
             | Self::EmergencyStopTask => "POST",
+            Self::ReplaceTaskTargetExclusions => "PUT",
         }
     }
 
@@ -98,6 +107,13 @@ impl ControlPlaneOperation {
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
             Self::CreateTask => "/api/v1/tasks",
             Self::StartTaskDiscovery => "/api/v1/tasks/{task_id}/discoveries",
+            Self::GetTaskTargetPreview => "/api/v1/tasks/{task_id}/target-preview",
+            Self::ReplaceTaskTargetExclusions => {
+                "/api/v1/tasks/{task_id}/target-preview/exclusions"
+            }
+            Self::ConfirmTaskTargetPreview => {
+                "/api/v1/tasks/{task_id}/target-preview/confirmations"
+            }
             Self::ListTasks => "/api/v1/tasks",
             Self::GetTask => "/api/v1/tasks/{task_id}",
             Self::StreamTaskEvents => "/api/v1/tasks/{task_id}/events",
@@ -114,6 +130,8 @@ impl ControlPlaneOperation {
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
             | Self::GetDouyinPlatformSession
+            | Self::GetTaskTargetPreview
+            | Self::ReplaceTaskTargetExclusions
             | Self::PrepareDouyinPlatformSessionLogout
             | Self::RevokeDeviceCredential
             | Self::ListTasks
@@ -125,6 +143,7 @@ impl ControlPlaneOperation {
             | Self::ExchangeDeviceSession
             | Self::CreateTask => 201,
             Self::StartTaskDiscovery
+            | Self::ConfirmTaskTargetPreview
             | Self::PauseTask
             | Self::ResumeTask
             | Self::CancelTask
@@ -138,6 +157,7 @@ impl ControlPlaneOperation {
                 self,
                 Self::CreateTask
                     | Self::StartTaskDiscovery
+                    | Self::ConfirmTaskTargetPreview
                     | Self::PauseTask
                     | Self::ResumeTask
                     | Self::CancelTask
@@ -168,6 +188,12 @@ enum ControlPlaneRequestTarget<'a> {
         last_event_id: Option<u64>,
     },
     Control(&'a str),
+    PreviewList {
+        task_id: &'a str,
+        cursor: Option<&'a str>,
+        limit: u16,
+    },
+    PreviewCommand(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -770,6 +796,118 @@ impl ControlPlaneClient {
         parse_task_discovery(&response_body, task_id)
     }
 
+    pub async fn get_task_target_preview<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<TaskTargetPreview, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(task_id)?;
+        if !(1..=MAX_TASK_TARGET_LIMIT).contains(&limit) {
+            return Err(protocol_invalid());
+        }
+        if let Some(value) = cursor {
+            require_preview_cursor(value)?;
+        }
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::GetTaskTargetPreview,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::PreviewList {
+                    task_id,
+                    cursor,
+                    limit,
+                }),
+            )
+            .await?;
+        parse_task_target_preview(&response_body, task_id, false)
+    }
+
+    pub async fn replace_task_target_exclusions<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        page_revision: u64,
+        expected_task_revision: u64,
+        excluded_target_ids: &[String],
+        idempotency_key: &str,
+    ) -> Result<TaskTargetPreview, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        validate_preview_command(
+            task_id,
+            page_revision,
+            expected_task_revision,
+            excluded_target_ids,
+            idempotency_key,
+        )?;
+        let body = serde_json::json!({
+            "pageRevision": page_revision,
+            "expectedTaskRevision": expected_task_revision,
+            "excludedTargetIds": excluded_target_ids,
+        });
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::ReplaceTaskTargetExclusions,
+                Some(session.token()),
+                Some(&body),
+                Some(idempotency_key),
+                Some(ControlPlaneRequestTarget::PreviewCommand(task_id)),
+            )
+            .await?;
+        parse_task_target_preview(&response_body, task_id, true)
+    }
+
+    pub async fn confirm_task_target_preview<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        page_revision: u64,
+        expected_task_revision: u64,
+        idempotency_key: &str,
+    ) -> Result<TaskTargetPreview, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        validate_preview_command(
+            task_id,
+            page_revision,
+            expected_task_revision,
+            &[],
+            idempotency_key,
+        )?;
+        let body = serde_json::json!({
+            "pageRevision": page_revision,
+            "expectedTaskRevision": expected_task_revision,
+        });
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::ConfirmTaskTargetPreview,
+                Some(session.token()),
+                Some(&body),
+                Some(idempotency_key),
+                Some(ControlPlaneRequestTarget::PreviewCommand(task_id)),
+            )
+            .await?;
+        parse_task_target_preview(&response_body, task_id, true)
+    }
+
     pub async fn pause_task<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1011,6 +1149,7 @@ impl ControlPlaneClient {
         let mut request = match operation.method() {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
+            "PUT" => self.client.put(url),
             _ => {
                 return Err(ControlPlaneError::new(
                     ControlPlaneErrorCode::ProtocolInvalid,
@@ -1091,6 +1230,36 @@ fn request_path(
             Ok(format!("/api/v1/tasks/{task_id}"))
         }
         (
+            ControlPlaneOperation::GetTaskTargetPreview,
+            Some(ControlPlaneRequestTarget::PreviewList {
+                task_id,
+                cursor,
+                limit,
+            }),
+        ) if (1..=MAX_TASK_TARGET_LIMIT).contains(&limit) => {
+            require_canonical_uuid_v4(task_id)?;
+            let mut path = format!("/api/v1/tasks/{task_id}/target-preview?limit={limit}");
+            if let Some(value) = cursor {
+                require_preview_cursor(value)?;
+                path.push_str("&cursor=");
+                path.push_str(value);
+            }
+            Ok(path)
+        }
+        (
+            operation @ (ControlPlaneOperation::ReplaceTaskTargetExclusions
+            | ControlPlaneOperation::ConfirmTaskTargetPreview),
+            Some(ControlPlaneRequestTarget::PreviewCommand(task_id)),
+        ) => {
+            require_canonical_uuid_v4(task_id)?;
+            let suffix = match operation {
+                ControlPlaneOperation::ReplaceTaskTargetExclusions => "exclusions",
+                ControlPlaneOperation::ConfirmTaskTargetPreview => "confirmations",
+                _ => return Err(protocol_invalid()),
+            };
+            Ok(format!("/api/v1/tasks/{task_id}/target-preview/{suffix}"))
+        }
+        (
             operation @ (ControlPlaneOperation::PauseTask
             | ControlPlaneOperation::StartTaskDiscovery
             | ControlPlaneOperation::ResumeTask
@@ -1125,6 +1294,9 @@ fn request_path(
         (
             ControlPlaneOperation::ListTasks
             | ControlPlaneOperation::GetTask
+            | ControlPlaneOperation::GetTaskTargetPreview
+            | ControlPlaneOperation::ReplaceTaskTargetExclusions
+            | ControlPlaneOperation::ConfirmTaskTargetPreview
             | ControlPlaneOperation::StreamTaskEvents
             | ControlPlaneOperation::PauseTask
             | ControlPlaneOperation::StartTaskDiscovery
@@ -1510,6 +1682,35 @@ struct TaskDiscoveryResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskTargetPreviewItemResponse {
+    target_id: String,
+    ordinal: u16,
+    display_name: String,
+    public_handle: Option<String>,
+    source: String,
+    disposition: String,
+    user_excluded: bool,
+    selected: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskTargetPreviewResponse {
+    task_id: String,
+    task_status: String,
+    task_revision: u64,
+    last_event_sequence: u64,
+    page_revision: u64,
+    selected_target_count: u16,
+    user_excluded_target_count: u16,
+    confirmed: bool,
+    confirmed_at: Option<String>,
+    items: Vec<TaskTargetPreviewItemResponse>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskListResponse {
     items: Vec<TaskSnapshotResponse>,
     next_cursor: Option<String>,
@@ -1597,6 +1798,91 @@ pub struct TaskDiscoveryCommand {
     command_id: String,
     execution_attempt_id: String,
     command_status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTargetPreviewItem {
+    target_id: String,
+    ordinal: u16,
+    display_name: String,
+    public_handle: Option<String>,
+    source: String,
+    disposition: String,
+    user_excluded: bool,
+    selected: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTargetPreview {
+    task_id: String,
+    task_status: String,
+    task_revision: u64,
+    last_event_sequence: u64,
+    page_revision: u64,
+    selected_target_count: u16,
+    user_excluded_target_count: u16,
+    confirmed: bool,
+    confirmed_at: Option<String>,
+    items: Vec<TaskTargetPreviewItem>,
+    next_cursor: Option<String>,
+}
+
+impl TaskTargetPreview {
+    pub fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
+    pub fn task_status(&self) -> &str {
+        &self.task_status
+    }
+
+    pub fn task_revision(&self) -> u64 {
+        self.task_revision
+    }
+
+    pub fn last_event_sequence(&self) -> u64 {
+        self.last_event_sequence
+    }
+
+    pub fn page_revision(&self) -> u64 {
+        self.page_revision
+    }
+
+    pub fn selected_target_count(&self) -> u16 {
+        self.selected_target_count
+    }
+
+    pub fn user_excluded_target_count(&self) -> u16 {
+        self.user_excluded_target_count
+    }
+
+    pub fn confirmed(&self) -> bool {
+        self.confirmed
+    }
+
+    pub fn items(&self) -> &[TaskTargetPreviewItem] {
+        &self.items
+    }
+}
+
+impl TaskTargetPreviewItem {
+    pub fn target_id(&self) -> &str {
+        &self.target_id
+    }
+
+    pub fn selected(&self) -> bool {
+        self.selected
+    }
+
+    pub fn user_excluded(&self) -> bool {
+        self.user_excluded
+    }
+
+    pub fn ordinal(&self) -> u16 {
+        self.ordinal
+    }
 }
 
 impl TaskDiscoveryCommand {
@@ -1819,6 +2105,45 @@ fn require_list_cursor(value: &str) -> Result<(), ControlPlaneError> {
     Ok(())
 }
 
+fn require_preview_cursor(value: &str) -> Result<(), ControlPlaneError> {
+    if value.is_empty()
+        || value.len() > 512
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn validate_preview_command(
+    task_id: &str,
+    page_revision: u64,
+    expected_task_revision: u64,
+    excluded_target_ids: &[String],
+    idempotency_key: &str,
+) -> Result<(), ControlPlaneError> {
+    require_canonical_uuid_v4(task_id)?;
+    require_idempotency_key(idempotency_key)?;
+    if page_revision == 0
+        || page_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || expected_task_revision == 0
+        || expected_task_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || excluded_target_ids.len() > MAX_TASK_TARGET_LIMIT as usize
+    {
+        return Err(protocol_invalid());
+    }
+    let mut unique = HashSet::with_capacity(excluded_target_ids.len());
+    for target_id in excluded_target_ids {
+        require_canonical_uuid_v4(target_id)?;
+        if !unique.insert(target_id.as_str()) {
+            return Err(protocol_invalid());
+        }
+    }
+    Ok(())
+}
+
 fn valid_task_status(value: &str) -> bool {
     matches!(
         value,
@@ -2020,6 +2345,120 @@ fn parse_task_discovery(
         command_id: response.command_id,
         execution_attempt_id: response.execution_attempt_id,
         command_status: response.command_status,
+    })
+}
+
+fn parse_task_target_preview(
+    body: &[u8],
+    expected_task_id: &str,
+    require_complete: bool,
+) -> Result<TaskTargetPreview, ControlPlaneError> {
+    let response: TaskTargetPreviewResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.task_id)?;
+    let confirmed_at = response
+        .confirmed_at
+        .as_deref()
+        .map(require_bounded_timestamp)
+        .transpose()?;
+    if response.task_id != expected_task_id
+        || !valid_task_status(&response.task_status)
+        || response.task_revision == 0
+        || response.task_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.last_event_sequence == 0
+        || response.last_event_sequence > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.page_revision == 0
+        || response.page_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.selected_target_count > MAX_TASK_TARGET_LIMIT
+        || response.user_excluded_target_count > MAX_TASK_TARGET_LIMIT
+        || response.selected_target_count + response.user_excluded_target_count
+            > MAX_TASK_TARGET_LIMIT
+        || response.items.len() > MAX_TASK_TARGET_LIMIT as usize
+        || response.items.is_empty() && response.next_cursor.is_some()
+        || response
+            .next_cursor
+            .as_deref()
+            .is_some_and(|cursor| require_preview_cursor(cursor).is_err())
+        || require_complete && response.next_cursor.is_some()
+        || response.confirmed != confirmed_at.is_some()
+        || (!response.confirmed && response.task_status != "awaiting_confirmation")
+        || (response.confirmed
+            && matches!(
+                response.task_status.as_str(),
+                "draft" | "validating" | "discovering_targets" | "awaiting_confirmation"
+            ))
+        || response.confirmed && response.selected_target_count == 0
+    {
+        return Err(protocol_invalid());
+    }
+    let mut seen = HashSet::with_capacity(response.items.len());
+    let mut previous: Option<(u16, String)> = None;
+    let mut computed_selected = 0_u16;
+    let mut computed_excluded = 0_u16;
+    let mut items = Vec::with_capacity(response.items.len());
+    for item in response.items {
+        require_canonical_uuid_v4(&item.target_id)?;
+        require_safe_exact_text(&item.display_name, MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS)?;
+        if let Some(handle) = item.public_handle.as_deref() {
+            let mut bytes = handle.bytes();
+            if handle.len() > MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS
+                || !bytes
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                || !bytes
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+            {
+                return Err(protocol_invalid());
+            }
+        }
+        let eligible = item.disposition == "eligible";
+        if item.ordinal == 0
+            || item.ordinal > MAX_TASK_TARGET_LIMIT
+            || item.source != "general_search_author"
+            || !matches!(
+                item.disposition.as_str(),
+                "eligible" | "duplicate_in_task" | "duplicate_in_history" | "blacklisted"
+            )
+            || item.user_excluded && !eligible
+            || item.selected != (eligible && !item.user_excluded)
+            || !seen.insert(item.target_id.clone())
+            || previous.as_ref().is_some_and(|value| {
+                (item.ordinal, item.target_id.as_str()) <= (value.0, value.1.as_str())
+            })
+        {
+            return Err(protocol_invalid());
+        }
+        computed_selected += u16::from(item.selected);
+        computed_excluded += u16::from(item.user_excluded);
+        previous = Some((item.ordinal, item.target_id.clone()));
+        items.push(TaskTargetPreviewItem {
+            target_id: item.target_id,
+            ordinal: item.ordinal,
+            display_name: item.display_name,
+            public_handle: item.public_handle,
+            source: item.source,
+            disposition: item.disposition,
+            user_excluded: item.user_excluded,
+            selected: item.selected,
+        });
+    }
+    if require_complete
+        && (computed_selected != response.selected_target_count
+            || computed_excluded != response.user_excluded_target_count)
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(TaskTargetPreview {
+        task_id: response.task_id,
+        task_status: response.task_status,
+        task_revision: response.task_revision,
+        last_event_sequence: response.last_event_sequence,
+        page_revision: response.page_revision,
+        selected_target_count: response.selected_target_count,
+        user_excluded_target_count: response.user_excluded_target_count,
+        confirmed: response.confirmed,
+        confirmed_at: response.confirmed_at,
+        items,
+        next_cursor: response.next_cursor,
     })
 }
 
@@ -2389,9 +2828,10 @@ mod tests {
         parse_douyin_platform_session_logout_prepare, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
         parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
-        parse_task_discovery, parse_task_list, parse_task_snapshot_body, parse_workbench_status,
-        request_path, require_idempotency_key, require_list_cursor, required_credential,
-        sse_frame_end, transport_error, validate_response_metadata, validated_loopback_origin,
+        parse_task_discovery, parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
+        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
+        require_preview_cursor, required_credential, sse_frame_end, transport_error,
+        validate_preview_command, validate_response_metadata, validated_loopback_origin,
         ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
         DeviceSessionCapability, DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition,
         ResponseMetadata,
@@ -3629,6 +4069,150 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn target_preview_parser_is_revision_bound_ordered_and_secret_free() {
+        let second_target = "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc";
+        let response = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "taskStatus": "awaiting_confirmation",
+            "taskRevision": 4,
+            "lastEventSequence": 3,
+            "pageRevision": 7,
+            "selectedTargetCount": 1,
+            "userExcludedTargetCount": 1,
+            "confirmed": false,
+            "confirmedAt": null,
+            "items": [
+                {
+                    "targetId": IDENTIFIER,
+                    "ordinal": 1,
+                    "displayName": "目标一",
+                    "publicHandle": "public_1",
+                    "source": "general_search_author",
+                    "disposition": "eligible",
+                    "userExcluded": false,
+                    "selected": true
+                },
+                {
+                    "targetId": second_target,
+                    "ordinal": 2,
+                    "displayName": "目标二",
+                    "publicHandle": null,
+                    "source": "general_search_author",
+                    "disposition": "eligible",
+                    "userExcluded": true,
+                    "selected": false
+                }
+            ],
+            "nextCursor": null
+        });
+        let encoded = serde_json::to_vec(&response).expect("preview JSON");
+        let parsed =
+            parse_task_target_preview(&encoded, IDENTIFIER, true).expect("valid complete preview");
+        assert_eq!(parsed.task_id(), IDENTIFIER);
+        assert_eq!(parsed.task_status(), "awaiting_confirmation");
+        assert_eq!(parsed.task_revision(), 4);
+        assert_eq!(parsed.page_revision(), 7);
+        assert_eq!(parsed.selected_target_count(), 1);
+        assert_eq!(parsed.user_excluded_target_count(), 1);
+        assert!(!parsed.confirmed());
+        assert_eq!(parsed.items().len(), 2);
+        assert!(parsed.items()[0].selected());
+        assert!(parsed.items()[1].user_excluded());
+        let public = serde_json::to_string(&parsed).expect("public preview JSON");
+        assert!(!public.contains("private-platform"));
+        assert!(!public.contains("dedupe"));
+
+        let mut paged = response.clone();
+        paged["items"] = serde_json::json!([response["items"][0].clone()]);
+        paged["nextCursor"] = serde_json::json!("YWJj");
+        assert!(parse_task_target_preview(
+            &serde_json::to_vec(&paged).expect("paged preview JSON"),
+            IDENTIFIER,
+            false,
+        )
+        .is_ok());
+        assert!(parse_task_target_preview(
+            &serde_json::to_vec(&paged).expect("paged preview JSON"),
+            IDENTIFIER,
+            true,
+        )
+        .is_err());
+
+        for invalid in [
+            {
+                let mut value = response.clone();
+                value["pageRevision"] = serde_json::json!(0);
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][1]["selected"] = serde_json::json!(true);
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][0]["displayName"] = serde_json::json!("cookie=private");
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][0]["publicHandle"] = serde_json::json!("invalid handle");
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][1]["ordinal"] = serde_json::json!(1);
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["confirmed"] = serde_json::json!(true);
+                value["confirmedAt"] = serde_json::json!("2026-07-20T03:00:00Z");
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["platformTargetId"] = serde_json::json!("private-platform");
+                value
+            },
+        ] {
+            assert!(parse_task_target_preview(
+                &serde_json::to_vec(&invalid).expect("invalid preview JSON"),
+                IDENTIFIER,
+                true,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn target_preview_commands_validate_canonical_revisions_targets_and_cursors() {
+        let target = "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc".to_owned();
+        validate_preview_command(
+            IDENTIFIER,
+            7,
+            4,
+            std::slice::from_ref(&target),
+            "task:preview:replace",
+        )
+        .expect("valid preview command");
+        for targets in [
+            vec!["private-invalid".to_owned()],
+            vec![target.clone(), target.clone()],
+        ] {
+            assert!(
+                validate_preview_command(IDENTIFIER, 7, 4, &targets, "task:preview:replace",)
+                    .is_err()
+            );
+        }
+        assert!(validate_preview_command(IDENTIFIER, 0, 4, &[], "task:preview:confirm").is_err());
+        assert!(validate_preview_command(IDENTIFIER, 7, 0, &[], "task:preview:confirm").is_err());
+        require_preview_cursor(&"a".repeat(512)).expect("maximum preview cursor");
+        assert!(require_preview_cursor(&"a".repeat(513)).is_err());
+        assert!(require_preview_cursor("private+cursor").is_err());
     }
 
     #[test]

@@ -294,6 +294,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{task_id}/target-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Task Target Preview */
+        get: operations["getTaskTargetPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/target-preview/confirmations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Task Target Preview */
+        post: operations["confirmTaskTargetPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/target-preview/exclusions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Task Target Exclusions */
+        put: operations["replaceTaskTargetExclusions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/version": {
         parameters: {
             query?: never;
@@ -357,6 +408,16 @@ export interface components {
             /** Sessiontoken */
             sessionToken: string;
         };
+        /**
+         * DouyinCandidateDisposition
+         * @enum {string}
+         */
+        DouyinCandidateDisposition: "eligible" | "duplicate_in_task" | "duplicate_in_history" | "blacklisted";
+        /**
+         * DouyinCandidateSource
+         * @enum {string}
+         */
+        DouyinCandidateSource: "general_search_author";
         /**
          * DouyinSearchExposureAction
          * @enum {string}
@@ -633,6 +694,63 @@ export interface components {
          * @enum {string}
          */
         TaskStatus: "draft" | "validating" | "awaiting_device" | "awaiting_platform_login" | "discovering_targets" | "awaiting_confirmation" | "queued" | "running" | "paused" | "awaiting_human" | "cancelling" | "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "outcome_uncertain";
+        /** TaskTargetConfirmationRequest */
+        TaskTargetConfirmationRequest: {
+            /** Expectedtaskrevision */
+            expectedTaskRevision: number;
+            /** Pagerevision */
+            pageRevision: number;
+        };
+        /** TaskTargetExclusionsRequest */
+        TaskTargetExclusionsRequest: {
+            /** Excludedtargetids */
+            excludedTargetIds: string[];
+            /** Expectedtaskrevision */
+            expectedTaskRevision: number;
+            /** Pagerevision */
+            pageRevision: number;
+        };
+        /** TaskTargetPreviewItemResponse */
+        TaskTargetPreviewItemResponse: {
+            /** Displayname */
+            displayName: string;
+            disposition: components["schemas"]["DouyinCandidateDisposition"];
+            /** Ordinal */
+            ordinal: number;
+            /** Publichandle */
+            publicHandle: string | null;
+            /** Selected */
+            selected: boolean;
+            source: components["schemas"]["DouyinCandidateSource"];
+            /** Targetid */
+            targetId: string;
+            /** Userexcluded */
+            userExcluded: boolean;
+        };
+        /** TaskTargetPreviewResponse */
+        TaskTargetPreviewResponse: {
+            /** Confirmed */
+            confirmed: boolean;
+            /** Confirmedat */
+            confirmedAt: string | null;
+            /** Items */
+            items: components["schemas"]["TaskTargetPreviewItemResponse"][];
+            /** Lasteventsequence */
+            lastEventSequence: number;
+            /** Nextcursor */
+            nextCursor: string | null;
+            /** Pagerevision */
+            pageRevision: number;
+            /** Selectedtargetcount */
+            selectedTargetCount: number;
+            /** Taskid */
+            taskId: string;
+            /** Taskrevision */
+            taskRevision: number;
+            taskStatus: components["schemas"]["TaskStatus"];
+            /** Userexcludedtargetcount */
+            userExcludedTargetCount: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1202,6 +1320,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getTaskTargetPreview: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTargetPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirmTaskTargetPreview: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskTargetConfirmationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTargetPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replaceTaskTargetExclusions: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskTargetExclusionsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTargetPreviewResponse"];
                 };
             };
             /** @description Validation Error */

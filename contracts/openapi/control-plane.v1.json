@@ -52,6 +52,23 @@
         "title": "DeviceSessionExchangeResponse",
         "type": "object"
       },
+      "DouyinCandidateDisposition": {
+        "enum": [
+          "eligible",
+          "duplicate_in_task",
+          "duplicate_in_history",
+          "blacklisted"
+        ],
+        "title": "DouyinCandidateDisposition",
+        "type": "string"
+      },
+      "DouyinCandidateSource": {
+        "enum": [
+          "general_search_author"
+        ],
+        "title": "DouyinCandidateSource",
+        "type": "string"
+      },
       "DouyinSearchExposureAction": {
         "enum": [
           "browse",
@@ -705,6 +722,208 @@
         ],
         "title": "TaskStatus",
         "type": "string"
+      },
+      "TaskTargetConfirmationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedTaskRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Expectedtaskrevision",
+            "type": "integer"
+          },
+          "pageRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Pagerevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pageRevision",
+          "expectedTaskRevision"
+        ],
+        "title": "TaskTargetConfirmationRequest",
+        "type": "object"
+      },
+      "TaskTargetExclusionsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "excludedTargetIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Excludedtargetids",
+            "type": "array"
+          },
+          "expectedTaskRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Expectedtaskrevision",
+            "type": "integer"
+          },
+          "pageRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Pagerevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pageRevision",
+          "expectedTaskRevision",
+          "excludedTargetIds"
+        ],
+        "title": "TaskTargetExclusionsRequest",
+        "type": "object"
+      },
+      "TaskTargetPreviewItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/DouyinCandidateDisposition"
+          },
+          "ordinal": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "publicHandle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publichandle"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/DouyinCandidateSource"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          },
+          "userExcluded": {
+            "title": "Userexcluded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "targetId",
+          "ordinal",
+          "displayName",
+          "publicHandle",
+          "source",
+          "disposition",
+          "userExcluded",
+          "selected"
+        ],
+        "title": "TaskTargetPreviewItemResponse",
+        "type": "object"
+      },
+      "TaskTargetPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "confirmedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmedat"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskTargetPreviewItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "lastEventSequence": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          },
+          "pageRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Pagerevision",
+            "type": "integer"
+          },
+          "selectedTargetCount": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Selectedtargetcount",
+            "type": "integer"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          },
+          "taskRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Taskrevision",
+            "type": "integer"
+          },
+          "taskStatus": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "userExcludedTargetCount": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Userexcludedtargetcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "taskId",
+          "taskStatus",
+          "taskRevision",
+          "lastEventSequence",
+          "pageRevision",
+          "selectedTargetCount",
+          "userExcludedTargetCount",
+          "confirmed",
+          "confirmedAt",
+          "items",
+          "nextCursor"
+        ],
+        "title": "TaskTargetPreviewResponse",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -1671,6 +1890,214 @@
           }
         ],
         "summary": "Resume Task",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/target-preview": {
+      "get": {
+        "operationId": "getTaskTargetPreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTargetPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Task Target Preview",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/target-preview/confirmations": {
+      "post": {
+        "operationId": "confirmTaskTargetPreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskTargetConfirmationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTargetPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Confirm Task Target Preview",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/target-preview/exclusions": {
+      "put": {
+        "operationId": "replaceTaskTargetExclusions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskTargetExclusionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTargetPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Replace Task Target Exclusions",
         "tags": [
           "tasks"
         ]

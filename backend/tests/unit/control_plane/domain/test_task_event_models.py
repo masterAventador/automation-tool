@@ -30,6 +30,8 @@ def test_task_event_version_types_and_sequence_limit_are_an_exact_contract() -> 
         "task.awaiting_platform_login",
         "task.discovery_started",
         "task.awaiting_confirmation",
+        "task.target_selection_updated",
+        "task.targets_confirmed",
         "task.started",
         "step.started",
         "step.progress",

@@ -26,6 +26,7 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
     installations,
+    task_target_confirmations,
     task_targets,
     tasks,
 )
@@ -173,6 +174,12 @@ async def evaluate_and_replace_task_targets(
         evaluated_at=initial.evaluated_at,
     )
     if existing_rows:
+        await session.execute(
+            delete(task_target_confirmations).where(
+                task_target_confirmations.c.task_id == task_id.uuid,
+                task_target_confirmations.c.installation_id == installation_id.uuid,
+            )
+        )
         await session.execute(
             delete(task_targets).where(
                 task_targets.c.task_id == task_id.uuid,

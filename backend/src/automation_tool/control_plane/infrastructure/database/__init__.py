@@ -15,6 +15,8 @@ from .schema import (
     task_actions,
     task_commands,
     task_events,
+    task_target_confirmations,
+    task_target_exclusions,
     task_targets,
     tasks,
 )
@@ -46,6 +48,8 @@ __all__ = [
     "task_actions",
     "task_commands",
     "task_events",
+    "task_target_confirmations",
+    "task_target_exclusions",
     "task_targets",
     "tasks",
 ]

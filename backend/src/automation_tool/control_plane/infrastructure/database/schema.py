@@ -578,6 +578,13 @@ task_targets = Table(
         name="uq_task_targets_binding",
     ),
     UniqueConstraint(
+        "id",
+        "task_id",
+        "installation_id",
+        "page_revision",
+        name="uq_task_targets_preview_binding",
+    ),
+    UniqueConstraint(
         "task_id",
         "installation_id",
         "ordinal",
@@ -599,6 +606,111 @@ Index(
     task_targets.c.installation_id,
     task_targets.c.dedupe_key,
     task_targets.c.evaluated_at,
+)
+
+task_target_exclusions = Table(
+    "task_target_exclusions",
+    metadata,
+    Column("target_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("page_revision", BigInteger(), nullable=False),
+    Column("excluded_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "substring(target_id::text from 15 for 1) = '4' "
+        "and substring(target_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_task_target_exclusions_target_uuid_v4",
+    ),
+    CheckConstraint(
+        f"page_revision between 1 and {MAX_EXECUTOR_SEQUENCE}",
+        name="ck_task_target_exclusions_page_revision_range",
+    ),
+    ForeignKeyConstraint(
+        ["target_id", "task_id", "installation_id", "page_revision"],
+        [
+            "task_targets.id",
+            "task_targets.task_id",
+            "task_targets.installation_id",
+            "task_targets.page_revision",
+        ],
+        name="fk_task_target_exclusions_preview_binding",
+        ondelete="CASCADE",
+    ),
+    PrimaryKeyConstraint("target_id", name="pk_task_target_exclusions"),
+)
+
+Index(
+    "ix_task_target_exclusions_installation_task_page",
+    task_target_exclusions.c.installation_id,
+    task_target_exclusions.c.task_id,
+    task_target_exclusions.c.page_revision,
+)
+
+task_target_confirmations = Table(
+    "task_target_confirmations",
+    metadata,
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("page_revision", BigInteger(), nullable=False),
+    Column("selection_task_revision", BigInteger(), nullable=False),
+    Column("confirmed_task_revision", BigInteger(), nullable=False),
+    Column("selected_target_count", BigInteger(), nullable=False),
+    Column("source_message_id", UUID(as_uuid=True), nullable=False),
+    Column("source_idempotency_key", String(), nullable=False),
+    Column("source_fingerprint", LargeBinary(length=32), nullable=False),
+    Column("confirmed_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        f"page_revision between 1 and {MAX_EXECUTOR_SEQUENCE}",
+        name="ck_task_target_confirmations_page_revision_range",
+    ),
+    CheckConstraint(
+        "selection_task_revision > 0 and confirmed_task_revision = selection_task_revision + 1",
+        name="ck_task_target_confirmations_revision_order",
+    ),
+    CheckConstraint(
+        f"selected_target_count between 1 and {MAX_TASK_TARGET_LIMIT}",
+        name="ck_task_target_confirmations_selected_count",
+    ),
+    CheckConstraint(
+        "substring(source_message_id::text from 15 for 1) = '4' "
+        "and substring(source_message_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_task_target_confirmations_message_uuid_v4",
+    ),
+    CheckConstraint(
+        "source_idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$'",
+        name="ck_task_target_confirmations_idempotency_key",
+    ),
+    CheckConstraint(
+        "octet_length(source_fingerprint) = 32",
+        name="ck_task_target_confirmations_fingerprint_length",
+    ),
+    CheckConstraint(
+        "created_at >= confirmed_at",
+        name="ck_task_target_confirmations_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["task_id", "installation_id"],
+        ["tasks.id", "tasks.installation_id"],
+        name="fk_task_target_confirmations_task_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("task_id", name="pk_task_target_confirmations"),
+    UniqueConstraint(
+        "installation_id",
+        "source_message_id",
+        name="uq_task_target_confirmations_source_message",
+    ),
+    UniqueConstraint(
+        "installation_id",
+        "source_idempotency_key",
+        name="uq_task_target_confirmations_source_idempotency",
+    ),
 )
 
 _terminal_attempt_values = ", ".join(
