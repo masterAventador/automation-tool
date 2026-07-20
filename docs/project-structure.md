@@ -266,6 +266,7 @@ backend/
 │       │   ├── browser_authority.py # 登录与发现共享的受信浏览器请求/lease 所有权
 │       │   ├── browser_runtime.py # 单 context、页面/窗口、超时和清理的 Playwright BrowserRuntime
 │       │   ├── rpa/douyin/comment_page.py # A7-08 评论输入/提交/最终确认的唯一 selector 所有者
+│       │   ├── rpa/douyin/direct_message_page.py # A7-09 私信会话/发送/权限/最终确认的唯一 selector 所有者
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
 │       │   ├── command_processor.py # 正式命令、SQLite checkpoint 和持久结果 outbox
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
@@ -373,6 +374,8 @@ D6-09 的 `control_plane/application/task_targets.py` 定义脱敏、不可变�
 D6-10 的服务端路径按 `api/task_discoveries.py`（App Session/HTTP）、`application/task_discovery.py`（启动、有限批次累计与收敛）、`infrastructure/database/task_discovery_repository.py`（唯一事务事实）和 `bootstrap/task_discovery.py`（装配）分层；迁移 `20260720_0017` 只扩展既有 Task command/event 封闭词汇。Executor 侧 `browser_authority.py`、`discovery_operation.py`、`command_processor.py` 与当时的 SQLite v3 分别负责浏览器所有权、现有 RPA adapter 组合、正式 envelope/outbox 和重放；A7-04 已原地升级为 v4，并增加 `action_gate.py`、动作策略、紧停和准入事实。Rust `control_plane.rs`/`lib.rs` 只向 App 提供固定 `start_task_discovery`，WebView 不接触 Session、Candidate、浏览器或 Profile。`scripts/run_d6_10_acceptance.py` 使用唯一 hidden App、真实 Uvicorn/PostgreSQL 与正式 LocalExecutorProcess 验证这条纵向链，并只清理自己的 AppData、端口和 Compose 资源。
 
 A7-08 的 `executor/rpa/douyin/comment_page.py` 与既有 `page_version.py` 共同拥有评论页信任边界：版本模型新增 canonical 视频详情入口，评论模块集中管理 input/submit/final/login/blocking selector 和有界等待，只返回封闭观察或 locator，不执行填写/点击。`tests/fixtures/douyin_comment_pages` 与对应 BrowserRuntime 集成测试只存在于测试树，以无头系统 Chrome 回放 ready→confirmed、阻塞和漂移；生产包不包含 Fake 页面，真实评论编排仍由 A7-11 承接。
+
+A7-09 的 `executor/rpa/douyin/direct_message_page.py` 与同一 `page_version.py` 共同拥有主动私信页信任边界：版本模型新增 canonical 用户主页入口，私信模块集中管理进入会话、input/send/final、两类 permission、login/blocking selector 和有界等待，只返回封闭观察或 locator，不执行填写/点击。`tests/fixtures/douyin_direct_message_pages` 与对应 BrowserRuntime 集成测试只存在于测试树，以无头系统 Chrome 回放 profile→conversation→confirmed、关注权限拒绝和冲突漂移；生产包不包含 Fake 页面，真实私信编排仍由 A7-12 承接。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 

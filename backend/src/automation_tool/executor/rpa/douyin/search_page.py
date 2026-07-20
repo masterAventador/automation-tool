@@ -134,6 +134,7 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinPageEntry.HOME,
                 DouyinPageEntry.SEARCH_RESULTS,
                 DouyinPageEntry.VIDEO_DETAIL,
+                DouyinPageEntry.USER_PROFILE,
             )
         ),
         *(
@@ -147,6 +148,7 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinPageEntry.HOME,
                 DouyinPageEntry.SEARCH_RESULTS,
                 DouyinPageEntry.VIDEO_DETAIL,
+                DouyinPageEntry.USER_PROFILE,
             )
         ),
         *(
@@ -160,6 +162,7 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinPageEntry.HOME,
                 DouyinPageEntry.SEARCH_RESULTS,
                 DouyinPageEntry.VIDEO_DETAIL,
+                DouyinPageEntry.USER_PROFILE,
             )
             for evidence in (
                 DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING,

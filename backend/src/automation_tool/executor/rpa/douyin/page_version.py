@@ -17,6 +17,7 @@ DOUYIN_VIDEO_ENTRY_URL = "https://www.douyin.com/video"
 
 _OFFICIAL_HOST = "www.douyin.com"
 _SESSION_PATH = "/user/self"
+_PROFILE_PATH_PREFIX = "/user/"
 _SEARCH_PATH_PREFIX = "/search/"
 _SEARCH_QUERY = "type=general"
 _VIDEO_PATH_PREFIX = "/video/"
@@ -24,6 +25,7 @@ _MAX_PAGE_URL_CHARACTERS = 2048
 _MAX_SEARCH_ROUTE_CHARACTERS = 256
 _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _VIDEO_ID_PATTERN = re.compile(r"[1-9][0-9]{0,31}")
+_PROFILE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 
 
 class DouyinPageVersionRejected(RuntimeError):
@@ -43,6 +45,7 @@ class DouyinPageEntry(StrEnum):
     SESSION_PROBE = "session_probe"
     SEARCH_RESULTS = "search_results"
     VIDEO_DETAIL = "video_detail"
+    USER_PROFILE = "user_profile"
     UNKNOWN = "unknown"
 
 
@@ -51,6 +54,7 @@ class DouyinPageEvidence(StrEnum):
     KNOWN_SESSION_ENTRY = "known_session_entry"
     KNOWN_SEARCH_ENTRY = "known_search_entry"
     KNOWN_VIDEO_ENTRY = "known_video_entry"
+    KNOWN_USER_PROFILE_ENTRY = "known_user_profile_entry"
     ORIGIN_INVALID = "origin_invalid"
     ENTRY_UNKNOWN = "entry_unknown"
     SEARCH_ROUTE_INVALID = "search_route_invalid"
@@ -61,6 +65,7 @@ _KNOWN_EVIDENCE = {
     DouyinPageEntry.SESSION_PROBE: DouyinPageEvidence.KNOWN_SESSION_ENTRY,
     DouyinPageEntry.SEARCH_RESULTS: DouyinPageEvidence.KNOWN_SEARCH_ENTRY,
     DouyinPageEntry.VIDEO_DETAIL: DouyinPageEvidence.KNOWN_VIDEO_ENTRY,
+    DouyinPageEntry.USER_PROFILE: DouyinPageEvidence.KNOWN_USER_PROFILE_ENTRY,
 }
 _FAILURE_EVIDENCE = frozenset(
     {
@@ -125,6 +130,13 @@ class DouyinPageVersionModel:
             return _known(DouyinPageEntry.HOME)
         if parsed.path == _SESSION_PATH and not parsed.query:
             return _known(DouyinPageEntry.SESSION_PROBE)
+        if (
+            parsed.path.startswith(_PROFILE_PATH_PREFIX)
+            and not parsed.query
+            and _PROFILE_ID_PATTERN.fullmatch(parsed.path.removeprefix(_PROFILE_PATH_PREFIX))
+            is not None
+        ):
+            return _known(DouyinPageEntry.USER_PROFILE)
         if parsed.path == DOUYIN_SEARCH_ENTRY_URL.removeprefix(
             "https://www.douyin.com"
         ) or parsed.path.startswith(_SEARCH_PATH_PREFIX):

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <main>
+      <button aria-label="私信" id="entry" type="button">私信</button>
+      <section id="conversation" hidden>
+        <textarea aria-label="发送私信"></textarea>
+        <button aria-label="发送私信" id="send" type="button">发送</button>
+      </section>
+      <div role="status" hidden>私信发送成功</div>
+    </main>
+    <script>
+      document.querySelector("#entry").addEventListener("click", () => {
+        document.querySelector("#entry").hidden = true;
+        document.querySelector("#conversation").hidden = false;
+      });
+      document.querySelector("#send").addEventListener("click", () => {
+        document.querySelector('[role="status"]').hidden = false;
+      });
+    </script>
+  </body>
+</html>

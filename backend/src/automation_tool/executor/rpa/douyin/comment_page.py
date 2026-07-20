@@ -122,7 +122,11 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinCommentPageState.UNKNOWN,
                 DouyinCommentPageEvidence.PAGE_VERSION_UNKNOWN,
             )
-            for entry in (DouyinPageEntry.HOME, DouyinPageEntry.SEARCH_RESULTS)
+            for entry in (
+                DouyinPageEntry.HOME,
+                DouyinPageEntry.SEARCH_RESULTS,
+                DouyinPageEntry.USER_PROFILE,
+            )
         ),
         (
             DouyinPageVersion.UNKNOWN,

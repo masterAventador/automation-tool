@@ -45,6 +45,11 @@ from automation_tool.protocol import DouyinSearchInput
             DouyinPageEntry.VIDEO_DETAIL,
             DouyinPageEvidence.KNOWN_VIDEO_ENTRY,
         ),
+        (
+            "https://www.douyin.com/user/creator-001",
+            DouyinPageEntry.USER_PROFILE,
+            DouyinPageEvidence.KNOWN_USER_PROFILE_ENTRY,
+        ),
     ),
 )
 def test_known_official_entries_resolve_to_one_page_contract(
@@ -83,7 +88,10 @@ def test_known_official_entries_resolve_to_one_page_contract(
         ("https://www.douyin.com/#search", DouyinPageEvidence.ORIGIN_INVALID),
         ("https://www.douyin.com/" + "a" * 2048, DouyinPageEvidence.ORIGIN_INVALID),
         ("https://www.douyin.com/live", DouyinPageEvidence.ENTRY_UNKNOWN),
-        ("https://www.douyin.com/user/other", DouyinPageEvidence.ENTRY_UNKNOWN),
+        ("https://www.douyin.com/user/", DouyinPageEvidence.ENTRY_UNKNOWN),
+        ("https://www.douyin.com/user/-other", DouyinPageEvidence.ENTRY_UNKNOWN),
+        ("https://www.douyin.com/user/other/extra", DouyinPageEvidence.ENTRY_UNKNOWN),
+        ("https://www.douyin.com/user/other?from=test", DouyinPageEvidence.ENTRY_UNKNOWN),
         ("https://www.douyin.com/?from=test", DouyinPageEvidence.ENTRY_UNKNOWN),
         ("https://www.douyin.com/user/self?from=test", DouyinPageEvidence.ENTRY_UNKNOWN),
         (f"{DOUYIN_VIDEO_ENTRY_URL}/", DouyinPageEvidence.ENTRY_UNKNOWN),
