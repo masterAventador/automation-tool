@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-15，下一项为 D6-16 真实目标发现验收；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线与 Wave 6 D6-01～D6-15 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-01；B5-15 真实账号 App 双重启证据同样独立补验 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -2099,10 +2099,21 @@
 - 资源与文档：浏览器测试只使用 pytest 临时目录和无头系统 Chrome；全量数据库继续使用 `automation-tool-pytest-*` 专属 Compose project 与随机 loopback 端口。结束后 Chrome/Playwright、pytest、PostgreSQL 容器/网络/Volume 和监听端口零残留，未触碰用户默认 Profile、真实抖音账号、系统钥匙串或其他项目；同步根/Backend README、后端架构、工程结构和本唯一台账
 - 后续：进入 `D6-16`，优先复用用户已授权的独立抖音 Profile，从正式只读目标发现链完成真实搜索/预览并证明没有评论、私信或其他外部副作用；若真实 Session 已失效则保持待账号补验并继续 Wave 7 可离线任务
 
+### D6-16 真实目标发现验收（当前待补）
+
+- 状态：🔍 待真实账号；真实 Session 已健康，但首页验证码挑战需要用户按平台正常流程处理，不能自动绕过
+- 首轮真实证据：只读检查确认生产 App 私有 Profile 目录仍存在且未被浏览器占用；`scripts/run_d6_16_browser_acceptance.py` 以 `headless=true` 系统 Chrome 先访问固定 `/user/self`，生产 Session detector 从短暂 `unknown` 稳定收敛为 `healthy`，无需重新扫码。随后同一 Profile 从正式 `ExecutorCommandProcessor.handle(task.discover)` 进入生产搜索，未产生 Candidate、Target 或平台副作用
+- RED 与修复：首页当前展示 ByteDance verifycenter 验证码 iframe。修复前正式搜索等待 10 秒后为 `failed/home_ready_timed_out`；新增 Page Object RED 在首页/结果页两种入口准确证明 iframe 会被误判为锚点冲突。将 `session.py` 的同一 `DOUYIN_RISK_CHALLENGE_SELECTORS` 公开给 `search_page.py` 复用后，两种入口均立即成为 `DIALOG_BLOCKED/BLOCKING_DIALOG`，正式发现收敛 `handoff_required/blocking_dialog`，不再等待、滚动或提取
+- 安全边界：使用 `agent-browser` 只读紧凑可访问性快照独立确认页面只有跨域验证码 iframe；未读取 iframe URL、Cookie、storage、网络响应、页面正文或账号信息，未截图/录屏，未点击、填写、拖拽或调用任何解题能力。诊断会话已按技能规范关闭；真实 runner stdout 只输出封闭 state/outcome/evidence/count，不输出 Profile 路径或候选摘要
+- 当前完成度：风控发现与 handoff 修复已完成并验证，但 D6-16 的完成定义要求真实搜索得到候选、经 App 目标预览确认且证明无外部副作用；当前 `candidate_count=0`，因此不得标绿。用户正常解除首页挑战后，复用同一 runner 与隐藏 App 预览链补验；在此之前不重复触发挑战
+- 门禁：风控 selector/Page Object/Search/Session 聚焦 `60 passed`；Backend 全量 `1406 passed, 5 skipped in 115.18s`，8997 条语句、1928 个分支 100%；Ruff/格式与严格 Mypy 覆盖 248 个源码/测试/验收脚本文件。真实 runner 最终稳定输出 Session healthy 与 `handoff_required/blocking_dialog`，退出码 3 精确表示真实目标验收未完成
+- 后续：按既定规则跳过需要即时用户介入的真实挑战，继续 `A7-01` 风险策略领域模型；D6-16 与 B5-15 均保留为独立真实账号补验项，不伪造完成
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-16`：使用受控真实抖音账号完成只读目标发现与预览，确认没有外部副作用；
-2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
-3. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。
+1. `A7-01`：建立平台/动作/安装实例级最小间隔、任务/日上限和连续失败阈值领域模型；
+2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
+3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
+4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

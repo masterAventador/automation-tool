@@ -17,6 +17,7 @@ from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageVersion,
     DouyinPageVersionModel,
 )
+from automation_tool.executor.rpa.douyin.session import DOUYIN_RISK_CHALLENGE_SELECTORS
 from automation_tool.protocol import (
     MAX_TASK_TARGET_LIMIT,
     DouyinCandidate,
@@ -57,6 +58,7 @@ _LOGIN_DIALOG_SELECTORS = (
     '[data-e2e="login-panel"]',
 )
 _BLOCKING_DIALOG_SELECTORS = (
+    *DOUYIN_RISK_CHALLENGE_SELECTORS,
     '[role="dialog"]',
     '[data-e2e="modal"]',
 )

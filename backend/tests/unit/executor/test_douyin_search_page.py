@@ -32,6 +32,7 @@ RESULT_ITEM = '[role="feed"] > article'
 RESULT_ITEM_FALLBACK = '[data-e2e="search-result-item"]'
 LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
+RISK_CHALLENGE = 'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'
 
 
 class FakeLocator:
@@ -231,10 +232,14 @@ def test_login_dialog_takes_priority_over_its_generic_dialog_shell(url: str) -> 
 
 
 @pytest.mark.parametrize("url", (DOUYIN_HOME_URL, SEARCH_RESULTS_URL))
-def test_non_login_dialog_blocks_every_page_anchor(url: str) -> None:
+@pytest.mark.parametrize("blocking_selector", (BLOCKING_DIALOG, RISK_CHALLENGE))
+def test_non_login_dialog_or_risk_challenge_blocks_every_page_anchor(
+    url: str,
+    blocking_selector: str,
+) -> None:
     page = FakePage(
         url=url,
-        visible_selectors={SEARCH_INPUT, SEARCH_BUTTON, RESULT_LIST, BLOCKING_DIALOG},
+        visible_selectors={SEARCH_INPUT, SEARCH_BUTTON, RESULT_LIST, blocking_selector},
     )
     search_page = DouyinSearchPage(window(page))
 
@@ -242,7 +247,7 @@ def test_non_login_dialog_blocks_every_page_anchor(url: str) -> None:
 
     assert observation.state is DouyinSearchPageState.DIALOG_BLOCKED
     assert observation.evidence is DouyinSearchPageEvidence.BLOCKING_DIALOG
-    assert cast(FakeLocator, search_page.blocking_dialog()).selector == BLOCKING_DIALOG
+    assert cast(FakeLocator, search_page.blocking_dialog()).selector == blocking_selector
 
 
 @pytest.mark.parametrize(

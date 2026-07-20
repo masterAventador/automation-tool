@@ -14,7 +14,7 @@ from automation_tool.protocol.safe_text import contains_control_or_bidi
 DOUYIN_SESSION_SELECTOR_VERSION = "douyin.session.v1"
 _MAX_PAGE_URL_CHARACTERS = 2048
 
-_RISK_SELECTORS = (
+DOUYIN_RISK_CHALLENGE_SELECTORS = (
     'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]',
     'iframe[src*="/verifycenter/captcha/"]',
     '[data-e2e="captcha-container"]',
@@ -120,7 +120,7 @@ class DouyinSessionDetector:
             visible = tuple(
                 evidence
                 for selectors, evidence in (
-                    (_RISK_SELECTORS, DouyinSessionEvidence.RISK_CHALLENGE),
+                    (DOUYIN_RISK_CHALLENGE_SELECTORS, DouyinSessionEvidence.RISK_CHALLENGE),
                     (_EXPIRED_SELECTORS, DouyinSessionEvidence.LOGIN_EXPIRED),
                     (DOUYIN_SESSION_HEALTHY_SELECTORS, DouyinSessionEvidence.AUTHENTICATED_SHELL),
                     (_MISSING_SELECTORS, DouyinSessionEvidence.LOGIN_ENTRY),
@@ -192,6 +192,7 @@ def _observation(
 
 
 __all__ = [
+    "DOUYIN_RISK_CHALLENGE_SELECTORS",
     "DOUYIN_SESSION_HEALTHY_SELECTORS",
     "DOUYIN_SESSION_PROBE_URL",
     "DOUYIN_SESSION_SELECTOR_VERSION",
