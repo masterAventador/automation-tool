@@ -395,7 +395,7 @@ MVP 不使用 AI 页面理解、stealth 或验证码识别。
 
 ### 9.2 Demo 注册
 
-受控 Demo 安装包使用限时、限环境、限一次或限次数的 bootstrap 授权完成设备注册。bootstrap 只允许注册，不允许创建或执行任务。注册后后端签发设备凭据并可随时吊销。
+受控 Demo 支持两种共用同一 I2 设备证明与凭据签发边界的注册来源：预授权安装批次可使用限时、限环境、限一次或限次数的 bootstrap；陌生设备由 P9-06 自动创建限时申请，经后台明确批准后获得只绑定该申请和设备公钥的一次注册授权。两者都只允许注册，不允许创建或执行任务；注册后后端签发设备凭据并可随时吊销。
 
 领域层的 `DemoBootstrapGrant` 固定唯一 purpose `installation.register`，绑定一个小写规范 Demo 环境 slug，采用 `[not_before, expires_at)` 半开时窗且硬上限 7 天。调用必须使用强类型 purpose/环境；原始字符串即使内容相同也不能越过能力边界，跨环境、未生效和到期均返回固定拒绝原因且不回显输入。这个对象只表达待签名 claims 的授权语义，不存 token、不读取环境变量，也不提前替代 C10-06 的注册次数、吊销、批次持久化和审计。
 
@@ -418,6 +418,12 @@ I2-14 增加服务器运维侧 Installation 吊销入口和统一 App 业务访�
 `require_current_installation_access` 是后续 App 业务路由的统一 FastAPI 依赖：只认证 `app.control-plane` Session 并返回强类型 `InstallationId` scope。`GET /api/v1/installations/current` 是正式启动探针，也是该守卫的首个消费者；缺少、畸形、过期或已吊销认证共享固定 401，依赖不可用使用固定可重试 503，所有响应禁止缓存。未来创建、读取和控制任务不得复制认证逻辑或只相信请求体中的 Installation ID；T3-06 在路线图上强制依赖 I2-14。
 
 隐藏 Tauri 生产同路径验收会先由 App 正式 Rust 桥注册并访问探针，再由服务器运维 CLI 吊销，最后让同一 App 重新走启动入口并得到独立吊销诊断；同时核对 Installation、长期凭据和全部 App Session 的原子最终状态。服务端吊销后本地凭据仍保留在 Rust 管理的 App 私有目录以稳定识别该安装状态，但已无法换取任何 Session；重新授权与本地凭据替换必须由后续显式流程完成。
+
+P9-06 规划新增安装前设备申请与后台审批，但不建立匿名业务入口或第二套长期凭据。未注册 Rust 客户端提交规范环境和设备公钥后，Control Plane 创建短期 pending request，返回公开配对码与只出现一次的高熵 poll secret；数据库只保存 poll secret 摘要。配对码只供人核对、不能认证轮询或注册。申请固定 submitted/pending/approved/rejected/expired/consumed 状态、UTC 有效期和单调 revision；匿名创建与轮询按 IP/环境/设备摘要限流，并限制并发申请、请求大小和失败次数。
+
+批准/拒绝只允许服务器认证运维 CLI 以 expected revision 做 CAS。批准时 CLI 在本机使用离线签发私钥产生现有 `atb1` bootstrap 并通过 HTTPS 提交；Control Plane 仍只持有验证公钥，验证环境、用途和时窗后把 typed grant、token SHA-256 指纹与精确 request/device public key 原子绑定，不保存原 token。poll secret 只允许读取该申请的安全状态，并在 approved 后请求同一设备公钥的注册 challenge；不能换取 Session 或调用任何业务 API。完成设备签名证明时在同一事务消费 challenge 与 approval、创建 Installation 并签发既有 `atdc1`，重放、跨设备、猜配对码、另一 poll secret、过期、拒绝和并发审批全部 fail closed。
+
+该流程的公开 App 投影只包含配对码、申请/到期时间、封闭状态和固定安全消息，不返回设备公钥、poll secret、bootstrap、拒绝内部原因或运维身份。P9-07 负责有界轮询和可见 UI；C10-06 再把离线签发批次、审批队列运营、次数限制、吊销与审计部署到云端 Demo。
 
 这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
 
@@ -848,7 +854,7 @@ Local Executor: uv 源码模式或测试构建
 - 使用云端 PostgreSQL；
 - 配置 HTTPS、域名、安装实例签发密钥和限流；
 - App `demo` Profile 指向云端 baseUrl；
-- 每个 Demo 安装包/批次使用隔离 bootstrap 授权；
+- 预授权安装批次使用隔离 bootstrap；陌生设备复用 P9-06/P9-07 申请、可见审批和一次性注册授权；
 - 部署、采购和公开访问必须由用户明确指示，规划文档不构成自动部署授权。
 
 ### 20.3 配置原则

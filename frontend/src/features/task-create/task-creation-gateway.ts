@@ -39,12 +39,14 @@ export type TaskCreationGatewayErrorCode =
   | "transport_unavailable"
   | "protocol_mismatch"
   | "installation_access_denied"
+  | "credential_missing"
   | "request_cancelled";
 
 const publicMessages: Record<TaskCreationGatewayErrorCode, string> = {
   transport_unavailable: "Task creation service is unavailable",
   protocol_mismatch: "Task creation protocol is incompatible",
   installation_access_denied: "Installation access is unavailable",
+  credential_missing: "Installation credential is unavailable",
   request_cancelled: "Task creation request was cancelled",
 };
 

@@ -44,6 +44,22 @@ describe("Tauri Task creation gateway", () => {
     });
   });
 
+  it("preserves a missing device credential as a non-retryable authorization error", async () => {
+    invoke.mockRejectedValueOnce({ code: "credential_missing", retryable: false });
+    const gateway = new TauriTaskCreationGateway();
+
+    await expect(
+      gateway.createDouyinSearchExposureTask(
+        definition,
+        "task:create:douyin-search:16fd2706-8baf-433b-82eb-8c7fada847da",
+      ),
+    ).rejects.toMatchObject({
+      code: "credential_missing",
+      retryable: false,
+      message: "Installation credential is unavailable",
+    });
+  });
+
   it("rejects invalid cross-runtime fields before invoke and never reflects secrets", async () => {
     const gateway = new TauriTaskCreationGateway();
     await expect(

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { TaskCreate } from "./TaskCreate";
-import type { TaskCreationGateway } from "./task-creation-gateway";
+import { TaskCreationGatewayError, type TaskCreationGateway } from "./task-creation-gateway";
 
 const TASK_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 
@@ -80,6 +80,22 @@ describe("Douyin search exposure Task creation", () => {
     await waitFor(() => expect(screen.getByText("请输入搜索关键词")).toBeVisible());
     expect(taskCreationGateway.createDouyinSearchExposureTask).not.toHaveBeenCalled();
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
+  });
+
+  it("explains when the current device has not completed Installation authorization", async () => {
+    const user = userEvent.setup();
+    const taskCreationGateway = gateway();
+    vi.mocked(taskCreationGateway.createDouyinSearchExposureTask).mockRejectedValue(
+      new TaskCreationGatewayError("credential_missing", false),
+    );
+    renderForm(taskCreationGateway);
+
+    await user.type(screen.getByLabelText("搜索关键词"), "新能源汽车");
+    await user.click(screen.getByRole("button", { name: "创建任务" }));
+
+    expect(await screen.findByText("当前设备尚未授权")).toBeVisible();
+    expect(screen.getByText("请先完成本机 Installation 授权后再创建任务。")).toBeVisible();
+    expect(screen.queryByText("请检查业务服务连接后重试。")).not.toBeInTheDocument();
   });
 
   it("submits an 80-code-point keyword through the original form caller", async () => {

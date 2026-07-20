@@ -74,6 +74,8 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 App 启动边界已实现 ready、checking、unavailable、revoked 四态和安全重试；ready 后进入正式工作台页面。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`、`TauriTaskProjectionSource` 与 `TauriWorkbenchGateway`。真实 WebView 只 invoke 固定 Rust Command，Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
 
+Wave 9 的 P9-06/P9-07 将替换“未注册 App 直接进入工作台”的临时行为：启动组合根在健康检查后先判断本机凭据，缺失时由 Rust 自动创建限时设备申请并持有 opaque 轮询秘密，React 只消费公开配对码、申请/到期时间和封闭状态投影。授权页必须可见展示提交中、等待审批、已批准、已拒绝、已过期和连接失败，提供安全重试或重新申请；批准前不挂载工作台业务路由，批准后由 Rust 完成 I2 两步设备证明并自动切换 ready。刷新、App 重启、断网和审批竞态都从服务端权威申请恢复，不能靠逐个业务按钮报错表达未授权。该段是明确规划边界，当前实现仍以上一段四态为准。
+
 T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation；T3-17 已以 `create_douyin_search_exposure_task` 固定 Command 接入窄任务表单。React 只能提交 `douyin.search_exposure.v1` 的明确字段，Zod 先校验，Rust 再校验安全文本、动作/消息关系、数量、间隔和强制确认，然后自行从 App 私有 vault 换取 `app.control-plane` Session 并注入受限幂等键。WebView 不接触 bearer、Header 或任意 URL。完成证据来自 `visible=false` 真实 Tauri App 点击表单并核对 PostgreSQL 最终定义，而不是浏览器 Harness 或直接 HTTP。
 
 D6-03 将表单和 Gateway 的关键词约束收敛到同一个 `douyinSearchKeywordSchema`，并导出只读 `80` 字符/`100` 目标上限给表单控件；长度使用 `Array.from` 的 Unicode code point 语义，与 Python `len`、Rust `chars().count()` 和 PostgreSQL `char_length` 一致，不再用 UTF-16 code unit 误拒非 BMP 文本。C0/C1/DEL、Bidi、首尾空白和安全文本违规在表单调用 Gateway 前显示固定校验错误，生产 Gateway 与 Rust 仍做第二、第三次复验；React 没有 trim、截断或自动改写用户输入。
@@ -226,17 +228,18 @@ I2-04 建立的设备密钥边界已在 I2-08 按当前产品决策迁移到统�
 
 ### 5.3 无登录页面下的安装实例认证
 
-第一期没有产品用户账号和登录 UI，但 Demo 云端仍需认证：
+第一期没有产品用户账号和登录 UI，但 Demo 云端仍需认证。I2 已实现设备身份、bootstrap challenge、长期凭据与短期 Session；P9-06/P9-07 在此基础上补齐陌生设备的可见申请和后台审批：
 
-- App 首次启动生成安装实例 ID 和设备密钥；
-- 受控 Demo 安装包通过限时、限环境的 bootstrap 授权注册一个安装实例；
-- 后端签发可撤销的设备凭据；
-- Rust 使用设备凭据换取短期访问能力；
-- 用户无感进入工作台；
-- bootstrap 凭据不能用于业务 API，Demo 结束后可吊销；
-- 这只是 Demo 安全边界，不冒充完整用户账号体系。
+- App 首次启动生成稳定设备身份和设备密钥；
+- 缺少长期凭据时，Rust 自动创建限时设备申请，只把公开配对码、申请时间、到期时间和封闭状态投影给 React；opaque 轮询秘密不进入 React、IPC 响应、localStorage、日志或普通配置；
+- 设备授权页展示提交中、等待审批、已批准、已拒绝、已过期和连接失败，允许对可恢复失败安全重试，对拒绝/过期明确重新申请；
+- 后台认证运维入口按配对码与设备公钥摘要批准或拒绝；批准使用离线签名 bootstrap 绑定该申请的一次注册，Control Plane 不持有离线签发私钥，也不持久化原 token；
+- Rust 仅在服务端权威状态为已批准时进入既有两步 challenge，用本机设备私钥证明后保存可撤销设备凭据；
+- 批准前不进入工作台且所有业务 Command fail closed，批准后自动进入工作台；日常重启已有有效凭据时继续打开即用；
+- bootstrap 或申请授权不能调用业务 API，Demo 结束后可吊销；
+- 这只是安装实例安全边界，不冒充完整用户账号体系。
 
-如果无法安全提供 bootstrap 或设备注册，Demo 后端必须限制在受控网络，不能退化成匿名公网写接口。
+如果无法安全提供 bootstrap、审批授权或设备注册，Demo 后端必须限制在受控网络，不能退化成匿名公网写接口。
 
 ## 6. Local Executor 桥接
 

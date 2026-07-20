@@ -19,9 +19,10 @@ import {
   douyinActionMessageTemplateSchema,
   douyinSearchKeywordSchema,
 } from "./task-creation-gateway";
-import type {
-  DouyinSearchExposureTaskDefinition,
-  TaskCreationGateway,
+import {
+  TaskCreationGatewayError,
+  type DouyinSearchExposureTaskDefinition,
+  type TaskCreationGateway,
 } from "./task-creation-gateway";
 
 interface TaskCreateProps {
@@ -65,6 +66,10 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
       await queryClient.invalidateQueries({ queryKey: taskProjectionKeys.all });
     },
   });
+
+  const credentialMissing =
+    mutation.error instanceof TaskCreationGatewayError &&
+    mutation.error.code === "credential_missing";
 
   const submit = (values: TaskFormValues) => {
     setCreatedTaskId(null);
@@ -201,8 +206,12 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
               className="task-create-notice"
               type="error"
               showIcon
-              title="任务创建失败"
-              description="请检查业务服务连接后重试。"
+              title={credentialMissing ? "当前设备尚未授权" : "任务创建失败"}
+              description={
+                credentialMissing
+                  ? "请先完成本机 Installation 授权后再创建任务。"
+                  : "请检查业务服务连接后重试。"
+              }
             />
           ) : null}
           {createdTaskId !== null ? (

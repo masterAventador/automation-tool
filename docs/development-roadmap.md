@@ -353,7 +353,7 @@
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ⬜ 未开始 |
 | H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | ⬜ 未开始 |
 
-## 14. Wave 9：双平台安装包与本地候选版
+## 14. Wave 9：双平台安装包、设备授权与本地候选版
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -362,10 +362,12 @@
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | ⬜ 未开始 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | ⬜ 未开始 |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ⬜ 未开始 |
-| P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
-| P9-07 | Windows 干净安装 | 无 Python 前置；同上；DPI/杀进程/卸载行为 | P9-04,P9-05 | 🔍 待设备验收 |
-| P9-08 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-06,P9-07 | ⬜ 未开始 |
-| P9-09 | 本地 MVP 最终验收 | 产品规划 14 条 MVP 验收全部通过并记录证据 | P9-08 | ⬜ 未开始 |
+| P9-06 | 新设备注册申请与后台审批 | 未注册 App 自动创建限时申请并获得公开配对码与 Rust-only 轮询秘密；认证运维入口按设备公钥摘要批准/拒绝，离线签名 bootstrap 只绑定并授权该申请的一次注册，原 token 不持久化；过期、限流、重放、跨设备、并发审批和审计 fail closed，审批能力不能调用业务 API | I2-14,H8-22 | ⬜ 未开始 |
+| P9-07 | 首次授权状态页与轮询 | 启动页明确展示提交中、等待审批、已批准、已拒绝、已过期和连接失败，显示配对码、申请时间与有效期并提供安全重试；Rust 有界轮询且不向 React 暴露轮询秘密/bootstrap/长期凭据，批准后自动进入工作台，批准前所有业务入口统一门禁；真实 Tauri App 覆盖刷新、重启、断网和审批竞态 | P9-06,F1-08,I2-09 | ⬜ 未开始 |
+| P9-08 | macOS 干净安装 | 无 Python 前置；设备授权可见且批准后打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05,P9-07 | 🔍 待设备验收 |
+| P9-09 | Windows 干净安装 | 无 Python 前置；同上；DPI/杀进程/卸载行为 | P9-04,P9-05,P9-07 | 🔍 待设备验收 |
+| P9-10 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-08,P9-09 | ⬜ 未开始 |
+| P9-11 | 本地 MVP 最终验收 | 产品规划 14 条 MVP 验收全部通过并记录证据 | P9-10 | ⬜ 未开始 |
 
 ## 15. Wave 10：云端客户 Demo
 
@@ -373,18 +375,18 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| C10-01 | Demo 部署设计 | 单实例 Control Plane、PostgreSQL、HTTPS、域名、备份和资源上限 | P9-09 | ⬜ 未开始 |
+| C10-01 | Demo 部署设计 | 单实例 Control Plane、PostgreSQL、HTTPS、域名、备份和资源上限 | P9-11 | ⬜ 未开始 |
 | C10-02 | Control Plane Docker | 锁定镜像、非 root、健康检查、优雅停止和版本标签 | F1-14,C10-01 | ⬜ 未开始 |
 | C10-03 | 云 PostgreSQL | 最小权限、迁移、备份、恢复演练和网络隔离 | C10-01 | ⬜ 未开始 |
 | C10-04 | HTTPS/域名 | TLS、反代、请求大小/超时/限流和安全头 | C10-02 | ⬜ 未开始 |
 | C10-05 | Secret 管理 | DB、签发密钥、bootstrap；不进入镜像、Git 或日志 | C10-02,C10-03 | ⬜ 未开始 |
-| C10-06 | Demo Bootstrap 批次 | 限时、限环境、限注册次数、可吊销和审计 | I2-14,C10-05 | ⬜ 未开始 |
+| C10-06 | Demo Bootstrap 批次与审批运营 | 复用 P9-06 申请/审批协议，提供限时、限环境、限注册次数的离线签发批次、审批队列、吊销和审计 | P9-06,I2-14,C10-05 | ⬜ 未开始 |
 | C10-07 | App Demo Profile | 签名 baseUrl/允许域名；local/demo 凭据隔离 | F1-09,C10-04,C10-06 | ⬜ 未开始 |
 | C10-08 | 云端部署 | 执行迁移、启动单实例、健康检查；不自动扩容多副本 | C10-03..C10-07 | ⬜ 未开始 |
 | C10-09 | 云端协议回归 | 同一 OpenAPI/fixtures，App 只切 baseUrl，无业务代码变化 | C10-08 | ⬜ 未开始 |
 | C10-10 | 网络/重启恢复 | 服务器重启、网络抖动、Executor 重连和事件续传 | C10-09,H8-07 | ⬜ 未开始 |
 | C10-11 | 安装实例吊销演示 | 吊销一个 Demo 不影响其他安装；无匿名业务写入口 | C10-10 | ⬜ 未开始 |
-| C10-12 | 客户视角 Demo 验收 | 安装→打开即用→扫码→预览→动作→结果→接管 | C10-11 | ⬜ 未开始 |
+| C10-12 | 客户视角 Demo 验收 | 安装→设备申请/可见审批→自动进入工作台→扫码→预览→动作→结果→接管 | C10-11 | ⬜ 未开始 |
 | C10-13 | 部署/回滚手册 | 部署、迁移、备份、恢复、吊销、回滚和紧急停服 | C10-12 | ⬜ 未开始 |
 
 ## 16. RPA 运营增强路线图
@@ -2243,6 +2245,19 @@
 - 失败矩阵与门禁：A7-10 聚焦 `81 passed`，profile-page/browse/page-version 三个变更模块 395 条语句/96 个分支覆盖率 100%；Backend 全量 `1665 passed, 5 skipped`，10737 条语句/2326 个分支覆盖率 100%，276 个 Python 文件格式、Ruff、严格 Mypy 276 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 97 项 Node 契约、184 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 快照、production boundary 与构建全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 与三套全目标 Clippy `-D warnings` 全绿
 - 资源与文档：浏览 Fake 验收与 UI 门禁固定 headless；BrowserRuntime/Playwright fixture 退出后不保留测试浏览器或 Vite。未启动 App、Uvicorn、PostgreSQL、Docker、真实平台账号或固定业务端口，未读取默认 Profile、系统钥匙串或其他项目资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增第二份规划
 - 后续：进入 `A7-11` 评论动作执行；A7-10 的通用主页 Page Object 保持与评论/私信选择器隔离，D6-16/B5-15 真实账号补验继续独立保留
+
+### M-01 正常开发 App 首次 Installation 注册补验（当前修复）
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本任务提交
+- RED：`pnpm exec vitest run src/platform/tauri/task-creation-gateway.test.ts src/features/task-create/TaskCreate.test.tsx` 精确得到 2 项失败、10 项通过；原生 `credential_missing` 被旧 Gateway 映射成 `transport_unavailable/retryable=true`，旧组件找不到“当前设备尚未授权”提示
+- 触发：2026-07-20 Windows 重启后，正常开发 App 的私有目录已有设备身份但缺少长期设备凭据；任务创建在 Rust 网络桥发出 HTTP 前以 `credential_missing` 失败，React 将其误映射为业务服务连接失败。既有隐藏 Tauri 验收使用隔离 App 标识，临时注册后清理，不能证明正常 App 重启后可直接运行
+- 范围：先以失败测试固定缺少 Installation 授权的原生错误映射和用户提示，再复用正式 Rust 注册协议为当前正常 App 完成一次性本地授权；不新增产品账号、登录或注册页面，不绕过设备签名、凭据保险库和 Control Plane 鉴权
+- GREEN：聚焦 12 项 Vitest 通过；Frontend 完整 96 项 Node 契约、24 个测试文件共 186 项 Vitest、ESLint 与严格 TypeScript 全绿。`credential_missing` 现在保持为不可重试授权错误，任务表单显示“当前设备尚未授权”，未知原生错误继续统一脱敏为传输不可用
+- 当前本机真实边界：正常 App 标识使用既有 Rust 两步 challenge 完成 Installation 注册，正式 AppData 持久化设备凭据；同一隐藏真实 App 不调用注册准备命令，直接从生产任务表单创建 `draft`，Control Plane 返回 `POST /api/v1/tasks` 201，随后正常可见 App 成功换取 Session 并读取任务、事件
+- Executor 本机装配：复用 E4-07 已验收的正式 PyInstaller spec 与开发 fixture signer，向正常 App 私有 `local-executor/package` 安装 356 个文件、约 148 MB 的 signed onedir；隐藏真实 App 经正式 `restart_executor` 逐文件验签、stdin Bootstrap、Windows 进程树和 WebSocket 首次健康心跳后返回 `running`。验收 App 退出后按正式 Drop 回收 Executor，正常 App 保持按需启动语义
+- 交付边界：本补验没有把 Executor 纳入 Tauri 安装包，也没有新增 Release 首次授权入口；陌生 Windows 干净安装仍依赖 Wave 9 `P9-02/P9-04/P9-09`，首次设备申请/可见审批依赖 `P9-06/P9-07`，云端 Bootstrap 运营与 Demo Profile 仍依赖 Wave 10 `C10-06/C10-07`。本任务只提交长期有效的缺凭据错误兜底与测试，不把本机手工装配冒充候选包完成
 
 ## 21. 当前下一步
 

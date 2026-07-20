@@ -22,6 +22,9 @@ function mapNativeError(value: unknown): TaskCreationGatewayError | undefined {
   if (record.code === "installation_access_denied" && record.retryable === false) {
     return new TaskCreationGatewayError("installation_access_denied", false);
   }
+  if (record.code === "credential_missing" && record.retryable === false) {
+    return new TaskCreationGatewayError("credential_missing", false);
+  }
   if (record.code === "operation_unavailable" && record.retryable === false) {
     return new TaskCreationGatewayError("protocol_mismatch", false);
   }
