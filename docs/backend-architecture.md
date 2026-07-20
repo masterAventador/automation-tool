@@ -312,7 +312,7 @@ D6-09 以 Alembic `20260718_0016` 增加 `task_targets`。每行只持有 UUIDv4
 
 D6-10 新增 `TaskDiscoveryStartService`、`TaskDiscoveryConvergenceService` 与唯一 `SqlAlchemyTaskDiscoveryRepository`。`POST /api/v1/tasks/{task_id}/discoveries` 复用 `app.control-plane` Session，只在 active Installation、健康抖音 Session、无 logout gate 且 Task 状态可达时启动；一个事务创建 Attempt、`task.discover` 持久命令、`task.discovery_started` 事件并把 Task 推进到 `discovering_targets`。命令 payload 由已持久化 Task 定义生成，不接受客户端提供关键词、Target 或浏览器事实；Idempotency-Key 同任务精确重放返回原 command，跨任务复用拒绝。
 
-Executor 的 `browser_authority.py` 把登录窗口创建的受信浏览器请求收敛成单一可撤销 lease；`discovery_operation.py` 只有拿到健康本机 Session 与该 lease 后，才能依次调用 D6-04 搜索、D6-05 有界滚动和 D6-07 最小提取。`ExecutorCommandProcessor` 先将 `task.discover` 写入 D6-10 当时的 SQLite v3，再把最多 100 条 Candidate 拆成每批最多 10 条的 `task.discovery_batch`，最后写入唯一 `task.discovery_completed`；命令结果、所有批次与完成事实在一个本机事务进入 outbox，重启只精确重放，不重跑浏览器动作。A7-04 已在保留全部命令、checkpoint、outbox 与平台 Session 的前提下原地迁移到 v4，并增加动作策略、紧停和准入事实。
+Executor 的 `browser_authority.py` 把登录窗口创建的受信浏览器请求收敛成单一可撤销 lease；`discovery_operation.py` 只有拿到健康本机 Session 与该 lease 后，才能依次调用 D6-04 搜索、D6-05 有界滚动和 D6-07 最小提取。`ExecutorCommandProcessor` 先将 `task.discover` 写入 D6-10 当时的 SQLite v3，再把最多 100 条 Candidate 拆成每批最多 10 条的 `task.discovery_batch`，最后写入唯一 `task.discovery_completed`；命令结果、所有批次与完成事实在一个本机事务进入 outbox，重启只精确重放，不重跑浏览器动作。A7-04/A7-07 已在保留全部命令、checkpoint、outbox 与平台 Session 的前提下依次原地迁移到 v4/v5，并增加动作策略、紧停、准入与最小副作用事实。
 
 Control Plane 只在认证 Executor WebSocket 接收 batch/completed。内存 accumulator 最多保留 32 个 Attempt，要求 batch 从 1 开始、连续、总批数一致且同批重放指纹完全一致；每批先经 PostgreSQL 核对当前已确认 discover command。completed 到达后复验候选数、page revision、Installation/Task/Attempt/correlation 和 deadline，在一个事务调用 D6-09 替换 Target、完成 Attempt、追加事件并把 Task 收敛到 `awaiting_confirmation`。缺批、乱序、篡改和过期拒绝；登录失效、人工接管或失败不保存 Target，并分别投影到封闭状态。断线后的完整 batch/completed 重放必须与已持久化 Target 和 command 精确一致。
 
@@ -334,11 +334,15 @@ A7-03 选择非对称 Ed25519，而不是复用 Executor 已知的本机会话 H
 
 A7-04 在 Local Executor 增加 `ExecutorActionGate`，把 A7-03 验签和本机 SQLite v4 准入组成逻辑与门。公开 `admit()` 只有 token 与完整 expectation 两个输入；最小间隔和单任务动作上限只能在构造时由本机显式注入，服务端 claims、wire 或调用参数都没有阈值字段。策略单例首次绑定后只允许 `max(当前间隔, 新间隔)` 与 `min(当前上限, 新上限)`，重启、弱配置或并发构造都不能放宽；策略行缺失、半损坏或越界直接拒绝，不能自动重建弱值。
 
-同一个 `BEGIN IMMEDIATE` 准入事务依次检查持久紧停 latch、Action/idempotency 精确重放、Installation/平台/动作的最近准入时间，以及 Task/平台/动作计数，然后写入唯一 ordinal。紧停先于重放和频控，重启后仍保持；清除必须提供当前本机 revision 且使用严格递增 UTC 时间。时钟倒退、数据库损坏、身份错绑和五路并发冲突都 fail closed。SQLite 只存 Action 完整绑定所需的最小 claims、准入时间、ordinal 与 token SHA-256 指纹，不存 token、服务端私钥、Cookie、Profile、页面事实或账号信息。当前模块是后续 A7-07/A7-11/A7-12 的内部动作入口；动作 wire、App UI 与真实平台副作用仍未提前实现。
+同一个 `BEGIN IMMEDIATE` 准入事务依次检查持久紧停 latch、Action/idempotency 精确重放、Installation/平台/动作的最近准入时间，以及 Task/平台/动作计数，然后写入唯一 ordinal。紧停先于重放和频控，重启后仍保持；清除必须提供当前本机 revision 且使用严格递增 UTC 时间。时钟倒退、数据库损坏、身份错绑和五路并发冲突都 fail closed。SQLite 只存 Action 完整绑定所需的最小 claims、准入时间、ordinal 与 token SHA-256 指纹，不存 token、服务端私钥、Cookie、Profile、页面事实或账号信息。A7-07 已让该准入事实成为副作用账本的强制前置条件；动作 wire、App UI 与真实平台副作用仍由 A7-11/A7-12 承接。
 
 A7-05 将 `action-message-template.v1` 放在共享 `protocol/` 而不是页面定位或 LLM 模块：允许纯固定文案，也只允许 `{{target_display_name}}` 一个变量，且删除合法占位符后必须仍有非空字面。Python 领域先校验 500 Unicode code point、控制/Bidi、敏感模式、私有路径和封闭变量；FastAPI 只返回固定错误，不回显原文。Alembic `20260720_0021` 替换原消息 check constraint，用同一合法占位符替换和剩余花括号拒绝保护直写 PostgreSQL 边界，并保留可回滚的旧约束。当前不渲染、不下发文案、不执行平台副作用；A7-06 再把精确动作/文案/数量与确认 revision 绑定。
 
 A7-06 将 confirmation 从“数量事实”提升为版本化执行意图。`task-target-confirmation-intent.v1` 的 canonical 指纹绑定 Installation、Task、page/selection revision、动作、原始模板和有序 Target ID；迁移 `20260720_0022` 对 `0021` 既有事实从 typed definition 与目标集合确定性回填，再增加非空和封闭约束。仓储在确认、读取与重放时重算意图；A7-02 在授权前重算全部字段，D6-13 在业务 offer 入队/claim 时复验动作与模板。定义、目标、排除、revision、计数、版本或指纹任一变化都不能静默沿用旧确认。
+
+A7-07 将 Local Executor SQLite 升级到 v5，并把不可重复的平台副作用拆成四个封闭状态：`prepared` 在任何平台点击前持久化精确效果 SHA-256；`begin_side_effect_dispatch()` 在同一 `BEGIN IMMEDIATE` 事务内把它原子推进为 `dispatched`，五路并发只有一个调用者得到 `replayed=false` 的执行许可；最终页面事实只能把 dispatched 一次性结算为带验证 SHA-256 的 `verified`，或不带伪证据的 `uncertain`。重启会列出 prepared/dispatched/uncertain 供恢复，但精确重放只返回 `replayed=true`，摘要、资源、状态或终态变化全部 fail closed，不会重新授权点击。
+
+副作用表通过外键复用 A7-04 的完整 Action/Target/Attempt/Task/Installation/Executor 绑定，不复制云端业务事实。它只新增 effect/verification 两个 32 字节摘要、封闭状态、UTC 时间与 revision，不保存评论或私信正文、Token、Cookie、Profile、页面原文、账号或密钥。A7-07 没有 HTTP、OpenAPI、Tauri Command、React 或浏览器入口；A7-11/A7-12 必须以该公开 Python 账本 API 作为真实点击前后的原调用面。
 
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
@@ -668,15 +672,16 @@ D6-13 将上述“无副作用骨架”和“业务动作承载 offer”按是�
 - Cookie、Token、页面原文、聊天全文和本机绝对路径不入库；
 - 删除任务不立即删除审计；Artifact 按保留策略异步清理。
 
-E4-11 建立、B5-12 升级到 v2 的 Executor 本机 SQLite 只保存：
+E4-11 建立并由 B5-12、D6-10、A7-04、A7-07 逐步升级到 v5 的 Executor 本机 SQLite 只保存：
 
 - 已接收正式命令的封闭 envelope、message/idempotency 双键与意图 SHA-256；
 - 当前 Attempt 的 task 绑定、连续 command sequence、单调 event sequence、封闭 checkpoint state 和 revision；
 - 与来源命令、Task/Attempt/correlation 严格绑定的待发送正式回执/事件及 delivered 标记；
 - 每个平台最新的封闭健康状态、单调 `session_revision` 和观察时间；
+- 已准入评论/私信的最小资源绑定、effect/verification SHA-256、封闭副作用状态、UTC 时间和 revision；
 - 不保存可由 Control Plane 恢复的第二套完整业务数据库。
 
-v1→v2 在单个排他迁移事务内保留既有 identity、command、checkpoint 和 outbox；损坏、未来版本或身份错绑继续拒绝。action 副作用账本与 Artifact spool 仍是后续 A7/H8 任务，不能在通用表中提前塞任意 JSON。任何 Control Plane Session、Cookie、浏览器登录态、密钥、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
+v1→v5 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；Artifact spool 仍由 H8 独立承接。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
 B5-15 明确首次健康 Profile 的 epoch 语义：若本机尚无平台行，无论调用方是否标记“恢复”，都只能创建 revision 1；只有已有行之后的显式健康恢复才递增 revision。这样 App/Executor 重启后可从现存 Profile 直接建立首个健康事实，同时仍禁止已有非健康 epoch 被隐式健康覆盖。四轮隐藏 App 验收验证健康→健康(revision 2)→expired→risk，后两次非健康变化保持同一 revision，Control Plane 最终只保存最小 risk 投影。
 

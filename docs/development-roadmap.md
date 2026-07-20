@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-06 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-07 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-07 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-08 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -313,7 +313,7 @@
 | A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | ✅ 已完成 |
 | A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | ✅ 已完成 |
 | A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | ✅ 已完成 |
-| A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ⬜ 未开始 |
+| A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ✅ 已完成 |
 | A7-08 | 抖音评论 Page Object | 定位输入/提交/最终状态；页面变化 fail closed | D6-02,A7-05 | ⬜ 未开始 |
 | A7-09 | 抖音私信 Page Object | 进入会话/输入/发送/最终状态；权限差异处理 | D6-02,A7-05 | ⬜ 未开始 |
 | A7-10 | 只浏览动作 | 无发送副作用的目标访问，作为低风险基线 | D6-10 | ⬜ 未开始 |
@@ -2188,11 +2188,24 @@
 - 资源与文档：隐藏 App 全程后台、不弹窗、不启动运营浏览器；验收前检查目标端口，结束回收 App/WDIO、Uvicorn、Executor、专属 PostgreSQL 容器/网络/Volume、AppData 和端口，未读取、停止或复用其他项目资源。同步根/Backend/Frontend README、产品规划、前后端架构、工程结构与本唯一台账，没有新增重复规划文档
 - 后续：进入 `A7-07` 副作用账本；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
 
+### A7-07 副作用账本
+
+- 状态：✅ 已完成
+- RED：先把唯一台账置为 `🧪 RED`；Python 原调用方测试准确在收集阶段失败于缺少 `automation_tool.executor.side_effect_ledger`，跨目录 Node 契约准确失败于生产模块不存在。测试先固定 v4→v5 原地迁移、四态闭合、精确重放、五路并发、重启恢复、期限/紧停与损坏失败矩阵，再实现生产代码
+- 封闭状态：新增脱敏不可变 `LocalSideEffect` 与 `prepared/dispatched/verified/uncertain` 四态。prepared revision 1 不带派发/结算时间，dispatched revision 2 只有派发时间，verified/uncertain revision 3 必须有单调结算时间；verified 必须且只能带 32 字节验证摘要，uncertain 不能伪造验证证据。非法 UUIDv4、平台、动作、幂等键、UTC、状态/时间/revision 组合及 repr 泄露全部拒绝
+- 原子执行许可：评论/私信必须先命中 A7-04 当前准入事实并在 deadline 与本机紧停打开前写入精确 effect SHA-256。`begin_side_effect_dispatch()` 使用 `BEGIN IMMEDIATE`，同一 Action 五路并发只有一个调用者获得 `replayed=false`；只有该返回值允许 A7-11/A7-12 执行外部点击。此后重启或重复调用只返回 `replayed=true`，绝不重新授予点击许可
+- 终态与恢复：dispatched 只能一次性结算到带匹配验证摘要的 verified 或不带证明的 uncertain，两个竞争终态只有一个成功；相反终态、摘要变化、倒序时间和越序结算 fail closed。`list_unresolved_side_effects()` 以稳定顺序有界返回 prepared/dispatched/uncertain，verified 不再进入恢复队列；崩溃窗口宁可保留为待核对/不确定，也不自动重放不可重复动作
+- SQLite v5 与隐私：排他迁移新增 `executor_side_effects` 固定八列和恢复索引，外键复用 Action 对 Target/Attempt/Task/Installation/Executor 的完整绑定；v1～v4 既有命令、checkpoint、outbox、平台 Session、动作策略/紧停/准入原地保留。数据库约束拒绝状态、revision、时间和验证摘要矛盾。只保存两个 32 字节摘要、资源 ID 与 UTC 时间，不保存评论/私信正文、完整授权 Token、Cookie、Profile、页面原文、账号或密钥，也不使用系统钥匙串
+- 原调用方验收：本任务公开能力的原始消费方是 Python Local Executor 动作执行层，验收直接通过正式 `ExecutorLedger` API 和真实私有 SQLite 完成迁移、并发、重开、损坏与故障注入，不启动无意义的 App、HTTP、PostgreSQL 或运营浏览器，也不以 Mock/Tauri 空壳冒充动作链路。A7-11/A7-12 接入真实动作时仍必须从同一 API 取得唯一许可
+- 门禁：A7-07 聚焦 `29 passed, 1 skipped`，相关 `820` 条语句/`206` 个分支覆盖率 100%；Backend 全量 `1594 passed, 5 skipped`，10086 条语句/2168 个分支覆盖率 100%，Ruff/格式、严格 Mypy、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 94 项 Node 契约、184 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 快照、production boundary 与构建全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套测试、Rustfmt 与三套全目标 Clippy `-D warnings` 全绿
+- 资源与文档：门禁启动前确认 1420 端口空闲，Playwright 固定无头并由 webServer fixture 关闭；没有启动 App、Uvicorn、PostgreSQL、Docker、运营浏览器或真实平台账号，没有新增固定端口、Profile、SQLite 或系统钥匙串资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有创建第二份规划
+- 后续：进入 `A7-08` 抖音评论 Page Object；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-07`（⬜ 未开始）：先以失败测试固定 Executor 私有 SQLite 的 prepared/dispatched/verified/uncertain 原子状态与崩溃恢复边界；
+1. `A7-08`（⬜ 未开始）：先以 Fake 页面失败矩阵固定评论输入、提交和最终状态 Page Object，页面变化必须 fail closed；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

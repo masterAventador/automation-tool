@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Final, cast
 from uuid import RFC_4122, UUID
 
+from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_CLOCK_SKEW,
     ActionAuthorizationClaims,
@@ -31,11 +32,22 @@ from automation_tool.protocol import (
 )
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 4
+_SCHEMA_VERSION: Final = 5
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_CROSS_RUNTIME_SEQUENCE: Final = 2**53 - 1
 _MAX_LOCAL_ACTION_INTERVAL_SECONDS: Final = 3600
 _MAX_LOCAL_TASK_ACTIONS: Final = 100
+_MAX_UNRESOLVED_SIDE_EFFECTS: Final = 100
+
+_SIDE_EFFECT_SELECT: Final = """
+    SELECT s.action_id, a.target_id, a.execution_attempt_id, a.task_id,
+           a.installation_id, a.executor_id, a.platform, a.action,
+           a.idempotency_key, s.effect_fingerprint, s.state,
+           s.prepared_at, s.dispatched_at, s.settled_at,
+           s.verification_fingerprint, s.revision, a.deadline_at
+    FROM executor_side_effects s
+    LEFT JOIN executor_action_admissions a ON a.action_id = s.action_id
+"""
 
 
 class ExecutorLedgerRejected(RuntimeError):
@@ -483,6 +495,295 @@ class ExecutorLedger:
             )
         except ExecutorActionAdmissionLimited:
             raise
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def get_side_effect(self, action_id: str) -> LocalSideEffect | None:
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+            return None if row is None else _side_effect(row, replayed=False)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def list_unresolved_side_effects(self, *, limit: int) -> tuple[LocalSideEffect, ...]:
+        try:
+            if type(limit) is not int or not 1 <= limit <= _MAX_UNRESOLVED_SIDE_EFFECTS:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    _SIDE_EFFECT_SELECT
+                    + " WHERE s.state != 'verified'"
+                    + " ORDER BY s.prepared_at, s.action_id LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return tuple(_side_effect(row, replayed=False) for row in rows)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def prepare_side_effect(
+        self,
+        *,
+        action_id: str,
+        effect_fingerprint: bytes,
+        prepared_at: datetime,
+    ) -> LocalSideEffect:
+        """Persist exact effect intent before any platform dispatch is permitted."""
+
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            canonical_prepared_at = _canonical_utc(prepared_at)
+            _require_fingerprint(effect_fingerprint)
+            if canonical_prepared_at is None:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+                if existing is not None:
+                    effect = _side_effect(existing, replayed=True)
+                    if effect.effect_fingerprint != effect_fingerprint:
+                        raise ValueError
+                    connection.commit()
+                    return effect
+                admission = connection.execute(
+                    """
+                    SELECT action_id, action, admitted_at, deadline_at
+                    FROM executor_action_admissions WHERE action_id = ?
+                    """,
+                    (canonical_action_id,),
+                ).fetchone()
+                if (
+                    admission is None
+                    or admission[1]
+                    not in {
+                        DouyinSearchExposureAction.COMMENT.value,
+                        DouyinSearchExposureAction.DIRECT_MESSAGE.value,
+                    }
+                    or canonical_prepared_at < _decode_utc(admission[2])
+                    or canonical_prepared_at >= _decode_utc(admission[3])
+                ):
+                    raise ValueError
+                if _action_emergency_stop(
+                    cast(
+                        sqlite3.Row | tuple[object, ...],
+                        connection.execute(
+                            """
+                            SELECT engaged, revision, changed_at
+                            FROM executor_action_guard WHERE singleton_id = 1
+                            """
+                        ).fetchone(),
+                    )
+                ).engaged:
+                    raise ValueError
+                connection.execute(
+                    """
+                    INSERT INTO executor_side_effects (
+                        action_id, effect_fingerprint, state, prepared_at,
+                        dispatched_at, settled_at, verification_fingerprint, revision
+                    ) VALUES (?, ?, 'prepared', ?, NULL, NULL, NULL, 1)
+                    """,
+                    (
+                        canonical_action_id,
+                        effect_fingerprint,
+                        _encode_utc(canonical_prepared_at),
+                    ),
+                )
+                row = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+                effect = _side_effect(
+                    cast(sqlite3.Row | tuple[object, ...], row),
+                    replayed=False,
+                )
+                connection.commit()
+                return effect
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def begin_side_effect_dispatch(
+        self,
+        *,
+        action_id: str,
+        effect_fingerprint: bytes,
+        dispatched_at: datetime,
+    ) -> LocalSideEffect:
+        """Atomically grant at most one caller permission to perform the effect."""
+
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            canonical_dispatched_at = _canonical_utc(dispatched_at)
+            _require_fingerprint(effect_fingerprint)
+            if canonical_dispatched_at is None:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+                current = _side_effect(
+                    cast(sqlite3.Row | tuple[object, ...], row),
+                    replayed=False,
+                )
+                if current.effect_fingerprint != effect_fingerprint:
+                    raise ValueError
+                if current.state is not SideEffectState.PREPARED:
+                    connection.commit()
+                    return _side_effect(
+                        cast(sqlite3.Row | tuple[object, ...], row),
+                        replayed=True,
+                    )
+                if (
+                    canonical_dispatched_at < current.prepared_at
+                    or canonical_dispatched_at >= _decode_utc(cast(tuple[object, ...], row)[16])
+                    or _action_emergency_stop(
+                        cast(
+                            sqlite3.Row | tuple[object, ...],
+                            connection.execute(
+                                """
+                                SELECT engaged, revision, changed_at
+                                FROM executor_action_guard WHERE singleton_id = 1
+                                """
+                            ).fetchone(),
+                        )
+                    ).engaged
+                ):
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_side_effects
+                    SET state = 'dispatched', dispatched_at = ?, revision = 2
+                    WHERE action_id = ? AND state = 'prepared' AND revision = 1
+                    """,
+                    (_encode_utc(canonical_dispatched_at), canonical_action_id),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - locked row cannot drift
+                    raise ValueError
+                changed = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+                effect = _side_effect(
+                    cast(sqlite3.Row | tuple[object, ...], changed),
+                    replayed=False,
+                )
+                connection.commit()
+                return effect
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def verify_side_effect(
+        self,
+        *,
+        action_id: str,
+        effect_fingerprint: bytes,
+        verification_fingerprint: bytes,
+        verified_at: datetime,
+    ) -> LocalSideEffect:
+        return self._settle_side_effect(
+            action_id=action_id,
+            effect_fingerprint=effect_fingerprint,
+            target_state=SideEffectState.VERIFIED,
+            verification_fingerprint=verification_fingerprint,
+            settled_at=verified_at,
+        )
+
+    def mark_side_effect_uncertain(
+        self,
+        *,
+        action_id: str,
+        effect_fingerprint: bytes,
+        uncertain_at: datetime,
+    ) -> LocalSideEffect:
+        return self._settle_side_effect(
+            action_id=action_id,
+            effect_fingerprint=effect_fingerprint,
+            target_state=SideEffectState.UNCERTAIN,
+            verification_fingerprint=None,
+            settled_at=uncertain_at,
+        )
+
+    def _settle_side_effect(
+        self,
+        *,
+        action_id: str,
+        effect_fingerprint: bytes,
+        target_state: SideEffectState,
+        verification_fingerprint: bytes | None,
+        settled_at: datetime,
+    ) -> LocalSideEffect:
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            canonical_settled_at = _canonical_utc(settled_at)
+            _require_fingerprint(effect_fingerprint)
+            if target_state is SideEffectState.VERIFIED:
+                _require_fingerprint(verification_fingerprint)
+            elif (
+                target_state is not SideEffectState.UNCERTAIN
+                or verification_fingerprint is not None
+            ):
+                raise ValueError
+            if canonical_settled_at is None:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+                current = _side_effect(
+                    cast(sqlite3.Row | tuple[object, ...], row),
+                    replayed=False,
+                )
+                if current.effect_fingerprint != effect_fingerprint:
+                    raise ValueError
+                if current.state is target_state:
+                    if current.verification_fingerprint != verification_fingerprint:
+                        raise ValueError
+                    connection.commit()
+                    return _side_effect(
+                        cast(sqlite3.Row | tuple[object, ...], row),
+                        replayed=True,
+                    )
+                if (
+                    current.state is not SideEffectState.DISPATCHED
+                    or current.dispatched_at is None
+                    or canonical_settled_at < current.dispatched_at
+                ):
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_side_effects
+                    SET state = ?, settled_at = ?, verification_fingerprint = ?, revision = 3
+                    WHERE action_id = ? AND state = 'dispatched' AND revision = 2
+                    """,
+                    (
+                        target_state.value,
+                        _encode_utc(canonical_settled_at),
+                        verification_fingerprint,
+                        canonical_action_id,
+                    ),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - locked row cannot drift
+                    raise ValueError
+                changed = connection.execute(
+                    _SIDE_EFFECT_SELECT + " WHERE s.action_id = ?",
+                    (canonical_action_id,),
+                ).fetchone()
+                effect = _side_effect(
+                    cast(sqlite3.Row | tuple[object, ...], changed),
+                    replayed=False,
+                )
+                connection.commit()
+                return effect
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -1270,6 +1571,9 @@ class ExecutorLedger:
             if version == 3:
                 _migrate_v4(connection)
                 version = 4
+            if version == 4:
+                _migrate_v5(connection)
+                version = 5
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -1516,6 +1820,60 @@ def _migrate_v4(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 4")
 
 
+def _migrate_v5(connection: sqlite3.Connection) -> None:
+    """Add the redacted write-ahead ledger for non-repeatable platform effects."""
+
+    connection.execute(
+        """
+        CREATE TABLE executor_side_effects (
+            action_id TEXT PRIMARY KEY CHECK (length(action_id) = 36),
+            effect_fingerprint BLOB NOT NULL CHECK (length(effect_fingerprint) = 32),
+            state TEXT NOT NULL CHECK (
+                state IN ('prepared', 'dispatched', 'verified', 'uncertain')
+            ),
+            prepared_at TEXT NOT NULL,
+            dispatched_at TEXT,
+            settled_at TEXT,
+            verification_fingerprint BLOB,
+            revision INTEGER NOT NULL,
+            CHECK (
+                (
+                    state = 'prepared' AND revision = 1
+                    AND dispatched_at IS NULL AND settled_at IS NULL
+                    AND verification_fingerprint IS NULL
+                )
+                OR (
+                    state = 'dispatched' AND revision = 2
+                    AND dispatched_at IS NOT NULL AND dispatched_at >= prepared_at
+                    AND settled_at IS NULL AND verification_fingerprint IS NULL
+                )
+                OR (
+                    state = 'verified' AND revision = 3
+                    AND dispatched_at IS NOT NULL AND dispatched_at >= prepared_at
+                    AND settled_at IS NOT NULL AND settled_at >= dispatched_at
+                    AND verification_fingerprint IS NOT NULL
+                    AND length(verification_fingerprint) = 32
+                )
+                OR (
+                    state = 'uncertain' AND revision = 3
+                    AND dispatched_at IS NOT NULL AND dispatched_at >= prepared_at
+                    AND settled_at IS NOT NULL AND settled_at >= dispatched_at
+                    AND verification_fingerprint IS NULL
+                )
+            ),
+            FOREIGN KEY (action_id) REFERENCES executor_action_admissions(action_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX ix_executor_side_effects_recovery
+        ON executor_side_effects (state, prepared_at, action_id)
+        """
+    )
+    connection.execute("PRAGMA user_version = 5")
+
+
 def _canonical_uuid_v4(value: object) -> str:
     if type(value) is not str:
         raise ValueError
@@ -1606,6 +1964,33 @@ def _decode_utc(value: object) -> datetime:
     if _encode_utc(parsed) != value:
         raise ValueError
     return parsed
+
+
+def _require_fingerprint(value: object) -> None:
+    if type(value) is not bytes or len(value) != 32:
+        raise ValueError
+
+
+def _side_effect(row: sqlite3.Row | tuple[object, ...], *, replayed: bool) -> LocalSideEffect:
+    return LocalSideEffect(
+        action_id=cast(str, row[0]),
+        target_id=cast(str, row[1]),
+        execution_attempt_id=cast(str, row[2]),
+        task_id=cast(str, row[3]),
+        installation_id=cast(str, row[4]),
+        executor_id=cast(str, row[5]),
+        platform=cast(str, row[6]),
+        action=DouyinSearchExposureAction(cast(str, row[7])),
+        idempotency_key=cast(str, row[8]),
+        effect_fingerprint=cast(bytes, row[9]),
+        state=SideEffectState(cast(str, row[10])),
+        prepared_at=_decode_utc(row[11]),
+        dispatched_at=None if row[12] is None else _decode_utc(row[12]),
+        settled_at=None if row[13] is None else _decode_utc(row[13]),
+        verification_fingerprint=(None if row[14] is None else cast(bytes, row[14])),
+        revision=cast(int, row[15]),
+        replayed=replayed,
+    )
 
 
 def _platform_session(row: sqlite3.Row | tuple[object, ...]) -> LocalPlatformSession:
@@ -1720,6 +2105,8 @@ __all__ = [
     "LocalActionEmergencyStop",
     "LocalActionHardPolicyBinding",
     "LocalPlatformSession",
+    "LocalSideEffect",
     "OutboxEntry",
     "PlatformSessionState",
+    "SideEffectState",
 ]
