@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-02；B5-15 真实账号 App 双重启证据同样独立补验 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-02 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-03；B5-15 真实账号 App 双重启证据同样独立补验 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -308,7 +308,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | A7-01 | 风险策略领域模型 | 平台/动作/安装实例级最小间隔、任务/日上限、连续失败阈值 | T3-01 | 🟩 完成 |
-| A7-02 | 服务端计数与并发授权 | PostgreSQL 原子授权；并发不能突破上限 | A7-01,T3-03 | ⬜ 未开始 |
+| A7-02 | 服务端计数与并发授权 | PostgreSQL 原子授权；并发不能突破上限 | A7-01,T3-03 | 🟩 完成 |
 | A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | ⬜ 未开始 |
 | A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | ⬜ 未开始 |
 | A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | ⬜ 未开始 |
@@ -2122,11 +2122,24 @@
 - 资源与文档：纯领域任务没有启动 App、浏览器、Uvicorn 或固定端口；全量数据库测试使用 `automation-tool-pytest-*` 专属动态端口、Compose project、网络和 Volume。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `A7-02`，设计 PostgreSQL 风险策略/计数事实与原子授权事务；并发请求不能突破任务、UTC 日或最小间隔硬限制，服务端配置也不得放宽调用方更严格的任务间隔
 
+### A7-02 服务端计数与并发授权
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`，新增应用记录、Repository 和真实 PostgreSQL 生命周期测试；两组聚焦测试均在收集阶段准确失败于 `application.action_risk_authorizations` 不存在。实现后的审计再新增同一 ActionId 动作意图变化用例，准确以 `_same_intent()` 缺少 `action` 参数失败，随后才收紧重放绑定
+- 原子事实：迁移 `20260720_0020` 新增 `action_risk_authorizations`；每条记录保存 Action/Target/Attempt/Task/Installation/ordinal 绑定、封闭平台/动作、策略版本、有效最小间隔、三项策略阈值、任务/UTC 日授权后计数与 UTC 时间。成功授权在同一事务插入既有 `task_actions(status=authorized)`，复合外键禁止跨执行链或跨 Target 拼接，两个计数序号唯一约束作为并发第二道防线
+- 服务端串行化：Repository 先 `FOR UPDATE` 锁定 active Installation，使同一安装实例的所有平台动作按数据库事务线性化；再复验当前 running Task/Attempt、任务定义动作、healthy Session 且无 gate、最新确认、同 page revision 的 eligible 且未排除 Target。任务上限按 Task/平台/动作，UTC 日上限按 Installation/平台/动作/日期，最小间隔跨 Installation/平台/动作计算；有效间隔固定取任务配置与服务端策略较大值
+- 幂等与失败关闭：同一 ActionId 只有 Target、Attempt、Task、Installation 和动作完全一致时返回原不可变事实，不重复计数；任何身份/动作变化、吊销安装、错误状态/定义、Session 风险或门闩、过期确认、排除目标、时钟倒退、重复 ordinal、约束冲突和数据库不可用均固定拒绝或脱敏不可用，事务不留下半条 Action。运营阈值仍无默认值，A7-02 没有把结构上界当额度
+- 分层边界：本任务只交付服务端内部 PostgreSQL 授权事实，不新增 HTTP、OpenAPI、Executor wire、Tauri Command、React 或外部平台动作；正式原调用方式是 Repository 对真实数据库的事务入口。A7-03 才从服务端时钟生成带 deadline/idempotency 的签名或 MAC ActionAuthorization，调用方不得把客户端自报时间作为权威时间
+- 迁移与测试：空库完整升级到 `20260720_0020`、`alembic check`、降级到 `0019` 和重新升 head 全部通过；真实数据库验证策略快照、精确重放、任务/UTC 日/间隔限流、5 路并发仅 1 路成功、状态/动作/确认拒绝、时钟倒退、重复 Target 唯一冲突、数据库不可用和约束故障注入。聚焦 40 项通过，两份新增生产模块 160 条语句/40 个分支覆盖率 100%
+- 门禁：Backend 最终全量 `1489 passed, 5 skipped in 119.36s`，9207 条语句/1972 个分支覆盖率 100%；274 个 Python 文件格式正确，Ruff 全绿，严格 Mypy 253 个源码/测试文件通过，uv lock、OpenAPI 和 Executor Schema 均无漂移
+- 资源与文档：没有启动 App、浏览器、Uvicorn 或固定业务端口；真实 PostgreSQL 测试使用 `automation-tool-pytest-*` 独立 Compose project、随机 loopback 端口、专属容器/网络/Volume，并在两次全量和聚焦测试后全部回收，未触碰其他项目的 5432/8000/8080 资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
+- 后续：进入 `A7-03`，在当前原子事实之上建立 action/target/attempt/deadline/idempotency 完整绑定的短期签名或 MAC 授权，并由 Local Executor 严格验签；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-02`：使用真实 PostgreSQL 建立安装实例/平台/动作计数与原子授权，并发请求不能突破最小间隔、单任务或 UTC 日硬上限；
+1. `A7-03`：为已原子授权的 Action 设计 action/target/attempt/deadline/idempotency 完整绑定的签名或 MAC，并让 Local Executor 使用固定协议严格验签；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

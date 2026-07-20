@@ -13,7 +13,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0002"
-HEAD_REVISION = "20260720_0019"
+HEAD_REVISION = "20260720_0020"
 EXPECTED_CONSTRAINTS = {
     "pk_registration_challenges",
     "fk_registration_challenges_installation_id",

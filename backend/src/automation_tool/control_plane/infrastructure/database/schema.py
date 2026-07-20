@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -19,8 +20,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 from automation_tool.control_plane.domain import (
+    ACTION_RISK_POLICY_VERSION,
     DOUYIN_CANDIDATE_POLICY_VERSION,
     DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
+    MAX_ACTION_RISK_LIMIT,
     MAX_MESSAGE_TEMPLATE_CHARACTERS,
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
     MAX_SEARCH_KEYWORD_CHARACTERS,
@@ -29,6 +32,7 @@ from automation_tool.control_plane.domain import (
     MAX_TASK_TARGET_LIMIT,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionOutcome,
+    ActionRiskPlatform,
     ActionStatus,
     DouyinCandidateDisposition,
     DouyinSearchExposureAction,
@@ -913,12 +917,155 @@ task_actions = Table(
     ),
 )
 
+task_actions.append_constraint(
+    UniqueConstraint(
+        task_actions.c.id,
+        task_actions.c.execution_attempt_id,
+        task_actions.c.task_id,
+        task_actions.c.installation_id,
+        task_actions.c.ordinal,
+        name="uq_task_actions_risk_binding",
+    )
+)
+
+task_targets.append_constraint(
+    UniqueConstraint(
+        task_targets.c.id,
+        task_targets.c.task_id,
+        task_targets.c.installation_id,
+        task_targets.c.ordinal,
+        name="uq_task_targets_action_binding",
+    )
+)
+
 Index(
     "ix_task_actions_installation_task",
     task_actions.c.installation_id,
     task_actions.c.task_id,
     task_actions.c.execution_attempt_id,
     task_actions.c.ordinal,
+)
+
+action_risk_authorizations = Table(
+    "action_risk_authorizations",
+    metadata,
+    Column("action_id", UUID(as_uuid=True), nullable=False),
+    Column("target_id", UUID(as_uuid=True), nullable=False),
+    Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("ordinal", BigInteger(), nullable=False),
+    Column("platform", String(length=32), nullable=False),
+    Column("action", String(length=32), nullable=False),
+    Column("policy_version", String(length=64), nullable=False),
+    Column("effective_minimum_interval_seconds", BigInteger(), nullable=False),
+    Column("task_action_limit", BigInteger(), nullable=False),
+    Column("daily_action_limit", BigInteger(), nullable=False),
+    Column("consecutive_failure_threshold", BigInteger(), nullable=False),
+    Column("task_count_after", BigInteger(), nullable=False),
+    Column("daily_count_after", BigInteger(), nullable=False),
+    Column("authorized_day", Date(), nullable=False),
+    Column("authorized_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "platform in (" + ", ".join(f"'{platform.value}'" for platform in ActionRiskPlatform) + ")",
+        name="ck_action_risk_authorizations_platform",
+    ),
+    CheckConstraint(
+        "action in ("
+        + ", ".join(f"'{action.value}'" for action in DouyinSearchExposureAction)
+        + ")",
+        name="ck_action_risk_authorizations_action",
+    ),
+    CheckConstraint(
+        f"policy_version = '{ACTION_RISK_POLICY_VERSION}'",
+        name="ck_action_risk_authorizations_policy_version",
+    ),
+    CheckConstraint(
+        f"effective_minimum_interval_seconds between 1 and {MAX_TASK_INTERVAL_SECONDS}",
+        name="ck_action_risk_authorizations_interval",
+    ),
+    CheckConstraint(
+        f"task_action_limit between 1 and {MAX_TASK_TARGET_LIMIT} "
+        f"and daily_action_limit between 1 and {MAX_ACTION_RISK_LIMIT} "
+        f"and consecutive_failure_threshold between 1 and {MAX_ACTION_RISK_LIMIT}",
+        name="ck_action_risk_authorizations_limits",
+    ),
+    CheckConstraint(
+        "task_count_after between 1 and task_action_limit "
+        "and daily_count_after between 1 and daily_action_limit",
+        name="ck_action_risk_authorizations_counts",
+    ),
+    CheckConstraint(
+        "authorized_day = (authorized_at at time zone 'UTC')::date",
+        name="ck_action_risk_authorizations_utc_day",
+    ),
+    CheckConstraint(
+        "created_at >= authorized_at",
+        name="ck_action_risk_authorizations_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["action_id", "execution_attempt_id", "task_id", "installation_id", "ordinal"],
+        [
+            "task_actions.id",
+            "task_actions.execution_attempt_id",
+            "task_actions.task_id",
+            "task_actions.installation_id",
+            "task_actions.ordinal",
+        ],
+        name="fk_action_risk_authorizations_action_binding",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["target_id", "task_id", "installation_id", "ordinal"],
+        [
+            "task_targets.id",
+            "task_targets.task_id",
+            "task_targets.installation_id",
+            "task_targets.ordinal",
+        ],
+        name="fk_action_risk_authorizations_target_binding",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("action_id", name="pk_action_risk_authorizations"),
+    UniqueConstraint(
+        "task_id",
+        "platform",
+        "action",
+        "task_count_after",
+        name="uq_action_risk_authorizations_task_count",
+    ),
+    UniqueConstraint(
+        "installation_id",
+        "platform",
+        "action",
+        "authorized_day",
+        "daily_count_after",
+        name="uq_action_risk_authorizations_daily_count",
+    ),
+)
+
+Index(
+    "ix_action_risk_authorizations_scope_time",
+    action_risk_authorizations.c.installation_id,
+    action_risk_authorizations.c.platform,
+    action_risk_authorizations.c.action,
+    action_risk_authorizations.c.authorized_at,
+    action_risk_authorizations.c.action_id,
+)
+
+Index(
+    "ix_action_risk_authorizations_task_scope",
+    action_risk_authorizations.c.task_id,
+    action_risk_authorizations.c.platform,
+    action_risk_authorizations.c.action,
+    action_risk_authorizations.c.authorized_at,
+    action_risk_authorizations.c.action_id,
 )
 
 task_events = Table(
@@ -1310,6 +1457,7 @@ Index(
 )
 
 __all__ = [
+    "action_risk_authorizations",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",

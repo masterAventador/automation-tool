@@ -1,8 +1,12 @@
 """Async PostgreSQL infrastructure."""
 
+from .action_risk_authorization_repository import (
+    SqlAlchemyActionRiskAuthorizationRepository,
+)
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
+    action_risk_authorizations,
     device_credentials,
     device_sessions,
     douyin_search_exposure_definitions,
@@ -29,6 +33,7 @@ from .task_target_repository import SqlAlchemyTaskTargetRepository
 
 __all__ = [
     "Database",
+    "SqlAlchemyActionRiskAuthorizationRepository",
     "SqlAlchemyInstallationRevocationRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
@@ -36,6 +41,7 @@ __all__ = [
     "SqlAlchemyTaskEventConvergenceRepository",
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",
+    "action_risk_authorizations",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",

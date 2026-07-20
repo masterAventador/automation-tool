@@ -326,7 +326,9 @@ D6-15 不增加第二套 Adapter，而是在 `tests/fixtures/douyin_discovery_pa
 
 D6-16 首轮真实只读验收使用此前用户明确授权的 App 私有抖音 Profile 与无头系统 Chrome。`/user/self` 经生产 Session detector 从短暂 unknown 收敛为 healthy，但首页加载 ByteDance verifycenter captcha iframe；这证明“登录 Session 健康”和“当前页面无风控”是两个独立门禁，不能以前者绕过后者。Session 与 Search Page Object 现在共享 `DOUYIN_RISK_CHALLENGE_SELECTORS`，搜索首页/结果页一旦看到验证码 iframe 或 captcha container，优先于业务锚点返回阻塞并经正式 discovery wire 收敛到 handoff，而不是继续等候或点击。真实候选尚未产生，D6-16 继续待挑战由用户正常处理后补验；当前证据不能替代目标预览成功。
 
-A7-01 在 Control Plane 领域层增加 `ActionRiskScope` 与 `ActionRiskPolicy`，不接数据库、HTTP、Executor wire 或 App。scope 以强类型 `InstallationId`、封闭社交平台和既有任务动作组成，令后续所有计数天然按安装实例/平台/动作隔离；Policy 必须显式提供最小间隔、单任务动作上限、UTC 日动作上限和连续失败阈值，拒绝零间隔、分数秒、bool/float、越界数值、自由字符串和伪造版本。单任务上限复用 `MAX_TASK_TARGET_LIMIT`，日/失败计数的 `2^53-1` 只保证跨运行时无损，不是运营默认或“安全值”。A7-02 必须在 PostgreSQL 事务内消费该模型，并用 `max(任务配置最小间隔, 服务端硬下限)`，不能让客户端或服务器配置放宽本模型。
+A7-01 在 Control Plane 领域层增加 `ActionRiskScope` 与 `ActionRiskPolicy`。scope 以强类型 `InstallationId`、封闭社交平台和既有任务动作组成，令所有计数天然按安装实例/平台/动作隔离；Policy 必须显式提供最小间隔、单任务动作上限、UTC 日动作上限和连续失败阈值，拒绝零间隔、分数秒、bool/float、越界数值、自由字符串和伪造版本。单任务上限复用 `MAX_TASK_TARGET_LIMIT`，日/失败计数的 `2^53-1` 只保证跨运行时无损，不是运营默认或“安全值”。
+
+A7-02 用 `action_risk_authorizations` 保存每次成功授权的不可变策略与计数快照，并在同一 PostgreSQL 事务插入既有 `task_actions(status=authorized)`。事务先锁 Installation 行，因此同一安装实例的并发动作被线性化；随后复验 active Installation、当前 running Task/Attempt、任务定义动作、healthy Session 且没有 logout/risk gate、当前确认 revision、eligible 且未排除 Target。任务上限按 Task/平台/动作计数，日上限按 Installation/平台/动作/UTC 日期计数，最小间隔跨同一 Installation/平台/动作执行并取 `max(任务配置, 服务端硬下限)`。复合外键把 Action/Target/Attempt/Task/Installation/ordinal 锁成一个事实，计数序号唯一约束作为事务并发的第二道防线；任何拒绝、限流或数据库冲突都不留下半条 Action。同一 ActionId 只有完整资源身份与动作一致才返回原事实，意图变化 fail closed。该仓储是服务端内部边界，不接收 App/Executor wire；A7-03 必须由服务端时钟产生 deadline 并签名或 MAC，不能把客户端自报时间当权威授权时间。
 
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 

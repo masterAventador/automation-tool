@@ -379,7 +379,9 @@ D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，
 
 D6-16 的 `scripts/run_d6_16_browser_acceptance.py` 是显式真实账号验收 runner，不进入 App/Executor 包。它只从进程环境接收既有 App 私有 Profile 路径，用无头系统 Chrome 先探测 Session，再构造正式 `task.discover` command；stdout 只允许封闭 session/outcome/evidence/candidate count，不输出候选摘要或路径。首轮真实运行确认 Session healthy，但首页验证码 iframe 进入 handoff；对应产品修复仅把 `session.py` 的同一风控 selector 导入 `search_page.py`，没有复制 selector 或新增验证码 Adapter。D6-16 仍待真实候选与隐藏 App 预览补验。
 
-A7-01 新增 `backend/src/automation_tool/control_plane/domain/action_risk_policy.py` 与对应纯单元测试。模块只依赖现有 Installation 资源 ID、抖音任务动作枚举、任务目标上限和跨运行时整数上限；不导入 SQLAlchemy、FastAPI、Executor、Playwright 或 Tauri。`ActionRiskScope` 是安装实例/平台/动作复合键，`ActionRiskPolicy` 保存显式硬限制且无运营默认值；A7-02 再新增数据库计数/授权边界，不得把旧 `agent-platform` 的账号、租户、RBAC、冷启动额度或内存锁迁入。
+A7-01 新增 `backend/src/automation_tool/control_plane/domain/action_risk_policy.py` 与对应纯单元测试。模块只依赖现有 Installation 资源 ID、抖音任务动作枚举、任务目标上限和跨运行时整数上限；不导入 SQLAlchemy、FastAPI、Executor、Playwright 或 Tauri。`ActionRiskScope` 是安装实例/平台/动作复合键，`ActionRiskPolicy` 保存显式硬限制且无运营默认值；不得把旧 `agent-platform` 的账号、租户、RBAC、冷启动额度或内存锁迁入。
+
+A7-02 新增应用层不可变 `ActionRiskAuthorization`/稳定失败类型、`infrastructure/database/action_risk_authorization_repository.py`、Alembic `20260720_0020` 和对应单元/真实 PostgreSQL 生命周期测试。Schema 中的 `action_risk_authorizations` 只保存强类型资源绑定、封闭平台/动作、策略版本与授权时计数，不保存任意 JSON、页面内容、Cookie、Token、文案或本机路径；两个补充复合唯一约束只为 Action/Target 外键绑定 ordinal。Repository 复用既有 Task、Attempt、Target、确认、Session health/gate 与 `task_actions` 表，不另建账号中心、内存计数器、HTTP 协议或第二套副作用账本。A7-03 在此内部事实之上建立可下发短期授权。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 
