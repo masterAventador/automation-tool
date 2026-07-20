@@ -356,6 +356,10 @@ A7-10 将“只浏览”收敛为 Executor 内部 `douyin.browse-execution.v1` �
 
 浏览执行固定一次 30 秒 `domcontentloaded` 导航、一次最多 10 秒的主页 ready 等待，并在最终成功前重新观察页面且二次取得唯一主页根节点。取消在导航前、导航后和成功前检查；明确取消、探针异常/非 bool、登录、风控、导航/主页超时、未知版本、重复锚点、驱动失败和中途漂移都返回封闭脱敏状态且不重试导航。完成只证明目标主页在当前窗口可见，不写 A7-07 副作用账本、不签发结果 receipt、不更新服务端 Task；A7-11/A7-12 才分别组合授权、账本和发送动作，A7-15 再建立目标级结果 UI。
 
+A7-11 将评论执行收敛在 Executor 内部 `douyin.comment-action-execution.v1`。输入只接受完整 `ActionAuthorizationExpectation`、A7-05 `ActionMessageTemplate` 和 D6-06 最小目标摘要；模板只展开唯一目标显示名变量，展开结果再次经过 500 字符、安全文本和零剩余变量校验。效果摘要用域隔离 canonical JSON 绑定完整授权 scope、最终文案和模板版本，SQLite 与 receipt 都不保存正文。执行顺序固定为 ActionAuthorization/本机硬限制准入 → prepared 摘要 → Page Object ready → 填写 → 原子 dispatch 许可 → 单次提交 → 最终锚点二次复验 → verified 摘要，执行层不拥有 selector、官方 URL、Cookie/storage 或任意 HTTP 面。
+
+结构化 receipt 只允许 `not_dispatched/verified/outcome_uncertain` 和阶段化固定 evidence，并绑定 Action/Target、账本状态/revision 与重放位。许可前的登录、风控、陈旧确认、页面版本/锚点漂移、填写或 dispatch 许可失败不点击且保持 prepared；许可后的 Playwright 超时/异常、登录或风控变化、最终确认缺失/漂移、时钟或结算失败都不能回到失败重试，而是持久化 uncertain 或至少保留 dispatched 事实。prepare/dispatch 竞争返回的 dispatched/uncertain/verified 重放立即投影既有事实且不访问 DOM；只有 prepared 重放仍可重新观察页面并竞争尚未授出的唯一许可。该模块当前没有 Executor wire、Control Plane API、Tauri Command 或 React 入口，A7-15 才消费目标级结果，A7-16 才能以真实平台最终状态完成评论验收。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

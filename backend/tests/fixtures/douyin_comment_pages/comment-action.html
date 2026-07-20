@@ -8,7 +8,9 @@
       <div role="status" hidden>评论成功</div>
     </main>
     <script>
+      window.__commentDispatches = 0;
       document.querySelector("button").addEventListener("click", () => {
+        window.__commentDispatches += 1;
         document.querySelector('[role="status"]').hidden = false;
       });
     </script>
