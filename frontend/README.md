@@ -120,7 +120,9 @@ T3-19 的完整生命周期纵向验收在仓库根目录执行 `backend/.venv/b
 
 T3-20 的重启恢复纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_20_acceptance.py`。唯一 `visible=false` App 从页面创建并运行 Task，在 Executor 离线时真实提交取消；runner 停止首个 Uvicorn 后整页刷新验证“Control Plane 不可用”，再以同一 PostgreSQL 启动第二个 Uvicorn。同一 FakeExecutor/Session 自动重连并消费原 pending cancel，App 点击“重新检查”后从工作台和详情读取 `cancelled`；最终核对原 Task/Command/Event ID、定义、revision 与水位未丢失，秘密仍只在隔离 `app_data_dir`。
 
-D6-11 在既有 `ControlPlaneClient` 和 `TauriPlatformAdapter` 上增加三个固定操作：读取目标预览、精确替换排除集合、确认当前 revision。Rust 自行换取短期 App Session，只构造固定 task-scoped 路径并严格解析有界、脱敏 DTO；React 不能提交 base URL、Session、平台目标 ID、dedupe key 或浏览器事实。`task-target-preview-source.ts` 用同一 Zod 边界拒绝未知字段、乱序、非法状态和不一致计数。仓库根执行 `backend/.venv/bin/python scripts/run_d6_11_acceptance.py` 会从唯一 `visible=false` App 经正式 TypeScript source/Tauri Command/Rust 网络桥连接真实 Uvicorn/PostgreSQL，完成列表、排除、确认及幂等重放；D6-12 才增加用户可见预览页面。
+D6-11 在既有 `ControlPlaneClient` 和 `TauriPlatformAdapter` 上增加三个固定操作：读取目标预览、精确替换排除集合、确认当前 revision。Rust 自行换取短期 App Session，只构造固定 task-scoped 路径并严格解析有界、脱敏 DTO；React 不能提交 base URL、Session、平台目标 ID、dedupe key 或浏览器事实。`task-target-preview-source.ts` 用同一 Zod 边界拒绝未知字段、乱序、非法状态和不一致计数。仓库根执行 `backend/.venv/bin/python scripts/run_d6_11_acceptance.py` 会从唯一 `visible=false` App 经正式 TypeScript source/Tauri Command/Rust 网络桥连接真实 Uvicorn/PostgreSQL，完成列表、排除、确认及幂等重放。
+
+D6-12 将正式 source 注入任务详情中的 `TaskTargetPreviewPanel`。页面展示有界最小摘要、固定来源、计划执行/本次排除/策略拦截计数和去重/黑名单标记，支持单项选择、全部取消、恢复全部及最终二次确认；空选择不能确认，过期 revision 会回拉，同意图网络不确定重试复用幂等键，错误不显示底层文本或私密目标 ID。执行 `backend/.venv/bin/python scripts/run_d6_12_acceptance.py` 会在独立隐藏 Tauri App 中真实点击取消和确认，经正式 React/source/IPC/Rust/HTTP/PostgreSQL 核对任务进入 `queued`；测试窗口不会显示，也不启动运营浏览器。
 
 `@wdio/tauri-service 1.2.0` 的发布清单仍将 `@wdio/native-utils` 固定在缺少其已调用导出的 2.4.0，因此 `pnpm-workspace.yaml` 通过官方依赖 override 固定到已提供该导出的 2.5.0；未修改任何第三方源码。当前 embedded provider 的成功测试仍会输出两条上游诊断噪声：误检查外部 `tauri-driver`，以及会话销毁后清理空 mock；两者不影响真实 WKWebView 会话和测试结果，项目不会因此安装未使用的外部驱动。
 

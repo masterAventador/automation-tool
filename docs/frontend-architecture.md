@@ -99,8 +99,8 @@ T3-18 将工作台 Task 入口接到正式 `TaskRunDetails`。页面先读 TanSt
 ```text
 features/
 ├── workbench/              # 运营总览和当前任务
-├── task-create/            # 抖音任务表单和目标预览
-├── task-runs/              # 快照、事件、控制和结果
+├── task-create/            # 抖音任务表单
+├── task-runs/              # 快照、目标预览、事件、控制和结果
 ├── platform-sessions/      # 抖音服务端健康、本机处理与后续安全注销
 ├── diagnostics/            # 后端、Executor、浏览器和权限诊断
 └── settings/               # 本地保留、浏览器选择和诊断导出
@@ -289,7 +289,9 @@ B5-16 继续复用生产 `BrowserProfileStore.current_douyin_profile()`→owned 
 
 D6-10 在既有 Rust `ControlPlaneClient` 增加唯一 `StartTaskDiscovery` operation，并在 Tauri 注册固定 `start_task_discovery(task_id,idempotency_key)` Command。Rust 自行从 App 私有 vault 换取 `app.control-plane` Session，只向固定 `/api/v1/tasks/{task_id}/discoveries` 发 POST，严格解析 task/command/attempt/status/revision/watermark/UTC deadline；WebView 不能提交关键词、Candidate、Cookie、浏览器/Profile 路径或任意 URL。D6-10 的 `control-plane-e2e` 专用 Command 只用于 hidden App 纵向验收，不进入默认构建。
 
-D6-11 继续复用同一个 `ControlPlaneClient`，以 `GetTaskTargetPreview`、`ReplaceTaskTargetExclusions`、`ConfirmTaskTargetPreview` 三个封闭 operation 和同名固定 Tauri Command 调用 task-scoped API。游标、page revision、task revision、Target UUIDv4、排除集合与幂等键均在 TypeScript、Rust 和后端逐层复验；Rust 只返回公开摘要、封闭来源/策略原因、选择状态、计数和确认时间，拒绝未知字段、乱序、跨 Task、无确认的后确认状态或确认后的预确认状态。`task-target-preview-source.ts` 是正式 PlatformAdapter source，当前仅由隐藏 App 验收消费；D6-12 才把它接入用户可见目标预览页面。测试配置固定 `visible=false`，生产配置和默认构建没有验收入口。
+D6-11 继续复用同一个 `ControlPlaneClient`，以 `GetTaskTargetPreview`、`ReplaceTaskTargetExclusions`、`ConfirmTaskTargetPreview` 三个封闭 operation 和同名固定 Tauri Command 调用 task-scoped API。游标、page revision、task revision、Target UUIDv4、排除集合与幂等键均在 TypeScript、Rust 和后端逐层复验；Rust 只返回公开摘要、封闭来源/策略原因、选择状态、计数和确认时间，拒绝未知字段、乱序、跨 Task、无确认的后确认状态或确认后的预确认状态。`task-target-preview-source.ts` 是正式 PlatformAdapter source；测试配置固定 `visible=false`，生产配置和默认构建没有验收入口。
+
+D6-12 把该正式 source 注入 `App → WorkbenchShell → TaskRunDetails`，没有新增 HTTP 或通用 IPC。`TaskTargetPreviewPanel` 只在当前 Task 等待确认或已收到确认事实时加载最多 100 个目标，展示最小摘要、固定来源、计划执行/用户排除/策略拦截计数，以及 `eligible/本任务重复/30 天内已触达/黑名单` 封闭标记；Target UUID 只作为受控 Mutation 参数，不渲染。单选、全部取消和恢复全部都用完整排除集合、当前 page/task revision 与同意图稳定幂等键调用正式 source；过期 revision 自动回拉，未知错误不显示底层文本，空选择禁止确认。确认使用明确二次确认，成功后回拉任务快照/列表并等待权威事件。`scripts/run_d6_12_acceptance.py` 由独立 `visible=false` App 在真实页面取消第二个目标并确认，经正式 TypeScript source、IPC、Rust、Uvicorn/PostgreSQL 验证最终 `queued`、selection revision 和连续事件；准备命令只注册/发现测试 Task，不代替三次用户页面 API 调用。
 
 E4-15 把测试隔离从源码约束扩展到实际 release 字节。`build.rs` 在 `PROFILE=release` 时先验证编译期 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY` 是 canonical 32 字节、有效且非弱 Ed25519 公钥，失败发生在 `tauri_build::build()` 之前且错误不回显输入；公开开发 fixture key 只存在于 debug 分支。生产二进制审计同时读取无默认特性的 Cargo 依赖树、正式 Tauri 配置和 Vite 资产，拒绝 WDIO/WebDriver、验收 Command、测试 origin/标识/Sidecar、Harness、开发验证公钥和 1420 调试端口，并要求实际制品包含预期发布公钥。
 

@@ -24,6 +24,8 @@ import {
   type TaskSnapshot,
   type TaskStatus,
 } from "../../api/control-plane/task-projections";
+import type { TaskTargetPreviewSource } from "../../api/control-plane/task-target-previews";
+import { TaskTargetPreviewPanel } from "./TaskTargetPreview";
 import type {
   TaskRunControlGateway,
   TaskRunControlOperation,
@@ -111,6 +113,7 @@ interface TaskRunDetailsProps {
   readonly taskId: string;
   readonly taskSource: TaskProjectionSource;
   readonly controlGateway: TaskRunControlGateway;
+  readonly taskTargetPreviewSource: TaskTargetPreviewSource;
   readonly onBack: () => void;
 }
 
@@ -199,6 +202,7 @@ export function TaskRunDetails({
   taskId,
   taskSource,
   controlGateway,
+  taskTargetPreviewSource,
   onBack,
 }: TaskRunDetailsProps) {
   const queryClient = useQueryClient();
@@ -207,6 +211,7 @@ export function TaskRunDetails({
   const [streamError, setStreamError] = useState(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmedPreviewTaskId, setConfirmedPreviewTaskId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<SubmittedControl | null>(null);
   const commandKeys = useRef(
     new Map<TaskRunControlOperation, { revision: number; key: string }>(),
@@ -237,6 +242,9 @@ export function TaskRunDetails({
               setStreamError(true);
               controller.abort();
               return;
+            }
+            if (event.eventType === "task.targets_confirmed") {
+              setConfirmedPreviewTaskId(taskId);
             }
             lastSequence = event.sequence;
             setEvents((current) =>
@@ -389,6 +397,14 @@ export function TaskRunDetails({
         </Descriptions>
         <Progress percent={progress} status={status === "failed" ? "exception" : "normal"} />
       </Card>
+
+      {status === "awaiting_confirmation" || confirmedPreviewTaskId === taskId ? (
+        <TaskTargetPreviewPanel
+          taskId={taskId}
+          source={taskTargetPreviewSource}
+          onConfirmed={() => setConfirmedPreviewTaskId(taskId)}
+        />
+      ) : null}
 
       <Card title="任务控制">
         <Flex gap={10} wrap>

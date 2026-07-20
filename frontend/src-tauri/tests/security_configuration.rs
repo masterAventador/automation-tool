@@ -150,6 +150,26 @@ fn task_target_preview_acceptance_is_isolated_and_hidden() {
 }
 
 #[test]
+fn task_target_preview_ui_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.task-target-preview-ui-e2e.conf.json");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.d612acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{ "label": "main", "title": "自动化运营工具", "visible": false }])
+    );
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(capabilities[1]["identifier"], "wdio-task-target-preview-ui");
+    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+}
+
+#[test]
 fn task_restart_acceptance_is_isolated_and_hidden() {
     let config = read_json("tauri.task-restart-e2e.conf.json");
     let capabilities = config["app"]["security"]["capabilities"]

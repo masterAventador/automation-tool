@@ -561,6 +561,92 @@ fn acceptance_task_definition() -> control_plane::DouyinSearchExposureTaskDefini
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PreparedTargetPreviewAcceptance {
+    installation_id: String,
+    task_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+async fn prepare_target_preview_acceptance(
+    client: &control_plane::ControlPlaneClient,
+    identity: &ProductionDeviceIdentity,
+    vault: &ProductionDeviceCredentialVault,
+    token_environment_variable: &str,
+    environment_id_variable: &str,
+    task_idempotency_key: &str,
+    discovery_idempotency_key: &str,
+) -> Result<PreparedTargetPreviewAcceptance, ControlPlaneCommandError> {
+    let token =
+        std::env::var(token_environment_variable).map_err(|_| ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        })?;
+    let environment_id =
+        std::env::var(environment_id_variable).map_err(|_| ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, identity, vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let task = client
+        .create_task(vault, task_idempotency_key, &acceptance_task_definition())
+        .await
+        .map_err(map_control_plane_error)?;
+
+    let mut platform_ready = false;
+    for _ in 0..120 {
+        let platform = client
+            .get_douyin_platform_session(vault)
+            .await
+            .map_err(map_control_plane_error)?;
+        if platform.state() == "healthy" {
+            platform_ready = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    if !platform_ready {
+        return Err(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: true,
+        });
+    }
+    client
+        .start_task_discovery(vault, task.task_id(), discovery_idempotency_key)
+        .await
+        .map_err(map_control_plane_error)?;
+    for _ in 0..240 {
+        let snapshot = client
+            .get_task(vault, task.task_id())
+            .await
+            .map_err(map_control_plane_error)?;
+        if snapshot.status() == "awaiting_confirmation" {
+            return Ok(PreparedTargetPreviewAcceptance {
+                installation_id: registration.installation_id().to_owned(),
+                task_id: task.task_id().to_owned(),
+            });
+        }
+        if matches!(
+            snapshot.status(),
+            "failed" | "cancelled" | "outcome_uncertain"
+        ) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(ControlPlaneCommandError {
+        code: "operation_unavailable",
+        retryable: true,
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TaskDiscoveryAcceptanceSummary {
     installation_id: String,
     task_id: String,
@@ -701,85 +787,18 @@ async fn preview_task_for_acceptance(
     identity: tauri::State<'_, ProductionDeviceIdentity>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
 ) -> Result<TaskTargetPreviewAcceptanceSummary, ControlPlaneCommandError> {
-    let token = std::env::var("AUTOMATION_TOOL_D611_BOOTSTRAP_TOKEN").map_err(|_| {
-        ControlPlaneCommandError {
-            code: "acceptance_configuration_unavailable",
-            retryable: false,
-        }
-    })?;
-    let environment_id = std::env::var("AUTOMATION_TOOL_D611_ENVIRONMENT_ID").map_err(|_| {
-        ControlPlaneCommandError {
-            code: "acceptance_configuration_unavailable",
-            retryable: false,
-        }
-    })?;
-    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
-        .map_err(map_control_plane_error)?;
-    let registration = client
-        .register_installation(&bootstrap, &identity, &vault)
-        .await
-        .map_err(map_control_plane_error)?;
-    let task = client
-        .create_task(
-            &vault,
-            "task:preview:tauri-acceptance",
-            &acceptance_task_definition(),
-        )
-        .await
-        .map_err(map_control_plane_error)?;
-
-    let mut platform_ready = false;
-    for _ in 0..120 {
-        let platform = client
-            .get_douyin_platform_session(&vault)
-            .await
-            .map_err(map_control_plane_error)?;
-        if platform.state() == "healthy" {
-            platform_ready = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    if !platform_ready {
-        return Err(ControlPlaneCommandError {
-            code: "operation_unavailable",
-            retryable: true,
-        });
-    }
-    client
-        .start_task_discovery(
-            &vault,
-            task.task_id(),
-            "task:preview:discover:tauri-acceptance",
-        )
-        .await
-        .map_err(map_control_plane_error)?;
-    let mut ready = false;
-    for _ in 0..240 {
-        let snapshot = client
-            .get_task(&vault, task.task_id())
-            .await
-            .map_err(map_control_plane_error)?;
-        if snapshot.status() == "awaiting_confirmation" {
-            ready = true;
-            break;
-        }
-        if matches!(
-            snapshot.status(),
-            "failed" | "cancelled" | "outcome_uncertain"
-        ) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    if !ready {
-        return Err(ControlPlaneCommandError {
-            code: "operation_unavailable",
-            retryable: true,
-        });
-    }
+    let prepared = prepare_target_preview_acceptance(
+        &client,
+        &identity,
+        &vault,
+        "AUTOMATION_TOOL_D611_BOOTSTRAP_TOKEN",
+        "AUTOMATION_TOOL_D611_ENVIRONMENT_ID",
+        "task:preview:tauri-acceptance",
+        "task:preview:discover:tauri-acceptance",
+    )
+    .await?;
     let initial = client
-        .get_task_target_preview(&vault, task.task_id(), None, 100)
+        .get_task_target_preview(&vault, &prepared.task_id, None, 100)
         .await
         .map_err(map_control_plane_error)?;
     if initial.items().len() != 2
@@ -797,7 +816,7 @@ async fn preview_task_for_acceptance(
     let excluded = client
         .replace_task_target_exclusions(
             &vault,
-            task.task_id(),
+            &prepared.task_id,
             initial.page_revision(),
             initial.task_revision(),
             &[excluded_target],
@@ -808,7 +827,7 @@ async fn preview_task_for_acceptance(
     let confirmed = client
         .confirm_task_target_preview(
             &vault,
-            task.task_id(),
+            &prepared.task_id,
             excluded.page_revision(),
             excluded.task_revision(),
             "task:preview:confirm:tauri-acceptance",
@@ -818,7 +837,7 @@ async fn preview_task_for_acceptance(
     let replayed = client
         .confirm_task_target_preview(
             &vault,
-            task.task_id(),
+            &prepared.task_id,
             excluded.page_revision(),
             excluded.task_revision(),
             "task:preview:confirm:tauri-acceptance",
@@ -826,8 +845,8 @@ async fn preview_task_for_acceptance(
         .await
         .map_err(map_control_plane_error)?;
     Ok(TaskTargetPreviewAcceptanceSummary {
-        installation_id: registration.installation_id().to_owned(),
-        task_id: task.task_id().to_owned(),
+        installation_id: prepared.installation_id,
+        task_id: prepared.task_id,
         page_revision: initial.page_revision(),
         initial_task_revision: initial.task_revision(),
         excluded_task_revision: excluded.task_revision(),
@@ -838,6 +857,25 @@ async fn preview_task_for_acceptance(
         final_status: confirmed.task_status().to_owned(),
         replay_revision: replayed.task_revision(),
     })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn prepare_task_target_preview_ui_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<PreparedTargetPreviewAcceptance, ControlPlaneCommandError> {
+    prepare_target_preview_acceptance(
+        &client,
+        &identity,
+        &vault,
+        "AUTOMATION_TOOL_D612_BOOTSTRAP_TOKEN",
+        "AUTOMATION_TOOL_D612_ENVIRONMENT_ID",
+        "task:preview-ui:tauri-acceptance",
+        "task:preview-ui:discover:tauri-acceptance",
+    )
+    .await
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -2129,6 +2167,7 @@ pub fn run() {
         prepare_platform_session_reuse_for_acceptance,
         discover_task_for_acceptance,
         preview_task_for_acceptance,
+        prepare_task_target_preview_ui_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance,
         get_executor_status,

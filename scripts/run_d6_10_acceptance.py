@@ -270,9 +270,11 @@ def start_executor(
     private_app_data: Path,
     installation_id: InstallationId,
     session_token: str,
+    state_directory_name: str = "d6-10-executor-state",
+    thread_name: str = "d6-10-formal-executor",
 ) -> tuple[threading.Event, threading.Thread, list[BaseException]]:
     executor_id = str(uuid4())
-    state_directory = private_app_data / "d6-10-executor-state"
+    state_directory = private_app_data / state_directory_name
     ledger = ExecutorLedger(
         state_directory=state_directory,
         installation_id=str(installation_id),
@@ -318,7 +320,7 @@ def start_executor(
         finally:
             authenticator.close()
 
-    thread = threading.Thread(target=run, name="d6-10-formal-executor", daemon=True)
+    thread = threading.Thread(target=run, name=thread_name, daemon=True)
     thread.start()
     return stop, thread, failures
 

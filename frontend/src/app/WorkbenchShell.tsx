@@ -5,6 +5,10 @@ import {
   TaskProjectionSourceError,
   type TaskProjectionSource,
 } from "../api/control-plane/task-projections";
+import {
+  TaskTargetPreviewSourceError,
+  type TaskTargetPreviewSource,
+} from "../api/control-plane/task-target-previews";
 import { TaskCreate } from "../features/task-create/TaskCreate";
 import {
   TaskCreationGatewayError,
@@ -80,6 +84,18 @@ const shellTaskRunControlGateway: TaskRunControlGateway = {
   },
 };
 
+const shellTaskTargetPreviewSource: TaskTargetPreviewSource = {
+  async getPreview() {
+    throw new TaskTargetPreviewSourceError("transport_unavailable", true);
+  },
+  async replaceExclusions() {
+    throw new TaskTargetPreviewSourceError("transport_unavailable", true);
+  },
+  async confirm() {
+    throw new TaskTargetPreviewSourceError("transport_unavailable", true);
+  },
+};
+
 const shellPlatformAdapter: PlatformAdapter = {
   async getBrowserSettings() {
     return { availableBrowsers: [], selectedBrowser: null };
@@ -121,6 +137,7 @@ interface WorkbenchShellProps {
   readonly gateway?: WorkbenchGateway | undefined;
   readonly taskCreationGateway?: TaskCreationGateway | undefined;
   readonly taskRunControlGateway?: TaskRunControlGateway | undefined;
+  readonly taskTargetPreviewSource?: TaskTargetPreviewSource | undefined;
   readonly platformAdapter?: PlatformAdapter | undefined;
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
 }
@@ -130,6 +147,7 @@ export function WorkbenchShell({
   gateway = shellWorkbenchGateway,
   taskCreationGateway = shellTaskCreationGateway,
   taskRunControlGateway = shellTaskRunControlGateway,
+  taskTargetPreviewSource = shellTaskTargetPreviewSource,
   platformAdapter = shellPlatformAdapter,
   platformSessionGateway = shellPlatformSessionGateway,
 }: WorkbenchShellProps) {
@@ -244,6 +262,7 @@ export function WorkbenchShell({
                 taskId={selectedTaskId}
                 taskSource={taskSource}
                 controlGateway={taskRunControlGateway}
+                taskTargetPreviewSource={taskTargetPreviewSource}
                 onBack={() => setActivePage("workbench")}
               />
             ) : showingTaskRun ? (

@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-11，下一项为 D6-12 目标预览 UI；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-12，下一项为 D6-13 未确认副作用守卫；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -293,7 +293,7 @@
 | D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | 🟩 完成 |
 | D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | 🟩 完成 |
 | D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | 🟩 完成 |
-| D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | ⬜ 未开始 |
+| D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | 🟩 完成 |
 | D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | ⬜ 未开始 |
 | D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | ⬜ 未开始 |
 | D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | ⬜ 未开始 |
@@ -2042,11 +2042,25 @@
 - 资源与文档：所有测试使用 `automation-tool-*` 唯一 Compose project、随机 PostgreSQL 端口和 D6-11 独立 App identifier；验收结束后 Uvicorn、Tauri App、WebDriver、端口、容器、网络、Volume 与 `com.aventador.automationtool.d611acceptance` AppData 均零残留，没有启动 Chrome、触碰默认 Profile、系统钥匙串、真实账号或其他项目资源。同步根/Backend/Frontend README、前后端架构、工程结构、OpenAPI/生成 DTO 和本唯一台账，没有新增重复规划文档
 - 后续：进入 `D6-12`，将本任务正式 source 接入用户可见目标预览页面，展示摘要、策略标记、排除操作和最终确认；页面验收仍须由隐藏真实 App 发出本任务接口调用
 
+### D6-12 目标预览 UI
+
+- 状态：🟩 完成
+- 提交：本记录、用户页面、组合根注入、组件/契约测试、D6-12 隐藏配置、验收脚本和文档属于单一 `feat: 完成目标预览用户界面` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`；组件测试最初准确失败于 `TaskTargetPreview.tsx` 不存在，任务详情测试准确失败于等待确认页未挂载预览，严格 TypeScript 准确失败于 `WorkbenchShell` 未注入 source，生产组合根契约准确失败于 `main.tsx` 未构造正式 source，Rust 安全配置测试准确失败于 D6-12 独立隐藏配置不存在，Node 契约准确失败于测试准备 Command 不存在。跨 Task 切换回归另准确捕获已打开预览会对新 Task 多发一次读取；最终以 Task-scoped 确认状态修复
+- 页面闭环：`TaskTargetPreviewPanel` 接入既有 `TaskRunDetails`，读取最多 100 个当前 revision 目标并展示发现、计划执行、用户排除和策略拦截计数；每行只显示最小名称、公开号、固定“抖音通用搜索作者”来源，以及可执行、本任务重复、30 天内已触达或黑名单标记，不渲染 Target UUID、平台目标 ID、dedupe key、URL 或页面事实。用户可逐项选择、全部取消、恢复全部，并通过明确二次确认进入队列；空选择无法确认，确认后全部编辑关闭
+- Revision、幂等与恢复：每次排除都发送完整 eligible 排除集合并绑定当前 page/task revision；同一意图在结果不确定后复用同一幂等键，成功或选择 revision 改变后才换键。确认独立绑定最新 revision 并复用同意图键；过期快照显示固定安全提示并自动回拉，其他失败不反射底层文本。确认成功使任务详情/列表失效并继续等待权威事件；已打开状态以当前 Task ID 隔离，切换到另一个未等待确认的 Task 不读取预览
+- 正式组合根：`main.tsx` 唯一构造 `TauriTaskTargetPreviewSource`，经 `App → WorkbenchShell → TaskRunDetails` 注入；业务组件没有 `@tauri-apps`、fetch、base URL、Header、Session 或任意 operation。D6-12 只消费 D6-11 三个固定生产 Command，不新增第二网络层；测试准备 Command 仅在 `control-plane-e2e` 特性注册并只负责注册、创建和发现测试 Task，不读取、排除或确认预览
+- 生产同路径验收：`scripts/run_d6_12_acceptance.py` 使用唯一 `visible=false` 的 `com.aventador.automationtool.d612acceptance` Tauri App、真实 Uvicorn/PostgreSQL 与正式 LocalExecutorProcess。WDIO 从真实工作台进入任务详情，页面经正式 TypeScript source/IPC/Rust 网络桥读取 2 个目标、取消第 2 个并确认；PostgreSQL 最终核对 Task `queued` revision 5、Attempt succeeded、1 条第二目标排除、绑定 selection revision 4 的确认和四条连续事件。验收没有 Mock、直接 HTTP、UI Harness、可见窗口或运营浏览器代替页面调用
+- 失败矩阵：组件覆盖策略目标不可选、全部取消后空选择禁止确认、过期 revision 回拉、未知传输错误脱敏、排除不确定重试同键、确认后锁定和跨 Task 状态隔离；D6-11 已覆盖并发、跨 Installation、非法 Target、确认重放和持久事实损坏。页面卸载会取消当前 Mutation，请求 Query 使用 TanStack AbortSignal；服务端最终状态仍只认权威快照/事件
+- 测试：Frontend 全量 89 项 Node 契约、160 项 Vitest、5 项无头 Playwright 全绿；ESLint、严格 TypeScript、OpenAPI 漂移与正式生产构建边界全绿。Rust 默认与 `desktop-e2e` 各 136 passed/4 ignored，`control-plane-e2e` 137 passed/5 ignored；三套全目标 Clippy `-D warnings`、Rustfmt、Actionlint 全绿。D6-12 隐藏真实 App WDIO 最终复验 1 项通过；共用准备逻辑抽取后的 D6-11 隐藏 App 回归 1 项通过；Python 验收脚本 Ruff/格式全绿。本任务未改变后端业务源码，真实后端/API/迁移链已由该纵向验收执行
+- 资源与文档：启动前确认 8765/1420 空闲；所有运行使用 `automation-tool-d612-*` 唯一 Compose project、随机 PostgreSQL 端口、独立 AppData、Executor state 和隐藏窗口。两轮验收及无头 UI Harness 后，Uvicorn、Tauri App、WebDriver、浏览器、端口、容器、网络、Volume 与 D6-12 AppData 均零残留；没有触碰用户默认 Profile、系统钥匙串、真实账号或其他项目资源。同步根/Frontend/Backend README、前端架构、工程结构和本唯一台账，没有新增重复规划文档
+- 后续：进入 `D6-13`，在动作命令投递边界增加未确认副作用守卫，确保没有当前确认事实时 Executor 永远收不到评论、私信或其他 action
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-12`：把正式目标预览 source 接入用户页面，展示摘要、排除、去重/黑名单标记并确认当前 revision；
-2. `D6-13`：增加未确认副作用守卫，确保没有确认 command 时 Executor 永远收不到 action；
+1. `D6-13`：增加未确认副作用守卫，确保没有确认 command 时 Executor 永远收不到 action；
+2. `D6-14`：未知页面元素时保存有界、脱敏诊断 Artifact 并进入人工接管；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

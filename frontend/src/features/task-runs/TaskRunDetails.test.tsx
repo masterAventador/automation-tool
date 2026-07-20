@@ -9,6 +9,10 @@ import type {
   TaskProjectionSource,
   TaskSnapshot,
 } from "../../api/control-plane/task-projections";
+import type {
+  TaskTargetPreview,
+  TaskTargetPreviewSource,
+} from "../../api/control-plane/task-target-previews";
 import { TaskRunDetails } from "./TaskRunDetails";
 import type {
   TaskRunControlGateway,
@@ -18,6 +22,7 @@ import type {
 const TASK_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const ATTEMPT_ID = "16fd2706-8baf-433b-82eb-8c7fada847da";
 const ACTION_ID = "adff54bd-3571-44da-8acd-5ea15695e5e9";
+const OTHER_TASK_ID = "fd4aa304-3d73-4fd2-af88-c2c9747c4168";
 
 function snapshot(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
   return {
@@ -107,9 +112,45 @@ function gateway(): TaskRunControlGateway {
   };
 }
 
+function targetPreview(): TaskTargetPreview {
+  return {
+    taskId: TASK_ID,
+    taskStatus: "awaiting_confirmation",
+    taskRevision: 3,
+    lastEventSequence: 2,
+    pageRevision: 1,
+    selectedTargetCount: 1,
+    userExcludedTargetCount: 0,
+    confirmed: false,
+    confirmedAt: null,
+    items: [
+      {
+        targetId: "6fa459ea-ee8a-4ca4-894e-db77e160355e",
+        ordinal: 1,
+        displayName: "任务详情候选",
+        publicHandle: "details.candidate",
+        source: "general_search_author",
+        disposition: "eligible",
+        userExcluded: false,
+        selected: true,
+      },
+    ],
+    nextCursor: null,
+  };
+}
+
+function targetSource(): TaskTargetPreviewSource {
+  return {
+    getPreview: vi.fn(async () => targetPreview()),
+    replaceExclusions: vi.fn(async () => targetPreview()),
+    confirm: vi.fn(async () => targetPreview()),
+  };
+}
+
 function renderDetails(
   taskSource = source(),
   controlGateway = gateway(),
+  taskTargetPreviewSource = targetSource(),
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -123,6 +164,7 @@ function renderDetails(
           taskId={TASK_ID}
           taskSource={taskSource}
           controlGateway={controlGateway}
+          taskTargetPreviewSource={taskTargetPreviewSource}
           onBack={() => undefined}
         />
       </QueryClientProvider>,
@@ -131,6 +173,67 @@ function renderDetails(
 }
 
 describe("Task run details", () => {
+  it("opens the target preview inside details only while confirmation is required", async () => {
+    const previewSource = targetSource();
+    renderDetails(
+      source(snapshot({ status: "awaiting_confirmation", revision: 3 })),
+      gateway(),
+      previewSource,
+    );
+
+    expect(await screen.findByRole("heading", { name: "目标预览" })).toBeVisible();
+    expect(screen.getByText("任务详情候选")).toBeVisible();
+    expect(previewSource.getPreview).toHaveBeenCalledOnce();
+  });
+
+  it("does not carry an opened preview into another task that has not requested confirmation", async () => {
+    const taskSource: TaskProjectionSource = {
+      getTask: vi.fn(async (taskId) =>
+        snapshot({
+          taskId,
+          status: taskId === TASK_ID ? "awaiting_confirmation" : "running",
+          revision: 3,
+          lastEventSequence: 0,
+        }),
+      ),
+      listTasks: vi.fn(async () => ({ items: [], nextCursor: null })),
+      streamTaskEvents: vi.fn<TaskProjectionSource["streamTaskEvents"]>(
+        async (_taskId, afterSequence, _onEvent, options = {}) =>
+          new Promise<{ lastSequence: number; terminal: boolean }>((resolve) => {
+            options.signal?.addEventListener(
+              "abort",
+              () => resolve({ lastSequence: afterSequence, terminal: false }),
+              { once: true },
+            );
+          }),
+      ),
+    };
+    const previewSource = targetSource();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const details = (taskId: string) => (
+      <QueryClientProvider client={queryClient}>
+        <TaskRunDetails
+          taskId={taskId}
+          taskSource={taskSource}
+          controlGateway={gateway()}
+          taskTargetPreviewSource={previewSource}
+          onBack={() => undefined}
+        />
+      </QueryClientProvider>
+    );
+    const rendered = render(details(TASK_ID));
+
+    expect(await screen.findByRole("heading", { name: "目标预览" })).toBeVisible();
+    rendered.rerender(details(OTHER_TASK_ID));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "目标预览" })).not.toBeInTheDocument(),
+    );
+    expect(previewSource.getPreview).toHaveBeenCalledTimes(1);
+  });
+
   it("shows authoritative status, progress, history, and scoped Action results", async () => {
     renderDetails();
 
