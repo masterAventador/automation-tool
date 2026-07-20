@@ -28,6 +28,7 @@ class TaskEventType(StrEnum):
     TASK_VALIDATION_STARTED = "task.validation_started"
     TASK_VALIDATION_FAILED = "task.validation_failed"
     TASK_AWAITING_PLATFORM_LOGIN = "task.awaiting_platform_login"
+    TASK_DISCOVERY_STARTED = "task.discovery_started"
     TASK_AWAITING_CONFIRMATION = "task.awaiting_confirmation"
     TASK_STARTED = "task.started"
     STEP_STARTED = "step.started"

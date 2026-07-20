@@ -1,5 +1,218 @@
 {
   "$defs": {
+    "DouyinDiscoveryBatchPayload": {
+      "additionalProperties": false,
+      "description": "One bounded replayable Candidate chunk.",
+      "properties": {
+        "batch_count": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Batch Count",
+          "type": "integer"
+        },
+        "batch_index": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Batch Index",
+          "type": "integer"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/DouyinDiscoveryCandidatePayload"
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "title": "Candidates",
+          "type": "array"
+        },
+        "discovery_version": {
+          "const": "douyin.discovery.v1",
+          "title": "Discovery Version",
+          "type": "string"
+        },
+        "page_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Page Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "discovery_version",
+        "page_revision",
+        "batch_index",
+        "batch_count",
+        "candidates"
+      ],
+      "title": "DouyinDiscoveryBatchPayload",
+      "type": "object"
+    },
+    "DouyinDiscoveryCandidatePayload": {
+      "additionalProperties": false,
+      "description": "The minimum Candidate fields allowed in one discovery batch.",
+      "properties": {
+        "candidate_version": {
+          "const": "douyin.candidate.v1",
+          "title": "Candidate Version",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "page_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Page Revision",
+          "type": "integer"
+        },
+        "platform_target_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Platform Target Id",
+          "type": "string"
+        },
+        "public_handle": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Public Handle"
+        },
+        "source": {
+          "const": "general_search_author",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_version",
+        "platform_target_id",
+        "display_name",
+        "public_handle",
+        "source",
+        "page_revision"
+      ],
+      "title": "DouyinDiscoveryCandidatePayload",
+      "type": "object"
+    },
+    "DouyinDiscoveryCommandPayload": {
+      "additionalProperties": false,
+      "description": "Only discovery business input crosses the cloud/local boundary.",
+      "properties": {
+        "discovery_version": {
+          "const": "douyin.discovery.v1",
+          "title": "Discovery Version",
+          "type": "string"
+        },
+        "keyword": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Keyword",
+          "type": "string"
+        },
+        "page_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Page Revision",
+          "type": "integer"
+        },
+        "target_limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Target Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "discovery_version",
+        "keyword",
+        "target_limit",
+        "page_revision"
+      ],
+      "title": "DouyinDiscoveryCommandPayload",
+      "type": "object"
+    },
+    "DouyinDiscoveryCompletedPayload": {
+      "additionalProperties": false,
+      "description": "Closed final discovery fact; only success can reference Candidate batches.",
+      "properties": {
+        "batch_count": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Batch Count",
+          "type": "integer"
+        },
+        "candidate_count": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Candidate Count",
+          "type": "integer"
+        },
+        "discovery_version": {
+          "const": "douyin.discovery.v1",
+          "title": "Discovery Version",
+          "type": "string"
+        },
+        "evidence": {
+          "enum": [
+            "candidates_extracted",
+            "login_required",
+            "blocking_dialog",
+            "no_candidates",
+            "navigation_timed_out",
+            "home_ready_timed_out",
+            "action_timed_out",
+            "result_url_timed_out",
+            "results_ready_timed_out",
+            "page_version_unknown",
+            "conflicting_anchors",
+            "results_unavailable",
+            "privacy_rejected",
+            "result_count_decreased",
+            "cancellation_unavailable",
+            "cancellation_requested",
+            "page_unavailable"
+          ],
+          "title": "Evidence",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "completed",
+            "login_required",
+            "handoff_required",
+            "failed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "page_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Page Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "discovery_version",
+        "outcome",
+        "evidence",
+        "page_revision",
+        "batch_count",
+        "candidate_count"
+      ],
+      "title": "DouyinDiscoveryCompletedPayload",
+      "type": "object"
+    },
     "ExecutorEnvelope": {
       "discriminator": {
         "mapping": {
@@ -17,6 +230,9 @@
           "task.cancelled": "#/$defs/TaskEventEnvelope",
           "task.completed": "#/$defs/TaskEventEnvelope",
           "task.control_ack": "#/$defs/TaskCommandResultEnvelope",
+          "task.discover": "#/$defs/TaskDiscoveryCommandEnvelope",
+          "task.discovery_batch": "#/$defs/TaskDiscoveryBatchEnvelope",
+          "task.discovery_completed": "#/$defs/TaskDiscoveryCompletedEnvelope",
           "task.emergency_stop": "#/$defs/TaskCommandEnvelope",
           "task.failed": "#/$defs/TaskEventEnvelope",
           "task.offer": "#/$defs/TaskCommandEnvelope",
@@ -42,10 +258,19 @@
           "$ref": "#/$defs/TaskCommandEnvelope"
         },
         {
+          "$ref": "#/$defs/TaskDiscoveryCommandEnvelope"
+        },
+        {
           "$ref": "#/$defs/TaskCommandResultEnvelope"
         },
         {
           "$ref": "#/$defs/TaskEventEnvelope"
+        },
+        {
+          "$ref": "#/$defs/TaskDiscoveryBatchEnvelope"
+        },
+        {
+          "$ref": "#/$defs/TaskDiscoveryCompletedEnvelope"
         }
       ]
     },
@@ -158,6 +383,7 @@
         },
         "deadline_at": {
           "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
           "title": "Deadline At",
           "type": "string"
         },
@@ -195,7 +421,8 @@
           "type": "string"
         },
         "payload": {
-          "$ref": "#/$defs/PlatformSessionHealthPayload"
+          "$ref": "#/$defs/PlatformSessionHealthPayload",
+          "maxProperties": 64
         },
         "protocol_version": {
           "const": "1.0",
@@ -204,6 +431,7 @@
         },
         "sent_at": {
           "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
           "title": "Sent At",
           "type": "string"
         },
@@ -499,6 +727,318 @@
         "message_type"
       ],
       "title": "TaskCommandResultEnvelope",
+      "type": "object"
+    },
+    "TaskDiscoveryBatchEnvelope": {
+      "additionalProperties": false,
+      "description": "One replayable chunk of privacy-trimmed Candidates.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "const": "task.discovery_batch",
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/DouyinDiscoveryBatchPayload",
+          "maxProperties": 64
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskDiscoveryBatchEnvelope",
+      "type": "object"
+    },
+    "TaskDiscoveryCommandEnvelope": {
+      "additionalProperties": false,
+      "description": "One typed, read-only Douyin target discovery command.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "const": "task.discover",
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/DouyinDiscoveryCommandPayload",
+          "maxProperties": 64
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskDiscoveryCommandEnvelope",
+      "type": "object"
+    },
+    "TaskDiscoveryCompletedEnvelope": {
+      "additionalProperties": false,
+      "description": "The final closed discovery outcome for one execution attempt.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "const": "task.discovery_completed",
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/DouyinDiscoveryCompletedPayload",
+          "maxProperties": 64
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskDiscoveryCompletedEnvelope",
       "type": "object"
     },
     "TaskEventEnvelope": {

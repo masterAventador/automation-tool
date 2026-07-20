@@ -45,6 +45,7 @@ enum ControlPlaneOperation {
     RevokeDeviceCredential,
     ExchangeDeviceSession,
     CreateTask,
+    StartTaskDiscovery,
     ListTasks,
     GetTask,
     StreamTaskEvents,
@@ -71,6 +72,7 @@ impl ControlPlaneOperation {
             | Self::ExchangeDeviceSession
             | Self::PrepareDouyinPlatformSessionLogout
             | Self::CreateTask
+            | Self::StartTaskDiscovery
             | Self::PauseTask
             | Self::ResumeTask
             | Self::CancelTask
@@ -95,6 +97,7 @@ impl ControlPlaneOperation {
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
             Self::CreateTask => "/api/v1/tasks",
+            Self::StartTaskDiscovery => "/api/v1/tasks/{task_id}/discoveries",
             Self::ListTasks => "/api/v1/tasks",
             Self::GetTask => "/api/v1/tasks/{task_id}",
             Self::StreamTaskEvents => "/api/v1/tasks/{task_id}/events",
@@ -121,7 +124,11 @@ impl ControlPlaneOperation {
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
             | Self::CreateTask => 201,
-            Self::PauseTask | Self::ResumeTask | Self::CancelTask | Self::EmergencyStopTask => 202,
+            Self::StartTaskDiscovery
+            | Self::PauseTask
+            | Self::ResumeTask
+            | Self::CancelTask
+            | Self::EmergencyStopTask => 202,
         }
     }
 
@@ -130,6 +137,7 @@ impl ControlPlaneOperation {
             || matches!(
                 self,
                 Self::CreateTask
+                    | Self::StartTaskDiscovery
                     | Self::PauseTask
                     | Self::ResumeTask
                     | Self::CancelTask
@@ -736,6 +744,32 @@ impl ControlPlaneClient {
         parse_task_snapshot_body(&response_body)
     }
 
+    pub async fn start_task_discovery<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<TaskDiscoveryCommand, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(task_id)?;
+        require_idempotency_key(idempotency_key)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::StartTaskDiscovery,
+                Some(session.token()),
+                None,
+                Some(idempotency_key),
+                Some(ControlPlaneRequestTarget::Control(task_id)),
+            )
+            .await?;
+        parse_task_discovery(&response_body, task_id)
+    }
+
     pub async fn pause_task<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1058,6 +1092,7 @@ fn request_path(
         }
         (
             operation @ (ControlPlaneOperation::PauseTask
+            | ControlPlaneOperation::StartTaskDiscovery
             | ControlPlaneOperation::ResumeTask
             | ControlPlaneOperation::CancelTask
             | ControlPlaneOperation::EmergencyStopTask),
@@ -1065,6 +1100,7 @@ fn request_path(
         ) => {
             require_canonical_uuid_v4(task_id)?;
             let suffix = match operation {
+                ControlPlaneOperation::StartTaskDiscovery => "discoveries",
                 ControlPlaneOperation::PauseTask => "pause",
                 ControlPlaneOperation::ResumeTask => "resume",
                 ControlPlaneOperation::CancelTask => "cancel",
@@ -1091,6 +1127,7 @@ fn request_path(
             | ControlPlaneOperation::GetTask
             | ControlPlaneOperation::StreamTaskEvents
             | ControlPlaneOperation::PauseTask
+            | ControlPlaneOperation::StartTaskDiscovery
             | ControlPlaneOperation::ResumeTask
             | ControlPlaneOperation::CancelTask
             | ControlPlaneOperation::EmergencyStopTask,
@@ -1177,6 +1214,7 @@ fn validate_response_metadata(
                 ControlPlaneOperation::ExchangeDeviceSession
                     | ControlPlaneOperation::GetCurrentInstallationAccess
                     | ControlPlaneOperation::CreateTask
+                    | ControlPlaneOperation::StartTaskDiscovery
                     | ControlPlaneOperation::ListTasks
                     | ControlPlaneOperation::GetTask
                     | ControlPlaneOperation::PauseTask
@@ -1458,6 +1496,20 @@ struct TaskControlResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskDiscoveryResponse {
+    task_id: String,
+    task_status: String,
+    task_revision: u64,
+    last_event_sequence: u64,
+    command_id: String,
+    execution_attempt_id: String,
+    command_status: String,
+    created_at: String,
+    deadline_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskListResponse {
     items: Vec<TaskSnapshotResponse>,
     next_cursor: Option<String>,
@@ -1533,6 +1585,48 @@ pub struct TaskControlCommand {
     sequence: u64,
     command_type: String,
     status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskDiscoveryCommand {
+    task_id: String,
+    task_status: String,
+    task_revision: u64,
+    last_event_sequence: u64,
+    command_id: String,
+    execution_attempt_id: String,
+    command_status: String,
+}
+
+impl TaskDiscoveryCommand {
+    pub fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
+    pub fn task_status(&self) -> &str {
+        &self.task_status
+    }
+
+    pub fn task_revision(&self) -> u64 {
+        self.task_revision
+    }
+
+    pub fn last_event_sequence(&self) -> u64 {
+        self.last_event_sequence
+    }
+
+    pub fn command_id(&self) -> &str {
+        &self.command_id
+    }
+
+    pub fn execution_attempt_id(&self) -> &str {
+        &self.execution_attempt_id
+    }
+
+    pub fn command_status(&self) -> &str {
+        &self.command_status
+    }
 }
 
 #[derive(Serialize)]
@@ -1873,6 +1967,59 @@ fn parse_task_control(
         sequence: response.sequence,
         command_type: response.command_type,
         status: response.status,
+    })
+}
+
+fn parse_task_discovery(
+    body: &[u8],
+    expected_task_id: &str,
+) -> Result<TaskDiscoveryCommand, ControlPlaneError> {
+    let response: TaskDiscoveryResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.task_id)?;
+    require_canonical_uuid_v4(&response.command_id)?;
+    require_canonical_uuid_v4(&response.execution_attempt_id)?;
+    let created_at = require_bounded_timestamp(&response.created_at)?;
+    let deadline_at = require_bounded_timestamp(&response.deadline_at)?;
+    if response.task_id != expected_task_id
+        || !matches!(
+            response.task_status.as_str(),
+            "draft"
+                | "validating"
+                | "awaiting_device"
+                | "awaiting_platform_login"
+                | "discovering_targets"
+                | "awaiting_confirmation"
+                | "queued"
+                | "running"
+                | "paused"
+                | "awaiting_human"
+                | "cancelling"
+                | "succeeded"
+                | "partially_succeeded"
+                | "failed"
+                | "cancelled"
+                | "outcome_uncertain"
+        )
+        || response.task_revision == 0
+        || response.task_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.last_event_sequence == 0
+        || response.last_event_sequence > MAX_CROSS_RUNTIME_SEQUENCE
+        || !matches!(
+            response.command_status.as_str(),
+            "pending" | "in_flight" | "delivered" | "acknowledged" | "rejected" | "expired"
+        )
+        || deadline_at <= created_at
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(TaskDiscoveryCommand {
+        task_id: response.task_id,
+        task_status: response.task_status,
+        task_revision: response.task_revision,
+        last_event_sequence: response.last_event_sequence,
+        command_id: response.command_id,
+        execution_attempt_id: response.execution_attempt_id,
+        command_status: response.command_status,
     })
 }
 
@@ -2242,9 +2389,9 @@ mod tests {
         parse_douyin_platform_session_logout_prepare, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
         parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
-        parse_task_list, parse_task_snapshot_body, parse_workbench_status, request_path,
-        require_idempotency_key, require_list_cursor, required_credential, sse_frame_end,
-        transport_error, validate_response_metadata, validated_loopback_origin,
+        parse_task_discovery, parse_task_list, parse_task_snapshot_body, parse_workbench_status,
+        request_path, require_idempotency_key, require_list_cursor, required_credential,
+        sse_frame_end, transport_error, validate_response_metadata, validated_loopback_origin,
         ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
         DeviceSessionCapability, DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition,
         ResponseMetadata,
@@ -2378,6 +2525,12 @@ mod tests {
                 "POST",
                 "/api/v1/tasks",
                 201,
+            ),
+            (
+                ControlPlaneOperation::StartTaskDiscovery,
+                "POST",
+                "/api/v1/tasks/{task_id}/discoveries",
+                202,
             ),
             (
                 ControlPlaneOperation::ListTasks,
@@ -3408,6 +3561,74 @@ mod tests {
         assert!(
             parse_task_control(&encoded, ControlPlaneOperation::CreateTask, IDENTIFIER).is_err()
         );
+    }
+
+    #[test]
+    fn task_discovery_parser_is_task_bound_exact_and_secret_free() {
+        let response = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "taskStatus": "discovering_targets",
+            "taskRevision": 2,
+            "lastEventSequence": 1,
+            "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+            "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+            "commandStatus": "pending",
+            "createdAt": "2026-07-18T18:30:00Z",
+            "deadlineAt": "2026-07-18T18:31:00Z"
+        });
+        let encoded = serde_json::to_vec(&response).expect("task discovery JSON");
+        let parsed = parse_task_discovery(&encoded, IDENTIFIER).expect("valid discovery command");
+        assert_eq!(parsed.task_id(), IDENTIFIER);
+        assert_eq!(parsed.task_status(), "discovering_targets");
+        assert_eq!(parsed.command_id(), "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc");
+        assert_eq!(
+            parsed.execution_attempt_id(),
+            "adff54bd-3571-44da-8acd-5ea15695e5e9"
+        );
+        assert_eq!(parsed.command_status(), "pending");
+
+        for invalid in [
+            serde_json::json!({
+                "taskId": "e2c20841-d4e0-42dc-b703-f4f2306b22f3",
+                "taskStatus": "discovering_targets",
+                "taskRevision": 2,
+                "lastEventSequence": 1,
+                "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+                "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+                "commandStatus": "pending",
+                "createdAt": "2026-07-18T18:30:00Z",
+                "deadlineAt": "2026-07-18T18:31:00Z"
+            }),
+            serde_json::json!({
+                "taskId": IDENTIFIER,
+                "taskStatus": "discovering_targets",
+                "taskRevision": 2,
+                "lastEventSequence": 1,
+                "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+                "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+                "commandStatus": "private",
+                "createdAt": "2026-07-18T18:30:00Z",
+                "deadlineAt": "2026-07-18T18:31:00Z"
+            }),
+            serde_json::json!({
+                "taskId": IDENTIFIER,
+                "taskStatus": "discovering_targets",
+                "taskRevision": 2,
+                "lastEventSequence": 1,
+                "commandId": "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc",
+                "executionAttemptId": "adff54bd-3571-44da-8acd-5ea15695e5e9",
+                "commandStatus": "pending",
+                "createdAt": "2026-07-18T18:30:00Z",
+                "deadlineAt": "2026-07-18T18:31:00Z",
+                "cookie": "private"
+            }),
+        ] {
+            assert!(parse_task_discovery(
+                &serde_json::to_vec(&invalid).expect("invalid task discovery JSON"),
+                IDENTIFIER,
+            )
+            .is_err());
+        }
     }
 
     #[test]

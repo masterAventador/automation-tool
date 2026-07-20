@@ -18,12 +18,16 @@ const expectedValid = [
   "platform-session-health.json",
   "step-progress.json",
   "task-accept.json",
+  "task-discover.json",
+  "task-discovery-batch.json",
+  "task-discovery-completed.json",
   "task-offer.json",
 ];
 const expectedInvalid = [
   "deadline-before-send-microsecond.json",
   "deadline-before-send.json",
   "deadline-equals-send.json",
+  "discovery-command-unknown-field.json",
   "duplicate-key.json",
   "inline-data-uri.json",
   "invalid-idempotency-key.json",

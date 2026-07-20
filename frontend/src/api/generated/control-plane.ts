@@ -209,6 +209,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{task_id}/discoveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Task Discovery */
+        post: operations["startTaskDiscovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/{task_id}/emergency-stop": {
         parameters: {
             query?: never;
@@ -501,7 +518,7 @@ export interface components {
          * TaskCommandType
          * @enum {string}
          */
-        TaskCommandType: "task.offer" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop";
+        TaskCommandType: "task.offer" | "task.discover" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop";
         /** TaskControlRequest */
         TaskControlRequest: Record<string, never>;
         /** TaskControlResponse */
@@ -557,6 +574,31 @@ export interface components {
              * @constant
              */
             template: "douyin.search_exposure.v1";
+        };
+        /** TaskDiscoveryResponse */
+        TaskDiscoveryResponse: {
+            /** Commandid */
+            commandId: string;
+            commandStatus: components["schemas"]["TaskCommandStatus"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Deadlineat
+             * Format: date-time
+             */
+            deadlineAt: string;
+            /** Executionattemptid */
+            executionAttemptId: string;
+            /** Lasteventsequence */
+            lastEventSequence: number;
+            /** Taskid */
+            taskId: string;
+            /** Taskrevision */
+            taskRevision: number;
+            taskStatus: components["schemas"]["TaskStatus"];
         };
         /** TaskListResponse */
         TaskListResponse: {
@@ -983,6 +1025,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    startTaskDiscovery: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDiscoveryResponse"];
                 };
             };
             /** @description Validation Error */

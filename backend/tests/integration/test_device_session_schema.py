@@ -23,7 +23,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0004"
-HEAD_REVISION = "20260718_0016"
+HEAD_REVISION = "20260720_0017"
 EXPECTED_CONSTRAINTS = {
     "pk_device_sessions",
     "fk_device_sessions_credential_binding",

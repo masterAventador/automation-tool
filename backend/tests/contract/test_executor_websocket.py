@@ -58,6 +58,13 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
     TaskCommandRecord,
 )
+from automation_tool.control_plane.application.task_discovery import (
+    TaskDiscoveryBatchAccumulator,
+    TaskDiscoveryConvergenceResult,
+    TaskDiscoveryConvergenceService,
+    TaskDiscoveryRejected,
+    TaskDiscoveryUnavailable,
+)
 from automation_tool.control_plane.application.task_event_convergence import (
     PendingTaskEvent,
     TaskEventConvergenceRejected,
@@ -65,6 +72,7 @@ from automation_tool.control_plane.application.task_event_convergence import (
     TaskEventConvergenceService,
     TaskEventConvergenceUnavailable,
 )
+from automation_tool.control_plane.application.tasks import TaskRecord
 from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
     InstallationId,
@@ -75,7 +83,13 @@ from automation_tool.control_plane.domain import (
     TaskSnapshotProjection,
     TaskStatus,
 )
-from automation_tool.protocol import PlatformSessionState, TaskCommandResultEnvelope
+from automation_tool.protocol import (
+    DouyinCandidate,
+    PlatformSessionState,
+    TaskCommandResultEnvelope,
+    TaskDiscoveryBatchEnvelope,
+    TaskDiscoveryCompletedEnvelope,
+)
 
 NOW = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 INSTALLATION_ID = UUID("123e4567-e89b-42d3-a456-426614174003")
@@ -263,6 +277,44 @@ class ContractPlatformSessionRepository:
         raise AssertionError("not used")
 
 
+class ContractDiscoveryRepository:
+    def __init__(self) -> None:
+        self.failure: Exception | None = None
+        self.batches: list[TaskDiscoveryBatchEnvelope] = []
+        self.completions: list[TaskDiscoveryCompletedEnvelope] = []
+
+    async def authorize_batch(self, message: TaskDiscoveryBatchEnvelope) -> None:
+        if self.failure is not None:
+            raise self.failure
+        self.batches.append(message)
+
+    async def converge(
+        self,
+        message: TaskDiscoveryCompletedEnvelope,
+        *,
+        candidates: tuple[DouyinCandidate, ...] | None,
+        source_fingerprint: bytes,
+        received_at: datetime,
+    ) -> TaskDiscoveryConvergenceResult:
+        if self.failure is not None:
+            raise self.failure
+        assert candidates is not None
+        assert len(source_fingerprint) == 32
+        self.completions.append(message)
+        return TaskDiscoveryConvergenceResult(
+            task=TaskRecord(
+                task_id=TaskId.parse(str(message.task_id)),
+                installation_id=InstallationId.parse(str(message.installation_id)),
+                status=TaskStatus.AWAITING_CONFIRMATION,
+                revision=3,
+                last_event_sequence=3,
+                created_at=NOW - timedelta(minutes=1),
+                updated_at=received_at,
+            ),
+            duplicate=False,
+        )
+
+
 @dataclass
 class SwitchableSessionRepository:
     expected: ParsedDeviceSession
@@ -394,6 +446,22 @@ def app_with_platform_session_service() -> tuple[
     return app, sessions, token, repository
 
 
+def app_with_discovery_service() -> tuple[
+    FastAPI,
+    SwitchableSessionRepository,
+    str,
+    ContractDiscoveryRepository,
+]:
+    app, sessions, token = app_with_live_session()
+    repository = ContractDiscoveryRepository()
+    app.state.task_discovery_convergence_service = TaskDiscoveryConvergenceService(
+        repository=repository,
+        accumulator=TaskDiscoveryBatchAccumulator(maximum_attempts=2),
+        clock=FixedClock(),
+    )
+    return app, sessions, token, repository
+
+
 def hello(
     *,
     installation_id: str = str(INSTALLATION_ID),
@@ -437,6 +505,61 @@ def heartbeat(*, executor_id: str = EXECUTOR_ID, sequence: int) -> str:
             "sequence": sequence,
             "payload": {"status": "healthy"},
         },
+        separators=(",", ":"),
+    )
+
+
+def discovery_message(message_type: str) -> str:
+    is_batch = message_type == "task.discovery_batch"
+    return json.dumps(
+        {
+            "protocol_version": "1.0",
+            "message_id": (
+                "623e4567-e89b-42d3-a456-426614174001"
+                if is_batch
+                else "623e4567-e89b-42d3-a456-426614174002"
+            ),
+            "message_type": message_type,
+            "sent_at": "2026-07-18T12:00:00Z",
+            "deadline_at": "2026-07-18T12:05:00Z",
+            "installation_id": str(INSTALLATION_ID),
+            "executor_id": EXECUTOR_ID,
+            "correlation_id": "623e4567-e89b-42d3-a456-426614174003",
+            "idempotency_key": (
+                "task:discovery:batch:1" if is_batch else "task:discovery:completed"
+            ),
+            "sequence": 1 if is_batch else 2,
+            "payload": (
+                {
+                    "discovery_version": "douyin.discovery.v1",
+                    "page_revision": 1,
+                    "batch_index": 1,
+                    "batch_count": 1,
+                    "candidates": [
+                        {
+                            "candidate_version": "douyin.candidate.v1",
+                            "platform_target_id": "author-1",
+                            "display_name": "目标一",
+                            "public_handle": "target_1",
+                            "source": "general_search_author",
+                            "page_revision": 1,
+                        }
+                    ],
+                }
+                if is_batch
+                else {
+                    "discovery_version": "douyin.discovery.v1",
+                    "outcome": "completed",
+                    "evidence": "candidates_extracted",
+                    "page_revision": 1,
+                    "batch_count": 1,
+                    "candidate_count": 1,
+                }
+            ),
+            "task_id": "123e4567-e89b-42d3-a456-426614174005",
+            "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
+        },
+        ensure_ascii=False,
         separators=(",", ":"),
     )
 
@@ -813,6 +936,110 @@ def test_unexpected_task_event_service_failure_closes_without_private_details(
     assert captured.value.code == EXECUTOR_CLOSE_INTERNAL_ERROR
     assert "private" not in captured.value.reason
     assert "private unexpected convergence failure" not in caplog.text
+
+
+def test_task_discovery_batches_and_completion_use_the_wired_convergence_service() -> None:
+    app, _, token, repository = app_with_discovery_service()
+
+    with (
+        TestClient(app) as client,
+        client.websocket_connect(
+            "/api/v1/executors/connect",
+            headers={"authorization": f"Bearer {token}"},
+            subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+        ) as websocket,
+    ):
+        websocket.send_text(hello())
+        websocket.send_text(discovery_message("task.discovery_batch"))
+        websocket.send_text(discovery_message("task.discovery_completed"))
+        websocket.send_text(heartbeat(sequence=2))
+        wait_for_online(
+            client,
+            app.state.executor_connection_registry,
+            lambda value: value is not None and value.last_sequence == 2,
+        )
+
+    assert len(repository.batches) == 1
+    assert len(repository.completions) == 1
+
+
+@pytest.mark.parametrize(
+    ("discovery_service", "expected_code"),
+    ((None, EXECUTOR_CLOSE_PROTOCOL_REJECTED), (object(), EXECUTOR_CLOSE_INTERNAL_ERROR)),
+)
+def test_task_discovery_requires_a_valid_wired_convergence_service(
+    discovery_service: object,
+    expected_code: int,
+) -> None:
+    app, _, token = app_with_live_session()
+    app.state.task_discovery_convergence_service = discovery_service
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(discovery_message("task.discovery_batch"))
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    (
+        (TaskDiscoveryRejected(), EXECUTOR_CLOSE_PROTOCOL_REJECTED),
+        (TaskDiscoveryUnavailable(), EXECUTOR_CLOSE_INTERNAL_ERROR),
+    ),
+)
+def test_task_discovery_failures_close_with_safe_reason(
+    failure: Exception,
+    expected_code: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token, repository = app_with_discovery_service()
+    repository.failure = failure
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(discovery_message("task.discovery_batch"))
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == expected_code
+    assert "private" not in captured.value.reason
+    assert "private" not in caplog.text
+
+
+def test_unexpected_task_discovery_failure_is_internal_and_safe(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app, _, token, _ = app_with_discovery_service()
+
+    async def fail(*_values: object) -> None:
+        raise RuntimeError("private discovery convergence failure")
+
+    monkeypatch.setattr(TaskDiscoveryConvergenceService, "receive_batch", fail)
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        websocket.send_text(discovery_message("task.discovery_batch"))
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == EXECUTOR_CLOSE_INTERNAL_ERROR
+    assert "private" not in captured.value.reason
+    assert "private discovery convergence failure" not in caplog.text
 
 
 def test_idle_receive_timeout_keeps_the_authenticated_connection_alive() -> None:

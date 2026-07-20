@@ -212,6 +212,113 @@ const taskCommandEnvelope = commonEnvelope.extend({
     "task.emergency_stop",
   ]),
 });
+const discoverySequence = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+const discoverySafeText = (maximum: number) =>
+  z
+    .string()
+    .min(1)
+    .max(maximum)
+    .refine((value) => value.trim() === value && !unsafePayloadString(value));
+const platformIdentifier = (maximum: number) =>
+  z
+    .string()
+    .min(1)
+    .max(maximum)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/);
+const discoveryCandidate = z
+  .object({
+    candidate_version: z.literal("douyin.candidate.v1"),
+    platform_target_id: platformIdentifier(128),
+    display_name: discoverySafeText(80),
+    public_handle: platformIdentifier(64).nullable(),
+    source: z.literal("general_search_author"),
+    page_revision: discoverySequence,
+  })
+  .strict();
+const taskDiscoveryCommandEnvelope = commonEnvelope.extend({
+  ...taskScope,
+  message_type: z.literal("task.discover"),
+  payload: z
+    .object({
+      discovery_version: z.literal("douyin.discovery.v1"),
+      keyword: discoverySafeText(80),
+      target_limit: z.number().int().min(1).max(100),
+      page_revision: discoverySequence,
+    })
+    .strict(),
+});
+const taskDiscoveryBatchEnvelope = commonEnvelope.extend({
+  ...taskScope,
+  message_type: z.literal("task.discovery_batch"),
+  payload: z
+    .object({
+      discovery_version: z.literal("douyin.discovery.v1"),
+      page_revision: discoverySequence,
+      batch_index: z.number().int().min(1).max(10),
+      batch_count: z.number().int().min(1).max(10),
+      candidates: z.array(discoveryCandidate).min(1).max(10),
+    })
+    .strict()
+    .refine(
+      (payload) =>
+        payload.batch_index <= payload.batch_count &&
+        payload.candidates.every(
+          (candidate) => candidate.page_revision === payload.page_revision,
+        ),
+    ),
+});
+const taskDiscoveryCompletedEnvelope = commonEnvelope.extend({
+  ...taskScope,
+  message_type: z.literal("task.discovery_completed"),
+  payload: z
+    .object({
+      discovery_version: z.literal("douyin.discovery.v1"),
+      outcome: z.enum(["completed", "login_required", "handoff_required", "failed"]),
+      evidence: z.enum([
+        "candidates_extracted",
+        "login_required",
+        "blocking_dialog",
+        "no_candidates",
+        "navigation_timed_out",
+        "home_ready_timed_out",
+        "action_timed_out",
+        "result_url_timed_out",
+        "results_ready_timed_out",
+        "page_version_unknown",
+        "conflicting_anchors",
+        "results_unavailable",
+        "privacy_rejected",
+        "result_count_decreased",
+        "cancellation_unavailable",
+        "cancellation_requested",
+        "page_unavailable",
+      ]),
+      page_revision: discoverySequence,
+      batch_count: z.number().int().min(0).max(10),
+      candidate_count: z.number().int().min(0).max(100),
+    })
+    .strict()
+    .refine((payload) => {
+      const evidenceMatches =
+        (payload.outcome === "completed" && payload.evidence === "candidates_extracted") ||
+        (payload.outcome === "login_required" && payload.evidence === "login_required") ||
+        (payload.outcome === "handoff_required" && payload.evidence === "blocking_dialog") ||
+        (payload.outcome === "failed" &&
+          !["candidates_extracted", "login_required", "blocking_dialog"].includes(
+            payload.evidence,
+          ));
+      if (!evidenceMatches) {
+        return false;
+      }
+      if (payload.outcome !== "completed") {
+        return payload.batch_count === 0 && payload.candidate_count === 0;
+      }
+      return (
+        payload.candidate_count > 0 &&
+        payload.batch_count === Math.ceil(payload.candidate_count / 10)
+      );
+    }),
+});
 const taskCommandResultEnvelope = commonEnvelope.extend({
   ...taskScope,
   message_type: z.enum(["task.accept", "task.reject", "task.control_ack"]),
@@ -240,7 +347,10 @@ const executorEnvelopeSchema = z
     lifecycleEnvelope,
     platformSessionHealthEnvelope,
     taskCommandEnvelope,
+    taskDiscoveryCommandEnvelope,
     taskCommandResultEnvelope,
+    taskDiscoveryBatchEnvelope,
+    taskDiscoveryCompletedEnvelope,
     taskEventEnvelope,
   ])
   .superRefine((message, context) => {

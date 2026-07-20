@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -34,6 +35,7 @@ from automation_tool.control_plane.domain import (
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
+    douyin_search_exposure_definitions,
     execution_attempts,
     installations,
     platform_session_gates,
@@ -41,7 +43,11 @@ from automation_tool.control_plane.infrastructure.database.schema import (
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
-from automation_tool.protocol import TaskCommandResultEnvelope
+from automation_tool.protocol import (
+    DOUYIN_DISCOVERY_PROTOCOL_VERSION,
+    DouyinDiscoveryCommandPayload,
+    TaskCommandResultEnvelope,
+)
 
 
 def _aware_utc(value: object) -> datetime:
@@ -105,7 +111,7 @@ def _response_matches_command(
     command_type: TaskCommandType,
     response_type: TaskCommandResponseType,
 ) -> bool:
-    if command_type is TaskCommandType.TASK_OFFER:
+    if command_type in {TaskCommandType.TASK_OFFER, TaskCommandType.TASK_DISCOVER}:
         return response_type in {
             TaskCommandResponseType.TASK_ACCEPT,
             TaskCommandResponseType.TASK_REJECT,
@@ -535,7 +541,49 @@ class SqlAlchemyTaskCommandRepository:
                 .mappings()
                 .one()
             )
-            return _record(claimed)
+            record = _record(claimed)
+            if record.command_type is TaskCommandType.TASK_DISCOVER:
+                definition = (
+                    (
+                        await session.execute(
+                            select(
+                                douyin_search_exposure_definitions.c.search_keyword,
+                                douyin_search_exposure_definitions.c.target_limit,
+                                execution_attempts.c.attempt_number,
+                            )
+                            .select_from(
+                                douyin_search_exposure_definitions.join(
+                                    execution_attempts,
+                                    execution_attempts.c.task_id
+                                    == douyin_search_exposure_definitions.c.task_id,
+                                )
+                            )
+                            .where(
+                                douyin_search_exposure_definitions.c.task_id == record.task_id.uuid,
+                                douyin_search_exposure_definitions.c.installation_id
+                                == record.installation_id.uuid,
+                                execution_attempts.c.id == record.execution_attempt_id.uuid,
+                                execution_attempts.c.installation_id == record.installation_id.uuid,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if definition is None:
+                    raise TaskCommandDeliveryRejected
+                record = replace(
+                    record,
+                    discovery_payload=DouyinDiscoveryCommandPayload.model_validate(
+                        {
+                            "discovery_version": DOUYIN_DISCOVERY_PROTOCOL_VERSION,
+                            "keyword": definition["search_keyword"],
+                            "target_limit": definition["target_limit"],
+                            "page_revision": definition["attempt_number"],
+                        }
+                    ),
+                )
+            return record
 
     async def mark_delivered(
         self,

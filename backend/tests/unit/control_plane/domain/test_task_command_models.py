@@ -12,6 +12,7 @@ def test_task_command_types_match_the_executor_v1_command_vocabulary() -> None:
     assert issubclass(TaskCommandType, StrEnum)
     assert tuple(command.value for command in TaskCommandType) == (
         "task.offer",
+        "task.discover",
         "task.pause",
         "task.resume",
         "task.cancel",

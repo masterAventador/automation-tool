@@ -51,8 +51,12 @@ def executor_schema() -> dict[str, Any]:
     definitions = schema["$defs"]
     for model_name in (
         "ExecutorLifecycleEnvelope",
+        "PlatformSessionHealthEnvelope",
         "TaskCommandEnvelope",
         "TaskCommandResultEnvelope",
+        "TaskDiscoveryBatchEnvelope",
+        "TaskDiscoveryCommandEnvelope",
+        "TaskDiscoveryCompletedEnvelope",
         "TaskEventEnvelope",
     ):
         properties = definitions[model_name]["properties"]

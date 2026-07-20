@@ -41,6 +41,13 @@ test("D6-07 keeps raw result facts inside the versioned Page Object", async () =
     /(?:inner_html|\.content\s*\(|context\.cookies|document\.cookie|storage_state|localStorage|sessionStorage)/iu,
   );
   assert.doesNotMatch(candidate, /(?:avatar|biography|contact|absolute_url|raw_html)/iu);
-  assert.doesNotMatch(wire, /candidate|platform_target_id|public_handle|page_revision/iu);
+  assert.match(wire, /DouyinDiscoveryCandidatePayload/u);
+  assert.match(wire, /platform_target_id/u);
+  assert.match(wire, /public_handle/u);
+  assert.match(wire, /page_revision/u);
+  assert.doesNotMatch(
+    wire,
+    /(?:avatar|biography|contact|absolute_url|raw_html|inner_html|document\.cookie|storage_state|localStorage|sessionStorage)/iu,
+  );
   assert.doesNotMatch(native, /tauri::command[\s\S]{0,300}(candidate|platform_target_id)/iu);
 });

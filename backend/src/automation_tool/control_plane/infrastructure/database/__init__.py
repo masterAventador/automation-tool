@@ -20,6 +20,7 @@ from .schema import (
 )
 from .session import Database
 from .task_command_repository import SqlAlchemyTaskCommandRepository
+from .task_discovery_repository import SqlAlchemyTaskDiscoveryRepository
 from .task_event_convergence_repository import SqlAlchemyTaskEventConvergenceRepository
 from .task_event_stream_repository import SqlAlchemyTaskEventStreamRepository
 from .task_target_repository import SqlAlchemyTaskTargetRepository
@@ -29,6 +30,7 @@ __all__ = [
     "SqlAlchemyInstallationRevocationRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
+    "SqlAlchemyTaskDiscoveryRepository",
     "SqlAlchemyTaskEventConvergenceRepository",
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",

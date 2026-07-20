@@ -260,10 +260,13 @@ backend/
 │       │   ├── __main__.py        # 源码模式与 PyInstaller 共用的模块入口
 │       │   ├── authentication.py  # 本机启动令牌校验、可清零 HMAC 事件证明
 │       │   ├── bootstrap.py       # 一次性 stdin bootstrap、端点/Session/身份严格校验
+│       │   ├── browser_authority.py # 登录与发现共享的受信浏览器请求/lease 所有权
 │       │   ├── browser_runtime.py # 单 context、页面/窗口、超时和清理的 Playwright BrowserRuntime
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
+│       │   ├── command_processor.py # 正式命令、SQLite checkpoint 和持久结果 outbox
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
-│       │   ├── ledger.py          # 本机 SQLite v2 命令/checkpoint/outbox/平台 Session 账本
+│       │   ├── discovery_operation.py # 搜索/滚动/提取的单次只读发现组合
+│       │   ├── ledger.py          # 本机 SQLite v3 命令/checkpoint/outbox/平台 Session 账本
 │       │   ├── platform_commands.py # 认证本机平台命令、扫码 flow 与健康队列
 │       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
 │       │   ├── runtime.py         # Hello/Heartbeat、固定健康投影和有界停止
@@ -285,6 +288,7 @@ backend/
 │       │       ├── desktop/
 │       │       └── logging/
 │       ├── protocol/              # Control Plane ↔ Executor 版本化协议
+│       │   ├── douyin_candidate.py # 最小 Candidate、来源与稳定去重键
 │       │   ├── douyin_search.py   # 双端共享关键词/目标上限与脱敏输入对象
 │       │   ├── executor_envelope.py # v1 判别联合、ID/时限/幂等/序号和安全 payload
 │       │   ├── json_object.py     # Bootstrap/Envelope 共用的有界无重复 key JSON 解码
@@ -351,13 +355,15 @@ D6-04 的 `executor/rpa/douyin/search.py` 只负责编排一次受控搜索：�
 
 D6-05 的 `executor/rpa/douyin/bounded_scroll.py` 是搜索成功后的有限控制层，不是 Candidate parser。它消费 D6-04 成功观察、公共目标上限和取消探针，只调用 `search_page.py` 的结果页观察/有界节点计数以及 Playwright `mouse.wheel`；最大轮次、滚动量、增长等待和轮询间隔固定在该模块。结果项 selectors 新增到唯一 Page Object，`frontend/tests/douyin-bounded-scroll-boundary.test.mjs` 阻止 selector、任意 locator、脚本、Cookie/storage、点击或 Control Plane 越界。`backend/tests/integration/test_douyin_bounded_scroll_browser.py` 通过一次性 Profile 和无头系统 Chrome 从 D6-04 搜索原入口继续真实 wheel；D6-06 才能读取并封闭候选字段。
 
-D6-06 的 `protocol/douyin_candidate.py` 是 Candidate 值、最小摘要、来源和稳定键算法的唯一 Python 来源，`protocol/__init__.py` 提供公共导入。它不依赖 Playwright、RPA、Control Plane、SQLAlchemy 或 App；`frontend/tests/douyin-candidate-model-boundary.test.mjs` 锁定无头像/简介/联系方式/页面原文/URL 字段，并证明 D6-05 滚动层不解析候选、Executor wire/Tauri 尚未提前暴露 Candidate。后续页面提取只能构造该对象，不能扩展自由字典。
+D6-06 的 `protocol/douyin_candidate.py` 是 Candidate 值、最小摘要、来源和稳定键算法的唯一 Python 来源，`protocol/__init__.py` 提供公共导入。它不依赖 Playwright、RPA、Control Plane、SQLAlchemy 或 App；`frontend/tests/douyin-candidate-model-boundary.test.mjs` 锁定无头像/简介/联系方式/页面原文/URL 字段，D6-05 滚动层仍不解析候选。D6-10 的 wire payload 只复制最小公开字段，不传 dedupe key，也不能扩展自由字典。
 
 D6-07 的 `executor/rpa/douyin/candidate_extraction.py` 只编排页面状态、封闭 evidence 与 D6-06 Candidate tuple，不含 selector、任意 locator、URL 字面量、HTTP/Control Plane 或存储访问。受控作者/名称 selector、有限字段读取及官方作者 href→目标 ID 缩减全部保留在唯一 `search_page.py`；源 href、query、页面正文和其他 DOM 属性不能越过 Page Object。`frontend/tests/douyin-candidate-privacy-boundary.test.mjs` 锁定这条依赖方向；`backend/tests/integration/test_douyin_candidate_extraction_browser.py` 从 D6-04 公开搜索入口使用一次性 Profile 和无头系统 Chrome 验证真实 Playwright 原调用路径，并在退出后关闭完整 Runtime。
 
 D6-08 的 `control_plane/domain/douyin_candidate_policy.py` 只消费公共 Candidate/key 和 UTC 时间，提供固定 30 天历史窗口及四种封闭 disposition，不导入仓储、SQLAlchemy、Executor/RPA、HTTP 或 App。`control_plane/domain/__init__.py` 是 Control Plane 公共领域入口；`frontend/tests/douyin-candidate-policy-boundary.test.mjs` 锁定策略只使用 `dedupe_key`、不读取候选个人字段，且尚未提前进入 Executor Schema/Tauri。D6-09 的基础设施层只向该策略提供匹配当前 Installation/当前候选 key 的唯一最新历史事实，黑名单 key 由当前已认证用例传入；查询对象不能反向塞进领域模块。
 
-D6-09 的 `control_plane/application/task_targets.py` 定义脱敏、不可变的 Target 持久记录，`infrastructure/database/task_target_repository.py` 是唯一 PostgreSQL 适配器，`schema.py` 与 Alembic `20260718_0016` 是同一 `task_targets` 结构的代码/迁移来源。适配器在 Installation/Task 行锁事务中查询当前 Candidate key 的同 Installation 历史、调用 D6-08、替换整批 Decision，并按 `(ordinal,id)` keyset 读取；应用/领域模块不导入 SQLAlchemy。`frontend/tests/task-target-database-boundary.test.mjs` 锁定表的复合归属、唯一顺序、历史索引和未提前进入 Executor Schema/Tauri 的边界；数据库原调用方测试使用独立 Compose project、随机 loopback 端口和真实 PostgreSQL，不启动 App 或浏览器。
+D6-09 的 `control_plane/application/task_targets.py` 定义脱敏、不可变的 Target 持久记录，`infrastructure/database/task_target_repository.py` 是唯一 PostgreSQL 适配器，`schema.py` 与 Alembic `20260718_0016` 是同一 `task_targets` 结构的代码/迁移来源。适配器在 Installation/Task 行锁事务中查询当前 Candidate key 的同 Installation 历史、调用 D6-08、替换整批 Decision，并按 `(ordinal,id)` keyset 读取；应用/领域模块不导入 SQLAlchemy。`frontend/tests/task-target-database-boundary.test.mjs` 锁定表的复合归属、唯一顺序和历史索引，且持久 disposition/dedupe key 不泄漏到 Executor wire 或 Tauri。D6-10 收敛仓储从正式 PostgreSQL 原入口调用它，D6-11 再增加公开预览读取。
+
+D6-10 的服务端路径按 `api/task_discoveries.py`（App Session/HTTP）、`application/task_discovery.py`（启动、有限批次累计与收敛）、`infrastructure/database/task_discovery_repository.py`（唯一事务事实）和 `bootstrap/task_discovery.py`（装配）分层；迁移 `20260720_0017` 只扩展既有 Task command/event 封闭词汇。Executor 侧 `browser_authority.py`、`discovery_operation.py`、`command_processor.py` 与 SQLite v3 分别负责浏览器所有权、现有 RPA adapter 组合、正式 envelope/outbox 和重放。Rust `control_plane.rs`/`lib.rs` 只向 App 提供固定 `start_task_discovery`，WebView 不接触 Session、Candidate、浏览器或 Profile。`scripts/run_d6_10_acceptance.py` 使用唯一 hidden App、真实 Uvicorn/PostgreSQL 与正式 LocalExecutorProcess 验证这条纵向链，并只清理自己的 AppData、端口和 Compose 资源。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 

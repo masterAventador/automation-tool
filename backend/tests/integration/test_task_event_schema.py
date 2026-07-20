@@ -35,7 +35,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0007"
-HEAD_REVISION = "20260718_0016"
+HEAD_REVISION = "20260720_0017"
 NOW = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)
 EXPECTED_EVENT_COLUMNS = {
     "task_id",
@@ -336,6 +336,25 @@ async def test_event_defaults_scope_and_task_snapshot_watermark_are_persisted(
             await session.execute(
                 update(tasks).where(tasks.c.id == task_id.uuid).values(last_event_sequence=1)
             )
+            discovery_started = (
+                await session.execute(
+                    insert(task_events)
+                    .values(
+                        task_id=task_id.uuid,
+                        installation_id=installation_id.uuid,
+                        sequence=2,
+                        event_type=TaskEventType.TASK_DISCOVERY_STARTED.value,
+                        task_revision=5,
+                        task_status=TaskStatus.DISCOVERING_TARGETS.value,
+                        execution_attempt_id=attempt_id.uuid,
+                        source_idempotency_key="task:event:discovery:2",
+                        source_fingerprint=b"d" * 32,
+                        occurred_at=NOW,
+                        recorded_at=NOW,
+                    )
+                    .returning(task_events.c.event_type)
+                )
+            ).scalar_one()
             projection = (
                 (
                     await session.execute(
@@ -353,6 +372,7 @@ async def test_event_defaults_scope_and_task_snapshot_watermark_are_persisted(
         assert created["recorded_at"].tzinfo is not None
         assert created["recorded_at"] >= created["occurred_at"]
         assert created["progress_percent"] == 50
+        assert discovery_started == TaskEventType.TASK_DISCOVERY_STARTED.value
         assert projection == {
             "status": TaskStatus.RUNNING.value,
             "revision": 4,

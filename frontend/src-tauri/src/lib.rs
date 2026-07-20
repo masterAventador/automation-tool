@@ -470,6 +470,20 @@ async fn create_douyin_search_exposure_task(
         .map_err(map_control_plane_error)
 }
 
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn start_task_discovery(
+    task_id: String,
+    idempotency_key: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskDiscoveryCommand, ControlPlaneCommandError> {
+    client
+        .start_task_discovery(&vault, &task_id, &idempotency_key)
+        .await
+        .map_err(map_control_plane_error)
+}
+
 #[cfg(feature = "control-plane-e2e")]
 fn acceptance_task_definition() -> control_plane::DouyinSearchExposureTaskDefinition {
     control_plane::DouyinSearchExposureTaskDefinition::new(
@@ -481,6 +495,125 @@ fn acceptance_task_definition() -> control_plane::DouyinSearchExposureTaskDefini
         90,
     )
     .expect("acceptance Task definition must remain valid")
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskDiscoveryAcceptanceSummary {
+    installation_id: String,
+    task_id: String,
+    command_id: String,
+    execution_attempt_id: String,
+    command_status: String,
+    started_status: String,
+    started_revision: u64,
+    started_event_sequence: u64,
+    final_status: String,
+    final_revision: u32,
+    final_event_sequence: u64,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn discover_task_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskDiscoveryAcceptanceSummary, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_D610_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_D610_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let task = client
+        .create_task(
+            &vault,
+            "task:discovery:tauri-acceptance",
+            &acceptance_task_definition(),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+
+    let mut platform_ready = false;
+    for _ in 0..120 {
+        let platform = client
+            .get_douyin_platform_session(&vault)
+            .await
+            .map_err(map_control_plane_error)?;
+        if platform.state() == "healthy" {
+            platform_ready = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    if !platform_ready {
+        return Err(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: true,
+        });
+    }
+
+    let command = client
+        .start_task_discovery(
+            &vault,
+            task.task_id(),
+            "task:discovery:start:tauri-acceptance",
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    for _ in 0..240 {
+        let snapshot = client
+            .get_task(&vault, task.task_id())
+            .await
+            .map_err(map_control_plane_error)?;
+        if snapshot.status() == "awaiting_confirmation" {
+            return Ok(TaskDiscoveryAcceptanceSummary {
+                installation_id: registration.installation_id().to_owned(),
+                task_id: task.task_id().to_owned(),
+                command_id: command.command_id().to_owned(),
+                execution_attempt_id: command.execution_attempt_id().to_owned(),
+                command_status: command.command_status().to_owned(),
+                started_status: command.task_status().to_owned(),
+                started_revision: command.task_revision(),
+                started_event_sequence: command.last_event_sequence(),
+                final_status: snapshot.status().to_owned(),
+                final_revision: snapshot.revision(),
+                final_event_sequence: snapshot.last_event_sequence(),
+            });
+        }
+        if matches!(
+            snapshot.status(),
+            "failed"
+                | "cancelled"
+                | "outcome_uncertain"
+                | "awaiting_platform_login"
+                | "awaiting_human"
+        ) {
+            return Err(ControlPlaneCommandError {
+                code: "operation_unavailable",
+                retryable: false,
+            });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(ControlPlaneCommandError {
+        code: "operation_unavailable",
+        retryable: true,
+    })
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -1711,6 +1844,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         create_douyin_search_exposure_task,
+        start_task_discovery,
         get_douyin_platform_session,
         get_workbench_status,
         open_douyin_login,
@@ -1735,6 +1869,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         create_douyin_search_exposure_task,
+        start_task_discovery,
         get_douyin_platform_session,
         get_workbench_status,
         open_douyin_login,
@@ -1762,6 +1897,7 @@ pub fn run() {
         prepare_workbench_for_acceptance,
         prepare_platform_session_for_acceptance,
         prepare_platform_session_reuse_for_acceptance,
+        discover_task_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance,
         get_executor_status,

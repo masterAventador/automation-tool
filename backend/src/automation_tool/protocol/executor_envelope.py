@@ -23,6 +23,19 @@ from pydantic import (
 )
 from pydantic_core import CoreSchema, core_schema
 
+from automation_tool.protocol.douyin_candidate import (
+    MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
+    MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS,
+    MAX_DOUYIN_TARGET_ID_CHARACTERS,
+    DouyinCandidate,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+)
+from automation_tool.protocol.douyin_search import (
+    MAX_SEARCH_KEYWORD_CHARACTERS,
+    MAX_TASK_TARGET_LIMIT,
+    DouyinSearchInput,
+)
 from automation_tool.protocol.json_object import decode_bounded_json_object
 from automation_tool.protocol.limits import MAX_CROSS_RUNTIME_SEQUENCE
 from automation_tool.protocol.safe_text import contains_control_or_bidi, is_unsafe_text
@@ -35,6 +48,9 @@ MAX_EXECUTOR_PAYLOAD_DEPTH = 8
 MAX_EXECUTOR_COLLECTION_ITEMS = 64
 MAX_EXECUTOR_STRING_LENGTH = 4096
 MAX_EXECUTOR_SEQUENCE = MAX_CROSS_RUNTIME_SEQUENCE
+DOUYIN_DISCOVERY_PROTOCOL_VERSION = "douyin.discovery.v1"
+MAX_DISCOVERY_BATCH_CANDIDATES = 10
+MAX_DISCOVERY_BATCH_COUNT = MAX_TASK_TARGET_LIMIT // MAX_DISCOVERY_BATCH_CANDIDATES
 
 _UUID_V4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
@@ -302,6 +318,152 @@ class _TaskEnvelopeBase(_ExecutorEnvelopeBase):
     execution_attempt_id: ProtocolExecutionAttemptId
 
 
+class DouyinDiscoveryCommandPayload(_ProtocolModel):
+    """Only discovery business input crosses the cloud/local boundary."""
+
+    discovery_version: Literal["douyin.discovery.v1"]
+    keyword: Annotated[
+        str,
+        Field(strict=True, min_length=1, max_length=MAX_SEARCH_KEYWORD_CHARACTERS),
+    ]
+    target_limit: Annotated[int, Field(strict=True, ge=1, le=MAX_TASK_TARGET_LIMIT)]
+    page_revision: Annotated[int, Field(strict=True, ge=1, le=MAX_EXECUTOR_SEQUENCE)]
+
+    @model_validator(mode="after")
+    def require_shared_search_policy(self) -> DouyinDiscoveryCommandPayload:
+        DouyinSearchInput(keyword=self.keyword, target_limit=self.target_limit)
+        return self
+
+    def to_search_input(self) -> DouyinSearchInput:
+        return DouyinSearchInput(keyword=self.keyword, target_limit=self.target_limit)
+
+
+class DouyinDiscoveryCandidatePayload(_ProtocolModel):
+    """The minimum Candidate fields allowed in one discovery batch."""
+
+    candidate_version: Literal["douyin.candidate.v1"]
+    platform_target_id: Annotated[
+        str,
+        Field(strict=True, min_length=1, max_length=MAX_DOUYIN_TARGET_ID_CHARACTERS),
+    ]
+    display_name: Annotated[
+        str,
+        Field(strict=True, min_length=1, max_length=MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS),
+    ]
+    public_handle: (
+        Annotated[
+            str,
+            Field(strict=True, min_length=1, max_length=MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS),
+        ]
+        | None
+    )
+    source: Literal["general_search_author"]
+    page_revision: Annotated[int, Field(strict=True, ge=1, le=MAX_EXECUTOR_SEQUENCE)]
+
+    @model_validator(mode="after")
+    def require_shared_candidate_policy(self) -> DouyinDiscoveryCandidatePayload:
+        self.to_candidate()
+        return self
+
+    def to_candidate(self) -> DouyinCandidate:
+        return DouyinCandidate(
+            platform_target_id=self.platform_target_id,
+            summary=DouyinCandidateSummary(
+                display_name=self.display_name,
+                public_handle=self.public_handle,
+            ),
+            source=DouyinCandidateSource(self.source),
+            page_revision=self.page_revision,
+        )
+
+
+class DouyinDiscoveryBatchPayload(_ProtocolModel):
+    """One bounded replayable Candidate chunk."""
+
+    discovery_version: Literal["douyin.discovery.v1"]
+    page_revision: Annotated[int, Field(strict=True, ge=1, le=MAX_EXECUTOR_SEQUENCE)]
+    batch_index: Annotated[int, Field(strict=True, ge=1, le=MAX_DISCOVERY_BATCH_COUNT)]
+    batch_count: Annotated[int, Field(strict=True, ge=1, le=MAX_DISCOVERY_BATCH_COUNT)]
+    candidates: Annotated[
+        list[DouyinDiscoveryCandidatePayload],
+        Field(min_length=1, max_length=MAX_DISCOVERY_BATCH_CANDIDATES),
+    ]
+
+    @model_validator(mode="after")
+    def require_consistent_page_and_batch(self) -> DouyinDiscoveryBatchPayload:
+        if self.batch_index > self.batch_count or any(
+            candidate.page_revision != self.page_revision for candidate in self.candidates
+        ):
+            raise ValueError("inconsistent discovery batch")
+        return self
+
+
+class DouyinDiscoveryCompletedPayload(_ProtocolModel):
+    """Closed final discovery fact; only success can reference Candidate batches."""
+
+    discovery_version: Literal["douyin.discovery.v1"]
+    outcome: Literal["completed", "login_required", "handoff_required", "failed"]
+    evidence: Literal[
+        "candidates_extracted",
+        "login_required",
+        "blocking_dialog",
+        "no_candidates",
+        "navigation_timed_out",
+        "home_ready_timed_out",
+        "action_timed_out",
+        "result_url_timed_out",
+        "results_ready_timed_out",
+        "page_version_unknown",
+        "conflicting_anchors",
+        "results_unavailable",
+        "privacy_rejected",
+        "result_count_decreased",
+        "cancellation_unavailable",
+        "cancellation_requested",
+        "page_unavailable",
+    ]
+    page_revision: Annotated[int, Field(strict=True, ge=1, le=MAX_EXECUTOR_SEQUENCE)]
+    batch_count: Annotated[int, Field(strict=True, ge=0, le=MAX_DISCOVERY_BATCH_COUNT)]
+    candidate_count: Annotated[int, Field(strict=True, ge=0, le=MAX_TASK_TARGET_LIMIT)]
+
+    @model_validator(mode="after")
+    def require_consistent_outcome(self) -> DouyinDiscoveryCompletedPayload:
+        expected_evidence = {
+            "completed": frozenset({"candidates_extracted"}),
+            "login_required": frozenset({"login_required"}),
+            "handoff_required": frozenset({"blocking_dialog"}),
+            "failed": frozenset(
+                {
+                    "no_candidates",
+                    "navigation_timed_out",
+                    "home_ready_timed_out",
+                    "action_timed_out",
+                    "result_url_timed_out",
+                    "results_ready_timed_out",
+                    "page_version_unknown",
+                    "conflicting_anchors",
+                    "results_unavailable",
+                    "privacy_rejected",
+                    "result_count_decreased",
+                    "cancellation_unavailable",
+                    "cancellation_requested",
+                    "page_unavailable",
+                }
+            ),
+        }
+        if self.evidence not in expected_evidence[self.outcome]:
+            raise ValueError("discovery evidence does not match outcome")
+        if self.outcome == "completed":
+            expected_batches = (
+                self.candidate_count + MAX_DISCOVERY_BATCH_CANDIDATES - 1
+            ) // MAX_DISCOVERY_BATCH_CANDIDATES
+            if self.candidate_count == 0 or self.batch_count != expected_batches:
+                raise ValueError("discovery completion counts are inconsistent")
+        elif self.batch_count != 0 or self.candidate_count != 0:
+            raise ValueError("non-success discovery cannot reference candidates")
+        return self
+
+
 class TaskCommandEnvelope(_TaskEnvelopeBase):
     """Control Plane commands that target one execution attempt."""
 
@@ -312,6 +474,13 @@ class TaskCommandEnvelope(_TaskEnvelopeBase):
         "task.cancel",
         "task.emergency_stop",
     ]
+
+
+class TaskDiscoveryCommandEnvelope(_TaskEnvelopeBase):
+    """One typed, read-only Douyin target discovery command."""
+
+    message_type: Literal["task.discover"]
+    payload: DouyinDiscoveryCommandPayload  # type: ignore[assignment]
 
 
 class TaskCommandResultEnvelope(_TaskEnvelopeBase):
@@ -341,12 +510,29 @@ class TaskEventEnvelope(_TaskEnvelopeBase):
     ]
 
 
+class TaskDiscoveryBatchEnvelope(_TaskEnvelopeBase):
+    """One replayable chunk of privacy-trimmed Candidates."""
+
+    message_type: Literal["task.discovery_batch"]
+    payload: DouyinDiscoveryBatchPayload  # type: ignore[assignment]
+
+
+class TaskDiscoveryCompletedEnvelope(_TaskEnvelopeBase):
+    """The final closed discovery outcome for one execution attempt."""
+
+    message_type: Literal["task.discovery_completed"]
+    payload: DouyinDiscoveryCompletedPayload  # type: ignore[assignment]
+
+
 type ExecutorEnvelope = Annotated[
     ExecutorLifecycleEnvelope
     | PlatformSessionHealthEnvelope
     | TaskCommandEnvelope
+    | TaskDiscoveryCommandEnvelope
     | TaskCommandResultEnvelope
-    | TaskEventEnvelope,
+    | TaskEventEnvelope
+    | TaskDiscoveryBatchEnvelope
+    | TaskDiscoveryCompletedEnvelope,
     Field(discriminator="message_type"),
 ]
 
@@ -411,9 +597,16 @@ def parse_executor_message(value: str | bytes) -> ExecutorEnvelope:
 
 
 __all__ = [
+    "DOUYIN_DISCOVERY_PROTOCOL_VERSION",
     "EXECUTOR_PROTOCOL_VERSION",
+    "MAX_DISCOVERY_BATCH_CANDIDATES",
+    "MAX_DISCOVERY_BATCH_COUNT",
     "MAX_EXECUTOR_MESSAGE_BYTES",
     "CorrelationId",
+    "DouyinDiscoveryBatchPayload",
+    "DouyinDiscoveryCandidatePayload",
+    "DouyinDiscoveryCommandPayload",
+    "DouyinDiscoveryCompletedPayload",
     "ExecutorEnvelope",
     "ExecutorLifecycleEnvelope",
     "ExecutorMessage",
@@ -426,6 +619,9 @@ __all__ = [
     "ProtocolTaskId",
     "TaskCommandEnvelope",
     "TaskCommandResultEnvelope",
+    "TaskDiscoveryBatchEnvelope",
+    "TaskDiscoveryCommandEnvelope",
+    "TaskDiscoveryCompletedEnvelope",
     "TaskEventEnvelope",
     "parse_executor_message",
 ]

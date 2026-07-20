@@ -8,15 +8,27 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
+from automation_tool.executor.discovery_operation import (
+    DouyinDiscoveryExecutionResult,
+    DouyinDiscoveryOperation,
+    DouyinDiscoveryOperationState,
+)
 from automation_tool.executor.ledger import (
     AttemptCheckpointState,
     ExecutorLedger,
     ExecutorLedgerRejected,
 )
 from automation_tool.protocol import (
+    DOUYIN_CANDIDATE_VERSION,
+    DOUYIN_DISCOVERY_PROTOCOL_VERSION,
     EXECUTOR_PROTOCOL_VERSION,
+    MAX_DISCOVERY_BATCH_CANDIDATES,
+    DouyinCandidate,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
+    TaskDiscoveryBatchEnvelope,
+    TaskDiscoveryCommandEnvelope,
+    TaskDiscoveryCompletedEnvelope,
     TaskEventEnvelope,
     parse_executor_message,
 )
@@ -25,7 +37,13 @@ _MESSAGE_DEADLINE = timedelta(seconds=30)
 _MAX_PENDING_OUTBOX = 1000
 _MISSING = object()
 
-type ExecutorOutboundMessage = TaskCommandResultEnvelope | TaskEventEnvelope
+type ExecutorCommandMessage = TaskCommandEnvelope | TaskDiscoveryCommandEnvelope
+type ExecutorOutboundMessage = (
+    TaskCommandResultEnvelope
+    | TaskEventEnvelope
+    | TaskDiscoveryBatchEnvelope
+    | TaskDiscoveryCompletedEnvelope
+)
 
 
 class ExecutorCommandRejected(ValueError):
@@ -56,6 +74,7 @@ class ExecutorCommandProcessor:
         executor_id: str,
         clock: ExecutorCommandClock | None = None,
         id_source: Callable[[], object] = uuid4,
+        discovery_operation: DouyinDiscoveryOperation | None = None,
     ) -> None:
         try:
             resolved_clock = SystemExecutorCommandClock() if clock is None else clock
@@ -63,6 +82,10 @@ class ExecutorCommandProcessor:
                 not isinstance(ledger, ExecutorLedger)
                 or not isinstance(resolved_clock, ExecutorCommandClock)
                 or not callable(id_source)
+                or (
+                    discovery_operation is not None
+                    and not isinstance(discovery_operation, DouyinDiscoveryOperation)
+                )
             ):
                 raise ValueError
             self._installation_id = _canonical_uuid_v4(installation_id)
@@ -70,6 +93,7 @@ class ExecutorCommandProcessor:
             self._ledger = ledger
             self._clock = resolved_clock
             self._id_source = id_source
+            self._discovery_operation = discovery_operation
         except Exception:
             raise ExecutorCommandRejected from None
 
@@ -92,8 +116,8 @@ class ExecutorCommandProcessor:
     def _handle(self, source: str | bytes) -> tuple[ExecutorOutboundMessage, ...]:
         command = parse_executor_message(source)
         if (
-            not isinstance(command, TaskCommandEnvelope)
-            or command.message_type != "task.offer"
+            not isinstance(command, (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope))
+            or (isinstance(command, TaskCommandEnvelope) and command.message_type != "task.offer")
             or str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
             or self._now() >= command.deadline_at
@@ -110,13 +134,27 @@ class ExecutorCommandProcessor:
             or checkpoint.last_event_sequence != 0
         ):
             raise ValueError
-        batch = self._success_batch(command)
+        if isinstance(command, TaskDiscoveryCommandEnvelope):
+            operation = self._discovery_operation
+            if operation is None:
+                raise ValueError
+            outcome = operation.run(command.payload, cancellation_requested=lambda: False)
+            if (
+                not isinstance(outcome, DouyinDiscoveryExecutionResult)
+                or outcome.page_revision != command.payload.page_revision
+                or len(outcome.candidates) > command.payload.target_limit
+            ):
+                raise ValueError
+            batch = self._discovery_batch(command, outcome)
+        else:
+            batch = self._success_batch(command)
+        last_event_sequence = len(batch) - 1
         try:
             entries = self._ledger.commit_outcome(
                 source_message_id=receipt.message_id,
                 expected_checkpoint_revision=checkpoint.revision,
                 checkpoint_state=AttemptCheckpointState.TERMINAL,
-                last_event_sequence=5,
+                last_event_sequence=last_event_sequence,
                 messages=batch,
             )
         except ExecutorLedgerRejected:
@@ -165,7 +203,34 @@ class ExecutorCommandProcessor:
         )
         return (result, *events)
 
-    def _result(self, command: TaskCommandEnvelope) -> TaskCommandResultEnvelope:
+    def _discovery_batch(
+        self,
+        command: TaskDiscoveryCommandEnvelope,
+        outcome: DouyinDiscoveryExecutionResult,
+    ) -> tuple[ExecutorOutboundMessage, ...]:
+        result = self._result(command)
+        candidates = outcome.candidates
+        batch_count = (
+            len(candidates) + MAX_DISCOVERY_BATCH_CANDIDATES - 1
+        ) // MAX_DISCOVERY_BATCH_CANDIDATES
+        chunks = tuple(
+            self._discovery_chunk(
+                command,
+                candidates=candidates[offset : offset + MAX_DISCOVERY_BATCH_CANDIDATES],
+                batch_index=offset // MAX_DISCOVERY_BATCH_CANDIDATES + 1,
+                batch_count=batch_count,
+            )
+            for offset in range(0, len(candidates), MAX_DISCOVERY_BATCH_CANDIDATES)
+        )
+        completed = self._discovery_completed(
+            command,
+            outcome=outcome,
+            batch_count=batch_count,
+            sequence=batch_count + 1,
+        )
+        return (result, *chunks, completed)
+
+    def _result(self, command: ExecutorCommandMessage) -> TaskCommandResultEnvelope:
         now = self._now()
         return TaskCommandResultEnvelope.model_validate(
             {
@@ -180,6 +245,92 @@ class ExecutorCommandProcessor:
                 "idempotency_key": f"executor:result:{command.message_id}",
                 "sequence": command.sequence,
                 "payload": {"accepted": True},
+                "task_id": str(command.task_id),
+                "execution_attempt_id": str(command.execution_attempt_id),
+            }
+        )
+
+    def _discovery_chunk(
+        self,
+        command: TaskDiscoveryCommandEnvelope,
+        *,
+        candidates: tuple[DouyinCandidate, ...],
+        batch_index: int,
+        batch_count: int,
+    ) -> TaskDiscoveryBatchEnvelope:
+        now = self._now()
+        payload_candidates = [
+            {
+                "candidate_version": DOUYIN_CANDIDATE_VERSION,
+                "platform_target_id": candidate.platform_target_id,
+                "display_name": candidate.summary.display_name,
+                "public_handle": candidate.summary.public_handle,
+                "source": candidate.source.value,
+                "page_revision": candidate.page_revision,
+            }
+            for candidate in candidates
+        ]
+        return TaskDiscoveryBatchEnvelope.model_validate(
+            {
+                "protocol_version": EXECUTOR_PROTOCOL_VERSION,
+                "message_id": self._new_id(),
+                "message_type": "task.discovery_batch",
+                "sent_at": now,
+                "deadline_at": now + _MESSAGE_DEADLINE,
+                "installation_id": self._installation_id,
+                "executor_id": self._executor_id,
+                "correlation_id": str(command.correlation_id),
+                "idempotency_key": (
+                    f"executor:discovery:{command.execution_attempt_id}:batch:{batch_index}"
+                ),
+                "sequence": batch_index,
+                "payload": {
+                    "discovery_version": DOUYIN_DISCOVERY_PROTOCOL_VERSION,
+                    "page_revision": command.payload.page_revision,
+                    "batch_index": batch_index,
+                    "batch_count": batch_count,
+                    "candidates": payload_candidates,
+                },
+                "task_id": str(command.task_id),
+                "execution_attempt_id": str(command.execution_attempt_id),
+            }
+        )
+
+    def _discovery_completed(
+        self,
+        command: TaskDiscoveryCommandEnvelope,
+        *,
+        outcome: DouyinDiscoveryExecutionResult,
+        batch_count: int,
+        sequence: int,
+    ) -> TaskDiscoveryCompletedEnvelope:
+        now = self._now()
+        wire_outcome = {
+            DouyinDiscoveryOperationState.COMPLETED: "completed",
+            DouyinDiscoveryOperationState.LOGIN_REQUIRED: "login_required",
+            DouyinDiscoveryOperationState.HANDOFF_REQUIRED: "handoff_required",
+            DouyinDiscoveryOperationState.FAILED: "failed",
+        }[outcome.state]
+        return TaskDiscoveryCompletedEnvelope.model_validate(
+            {
+                "protocol_version": EXECUTOR_PROTOCOL_VERSION,
+                "message_id": self._new_id(),
+                "message_type": "task.discovery_completed",
+                "sent_at": now,
+                "deadline_at": now + _MESSAGE_DEADLINE,
+                "installation_id": self._installation_id,
+                "executor_id": self._executor_id,
+                "correlation_id": str(command.correlation_id),
+                "idempotency_key": (f"executor:discovery:{command.execution_attempt_id}:completed"),
+                "sequence": sequence,
+                "payload": {
+                    "discovery_version": DOUYIN_DISCOVERY_PROTOCOL_VERSION,
+                    "outcome": wire_outcome,
+                    "evidence": outcome.evidence,
+                    "page_revision": outcome.page_revision,
+                    "batch_count": batch_count,
+                    "candidate_count": len(outcome.candidates),
+                },
                 "task_id": str(command.task_id),
                 "execution_attempt_id": str(command.execution_attempt_id),
             }

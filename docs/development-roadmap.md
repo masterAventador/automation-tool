@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 5 外部浏览器与抖音登录
+> 当前阶段：Wave 6 抖音目标发现与用户预览
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-09，下一项为 D6-10 Discover 命令与 Target 收敛闭环；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-10，下一项为 D6-11 目标预览 API；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -57,7 +57,8 @@
 | Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
-| Executor v1 协议 | `✅` 25 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 33 个公共 fixtures 已验证 |
+| Executor v1 协议 | `✅` 28 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 37 个公共 fixtures 已验证 |
+| Target 发现命令闭环 | `✅` 隐藏 Tauri App 已经正式 Rust bridge 启动发现；Control Plane 原子创建 Attempt/Discover Command，Local Executor 经生产 Processor 上报有界 Candidate 批次并持久 Outbox，PostgreSQL 原子替换 Target、追加事件和收敛 Task；成功、登录失效、人工接管、失败、重试与精确重放矩阵已验证 |
 | Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Executor Playwright onedir | `✅` macOS arm64 与 Windows x86_64 正式 onedir 均已包含 Python Playwright driver 且无浏览器缓存；冻结生产 primitive 已用受信系统浏览器、私有 Profile 与原生锁启动 headed context |
 | Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS/Windows 冻结实包验证 |
@@ -290,7 +291,7 @@
 | D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | 🟩 完成 |
 | D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | 🟩 完成 |
 | D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | 🟩 完成 |
-| D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | ⬜ 未开始 |
+| D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | 🟩 完成 |
 | D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | ⬜ 未开始 |
 | D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | ⬜ 未开始 |
 | D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | ⬜ 未开始 |
@@ -2014,10 +2015,24 @@
 - 清理与文档：同步根/Backend README、后端架构、工程结构和唯一开发台账；测试使用随机 loopback 端口、随机数据库密码和独立 Compose project。结束后 1420、Vite、Playwright/Chromium、Executor 及 `automation-tool-pytest-*` 容器/网络/Volume 均无残留，没有触碰默认浏览器 Profile、真实账号、其他项目或系统钥匙串
 - 后续：进入 `D6-10`，把 D6-05～D6-07 的发现结果通过正式 Executor wire 上报，并在 Control Plane 调用本仓储后收敛 Task 状态
 
+### D6-10 Discover 命令与 Target 收敛闭环
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`；新增 App 入口、HTTP 契约、Executor 三类 wire、批次 accumulator、SQLite v3、PostgreSQL 收敛与隐藏 Tauri 纵向验收。目标用例最初准确失败于 Discover API/协议/本地执行入口不存在；实现后全量门禁又暴露 D6-07 旧 wire 断言、人工接管 Attempt 无法重试及新增分支覆盖不足，均先保留失败证据再修复
+- Control Plane 启动：新增 App Session 保护的 `POST /api/v1/tasks/{task_id}/discoveries`，强制 `Idempotency-Key`，首次返回 202、同键精确重放返回 200。PostgreSQL 单事务锁 active Installation、抖音健康门闩、Task 与当前 Attempt，创建新 Attempt、`task.discover` Command 和 `task.discovery_started` Event，并把 Task 收敛到 `discovering_targets`；草稿、登录后、人工接管后和预览重发现使用同一状态机边界
+- Executor wire：Executor v1 增加严格区分的 `task.discover`、`task.discovery_batch`、`task.discovery_completed`。命令只携带已持久化的关键词、目标上限和 Attempt page revision；结果每批最多 10 条 D6-06 最小 Candidate、总计最多 100 条，完成消息只携带封闭 outcome/evidence/count。Python、Rust、TypeScript、Draft 2020-12 Schema 和共享 fixtures 同步为 28 种消息、10 个 valid 与 27 个 invalid 文件
+- 本地执行与恢复：Rust 授权的浏览器 executable/Profile 只保留在 Executor 进程内 `BrowserLaunchAuthority`，互斥 lease 每次启动前重新验证；`ProductionDouyinDiscoveryOperation` 只组合 D6-04 搜索、D6-05 有界滚动和 D6-07 隐私提取。`ExecutorCommandProcessor` 先 ACK，再把最多 10 条一批的结果和唯一完成消息原子写入 SQLite v3 durable Outbox；断线重发不会重复执行浏览器动作，重启按 command/idempotency 指纹精确回放
+- 服务端收敛：WebSocket 只接受当前已 ACK 的 Task/Attempt/correlation/page revision 连续批次；bounded accumulator 最多同时保留 32 个 Attempt，拒绝跳批、改批、超量和跨 Attempt 拼接。完成时同一 PostgreSQL 事务重新验证全部 identity，调用 D6-09 策略替换 Target、追加终态事件并把成功收敛到 `awaiting_confirmation`；登录失效、人工接管和失败不保存 Target，并把本次一次性 Attempt 终结后允许用户重新发起。完成/批次重放必须与已持久化事实逐字段一致
+- 失败矩阵：覆盖 Installation 吊销/平台门闩/健康缺失、Task 不存在/过期/非法状态、定义缺失、同键异任务、活动 Attempt、DB 约束、未 ACK/错误 scope、批次乱序/冲突/资源上限、完成计数/page revision 不符、登录/接管/失败、旧消息/坏指纹、断线重放和仓储异常；错误、日志、API、IPC、SQLite 与 PostgreSQL 均不含 Cookie、Profile 路径、页面正文、DOM、绝对 URL 或自由错误文本
+- 原调用方验收：`scripts/run_d6_10_acceptance.py` 使用项目专属随机端口、Compose project、PostgreSQL、AppData、SQLite 和 Profile；唯一 `visible=false` 真实 Tauri App 从页面调用正式 TypeScript/Tauri Command/Rust Control Plane client，真实 Uvicorn 接收后由正式 `LocalExecutorProcess + ExecutorCommandProcessor` 上报批次，最终核对 PostgreSQL 两条 Target、Task `awaiting_confirmation`、Attempt succeeded、Command acknowledged 和连续事件。验收不走直接 HTTP/Mock/Harness；D6-04/D6-05/D6-07 已分别证明生产 BrowserRuntime，本纵向链路使用确定性 operation 避免日常测试触碰真实账号或弹出浏览器
+- 测试：Backend 全量 `1333 passed, 5 skipped in 98.04s`，8374 条语句/1776 个分支覆盖率 100%；聚焦六个新增核心模块 909 条语句/212 个分支 100%，真实 PostgreSQL D6-10 矩阵 4 项通过。Ruff/格式 254 个文件、严格 Mypy 236 个源码文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。Frontend 86 项 Node 契约、149 项 Vitest、ESLint、严格 TypeScript、API/生产边界全绿；隐藏 App WDIO 1 项通过。Rust default、`desktop-e2e`、`control-plane-e2e` 三套完整测试、三套全目标 Clippy `-D warnings`、Rustfmt与 Actionlint 全绿
+- 资源与文档：验收结束后随机端口、Uvicorn、Tauri App、Executor、PostgreSQL 容器/网络/Volume、AppData 和 SQLite 均精确回收；没有可见浏览器、默认 Profile、系统钥匙串或其他项目资源。同步根/Frontend/Backend README、前后端架构、工程结构和本唯一台账，没有新增重复计划
+- 后续：进入 `D6-11`，基于已收敛的最新 page revision 暴露 Installation-scoped 目标预览、排除和确认 revision API；过期快照必须拒绝
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-10`：实现 Discover 命令投递、Executor 结果上报、Target 持久化和 Task 状态收敛；
+1. `D6-11`：实现 Installation-scoped 目标预览列表、排除/确认 revision 和过期候选拒绝；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

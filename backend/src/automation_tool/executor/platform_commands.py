@@ -15,6 +15,10 @@ from automation_tool.executor.authentication import (
     LocalSessionAuthenticationRejected,
     LocalSessionAuthenticator,
 )
+from automation_tool.executor.browser_authority import (
+    BrowserLaunchAuthority,
+    BrowserLaunchLease,
+)
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
     BrowserRuntime,
@@ -196,6 +200,7 @@ class DouyinLoginCommandOperation:
         runtime_factory: Callable[[], _Runtime] = BrowserRuntime,
         flow_factory: Callable[[_Runtime], _LoginFlow] = DouyinQrLoginFlow,  # type: ignore[assignment]
         sequence_source: Callable[[], int] | None = None,
+        browser_authority: BrowserLaunchAuthority | None = None,
     ) -> None:
         if (
             not hasattr(health_reporter, "observe")
@@ -203,6 +208,10 @@ class DouyinLoginCommandOperation:
             or not callable(runtime_factory)
             or not callable(flow_factory)
             or (sequence_source is not None and not callable(sequence_source))
+            or (
+                browser_authority is not None
+                and not isinstance(browser_authority, BrowserLaunchAuthority)
+            )
         ):
             raise PlatformCommandRejected
         self._health_reporter = health_reporter
@@ -210,10 +219,12 @@ class DouyinLoginCommandOperation:
         self._runtime_factory = runtime_factory
         self._flow_factory = flow_factory
         self._sequence_source = sequence_source or self._next_wall_sequence
+        self._browser_authority = browser_authority or BrowserLaunchAuthority()
         self._last_sequence = 0
         self._runtime: _Runtime | None = None
         self._flow: _LoginFlow | None = None
         self._launch_identity: tuple[str, str, bool] | None = None
+        self._browser_lease: BrowserLaunchLease | None = None
 
     def handle(self, command: PlatformCommand) -> str:
         if not isinstance(command, PlatformCommand):
@@ -221,6 +232,7 @@ class DouyinLoginCommandOperation:
         try:
             if command.command_type == "douyin.logout.complete":
                 self._close_active()
+                self._browser_authority.revoke()
                 sequence = self._next_sequence()
                 self._outbound.put(self._health_reporter.record_logout(sequence=sequence))
                 return "logged_out"
@@ -302,21 +314,26 @@ class DouyinLoginCommandOperation:
     ) -> None:
         runtime = self._runtime_factory()
         executable_path, profile_directory, headless = identity
-        runtime.start(
-            BrowserLaunchRequest(
-                executable_path=Path(executable_path),
-                profile_directory=Path(profile_directory),
-                headless=headless,
-            )
+        request = BrowserLaunchRequest(
+            executable_path=Path(executable_path),
+            profile_directory=Path(profile_directory),
+            headless=headless,
         )
+        self._browser_authority.authorize(request)
+        lease = self._browser_authority.acquire()
         try:
+            runtime.start(lease.request)
             flow = self._flow_factory(runtime)
         except Exception:
-            runtime.close()
+            try:
+                runtime.close()
+            finally:
+                lease.close()
             raise
         self._runtime = runtime
         self._flow = flow
         self._launch_identity = identity
+        self._browser_lease = lease
 
     def _next_wall_sequence(self) -> int:
         return max(self._last_sequence + 1, time.time_ns() // 1_000)
@@ -324,9 +341,11 @@ class DouyinLoginCommandOperation:
     def _close_active(self, *, best_effort: bool = False) -> None:
         flow = self._flow
         runtime = self._runtime
+        lease = self._browser_lease
         self._flow = None
         self._runtime = None
         self._launch_identity = None
+        self._browser_lease = None
         failed = False
         if flow is not None:
             try:
@@ -336,6 +355,11 @@ class DouyinLoginCommandOperation:
         if runtime is not None:
             try:
                 runtime.close()
+            except Exception:
+                failed = True
+        if lease is not None:
+            try:
+                lease.close()
             except Exception:
                 failed = True
         if failed and not best_effort:

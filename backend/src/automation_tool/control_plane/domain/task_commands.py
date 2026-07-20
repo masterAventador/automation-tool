@@ -6,6 +6,7 @@ from typing import Final
 
 class TaskCommandType(StrEnum):
     TASK_OFFER = "task.offer"
+    TASK_DISCOVER = "task.discover"
     TASK_PAUSE = "task.pause"
     TASK_RESUME = "task.resume"
     TASK_CANCEL = "task.cancel"

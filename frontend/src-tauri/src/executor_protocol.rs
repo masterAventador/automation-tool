@@ -62,6 +62,9 @@ pub enum ExecutorEnvelopeKind {
     PlatformSessionHealth,
     TaskCommand,
     TaskCommandResult,
+    TaskDiscoveryBatch,
+    TaskDiscoveryCommand,
+    TaskDiscoveryCompleted,
     TaskEvent,
 }
 
@@ -260,6 +263,9 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
         }
         ExecutorEnvelopeKind::TaskCommand
         | ExecutorEnvelopeKind::TaskCommandResult
+        | ExecutorEnvelopeKind::TaskDiscoveryBatch
+        | ExecutorEnvelopeKind::TaskDiscoveryCommand
+        | ExecutorEnvelopeKind::TaskDiscoveryCompleted
         | ExecutorEnvelopeKind::TaskEvent => {
             if !raw.task_id.as_deref().is_some_and(is_canonical_uuid_v4)
                 || !raw
@@ -268,6 +274,18 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
                     .is_some_and(is_canonical_uuid_v4)
             {
                 return Err(());
+            }
+            match kind {
+                ExecutorEnvelopeKind::TaskDiscoveryCommand => {
+                    validate_discovery_command(&raw.payload.0)?;
+                }
+                ExecutorEnvelopeKind::TaskDiscoveryBatch => {
+                    validate_discovery_batch(&raw.payload.0)?;
+                }
+                ExecutorEnvelopeKind::TaskDiscoveryCompleted => {
+                    validate_discovery_completed(&raw.payload.0)?;
+                }
+                _ => {}
             }
         }
     }
@@ -283,6 +301,9 @@ fn message_kind(message_type: &str) -> Option<ExecutorEnvelopeKind> {
         "task.offer" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop" => {
             Some(ExecutorEnvelopeKind::TaskCommand)
         }
+        "task.discover" => Some(ExecutorEnvelopeKind::TaskDiscoveryCommand),
+        "task.discovery_batch" => Some(ExecutorEnvelopeKind::TaskDiscoveryBatch),
+        "task.discovery_completed" => Some(ExecutorEnvelopeKind::TaskDiscoveryCompleted),
         "task.accept" | "task.reject" | "task.control_ack" => {
             Some(ExecutorEnvelopeKind::TaskCommandResult)
         }
@@ -302,6 +323,192 @@ fn message_kind(message_type: &str) -> Option<ExecutorEnvelopeKind> {
         | "task.outcome_uncertain" => Some(ExecutorEnvelopeKind::TaskEvent),
         _ => None,
     }
+}
+
+fn has_exact_keys(object: &Map<String, Value>, expected: &[&str]) -> bool {
+    object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
+}
+
+fn bounded_sequence(object: &Map<String, Value>, name: &str, maximum: u64) -> Option<u64> {
+    object
+        .get(name)
+        .and_then(Value::as_u64)
+        .filter(|value| (1..=maximum).contains(value))
+}
+
+fn validate_discovery_command(payload: &Value) -> Result<(), ()> {
+    let object = payload.as_object().ok_or(())?;
+    if !has_exact_keys(
+        object,
+        &[
+            "discovery_version",
+            "keyword",
+            "target_limit",
+            "page_revision",
+        ],
+    ) || object.get("discovery_version").and_then(Value::as_str) != Some("douyin.discovery.v1")
+        || !object
+            .get("keyword")
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                !value.is_empty()
+                    && value.trim() == value
+                    && value.chars().count() <= 80
+                    && !unsafe_payload_string(value)
+            })
+        || bounded_sequence(object, "target_limit", 100).is_none()
+        || bounded_sequence(object, "page_revision", MAX_SEQUENCE).is_none()
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn validate_discovery_batch(payload: &Value) -> Result<(), ()> {
+    let object = payload.as_object().ok_or(())?;
+    if !has_exact_keys(
+        object,
+        &[
+            "discovery_version",
+            "page_revision",
+            "batch_index",
+            "batch_count",
+            "candidates",
+        ],
+    ) || object.get("discovery_version").and_then(Value::as_str) != Some("douyin.discovery.v1")
+    {
+        return Err(());
+    }
+    let page_revision = bounded_sequence(object, "page_revision", MAX_SEQUENCE).ok_or(())?;
+    let batch_index = bounded_sequence(object, "batch_index", 10).ok_or(())?;
+    let batch_count = bounded_sequence(object, "batch_count", 10).ok_or(())?;
+    let candidates = object
+        .get("candidates")
+        .and_then(Value::as_array)
+        .ok_or(())?;
+    if batch_index > batch_count || candidates.is_empty() || candidates.len() > 10 {
+        return Err(());
+    }
+    for candidate in candidates {
+        validate_discovery_candidate(candidate, page_revision)?;
+    }
+    Ok(())
+}
+
+fn validate_discovery_candidate(candidate: &Value, page_revision: u64) -> Result<(), ()> {
+    let object = candidate.as_object().ok_or(())?;
+    if !has_exact_keys(
+        object,
+        &[
+            "candidate_version",
+            "platform_target_id",
+            "display_name",
+            "public_handle",
+            "source",
+            "page_revision",
+        ],
+    ) || object.get("candidate_version").and_then(Value::as_str) != Some("douyin.candidate.v1")
+        || object.get("source").and_then(Value::as_str) != Some("general_search_author")
+        || bounded_sequence(object, "page_revision", MAX_SEQUENCE) != Some(page_revision)
+        || !object
+            .get("platform_target_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| valid_platform_identifier(value, 128))
+        || !object
+            .get("display_name")
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                !value.is_empty()
+                    && value.trim() == value
+                    && value.chars().count() <= 80
+                    && !unsafe_payload_string(value)
+            })
+    {
+        return Err(());
+    }
+    match object.get("public_handle") {
+        Some(Value::Null) => {}
+        Some(Value::String(value)) if valid_platform_identifier(value, 64) => {}
+        _ => return Err(()),
+    }
+    Ok(())
+}
+
+fn valid_platform_identifier(value: &str, maximum: usize) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= maximum
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+}
+
+fn validate_discovery_completed(payload: &Value) -> Result<(), ()> {
+    let object = payload.as_object().ok_or(())?;
+    if !has_exact_keys(
+        object,
+        &[
+            "discovery_version",
+            "outcome",
+            "evidence",
+            "page_revision",
+            "batch_count",
+            "candidate_count",
+        ],
+    ) || object.get("discovery_version").and_then(Value::as_str) != Some("douyin.discovery.v1")
+        || bounded_sequence(object, "page_revision", MAX_SEQUENCE).is_none()
+    {
+        return Err(());
+    }
+    let outcome = object.get("outcome").and_then(Value::as_str).ok_or(())?;
+    let evidence = object.get("evidence").and_then(Value::as_str).ok_or(())?;
+    let batch_count = object
+        .get("batch_count")
+        .and_then(Value::as_u64)
+        .ok_or(())?;
+    let candidate_count = object
+        .get("candidate_count")
+        .and_then(Value::as_u64)
+        .ok_or(())?;
+    if batch_count > 10 || candidate_count > 100 {
+        return Err(());
+    }
+    let valid = match outcome {
+        "completed" => {
+            evidence == "candidates_extracted"
+                && candidate_count > 0
+                && batch_count == candidate_count.div_ceil(10)
+        }
+        "login_required" => {
+            evidence == "login_required" && batch_count == 0 && candidate_count == 0
+        }
+        "handoff_required" => {
+            evidence == "blocking_dialog" && batch_count == 0 && candidate_count == 0
+        }
+        "failed" => {
+            matches!(
+                evidence,
+                "no_candidates"
+                    | "navigation_timed_out"
+                    | "home_ready_timed_out"
+                    | "action_timed_out"
+                    | "result_url_timed_out"
+                    | "results_ready_timed_out"
+                    | "page_version_unknown"
+                    | "conflicting_anchors"
+                    | "results_unavailable"
+                    | "privacy_rejected"
+                    | "result_count_decreased"
+                    | "cancellation_unavailable"
+                    | "cancellation_requested"
+                    | "page_unavailable"
+            ) && batch_count == 0
+                && candidate_count == 0
+        }
+        _ => false,
+    };
+    valid.then_some(()).ok_or(())
 }
 
 fn validate_platform_session_health(payload: &Value, sent_at: OffsetDateTime) -> Result<(), ()> {

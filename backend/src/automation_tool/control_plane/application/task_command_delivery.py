@@ -27,9 +27,11 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.protocol import (
     EXECUTOR_PROTOCOL_VERSION,
+    DouyinDiscoveryCommandPayload,
     IdempotencyKey,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
+    TaskDiscoveryCommandEnvelope,
 )
 
 
@@ -134,6 +136,7 @@ class TaskCommandRecord:
     deadline_at: datetime
     created_at: datetime
     updated_at: datetime
+    discovery_payload: DouyinDiscoveryCommandPayload | None = None
 
     @classmethod
     def from_pending(cls, command: PendingTaskCommand) -> TaskCommandRecord:
@@ -407,23 +410,34 @@ def _command_wire(
     sent_at: datetime,
 ) -> str:
     try:
-        envelope = TaskCommandEnvelope.model_validate(
-            {
-                "protocol_version": EXECUTOR_PROTOCOL_VERSION,
-                "message_id": str(command.message_id),
-                "message_type": command.command_type.value,
-                "sent_at": sent_at,
-                "deadline_at": command.deadline_at,
-                "installation_id": str(command.installation_id),
-                "executor_id": str(executor_id),
-                "correlation_id": str(command.correlation_id),
-                "idempotency_key": command.idempotency_key,
-                "sequence": command.sequence,
-                "payload": {},
-                "task_id": str(command.task_id),
-                "execution_attempt_id": str(command.execution_attempt_id),
-            }
-        )
+        source = {
+            "protocol_version": EXECUTOR_PROTOCOL_VERSION,
+            "message_id": str(command.message_id),
+            "message_type": command.command_type.value,
+            "sent_at": sent_at,
+            "deadline_at": command.deadline_at,
+            "installation_id": str(command.installation_id),
+            "executor_id": str(executor_id),
+            "correlation_id": str(command.correlation_id),
+            "idempotency_key": command.idempotency_key,
+            "sequence": command.sequence,
+            "payload": (
+                command.discovery_payload.model_dump(mode="json")
+                if command.discovery_payload is not None
+                else {}
+            ),
+            "task_id": str(command.task_id),
+            "execution_attempt_id": str(command.execution_attempt_id),
+        }
+        envelope: TaskDiscoveryCommandEnvelope | TaskCommandEnvelope
+        if command.command_type is TaskCommandType.TASK_DISCOVER:
+            if command.discovery_payload is None:
+                raise ValueError
+            envelope = TaskDiscoveryCommandEnvelope.model_validate(source)
+        else:
+            if command.discovery_payload is not None:
+                raise ValueError
+            envelope = TaskCommandEnvelope.model_validate(source)
         return json.dumps(
             envelope.model_dump(mode="json"),
             ensure_ascii=False,

@@ -70,6 +70,9 @@ warn_unused_configs = true
 [tool.coverage.run]
 branch = true
 source = ["automation_tool"]
+# This module is exercised by the native Windows runner; importing Win32 DLLs is
+# intentionally impossible on the Linux backend coverage runner.
+omit = ["src/automation_tool/executor/windows_acl.py"]
 
 [tool.coverage.report]
 fail_under = 100

@@ -4,15 +4,18 @@ import os
 import sqlite3
 import stat
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 from uuid import UUID
 
 import pytest
 
+from automation_tool.executor import ledger as ledger_module
 from automation_tool.executor.ledger import (
     EXECUTOR_LEDGER_FILE_NAME,
     AttemptCheckpointState,
@@ -104,14 +107,14 @@ def ledger(state_directory: Path) -> ExecutorLedger:
     )
 
 
-def test_empty_private_directory_migrates_to_the_exact_v2_schema(tmp_path: Path) -> None:
+def test_empty_private_directory_migrates_to_the_exact_v3_schema(tmp_path: Path) -> None:
     state_directory = tmp_path / "executor-state"
 
     opened = ledger(state_directory)
 
     assert opened.database_path == state_directory / EXECUTOR_LEDGER_FILE_NAME
     with sqlite3.connect(opened.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
         tables = {
             row[0]
             for row in connection.execute(
@@ -253,7 +256,7 @@ def test_v1_ledger_is_migrated_in_place_without_losing_commands(tmp_path: Path) 
 
     assert migrated.receive_command(source).replayed is True
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'executor_platform_sessions'"
@@ -635,7 +638,7 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)
     with sqlite3.connect(opened.database_path) as connection:
-        connection.execute("PRAGMA user_version = 3")
+        connection.execute("PRAGMA user_version = 4")
     with pytest.raises(ExecutorLedgerRejected):
         ledger(state_directory)
 
@@ -695,6 +698,21 @@ def test_windows_broad_directory_and_database_acls_fail_closed(tmp_path: Path) -
     assert file_acl.returncode == 0, file_acl.stderr
     with pytest.raises(ExecutorLedgerRejected):
         opened.get_checkpoint(ATTEMPT_ID)
+
+
+def test_windows_acl_adapter_invokes_the_native_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[Path] = []
+    adapter = ModuleType("automation_tool.executor.windows_acl")
+    adapter.validate_private_acl = lambda path: calls.append(path)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "automation_tool.executor.windows_acl", adapter)
+    monkeypatch.setattr(os, "name", "nt")
+
+    ledger_module._validate_windows_private_acl(tmp_path)
+
+    assert calls == [tmp_path]
 
 
 def test_invalid_identity_permissions_file_shapes_and_open_races_fail_closed(

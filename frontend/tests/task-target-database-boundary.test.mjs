@@ -8,7 +8,7 @@ async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
 }
 
-test("D6-09 persists bounded target previews without widening the App or wire", async () => {
+test("D6-09 persistence details do not leak into the D6-10 App or wire", async () => {
   const [migration, schema, repository, records, wire, native] = await Promise.all([
     readRepositoryFile(
       "backend/migrations/versions/20260718_0016_task_targets.py",

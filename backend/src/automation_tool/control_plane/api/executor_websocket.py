@@ -33,6 +33,11 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
     TaskCommandDeliveryUnavailable,
 )
+from automation_tool.control_plane.application.task_discovery import (
+    TaskDiscoveryConvergenceService,
+    TaskDiscoveryRejected,
+    TaskDiscoveryUnavailable,
+)
 from automation_tool.control_plane.application.task_event_convergence import (
     TaskEventConvergenceRejected,
     TaskEventConvergenceService,
@@ -42,6 +47,8 @@ from automation_tool.protocol import (
     ExecutorLifecycleEnvelope,
     PlatformSessionHealthEnvelope,
     TaskCommandResultEnvelope,
+    TaskDiscoveryBatchEnvelope,
+    TaskDiscoveryCompletedEnvelope,
     TaskEventEnvelope,
 )
 
@@ -125,6 +132,7 @@ async def connect_executor(websocket: WebSocket) -> None:
     registry = websocket.app.state.executor_connection_registry
     delivery = websocket.app.state.task_command_delivery_service
     event_convergence = websocket.app.state.task_event_convergence_service
+    discovery_convergence = websocket.app.state.task_discovery_convergence_service
     session_health = websocket.app.state.platform_session_health_service
     if not isinstance(service, ExecutorConnectionService) or not isinstance(
         registry, ExecutorConnectionRegistry
@@ -373,6 +381,54 @@ async def connect_executor(websocket: WebSocket) -> None:
                     return
                 except Exception:
                     logger.error("Executor platform Session health convergence failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                continue
+
+            if isinstance(
+                message,
+                (TaskDiscoveryBatchEnvelope, TaskDiscoveryCompletedEnvelope),
+            ):
+                if discovery_convergence is None:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                if not isinstance(discovery_convergence, TaskDiscoveryConvergenceService):
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                try:
+                    if isinstance(message, TaskDiscoveryBatchEnvelope):
+                        await discovery_convergence.receive_batch(message)
+                    else:
+                        await discovery_convergence.receive_completed(message)
+                except TaskDiscoveryRejected:
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
+                        reason=_PROTOCOL_REJECTED_REASON,
+                    )
+                    return
+                except TaskDiscoveryUnavailable:
+                    logger.error("Executor Task discovery persistence failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                except Exception:
+                    logger.error("Executor Task discovery convergence failed")
                     await _close(
                         websocket,
                         code=EXECUTOR_CLOSE_INTERNAL_ERROR,

@@ -29,6 +29,7 @@ from automation_tool.control_plane.api.platform_sessions import (
 from automation_tool.control_plane.api.registrations import router as registration_router
 from automation_tool.control_plane.api.system import router as system_router
 from automation_tool.control_plane.api.task_controls import router as task_control_router
+from automation_tool.control_plane.api.task_discoveries import router as task_discovery_router
 from automation_tool.control_plane.api.task_event_stream import router as task_event_stream_router
 from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.api.workbench import router as workbench_router
@@ -48,6 +49,10 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
 )
 from automation_tool.control_plane.application.task_controls import TaskControlService
+from automation_tool.control_plane.application.task_discovery import (
+    TaskDiscoveryConvergenceService,
+    TaskDiscoveryStartService,
+)
 from automation_tool.control_plane.application.task_event_convergence import (
     TaskEventConvergenceService,
 )
@@ -72,6 +77,9 @@ from automation_tool.control_plane.bootstrap.task_commands import (
 )
 from automation_tool.control_plane.bootstrap.task_commands import (
     task_control_service as build_task_control_service,
+)
+from automation_tool.control_plane.bootstrap.task_discovery import (
+    task_discovery_services as build_task_discovery_services,
 )
 from automation_tool.control_plane.bootstrap.task_event_stream import (
     task_event_stream_service as build_task_event_stream_service,
@@ -142,6 +150,8 @@ def create_app(
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
     task_control_service: TaskControlService | None = None,
+    task_discovery_start_service: TaskDiscoveryStartService | None = None,
+    task_discovery_convergence_service: TaskDiscoveryConvergenceService | None = None,
     task_event_convergence_service: TaskEventConvergenceService | None = None,
     task_event_stream_service: TaskEventStreamService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
@@ -167,6 +177,8 @@ def create_app(
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
     resolved_task_control_service = task_control_service
+    resolved_task_discovery_start_service = task_discovery_start_service
+    resolved_task_discovery_convergence_service = task_discovery_convergence_service
     resolved_task_event_convergence_service = task_event_convergence_service
     resolved_task_event_stream_service = task_event_stream_service
     if (
@@ -198,6 +210,15 @@ def create_app(
         )
     if resolved_task_control_service is None and isinstance(resolved_database, Database):
         resolved_task_control_service = build_task_control_service(resolved_database)
+    if (
+        resolved_task_discovery_start_service is None
+        and resolved_task_discovery_convergence_service is None
+        and isinstance(resolved_database, Database)
+    ):
+        (
+            resolved_task_discovery_start_service,
+            resolved_task_discovery_convergence_service,
+        ) = build_task_discovery_services(resolved_database)
     if resolved_task_event_convergence_service is None and isinstance(resolved_database, Database):
         resolved_task_event_convergence_service = build_task_event_convergence_service(
             resolved_database
@@ -235,6 +256,8 @@ def create_app(
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
     app.state.task_control_service = resolved_task_control_service
+    app.state.task_discovery_start_service = resolved_task_discovery_start_service
+    app.state.task_discovery_convergence_service = resolved_task_discovery_convergence_service
     app.state.task_event_convergence_service = resolved_task_event_convergence_service
     app.state.task_event_stream_service = resolved_task_event_stream_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
@@ -252,6 +275,7 @@ def create_app(
     app.include_router(platform_session_router)
     app.include_router(task_event_stream_router)
     app.include_router(task_control_router)
+    app.include_router(task_discovery_router)
     app.include_router(task_router)
     app.include_router(workbench_router)
     app.include_router(executor_websocket_router)

@@ -1075,7 +1075,8 @@ task_commands = Table(
     ),
     CheckConstraint(
         "response_type is null or "
-        "(command_type = 'task.offer' and response_type in ('task.accept', 'task.reject')) or "
+        "(command_type in ('task.offer', 'task.discover') "
+        "and response_type in ('task.accept', 'task.reject')) or "
         "(command_type in ('task.pause', 'task.resume', 'task.cancel', "
         "'task.emergency_stop') and response_type = 'task.control_ack')",
         name="ck_task_commands_response_coherence",

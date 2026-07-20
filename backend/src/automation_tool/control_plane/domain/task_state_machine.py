@@ -72,6 +72,7 @@ _TRANSITIONS: Final[Mapping[TaskStatus, frozenset[TaskStatus]]] = MappingProxyTy
         ),
         TaskStatus.DISCOVERING_TARGETS: frozenset(
             {
+                TaskStatus.AWAITING_PLATFORM_LOGIN,
                 TaskStatus.AWAITING_CONFIRMATION,
                 TaskStatus.AWAITING_HUMAN,
                 TaskStatus.CANCELLING,

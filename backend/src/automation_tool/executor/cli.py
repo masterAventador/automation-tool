@@ -17,10 +17,12 @@ from automation_tool.executor.authentication import (
     LocalSessionAuthenticator,
 )
 from automation_tool.executor.bootstrap import ExecutorBootstrapRejected, read_executor_bootstrap
+from automation_tool.executor.browser_authority import BrowserLaunchAuthority
 from automation_tool.executor.command_processor import (
     ExecutorCommandProcessor,
     ExecutorCommandRejected,
 )
+from automation_tool.executor.discovery_operation import ProductionDouyinDiscoveryOperation
 from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
 from automation_tool.executor.platform_commands import (
     DouyinLoginCommandOperation,
@@ -91,10 +93,15 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 installation_id=str(bootstrap.installation_id),
                 executor_id=str(bootstrap.executor_id),
             )
+            browser_authority = BrowserLaunchAuthority()
             command_processor = ExecutorCommandProcessor(
                 ledger=ledger,
                 installation_id=str(bootstrap.installation_id),
                 executor_id=str(bootstrap.executor_id),
+                discovery_operation=ProductionDouyinDiscoveryOperation(
+                    ledger=ledger,
+                    browser_authority=browser_authority,
+                ),
             )
             local_outbox: Queue[object] = Queue()
             reporter = ExecutorProcessReporter(stdout, authenticator)
@@ -104,6 +111,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 operation=DouyinLoginCommandOperation(
                     health_reporter=DouyinSessionHealthReporter(ledger=ledger),
                     outbound=local_outbox,
+                    browser_authority=browser_authority,
                 ),
                 result_writer=reporter.platform_command_result,
             )

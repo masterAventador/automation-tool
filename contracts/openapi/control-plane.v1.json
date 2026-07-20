@@ -411,6 +411,7 @@
       "TaskCommandType": {
         "enum": [
           "task.offer",
+          "task.discover",
           "task.pause",
           "task.resume",
           "task.cancel",
@@ -549,6 +550,64 @@
           "finalConfirmationRequired"
         ],
         "title": "TaskCreateRequest",
+        "type": "object"
+      },
+      "TaskDiscoveryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "commandId": {
+            "title": "Commandid",
+            "type": "string"
+          },
+          "commandStatus": {
+            "$ref": "#/components/schemas/TaskCommandStatus"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "deadlineAt": {
+            "format": "date-time",
+            "title": "Deadlineat",
+            "type": "string"
+          },
+          "executionAttemptId": {
+            "title": "Executionattemptid",
+            "type": "string"
+          },
+          "lastEventSequence": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          },
+          "taskRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Taskrevision",
+            "type": "integer"
+          },
+          "taskStatus": {
+            "$ref": "#/components/schemas/TaskStatus"
+          }
+        },
+        "required": [
+          "taskId",
+          "taskStatus",
+          "taskRevision",
+          "lastEventSequence",
+          "commandId",
+          "executionAttemptId",
+          "commandStatus",
+          "createdAt",
+          "deadlineAt"
+        ],
+        "title": "TaskDiscoveryResponse",
         "type": "object"
       },
       "TaskListResponse": {
@@ -1294,6 +1353,62 @@
           }
         ],
         "summary": "Cancel Task",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/discoveries": {
+      "post": {
+        "operationId": "startTaskDiscovery",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDiscoveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Start Task Discovery",
         "tags": [
           "tasks"
         ]

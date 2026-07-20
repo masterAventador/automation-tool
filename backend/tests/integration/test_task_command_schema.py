@@ -33,7 +33,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0008"
-HEAD_REVISION = "20260718_0016"
+HEAD_REVISION = "20260720_0017"
 NOW = datetime(2026, 7, 18, 5, 30, tzinfo=UTC)
 DEADLINE = NOW + timedelta(minutes=5)
 EXPECTED_COLUMNS = {
@@ -326,7 +326,15 @@ async def test_command_defaults_and_valid_delivery_ack_reject_expiry_states_are_
                 response_type=TaskCommandResponseType.TASK_REJECT,
                 status=TaskCommandStatus.REJECTED,
             )
-            expired = command_values(installation_id, task_id, attempt_id, sequence=7)
+            discovery_accepted = acknowledged_values(
+                installation_id,
+                task_id,
+                attempt_id,
+                sequence=7,
+                command_type=TaskCommandType.TASK_DISCOVER,
+                response_type=TaskCommandResponseType.TASK_ACCEPT,
+            )
+            expired = command_values(installation_id, task_id, attempt_id, sequence=8)
             expired.update(
                 {
                     "status": TaskCommandStatus.EXPIRED.value,
@@ -334,7 +342,15 @@ async def test_command_defaults_and_valid_delivery_ack_reject_expiry_states_are_
                     "updated_at": DEADLINE,
                 }
             )
-            for values in (in_flight, delivered, accepted, control_ack, rejected, expired):
+            for values in (
+                in_flight,
+                delivered,
+                accepted,
+                control_ack,
+                rejected,
+                discovery_accepted,
+                expired,
+            ):
                 await session.execute(insert(task_commands).values(values))
 
         assert pending["status"] == TaskCommandStatus.PENDING.value
@@ -507,7 +523,19 @@ async def test_command_constraints_reject_invalid_scope_identity_time_state_and_
             response_type=TaskCommandResponseType.TASK_ACCEPT,
         )
         invalid_response_uuid["response_message_id"] = UUID("123e4567-e89b-12d3-a456-426614174000")
-        for values in (invalid_control_response, invalid_response_uuid):
+        invalid_discovery_response = acknowledged_values(
+            installation_id,
+            task_id,
+            attempt_id,
+            sequence=102,
+            command_type=TaskCommandType.TASK_DISCOVER,
+            response_type=TaskCommandResponseType.TASK_CONTROL_ACK,
+        )
+        for values in (
+            invalid_control_response,
+            invalid_response_uuid,
+            invalid_discovery_response,
+        ):
             with pytest.raises(IntegrityError):
                 async with database.session() as session:
                     await session.execute(insert(task_commands).values(values))

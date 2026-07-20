@@ -11,6 +11,10 @@ import pytest
 from pydantic import SecretStr
 
 from automation_tool.executor.authentication import LocalSessionAuthenticator
+from automation_tool.executor.browser_authority import (
+    BrowserLaunchAuthority,
+    BrowserLaunchAuthorityRejected,
+)
 from automation_tool.executor.platform_commands import (
     DouyinLoginCommandOperation,
     PlatformCommand,
@@ -226,10 +230,15 @@ def test_douyin_operation_reuses_one_flow_reports_health_and_closes_when_healthy
             self.calls.append((window, sequence, recovered))
             return f"health-{sequence}"
 
+        @staticmethod
+        def record_logout(*, sequence: int) -> str:
+            return f"logout-health-{sequence}"
+
     runtimes: list[Runtime] = []
     flows: list[Flow] = []
     reporter = Reporter()
     outbound: Queue[object] = Queue()
+    browser_authority = BrowserLaunchAuthority()
 
     def runtime_factory() -> Runtime:
         runtime = Runtime()
@@ -246,7 +255,8 @@ def test_douyin_operation_reuses_one_flow_reports_health_and_closes_when_healthy
         outbound=outbound,
         runtime_factory=cast(Any, runtime_factory),
         flow_factory=cast(Any, flow_factory),
-        sequence_source=iter((41, 42)).__next__,
+        sequence_source=iter((41, 42, 43)).__next__,
+        browser_authority=browser_authority,
     )
 
     def command(command_type: str) -> PlatformCommand:
@@ -272,6 +282,15 @@ def test_douyin_operation_reuses_one_flow_reports_health_and_closes_when_healthy
     assert outbound.get_nowait() == "health-42"
     assert flows[0].closed == 1
     assert runtimes[0].closed == 1
+    with browser_authority.lease() as retained:
+        assert retained.profile_directory == profile
+
+    assert operation.handle(
+        PlatformCommand.model_validate(json.loads(logout_command_source()))
+    ) == ("logged_out")
+    assert outbound.get_nowait() == "logout-health-43"
+    with pytest.raises(BrowserLaunchAuthorityRejected), browser_authority.lease():
+        raise AssertionError
 
 
 def test_douyin_operation_completes_logout_without_launching_a_browser() -> None:
@@ -533,6 +552,16 @@ def test_douyin_operation_fails_closed_for_invalid_dependencies_and_commands(
     strict_close._runtime = Runtime(close_failure=True)
     with pytest.raises(PlatformCommandRejected):
         strict_close.close()
+
+    class FailingLease:
+        @staticmethod
+        def close() -> None:
+            raise RuntimeError("private lease close")
+
+    lease_close = make_operation()
+    lease_close._browser_lease = cast(Any, FailingLease())
+    with pytest.raises(PlatformCommandRejected):
+        lease_close.close()
 
     explicit_rejection = make_operation()
     explicit_rejection._flow = Flow(close_failure=True)  # type: ignore[assignment]

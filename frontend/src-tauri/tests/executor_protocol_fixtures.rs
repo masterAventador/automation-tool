@@ -6,19 +6,23 @@ use automation_tool_desktop_lib::executor_protocol::{
     parse_executor_message, ExecutorEnvelopeKind,
 };
 
-const VALID_FIXTURES: [&str; 7] = [
+const VALID_FIXTURES: [&str; 10] = [
     "executor-heartbeat.json",
     "executor-hello.json",
     "microsecond-deadline.json",
     "platform-session-health.json",
     "step-progress.json",
     "task-accept.json",
+    "task-discover.json",
+    "task-discovery-batch.json",
+    "task-discovery-completed.json",
     "task-offer.json",
 ];
-const INVALID_FIXTURES: [&str; 26] = [
+const INVALID_FIXTURES: [&str; 27] = [
     "deadline-before-send.json",
     "deadline-before-send-microsecond.json",
     "deadline-equals-send.json",
+    "discovery-command-unknown-field.json",
     "duplicate-key.json",
     "inline-data-uri.json",
     "invalid-idempotency-key.json",
@@ -96,6 +100,9 @@ fn rust_formal_parser_accepts_every_shared_valid_fixture() {
             ExecutorEnvelopeKind::PlatformSessionHealth,
             ExecutorEnvelopeKind::TaskCommand,
             ExecutorEnvelopeKind::TaskCommandResult,
+            ExecutorEnvelopeKind::TaskDiscoveryBatch,
+            ExecutorEnvelopeKind::TaskDiscoveryCommand,
+            ExecutorEnvelopeKind::TaskDiscoveryCompleted,
             ExecutorEnvelopeKind::TaskEvent,
         ])
     );

@@ -28,12 +28,16 @@ EXPECTED_VALID_FIXTURES = {
     "platform-session-health.json",
     "step-progress.json",
     "task-accept.json",
+    "task-discover.json",
+    "task-discovery-batch.json",
+    "task-discovery-completed.json",
     "task-offer.json",
 }
 EXPECTED_INVALID_FIXTURES = {
     "deadline-before-send.json",
     "deadline-before-send-microsecond.json",
     "deadline-equals-send.json",
+    "discovery-command-unknown-field.json",
     "duplicate-key.json",
     "inline-data-uri.json",
     "invalid-idempotency-key.json",
@@ -144,13 +148,13 @@ def test_fixture_inventory_is_exact_documented_and_nontrivial() -> None:
 
     assert fixture_names(VALID_FIXTURE_ROOT) == EXPECTED_VALID_FIXTURES
     assert fixture_names(INVALID_FIXTURE_ROOT) == EXPECTED_INVALID_FIXTURES
-    assert len(EXPECTED_VALID_FIXTURES) == 7
-    assert len(EXPECTED_INVALID_FIXTURES) == 26
+    assert len(EXPECTED_VALID_FIXTURES) == 10
+    assert len(EXPECTED_INVALID_FIXTURES) == 27
     assert len(SEMANTIC_ONLY_INVALID_FIXTURES) == 10
     for fixture_name in sorted(SEMANTIC_ONLY_INVALID_FIXTURES):
         assert f"`{fixture_name}`" in document
     assert "10 个语义层无效样例" in document
-    assert "其余 16 个结构层无效样例" in document
+    assert "其余 17 个结构层无效样例" in document
 
 
 @pytest.mark.parametrize(

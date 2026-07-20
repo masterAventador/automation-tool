@@ -20,12 +20,15 @@ from automation_tool.protocol import (
     PlatformSessionState,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
+    TaskDiscoveryBatchEnvelope,
+    TaskDiscoveryCommandEnvelope,
+    TaskDiscoveryCompletedEnvelope,
     TaskEventEnvelope,
     parse_executor_message,
 )
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 2
+_SCHEMA_VERSION: Final = 3
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_CROSS_RUNTIME_SEQUENCE: Final = 2**53 - 1
 
@@ -89,7 +92,13 @@ class AttemptCheckpoint:
     revision: int
 
 
-type OutboundExecutorMessage = TaskCommandResultEnvelope | TaskEventEnvelope
+type InboundTaskCommand = TaskCommandEnvelope | TaskDiscoveryCommandEnvelope
+type OutboundExecutorMessage = (
+    TaskCommandResultEnvelope
+    | TaskEventEnvelope
+    | TaskDiscoveryBatchEnvelope
+    | TaskDiscoveryCompletedEnvelope
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +143,7 @@ class ExecutorLedger:
     def executor_id(self) -> str:
         return self._executor_id
 
-    def receive_command(self, command: TaskCommandEnvelope) -> CommandReceipt:
+    def receive_command(self, command: InboundTaskCommand) -> CommandReceipt:
         try:
             self._require_command_identity(command)
             envelope = _canonical_message(command)
@@ -688,15 +697,23 @@ class ExecutorLedger:
         except Exception:
             raise ExecutorLedgerRejected from None
 
-    def _require_command_identity(self, command: TaskCommandEnvelope) -> None:
-        if not isinstance(command, TaskCommandEnvelope) or (
+    def _require_command_identity(self, command: InboundTaskCommand) -> None:
+        if not isinstance(command, (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope)) or (
             str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
         ):
             raise ValueError
 
     def _require_outbound_identity(self, message: OutboundExecutorMessage) -> None:
-        if not isinstance(message, (TaskCommandResultEnvelope, TaskEventEnvelope)) or (
+        if not isinstance(
+            message,
+            (
+                TaskCommandResultEnvelope,
+                TaskEventEnvelope,
+                TaskDiscoveryBatchEnvelope,
+                TaskDiscoveryCompletedEnvelope,
+            ),
+        ) or (
             str(message.installation_id) != self._installation_id
             or str(message.executor_id) != self._executor_id
         ):
@@ -796,6 +813,9 @@ class ExecutorLedger:
             if version == 1:
                 _migrate_v2(connection)
                 version = 2
+            if version == 2:
+                _migrate_v3(connection)
+                version = 3
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -849,7 +869,7 @@ def _migrate_v1(connection: sqlite3.Connection) -> None:
             sequence INTEGER NOT NULL CHECK (sequence >= 1),
             message_type TEXT NOT NULL CHECK (
                 message_type IN (
-                    'task.offer', 'task.pause', 'task.resume',
+                    'task.offer', 'task.discover', 'task.pause', 'task.resume',
                     'task.cancel', 'task.emergency_stop'
                 )
             ),
@@ -894,6 +914,76 @@ def _migrate_v2(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 2")
 
 
+def _migrate_v3(connection: sqlite3.Connection) -> None:
+    """Extend the closed command vocabulary without weakening existing replay rows."""
+
+    connection.execute("ALTER TABLE executor_outbox RENAME TO executor_outbox_v2")
+    connection.execute("ALTER TABLE executor_commands RENAME TO executor_commands_v2")
+    connection.execute(
+        """
+        CREATE TABLE executor_commands (
+            message_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            intent_sha256 BLOB NOT NULL CHECK (length(intent_sha256) = 32),
+            envelope TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            message_type TEXT NOT NULL CHECK (
+                message_type IN (
+                    'task.offer', 'task.discover', 'task.pause', 'task.resume',
+                    'task.cancel', 'task.emergency_stop'
+                )
+            ),
+            correlation_id TEXT GENERATED ALWAYS AS (
+                json_extract(envelope, '$.correlation_id')
+            ) STORED,
+            UNIQUE (attempt_id, sequence),
+            FOREIGN KEY (attempt_id) REFERENCES executor_attempt_checkpoints(attempt_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO executor_commands (
+            message_id, idempotency_key, intent_sha256, envelope,
+            task_id, attempt_id, sequence, message_type
+        )
+        SELECT message_id, idempotency_key, intent_sha256, envelope,
+               task_id, attempt_id, sequence, message_type
+        FROM executor_commands_v2
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE executor_outbox (
+            ordinal INTEGER NOT NULL UNIQUE CHECK (ordinal >= 1),
+            message_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            intent_sha256 BLOB NOT NULL CHECK (length(intent_sha256) = 32),
+            envelope TEXT NOT NULL,
+            source_message_id TEXT NOT NULL,
+            delivered INTEGER NOT NULL CHECK (delivered IN (0, 1)),
+            FOREIGN KEY (source_message_id) REFERENCES executor_commands(message_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO executor_outbox (
+            ordinal, message_id, idempotency_key, intent_sha256,
+            envelope, source_message_id, delivered
+        )
+        SELECT ordinal, message_id, idempotency_key, intent_sha256,
+               envelope, source_message_id, delivered
+        FROM executor_outbox_v2
+        """
+    )
+    connection.execute("DROP TABLE executor_outbox_v2")
+    connection.execute("DROP TABLE executor_commands_v2")
+    connection.execute("PRAGMA user_version = 3")
+
+
 def _canonical_uuid_v4(value: object) -> str:
     if type(value) is not str:
         raise ValueError
@@ -904,7 +994,7 @@ def _canonical_uuid_v4(value: object) -> str:
 
 
 def _canonical_message(
-    message: TaskCommandEnvelope | TaskCommandResultEnvelope | TaskEventEnvelope,
+    message: InboundTaskCommand | OutboundExecutorMessage,
 ) -> str:
     return json.dumps(
         message.model_dump(mode="json"),
@@ -915,7 +1005,7 @@ def _canonical_message(
     )
 
 
-def _command_intent_fingerprint(command: TaskCommandEnvelope) -> bytes:
+def _command_intent_fingerprint(command: InboundTaskCommand) -> bytes:
     intent = command.model_dump(mode="json", exclude={"message_id", "sent_at"})
     encoded = json.dumps(
         intent,
@@ -971,7 +1061,15 @@ def _platform_session(row: sqlite3.Row | tuple[object, ...]) -> LocalPlatformSes
 
 def _parse_outbound(source: str) -> OutboundExecutorMessage:
     parsed = parse_executor_message(source)
-    if not isinstance(parsed, (TaskCommandResultEnvelope, TaskEventEnvelope)):
+    if not isinstance(
+        parsed,
+        (
+            TaskCommandResultEnvelope,
+            TaskEventEnvelope,
+            TaskDiscoveryBatchEnvelope,
+            TaskDiscoveryCompletedEnvelope,
+        ),
+    ):
         raise ValueError
     return parsed
 

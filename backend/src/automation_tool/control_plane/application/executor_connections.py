@@ -32,6 +32,8 @@ from automation_tool.protocol import (
     ExecutorProtocolError,
     PlatformSessionHealthEnvelope,
     TaskCommandResultEnvelope,
+    TaskDiscoveryBatchEnvelope,
+    TaskDiscoveryCompletedEnvelope,
     TaskEventEnvelope,
     parse_executor_message,
 )
@@ -190,6 +192,8 @@ class ExecutorConnectionService:
         ExecutorLifecycleEnvelope
         | PlatformSessionHealthEnvelope
         | TaskCommandResultEnvelope
+        | TaskDiscoveryBatchEnvelope
+        | TaskDiscoveryCompletedEnvelope
         | TaskEventEnvelope
     ):
         """Accept only bound Executor facts and acknowledgements after Hello."""
@@ -203,6 +207,8 @@ class ExecutorConnectionService:
                         ExecutorLifecycleEnvelope,
                         PlatformSessionHealthEnvelope,
                         TaskCommandResultEnvelope,
+                        TaskDiscoveryBatchEnvelope,
+                        TaskDiscoveryCompletedEnvelope,
                         TaskEventEnvelope,
                     ),
                 )

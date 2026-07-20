@@ -359,6 +359,9 @@ def test_schema_publishes_one_exact_discriminator_and_explicit_required_core_fie
         "task.cancelled",
         "task.completed",
         "task.control_ack",
+        "task.discover",
+        "task.discovery_batch",
+        "task.discovery_completed",
         "task.emergency_stop",
         "task.failed",
         "task.offer",
@@ -379,6 +382,9 @@ def test_schema_publishes_one_exact_discriminator_and_explicit_required_core_fie
         "PlatformSessionHealthEnvelope",
         "TaskCommandEnvelope",
         "TaskCommandResultEnvelope",
+        "TaskDiscoveryBatchEnvelope",
+        "TaskDiscoveryCommandEnvelope",
+        "TaskDiscoveryCompletedEnvelope",
         "TaskEventEnvelope",
     ):
         model_schema = schema["$defs"][model_name]

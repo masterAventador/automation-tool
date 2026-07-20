@@ -29,7 +29,7 @@ from automation_tool.control_plane.domain import (
     TaskCommandType,
     TaskId,
 )
-from automation_tool.protocol import TaskCommandResultEnvelope
+from automation_tool.protocol import DouyinDiscoveryCommandPayload, TaskCommandResultEnvelope
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 INSTALLATION_ID = InstallationId.parse("123e4567-e89b-42d3-a456-426614174003")
@@ -578,6 +578,42 @@ async def test_acknowledgement_failure_expiry_and_wire_validation_are_closed() -
             executor_id=EXECUTOR_ID,
             sent_at=NOW,
         )
+
+    discovery_payload = DouyinDiscoveryCommandPayload.model_validate(
+        {
+            "discovery_version": "douyin.discovery.v1",
+            "keyword": "自动化运营",
+            "target_limit": 10,
+            "page_revision": 1,
+        }
+    )
+    for inconsistent in (
+        replace(
+            TaskCommandRecord.from_pending(pending_command()),
+            command_type=TaskCommandType.TASK_DISCOVER,
+        ),
+        replace(
+            TaskCommandRecord.from_pending(pending_command()),
+            discovery_payload=discovery_payload,
+        ),
+    ):
+        with pytest.raises(TaskCommandDeliveryRejected):
+            delivery_module._command_wire(
+                inconsistent,
+                executor_id=EXECUTOR_ID,
+                sent_at=NOW,
+            )
+
+    discovery_wire = delivery_module._command_wire(
+        replace(
+            TaskCommandRecord.from_pending(pending_command()),
+            command_type=TaskCommandType.TASK_DISCOVER,
+            discovery_payload=discovery_payload,
+        ),
+        executor_id=EXECUTOR_ID,
+        sent_at=NOW,
+    )
+    assert json.loads(discovery_wire)["message_type"] == "task.discover"
 
 
 @pytest.mark.asyncio

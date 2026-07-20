@@ -189,6 +189,37 @@ def test_signal_scope_sets_one_event_and_restores_process_handlers() -> None:
         assert signal.getsignal(break_signal) == previous_break
 
 
+def test_signal_scope_installs_and_restores_windows_break_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handlers: dict[int, object] = {
+        signal.SIGINT: object(),
+        signal.SIGTERM: object(),
+        21: object(),
+    }
+    original = dict(handlers)
+
+    def get_handler(signum: int) -> object:
+        return handlers[signum]
+
+    def set_handler(signum: int, handler: object) -> object:
+        previous = handlers[signum]
+        handlers[signum] = handler
+        return previous
+
+    monkeypatch.setattr(signal, "SIGBREAK", 21, raising=False)
+    monkeypatch.setattr(signal, "getsignal", get_handler)
+    monkeypatch.setattr(signal, "signal", set_handler)
+
+    with cli.stop_signal_event() as stop:
+        break_handler = handlers[21]
+        assert callable(break_handler)
+        break_handler(21, None)
+        assert stop.is_set()
+
+    assert handlers == original
+
+
 def test_main_uses_binary_stdin_and_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> None:
     stdin = TextIOWrapper(BytesIO(b"private-invalid\n"), encoding="utf-8")
     stdout = StringIO()
