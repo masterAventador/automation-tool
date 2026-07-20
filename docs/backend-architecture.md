@@ -140,7 +140,7 @@ infrastructure
 ### 6.1 API
 
 - FastAPI 路由和 WebSocket 入口；
-- 安装实例认证；
+- 产品账号与安装实例认证；
 - 输入校验、请求大小、超时和错误映射；
 - 关联 ID 和协议版本；
 - 调用应用服务；
@@ -376,12 +376,14 @@ B5-13/B5-14 的本机命令复用 E4-06 的每次启动 256-bit 本机会话，�
 
 MVP 不使用 AI 页面理解、stealth 或验证码识别。
 
-## 9. 安装实例与设备认证
+## 9. 产品账号、安装实例与设备认证
 
-产品第一期没有用户账号，但 Demo 云端需要服务认证。
+P9 本地 MVP 暂不要求产品账号，只使用已实现的 Installation 服务认证；任何客户 Demo 必须先完成 U9 账号体系，并让业务访问同时受产品账号与账号所属 Installation 约束。
 
 ### 9.1 实体
 
+- `user_id`：U9 新增的产品账号稳定 ID；
+- `account_session`：登录后可刷新、可全量吊销的短期产品访问能力；
 - `installation_id`：一次 App 安装的稳定 ID；
 - `device_public_key`：本机生成密钥对的公钥；
 - `device_credential`：后端签发、可撤销；
@@ -393,11 +395,11 @@ MVP 不使用 AI 页面理解、stealth 或验证码识别。
 
 私钥和长期设备凭据留在 Tauri `app_data_dir` 下由 Rust 管理的 App 私有文件，不调用系统钥匙串，也不进入 React、Tauri Command 或 Python 普通配置。
 
-### 9.2 Demo 注册
+### 9.2 受控注册与账号归属
 
-受控 Demo 支持两种共用同一 I2 设备证明与凭据签发边界的注册来源：预授权安装批次可使用限时、限环境、限一次或限次数的 bootstrap；陌生设备由 P9-06 自动创建限时申请，经后台明确批准后获得只绑定该申请和设备公钥的一次注册授权。两者都只允许注册，不允许创建或执行任务；注册后后端签发设备凭据并可随时吊销。
+I2 已实现限时、限环境、限用途的 bootstrap 设备注册，用于 P9 本地验收、隔离测试和受控迁移。bootstrap 只允许注册，不允许创建或执行任务；它不再作为客户 Demo 的分发、配对或逐设备审批机制。
 
-领域层的 `DemoBootstrapGrant` 固定唯一 purpose `installation.register`，绑定一个小写规范 Demo 环境 slug，采用 `[not_before, expires_at)` 半开时窗且硬上限 7 天。调用必须使用强类型 purpose/环境；原始字符串即使内容相同也不能越过能力边界，跨环境、未生效和到期均返回固定拒绝原因且不回显输入。这个对象只表达待签名 claims 的授权语义，不存 token、不读取环境变量，也不提前替代 C10-06 的注册次数、吊销、批次持久化和审计。
+领域层的 `DemoBootstrapGrant` 固定唯一 purpose `installation.register`，绑定一个小写规范 Demo 环境 slug，采用 `[not_before, expires_at)` 半开时窗且硬上限 7 天。调用必须使用强类型 purpose/环境；原始字符串即使内容相同也不能越过能力边界，跨环境、未生效和到期均返回固定拒绝原因且不回显输入。这个对象只表达既有 I2 受控注册 claims 的授权语义，不存 token、不读取环境变量，也不替代 U9 产品账号、账号 Session 或账号设备归属。
 
 I2-05 将这些 claims 封装为验证专用的 `atb1.<payload>.<signature>`：payload 必须是 exact-field canonical JSON，签名算法固定 Ed25519，Control Plane 只从部署配置读取 32 字节验证公钥和精确 Demo 环境，不持有离线签发私钥。未知字段、重复 JSON key、非 canonical base64url、错误版本/用途/时间类型、超长、篡改和错误 signer 统一拒绝；服务端只保存 token 的 SHA-256 指纹用于 challenge 绑定，不保存原 token。
 
@@ -419,21 +421,20 @@ I2-14 增加服务器运维侧 Installation 吊销入口和统一 App 业务访�
 
 隐藏 Tauri 生产同路径验收会先由 App 正式 Rust 桥注册并访问探针，再由服务器运维 CLI 吊销，最后让同一 App 重新走启动入口并得到独立吊销诊断；同时核对 Installation、长期凭据和全部 App Session 的原子最终状态。服务端吊销后本地凭据仍保留在 Rust 管理的 App 私有目录以稳定识别该安装状态，但已无法换取任何 Session；重新授权与本地凭据替换必须由后续显式流程完成。
 
-P9-06 规划新增安装前设备申请与后台审批，但不建立匿名业务入口或第二套长期凭据。未注册 Rust 客户端提交规范环境和设备公钥后，Control Plane 创建短期 pending request，返回公开配对码与只出现一次的高熵 poll secret；数据库只保存 poll secret 摘要。配对码只供人核对、不能认证轮询或注册。申请固定 submitted/pending/approved/rejected/expired/consumed 状态、UTC 有效期和单调 revision；匿名创建与轮询按 IP/环境/设备摘要限流，并限制并发申请、请求大小和失败次数。
+上述 I2 方案是当前 P9 本地 MVP 的设备安全基线，不是客户账号体系。U9-02/U9-03 将新增产品账号、登录凭据、账号状态和可刷新/可全量吊销的账号 Session；账号停用必须立即使其全部产品 Session 和业务访问失效。
 
-批准/拒绝只允许服务器认证运维 CLI 以 expected revision 做 CAS。批准时 CLI 在本机使用离线签发私钥产生现有 `atb1` bootstrap 并通过 HTTPS 提交；Control Plane 仍只持有验证公钥，验证环境、用途和时窗后把 typed grant、token SHA-256 指纹与精确 request/device public key 原子绑定，不保存原 token。poll secret 只允许读取该申请的安全状态，并在 approved 后请求同一设备公钥的注册 challenge；不能换取 Session 或调用任何业务 API。完成设备签名证明时在同一事务消费 challenge 与 approval、创建 Installation 并签发既有 `atdc1`，重放、跨设备、猜配对码、另一 poll secret、过期、拒绝和并发审批全部 fail closed。
+U9-05 在有效账号 Session 下复用现有两步设备密钥证明：Control Plane 把新 Installation 与当前 `user_id` 原子绑定后签发既有设备凭据，设备公钥证明与账号授权缺一不可。已绑定设备重启时同时复验账号状态、账号 Session、Installation 归属和设备状态；跨账号绑定、重复公钥、并发绑定、账号停用与设备吊销全部 fail closed。
 
-该流程的公开 App 投影只包含配对码、申请/到期时间、封闭状态和固定安全消息，不返回设备公钥、poll secret、bootstrap、拒绝内部原因或运维身份。P9-07 负责有界轮询和可见 UI；C10-06 再把离线签发批次、审批队列运营、次数限制、吊销与审计部署到云端 Demo。
-
-这个方案满足“用户无登录页面、打开即用”，但不是正式账号体系。若以后开放公开产品，必须增加用户身份、设备归属、恢复和撤销流程。
+客户 Demo 不创建匿名设备申请端点，不生成配对码或 poll secret，也不提供后台逐设备审批队列。Demo 账号由认证运维入口创建/恢复，用户登录后客户端自动完成设备绑定；既有 bootstrap 仅保留在受控测试和明确迁移边界，不能用于客户业务 API。
 
 ### 9.3 请求授权
 
-- App 业务请求作用域固定到 installation；
+- P9 本地 App 业务请求继续作用域固定到 installation；
+- U9 客户 Demo 业务请求必须同时绑定有效产品账号和该账号所属 installation；
 - Executor 连接同时绑定 installation、executor、版本和平台；
-- 服务端每次创建/读取/控制任务都校验 installation；
+- 服务端每次创建/读取/控制任务都校验账号状态、Session、installation 归属与设备状态；
 - Executor 只能领取目标 installation 的任务；
-- 设备被吊销后禁止新任务并要求 Executor 断开；
+- 账号停用、全 Session 注销或设备吊销后禁止新任务并要求 Executor 断开；
 - 前端隐藏按钮不能代替服务端校验。
 
 ## 10. 执行协议
@@ -818,9 +819,9 @@ internal
 ## 19. 安全与隐私
 
 - local Control Plane 只绑定 loopback；
-- Demo Control Plane 强制 HTTPS、安装实例认证和请求限流；
-- bootstrap 授权最小化、短期、可撤销且不能调用业务 API；
-- 数据库凭据、设备签发密钥和对象存储密钥只在服务端 Secret 管理；
+- Demo Control Plane 强制 HTTPS、产品账号认证、账号所属 Installation 认证和请求限流；
+- 既有 bootstrap 只允许受控测试/迁移注册，保持最小化、短期且不能调用业务 API；
+- 数据库凭据、账号 Session 签发 Secret、密码 Pepper、设备签发密钥和对象存储密钥只在服务端 Secret 管理；
 - Executor 连接为出站连接，不要求客户电脑开放入站端口；
 - 平台 Cookie 和浏览器 Profile永不上传；
 - Pydantic 拒绝未知字段和超大 payload；
@@ -852,9 +853,10 @@ Local Executor: uv 源码模式或测试构建
 - Control Plane 构建 Docker 镜像；
 - 执行同一 Alembic 迁移；
 - 使用云端 PostgreSQL；
-- 配置 HTTPS、域名、安装实例签发密钥和限流；
-- App `demo` Profile 指向云端 baseUrl；
-- 预授权安装批次使用隔离 bootstrap；陌生设备复用 P9-06/P9-07 申请、可见审批和一次性注册授权；
+- 配置 HTTPS、域名、账号 Session 签发 Secret、密码 Pepper、设备签发密钥和限流；
+- 通过认证运维入口创建首个 Demo 账号，并验证停用、重置、全 Session 与设备吊销；
+- App `demo` Profile 指向云端 baseUrl，启动后先登录产品账号，再自动绑定当前设备；
+- 不使用匿名设备申请、配对码、轮询审批或随安装包分发的客户 bootstrap；
 - 部署、采购和公开访问必须由用户明确指示，规划文档不构成自动部署授权。
 
 ### 20.3 配置原则

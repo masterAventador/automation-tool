@@ -6,7 +6,7 @@
 
 ## 1. 建设目标
 
-前端只交付一个 Tauri 桌面客户端，用户打开 App 后直接进入 RPA 运营工作台。
+前端只交付一个 Tauri 桌面客户端。P9 本地 MVP 打开 App 后直接进入 RPA 运营工作台；客户 Demo 在 U9 账号体系完成后先进入产品登录，认证成功且设备归属有效才进入工作台。
 
 它需要同时处理三类能力：
 
@@ -70,11 +70,11 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 - 全局 Error Boundary；
 - 任务运行时的全局紧急停止入口。
 
-第一期没有认证路由守卫。启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页，而不是登录页。
+当前 P9 本地 MVP 没有认证路由守卫，启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页。U9-04 将为客户 Demo 增加独立登录/恢复路由和业务路由守卫，未登录时不挂载工作台。
 
 App 启动边界已实现 ready、checking、unavailable、revoked 四态和安全重试；ready 后进入正式工作台页面。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`、`TauriTaskProjectionSource` 与 `TauriWorkbenchGateway`。真实 WebView 只 invoke 固定 Rust Command，Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
 
-Wave 9 的 P9-06/P9-07 将替换“未注册 App 直接进入工作台”的临时行为：启动组合根在健康检查后先判断本机凭据，缺失时由 Rust 自动创建限时设备申请并持有 opaque 轮询秘密，React 只消费公开配对码、申请/到期时间和封闭状态投影。授权页必须可见展示提交中、等待审批、已批准、已拒绝、已过期和连接失败，提供安全重试或重新申请；批准前不挂载工作台业务路由，批准后由 Rust 完成 I2 两步设备证明并自动切换 ready。刷新、App 重启、断网和审批竞态都从服务端权威申请恢复，不能靠逐个业务按钮报错表达未授权。该段是明确规划边界，当前实现仍以上一段四态为准。
+U9-04/U9-05 将在客户 Demo Profile 中把启动组合根扩展为“产品账号会话 + 账号所属 Installation”双门禁：未登录展示登录/恢复状态，登录成功后 Rust 自动完成账号授权下的设备证明和归属绑定，不生成配对码、不轮询设备审批，也不要求后台逐设备批准。账号或设备任一失效都退出业务工作台并显示各自可操作的固定诊断；该段是后续规划，当前实现仍以上一段 P9 四态为准。
 
 T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation；T3-17 已以 `create_douyin_search_exposure_task` 固定 Command 接入窄任务表单。React 只能提交 `douyin.search_exposure.v1` 的明确字段，Zod 先校验，Rust 再校验安全文本、动作/消息关系、数量、间隔和强制确认，然后自行从 App 私有 vault 换取 `app.control-plane` Session 并注入受限幂等键。WebView 不接触 bearer、Header 或任意 URL。完成证据来自 `visible=false` 真实 Tauri App 点击表单并核对 PostgreSQL 最终定义，而不是浏览器 Harness 或直接 HTTP。
 
@@ -226,20 +226,19 @@ I2-04 建立的设备密钥边界已在 I2-08 按当前产品决策迁移到统�
 
 当前 Playwright 入口固定为 `harness.html`，支持显式 available、unavailable、flaky、revoked 健康/授权投影，以及 `task-lifecycle` 的创建→暂停→恢复→取消、独立成功和整页刷新恢复，只在 Vite 测试服务存在。正式 Vite 仍以 `index.html` 为唯一入口；构建后扫描 `dist/`，拒绝 `harness.html`、Harness runtime 字符串和测试 Transport 标记。扫描器本身用干净/污染临时目录回归，不能静默失效。
 
-### 5.3 无登录页面下的安装实例认证
+### 5.3 客户 Demo 的产品账号与设备归属
 
-第一期没有产品用户账号和登录 UI，但 Demo 云端仍需认证。I2 已实现设备身份、bootstrap challenge、长期凭据与短期 Session；P9-06/P9-07 在此基础上补齐陌生设备的可见申请和后台审批：
+P9 本地 MVP 保留当前无产品登录的 Installation 认证；任何客户 Demo 必须先完成 U9-01～U9-06，并使用以下正式路径：
 
-- App 首次启动生成稳定设备身份和设备密钥；
-- 缺少长期凭据时，Rust 自动创建限时设备申请，只把公开配对码、申请时间、到期时间和封闭状态投影给 React；opaque 轮询秘密不进入 React、IPC 响应、localStorage、日志或普通配置；
-- 设备授权页展示提交中、等待审批、已批准、已拒绝、已过期和连接失败，允许对可恢复失败安全重试，对拒绝/过期明确重新申请；
-- 后台认证运维入口按配对码与设备公钥摘要批准或拒绝；批准使用离线签名 bootstrap 绑定该申请的一次注册，Control Plane 不持有离线签发私钥，也不持久化原 token；
-- Rust 仅在服务端权威状态为已批准时进入既有两步 challenge，用本机设备私钥证明后保存可撤销设备凭据；
-- 批准前不进入工作台且所有业务 Command fail closed，批准后自动进入工作台；日常重启已有有效凭据时继续打开即用；
-- bootstrap 或申请授权不能调用业务 API，Demo 结束后可吊销；
-- 这只是安装实例安全边界，不冒充完整用户账号体系。
+- 未登录时只挂载产品登录与恢复页面，不渲染工作台、任务路由或业务数据；
+- 登录标识和密码只作为当前表单的短生命周期输入传给固定 Rust Command，不写入 localStorage、普通配置、日志或错误；产品 access/refresh secret 始终只由 Rust 私有存储持有，不返回 React；
+- Rust 通过固定 Control Plane operation 登录、刷新和注销，React 只接收脱敏账号 ID、展示名、状态和可操作错误；
+- 首次登录成功后，Rust 复用 I2 设备密钥证明，把当前 Installation 原子绑定登录账号并取得账号范围内的设备凭据，不使用 bootstrap 配对码、设备轮询或后台逐设备审批；
+- Demo 业务 Session 必须同时来源于有效产品账号会话和该账号下有效 Installation；账号停用、全 Session 注销、设备吊销或归属变化任一发生都立即 fail closed；
+- 已绑定设备重启时由 Rust 刷新账号会话并复验设备归属；需要重新输入凭据时明确回到登录页，网络失败与账号拒绝不能混成同一错误；
+- 产品账号只授权 automation-tool 服务，不读取、上传或同步运营浏览器 Profile、平台 Cookie、微信数据和原始本机证据。
 
-如果无法安全提供 bootstrap、审批授权或设备注册，Demo 后端必须限制在受控网络，不能退化成匿名公网写接口。
+首个 Demo 账号由认证运维入口创建和重置，不开放匿名自注册。组织、租户、RBAC、套餐、计费与跨设备业务数据同步仍在本阶段之外，不能复制旧项目账号服务提前引入。
 
 ## 6. Local Executor 桥接
 

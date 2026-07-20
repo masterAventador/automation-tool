@@ -676,8 +676,8 @@ ActorContext + tenant/RBAC/Entitlement + Core Approval/Audit/Artifact
 | `frontend/src-tauri/src/browser_session.rs` | 556 行；Profile 在 60～99 行，独立 Cookie Vault 在 101～324 行，目录/权限防护在 326～452 行，`QrLoginSession` 在 454～556 行 | 只保留私有目录、规范身份、熔断/人工恢复和定向清理意图；公开类型、路径、状态与文件操作全部按当前契约重写 |
 | `frontend/src-tauri/tests/browser_session.rs` | 9 项旧测试覆盖路径逃逸、祖先 symlink、Unix 私有目录、Cookie 密文/AAD/重开、状态转换与 Profile 定向删除；R0-12 已在固定提交实跑 9 项通过 | 测试是行为样本，不复制为当前 GREEN；没有覆盖目录创建/删除竞态、Windows reparse point、Profile 锁、浏览器仍持有目录、停止失败或真实页面状态 |
 | `frontend/src-tauri/src/social_operations_runtime.rs` | 58～71 行把 Profile、登录状态、Cookie、Sidecar 和进程内 `HashMap`/`active_account` 聚合；294～323 行实现注销 | `SocialOperationsRuntime` 整体删除；Profile、锁、浏览器进程、Session 检测、任务门禁与注销协调分别归属，禁止恢复成新的万能 Runtime |
-| `backend/src/agent_platform/capabilities/social_operations/device_account_service.py` | `ActorContext`/`PlatformAccount` 绑定 `tenant_id`、`owner_user_id`、设备、权限和账号；注销依赖 `social.manage`、内存账号表与 Core audit | 旧产品账号/RBAC 服务删除；当前只有 Installation/Executor/Task 权威模型和非敏感平台 Session 健康投影 |
-| `contracts/capabilities/social-operations/device-account-v1.md` | 契约要求 tenant/owner、`social.read/execute/manage`、五平台枚举、Entitlement/Core Audit，并规定独立 Cookie 密文文件 | 不兼容、不复制；第一期无产品账号/RBAC/Entitlement，MVP 只启用抖音，登录态只存在持久浏览器 Profile |
+| `backend/src/agent_platform/capabilities/social_operations/device_account_service.py` | `ActorContext`/`PlatformAccount` 绑定 `tenant_id`、`owner_user_id`、设备、权限和账号；注销依赖 `social.manage`、内存账号表与 Core audit | 旧产品账号/RBAC 服务删除；P9 仍以 Installation/Executor/Task 为权威，U9 产品账号与设备归属必须按新契约独立建设，不能复用该内存服务 |
+| `contracts/capabilities/social-operations/device-account-v1.md` | 契约要求 tenant/owner、`social.read/execute/manage`、五平台枚举、Entitlement/Core Audit，并规定独立 Cookie 密文文件 | 不兼容、不复制；P9 本地 MVP 无产品账号，U9 只新增独立产品账号/Session/Installation 归属，仍不引入旧 tenant/RBAC/Entitlement 或云端平台 Cookie |
 
 旧模块 9 项通过只能说明样本内部自洽。当前三个 Manifest 均不依赖旧仓库、`social-operations` 包或 `chacha20poly1305` Cookie Vault；后续每项仍须在当前仓库重新 RED/GREEN，并从真实 App/Executor/外部浏览器原入口验收。
 
@@ -709,7 +709,7 @@ Tauri app_data_dir/
 ```
 
 - `app_data_dir` 只能由 Tauri Rust 组合根解析；React、Control Plane、任务 payload 和用户输入都不能提交根目录、Profile 路径或可执行文件路径。
-- `profile_id` 是本机生成并持久的 canonical UUIDv4，只表示运营 Profile，不是产品 `account_id`，也不能由昵称、手机号、抖音号或目录片段派生。MVP 不预建小红书、快手或微信目录。
+- `profile_id` 是本机生成并持久的 canonical UUIDv4，只表示运营 Profile，即使 U9 增加产品账号也不是产品 `account_id`，不能由昵称、手机号、抖音号或目录片段派生。MVP 不预建小红书、快手或微信目录。
 - `B5-05` 已逐级拒绝 symlink/非目录，macOS/Unix 固定目录 `0700`；Windows 使用 handle-relative 创建、拒绝 reparse point 并应用当前用户 protected DACL。创建、打开和交给后续消费者前后都校验稳定 identity；B5-14 删除仍须沿用句柄/identity 语义，不能退回旧实现的 `metadata → remove_dir_all` 竞态窗口。
 - `B5-06` 在任何 persistent context 启动前取得跨进程 Profile 单实例锁；`B5-07` 让具体浏览器运行实例拥有 context、进程和锁。App/Executor 崩溃恢复不能把仍被浏览器占用的 Profile 当成空闲。
 - `B5-02`/`B5-03` 只发现签名/产品 allowlist 内的系统 Chrome/Edge，`B5-07` 始终传独立 Profile；任何代码都不得读取、复制或迁移用户默认 Chrome/Edge `User Data`。
@@ -751,11 +751,11 @@ Tauri app_data_dir/
 | `HashMap<String, ManagedAccount>`、`active_account` | 删除 | Profile 锁决定本机互斥；Task/Attempt/Action 与 Executor 账本保存运行事实，不能由 Tauri 内存账号表决定 |
 | `SocialOperationsRuntime` 聚合对象与通用账号 invoke | 删除 | 浏览器发现、Profile store、process/session detector、平台 Adapter 和 logout coordinator 各自窄接口；React 无任意 payload/路径命令 |
 | `EncryptedCookieVault`、`.cookie-key`、`SOC1`、Cookie store/load/logout | 删除 | 浏览器持久 Profile 是登录态唯一来源；没有可调用的 Cookie API，也不新增 `chacha20poly1305` 依赖 |
-| `ActorContext.tenant_id/user_id/permissions`、`owner_user_id`、`social.read/execute/manage` RBAC | 删除 | 第一期无产品账号；App 使用 Installation 身份，Executor 使用独立 Session 能力，平台登录只表示本机 Profile 的抖音状态 |
-| DeviceAccountService 的五平台账号、设备 owner、Entitlement 与 Core Audit | 删除 | MVP 只做抖音 Session 健康；Control Plane 只接收当前 Installation-scoped 的非敏感状态/任务事实 |
+| `ActorContext.tenant_id/user_id/permissions`、`owner_user_id`、`social.read/execute/manage` RBAC | 删除 | 不复用旧 Actor/RBAC；P9 使用 Installation，U9 另建最小产品 User/Session 和 Installation 归属，Executor 仍使用独立 Session，平台登录只表示本机 Profile 的抖音状态 |
+| DeviceAccountService 的五平台账号、设备 owner、Entitlement 与 Core Audit | 删除 | P9 只做抖音 Session 健康；U9 的产品账号设备归属不等于平台账号 owner，不上传平台凭据，也不恢复旧五平台/Entitlement 服务 |
 | 云端平台 Cookie/账号密文、导入导出或跨设备同步 | 禁止 | 平台秘密永不离开 App 私有 Profile；未来即使增加产品账号，也不能静默扩大这一隐私边界 |
 
-“无产品账号”和“需要抖音登录”是两个独立事实：用户打开 App 不登录 automation-tool，但首次使用抖音仍要在 App 管理的可见外部浏览器完成平台登录。后续 B5 任务不得为了复用旧代码重新引入注册页、账号中心、tenant、RBAC、Entitlement 或云端 Cookie。
+“产品账号”和“抖音平台登录”始终是两个独立事实：P9 用户不登录 automation-tool，U9 客户 Demo 用户先登录产品账号；两种阶段首次使用抖音仍要在 App 管理的可见外部浏览器完成平台登录。B5 任务不得为了复用旧代码引入产品账号或云端 Cookie；产品账号只由 U9 按新契约建设，首版不引入旧 tenant、RBAC、Entitlement。
 
 ### 10.5 跨模块保留与明确排除
 
