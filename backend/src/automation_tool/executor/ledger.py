@@ -10,13 +10,16 @@ import stat
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, cast
 from uuid import RFC_4122, UUID
 
 from automation_tool.protocol import (
+    ACTION_AUTHORIZATION_CLOCK_SKEW,
+    ActionAuthorizationClaims,
+    DouyinSearchExposureAction,
     PlatformSessionState,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
@@ -28,9 +31,11 @@ from automation_tool.protocol import (
 )
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 3
+_SCHEMA_VERSION: Final = 4
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_CROSS_RUNTIME_SEQUENCE: Final = 2**53 - 1
+_MAX_LOCAL_ACTION_INTERVAL_SECONDS: Final = 3600
+_MAX_LOCAL_TASK_ACTIONS: Final = 100
 
 
 class ExecutorLedgerRejected(RuntimeError):
@@ -38,6 +43,20 @@ class ExecutorLedgerRejected(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("Local Executor ledger is unavailable")
+
+
+class ExecutorActionAdmissionLimitReason(StrEnum):
+    EMERGENCY_STOP = "emergency_stop"
+    MINIMUM_INTERVAL = "minimum_interval"
+    TASK_ACTION_LIMIT = "task_action_limit"
+
+
+class ExecutorActionAdmissionLimited(ExecutorLedgerRejected):
+    def __init__(self, reason: ExecutorActionAdmissionLimitReason) -> None:
+        if not isinstance(reason, ExecutorActionAdmissionLimitReason):
+            raise ExecutorLedgerRejected
+        self.reason = reason
+        RuntimeError.__init__(self, "Local Executor action admission is limited")
 
 
 class AttemptCheckpointState(StrEnum):
@@ -108,6 +127,96 @@ class OutboxEntry:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalActionAdmission:
+    action_id: str
+    target_id: str
+    execution_attempt_id: str
+    task_id: str
+    installation_id: str
+    executor_id: str
+    platform: str
+    action: DouyinSearchExposureAction
+    idempotency_key: str
+    authorization_fingerprint: bytes
+    authorized_at: datetime
+    deadline_at: datetime
+    admitted_at: datetime
+    task_action_ordinal: int
+    replayed: bool
+
+    def __post_init__(self) -> None:
+        if (
+            not _is_canonical_uuid_v4(self.action_id)
+            or not _is_canonical_uuid_v4(self.target_id)
+            or not _is_canonical_uuid_v4(self.execution_attempt_id)
+            or not _is_canonical_uuid_v4(self.task_id)
+            or not _is_canonical_uuid_v4(self.installation_id)
+            or not _is_canonical_uuid_v4(self.executor_id)
+            or self.platform != "douyin"
+            or not isinstance(self.action, DouyinSearchExposureAction)
+            or self.idempotency_key != f"action:{self.action_id}"
+            or type(self.authorization_fingerprint) is not bytes
+            or len(self.authorization_fingerprint) != 32
+            or _canonical_utc(self.authorized_at) is None
+            or _canonical_utc(self.deadline_at) is None
+            or _canonical_utc(self.admitted_at) is None
+            or not self.authorized_at < self.deadline_at
+            or not self.admitted_at < self.deadline_at
+            or type(self.task_action_ordinal) is not int
+            or not 1 <= self.task_action_ordinal <= _MAX_LOCAL_TASK_ACTIONS
+            or type(self.replayed) is not bool
+        ):
+            raise ExecutorLedgerRejected
+
+    def __repr__(self) -> str:
+        return "LocalActionAdmission(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalActionEmergencyStop:
+    engaged: bool
+    revision: int
+    changed_at: datetime | None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.engaged) is not bool
+            or type(self.revision) is not int
+            or self.revision < 0
+            or (self.revision == 0 and (self.engaged or self.changed_at is not None))
+            or (
+                self.revision > 0
+                and (self.changed_at is None or _canonical_utc(self.changed_at) is None)
+            )
+        ):
+            raise ExecutorLedgerRejected
+
+    def __repr__(self) -> str:
+        return (
+            "LocalActionEmergencyStop("
+            f"engaged={self.engaged!r}, revision={self.revision!r}, <redacted>)"
+        )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalActionHardPolicyBinding:
+    minimum_interval_seconds: int
+    task_action_limit: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.minimum_interval_seconds) is not int
+            or not 1 <= self.minimum_interval_seconds <= _MAX_LOCAL_ACTION_INTERVAL_SECONDS
+            or type(self.task_action_limit) is not int
+            or not 1 <= self.task_action_limit <= _MAX_LOCAL_TASK_ACTIONS
+        ):
+            raise ExecutorLedgerRejected
+
+    def __repr__(self) -> str:
+        return "LocalActionHardPolicyBinding(<redacted>)"
+
+
 class ExecutorLedger:
     """Own the fixed-schema command, checkpoint, and outbound replay ledger."""
 
@@ -142,6 +251,348 @@ class ExecutorLedger:
     @property
     def executor_id(self) -> str:
         return self._executor_id
+
+    def bind_action_hard_policy(
+        self,
+        *,
+        minimum_interval_seconds: int,
+        task_action_limit: int,
+    ) -> LocalActionHardPolicyBinding:
+        """Persist local limits monotonically so no later caller can loosen them."""
+
+        try:
+            proposed = LocalActionHardPolicyBinding(
+                minimum_interval_seconds=minimum_interval_seconds,
+                task_action_limit=task_action_limit,
+            )
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT minimum_interval_seconds, task_action_limit
+                    FROM executor_action_policy WHERE singleton_id = 1
+                    """
+                ).fetchone()
+                if row is None:
+                    raise ValueError
+                if row == (None, None):
+                    effective = proposed
+                    connection.execute(
+                        """
+                        UPDATE executor_action_policy
+                        SET minimum_interval_seconds = ?, task_action_limit = ?
+                        WHERE singleton_id = 1
+                        """,
+                        (effective.minimum_interval_seconds, effective.task_action_limit),
+                    )
+                else:
+                    if row[0] is None or row[1] is None:
+                        raise ValueError
+                    current = LocalActionHardPolicyBinding(
+                        minimum_interval_seconds=cast(int, row[0]),
+                        task_action_limit=cast(int, row[1]),
+                    )
+                    effective = LocalActionHardPolicyBinding(
+                        minimum_interval_seconds=max(
+                            current.minimum_interval_seconds,
+                            proposed.minimum_interval_seconds,
+                        ),
+                        task_action_limit=min(
+                            current.task_action_limit,
+                            proposed.task_action_limit,
+                        ),
+                    )
+                    if effective != current:
+                        connection.execute(
+                            """
+                            UPDATE executor_action_policy
+                            SET minimum_interval_seconds = ?, task_action_limit = ?
+                            WHERE singleton_id = 1
+                            """,
+                            (
+                                effective.minimum_interval_seconds,
+                                effective.task_action_limit,
+                            ),
+                        )
+                connection.commit()
+                return effective
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def get_action_admission(self, action_id: str) -> LocalActionAdmission | None:
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    """
+                    SELECT action_id, target_id, execution_attempt_id, task_id,
+                           installation_id, executor_id, platform, action,
+                           idempotency_key, authorization_fingerprint,
+                           authorized_at, deadline_at, admitted_at,
+                           task_action_ordinal
+                    FROM executor_action_admissions
+                    WHERE action_id = ?
+                    """,
+                    (canonical_action_id,),
+                ).fetchone()
+            return None if row is None else _action_admission(row, replayed=False)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def admit_action(
+        self,
+        *,
+        claims: ActionAuthorizationClaims,
+        authorization_fingerprint: bytes,
+        admitted_at: datetime,
+        minimum_interval_seconds: int,
+        task_action_limit: int,
+    ) -> LocalActionAdmission:
+        """Atomically enforce the local latch, interval, task cap, and exact replay."""
+
+        try:
+            canonical_admitted_at = _canonical_utc(admitted_at)
+            if (
+                not isinstance(claims, ActionAuthorizationClaims)
+                or str(claims.installation_id) != self._installation_id
+                or str(claims.executor_id) != self._executor_id
+                or type(authorization_fingerprint) is not bytes
+                or len(authorization_fingerprint) != 32
+                or canonical_admitted_at is None
+                or canonical_admitted_at + ACTION_AUTHORIZATION_CLOCK_SKEW < claims.authorized_at
+                or canonical_admitted_at >= claims.deadline_at
+                or type(minimum_interval_seconds) is not int
+                or not 1 <= minimum_interval_seconds <= _MAX_LOCAL_ACTION_INTERVAL_SECONDS
+                or type(task_action_limit) is not int
+                or not 1 <= task_action_limit <= _MAX_LOCAL_TASK_ACTIONS
+            ):
+                raise ValueError
+            encoded_admitted_at = _encode_utc(canonical_admitted_at)
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                stop = _action_emergency_stop(
+                    cast(
+                        sqlite3.Row | tuple[object, ...],
+                        connection.execute(
+                            """
+                            SELECT engaged, revision, changed_at
+                            FROM executor_action_guard WHERE singleton_id = 1
+                            """
+                        ).fetchone(),
+                    )
+                )
+                if stop.engaged:
+                    raise ExecutorActionAdmissionLimited(
+                        ExecutorActionAdmissionLimitReason.EMERGENCY_STOP
+                    )
+                rows = connection.execute(
+                    """
+                    SELECT action_id, target_id, execution_attempt_id, task_id,
+                           installation_id, executor_id, platform, action,
+                           idempotency_key, authorization_fingerprint,
+                           authorized_at, deadline_at, admitted_at,
+                           task_action_ordinal
+                    FROM executor_action_admissions
+                    WHERE action_id = ? OR idempotency_key = ?
+                    """,
+                    (str(claims.action_id), str(claims.idempotency_key)),
+                ).fetchall()
+                if rows:
+                    if len(rows) != 1 or not _same_action_admission(
+                        rows[0], claims, authorization_fingerprint
+                    ):
+                        raise ValueError
+                    connection.commit()
+                    return _action_admission(rows[0], replayed=True)
+                latest = connection.execute(
+                    """
+                    SELECT admitted_at FROM executor_action_admissions
+                    WHERE installation_id = ? AND platform = ? AND action = ?
+                    ORDER BY admitted_at DESC, action_id DESC LIMIT 1
+                    """,
+                    (self._installation_id, claims.platform, claims.action.value),
+                ).fetchone()
+                if latest is not None:
+                    latest_at = _decode_utc(latest[0])
+                    if canonical_admitted_at < latest_at:
+                        raise ValueError
+                    if canonical_admitted_at - latest_at < timedelta(
+                        seconds=minimum_interval_seconds
+                    ):
+                        raise ExecutorActionAdmissionLimited(
+                            ExecutorActionAdmissionLimitReason.MINIMUM_INTERVAL
+                        )
+                task_count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM executor_action_admissions
+                        WHERE task_id = ? AND platform = ? AND action = ?
+                        """,
+                        (str(claims.task_id), claims.platform, claims.action.value),
+                    ).fetchone()[0]
+                )
+                if task_count >= task_action_limit:
+                    raise ExecutorActionAdmissionLimited(
+                        ExecutorActionAdmissionLimitReason.TASK_ACTION_LIMIT
+                    )
+                task_action_ordinal = task_count + 1
+                connection.execute(
+                    """
+                    INSERT INTO executor_action_admissions (
+                        action_id, target_id, execution_attempt_id, task_id,
+                        installation_id, executor_id, platform, action,
+                        idempotency_key, authorization_fingerprint,
+                        authorized_at, deadline_at, admitted_at,
+                        task_action_ordinal
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(claims.action_id),
+                        str(claims.target_id),
+                        str(claims.execution_attempt_id),
+                        str(claims.task_id),
+                        str(claims.installation_id),
+                        str(claims.executor_id),
+                        claims.platform,
+                        claims.action.value,
+                        str(claims.idempotency_key),
+                        authorization_fingerprint,
+                        _encode_utc(claims.authorized_at),
+                        _encode_utc(claims.deadline_at),
+                        encoded_admitted_at,
+                        task_action_ordinal,
+                    ),
+                )
+                connection.commit()
+            return LocalActionAdmission(
+                action_id=str(claims.action_id),
+                target_id=str(claims.target_id),
+                execution_attempt_id=str(claims.execution_attempt_id),
+                task_id=str(claims.task_id),
+                installation_id=str(claims.installation_id),
+                executor_id=str(claims.executor_id),
+                platform=claims.platform,
+                action=claims.action,
+                idempotency_key=str(claims.idempotency_key),
+                authorization_fingerprint=authorization_fingerprint,
+                authorized_at=claims.authorized_at,
+                deadline_at=claims.deadline_at,
+                admitted_at=canonical_admitted_at,
+                task_action_ordinal=task_action_ordinal,
+                replayed=False,
+            )
+        except ExecutorActionAdmissionLimited:
+            raise
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def get_action_emergency_stop(self) -> LocalActionEmergencyStop:
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    """
+                    SELECT engaged, revision, changed_at
+                    FROM executor_action_guard WHERE singleton_id = 1
+                    """
+                ).fetchone()
+            return _action_emergency_stop(cast(sqlite3.Row | tuple[object, ...], row))
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def engage_action_emergency_stop(self, *, changed_at: datetime) -> LocalActionEmergencyStop:
+        try:
+            canonical_changed_at = _canonical_utc(changed_at)
+            if canonical_changed_at is None:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = _action_emergency_stop(
+                    cast(
+                        sqlite3.Row | tuple[object, ...],
+                        connection.execute(
+                            """
+                            SELECT engaged, revision, changed_at
+                            FROM executor_action_guard WHERE singleton_id = 1
+                            """
+                        ).fetchone(),
+                    )
+                )
+                if current.engaged:
+                    connection.commit()
+                    return current
+                if current.changed_at is not None and canonical_changed_at <= current.changed_at:
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_action_guard
+                    SET engaged = 1, revision = revision + 1, changed_at = ?
+                    WHERE singleton_id = 1 AND revision = ? AND engaged = 0
+                    """,
+                    (_encode_utc(canonical_changed_at), current.revision),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - same locked revision selected above
+                    raise ValueError
+                connection.commit()
+                return LocalActionEmergencyStop(
+                    engaged=True,
+                    revision=current.revision + 1,
+                    changed_at=canonical_changed_at,
+                )
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def clear_action_emergency_stop(
+        self,
+        *,
+        expected_revision: int,
+        changed_at: datetime,
+    ) -> LocalActionEmergencyStop:
+        try:
+            canonical_changed_at = _canonical_utc(changed_at)
+            if (
+                type(expected_revision) is not int
+                or expected_revision <= 0
+                or canonical_changed_at is None
+            ):
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = _action_emergency_stop(
+                    cast(
+                        sqlite3.Row | tuple[object, ...],
+                        connection.execute(
+                            """
+                            SELECT engaged, revision, changed_at
+                            FROM executor_action_guard WHERE singleton_id = 1
+                            """
+                        ).fetchone(),
+                    )
+                )
+                if (
+                    not current.engaged
+                    or current.revision != expected_revision
+                    or current.changed_at is None
+                    or canonical_changed_at <= current.changed_at
+                ):
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_action_guard
+                    SET engaged = 0, revision = revision + 1, changed_at = ?
+                    WHERE singleton_id = 1 AND revision = ? AND engaged = 1
+                    """,
+                    (_encode_utc(canonical_changed_at), current.revision),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - same locked revision selected above
+                    raise ValueError
+                connection.commit()
+                return LocalActionEmergencyStop(
+                    engaged=False,
+                    revision=current.revision + 1,
+                    changed_at=canonical_changed_at,
+                )
+        except Exception:
+            raise ExecutorLedgerRejected from None
 
     def receive_command(self, command: InboundTaskCommand) -> CommandReceipt:
         try:
@@ -816,6 +1267,9 @@ class ExecutorLedger:
             if version == 2:
                 _migrate_v3(connection)
                 version = 3
+            if version == 3:
+                _migrate_v4(connection)
+                version = 4
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -984,6 +1438,84 @@ def _migrate_v3(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 3")
 
 
+def _migrate_v4(connection: sqlite3.Connection) -> None:
+    """Add an installation-local action gate without storing signed tokens."""
+
+    connection.execute(
+        """
+        CREATE TABLE executor_action_guard (
+            singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            engaged INTEGER NOT NULL CHECK (engaged IN (0, 1)),
+            revision INTEGER NOT NULL CHECK (revision >= 0),
+            changed_at TEXT,
+            CHECK (
+                (revision = 0 AND engaged = 0 AND changed_at IS NULL)
+                OR (revision >= 1 AND changed_at IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO executor_action_guard (singleton_id, engaged, revision, changed_at)
+        VALUES (1, 0, 0, NULL)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE executor_action_policy (
+            singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            minimum_interval_seconds INTEGER,
+            task_action_limit INTEGER,
+            CHECK (
+                (minimum_interval_seconds IS NULL AND task_action_limit IS NULL)
+                OR (
+                    minimum_interval_seconds BETWEEN 1 AND 3600
+                    AND task_action_limit BETWEEN 1 AND 100
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO executor_action_policy (
+            singleton_id, minimum_interval_seconds, task_action_limit
+        ) VALUES (1, NULL, NULL)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE executor_action_admissions (
+            action_id TEXT PRIMARY KEY CHECK (length(action_id) = 36),
+            target_id TEXT NOT NULL CHECK (length(target_id) = 36),
+            execution_attempt_id TEXT NOT NULL CHECK (length(execution_attempt_id) = 36),
+            task_id TEXT NOT NULL CHECK (length(task_id) = 36),
+            installation_id TEXT NOT NULL CHECK (length(installation_id) = 36),
+            executor_id TEXT NOT NULL CHECK (length(executor_id) = 36),
+            platform TEXT NOT NULL CHECK (platform = 'douyin'),
+            action TEXT NOT NULL CHECK (action IN ('browse', 'comment', 'direct_message')),
+            idempotency_key TEXT NOT NULL UNIQUE,
+            authorization_fingerprint BLOB NOT NULL
+                CHECK (length(authorization_fingerprint) = 32),
+            authorized_at TEXT NOT NULL,
+            deadline_at TEXT NOT NULL,
+            admitted_at TEXT NOT NULL,
+            task_action_ordinal INTEGER NOT NULL
+                CHECK (task_action_ordinal BETWEEN 1 AND 100),
+            UNIQUE (task_id, platform, action, task_action_ordinal)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX ix_executor_action_admissions_scope_time
+        ON executor_action_admissions (installation_id, platform, action, admitted_at DESC)
+        """
+    )
+    connection.execute("PRAGMA user_version = 4")
+
+
 def _canonical_uuid_v4(value: object) -> str:
     if type(value) is not str:
         raise ValueError
@@ -991,6 +1523,13 @@ def _canonical_uuid_v4(value: object) -> str:
     if parsed.version != 4 or parsed.variant != RFC_4122 or str(parsed) != value:
         raise ValueError
     return value
+
+
+def _is_canonical_uuid_v4(value: object) -> bool:
+    try:
+        return _canonical_uuid_v4(value) == value
+    except Exception:
+        return False
 
 
 def _canonical_message(
@@ -1049,6 +1588,26 @@ def _encode_utc(value: datetime) -> str:
     return value.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
+def _canonical_utc(value: object) -> datetime | None:
+    if type(value) is not datetime or value.tzinfo is None:
+        return None
+    try:
+        if value.utcoffset() != timedelta(0):
+            return None
+        return value.astimezone(UTC)
+    except Exception:
+        return None
+
+
+def _decode_utc(value: object) -> datetime:
+    if type(value) is not str:
+        raise ValueError
+    parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+    if _encode_utc(parsed) != value:
+        raise ValueError
+    return parsed
+
+
 def _platform_session(row: sqlite3.Row | tuple[object, ...]) -> LocalPlatformSession:
     observed_at = datetime.fromisoformat(str(row[3]).replace("Z", "+00:00"))
     return LocalPlatformSession(
@@ -1056,6 +1615,63 @@ def _platform_session(row: sqlite3.Row | tuple[object, ...]) -> LocalPlatformSes
         state=PlatformSessionState(str(row[1])),
         session_revision=cast(int, row[2]),
         observed_at=observed_at,
+    )
+
+
+def _action_admission(
+    row: sqlite3.Row | tuple[object, ...],
+    *,
+    replayed: bool,
+) -> LocalActionAdmission:
+    return LocalActionAdmission(
+        action_id=str(row[0]),
+        target_id=str(row[1]),
+        execution_attempt_id=str(row[2]),
+        task_id=str(row[3]),
+        installation_id=str(row[4]),
+        executor_id=str(row[5]),
+        platform=str(row[6]),
+        action=DouyinSearchExposureAction(str(row[7])),
+        idempotency_key=str(row[8]),
+        authorization_fingerprint=cast(bytes, row[9]),
+        authorized_at=_decode_utc(row[10]),
+        deadline_at=_decode_utc(row[11]),
+        admitted_at=_decode_utc(row[12]),
+        task_action_ordinal=cast(int, row[13]),
+        replayed=replayed,
+    )
+
+
+def _same_action_admission(
+    row: sqlite3.Row | tuple[object, ...],
+    claims: ActionAuthorizationClaims,
+    authorization_fingerprint: bytes,
+) -> bool:
+    existing = _action_admission(row, replayed=False)
+    return (
+        existing.action_id == str(claims.action_id)
+        and existing.target_id == str(claims.target_id)
+        and existing.execution_attempt_id == str(claims.execution_attempt_id)
+        and existing.task_id == str(claims.task_id)
+        and existing.installation_id == str(claims.installation_id)
+        and existing.executor_id == str(claims.executor_id)
+        and existing.platform == claims.platform
+        and existing.action is claims.action
+        and existing.idempotency_key == str(claims.idempotency_key)
+        and existing.authorization_fingerprint == authorization_fingerprint
+        and existing.authorized_at == claims.authorized_at
+        and existing.deadline_at == claims.deadline_at
+    )
+
+
+def _action_emergency_stop(
+    row: sqlite3.Row | tuple[object, ...],
+) -> LocalActionEmergencyStop:
+    changed_at = None if row[2] is None else _decode_utc(row[2])
+    return LocalActionEmergencyStop(
+        engaged=bool(row[0]) if row[0] in (0, 1) else cast(bool, row[0]),
+        revision=cast(int, row[1]),
+        changed_at=changed_at,
     )
 
 
@@ -1096,8 +1712,13 @@ __all__ = [
     "AttemptCheckpoint",
     "AttemptCheckpointState",
     "CommandReceipt",
+    "ExecutorActionAdmissionLimitReason",
+    "ExecutorActionAdmissionLimited",
     "ExecutorLedger",
     "ExecutorLedgerRejected",
+    "LocalActionAdmission",
+    "LocalActionEmergencyStop",
+    "LocalActionHardPolicyBinding",
     "LocalPlatformSession",
     "OutboxEntry",
     "PlatformSessionState",

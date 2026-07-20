@@ -259,6 +259,8 @@ backend/
 │       │       └── observability/
 │       ├── executor/              # 永远运行在用户电脑的执行器
 │       │   ├── __main__.py        # 源码模式与 PyInstaller 共用的模块入口
+│       │   ├── action_authorization.py # A7-03 固定公钥验签和完整执行意图匹配
+│       │   ├── action_gate.py     # A7-04 验签 + SQLite 本机硬下限唯一动作准入门
 │       │   ├── authentication.py  # 本机启动令牌校验、可清零 HMAC 事件证明
 │       │   ├── bootstrap.py       # 一次性 stdin bootstrap、端点/Session/身份严格校验
 │       │   ├── browser_authority.py # 登录与发现共享的受信浏览器请求/lease 所有权
@@ -267,7 +269,7 @@ backend/
 │       │   ├── command_processor.py # 正式命令、SQLite checkpoint 和持久结果 outbox
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
 │       │   ├── discovery_operation.py # 搜索/滚动/提取的单次只读发现组合
-│       │   ├── ledger.py          # 本机 SQLite v3 命令/checkpoint/outbox/平台 Session 账本
+│       │   ├── ledger.py          # 本机 SQLite v4 命令/Session/动作策略/紧停/准入账本
 │       │   ├── page_drift_artifact.py # 固定 Schema/大小/数量的本机页面漂移诊断 spool
 │       │   ├── platform_commands.py # 认证本机平台命令、扫码 flow 与健康队列
 │       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
@@ -365,7 +367,7 @@ D6-08 的 `control_plane/domain/douyin_candidate_policy.py` 只消费公共 Cand
 
 D6-09 的 `control_plane/application/task_targets.py` 定义脱敏、不可变的 Target 持久记录，`infrastructure/database/task_target_repository.py` 是唯一 PostgreSQL 适配器，`schema.py` 与 Alembic `20260718_0016` 是同一 `task_targets` 结构的代码/迁移来源。适配器在 Installation/Task 行锁事务中查询当前 Candidate key 的同 Installation 历史、调用 D6-08、替换整批 Decision，并按 `(ordinal,id)` keyset 读取；应用/领域模块不导入 SQLAlchemy。`frontend/tests/task-target-database-boundary.test.mjs` 锁定表的复合归属、唯一顺序和历史索引，且持久 disposition/dedupe key 不泄漏到 Executor wire 或 Tauri。D6-10 收敛仓储从正式 PostgreSQL 原入口调用它，D6-11 再增加公开预览读取。
 
-D6-10 的服务端路径按 `api/task_discoveries.py`（App Session/HTTP）、`application/task_discovery.py`（启动、有限批次累计与收敛）、`infrastructure/database/task_discovery_repository.py`（唯一事务事实）和 `bootstrap/task_discovery.py`（装配）分层；迁移 `20260720_0017` 只扩展既有 Task command/event 封闭词汇。Executor 侧 `browser_authority.py`、`discovery_operation.py`、`command_processor.py` 与 SQLite v3 分别负责浏览器所有权、现有 RPA adapter 组合、正式 envelope/outbox 和重放。Rust `control_plane.rs`/`lib.rs` 只向 App 提供固定 `start_task_discovery`，WebView 不接触 Session、Candidate、浏览器或 Profile。`scripts/run_d6_10_acceptance.py` 使用唯一 hidden App、真实 Uvicorn/PostgreSQL 与正式 LocalExecutorProcess 验证这条纵向链，并只清理自己的 AppData、端口和 Compose 资源。
+D6-10 的服务端路径按 `api/task_discoveries.py`（App Session/HTTP）、`application/task_discovery.py`（启动、有限批次累计与收敛）、`infrastructure/database/task_discovery_repository.py`（唯一事务事实）和 `bootstrap/task_discovery.py`（装配）分层；迁移 `20260720_0017` 只扩展既有 Task command/event 封闭词汇。Executor 侧 `browser_authority.py`、`discovery_operation.py`、`command_processor.py` 与当时的 SQLite v3 分别负责浏览器所有权、现有 RPA adapter 组合、正式 envelope/outbox 和重放；A7-04 已原地升级为 v4，并增加 `action_gate.py`、动作策略、紧停和准入事实。Rust `control_plane.rs`/`lib.rs` 只向 App 提供固定 `start_task_discovery`，WebView 不接触 Session、Candidate、浏览器或 Profile。`scripts/run_d6_10_acceptance.py` 使用唯一 hidden App、真实 Uvicorn/PostgreSQL 与正式 LocalExecutorProcess 验证这条纵向链，并只清理自己的 AppData、端口和 Compose 资源。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 
@@ -399,7 +401,7 @@ E4-09 仍不新建进程服务：`RunningExecutor` 直接拥有跨平台 `Proces
 
 E4-10 新建的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承担生命周期或业务日志。Manager Core 持有唯一内存队列，各次启动的 reader 共享它；输入以固定容量流式消费，超长/非法编码 fail closed，再按 `contracts/fixtures/executor-diagnostics-v1.json` 规则脱敏并执行行数/单行/总字节上限。Python `executor/diagnostics.py` 回放同一 fixtures，为未来 Executor 自身安全消息提供一致策略，但 Rust 仍对原始 stderr 独立重做脱敏，不能信任进程内结论。真实 signed 进程测试证明公开 Manager `diagnostics()` 原入口，不新增 Tauri Command 或持久日志。
 
-E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3` 和 v1 identity/commands/attempt checkpoints/outbox 四表。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS 和协议 outbox 重放均在该模块内事务化；测试覆盖真实并发、重开恢复、迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
+E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3`，从 v1 identity/commands/attempt checkpoints/outbox、v2 平台 Session、v3 发现状态原地迁移到 A7-04 当前 v4 动作策略/紧停/准入账本。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS、协议 outbox 重放及动作准入均在该模块内事务化；测试覆盖真实并发、重开恢复、逐版迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
 
 E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 已完成隐藏 App 验收。
 

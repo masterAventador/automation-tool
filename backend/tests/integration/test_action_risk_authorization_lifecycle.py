@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import secrets
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from conftest import AlembicRunner
@@ -57,6 +60,11 @@ from automation_tool.executor.action_authorization import (
     ActionAuthorizationExpectation,
     Ed25519ActionAuthorizationVerifier,
 )
+from automation_tool.executor.action_gate import (
+    ExecutorActionGate,
+    LocalActionHardPolicy,
+)
+from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.protocol import (
     DouyinCandidateSource,
     PlatformSessionState,
@@ -430,9 +438,10 @@ async def test_authorization_persists_action_policy_snapshot_and_exact_replay(
 
 
 @pytest.mark.asyncio
-async def test_database_authorization_is_signed_and_verified_for_the_exact_executor_intent(
+async def test_database_authorization_is_signed_and_locally_admitted_for_exact_executor_intent(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
+    tmp_path: Path,
 ) -> None:
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -451,31 +460,59 @@ async def test_database_authorization_is_signed_and_verified_for_the_exact_execu
             authorization_lifetime=timedelta(seconds=60),
         ).issue(authorization=authorization, executor_id=executor_id)
         protocol_action_id = ProtocolActionId(str(authorization.action_id))
-        verified = Ed25519ActionAuthorizationVerifier(
+        verifier = Ed25519ActionAuthorizationVerifier(
             public_key=(
                 Ed25519PrivateKey.from_private_bytes(private_key).public_key().public_bytes_raw()
             ),
             clock=FixedAuthorizationClock(NOW + timedelta(seconds=1)),
-        ).verify(
-            token=issued.token,
-            expected=ActionAuthorizationExpectation(
-                action_id=protocol_action_id,
-                target_id=ProtocolTargetId(str(authorization.target_id)),
-                execution_attempt_id=ProtocolExecutionAttemptId(
-                    str(authorization.execution_attempt_id)
-                ),
-                task_id=ProtocolTaskId(str(authorization.task_id)),
-                installation_id=ProtocolInstallationId(str(authorization.installation_id)),
-                executor_id=ProtocolExecutorId(str(executor_id)),
-                platform=authorization.platform.value,
-                action=authorization.action,
-                idempotency_key=action_authorization_idempotency_key(protocol_action_id),
+        )
+        expected = ActionAuthorizationExpectation(
+            action_id=protocol_action_id,
+            target_id=ProtocolTargetId(str(authorization.target_id)),
+            execution_attempt_id=ProtocolExecutionAttemptId(
+                str(authorization.execution_attempt_id)
             ),
+            task_id=ProtocolTaskId(str(authorization.task_id)),
+            installation_id=ProtocolInstallationId(str(authorization.installation_id)),
+            executor_id=ProtocolExecutorId(str(executor_id)),
+            platform=authorization.platform.value,
+            action=authorization.action,
+            idempotency_key=action_authorization_idempotency_key(protocol_action_id),
+        )
+        ledger = ExecutorLedger(
+            state_directory=tmp_path / "executor-state",
+            installation_id=str(installation_id),
+            executor_id=str(executor_id),
+        )
+        admitted = ExecutorActionGate(
+            ledger=ledger,
+            verifier=verifier,
+            policy=LocalActionHardPolicy(
+                minimum_interval=timedelta(seconds=30),
+                task_action_limit=2,
+            ),
+            clock=FixedAuthorizationClock(NOW + timedelta(seconds=1)),
+        ).admit(
+            token=issued.token,
+            expected=expected,
         )
 
-        assert verified == issued.claims
-        assert verified.authorized_at == authorization.authorized_at
-        assert verified.deadline_at == NOW + timedelta(seconds=60)
+        assert admitted.action_id == str(issued.claims.action_id)
+        assert admitted.authorized_at == authorization.authorized_at
+        assert admitted.deadline_at == NOW + timedelta(seconds=60)
+        assert (
+            admitted.authorization_fingerprint
+            == hashlib.sha256(issued.token.encode("ascii")).digest()
+        )
+        assert admitted.replayed is False
+        assert issued.token.encode("ascii") not in ledger.database_path.read_bytes()
+        with sqlite3.connect(ledger.database_path) as connection:
+            assert connection.execute(
+                """
+                SELECT minimum_interval_seconds, task_action_limit
+                FROM executor_action_policy WHERE singleton_id = 1
+                """
+            ).fetchone() == (30, 2)
         async with database.session() as session:
             assert (
                 await session.scalar(select(func.count()).select_from(action_risk_authorizations))
