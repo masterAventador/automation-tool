@@ -1,5 +1,13 @@
 """Control Plane domain contracts and errors."""
 
+from automation_tool.control_plane.domain.action_risk_policy import (
+    ACTION_RISK_POLICY_VERSION,
+    MAX_ACTION_RISK_LIMIT,
+    ActionRiskPlatform,
+    ActionRiskPolicy,
+    ActionRiskScope,
+    InvalidActionRiskPolicy,
+)
 from automation_tool.control_plane.domain.demo_bootstrap import (
     MAX_DEMO_BOOTSTRAP_LIFETIME,
     BootstrapAuthorizationDenied,
@@ -74,9 +82,11 @@ from automation_tool.control_plane.domain.task_state_machine import (
 )
 
 __all__ = [
+    "ACTION_RISK_POLICY_VERSION",
     "DOUYIN_CANDIDATE_HISTORY_WINDOW",
     "DOUYIN_CANDIDATE_POLICY_VERSION",
     "DOUYIN_SEARCH_EXPOSURE_TEMPLATE",
+    "MAX_ACTION_RISK_LIMIT",
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
     "MAX_MESSAGE_TEMPLATE_CHARACTERS",
     "MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS",
@@ -89,6 +99,9 @@ __all__ = [
     "TERMINAL_TASK_COMMAND_STATUSES",
     "ActionId",
     "ActionOutcome",
+    "ActionRiskPlatform",
+    "ActionRiskPolicy",
+    "ActionRiskScope",
     "ActionStatus",
     "ArtifactId",
     "BootstrapAuthorizationDenied",
@@ -110,6 +123,7 @@ __all__ = [
     "ExecutorId",
     "InstallationId",
     "InstallationStatus",
+    "InvalidActionRiskPolicy",
     "InvalidDemoBootstrap",
     "InvalidDemoEnvironmentId",
     "InvalidDouyinCandidatePolicy",

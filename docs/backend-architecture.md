@@ -326,6 +326,8 @@ D6-15 不增加第二套 Adapter，而是在 `tests/fixtures/douyin_discovery_pa
 
 D6-16 首轮真实只读验收使用此前用户明确授权的 App 私有抖音 Profile 与无头系统 Chrome。`/user/self` 经生产 Session detector 从短暂 unknown 收敛为 healthy，但首页加载 ByteDance verifycenter captcha iframe；这证明“登录 Session 健康”和“当前页面无风控”是两个独立门禁，不能以前者绕过后者。Session 与 Search Page Object 现在共享 `DOUYIN_RISK_CHALLENGE_SELECTORS`，搜索首页/结果页一旦看到验证码 iframe 或 captcha container，优先于业务锚点返回阻塞并经正式 discovery wire 收敛到 handoff，而不是继续等候或点击。真实候选尚未产生，D6-16 继续待挑战由用户正常处理后补验；当前证据不能替代目标预览成功。
 
+A7-01 在 Control Plane 领域层增加 `ActionRiskScope` 与 `ActionRiskPolicy`，不接数据库、HTTP、Executor wire 或 App。scope 以强类型 `InstallationId`、封闭社交平台和既有任务动作组成，令后续所有计数天然按安装实例/平台/动作隔离；Policy 必须显式提供最小间隔、单任务动作上限、UTC 日动作上限和连续失败阈值，拒绝零间隔、分数秒、bool/float、越界数值、自由字符串和伪造版本。单任务上限复用 `MAX_TASK_TARGET_LIMIT`，日/失败计数的 `2^53-1` 只保证跨运行时无损，不是运营默认或“安全值”。A7-02 必须在 PostgreSQL 事务内消费该模型，并用 `max(任务配置最小间隔, 服务端硬下限)`，不能让客户端或服务器配置放宽本模型。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

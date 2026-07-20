@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线与 Wave 6 D6-01～D6-15 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-01；B5-15 真实账号 App 双重启证据同样独立补验 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-02；B5-15 真实账号 App 双重启证据同样独立补验 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -307,7 +307,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| A7-01 | 风险策略领域模型 | 平台/动作/安装实例级最小间隔、任务/日上限、连续失败阈值 | T3-01 | ⬜ 未开始 |
+| A7-01 | 风险策略领域模型 | 平台/动作/安装实例级最小间隔、任务/日上限、连续失败阈值 | T3-01 | 🟩 完成 |
 | A7-02 | 服务端计数与并发授权 | PostgreSQL 原子授权；并发不能突破上限 | A7-01,T3-03 | ⬜ 未开始 |
 | A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | ⬜ 未开始 |
 | A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | ⬜ 未开始 |
@@ -2109,11 +2109,24 @@
 - 门禁：风控 selector/Page Object/Search/Session 聚焦 `60 passed`；Backend 全量 `1406 passed, 5 skipped in 115.18s`，8997 条语句、1928 个分支 100%；Ruff/格式与严格 Mypy 覆盖 248 个源码/测试/验收脚本文件。真实 runner 最终稳定输出 Session healthy 与 `handoff_required/blocking_dialog`，退出码 3 精确表示真实目标验收未完成
 - 后续：按既定规则跳过需要即时用户介入的真实挑战，继续 `A7-01` 风险策略领域模型；D6-16 与 B5-15 均保留为独立真实账号补验项，不伪造完成
 
+### A7-01 风险策略领域模型
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`，新增 43 项纯领域失败矩阵；聚焦测试在收集阶段准确失败于公共 `ACTION_RISK_POLICY_VERSION` 不存在，证明没有复用旧账号服务或提前放入空壳实现让测试假绿
+- 旧代码审计：只读复核 `agent-platform` 的 `AccountGovernancePolicy`、授权和连续失败用例；保留最小间隔、任务/日上限与连续失败阈值语义，明确删除旧租户、RBAC、平台账号、冷启动额度、内存锁、自由 `action_type` 和零间隔。旧代码中的 20/5/3 等值没有迁入当前项目
+- 复合范围：新增不可变 `ActionRiskScope`，唯一键由强类型 `InstallationId`、封闭 `douyin` 平台和既有 `browse/comment/direct_message` 动作构成；自由字符串、伪造资源 ID/枚举和跨类型对象统一固定错误拒绝，repr 不暴露 Installation ID
+- 显式硬限制：`ActionRiskPolicy` 必须调用方逐项提供正整数秒最小间隔、`1..100` 单任务动作上限、正 UTC 日动作上限和正连续失败阈值；零/负/分数秒、bool/float/string、超限与伪造版本 fail closed。最小间隔复用任务现有 1～3600 秒边界，任务动作上限复用目标硬上限
+- 无伪安全默认：除固定契约版本外，四个运营阈值都没有默认值。`MAX_ACTION_RISK_LIMIT=2^53-1` 只是 Python/Rust/TypeScript 无损整数的结构上界，不是推荐日额度或安全阈值；具体值继续按产品规则等待受控真实账号校准。任务/日/失败阈值彼此独立，不用未经验证的大小关系制造隐式默认
+- 分层边界：本任务只交付 Control Plane 纯领域对象，不导入 SQLAlchemy、FastAPI、Executor wire、Playwright、Tauri 或 React，没有网络、数据库、App API 或外部副作用，因此正式原调用方式就是公共构造器/不可变值/拒绝矩阵，不启动空壳 App 或服务。A7-02 才在 PostgreSQL 原子事务中计数和授权，A7-14 再把连续失败收敛为 handoff
+- 门禁：聚焦 43 项通过，新模块 43 条语句、4 个分支覆盖率 100%；Backend 全量 `1449 passed, 5 skipped in 114.93s`，9041 条语句、1932 个分支覆盖率 100%。269 个 Python 文件格式正确，Ruff 全绿，严格 Mypy 249 个源码文件通过，uv lock、OpenAPI 和 Executor Schema 均无漂移
+- 资源与文档：纯领域任务没有启动 App、浏览器、Uvicorn 或固定端口；全量数据库测试使用 `automation-tool-pytest-*` 专属动态端口、Compose project、网络和 Volume。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
+- 后续：进入 `A7-02`，设计 PostgreSQL 风险策略/计数事实与原子授权事务；并发请求不能突破任务、UTC 日或最小间隔硬限制，服务端配置也不得放宽调用方更严格的任务间隔
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-01`：建立平台/动作/安装实例级最小间隔、任务/日上限和连续失败阈值领域模型；
+1. `A7-02`：使用真实 PostgreSQL 建立安装实例/平台/动作计数与原子授权，并发请求不能突破最小间隔、单任务或 UTC 日硬上限；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

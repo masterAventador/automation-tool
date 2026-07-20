@@ -72,6 +72,8 @@ D6-15 Fake 页面回归执行 `uv run pytest tests/integration/test_douyin_disco
 
 D6-16 真实只读探针在仓库根执行 `AUTOMATION_TOOL_D616_PROFILE_DIRECTORY=<App 私有 Profile> backend/.venv/bin/python scripts/run_d6_16_browser_acceptance.py`。路径只从当前进程环境读取，脚本不输出路径、账号、候选名、Cookie、storage 或页面正文；先用生产 Session detector 有界确认健康，再从正式 `task.discover` command 进入生产发现编排，浏览器固定 `headless=true`。当前真实证据为受保护页 `healthy`、首页验证码风控并收敛 `handoff_required/blocking_dialog`，退出码 3 表示尚未完成候选验收；不得把该结果标成 D6-16 完成。
 
+A7-01 的 `control_plane/domain/action_risk_policy.py` 是服务端风险硬限制的唯一纯领域入口。`ActionRiskScope` 只接受强类型 Installation、封闭 `douyin` 平台和既有 `browse/comment/direct_message` 动作；`ActionRiskPolicy` 必须显式传入整秒正最小间隔、任务动作上限、UTC 日上限和连续失败阈值，不提供运营默认值。`MAX_ACTION_RISK_LIMIT = 2^53-1` 只是 Python/Rust/TypeScript 无损序列化的结构上界，不代表安全日额度；真实额度需经受控账号校准后由后续装配提供。
+
 B5-13/B5-14 的隐藏 App 原入口执行 `uv run --project backend python scripts/run_b5_13_acceptance.py`：唯一 `visible=false` Tauri App 实际点击平台状态、打开处理、重新检查和确认安全注销，经正式 TypeScript/Rust、signed Executor、后台系统 Chrome、认证 WebSocket 和真实 Uvicorn/Alembic/PostgreSQL 核对 `missing` projection 与持久 logout gate，并从 App 原入口确认新任务被门闩拒绝。runner 使用专属随机端口、Compose project、AppData、SQLite 和 Profile；注销后只允许 current Profile 消失，Executor SQLite 必须保留，并在 App 正常退出后审计浏览器、Executor、容器和端口零残留。
 
 B5-15 工程纵向验收执行 `backend/.venv/bin/python scripts/run_b5_15_acceptance.py`。它用唯一 AppData/Profile 连续运行 `first/restart/expired/risk` 四个隐藏 Tauri App 生命周期，每轮都从正式 TypeScript Gateway、Tauri IPC、Rust Manager、本机认证命令、signed Executor、无头系统 Chrome、WebSocket 到 PostgreSQL；前两轮必须保持同一 marker 和目录 identity 且直接健康，后两轮分别进入扫码和人工接管，最终 SQLite/PostgreSQL 固定收敛到 revision 2/risk。官方 origin 的确定性页面只打入 `backend/tests/fixtures/automation-tool-executor-b515.spec` 生成的独立验收包，不改变正式 Executor spec，也不冒充真实账号证据；真实账号纵向补验仍保持待办。
