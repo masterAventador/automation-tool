@@ -33,7 +33,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0008"
-HEAD_REVISION = "20260720_0018"
+HEAD_REVISION = "20260720_0019"
 NOW = datetime(2026, 7, 18, 5, 30, tzinfo=UTC)
 DEADLINE = NOW + timedelta(minutes=5)
 EXPECTED_COLUMNS = {
@@ -44,6 +44,7 @@ EXPECTED_COLUMNS = {
     "execution_attempt_id",
     "sequence",
     "command_type",
+    "target_confirmation_message_id",
     "status",
     "idempotency_key",
     "revision",
@@ -67,6 +68,8 @@ EXPECTED_CONSTRAINTS = {
     "ck_task_commands_message_uuid_v4",
     "ck_task_commands_correlation_uuid_v4",
     "ck_task_commands_response_uuid_v4",
+    "ck_task_commands_target_confirmation_uuid_v4",
+    "ck_task_commands_target_confirmation_scope",
     "ck_task_commands_sequence_range",
     "ck_task_commands_type",
     "ck_task_commands_status",
@@ -461,6 +464,7 @@ async def test_command_constraints_reject_invalid_scope_identity_time_state_and_
         invalid_cases: tuple[dict[str, object], ...] = (
             {"message_id": UUID("123e4567-e89b-12d3-a456-426614174000")},
             {"correlation_id": UUID("123e4567-e89b-12d3-a456-426614174000")},
+            {"target_confirmation_message_id": UUID("123e4567-e89b-12d3-a456-426614174000")},
             {"installation_id": other_installation.uuid},
             {"task_id": other_task.uuid},
             {"execution_attempt_id": other_attempt.uuid},
@@ -531,10 +535,19 @@ async def test_command_constraints_reject_invalid_scope_identity_time_state_and_
             command_type=TaskCommandType.TASK_DISCOVER,
             response_type=TaskCommandResponseType.TASK_CONTROL_ACK,
         )
+        invalid_control_confirmation = command_values(
+            installation_id,
+            task_id,
+            attempt_id,
+            sequence=103,
+            command_type=TaskCommandType.TASK_PAUSE,
+        )
+        invalid_control_confirmation["target_confirmation_message_id"] = uuid4()
         for values in (
             invalid_control_response,
             invalid_response_uuid,
             invalid_discovery_response,
+            invalid_control_confirmation,
         ):
             with pytest.raises(IntegrityError):
                 async with database.session() as session:

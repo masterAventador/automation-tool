@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, exists, func, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
@@ -40,6 +40,7 @@ from automation_tool.control_plane.infrastructure.database.schema import (
     installations,
     platform_session_gates,
     task_commands,
+    task_target_confirmations,
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
@@ -67,6 +68,10 @@ def _record(row: RowMapping) -> TaskCommandRecord:
             execution_attempt_id=ExecutionAttemptId.parse(row["execution_attempt_id"]),
             sequence=cast(int, row["sequence"]),
             command_type=TaskCommandType(cast(str, row["command_type"])),
+            target_confirmation_message_id=cast(
+                UUID | None,
+                row["target_confirmation_message_id"],
+            ),
             status=TaskCommandStatus(cast(str, row["status"])),
             idempotency_key=cast(str, row["idempotency_key"]),
             revision=cast(int, row["revision"]),
@@ -87,13 +92,19 @@ def _record(row: RowMapping) -> TaskCommandRecord:
         raise TaskCommandDeliveryRejected from None
 
 
-def _same_intent(existing: TaskCommandRecord, pending: PendingTaskCommand) -> bool:
+def _same_intent(
+    existing: TaskCommandRecord,
+    pending: PendingTaskCommand,
+    *,
+    target_confirmation_message_id: UUID | None,
+) -> bool:
     return (
         existing.installation_id == pending.installation_id
         and existing.task_id == pending.task_id
         and existing.execution_attempt_id == pending.execution_attempt_id
         and existing.sequence == pending.sequence
         and existing.command_type is pending.command_type
+        and existing.target_confirmation_message_id == target_confirmation_message_id
         and existing.idempotency_key == pending.idempotency_key
         and existing.deadline_at == pending.deadline_at
     )
@@ -157,6 +168,58 @@ class SqlAlchemyTaskCommandRepository:
                 )
                 if installation_status != InstallationStatus.ACTIVE.value:
                     raise TaskCommandDeliveryRejected
+                requires_target_confirmation = False
+                if command.command_type is TaskCommandType.TASK_OFFER:
+                    requires_target_confirmation = (
+                        await session.scalar(
+                            select(
+                                exists().where(
+                                    douyin_search_exposure_definitions.c.task_id
+                                    == command.task_id.uuid,
+                                    douyin_search_exposure_definitions.c.installation_id
+                                    == command.installation_id.uuid,
+                                )
+                            )
+                        )
+                        is True
+                    )
+                confirmation_row = None
+                if requires_target_confirmation:
+                    confirmation_row = (
+                        (
+                            await session.execute(
+                                select(
+                                    task_target_confirmations.c.source_message_id,
+                                    task_target_confirmations.c.confirmed_task_revision,
+                                    tasks.c.status,
+                                    tasks.c.revision,
+                                )
+                                .select_from(
+                                    task_target_confirmations.join(
+                                        tasks,
+                                        and_(
+                                            tasks.c.id == task_target_confirmations.c.task_id,
+                                            tasks.c.installation_id
+                                            == task_target_confirmations.c.installation_id,
+                                        ),
+                                    )
+                                )
+                                .where(
+                                    task_target_confirmations.c.task_id == command.task_id.uuid,
+                                    task_target_confirmations.c.installation_id
+                                    == command.installation_id.uuid,
+                                )
+                                .with_for_update()
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                confirmation_message_id = (
+                    None
+                    if confirmation_row is None
+                    else cast(UUID, confirmation_row["source_message_id"])
+                )
                 existing_row = (
                     (
                         await session.execute(
@@ -171,9 +234,19 @@ class SqlAlchemyTaskCommandRepository:
                 )
                 if existing_row is not None:
                     existing = _record(existing_row)
-                    if not _same_intent(existing, command):
+                    if not _same_intent(
+                        existing,
+                        command,
+                        target_confirmation_message_id=confirmation_message_id,
+                    ):
                         raise TaskCommandDeliveryRejected
                     return existing
+                if requires_target_confirmation and (
+                    confirmation_row is None
+                    or confirmation_row["status"] != TaskStatus.QUEUED.value
+                    or confirmation_row["revision"] != confirmation_row["confirmed_task_revision"]
+                ):
+                    raise TaskCommandDeliveryRejected
                 blocked = await session.scalar(
                     select(platform_session_gates.c.session_revision).where(
                         platform_session_gates.c.installation_id == command.installation_id.uuid,
@@ -194,6 +267,7 @@ class SqlAlchemyTaskCommandRepository:
                                 execution_attempt_id=command.execution_attempt_id.uuid,
                                 sequence=command.sequence,
                                 command_type=command.command_type.value,
+                                target_confirmation_message_id=confirmation_message_id,
                                 status=TaskCommandStatus.PENDING.value,
                                 idempotency_key=command.idempotency_key,
                                 revision=1,
@@ -489,6 +563,51 @@ class SqlAlchemyTaskCommandRepository:
                 task_commands.c.deadline_at > timestamp,
                 task_commands.c.updated_at <= timestamp,
                 due,
+                or_(
+                    task_commands.c.command_type != TaskCommandType.TASK_OFFER.value,
+                    and_(
+                        task_commands.c.target_confirmation_message_id.is_(None),
+                        ~exists(
+                            select(douyin_search_exposure_definitions.c.task_id).where(
+                                douyin_search_exposure_definitions.c.task_id
+                                == task_commands.c.task_id,
+                                douyin_search_exposure_definitions.c.installation_id
+                                == task_commands.c.installation_id,
+                            )
+                        ),
+                    ),
+                    and_(
+                        task_commands.c.target_confirmation_message_id.is_not(None),
+                        exists(
+                            select(task_target_confirmations.c.task_id)
+                            .select_from(
+                                task_target_confirmations.join(
+                                    tasks,
+                                    and_(
+                                        tasks.c.id == task_target_confirmations.c.task_id,
+                                        tasks.c.installation_id
+                                        == task_target_confirmations.c.installation_id,
+                                    ),
+                                )
+                            )
+                            .where(
+                                task_target_confirmations.c.task_id == task_commands.c.task_id,
+                                task_target_confirmations.c.installation_id
+                                == task_commands.c.installation_id,
+                                task_target_confirmations.c.source_message_id
+                                == task_commands.c.target_confirmation_message_id,
+                                tasks.c.status.in_(
+                                    (
+                                        TaskStatus.QUEUED.value,
+                                        TaskStatus.RUNNING.value,
+                                    )
+                                ),
+                                tasks.c.revision
+                                >= task_target_confirmations.c.confirmed_task_revision,
+                            )
+                        ),
+                    ),
+                ),
             )
             if blocked is not None:
                 query = query.where(

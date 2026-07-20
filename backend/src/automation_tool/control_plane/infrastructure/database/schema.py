@@ -1074,6 +1074,7 @@ task_commands = Table(
     Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
     Column("sequence", BigInteger(), nullable=False),
     Column("command_type", String(length=32), nullable=False),
+    Column("target_confirmation_message_id", UUID(as_uuid=True), nullable=True),
     Column(
         "status",
         String(length=16),
@@ -1122,6 +1123,13 @@ task_commands = Table(
         "substring(response_message_id::text from 15 for 1) = '4' "
         "and substring(response_message_id::text from 20 for 1) in ('8', '9', 'a', 'b'))",
         name="ck_task_commands_response_uuid_v4",
+    ),
+    CheckConstraint(
+        "target_confirmation_message_id is null or ("
+        "substring(target_confirmation_message_id::text from 15 for 1) = '4' "
+        "and substring(target_confirmation_message_id::text from 20 for 1) "
+        "in ('8', '9', 'a', 'b'))",
+        name="ck_task_commands_target_confirmation_uuid_v4",
     ),
     CheckConstraint(
         f"sequence between 1 and {MAX_TASK_EVENT_SEQUENCE}",
@@ -1192,6 +1200,10 @@ task_commands = Table(
         "(command_type in ('task.pause', 'task.resume', 'task.cancel', "
         "'task.emergency_stop') and response_type = 'task.control_ack')",
         name="ck_task_commands_response_coherence",
+    ),
+    CheckConstraint(
+        "target_confirmation_message_id is null or command_type = 'task.offer'",
+        name="ck_task_commands_target_confirmation_scope",
     ),
     ForeignKeyConstraint(
         ["execution_attempt_id", "task_id", "installation_id"],

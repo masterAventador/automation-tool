@@ -22,12 +22,14 @@ from automation_tool.control_plane.domain import (
     TaskCommandStatus,
     TaskCommandType,
     TaskId,
+    TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     SqlAlchemyTaskCommandRepository,
     device_credentials,
     device_sessions,
+    douyin_search_exposure_definitions,
     execution_attempts,
     installation_registration_challenges,
     installations,
@@ -35,6 +37,7 @@ from automation_tool.control_plane.infrastructure.database import (
     task_actions,
     task_commands,
     task_events,
+    task_target_confirmations,
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database import (
@@ -50,6 +53,8 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(task_commands))
         await session.execute(delete(task_events))
         await session.execute(delete(task_actions))
+        await session.execute(delete(task_target_confirmations))
+        await session.execute(delete(douyin_search_exposure_definitions))
         await session.execute(update(tasks).values(current_attempt_id=None))
         await session.execute(delete(execution_attempts))
         await session.execute(delete(tasks))
@@ -60,7 +65,11 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(installations))
 
 
-async def seed_attempt(database: Database) -> tuple[InstallationId, TaskId, ExecutionAttemptId]:
+async def seed_attempt(
+    database: Database,
+    *,
+    confirmed: bool = True,
+) -> tuple[InstallationId, TaskId, ExecutionAttemptId]:
     installation_id = InstallationId.new()
     task_id = TaskId.new()
     attempt_id = ExecutionAttemptId.new()
@@ -78,10 +87,42 @@ async def seed_attempt(database: Database) -> tuple[InstallationId, TaskId, Exec
                 id=task_id.uuid,
                 installation_id=installation_id.uuid,
                 creation_idempotency_key=f"task:delivery:{task_id}",
+                status=(TaskStatus.QUEUED.value if confirmed else TaskStatus.DRAFT.value),
+                revision=2 if confirmed else 1,
                 created_at=NOW,
                 updated_at=NOW,
             )
         )
+        await session.execute(
+            insert(douyin_search_exposure_definitions).values(
+                task_id=task_id.uuid,
+                installation_id=installation_id.uuid,
+                search_keyword="D6-13 验收",
+                action="comment",
+                message_template="D6-13 受控评论",
+                target_limit=1,
+                minimum_interval_seconds=30,
+                maximum_interval_seconds=60,
+                preview_required=True,
+                final_confirmation_required=True,
+            )
+        )
+        if confirmed:
+            await session.execute(
+                insert(task_target_confirmations).values(
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    page_revision=1,
+                    selection_task_revision=1,
+                    confirmed_task_revision=2,
+                    selected_target_count=1,
+                    source_message_id=UUID("223e4567-e89b-42d3-a456-426614174001"),
+                    source_idempotency_key="task:targets:confirm:delivery",
+                    source_fingerprint=b"c" * 32,
+                    confirmed_at=NOW,
+                    created_at=NOW,
+                )
+            )
         await session.execute(
             insert(execution_attempts).values(
                 id=attempt_id.uuid,
@@ -94,6 +135,109 @@ async def seed_attempt(database: Database) -> tuple[InstallationId, TaskId, Exec
             )
         )
     return installation_id, task_id, attempt_id
+
+
+@pytest.mark.asyncio
+async def test_offer_enqueue_requires_a_current_target_confirmation(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_attempt(database, confirmed=False)
+
+        with pytest.raises(TaskCommandDeliveryRejected):
+            await SqlAlchemyTaskCommandRepository(database).enqueue(
+                pending(installation_id, task_id, attempt_id)
+            )
+
+        emergency_stop = replace(
+            pending(installation_id, task_id, attempt_id),
+            command_type=TaskCommandType.TASK_EMERGENCY_STOP,
+            idempotency_key="task:emergency-stop:unconfirmed",
+        )
+        repository = SqlAlchemyTaskCommandRepository(database)
+        await repository.enqueue(emergency_stop)
+        claimed = await repository.claim_next(
+            installation_id=installation_id,
+            now=NOW,
+            lease_expires_at=NOW + timedelta(seconds=10),
+            retry_delivered_before=NOW - timedelta(seconds=5),
+            recover_delivered=False,
+        )
+        assert claimed is not None
+        assert claimed.command_type is TaskCommandType.TASK_EMERGENCY_STOP
+
+        async with database.session() as session:
+            assert (
+                await session.scalar(
+                    select(task_commands.c.message_id).where(
+                        task_commands.c.command_type == TaskCommandType.TASK_OFFER.value
+                    )
+                )
+                is None
+            )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_offer_binds_the_current_confirmation_and_stale_binding_cannot_be_claimed(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id, attempt_id = await seed_attempt(database)
+        repository = SqlAlchemyTaskCommandRepository(database)
+
+        created = await repository.enqueue(pending(installation_id, task_id, attempt_id))
+        assert created.target_confirmation_message_id == UUID(
+            "223e4567-e89b-42d3-a456-426614174001"
+        )
+
+        async with database.session() as session:
+            await session.execute(
+                delete(task_target_confirmations).where(
+                    task_target_confirmations.c.task_id == task_id.uuid
+                )
+            )
+
+        assert (
+            await repository.claim_next(
+                installation_id=installation_id,
+                now=NOW,
+                lease_expires_at=NOW + timedelta(seconds=10),
+                retry_delivered_before=NOW - timedelta(seconds=5),
+                recover_delivered=False,
+            )
+            is None
+        )
+        async with database.session() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(
+                            task_commands.c.status,
+                            task_commands.c.delivery_attempts,
+                        ).where(task_commands.c.message_id == created.message_id)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert row == {
+            "status": TaskCommandStatus.PENDING.value,
+            "delivery_attempts": 0,
+        }
+    finally:
+        await reset_data(database)
+        await database.close()
 
 
 def pending(

@@ -136,6 +136,7 @@ class TaskCommandRecord:
     deadline_at: datetime
     created_at: datetime
     updated_at: datetime
+    target_confirmation_message_id: UUID | None = None
     discovery_payload: DouyinDiscoveryCommandPayload | None = None
 
     @classmethod
@@ -150,6 +151,7 @@ class TaskCommandRecord:
             execution_attempt_id=command.execution_attempt_id,
             sequence=command.sequence,
             command_type=command.command_type,
+            target_confirmation_message_id=None,
             status=TaskCommandStatus.PENDING,
             idempotency_key=command.idempotency_key,
             revision=1,

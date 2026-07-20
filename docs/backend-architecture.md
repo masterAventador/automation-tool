@@ -318,6 +318,8 @@ Control Plane 只在认证 Executor WebSocket 接收 batch/completed。内存 ac
 
 D6-11 新增 `TaskTargetPreviewService` 与唯一 `SqlAlchemyTaskTargetPreviewRepository`。读取只返回同 Installation/Task 最新单一 page revision，按 `(ordinal,id)` 做 revision-bound keyset；API 只投影 Target UUID、ordinal、最小公开摘要、封闭来源/策略 disposition、用户排除与选择状态，不返回平台目标 ID、dedupe key 或页面事实。排除入口在 active Installation、`awaiting_confirmation` Task 与精确 page/task revision 行锁内完整替换用户排除集合，只允许排除 `eligible` Target，并追加 `task.target_selection_updated`。确认入口至少要求一个最终选择，持久化 page/selection/confirmed revision、选择数量、幂等指纹和 UTC 时间，追加 `task.targets_confirmed` 并把 Task 原子推进到 `queued`；同键精确重放可读，改体、过期、跨 scope、并发输家、损坏重放和空选择全部拒绝。迁移 `20260720_0018` 增加 `task_target_exclusions`、`task_target_confirmations`、Target 预览复合绑定与两种事件；重新发现替换 Target 前清除旧确认，避免新快照继承旧授权。
 
+D6-13 在动作承载命令离开 Control Plane 前增加第二道确认门。迁移 `20260720_0019` 只给 `task_commands` 增加可空、UUIDv4 且只允许用于 `task.offer` 的 `target_confirmation_message_id`；它引用确认的稳定 source identity，不复制选择列表、页面事实或动作 payload。带 `douyin.search_exposure.v1` 定义的业务 offer 在 enqueue 时必须看到 active Installation、`queued` Task、精确 confirmed revision 和当前 confirmation，并把 message ID 固定进 Outbox；同键重放不能换绑。claim 以 Task/Installation/确认 ID 关联复验确认仍存在、Task revision 未倒退且状态为 `queued/running`，否则行保持 pending 且不增加 delivery attempts。迁移前遗留的无绑定业务 offer、重新发现后失效的旧绑定和篡改行都不会发到 Executor；`task.discover`、pause/resume/cancel/emergency-stop 以及无业务定义的既有无副作用协议骨架不受误拦。该层不是 A7-03 ActionAuthorization，也不允许 Executor 执行真实评论/私信；它只消除“动作协议落地前可绕过用户确认”的投递空窗。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。
@@ -634,6 +636,8 @@ Outbox 状态精确为 pending、in_flight、delivered、acknowledged、rejected
 `(execution_attempt_id, sequence)`、`(installation_id, idempotency_key)` 和 `(installation_id, response_message_id)` 分别去重命令顺序、业务意图与响应重放；相同幂等键/响应 ID 不跨 Installation 互相阻塞。T3-09 已使用 due index 与 `FOR UPDATE SKIP LOCKED` 实现原子抢占、lease 恢复、ACK 超时重投、连接恢复和 deadline 过期；socket write 仍只等于 delivered，绝不等于 Executor 已处理。
 
 Outbox 不保存任意 payload。T3-09 的 task.offer 当前仍发送空 object 安全骨架，用于 FakeExecutor 无副作用闭环；T3-17 已提供可读取的明确 Task 定义事实，后续 Executor 业务 payload 只能从这些受约束列按正式版本构造，不能在 Outbox 复制定义或退回任意 JSON。pause/resume 与 cancel/emergency-stop 继续复用同一确认门禁。
+
+D6-13 将上述“无副作用骨架”和“业务动作承载 offer”按是否存在 `douyin.search_exposure.v1` 定义明确区分。后者必须把当时的 `task_target_confirmations.source_message_id` 固定为 Outbox 事实，并在每次 claim 重新匹配；绑定不存在或已失效时不抢 lease、不写 socket。这个数据库门禁不能替代 Executor 侧 A7-03/A7-04 的短期动作授权与本机硬限制，两侧后续必须同时满足。
 
 约束：
 

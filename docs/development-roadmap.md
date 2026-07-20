@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-12，下一项为 D6-13 未确认副作用守卫；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-13，下一项为 D6-14 页面漂移诊断；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -294,7 +294,7 @@
 | D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | 🟩 完成 |
 | D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | 🟩 完成 |
 | D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | 🟩 完成 |
-| D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | ⬜ 未开始 |
+| D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | 🟩 完成 |
 | D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | ⬜ 未开始 |
 | D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | ⬜ 未开始 |
 | D6-16 | 真实目标发现验收 | 受控抖音账号完成搜索与预览，确认无外部副作用 | D6-15 | 🔍 待真实账号 |
@@ -2056,11 +2056,25 @@
 - 资源与文档：启动前确认 8765/1420 空闲；所有运行使用 `automation-tool-d612-*` 唯一 Compose project、随机 PostgreSQL 端口、独立 AppData、Executor state 和隐藏窗口。两轮验收及无头 UI Harness 后，Uvicorn、Tauri App、WebDriver、浏览器、端口、容器、网络、Volume 与 D6-12 AppData 均零残留；没有触碰用户默认 Profile、系统钥匙串、真实账号或其他项目资源。同步根/Frontend/Backend README、前端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `D6-13`，在动作命令投递边界增加未确认副作用守卫，确保没有当前确认事实时 Executor 永远收不到评论、私信或其他 action
 
+### D6-13 未确认副作用守卫
+
+- 状态：🟩 完成
+- 提交：本记录、迁移、Outbox 确认绑定、PostgreSQL 失败矩阵、真实 WebSocket 验收和文档属于单一 `feat: 完成未确认副作用投递守卫` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`；真实 PostgreSQL 测试准确证明未确认的业务 `task.offer` 仍会成功入队，确认后的 command record 也没有 `target_confirmation_message_id`。第二条用例继续准确暴露删除 confirmation 后旧 offer 仍可被 claim；失败原因均落在 D6-13 目标边界，而非测试脚手架
+- 精确分类：守卫只针对带 `douyin.search_exposure.v1` typed definition、未来可能承载浏览/评论/私信的业务 `task.offer`。无业务定义的 T3-09 offer 仍是空 payload、无平台副作用的协议骨架；`task.discover` 是只读发现，pause/resume/cancel/emergency-stop 是控制命令，均不要求目标确认，紧停在未确认状态下仍可入队和抢占
+- 持久绑定：Alembic `20260720_0019` 与 SQLAlchemy 同步给 `task_commands` 增加可空 `target_confirmation_message_id`，数据库要求非空值为 UUIDv4 且只能绑定 `task.offer`。业务 offer 入队事务锁 active Installation，读取 typed definition 与当前 confirmation，要求 Task 为 `queued` 且 revision 精确等于 confirmed revision，再将 confirmation source message ID 固定进 Outbox；同键重放不能换绑。旧库中已有命令不补造确认，nullable 迁移保证可升级并由 claim fail closed
+- Claim 守卫：`FOR UPDATE SKIP LOCKED` due 查询对业务 offer 使用关联 `EXISTS` 复验 Task/Installation/确认 message、Task revision 未倒退且状态为 `queued/running`。无绑定、确认被删除、绑定已过期、预确认状态或持久事实不匹配时不取得 lease、不写 WebSocket、不增加 delivery attempts，命令保持 pending；当前确认命令仍沿用既有 delivered/ACK/retry/expiry 语义
+- 生产同路径验收：`scripts/run_d6_13_acceptance.py` 使用唯一 `automation-tool-d613-<pid>` Compose project、随机 PostgreSQL/Uvicorn 端口、完整 Alembic、真实设备凭据/`executor.connect` Session 和正式 `/api/v1/executors/connect`。同一 Installation 下，无绑定业务 offer 与入队后删除 confirmation 的旧绑定 offer 在多轮 dispatch 中均未到达 Executor；随后创建当前确认的 offer 后，WebSocket 只收到该 message。最终数据库精确核对前两条 `pending/delivery_attempts=0`、后一条 `delivered/delivery_attempts=1` 且绑定当前确认 ID
+- 原调用方边界：D6-13 没有新增 App API，因此不启动 Tauri 或用直接 HTTP 冒充 App 页面；D6-11/D6-12 已由隐藏真实 App 证明 confirmation 的生产入口。本任务的原始消费方是认证 Executor WebSocket，验收使用正式 Uvicorn、Session、Registry、DeliveryService 和 PostgreSQL Outbox。测试未启动运营浏览器、未触碰平台账号，也没有把标准 WebSocket 客户端冒充已经实现的 Wave 7 平台动作
+- 失败矩阵：覆盖未确认入队、当前确认绑定、确认删除后 stale claim、紧停不被误拦、平台 logout gate、并发 enqueue/claim 单赢家、lease/reconnect/ACK/expiry、错误 response、UUID/scope/status/time 数据库约束、迁移升降级和无业务定义 offer 回归。A7-03 签名/MAC ActionAuthorization、A7-04 Executor 本机硬下限、动作 payload 与真实平台最终状态均保持 Wave 7 范围，D6-13 不提前伪造
+- 测试：Backend 全量 `1381 passed, 5 skipped in 104.43s`，8842 条语句、1890 个分支 100% 覆盖；Ruff/格式 264 个文件、严格 Mypy 243 个源码文件、uv lock、完整 Alembic 升降级/schema check 全绿。D6-13 真实 WebSocket 验收与 T3-09 真实网络重投/ACK/过期回归均通过；本任务未改变 OpenAPI、Executor Schema、Frontend 或 Rust 产品代码
+- 资源与文档：验收前检查动态 Control Plane/PostgreSQL 端口；两次运行分别使用 `automation-tool-d613-*` 与 `automation-tool-t309-*` 专属容器、网络和 Volume，finally 后全部为零，Uvicorn/runner/监听端口无残留。没有启动 Tauri、WebDriver、Chrome、用户 Profile 或系统钥匙串；同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
+- 后续：进入 `D6-14`，对未知页面元素保存有界、脱敏诊断 Artifact 并进入人工接管；不得把 DOM/截图原文无界上传，也不得在页面未知时继续动作
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-13`：增加未确认副作用守卫，确保没有确认 command 时 Executor 永远收不到 action；
-2. `D6-14`：未知页面元素时保存有界、脱敏诊断 Artifact 并进入人工接管；
-3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
-4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。
+1. `D6-14`：未知页面元素时保存有界、脱敏诊断 Artifact 并进入人工接管；
+2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
+3. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。
