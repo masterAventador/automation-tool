@@ -13,14 +13,17 @@ DOUYIN_PAGE_MODEL_VERSION = "douyin.web.v1"
 DOUYIN_HOME_URL = "https://www.douyin.com/"
 DOUYIN_SESSION_PROBE_URL = "https://www.douyin.com/user/self"
 DOUYIN_SEARCH_ENTRY_URL = "https://www.douyin.com/search"
+DOUYIN_VIDEO_ENTRY_URL = "https://www.douyin.com/video"
 
 _OFFICIAL_HOST = "www.douyin.com"
 _SESSION_PATH = "/user/self"
 _SEARCH_PATH_PREFIX = "/search/"
 _SEARCH_QUERY = "type=general"
+_VIDEO_PATH_PREFIX = "/video/"
 _MAX_PAGE_URL_CHARACTERS = 2048
 _MAX_SEARCH_ROUTE_CHARACTERS = 256
 _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+_VIDEO_ID_PATTERN = re.compile(r"[1-9][0-9]{0,31}")
 
 
 class DouyinPageVersionRejected(RuntimeError):
@@ -39,6 +42,7 @@ class DouyinPageEntry(StrEnum):
     HOME = "home"
     SESSION_PROBE = "session_probe"
     SEARCH_RESULTS = "search_results"
+    VIDEO_DETAIL = "video_detail"
     UNKNOWN = "unknown"
 
 
@@ -46,6 +50,7 @@ class DouyinPageEvidence(StrEnum):
     KNOWN_HOME_ENTRY = "known_home_entry"
     KNOWN_SESSION_ENTRY = "known_session_entry"
     KNOWN_SEARCH_ENTRY = "known_search_entry"
+    KNOWN_VIDEO_ENTRY = "known_video_entry"
     ORIGIN_INVALID = "origin_invalid"
     ENTRY_UNKNOWN = "entry_unknown"
     SEARCH_ROUTE_INVALID = "search_route_invalid"
@@ -55,6 +60,7 @@ _KNOWN_EVIDENCE = {
     DouyinPageEntry.HOME: DouyinPageEvidence.KNOWN_HOME_ENTRY,
     DouyinPageEntry.SESSION_PROBE: DouyinPageEvidence.KNOWN_SESSION_ENTRY,
     DouyinPageEntry.SEARCH_RESULTS: DouyinPageEvidence.KNOWN_SEARCH_ENTRY,
+    DouyinPageEntry.VIDEO_DETAIL: DouyinPageEvidence.KNOWN_VIDEO_ENTRY,
 }
 _FAILURE_EVIDENCE = frozenset(
     {
@@ -125,6 +131,13 @@ class DouyinPageVersionModel:
             if _valid_search_route(parsed):
                 return _known(DouyinPageEntry.SEARCH_RESULTS)
             return _unknown(DouyinPageEvidence.SEARCH_ROUTE_INVALID)
+        if (
+            parsed.path.startswith(_VIDEO_PATH_PREFIX)
+            and not parsed.query
+            and _VIDEO_ID_PATTERN.fullmatch(parsed.path.removeprefix(_VIDEO_PATH_PREFIX))
+            is not None
+        ):
+            return _known(DouyinPageEntry.VIDEO_DETAIL)
         return _unknown(DouyinPageEvidence.ENTRY_UNKNOWN)
 
     def require_entry(
@@ -219,6 +232,7 @@ __all__ = [
     "DOUYIN_PAGE_MODEL_VERSION",
     "DOUYIN_SEARCH_ENTRY_URL",
     "DOUYIN_SESSION_PROBE_URL",
+    "DOUYIN_VIDEO_ENTRY_URL",
     "DouyinPageEntry",
     "DouyinPageEvidence",
     "DouyinPageObservation",

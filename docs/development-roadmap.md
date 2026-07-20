@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-07 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-08 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-08 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-09 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -314,7 +314,7 @@
 | A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | ✅ 已完成 |
 | A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | ✅ 已完成 |
 | A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ✅ 已完成 |
-| A7-08 | 抖音评论 Page Object | 定位输入/提交/最终状态；页面变化 fail closed | D6-02,A7-05 | ⬜ 未开始 |
+| A7-08 | 抖音评论 Page Object | 定位输入/提交/最终状态；页面变化 fail closed | D6-02,A7-05 | ✅ 已完成 |
 | A7-09 | 抖音私信 Page Object | 进入会话/输入/发送/最终状态；权限差异处理 | D6-02,A7-05 | ⬜ 未开始 |
 | A7-10 | 只浏览动作 | 无发送副作用的目标访问，作为低风险基线 | D6-10 | ⬜ 未开始 |
 | A7-11 | 评论动作执行 | 授权校验→账本→点击→最终验证→结构化 receipt | A7-07,A7-08 | ⬜ 未开始 |
@@ -2201,11 +2201,24 @@
 - 资源与文档：门禁启动前确认 1420 端口空闲，Playwright 固定无头并由 webServer fixture 关闭；没有启动 App、Uvicorn、PostgreSQL、Docker、运营浏览器或真实平台账号，没有新增固定端口、Profile、SQLite 或系统钥匙串资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有创建第二份规划
 - 后续：进入 `A7-08` 抖音评论 Page Object；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
 
+### A7-08 抖音评论 Page Object
+
+- 状态：✅ 已完成
+- RED：先把唯一台账置为 `🧪 RED`；Python Page Object 测试准确在收集阶段失败于缺少 `automation_tool.executor.rpa.douyin.comment_page`，跨目录 Node 契约准确失败于生产模块不存在。测试先固定官方视频详情路由、ready/final 状态、selector 所有权、登录/风控优先级、半套/重复锚点、中途漂移、有界等待和错误脱敏，再实现生产模块
+- 路由版本：D6-02 的共享 `DouyinPageVersionModel` 新增 `VIDEO_DETAIL/KNOWN_VIDEO_ENTRY`，只接受官方 HTTPS host、无 query/fragment、`/video/<1..32 位非零开头数字 ID>` canonical 路由；空/零/非数字/多段/带 query 视频路由继续 unknown。既有搜索 Page Object 在视频入口只返回 `required_anchor_missing` 熔断，不会把评论页误认成搜索页
+- Selector 所有权：`comment_page.py` 独占 comment input、submit、final confirmation、login 和 blocking selector 组；每组使用一个合并 locator 并要求恰好一个可见元素，既避免同一元素多属性造成误判，也拒绝两个真实控件的歧义。访问器每次先重新观察完整页面，再返回对应 locator；Page Object 源码没有 fill/click/press，不提前执行平台副作用
+- 封闭状态：只返回 `ready/confirmed/login_required/dialog_blocked/unknown` 与固定 evidence；登录证据优先于通用 dialog，风控/阻塞优先于动作锚点，final confirmation 优先于仍可见输入区，使陈旧成功提示不能继续动作。输入/提交缺一、重复锚点、未知/错误路由、坏 count、驱动异常和访问时 DOM 漂移全部 fail closed，异常与 repr 不回显 URL 或页面内容
+- 有界等待：ready 和 final 最多接受 `1..60000` 毫秒并共享单次总预算；等待期间每个锚点出现后都重新观察路由、登录、风控和全部锚点。超时返回当前封闭事实，页面不可用返回固定 unavailable；路由变化、冲突或阻塞立即结束，不把单次 locator 可见冒充页面整体可用
+- 原调用方验收：隔离 `douyin_comment_pages` Fake 语料通过生产 `BrowserRuntime → BrowserWindow → DouyinCommentPage` 在无头系统 Chrome、官方 origin 路由回放；正式 locator 完成 ready→输入/提交→confirmed，另覆盖阻塞和双输入漂移，runtime 退出后 Profile 保持 0700 且浏览器完整关闭。该证据验证生产 Page Object 原入口，但不访问真实账号、不冒充 A7-16 真实评论最终状态；A7-11 才在 A7-07 唯一许可后编排真实填写/点击
+- 门禁：完整 A7-08 聚焦 `95 passed`；comment/page-version 两个新改模块 290 条语句/76 个分支覆盖率 100%。Backend 全量 `1616 passed, 5 skipped`，10260 条语句/2212 个分支覆盖率 100%，291 个 Python 文件格式、Ruff、严格 Mypy 268 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 95 项 Node 契约、184 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 快照、production boundary 与构建全绿；Rust 三套配置、Rustfmt 与三套全目标 Clippy `-D warnings` 全绿
+- 资源与文档：Fake 验收与 UI 门禁均固定 headless，运行前确认 1420 端口空闲；BrowserRuntime/Playwright fixture 退出后无浏览器、Vite、pytest、Executor 或 Uvicorn 进程和监听残留。未启动 App、PostgreSQL、Docker、真实平台账号或固定业务端口，未读取或复用其他项目资源。同步根/Backend README、后端架构、工程结构和本唯一台账
+- 后续：进入 `A7-09` 抖音私信 Page Object；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-08`（⬜ 未开始）：先以 Fake 页面失败矩阵固定评论输入、提交和最终状态 Page Object，页面变化必须 fail closed；
+1. `A7-09`（⬜ 未开始）：先以 Fake 页面失败矩阵固定进入会话、私信输入/发送、最终状态和权限差异，页面变化必须 fail closed；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

@@ -130,7 +130,11 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinSearchPageState.LOGIN_REQUIRED,
                 DouyinSearchPageEvidence.LOGIN_DIALOG,
             )
-            for entry in (DouyinPageEntry.HOME, DouyinPageEntry.SEARCH_RESULTS)
+            for entry in (
+                DouyinPageEntry.HOME,
+                DouyinPageEntry.SEARCH_RESULTS,
+                DouyinPageEntry.VIDEO_DETAIL,
+            )
         ),
         *(
             (
@@ -139,7 +143,11 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinSearchPageState.DIALOG_BLOCKED,
                 DouyinSearchPageEvidence.BLOCKING_DIALOG,
             )
-            for entry in (DouyinPageEntry.HOME, DouyinPageEntry.SEARCH_RESULTS)
+            for entry in (
+                DouyinPageEntry.HOME,
+                DouyinPageEntry.SEARCH_RESULTS,
+                DouyinPageEntry.VIDEO_DETAIL,
+            )
         ),
         *(
             (
@@ -148,7 +156,11 @@ _ALLOWED_OBSERVATIONS = frozenset(
                 DouyinSearchPageState.UNKNOWN,
                 evidence,
             )
-            for entry in (DouyinPageEntry.HOME, DouyinPageEntry.SEARCH_RESULTS)
+            for entry in (
+                DouyinPageEntry.HOME,
+                DouyinPageEntry.SEARCH_RESULTS,
+                DouyinPageEntry.VIDEO_DETAIL,
+            )
             for evidence in (
                 DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING,
                 DouyinSearchPageEvidence.CONFLICTING_ANCHORS,

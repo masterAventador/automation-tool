@@ -33,6 +33,7 @@ RESULT_ITEM_FALLBACK = '[data-e2e="search-result-item"]'
 LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
 RISK_CHALLENGE = 'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'
+VIDEO_DETAIL_URL = "https://www.douyin.com/video/7351234567890123456"
 
 
 class FakeLocator:
@@ -215,6 +216,16 @@ def test_session_entry_is_a_login_redirect_without_dom_guessing() -> None:
     assert observation.entry is DouyinPageEntry.SESSION_PROBE
     assert observation.circuit_open is True
     assert page.requested_selectors == []
+
+
+def test_video_detail_is_known_but_never_mistaken_for_a_search_page() -> None:
+    observation = DouyinSearchPage(window(FakePage(url=VIDEO_DETAIL_URL))).observe()
+
+    assert observation.page_version is DouyinPageVersion.WEB_V1
+    assert observation.entry is DouyinPageEntry.VIDEO_DETAIL
+    assert observation.state is DouyinSearchPageState.UNKNOWN
+    assert observation.evidence is DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING
+    assert observation.circuit_open is True
 
 
 @pytest.mark.parametrize("url", (DOUYIN_HOME_URL, SEARCH_RESULTS_URL))

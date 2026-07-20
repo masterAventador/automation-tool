@@ -344,6 +344,10 @@ A7-07 将 Local Executor SQLite 升级到 v5，并把不可重复的平台副作
 
 副作用表通过外键复用 A7-04 的完整 Action/Target/Attempt/Task/Installation/Executor 绑定，不复制云端业务事实。它只新增 effect/verification 两个 32 字节摘要、封闭状态、UTC 时间与 revision，不保存评论或私信正文、Token、Cookie、Profile、页面原文、账号或密钥。A7-07 没有 HTTP、OpenAPI、Tauri Command、React 或浏览器入口；A7-11/A7-12 必须以该公开 Python 账本 API 作为真实点击前后的原调用面。
 
+A7-08 在 D6-02 页面版本模型内新增 `VIDEO_DETAIL`，只接受 HTTPS 官方 host、无 query/fragment 的 canonical `/video/<1..32 位非零开头数字 ID>`；搜索 Page Object 在该已知但不属于搜索的入口只返回熔断状态，不能误用评论 DOM。`comment_page.py` 独占评论 input、submit、final confirmation、登录与阻塞 selector 组，每组通过一个合并 locator 要求恰好一个可见元素，避免相同元素多属性误报，也拒绝两个真实控件造成的歧义。
+
+评论 Page Object 本身不调用 fill/click/press，不接收正文、授权或账本，也不读取页面文本作为业务数据。它只返回封闭 `ready/confirmed/login_required/dialog_blocked/unknown` 观察和经再次观察后取得的 locator；最终确认优先于仍可见的输入区，陈旧确认会使页面不可继续动作。ready/final 等待共用有界总预算，路由变化、半套/重复锚点、登录、风控和驱动异常都停止等待。A7-11 必须在动作前拒绝陈旧 confirmed，再从 A7-07 获得唯一分发许可后使用这些 locator，并自行负责精确文案和最终证据绑定。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。
