@@ -32,6 +32,7 @@ automation-tool/
 │   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
 │   └── fixtures/
+│       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
 │       ├── executor-package-v1/   # Python 生成、Rust 复验的 inert 签名目录样例
 │       └── executor-diagnostics-v1.json # Python/Rust 共用脱敏输入与安全结果
@@ -373,6 +374,8 @@ D6-12 的用户页面位于既有 `features/task-runs/`：`TaskTargetPreview.tsx
 D6-13 复用既有 `application/task_command_delivery.py` 与 `infrastructure/database/task_command_repository.py`，没有新增 dispatcher、消息队列或第二协议。`schema.py`/Alembic `20260720_0019` 只给 Outbox 增加确认 message 绑定；仓储以 typed Task definition 判断 offer 是否可能承载业务动作，在 enqueue 固定当前确认并在 claim 关联复验。`scripts/run_d6_13_acceptance.py` 复用共享隔离 PostgreSQL/Uvicorn/WebSocket 脚手架，证明未绑定和确认失效命令不离开数据库、当前绑定命令才到达正式 Executor 网络入口；它不调用 App API、不启动 Tauri/浏览器，也不伪造 Wave 7 ActionAuthorization 或平台动作。
 
 D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移专用本机 spool 与窄引用；`discovery_operation.py` 仍是唯一调用方，`protocol/executor_envelope.py` 只把两种明确漂移 evidence 收紧到 `handoff_required`，Control Plane 继续复用既有发现收敛仓储。`tests/integration/test_page_drift_artifact_browser.py` 从正式 command processor 进入生产编排，以无头系统 Chrome 和隔离 Profile 验证 Artifact 与浏览器清理；PostgreSQL 集成矩阵验证两种 evidence 都投影为 `awaiting_human`。本任务没有新增 App/API/数据库表、通用文件浏览器、截图/Trace 或上传通道，H8-09/H8-12 仍负责通用 Artifact 与保留治理。
+
+D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 

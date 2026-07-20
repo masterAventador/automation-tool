@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-14，下一项为 D6-15 Fake 页面回归样例；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-15，下一项为 D6-16 真实目标发现验收；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -296,7 +296,7 @@
 | D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | 🟩 完成 |
 | D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | 🟩 完成 |
 | D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | 🟩 完成 |
-| D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | ⬜ 未开始 |
+| D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | 🟩 完成 |
 | D6-16 | 真实目标发现验收 | 受控抖音账号完成搜索与预览，确认无外部副作用 | D6-15 | 🔍 待真实账号 |
 
 ## 12. Wave 7：抖音受控评论与主动私信
@@ -2086,10 +2086,23 @@
 - 资源与文档：全部数据库测试继续使用 `automation-tool-pytest-*` 专属 Compose project 与随机 loopback 端口；浏览器只使用 pytest 临时 Profile/state，未触碰默认 Chrome User Data、真实抖音账号、AppData、系统钥匙串或其他项目。测试结束后 Chrome、Playwright、PostgreSQL 容器/网络/Volume 和监听端口零残留；同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `D6-15`，把正常、空结果、弹窗、登录跳转、未知版本和无限滚动页面固化为可回放 Fake 页面回归样例；继续使用正式 Page Object/执行器，不把 Fake Adapter 打进生产包
 
+### D6-15 Fake 页面回归样例
+
+- 状态：🟩 完成
+- 提交：本记录、七份静态页面语料、六场景正式命令回归、既有浏览器测试去重和文档属于单一 `test: 固化抖音发现页面回归语料` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`；语料契约最初准确失败于 `tests/fixtures/douyin_discovery_pages/` 不存在。首轮补齐后六场景中的空结果继续准确失败为 `results_ready_timed_out`，证明无高度的空 `role=feed` 在真实浏览器中不可见；修正为“容器可见但零 article”的确定空结果后，正式链路收敛到预期 `failed/no_candidates`
+- 封闭语料：目录固定七个小型 UTF-8 HTML：首页、普通阻塞弹窗、Session probe 登录页、未知版本页、正常两候选、可见空结果和无限滚动结果。契约要求文件集合精确、单文件 `1..16 KiB`，不含 `http://`/`https://`、fetch、Cookie 或 Local Storage 依赖；页面不连外网、不读取本机数据，也不进入 PyInstaller/Tauri 正式包
+- 正式链路：参数化回归为每个场景创建独立 pytest 临时 state/Profile 与 `headless=true` 系统 Chrome，从 `ExecutorCommandProcessor.handle(task.discover)` 进入 D6-10 生产发现编排；只用 Playwright route 把固定官方 URL 映射到本地 HTML，没有 Mock Page Object、Fake Adapter、直接调用结果构造器或可见窗口。每次结束都断言 BrowserRuntime 已关闭、Profile 权限保持私有
+- 六类结果：正常页返回 2 个最小 Candidate 与 `completed/candidates_extracted`；空列表经一轮无增长停止后返回 `failed/no_candidates`；普通 dialog 返回 `handoff_required/blocking_dialog`；302 到 `/user/self` 返回 `login_required/login_required`；未知官方路径触发 D6-14 一份受限 Artifact 与 `handoff_required/page_version_unknown`；无限页每次 wheel 持续增加一项，但 20 轮硬上限后只提取初始 1 + 新增 20 = 21 个 Candidate，不因页面仍可增长而继续
+- 去重与回归：D6-04 搜索、D6-05 有界滚动和 D6-07 候选隐私三个既有真实浏览器测试删除各自内联首页/结果 HTML，改读同一语料；原有搜索 URL、2 轮达到目标、隐私字段不离开 Page Object 和 Runtime 关闭断言全部保持。D6-14 锚点冲突专用验收独立保留，避免把页面漂移诊断和本任务未知版本样例混为同一证据
+- 测试：Backend 全量 `1404 passed, 5 skipped in 114.94s`，8996 条语句、1928 个分支覆盖率 100%；Ruff/格式 247 个文件、严格 Mypy 247 个源码/测试文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。D6-15 六场景加语料契约 7 项、D6-04/D6-05/D6-07 共享语料回归 3 项均单独通过；本任务没有修改任何生产代码、协议、API、数据库、Frontend 或 Rust
+- 资源与文档：浏览器测试只使用 pytest 临时目录和无头系统 Chrome；全量数据库继续使用 `automation-tool-pytest-*` 专属 Compose project 与随机 loopback 端口。结束后 Chrome/Playwright、pytest、PostgreSQL 容器/网络/Volume 和监听端口零残留，未触碰用户默认 Profile、真实抖音账号、系统钥匙串或其他项目；同步根/Backend README、后端架构、工程结构和本唯一台账
+- 后续：进入 `D6-16`，优先复用用户已授权的独立抖音 Profile，从正式只读目标发现链完成真实搜索/预览并证明没有评论、私信或其他外部副作用；若真实 Session 已失效则保持待账号补验并继续 Wave 7 可离线任务
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-15`：固化正常、空结果、弹窗、登录跳转、未知版本和无限滚动 Fake 页面回归样例；
+1. `D6-16`：使用受控真实抖音账号完成只读目标发现与预览，确认没有外部副作用；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

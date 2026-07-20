@@ -22,46 +22,9 @@ from automation_tool.executor.rpa.douyin.search import DouyinSearchExecution
 from automation_tool.protocol import DouyinSearchInput
 
 MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-HOME_DOCUMENT = """<!doctype html>
-<html lang="zh-CN">
-  <head><meta charset="utf-8" /></head>
-  <body>
-    <input aria-label="搜索" />
-    <button aria-label="搜索" onclick="runSearch()">搜索</button>
-    <script>
-      function runSearch() {
-        const keyword = document.querySelector('input[aria-label="搜索"]').value;
-        window.location.href = `/search/${encodeURIComponent(keyword)}?type=general`;
-      }
-    </script>
-  </body>
-</html>
-"""
-RESULT_DOCUMENT = """<!doctype html>
-<html lang="zh-CN">
-  <head><meta charset="utf-8" /></head>
-  <body>
-    <main role="feed">
-      <article data-page-copy="private-page-body">
-        <a data-e2e="search-result-author"
-           data-user-id="creator-001"
-           data-user-handle="creator.one"
-           data-avatar="https://private.invalid/avatar-secret.jpg"
-           data-contact="private-phone-13800000000"
-           href="https://www.douyin.com/user/creator-001?token=page-secret">
-          <span data-e2e="search-result-author-name">创作者甲</span>
-        </a>
-        <p>不应离开页面对象的完整正文 private-article-copy</p>
-      </article>
-      <article>
-        <a data-e2e="search-result-author" href="/user/creator-002?tracking=discard-me">
-          <span data-e2e="search-result-author-name">创作者乙</span>
-        </a>
-      </article>
-    </main>
-  </body>
-</html>
-"""
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_discovery_pages"
+HOME_DOCUMENT = (FIXTURE_ROOT / "home.html").read_text(encoding="utf-8")
+RESULT_DOCUMENT = (FIXTURE_ROOT / "results-normal.html").read_text(encoding="utf-8")
 
 
 def test_production_search_then_candidate_privacy_boundary_uses_headless_browser_and_closes(

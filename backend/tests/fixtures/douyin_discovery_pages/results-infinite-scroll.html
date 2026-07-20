@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body style="min-height: 4000px">
+    <main role="feed">
+      <article>
+        <a data-e2e="search-result-author"
+           data-user-id="fake-infinite-001"
+           href="/user/fake-infinite-001">
+          <span data-e2e="search-result-author-name">无限样例 1</span>
+        </a>
+      </article>
+    </main>
+    <script>
+      window.addEventListener("wheel", () => {
+        const feed = document.querySelector('[role="feed"]');
+        const next = feed.children.length + 1;
+        const identifier = `fake-infinite-${String(next).padStart(3, "0")}`;
+        const article = document.createElement("article");
+        const author = document.createElement("a");
+        const name = document.createElement("span");
+        author.dataset.e2e = "search-result-author";
+        author.dataset.userId = identifier;
+        author.setAttribute("href", `/user/${identifier}`);
+        name.dataset.e2e = "search-result-author-name";
+        name.textContent = `无限样例 ${next}`;
+        author.appendChild(name);
+        article.appendChild(author);
+        feed.appendChild(article);
+      });
+    </script>
+  </body>
+</html>

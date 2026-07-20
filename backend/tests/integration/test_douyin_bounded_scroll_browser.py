@@ -21,40 +21,9 @@ from automation_tool.executor.rpa.douyin.search import DouyinSearchExecution
 from automation_tool.protocol import DouyinSearchInput
 
 MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-HOME_DOCUMENT = """<!doctype html>
-<html lang="zh-CN">
-  <head><meta charset="utf-8" /></head>
-  <body>
-    <input aria-label="搜索" />
-    <button aria-label="搜索" onclick="runSearch()">搜索</button>
-    <script>
-      function runSearch() {
-        const keyword = document.querySelector('input[aria-label="搜索"]').value;
-        window.location.href = `/search/${encodeURIComponent(keyword)}?type=general`;
-      }
-    </script>
-  </body>
-</html>
-"""
-RESULT_DOCUMENT = """<!doctype html>
-<html lang="zh-CN">
-  <head><meta charset="utf-8" /></head>
-  <body style="min-height: 4000px">
-    <main role="feed"><article>结果 1</article></main>
-    <script>
-      window.addEventListener('wheel', () => {
-        const feed = document.querySelector('[role="feed"]');
-        const next = feed.children.length + 1;
-        if (next <= 3) {
-          const article = document.createElement('article');
-          article.textContent = `结果 ${next}`;
-          feed.appendChild(article);
-        }
-      });
-    </script>
-  </body>
-</html>
-"""
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_discovery_pages"
+HOME_DOCUMENT = (FIXTURE_ROOT / "home.html").read_text(encoding="utf-8")
+RESULT_DOCUMENT = (FIXTURE_ROOT / "results-infinite-scroll.html").read_text(encoding="utf-8")
 
 
 def test_production_search_then_bounded_scroll_uses_headless_browser_and_closes(

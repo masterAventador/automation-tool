@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <input aria-label="搜索" />
+    <button aria-label="搜索" onclick="runSearch()">搜索</button>
+    <script>
+      function runSearch() {
+        const keyword = document.querySelector('input[aria-label="搜索"]').value;
+        window.location.href = `/search/${encodeURIComponent(keyword)}?type=general`;
+      }
+    </script>
+  </body>
+</html>

@@ -20,24 +20,9 @@ from automation_tool.executor.rpa.douyin.search import (
 from automation_tool.protocol import DouyinSearchInput
 
 MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-HOME_DOCUMENT = """<!doctype html>
-<html lang="zh-CN">
-  <head><meta charset="utf-8" /></head>
-  <body>
-    <input aria-label="搜索" />
-    <button aria-label="搜索" onclick="runSearch()">搜索</button>
-    <script>
-      function runSearch() {
-        const keyword = document.querySelector('input[aria-label="搜索"]').value;
-        window.location.href = `/search/${encodeURIComponent(keyword)}?type=general`;
-      }
-    </script>
-  </body>
-</html>
-"""
-RESULT_DOCUMENT = """<!doctype html>
-<html lang="zh-CN"><body><main role="feed">确定性搜索结果</main></body></html>
-"""
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_discovery_pages"
+HOME_DOCUMENT = (FIXTURE_ROOT / "home.html").read_text(encoding="utf-8")
+RESULT_DOCUMENT = (FIXTURE_ROOT / "results-normal.html").read_text(encoding="utf-8")
 
 
 def test_production_browser_runtime_executes_search_headlessly_and_closes(
