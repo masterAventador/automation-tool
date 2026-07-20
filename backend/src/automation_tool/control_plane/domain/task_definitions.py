@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 from automation_tool.protocol import (
     MAX_SEARCH_KEYWORD_CHARACTERS,
     MAX_TASK_TARGET_LIMIT,
+    DouyinSearchExposureAction,
     DouyinSearchInput,
     DouyinSearchInputRejected,
 )
@@ -16,12 +16,6 @@ from automation_tool.protocol.safe_text import is_unsafe_text
 DOUYIN_SEARCH_EXPOSURE_TEMPLATE = "douyin.search_exposure.v1"
 MAX_MESSAGE_TEMPLATE_CHARACTERS = 500
 MAX_TASK_INTERVAL_SECONDS = 3600
-
-
-class DouyinSearchExposureAction(StrEnum):
-    BROWSE = "browse"
-    COMMENT = "comment"
-    DIRECT_MESSAGE = "direct_message"
 
 
 class InvalidTaskDefinition(ValueError):

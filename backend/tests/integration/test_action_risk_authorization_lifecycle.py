@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import AlembicRunner
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 
@@ -28,6 +29,7 @@ from automation_tool.control_plane.domain import (
     DouyinSearchExposureAction,
     ExecutionAttemptId,
     ExecutionAttemptStatus,
+    ExecutorId,
     InstallationId,
     TargetId,
     TaskId,
@@ -48,7 +50,24 @@ from automation_tool.control_plane.infrastructure.database import (
     task_targets,
     tasks,
 )
-from automation_tool.protocol import DouyinCandidateSource, PlatformSessionState
+from automation_tool.control_plane.infrastructure.security import (
+    Ed25519ActionAuthorizationIssuer,
+)
+from automation_tool.executor.action_authorization import (
+    ActionAuthorizationExpectation,
+    Ed25519ActionAuthorizationVerifier,
+)
+from automation_tool.protocol import (
+    DouyinCandidateSource,
+    PlatformSessionState,
+    ProtocolActionId,
+    ProtocolExecutionAttemptId,
+    ProtocolExecutorId,
+    ProtocolInstallationId,
+    ProtocolTargetId,
+    ProtocolTaskId,
+    action_authorization_idempotency_key,
+)
 
 PREVIOUS_REVISION = "20260720_0019"
 HEAD_REVISION = "20260720_0020"
@@ -95,6 +114,14 @@ class RunnableTarget:
     task_id: TaskId
     attempt_id: ExecutionAttemptId
     target_id: TargetId
+
+
+@dataclass(slots=True)
+class FixedAuthorizationClock:
+    value: datetime
+
+    def now(self) -> datetime:
+        return self.value
 
 
 async def reset_data(database: Database) -> None:
@@ -396,6 +423,63 @@ async def test_authorization_persists_action_policy_snapshot_and_exact_replay(
                     consecutive_failure_threshold=3,
                 ),
                 authorized_at=NOW,
+            )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_database_authorization_is_signed_and_verified_for_the_exact_executor_intent(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyActionRiskAuthorizationRepository(database)
+    private_key = bytes(range(32))
+    executor_id = ExecutorId.new()
+    try:
+        await reset_data(database)
+        installation_id = await seed_installation(database)
+        target = (await seed_runnable_target(database, installation_id))[0]
+
+        authorization = await authorize(repository, target, installation_id)
+        issued = Ed25519ActionAuthorizationIssuer(
+            private_key=private_key,
+            clock=FixedAuthorizationClock(NOW),
+            authorization_lifetime=timedelta(seconds=60),
+        ).issue(authorization=authorization, executor_id=executor_id)
+        protocol_action_id = ProtocolActionId(str(authorization.action_id))
+        verified = Ed25519ActionAuthorizationVerifier(
+            public_key=(
+                Ed25519PrivateKey.from_private_bytes(private_key).public_key().public_bytes_raw()
+            ),
+            clock=FixedAuthorizationClock(NOW + timedelta(seconds=1)),
+        ).verify(
+            token=issued.token,
+            expected=ActionAuthorizationExpectation(
+                action_id=protocol_action_id,
+                target_id=ProtocolTargetId(str(authorization.target_id)),
+                execution_attempt_id=ProtocolExecutionAttemptId(
+                    str(authorization.execution_attempt_id)
+                ),
+                task_id=ProtocolTaskId(str(authorization.task_id)),
+                installation_id=ProtocolInstallationId(str(authorization.installation_id)),
+                executor_id=ProtocolExecutorId(str(executor_id)),
+                platform=authorization.platform.value,
+                action=authorization.action,
+                idempotency_key=action_authorization_idempotency_key(protocol_action_id),
+            ),
+        )
+
+        assert verified == issued.claims
+        assert verified.authorized_at == authorization.authorized_at
+        assert verified.deadline_at == NOW + timedelta(seconds=60)
+        async with database.session() as session:
+            assert (
+                await session.scalar(select(func.count()).select_from(action_risk_authorizations))
+                == 1
             )
     finally:
         await reset_data(database)

@@ -171,6 +171,18 @@ class ProtocolExecutionAttemptId(_CanonicalUuidV4):
     _purpose = "execution attempt"
 
 
+class ProtocolActionId(_CanonicalUuidV4):
+    """Action identity at the process protocol boundary."""
+
+    _purpose = "action"
+
+
+class ProtocolTargetId(_CanonicalUuidV4):
+    """Target identity at the process protocol boundary."""
+
+    _purpose = "target"
+
+
 class IdempotencyKey(str):
     """Bounded canonical key used to deduplicate one message intent."""
 
@@ -613,9 +625,11 @@ __all__ = [
     "ExecutorProtocolError",
     "IdempotencyKey",
     "MessageId",
+    "ProtocolActionId",
     "ProtocolExecutionAttemptId",
     "ProtocolExecutorId",
     "ProtocolInstallationId",
+    "ProtocolTargetId",
     "ProtocolTaskId",
     "TaskCommandEnvelope",
     "TaskCommandResultEnvelope",

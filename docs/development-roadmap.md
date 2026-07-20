@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-02 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-03；B5-15 真实账号 App 双重启证据同样独立补验 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-03 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-04；B5-15 真实账号 App 双重启证据同样独立补验 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -309,8 +309,8 @@
 | --- | --- | --- | --- | --- |
 | A7-01 | 风险策略领域模型 | 平台/动作/安装实例级最小间隔、任务/日上限、连续失败阈值 | T3-01 | 🟩 完成 |
 | A7-02 | 服务端计数与并发授权 | PostgreSQL 原子授权；并发不能突破上限 | A7-01,T3-03 | 🟩 完成 |
-| A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | ⬜ 未开始 |
-| A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | ⬜ 未开始 |
+| A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | 🟩 完成 |
+| A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | 🧪 RED |
 | A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | ⬜ 未开始 |
 | A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | ⬜ 未开始 |
 | A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ⬜ 未开始 |
@@ -2135,11 +2135,24 @@
 - 资源与文档：没有启动 App、浏览器、Uvicorn 或固定业务端口；真实 PostgreSQL 测试使用 `automation-tool-pytest-*` 独立 Compose project、随机 loopback 端口、专属容器/网络/Volume，并在两次全量和聚焦测试后全部回收，未触碰其他项目的 5432/8000/8080 资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `A7-03`，在当前原子事实之上建立 action/target/attempt/deadline/idempotency 完整绑定的短期签名或 MAC 授权，并由 Local Executor 严格验签；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
 
+### A7-03 ActionAuthorization
+
+- 状态：🟩 完成
+- RED：先把唯一台账置为 `🧪 RED`，新增共享 claims/token、Control Plane 签发器与 Executor 验签器失败矩阵；聚焦测试在收集阶段准确失败于 `automation_tool.protocol.action_authorization`、签发和验签模块不存在。全量回归随后准确发现共享动作枚举新增说明会造成 OpenAPI 文案漂移；保持该失败证据后删除非必要 Schema 描述，原快照逐字恢复，没有以重生成快照掩盖意外 API 变化
+- 非对称信任：选择 Ed25519 而非复用 Executor 已知的本机会话 MAC key，避免本机执行器持有可自行签发/扩大权限的共享秘密。Control Plane 签发器显式接受独立 32 字节部署私钥，Local Executor 验签器只接受对应固定公钥；私钥不进入 App、Executor、SQLite、协议、普通配置或系统钥匙串，真实部署注入和公钥固定由后续组合根完成
+- 完整 claims：不可变 `action-authorization.v1` 精确绑定 Action、Target、Execution Attempt、Task、Installation、Executor、固定 `douyin` 平台、`browse/comment/direct_message` 动作、派生 `action:<action_id>` 幂等键，以及服务端 UTC `authorized_at/deadline_at`。授权生命周期调用方必须显式给出整秒 `1 秒..5 分钟`；服务端不能从客户端自报时间构造授权
+- Canonical token：固定 `ataa1.<payload>.<signature>`，签名输入带独立域；payload 是排序、紧凑、ASCII、exact-field JSON，时间固定六位微秒 UTC，Base64URL 无 padding，token 最大 2 KiB。解析器拒绝重复/缺失/额外字段、错误资源类型、非 canonical JSON/时间/Base64、Unicode、坏签名长度和超限输入；错误、repr 与 fingerprint 不回显资源身份或 token
+- Executor 验签：先用固定公钥验 Ed25519，再把九项执行意图逐字段匹配；授权最多允许 30 秒未来时钟偏差，到达 deadline 立即失效且没有过期宽限。篡改、错误 signer、跨 Target/Attempt/Task/Installation/Executor、动作或幂等键变化、坏时钟和非 canonical token 全部统一脱敏拒绝。A7-03 不执行平台动作，也不提前实现 A7-04 本机频控/紧停或 A7-07 副作用账本
+- 生产同路径：真实 PostgreSQL 18.4、完整 Alembic 和正式 `SqlAlchemyActionRiskAuthorizationRepository` 先产生唯一 A7-02 原子事实；随后正式 Issuer 签发，Executor Verifier 以从该事实独立构造的完整 expectation 验签，最终数据库仍只有一条授权记录。该内部边界没有 HTTP、OpenAPI、Tauri Command、React 或浏览器调用，因此不启动空壳 App；后续动作 wire 接入时必须继续从真实 Executor 原入口验收
+- 测试：协议/签发/验签聚焦 50 项、275 条语句/60 个分支覆盖率 100%，固定 golden token 防 canonical wire 漂移；Backend 全量 `1540 passed, 5 skipped in 120.15s`，9488 条语句/2032 个分支覆盖率 100%。280 个 Python 文件格式正确，Ruff 全绿，严格 Mypy 259 个源码/测试文件通过，uv lock、OpenAPI 和 Executor Schema 均无漂移；Frontend 89 项 Node 跨端契约、160 项 Vitest、ESLint、严格 TypeScript 和 API 快照全绿
+- 资源与文档：没有启动 App、Uvicorn、可见浏览器或固定业务端口；全量中的浏览器用例继续 headless，数据库测试使用 `automation-tool-pytest-*` 专属随机端口/Compose/容器/网络/Volume 并由 fixture 回收。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增第二份规划文档
+- 后续：进入 `A7-04`，在 Executor SQLite 建立服务端不可放宽的本机最小间隔、任务动作上限、紧停 latch 与授权验签消费边界；服务器授权、本机硬限制和紧停必须同时通过才允许后续动作进入 prepared
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-03`：为已原子授权的 Action 设计 action/target/attempt/deadline/idempotency 完整绑定的签名或 MAC，并让 Local Executor 使用固定协议严格验签；
+1. `A7-04`（🧪 RED）：正在审计 Executor SQLite v3、command processor 与紧停边界，先以失败测试固定本机最小间隔、任务上限和持久紧停 latch，服务端不得放宽；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from automation_tool.protocol.safe_text import is_unsafe_text
 
 DOUYIN_SEARCH_INPUT_VERSION = "douyin.search-input.v1"
 MAX_SEARCH_KEYWORD_CHARACTERS = 80
 MAX_TASK_TARGET_LIMIT = 100
+
+
+class DouyinSearchExposureAction(StrEnum):
+    BROWSE = "browse"
+    COMMENT = "comment"
+    DIRECT_MESSAGE = "direct_message"
 
 
 class DouyinSearchInputRejected(ValueError):
@@ -51,6 +58,7 @@ __all__ = [
     "DOUYIN_SEARCH_INPUT_VERSION",
     "MAX_SEARCH_KEYWORD_CHARACTERS",
     "MAX_TASK_TARGET_LIMIT",
+    "DouyinSearchExposureAction",
     "DouyinSearchInput",
     "DouyinSearchInputRejected",
 ]
