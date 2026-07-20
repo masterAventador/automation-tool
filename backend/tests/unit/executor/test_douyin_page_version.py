@@ -17,6 +17,7 @@ from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageVersionModel,
     DouyinPageVersionRejected,
     douyin_search_results_url,
+    douyin_user_profile_url,
 )
 from automation_tool.protocol import DouyinSearchInput
 
@@ -230,3 +231,13 @@ def test_canonical_search_url_preserves_shared_validated_keyword() -> None:
     )
     with pytest.raises(DouyinPageVersionRejected, match="page version is unavailable"):
         douyin_search_results_url(cast(str, object()))
+
+
+def test_canonical_user_profile_url_accepts_only_shared_target_identifiers() -> None:
+    result = douyin_user_profile_url("creator-001")
+
+    assert result == "https://www.douyin.com/user/creator-001"
+    assert DouyinPageVersionModel().require_entry(result, DouyinPageEntry.USER_PROFILE).compatible
+    for invalid in (cast(str, object()), "", "-creator", "creator/extra", "a" * 129):
+        with pytest.raises(DouyinPageVersionRejected, match="page version is unavailable"):
+            douyin_user_profile_url(invalid)

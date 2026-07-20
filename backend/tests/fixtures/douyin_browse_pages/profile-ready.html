@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <main aria-label="用户主页">
+      <h1>隔离目标主页</h1>
+      <button aria-label="私信" id="message" type="button">私信</button>
+      <button aria-label="发表评论" id="comment" type="button">评论</button>
+    </main>
+    <script>
+      window.__browseSideEffects = 0;
+      document.querySelector("#message").addEventListener("click", () => {
+        window.__browseSideEffects += 1;
+      });
+      document.querySelector("#comment").addEventListener("click", () => {
+        window.__browseSideEffects += 1;
+      });
+    </script>
+  </body>
+</html>

@@ -14,6 +14,7 @@ DOUYIN_HOME_URL = "https://www.douyin.com/"
 DOUYIN_SESSION_PROBE_URL = "https://www.douyin.com/user/self"
 DOUYIN_SEARCH_ENTRY_URL = "https://www.douyin.com/search"
 DOUYIN_VIDEO_ENTRY_URL = "https://www.douyin.com/video"
+DOUYIN_USER_PROFILE_ENTRY_URL = "https://www.douyin.com/user"
 
 _OFFICIAL_HOST = "www.douyin.com"
 _SESSION_PATH = "/user/self"
@@ -175,6 +176,19 @@ def douyin_search_results_url(keyword: str) -> str:
         raise DouyinPageVersionRejected
     result = f"{DOUYIN_SEARCH_ENTRY_URL}/{quote(keyword, safe='')}?{_SEARCH_QUERY}"
     DouyinPageVersionModel().require_entry(result, DouyinPageEntry.SEARCH_RESULTS)
+    return result
+
+
+def douyin_user_profile_url(platform_target_id: str) -> str:
+    """Build one canonical user-profile route from a validated target identifier."""
+
+    if (
+        type(platform_target_id) is not str
+        or _PROFILE_ID_PATTERN.fullmatch(platform_target_id) is None
+    ):
+        raise DouyinPageVersionRejected
+    result = f"{DOUYIN_USER_PROFILE_ENTRY_URL}/{platform_target_id}"
+    DouyinPageVersionModel().require_entry(result, DouyinPageEntry.USER_PROFILE)
     return result
 
 

@@ -352,6 +352,10 @@ A7-09 在同一页面版本模型内新增 `USER_PROFILE`，只接受 HTTPS 官�
 
 私信 Page Object 本身不调用 fill/click/press，不接收正文、授权或账本，也不读取会话或页面文本作为业务数据。它只返回封闭 `profile_ready/conversation_ready/confirmed/permission_denied/login_required/dialog_blocked/unknown` 观察和经再次观察后取得的 locator；登录、风控和权限拒绝优先于动作锚点，final confirmation 优先于仍可见的输入区。profile/conversation/final 等待共用有界总预算，路由变化、半套/重复锚点、权限变化、驱动异常或中途漂移都会立即停止。A7-12 必须在动作前拒绝陈旧 confirmed/permission denied，再从 A7-07 获得唯一分发许可后使用这些 locator，并自行负责精确文案和最终证据绑定。
 
+A7-10 将“只浏览”收敛为 Executor 内部 `douyin.browse-execution.v1` 单次状态机，而不是新的 Web/App 接口。输入必须是 D6-10 链生成的完整最小 `DouyinCandidate`；共享页面版本模块用同一平台目标 ID 规则构造且复验 canonical 官方 `/user/<id>`，执行层没有官方 URL 或 selector 字面量，也不接受调用方任意 URL。`profile_page.py` 只拥有通用主页、登录、风控 selector，刻意不包含评论输入、私信入口或发送按钮。
+
+浏览执行固定一次 30 秒 `domcontentloaded` 导航、一次最多 10 秒的主页 ready 等待，并在最终成功前重新观察页面且二次取得唯一主页根节点。取消在导航前、导航后和成功前检查；明确取消、探针异常/非 bool、登录、风控、导航/主页超时、未知版本、重复锚点、驱动失败和中途漂移都返回封闭脱敏状态且不重试导航。完成只证明目标主页在当前窗口可见，不写 A7-07 副作用账本、不签发结果 receipt、不更新服务端 Task；A7-11/A7-12 才分别组合授权、账本和发送动作，A7-15 再建立目标级结果 UI。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

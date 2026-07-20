@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-09 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-10 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-10 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-11 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -316,7 +316,7 @@
 | A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ✅ 已完成 |
 | A7-08 | 抖音评论 Page Object | 定位输入/提交/最终状态；页面变化 fail closed | D6-02,A7-05 | ✅ 已完成 |
 | A7-09 | 抖音私信 Page Object | 进入会话/输入/发送/最终状态；权限差异处理 | D6-02,A7-05 | ✅ 已完成 |
-| A7-10 | 只浏览动作 | 无发送副作用的目标访问，作为低风险基线 | D6-10 | ⬜ 未开始 |
+| A7-10 | 只浏览动作 | 无发送副作用的目标访问，作为低风险基线 | D6-10 | ✅ 已完成 |
 | A7-11 | 评论动作执行 | 授权校验→账本→点击→最终验证→结构化 receipt | A7-07,A7-08 | ⬜ 未开始 |
 | A7-12 | 私信动作执行 | 授权校验→账本→发送→最终验证→结构化 receipt | A7-07,A7-09 | ⬜ 未开始 |
 | A7-13 | 结果不确定处理 | dispatched 未 verified 先查询；无法确认不重放 | A7-11,A7-12 | ⬜ 未开始 |
@@ -2229,11 +2229,26 @@
 - 资源与文档：Fake 验收与 UI 门禁均固定 headless；BrowserRuntime/Playwright fixture 退出后不保留运营浏览器或 Vite。未启动 App、Uvicorn、PostgreSQL、Docker、真实平台账号或固定业务端口，未读取默认 Profile、系统钥匙串或其他项目资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有创建第二份规划
 - 后续：进入 `A7-10` 只浏览动作；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
 
+### A7-10 只浏览动作
+
+- 状态：✅ 已完成
+- 日期：2026-07-20
+- 提交：本任务提交
+- RED：先把唯一台账置为 `🧪 RED`；Python 用例准确在收集阶段分别失败于缺少 `profile_page`、`browse` 和 `douyin_user_profile_url`，跨目录 Node 契约准确失败于生产模块不存在。最终主页锚点二次校验又先以行为测试证明旧实现会误报 completed，再补最小复验；没有先写实现或用日志/Mock 结果让用例假绿
+- 输入与路由：只接受 D6-10 发现链的完整最小 `DouyinCandidate`，不接受裸 URL、页面对象或私有路径。共享页面版本模块新增 `douyin_user_profile_url()`，以 A7-09 同一 `1..128` 位平台目标 ID 规则构造并复验 canonical 官方 `/user/<id>`；非法首字符、层级、超长、非字符串或未知路由全部拒绝
+- Page Object：`profile_page.py` 独占通用 profile root、login 和 blocking selector，不包含评论/私信控件；只返回 `ready/login_required/dialog_blocked/unknown` 与固定 evidence。登录优先于通用 dialog，风控优先于主页锚点；缺失、重复、坏 count、未知路由、驱动异常和访问时 DOM 漂移全部 fail closed，repr 与错误不回显目标、URL 或页面内容
+- 单次浏览：`browse.py` 固定一次 30 秒 `domcontentloaded` 导航和一次最多 10 秒的主页等待，执行层没有官方 URL/selector 字面量，也没有 click/fill/press/evaluate、Cookie/storage、HTTP 或 Control Plane 访问。同一实例拒绝重跑；开始、导航后、成功前各检查取消，探针抛错或非 bool 也开路停止；ready 后还须重新观察并二次取得唯一主页根节点才可 completed
+- 封闭结果：只返回 `completed/login_required/dialog_blocked/cancelled/timed_out/unknown` 与固定 evidence；导航/主页分别保留超时事实，登录、风控、未知版本、锚点冲突、页面不可用和取消探针不可用不重试。completed 只证明目标主页当前可见，不写 A7-07 账本、不生成服务端 receipt、不宣称 Task 或真实业务动作已完成
+- 原调用方验收：生产 `BrowserRuntime → BrowserWindow → DouyinBrowseExecution → DouyinProfilePage` 在无头系统 Chrome、一次性 0700 Profile 和官方-origin 隔离路由中依次回放 ready/login/blocked/drift 四个目标。ready 页面刻意放置评论/私信陷阱按钮，执行后 `window.__browseSideEffects == 0`；四次只产生四个 canonical 导航，Runtime 退出后浏览器完整关闭。该证据验证本任务 Executor RPA 原入口，不访问真实账号、不冒充后续 App/Executor wire 或 A7-15 结果 UI
+- 失败矩阵与门禁：A7-10 聚焦 `81 passed`，profile-page/browse/page-version 三个变更模块 395 条语句/96 个分支覆盖率 100%；Backend 全量 `1665 passed, 5 skipped`，10737 条语句/2326 个分支覆盖率 100%，276 个 Python 文件格式、Ruff、严格 Mypy 276 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 97 项 Node 契约、184 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 快照、production boundary 与构建全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 与三套全目标 Clippy `-D warnings` 全绿
+- 资源与文档：浏览 Fake 验收与 UI 门禁固定 headless；BrowserRuntime/Playwright fixture 退出后不保留测试浏览器或 Vite。未启动 App、Uvicorn、PostgreSQL、Docker、真实平台账号或固定业务端口，未读取默认 Profile、系统钥匙串或其他项目资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增第二份规划
+- 后续：进入 `A7-11` 评论动作执行；A7-10 的通用主页 Page Object 保持与评论/私信选择器隔离，D6-16/B5-15 真实账号补验继续独立保留
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-10`（⬜ 未开始）：实现无发送副作用的目标访问，作为后续动作执行和恢复链的低风险基线；
+1. `A7-11`（⬜ 未开始）：组合 ActionAuthorization、本机硬下限、副作用账本与评论 Page Object，形成一次性评论执行和结构化 receipt；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

@@ -265,8 +265,10 @@ backend/
 │       │   ├── bootstrap.py       # 一次性 stdin bootstrap、端点/Session/身份严格校验
 │       │   ├── browser_authority.py # 登录与发现共享的受信浏览器请求/lease 所有权
 │       │   ├── browser_runtime.py # 单 context、页面/窗口、超时和清理的 Playwright BrowserRuntime
+│       │   ├── rpa/douyin/browse.py # A7-10 单次、可取消、零发送的目标主页访问
 │       │   ├── rpa/douyin/comment_page.py # A7-08 评论输入/提交/最终确认的唯一 selector 所有者
 │       │   ├── rpa/douyin/direct_message_page.py # A7-09 私信会话/发送/权限/最终确认的唯一 selector 所有者
+│       │   ├── rpa/douyin/profile_page.py # A7-10 通用用户主页/登录/风控 Page Object
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
 │       │   ├── command_processor.py # 正式命令、SQLite checkpoint 和持久结果 outbox
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
@@ -376,6 +378,8 @@ D6-10 的服务端路径按 `api/task_discoveries.py`（App Session/HTTP）、`a
 A7-08 的 `executor/rpa/douyin/comment_page.py` 与既有 `page_version.py` 共同拥有评论页信任边界：版本模型新增 canonical 视频详情入口，评论模块集中管理 input/submit/final/login/blocking selector 和有界等待，只返回封闭观察或 locator，不执行填写/点击。`tests/fixtures/douyin_comment_pages` 与对应 BrowserRuntime 集成测试只存在于测试树，以无头系统 Chrome 回放 ready→confirmed、阻塞和漂移；生产包不包含 Fake 页面，真实评论编排仍由 A7-11 承接。
 
 A7-09 的 `executor/rpa/douyin/direct_message_page.py` 与同一 `page_version.py` 共同拥有主动私信页信任边界：版本模型新增 canonical 用户主页入口，私信模块集中管理进入会话、input/send/final、两类 permission、login/blocking selector 和有界等待，只返回封闭观察或 locator，不执行填写/点击。`tests/fixtures/douyin_direct_message_pages` 与对应 BrowserRuntime 集成测试只存在于测试树，以无头系统 Chrome 回放 profile→conversation→confirmed、关注权限拒绝和冲突漂移；生产包不包含 Fake 页面，真实私信编排仍由 A7-12 承接。
+
+A7-10 的 `executor/rpa/douyin/profile_page.py` 是与评论/私信页面对象平行的通用只读主页信任边界，只集中管理 profile root、login/blocking selector；`browse.py` 只编排 D6-10 Candidate→共享 canonical 用户 URL→一次导航→有界 Page Object 复验与取消检查，不含 selector、发送控件、任意 URL、Cookie/storage、Control Plane 或持久化。`tests/fixtures/douyin_browse_pages` 与 BrowserRuntime 集成测试只存在于测试树，以无头系统 Chrome 回放 ready/login/blocked/drift，并用页面内陷阱计数证明评论/私信按钮未触发；A7-11/A7-12 才能进入真实动作执行。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 
