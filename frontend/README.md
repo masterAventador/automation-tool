@@ -112,7 +112,7 @@ T3-15 的 Query/事件投影纵向验收执行 `uv run python ../scripts/run_t3_
 
 T3-16 的工作台纵向验收执行 `uv run python ../scripts/run_t3_16_acceptance.py`。唯一 `visible=false` 真实 App 从页面加载当前/最近 Task 和 Control Plane/Executor 状态，再真实点击“全局紧急停止/确认紧停”；正式 Rust client 写入紧停命令，HOLD FakeExecutor 从生产 Session/WebSocket 收到并 ACK，事件把 Task 收敛为 `outcome_uncertain`。运行状态轮询在隐藏窗口仍保持，设备私钥与长期凭据仍只在测试 App 的 `app_data_dir` 私有文件中。
 
-T3-17 的新建任务纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`。唯一 `visible=false` 真实 App 从页面进入“新建任务”，填写关键词和数量后点击创建，经正式 `TauriTaskCreationGateway`、固定 Rust Command、真实 Uvicorn/PostgreSQL 写入精确 `douyin.search_exposure.v1` 定义。App 不弹窗、不读取系统钥匙串，验收结束清理隔离 App 数据和后端资源。
+T3-17/A7-05 的新建任务纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`。唯一 `visible=false` 真实 App 从页面进入“新建任务”，先证明未知变量在表单层被拒绝且不发起请求，再提交唯一合法 `{{target_display_name}}` 个性化文案；请求经正式 `TauriTaskCreationGateway`、固定 Rust Command、真实 Uvicorn/PostgreSQL 写入精确 `douyin.search_exposure.v1` 定义。App 不弹窗、不读取系统钥匙串，验收结束清理隔离 App 数据和后端资源。
 
 T3-18 的运行详情纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_18_acceptance.py`。唯一 `visible=false` 真实 App 打开两个有持久事件的 Task，从页面依次真实点击暂停、恢复、取消和紧急停止；正式 gateway/Rust/后端 Outbox/HOLD FakeExecutor 链路将命令全部 ACK，并把两个任务分别收敛为 `cancelled` 与 `outcome_uncertain`。验收不操作社交平台，结束后清理隔离 App 数据、服务、端口和 PostgreSQL 资源。
 

@@ -5,33 +5,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from automation_tool.protocol import (
+    MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS,
     MAX_SEARCH_KEYWORD_CHARACTERS,
     MAX_TASK_TARGET_LIMIT,
+    ActionMessageTemplate,
+    ActionMessageTemplateRejected,
     DouyinSearchExposureAction,
     DouyinSearchInput,
     DouyinSearchInputRejected,
 )
-from automation_tool.protocol.safe_text import is_unsafe_text
 
 DOUYIN_SEARCH_EXPOSURE_TEMPLATE = "douyin.search_exposure.v1"
-MAX_MESSAGE_TEMPLATE_CHARACTERS = 500
+MAX_MESSAGE_TEMPLATE_CHARACTERS = MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS
 MAX_TASK_INTERVAL_SECONDS = 3600
 
 
 class InvalidTaskDefinition(ValueError):
     def __init__(self) -> None:
         super().__init__("Task definition is invalid")
-
-
-def _safe_exact_text(value: object, *, maximum_characters: int) -> str:
-    if (
-        type(value) is not str
-        or not value
-        or value.strip() != value
-        or is_unsafe_text(value, maximum_characters=maximum_characters)
-    ):
-        raise InvalidTaskDefinition
-    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,10 +58,10 @@ class DouyinSearchExposureDefinition:
         elif self.message_template is None:
             raise InvalidTaskDefinition
         else:
-            _safe_exact_text(
-                self.message_template,
-                maximum_characters=MAX_MESSAGE_TEMPLATE_CHARACTERS,
-            )
+            try:
+                ActionMessageTemplate(source=self.message_template)
+            except ActionMessageTemplateRejected:
+                raise InvalidTaskDefinition from None
         if (
             type(self.minimum_interval_seconds) is not int
             or not 1 <= self.minimum_interval_seconds <= MAX_TASK_INTERVAL_SECONDS

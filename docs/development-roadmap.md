@@ -36,60 +36,60 @@
 
 | 范围 | 当前结果 |
 | --- | --- |
-| 竞品分析 | `✅` 已完整阅读并转为能力地图；动态长期稳定性仍需我们自己的真实账号验证 |
-| 产品决策 | `✅` Tauri-only、无产品登录 UI、RPA 优先、外部浏览器 + 独立 Profile |
-| 后端决策 | `✅` 独立 FastAPI Control Plane；开发本机、Demo 云端；PostgreSQL 从第一天使用 |
-| 本地执行决策 | `✅` Python Local Executor 永远在用户电脑，随 Tauri 打包 |
-| 项目规则 | `✅` 已从 `agent-platform` 筛选、改写并写入仓库 |
-| 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
-| 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
-| 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-04 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-05；B5-15 真实账号 App 双重启证据同样独立补验 |
-| Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
-| 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
-| 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
-| 数据访问与迁移 | `✅` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
-| Installation 持久化 | `✅` 32 字节公钥、active/revoked、revision CAS、吊销时间、唯一性和时间一致性约束已在 PostgreSQL 18.4 验证 |
-| Demo Bootstrap | `✅` 最多 7 天、精确 Demo 环境、唯一 installation.register purpose 和业务 API 拒绝模型已验证 |
-| Installation 注册 | `✅` 离线签名 Bootstrap、最长 5 分钟的一次性 challenge、设备 Ed25519 证明和 PostgreSQL 原子消费已验证 |
-| 设备凭据 | `✅` `atdc1` 一次返回、摘要持久化、版本历史、最小 session scope、原子轮换/吊销和并发单赢家已验证 |
-| 桌面 UI 资产 | `✅` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
-| Tauri 桌面壳 | `✅` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
-| 设备身份与凭据存储 | `✅` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
-| 前端 Transport | `✅` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
-| Executor v1 协议 | `✅` 28 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 37 个公共 fixtures 已验证 |
-| Target 发现命令闭环 | `✅` 隐藏 Tauri App 已经正式 Rust bridge 启动发现；Control Plane 原子创建 Attempt/Discover Command，Local Executor 经生产 Processor 上报有界 Candidate 批次并持久 Outbox，PostgreSQL 原子替换 Target、追加事件和收敛 Task；成功、登录失效、人工接管、失败、重试与精确重放矩阵已验证 |
-| Executor WebSocket | `✅` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
-| Executor Playwright onedir | `✅` macOS arm64 与 Windows x86_64 正式 onedir 均已包含 Python Playwright driver 且无浏览器缓存；冻结生产 primitive 已用受信系统浏览器、私有 Profile 与原生锁启动 headed context |
-| Executor signed Manifest | `✅` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS/Windows 冻结实包验证 |
-| Rust Executor package verifier | `✅` macOS arm64 与 Windows x86_64 均已从公开 Rust verifier 验证签名、完整目录、平台/架构、SemVer 范围、防降级和原生路径 identity |
-| Executor stdin 认证 | `✅` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
-| Rust ExecutorManager | `✅` macOS 与 Windows 均已从公开 Rust 生命周期入口完成 signed PyInstaller onedir、stdin 认证、真实 Uvicorn、监管/重启、整树清理和 App 纵向验收 |
-| 正式桌面制品隔离 | `✅` macOS 与 Windows release 实际二进制、正式资产/配置和无默认特性依赖树均确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed |
+| 竞品分析 | `✅ 已完成` 已完整阅读并转为能力地图；动态长期稳定性仍需我们自己的真实账号验证 |
+| 产品决策 | `✅ 已完成` Tauri-only、无产品登录 UI、RPA 优先、外部浏览器 + 独立 Profile |
+| 后端决策 | `✅ 已完成` 独立 FastAPI Control Plane；开发本机、Demo 云端；PostgreSQL 从第一天使用 |
+| 本地执行决策 | `✅ 已完成` Python Local Executor 永远在用户电脑，随 Tauri 打包 |
+| 项目规则 | `✅ 已完成` 已从 `agent-platform` 筛选、改写并写入仓库 |
+| 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
+| 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
+| 任务级路线图 | `✅ 已完成` 本文件已建立 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-05 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-06；B5-15 真实账号 App 双重启证据同样独立补验 |
+| Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
+| 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
+| 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
+| 数据访问与迁移 | `✅ 已完成` SQLAlchemy asyncio/asyncpg、事务 session、Alembic 空库升级/回滚、Installation schema/约束和脱敏连接错误已验证 |
+| Installation 持久化 | `✅ 已完成` 32 字节公钥、active/revoked、revision CAS、吊销时间、唯一性和时间一致性约束已在 PostgreSQL 18.4 验证 |
+| Demo Bootstrap | `✅ 已完成` 最多 7 天、精确 Demo 环境、唯一 installation.register purpose 和业务 API 拒绝模型已验证 |
+| Installation 注册 | `✅ 已完成` 离线签名 Bootstrap、最长 5 分钟的一次性 challenge、设备 Ed25519 证明和 PostgreSQL 原子消费已验证 |
+| 设备凭据 | `✅ 已完成` `atdc1` 一次返回、摘要持久化、版本历史、最小 session scope、原子轮换/吊销和并发单赢家已验证 |
+| 桌面 UI 资产 | `✅ 已完成` React 19、TypeScript 5.9、Vite 8、Ant Design 6 和 pnpm 冻结锁文件基线已验证 |
+| Tauri 桌面壳 | `✅ 已完成` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
+| 设备身份与凭据存储 | `✅ 已完成` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
+| 前端 Transport | `✅ 已完成` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
+| Executor v1 协议 | `✅ 已完成` 28 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 37 个公共 fixtures 已验证 |
+| Target 发现命令闭环 | `✅ 已完成` 隐藏 Tauri App 已经正式 Rust bridge 启动发现；Control Plane 原子创建 Attempt/Discover Command，Local Executor 经生产 Processor 上报有界 Candidate 批次并持久 Outbox，PostgreSQL 原子替换 Target、追加事件和收敛 Task；成功、登录失效、人工接管、失败、重试与精确重放矩阵已验证 |
+| Executor WebSocket | `✅ 已完成` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
+| Executor Playwright onedir | `✅ 已完成` macOS arm64 与 Windows x86_64 正式 onedir 均已包含 Python Playwright driver 且无浏览器缓存；冻结生产 primitive 已用受信系统浏览器、私有 Profile 与原生锁启动 headed context |
+| Executor signed Manifest | `✅ 已完成` onedir 全目录路径/大小/SHA-256、确定性目录摘要、版本/构建/平台/架构/入口和 exact-byte Ed25519 `atems1` 签名已由 Schema、跨语言 fixture、真实 CLI 与 macOS/Windows 冻结实包验证 |
+| Rust Executor package verifier | `✅ 已完成` macOS arm64 与 Windows x86_64 均已从公开 Rust verifier 验证签名、完整目录、平台/架构、SemVer 范围、防降级和原生路径 identity |
+| Executor stdin 认证 | `✅ 已完成` Rust 每次生成/清零 256-bit 本机令牌并只写 stdin；Python 输出域隔离 `atlep1` HMAC 事件证明，Rust 常量时间校验；与 Control Plane Session 用途隔离且无 argv/env/log/明文响应面 |
+| Rust ExecutorManager | `✅ 已完成` macOS 与 Windows 均已从公开 Rust 生命周期入口完成 signed PyInstaller onedir、stdin 认证、真实 Uvicorn、监管/重启、整树清理和 App 纵向验收 |
+| 正式桌面制品隔离 | `✅ 已完成` macOS 与 Windows release 实际二进制、正式资产/配置和无默认特性依赖树均确认无 WebDriver、验收 Command、测试 Sidecar/origin、开发公钥和调试端口；release 公钥打包前 fail closed |
 | macOS 浏览器受信发现 | `🔍` Rust 生产 API 已用 Apple Security.framework 验证标准路径 Chrome 的签名、Bundle ID、Team ID、全架构/嵌套代码和路径 identity；Edge allowlist/失败矩阵已实现，本机未安装 Edge，保留真实 Edge 实机验收 |
-| 运营浏览器选择 | `✅` macOS 与 Windows 隐藏真实 App 均已从设置页保存、刷新并读回受信浏览器枚举；WebView/IPC/沙盒文件无可执行路径 |
-| 私有浏览器 Profile | `✅` macOS/Unix 与 Windows 均已从公开 Rust Store 完成 UUIDv4 Profile 原子创建、重开、私有权限/DACL、symlink/reparse、identity 替换与并发矩阵 |
-| Profile 单实例锁 | `✅` macOS/Unix 与 Windows 均已从公开 Rust Profile API 验证同 Profile 跨进程排他、不同 Profile 并行、显式释放、原生权限/链接及真实子进程崩溃恢复 |
-| BrowserRuntime | `✅` macOS 与 Windows 冻结生产模块均已用受信系统浏览器、私有 Profile 与原生锁验证单 context、双窗口正常关闭，并分别由 process group/正式 Manager Job Object 完成整树强杀 |
-| 平台 Session 健康投影 | `✅` 生产 detector→本机 SQLite v2 单调 epoch→认证 Executor WebSocket→PostgreSQL 六列最小投影已在后台无头系统 Chrome/真实网络边界验证 |
-| Executor Connection Registry | `✅` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
-| Installation 吊销闭环 | `✅` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
-| Task 状态机 | `✅` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
-| Task 持久化 | `✅` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
-| Attempt/Action 持久化 | `✅` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
-| Task Event 持久化 | `✅` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
-| Command/Outbox 持久化 | `✅` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
-| Command 投递闭环 | `✅` PostgreSQL 原子抢占、current WebSocket 发送、断线/ACK 超时重投、重连恢复、严格回执与 deadline 过期已在真实网络验证 |
-| 创建 Task API | `✅` `app.control-plane` 守卫、Installation-scoped 幂等键、唯一抖音搜索曝光 DTO、Task/定义原子创建、201/200 重放与隐藏 Tauri App 表单生产同路径已验证 |
-| 查询 Task API | `✅` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
-| 暂停/恢复 API | `✅` Installation-scoped 幂等控制命令、原子 sequence、ACK 后事件门禁与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
-| 取消/紧停 API | `✅` 原子 CANCELLING、幂等重放、ACK 后终态、完成竞态、结果不确定与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
-| Task 桌面投影 | `✅` TanStack Query 权威快照、严格 DTO、事件去重、缺口/版本回拉、有限降级及 Rust SSE→Tauri Channel 已由隐藏 App 生产同路径验证 |
-| UI Harness | `✅` Playwright Chromium 覆盖 ready/unavailable/flaky，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 dist 排除 Harness 与测试 Adapter 已验证 |
-| 持续集成 | `✅` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
-| Git 仓库 | `✅` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
-| GitHub 私有仓库 | `✅` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
-| 本机工具链 | `✅` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
+| 运营浏览器选择 | `✅ 已完成` macOS 与 Windows 隐藏真实 App 均已从设置页保存、刷新并读回受信浏览器枚举；WebView/IPC/沙盒文件无可执行路径 |
+| 私有浏览器 Profile | `✅ 已完成` macOS/Unix 与 Windows 均已从公开 Rust Store 完成 UUIDv4 Profile 原子创建、重开、私有权限/DACL、symlink/reparse、identity 替换与并发矩阵 |
+| Profile 单实例锁 | `✅ 已完成` macOS/Unix 与 Windows 均已从公开 Rust Profile API 验证同 Profile 跨进程排他、不同 Profile 并行、显式释放、原生权限/链接及真实子进程崩溃恢复 |
+| BrowserRuntime | `✅ 已完成` macOS 与 Windows 冻结生产模块均已用受信系统浏览器、私有 Profile 与原生锁验证单 context、双窗口正常关闭，并分别由 process group/正式 Manager Job Object 完成整树强杀 |
+| 平台 Session 健康投影 | `✅ 已完成` 生产 detector→本机 SQLite v2 单调 epoch→认证 Executor WebSocket→PostgreSQL 六列最小投影已在后台无头系统 Chrome/真实网络边界验证 |
+| Executor Connection Registry | `✅ 已完成` Installation 单活、服务端心跳投影、固定旧连接替换、stale 保护、受限 current send API 与进程退出清理已验证 |
+| Installation 吊销闭环 | `✅ 已完成` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
+| Task 状态机 | `✅ 已完成` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
+| Task 持久化 | `✅ 已完成` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
+| Attempt/Action 持久化 | `✅ 已完成` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
+| Task Event 持久化 | `✅ 已完成` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
+| Command/Outbox 持久化 | `✅ 已完成` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
+| Command 投递闭环 | `✅ 已完成` PostgreSQL 原子抢占、current WebSocket 发送、断线/ACK 超时重投、重连恢复、严格回执与 deadline 过期已在真实网络验证 |
+| 创建 Task API | `✅ 已完成` `app.control-plane` 守卫、Installation-scoped 幂等键、唯一抖音搜索曝光 DTO、Task/定义原子创建、201/200 重放与隐藏 Tauri App 表单生产同路径已验证 |
+| 查询 Task API | `✅ 已完成` Installation-scoped 列表/详情、opaque keyset 分页、跨 scope 统一不可见与隐藏 Tauri App 生产同路径已验证 |
+| 暂停/恢复 API | `✅ 已完成` Installation-scoped 幂等控制命令、原子 sequence、ACK 后事件门禁与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
+| 取消/紧停 API | `✅ 已完成` 原子 CANCELLING、幂等重放、ACK 后终态、完成竞态、结果不确定与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
+| Task 桌面投影 | `✅ 已完成` TanStack Query 权威快照、严格 DTO、事件去重、缺口/版本回拉、有限降级及 Rust SSE→Tauri Channel 已由隐藏 App 生产同路径验证 |
+| UI Harness | `✅ 已完成` Playwright Chromium 覆盖 ready/unavailable/flaky，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 dist 排除 Harness 与测试 Adapter 已验证 |
+| 持续集成 | `✅ 已完成` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
+| Git 仓库 | `✅ 已完成` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
+| GitHub 私有仓库 | `✅ 已完成` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
+| 本机工具链 | `✅ 已完成` macOS arm64、Rust/Clippy/Rustfmt、Node/pnpm、uv Python 3.12、Docker、Chrome、Xcode 签名链和 ffmpeg-full 可用 |
 | 本地/云端服务 | `⬜` 开发验收会临时启动并清理本地服务；尚无常驻环境，未部署云端 |
 
 ## 4. 全局完成门禁
@@ -272,7 +272,7 @@
 | B5-13 | 平台状态页面 | 查看登录健康、打开处理、重新检查和注销 | B5-10,B5-12 | ✅ 已完成 |
 | B5-14 | 安全注销 | 先阻止新任务、停关联执行、再删除平台 Profile | B5-06,B5-13 | ✅ 已完成 |
 | B5-15 | 登录复用验收 | App/Executor/浏览器重启后不重扫；失效后正确接管 | B5-14 | 🔍 待真实账号 |
-| B5-16 | 默认 Profile 隔离审计 | 测试和运行证据证明未读用户默认 Chrome User Data | B5-15 | 🟩 完成 |
+| B5-16 | 默认 Profile 隔离审计 | 测试和运行证据证明未读用户默认 Chrome User Data | B5-15 | ✅ 已完成 |
 
 ## 11. Wave 6：抖音目标发现与用户预览
 
@@ -282,21 +282,21 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | 🟩 完成 |
-| D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | 🟩 完成 |
-| D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | 🟩 完成 |
-| D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | 🟩 完成 |
-| D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | 🟩 完成 |
-| D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | 🟩 完成 |
-| D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | 🟩 完成 |
-| D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | 🟩 完成 |
-| D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | 🟩 完成 |
-| D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | 🟩 完成 |
-| D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | 🟩 完成 |
-| D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | 🟩 完成 |
-| D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | 🟩 完成 |
-| D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | 🟩 完成 |
-| D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | 🟩 完成 |
+| D6-01 | 抖音页面版本模型 | page version、已知入口、未知版本 fail closed | B5-09 | ✅ 已完成 |
+| D6-02 | 页面对象基础 | 搜索入口、结果列表、弹窗和登录跳转集中封装 | D6-01 | ✅ 已完成 |
+| D6-03 | 关键词校验 | 长度、空白、控制字符、任务上限和服务端一致规则 | T3-17 | ✅ 已完成 |
+| D6-04 | 搜索执行 | 打开页面、输入、提交、等待结果；网络慢/超时测试 | D6-02,D6-03 | ✅ 已完成 |
+| D6-05 | 有界滚动 | 最大轮次、最大目标、无新增停止和取消检查点 | D6-04 | ✅ 已完成 |
+| D6-06 | Candidate 模型 | 稳定去重键、最小摘要、来源和页面 revision | D6-05,I2-10 | ✅ 已完成 |
+| D6-07 | 目标隐私裁剪 | 不上传非必要个人信息、页面原文或绝对链接凭据 | D6-06 | ✅ 已完成 |
+| D6-08 | 黑名单/去重 | 本任务去重、历史窗口去重和黑名单原因 | D6-06 | ✅ 已完成 |
+| D6-09 | Target 数据库 | task_targets、唯一约束、分页和 installation 隔离 | D6-06,T3-02 | ✅ 已完成 |
+| D6-10 | Discover 命令闭环 | Control Plane 投递、Executor 上报、任务状态收敛 | D6-05,D6-09,E4-12 | ✅ 已完成 |
+| D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | ✅ 已完成 |
+| D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | ✅ 已完成 |
+| D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | ✅ 已完成 |
+| D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | ✅ 已完成 |
+| D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | ✅ 已完成 |
 | D6-16 | 真实目标发现验收 | 受控抖音账号完成搜索与预览，确认无外部副作用 | D6-15 | 🔍 待真实账号 |
 
 ## 12. Wave 7：抖音受控评论与主动私信
@@ -307,12 +307,12 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| A7-01 | 风险策略领域模型 | 平台/动作/安装实例级最小间隔、任务/日上限、连续失败阈值 | T3-01 | 🟩 完成 |
-| A7-02 | 服务端计数与并发授权 | PostgreSQL 原子授权；并发不能突破上限 | A7-01,T3-03 | 🟩 完成 |
-| A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | 🟩 完成 |
-| A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | 🟩 完成 |
-| A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | 🧪 RED |
-| A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | ⬜ 未开始 |
+| A7-01 | 风险策略领域模型 | 平台/动作/安装实例级最小间隔、任务/日上限、连续失败阈值 | T3-01 | ✅ 已完成 |
+| A7-02 | 服务端计数与并发授权 | PostgreSQL 原子授权；并发不能突破上限 | A7-01,T3-03 | ✅ 已完成 |
+| A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | ✅ 已完成 |
+| A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | ✅ 已完成 |
+| A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | ✅ 已完成 |
+| A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | 🧪 RED |
 | A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ⬜ 未开始 |
 | A7-08 | 抖音评论 Page Object | 定位输入/提交/最终状态；页面变化 fail closed | D6-02,A7-05 | ⬜ 未开始 |
 | A7-09 | 抖音私信 Page Object | 进入会话/输入/发送/最终状态；权限差异处理 | D6-02,A7-05 | ⬜ 未开始 |
@@ -1578,7 +1578,7 @@
 - 会话与启动：`restart_executor` 先由 Rust 凭据仓换取 `app.control-plane` Session，读取当前 active Installation ID，再换取独立 `executor.connect` 短期 Session；Session 只在 `Zeroizing<String>` 与 stdin 启动链短暂存在。Manager 先停止旧进程树，再以固定 WebSocket endpoint、Installation/Executor ID、状态目录和 15 秒心跳启动签名包；E4-14 真实链路暴露原 10 秒启动预算必然早于首个健康心跳，现固定为 30 秒并由架构回归锁定。debug 只信任公开测试 signer；release 构建缺少打包流水线注入的 `AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY` 时 fail closed，不把测试 signer 当发布信任根
 - IPC 与 UI：正式 Command allowlist 只有 `get_executor_status`、`restart_executor`、`get_executor_diagnostics`、`emergency_stop_executor`。TypeScript Adapter 严格校验 exact-field 状态、SemVer/build ID、0..8 恢复次数和 200 行/4096-byte 安全诊断，原生异常只映射固定 allowlist 错误且不反射详情。“设置与诊断”页面可查看状态/版本/构建/恢复次数和安全 stderr、启动/重启，并在二次确认后执行本机硬停止；页面明确区分本机进程树停止与业务 Task 协作式紧停，不能宣称远端副作用已停止
 - 分层 GREEN：Frontend 49 项 Node 架构/契约、118 项 Vitest 全绿，ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套各为 44 单元 + 3 bootstrap + 15 manager + 10 package + 2 platform + 3 protocol fixture + 14 security，共 91 项通过，另有 1 项正式 PyInstaller 编排由专用脚本负责并在普通 suite 中 ignored。三套 Clippy `-D warnings` 与 Rustfmt 全绿；不带测试驱动的 `pnpm tauri build --debug --no-bundle` 成功，App 未启动
-- 原始入口验收：E4-14 已用唯一 `visible=false` App 从真实诊断页面点击启动/紧停/再次启动，经正式 TypeScript Adapter、Tauri IPC、Rust 换票、真实 Control Plane/PostgreSQL 和 signed Executor 覆盖崩溃恢复、挂起超时、退出清理与数据库最终事实；macOS 不再依赖组件 Mock，Windows AppData/Job Object/真实 WebView 链也已于 2026-07-20 在本机完成，任务结论为 `✅`
+- 原始入口验收：E4-14 已用唯一 `visible=false` App 从真实诊断页面点击启动/紧停/再次启动，经正式 TypeScript Adapter、Tauri IPC、Rust 换票、真实 Control Plane/PostgreSQL 和 signed Executor 覆盖崩溃恢复、挂起超时、退出清理与数据库最终事实；macOS 不再依赖组件 Mock，Windows AppData/Job Object/真实 WebView 链也已于 2026-07-20 在本机完成，任务结论为 `✅ 已完成`
 - 失败矩阵：覆盖恶意/未知原生 DTO、超长或控制/Bidi 诊断、原生秘密异常不反射、状态目录/身份损坏、相对路径、Unix 权限、重复启动先停旧树、缺凭据/安装授权/网络/协议、包拒绝、认证拒绝、超时与进程不可用的固定错误映射；E4-14 已补真实崩溃、挂起和正常退出竞态，Windows AppData ACL/Job Object/IPC 仍归原生 runner
 - 本地隔离与清理：本任务没有启动前端、后端、Docker、测试服务器或可见/隐藏 App，没有监听或占用端口；只执行编译和进程内测试，临时 App-data 目录由 RAII 删除。项目规则同时新增“启动前查端口、`automation-tool` 专属 Compose/容器/网络/Volume/SQLite/端口段、只清理本次实例”的强制隔离要求，后续 E4-14 起执行
 - 文档：同步根/Frontend README、前端架构、工程结构、Git 忽略边界和唯一开发台账；没有新增第二份 implementation plan
@@ -1889,7 +1889,7 @@
 
 ### B5-16 默认 Profile 隔离审计
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；新增 Node 契约准确失败于缺少 B5-16 隐藏 App spec/config/runner，没有把既有源码约定冒充为运行时证据
 - 唯一生产链：契约固定 `BrowserProfileStore.current_douyin_profile()`→Rust owned lease→认证本机命令→Python `launch_persistent_context(request.profile_directory)`；递归扫描 `backend/src`、`frontend/src`、`frontend/src-tauri/src`，拒绝 Chrome/Edge 默认 User Data 常量、`--profile-directory`、Cookie 与 storage-state API，不允许增加第二个 Profile 来源
 - 原始 App 验收：`scripts/run_b5_16_acceptance.py` 构建唯一 `visible=false` Tauri App 与单独签名验收 Executor，从真实平台状态页面点击“打开登录处理”，经 TypeScript Gateway→Tauri IPC→Rust 受信浏览器/current Profile/lease→Manager→signed PyInstaller Executor→无头系统 Chrome→正式 WebSocket→Uvicorn/Alembic/PostgreSQL；确定性 expired 页面只让生产 persistent context 保持活跃，不替代 Profile、runtime、网络或数据库链路
@@ -1902,7 +1902,7 @@
 
 ### D6-01 抖音页面版本模型
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；新增 41 个版本模型用例准确失败于 `page_version` 生产模块不存在，没有先写实现或把既有 Session selector version 冒充成搜索页面版本
 - 单一模型：新增 Executor-only `douyin.web.v1` 封闭模型，版本、入口与 evidence 均为 `StrEnum`，合法观察只能是 v1 + `home/session_probe/search_results` 的精确组合；`unknown` 只能携带 `origin_invalid/entry_unknown/search_route_invalid`，伪造版本、入口或 evidence 组合在对象创建阶段拒绝
 - 已知入口：首页只接受官方 canonical `/`，Session 入口只接受 `/user/self`，搜索结果只接受 `/search/<canonical percent-encoded term>?type=general`。共同要求精确 HTTPS `www.douyin.com`、无 userinfo、端口仅默认/443、无 fragment、受限 URL 长度；B5-09/B5-10 的 probe URL 改为从该唯一模型导入，不再维护第二份字符串
@@ -1916,7 +1916,7 @@
 
 ### D6-02 页面对象基础
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；新增页面对象用例准确失败于 `search_page` 生产模块不存在，随后才建立实现。首轮覆盖率验收又准确暴露动态 DOM 下“识别后控件消失/查询失败”的未覆盖分支，补齐失败关闭用例后才转绿
 - 唯一页面对象：新增 Executor-only `DouyinSearchPage` 和 `douyin.search-page.v1` selector contract，只接受 Runtime-owned `BrowserWindow` 并复用 D6-01 `DouyinPageVersionModel`，没有复制官方 origin、route 或页面版本判断。搜索输入、提交控件、结果列表、登录弹窗和阻塞弹窗全部集中在一个模块，优先使用 role/label/placeholder 等语义锚点，再使用版本化 `data-e2e` 兜底
 - 封闭事实：观察结果只能是 `home_ready/results_ready/login_required/dialog_blocked/unknown` 与固定 evidence 的合法组合；Session probe 不查询 DOM 就投影登录跳转，登录弹窗优先于其通用 dialog 外壳，普通阻塞弹窗优先于搜索/结果锚点。入口与锚点冲突、锚点缺失、未知 route/version、定位异常和识别后 DOM 变化全部保持 `circuit_open=true`
@@ -1928,7 +1928,7 @@
 
 ### D6-03 关键词校验
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`。Backend 新测试准确失败于公共 `protocol.douyin_search` 不存在；Frontend 明确复现 Zod 按 UTF-16 code unit 误拒服务端可接收的 80 个 emoji，同时放过 C1 `U+0085`。表单原调用方又证明首尾空白/C1 会调用 Gateway、81 个非 BMP 字符虽被旧长度规则拦截但没有统一错误；公共协议导出测试也在实现前准确失败
 - Python 唯一策略：新增公共 `douyin.search-input.v1` 不可变值，`MAX_SEARCH_KEYWORD_CHARACTERS=80` 与 `MAX_TASK_TARGET_LIMIT=100` 只在该模块赋值。关键词必须是原样非空字符串、按 Unicode code point 最多 80 个、首尾无 Unicode 空白，并拒绝 C0/C1/DEL、Bidi、敏感赋值、私有路径、inline data；目标上限只接受真整数 `1..100`。对象和固定错误不回显关键词
 - 双端复用：T3-17 `DouyinSearchExposureDefinition` 改为先构造公共输入值，Control Plane 与后续 Local Executor 都只能从 `automation_tool.protocol` 稳定入口导入，不再复制 Python 校验。FastAPI/Pydantic/OpenAPI 与 PostgreSQL 保留入口/持久层复验；数据库故障注入确认 C1 直接写入也被 check constraint 拒绝
@@ -1941,7 +1941,7 @@
 
 ### D6-04 搜索执行
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；Backend 新用例准确失败于 canonical 结果 URL 构造器和 `search.py` 不存在，跨边界 Node 契约同时因生产执行模块缺失失败，随后才实现最小闭环
 - 单次执行：新增 Executor-only `douyin.search-execution.v1`，构造时只接受 Runtime-owned `BrowserWindow` 与 D6-03 公共 `DouyinSearchInput`。同一实例只允许 `run()` 一次，提交无自动重试；结果状态/evidence 是不可伪造的固定组合，对象与错误不回显关键词、URL、DOM 或 selector
 - 固定路径：先用 D6-01 canonical 首页导航并等待 `domcontentloaded`，再只经 D6-02 Page Object 等候和二次确认输入/提交控件；原样填写关键词、恰好一次 `click(no_wait_after=True)`，随后等待 D6-01 构造并复验的精确关键词结果 URL，最后等候并再次取得结果列表才成功。执行模块没有 URL/selector 字面量或任意 locator
@@ -1954,7 +1954,7 @@
 
 ### D6-05 有界滚动
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；Backend 新用例准确失败于 `bounded_scroll` 生产模块不存在，跨边界 Node 契约同时因同一文件缺失失败，随后才实现最小控制层。首轮覆盖审计继续暴露滚动后页面切换/计数失败、下一轮前取消、增长后取消和备用 selector 等遗漏分支，全部补齐后才达到 100%
 - 固定边界：新增 Executor-only `douyin.bounded-scroll.v1`，只接受 Runtime-owned `BrowserWindow`、D6-03 公共 `DouyinSearchInput`、D6-04 成功观察和无参数取消探针；同一实例只运行一次。D6-04 非成功事实、原始字符串/伪对象或不可调用取消源在构造时拒绝
 - 有界推进：最多 20 轮，每轮只发一次 `mouse.wheel(0, 800)`；每轮结果增长等待总预算 3 秒、固定 100ms 轮询。初始或后续节点数达到 `target_limit`、一整个窗口无新增、或持续增长达到轮次上限时分别以固定 evidence 完成，不存在无限滚动
@@ -1967,7 +1967,7 @@
 
 ### D6-06 Candidate 模型
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；42 项 Backend 目标用例准确失败于公共 Candidate 导出不存在，跨边界 Node 契约同时因 `protocol/douyin_candidate.py` 缺失失败；随后才加入最小模型与公共入口
 - 最小模型：新增不可变 `douyin.candidate.v1`。Candidate 只含规范平台目标 ID、`DouyinCandidateSummary(display_name, public_handle?)`、唯一 MVP 来源 `general_search_author`、page revision 与派生去重键；没有头像、简介、联系方式、页面正文、HTML、绝对/个人链接或任意扩展字典
 - 输入边界：目标 ID 为 `1..128` 位 ASCII 字母数字起始、后续只允许字母数字/点/下划线/连字符；展示名为原样非空 `1..80` Unicode 字符，拒绝首尾空白及共享控制/Bidi/secret/path/inline-data 违规；可选公开号为 `1..64` 位同类规范 ASCII；page revision 复用 I2-10 `1..2^53-1` 真整数范围。字符串枚举、bool/float 冒充、URL/path/query 与伪造对象全部拒绝
@@ -1980,7 +1980,7 @@
 
 ### D6-07 目标隐私裁剪
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；Python 目标用例准确在收集期失败于 `candidate_extraction.py` 不存在，跨边界 Node 契约也因同一生产模块缺失失败，随后才实现页面字段裁剪与执行器
 - 单次提取：新增 Executor-only `douyin.candidate-extraction.v1`，只接受 Runtime-owned `BrowserWindow`、`1..100` 真整数上限和 `1..2^53-1` page revision，同一对象只运行一次。结果封闭为 completed/blocked/unknown 与固定 evidence，repr/异常不回显候选、源链接或 DOM
 - Page Object 边界：结果项、作者和作者名 selector 只存在于 D6-02 `search_page.py`；页面层只读取受控作者节点的 `data-user-id`、`href`、可选 `data-user-handle` 与专用名称节点。相对或官方 HTTPS 作者 href 在本机立即缩减为 path 中的规范目标 ID 并丢弃 query；跨域、scheme-relative、userinfo、fragment、多层路径、超限/控制字符和 data ID/href 冲突均拒绝
@@ -1992,7 +1992,7 @@
 
 ### D6-08 黑名单/去重
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；Python 领域测试准确在收集期失败于 `douyin_candidate_policy.py` 不存在，跨边界 Node 契约也因同一生产模块缺失失败，随后才实现并从 Control Plane domain 公共入口导出
 - 固定策略：新增纯 `douyin.candidate-policy.v1`，MVP 历史去重窗固定 30 天且 UI 不可放宽；以包含 cutoff 的 UTC 区间判断历史。输入 Candidate/history/blacklist 均为 exact tuple、各限 100 项，Candidate 必须属于同一 page revision；历史和黑名单只携带稳定 `DouyinCandidateKey`，不接受平台 ID、昵称、公开号或任意原因文本
 - 原因与顺序：评估保留输入顺序和全部 Candidate，不做破坏性过滤；每条 Decision 只有 `eligible/duplicate_in_task/duplicate_in_history/blacklisted` 之一，优先级固定为黑名单 > 本任务后续重复 > 窗口内历史重复 > 可用。同一目标跨名称/handle 变化仍按 D6-06 key 命中；提供分类计数、可用 Candidate tuple、统一 page revision 与 cutoff 供后续预览/持久化
@@ -2004,7 +2004,7 @@
 
 ### D6-09 Target 数据库
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`，并新增强类型 Target、真实迁移/Schema、原子仓储、历史窗口、并发替换、稳定分页、跨 scope 和损坏行矩阵；聚焦命令在收集期准确失败于 `TargetId` 未导出、`application.task_targets` 不存在，随后才实现生产代码
 - 数据模型：新增 UUIDv4 `TargetId` 和不可变、脱敏 `TaskTargetRecord`。Alembic `20260718_0016`/SQLAlchemy 同步建立 `task_targets`：只保存父 Task/Installation、任务内 `1..100` ordinal、D6-06 的规范目标 ID/稳定 key/最小摘要/来源/page revision、D6-08 disposition/policy version 与 UTC 时间；无自由 JSON、页面正文、源 URL、头像、简介或联系方式。数据库再次约束 UUID 版本、长度/字符集、安全显示名、封闭枚举、跨运行时整数和时间顺序
 - 唯一与归属：`(task_id,installation_id)` 复合外键阻止跨 Installation 挂接；Target 主键全局唯一，`(id,task_id,installation_id)` 为后续复合引用保留稳定绑定，`(task_id,installation_id,ordinal)` 保证任务内顺序唯一。dedupe key 刻意只建历史索引而不唯一，因此首条与 `duplicate_in_task` 后续行都能留在预览，不用数据库冲突掩盖策略原因
@@ -2017,7 +2017,7 @@
 
 ### D6-10 Discover 命令与 Target 收敛闭环
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`；新增 App 入口、HTTP 契约、Executor 三类 wire、批次 accumulator、SQLite v3、PostgreSQL 收敛与隐藏 Tauri 纵向验收。目标用例最初准确失败于 Discover API/协议/本地执行入口不存在；实现后全量门禁又暴露 D6-07 旧 wire 断言、人工接管 Attempt 无法重试及新增分支覆盖不足，均先保留失败证据再修复
 - Control Plane 启动：新增 App Session 保护的 `POST /api/v1/tasks/{task_id}/discoveries`，强制 `Idempotency-Key`，首次返回 202、同键精确重放返回 200。PostgreSQL 单事务锁 active Installation、抖音健康门闩、Task 与当前 Attempt，创建新 Attempt、`task.discover` Command 和 `task.discovery_started` Event，并把 Task 收敛到 `discovering_targets`；草稿、登录后、人工接管后和预览重发现使用同一状态机边界
 - Executor wire：Executor v1 增加严格区分的 `task.discover`、`task.discovery_batch`、`task.discovery_completed`。命令只携带已持久化的关键词、目标上限和 Attempt page revision；结果每批最多 10 条 D6-06 最小 Candidate、总计最多 100 条，完成消息只携带封闭 outcome/evidence/count。Python、Rust、TypeScript、Draft 2020-12 Schema 和共享 fixtures 同步为 28 种消息、10 个 valid 与 27 个 invalid 文件
@@ -2031,7 +2031,7 @@
 
 ### D6-11 目标预览 API
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - 提交：本记录、迁移、生成契约、后端、桌面桥和验收脚本属于单一 `feat: 完成目标预览接口闭环` 提交；完成后立即推送 `main`
 - RED：先把唯一台账置为 `🧪 RED`，新增应用模型、Repository、真实 PostgreSQL 生命周期、FastAPI/OpenAPI、TypeScript/Rust 严格解析和隐藏 App 纵向测试；初始聚焦测试准确失败于 `task_target_previews` 模块不存在。全量事件精确词汇测试随后因新增两种事件失败；“重新发现必须使旧确认失效”回归在临时撤下实现后准确得到 `confirmation_count == 1`；目标来源强类型契约准确暴露 OpenAPI 仍是任意 string，均在保留 RED 证据后补最小实现
 - API 与公开数据：新增 App Session 保护的 `GET /api/v1/tasks/{task_id}/target-preview`、`PUT .../exclusions` 和 `POST .../confirmations`。列表 cursor 绑定 page revision、task revision、ordinal 与 Target UUIDv4；写入口同时绑定期望 revision 和 `Idempotency-Key`。公开 DTO 只含 Target UUID、顺序、最小展示名/公开号、固定来源枚举、策略 disposition、用户排除/最终选择、聚合计数和确认时间，不返回平台目标 ID、dedupe key、页面正文、URL、Cookie、Profile 或服务端路径
@@ -2044,7 +2044,7 @@
 
 ### D6-12 目标预览 UI
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - 提交：本记录、用户页面、组合根注入、组件/契约测试、D6-12 隐藏配置、验收脚本和文档属于单一 `feat: 完成目标预览用户界面` 提交；完成后立即推送 `main`
 - RED：先把唯一台账置为 `🧪 RED`；组件测试最初准确失败于 `TaskTargetPreview.tsx` 不存在，任务详情测试准确失败于等待确认页未挂载预览，严格 TypeScript 准确失败于 `WorkbenchShell` 未注入 source，生产组合根契约准确失败于 `main.tsx` 未构造正式 source，Rust 安全配置测试准确失败于 D6-12 独立隐藏配置不存在，Node 契约准确失败于测试准备 Command 不存在。跨 Task 切换回归另准确捕获已打开预览会对新 Task 多发一次读取；最终以 Task-scoped 确认状态修复
 - 页面闭环：`TaskTargetPreviewPanel` 接入既有 `TaskRunDetails`，读取最多 100 个当前 revision 目标并展示发现、计划执行、用户排除和策略拦截计数；每行只显示最小名称、公开号、固定“抖音通用搜索作者”来源，以及可执行、本任务重复、30 天内已触达或黑名单标记，不渲染 Target UUID、平台目标 ID、dedupe key、URL 或页面事实。用户可逐项选择、全部取消、恢复全部，并通过明确二次确认进入队列；空选择无法确认，确认后全部编辑关闭
@@ -2058,7 +2058,7 @@
 
 ### D6-13 未确认副作用守卫
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - 提交：本记录、迁移、Outbox 确认绑定、PostgreSQL 失败矩阵、真实 WebSocket 验收和文档属于单一 `feat: 完成未确认副作用投递守卫` 提交；完成后立即推送 `main`
 - RED：先把唯一台账置为 `🧪 RED`；真实 PostgreSQL 测试准确证明未确认的业务 `task.offer` 仍会成功入队，确认后的 command record 也没有 `target_confirmation_message_id`。第二条用例继续准确暴露删除 confirmation 后旧 offer 仍可被 claim；失败原因均落在 D6-13 目标边界，而非测试脚手架
 - 精确分类：守卫只针对带 `douyin.search_exposure.v1` typed definition、未来可能承载浏览/评论/私信的业务 `task.offer`。无业务定义的 T3-09 offer 仍是空 payload、无平台副作用的协议骨架；`task.discover` 是只读发现，pause/resume/cancel/emergency-stop 是控制命令，均不要求目标确认，紧停在未确认状态下仍可入队和抢占
@@ -2073,7 +2073,7 @@
 
 ### D6-14 页面漂移诊断
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - 提交：本记录、页面漂移专用 Artifact、发现编排/协议收紧、单元/真实浏览器/PostgreSQL 测试和文档属于单一 `feat: 完成页面漂移诊断与人工接管` 提交；完成后立即推送 `main`
 - RED：先把唯一台账置为 `🧪 RED`；新增聚焦测试最初在收集阶段准确失败于 `automation_tool.executor.page_drift_artifact` 不存在，随后用例还要求原有 `page_version_unknown/conflicting_anchors` 不再作为普通失败，而必须写入诊断并进入 handoff。失败落在 D6-14 产品能力，不是环境、浏览器或测试脚手架
 - 专用本机 Artifact：新增 `executor/page_drift_artifact.py`，只接受固定 `page_version_unknown/conflicting_anchors` evidence、`search` 阶段与正 page revision。每份 JSON 最多 2 KiB、目录最多 20 份，文件名为 canonical UUIDv4；返回窄引用包含 SHA-256、固定 `application/vnd.automation-tool.page-drift+json` 媒体类型、大小和 `page-drift-artifacts/<id>.json` 受控相对路径。POSIX 目录/文件收紧为 `0700/0600`，不覆盖既有文件
@@ -2088,7 +2088,7 @@
 
 ### D6-15 Fake 页面回归样例
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - 提交：本记录、七份静态页面语料、六场景正式命令回归、既有浏览器测试去重和文档属于单一 `test: 固化抖音发现页面回归语料` 提交；完成后立即推送 `main`
 - RED：先把唯一台账置为 `🧪 RED`；语料契约最初准确失败于 `tests/fixtures/douyin_discovery_pages/` 不存在。首轮补齐后六场景中的空结果继续准确失败为 `results_ready_timed_out`，证明无高度的空 `role=feed` 在真实浏览器中不可见；修正为“容器可见但零 article”的确定空结果后，正式链路收敛到预期 `failed/no_candidates`
 - 封闭语料：目录固定七个小型 UTF-8 HTML：首页、普通阻塞弹窗、Session probe 登录页、未知版本页、正常两候选、可见空结果和无限滚动结果。契约要求文件集合精确、单文件 `1..16 KiB`，不含 `http://`/`https://`、fetch、Cookie 或 Local Storage 依赖；页面不连外网、不读取本机数据，也不进入 PyInstaller/Tauri 正式包
@@ -2111,7 +2111,7 @@
 
 ### A7-01 风险策略领域模型
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`，新增 43 项纯领域失败矩阵；聚焦测试在收集阶段准确失败于公共 `ACTION_RISK_POLICY_VERSION` 不存在，证明没有复用旧账号服务或提前放入空壳实现让测试假绿
 - 旧代码审计：只读复核 `agent-platform` 的 `AccountGovernancePolicy`、授权和连续失败用例；保留最小间隔、任务/日上限与连续失败阈值语义，明确删除旧租户、RBAC、平台账号、冷启动额度、内存锁、自由 `action_type` 和零间隔。旧代码中的 20/5/3 等值没有迁入当前项目
 - 复合范围：新增不可变 `ActionRiskScope`，唯一键由强类型 `InstallationId`、封闭 `douyin` 平台和既有 `browse/comment/direct_message` 动作构成；自由字符串、伪造资源 ID/枚举和跨类型对象统一固定错误拒绝，repr 不暴露 Installation ID
@@ -2124,7 +2124,7 @@
 
 ### A7-02 服务端计数与并发授权
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`，新增应用记录、Repository 和真实 PostgreSQL 生命周期测试；两组聚焦测试均在收集阶段准确失败于 `application.action_risk_authorizations` 不存在。实现后的审计再新增同一 ActionId 动作意图变化用例，准确以 `_same_intent()` 缺少 `action` 参数失败，随后才收紧重放绑定
 - 原子事实：迁移 `20260720_0020` 新增 `action_risk_authorizations`；每条记录保存 Action/Target/Attempt/Task/Installation/ordinal 绑定、封闭平台/动作、策略版本、有效最小间隔、三项策略阈值、任务/UTC 日授权后计数与 UTC 时间。成功授权在同一事务插入既有 `task_actions(status=authorized)`，复合外键禁止跨执行链或跨 Target 拼接，两个计数序号唯一约束作为并发第二道防线
 - 服务端串行化：Repository 先 `FOR UPDATE` 锁定 active Installation，使同一安装实例的所有平台动作按数据库事务线性化；再复验当前 running Task/Attempt、任务定义动作、healthy Session 且无 gate、最新确认、同 page revision 的 eligible 且未排除 Target。任务上限按 Task/平台/动作，UTC 日上限按 Installation/平台/动作/日期，最小间隔跨 Installation/平台/动作计算；有效间隔固定取任务配置与服务端策略较大值
@@ -2137,7 +2137,7 @@
 
 ### A7-03 ActionAuthorization
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`，新增共享 claims/token、Control Plane 签发器与 Executor 验签器失败矩阵；聚焦测试在收集阶段准确失败于 `automation_tool.protocol.action_authorization`、签发和验签模块不存在。全量回归随后准确发现共享动作枚举新增说明会造成 OpenAPI 文案漂移；保持该失败证据后删除非必要 Schema 描述，原快照逐字恢复，没有以重生成快照掩盖意外 API 变化
 - 非对称信任：选择 Ed25519 而非复用 Executor 已知的本机会话 MAC key，避免本机执行器持有可自行签发/扩大权限的共享秘密。Control Plane 签发器显式接受独立 32 字节部署私钥，Local Executor 验签器只接受对应固定公钥；私钥不进入 App、Executor、SQLite、协议、普通配置或系统钥匙串，真实部署注入和公钥固定由后续组合根完成
 - 完整 claims：不可变 `action-authorization.v1` 精确绑定 Action、Target、Execution Attempt、Task、Installation、Executor、固定 `douyin` 平台、`browse/comment/direct_message` 动作、派生 `action:<action_id>` 幂等键，以及服务端 UTC `authorized_at/deadline_at`。授权生命周期调用方必须显式给出整秒 `1 秒..5 分钟`；服务端不能从客户端自报时间构造授权
@@ -2150,7 +2150,7 @@
 
 ### A7-04 Executor 本机硬下限
 
-- 状态：🟩 完成
+- 状态：✅ 已完成
 - RED：先把唯一台账置为 `🧪 RED`，新增本机策略、紧停、准入与 SQLite v4 迁移失败矩阵；目标测试最初准确失败于 `automation_tool.executor.action_gate` 不存在。实现后再以“删除策略行并用 1 秒/100 次重启”做安全审计，测试准确证明旧实现会自动重建并放宽 60 秒/1 次；随后才把策略单例固化为迁移事实，缺失或半损坏统一 fail closed
 - 双重准入：新增 `ExecutorActionGate`，只接受真实 `Ed25519ActionAuthorizationVerifier`、真实 `ExecutorLedger`、显式本机策略和 UTC 时钟。`admit()` 的调用面只有 token 与 A7-03 完整 expectation，先验签再进入本机事务；服务器 claims、Executor wire、HTTP 与 App IPC 都没有最小间隔或任务上限参数，不能在单次请求中下调阈值
 - 单调本机策略：SQLite v4 在迁移时创建固定策略单例，首次本机装配原子绑定；后续只取更长最小间隔和更小任务上限。弱配置、重启和并发构造只能得到已持久化的更严格结果；缺行、单字段 NULL、越界值或数据库异常不会自动修复成宽松默认。MVP 仍不虚构运营默认值，装配者必须显式提供 `1..3600` 整秒和 `1..100` 次
@@ -2162,11 +2162,24 @@
 - 资源与文档：没有启动 App、Uvicorn、可见浏览器或固定业务端口；全量浏览器用例保持 headless，测试结束由既有 fixture 关闭浏览器并回收 `automation-tool-pytest-*` 专属随机端口、Compose、容器、网络和 Volume，未触碰其他项目资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `A7-05`，先以失败测试固定文案长度、空内容、控制字符、敏感模式与模板变量边界；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
 
+### A7-05 文案校验
+
+- 状态：✅ 已完成
+- RED：先新增 Python 共享策略、Task 领域/HTTP/PostgreSQL 失败矩阵、TypeScript 表单/Gateway 用例和 Rust 边界用例；实现前分别准确失败于公共模块/Schema 缺失、未知变量被放行与 PostgreSQL 仍在 `0020`，没有用旧的普通 500 字符校验冒充封闭模板已完成
+- 唯一策略：新增不可变 `action-message-template.v1`，允许纯固定文案，也只允许 `{{target_display_name}}` 一个变量。删除合法占位符后必须仍存在非空字面；纯变量、未知/带空格/点号/单花括号/畸形占位符全部 fail closed。变量集按首次出现去重，异常与 repr 不回显文案
+- 安全边界：按 Unicode code point 限制 `1..500`，不改写用户原文；首尾空白、C0/C1/DEL、Bidi、敏感赋值、Bearer/file/data URI、macOS/Linux 私有路径与 Windows 绝对路径均拒绝。`browse` 继续要求模板为 null，comment/direct_message 必须有合法文案
+- 五层复验：React `TaskCreate` 直接复用 Gateway Zod Schema，Rust 在发起 HTTP 前复验，Python Task 定义只调用共享对象，FastAPI/Pydantic 保留入口约束，Alembic `20260720_0021` 和 `schema.py` 通过替换唯一合法占位符后禁止剩余花括号，保护直写 PostgreSQL 边界。跨端 Node 契约固定变量/长度/无渲染规则
+- 原始调用方验收：唯一 `visible=false` Tauri App 从“新建任务”表单先提交 `{{unknown}}` 并确认 Gateway 未被调用，再提交 `{{target_display_name}}` 合法评论文案；请求经正式 TypeScript Gateway→Tauri Command→Rust Client→真实 Uvicorn/FastAPI→PostgreSQL，最终精确核对一条 Task 定义。全程隐藏、不打开可见浏览器，不使用 Mock HTTP，结束回收 App/Uvicorn/PostgreSQL/端口/Compose/AppData
+- 边界：本任务只验证并持久模板原文，不渲染目标名、不调用 LLM、不识别页面 DOM/OCR、不执行评论或私信。A7-06 负责将精确目标/动作/文案/数量与确认 revision 绑定，A7-08/A7-09 再建立平台 Page Object
+- 门禁：聚焦 Python 领域、HTTP 与真实 PostgreSQL `40 passed`；Backend 全量 `1584 passed, 5 skipped`，9814 条语句、2100 个分支覆盖率 100%，285 个 Python 文件格式、Ruff、严格 Mypy 263 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend 93 项 Node 契约、183 项 Vitest、ESLint、严格 TypeScript 和 API 快照全绿；Rust 默认完整测试、Rustfmt 与全目标/全特性 Clippy `-D warnings` 全绿；隐藏 App 纵向验收 1 项通过
+- 文档与台账：同步根/Backend/Frontend README、产品规划、前后端架构、工程结构和本唯一台账；同时将台账中全部历史完成标记统一为 `✅ 已完成`，未改动待验收/RED/未开始语义，没有新增第二份规划
+- 后续：进入 `A7-06` 高风险最终确认；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-05`（🧪 RED）：新增文案纯领域失败矩阵，固定长度、空内容、控制字符、敏感模式和模板变量边界，不接触真实账号或平台发送；
+1. `A7-06`（🧪 RED）：先以失败测试固定高风险最终确认快照，UI 展示精确目标、动作、文案和数量，并用确认 revision 拒绝旧提交；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

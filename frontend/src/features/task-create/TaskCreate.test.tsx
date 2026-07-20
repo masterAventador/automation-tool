@@ -46,7 +46,8 @@ describe("Douyin search exposure Task creation", () => {
     await user.type(screen.getByLabelText("搜索关键词"), "新能源汽车");
     await user.click(screen.getByLabelText("动作"));
     await user.click(await screen.findByText("评论"));
-    await user.type(screen.getByLabelText("评论或私信模板"), "内容很有启发");
+    await user.click(screen.getByLabelText("评论或私信模板"));
+    await user.paste("您好，{{target_display_name}}，内容很有启发");
     await user.clear(screen.getByLabelText("单任务目标上限"));
     await user.type(screen.getByLabelText("单任务目标上限"), "12");
     await user.click(screen.getByRole("button", { name: "创建任务" }));
@@ -59,7 +60,7 @@ describe("Douyin search exposure Task creation", () => {
       template: "douyin.search_exposure.v1",
       searchKeyword: "新能源汽车",
       action: "comment",
-      messageTemplate: "内容很有启发",
+      messageTemplate: "您好，{{target_display_name}}，内容很有启发",
       targetLimit: 12,
       previewRequired: true,
       finalConfirmationRequired: true,
@@ -111,6 +112,21 @@ describe("Douyin search exposure Task creation", () => {
       expect(taskCreationGateway.createDouyinSearchExposureTask).not.toHaveBeenCalled();
     },
   );
+
+  it("rejects an unknown message variable before the production gateway", async () => {
+    const user = userEvent.setup();
+    const { taskCreationGateway } = renderForm();
+
+    await user.type(screen.getByLabelText("搜索关键词"), "新能源汽车");
+    await user.click(screen.getByLabelText("动作"));
+    await user.click(await screen.findByText("评论"));
+    await user.click(screen.getByLabelText("评论或私信模板"));
+    await user.paste("您好，{{unknown}}");
+    await user.click(screen.getByRole("button", { name: "创建任务" }));
+
+    expect(await screen.findByText("请输入有效的评论或私信模板")).toBeInTheDocument();
+    expect(taskCreationGateway.createDouyinSearchExposureTask).not.toHaveBeenCalled();
+  });
 
   it("keeps the creation receipt visible until the operator opens run details", async () => {
     const onCreated = vi.fn();

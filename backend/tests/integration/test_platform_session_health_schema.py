@@ -30,7 +30,7 @@ from automation_tool.control_plane.infrastructure.database import (
 from automation_tool.protocol import PlatformSessionState
 
 PREVIOUS_REVISION = "20260718_0013"
-HEAD_REVISION = "20260720_0020"
+HEAD_REVISION = "20260720_0021"
 NOW = datetime(2026, 7, 19, 11, 30, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "installation_id",

@@ -14,6 +14,13 @@ from automation_tool.protocol.action_authorization import (
     encode_action_authorization_token,
     parse_action_authorization_token,
 )
+from automation_tool.protocol.action_message_template import (
+    ACTION_MESSAGE_TEMPLATE_VERSION,
+    MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS,
+    ActionMessageTemplate,
+    ActionMessageTemplateRejected,
+    ActionMessageVariable,
+)
 from automation_tool.protocol.douyin_candidate import (
     DOUYIN_CANDIDATE_VERSION,
     MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
@@ -81,6 +88,7 @@ __all__ = [
     "ACTION_AUTHORIZATION_MAX_LIFETIME",
     "ACTION_AUTHORIZATION_TOKEN_PREFIX",
     "ACTION_AUTHORIZATION_VERSION",
+    "ACTION_MESSAGE_TEMPLATE_VERSION",
     "API_VERSION",
     "CURRENT_EXECUTOR_PROTOCOL",
     "DOUYIN_CANDIDATE_VERSION",
@@ -90,6 +98,7 @@ __all__ = [
     "EXECUTOR_WEBSOCKET_SUBPROTOCOL",
     "MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "MAX_ACTION_AUTHORIZATION_TOKEN_BYTES",
+    "MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS",
     "MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS",
     "MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS",
     "MAX_DISCOVERY_BATCH_CANDIDATES",
@@ -102,6 +111,9 @@ __all__ = [
     "MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "ActionAuthorizationClaims",
     "ActionAuthorizationRejected",
+    "ActionMessageTemplate",
+    "ActionMessageTemplateRejected",
+    "ActionMessageVariable",
     "CorrelationId",
     "DouyinCandidate",
     "DouyinCandidateKey",

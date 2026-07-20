@@ -454,7 +454,9 @@ douyin_search_exposure_definitions = Table(
         "and lower(message_template) !~ "
         "'(access[_-]?token|api[_-]?key|authorization|cookie|credential|password|"
         "private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)"
-        "[[:space:]]*[:=]')",
+        "[[:space:]]*[:=]' "
+        "and btrim(replace(message_template, '{{target_display_name}}', '')) <> '' "
+        "and replace(message_template, '{{target_display_name}}', '') !~ '[{}]')",
         name="ck_douyin_search_exposure_message_safe",
     ),
     CheckConstraint(

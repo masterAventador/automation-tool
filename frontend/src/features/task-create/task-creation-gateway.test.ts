@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  douyinActionMessageTemplateSchema,
   douyinSearchExposureDefinitionSchema,
   validateTaskCreationInput,
 } from "./task-creation-gateway";
@@ -43,5 +44,43 @@ describe("Douyin discovery input policy", () => {
     expect(
       douyinSearchExposureDefinitionSchema.safeParse({ ...definition, ...change }).success,
     ).toBe(false);
+  });
+});
+
+describe("A7-05 action message template policy", () => {
+  it("accepts exact fixed copy, Unicode bounds, and the one closed variable", () => {
+    for (const messageTemplate of [
+      "内容很有启发",
+      "您好，{{target_display_name}}，内容很有启发",
+      "😀".repeat(500),
+    ]) {
+      expect(douyinActionMessageTemplateSchema.safeParse(messageTemplate).success).toBe(true);
+    }
+  });
+
+  it.each([
+    "",
+    " ",
+    " leading",
+    "trailing\u00a0",
+    "line\nbreak",
+    "control\u0085character",
+    "visual\u202etrap",
+    "😀".repeat(501),
+    "password=private-value",
+    "Bearer private-value",
+    "file:///Users/private-value",
+    "data:image/png;base64,private-value",
+    "/Users/private-value/message.txt",
+    "C:\\Users\\private-value\\message.txt",
+    "{{target_display_name}}",
+    "{{unknown}}您好",
+    "{{ target_display_name }}您好",
+    "{{target.display_name}}您好",
+    "{target_display_name}您好",
+    "{{target_display_name}您好",
+    "{{{target_display_name}}}您好",
+  ])("rejects invalid or unresolved copy before the native gateway: %s", (messageTemplate) => {
+    expect(douyinActionMessageTemplateSchema.safeParse(messageTemplate).success).toBe(false);
   });
 });

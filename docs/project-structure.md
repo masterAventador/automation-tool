@@ -292,6 +292,7 @@ backend/
 │       │       ├── desktop/
 │       │       └── logging/
 │       ├── protocol/              # Control Plane ↔ Executor 版本化协议
+│       │   ├── action_message_template.py # A7-05 固定文案/单变量封闭校验
 │       │   ├── douyin_candidate.py # 最小 Candidate、来源与稳定去重键
 │       │   ├── douyin_search.py   # 双端共享关键词/目标上限与脱敏输入对象
 │       │   ├── executor_envelope.py # v1 判别联合、ID/时限/幂等/序号和安全 payload
@@ -386,6 +387,8 @@ A7-01 新增 `backend/src/automation_tool/control_plane/domain/action_risk_polic
 A7-02 新增应用层不可变 `ActionRiskAuthorization`/稳定失败类型、`infrastructure/database/action_risk_authorization_repository.py`、Alembic `20260720_0020` 和对应单元/真实 PostgreSQL 生命周期测试。Schema 中的 `action_risk_authorizations` 只保存强类型资源绑定、封闭平台/动作、策略版本与授权时计数，不保存任意 JSON、页面内容、Cookie、Token、文案或本机路径；两个补充复合唯一约束只为 Action/Target 外键绑定 ordinal。Repository 复用既有 Task、Attempt、Target、确认、Session health/gate 与 `task_actions` 表，不另建账号中心、内存计数器、HTTP 协议或第二套副作用账本。A7-03 在此内部事实之上建立可下发短期授权。
 
 A7-03 新增共享 `protocol/action_authorization.py`、Control Plane-only `infrastructure/security/action_authorizations.py` 和 Executor-only `executor/action_authorization.py`。共享层拥有 canonical claims/token/parser、`ProtocolActionId`/`ProtocolTargetId` 与从任务定义上移的封闭动作枚举；签发层只把 A7-02 事实映射为 Ed25519 token，验签层只用固定公钥匹配当前执行意图。私钥加载与公钥固定由后续部署/Executor 组合根负责，不能从 React、HTTP payload、普通配置、SQLite 或系统钥匙串传入；当前没有迁移、API、Executor v1 Schema、Rust 或 Frontend 产品代码。真实 PostgreSQL 集成测试从正式 A7-02 Repository 授权后再签发/验签，不用 Mock 数据库或内部伪事实替代。
+
+A7-05 新增共享 `protocol/action_message_template.py` 和 Alembic `20260720_0021`，并收紧既有 `domain/task_definitions.py`、React/TypeScript 表单 Gateway、Rust `control_plane.rs` 与 PostgreSQL check constraint。各层只复验同一 500 字符、安全文本、非空字面和 `{{target_display_name}}` 封闭变量集；不新建模板引擎、LLM 调用、动作 wire 或第二份任务定义。`frontend/tests/action-message-template-boundary.test.mjs` 防止五个生产边界变量/长度规则漂移，`scripts/run_t3_17_acceptance.py` 从唯一隐藏 App 原表单入口验证非法模板不发请求、合法模板经真实 HTTP 落 PostgreSQL。
 
 E4-04 的 `package_manifest.py` 是唯一 Manifest 生成器和 `automation-tool-build-executor-manifest` CLI：发布私钥只接受 stdin 的 32 字节 seed；整个 `onedir` payload 以受限 ASCII 相对路径排序，逐文件记录大小/SHA-256，并以固定域、长度前缀、大小和原始摘要计算目录 SHA-256。canonical Manifest 原始字节由独立 `atems1` Ed25519 envelope 签名；`contracts/protocol/executor-package-manifest-v1.schema.json` 固化 exact fields，`contracts/fixtures/executor-package-v1/valid/` 用明确的测试 seed 提供 inert 跨语言验签样例。生成器拒绝 symlink、非普通文件、错误入口、平台/架构/版本/build ID、读取竞态和资源超限；Rust 可信读取、安装与防降级不在 Python 中伪造，继续由 E4-05 承接。
 

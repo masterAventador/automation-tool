@@ -30,6 +30,7 @@ const MAX_CROSS_RUNTIME_SEQUENCE: u64 = (1_u64 << 53) - 1;
 const DOUYIN_SEARCH_EXPOSURE_TEMPLATE: &str = "douyin.search_exposure.v1";
 const MAX_SEARCH_KEYWORD_CHARACTERS: usize = 80;
 const MAX_MESSAGE_TEMPLATE_CHARACTERS: usize = 500;
+const TARGET_DISPLAY_NAME_VARIABLE: &str = "{{target_display_name}}";
 const MAX_TASK_TARGET_LIMIT: u16 = 100;
 const MAX_TASK_INTERVAL_SECONDS: u16 = 3600;
 const MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS: usize = 80;
@@ -319,7 +320,7 @@ impl DouyinSearchExposureTaskDefinition {
             (DouyinSearchExposureAction::Browse, None) => {}
             (DouyinSearchExposureAction::Comment, Some(message))
             | (DouyinSearchExposureAction::DirectMessage, Some(message)) => {
-                require_safe_exact_text(message, MAX_MESSAGE_TEMPLATE_CHARACTERS)?;
+                require_action_message_template(message)?;
             }
             _ => return Err(protocol_invalid()),
         }
@@ -2093,6 +2094,15 @@ fn require_safe_exact_text(
     Ok(())
 }
 
+fn require_action_message_template(value: &str) -> Result<(), ControlPlaneError> {
+    require_safe_exact_text(value, MAX_MESSAGE_TEMPLATE_CHARACTERS)?;
+    let literal = value.replace(TARGET_DISPLAY_NAME_VARIABLE, "");
+    if literal.trim().is_empty() || literal.contains('{') || literal.contains('}') {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
 fn require_list_cursor(value: &str) -> Result<(), ControlPlaneError> {
     if value.is_empty()
         || value.len() > 256
@@ -3584,7 +3594,7 @@ mod tests {
         let definition = DouyinSearchExposureTaskDefinition::new(
             "新能源汽车".to_owned(),
             DouyinSearchExposureAction::Comment,
-            Some("内容很有启发".to_owned()),
+            Some("您好，{{target_display_name}}，内容很有启发".to_owned()),
             12,
             30,
             90,
@@ -3596,7 +3606,7 @@ mod tests {
                 "template": "douyin.search_exposure.v1",
                 "searchKeyword": "新能源汽车",
                 "action": "comment",
-                "messageTemplate": "内容很有启发",
+                "messageTemplate": "您好，{{target_display_name}}，内容很有启发",
                 "targetLimit": 12,
                 "minimumIntervalSeconds": 30,
                 "maximumIntervalSeconds": 90,
@@ -3654,6 +3664,25 @@ mod tests {
             assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
             assert_eq!(error.to_string(), "Control Plane request failed");
             assert!(!error.to_string().contains("private-value"));
+        }
+
+        for invalid_message in [
+            "{{target_display_name}}",
+            "{{unknown}}您好",
+            "{{ target_display_name }}您好",
+            "{{target.display_name}}您好",
+            "{target_display_name}您好",
+            "{{target_display_name}您好",
+            "{{{target_display_name}}}您好",
+        ] {
+            let mut candidate = base.clone();
+            candidate["messageTemplate"] = serde_json::json!(invalid_message);
+            let parsed: DouyinSearchExposureTaskDefinition =
+                serde_json::from_value(candidate).expect("typed candidate");
+            let error = parsed.validate().expect_err("invalid message template");
+            assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+            assert_eq!(error.to_string(), "Control Plane request failed");
+            assert!(!error.to_string().contains(invalid_message));
         }
 
         let mut unknown = base;

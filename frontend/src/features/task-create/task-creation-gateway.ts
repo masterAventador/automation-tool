@@ -14,6 +14,7 @@ const privatePosixPath = /(?:^|[\s"'=])\/(?:users|home|root|tmp|var\/folders)(?:
 const windowsAbsolutePath = /(?:^|[\s"'=])[a-z]:[\\/]/i;
 
 export const MAX_SEARCH_KEYWORD_CHARACTERS = 80;
+export const MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS = 500;
 export const MAX_TASK_TARGET_LIMIT = 100;
 
 function containsControlOrBidi(value: string): boolean {
@@ -52,12 +53,32 @@ function safeExactText(maximumCharacters: number) {
 
 export const douyinSearchKeywordSchema = safeExactText(MAX_SEARCH_KEYWORD_CHARACTERS);
 
+export const douyinActionMessageTemplateSchema = safeExactText(
+  MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS,
+).superRefine((value, context) => {
+  let unknownVariable = false;
+  const literal = value.replace(/\{\{([a-z][a-z0-9_]*)\}\}/g, (_, variable: string) => {
+    if (variable !== "target_display_name") {
+      unknownVariable = true;
+    }
+    return "";
+  });
+  if (
+    unknownVariable ||
+    literal.trim().length === 0 ||
+    literal.includes("{") ||
+    literal.includes("}")
+  ) {
+    context.addIssue({ code: "custom", message: "Invalid action message template" });
+  }
+});
+
 export const douyinSearchExposureDefinitionSchema = z
   .object({
     template: z.literal("douyin.search_exposure.v1"),
     searchKeyword: douyinSearchKeywordSchema,
     action: z.enum(["browse", "comment", "direct_message"]),
-    messageTemplate: safeExactText(500).nullable(),
+    messageTemplate: douyinActionMessageTemplateSchema.nullable(),
     targetLimit: z.number().int().min(1).max(MAX_TASK_TARGET_LIMIT),
     minimumIntervalSeconds: z.number().int().min(1).max(3600),
     maximumIntervalSeconds: z.number().int().min(1).max(3600),

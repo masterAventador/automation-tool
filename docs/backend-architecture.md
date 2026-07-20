@@ -336,6 +336,8 @@ A7-04 在 Local Executor 增加 `ExecutorActionGate`，把 A7-03 验签和本机
 
 同一个 `BEGIN IMMEDIATE` 准入事务依次检查持久紧停 latch、Action/idempotency 精确重放、Installation/平台/动作的最近准入时间，以及 Task/平台/动作计数，然后写入唯一 ordinal。紧停先于重放和频控，重启后仍保持；清除必须提供当前本机 revision 且使用严格递增 UTC 时间。时钟倒退、数据库损坏、身份错绑和五路并发冲突都 fail closed。SQLite 只存 Action 完整绑定所需的最小 claims、准入时间、ordinal 与 token SHA-256 指纹，不存 token、服务端私钥、Cookie、Profile、页面事实或账号信息。当前模块是后续 A7-07/A7-11/A7-12 的内部动作入口；动作 wire、App UI 与真实平台副作用仍未提前实现。
 
+A7-05 将 `action-message-template.v1` 放在共享 `protocol/` 而不是页面定位或 LLM 模块：允许纯固定文案，也只允许 `{{target_display_name}}` 一个变量，且删除合法占位符后必须仍有非空字面。Python 领域先校验 500 Unicode code point、控制/Bidi、敏感模式、私有路径和封闭变量；FastAPI 只返回固定错误，不回显原文。Alembic `20260720_0021` 替换原消息 check constraint，用同一合法占位符替换和剩余花括号拒绝保护直写 PostgreSQL 边界，并保留可回滚的旧约束。当前不渲染、不下发文案、不执行平台副作用；A7-06 再把精确动作/文案/数量与确认 revision 绑定。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

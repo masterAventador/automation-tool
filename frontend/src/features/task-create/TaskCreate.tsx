@@ -16,6 +16,7 @@ import { useRef, useState } from "react";
 import { taskProjectionKeys } from "../../api/control-plane/task-projections";
 import {
   MAX_TASK_TARGET_LIMIT,
+  douyinActionMessageTemplateSchema,
   douyinSearchKeywordSchema,
 } from "./task-creation-gateway";
 import type {
@@ -139,9 +140,20 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
             <Form.Item
               label="评论或私信模板"
               name="messageTemplate"
+              extra={"可用变量：{{target_display_name}}"}
               rules={[
                 { required: true, message: "请输入评论或私信模板" },
-                { max: 500, message: "模板不能超过 500 个字符" },
+                {
+                  validator: async (_, value: string | undefined) => {
+                    if (
+                      value === undefined ||
+                      douyinActionMessageTemplateSchema.safeParse(value).success
+                    ) {
+                      return;
+                    }
+                    throw new Error("请输入有效的评论或私信模板");
+                  },
+                },
               ]}
             >
               <Input.TextArea rows={4} autoComplete="off" />

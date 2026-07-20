@@ -32,7 +32,7 @@ VALID_DEFINITION = {
     "template": "douyin.search_exposure.v1",
     "searchKeyword": "新能源汽车",
     "action": "comment",
-    "messageTemplate": "内容很有启发,期待更多分享",
+    "messageTemplate": "您好 {{target_display_name}} 期待更多分享",
     "targetLimit": 12,
     "minimumIntervalSeconds": 30,
     "maximumIntervalSeconds": 90,
@@ -130,7 +130,7 @@ def test_valid_definition_reaches_the_service_as_canonical_typed_fields() -> Non
         "finalConfirmationRequired": repository.definition.final_confirmation_required,
     } == VALID_DEFINITION
     assert "新能源汽车" not in response.text
-    assert "内容很有启发" not in response.text
+    assert "target_display_name" not in response.text
 
 
 def test_http_caller_uses_unicode_code_points_and_the_exact_target_cap() -> None:
@@ -167,6 +167,12 @@ def test_definition_validation_is_closed_consistent_and_secret_safe() -> None:
         {**VALID_DEFINITION, "action": "browse", "messageTemplate": "must be absent"},
         {**VALID_DEFINITION, "action": "comment", "messageTemplate": None},
         {**VALID_DEFINITION, "messageTemplate": "password=private-value"},
+        {**VALID_DEFINITION, "messageTemplate": "{{target_display_name}}"},
+        {**VALID_DEFINITION, "messageTemplate": "{{unknown}}您好"},
+        {**VALID_DEFINITION, "messageTemplate": "{{ target_display_name }}您好"},
+        {**VALID_DEFINITION, "messageTemplate": "{{target.display_name}}您好"},
+        {**VALID_DEFINITION, "messageTemplate": "{target_display_name}您好"},
+        {**VALID_DEFINITION, "messageTemplate": "{{target_display_name}您好"},
         {**VALID_DEFINITION, "targetLimit": 0},
         {**VALID_DEFINITION, "targetLimit": 101},
         {**VALID_DEFINITION, "targetLimit": True},

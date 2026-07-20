@@ -17,7 +17,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0012"
-HEAD_REVISION = "20260720_0020"
+HEAD_REVISION = "20260720_0021"
 NOW = datetime(2026, 7, 18, 23, 40, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "task_id",
@@ -181,6 +181,15 @@ async def test_database_enforces_closed_definition_shape_and_task_binding(
                     definition_values(valid_task, valid_installation)
                 )
             )
+        personalized_task, personalized_installation = await seed_task(database)
+        created_installations.add(personalized_installation)
+        personalized = definition_values(personalized_task, personalized_installation)
+        personalized.update(
+            action="comment",
+            message_template="您好 {{target_display_name}} 内容很有启发",
+        )
+        async with database.session() as session:
+            await session.execute(insert(douyin_search_exposure_definitions).values(personalized))
 
         invalid_overrides: tuple[dict[str, object], ...] = (
             {"template": "unknown.template"},
@@ -192,6 +201,13 @@ async def test_database_enforces_closed_definition_shape_and_task_binding(
             {"action": "browse", "message_template": "not allowed"},
             {"action": "comment", "message_template": None},
             {"action": "comment", "message_template": "password=private-value"},
+            {"action": "comment", "message_template": "{{target_display_name}}"},
+            {"action": "comment", "message_template": "{{unknown}}您好"},
+            {"action": "comment", "message_template": "{{ target_display_name }}您好"},
+            {"action": "comment", "message_template": "{{target.display_name}}您好"},
+            {"action": "comment", "message_template": "{target_display_name}您好"},
+            {"action": "comment", "message_template": "{{target_display_name}您好"},
+            {"action": "comment", "message_template": "{{{target_display_name}}}您好"},
             {"target_limit": 0},
             {"target_limit": 101},
             {"minimum_interval_seconds": 91, "maximum_interval_seconds": 90},
