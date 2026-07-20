@@ -10,8 +10,10 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
     PendingTaskTargetConfirmation,
     PendingTaskTargetExclusions,
+    TaskTargetConfirmationIntent,
     TaskTargetPreviewConflict,
     TaskTargetPreviewItem,
     TaskTargetPreviewMutationResult,
@@ -20,6 +22,7 @@ from automation_tool.control_plane.application.task_target_previews import (
 )
 from automation_tool.control_plane.domain import (
     DouyinCandidateDisposition,
+    DouyinSearchExposureAction,
     InstallationId,
     InstallationStatus,
     TargetId,
@@ -30,6 +33,7 @@ from automation_tool.control_plane.domain import (
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
+    douyin_search_exposure_definitions,
     installations,
     task_events,
     task_target_confirmations,
@@ -242,34 +246,28 @@ class SqlAlchemyTaskTargetPreviewRepository:
             )
             if page_bounds != (pending.page_revision, pending.page_revision):
                 raise TaskTargetPreviewConflict
-            selected_count = cast(
-                int,
-                await session.scalar(
-                    select(func.count())
-                    .select_from(
-                        task_targets.outerjoin(
-                            task_target_exclusions,
-                            and_(
-                                task_target_exclusions.c.target_id == task_targets.c.id,
-                                task_target_exclusions.c.task_id == task_targets.c.task_id,
-                                task_target_exclusions.c.installation_id
-                                == task_targets.c.installation_id,
-                                task_target_exclusions.c.page_revision
-                                == task_targets.c.page_revision,
-                            ),
-                        )
-                    )
-                    .where(
-                        task_targets.c.task_id == pending.task_id.uuid,
-                        task_targets.c.installation_id == pending.installation_id.uuid,
-                        task_targets.c.page_revision == pending.page_revision,
-                        task_targets.c.disposition == DouyinCandidateDisposition.ELIGIBLE.value,
-                        task_target_exclusions.c.target_id.is_(None),
-                    )
-                ),
+            selected_target_ids = await _selected_target_ids(
+                session,
+                installation_id=pending.installation_id,
+                task_id=pending.task_id,
+                page_revision=pending.page_revision,
             )
-            if selected_count < 1:
+            if not selected_target_ids:
                 raise TaskTargetPreviewConflict
+            definition = await _read_definition(
+                session,
+                installation_id=pending.installation_id,
+                task_id=pending.task_id,
+                lock=True,
+            )
+            intent = _confirmation_intent(
+                installation_id=pending.installation_id,
+                task_id=pending.task_id,
+                page_revision=pending.page_revision,
+                confirmation_revision=pending.expected_task_revision,
+                definition=definition,
+                selected_target_ids=selected_target_ids,
+            )
             next_revision = pending.expected_task_revision + 1
             await session.execute(
                 insert(task_target_confirmations).values(
@@ -278,7 +276,11 @@ class SqlAlchemyTaskTargetPreviewRepository:
                     page_revision=pending.page_revision,
                     selection_task_revision=pending.expected_task_revision,
                     confirmed_task_revision=next_revision,
-                    selected_target_count=selected_count,
+                    selected_target_count=intent.selected_target_count,
+                    action=intent.action.value,
+                    message_template=intent.message_template,
+                    intent_version=TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+                    intent_fingerprint=intent.fingerprint(),
                     source_message_id=pending.source_message_id,
                     source_idempotency_key=pending.idempotency_key,
                     source_fingerprint=pending.fingerprint(),
@@ -401,6 +403,83 @@ async def _page_bounds(
     return cast(int | None, row[0]), cast(int | None, row[1])
 
 
+async def _read_definition(
+    session: AsyncSession,
+    *,
+    installation_id: InstallationId,
+    task_id: TaskId,
+    lock: bool,
+) -> RowMapping:
+    statement = select(
+        douyin_search_exposure_definitions.c.action,
+        douyin_search_exposure_definitions.c.message_template,
+    ).where(
+        douyin_search_exposure_definitions.c.task_id == task_id.uuid,
+        douyin_search_exposure_definitions.c.installation_id == installation_id.uuid,
+    )
+    if lock:
+        statement = statement.with_for_update()
+    row = (await session.execute(statement)).mappings().one_or_none()
+    if row is None:
+        raise TaskTargetPreviewConflict
+    return row
+
+
+async def _selected_target_ids(
+    session: AsyncSession,
+    *,
+    installation_id: InstallationId,
+    task_id: TaskId,
+    page_revision: int,
+) -> tuple[TargetId, ...]:
+    values = await session.scalars(
+        select(task_targets.c.id)
+        .select_from(
+            task_targets.outerjoin(
+                task_target_exclusions,
+                and_(
+                    task_target_exclusions.c.target_id == task_targets.c.id,
+                    task_target_exclusions.c.task_id == task_targets.c.task_id,
+                    task_target_exclusions.c.installation_id == task_targets.c.installation_id,
+                    task_target_exclusions.c.page_revision == task_targets.c.page_revision,
+                ),
+            )
+        )
+        .where(
+            task_targets.c.task_id == task_id.uuid,
+            task_targets.c.installation_id == installation_id.uuid,
+            task_targets.c.page_revision == page_revision,
+            task_targets.c.disposition == DouyinCandidateDisposition.ELIGIBLE.value,
+            task_target_exclusions.c.target_id.is_(None),
+        )
+        .order_by(task_targets.c.ordinal, task_targets.c.id)
+    )
+    return tuple(TargetId.parse(value) for value in values)
+
+
+def _confirmation_intent(
+    *,
+    installation_id: InstallationId,
+    task_id: TaskId,
+    page_revision: int,
+    confirmation_revision: int,
+    definition: RowMapping,
+    selected_target_ids: tuple[TargetId, ...],
+) -> TaskTargetConfirmationIntent:
+    try:
+        return TaskTargetConfirmationIntent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=page_revision,
+            confirmation_revision=confirmation_revision,
+            action=DouyinSearchExposureAction(cast(str, definition["action"])),
+            message_template=cast(str | None, definition["message_template"]),
+            selected_target_ids=selected_target_ids,
+        )
+    except (KeyError, TypeError, ValueError):
+        raise TaskTargetPreviewConflict from None
+
+
 async def _read_snapshot(
     session: AsyncSession,
     *,
@@ -438,6 +517,12 @@ async def _read_snapshot(
         raise TaskTargetPreviewNotFound
     if expected_page_revision is not None and maximum != expected_page_revision:
         raise TaskTargetPreviewConflict
+    definition = await _read_definition(
+        session,
+        installation_id=installation_id,
+        task_id=task_id,
+        lock=False,
+    )
     statement = (
         select(task_targets, task_target_exclusions.c.target_id.label("excluded_target_id"))
         .select_from(
@@ -510,13 +595,20 @@ async def _read_snapshot(
             )
         )
     ).one()
-    confirmed_at = await session.scalar(
-        select(task_target_confirmations.c.confirmed_at).where(
-            task_target_confirmations.c.task_id == task_id.uuid,
-            task_target_confirmations.c.installation_id == installation_id.uuid,
-            task_target_confirmations.c.page_revision == maximum,
+    confirmation = (
+        (
+            await session.execute(
+                select(task_target_confirmations).where(
+                    task_target_confirmations.c.task_id == task_id.uuid,
+                    task_target_confirmations.c.installation_id == installation_id.uuid,
+                    task_target_confirmations.c.page_revision == maximum,
+                )
+            )
         )
+        .mappings()
+        .one_or_none()
     )
+    confirmed_at = None if confirmation is None else confirmation["confirmed_at"]
     task_status = TaskStatus(cast(str, task_row["status"]))
     if (confirmed_at is None and task_status is not TaskStatus.AWAITING_CONFIRMATION) or (
         confirmed_at is not None
@@ -529,9 +621,42 @@ async def _read_snapshot(
         }
     ):
         raise TaskTargetPreviewConflict
+    selected_target_ids = await _selected_target_ids(
+        session,
+        installation_id=installation_id,
+        task_id=task_id,
+        page_revision=maximum,
+    )
+    if confirmation is None:
+        confirmation_revision = cast(int, task_row["revision"])
+        action = DouyinSearchExposureAction(cast(str, definition["action"]))
+        message_template = cast(str | None, definition["message_template"])
+    else:
+        intent = _confirmation_intent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=maximum,
+            confirmation_revision=cast(int, confirmation["selection_task_revision"]),
+            definition=definition,
+            selected_target_ids=selected_target_ids,
+        )
+        if (
+            confirmation["action"] != intent.action.value
+            or confirmation["message_template"] != intent.message_template
+            or confirmation["intent_version"] != TASK_TARGET_CONFIRMATION_INTENT_VERSION
+            or bytes(confirmation["intent_fingerprint"]) != intent.fingerprint()
+            or confirmation["selected_target_count"] != intent.selected_target_count
+        ):
+            raise TaskTargetPreviewConflict
+        confirmation_revision = intent.confirmation_revision
+        action = intent.action
+        message_template = intent.message_template
     return TaskTargetPreviewSnapshot(
         task=task_record_from_row(task_row),
         page_revision=maximum,
+        confirmation_revision=confirmation_revision,
+        action=action,
+        message_template=message_template,
         items=items,
         selected_target_count=cast(int, counts.selected_count),
         user_excluded_target_count=cast(int, counts.excluded_count),

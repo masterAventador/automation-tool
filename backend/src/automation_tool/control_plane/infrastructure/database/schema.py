@@ -19,6 +19,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+)
 from automation_tool.control_plane.domain import (
     ACTION_RISK_POLICY_VERSION,
     DOUYIN_CANDIDATE_POLICY_VERSION,
@@ -661,6 +664,10 @@ task_target_confirmations = Table(
     Column("selection_task_revision", BigInteger(), nullable=False),
     Column("confirmed_task_revision", BigInteger(), nullable=False),
     Column("selected_target_count", BigInteger(), nullable=False),
+    Column("action", String(length=32), nullable=False),
+    Column("message_template", String(), nullable=True),
+    Column("intent_version", String(length=64), nullable=False),
+    Column("intent_fingerprint", LargeBinary(length=32), nullable=False),
     Column("source_message_id", UUID(as_uuid=True), nullable=False),
     Column("source_idempotency_key", String(), nullable=False),
     Column("source_fingerprint", LargeBinary(length=32), nullable=False),
@@ -682,6 +689,41 @@ task_target_confirmations = Table(
     CheckConstraint(
         f"selected_target_count between 1 and {MAX_TASK_TARGET_LIMIT}",
         name="ck_task_target_confirmations_selected_count",
+    ),
+    CheckConstraint(
+        "action in ("
+        + ", ".join(f"'{action.value}'" for action in DouyinSearchExposureAction)
+        + ")",
+        name="ck_task_target_confirmations_action",
+    ),
+    CheckConstraint(
+        "(action = 'browse' and message_template is null) or "
+        "(action in ('comment', 'direct_message') and message_template is not null)",
+        name="ck_task_target_confirmations_message_presence",
+    ),
+    CheckConstraint(
+        "message_template is null or ("
+        f"char_length(message_template) between 1 and {MAX_MESSAGE_TEMPLATE_CHARACTERS} "
+        f"and octet_length(message_template) <= {MAX_MESSAGE_TEMPLATE_CHARACTERS * 4} "
+        "and btrim(message_template) = message_template "
+        "and message_template !~ '[[:cntrl:]]' "
+        "and lower(message_template) not like '%bearer %' "
+        "and lower(message_template) not like '%file://%' "
+        "and lower(message_template) !~ "
+        "'(access[_-]?token|api[_-]?key|authorization|cookie|credential|password|"
+        "private[_-]?key|refresh[_-]?token|secret|session[_-]?cookie|token)"
+        "[[:space:]]*[:=]' "
+        "and btrim(replace(message_template, '{{target_display_name}}', '')) <> '' "
+        "and replace(message_template, '{{target_display_name}}', '') !~ '[{}]')",
+        name="ck_task_target_confirmations_message_safe",
+    ),
+    CheckConstraint(
+        f"intent_version = '{TASK_TARGET_CONFIRMATION_INTENT_VERSION}'",
+        name="ck_task_target_confirmations_intent_version",
+    ),
+    CheckConstraint(
+        "octet_length(intent_fingerprint) = 32",
+        name="ck_task_target_confirmations_intent_fingerprint_length",
     ),
     CheckConstraint(
         "substring(source_message_id::text from 15 for 1) = '4' "

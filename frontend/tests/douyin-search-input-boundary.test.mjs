@@ -9,13 +9,16 @@ async function readRepositoryFile(path) {
 }
 
 test("D6-03 keeps one Python search-input policy and matching desktop bounds", async () => {
-  const [policy, definition, api, gateway, form, native, openapi, acceptance] =
+  const [policy, definition, api, sharedSchema, gateway, form, native, openapi, acceptance] =
     await Promise.all([
       readRepositoryFile("backend/src/automation_tool/protocol/douyin_search.py"),
       readRepositoryFile(
         "backend/src/automation_tool/control_plane/domain/task_definitions.py",
       ),
       readRepositoryFile("backend/src/automation_tool/control_plane/api/tasks.py"),
+      readRepositoryFile(
+        "frontend/src/api/control-plane/douyin-search-exposure.ts",
+      ),
       readRepositoryFile(
         "frontend/src/features/task-create/task-creation-gateway.ts",
       ),
@@ -35,9 +38,12 @@ test("D6-03 keeps one Python search-input policy and matching desktop bounds", a
   assert.doesNotMatch(definition, /MAX_TASK_TARGET_LIMIT\s*=\s*100/u);
   assert.match(api, /MAX_SEARCH_KEYWORD_CHARACTERS/u);
   assert.match(api, /MAX_TASK_TARGET_LIMIT/u);
-  assert.match(gateway, /export const MAX_SEARCH_KEYWORD_CHARACTERS = 80/u);
-  assert.match(gateway, /export const MAX_TASK_TARGET_LIMIT = 100/u);
-  assert.match(gateway, /Array\.from\(value\)\.length/u);
+  assert.match(sharedSchema, /export const MAX_SEARCH_KEYWORD_CHARACTERS = 80/u);
+  assert.match(sharedSchema, /export const MAX_TASK_TARGET_LIMIT = 100/u);
+  assert.match(sharedSchema, /Array\.from\(value\)\.length/u);
+  assert.match(gateway, /MAX_SEARCH_KEYWORD_CHARACTERS,/u);
+  assert.match(gateway, /from "\.\.\/\.\.\/api\/control-plane\/douyin-search-exposure"/u);
+  assert.doesNotMatch(gateway, /export const MAX_SEARCH_KEYWORD_CHARACTERS/u);
   assert.match(form, /douyinSearchKeywordSchema/u);
   assert.match(form, /MAX_TASK_TARGET_LIMIT/u);
   assert.match(native, /const MAX_SEARCH_KEYWORD_CHARACTERS: usize = 80/u);

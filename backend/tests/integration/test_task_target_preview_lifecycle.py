@@ -9,16 +9,19 @@ from uuid import uuid4
 
 import pytest
 from conftest import AlembicRunner
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, select, text, update
 
 from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
     PendingTaskTargetConfirmation,
     PendingTaskTargetExclusions,
+    TaskTargetConfirmationIntent,
     TaskTargetPreviewConflict,
     TaskTargetPreviewNotFound,
     TaskTargetPreviewService,
 )
 from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
     InstallationId,
     TargetId,
     TaskEventType,
@@ -27,6 +30,7 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
+    douyin_search_exposure_definitions,
     installations,
     task_events,
     task_target_confirmations,
@@ -36,6 +40,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 from automation_tool.control_plane.infrastructure.database.task_target_preview_repository import (
     SqlAlchemyTaskTargetPreviewRepository,
+    _confirmation_intent,
 )
 from automation_tool.control_plane.infrastructure.database.task_target_repository import (
     SqlAlchemyTaskTargetRepository,
@@ -75,6 +80,7 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(task_target_exclusions))
         await session.execute(delete(task_targets))
         await session.execute(delete(task_events))
+        await session.execute(delete(douyin_search_exposure_definitions))
         await session.execute(delete(tasks))
         await session.execute(delete(installations))
 
@@ -106,6 +112,18 @@ async def seed_preview(
                 last_event_sequence=3,
                 created_at=BASE,
                 updated_at=BASE,
+            )
+        )
+        await session.execute(
+            insert(douyin_search_exposure_definitions).values(
+                task_id=task_id.uuid,
+                installation_id=scoped_installation.uuid,
+                search_keyword="新能源汽车",
+                action="comment",
+                message_template="您好 {{target_display_name}} 期待您的分享",
+                target_limit=10,
+                minimum_interval_seconds=30,
+                maximum_interval_seconds=90,
             )
         )
     records = await SqlAlchemyTaskTargetRepository(database).evaluate_and_replace(
@@ -267,6 +285,12 @@ async def test_preview_paginates_excludes_confirms_and_replays_atomically(
             )
         assert len(confirmation_rows) == 1
         assert confirmation_rows[0]["selected_target_count"] == 1
+        assert confirmation_rows[0]["action"] == "comment"
+        assert confirmation_rows[0]["message_template"] == (
+            "您好 {{target_display_name}} 期待您的分享"
+        )
+        assert confirmation_rows[0]["intent_version"] == ("task-target-confirmation-intent.v1")
+        assert len(confirmation_rows[0]["intent_fingerprint"]) == 32
         assert event_types == [
             TaskEventType.TASK_TARGET_SELECTION_UPDATED.value,
             TaskEventType.TASK_TARGETS_CONFIRMED.value,
@@ -312,6 +336,92 @@ async def test_replacing_discovered_targets_invalidates_the_previous_confirmatio
                 select(func.count()).select_from(task_target_confirmations)
             )
         assert confirmation_count == 0
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_snapshot_rejects_changed_intent_or_target_selection(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    service = TaskTargetPreviewService(
+        repository=SqlAlchemyTaskTargetPreviewRepository(database),
+        clock=MutableClock(BASE + timedelta(seconds=1)),
+    )
+    try:
+        await reset_data(database)
+        installation_id, task_id, target_ids = await seed_preview(database)
+        await service.confirm(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=7,
+            expected_task_revision=4,
+            idempotency_key="task:preview:confirm-intent",
+        )
+        async with database.session() as session:
+            fingerprint = await session.scalar(
+                select(task_target_confirmations.c.intent_fingerprint).where(
+                    task_target_confirmations.c.task_id == task_id.uuid
+                )
+            )
+            await session.execute(
+                update(task_target_confirmations)
+                .where(task_target_confirmations.c.task_id == task_id.uuid)
+                .values(intent_fingerprint=b"x" * 32)
+            )
+        with pytest.raises(TaskTargetPreviewConflict):
+            await service.get(
+                installation_id=installation_id,
+                task_id=task_id,
+                cursor=None,
+                limit=20,
+            )
+
+        async with database.session() as session:
+            await session.execute(
+                update(task_target_confirmations)
+                .where(task_target_confirmations.c.task_id == task_id.uuid)
+                .values(intent_fingerprint=fingerprint)
+            )
+            await session.execute(
+                update(douyin_search_exposure_definitions)
+                .where(douyin_search_exposure_definitions.c.task_id == task_id.uuid)
+                .values(message_template="另一条固定文案")
+            )
+        with pytest.raises(TaskTargetPreviewConflict):
+            await service.get(
+                installation_id=installation_id,
+                task_id=task_id,
+                cursor=None,
+                limit=20,
+            )
+
+        async with database.session() as session:
+            await session.execute(
+                update(douyin_search_exposure_definitions)
+                .where(douyin_search_exposure_definitions.c.task_id == task_id.uuid)
+                .values(message_template="您好 {{target_display_name}} 期待您的分享")
+            )
+            await session.execute(
+                insert(task_target_exclusions).values(
+                    target_id=target_ids[0].uuid,
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    page_revision=7,
+                    excluded_at=BASE + timedelta(seconds=2),
+                )
+            )
+        with pytest.raises(TaskTargetPreviewConflict):
+            await service.get(
+                installation_id=installation_id,
+                task_id=task_id,
+                cursor=None,
+                limit=20,
+            )
     finally:
         await reset_data(database)
         await database.close()
@@ -464,6 +574,10 @@ def test_preview_tables_export_only_minimal_relational_facts() -> None:
         "selection_task_revision",
         "confirmed_task_revision",
         "selected_target_count",
+        "action",
+        "message_template",
+        "intent_version",
+        "intent_fingerprint",
         "source_message_id",
         "source_idempotency_key",
         "source_fingerprint",
@@ -473,6 +587,87 @@ def test_preview_tables_export_only_minimal_relational_facts() -> None:
     forbidden = {"cookie", "html", "profile_path", "raw_text", "url"}
     assert forbidden.isdisjoint(task_target_exclusions.c.keys())
     assert forbidden.isdisjoint(task_target_confirmations.c.keys())
+
+
+@pytest.mark.asyncio
+async def test_confirmation_intent_migration_backfills_and_downgrades_existing_facts(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "downgrade", "base")
+    alembic_runner(postgresql_url, "upgrade", "20260720_0021")
+    database = Database.from_url(postgresql_url)
+    installation_id: InstallationId | None = None
+    task_id: TaskId | None = None
+    try:
+        await reset_data(database)
+        installation_id, task_id, target_ids = await seed_preview(database)
+        async with database.session() as session:
+            await session.execute(
+                insert(task_target_confirmations).values(
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    page_revision=7,
+                    selection_task_revision=4,
+                    confirmed_task_revision=5,
+                    selected_target_count=2,
+                    source_message_id=uuid4(),
+                    source_idempotency_key="task:preview:migration-confirm",
+                    source_fingerprint=b"m" * 32,
+                    confirmed_at=BASE + timedelta(seconds=1),
+                    created_at=BASE + timedelta(seconds=1),
+                )
+            )
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == task_id.uuid)
+                .values(
+                    status=TaskStatus.QUEUED.value,
+                    revision=5,
+                    last_event_sequence=4,
+                    updated_at=BASE + timedelta(seconds=1),
+                )
+            )
+
+        alembic_runner(postgresql_url, "upgrade", "head")
+        intent = TaskTargetConfirmationIntent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=7,
+            confirmation_revision=4,
+            action=DouyinSearchExposureAction.COMMENT,
+            message_template="您好 {{target_display_name}} 期待您的分享",
+            selected_target_ids=target_ids[:2],
+        )
+        async with database.session() as session:
+            row = (await session.execute(select(task_target_confirmations))).mappings().one()
+        assert row["action"] == intent.action.value
+        assert row["message_template"] == intent.message_template
+        assert row["intent_version"] == TASK_TARGET_CONFIRMATION_INTENT_VERSION
+        assert bytes(row["intent_fingerprint"]) == intent.fingerprint()
+
+        alembic_runner(postgresql_url, "downgrade", "20260720_0021")
+        async with database.session() as session:
+            columns = set(
+                await session.scalars(
+                    text(
+                        "select column_name from information_schema.columns "
+                        "where table_schema = 'public' "
+                        "and table_name = 'task_target_confirmations'"
+                    )
+                )
+            )
+        assert {
+            "action",
+            "message_template",
+            "intent_version",
+            "intent_fingerprint",
+        }.isdisjoint(columns)
+    finally:
+        alembic_runner(postgresql_url, "upgrade", "head")
+        if installation_id is not None and task_id is not None:
+            await reset_data(database)
+        await database.close()
 
 
 @pytest.mark.asyncio
@@ -682,6 +877,34 @@ async def test_repository_rejects_missing_and_mixed_target_snapshots(
                 after_ordinal=None,
                 after_target_id=None,
                 limit=20,
+            )
+
+        await reset_data(database)
+        installation_id, task_id, target_ids = await seed_preview(database)
+        async with database.session() as session:
+            await session.execute(
+                delete(douyin_search_exposure_definitions).where(
+                    douyin_search_exposure_definitions.c.task_id == task_id.uuid
+                )
+            )
+        with pytest.raises(TaskTargetPreviewConflict):
+            await repository.read_page(
+                installation_id=installation_id,
+                task_id=task_id,
+                expected_page_revision=None,
+                expected_task_revision=None,
+                after_ordinal=None,
+                after_target_id=None,
+                limit=20,
+            )
+        with pytest.raises(TaskTargetPreviewConflict):
+            _confirmation_intent(
+                installation_id=installation_id,
+                task_id=task_id,
+                page_revision=7,
+                confirmation_revision=4,
+                definition={"action": "unknown", "message_template": None},  # type: ignore[arg-type]
+                selected_target_ids=(target_ids[0],),
             )
 
         await reset_data(database)

@@ -18,7 +18,7 @@ test("A7-05 keeps one closed action message variable across every production bou
         "backend/src/automation_tool/control_plane/domain/task_definitions.py",
       ),
       readRepositoryFile(
-        "frontend/src/features/task-create/task-creation-gateway.ts",
+        "frontend/src/api/control-plane/douyin-search-exposure.ts",
       ),
       readRepositoryFile("frontend/src/features/task-create/TaskCreate.tsx"),
       readRepositoryFile("frontend/src-tauri/src/control_plane.rs"),
@@ -61,7 +61,7 @@ test("A7-05 validates but never evaluates or renders action message templates", 
         "backend/src/automation_tool/protocol/action_message_template.py",
       ),
       readRepositoryFile(
-        "frontend/src/features/task-create/task-creation-gateway.ts",
+        "frontend/src/api/control-plane/douyin-search-exposure.ts",
       ),
       readRepositoryFile("frontend/src-tauri/src/control_plane.rs"),
       readRepositoryFile("frontend/e2e-tauri/task-create-form.spec.ts"),

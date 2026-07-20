@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  douyinActionMessageTemplateSchema,
+  douyinSearchExposureActionSchema,
+} from "./douyin-search-exposure";
+
 const canonicalUuidV4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const canonicalUtcTimestamp =
@@ -81,8 +86,11 @@ const taskTargetPreview = z
       "outcome_uncertain",
     ]),
     taskRevision: safeInteger,
+    confirmationRevision: safeInteger,
     lastEventSequence: safeInteger,
     pageRevision: safeInteger,
+    action: douyinSearchExposureActionSchema,
+    messageTemplate: douyinActionMessageTemplateSchema.nullable(),
     selectedTargetCount: z.number().int().min(0).max(100),
     userExcludedTargetCount: z.number().int().min(0).max(100),
     confirmed: z.boolean(),
@@ -99,13 +107,17 @@ const taskTargetPreview = z
   .superRefine((value, context) => {
     if (
       value.selectedTargetCount + value.userExcludedTargetCount > 100 ||
+      (value.action === "browse" && value.messageTemplate !== null) ||
+      (value.action !== "browse" && value.messageTemplate === null) ||
       value.confirmed !== (value.confirmedAt !== null) ||
       (!value.confirmed && value.taskStatus !== "awaiting_confirmation") ||
+      (!value.confirmed && value.confirmationRevision !== value.taskRevision) ||
       (value.confirmed &&
         ["draft", "validating", "discovering_targets", "awaiting_confirmation"].includes(
           value.taskStatus,
         )) ||
       (value.confirmed && value.selectedTargetCount === 0) ||
+      (value.confirmed && value.confirmationRevision >= value.taskRevision) ||
       (value.items.length === 0 && value.nextCursor !== null)
     ) {
       context.addIssue({ code: "custom", message: "Invalid target preview state" });
@@ -151,7 +163,7 @@ export interface TaskTargetExclusionsRequest extends TaskTargetPreviewOptions {
 export interface TaskTargetConfirmationRequest extends TaskTargetPreviewOptions {
   readonly taskId: string;
   readonly pageRevision: number;
-  readonly expectedTaskRevision: number;
+  readonly confirmationRevision: number;
   readonly idempotencyKey: string;
 }
 

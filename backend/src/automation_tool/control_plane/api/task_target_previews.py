@@ -25,6 +25,7 @@ from automation_tool.control_plane.application.task_target_previews import (
 from automation_tool.control_plane.domain import (
     MAX_TASK_EVENT_SEQUENCE,
     DouyinCandidateDisposition,
+    DouyinSearchExposureAction,
     InstallationId,
     InvalidResourceId,
     TargetId,
@@ -60,8 +61,13 @@ class TaskTargetPreviewResponse(BaseModel):
     task_id: str = Field(alias="taskId")
     task_status: TaskStatus = Field(alias="taskStatus")
     task_revision: int = Field(alias="taskRevision", ge=1, le=MAX_TASK_EVENT_SEQUENCE)
+    confirmation_revision: int = Field(
+        alias="confirmationRevision", ge=1, le=MAX_TASK_EVENT_SEQUENCE
+    )
     last_event_sequence: int = Field(alias="lastEventSequence", ge=0, le=MAX_TASK_EVENT_SEQUENCE)
     page_revision: int = Field(alias="pageRevision", ge=1, le=MAX_EXECUTOR_SEQUENCE)
+    action: DouyinSearchExposureAction
+    message_template: str | None = Field(alias="messageTemplate")
     selected_target_count: int = Field(alias="selectedTargetCount", ge=0, le=MAX_TASK_TARGET_LIMIT)
     user_excluded_target_count: int = Field(
         alias="userExcludedTargetCount", ge=0, le=MAX_TASK_TARGET_LIMIT
@@ -88,8 +94,8 @@ class TaskTargetConfirmationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     page_revision: int = Field(alias="pageRevision", ge=1, le=MAX_EXECUTOR_SEQUENCE, strict=True)
-    expected_task_revision: int = Field(
-        alias="expectedTaskRevision", ge=1, le=MAX_TASK_EVENT_SEQUENCE, strict=True
+    confirmation_revision: int = Field(
+        alias="confirmationRevision", ge=1, le=MAX_TASK_EVENT_SEQUENCE, strict=True
     )
 
 
@@ -114,8 +120,11 @@ def _snapshot_response(
         taskId=str(snapshot.task.task_id),
         taskStatus=snapshot.task.status,
         taskRevision=snapshot.task.revision,
+        confirmationRevision=snapshot.confirmation_revision,
         lastEventSequence=snapshot.task.last_event_sequence,
         pageRevision=snapshot.page_revision,
+        action=snapshot.action,
+        messageTemplate=snapshot.message_template,
         selectedTargetCount=snapshot.selected_target_count,
         userExcludedTargetCount=snapshot.user_excluded_target_count,
         confirmed=snapshot.confirmed_at is not None,
@@ -265,7 +274,7 @@ async def confirm_task_target_preview(
             installation_id=installation_id,
             task_id=parsed_task_id,
             page_revision=payload.page_revision,
-            expected_task_revision=payload.expected_task_revision,
+            expected_task_revision=payload.confirmation_revision,
             idempotency_key=normalized_key,
         )
     except Exception as error:

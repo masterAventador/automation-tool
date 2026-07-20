@@ -14,6 +14,7 @@ from automation_tool.control_plane.application.task_target_previews import (
     InvalidTaskTargetPreview,
     PendingTaskTargetConfirmation,
     PendingTaskTargetExclusions,
+    TaskTargetConfirmationIntent,
     TaskTargetPreviewConflict,
     TaskTargetPreviewItem,
     TaskTargetPreviewMutationResult,
@@ -29,6 +30,7 @@ from automation_tool.control_plane.application.tasks import TaskRecord
 from automation_tool.control_plane.domain import (
     DOUYIN_CANDIDATE_POLICY_VERSION,
     DouyinCandidateDisposition,
+    DouyinSearchExposureAction,
     InstallationId,
     TargetId,
     TaskId,
@@ -100,6 +102,13 @@ def snapshot(*, status: TaskStatus = TaskStatus.AWAITING_CONFIRMATION) -> TaskTa
     return TaskTargetPreviewSnapshot(
         task=task_value,
         page_revision=7,
+        confirmation_revision=(
+            task_value.revision
+            if status is TaskStatus.AWAITING_CONFIRMATION
+            else task_value.revision - 1
+        ),
+        action=DouyinSearchExposureAction.BROWSE,
+        message_template=None,
         items=(TaskTargetPreviewItem(target=target_value),),
         selected_target_count=1,
         user_excluded_target_count=0,
@@ -272,6 +281,9 @@ def test_preview_value_objects_reject_incoherent_state() -> None:
         {"selected_target_count": 100, "user_excluded_target_count": 1},
         {"task": replace(valid.task, status=TaskStatus.QUEUED)},
         {"confirmed_at": NOW},
+        {"action": DouyinSearchExposureAction.BROWSE, "message_template": "不应发送"},
+        {"action": DouyinSearchExposureAction.COMMENT, "message_template": "\n"},
+        {"action": cast(DouyinSearchExposureAction, object())},
     )
     for overrides in invalid_snapshots:
         with pytest.raises(InvalidTaskTargetPreview):
@@ -287,6 +299,26 @@ def test_preview_value_objects_reject_incoherent_state() -> None:
         TaskTargetPreviewPage(snapshot=valid, next_cursor="invalid+cursor")
     with pytest.raises(InvalidTaskTargetPreview):
         TaskTargetPreviewMutationResult(snapshot=valid, replayed=cast(bool, 1))
+
+
+def test_confirmation_intent_rejects_action_message_mismatches() -> None:
+    valid = TaskTargetConfirmationIntent(
+        installation_id=InstallationId.new(),
+        task_id=TaskId.new(),
+        page_revision=7,
+        confirmation_revision=4,
+        action=DouyinSearchExposureAction.BROWSE,
+        message_template=None,
+        selected_target_ids=(TargetId.new(),),
+    )
+    assert len(valid.fingerprint()) == 32
+    for overrides in (
+        {"message_template": "不应发送"},
+        {"action": DouyinSearchExposureAction.COMMENT, "message_template": "\n"},
+        {"action": cast(DouyinSearchExposureAction, object())},
+    ):
+        with pytest.raises(InvalidTaskTargetPreview):
+            replace(valid, **overrides)
 
 
 def _cursor(payload: object) -> str:

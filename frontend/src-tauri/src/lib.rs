@@ -425,6 +425,19 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_task_target_preview_error(
+    error: control_plane::ControlPlaneError,
+) -> ControlPlaneCommandError {
+    if error.code() == control_plane::ControlPlaneErrorCode::RequestRejected {
+        return ControlPlaneCommandError {
+            code: "request_rejected",
+            retryable: error.retryable(),
+        };
+    }
+    map_control_plane_error(error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskProjectionStreamSummary {
@@ -496,7 +509,7 @@ async fn get_task_target_preview(
     client
         .get_task_target_preview(&vault, &task_id, cursor.as_deref(), limit)
         .await
-        .map_err(map_control_plane_error)
+        .map_err(map_task_target_preview_error)
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -520,7 +533,7 @@ async fn replace_task_target_exclusions(
             &idempotency_key,
         )
         .await
-        .map_err(map_control_plane_error)
+        .map_err(map_task_target_preview_error)
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -528,7 +541,7 @@ async fn replace_task_target_exclusions(
 async fn confirm_task_target_preview(
     task_id: String,
     page_revision: u64,
-    expected_task_revision: u64,
+    confirmation_revision: u64,
     idempotency_key: String,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
@@ -538,19 +551,19 @@ async fn confirm_task_target_preview(
             &vault,
             &task_id,
             page_revision,
-            expected_task_revision,
+            confirmation_revision,
             &idempotency_key,
         )
         .await
-        .map_err(map_control_plane_error)
+        .map_err(map_task_target_preview_error)
 }
 
 #[cfg(feature = "control-plane-e2e")]
 fn acceptance_task_definition() -> control_plane::DouyinSearchExposureTaskDefinition {
     control_plane::DouyinSearchExposureTaskDefinition::new(
         "新能源汽车".to_owned(),
-        control_plane::DouyinSearchExposureAction::Browse,
-        None,
+        control_plane::DouyinSearchExposureAction::Comment,
+        Some("您好 {{target_display_name}} 期待您的分享".to_owned()),
         10,
         30,
         90,
@@ -829,7 +842,7 @@ async fn preview_task_for_acceptance(
             &vault,
             &prepared.task_id,
             excluded.page_revision(),
-            excluded.task_revision(),
+            excluded.confirmation_revision(),
             "task:preview:confirm:tauri-acceptance",
         )
         .await
@@ -839,7 +852,7 @@ async fn preview_task_for_acceptance(
             &vault,
             &prepared.task_id,
             excluded.page_revision(),
-            excluded.task_revision(),
+            excluded.confirmation_revision(),
             "task:preview:confirm:tauri-acceptance",
         )
         .await
@@ -876,6 +889,30 @@ async fn prepare_task_target_preview_ui_for_acceptance(
         "task:preview-ui:discover:tauri-acceptance",
     )
     .await
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn advance_task_target_confirmation_revision_for_acceptance(
+    task_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskTargetPreview, ControlPlaneCommandError> {
+    let preview = client
+        .get_task_target_preview(&vault, &task_id, None, 100)
+        .await
+        .map_err(map_control_plane_error)?;
+    client
+        .replace_task_target_exclusions(
+            &vault,
+            &task_id,
+            preview.page_revision(),
+            preview.task_revision(),
+            &[],
+            "task:preview-ui:restore:tauri-acceptance",
+        )
+        .await
+        .map_err(map_control_plane_error)
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -2168,6 +2205,7 @@ pub fn run() {
         discover_task_for_acceptance,
         preview_task_for_acceptance,
         prepare_task_target_preview_ui_for_acceptance,
+        advance_task_target_confirmation_revision_for_acceptance,
         control_task_for_acceptance,
         terminate_tasks_for_acceptance,
         get_executor_status,

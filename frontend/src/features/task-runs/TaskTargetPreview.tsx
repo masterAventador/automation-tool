@@ -22,6 +22,12 @@ import {
 
 const TARGET_PREVIEW_LIMIT = 100;
 
+const ACTION_LABELS: Record<TaskTargetPreview["action"], string> = {
+  browse: "只浏览",
+  comment: "评论",
+  direct_message: "主动私信",
+};
+
 const DISPOSITION_LABELS: Record<
   TaskTargetPreview["items"][number]["disposition"],
   string
@@ -56,7 +62,13 @@ interface ExclusionRequest {
 
 interface ConfirmationRequest {
   readonly pageRevision: number;
-  readonly taskRevision: number;
+  readonly confirmationRevision: number;
+}
+
+interface ConfirmationReview extends ConfirmationRequest {
+  readonly action: TaskTargetPreview["action"];
+  readonly messageTemplate: string | null;
+  readonly selectedTargetCount: number;
 }
 
 interface IdempotencyEntry {
@@ -77,7 +89,7 @@ function exclusionFingerprint(request: ExclusionRequest): string {
 }
 
 function confirmationFingerprint(request: ConfirmationRequest): string {
-  return `${request.pageRevision}:${request.taskRevision}`;
+  return `${request.pageRevision}:${request.confirmationRevision}`;
 }
 
 function currentExcludedTargetIds(preview: TaskTargetPreview): readonly string[] {
@@ -100,6 +112,10 @@ export function TaskTargetPreviewPanel({
 }: TaskTargetPreviewPanelProps) {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [confirmationReview, setConfirmationReview] =
+    useState<ConfirmationReview | null>(null);
+  const confirmationReviewRef = useRef<ConfirmationReview | null>(null);
   const exclusionKey = useRef<IdempotencyEntry | null>(null);
   const confirmationKey = useRef<IdempotencyEntry | null>(null);
   const mutationAbort = useRef<AbortController | null>(null);
@@ -173,13 +189,15 @@ export function TaskTargetPreviewPanel({
       return source.confirm({
         taskId,
         pageRevision: request.pageRevision,
-        expectedTaskRevision: request.taskRevision,
+        confirmationRevision: request.confirmationRevision,
         idempotencyKey: confirmationKey.current.key,
         signal: controller.signal,
       });
     },
     onSuccess: async (preview) => {
       confirmationKey.current = null;
+      confirmationReviewRef.current = null;
+      setConfirmationReview(null);
       setNotice("目标已确认，任务已进入执行队列");
       queryClient.setQueryData(targetPreviewKey(taskId), preview);
       onConfirmed?.();
@@ -189,6 +207,8 @@ export function TaskTargetPreviewPanel({
       ]);
     },
     onError: async (error) => {
+      confirmationReviewRef.current = null;
+      setConfirmationReview(null);
       setNotice(safeFailureNotice(error));
       if (error instanceof TaskTargetPreviewSourceError && error.code === "preview_stale") {
         await previewQuery.refetch();
@@ -223,6 +243,13 @@ export function TaskTargetPreviewPanel({
   ).length;
   const busy = replaceExclusions.isPending || confirm.isPending;
   const editingDisabled = preview.confirmed || busy;
+  const reviewedAction = confirmationReview?.action ?? preview.action;
+  const reviewedMessageTemplate =
+    confirmationReview?.messageTemplate ?? preview.messageTemplate;
+  const reviewedTargetCount =
+    confirmationReview?.selectedTargetCount ?? preview.selectedTargetCount;
+  const reviewedConfirmationRevision =
+    confirmationReview?.confirmationRevision ?? preview.confirmationRevision;
 
   const updateExclusions = (excludedTargetIds: readonly string[]) => {
     setNotice(null);
@@ -277,6 +304,15 @@ export function TaskTargetPreviewPanel({
           <Typography.Text>策略拦截 {policyBlockedCount} 个</Typography.Text>
         </Flex>
 
+        <Space orientation="vertical" size={4} className="task-target-confirmation-summary">
+          <Typography.Text strong>最终执行确认</Typography.Text>
+          <Typography.Text>动作 {ACTION_LABELS[preview.action]}</Typography.Text>
+          <Typography.Text>
+            文案模板 {preview.messageTemplate ?? "无发送文案"}
+          </Typography.Text>
+          <Typography.Text>确认版本 {preview.confirmationRevision}</Typography.Text>
+        </Space>
+
         {preview.items.length === 0 ? (
           <Empty description="没有可预览目标" />
         ) : (
@@ -327,17 +363,41 @@ export function TaskTargetPreviewPanel({
             </Button>
           </Space>
           <Popconfirm
+            open={confirmationOpen}
             title="确认目标并进入执行队列？"
-            description={`将按当前选择执行 ${preview.selectedTargetCount} 个目标，确认后不能在本页修改。`}
+            description={`动作 ${ACTION_LABELS[reviewedAction]}；文案模板 ${reviewedMessageTemplate ?? "无发送文案"}；执行 ${reviewedTargetCount} 个目标；确认版本 ${reviewedConfirmationRevision}。确认后不能在本页修改。`}
             okText="确认目标"
             cancelText="继续检查"
             disabled={editingDisabled || preview.selectedTargetCount === 0}
+            onOpenChange={(open) => {
+              if (open) {
+                const review = {
+                  pageRevision: preview.pageRevision,
+                  confirmationRevision: preview.confirmationRevision,
+                  action: preview.action,
+                  messageTemplate: preview.messageTemplate,
+                  selectedTargetCount: preview.selectedTargetCount,
+                } satisfies ConfirmationReview;
+                confirmationReviewRef.current = review;
+                setConfirmationReview(review);
+              }
+              setConfirmationOpen(open);
+            }}
+            onCancel={() => {
+              confirmationReviewRef.current = null;
+              setConfirmationReview(null);
+              setConfirmationOpen(false);
+            }}
             onConfirm={() => {
               setNotice(null);
-              confirm.mutate({
-                pageRevision: preview.pageRevision,
-                taskRevision: preview.taskRevision,
-              });
+              const review = confirmationReviewRef.current;
+              setConfirmationOpen(false);
+              if (review !== null) {
+                confirm.mutate({
+                  pageRevision: review.pageRevision,
+                  confirmationRevision: review.confirmationRevision,
+                });
+              }
             }}
           >
             <Button

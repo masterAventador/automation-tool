@@ -877,7 +877,7 @@ impl ControlPlaneClient {
         vault: &DeviceCredentialVault<S>,
         task_id: &str,
         page_revision: u64,
-        expected_task_revision: u64,
+        confirmation_revision: u64,
         idempotency_key: &str,
     ) -> Result<TaskTargetPreview, ControlPlaneError>
     where
@@ -886,13 +886,13 @@ impl ControlPlaneClient {
         validate_preview_command(
             task_id,
             page_revision,
-            expected_task_revision,
+            confirmation_revision,
             &[],
             idempotency_key,
         )?;
         let body = serde_json::json!({
             "pageRevision": page_revision,
-            "expectedTaskRevision": expected_task_revision,
+            "confirmationRevision": confirmation_revision,
         });
         let session = self
             .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
@@ -1700,8 +1700,11 @@ struct TaskTargetPreviewResponse {
     task_id: String,
     task_status: String,
     task_revision: u64,
+    confirmation_revision: u64,
     last_event_sequence: u64,
     page_revision: u64,
+    action: DouyinSearchExposureAction,
+    message_template: Option<String>,
     selected_target_count: u16,
     user_excluded_target_count: u16,
     confirmed: bool,
@@ -1820,8 +1823,11 @@ pub struct TaskTargetPreview {
     task_id: String,
     task_status: String,
     task_revision: u64,
+    confirmation_revision: u64,
     last_event_sequence: u64,
     page_revision: u64,
+    action: DouyinSearchExposureAction,
+    message_template: Option<String>,
     selected_target_count: u16,
     user_excluded_target_count: u16,
     confirmed: bool,
@@ -1843,12 +1849,24 @@ impl TaskTargetPreview {
         self.task_revision
     }
 
+    pub fn confirmation_revision(&self) -> u64 {
+        self.confirmation_revision
+    }
+
     pub fn last_event_sequence(&self) -> u64 {
         self.last_event_sequence
     }
 
     pub fn page_revision(&self) -> u64 {
         self.page_revision
+    }
+
+    pub fn action(&self) -> DouyinSearchExposureAction {
+        self.action
+    }
+
+    pub fn message_template(&self) -> Option<&str> {
+        self.message_template.as_deref()
     }
 
     pub fn selected_target_count(&self) -> u16 {
@@ -2370,10 +2388,20 @@ fn parse_task_target_preview(
         .as_deref()
         .map(require_bounded_timestamp)
         .transpose()?;
+    let message_valid = match (response.action, response.message_template.as_deref()) {
+        (DouyinSearchExposureAction::Browse, None) => true,
+        (DouyinSearchExposureAction::Comment, Some(message))
+        | (DouyinSearchExposureAction::DirectMessage, Some(message)) => {
+            require_action_message_template(message).is_ok()
+        }
+        _ => false,
+    };
     if response.task_id != expected_task_id
         || !valid_task_status(&response.task_status)
         || response.task_revision == 0
         || response.task_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.confirmation_revision == 0
+        || response.confirmation_revision > MAX_CROSS_RUNTIME_SEQUENCE
         || response.last_event_sequence == 0
         || response.last_event_sequence > MAX_CROSS_RUNTIME_SEQUENCE
         || response.page_revision == 0
@@ -2390,13 +2418,16 @@ fn parse_task_target_preview(
             .is_some_and(|cursor| require_preview_cursor(cursor).is_err())
         || require_complete && response.next_cursor.is_some()
         || response.confirmed != confirmed_at.is_some()
+        || !message_valid
         || (!response.confirmed && response.task_status != "awaiting_confirmation")
+        || (!response.confirmed && response.confirmation_revision != response.task_revision)
         || (response.confirmed
             && matches!(
                 response.task_status.as_str(),
                 "draft" | "validating" | "discovering_targets" | "awaiting_confirmation"
             ))
         || response.confirmed && response.selected_target_count == 0
+        || response.confirmed && response.confirmation_revision >= response.task_revision
     {
         return Err(protocol_invalid());
     }
@@ -2461,8 +2492,11 @@ fn parse_task_target_preview(
         task_id: response.task_id,
         task_status: response.task_status,
         task_revision: response.task_revision,
+        confirmation_revision: response.confirmation_revision,
         last_event_sequence: response.last_event_sequence,
         page_revision: response.page_revision,
+        action: response.action,
+        message_template: response.message_template,
         selected_target_count: response.selected_target_count,
         user_excluded_target_count: response.user_excluded_target_count,
         confirmed: response.confirmed,
@@ -4107,8 +4141,11 @@ mod tests {
             "taskId": IDENTIFIER,
             "taskStatus": "awaiting_confirmation",
             "taskRevision": 4,
+            "confirmationRevision": 4,
             "lastEventSequence": 3,
             "pageRevision": 7,
+            "action": "comment",
+            "messageTemplate": "您好 {{target_display_name}} 期待您的分享",
             "selectedTargetCount": 1,
             "userExcludedTargetCount": 1,
             "confirmed": false,
@@ -4143,7 +4180,13 @@ mod tests {
         assert_eq!(parsed.task_id(), IDENTIFIER);
         assert_eq!(parsed.task_status(), "awaiting_confirmation");
         assert_eq!(parsed.task_revision(), 4);
+        assert_eq!(parsed.confirmation_revision(), 4);
         assert_eq!(parsed.page_revision(), 7);
+        assert_eq!(parsed.action(), DouyinSearchExposureAction::Comment);
+        assert_eq!(
+            parsed.message_template(),
+            Some("您好 {{target_display_name}} 期待您的分享")
+        );
         assert_eq!(parsed.selected_target_count(), 1);
         assert_eq!(parsed.user_excluded_target_count(), 1);
         assert!(!parsed.confirmed());

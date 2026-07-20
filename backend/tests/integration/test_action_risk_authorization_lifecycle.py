@@ -21,6 +21,10 @@ from automation_tool.control_plane.application.action_risk_authorizations import
     ActionRiskAuthorizationUnavailable,
     ActionRiskLimitReason,
 )
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+    TaskTargetConfirmationIntent,
+)
 from automation_tool.control_plane.domain import (
     DOUYIN_CANDIDATE_POLICY_VERSION,
     DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
@@ -78,7 +82,7 @@ from automation_tool.protocol import (
 )
 
 PREVIOUS_REVISION = "20260720_0019"
-HEAD_REVISION = "20260720_0021"
+HEAD_REVISION = "20260720_0022"
 NOW = datetime(2026, 7, 20, 1, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "action_id",
@@ -229,6 +233,15 @@ async def seed_runnable_target(
                     created_at=NOW,
                 )
             )
+        intent = TaskTargetConfirmationIntent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=1,
+            confirmation_revision=4,
+            action=action,
+            message_template=None if action is DouyinSearchExposureAction.BROWSE else "您好",
+            selected_target_ids=tuple(target_ids),
+        )
         await session.execute(
             insert(task_target_confirmations).values(
                 task_id=task_id.uuid,
@@ -237,6 +250,10 @@ async def seed_runnable_target(
                 selection_task_revision=4,
                 confirmed_task_revision=5,
                 selected_target_count=target_count,
+                action=intent.action.value,
+                message_template=intent.message_template,
+                intent_version=TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+                intent_fingerprint=intent.fingerprint(),
                 source_message_id=TaskId.new().uuid,
                 source_idempotency_key=f"target:confirm:a702:{task_id}",
                 source_fingerprint=secrets.token_bytes(32),
@@ -667,6 +684,25 @@ async def test_authorization_rejects_unhealthy_unconfirmed_or_cross_scope_inputs
                     installation_id=installation_id.uuid,
                     page_revision=1,
                     excluded_at=NOW,
+                )
+            )
+        with pytest.raises(ActionRiskAuthorizationRejected):
+            await authorize(repository, target, installation_id)
+
+        async with database.session() as session:
+            await session.execute(delete(task_target_exclusions))
+            await session.execute(
+                update(task_target_confirmations)
+                .where(task_target_confirmations.c.task_id == target.task_id.uuid)
+                .values(intent_fingerprint=b"x" * 32)
+            )
+        with pytest.raises(ActionRiskAuthorizationRejected):
+            await authorize(repository, target, installation_id)
+
+        async with database.session() as session:
+            await session.execute(
+                delete(task_target_confirmations).where(
+                    task_target_confirmations.c.task_id == target.task_id.uuid
                 )
             )
         with pytest.raises(ActionRiskAuthorizationRejected):

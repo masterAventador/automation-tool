@@ -41,6 +41,29 @@ describe("Task target preview UI production-path acceptance", () => {
     assert.equal(await secondTarget.isSelected(), false);
 
     await browser.$("button=确认执行").click();
+    const confirmationDescription = await browser.$(".ant-popconfirm-description");
+    await expect(confirmationDescription).toExist();
+    assert.match(await confirmationDescription.getText(), /动作\s*评论/);
+    assert.match(
+      await confirmationDescription.getText(),
+      /文案模板\s*您好 \{\{target_display_name\}\} 期待您的分享/,
+    );
+    assert.match(await confirmationDescription.getText(), /确认版本\s*4/);
+
+    await browser.tauri.execute(({ core }, taskId) =>
+      core.invoke("advance_task_target_confirmation_revision_for_acceptance", {
+        taskId,
+      }),
+    preparation.taskId);
+    assert.match(await confirmationDescription.getText(), /确认版本\s*4/);
+    await browser.$("button=确认目标").click();
+    await browser.waitUntil(
+      async () => (await body.getText()).includes("目标列表已变化，已重新加载最新版本"),
+      { timeout: 60_000, timeoutMsg: "Stale confirmation was not rejected" },
+    );
+    assert.equal(await browser.$("button=确认执行").isEnabled(), true);
+
+    await browser.$("button=确认执行").click();
     await browser.$("button=确认目标").click();
     await browser.waitUntil(
       async () => (await body.getText()).includes("目标已确认，任务已进入执行队列"),
@@ -50,7 +73,7 @@ describe("Task target preview UI production-path acceptance", () => {
 
     const text = await body.getText();
     assert.match(text, /已发现 2 个目标/);
-    assert.match(text, /计划执行 1 个/);
+    assert.match(text, /计划执行 2 个/);
     assert.match(text, /抖音通用搜索作者/);
     assert.doesNotMatch(text, /acceptance-author-|产品登录|注册账号|账号登录/);
   });

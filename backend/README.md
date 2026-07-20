@@ -82,6 +82,8 @@ A7-04 的 `executor/action_gate.py` 是后续真实动作进入 prepared 前的�
 
 A7-05 的 `protocol/action_message_template.py` 是 Control Plane 与后续 Local Executor 动作共用的唯一 Python 文案策略。`action-message-template.v1` 允许纯固定文案，并只开放 `{{target_display_name}}`；全字面为空、纯占位符、未知/畸形占位符、首尾空白、超过 500 Unicode code point、控制/Bidi、敏感赋值、inline data 或私有路径全部以固定错误拒绝。Alembic `20260720_0021` 用 PostgreSQL check constraint 拒绝纯变量及任何剩余花括号，直接写库也不能绕过封闭变量集。模块只校验并返回变量枚举，不渲染目标数据、不调用 LLM、不产生平台副作用。
 
+A7-06 的 `task-target-confirmation-intent.v1` 把 Installation、Task、page revision、selection revision、动作、原始文案模板和按预览顺序排列的全部已选 Target ID 编成 canonical JSON 后计算 SHA-256。Alembic `20260720_0022` 为既有 confirmation 回填 action/message、版本和指纹，再强制非空与封闭约束；读取/重放会从当前定义和目标集合重算，篡改即拒绝。确认请求使用显式 `confirmationRevision`，必须等于当前 Task revision；A7-02 授权重算完整意图，D6-13 offer 入队/claim 复验动作与文案，旧 revision、定义变化或选择变化不能获得副作用执行资格。
+
 B5-13/B5-14 的隐藏 App 原入口执行 `uv run --project backend python scripts/run_b5_13_acceptance.py`：唯一 `visible=false` Tauri App 实际点击平台状态、打开处理、重新检查和确认安全注销，经正式 TypeScript/Rust、signed Executor、后台系统 Chrome、认证 WebSocket 和真实 Uvicorn/Alembic/PostgreSQL 核对 `missing` projection 与持久 logout gate，并从 App 原入口确认新任务被门闩拒绝。runner 使用专属随机端口、Compose project、AppData、SQLite 和 Profile；注销后只允许 current Profile 消失，Executor SQLite 必须保留，并在 App 正常退出后审计浏览器、Executor、容器和端口零残留。
 
 B5-15 工程纵向验收执行 `backend/.venv/bin/python scripts/run_b5_15_acceptance.py`。它用唯一 AppData/Profile 连续运行 `first/restart/expired/risk` 四个隐藏 Tauri App 生命周期，每轮都从正式 TypeScript Gateway、Tauri IPC、Rust Manager、本机认证命令、signed Executor、无头系统 Chrome、WebSocket 到 PostgreSQL；前两轮必须保持同一 marker 和目录 identity 且直接健康，后两轮分别进入扫码和人工接管，最终 SQLite/PostgreSQL 固定收敛到 revision 2/risk。官方 origin 的确定性页面只打入 `backend/tests/fixtures/automation-tool-executor-b515.spec` 生成的独立验收包，不改变正式 Executor spec，也不冒充真实账号证据；真实账号纵向补验仍保持待办。

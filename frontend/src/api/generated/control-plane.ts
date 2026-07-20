@@ -696,8 +696,8 @@ export interface components {
         TaskStatus: "draft" | "validating" | "awaiting_device" | "awaiting_platform_login" | "discovering_targets" | "awaiting_confirmation" | "queued" | "running" | "paused" | "awaiting_human" | "cancelling" | "succeeded" | "partially_succeeded" | "failed" | "cancelled" | "outcome_uncertain";
         /** TaskTargetConfirmationRequest */
         TaskTargetConfirmationRequest: {
-            /** Expectedtaskrevision */
-            expectedTaskRevision: number;
+            /** Confirmationrevision */
+            confirmationRevision: number;
             /** Pagerevision */
             pageRevision: number;
         };
@@ -729,6 +729,9 @@ export interface components {
         };
         /** TaskTargetPreviewResponse */
         TaskTargetPreviewResponse: {
+            action: components["schemas"]["DouyinSearchExposureAction"];
+            /** Confirmationrevision */
+            confirmationRevision: number;
             /** Confirmed */
             confirmed: boolean;
             /** Confirmedat */
@@ -737,6 +740,8 @@ export interface components {
             items: components["schemas"]["TaskTargetPreviewItemResponse"][];
             /** Lasteventsequence */
             lastEventSequence: number;
+            /** Messagetemplate */
+            messageTemplate: string | null;
             /** Nextcursor */
             nextCursor: string | null;
             /** Pagerevision */

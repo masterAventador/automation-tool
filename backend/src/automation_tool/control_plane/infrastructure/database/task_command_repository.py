@@ -191,6 +191,16 @@ class SqlAlchemyTaskCommandRepository:
                                 select(
                                     task_target_confirmations.c.source_message_id,
                                     task_target_confirmations.c.confirmed_task_revision,
+                                    task_target_confirmations.c.action.label("confirmation_action"),
+                                    task_target_confirmations.c.message_template.label(
+                                        "confirmation_message_template"
+                                    ),
+                                    douyin_search_exposure_definitions.c.action.label(
+                                        "definition_action"
+                                    ),
+                                    douyin_search_exposure_definitions.c.message_template.label(
+                                        "definition_message_template"
+                                    ),
                                     tasks.c.status,
                                     tasks.c.revision,
                                 )
@@ -200,6 +210,14 @@ class SqlAlchemyTaskCommandRepository:
                                         and_(
                                             tasks.c.id == task_target_confirmations.c.task_id,
                                             tasks.c.installation_id
+                                            == task_target_confirmations.c.installation_id,
+                                        ),
+                                    ).join(
+                                        douyin_search_exposure_definitions,
+                                        and_(
+                                            douyin_search_exposure_definitions.c.task_id
+                                            == task_target_confirmations.c.task_id,
+                                            douyin_search_exposure_definitions.c.installation_id
                                             == task_target_confirmations.c.installation_id,
                                         ),
                                     )
@@ -245,6 +263,10 @@ class SqlAlchemyTaskCommandRepository:
                     confirmation_row is None
                     or confirmation_row["status"] != TaskStatus.QUEUED.value
                     or confirmation_row["revision"] != confirmation_row["confirmed_task_revision"]
+                    or confirmation_row["confirmation_action"]
+                    != confirmation_row["definition_action"]
+                    or confirmation_row["confirmation_message_template"]
+                    != confirmation_row["definition_message_template"]
                 ):
                     raise TaskCommandDeliveryRejected
                 blocked = await session.scalar(
@@ -588,6 +610,14 @@ class SqlAlchemyTaskCommandRepository:
                                         tasks.c.installation_id
                                         == task_target_confirmations.c.installation_id,
                                     ),
+                                ).join(
+                                    douyin_search_exposure_definitions,
+                                    and_(
+                                        douyin_search_exposure_definitions.c.task_id
+                                        == task_target_confirmations.c.task_id,
+                                        douyin_search_exposure_definitions.c.installation_id
+                                        == task_target_confirmations.c.installation_id,
+                                    ),
                                 )
                             )
                             .where(
@@ -604,6 +634,11 @@ class SqlAlchemyTaskCommandRepository:
                                 ),
                                 tasks.c.revision
                                 >= task_target_confirmations.c.confirmed_task_revision,
+                                task_target_confirmations.c.action
+                                == douyin_search_exposure_definitions.c.action,
+                                task_target_confirmations.c.message_template.is_not_distinct_from(
+                                    douyin_search_exposure_definitions.c.message_template
+                                ),
                             )
                         ),
                     ),

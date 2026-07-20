@@ -42,6 +42,9 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
     TaskCommandRecord,
 )
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+)
 from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
     ExecutionAttemptStatus,
@@ -65,9 +68,7 @@ from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
     environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("AUTOMATION_TOOL_")
+        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
     }
     database_password = secrets.token_hex(24)
     database_url = (
@@ -152,6 +153,10 @@ async def seed_business_task(
                         selection_task_revision=1,
                         confirmed_task_revision=2,
                         selected_target_count=1,
+                        action="comment",
+                        message_template="D6-13 只验证投递守卫",
+                        intent_version=TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+                        intent_fingerprint=secrets.token_bytes(32),
                         source_message_id=confirmation_message_id,
                         source_idempotency_key=f"task:d613:confirm:{task_id}",
                         source_fingerprint=secrets.token_bytes(32),
@@ -409,13 +414,9 @@ def main() -> None:
                 cwd=BACKEND_ROOT,
                 env=environment,
             )
-            credential, installation_id = asyncio.run(
-                seed_active_credential(database_url)
-            )
+            credential, installation_id = asyncio.run(seed_active_credential(database_url))
             unbound = asyncio.run(seed_unbound_offer(database_url, installation_id))
-            stale, _ = asyncio.run(
-                enqueue_confirmed_offer(database_url, installation_id)
-            )
+            stale, _ = asyncio.run(enqueue_confirmed_offer(database_url, installation_id))
             asyncio.run(invalidate_confirmation(database_url, stale.task_id))
 
             print("[D6-13] Starting the real Uvicorn Executor boundary")

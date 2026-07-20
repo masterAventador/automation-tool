@@ -21,8 +21,11 @@ function preview(overrides: Partial<TaskTargetPreview> = {}): TaskTargetPreview 
     taskId: TASK_ID,
     taskStatus: "awaiting_confirmation",
     taskRevision: 3,
+    confirmationRevision: 3,
     lastEventSequence: 2,
     pageRevision: 1,
+    action: "comment",
+    messageTemplate: "您好 {{target_display_name}} 期待您的分享",
     selectedTargetCount: 2,
     userExcludedTargetCount: 0,
     confirmed: false,
@@ -80,6 +83,7 @@ function source(initial = preview()): TaskTargetPreviewSource {
     replaceExclusions: vi.fn(async (request) =>
       preview({
         taskRevision: request.expectedTaskRevision + 1,
+        confirmationRevision: request.expectedTaskRevision + 1,
         lastEventSequence: 3,
         selectedTargetCount: 1,
         userExcludedTargetCount: 1,
@@ -93,7 +97,8 @@ function source(initial = preview()): TaskTargetPreviewSource {
     confirm: vi.fn(async (request) =>
       preview({
         taskStatus: "queued",
-        taskRevision: request.expectedTaskRevision + 1,
+        taskRevision: request.confirmationRevision + 1,
+        confirmationRevision: request.confirmationRevision,
         lastEventSequence: 4,
         confirmed: true,
         confirmedAt: "2026-07-20T01:30:00Z",
@@ -124,6 +129,11 @@ describe("Task target preview panel", () => {
     expect(await screen.findByRole("heading", { name: "目标预览" })).toBeVisible();
     expect(screen.getByText("已发现 4 个目标")).toBeVisible();
     expect(screen.getByText("计划执行 2 个")).toBeVisible();
+    expect(screen.getByText("动作 评论")).toBeVisible();
+    expect(
+      screen.getByText("文案模板 您好 {{target_display_name}} 期待您的分享"),
+    ).toBeVisible();
+    expect(screen.getByText("确认版本 3")).toBeVisible();
     expect(screen.getByText("策略拦截 2 个")).toBeVisible();
     expect(screen.getAllByText("抖音通用搜索作者")).toHaveLength(4);
     expect(screen.getByText("30 天内已触达")).toBeVisible();
@@ -165,12 +175,41 @@ describe("Task target preview panel", () => {
     expect(vi.mocked(targetSource.confirm).mock.calls[0]?.[0]).toMatchObject({
       taskId: TASK_ID,
       pageRevision: 1,
-      expectedTaskRevision: 3,
+      confirmationRevision: 3,
       idempotencyKey: expect.stringMatching(/^task-targets:confirm:[0-9a-f-]{36}$/),
     });
     expect(await screen.findByText("目标已确认，任务已进入执行队列")).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "选择目标 目标甲" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "确认执行" })).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /确认执行/ })).toBeDisabled(),
+    );
+  });
+
+  it("submits only the exact confirmation snapshot reviewed when the dialog opened", async () => {
+    const targetSource = source();
+    const user = userEvent.setup();
+    const { queryClient } = renderPreview(targetSource);
+
+    await user.click(await screen.findByRole("button", { name: "确认执行" }));
+    queryClient.setQueryData(
+      ["task-target-preview", TASK_ID],
+      preview({
+        taskRevision: 4,
+        confirmationRevision: 4,
+        selectedTargetCount: 1,
+      }),
+    );
+
+    expect(
+      screen.getByText(/执行 2 个目标；确认版本 3。确认后不能在本页修改。/),
+    ).toHaveTextContent("执行 2 个目标；确认版本 3");
+    await user.click(screen.getByRole("button", { name: "确认目标" }));
+
+    await waitFor(() => expect(targetSource.confirm).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(targetSource.confirm).mock.calls[0]?.[0]).toMatchObject({
+      pageRevision: 1,
+      confirmationRevision: 3,
+    });
   });
 
   it("reloads a stale preview and never exposes private transport details", async () => {

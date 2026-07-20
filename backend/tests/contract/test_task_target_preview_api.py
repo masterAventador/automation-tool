@@ -25,6 +25,7 @@ from automation_tool.control_plane.application.tasks import TaskRecord
 from automation_tool.control_plane.domain import (
     DOUYIN_CANDIDATE_POLICY_VERSION,
     DouyinCandidateDisposition,
+    DouyinSearchExposureAction,
     InstallationId,
     TargetId,
     TaskId,
@@ -94,6 +95,11 @@ class MemoryPreviewRepository:
                 updated_at=NOW,
             ),
             page_revision=7,
+            confirmation_revision=(
+                self.task_revision if not self.confirmed else self.task_revision - 1
+            ),
+            action=DouyinSearchExposureAction.COMMENT,
+            message_template="您好 {{target_display_name}} 期待您的分享",
             items=items,
             selected_target_count=sum(item.selected for item in items),
             user_excluded_target_count=len(self.excluded),
@@ -169,8 +175,11 @@ def test_app_reads_excludes_and_confirms_only_public_preview_fields() -> None:
         "taskId": str(TASK_ID),
         "taskStatus": "awaiting_confirmation",
         "taskRevision": 4,
+        "confirmationRevision": 4,
         "lastEventSequence": 3,
         "pageRevision": 7,
+        "action": "comment",
+        "messageTemplate": "您好 {{target_display_name}} 期待您的分享",
         "selectedTargetCount": 2,
         "userExcludedTargetCount": 0,
         "confirmed": False,
@@ -219,18 +228,25 @@ def test_app_reads_excludes_and_confirms_only_public_preview_fields() -> None:
     confirmed = client.post(
         f"/api/v1/tasks/{TASK_ID}/target-preview/confirmations",
         headers={"Idempotency-Key": "task:preview:api:confirm"},
-        json={"pageRevision": 7, "expectedTaskRevision": 5},
+        json={"pageRevision": 7, "confirmationRevision": 5},
     )
     replayed = client.post(
         f"/api/v1/tasks/{TASK_ID}/target-preview/confirmations",
         headers={"Idempotency-Key": "task:preview:api:confirm"},
-        json={"pageRevision": 7, "expectedTaskRevision": 5},
+        json={"pageRevision": 7, "confirmationRevision": 5},
     )
     assert confirmed.status_code == 202
     assert replayed.status_code == 200
     assert confirmed.json() == replayed.json()
     assert confirmed.json()["taskStatus"] == "queued"
     assert confirmed.json()["confirmed"] is True
+
+    old_confirmation_field = client.post(
+        f"/api/v1/tasks/{TASK_ID}/target-preview/confirmations",
+        headers={"Idempotency-Key": "task:preview:api:old-field"},
+        json={"pageRevision": 7, "expectedTaskRevision": 5},
+    )
+    assert old_confirmation_field.status_code == 422
 
 
 def test_preview_auth_validation_stale_not_found_and_unavailable_fail_closed() -> None:
@@ -279,7 +295,7 @@ def test_preview_auth_validation_stale_not_found_and_unavailable_fail_closed() -
     stale_confirmation = client.post(
         f"/api/v1/tasks/{TASK_ID}/target-preview/confirmations",
         headers={"Idempotency-Key": "task:preview:stale-confirmation"},
-        json={"pageRevision": 7, "expectedTaskRevision": 4},
+        json={"pageRevision": 7, "confirmationRevision": 4},
     )
     assert stale_exclusion.status_code == 409
     assert stale_confirmation.status_code == 409

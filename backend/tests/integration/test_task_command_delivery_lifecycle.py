@@ -14,6 +14,9 @@ from automation_tool.control_plane.application.task_command_delivery import (
     PendingTaskCommand,
     TaskCommandDeliveryRejected,
 )
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+)
 from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
     ExecutionAttemptStatus,
@@ -116,6 +119,10 @@ async def seed_attempt(
                     selection_task_revision=1,
                     confirmed_task_revision=2,
                     selected_target_count=1,
+                    action="comment",
+                    message_template="D6-13 受控评论",
+                    intent_version=TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+                    intent_fingerprint=b"i" * 32,
                     source_message_id=UUID("223e4567-e89b-42d3-a456-426614174001"),
                     source_idempotency_key="task:targets:confirm:delivery",
                     source_fingerprint=b"c" * 32,

@@ -89,7 +89,7 @@ export class TauriTaskTargetPreviewSource implements TaskTargetPreviewSource {
       {
         taskId: request.taskId,
         pageRevision: request.pageRevision,
-        expectedTaskRevision: request.expectedTaskRevision,
+        confirmationRevision: request.confirmationRevision,
         idempotencyKey: request.idempotencyKey,
       },
       request.signal,

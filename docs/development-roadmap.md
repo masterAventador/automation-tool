@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 6 抖音目标发现与用户预览
+> 当前阶段：Wave 7 抖音受控评论与主动私信
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-05 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，保持待补且不阻塞下一项 A7-06；B5-15 真实账号 App 双重启证据同样独立补验 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线、Wave 6 D6-01～D6-15 与 A7-01～A7-06 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-07 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -312,7 +312,7 @@
 | A7-03 | ActionAuthorization | action/target/attempt/deadline/idempotency 签名或 MAC | A7-02,I2-10 | ✅ 已完成 |
 | A7-04 | Executor 本机硬下限 | 服务器不能放宽最小间隔、任务上限和紧停 | A7-03,E4-11 | ✅ 已完成 |
 | A7-05 | 文案校验 | 长度、空内容、控制字符、敏感模式和模板变量 | A7-01 | ✅ 已完成 |
-| A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | 🧪 RED |
+| A7-06 | 高风险最终确认 | UI 展示目标、动作、文案和数量；确认 revision 防旧提交 | A7-03,D6-12 | ✅ 已完成 |
 | A7-07 | 副作用账本 | prepared/dispatched/verified/uncertain 本机原子状态 | A7-04,E4-11 | ⬜ 未开始 |
 | A7-08 | 抖音评论 Page Object | 定位输入/提交/最终状态；页面变化 fail closed | D6-02,A7-05 | ⬜ 未开始 |
 | A7-09 | 抖音私信 Page Object | 进入会话/输入/发送/最终状态；权限差异处理 | D6-02,A7-05 | ⬜ 未开始 |
@@ -2175,11 +2175,24 @@
 - 文档与台账：同步根/Backend/Frontend README、产品规划、前后端架构、工程结构和本唯一台账；同时将台账中全部历史完成标记统一为 `✅ 已完成`，未改动待验收/RED/未开始语义，没有新增第二份规划
 - 后续：进入 `A7-06` 高风险最终确认；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
 
+### A7-06 高风险最终确认
+
+- 状态：✅ 已完成
+- RED：Backend 契约先准确证明响应缺少 action/messageTemplate/confirmationRevision，使用新 `confirmationRevision` 请求在旧接口返回 422；Frontend 组件准确证明最终确认未展示动作、文案和 revision，Source 仍发送旧字段；Rust 解析器准确失败于缺少新访问器。首次隐藏 App 验收又发现真实时序缺口：弹窗打开后后台 revision 变化可能使提交语义不清，测试坚持要求旧版本由后端真实拒绝，没有把等待放宽或改成 Mock
+- 执行意图：新增不可变 `task-target-confirmation-intent.v1`，canonical SHA-256 绑定 Installation、Task、page revision、selection revision、封闭 action、原始 message template 与按预览顺序排列的全部已选 Target ID。确认响应公开动作/模板/确认 revision；确认请求只接受显式 `confirmationRevision`。Alembic `20260720_0022` 从 `0021` typed definition 与目标集合确定性回填既有确认，再强制 action/message/version/fingerprint 非空与封闭约束，降级精确移除新增列
+- 服务端防篡改：确认必须命中当前 Task revision 且至少一个已选目标，原子写入完整意图和 `task.targets_confirmed`；读取、确认重放和 A7-02 Action 授权会重算目标集合与完整指纹，动作、模板、计数、版本、指纹、排除或定义任一变化均拒绝。D6-13 业务 offer 入队和 claim 额外复验确认动作/模板仍与 typed Task 定义一致；无副作用发现/控制命令不被误拦
+- App 审阅边界：目标预览最终确认区和 Popconfirm 同时展示动作、原始模板、数量与 revision。弹窗以受控 open 状态和同步 ref 冻结用户打开瞬间的 page/revision/action/template/count；后台 Query/事件更新不能偷换已审阅提交。目标预览专用 Tauri 错误映射仅把 Control Plane `RequestRejected` 保留为 `request_rejected`，React 据此显示固定旧版本提示并回拉，其他错误仍统一脱敏
+- 生产同路径：`uv run python ../scripts/run_d6_12_acceptance.py` 使用唯一 `automation-tool-d612-<pid>` Compose project、随机 PostgreSQL 端口、完整 Alembic、真实 Uvicorn、正式 Executor discovery 和唯一 `visible=false` Tauri App。App 先排除一个目标并打开 revision 4 确认弹窗，后台正式 Command 恢复目标推进到 revision 5；App 仍提交冻结的 revision 4 并收到真实 409，回拉后再次审阅 revision 5 才确认成功。最终 PostgreSQL 核对 queued/revision 6、两项目标、action/template/version/fingerprint 和连续事件
+- 失败矩阵：覆盖旧请求字段、旧 page/task/confirmation revision、空选择、并发确认、跨 Installation/Task、未知 action、browse/文案错配、非法模板、确认/定义/选择/计数/版本/指纹篡改、迁移既有事实、降级、确认重放、授权复验、offer 投递守卫、协议未知字段、乱序目标、弹窗期间后台刷新和原生错误脱敏
+- 门禁：Backend 全量 `1587 passed, 5 skipped`，9897 条语句/2120 个分支覆盖率 100%，286 个 Python 文件格式、Ruff、严格 Mypy 263 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 93 项 Node 契约、184 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 快照和 production boundary 全绿；Rust 三套配置、Rustfmt 与全目标/全特性 Clippy `-D warnings` 全绿；隐藏 App 纵向验收 1 项通过
+- 资源与文档：隐藏 App 全程后台、不弹窗、不启动运营浏览器；验收前检查目标端口，结束回收 App/WDIO、Uvicorn、Executor、专属 PostgreSQL 容器/网络/Volume、AppData 和端口，未读取、停止或复用其他项目资源。同步根/Backend/Frontend README、产品规划、前后端架构、工程结构与本唯一台账，没有新增重复规划文档
+- 后续：进入 `A7-07` 副作用账本；D6-16、B5-15 继续保持独立真实账号补验，不阻塞主线
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-06`（🧪 RED）：先以失败测试固定高风险最终确认快照，UI 展示精确目标、动作、文案和数量，并用确认 revision 拒绝旧提交；
+1. `A7-07`（⬜ 未开始）：先以失败测试固定 Executor 私有 SQLite 的 prepared/dispatched/verified/uncertain 原子状态与崩溃恢复边界；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

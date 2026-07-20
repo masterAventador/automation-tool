@@ -726,10 +726,10 @@
       "TaskTargetConfirmationRequest": {
         "additionalProperties": false,
         "properties": {
-          "expectedTaskRevision": {
+          "confirmationRevision": {
             "maximum": 9007199254740991.0,
             "minimum": 1.0,
-            "title": "Expectedtaskrevision",
+            "title": "Confirmationrevision",
             "type": "integer"
           },
           "pageRevision": {
@@ -741,7 +741,7 @@
         },
         "required": [
           "pageRevision",
-          "expectedTaskRevision"
+          "confirmationRevision"
         ],
         "title": "TaskTargetConfirmationRequest",
         "type": "object"
@@ -837,6 +837,15 @@
       "TaskTargetPreviewResponse": {
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "$ref": "#/components/schemas/DouyinSearchExposureAction"
+          },
+          "confirmationRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Confirmationrevision",
+            "type": "integer"
+          },
           "confirmed": {
             "title": "Confirmed",
             "type": "boolean"
@@ -865,6 +874,17 @@
             "minimum": 0.0,
             "title": "Lasteventsequence",
             "type": "integer"
+          },
+          "messageTemplate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messagetemplate"
           },
           "nextCursor": {
             "anyOf": [
@@ -913,8 +933,11 @@
           "taskId",
           "taskStatus",
           "taskRevision",
+          "confirmationRevision",
           "lastEventSequence",
           "pageRevision",
+          "action",
+          "messageTemplate",
           "selectedTargetCount",
           "userExcludedTargetCount",
           "confirmed",

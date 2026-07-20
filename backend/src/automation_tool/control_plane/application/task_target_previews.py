@@ -16,14 +16,21 @@ from automation_tool.control_plane.application.task_targets import TaskTargetRec
 from automation_tool.control_plane.application.tasks import TaskRecord
 from automation_tool.control_plane.domain import (
     DouyinCandidateDisposition,
+    DouyinSearchExposureAction,
     InstallationId,
     TargetId,
     TaskId,
     TaskStatus,
 )
-from automation_tool.protocol import MAX_TASK_TARGET_LIMIT, IdempotencyKey
+from automation_tool.protocol import (
+    MAX_TASK_TARGET_LIMIT,
+    ActionMessageTemplate,
+    ActionMessageTemplateRejected,
+    IdempotencyKey,
+)
 
 _CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,512}$")
+TASK_TARGET_CONFIRMATION_INTENT_VERSION = "task-target-confirmation-intent.v1"
 
 
 class InvalidTaskTargetPreview(ValueError):
@@ -103,6 +110,9 @@ class TaskTargetPreviewItem:
 class TaskTargetPreviewSnapshot:
     task: TaskRecord
     page_revision: int
+    confirmation_revision: int
+    action: DouyinSearchExposureAction
+    message_template: str | None
     items: tuple[TaskTargetPreviewItem, ...]
     selected_target_count: int
     user_excluded_target_count: int
@@ -110,10 +120,23 @@ class TaskTargetPreviewSnapshot:
 
     def __post_init__(self) -> None:
         confirmed_at = None if self.confirmed_at is None else _canonical_utc(self.confirmed_at)
+        message_valid = False
+        try:
+            if self.action is DouyinSearchExposureAction.BROWSE:
+                message_valid = self.message_template is None
+            elif isinstance(self.message_template, str):
+                ActionMessageTemplate(source=self.message_template)
+                message_valid = True
+        except ActionMessageTemplateRejected:
+            message_valid = False
         if (
             not isinstance(self.task, TaskRecord)
             or type(self.page_revision) is not int
             or not 1 <= self.page_revision <= (1 << 53) - 1
+            or type(self.confirmation_revision) is not int
+            or not 1 <= self.confirmation_revision <= (1 << 53) - 1
+            or not isinstance(self.action, DouyinSearchExposureAction)
+            or not message_valid
             or type(self.items) is not tuple
             or any(
                 not isinstance(item, TaskTargetPreviewItem)
@@ -128,6 +151,8 @@ class TaskTargetPreviewSnapshot:
             or not 0 <= self.user_excluded_target_count <= MAX_TASK_TARGET_LIMIT
             or self.selected_target_count + self.user_excluded_target_count > MAX_TASK_TARGET_LIMIT
             or (confirmed_at is None and self.task.status is not TaskStatus.AWAITING_CONFIRMATION)
+            or (confirmed_at is None and self.confirmation_revision != self.task.revision)
+            or (confirmed_at is not None and self.confirmation_revision >= self.task.revision)
             or (
                 confirmed_at is not None
                 and self.task.status
@@ -141,6 +166,65 @@ class TaskTargetPreviewSnapshot:
         ):
             raise InvalidTaskTargetPreview
         object.__setattr__(self, "confirmed_at", confirmed_at)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class TaskTargetConfirmationIntent:
+    installation_id: InstallationId
+    task_id: TaskId
+    page_revision: int
+    confirmation_revision: int
+    action: DouyinSearchExposureAction
+    message_template: str | None
+    selected_target_ids: tuple[TargetId, ...]
+
+    def __post_init__(self) -> None:
+        message_valid = False
+        try:
+            if self.action is DouyinSearchExposureAction.BROWSE:
+                message_valid = self.message_template is None
+            elif isinstance(self.message_template, str):
+                ActionMessageTemplate(source=self.message_template)
+                message_valid = True
+        except ActionMessageTemplateRejected:
+            message_valid = False
+        if (
+            not isinstance(self.installation_id, InstallationId)
+            or not isinstance(self.task_id, TaskId)
+            or type(self.page_revision) is not int
+            or not 1 <= self.page_revision <= (1 << 53) - 1
+            or type(self.confirmation_revision) is not int
+            or not 1 <= self.confirmation_revision <= (1 << 53) - 1
+            or not isinstance(self.action, DouyinSearchExposureAction)
+            or not message_valid
+            or type(self.selected_target_ids) is not tuple
+            or not 1 <= len(self.selected_target_ids) <= MAX_TASK_TARGET_LIMIT
+            or any(not isinstance(value, TargetId) for value in self.selected_target_ids)
+            or len(set(self.selected_target_ids)) != len(self.selected_target_ids)
+        ):
+            raise InvalidTaskTargetPreview
+
+    @property
+    def selected_target_count(self) -> int:
+        return len(self.selected_target_ids)
+
+    def fingerprint(self) -> bytes:
+        encoded = json.dumps(
+            {
+                "action": self.action.value,
+                "confirmationRevision": self.confirmation_revision,
+                "installationId": str(self.installation_id),
+                "messageTemplate": self.message_template,
+                "pageRevision": self.page_revision,
+                "selectedTargetIds": [str(value) for value in self.selected_target_ids],
+                "taskId": str(self.task_id),
+                "version": TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        return hashlib.sha256(encoded).digest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,6 +511,9 @@ class TaskTargetPreviewService:
             snapshot=TaskTargetPreviewSnapshot(
                 task=snapshot.task,
                 page_revision=snapshot.page_revision,
+                confirmation_revision=snapshot.confirmation_revision,
+                action=snapshot.action,
+                message_template=snapshot.message_template,
                 items=visible,
                 selected_target_count=snapshot.selected_target_count,
                 user_excluded_target_count=snapshot.user_excluded_target_count,
@@ -494,9 +581,11 @@ class _SystemClock:
 
 
 __all__ = [
+    "TASK_TARGET_CONFIRMATION_INTENT_VERSION",
     "InvalidTaskTargetPreview",
     "PendingTaskTargetConfirmation",
     "PendingTaskTargetExclusions",
+    "TaskTargetConfirmationIntent",
     "TaskTargetPreviewConflict",
     "TaskTargetPreviewItem",
     "TaskTargetPreviewMutationResult",

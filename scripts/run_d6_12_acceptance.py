@@ -32,7 +32,16 @@ from run_t3_06_acceptance import (
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from automation_tool.control_plane.domain import InstallationId, TaskId
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+    TaskTargetConfirmationIntent,
+)
+from automation_tool.control_plane.domain import (
+    DouyinSearchExposureAction,
+    InstallationId,
+    TargetId,
+    TaskId,
+)
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     execution_attempts,
@@ -44,9 +53,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
-TAURI_CONFIG = (
-    FRONTEND_ROOT / "src-tauri" / "tauri.task-target-preview-ui-e2e.conf.json"
-)
+TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-target-preview-ui-e2e.conf.json"
 CONTROL_PLANE_PORT = 8765
 APP_IDENTIFIER = "com.aventador.automationtool.d612acceptance"
 ENVIRONMENT_ID = "d612-acceptance"
@@ -106,9 +113,7 @@ def signed_bootstrap() -> tuple[str, str]:
 
 def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
     environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("AUTOMATION_TOOL_")
+        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
     }
     password = secrets.token_hex(24)
     database_url = (
@@ -162,9 +167,7 @@ async def wait_for_app_task(
                 try:
                     credential = credential_path.read_text(encoding="ascii")
                 except (OSError, UnicodeError) as error:
-                    raise RuntimeError(
-                        "D6-12 App credential vault is unreadable"
-                    ) from error
+                    raise RuntimeError("D6-12 App credential vault is unreadable") from error
                 return InstallationId.parse(row[0]), TaskId.parse(row[1]), credential
             if time.monotonic() >= deadline:
                 raise RuntimeError("D6-12 hidden App did not prepare its Task in time")
@@ -240,29 +243,37 @@ async def verify_database_state(
         if (
             task_row["installation_id"] != installation_id.uuid
             or task_row["status"] != "queued"
-            or task_row["revision"] != 5
-            or task_row["last_event_sequence"] != 4
+            or task_row["revision"] != 6
+            or task_row["last_event_sequence"] != 5
             or attempt_row["status"] != "succeeded"
         ):
-            raise RuntimeError(
-                "D6-12 Task/Attempt did not converge after UI confirmation"
-            )
-        if len(targets) != 2 or len(exclusions) != 1:
+            raise RuntimeError("D6-12 Task/Attempt did not converge after UI confirmation")
+        if len(targets) != 2 or exclusions:
             raise RuntimeError("D6-12 UI persisted the wrong target selection")
-        if exclusions[0]["target_id"] != targets[1]["id"]:
-            raise RuntimeError("D6-12 UI excluded a target other than its second row")
+        intent = TaskTargetConfirmationIntent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=1,
+            confirmation_revision=5,
+            action=DouyinSearchExposureAction.COMMENT,
+            message_template="您好 {{target_display_name}} 期待您的分享",
+            selected_target_ids=tuple(TargetId.parse(row["id"]) for row in targets),
+        )
         if (
             confirmation["page_revision"] != 1
-            or confirmation["selection_task_revision"] != 4
-            or confirmation["confirmed_task_revision"] != 5
-            or confirmation["selected_target_count"] != 1
+            or confirmation["selection_task_revision"] != 5
+            or confirmation["confirmed_task_revision"] != 6
+            or confirmation["selected_target_count"] != 2
+            or confirmation["action"] != intent.action.value
+            or confirmation["message_template"] != intent.message_template
+            or confirmation["intent_version"] != TASK_TARGET_CONFIRMATION_INTENT_VERSION
+            or bytes(confirmation["intent_fingerprint"]) != intent.fingerprint()
         ):
-            raise RuntimeError(
-                "D6-12 UI did not bind confirmation to the latest revision"
-            )
+            raise RuntimeError("D6-12 UI did not bind confirmation to the latest revision")
         if events != [
             "task.discovery_started",
             "task.awaiting_confirmation",
+            "task.target_selection_updated",
             "task.target_selection_updated",
             "task.targets_confirmed",
         ]:
@@ -345,9 +356,7 @@ def main() -> None:
         try:
             app_exit = app_process.wait(timeout=180)
         except subprocess.TimeoutExpired as error:
-            raise RuntimeError(
-                "D6-12 hidden App UI acceptance did not finish"
-            ) from error
+            raise RuntimeError("D6-12 hidden App UI acceptance did not finish") from error
         if app_exit != 0:
             raise RuntimeError("D6-12 hidden App UI acceptance failed")
         app_process = None

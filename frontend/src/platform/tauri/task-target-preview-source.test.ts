@@ -9,8 +9,11 @@ const PREVIEW: TaskTargetPreview = {
   taskId: TASK_ID,
   taskStatus: "awaiting_confirmation",
   taskRevision: 4,
+  confirmationRevision: 4,
   lastEventSequence: 3,
   pageRevision: 7,
+  action: "comment",
+  messageTemplate: "您好 {{target_display_name}} 期待您的分享",
   selectedTargetCount: 1,
   userExcludedTargetCount: 0,
   confirmed: false,
@@ -54,7 +57,7 @@ describe("Tauri target preview source", () => {
       source.confirm({
         taskId: TASK_ID,
         pageRevision: 7,
-        expectedTaskRevision: 4,
+        confirmationRevision: 4,
         idempotencyKey: "task:preview:confirm",
       }),
     ).resolves.toEqual(PREVIEW);
@@ -74,7 +77,7 @@ describe("Tauri target preview source", () => {
     expect(invoke).toHaveBeenNthCalledWith(3, "confirm_task_target_preview", {
       taskId: TASK_ID,
       pageRevision: 7,
-      expectedTaskRevision: 4,
+      confirmationRevision: 4,
       idempotencyKey: "task:preview:confirm",
     });
   });

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import and_, func, insert, select
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -15,6 +15,10 @@ from automation_tool.control_plane.application.action_risk_authorizations import
     ActionRiskAuthorizationRejected,
     ActionRiskAuthorizationUnavailable,
     ActionRiskLimitReason,
+)
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+    TaskTargetConfirmationIntent,
 )
 from automation_tool.control_plane.domain import (
     ActionId,
@@ -227,6 +231,7 @@ class SqlAlchemyActionRiskAuthorizationRepository:
                         await session.execute(
                             select(
                                 douyin_search_exposure_definitions.c.action,
+                                douyin_search_exposure_definitions.c.message_template,
                                 douyin_search_exposure_definitions.c.minimum_interval_seconds,
                             ).where(
                                 douyin_search_exposure_definitions.c.task_id == task_id.uuid,
@@ -262,6 +267,12 @@ class SqlAlchemyActionRiskAuthorizationRepository:
                             select(
                                 task_target_confirmations.c.page_revision,
                                 task_target_confirmations.c.confirmed_task_revision,
+                                task_target_confirmations.c.selection_task_revision,
+                                task_target_confirmations.c.selected_target_count,
+                                task_target_confirmations.c.action,
+                                task_target_confirmations.c.message_template,
+                                task_target_confirmations.c.intent_version,
+                                task_target_confirmations.c.intent_fingerprint,
                                 task_target_confirmations.c.confirmed_at,
                             )
                             .where(
@@ -300,12 +311,57 @@ class SqlAlchemyActionRiskAuthorizationRepository:
                         task_target_exclusions.c.installation_id == installation_id.uuid,
                     )
                 )
+                if confirmation is None:
+                    raise ActionRiskAuthorizationRejected
+                selected_target_ids = tuple(
+                    TargetId.parse(value)
+                    for value in await session.scalars(
+                        select(task_targets.c.id)
+                        .select_from(
+                            task_targets.outerjoin(
+                                task_target_exclusions,
+                                and_(
+                                    task_target_exclusions.c.target_id == task_targets.c.id,
+                                    task_target_exclusions.c.task_id == task_targets.c.task_id,
+                                    task_target_exclusions.c.installation_id
+                                    == task_targets.c.installation_id,
+                                    task_target_exclusions.c.page_revision
+                                    == task_targets.c.page_revision,
+                                ),
+                            )
+                        )
+                        .where(
+                            task_targets.c.task_id == task_id.uuid,
+                            task_targets.c.installation_id == installation_id.uuid,
+                            task_targets.c.page_revision == confirmation["page_revision"],
+                            task_targets.c.disposition == DouyinCandidateDisposition.ELIGIBLE.value,
+                            task_target_exclusions.c.target_id.is_(None),
+                        )
+                        .order_by(task_targets.c.ordinal, task_targets.c.id)
+                    )
+                )
+                try:
+                    intent = TaskTargetConfirmationIntent(
+                        installation_id=installation_id,
+                        task_id=task_id,
+                        page_revision=cast(int, confirmation["page_revision"]),
+                        confirmation_revision=cast(int, confirmation["selection_task_revision"]),
+                        action=policy.scope.action,
+                        message_template=cast(str | None, definition["message_template"]),
+                        selected_target_ids=selected_target_ids,
+                    )
+                except (TypeError, ValueError):
+                    raise ActionRiskAuthorizationRejected from None
                 if (
-                    confirmation is None
-                    or target is None
+                    target is None
                     or target["page_revision"] != confirmation["page_revision"]
                     or target["disposition"] != DouyinCandidateDisposition.ELIGIBLE.value
                     or excluded is not None
+                    or confirmation["action"] != intent.action.value
+                    or confirmation["message_template"] != intent.message_template
+                    or confirmation["intent_version"] != TASK_TARGET_CONFIRMATION_INTENT_VERSION
+                    or bytes(confirmation["intent_fingerprint"]) != intent.fingerprint()
+                    or confirmation["selected_target_count"] != intent.selected_target_count
                     or cast(int, task_row["revision"])
                     < cast(int, confirmation["confirmed_task_revision"])
                     or timestamp < cast(datetime, confirmation["confirmed_at"])
