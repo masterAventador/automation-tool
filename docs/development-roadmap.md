@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-13，下一项为 D6-14 页面漂移诊断；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
+| 产品代码 | `🚧` Wave 1～Wave 5 工程主线已完成，Wave 6 已完成 D6-01～D6-14，下一项为 D6-15 Fake 页面回归样例；B5-15 真实账号 App 双重启证据保持独立补验且不阻塞主线 |
 | Windows 原生验收集成 | `✅` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -295,7 +295,7 @@
 | D6-11 | 目标预览 API | 列表、排除、确认 revision；过期候选拒绝 | D6-09 | 🟩 完成 |
 | D6-12 | 目标预览 UI | 摘要、排除、去重/黑名单标记和确认 | D6-11,T3-18 | 🟩 完成 |
 | D6-13 | 未确认副作用守卫 | 没有确认 command 时 Executor 无法收到 action | D6-10,D6-11 | 🟩 完成 |
-| D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | ⬜ 未开始 |
+| D6-14 | 页面漂移诊断 | 未知元素时保存受限 Artifact 并进入 handoff | D6-02,E4-10 | 🟩 完成 |
 | D6-15 | Fake 页面回归样例 | 正常、空结果、弹窗、登录跳转、未知版本和无限滚动 | D6-14 | ⬜ 未开始 |
 | D6-16 | 真实目标发现验收 | 受控抖音账号完成搜索与预览，确认无外部副作用 | D6-15 | 🔍 待真实账号 |
 
@@ -2071,10 +2071,25 @@
 - 资源与文档：验收前检查动态 Control Plane/PostgreSQL 端口；两次运行分别使用 `automation-tool-d613-*` 与 `automation-tool-t309-*` 专属容器、网络和 Volume，finally 后全部为零，Uvicorn/runner/监听端口无残留。没有启动 Tauri、WebDriver、Chrome、用户 Profile 或系统钥匙串；同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `D6-14`，对未知页面元素保存有界、脱敏诊断 Artifact 并进入人工接管；不得把 DOM/截图原文无界上传，也不得在页面未知时继续动作
 
+### D6-14 页面漂移诊断
+
+- 状态：🟩 完成
+- 提交：本记录、页面漂移专用 Artifact、发现编排/协议收紧、单元/真实浏览器/PostgreSQL 测试和文档属于单一 `feat: 完成页面漂移诊断与人工接管` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`；新增聚焦测试最初在收集阶段准确失败于 `automation_tool.executor.page_drift_artifact` 不存在，随后用例还要求原有 `page_version_unknown/conflicting_anchors` 不再作为普通失败，而必须写入诊断并进入 handoff。失败落在 D6-14 产品能力，不是环境、浏览器或测试脚手架
+- 专用本机 Artifact：新增 `executor/page_drift_artifact.py`，只接受固定 `page_version_unknown/conflicting_anchors` evidence、`search` 阶段与正 page revision。每份 JSON 最多 2 KiB、目录最多 20 份，文件名为 canonical UUIDv4；返回窄引用包含 SHA-256、固定 `application/vnd.automation-tool.page-drift+json` 媒体类型、大小和 `page-drift-artifacts/<id>.json` 受控相对路径。POSIX 目录/文件收紧为 `0700/0600`，不覆盖既有文件
+- 隐私与边界：Artifact Schema 只有固定版本、ID、平台、操作、阶段、evidence、page revision 与 UTC 观察时间，没有自由文本输入，因此关键词、URL、DOM、HTML、页面正文、截图、Cookie、Header、凭据和 Profile/私有路径无法进入文件。它是 H8-09 之前的页面漂移专用 spool，不提供通用浏览、导出、上传或截图/Trace；H8-09/H8-10/H8-12 的通用引用、展示与保留治理仍保持后续任务
+- 熔断与收敛：`ProductionDouyinDiscoveryOperation` 只对页面层已明确识别的版本未知或锚点冲突写诊断，并在写入后立即关闭 Runtime，不运行滚动或候选提取。上述两种 evidence 在 `DouyinDiscoveryExecutionResult` 与 Executor v1 语义校验中只能配对 `handoff_required`；Control Plane 复用既有发现收敛事务投影为 `awaiting_human` 且不保存 Target。诊断因磁盘、权限或路径问题不可写时也不能解除熔断，仍进入人工接管
+- 失败矩阵：覆盖坏 evidence/stage/revision、非 UUIDv4 ID、坏/naive 时钟、state 目录 identity 替换、非目录、未知目录项、单文件非法名称/类型/大小、超过 20 份、排他创建冲突、磁盘写入失败、fdopen/fsync 中途失败及残片删除；发现层覆盖两种漂移、Artifact 写失败仍 handoff、登录/弹窗/普通不可用不误判、Runtime 总是关闭。现有 H8-12 仍负责完整过期保留、引用保护和清理治理
+- 生产同路径验收：`tests/integration/test_page_drift_artifact_browser.py` 从正式 `ExecutorCommandProcessor.handle(task.discover)` 进入 `ProductionDouyinDiscoveryOperation`，使用隔离临时 Profile 与 `headless=true` 系统 Chrome 命中确定性锚点冲突页；最终正式 `task.discovery_completed` 为 `handoff_required/conflicting_anchors`，本机仅生成一份固定诊断且不含测试关键词/页面文本/URL，BrowserRuntime 完整关闭。该能力没有 App API，故不启动 Tauri 或以直接 HTTP 冒充 App；原始调用方就是正式 Executor command processor
+- 数据库验证：真实 PostgreSQL 18.4、完整 Alembic 与既有发现收敛仓储分别接收 `blocking_dialog/page_version_unknown/conflicting_anchors` 三种 handoff，均把 Task 投影为 `awaiting_human`，不携带 Candidate。Executor Schema 的结构枚举未扩张，Pydantic 语义约束和确定性 Schema 漂移检查均通过
+- 测试：Backend 全量 `1397 passed, 5 skipped in 105.64s`，8996 条语句、1928 个分支覆盖率 100%；Ruff/格式 246 个文件、严格 Mypy 246 个源码/测试文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。聚焦新增 Artifact/发现编排模块分支覆盖率 100%，真实无头 Chrome 用例与真实 PostgreSQL handoff 矩阵均单独通过；本任务未修改 OpenAPI、Frontend、Rust、Tauri Command、数据库 Schema 或迁移
+- 资源与文档：全部数据库测试继续使用 `automation-tool-pytest-*` 专属 Compose project 与随机 loopback 端口；浏览器只使用 pytest 临时 Profile/state，未触碰默认 Chrome User Data、真实抖音账号、AppData、系统钥匙串或其他项目。测试结束后 Chrome、Playwright、PostgreSQL 容器/网络/Volume 和监听端口零残留；同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
+- 后续：进入 `D6-15`，把正常、空结果、弹窗、登录跳转、未知版本和无限滚动页面固化为可回放 Fake 页面回归样例；继续使用正式 Page Object/执行器，不把 Fake Adapter 打进生产包
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `D6-14`：未知页面元素时保存有界、脱敏诊断 Artifact 并进入人工接管；
+1. `D6-15`：固化正常、空结果、弹窗、登录跳转、未知版本和无限滚动 Fake 页面回归样例；
 2. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 3. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

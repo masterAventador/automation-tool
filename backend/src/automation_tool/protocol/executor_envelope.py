@@ -431,7 +431,9 @@ class DouyinDiscoveryCompletedPayload(_ProtocolModel):
         expected_evidence = {
             "completed": frozenset({"candidates_extracted"}),
             "login_required": frozenset({"login_required"}),
-            "handoff_required": frozenset({"blocking_dialog"}),
+            "handoff_required": frozenset(
+                {"blocking_dialog", "page_version_unknown", "conflicting_anchors"}
+            ),
             "failed": frozenset(
                 {
                     "no_candidates",
@@ -440,8 +442,6 @@ class DouyinDiscoveryCompletedPayload(_ProtocolModel):
                     "action_timed_out",
                     "result_url_timed_out",
                     "results_ready_timed_out",
-                    "page_version_unknown",
-                    "conflicting_anchors",
                     "results_unavailable",
                     "privacy_rejected",
                     "result_count_decreased",

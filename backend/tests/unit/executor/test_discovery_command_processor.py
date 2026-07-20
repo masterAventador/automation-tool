@@ -158,6 +158,16 @@ def test_discover_non_success_emits_no_candidate_batch_and_closed_completion(
     for state, evidence, outcome in (
         (DouyinDiscoveryOperationState.LOGIN_REQUIRED, "login_required", "login_required"),
         (DouyinDiscoveryOperationState.HANDOFF_REQUIRED, "blocking_dialog", "handoff_required"),
+        (
+            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
+            "page_version_unknown",
+            "handoff_required",
+        ),
+        (
+            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
+            "conflicting_anchors",
+            "handoff_required",
+        ),
         (DouyinDiscoveryOperationState.FAILED, "page_unavailable", "failed"),
     ):
         result = DouyinDiscoveryExecutionResult(

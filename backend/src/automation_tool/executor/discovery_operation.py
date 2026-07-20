@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
@@ -10,6 +11,10 @@ from typing import Protocol, runtime_checkable
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
 from automation_tool.executor.browser_runtime import BrowserRuntime, BrowserWindow
 from automation_tool.executor.ledger import ExecutorLedger
+from automation_tool.executor.page_drift_artifact import (
+    PageDriftArtifactRejected,
+    PageDriftArtifactStore,
+)
 from automation_tool.executor.rpa.douyin.bounded_scroll import (
     DouyinBoundedScroll,
     DouyinBoundedScrollEvidence,
@@ -50,7 +55,9 @@ class DouyinDiscoveryOperationState(StrEnum):
 _EVIDENCE_BY_STATE = {
     DouyinDiscoveryOperationState.COMPLETED: frozenset({"candidates_extracted"}),
     DouyinDiscoveryOperationState.LOGIN_REQUIRED: frozenset({"login_required"}),
-    DouyinDiscoveryOperationState.HANDOFF_REQUIRED: frozenset({"blocking_dialog"}),
+    DouyinDiscoveryOperationState.HANDOFF_REQUIRED: frozenset(
+        {"blocking_dialog", "page_version_unknown", "conflicting_anchors"}
+    ),
     DouyinDiscoveryOperationState.FAILED: frozenset(
         {
             "no_candidates",
@@ -59,8 +66,6 @@ _EVIDENCE_BY_STATE = {
             "action_timed_out",
             "result_url_timed_out",
             "results_ready_timed_out",
-            "page_version_unknown",
-            "conflicting_anchors",
             "results_unavailable",
             "privacy_rejected",
             "result_count_decreased",
@@ -163,6 +168,7 @@ class ProductionDouyinDiscoveryOperation:
             _Scroll,
         ] = DouyinBoundedScroll,  # type: ignore[assignment]
         extraction_factory: Callable[[BrowserWindow, int, int], _Extraction] = _default_extraction,
+        page_drift_artifacts: PageDriftArtifactStore | None = None,
     ) -> None:
         if (
             not isinstance(ledger, ExecutorLedger)
@@ -173,12 +179,20 @@ class ProductionDouyinDiscoveryOperation:
             or not callable(extraction_factory)
         ):
             raise DouyinDiscoveryOperationRejected
+        resolved_artifacts = (
+            PageDriftArtifactStore(state_directory=ledger.database_path.parent)
+            if page_drift_artifacts is None
+            else page_drift_artifacts
+        )
+        if not isinstance(resolved_artifacts, PageDriftArtifactStore):
+            raise DouyinDiscoveryOperationRejected
         self._ledger = ledger
         self._browser_authority = browser_authority
         self._runtime_factory = runtime_factory
         self._search_factory = search_factory
         self._scroll_factory = scroll_factory
         self._extraction_factory = extraction_factory
+        self._page_drift_artifacts = resolved_artifacts
 
     def run(
         self,
@@ -211,6 +225,11 @@ class ProductionDouyinDiscoveryOperation:
                     search_input = payload.to_search_input()
                     search = self._search_factory(window, search_input).run()
                     result = _from_search(search, payload.page_revision)
+                    if result is not None and result.evidence in {
+                        "page_version_unknown",
+                        "conflicting_anchors",
+                    }:
+                        self._capture_page_drift(result)
                     if result is None:
                         scroll = self._scroll_factory(
                             window,
@@ -231,6 +250,14 @@ class ProductionDouyinDiscoveryOperation:
         except Exception:
             result = _failed(payload.page_revision, "page_unavailable")
         return result or _failed(payload.page_revision, "page_unavailable")
+
+    def _capture_page_drift(self, result: DouyinDiscoveryExecutionResult) -> None:
+        with suppress(PageDriftArtifactRejected):
+            self._page_drift_artifacts.capture(
+                evidence=result.evidence,
+                page_revision=result.page_revision,
+                stage="search",
+            )
 
 
 def _from_search(
@@ -254,6 +281,12 @@ def _from_search(
             page_revision,
         )
     evidence = observation.evidence.value
+    if evidence in {"page_version_unknown", "conflicting_anchors"}:
+        return _result(
+            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
+            evidence,
+            page_revision,
+        )
     return _failed(page_revision, evidence)
 
 

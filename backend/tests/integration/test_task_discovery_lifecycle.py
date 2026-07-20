@@ -224,14 +224,18 @@ def completed(
     command: TaskCommandRecord,
     *,
     outcome: str = "completed",
+    evidence_override: str | None = None,
 ) -> TaskDiscoveryCompletedEnvelope:
     successful = outcome == "completed"
-    evidence = {
-        "completed": "candidates_extracted",
-        "login_required": "login_required",
-        "handoff_required": "blocking_dialog",
-        "failed": "page_unavailable",
-    }[outcome]
+    evidence = (
+        evidence_override
+        or {
+            "completed": "candidates_extracted",
+            "login_required": "login_required",
+            "handoff_required": "blocking_dialog",
+            "failed": "page_unavailable",
+        }[outcome]
+    )
     return TaskDiscoveryCompletedEnvelope.model_validate(
         {
             "protocol_version": "1.0",
@@ -779,9 +783,11 @@ async def test_discovery_repository_convergence_input_and_terminal_outcome_matri
             with pytest.raises(TaskDiscoveryRejected):
                 await repository.converge(**cast(Any, values))
 
-        for outcome, expected_status in (
-            ("handoff_required", TaskStatus.AWAITING_HUMAN),
-            ("failed", TaskStatus.FAILED),
+        for outcome, evidence, expected_status in (
+            ("handoff_required", "blocking_dialog", TaskStatus.AWAITING_HUMAN),
+            ("handoff_required", "page_version_unknown", TaskStatus.AWAITING_HUMAN),
+            ("handoff_required", "conflicting_anchors", TaskStatus.AWAITING_HUMAN),
+            ("failed", "page_unavailable", TaskStatus.FAILED),
         ):
             await reset_data(database)
             installation_id, task_id = await seed_ready_task(database)
@@ -791,14 +797,18 @@ async def test_discovery_repository_convergence_input_and_terminal_outcome_matri
             ).start(
                 installation_id=installation_id,
                 task_id=task_id,
-                idempotency_key=f"task:discover:{outcome}",
+                idempotency_key=f"task:discover:{outcome}:{evidence}",
             )
             claimed = await acknowledge_discovery(
                 database,
                 installation_id=installation_id,
                 command=started.command,
             )
-            message = completed(claimed, outcome=outcome)
+            message = completed(
+                claimed,
+                outcome=outcome,
+                evidence_override=evidence,
+            )
             fingerprint = discovery_application._source_fingerprint(message)
             candidates = tuple(item.to_candidate() for item in batch(claimed).payload.candidates)
             with pytest.raises(TaskDiscoveryRejected):

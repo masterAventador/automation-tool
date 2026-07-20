@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +20,7 @@ from automation_tool.executor.discovery_operation import (
     ProductionDouyinDiscoveryOperation,
 )
 from automation_tool.executor.ledger import ExecutorLedger
+from automation_tool.executor.page_drift_artifact import PageDriftArtifactRejected
 from automation_tool.executor.rpa.douyin.bounded_scroll import (
     DouyinBoundedScrollEvidence,
     DouyinBoundedScrollObservation,
@@ -302,6 +304,97 @@ def test_production_discovery_maps_search_circuit_breakers_without_scrolling(
     assert downstream_calls == 0
 
 
+@pytest.mark.parametrize(
+    "evidence",
+    (
+        DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
+        DouyinSearchExecutionEvidence.CONFLICTING_ANCHORS,
+    ),
+)
+def test_production_discovery_saves_page_drift_artifact_and_enters_handoff(
+    tmp_path: Path,
+    evidence: DouyinSearchExecutionEvidence,
+) -> None:
+    authority = BrowserLaunchAuthority()
+    authority.authorize(browser_request(tmp_path / "browser"))
+    ledger = healthy_ledger(tmp_path / "ledger")
+
+    class Runtime:
+        def start(self, _request: BrowserLaunchRequest) -> None:
+            pass
+
+        @staticmethod
+        def primary_window() -> object:
+            return object()
+
+        def close(self) -> None:
+            pass
+
+    class Search:
+        def run(self) -> DouyinSearchExecutionObservation:
+            return DouyinSearchExecutionObservation(
+                state=DouyinSearchExecutionState.UNKNOWN,
+                evidence=evidence,
+            )
+
+    operation = ProductionDouyinDiscoveryOperation(
+        ledger=ledger,
+        browser_authority=authority,
+        runtime_factory=cast(Any, Runtime),
+        search_factory=lambda _window, _search: Search(),
+    )
+
+    result = operation.run(payload(), cancellation_requested=lambda: False)
+
+    assert result.state is DouyinDiscoveryOperationState.HANDOFF_REQUIRED
+    assert result.evidence == evidence.value
+    artifacts = tuple((ledger.database_path.parent / "page-drift-artifacts").glob("*.json"))
+    assert len(artifacts) == 1
+    assert json.loads(artifacts[0].read_text(encoding="utf-8"))["evidence"] == evidence.value
+
+
+def test_page_drift_artifact_failure_still_enters_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = BrowserLaunchAuthority()
+    authority.authorize(browser_request(tmp_path / "browser"))
+    ledger = healthy_ledger(tmp_path / "ledger")
+
+    class Runtime:
+        def start(self, _request: BrowserLaunchRequest) -> None:
+            pass
+
+        @staticmethod
+        def primary_window() -> object:
+            return object()
+
+        def close(self) -> None:
+            pass
+
+    class Search:
+        @staticmethod
+        def run() -> DouyinSearchExecutionObservation:
+            return DouyinSearchExecutionObservation(
+                state=DouyinSearchExecutionState.UNKNOWN,
+                evidence=DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
+            )
+
+    monkeypatch.setattr(
+        "automation_tool.executor.page_drift_artifact.PageDriftArtifactStore.capture",
+        lambda *_arguments, **_keywords: (_ for _ in ()).throw(PageDriftArtifactRejected()),
+    )
+    result = ProductionDouyinDiscoveryOperation(
+        ledger=ledger,
+        browser_authority=authority,
+        runtime_factory=cast(Any, Runtime),
+        search_factory=lambda _window, _search: Search(),
+    ).run(payload(), cancellation_requested=lambda: False)
+
+    assert result.state is DouyinDiscoveryOperationState.HANDOFF_REQUIRED
+    assert result.evidence == "page_version_unknown"
+
+
 def test_production_discovery_requires_healthy_local_session_and_authorized_browser(
     tmp_path: Path,
 ) -> None:
@@ -363,6 +456,12 @@ def test_discovery_result_and_operation_inputs_fail_closed(tmp_path: Path) -> No
     ledger = healthy_ledger(tmp_path / "invalid-operation")
     with pytest.raises(DouyinDiscoveryOperationRejected):
         ProductionDouyinDiscoveryOperation(ledger=cast(Any, object()), browser_authority=authority)
+    with pytest.raises(DouyinDiscoveryOperationRejected):
+        ProductionDouyinDiscoveryOperation(
+            ledger=ledger,
+            browser_authority=authority,
+            page_drift_artifacts=cast(Any, object()),
+        )
     operation = ProductionDouyinDiscoveryOperation(
         ledger=ledger,
         browser_authority=authority,
