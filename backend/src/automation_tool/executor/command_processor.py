@@ -116,6 +116,9 @@ class ExecutorCommandProcessor:
     def mark_delivered(self, message_id: str) -> bool:
         return _collapse_failure(lambda: self._ledger.mark_outbox_delivered(message_id))
 
+    def emergency_stop_received(self) -> bool:
+        return _collapse_failure(self._ledger.has_received_task_emergency_stop)
+
     def _handle(self, source: str | bytes) -> tuple[ExecutorOutboundMessage, ...]:
         command = parse_executor_message(source)
         if (
@@ -123,7 +126,13 @@ class ExecutorCommandProcessor:
             or (
                 isinstance(command, TaskCommandEnvelope)
                 and command.message_type
-                not in {"task.offer", "task.pause", "task.resume", "task.cancel"}
+                not in {
+                    "task.offer",
+                    "task.pause",
+                    "task.resume",
+                    "task.cancel",
+                    "task.emergency_stop",
+                }
             )
             or str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
@@ -134,6 +143,7 @@ class ExecutorCommandProcessor:
             "task.pause",
             "task.resume",
             "task.cancel",
+            "task.emergency_stop",
         }:
             return self._handle_control(command)
         receipt = self._ledger.receive_command(command)
@@ -181,7 +191,11 @@ class ExecutorCommandProcessor:
         self,
         command: TaskCommandEnvelope,
     ) -> tuple[ExecutorOutboundMessage, ...]:
-        receipt = self._ledger.receive_command(command)
+        receipt = (
+            self._ledger.receive_task_emergency_stop(command, changed_at=self._now())
+            if command.message_type == "task.emergency_stop"
+            else self._ledger.receive_command(command)
+        )
         existing = self._ledger.outbox_for_command(receipt.message_id)
         if not existing:
             self._ledger.enqueue_outbox(

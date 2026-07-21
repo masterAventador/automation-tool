@@ -4,6 +4,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -28,11 +30,14 @@ use crate::executor_manager::{
 };
 use crate::executor_package::ExecutorPackageVerifier;
 use crate::secure_store::{AppDataSecretStore, SecretStore};
+use serde::{Deserialize, Serialize};
 
 const EXECUTOR_DIRECTORY: &str = "local-executor";
 const EXECUTOR_IDENTITY_FILE: &str = "executor-id-v1";
 const EXECUTOR_PACKAGE_DIRECTORY: &str = "package";
 const EXECUTOR_STATE_DIRECTORY: &str = "state";
+const TASK_EMERGENCY_STOP_FILE: &str = "task-emergency-stop-v1";
+const TASK_EMERGENCY_STOP_VERSION: &str = "1";
 const EXECUTOR_START_TIMEOUT_SECONDS: u64 = 30;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 const HEARTBEAT_INTERVAL_SECONDS: u8 = 15;
@@ -110,6 +115,71 @@ pub struct LocalExecutorIdentity {
     executor_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingTaskEmergencyStop {
+    version: String,
+    task_id: String,
+    idempotency_key: String,
+}
+
+impl PendingTaskEmergencyStop {
+    fn new(task_id: &str, idempotency_key: &str) -> Result<Self, ExecutorPlatformError> {
+        crate::control_plane::validate_task_control_input(task_id, idempotency_key)
+            .map_err(|_| configuration_invalid())?;
+        Ok(Self {
+            version: TASK_EMERGENCY_STOP_VERSION.to_owned(),
+            task_id: task_id.to_owned(),
+            idempotency_key: idempotency_key.to_owned(),
+        })
+    }
+
+    fn validate(self) -> Result<Self, ExecutorPlatformError> {
+        if self.version != TASK_EMERGENCY_STOP_VERSION {
+            return Err(storage_unavailable());
+        }
+        Self::new(&self.task_id, &self.idempotency_key).map_err(|_| storage_unavailable())
+    }
+
+    pub fn task_id(&self) -> &str {
+        &self.task_id
+    }
+
+    pub fn idempotency_key(&self) -> &str {
+        &self.idempotency_key
+    }
+}
+
+struct TaskEmergencyStopState {
+    store: AppDataSecretStore,
+    pending: Option<PendingTaskEmergencyStop>,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+struct TaskEmergencyStopReconciliationGuard {
+    active: Arc<AtomicBool>,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl Drop for TaskEmergencyStopReconciliationGuard {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+pub(crate) struct TaskEmergencyStopReconciliationClaim {
+    _guard: TaskEmergencyStopReconciliationGuard,
+    pending: PendingTaskEmergencyStop,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl TaskEmergencyStopReconciliationClaim {
+    pub(crate) fn pending(&self) -> &PendingTaskEmergencyStop {
+        &self.pending
+    }
+}
+
 impl LocalExecutorIdentity {
     pub fn load_or_create(app_data_directory: &Path) -> Result<Self, ExecutorPlatformError> {
         require_absolute_private_root(app_data_directory)?;
@@ -144,6 +214,9 @@ impl LocalExecutorIdentity {
 pub struct ExecutorPlatformService {
     manager: Arc<ExecutorManager>,
     platform_profile_lease: Arc<Mutex<Option<BrowserProfileLease>>>,
+    task_emergency_stop: Arc<Mutex<TaskEmergencyStopState>>,
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    task_emergency_stop_reconciliation_active: Arc<AtomicBool>,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     paths: ExecutorPlatformPaths,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -172,9 +245,29 @@ impl ExecutorPlatformService {
             restart_policy,
         )
         .map_err(map_manager_error)?;
+        let task_emergency_stop_store = AppDataSecretStore::new(
+            &app_data_directory.join(EXECUTOR_DIRECTORY),
+            TASK_EMERGENCY_STOP_FILE,
+        )
+        .map_err(|_| storage_unavailable())?;
+        let pending_task_emergency_stop = task_emergency_stop_store
+            .load()
+            .map_err(|_| storage_unavailable())?
+            .map(|source| {
+                serde_json::from_slice::<PendingTaskEmergencyStop>(&source)
+                    .map_err(|_| storage_unavailable())?
+                    .validate()
+            })
+            .transpose()?;
         Ok(Self {
             manager: Arc::new(manager),
             platform_profile_lease: Arc::new(Mutex::new(None)),
+            task_emergency_stop: Arc::new(Mutex::new(TaskEmergencyStopState {
+                store: task_emergency_stop_store,
+                pending: pending_task_emergency_stop,
+            })),
+            #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+            task_emergency_stop_reconciliation_active: Arc::new(AtomicBool::new(false)),
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
             paths,
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -191,12 +284,70 @@ impl ExecutorPlatformService {
     }
 
     pub fn emergency_stop(&self) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
-        let result = self.manager.stop().map_err(map_manager_error);
+        let result = self.manager.emergency_stop().map_err(map_manager_error);
         let release = self.release_platform_profile();
         match (result, release) {
             (Ok(status), Ok(())) => Ok(status),
             (Err(error), _) | (_, Err(error)) => Err(error),
         }
+    }
+
+    pub fn engage_task_emergency_stop(
+        &self,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
+        let requested = PendingTaskEmergencyStop::new(task_id, idempotency_key)?;
+        {
+            let mut state = self
+                .task_emergency_stop
+                .lock()
+                .map_err(|_| storage_unavailable())?;
+            match state.pending.as_ref() {
+                Some(current) if current == &requested => {}
+                Some(_) => return Err(configuration_invalid()),
+                None => {
+                    let serialized =
+                        serde_json::to_vec(&requested).map_err(|_| storage_unavailable())?;
+                    state
+                        .store
+                        .save(&serialized)
+                        .map_err(|_| storage_unavailable())?;
+                    state.pending = Some(requested);
+                }
+            }
+        }
+        self.emergency_stop()
+    }
+
+    pub fn pending_task_emergency_stop(
+        &self,
+    ) -> Result<Option<PendingTaskEmergencyStop>, ExecutorPlatformError> {
+        self.task_emergency_stop
+            .lock()
+            .map(|state| state.pending.clone())
+            .map_err(|_| storage_unavailable())
+    }
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    pub(crate) fn begin_task_emergency_stop_reconciliation(
+        &self,
+    ) -> Result<Option<TaskEmergencyStopReconciliationClaim>, ExecutorPlatformError> {
+        let Some(guard) = self
+            .task_emergency_stop_reconciliation_active
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| TaskEmergencyStopReconciliationGuard {
+                active: Arc::clone(&self.task_emergency_stop_reconciliation_active),
+            })
+        else {
+            return Ok(None);
+        };
+        let pending = self.pending_task_emergency_stop()?;
+        Ok(pending.map(|pending| TaskEmergencyStopReconciliationClaim {
+            _guard: guard,
+            pending,
+        }))
     }
 
     pub fn shutdown_for_app_exit(&self) {
@@ -277,6 +428,9 @@ impl ExecutorPlatformService {
         &self,
         connection: ExecutorConnectionMaterial,
     ) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
+        if self.pending_task_emergency_stop()?.is_some() {
+            return Err(configuration_invalid());
+        }
         self.manager.stop().map_err(map_manager_error)?;
         self.release_platform_profile()?;
         let (websocket_url, session_token, installation_id) = connection.into_parts();
@@ -290,6 +444,46 @@ impl ExecutorPlatformService {
         )
         .map_err(map_manager_error)?;
         self.manager.start(launch).map_err(map_manager_error)
+    }
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    pub(crate) fn restart_for_task_emergency_stop(
+        &self,
+        connection: ExecutorConnectionMaterial,
+        expected: &PendingTaskEmergencyStop,
+    ) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
+        if self.pending_task_emergency_stop()?.as_ref() != Some(expected) {
+            return Err(configuration_invalid());
+        }
+        self.manager.emergency_stop().map_err(map_manager_error)?;
+        self.release_platform_profile()?;
+        let (websocket_url, session_token, installation_id) = connection.into_parts();
+        let launch = ExecutorLaunchConfiguration::new_emergency_report_with_secret(
+            websocket_url,
+            session_token,
+            installation_id,
+            self.identity.executor_id().to_owned(),
+            self.paths.state_directory().to_path_buf(),
+            HEARTBEAT_INTERVAL_SECONDS,
+        )
+        .map_err(map_manager_error)?;
+        let status = self.manager.start(launch).map_err(map_manager_error)?;
+        let cleared = (|| {
+            let mut state = self
+                .task_emergency_stop
+                .lock()
+                .map_err(|_| storage_unavailable())?;
+            if state.pending.as_ref() != Some(expected) {
+                return Err(configuration_invalid());
+            }
+            state.store.delete().map_err(|_| storage_unavailable())?;
+            state.pending = None;
+            Ok(status)
+        })();
+        if cleared.is_err() {
+            let _ = self.manager.emergency_stop();
+        }
+        cleared
     }
 
     fn release_platform_profile(&self) -> Result<(), ExecutorPlatformError> {
@@ -438,4 +632,63 @@ const fn configuration_invalid() -> ExecutorPlatformError {
 
 const fn storage_unavailable() -> ExecutorPlatformError {
     ExecutorPlatformError::new(ExecutorPlatformErrorCode::StorageUnavailable)
+}
+
+#[cfg(all(test, any(not(feature = "desktop-e2e"), feature = "control-plane-e2e")))]
+mod tests {
+    use super::ExecutorPlatformService;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TemporaryAppData(PathBuf);
+
+    impl TemporaryAppData {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!(
+                "automation-tool-h8-03-reconciliation-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system time")
+                    .as_nanos(),
+            )))
+        }
+    }
+
+    impl Drop for TemporaryAppData {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn emergency_stop_reconciliation_claim_owns_the_pending_snapshot_and_gate() {
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        service
+            .engage_task_emergency_stop(
+                "123e4567-e89b-42d3-a456-426614174005",
+                "task:emergency-stop:h8-03-race",
+            )
+            .expect("engage emergency stop");
+
+        let claim = service
+            .begin_task_emergency_stop_reconciliation()
+            .expect("read pending stop")
+            .expect("claim pending stop");
+        assert_eq!(
+            claim.pending().task_id(),
+            "123e4567-e89b-42d3-a456-426614174005"
+        );
+        assert!(service
+            .begin_task_emergency_stop_reconciliation()
+            .expect("busy reconciliation gate")
+            .is_none());
+
+        drop(claim);
+        assert!(service
+            .begin_task_emergency_stop_reconciliation()
+            .expect("released reconciliation gate")
+            .is_some());
+    }
 }

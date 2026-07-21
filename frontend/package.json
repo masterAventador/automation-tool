@@ -56,6 +56,7 @@
     "test:task-query-tauri": "pnpm build:tauri:task-query-test && wdio run wdio.task-query.conf.ts",
     "test:task-event-stream-tauri": "pnpm build:tauri:task-event-stream-test && wdio run wdio.task-event-stream.conf.ts",
     "test:task-control-tauri": "pnpm build:tauri:task-control-test && wdio run wdio.task-control.conf.ts",
+    "test:h8-03-tauri": "../backend/.venv/bin/python ../scripts/run_h8_03_acceptance.py",
     "test:task-discovery-tauri": "pnpm build:tauri:task-discovery-test && wdio run wdio.task-discovery.conf.ts",
     "test:task-target-preview-tauri": "pnpm build:tauri:task-target-preview-test && wdio run wdio.task-target-preview.conf.ts",
     "test:task-target-preview-ui-tauri": "pnpm build:tauri:task-target-preview-ui-test && wdio run wdio.task-target-preview-ui.conf.ts",

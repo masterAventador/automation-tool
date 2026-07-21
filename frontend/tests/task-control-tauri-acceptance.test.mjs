@@ -70,7 +70,7 @@ test("H8-01 waits for the durable side-effect checkpoint through the real Execut
   assert.match(orchestrator, /pause request allowed a new side-effect dispatch/);
   assert.match(
     processor,
-    /not in \{"task\.offer", "task\.pause", "task\.resume", "task\.cancel"\}/,
+    /"task\.emergency_stop"/,
   );
   assert.match(processor, /def poll_controls/);
   assert.match(ledger, /c\.message_type = 'task\.pause'/);
@@ -106,7 +106,73 @@ test("H8-02 converges cooperative cancellation from the original hidden App path
   assert.match(orchestrator, /start_real_executor\(/);
   assert.match(processor, /"task\.cancel"/);
   assert.match(ledger, /task\.outcome_uncertain/);
-  assert.match(ledger, /c\.message_type IN \('task\.pause', 'task\.cancel'\)/);
+  assert.match(ledger, /c\.message_type IN \(/);
+  assert.match(ledger, /'task\.emergency_stop'/);
   assert.match(spec, /AUTOMATION_TOOL_H802_CANCEL_OUTCOME_UNCERTAIN/);
   assert.match(spec, /core\.invoke\("terminate_tasks_for_acceptance"\)/);
+});
+
+test("H8-03 persists and hard-stops before the network, then reconciles from App polling", async () => {
+  const [packageJson, rustEntry, platform, bootstrap, processor, runtime, cli, spec, orchestrator] = await Promise.all([
+    readProjectFile("package.json"),
+    readProjectFile("src-tauri/src/lib.rs"),
+    readProjectFile("src-tauri/src/executor_platform.rs"),
+    readProjectFile("src-tauri/src/executor_bootstrap.rs"),
+    readFile(
+      new URL(
+        "../../backend/src/automation_tool/executor/command_processor.py",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../../backend/src/automation_tool/executor/runtime.py", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../../backend/src/automation_tool/executor/cli.py", import.meta.url),
+      "utf8",
+    ),
+    readProjectFile("e2e-tauri/task-run.spec.ts"),
+    readFile(new URL("../../scripts/run_h8_03_acceptance.py", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(rustEntry, /async fn reconcile_pending_task_emergency_stop/);
+  assert.match(rustEntry, /begin_task_emergency_stop_reconciliation/);
+  assert.match(
+    rustEntry,
+    /engage_task_emergency_stop[\s\S]*\.emergency_stop_task\([\s\S]*issue_executor_connection[\s\S]*restart_for_task_emergency_stop/,
+  );
+  assert.match(
+    rustEntry,
+    /async fn get_workbench_status[\s\S]*reconcile_pending_task_emergency_stop/,
+  );
+  assert.match(
+    rustEntry,
+    /async fn get_task_snapshot[\s\S]*reconcile_pending_task_emergency_stop/,
+  );
+  assert.match(
+    rustEntry,
+    /async fn list_task_snapshots[\s\S]*reconcile_pending_task_emergency_stop/,
+  );
+  assert.match(platform, /TASK_EMERGENCY_STOP_FILE/);
+  assert.match(platform, /pub fn engage_task_emergency_stop/);
+  assert.match(platform, /AtomicBool/);
+  assert.match(platform, /begin_task_emergency_stop_reconciliation/);
+  assert.match(platform, /pub\(crate\) fn restart_for_task_emergency_stop/);
+  assert.match(bootstrap, /local_emergency_stop/);
+  assert.match(processor, /receive_task_emergency_stop/);
+  assert.match(runtime, /emergency_stop_received/);
+  assert.match(cli, /engage_action_emergency_stop/);
+  assert.match(packageJson, /test:h8-03-tauri/);
+  assert.match(spec, /AUTOMATION_TOOL_H803_OFFLINE_EMERGENCY_STOP/);
+  assert.match(spec, /button=紧急停止/u);
+  assert.match(spec, /button=确认紧停/u);
+  assert.match(orchestrator, /build_signed_executor/);
+  assert.match(orchestrator, /install_executor_package/);
+  assert.match(orchestrator, /task-emergency-stop-v1/);
+  assert.match(orchestrator, /stop_control_plane/);
+  assert.match(orchestrator, /start_control_plane/);
+  assert.match(orchestrator, /executor_action_guard/);
+  assert.match(orchestrator, /outcome_uncertain/);
 });

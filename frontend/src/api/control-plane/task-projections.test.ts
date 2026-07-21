@@ -40,6 +40,14 @@ describe("Task projection query boundary", () => {
     expect(getTask.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("keeps polling the authoritative snapshot so an offline emergency stop reconciles", () => {
+    const source = {} as TaskProjectionSource;
+    const options = taskSnapshotQueryOptions(source, TASK_ID);
+
+    expect(options.refetchInterval).toBe(1_000);
+    expect(options.refetchIntervalInBackground).toBe(true);
+  });
+
   it("accepts only an exact public snapshot with a safe integer watermark", () => {
     expect(parseTaskSnapshot(SNAPSHOT)).toEqual(SNAPSHOT);
     expect(() =>

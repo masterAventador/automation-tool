@@ -78,7 +78,12 @@ def run_server(
     return server, thread, int(server.socket.getsockname()[1])
 
 
-def bootstrap(port: int, state_directory: Path) -> object:
+def bootstrap(
+    port: int,
+    state_directory: Path,
+    *,
+    local_emergency_stop: bool = False,
+) -> object:
     source = json.dumps(
         {
             "bootstrap_version": "1",
@@ -89,6 +94,7 @@ def bootstrap(port: int, state_directory: Path) -> object:
             "executor_id": EXECUTOR_ID,
             "heartbeat_interval_seconds": 1,
             "state_directory": str(state_directory),
+            "local_emergency_stop": local_emergency_stop,
         },
         separators=(",", ":"),
     )
@@ -103,10 +109,15 @@ def process_for(
     clock: object = FixedClock(),
     id_source: object = None,
     local_outbox: queue.Queue[object] | None = None,
+    local_emergency_stop: bool = False,
 ) -> tuple[LocalExecutorProcess, StringIO]:
     target = output or StringIO()
     values: dict[str, object] = {
-        "bootstrap": bootstrap(port, state_directory),
+        "bootstrap": bootstrap(
+            port,
+            state_directory,
+            local_emergency_stop=local_emergency_stop,
+        ),
         "metadata": RuntimeMetadata(
             executor_version="0.1.0",
             platform="macos",
@@ -523,6 +534,151 @@ def test_process_consumes_cancel_and_confirms_the_safe_terminal_checkpoint(
         assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
             "executor.stopped"
         ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+@pytest.mark.parametrize(
+    ("local_emergency_stop", "expected_lifecycle"),
+    (
+        (False, ["executor.stopped"]),
+        (True, ["executor.healthy", "executor.stopped"]),
+    ),
+)
+def test_process_reports_emergency_stop_uncertain_and_exits_without_network_stop_signal(
+    tmp_path: Path,
+    local_emergency_stop: bool,
+    expected_lifecycle: list[str],
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    state_directory = tmp_path / "emergency-stop-state"
+    opened = ExecutorLedger(
+        state_directory=state_directory,
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+    offered = offer()
+    opened.receive_command(offered)
+    opened.compare_and_set_checkpoint(
+        attempt_id=str(offered.execution_attempt_id),
+        expected_revision=1,
+        state=AttemptCheckpointState.RUNNING,
+        last_event_sequence=2,
+    )
+    emergency_stop = control(
+        "task.emergency_stop",
+        sequence=2,
+        message_id="323e4567-e89b-42d3-a456-426614174023",
+        correlation_id="323e4567-e89b-42d3-a456-426614174024",
+    )
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.send(emergency_stop.model_dump_json())
+            terminal = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
+            observed.put(terminal)
+        except Exception as error:
+            observed.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(
+            port,
+            state_directory,
+            local_emergency_stop=local_emergency_stop,
+        )
+        process.run(threading.Event())
+        messages = observed.get(timeout=2)
+        if isinstance(messages, Exception):
+            raise messages
+        assert [
+            message.message_type for message in cast(tuple[ExecutorEnvelope, ...], messages)
+        ] == ["task.control_ack", "task.outcome_uncertain"]
+        checkpoint = opened.get_checkpoint(str(offered.execution_attempt_id))
+        assert checkpoint is not None
+        assert checkpoint.state is AttemptCheckpointState.OUTCOME_UNCERTAIN
+        assert opened.get_action_emergency_stop().engaged is True
+        assert [
+            json.loads(line)["event"] for line in output.getvalue().splitlines()
+        ] == expected_lifecycle
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+@pytest.mark.parametrize(
+    ("local_emergency_stop", "expected_lifecycle"),
+    (
+        (False, ["executor.stopped"]),
+        (True, ["executor.healthy", "executor.stopped"]),
+    ),
+)
+def test_emergency_report_process_is_healthy_before_fast_recovery_exit(
+    tmp_path: Path,
+    local_emergency_stop: bool,
+    expected_lifecycle: list[str],
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    state_directory = tmp_path / "emergency-report-state"
+    opened = ExecutorLedger(
+        state_directory=state_directory,
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+    offered = offer()
+    opened.receive_command(offered)
+    opened.compare_and_set_checkpoint(
+        attempt_id=str(offered.execution_attempt_id),
+        expected_revision=1,
+        state=AttemptCheckpointState.RUNNING,
+        last_event_sequence=2,
+    )
+    emergency_stop = control(
+        "task.emergency_stop",
+        sequence=2,
+        message_id="323e4567-e89b-42d3-a456-426614174025",
+        correlation_id="323e4567-e89b-42d3-a456-426614174026",
+    )
+    preparer = ExecutorCommandProcessor(
+        ledger=opened,
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+        clock=FixedClock(),
+        id_source=DeterministicIds(),
+    )
+    assert [
+        message.message_type for message in preparer.handle(emergency_stop.model_dump_json())
+    ] == [
+        "task.control_ack",
+        "task.outcome_uncertain",
+    ]
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            hello = parse_executor_message(connection.recv(timeout=2))
+            recovered = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
+            observed.put((hello, recovered))
+        except Exception as error:
+            observed.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(
+            port,
+            state_directory,
+            local_emergency_stop=local_emergency_stop,
+        )
+        process.run(threading.Event())
+        messages = observed.get(timeout=2)
+        if isinstance(messages, Exception):
+            raise messages
+        assert [
+            json.loads(line)["event"] for line in output.getvalue().splitlines()
+        ] == expected_lifecycle
     finally:
         server.shutdown()
         thread.join(timeout=2)

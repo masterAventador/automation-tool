@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from automation_tool.executor.ledger import (
     ExecutorLedgerRejected,
     PendingTaskControl,
 )
+from automation_tool.executor.side_effect_ledger import SideEffectState
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_VERSION,
     ActionAuthorizationClaims,
@@ -391,4 +393,114 @@ def test_cancel_projection_recomputes_uncertainty_and_rejects_wrong_terminal_eve
             checkpoint_revision=3,
             next_event_sequence=3,
             outcome_uncertain=True,
+        )
+
+
+def test_emergency_stop_atomically_latches_and_settles_inflight_action_uncertain(
+    tmp_path: Path,
+) -> None:
+    processor = running_processor(tmp_path / "emergency-stop")
+    dispatched_id, _dispatched_effect = prepare_action(
+        processor.ledger,
+        index=70,
+        dispatch=True,
+        offset_seconds=-4,
+    )
+    waiting_id, waiting_effect = prepare_action(
+        processor.ledger,
+        index=80,
+        dispatch=False,
+        offset_seconds=-1,
+    )
+    emergency_stop = command(
+        "task.emergency_stop",
+        sequence=2,
+        message_id=resource_id(71),
+    )
+
+    first = processor.handle(source(emergency_stop))
+    replay = processor.handle(source(emergency_stop))
+
+    assert [message.message_type for message in first] == [
+        "task.control_ack",
+        "task.outcome_uncertain",
+    ]
+    assert replay == first
+    assert processor.ledger.get_action_emergency_stop().engaged is True
+    dispatched = processor.ledger.get_side_effect(dispatched_id)
+    assert dispatched is not None
+    assert dispatched.state is SideEffectState.UNCERTAIN
+    checkpoint = processor.ledger.get_checkpoint(str(ATTEMPT_ID))
+    assert checkpoint is not None
+    assert checkpoint.state is AttemptCheckpointState.OUTCOME_UNCERTAIN
+    assert checkpoint.last_command_sequence == 2
+    assert checkpoint.last_event_sequence == 3
+    with pytest.raises(ExecutorLedgerRejected):
+        processor.ledger.begin_side_effect_dispatch(
+            action_id=waiting_id,
+            effect_fingerprint=waiting_effect,
+            dispatched_at=NOW + timedelta(seconds=1),
+        )
+
+
+def test_emergency_stop_rejects_wrong_entrypoints_future_dispatch_and_storage_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processor = running_processor(tmp_path / "emergency-failure-matrix")
+    emergency_stop = command(
+        "task.emergency_stop",
+        sequence=2,
+        message_id=resource_id(91),
+    )
+    with pytest.raises(ExecutorLedgerRejected):
+        processor.ledger.receive_task_emergency_stop(
+            command("task.cancel", sequence=2, message_id=resource_id(92)),
+            changed_at=NOW,
+        )
+    with pytest.raises(ExecutorLedgerRejected):
+        processor.ledger.receive_command(emergency_stop)
+
+    dispatched_id, _ = prepare_action(
+        processor.ledger,
+        index=93,
+        dispatch=True,
+    )
+    with pytest.raises(ExecutorCommandRejected):
+        processor.handle(source(emergency_stop))
+    dispatched = processor.ledger.get_side_effect(dispatched_id)
+    assert dispatched is not None
+    assert dispatched.state is SideEffectState.DISPATCHED
+    assert processor.ledger.get_action_emergency_stop().engaged is False
+    assert processor.ledger.has_received_task_emergency_stop() is False
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            processor.ledger,
+            "_connect",
+            lambda: (_ for _ in ()).throw(OSError()),
+        )
+        with pytest.raises(ExecutorLedgerRejected):
+            processor.ledger.has_received_task_emergency_stop()
+
+
+def test_emergency_latch_rejects_an_impossible_lost_locked_update() -> None:
+    class Result:
+        def __init__(self, row: tuple[object, ...] | None, rowcount: int) -> None:
+            self._row = row
+            self.rowcount = rowcount
+
+        def fetchone(self) -> tuple[object, ...] | None:
+            return self._row
+
+    class LostUpdateConnection:
+        def execute(self, statement: str, _parameters: object = None) -> Result:
+            if "SELECT engaged" in statement:
+                return Result((0, 0, None), -1)
+            return Result(None, 0)
+
+    with pytest.raises(ValueError):
+        ExecutorLedger._engage_action_latch_in_connection(
+            cast(sqlite3.Connection, LostUpdateConnection()),
+            changed_at=NOW,
         )

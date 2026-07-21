@@ -368,7 +368,7 @@ export function TaskRunDetails({
     },
   });
 
-  if (taskQuery.isError) {
+  if (taskQuery.isError && taskQuery.data === undefined) {
     return (
       <Card className="task-run-state-card">
         <Alert

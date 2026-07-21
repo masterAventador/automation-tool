@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::executor_bootstrap::LocalPlatformCommand;
 use automation_tool_desktop_lib::executor_manager::{
@@ -592,6 +592,33 @@ time.sleep(30)"#,
     let error = manager.stop().expect_err("hung stop must time out");
 
     assert_eq!(error.code(), ExecutorManagerErrorCode::TimedOut);
+    marker.wait_for_exit(descendant_id);
+}
+
+#[test]
+fn emergency_stop_immediately_terminates_the_complete_executor_process_tree() {
+    let marker = DescendantMarker::new();
+    let package = TemporaryPackage::new(&process_tree_fixture(
+        &marker,
+        r#"signal.signal(signal.SIGTERM, signal.SIG_IGN)
+emit("executor.healthy")
+time.sleep(30)"#,
+    ));
+    let manager = manager_for_root_with_timeouts(
+        package.root.clone(),
+        Duration::from_secs(10),
+        Duration::from_secs(10),
+    );
+
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start emergency-stop process tree");
+    let descendant_id = marker.wait_for_pid();
+    let started_at = Instant::now();
+    let stopped = manager.emergency_stop().expect("hard emergency stop");
+
+    assert_eq!(stopped.state(), ExecutorManagerState::Stopped);
+    assert!(started_at.elapsed() < Duration::from_secs(2));
     marker.wait_for_exit(descendant_id);
 }
 

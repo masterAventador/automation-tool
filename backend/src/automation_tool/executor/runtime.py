@@ -304,6 +304,7 @@ class LocalExecutorProcess:
         if not isinstance(stop, threading.Event):
             raise ExecutorProcessRejected
         failed = False
+        healthy = False
         try:
             session_token = self._bootstrap.session_token.get_secret_value()
             websocket = connect_executor_websocket(
@@ -321,8 +322,12 @@ class LocalExecutorProcess:
                 )
                 self._send_outbox(websocket, self._command_processor.recover_outbox())
                 self._send_outbox(websocket, self._command_processor.poll_controls())
+                if self._command_processor.emergency_stop_received():
+                    if self._bootstrap.local_emergency_stop:
+                        self._reporter.healthy()
+                    self._reporter.stopped()
+                    return
                 sequence = 1
-                healthy = False
                 heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
                 heartbeat_deadline = time.monotonic() + heartbeat_interval
                 while not stop.is_set():
@@ -358,10 +363,18 @@ class LocalExecutorProcess:
                     if stop.is_set():
                         break
                     self._send_outbox(websocket, self._command_processor.handle(source))
+                    if self._command_processor.emergency_stop_received():
+                        break
         except Exception:
             failed = True
         if failed:
             raise ExecutorProcessRejected from None
+        if (
+            self._bootstrap.local_emergency_stop
+            and self._command_processor.emergency_stop_received()
+            and not healthy
+        ):
+            self._reporter.healthy()
         self._reporter.stopped()
 
 

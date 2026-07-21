@@ -278,12 +278,16 @@ export const taskProjectionKeys = {
   detail: (taskId: string) => [...taskProjectionKeys.details(), taskId] as const,
 };
 
+const TASK_SNAPSHOT_REFETCH_INTERVAL_MS = 1_000;
+
 export function taskSnapshotQueryOptions(source: TaskProjectionSource, taskId: string) {
   return queryOptions({
     queryKey: taskProjectionKeys.detail(taskId),
     queryFn: ({ signal }) => source.getTask(taskId, { signal }),
     retry: false,
     staleTime: 0,
+    refetchInterval: TASK_SNAPSHOT_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: true,
   });
 }
 

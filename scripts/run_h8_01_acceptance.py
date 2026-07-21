@@ -160,7 +160,7 @@ def seed_local_checkpoint(
     original: TaskCommandRecord,
     executor_id: str,
 ) -> tuple[ExecutorLedger, tuple[str, bytes], tuple[str, bytes]]:
-    state_directory.mkdir(mode=0o700)
+    state_directory.mkdir(mode=0o700, exist_ok=True)
     ledger = ExecutorLedger(
         state_directory=state_directory,
         installation_id=str(original.installation_id),

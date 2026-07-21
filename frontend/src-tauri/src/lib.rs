@@ -425,6 +425,66 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_task_emergency_stop_platform_error(
+    error: executor_platform::ExecutorPlatformError,
+) -> ControlPlaneCommandError {
+    let mapped = map_executor_platform_error(error);
+    ControlPlaneCommandError {
+        code: mapped.code,
+        retryable: mapped.retryable,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+async fn reconcile_pending_task_emergency_stop(
+    client: &control_plane::ControlPlaneClient,
+    vault: &ProductionDeviceCredentialVault,
+    platform: &executor_platform::ExecutorPlatformService,
+) -> Result<Option<control_plane::TaskControlCommand>, ControlPlaneCommandError> {
+    let Some(reconciliation) = platform
+        .begin_task_emergency_stop_reconciliation()
+        .map_err(map_task_emergency_stop_platform_error)?
+    else {
+        return Ok(None);
+    };
+    let pending = reconciliation.pending();
+
+    let service = platform.clone();
+    let task_id = pending.task_id().to_owned();
+    let idempotency_key = pending.idempotency_key().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.engage_task_emergency_stop(&task_id, &idempotency_key)
+    })
+    .await
+    .map_err(|_| ControlPlaneCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?
+    .map_err(map_task_emergency_stop_platform_error)?;
+
+    let command = client
+        .emergency_stop_task(vault, pending.task_id(), pending.idempotency_key())
+        .await
+        .map_err(map_control_plane_error)?;
+    let connection = client
+        .issue_executor_connection(vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let service = platform.clone();
+    let expected = pending.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.restart_for_task_emergency_stop(connection, &expected)
+    })
+    .await
+    .map_err(|_| ControlPlaneCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?
+    .map_err(map_task_emergency_stop_platform_error)?;
+    Ok(Some(command))
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn map_task_target_preview_error(
     error: control_plane::ControlPlaneError,
 ) -> ControlPlaneCommandError {
@@ -450,7 +510,9 @@ struct TaskProjectionStreamSummary {
 async fn get_workbench_status(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<control_plane::WorkbenchRuntimeStatus, ControlPlaneCommandError> {
+    reconcile_pending_task_emergency_stop(&client, &vault, &platform).await?;
     client
         .get_workbench_status(&vault)
         .await
@@ -922,11 +984,24 @@ async fn emergency_stop_workbench_task(
     idempotency_key: String,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<control_plane::TaskControlCommand, ControlPlaneCommandError> {
-    client
-        .emergency_stop_task(&vault, &task_id, &idempotency_key)
-        .await
-        .map_err(map_control_plane_error)
+    let service = platform.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.engage_task_emergency_stop(&task_id, &idempotency_key)
+    })
+    .await
+    .map_err(|_| ControlPlaneCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?
+    .map_err(map_task_emergency_stop_platform_error)?;
+    reconcile_pending_task_emergency_stop(&client, &vault, &platform)
+        .await?
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -978,11 +1053,24 @@ async fn emergency_stop_task_run(
     idempotency_key: String,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<control_plane::TaskControlCommand, ControlPlaneCommandError> {
-    client
-        .emergency_stop_task(&vault, &task_id, &idempotency_key)
-        .await
-        .map_err(map_control_plane_error)
+    let service = platform.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.engage_task_emergency_stop(&task_id, &idempotency_key)
+    })
+    .await
+    .map_err(|_| ControlPlaneCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?
+    .map_err(map_task_emergency_stop_platform_error)?;
+    reconcile_pending_task_emergency_stop(&client, &vault, &platform)
+        .await?
+        .ok_or(ControlPlaneCommandError {
+            code: "operation_unavailable",
+            retryable: false,
+        })
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -991,7 +1079,9 @@ async fn get_task_snapshot(
     task_id: String,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<control_plane::TaskSnapshot, ControlPlaneCommandError> {
+    reconcile_pending_task_emergency_stop(&client, &vault, &platform).await?;
     client
         .get_task(&vault, &task_id)
         .await
@@ -1018,7 +1108,9 @@ async fn list_task_snapshots(
     limit: u16,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<control_plane::TaskListPage, ControlPlaneCommandError> {
+    reconcile_pending_task_emergency_stop(&client, &vault, &platform).await?;
     client
         .list_tasks(&vault, cursor.as_deref(), limit)
         .await

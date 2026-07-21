@@ -91,6 +91,28 @@ fn bootstrap_writes_a_fresh_256_bit_token_only_to_the_stdin_document() {
 }
 
 #[test]
+fn emergency_report_bootstrap_explicitly_latches_before_executor_network_start() {
+    let emergency = ExecutorBootstrapInput::new_emergency_report(
+        "ws://127.0.0.1:8765/api/v1/executors/connect",
+        CONTROL_PLANE_SESSION,
+        "123e4567-e89b-42d3-a456-426614174003",
+        "123e4567-e89b-42d3-a456-426614174004",
+        Path::new(STATE_DIRECTORY),
+        1,
+    )
+    .expect("emergency report bootstrap");
+    let token = LocalSessionToken::generate().expect("random local session");
+    let mut stdin = Vec::new();
+
+    token
+        .write_bootstrap(&mut stdin, &emergency)
+        .expect("write emergency report bootstrap");
+    let document: Value = serde_json::from_slice(&stdin).expect("emergency bootstrap JSON");
+
+    assert_eq!(document["local_emergency_stop"], true);
+}
+
+#[test]
 fn event_proof_is_verified_in_constant_time_without_reflecting_the_token() {
     let token = LocalSessionToken::generate().expect("random local session");
     let mut stdin = Vec::new();

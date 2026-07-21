@@ -323,7 +323,7 @@ def test_resume_is_durable_and_only_then_reopens_dispatch(
     assert dispatched.replayed is False
 
 
-def test_control_state_and_type_fail_closed_without_poisoning_the_attempt(
+def test_control_state_fails_closed_without_poisoning_the_attempt(
     tmp_path: Path,
 ) -> None:
     processor = active_processor(tmp_path / "invalid")
@@ -333,20 +333,12 @@ def test_control_state_and_type_fail_closed_without_poisoning_the_attempt(
         message_id=resource_id(6),
         correlation_id=resource_id(106),
     )
-    emergency_stop = command(
-        "task.emergency_stop",
-        sequence=2,
-        message_id=resource_id(7),
-        correlation_id=resource_id(107),
-    )
-
-    for rejected in (invalid_resume, emergency_stop):
-        with pytest.raises(ExecutorCommandRejected):
-            processor.handle(source(rejected))
-        checkpoint = processor.ledger.get_checkpoint(str(ATTEMPT_ID))
-        assert checkpoint is not None
-        assert checkpoint.state is AttemptCheckpointState.RUNNING
-        assert checkpoint.last_command_sequence == 1
+    with pytest.raises(ExecutorCommandRejected):
+        processor.handle(source(invalid_resume))
+    checkpoint = processor.ledger.get_checkpoint(str(ATTEMPT_ID))
+    assert checkpoint is not None
+    assert checkpoint.state is AttemptCheckpointState.RUNNING
+    assert checkpoint.last_command_sequence == 1
 
 
 def test_control_ledger_boundaries_replay_and_corruption_fail_closed(

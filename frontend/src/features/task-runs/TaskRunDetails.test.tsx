@@ -9,6 +9,7 @@ import type {
   TaskProjectionSource,
   TaskSnapshot,
 } from "../../api/control-plane/task-projections";
+import { taskProjectionKeys } from "../../api/control-plane/task-projections";
 import type {
   TaskTargetPreview,
   TaskTargetPreviewSource,
@@ -222,6 +223,7 @@ function renderDetails(
   return {
     taskSource,
     controlGateway,
+    queryClient,
     ...render(
       <QueryClientProvider client={queryClient}>
         <TaskRunDetails
@@ -356,6 +358,28 @@ describe("Task run details", () => {
     await user.click(screen.getByRole("button", { name: "紧急停止" }));
     await user.click(screen.getByRole("button", { name: "确认紧停" }));
     expect(controlGateway.emergencyStopTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last authoritative snapshot and emergency stop during a background outage", async () => {
+    const taskSource = source();
+    vi.mocked(taskSource.getTask)
+      .mockResolvedValueOnce(snapshot())
+      .mockRejectedValueOnce(new Error("offline"));
+    const rendered = renderDetails(taskSource);
+
+    expect(await screen.findByRole("button", { name: "紧急停止" })).toBeEnabled();
+    await rendered.queryClient.refetchQueries({
+      queryKey: taskProjectionKeys.detail(TASK_ID),
+    });
+    await waitFor(() =>
+      expect(rendered.queryClient.getQueryState(taskProjectionKeys.detail(TASK_ID))?.status).toBe(
+        "error",
+      ),
+    );
+
+    expect(screen.getByRole("heading", { name: "任务运行详情" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "紧急停止" })).toBeEnabled();
+    expect(screen.queryByText("任务详情暂时不可用")).not.toBeInTheDocument();
   });
 
   it("stops on a timeline gap and restarts only from the explicit safe retry", async () => {

@@ -808,8 +808,7 @@ impl ControlPlaneClient {
     where
         S: SecretStore,
     {
-        require_canonical_uuid_v4(task_id)?;
-        require_idempotency_key(idempotency_key)?;
+        validate_task_control_input(task_id, idempotency_key)?;
         let session = self
             .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
             .await?;
@@ -1019,8 +1018,7 @@ impl ControlPlaneClient {
     where
         S: SecretStore,
     {
-        require_canonical_uuid_v4(task_id)?;
-        require_idempotency_key(idempotency_key)?;
+        validate_task_control_input(task_id, idempotency_key)?;
         let session = self
             .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
             .await?;
@@ -2137,6 +2135,14 @@ fn require_idempotency_key(value: &str) -> Result<(), ControlPlaneError> {
         return Err(protocol_invalid());
     }
     Ok(())
+}
+
+pub(crate) fn validate_task_control_input(
+    task_id: &str,
+    idempotency_key: &str,
+) -> Result<(), ControlPlaneError> {
+    require_canonical_uuid_v4(task_id)?;
+    require_idempotency_key(idempotency_key)
 }
 
 fn require_safe_exact_text(

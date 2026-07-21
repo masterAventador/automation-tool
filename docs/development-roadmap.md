@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-02 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-03 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-03 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-04 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -332,7 +332,7 @@
 | --- | --- | --- | --- | --- |
 | H8-01 | 端到端暂停 | 安全检查点确认后才 PAUSED；运行中原子动作不伪装撤销 | A7-13,T3-13 | ✅ 已完成 |
 | H8-02 | 端到端取消 | CANCELLING→确认终态；最后动作不明进入 uncertain | H8-01,T3-14 | ✅ 已完成 |
-| H8-03 | 离线紧急停止 | 不依赖网络停止新副作用和完整进程树；重连补报 | E4-09,A7-07 | ⬜ 未开始 |
+| H8-03 | 离线紧急停止 | 不依赖网络停止新副作用和完整进程树；重连补报 | E4-09,A7-07 | ✅ 已完成 |
 | H8-04 | App 崩溃恢复 | UI 恢复快照，任务不中断或重复 | T3-20,H8-01 | ⬜ 未开始 |
 | H8-05 | Executor 崩溃恢复 | restart budget、账本对齐、dispatched 未验证处理 | E4-08,A7-13 | ⬜ 未开始 |
 | H8-06 | Control Plane 重启恢复 | Executor 重连、命令/事件幂等、任务收敛 | T3-20,E4-12 | ⬜ 未开始 |
@@ -2390,13 +2390,30 @@
 - 资源与隐私：验收启动前检查固定端口，使用 `automation-tool-h802-*` 专属 Compose project 和随机数据库端口，没有复用或停止正在运行的 `agent-platform` 容器。App 全程隐藏且未启动运营浏览器；runner 结束后 App、Executor、Uvicorn、WebdriverIO、1420/8765、专属容器/网络/Volume 与 AppData 全部回收。本机账本不含设备凭据、Local/Executor Session，不使用系统钥匙串、默认浏览器 Profile 或真实账号
 - 后续：进入 `H8-03`，把正式 `task.emergency_stop` 接到不依赖网络的本机持久 latch、完整 Executor/浏览器进程树停止与重连补报；不得复用普通 cancel 的“等待安全点”语义冒充硬停止
 
+### H8-03 离线紧急停止
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、本机持久紧停、完整进程树硬停、正式 Executor 补报、隐藏 App 断网原调用方验收和文档属于单一 `feat: 完成离线紧急停止闭环` 提交；完成后立即推送 `main`
+- RED 与语义边界：先把唯一台账置为 `🧪 RED`，正式 Processor、SQLite、Rust manager/platform、React 投影与隐藏 App 契约准确失败于 `task.emergency_stop` 未被 Local Executor 接受、App 只会先走网络、离线失败后权威快照被 error 覆盖以及没有持久恢复意图。H8-03 保留普通 cancel 的协作式安全点语义，emergency stop 独立采用“先本机、后网络”的硬停语义；不把二者合并，也不新增 WebView 路径、账号或系统钥匙串依赖
+- 本机先行硬停：Tauri 在任何 HTTP 前把 version/task/idempotency 的最小意图原子写入 AppData `local-executor/task-emergency-stop-v1`，随后调用 manager 的跨平台完整进程树 emergency stop；Unix 直接杀固定 process group，Windows 终止既有 Job Object，不等待 Python 优雅超时。重复同一意图幂等，冲突意图 fail closed；存在 marker 时普通 restart 被拒绝，App 重启可重新读取意图
+- SQLite 原子收敛：报告型 Executor bootstrap 在建立网络前先持久 engage 既有 `executor_action_guard`；`receive_task_emergency_stop()` 在一个 `BEGIN IMMEDIATE` 内写 command、封闭所有新 dispatch、把本 Attempt 已 dispatched 且时间可归属的副作用结算为 uncertain，再由既有控制事务一起生成 `task.control_ack`、`task.outcome_uncertain`、checkpoint revision/sequence。prepared 保持 prepared，凭据、Cookie、DOM、正文、URL 和 Session 均不入账
+- 重连补报与并发线性化：App 的 workbench/detail/list 原生产轮询都会尝试恢复；恢复 claim 先原子持有互斥门再读取 pending，避免旧快照在 marker 清理后把同一紧停复活。服务端幂等 emergency command 成功后只签发一个 `executor.connect` Session，Rust 以 `local_emergency_stop=true` 启动报告型 Executor；无论命令已在 SQLite 恢复还是首次从 WebSocket 到达，生命周期都严格先 `executor.healthy` 再 `executor.stopped`，manager 成功接管后才删除 marker
+- App 权威状态：Task 详情查询以 1 秒后台轮询权威快照；后台 refetch 暂时失败时保留最后一个已成功 running 快照和紧停入口，不把离线错误替换成空页面。用户在真实详情页点击“紧急停止/确认紧停”后，即使 HTTP 不可达也能看到“命令结果暂时无法确认”，服务恢复后同一页面自动收敛为“结果待确认”
+- 原调用方验收：`scripts/run_h8_03_acceptance.py` 构建并签名真实 PyInstaller Executor，安装到独立 T318 AppData，启动 `automation-tool-h803-*` 专属 PostgreSQL/完整 Alembic/真实 Uvicorn 与唯一 `visible=false` Tauri App。HOLD fixture 只建立服务端 running；runner 在 App 固定 SQLite 预置一条 dispatched 与一条 prepared，再由页面启动签名 Executor。服务端完全停止后页面真实点击紧停，验证 marker 先落盘且签名进程树已消失；服务恢复后 App 自动补发，最终 PostgreSQL command/event/Task/Attempt 与 SQLite latch/checkpoint/outbox/副作用精确收敛，`executor.connect` 总数严格为 fixture、正常 Executor、报告 Executor 三次且 marker 被清除
+- 失败发现与修正：纵向验收先发现多轮轮询“先读 pending、后抢锁”会重复恢复，改为 claim 同时拥有快照与门闩；随后发现报告进程快速退出时 daemon 线程争抢 buffered stdin 导致 Python fatal，正式入口改为从一开始使用原始无缓冲二进制描述符；最后发现首次在线收到 emergency 只发 stopped、Rust 健康握手失败，补齐在线/恢复两条路径统一 healthy→stopped。所有问题均先由 RED/严格 Session 计数或真实诊断复现，再修实现；没有放宽断言或降低重试标准
+- 失败与覆盖矩阵：覆盖本机写入失败、marker 损坏/冲突/重启恢复、进程不存在/运行中/进程树子孙、网络先断/恢复、同一命令重放、恢复 claim 竞争、普通 restart 封门、错 task/idempotency、错误控制入口、未来 dispatched 时间导致整笔回滚、理论锁丢失、SQLite 存储失败、在线首次命令/已持久命令两条报告生命周期，以及 React background refetch 保留。异常只返回固定错误码，不回显 marker、凭据或私有路径
+- 门禁：H8-03 最终 Backend 全量 `1893 passed, 5 skipped`，12037 条语句/2674 个分支覆盖率 100%，324 个 Python 文件格式、Ruff、严格 Mypy 299 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend 105 项 Node 契约、197 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、peer 依赖、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿；隐藏真实 App 离线纵向验收 1/1 通过
+- 资源与隐私：所有验收启动前检查固定 8765 和随机 PostgreSQL 端口，使用专属 Compose project、网络、Volume、AppData 和 SQLite；App 全程隐藏，不启动运营浏览器、不访问真实账号。每次退出均精确回收 App process group、Executor、Uvicorn、WebdriverIO、Chromium、端口、容器/网络/Volume 与私有目录；最终再次确认零监听、零 H8-03 容器、零 App/Executor 进程，不触碰默认 Profile、系统钥匙串或其他项目资源
+- 后续：进入 `H8-04`，验证 App 在任务运行中崩溃/被杀后从服务端权威快照和本机状态恢复 UI，且不会重复启动任务、重复发控制命令或重复平台副作用
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-03`（⬜ 未开始）：实现不依赖网络的本机持久紧停 latch、完整 Executor/浏览器进程树停止和重连补报；普通取消已经由 H8-02 完成，不能混用两种语义；
+3. `H8-04`（⬜ 未开始）：验证 App 崩溃/被杀后从服务端权威快照和本机状态恢复 UI，任务不中断、不重复启动、不重复控制或执行平台副作用；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

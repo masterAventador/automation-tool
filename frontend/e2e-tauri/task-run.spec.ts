@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 
 import { browser, expect } from "@wdio/globals";
 
@@ -10,6 +12,27 @@ interface TaskRunPreparation {
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const OFFLINE_EMERGENCY_STOP =
+  process.env.AUTOMATION_TOOL_H803_OFFLINE_EMERGENCY_STOP === "1";
+
+function requiredSignalPath(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value.length === 0) {
+    throw new Error(`Missing H8-03 signal path: ${name}`);
+  }
+  return value;
+}
+
+async function writeSignal(path: string, value: string): Promise<void> {
+  await writeFile(path, `${value}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+}
+
+async function waitForSignal(path: string, label: string): Promise<void> {
+  await browser.waitUntil(() => existsSync(path), {
+    timeout: 120_000,
+    timeoutMsg: `H8-03 runner did not publish ${label}`,
+  });
+}
 
 async function waitForRenderedText(...expected: string[]): Promise<void> {
   const body = await browser.$("body");
@@ -69,6 +92,43 @@ describe("Task run production-path acceptance", () => {
       { timeout: 90_000, timeoutMsg: "workbench did not expose Task run fixtures" },
     );
     if (await retry.isExisting()) await retry.click();
+
+    if (OFFLINE_EMERGENCY_STOP) {
+      await writeSignal(
+        requiredSignalPath("AUTOMATION_TOOL_H803_PREPARED_SIGNAL"),
+        "prepared",
+      );
+      await waitForSignal(
+        requiredSignalPath("AUTOMATION_TOOL_H803_SEEDED_SIGNAL"),
+        "running checkpoint fixture",
+      );
+      const executor = (await browser.tauri.execute(({ core }) =>
+        core.invoke("restart_executor"),
+      )) as { readonly state: string };
+      assert.equal(executor.state, "running");
+      await waitForRenderedText("Executor 在线", "运行中");
+      await openTask(preparation.emergencyTaskId);
+      await writeSignal(
+        requiredSignalPath("AUTOMATION_TOOL_H803_READY_SIGNAL"),
+        "ready",
+      );
+      await waitForSignal(
+        requiredSignalPath("AUTOMATION_TOOL_H803_DOWN_SIGNAL"),
+        "Control Plane shutdown",
+      );
+      await browser.$("button=紧急停止").click();
+      await browser.$("button=确认紧停").click();
+      await waitForRenderedText("命令结果暂时无法确认，请查看权威状态后重试");
+      await writeSignal(
+        requiredSignalPath("AUTOMATION_TOOL_H803_OFFLINE_OBSERVED_SIGNAL"),
+        "offline-observed",
+      );
+      const terminalStatus = await browser.$(
+        "//div[contains(@class, 'ant-descriptions-item')][.//*[normalize-space() = '当前状态']]//*[contains(@class, 'ant-tag') and normalize-space() = '结果待确认']",
+      );
+      await terminalStatus.waitForExist({ timeout: 120_000 });
+      return;
+    }
 
     await waitForRenderedText(
       preparation.controlledTaskId,

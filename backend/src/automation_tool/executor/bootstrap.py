@@ -43,6 +43,7 @@ class ExecutorBootstrap(BaseModel):
     executor_id: ProtocolExecutorId
     heartbeat_interval_seconds: Annotated[int, Field(ge=1, le=60)]
     state_directory: Annotated[str, Field(min_length=1, max_length=4096)]
+    local_emergency_stop: bool = False
 
     @field_validator("websocket_url")
     @classmethod

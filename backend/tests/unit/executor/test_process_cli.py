@@ -27,23 +27,21 @@ def source(
     websocket_url: str,
     state_directory: Path,
     token: str = "private-session",
+    local_emergency_stop: bool = False,
 ) -> bytes:
-    return (
-        json.dumps(
-            {
-                "bootstrap_version": "1",
-                "websocket_url": websocket_url,
-                "local_session_token": LOCAL_SESSION_TOKEN,
-                "session_token": token,
-                "installation_id": INSTALLATION_ID,
-                "executor_id": EXECUTOR_ID,
-                "heartbeat_interval_seconds": 1,
-                "state_directory": str(state_directory),
-            },
-            separators=(",", ":"),
-        )
-        + "\n"
-    ).encode()
+    document = {
+        "bootstrap_version": "1",
+        "websocket_url": websocket_url,
+        "local_session_token": LOCAL_SESSION_TOKEN,
+        "session_token": token,
+        "installation_id": INSTALLATION_ID,
+        "executor_id": EXECUTOR_ID,
+        "heartbeat_interval_seconds": 1,
+        "state_directory": str(state_directory),
+    }
+    if local_emergency_stop:
+        document["local_emergency_stop"] = True
+    return (json.dumps(document, separators=(",", ":")) + "\n").encode()
 
 
 def test_cli_maps_bootstrap_and_process_failures_to_fixed_exit_contracts(tmp_path: Path) -> None:
@@ -98,6 +96,39 @@ def test_cli_returns_success_after_the_runtime_stops(
             source(
                 websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
                 state_directory=tmp_path / "executor-state",
+            )
+        ),
+        StringIO(),
+        StringIO(),
+    )
+
+    assert status == 0
+
+
+def test_cli_persists_bootstrap_emergency_stop_before_network_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state_directory = tmp_path / "emergency-state"
+
+    def require_latch_before_run(_self: LocalExecutorProcess, _stop: object) -> None:
+        from automation_tool.executor.ledger import ExecutorLedger
+
+        ledger = ExecutorLedger(
+            state_directory=state_directory,
+            installation_id=INSTALLATION_ID,
+            executor_id=EXECUTOR_ID,
+        )
+        assert ledger.get_action_emergency_stop().engaged is True
+
+    monkeypatch.setattr(LocalExecutorProcess, "run", require_latch_before_run)
+
+    status = cli.run_executor(
+        BytesIO(
+            source(
+                websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
+                state_directory=state_directory,
+                local_emergency_stop=True,
             )
         ),
         StringIO(),
@@ -234,6 +265,33 @@ def test_main_uses_binary_stdin_and_exits_with_run_status(monkeypatch: pytest.Mo
     assert captured.value.code == 2
     assert stdout.getvalue() == ""
     assert stderr.getvalue() == "Local Executor bootstrap is rejected\n"
+
+
+def test_main_prefers_the_unbuffered_stdin_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = BytesIO(b"private-invalid\n")
+
+    class BufferedInput:
+        raw = raw_input
+
+    class TextInput:
+        buffer = BufferedInput()
+
+    captured: list[object] = []
+
+    def capture(input_stream: object, _stdout: object, _stderr: object) -> int:
+        captured.append(input_stream)
+        return 2
+
+    monkeypatch.setattr(sys, "stdin", TextInput())
+    monkeypatch.setattr(cli, "run_executor", capture)
+
+    with pytest.raises(SystemExit) as exit_status:
+        cli.main()
+
+    assert exit_status.value.code == 2
+    assert captured == [raw_input]
 
 
 def test_executor_package_module_uses_the_formal_cli_entry() -> None:

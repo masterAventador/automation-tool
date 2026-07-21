@@ -7,6 +7,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from queue import Queue
 from types import FrameType
@@ -93,6 +94,8 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 installation_id=str(bootstrap.installation_id),
                 executor_id=str(bootstrap.executor_id),
             )
+            if bootstrap.local_emergency_stop:
+                ledger.engage_action_emergency_stop(changed_at=datetime.now(UTC))
             browser_authority = BrowserLaunchAuthority()
             command_processor = ExecutorCommandProcessor(
                 ledger=ledger,
@@ -156,7 +159,9 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
 
 
 def main() -> None:
-    raise SystemExit(run_executor(sys.stdin.buffer, sys.stdout, sys.stderr))
+    buffered_stdin = sys.stdin.buffer
+    input_stream = getattr(buffered_stdin, "raw", buffered_stdin)
+    raise SystemExit(run_executor(input_stream, sys.stdout, sys.stderr))
 
 
 __all__ = ["main", "run_executor", "stop_signal_event"]

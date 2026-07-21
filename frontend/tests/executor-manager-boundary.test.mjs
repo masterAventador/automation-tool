@@ -186,7 +186,7 @@ test("E4-12 consumes real offers and closed controls through the durable protoco
   assert.match(cli, /ExecutorCommandProcessor\(/);
   assert.match(
     processor,
-    /not in \{"task\.offer", "task\.pause", "task\.resume", "task\.cancel"\}/,
+    /not in \{\s*"task\.offer",\s*"task\.pause",\s*"task\.resume",\s*"task\.cancel",\s*"task\.emergency_stop",\s*\}/,
   );
   assert.match(processor, /commit_outcome\(/);
   assert.match(processor, /AttemptCheckpointState\.TERMINAL/);

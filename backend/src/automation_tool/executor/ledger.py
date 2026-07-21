@@ -135,6 +135,7 @@ class PendingTaskControl:
             "task.pause",
             "task.resume",
             "task.cancel",
+            "task.emergency_stop",
         }
         if (
             not expected_state
@@ -143,7 +144,11 @@ class PendingTaskControl:
             or type(self.next_event_sequence) is not int
             or not 1 <= self.next_event_sequence <= _MAX_CROSS_RUNTIME_SEQUENCE
             or type(self.outcome_uncertain) is not bool
-            or (self.outcome_uncertain and self.command.message_type != "task.cancel")
+            or (
+                self.outcome_uncertain
+                and self.command.message_type not in {"task.cancel", "task.emergency_stop"}
+            )
+            or (self.command.message_type == "task.emergency_stop" and not self.outcome_uncertain)
         ):
             raise ExecutorLedgerRejected
 
@@ -153,6 +158,8 @@ class PendingTaskControl:
             return "task.paused"
         if self.command.message_type == "task.resume":
             return "task.resumed"
+        if self.command.message_type == "task.emergency_stop":
+            return "task.outcome_uncertain"
         return "task.outcome_uncertain" if self.outcome_uncertain else "task.cancelled"
 
 
@@ -684,7 +691,9 @@ class ExecutorLedger:
                         p.state IN ('terminal', 'outcome_uncertain')
                         OR (
                           c.sequence = p.last_command_sequence
-                          AND c.message_type IN ('task.pause', 'task.cancel')
+                          AND c.message_type IN (
+                            'task.pause', 'task.cancel', 'task.emergency_stop'
+                          )
                           AND p.state IN ('running', 'paused')
                         )
                       )
@@ -859,38 +868,12 @@ class ExecutorLedger:
                 raise ValueError
             with closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                current = _action_emergency_stop(
-                    cast(
-                        sqlite3.Row | tuple[object, ...],
-                        connection.execute(
-                            """
-                            SELECT engaged, revision, changed_at
-                            FROM executor_action_guard WHERE singleton_id = 1
-                            """
-                        ).fetchone(),
-                    )
-                )
-                if current.engaged:
-                    connection.commit()
-                    return current
-                if current.changed_at is not None and canonical_changed_at <= current.changed_at:
-                    raise ValueError
-                updated = connection.execute(
-                    """
-                    UPDATE executor_action_guard
-                    SET engaged = 1, revision = revision + 1, changed_at = ?
-                    WHERE singleton_id = 1 AND revision = ? AND engaged = 0
-                    """,
-                    (_encode_utc(canonical_changed_at), current.revision),
-                )
-                if updated.rowcount != 1:  # pragma: no cover - same locked revision selected above
-                    raise ValueError
-                connection.commit()
-                return LocalActionEmergencyStop(
-                    engaged=True,
-                    revision=current.revision + 1,
+                stopped = self._engage_action_latch_in_connection(
+                    connection,
                     changed_at=canonical_changed_at,
                 )
+                connection.commit()
+                return stopped
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -948,8 +931,31 @@ class ExecutorLedger:
             raise ExecutorLedgerRejected from None
 
     def receive_command(self, command: InboundTaskCommand) -> CommandReceipt:
+        return self._receive_command(command, emergency_stop_changed_at=None)
+
+    def receive_task_emergency_stop(
+        self,
+        command: TaskCommandEnvelope,
+        *,
+        changed_at: datetime,
+    ) -> CommandReceipt:
+        if command.message_type != "task.emergency_stop":
+            raise ExecutorLedgerRejected
+        return self._receive_command(command, emergency_stop_changed_at=changed_at)
+
+    def _receive_command(
+        self,
+        command: InboundTaskCommand,
+        *,
+        emergency_stop_changed_at: datetime | None,
+    ) -> CommandReceipt:
         try:
             self._require_command_identity(command)
+            canonical_emergency_stop_at = _canonical_utc(emergency_stop_changed_at)
+            if (command.message_type == "task.emergency_stop") != (
+                canonical_emergency_stop_at is not None
+            ):
+                raise ValueError
             envelope = _canonical_message(command)
             fingerprint = _command_intent_fingerprint(command)
             with closing(self._connect()) as connection:
@@ -966,6 +972,12 @@ class ExecutorLedger:
                 if rows:
                     if len(rows) != 1 or bytes(rows[0][6]) != fingerprint:
                         raise ValueError
+                    if canonical_emergency_stop_at is not None:
+                        self._engage_emergency_stop_in_connection(
+                            connection,
+                            attempt_id=str(command.execution_attempt_id),
+                            changed_at=canonical_emergency_stop_at,
+                        )
                     connection.commit()
                     return _command_receipt(rows[0], replayed=True)
 
@@ -1003,6 +1015,10 @@ class ExecutorLedger:
                         "task.pause": (AttemptCheckpointState.RUNNING,),
                         "task.resume": (AttemptCheckpointState.PAUSED,),
                         "task.cancel": (
+                            AttemptCheckpointState.RUNNING,
+                            AttemptCheckpointState.PAUSED,
+                        ),
+                        "task.emergency_stop": (
                             AttemptCheckpointState.RUNNING,
                             AttemptCheckpointState.PAUSED,
                         ),
@@ -1047,6 +1063,12 @@ class ExecutorLedger:
                         command.message_type,
                     ),
                 )
+                if canonical_emergency_stop_at is not None:
+                    self._engage_emergency_stop_in_connection(
+                        connection,
+                        attempt_id=str(command.execution_attempt_id),
+                        changed_at=canonical_emergency_stop_at,
+                    )
                 connection.commit()
                 return CommandReceipt(
                     message_id=str(command.message_id),
@@ -1059,6 +1081,82 @@ class ExecutorLedger:
                 )
         except Exception:
             raise ExecutorLedgerRejected from None
+
+    @staticmethod
+    def _engage_emergency_stop_in_connection(
+        connection: sqlite3.Connection,
+        *,
+        attempt_id: str,
+        changed_at: datetime,
+    ) -> None:
+        ExecutorLedger._engage_action_latch_in_connection(
+            connection,
+            changed_at=changed_at,
+        )
+        connection.execute(
+            """
+            UPDATE executor_side_effects
+            SET state = 'uncertain', settled_at = ?, revision = revision + 1
+            WHERE state = 'dispatched'
+              AND dispatched_at <= ?
+              AND action_id IN (
+                SELECT action_id FROM executor_action_admissions
+                WHERE execution_attempt_id = ?
+              )
+            """,
+            (_encode_utc(changed_at), _encode_utc(changed_at), attempt_id),
+        )
+        if (
+            connection.execute(
+                """
+                SELECT 1
+                FROM executor_side_effects s
+                JOIN executor_action_admissions a ON a.action_id = s.action_id
+                WHERE a.execution_attempt_id = ? AND s.state = 'dispatched'
+                LIMIT 1
+                """,
+                (attempt_id,),
+            ).fetchone()
+            is not None
+        ):
+            raise ValueError
+
+    @staticmethod
+    def _engage_action_latch_in_connection(
+        connection: sqlite3.Connection,
+        *,
+        changed_at: datetime,
+    ) -> LocalActionEmergencyStop:
+        current = _action_emergency_stop(
+            cast(
+                sqlite3.Row | tuple[object, ...],
+                connection.execute(
+                    """
+                    SELECT engaged, revision, changed_at
+                    FROM executor_action_guard WHERE singleton_id = 1
+                    """
+                ).fetchone(),
+            )
+        )
+        if current.engaged:
+            return current
+        if current.changed_at is not None and changed_at <= current.changed_at:
+            raise ValueError
+        updated = connection.execute(
+            """
+            UPDATE executor_action_guard
+            SET engaged = 1, revision = revision + 1, changed_at = ?
+            WHERE singleton_id = 1 AND revision = ? AND engaged = 0
+            """,
+            (_encode_utc(changed_at), current.revision),
+        )
+        if updated.rowcount != 1:
+            raise ValueError
+        return LocalActionEmergencyStop(
+            engaged=True,
+            revision=current.revision + 1,
+            changed_at=changed_at,
+        )
 
     def get_checkpoint(self, attempt_id: str) -> AttemptCheckpoint | None:
         try:
@@ -1074,6 +1172,22 @@ class ExecutorLedger:
                     (canonical_attempt_id,),
                 ).fetchone()
             return None if row is None else _checkpoint(row)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def has_received_task_emergency_stop(self) -> bool:
+        try:
+            with closing(self._connect()) as connection:
+                return (
+                    connection.execute(
+                        """
+                        SELECT 1 FROM executor_commands
+                        WHERE message_type = 'task.emergency_stop'
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                    is not None
+                )
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -1238,6 +1352,7 @@ class ExecutorLedger:
                     """
                     SELECT c.envelope, p.revision, p.last_event_sequence,
                            CASE
+                             WHEN c.message_type = 'task.emergency_stop' THEN 1
                              WHEN c.message_type = 'task.cancel' AND EXISTS (
                                SELECT 1
                                FROM executor_side_effects uncertain_effect
@@ -1256,6 +1371,10 @@ class ExecutorLedger:
                         OR (c.message_type = 'task.resume' AND p.state = 'paused')
                         OR (
                           c.message_type = 'task.cancel'
+                          AND p.state IN ('running', 'paused')
+                        )
+                        OR (
+                          c.message_type = 'task.emergency_stop'
                           AND p.state IN ('running', 'paused')
                         )
                       )
@@ -1279,6 +1398,9 @@ class ExecutorLedger:
                             OR (c.message_type = 'task.cancel' AND json_extract(
                               projected.envelope, '$.message_type'
                             ) IN ('task.cancelled', 'task.outcome_uncertain'))
+                            OR (c.message_type = 'task.emergency_stop' AND json_extract(
+                              projected.envelope, '$.message_type'
+                            ) = 'task.outcome_uncertain')
                           )
                       )
                       AND (
@@ -1356,11 +1478,16 @@ class ExecutorLedger:
                         AttemptCheckpointState.RUNNING,
                         AttemptCheckpointState.PAUSED,
                     },
+                    "task.emergency_stop": {
+                        AttemptCheckpointState.RUNNING,
+                        AttemptCheckpointState.PAUSED,
+                    },
                 }.get(command_type)
                 allowed_event_types = {
                     "task.pause": {"task.paused"},
                     "task.resume": {"task.resumed"},
                     "task.cancel": {"task.cancelled", "task.outcome_uncertain"},
+                    "task.emergency_stop": {"task.outcome_uncertain"},
                 }.get(command_type)
                 if allowed_states is None or allowed_event_types is None:
                     raise ValueError
@@ -1440,6 +1567,9 @@ class ExecutorLedger:
                 elif command_type == "task.resume":
                     target_state = AttemptCheckpointState.RUNNING
                     expected_event_type = "task.resumed"
+                elif command_type == "task.emergency_stop":
+                    target_state = AttemptCheckpointState.OUTCOME_UNCERTAIN
+                    expected_event_type = "task.outcome_uncertain"
                 else:
                     uncertain = connection.execute(
                         """

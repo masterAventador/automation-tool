@@ -136,6 +136,7 @@ pub struct ExecutorLaunchConfiguration {
     executor_id: String,
     state_directory: PathBuf,
     heartbeat_interval_seconds: u8,
+    local_emergency_stop: bool,
 }
 
 impl ExecutorLaunchConfiguration {
@@ -165,15 +166,68 @@ impl ExecutorLaunchConfiguration {
         state_directory: PathBuf,
         heartbeat_interval_seconds: u8,
     ) -> Result<Self, ExecutorManagerError> {
-        ExecutorBootstrapInput::new(
-            &websocket_url,
-            &control_plane_session,
-            &installation_id,
-            &executor_id,
-            &state_directory,
+        Self::new_with_secret_and_emergency_stop(
+            websocket_url,
+            control_plane_session,
+            installation_id,
+            executor_id,
+            state_directory,
             heartbeat_interval_seconds,
+            false,
         )
-        .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))?;
+    }
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    pub(crate) fn new_emergency_report_with_secret(
+        websocket_url: String,
+        control_plane_session: Zeroizing<String>,
+        installation_id: String,
+        executor_id: String,
+        state_directory: PathBuf,
+        heartbeat_interval_seconds: u8,
+    ) -> Result<Self, ExecutorManagerError> {
+        Self::new_with_secret_and_emergency_stop(
+            websocket_url,
+            control_plane_session,
+            installation_id,
+            executor_id,
+            state_directory,
+            heartbeat_interval_seconds,
+            true,
+        )
+    }
+
+    fn new_with_secret_and_emergency_stop(
+        websocket_url: String,
+        control_plane_session: Zeroizing<String>,
+        installation_id: String,
+        executor_id: String,
+        state_directory: PathBuf,
+        heartbeat_interval_seconds: u8,
+        local_emergency_stop: bool,
+    ) -> Result<Self, ExecutorManagerError> {
+        let bootstrap = if local_emergency_stop {
+            ExecutorBootstrapInput::new_emergency_report(
+                &websocket_url,
+                &control_plane_session,
+                &installation_id,
+                &executor_id,
+                &state_directory,
+                heartbeat_interval_seconds,
+            )
+        } else {
+            ExecutorBootstrapInput::new(
+                &websocket_url,
+                &control_plane_session,
+                &installation_id,
+                &executor_id,
+                &state_directory,
+                heartbeat_interval_seconds,
+            )
+        };
+        bootstrap.map_err(|_| {
+            ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid)
+        })?;
         Ok(Self {
             websocket_url,
             control_plane_session,
@@ -181,19 +235,31 @@ impl ExecutorLaunchConfiguration {
             executor_id,
             state_directory,
             heartbeat_interval_seconds,
+            local_emergency_stop,
         })
     }
 
     fn bootstrap_input(&self) -> Result<ExecutorBootstrapInput<'_>, ExecutorManagerError> {
-        ExecutorBootstrapInput::new(
-            &self.websocket_url,
-            &self.control_plane_session,
-            &self.installation_id,
-            &self.executor_id,
-            &self.state_directory,
-            self.heartbeat_interval_seconds,
-        )
-        .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))
+        let input = if self.local_emergency_stop {
+            ExecutorBootstrapInput::new_emergency_report(
+                &self.websocket_url,
+                &self.control_plane_session,
+                &self.installation_id,
+                &self.executor_id,
+                &self.state_directory,
+                self.heartbeat_interval_seconds,
+            )
+        } else {
+            ExecutorBootstrapInput::new(
+                &self.websocket_url,
+                &self.control_plane_session,
+                &self.installation_id,
+                &self.executor_id,
+                &self.state_directory,
+                self.heartbeat_interval_seconds,
+            )
+        };
+        input.map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))
     }
 }
 
@@ -457,6 +523,28 @@ impl ExecutorManager {
         slot.status = ExecutorManagerStatus::stopped(restart_count);
         if let ManagedExecutorLifecycle::Running(mut managed) = lifecycle {
             stop_executor(&mut managed.process, self.core.stop_timeout)?;
+        }
+        Ok(slot.status.clone())
+    }
+
+    pub fn emergency_stop(&self) -> Result<ExecutorManagerStatus, ExecutorManagerError> {
+        let mut slot = self.lock_slot()?;
+        reconcile_supervision(&self.core, &mut slot)?;
+        let restart_count = slot.status.restart_count();
+        let lifecycle = slot.lifecycle.take();
+        slot.status = ExecutorManagerStatus::stopped(restart_count);
+        if let Some(ManagedExecutorLifecycle::Running(mut managed)) = lifecycle {
+            managed.process.stdin.take();
+            let stopped = managed.process.process_tree.terminate();
+            let _ = managed.process.child.kill();
+            let waited = managed
+                .process
+                .child
+                .wait()
+                .map_err(|_| process_unavailable());
+            join_readers(&mut managed.process);
+            stopped?;
+            waited?;
         }
         Ok(slot.status.clone())
     }
