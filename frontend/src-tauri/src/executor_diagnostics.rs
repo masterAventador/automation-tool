@@ -15,13 +15,17 @@ const SECRET_KEYS: &str = concat!(
     r"control[_-]?plane[_-]?session|session[_-]?token|api[_-]?key|",
     r"private[_-]?key|authorization|credential|password|secret|cookie|",
     r"session[_-]?cookie|token|sid_tt|sessionid(?:_ss)?|web_session|",
-    r"passport_csrf_token|a1",
+    r"passport_csrf_token|a1|page[_-]?(?:content|text)|html|dom|",
+    r"comment[_-]?text|direct[_-]?message|message[_-]?text|",
+    r"request[_-]?body|response[_-]?body",
 );
 const COLON_SECRET_KEYS: &str = concat!(
     r"access[_-]?token|refresh[_-]?token|local[_-]?session[_-]?token|",
     r"control[_-]?plane[_-]?session|session[_-]?token|private[_-]?key|",
     r"credential|password|secret|session[_-]?cookie|token|sid_tt|",
-    r"sessionid(?:_ss)?|web_session|passport_csrf_token|a1",
+    r"sessionid(?:_ss)?|web_session|passport_csrf_token|a1|",
+    r"page[_-]?(?:content|text)|html|dom|comment[_-]?text|",
+    r"direct[_-]?message|message[_-]?text|request[_-]?body|response[_-]?body",
 );
 
 #[derive(Default)]
@@ -92,18 +96,10 @@ pub(crate) fn redact_diagnostic_line(value: &str) -> String {
         .replace_all(&safe, r#""${1}":"[REDACTED]""#)
         .into_owned();
     safe = patterns
-        .url_userinfo
-        .replace_all(&safe, "${1}[REDACTED]@")
-        .into_owned();
-    safe = patterns
-        .url_query
-        .replace_all(&safe, "${1}?[REDACTED]")
-        .into_owned();
-    safe = patterns.file_url.replace_all(&safe, REDACTED).into_owned();
-    safe = patterns
         .inline_data
         .replace_all(&safe, REDACTED)
         .into_owned();
+    safe = patterns.url.replace_all(&safe, REDACTED).into_owned();
     safe = patterns
         .credential_envelope
         .replace_all(&safe, REDACTED)
@@ -162,9 +158,7 @@ struct DiagnosticPatterns {
     bearer: Regex,
     credential_envelope: Regex,
     raw_hex: Regex,
-    url_userinfo: Regex,
-    url_query: Regex,
-    file_url: Regex,
+    url: Regex,
     inline_data: Regex,
     private_posix_path: Regex,
     private_windows_path: Regex,
@@ -188,12 +182,10 @@ fn diagnostic_patterns() -> &'static DiagnosticPatterns {
         bearer: regex(r#"(?i)\bbearer\s+[^\s,;"']+"#),
         credential_envelope: regex(r"(?i)\bat(?:dc|ds|lep|ems)1\.[a-z0-9._~-]+"),
         raw_hex: regex(r"(?i)\b[0-9a-f]{64}\b"),
-        url_userinfo: regex(r"(?i)\b((?:https?|wss?)://)[^/\s:@]+:[^@/\s]+@"),
-        url_query: regex(r"(?i)\b((?:https?|wss?)://[^\s?#]+)\?[^\s#]*"),
-        file_url: regex(r#"(?i)\bfile://[^\s"'<>]+"#),
+        url: regex(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+"#),
         inline_data: regex(r"(?i)\bdata:[a-z0-9.+-]+/[a-z0-9.+-]+[^,\s]*,[^\s]+"),
         private_posix_path: regex(
-            r#"(?i)(?:/private)?/(?:users|home|root|tmp|var/folders)(?:/[^\s"'<>]*)?"#,
+            r#"(?i)(?:/private)?/(?:users|home|root|tmp|var/folders|volumes)(?:/[^\s"'<>]*)?"#,
         ),
         private_windows_path: regex(r#"(?i)\b[a-z]:[\\/][^\s"'<>]+"#),
     })
@@ -229,8 +221,8 @@ mod tests {
             "../../../contracts/fixtures/executor-diagnostics-v1.json"
         ))
         .expect("strict diagnostic fixture");
-        assert_eq!(document.fixture_version, "1");
-        assert!(document.cases.len() >= 14);
+        assert_eq!(document.fixture_version, "2");
+        assert!(document.cases.len() >= 18);
         for case in document.cases {
             assert_eq!(
                 redact_diagnostic_line(&case.input),

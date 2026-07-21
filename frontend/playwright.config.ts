@@ -9,6 +9,7 @@ export default defineConfig({
   outputDir: "test-results/playwright",
   use: {
     baseURL: "http://127.0.0.1:1420",
+    headless: true,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

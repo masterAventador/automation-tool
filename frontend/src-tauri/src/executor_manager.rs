@@ -595,6 +595,11 @@ impl ExecutorManager {
         suspend_process_for_acceptance(&managed.process.child)
     }
 
+    #[cfg(feature = "control-plane-e2e")]
+    pub fn inject_raw_diagnostic_for_acceptance(&self, raw: &[u8]) {
+        self.core.diagnostics.retain_raw_line(raw, false);
+    }
+
     fn lock_slot(&self) -> Result<MutexGuard<'_, ExecutorManagerSlot>, ExecutorManagerError> {
         self.core
             .slot

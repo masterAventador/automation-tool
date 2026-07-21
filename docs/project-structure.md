@@ -35,7 +35,7 @@ automation-tool/
 │       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
 │       ├── executor-package-v1/   # Python 生成、Rust 复验的 inert 签名目录样例
-│       └── executor-diagnostics-v1.json # Python/Rust 共用脱敏输入与安全结果
+│       └── executor-diagnostics-v1.json # Python/Rust 共用 fixture v2 脱敏输入与安全结果
 ├── docs/
 │   ├── dt-ai-helper-competitive-analysis.md
 │   ├── product-plan.md
@@ -250,7 +250,9 @@ B5-05 的 `browser_profiles.rs` 是后续浏览器运行时唯一 Profile 组合
 backend/
 ├── src/
 │   └── automation_tool/
+│       ├── logging_redaction.py  # H8-11 Control Plane/Executor 共用 fail-closed 文本脱敏
 │       ├── control_plane/         # 独立部署的 FastAPI 业务后端
+│       │   ├── logging.py         # H8-11 进程级 LogRecord/Uvicorn 脱敏与限界
 │       │   ├── bootstrap/         # 配置、注册、设备凭据和 Session 依赖装配
 │       │   ├── api/               # REST、设备认证、SSE/WebSocket 和错误映射
 │       │   ├── application/       # 注册、凭据、任务、配置、内容和工作流用例
@@ -450,7 +452,7 @@ E4-08 不新增 supervisor 文件或第二生命周期源，而是在同一 `exe
 
 E4-09 仍不新建进程服务：`RunningExecutor` 直接拥有跨平台 `ProcessTree`。Unix 在 spawn 前建立独立 process group，Windows 在 suspended child 上先配置并挂入 kill-on-close Job Object 再恢复；所有 setup 失败、启动/停止超时、显式停止后的剩余后代、异常退出准备恢复和 Manager Drop 都复用同一树终止原语。Rust 测试让真实签名主进程生成忽略 `SIGTERM` 的孙进程并核对 PID 消失，未使用 Mock 或 shell 进程列表冒充；Windows 原生签名实包已于 2026-07-20 覆盖显式停止、挂起停止、启动超时、Manager Drop 和崩溃重启整树清理。
 
-E4-10 新建的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承担生命周期或业务日志。Manager Core 持有唯一内存队列，各次启动的 reader 共享它；输入以固定容量流式消费，超长/非法编码 fail closed，再按 `contracts/fixtures/executor-diagnostics-v1.json` 规则脱敏并执行行数/单行/总字节上限。Python `executor/diagnostics.py` 回放同一 fixtures，为未来 Executor 自身安全消息提供一致策略，但 Rust 仍对原始 stderr 独立重做脱敏，不能信任进程内结论。真实 signed 进程测试证明公开 Manager `diagnostics()` 原入口，不新增 Tauri Command 或持久日志。
+E4-10/H8-11 的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承担生命周期或业务日志。Manager Core 持有唯一内存队列，各次启动的 reader 共享它；输入以固定容量流式消费，超长/非法编码 fail closed，再按 `contracts/fixtures/executor-diagnostics-v1.json` fixture v2 清除凭据、Header/Cookie、完整 URL、页面/消息内容、错误原文和私有路径，并执行行数/单行/总字节上限。Python `executor/diagnostics.py` 委托根级 `logging_redaction.py` 回放同一 fixtures，但 Rust 仍对原始 stderr 独立重做脱敏，不能信任进程内结论。真实 signed 进程测试证明公开 Manager `diagnostics()` 原入口；隐藏 App 继续从既有 `get_executor_diagnostics` 读取，不新增生产 Tauri Command 或持久日志。
 
 E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3`，从 v1 identity/commands/attempt checkpoints/outbox、v2 平台 Session、v3 发现状态、v4 动作策略/紧停/准入、v5 副作用状态原地迁移到 H8-07 当前 v6 网络闸门。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS、最多 1000 条/16 MiB 的未交付协议 outbox、动作准入及 prepared/dispatched/verified/uncertain 状态均在该模块内事务化；`side_effect_ledger.py` 只承载封闭脱敏值对象。测试覆盖真实并发、重开恢复、逐版迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
 

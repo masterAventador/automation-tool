@@ -183,6 +183,53 @@ fn set_capture_successful_diagnostics(
         .map_err(map_executor_platform_error)
 }
 
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostileDiagnosticFixtureDocument {
+    cases: Vec<HostileDiagnosticFixtureCase>,
+    fixture_version: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostileDiagnosticFixtureCase {
+    expected: String,
+    input: String,
+    name: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inject_hostile_executor_diagnostics_for_acceptance(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<(), ExecutorPlatformCommandError> {
+    let document: HostileDiagnosticFixtureDocument = serde_json::from_str(include_str!(
+        "../../../contracts/fixtures/executor-diagnostics-v1.json"
+    ))
+    .map_err(|_| ExecutorPlatformCommandError {
+        code: "configuration_invalid",
+        retryable: false,
+    })?;
+    if document.fixture_version != "2" || document.cases.len() < 18 {
+        return Err(ExecutorPlatformCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    }
+    for case in document.cases {
+        if case.expected.is_empty() || case.name.is_empty() {
+            return Err(ExecutorPlatformCommandError {
+                code: "configuration_invalid",
+                retryable: false,
+            });
+        }
+        platform.inject_raw_diagnostic_for_acceptance(case.input.as_bytes());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn emergency_stop_executor(
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
@@ -2497,6 +2544,7 @@ pub fn run() {
         set_capture_successful_diagnostics,
         inject_executor_crash_for_acceptance,
         inject_executor_hang_for_acceptance,
+        inject_hostile_executor_diagnostics_for_acceptance,
         exit_app_for_acceptance,
         get_browser_settings,
         select_browser

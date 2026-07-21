@@ -41,12 +41,12 @@
       "name": "unlabelled_local_token"
     },
     {
-      "expected": "request=https://example.com/path?[REDACTED]#fragment",
+      "expected": "request=[REDACTED]",
       "input": "request=https://example.com/path?token=private&next=/home/alice#fragment",
       "name": "url_query"
     },
     {
-      "expected": "origin=https://[REDACTED]@example.com/path",
+      "expected": "origin=[REDACTED]",
       "input": "origin=https://alice:hunter2@example.com/path",
       "name": "url_userinfo"
     },
@@ -69,7 +69,27 @@
       "expected": "unsafe   sequence",
       "input": "unsafe\r\t‮sequence",
       "name": "control_and_bidi"
+    },
+    {
+      "expected": "origin=[REDACTED]",
+      "input": "origin=https://example.com/private/page",
+      "name": "complete_url"
+    },
+    {
+      "expected": "database=[REDACTED]",
+      "input": "database=postgresql+asyncpg://private_user:hunter2@db.example/automation",
+      "name": "database_url"
+    },
+    {
+      "expected": "page_content=[REDACTED] html=[REDACTED] dom=[REDACTED] comment_text=[REDACTED]",
+      "input": "page_content='private author text' html='<div>private</div>' dom='private-node' comment_text='private reply'",
+      "name": "page_and_message_content"
+    },
+    {
+      "expected": "signed_url=[REDACTED]",
+      "input": "signed_url=https://download.example/package?X-Amz-Credential=private&X-Amz-Signature=hidden",
+      "name": "signed_url"
     }
   ],
-  "fixtureVersion": "1"
+  "fixtureVersion": "2"
 }

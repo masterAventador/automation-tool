@@ -8,6 +8,8 @@ interface ExecutorLifecyclePreparation {
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const PRIVATE_DIAGNOSTIC_VALUES =
+  /private-access-token|sid_tt=private|sessionid=hidden|private-token|hunter2|0001020304050607|private-cookie|hidden-cookie|atds1\.private|atlep1\.private|example\.com|\/Users\/alice|C:\\Users\\alice|file:\/\/\/private|data:image|private_user|db\.example|private author text|<div>private<\/div>|private-node|private reply|download\.example|X-Amz/i;
 
 async function waitForText(...expected: string[]): Promise<string> {
   const body = await browser.$("body");
@@ -61,6 +63,18 @@ describe("E4-14 hidden App Executor lifecycle acceptance", () => {
 
     await openDiagnostics();
     await waitForText("本地执行器已停止", "暂无本地执行器诊断记录");
+    await browser.tauri.execute(({ core }) =>
+      core.invoke("inject_hostile_executor_diagnostics_for_acceptance"),
+    );
+    await browser.$("button=刷新状态").click();
+    await waitForText(
+      "request=[REDACTED]",
+      "database=[REDACTED]",
+      "page_content=[REDACTED] html=[REDACTED] dom=[REDACTED] comment_text=[REDACTED]",
+      "signed_url=[REDACTED]",
+    );
+    const redactedBody = await browser.$("body").getText();
+    assert.doesNotMatch(redactedBody, PRIVATE_DIAGNOSTIC_VALUES);
     const successfulDiagnostics = await browser.$(
       "[role='switch'][aria-label='保存成功任务的脱敏诊断']",
     );
@@ -106,7 +120,7 @@ describe("E4-14 hidden App Executor lifecycle acceptance", () => {
     await browser.$("button=启动执行器").click();
     await waitForText("本地执行器运行中", "e4-14-hidden-app");
     const bodyText = await browser.$("body").getText();
-    assert.doesNotMatch(bodyText, /session|token|password|私钥|本机路径/i);
+    assert.doesNotMatch(bodyText, PRIVATE_DIAGNOSTIC_VALUES);
 
     await browser.tauri.execute(({ core }) => core.invoke("exit_app_for_acceptance"));
     await browser.pause(12_000);

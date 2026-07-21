@@ -19,8 +19,8 @@ def test_python_redactor_matches_every_shared_executor_diagnostic_fixture() -> N
     )
     document = json.loads(fixture_path.read_text(encoding="utf-8"))
 
-    assert document["fixtureVersion"] == "1"
-    assert len(document["cases"]) >= 14
+    assert document["fixtureVersion"] == "2"
+    assert len(document["cases"]) >= 18
     for case in document["cases"]:
         assert redact_diagnostic_line(case["input"]) == case["expected"], case["name"]
 

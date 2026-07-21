@@ -143,7 +143,7 @@ fn real_packaged_executor_enforces_bounded_restart_policy() {
         .expect("inject terminal packaged crash");
     wait_for_status(&manager, ExecutorManagerState::Stopped, 2);
 }
-#[cfg(all(feature = "control-plane-e2e", windows))]
+#[cfg(feature = "control-plane-e2e")]
 fn launch_for(
     configuration: &RealAcceptanceConfiguration,
     state_directory: PathBuf,
@@ -299,7 +299,7 @@ fn real_packaged_executor_cleans_its_windows_job_tree() {
     manager.stop().expect("stop restarted Windows Job");
     wait_for_descendant_exit(process_ids[1]);
 }
-#[cfg(all(feature = "control-plane-e2e", windows))]
+#[cfg(feature = "control-plane-e2e")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DiagnosticFixtureDocument {
@@ -307,7 +307,7 @@ struct DiagnosticFixtureDocument {
     fixture_version: String,
 }
 
-#[cfg(all(feature = "control-plane-e2e", windows))]
+#[cfg(feature = "control-plane-e2e")]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DiagnosticFixtureCase {
@@ -317,7 +317,7 @@ struct DiagnosticFixtureCase {
     _name: String,
 }
 
-#[cfg(all(feature = "control-plane-e2e", windows))]
+#[cfg(feature = "control-plane-e2e")]
 fn prepare_diagnostic_case(base: &std::path::Path, name: &str, mode: &str) -> PathBuf {
     let state_directory = base.join(name);
     fs::create_dir_all(&state_directory).expect("E4-10 state directory");
@@ -325,7 +325,7 @@ fn prepare_diagnostic_case(base: &std::path::Path, name: &str, mode: &str) -> Pa
     state_directory
 }
 
-#[cfg(all(feature = "control-plane-e2e", windows))]
+#[cfg(feature = "control-plane-e2e")]
 fn wait_for_changed_diagnostic_tail(
     manager: &ExecutorManager,
     previous: &[String],
@@ -348,10 +348,10 @@ fn wait_for_changed_diagnostic_tail(
     }
 }
 
-#[cfg(all(feature = "control-plane-e2e", windows))]
+#[cfg(feature = "control-plane-e2e")]
 #[test]
 #[ignore = "requires the E4-10 packaged stderr orchestrator"]
-fn real_packaged_executor_bounds_and_redacts_windows_stderr() {
+fn real_packaged_executor_bounds_and_redacts_stderr() {
     let configuration_path = std::env::var_os("AUTOMATION_TOOL_E407_CONFIGURATION")
         .map(PathBuf::from)
         .expect("E4-10 configuration path");
@@ -364,7 +364,7 @@ fn real_packaged_executor_bounds_and_redacts_windows_stderr() {
     let fixture_source = include_str!("../../../contracts/fixtures/executor-diagnostics-v1.json");
     let fixture: DiagnosticFixtureDocument =
         serde_json::from_str(fixture_source).expect("strict diagnostic fixture");
-    assert_eq!(fixture.fixture_version, "1");
+    assert_eq!(fixture.fixture_version, "2");
 
     let shared = prepare_diagnostic_case(&state_root, "shared-fixture", "shared-fixture");
     fs::write(shared.join("diagnostic-inputs.json"), fixture_source)
@@ -373,7 +373,9 @@ fn real_packaged_executor_bounds_and_redacts_windows_stderr() {
     manager
         .start(launch_for(&configuration, shared))
         .expect("start shared diagnostic probe");
-    manager.stop().expect("stop shared diagnostic probe");
+    manager
+        .emergency_stop()
+        .expect("hard-stop shared diagnostic probe");
     assert_eq!(
         manager.diagnostics().expect("shared safe diagnostics"),
         fixture
@@ -398,7 +400,9 @@ fn real_packaged_executor_bounds_and_redacts_windows_stderr() {
         .expect("crash diagnostic probe");
     wait_for_status(&manager, ExecutorManagerState::Running, 1);
     let diagnostics = wait_for_changed_diagnostic_tail(&manager, &first, "E4-10-finished-2");
-    manager.stop().expect("stop restarted diagnostic probe");
+    manager
+        .emergency_stop()
+        .expect("hard-stop restarted diagnostic probe");
 
     assert!(diagnostics.len() <= 200);
     assert!(diagnostics.iter().map(String::len).sum::<usize>() <= 64 * 1024);

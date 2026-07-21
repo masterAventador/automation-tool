@@ -113,6 +113,7 @@ from automation_tool.control_plane.bootstrap.tasks import (
 )
 from automation_tool.control_plane.domain import DatabaseLifecycle
 from automation_tool.control_plane.infrastructure.database import Database
+from automation_tool.control_plane.logging import install_control_plane_log_redaction
 
 
 class _FromEnvironment:
@@ -182,6 +183,7 @@ def create_app(
 ) -> FastAPI:
     """Create an isolated Control Plane application instance."""
 
+    install_control_plane_log_redaction()
     resolved_database = (
         database_from_environment() if isinstance(database, _FromEnvironment) else database
     )

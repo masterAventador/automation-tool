@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify bounded and redacted stderr from a real packaged Windows Executor."""
+"""Verify bounded and redacted stderr from a real packaged macOS/Windows Executor."""
 
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ def build_signed_probe(workspace: Path) -> Path:
         raise RuntimeError("E4-10 PyInstaller diagnostic probe build failed")
     package_root = distribution / "automation-tool-executor"
     architecture = "x86_64" if platform.machine().lower() in {"x86_64", "amd64"} else "aarch64"
+    target_platform = "windows" if platform.system() == "Windows" else "macos"
     manifest = subprocess.run(
         [
             sys.executable,
@@ -64,9 +65,9 @@ def build_signed_probe(workspace: Path) -> Path:
             "--executor-version",
             "0.1.0",
             "--build-id",
-            "e4-10-windows-stderr",
+            f"e4-10-{target_platform}-stderr",
             "--platform",
-            "windows",
+            target_platform,
             "--architecture",
             architecture,
         ],
@@ -109,7 +110,7 @@ def run_rust_diagnostic_test(package_root: Path, workspace: Path) -> None:
             "control-plane-e2e",
             "--test",
             "executor_manager_packaged",
-            "real_packaged_executor_bounds_and_redacts_windows_stderr",
+            "real_packaged_executor_bounds_and_redacts_stderr",
             "--",
             "--ignored",
             "--exact",
@@ -123,17 +124,17 @@ def run_rust_diagnostic_test(package_root: Path, workspace: Path) -> None:
     )
     if completed.returncode != 0 or "1 passed; 0 failed" not in completed.stdout:
         diagnostic = (completed.stdout + "\n" + completed.stderr)[-4000:]
-        raise RuntimeError(f"E4-10 Windows stderr acceptance failed\n{diagnostic}")
+        raise RuntimeError(f"E4-10 packaged stderr acceptance failed\n{diagnostic}")
 
 
 def main() -> None:
-    if platform.system() != "Windows":
-        raise RuntimeError("E4-10 local stderr acceptance requires Windows")
+    if platform.system() not in {"Darwin", "Windows"}:
+        raise RuntimeError("E4-10 local stderr acceptance requires macOS or Windows")
     with tempfile.TemporaryDirectory(prefix="automation-tool-e4-10-") as directory:
         workspace = Path(directory).resolve(strict=True)
         package_root = build_signed_probe(workspace)
         run_rust_diagnostic_test(package_root, workspace)
-    print("E4-10 acceptance passed: Windows stderr is redacted and bounded")
+    print("E4-10 acceptance passed: packaged stderr is redacted and bounded")
 
 
 if __name__ == "__main__":

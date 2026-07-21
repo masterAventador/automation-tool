@@ -34,6 +34,7 @@ def test_local_cli_binds_loopback_and_enables_factory_mode(monkeypatch: Any) -> 
         "factory": True,
         "host": "127.0.0.1",
         "port": 8765,
+        "access_log": False,
         "ws": "websockets-sansio",
         "ws_max_size": MAX_EXECUTOR_MESSAGE_BYTES,
     }

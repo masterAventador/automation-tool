@@ -134,7 +134,7 @@ B5-15 工程纵向验收执行 `backend/.venv/bin/python scripts/run_b5_15_accep
 
 B5-16 默认 Profile 隔离验收执行 `backend/.venv/bin/python scripts/run_b5_16_acceptance.py`。唯一 `visible=false` App 从正式 React/IPC/Rust/Manager/Executor 入口启动无头系统 Chrome，扫码页面让 persistent context 保持活跃；runner 随后从 OS 进程表确认唯一根进程的 `--user-data-dir` 精确指向 AppData current Profile，递归检查完整后代树，再用 `lsof` 核对实际打开文件没有落入用户默认 Chrome/Edge User Data。源码契约同时递归拒绝默认 Profile 常量与 Cookie/storage-state API；runner 不打印 Profile 路径或 UUID，完成后只清理专属 AppData、进程、随机端口和 Compose 资源。
 
-E4-10 的 `executor/diagnostics.py` 与 Rust Manager 共同回放根目录 `contracts/fixtures/executor-diagnostics-v1.json`，为 Python 后续结构化诊断提供同一 fail-closed 脱敏规则。它不改变正式 CLI 的固定 stderr，也不替代 Rust 对真实子进程 stderr 的独立流式限界和再次脱敏。
+E4-10/H8-11 的 `executor/diagnostics.py` 委托根级 `logging_redaction.py`，并与 Rust Manager 共同回放根目录 `contracts/fixtures/executor-diagnostics-v1.json` fixture v2。规则固定清除凭据、Header/Cookie、任意 scheme 完整 URL、页面/DOM/评论/私信内容、错误原文、私有路径和控制字符；Python 的结论不替代 Rust 对真实子进程 stderr 的独立流式限界和再次脱敏。
 
 E4-11 的 `executor/ledger.py` 使用 Python 内置 `sqlite3`，不引入第二 ORM 或服务端数据库依赖。v1 建立 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints` 和 `executor_outbox`；B5-12 迁移到 v2 增加 `executor_platform_sessions`，D6-10 的 v3 扩展只读发现重放，A7-04 的 v4 增加动作策略单例、紧停 latch 和最小准入事实，A7-07 的 v5 增加最小副作用状态机，H8-07 的当前 v6 再增加持久网络闸门。命令按 message/idempotency 双键与 SHA-256 意图指纹重放，Attempt 命令序号连续，checkpoint 用 revision/CAS 和单调事件序号更新，outbox 保存已通过正式协议模型的精确回执/事件并可持久标记 delivered；平台健康只保存平台、封闭状态、单调 revision 和观察时间。目录祖先 symlink/reparse point、宽权限、身份错绑、更新竞争、损坏/未来 schema 和文件替换均 fail closed。CLI 在联网前完成迁移；数据库只在 App 私有目录保存协议任务事实、非敏感平台健康、动作准入和副作用摘要最小事实，不保存 Control Plane Session、完整 ActionAuthorization token、Cookie、浏览器登录数据、密钥、正文、页面原文或任意配置，也不使用系统钥匙串。
 
@@ -195,6 +195,8 @@ D6-13 的迁移 `20260720_0019` 为既有 `task_commands` 增加可空 `target_c
 H8-09 的 `executor/local_artifact.py` 是本机 Artifact 唯一字节边界。可信生产者必须提供固定 `LocalArtifactPolicy`，声明受控小写相对目录、扩展名、媒体类型、单文件和数量上限；`LocalArtifactRef` 只返回 canonical UUIDv4、SHA-256、媒体类型、大小和相对路径。Store 支持独占 capture、按 ID resolve、完整引用校验 read 与稳定顺序 list，不提供任意路径、自由媒体类型、覆盖、上传、导出或删除。每次操作都复验根目录和叶目录 identity、拒绝 symlink/reparse/硬链接/未知目录项/宽权限/文件竞态，写失败清理残片；POSIX 目录/文件固定 `0700/0600`，Windows 复用私有 ACL 适配器。
 
 H8-10 的 `executor/browser_diagnostic_artifact.py` 是截图/Trace 的唯一可信生产者。`ProductionDouyinDiscoveryOperation` 对失败自动触发；成功默认不采集，只有 bootstrap 的 strict bool `capture_successful_diagnostics=true` 才触发。截图调用固定 `full_page=false`、`animations=disabled`、5 秒 timeout，并用样式隐藏文字、表单、图片、媒体、Canvas/SVG/iframe/object/embed、背景与 mask 资源；落盘前只保留 PNG 的 IHDR/PLTE/IDAT/IEND，拒绝坏 CRC、未知关键 chunk、超过 4096 像素边长或 1 MiB 的输入。Trace 不启用 Playwright 原始 trace，只生成最多 4 KiB 的固定结构 JSON，避免 DOM、网络、页面快照、URL、正文、Cookie、凭据与 Profile 路径进入诊断。截图和 Trace 各最多 8 个，均复用 H8-09 `LocalArtifactStore`；H8-12 再负责保留和磁盘清理。
+
+H8-11 的 `control_plane/logging.py` 在应用工厂和正式 CLI 最早期安装幂等进程级 `LogRecord` 边界。`automation_tool.control_plane*` 与 `uvicorn*` 的动态参数、异常、stack 和 pathname 在 handler 前变为固定脱敏值，最终消息最多 4096 UTF-8 bytes；`uvicorn.access` 只留下固定请求事实，CLI 同时设置 `access_log=false`。生产 Control Plane 的 `logger.*` 调用由 AST 契约限制为字面量消息，`extra` 只允许固定 `request_id`。该边界不建立日志文件或上传通道，也不保存页面、URL、凭据或异常原文。
 
 D6-14 的 `executor/page_drift_artifact.py` 现在只保留页面漂移固定 Schema 和窄 Policy/Ref，底层复用 H8-09 Store，不再维护第二套文件安全实现。它只在 D6-04 明确返回 `page_version_unknown/conflicting_anchors` 时写入 `artifacts/evidence/page-drift/<id>.json`，单文件上限 2 KiB、总数上限 20；诊断失败不能解除页面熔断，发现结果仍经正式 Executor wire 收敛到 `handoff_required`，Control Plane 投影为 `awaiting_human`。关键词、URL、HTML、页面正文、Cookie、凭据和 Profile 路径没有输入字段；H8-10 的受限截图/Trace 是独立固定 Policy，H8-12 后续增加保留清理，不扩大页面漂移 Schema。
 

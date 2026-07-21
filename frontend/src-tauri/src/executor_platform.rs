@@ -366,6 +366,11 @@ impl ExecutorPlatformService {
         })
     }
 
+    #[cfg(feature = "control-plane-e2e")]
+    pub fn inject_raw_diagnostic_for_acceptance(&self, raw: &[u8]) {
+        self.manager.inject_raw_diagnostic_for_acceptance(raw);
+    }
+
     pub fn emergency_stop(&self) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
         let result = self.manager.emergency_stop().map_err(map_manager_error);
         let release = self.release_platform_profile();

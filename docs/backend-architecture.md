@@ -202,7 +202,9 @@ E4-14 已用唯一隐藏 Tauri App 经正式 Rust client 连接动态 loopback C
 
 E4-15 不改变 Control Plane 协议或部署边界。桌面 release 在打包前强制绑定非开发 Executor 验证公钥，并对实际二进制/依赖树排除验收 Command、测试 origin、WebDriver 和调试端口；因此服务端不能通过配置把测试能力重新打开。正式公钥是公开信任根，不是签发私钥或设备秘密；验收公钥只进入随即删除的临时制品，真实发布仍必须由打包流水线注入对应发布 signer 的公钥。
 
-E4-10 增加 Python `executor/diagnostics.py`，与 Rust 回放同一 `executor-diagnostics-v1` fixtures，固定清除凭据/Cookie、URL userinfo/query、data/file URL、私有路径和控制/Bidi 字符。该模块为后续 Executor 结构化安全消息提供单一规则，但不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。Python 当前正式 CLI 仍只输出既有固定错误，不新增任意异常或秘密日志。
+E4-10/H8-11 让 Python `executor/diagnostics.py` 委托根级 `logging_redaction.py`，并与 Rust 回放同一 `executor-diagnostics-v1` fixture v2，固定清除凭据、Header/Cookie、任意 scheme 完整 URL、data URL、页面/HTML/DOM/评论/私信正文、私有路径和控制/Bidi 字符。该共享规则不是信任捷径：Tauri/Rust 仍把整个 Python 进程视为不可信，对原始 stderr 在读取阶段重新限界和脱敏。真实 signed PyInstaller Executor 已经公开 Manager `diagnostics()` 原入口证明双重边界一致。
+
+Control Plane 的 H8-11 边界位于 `control_plane/logging.py`。应用工厂和正式 CLI 在任何业务 handler 前安装幂等 `LogRecord` factory，只治理 `automation_tool.control_plane*` 与 `uvicorn*`：消息先走同一共享脱敏器，动态参数、异常和 stack 只保留固定占位，pathname 固定脱敏，最终 UTF-8 最多 4096 bytes；`uvicorn.access` 在 handler 前折叠为固定请求事实，正式 CLI 也关闭 access log。AST 契约把生产 `logger.*` 限制为单一字面量消息，`extra` 只允许固定 `request_id`。当前没有日志文件、数据库表、任意查询、上传或导出通道。
 
 E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在正式 CLI 联网前打开。初始 `PRAGMA user_version=1` 创建 identity、commands、attempt checkpoints、outbox 四表；B5-12 以排他事务迁移到 v2 并增加四列平台 Session 健康表；D6-10 再迁移到 v3，把 `task.discover` 及 discovery batch/completed 纳入同一命令与 outbox 精确重放边界。数据库绑定唯一 Installation/Executor，未来版本、缺表/损坏、身份错绑、symlink/reparse point、宽权限、非普通文件和打开 identity 变化全部 fail closed。命令以 message ID、idempotency key、32 字节意图 SHA-256 和 Attempt 连续 sequence 去重；checkpoint 以 revision/CAS 和单调 event sequence 更新；outbox 只接受正式结果/事件/发现消息并保留精确 wire 重放身份。SQLite 不保存 bootstrap/Control Plane Session、Cookie、浏览器登录数据、密钥、页面原文或任意配置，不调用系统钥匙串，也不替代云端 PostgreSQL 权威状态。
 

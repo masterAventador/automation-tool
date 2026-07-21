@@ -665,7 +665,7 @@ emit("executor.stopped")"#,
 #[test]
 fn real_executor_stderr_is_redacted_by_the_manager_before_diagnostics_are_exposed() {
     let document = diagnostic_fixture_document();
-    assert_eq!(document.fixture_version, "1");
+    assert_eq!(document.fixture_version, "2");
     let inputs = document
         .cases
         .iter()

@@ -111,21 +111,30 @@ test("E4-10 bounds and redacts stderr before diagnostics leave the Rust manager"
   assert.match(diagnostics, /MAX_DIAGNOSTIC_LINE_BYTES:\s*usize\s*=\s*4096/);
   assert.match(diagnostics, /\[TRUNCATED\]/);
   assert.doesNotMatch(manager, /BufReader::new\(stderr\)\.lines\(\)/);
-  assert.equal(JSON.parse(fixture).fixtureVersion, "1");
+  assert.equal(JSON.parse(fixture).fixtureVersion, "2");
 });
 
-test("E4-10 acceptance streams real packaged Windows stderr through every diagnostic bound", async () => {
-  const acceptance = await readFile(
-    new URL("../scripts/run_e4_10_acceptance.py", frontendRoot),
-    "utf8",
-  );
+test("E4-10/H8-11 acceptance streams real packaged stderr through every diagnostic bound", async () => {
+  const [acceptance, entry, manager, platform, spec] = await Promise.all([
+    readFile(new URL("../scripts/run_e4_10_acceptance.py", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/lib.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_platform.rs", frontendRoot), "utf8"),
+    readFile(new URL("e2e-tauri/executor-lifecycle.spec.ts", frontendRoot), "utf8"),
+  ]);
 
   assert.match(acceptance, /executor_diagnostics_probe\.py/);
   assert.match(acceptance, /cwd=workspace/);
   assert.match(acceptance, /"executor_manager_packaged"/);
-  assert.match(acceptance, /"real_packaged_executor_bounds_and_redacts_windows_stderr"/);
+  assert.match(acceptance, /platform\.system\(\) not in \{"Darwin", "Windows"\}/);
+  assert.match(acceptance, /"real_packaged_executor_bounds_and_redacts_stderr"/);
   assert.match(acceptance, /"control-plane-e2e"/);
   assert.match(acceptance, /"1 passed; 0 failed"/);
+  assert.match(manager, /inject_raw_diagnostic_for_acceptance/);
+  assert.match(platform, /inject_raw_diagnostic_for_acceptance/);
+  assert.match(entry, /inject_hostile_executor_diagnostics_for_acceptance/);
+  assert.match(spec, /inject_hostile_executor_diagnostics_for_acceptance/);
+  assert.match(spec, /page_content=\[REDACTED\]/);
 });
 
 test("E4-11 keeps the durable command ledger inside the private Executor state directory", async () => {
