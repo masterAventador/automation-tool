@@ -157,6 +157,7 @@ fn map_executor_connection_error(
         control_plane::ControlPlaneErrorCode::InstallationAccessDenied => {
             "installation_access_denied"
         }
+        control_plane::ControlPlaneErrorCode::InstallationBusy => "operation_unavailable",
         control_plane::ControlPlaneErrorCode::TransportUnavailable
         | control_plane::ControlPlaneErrorCode::OutcomeUncertain => "transport_unavailable",
         control_plane::ControlPlaneErrorCode::IdentityUnavailable
@@ -543,6 +544,7 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
         control_plane::ControlPlaneErrorCode::InstallationAccessDenied => {
             "installation_access_denied"
         }
+        control_plane::ControlPlaneErrorCode::InstallationBusy => "installation_busy",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
         | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
     };
@@ -865,6 +867,7 @@ async fn prepare_target_preview_acceptance(
 struct TaskDiscoveryAcceptancePreparation {
     installation_id: String,
     task_id: String,
+    competing_task_id: String,
     task_status: String,
     task_revision: u32,
     last_event_sequence: u64,
@@ -903,6 +906,14 @@ async fn prepare_task_discovery_for_acceptance(
         )
         .await
         .map_err(map_control_plane_error)?;
+    let competing_task = client
+        .create_task(
+            &vault,
+            "task:discovery:tauri-acceptance-competing",
+            &acceptance_task_definition(),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
 
     let mut platform_ready = false;
     for _ in 0..120 {
@@ -926,9 +937,30 @@ async fn prepare_task_discovery_for_acceptance(
     Ok(TaskDiscoveryAcceptancePreparation {
         installation_id: registration.installation_id().to_owned(),
         task_id: task.task_id().to_owned(),
+        competing_task_id: competing_task.task_id().to_owned(),
         task_status: task.status().to_owned(),
         task_revision: task.revision(),
         last_event_sequence: task.last_event_sequence(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn signal_task_discovery_busy_for_acceptance(
+    app: tauri::AppHandle,
+) -> Result<(), ControlPlaneCommandError> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        })?;
+    std::fs::write(directory.join("h8-16b-busy-observed"), b"observed").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
     })
 }
 
@@ -2614,6 +2646,7 @@ pub fn run() {
         prepare_platform_session_for_acceptance,
         prepare_platform_session_reuse_for_acceptance,
         prepare_task_discovery_for_acceptance,
+        signal_task_discovery_busy_for_acceptance,
         preview_task_for_acceptance,
         prepare_task_target_preview_ui_for_acceptance,
         advance_task_target_confirmation_revision_for_acceptance,

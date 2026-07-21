@@ -31,7 +31,7 @@ from run_t3_06_acceptance import (
     verify_app_private_data,
     wait_for_control_plane,
 )
-from sqlalchemy import insert, select, text
+from sqlalchemy import func, insert, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from automation_tool.control_plane.application.device_sessions import (
@@ -74,6 +74,7 @@ APP_IDENTIFIER = "com.aventador.automationtool.d610acceptance"
 ENVIRONMENT_ID = "d610-acceptance"
 TASK_KEY = "task:discovery:tauri-acceptance"
 DEVICE_CREDENTIAL_FILE = "device-credential-v1"
+BUSY_SIGNAL_FILE = "h8-16b-busy-observed"
 
 
 class DeterministicDiscoveryOperation:
@@ -251,6 +252,22 @@ async def seed_healthy_platform(
         await database.close()
 
 
+def wait_for_busy_signal(
+    signal_path: Path,
+    app_process: subprocess.Popen[bytes],
+) -> None:
+    deadline = time.monotonic() + 120
+    while not signal_path.is_file():
+        if app_process.poll() is not None:
+            raise RuntimeError("H8-16B hidden App exited before observing Installation busy")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("H8-16B hidden App did not observe Installation busy in time")
+        time.sleep(0.05)
+    if signal_path.read_bytes() != b"observed":
+        raise RuntimeError("H8-16B hidden App busy observation signal is invalid")
+    signal_path.unlink()
+
+
 def executor_session(credential: str) -> str:
     exchanged = post_json(
         CONTROL_PLANE_PORT,
@@ -390,6 +407,24 @@ async def verify_database_state(
                     text("select capability from device_sessions order by id")
                 )
             )
+            installation_task_rows = (
+                (
+                    await session.execute(
+                        select(
+                            tasks.c.id,
+                            tasks.c.status,
+                            tasks.c.current_attempt_id,
+                        ).where(tasks.c.installation_id == installation_id.uuid)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            installation_attempt_count = await session.scalar(
+                select(func.count()).select_from(execution_attempts).where(
+                    execution_attempts.c.installation_id == installation_id.uuid
+                )
+            )
     finally:
         await database.close()
 
@@ -402,6 +437,17 @@ async def verify_database_state(
         raise RuntimeError("D6-10 final Task projection is invalid")
     if attempt_row["status"] != "succeeded" or attempt_row["finished_at"] is None:
         raise RuntimeError("D6-10 final discovery Attempt is invalid")
+    competing_tasks = [
+        row for row in installation_task_rows if row["id"] != task_id.uuid
+    ]
+    if (
+        installation_attempt_count != 1
+        or len(installation_task_rows) != 2
+        or len(competing_tasks) != 1
+        or competing_tasks[0]["status"] != "draft"
+        or competing_tasks[0]["current_attempt_id"] is not None
+    ):
+        raise RuntimeError("H8-16B Installation single-active outcome is invalid")
     if len(command_rows) != 1 or (
         command_rows[0]["command_type"],
         command_rows[0]["status"],
@@ -523,6 +569,7 @@ def main() -> None:
             wait_for_app_task(database_url, private_app_data, app_process)
         )
         asyncio.run(seed_healthy_platform(database_url, installation_id))
+        wait_for_busy_signal(private_app_data / BUSY_SIGNAL_FILE, app_process)
         executor_stop, executor_thread, executor_failures = start_executor(
             private_app_data=private_app_data,
             installation_id=installation_id,
@@ -533,7 +580,10 @@ def main() -> None:
         except subprocess.TimeoutExpired as error:
             raise RuntimeError("D6-10 hidden App acceptance did not finish") from error
         if app_exit != 0:
-            raise RuntimeError("D6-10 hidden App acceptance failed")
+            asyncio.run(verify_database_state(database_url, installation_id, task_id))
+            raise RuntimeError(
+                "D6-10 hidden App acceptance failed after the database converged"
+            )
         app_process = None
         verify_app_private_data(private_app_data)
         asyncio.run(verify_database_state(database_url, installation_id, task_id))

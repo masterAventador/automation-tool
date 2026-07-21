@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import subprocess
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -30,7 +31,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0006"
-HEAD_REVISION = "20260721_0024"
+HEAD_REVISION = "20260721_0025"
 NOW = datetime(2026, 7, 18, 16, 0, tzinfo=UTC)
 EXPECTED_ATTEMPT_COLUMNS = {
     "id",
@@ -236,7 +237,7 @@ async def test_execution_migration_upgrades_checks_and_downgrades_cleanly(
         assert action_constraints >= EXPECTED_ACTION_CONSTRAINTS
         assert "fk_tasks_current_attempt_binding" in task_constraints
         assert {
-            "uq_execution_attempts_one_active_task",
+            "uq_execution_attempts_one_active_installation",
             "ix_execution_attempts_installation_updated",
             "ix_task_actions_installation_task",
         } <= indexes
@@ -265,6 +266,56 @@ async def test_execution_migration_upgrades_checks_and_downgrades_cleanly(
         assert attempts_removed is None
         assert actions_removed is None
     finally:
+        await database.close()
+        alembic_runner(postgresql_url, "upgrade", "head")
+
+
+@pytest.mark.asyncio
+async def test_installation_single_active_migration_fails_closed_on_dirty_legacy_data(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "downgrade", "20260721_0024")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, first_task_id = await seed_task(database)
+        second_task_id = TaskId.new()
+        async with database.session() as session:
+            await session.execute(
+                insert(tasks).values(
+                    id=second_task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    creation_idempotency_key=f"task:seed:{second_task_id}",
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+            await session.execute(
+                insert(execution_attempts).values(attempt_values(installation_id, first_task_id))
+            )
+            await session.execute(
+                insert(execution_attempts).values(attempt_values(installation_id, second_task_id))
+            )
+
+        with pytest.raises(subprocess.CalledProcessError):
+            alembic_runner(postgresql_url, "upgrade", "head")
+
+        async with database.session() as session:
+            revision = await session.scalar(text("select version_num from alembic_version"))
+            indexes = set(
+                await session.scalars(
+                    text(
+                        "select indexname from pg_indexes where schemaname = 'public' "
+                        "and tablename = 'execution_attempts'"
+                    )
+                )
+            )
+        assert revision == "20260721_0024"
+        assert "uq_execution_attempts_one_active_task" in indexes
+        assert "uq_execution_attempts_one_active_installation" not in indexes
+    finally:
+        await reset_data(database)
         await database.close()
         alembic_runner(postgresql_url, "upgrade", "head")
 
@@ -308,6 +359,25 @@ async def test_attempt_defaults_current_binding_and_retry_uniqueness_are_databas
         assert created["started_at"] is None
         assert created["finished_at"] is None
         assert created["created_at"].tzinfo is not None
+
+        second_task_id = TaskId.new()
+        async with database.session() as session:
+            await session.execute(
+                insert(tasks).values(
+                    id=second_task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    creation_idempotency_key=f"task:seed:{second_task_id}",
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+        with pytest.raises(IntegrityError):
+            async with database.session() as session:
+                await session.execute(
+                    insert(execution_attempts).values(
+                        attempt_values(installation_id, second_task_id)
+                    )
+                )
 
         with pytest.raises(IntegrityError):
             async with database.session() as session:

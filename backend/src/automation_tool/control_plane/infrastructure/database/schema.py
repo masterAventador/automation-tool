@@ -849,8 +849,8 @@ execution_attempts = Table(
 )
 
 Index(
-    "uq_execution_attempts_one_active_task",
-    execution_attempts.c.task_id,
+    "uq_execution_attempts_one_active_installation",
+    execution_attempts.c.installation_id,
     unique=True,
     postgresql_where=text(f"status in ({_nonterminal_attempt_values})"),
 )

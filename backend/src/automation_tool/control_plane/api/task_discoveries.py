@@ -11,6 +11,7 @@ from automation_tool.control_plane.api.installation_access import (
     require_current_installation_access,
 )
 from automation_tool.control_plane.application.task_discovery import (
+    TaskDiscoveryInstallationBusy,
     TaskDiscoveryRejected,
     TaskDiscoveryStartResult,
     TaskDiscoveryStartService,
@@ -104,6 +105,12 @@ async def start_task_discovery(
             task_id=parsed_task_id,
             idempotency_key=normalized_idempotency_key,
         )
+    except TaskDiscoveryInstallationBusy:
+        raise AppError(
+            status_code=status.HTTP_423_LOCKED,
+            code="installation_task_active",
+            message="Another task is already active on this device",
+        ) from None
     except TaskDiscoveryRejected:
         raise AppError(
             status_code=status.HTTP_409_CONFLICT,

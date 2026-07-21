@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16A 已完成，下一项 H8-16B）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16B 已完成，下一项 H8-16C）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16A 已完成；下一项 H8-16B 修正 Installation 单活任务约束；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16B 已完成；下一项 H8-16C 建立服务端动作执行编排；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -76,7 +76,7 @@
 | Installation 吊销闭环 | `✅ 已完成` 运维 CLI 原子吊销 Installation/凭据/Session；App 业务访问守卫、Executor 在线断连、未来任务 API 依赖门禁与隐藏 Tauri 吊销诊断已验证 |
 | Task 状态机 | `✅ 已完成` 16 个状态、5 个无出边终态、取消确认/完成竞态与结果不确定来源已由 256 个状态对穷举验证 |
 | Task 持久化 | `✅ 已完成` `tasks` migration、Installation scope、active 创建门禁、revision CAS、跨 scope 不可见和并发单赢家已在 PostgreSQL 18.4 验证 |
-| Attempt/Action 持久化 | `✅ 已完成` current Attempt 复合绑定、单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
+| Attempt/Action 持久化 | `✅ 已完成` current Attempt 复合绑定、Installation 级非终态单活 Attempt、重试/Action 序号唯一、阶段/结果一致性已在 PostgreSQL 18.4 验证 |
 | Task Event 持久化 | `✅ 已完成` `1.0` 事件词汇、单调安全序号、来源去重、复合 scope、安全消息和快照水位已在 PostgreSQL 18.4 验证 |
 | Command/Outbox 持久化 | `✅ 已完成` 命令/响应词汇、sequence/idempotency 去重、deadline/lease、投递与 ACK 严格分态已在 PostgreSQL 18.4 验证 |
 | Command 投递闭环 | `✅ 已完成` PostgreSQL 原子抢占、current WebSocket 发送、断线/ACK 超时重投、重连恢复、严格回执与 deadline 过期已在真实网络验证 |
@@ -347,7 +347,7 @@
 | H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ✅ 已完成 |
 | H8-16 | 规格复审 | 从分叉点审查完整实现是否满足产品/MVP/文档 | H8-15 | ✅ 已完成 |
 | H8-16A | 桌面发现入口闭环 | 正式页面从 Task 草稿/登录接管状态启动或重试发现，调用固定 Tauri→API 原路径 | H8-16 | ✅ 已完成 |
-| H8-16B | Installation 单活任务 | 同一 Installation 只能有一个未终结 RPA Attempt，数据库并发单赢家且 UI 明确提示 | H8-16A | ⬜ 未开始 |
+| H8-16B | Installation 单活任务 | 同一 Installation 只能有一个未终结 RPA Attempt，数据库并发单赢家且 UI 明确提示 | H8-16A | ✅ 已完成 |
 | H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ⬜ 未开始 |
 | H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ⬜ 未开始 |
 | H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ⬜ 未开始 |
@@ -2624,13 +2624,27 @@
 - 隔离与清理：启动固定 8765/1420 前确认空闲；纵向验收使用 `automation-tool-d610-<pid>` 专属 Compose project、随机 PostgreSQL 端口、唯一 AppData/Executor state 和隐藏 App，finally 回收 WDIO/App/Executor/Uvicorn、容器/网络/Volume、端口和临时目录。例行 UI 全局无头，验收没有启动外部浏览器；结束后复核本项目 App、WebDriver、浏览器、监听端口和 Compose 资源零残留
 - 后续：进入 `H8-16B`，把单活约束从“同一 Task 一个活动 Attempt”改为“同一 Installation 一个未终结 RPA Attempt”，并由数据库并发单赢家和 App 明确提示证明
 
+### H8-16B Installation 单活任务
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、Installation 级数据库约束、竞争错误语义、桌面提示与隐藏 App 原调用方验收属于单一 `feat: 完成 Installation 单活任务` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`。Backend 聚焦套件在收集阶段因缺少 `TaskDiscoveryInstallationBusy` 得到 2 个 ImportError；Frontend 发现 Gateway/详情套件准确得到 2 项失败、14 项通过，原生忙碌码被误降级为 `transport_unavailable` 且页面没有单活提示；Rust 聚焦测试因缺少 `ControlPlaneErrorCode::InstallationBusy` 编译失败。随后新增隐藏 App 契约先因没有竞争 Task 与同步边界而 1/1 失败
+- 数据库与事务：Alembic `20260721_0025` 把非终态 Attempt 的部分唯一索引从 `task_id` 改为 `installation_id`，Schema 使用同一名称/列/谓词。仓储继续先锁 Installation，同键幂等重放优先返回原 Command，再检查该 Installation 任意非终态 Attempt；两个不同 Task 并发启动只能有一个 `TaskDiscoveryStartResult`，另一方得到固定 `TaskDiscoveryInstallationBusy`，且失败方不产生 Attempt、Command、Event 或 Task revision 变化。旧库若已有同 Installation 多条非终态 Attempt，迁移事务明确失败并保留 `0024` 与旧索引，不静默删除或篡改历史事实
+- 协议与页面：FastAPI 将单活竞争映射为不可重试 `423 installation_task_active` 和固定英文安全文案；Rust 只在固定 StartTaskDiscovery operation、请求关联匹配、JSON 与 `no-store` 都合法时映射 `InstallationBusy`，Tauri IPC 输出 `installation_busy`；严格 TypeScript Gateway 不接收原生私有扩展字段，任务详情只显示“当前设备已有任务正在运行，请先完成或终止该任务后再试”，不展示活动 Task/Attempt ID、数据库约束或原始错误
+- 原调用方验收：D6-10 的 `control-plane-e2e` 准备 Command 只注册 Installation 并创建两个 draft Task。唯一 `visible=false` App 依次从正式工作台进入两个详情并实际点击“开始目标发现”：首个 Task 进入 `discovering_targets`，第二个 Task 显示 Installation busy；测试专用同步 Command 只在页面已观察提示后写入 App 私有信号，runner 此后才启动正式 `LocalExecutorProcess` 收敛首个 Task。最终页面展示两名候选，PostgreSQL 核对首 Task `awaiting_confirmation`、竞争 Task 仍为 draft/无 current Attempt、整个 Installation 只有一条 succeeded Attempt；没有直接 HTTP、Mock Gateway 或准备 Command 代替业务按钮
+- 验收修正：首次扩展验收仍等待瞬时“命令已提交”提示，真实页面已经持久化到 `discovering_targets/revision 2/watermark 1`，因此改为等待权威状态；调试中增加整页刷新后，WDIO 旧 `body` 句柄按预期失效，重新获取页面句柄后最终 1/1 通过。没有修改产品状态机、放宽断言或让测试直接制造 busy
+- 门禁：Backend `1981 passed / 5 skipped`、覆盖率 `100.00%`；Frontend Node `118/118`、Vitest `208/208`、全局无头 Playwright `5/5`；Rust 默认 `154 passed / 4 ignored`、`desktop-e2e` `151 passed / 4 ignored`、`control-plane-e2e` `155 passed / 6 ignored`，三套 Clippy、格式化、OpenAPI/Executor Schema 快照、生产边界与 `actionlint` 全部通过；隐藏真实 App + 正式 Executor + 隔离 PostgreSQL 原始调用方验收 `1/1` 通过，端口、容器、网络、Volume、AppData 与项目测试进程均已清理
+- 隔离与清理：数据库测试使用 `automation-tool-pytest-*` 专属 Compose project 与随机 PostgreSQL 端口；纵向验收使用 `automation-tool-d610-<pid>`、唯一 AppData/Executor SQLite 和启动前检查的 8765，窗口固定隐藏且不启动运营浏览器。失败/中断/成功路径均由 finally 回收 App、WDIO、Executor、Uvicorn、容器、网络、Volume、AppData 与监听；一次主动中断后 macOS 短暂保留端口状态，脚本正确拒绝复用，确认可绑定后才重跑
+- 后续：进入 `H8-16C`，在当前确认快照之上按目标创建服务端授权并投递 typed 动作命令，不让 H8-16B 的互斥错误或测试同步面扩展成通用协议
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-16B`（⬜ 未开始）：修正 Installation 单活任务数据库约束、并发单赢家与 App 明确提示；
+3. `H8-16C`（⬜ 未开始）：确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

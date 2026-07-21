@@ -87,6 +87,8 @@ B5-16 的 `pnpm test:default-profile-isolation-tauri` 使用另一个 `visible=f
 
 四层桌面测试命令分别是：`pnpm test:unit`（Vitest）、`pnpm test:ui`（Playwright UI Harness）、`pnpm test:rust`（Rust）和 `pnpm test:tauri`（真实 Tauri + WebdriverIO）；`pnpm test:layers` 顺序执行全部层级。`test:tauri` 只构建带 `desktop-e2e` Cargo 特性、测试专用前端入口和内联测试 Capability 的 debug App；正常构建仍保持 `withGlobalTauri=false`，正式 Cargo 依赖树不启用 WDIO 插件，生产资产扫描也拒绝 WDIO 标记。所有自动化 Tauri 构建都通过测试专用配置把主窗口设为 `visible=false`，在后台运行且不抢占用户前台；正式 `tauri.conf.json` 不包含这个覆盖，产品窗口正常可见。
 
+H8-16B 保留同一个 `TaskDiscoveryGateway` 和固定 `start_task_discovery` Command；Control Plane 返回的 `423 installation_task_active` 经 Rust `InstallationBusy` 与 TypeScript `installation_busy` 原样分类为不可重试安全错误，任务详情显示“当前设备已有任务正在运行”，不会展示活动 Task ID、底层数据库错误或凭据。D6-10 隐藏 App 验收从两个真实草稿 Task 的页面按钮依次发起请求，第二个请求看到忙碌提示后才启动 Executor 收敛第一个 Task；测试专用同步 Command 不发业务请求且不进入正式构建。
+
 H8-11 复用既有“设置与诊断”页和正式 `get_executor_diagnostics` Command，不增加通用日志查看器。Rust Manager 对真实 Executor stderr 按公共 fixture v2 二次脱敏并执行 200 行/单行 4096 bytes/总计 64 KiB 内存上限；React 只能收到已经限界的安全行，不能提交查询、路径、URL 或任意日志输入。隐藏 `visible=false` E4-14 App 已从同一正式读取入口验证 hostile 凭据、页面内容、URL、Cookie、异常和私有路径均不会到达 WebView；测试准备 Command 仅在 `control-plane-e2e` 特性存在，不进入生产制品。
 
 I2-09 的生产同路径纵向验收必须从仓库根的 Python 3.12/uv 后端环境执行：

@@ -285,7 +285,7 @@ async def test_task_action_evidence_migration_is_exact_and_reversible(
                     )
                 )
             )
-        assert revision == "20260721_0024"
+        assert revision == "20260721_0025"
         assert "evidence_code" in columns
         assert "ck_task_actions_evidence_coherence" in checks
         assert ACTION_RESULT_EVIDENCE_VERSION == "action-result-evidence.v1"

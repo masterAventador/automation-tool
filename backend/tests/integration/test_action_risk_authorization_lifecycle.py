@@ -119,7 +119,7 @@ from automation_tool.protocol import (
 )
 
 PREVIOUS_REVISION = "20260720_0019"
-HEAD_REVISION = "20260721_0024"
+HEAD_REVISION = "20260721_0025"
 NOW = datetime(2026, 7, 20, 1, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "action_id",
@@ -363,6 +363,33 @@ async def seed_runnable_target(
     )
 
 
+async def finish_runnable_task(
+    database: Database,
+    target: RunnableTarget,
+    *,
+    finished_at: datetime,
+) -> None:
+    async with database.session() as session:
+        await session.execute(
+            update(execution_attempts)
+            .where(execution_attempts.c.id == target.attempt_id.uuid)
+            .values(
+                status=ExecutionAttemptStatus.SUCCEEDED.value,
+                updated_at=finished_at,
+                finished_at=finished_at,
+            )
+        )
+        await session.execute(
+            update(tasks)
+            .where(tasks.c.id == target.task_id.uuid)
+            .values(
+                status=TaskStatus.SUCCEEDED.value,
+                current_attempt_id=None,
+                updated_at=finished_at,
+            )
+        )
+
+
 def policy(
     installation_id: InstallationId,
     *,
@@ -510,33 +537,23 @@ async def seed_resume_ack(
         )
 
 
-async def seed_two_authorized_tasks(
+async def seed_two_authorized_actions(
     database: Database,
     repository: SqlAlchemyActionRiskAuthorizationRepository,
     *,
     consecutive_failure_threshold: int,
 ) -> tuple[InstallationId, ActionRiskAuthorization, ActionRiskAuthorization]:
     installation_id = await seed_installation(database)
-    first_target = (
-        await seed_runnable_target(
-            database,
-            installation_id,
-            definition_interval_seconds=1,
-            target_count=1,
-        )
-    )[0]
-    second_target = (
-        await seed_runnable_target(
-            database,
-            installation_id,
-            definition_interval_seconds=1,
-            target_count=1,
-        )
-    )[0]
+    first_target, second_target = await seed_runnable_target(
+        database,
+        installation_id,
+        definition_interval_seconds=1,
+        target_count=2,
+    )
     risk_policy = policy(
         installation_id,
         minimum_interval_seconds=1,
-        task_action_limit=1,
+        task_action_limit=2,
         daily_action_limit=2,
         consecutive_failure_threshold=consecutive_failure_threshold,
     )
@@ -809,12 +826,22 @@ async def test_minimum_interval_task_and_utc_daily_limits_are_all_enforced(
             )
         assert task_limit.value.reason is ActionRiskLimitReason.TASK_ACTION_LIMIT
 
+        await finish_runnable_task(
+            database,
+            first_task[0],
+            finished_at=NOW + timedelta(seconds=20),
+        )
         second_task = (await seed_runnable_target(database, installation_id))[0]
         await authorize(
             repository,
             second_task,
             installation_id,
             authorized_at=NOW + timedelta(seconds=20),
+        )
+        await finish_runnable_task(
+            database,
+            second_task,
+            finished_at=NOW + timedelta(seconds=30),
         )
         third_task = (await seed_runnable_target(database, installation_id))[0]
         with pytest.raises(ActionRiskAuthorizationLimited) as daily_limit:
@@ -1341,7 +1368,7 @@ async def test_success_resets_only_a_closed_failure_streak(
 
 
 @pytest.mark.asyncio
-async def test_late_success_from_another_task_cannot_auto_close_an_open_circuit(
+async def test_late_success_cannot_auto_close_an_open_circuit(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
@@ -1351,13 +1378,7 @@ async def test_late_success_from_another_task_cannot_auto_close_an_open_circuit(
     try:
         await reset_data(database)
         installation_id = await seed_installation(database)
-        first_targets = await seed_runnable_target(
-            database,
-            installation_id,
-            definition_interval_seconds=1,
-            target_count=1,
-        )
-        second_targets = await seed_runnable_target(
+        first_target, second_target = await seed_runnable_target(
             database,
             installation_id,
             definition_interval_seconds=1,
@@ -1372,13 +1393,13 @@ async def test_late_success_from_another_task_cannot_auto_close_an_open_circuit(
         )
         failed_authorization = await authorize(
             repository,
-            first_targets[0],
+            first_target,
             installation_id,
             risk_policy=risk_policy,
         )
         successful_authorization = await authorize(
             repository,
-            second_targets[0],
+            second_target,
             installation_id,
             authorized_at=NOW + timedelta(seconds=2),
             risk_policy=risk_policy,
@@ -1400,6 +1421,17 @@ async def test_late_success_from_another_task_cannot_auto_close_an_open_circuit(
                 action_id=failed_authorization.action_id,
             )
         )
+        async with database.session() as session:
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == failed_authorization.task_id.uuid)
+                .values(status=TaskStatus.RUNNING.value)
+            )
+            await session.execute(
+                update(execution_attempts)
+                .where(execution_attempts.c.id == failed_authorization.execution_attempt_id.uuid)
+                .values(status=ExecutionAttemptStatus.RUNNING.value)
+            )
         successful_at = NOW + timedelta(seconds=11)
         await convergence_service(database, successful_at).receive(
             action_event(
@@ -1407,7 +1439,7 @@ async def test_late_success_from_another_task_cannot_auto_close_an_open_circuit(
                 task_id=successful_authorization.task_id,
                 attempt_id=successful_authorization.execution_attempt_id,
                 message_type="step.completed",
-                sequence=1,
+                sequence=2,
                 observed_at=successful_at,
                 action_id=successful_authorization.action_id,
             )
@@ -1416,7 +1448,7 @@ async def test_late_success_from_another_task_cannot_auto_close_an_open_circuit(
         with pytest.raises(ActionRiskAuthorizationLimited) as blocked:
             await authorize(
                 repository,
-                second_targets[1],
+                second_target,
                 installation_id,
                 authorized_at=NOW + timedelta(seconds=20),
                 risk_policy=risk_policy,
@@ -1460,26 +1492,16 @@ async def test_concurrent_failures_are_serialized_and_only_one_opens_the_circuit
     try:
         await reset_data(database)
         installation_id = await seed_installation(database)
-        first_target = (
-            await seed_runnable_target(
-                database,
-                installation_id,
-                definition_interval_seconds=1,
-                target_count=1,
-            )
-        )[0]
-        second_target = (
-            await seed_runnable_target(
-                database,
-                installation_id,
-                definition_interval_seconds=1,
-                target_count=1,
-            )
-        )[0]
+        first_target, second_target = await seed_runnable_target(
+            database,
+            installation_id,
+            definition_interval_seconds=1,
+            target_count=2,
+        )
         risk_policy = policy(
             installation_id,
             minimum_interval_seconds=1,
-            task_action_limit=1,
+            task_action_limit=2,
             daily_action_limit=2,
             consecutive_failure_threshold=2,
         )
@@ -1506,12 +1528,12 @@ async def test_concurrent_failures_are_serialized_and_only_one_opens_the_circuit
                         task_id=authorization.task_id,
                         attempt_id=authorization.execution_attempt_id,
                         message_type="step.failed",
-                        sequence=1,
+                        sequence=sequence,
                         observed_at=observed_at,
                         action_id=authorization.action_id,
                     )
                 )
-                for authorization in (first, second)
+                for sequence, authorization in enumerate((first, second), start=1)
             )
         )
 
@@ -1542,7 +1564,7 @@ async def test_preexisting_result_and_circuit_clock_rollback_fail_without_partia
     repository = SqlAlchemyActionRiskAuthorizationRepository(database)
     try:
         await reset_data(database)
-        installation_id, first, second = await seed_two_authorized_tasks(
+        installation_id, first, second = await seed_two_authorized_actions(
             database,
             repository,
             consecutive_failure_threshold=3,
@@ -1591,6 +1613,17 @@ async def test_preexisting_result_and_circuit_clock_rollback_fail_without_partia
             )
         )
         stale_at = NOW + timedelta(seconds=19)
+        async with database.session() as session:
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == second.task_id.uuid)
+                .values(updated_at=stale_at - timedelta(seconds=1))
+            )
+            await session.execute(
+                update(execution_attempts)
+                .where(execution_attempts.c.id == second.execution_attempt_id.uuid)
+                .values(updated_at=stale_at - timedelta(seconds=1))
+            )
         with pytest.raises(TaskEventConvergenceRejected):
             await convergence_service(database, stale_at).receive(
                 action_event(
@@ -1598,7 +1631,7 @@ async def test_preexisting_result_and_circuit_clock_rollback_fail_without_partia
                     task_id=second.task_id,
                     attempt_id=second.execution_attempt_id,
                     message_type="step.failed",
-                    sequence=1,
+                    sequence=2,
                     observed_at=stale_at,
                     action_id=second.action_id,
                 )
@@ -1626,7 +1659,7 @@ async def test_failure_counter_overflow_is_rejected_without_new_result(
     repository = SqlAlchemyActionRiskAuthorizationRepository(database)
     try:
         await reset_data(database)
-        installation_id, first, second = await seed_two_authorized_tasks(
+        installation_id, first, second = await seed_two_authorized_actions(
             database,
             repository,
             consecutive_failure_threshold=MAX_ACTION_RISK_LIMIT,
@@ -1655,7 +1688,7 @@ async def test_failure_counter_overflow_is_rejected_without_new_result(
                     task_id=second.task_id,
                     attempt_id=second.execution_attempt_id,
                     message_type="step.failed",
-                    sequence=1,
+                    sequence=2,
                     observed_at=second_at,
                     action_id=second.action_id,
                 )
@@ -1677,11 +1710,28 @@ async def test_only_the_task_that_opened_the_circuit_can_clear_it_with_monotonic
     repository = SqlAlchemyActionRiskAuthorizationRepository(database)
     try:
         await reset_data(database)
-        installation_id, owner, other = await seed_two_authorized_tasks(
-            database,
-            repository,
+        installation_id = await seed_installation(database)
+        owner_target = (
+            await seed_runnable_target(
+                database,
+                installation_id,
+                definition_interval_seconds=1,
+            )
+        )[0]
+        risk_policy = policy(
+            installation_id,
+            minimum_interval_seconds=1,
+            task_action_limit=1,
+            daily_action_limit=2,
             consecutive_failure_threshold=1,
         )
+        owner = await authorize(
+            repository,
+            owner_target,
+            installation_id,
+            risk_policy=risk_policy,
+        )
+        await mark_dispatched(database, (owner,), updated_at=NOW + timedelta(seconds=4))
         opened_at = NOW + timedelta(seconds=10)
         await convergence_service(database, opened_at).receive(
             action_event(
@@ -1697,23 +1747,44 @@ async def test_only_the_task_that_opened_the_circuit_can_clear_it_with_monotonic
         async with database.session() as session:
             await session.execute(
                 update(tasks)
-                .where(tasks.c.id == other.task_id.uuid)
+                .where(tasks.c.id == owner.task_id.uuid)
+                .values(
+                    status=TaskStatus.CANCELLED.value,
+                    current_attempt_id=None,
+                    updated_at=opened_at,
+                )
+            )
+            await session.execute(
+                update(execution_attempts)
+                .where(execution_attempts.c.id == owner.execution_attempt_id.uuid)
+                .values(
+                    status=ExecutionAttemptStatus.CANCELLED.value,
+                    updated_at=opened_at,
+                    finished_at=opened_at,
+                )
+            )
+        other_target = (
+            await seed_runnable_target(
+                database,
+                installation_id,
+                definition_interval_seconds=1,
+            )
+        )[0]
+        async with database.session() as session:
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == other_target.task_id.uuid)
                 .values(status=TaskStatus.AWAITING_HUMAN.value, updated_at=opened_at)
             )
             await session.execute(
                 update(execution_attempts)
-                .where(execution_attempts.c.id == other.execution_attempt_id.uuid)
+                .where(execution_attempts.c.id == other_target.attempt_id.uuid)
                 .values(
                     status=ExecutionAttemptStatus.AWAITING_HUMAN.value,
                     updated_at=opened_at,
                 )
             )
         other_correlation = TaskId.new().uuid
-        other_target = RunnableTarget(
-            task_id=other.task_id,
-            attempt_id=other.execution_attempt_id,
-            target_id=other.target_id,
-        )
         await seed_resume_ack(
             database,
             target=other_target,
@@ -1725,8 +1796,8 @@ async def test_only_the_task_that_opened_the_circuit_can_clear_it_with_monotonic
         await convergence_service(database, other_resume_at).receive(
             action_event(
                 installation_id=installation_id,
-                task_id=other.task_id,
-                attempt_id=other.execution_attempt_id,
+                task_id=other_target.task_id,
+                attempt_id=other_target.attempt_id,
                 message_type="task.resumed",
                 sequence=1,
                 observed_at=other_resume_at,
@@ -1735,17 +1806,46 @@ async def test_only_the_task_that_opened_the_circuit_can_clear_it_with_monotonic
         )
         async with database.session() as session:
             circuit_open = await session.scalar(select(action_failure_circuits.c.circuit_open))
+        assert circuit_open is True
+
+        await reset_data(database)
+        installation_id = await seed_installation(database)
+        owner_target = (
+            await seed_runnable_target(
+                database,
+                installation_id,
+                definition_interval_seconds=1,
+            )
+        )[0]
+        owner = await authorize(
+            repository,
+            owner_target,
+            installation_id,
+            risk_policy=policy(
+                installation_id,
+                minimum_interval_seconds=1,
+                task_action_limit=1,
+                daily_action_limit=1,
+                consecutive_failure_threshold=1,
+            ),
+        )
+        await mark_dispatched(database, (owner,), updated_at=NOW + timedelta(seconds=4))
+        await convergence_service(database, opened_at).receive(
+            action_event(
+                installation_id=installation_id,
+                task_id=owner.task_id,
+                attempt_id=owner.execution_attempt_id,
+                message_type="step.failed",
+                sequence=1,
+                observed_at=opened_at,
+                action_id=owner.action_id,
+            )
+        )
+        async with database.session() as session:
             await session.execute(
                 update(action_failure_circuits).values(updated_at=NOW + timedelta(seconds=20))
             )
-        assert circuit_open is True
-
         owner_correlation = TaskId.new().uuid
-        owner_target = RunnableTarget(
-            task_id=owner.task_id,
-            attempt_id=owner.execution_attempt_id,
-            target_id=owner.target_id,
-        )
         await seed_resume_ack(
             database,
             target=owner_target,

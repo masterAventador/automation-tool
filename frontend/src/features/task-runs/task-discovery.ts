@@ -44,6 +44,7 @@ export type TaskDiscoveryGatewayErrorCode =
   | "transport_unavailable"
   | "protocol_mismatch"
   | "installation_access_denied"
+  | "installation_busy"
   | "discovery_rejected"
   | "request_cancelled";
 
@@ -51,6 +52,7 @@ const PUBLIC_MESSAGES: Record<TaskDiscoveryGatewayErrorCode, string> = {
   transport_unavailable: "Task discovery service is unavailable",
   protocol_mismatch: "Task discovery protocol is incompatible",
   installation_access_denied: "Installation access is unavailable",
+  installation_busy: "Another task is already active on this device",
   discovery_rejected: "Task discovery request was rejected",
   request_cancelled: "Task discovery request was cancelled",
 };

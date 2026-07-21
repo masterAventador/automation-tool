@@ -33,6 +33,11 @@ class TaskDiscoveryRejected(ValueError):
         super().__init__("Task discovery is rejected")
 
 
+class TaskDiscoveryInstallationBusy(TaskDiscoveryRejected):
+    def __init__(self) -> None:
+        super().__init__()
+
+
 class TaskDiscoveryUnavailable(RuntimeError):
     def __init__(self) -> None:
         super().__init__("Task discovery is unavailable")

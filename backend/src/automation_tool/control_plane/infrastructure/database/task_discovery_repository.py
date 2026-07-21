@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from automation_tool.control_plane.application.task_discovery import (
     PendingTaskDiscovery,
     TaskDiscoveryConvergenceResult,
+    TaskDiscoveryInstallationBusy,
     TaskDiscoveryRejected,
     TaskDiscoveryStartResult,
 )
@@ -22,6 +23,7 @@ from automation_tool.control_plane.application.task_targets import (
     TaskTargetPersistenceRejected,
 )
 from automation_tool.control_plane.domain import (
+    TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ExecutionAttemptStatus,
     InstallationId,
     InstallationStatus,
@@ -176,6 +178,19 @@ class SqlAlchemyTaskDiscoveryRepository:
                         created=False,
                     )
 
+                active_attempt_id = await session.scalar(
+                    select(execution_attempts.c.id)
+                    .where(
+                        execution_attempts.c.installation_id == pending.installation_id.uuid,
+                        execution_attempts.c.status.not_in(
+                            tuple(status.value for status in TERMINAL_EXECUTION_ATTEMPT_STATUSES)
+                        ),
+                    )
+                    .limit(1)
+                )
+                if active_attempt_id is not None:
+                    raise TaskDiscoveryInstallationBusy
+
                 task_row = (
                     (
                         await session.execute(
@@ -194,19 +209,6 @@ class SqlAlchemyTaskDiscoveryRepository:
                     raise TaskDiscoveryRejected
                 current_status = TaskStatus(cast(str, task_row["status"]))
                 _require_discovery_reachable(current_status)
-                current_attempt_id = task_row["current_attempt_id"]
-                if current_attempt_id is not None:
-                    current_attempt_status = await session.scalar(
-                        select(execution_attempts.c.status).where(
-                            execution_attempts.c.id == current_attempt_id,
-                            execution_attempts.c.task_id == pending.task_id.uuid,
-                            execution_attempts.c.installation_id == pending.installation_id.uuid,
-                        )
-                    )
-                    if ExecutionAttemptStatus(cast(str, current_attempt_status)) in (
-                        _ACTIVE_DISCOVERY_ATTEMPT_STATUSES
-                    ):
-                        raise TaskDiscoveryRejected
                 definition_exists = await session.scalar(
                     select(douyin_search_exposure_definitions.c.task_id).where(
                         douyin_search_exposure_definitions.c.task_id == pending.task_id.uuid,

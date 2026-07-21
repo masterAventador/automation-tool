@@ -336,6 +336,27 @@ describe("Task run details", () => {
     expect(startDiscovery.mock.calls[1]?.[1]).toBe(firstKey);
   });
 
+  it("shows an explicit device single-task message for an Installation conflict", async () => {
+    const taskDiscoveryGateway: TaskDiscoveryGateway = {
+      startDiscovery: vi.fn(async () => {
+        throw new TaskDiscoveryGatewayError("installation_busy", false);
+      }),
+    };
+    const user = userEvent.setup();
+    renderDetails(
+      idleSource(snapshot({ status: "draft", revision: 1, lastEventSequence: 0 })),
+      gateway(),
+      targetSource(),
+      targetResultSource(),
+      taskDiscoveryGateway,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "开始目标发现" }));
+    expect(
+      await screen.findByText("当前设备已有任务正在运行，请先完成或终止该任务后再试"),
+    ).toBeVisible();
+  });
+
   it("opens the target preview inside details only while confirmation is required", async () => {
     const previewSource = targetSource();
     renderDetails(

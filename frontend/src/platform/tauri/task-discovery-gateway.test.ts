@@ -48,6 +48,21 @@ describe("Tauri Task discovery gateway", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves the explicit Installation busy reason without private details", async () => {
+    invoke.mockRejectedValueOnce({
+      code: "installation_busy",
+      retryable: false,
+      activeTaskId: "private-task",
+    });
+    const gateway = new TauriTaskDiscoveryGateway();
+
+    await expect(gateway.startDiscovery(TASK_ID, KEY)).rejects.toMatchObject({
+      code: "installation_busy",
+      retryable: false,
+      message: "Another task is already active on this device",
+    });
+  });
+
   it("rejects a cross-Task receipt", async () => {
     invoke.mockResolvedValueOnce({ ...RECEIPT, taskId: "d9428888-122b-4b3b-a4f8-814f6f5f899a" });
     const gateway = new TauriTaskDiscoveryGateway();

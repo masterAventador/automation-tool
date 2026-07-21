@@ -11,6 +11,7 @@ from automation_tool.control_plane.api.installation_access import (
 from automation_tool.control_plane.application.task_command_delivery import TaskCommandRecord
 from automation_tool.control_plane.application.task_discovery import (
     PendingTaskDiscovery,
+    TaskDiscoveryInstallationBusy,
     TaskDiscoveryRejected,
     TaskDiscoveryStartResult,
     TaskDiscoveryStartService,
@@ -160,6 +161,19 @@ def test_discovery_input_auth_rejection_and_unavailable_fail_closed() -> None:
     )
     assert rejected.status_code == 409
     assert rejected.json()["error"]["code"] == "task_discovery_rejected"
+
+    repository.failure = TaskDiscoveryInstallationBusy()
+    busy = client.post(
+        f"/api/v1/tasks/{TASK_ID}/discoveries",
+        headers={"Idempotency-Key": "task:discover:installation-busy"},
+    )
+    assert busy.status_code == 423
+    assert busy.json()["error"] == {
+        "code": "installation_task_active",
+        "message": "Another task is already active on this device",
+        "retryable": False,
+        "requestId": busy.headers["x-request-id"],
+    }
 
     repository.failure = RuntimeError("private database location")
     unavailable = client.post(

@@ -211,6 +211,7 @@ pub enum ControlPlaneErrorCode {
     ProtocolInvalid,
     RequestRejected,
     InstallationAccessDenied,
+    InstallationBusy,
     CredentialMissing,
     IdentityUnavailable,
     StorageUnavailable,
@@ -1443,6 +1444,13 @@ fn validate_response_metadata(
     {
         let code = if operation.accepts_status(metadata.status) {
             ControlPlaneErrorCode::ProtocolInvalid
+        } else if metadata.status == 423
+            && matches!(operation, ControlPlaneOperation::StartTaskDiscovery)
+            && metadata.request_id.as_deref() == Some(expected_request_id)
+            && content_type_is_json
+            && cache_control_is_private
+        {
+            ControlPlaneErrorCode::InstallationBusy
         } else if metadata.status == 401
             && matches!(
                 operation,
@@ -3695,6 +3703,23 @@ mod tests {
         .expect_err("503 access dependency failure");
         assert_eq!(unavailable.code(), ControlPlaneErrorCode::RequestRejected);
         assert!(unavailable.retryable());
+
+        let installation_busy = validate_response_metadata(
+            ControlPlaneOperation::StartTaskDiscovery,
+            "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+            &ResponseMetadata {
+                status: 423,
+                request_id: Some("f831a58a-a54c-4bd9-8f3e-0383c4df609d".to_owned()),
+                content_type: Some("application/json".to_owned()),
+                cache_control: Some("no-store".to_owned()),
+            },
+        )
+        .expect_err("active Installation task");
+        assert_eq!(
+            installation_busy.code(),
+            ControlPlaneErrorCode::InstallationBusy
+        );
+        assert!(!installation_busy.retryable());
 
         for status in [200, 201] {
             validate_response_metadata(

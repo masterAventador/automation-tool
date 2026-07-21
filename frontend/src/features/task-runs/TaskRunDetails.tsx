@@ -410,8 +410,11 @@ export function TaskRunDetails({
       ]);
     },
     onError: (error) => {
+      const errorCode = error instanceof TaskDiscoveryGatewayError ? error.code : null;
       setDiscoveryNotice(
-        error instanceof TaskDiscoveryGatewayError && error.code === "discovery_rejected"
+        errorCode === "installation_busy"
+          ? "当前设备已有任务正在运行，请先完成或终止该任务后再试"
+          : errorCode === "discovery_rejected"
           ? "当前平台登录或任务状态尚未满足目标发现条件，请先处理平台状态后重试"
           : "目标发现结果暂时无法确认，请查看权威状态后重试",
       );

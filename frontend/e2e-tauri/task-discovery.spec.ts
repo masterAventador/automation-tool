@@ -5,6 +5,7 @@ import { browser, expect } from "@wdio/globals";
 interface TaskDiscoveryPreparation {
   readonly installationId: string;
   readonly taskId: string;
+  readonly competingTaskId: string;
   readonly taskStatus: string;
   readonly taskRevision: number;
   readonly lastEventSequence: number;
@@ -24,32 +25,70 @@ describe("Task discovery production-path acceptance", () => {
 
     assert.match(preparation.installationId, UUID_V4);
     assert.match(preparation.taskId, UUID_V4);
+    assert.match(preparation.competingTaskId, UUID_V4);
+    assert.notEqual(preparation.competingTaskId, preparation.taskId);
     assert.equal(preparation.taskStatus, "draft");
     assert.equal(preparation.taskRevision, 1);
     assert.equal(preparation.lastEventSequence, 0);
 
     await browser.refresh();
-    const body = await browser.$("body");
-    await browser.waitUntil(
-      async () => (await body.getText()).includes(preparation.taskId),
-      { timeout: 60_000, timeoutMsg: "Workbench did not load the prepared discovery Task" },
-    );
-    await browser.$("button=查看运行详情").click();
-    await expect(await browser.$("h3=任务运行详情")).toExist();
-    await browser.$("button=开始目标发现").click();
+    let body = await browser.$("body");
     await browser.waitUntil(
       async () => {
         const text = await body.getText();
         return (
-          text.includes("目标发现命令已提交") &&
-          text.includes("等待确认") &&
-          text.includes("目标预览") &&
-          text.includes("验收目标 1") &&
-          text.includes("验收目标 2")
+          text.includes(preparation.taskId) && text.includes(preparation.competingTaskId)
         );
       },
-      { timeout: 120_000, timeoutMsg: "UI-started discovery did not converge to preview" },
+      { timeout: 60_000, timeoutMsg: "Workbench did not load both prepared discovery Tasks" },
     );
+    await browser.$(`button=${preparation.taskId}`).click();
+    await expect(await browser.$("h3=任务运行详情")).toExist();
+    await browser.$("button=开始目标发现").click();
+    await browser.waitUntil(
+      async () => (await body.getText()).includes("发现目标中"),
+      { timeout: 10_000, timeoutMsg: "First UI-started Task did not enter discovery" },
+    );
+
+    await browser.$("button=返回工作台").click();
+    await browser.$(`button=${preparation.competingTaskId}`).click();
+    await expect(await browser.$("h3=任务运行详情")).toExist();
+    await browser.$("button=开始目标发现").click();
+    await browser.waitUntil(
+      async () => (await body.getText()).includes("当前设备已有任务正在运行"),
+      { timeout: 10_000, timeoutMsg: "Competing Task did not show Installation busy" },
+    );
+    await browser.tauri.execute(({ core }) =>
+      core.invoke("signal_task_discovery_busy_for_acceptance"),
+    );
+
+    await browser.refresh();
+    body = await browser.$("body");
+    await browser.waitUntil(
+      async () => (await body.getText()).includes(preparation.taskId),
+      { timeout: 30_000, timeoutMsg: "Workbench did not reload the first Task" },
+    );
+    await browser.$(`button=${preparation.taskId}`).click();
+    await browser.waitUntil(
+      async () => (await body.getText()).includes(preparation.taskId),
+      { timeout: 10_000, timeoutMsg: "Task details did not open the first Task" },
+    );
+    try {
+      await browser.waitUntil(
+        async () => {
+          const text = await body.getText();
+          return (
+            text.includes("等待确认") &&
+            text.includes("目标预览") &&
+            text.includes("验收目标 1") &&
+            text.includes("验收目标 2")
+          );
+        },
+        { timeout: 30_000 },
+      );
+    } catch {
+      throw new Error(`UI-started discovery did not converge to preview: ${await body.getText()}`);
+    }
     const text = await body.getText();
     assert.doesNotMatch(text, /acceptance-author-|产品登录|注册账号|账号登录/);
   });

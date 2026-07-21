@@ -954,7 +954,7 @@ async def test_stale_server_times_and_malicious_cross_key_replay_are_rejected(
 
 
 @pytest.mark.asyncio
-async def test_cross_task_idempotency_race_has_one_winner_and_database_failure_is_safe(
+async def test_idempotency_race_has_one_winner_and_database_failure_is_safe(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
@@ -962,35 +962,37 @@ async def test_cross_task_idempotency_race_has_one_winner_and_database_failure_i
     database = Database.from_url(postgresql_url)
     try:
         await reset_data(database)
-        installation_id, first_task, first_attempt, _ = await seed_chain(database)
-        _, second_task, second_attempt, _ = await seed_chain(
-            database,
-            installation_id=installation_id,
+        installation_id, task_id, attempt_id, _ = await seed_chain(database)
+        convergence = service(database)
+        await convergence.receive(
+            event(installation_id, task_id, attempt_id, "task.started", sequence=1)
         )
-        shared_key = "task:t311:cross-task-race"
+        shared_key = "task:t311:event-race"
         competitors = (
             event(
                 installation_id,
-                first_task,
-                first_attempt,
-                "task.started",
-                sequence=1,
+                task_id,
+                attempt_id,
+                "step.progress",
+                sequence=2,
                 message_id="b23e4567-e89b-42d3-a456-426614174001",
                 idempotency_key=shared_key,
+                payload={"progress_percent": 25},
             ),
             event(
                 installation_id,
-                second_task,
-                second_attempt,
-                "task.started",
-                sequence=1,
+                task_id,
+                attempt_id,
+                "step.progress",
+                sequence=2,
                 message_id="c23e4567-e89b-42d3-a456-426614174001",
                 idempotency_key=shared_key,
+                payload={"progress_percent": 50},
             ),
         )
 
         outcomes = await asyncio.gather(
-            *(service(database).receive(message) for message in competitors),
+            *(convergence.receive(message) for message in competitors),
             return_exceptions=True,
         )
 

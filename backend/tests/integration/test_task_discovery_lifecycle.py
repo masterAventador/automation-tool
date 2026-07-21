@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -17,7 +18,9 @@ from automation_tool.control_plane.application.task_command_delivery import (
 )
 from automation_tool.control_plane.application.task_discovery import (
     TaskDiscoveryConvergenceService,
+    TaskDiscoveryInstallationBusy,
     TaskDiscoveryRejected,
+    TaskDiscoveryStartResult,
     TaskDiscoveryStartService,
 )
 from automation_tool.control_plane.domain import (
@@ -127,6 +130,22 @@ async def seed_ready_task(database: Database) -> tuple[InstallationId, TaskId]:
     )
     assert created.created is True
     return installation_id, task_id
+
+
+async def seed_additional_ready_task(
+    database: Database,
+    installation_id: InstallationId,
+) -> TaskId:
+    task_id = TaskId.new()
+    created = await SqlAlchemyTaskRepository(database).create(
+        task_id=task_id,
+        installation_id=installation_id,
+        idempotency_key=f"task:create:{task_id}",
+        definition=DEFINITION,
+        created_at=BASE,
+    )
+    assert created.created is True
+    return task_id
 
 
 async def acknowledge_discovery(
@@ -440,6 +459,69 @@ async def test_real_repository_delivers_converges_and_exactly_replays_discovery(
                 source_fingerprint=completion_fingerprint,
                 received_at=BASE + timedelta(seconds=6),
             )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_installation_allows_only_one_concurrent_discovery_attempt_winner(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTaskDiscoveryRepository(database)
+    try:
+        await reset_data(database)
+        installation_id, first_task_id = await seed_ready_task(database)
+        second_task_id = await seed_additional_ready_task(database, installation_id)
+        service = TaskDiscoveryStartService(
+            repository=repository,
+            clock=FixedClock(BASE + timedelta(seconds=1)),
+        )
+
+        results = await asyncio.gather(
+            service.start(
+                installation_id=installation_id,
+                task_id=first_task_id,
+                idempotency_key="task:discover:installation-winner-1",
+            ),
+            service.start(
+                installation_id=installation_id,
+                task_id=second_task_id,
+                idempotency_key="task:discover:installation-winner-2",
+            ),
+            return_exceptions=True,
+        )
+
+        assert sum(isinstance(result, TaskDiscoveryStartResult) for result in results) == 1
+        assert sum(isinstance(result, TaskDiscoveryInstallationBusy) for result in results) == 1
+        async with database.session() as session:
+            attempt_task_ids = list(
+                await session.scalars(
+                    select(execution_attempts.c.task_id).where(
+                        execution_attempts.c.installation_id == installation_id.uuid
+                    )
+                )
+            )
+            task_rows = (
+                (
+                    await session.execute(
+                        select(tasks.c.id, tasks.c.status, tasks.c.current_attempt_id).where(
+                            tasks.c.id.in_((first_task_id.uuid, second_task_id.uuid))
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        assert len(attempt_task_ids) == 1
+        assert {row["status"] for row in task_rows} == {
+            TaskStatus.DRAFT.value,
+            TaskStatus.DISCOVERING_TARGETS.value,
+        }
+        assert sum(row["current_attempt_id"] is not None for row in task_rows) == 1
     finally:
         await reset_data(database)
         await database.close()

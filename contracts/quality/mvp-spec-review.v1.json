@@ -168,10 +168,16 @@
     },
     {
       "remediationTask": "H8-16B",
-      "state": "open",
+      "state": "resolved",
       "requirementRefs": ["MVP-AC-06"],
-      "summary": "单活索引当前按 task_id 限制同一任务 Attempt，而不是按 installation_id 限制单安装实例活动任务",
-      "evidence": [{"path": "backend/src/automation_tool/control_plane/infrastructure/database/schema.py", "anchor": "\"uq_execution_attempts_one_active_task\""}]
+      "summary": "规格复审时单活索引按 task_id 限制同一任务 Attempt，而不是按 installation_id 限制单安装实例活动任务",
+      "evidence": [{"path": "backend/migrations/versions/20260718_0007_execution_models.py", "anchor": "\"uq_execution_attempts_one_active_task\""}],
+      "resolutionEvidence": [
+        {"path": "backend/src/automation_tool/control_plane/infrastructure/database/schema.py", "anchor": "\"uq_execution_attempts_one_active_installation\""},
+        {"path": "backend/tests/integration/test_task_discovery_lifecycle.py", "anchor": "test_installation_allows_only_one_concurrent_discovery_attempt_winner"},
+        {"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "当前设备已有任务正在运行"},
+        {"path": "frontend/e2e-tauri/task-discovery.spec.ts", "anchor": "Competing Task did not show Installation busy"}
+      ]
     },
     {
       "remediationTask": "H8-16C",

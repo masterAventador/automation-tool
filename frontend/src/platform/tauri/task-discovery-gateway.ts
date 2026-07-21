@@ -19,6 +19,9 @@ function mapNativeError(value: unknown): TaskDiscoveryGatewayError {
     if (record.code === "installation_access_denied" && record.retryable === false) {
       return new TaskDiscoveryGatewayError("installation_access_denied", false);
     }
+    if (record.code === "installation_busy" && record.retryable === false) {
+      return new TaskDiscoveryGatewayError("installation_busy", false);
+    }
     if (record.code === "operation_unavailable" && record.retryable === false) {
       return new TaskDiscoveryGatewayError("discovery_rejected", false);
     }

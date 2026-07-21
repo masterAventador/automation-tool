@@ -439,6 +439,8 @@ H8-16 的 `contracts/quality/mvp-spec-review.v1.json` 把产品规划 14 条 MVP
 
 H8-16A 在既有 `features/task-runs/` 内新增 `task-discovery.ts` 严格领域边界，在 `platform/tauri/task-discovery-gateway.ts` 增加唯一固定 Command Adapter，并由 `main.tsx → App → WorkbenchShell → TaskRunDetails` 注入；业务组件不导入 Tauri、不接触 HTTP、Session、Candidate 私密字段或浏览器路径。D6-10 的 feature-gated 验收 Command 现在只注册 Installation 并创建 draft Task，`e2e-tauri/task-discovery.spec.ts` 必须从隐藏 App 的正式页面点击“开始目标发现”，再由 `scripts/run_d6_10_acceptance.py` 的真实 PostgreSQL/Uvicorn/LocalExecutorProcess 核对收敛事实；正式包不包含测试准备命令。
 
+H8-16B 只扩展既有发现纵向切片：Alembic `20260721_0025` 与 `schema.py` 拥有 Installation 级非终态 Attempt 部分唯一索引，`task_discovery_repository.py` 在既有 Installation 行锁内执行同键重放与竞争检查，API/Rust/TypeScript 沿固定发现调用链传递封闭忙碌码。D6-10 验收准备 Command 只多创建一个竞争草稿 Task；独立同步 Command 只在隐藏 App 已观察忙碌提示后写测试信号，不启动发现、Executor 或平台动作，且受 `control-plane-e2e` feature 隔离。
+
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 
 D6-16 的 `scripts/run_d6_16_browser_acceptance.py` 是显式真实账号验收 runner，不进入 App/Executor 包。它只从进程环境接收既有 App 私有 Profile 路径，用无头系统 Chrome 先探测 Session，再构造正式 `task.discover` command；stdout 只允许封闭 session/outcome/evidence/candidate count，不输出候选摘要或路径。首轮真实运行确认 Session healthy，但首页验证码 iframe 进入 handoff；对应产品修复仅把 `session.py` 的同一风控 selector 导入 `search_page.py`，没有复制 selector 或新增验证码 Adapter。D6-16 仍待真实候选与隐藏 App 预览补验。

@@ -32,7 +32,10 @@ test("discovery acceptance uses the production bridge from one hidden App", asyn
   assert.match(wdio, /specs:\s*\["\.\/e2e-tauri\/task-discovery\.spec\.ts"\]/u);
   assert.match(spec, /core\.invoke\("prepare_task_discovery_for_acceptance"\)/u);
   assert.match(spec, /button=开始目标发现/u);
-  assert.match(spec, /目标发现命令已提交/u);
+  assert.match(spec, /发现目标中/u);
+  assert.match(spec, /competingTaskId/u);
+  assert.match(spec, /当前设备已有任务正在运行/u);
+  assert.match(spec, /core\.invoke\("signal_task_discovery_busy_for_acceptance"\)/u);
   assert.match(rustClient, /pub async fn start_task_discovery/u);
   assert.match(rustEntry, /async fn start_task_discovery\(/u);
   const preparation = rustEntry.match(
@@ -44,5 +47,9 @@ test("discovery acceptance uses the production bridge from one hidden App", asyn
   assert.match(orchestrator, /ExecutorCommandProcessor/u);
   assert.match(orchestrator, /test:task-discovery-tauri/u);
   assert.match(orchestrator, /visible=false/u);
+  assert.match(orchestrator, /wait_for_busy_signal/u);
+  assert.ok(
+    orchestrator.indexOf("wait_for_busy_signal(") < orchestrator.lastIndexOf("start_executor("),
+  );
   assert.doesNotMatch(orchestrator, /sync_playwright|headless=false/iu);
 });
