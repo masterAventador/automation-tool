@@ -17,7 +17,14 @@ from automation_tool.control_plane.domain import (
     TaskSnapshotProjection,
     TaskStatus,
 )
-from automation_tool.protocol import TaskEventEnvelope
+from automation_tool.protocol import (
+    ACTION_RESULT_EVIDENCE_VERSION,
+    FAILED_ACTION_RESULT_EVIDENCE,
+    SUCCESS_ACTION_RESULT_EVIDENCE,
+    UNCERTAIN_ACTION_RESULT_EVIDENCE,
+    ActionResultEvidence,
+    TaskEventEnvelope,
+)
 
 
 class TaskEventConvergenceRejected(ValueError):
@@ -107,6 +114,12 @@ _EVENT_PLANS: dict[str, _EventPlan] = {
     ),
 }
 
+_ACTION_OUTCOME_EVIDENCE = {
+    ActionOutcome.SUCCEEDED: SUCCESS_ACTION_RESULT_EVIDENCE,
+    ActionOutcome.FAILED: FAILED_ACTION_RESULT_EVIDENCE,
+    ActionOutcome.OUTCOME_UNCERTAIN: UNCERTAIN_ACTION_RESULT_EVIDENCE,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class PendingTaskEvent:
@@ -120,8 +133,22 @@ class PendingTaskEvent:
     progress_percent: int | None
     source_fingerprint: bytes
     received_at: datetime
+    action_evidence: ActionResultEvidence | None = None
 
     def __post_init__(self) -> None:
+        if self.action_id is not None and self.action_evidence is None:
+            outcome = self.target_action_outcome
+            fallback = (
+                {
+                    ActionOutcome.SUCCEEDED: ActionResultEvidence.EXECUTOR_REPORTED_SUCCESS,
+                    ActionOutcome.FAILED: ActionResultEvidence.EXECUTOR_REPORTED_FAILURE,
+                    ActionOutcome.OUTCOME_UNCERTAIN: (ActionResultEvidence.FINAL_STATE_UNCONFIRMED),
+                }.get(outcome)
+                if isinstance(outcome, ActionOutcome)
+                else None
+            )
+            if fallback is not None:
+                object.__setattr__(self, "action_evidence", fallback)
         if (
             not isinstance(self.message, TaskEventEnvelope)
             or not isinstance(self.event_type, TaskEventType)
@@ -144,6 +171,15 @@ class PendingTaskEvent:
             )
             or (self.action_id is None and self.target_action_status is not None)
             or (self.action_id is None and self.target_action_outcome is not None)
+            or (self.action_id is None and self.action_evidence is not None)
+            or (
+                self.action_evidence is not None
+                and not isinstance(self.action_evidence, ActionResultEvidence)
+            )
+            or (
+                self.target_action_outcome in _ACTION_OUTCOME_EVIDENCE
+                and self.action_evidence not in _ACTION_OUTCOME_EVIDENCE[self.target_action_outcome]
+            )
             or (
                 self.progress_percent is not None
                 and (
@@ -191,17 +227,32 @@ def _source_fingerprint(message: TaskEventEnvelope) -> bytes:
 
 def _action_plan(
     message: TaskEventEnvelope,
-) -> tuple[ActionId | None, ActionStatus | None, ActionOutcome | None, int | None]:
+) -> tuple[
+    ActionId | None,
+    ActionStatus | None,
+    ActionOutcome | None,
+    ActionResultEvidence | None,
+    int | None,
+]:
     payload = message.payload
     message_type = message.message_type
-    if message_type not in {"step.started", "step.progress", "step.completed", "step.failed"}:
+    action_event = message_type in {
+        "step.started",
+        "step.progress",
+        "step.completed",
+        "step.failed",
+        "task.outcome_uncertain",
+    }
+    if not action_event:
         if payload:
             raise TaskEventConvergenceRejected
-        return None, None, None, None
+        return None, None, None, None, None
 
     allowed = {"action_id"}
     if message_type == "step.progress":
         allowed.add("progress_percent")
+    if message_type in {"step.completed", "step.failed", "task.outcome_uncertain"}:
+        allowed.update({"evidence", "evidence_version"})
     if not set(payload).issubset(allowed):
         raise TaskEventConvergenceRejected
     action_id: ActionId | None = None
@@ -211,28 +262,68 @@ def _action_plan(
         except Exception:
             raise TaskEventConvergenceRejected from None
 
+    evidence: ActionResultEvidence | None = None
+    evidence_value = payload.get("evidence")
+    evidence_version = payload.get("evidence_version")
+    if (evidence_value is None) != (evidence_version is None):
+        raise TaskEventConvergenceRejected
+    if evidence_value is not None:
+        if (
+            action_id is None
+            or type(evidence_value) is not str
+            or evidence_version != ACTION_RESULT_EVIDENCE_VERSION
+        ):
+            raise TaskEventConvergenceRejected
+        try:
+            evidence = ActionResultEvidence(evidence_value)
+        except (TypeError, ValueError):
+            raise TaskEventConvergenceRejected from None
+
     progress_percent: int | None = None
     if message_type == "step.progress":
         progress_percent = payload.get("progress_percent")  # type: ignore[assignment]
         if type(progress_percent) is not int or not 0 <= progress_percent <= 100:
             raise TaskEventConvergenceRejected
     if message_type == "step.started":
-        return action_id, ActionStatus.DISPATCHED if action_id else None, None, None
+        return action_id, ActionStatus.DISPATCHED if action_id else None, None, None, None
     if message_type == "step.completed":
+        evidence = evidence or (
+            ActionResultEvidence.EXECUTOR_REPORTED_SUCCESS if action_id else None
+        )
+        if evidence is not None and evidence not in SUCCESS_ACTION_RESULT_EVIDENCE:
+            raise TaskEventConvergenceRejected
         return (
             action_id,
             ActionStatus.VERIFIED if action_id else None,
             ActionOutcome.SUCCEEDED if action_id else None,
+            evidence,
             None,
         )
     if message_type == "step.failed":
+        evidence = evidence or (
+            ActionResultEvidence.EXECUTOR_REPORTED_FAILURE if action_id else None
+        )
+        if evidence is not None and evidence not in FAILED_ACTION_RESULT_EVIDENCE:
+            raise TaskEventConvergenceRejected
         return (
             action_id,
             ActionStatus.VERIFIED if action_id else None,
             ActionOutcome.FAILED if action_id else None,
+            evidence,
             None,
         )
-    return action_id, None, None, progress_percent
+    if message_type == "task.outcome_uncertain" and action_id is not None:
+        evidence = evidence or ActionResultEvidence.FINAL_STATE_UNCONFIRMED
+        if evidence not in UNCERTAIN_ACTION_RESULT_EVIDENCE:
+            raise TaskEventConvergenceRejected
+        return (
+            action_id,
+            ActionStatus.OUTCOME_UNCERTAIN,
+            ActionOutcome.OUTCOME_UNCERTAIN,
+            evidence,
+            None,
+        )
+    return action_id, None, None, None, progress_percent
 
 
 class TaskEventConvergenceService:
@@ -266,7 +357,13 @@ class TaskEventConvergenceService:
         if received_at < message.sent_at or received_at >= message.deadline_at:
             raise TaskEventConvergenceRejected
         plan = _EVENT_PLANS[message.message_type]
-        action_id, action_status, action_outcome, progress_percent = _action_plan(message)
+        (
+            action_id,
+            action_status,
+            action_outcome,
+            action_evidence,
+            progress_percent,
+        ) = _action_plan(message)
         pending = PendingTaskEvent(
             message=message,
             event_type=plan.event_type,
@@ -275,6 +372,7 @@ class TaskEventConvergenceService:
             action_id=action_id,
             target_action_status=action_status,
             target_action_outcome=action_outcome,
+            action_evidence=action_evidence,
             progress_percent=progress_percent,
             source_fingerprint=_source_fingerprint(message),
             received_at=received_at,

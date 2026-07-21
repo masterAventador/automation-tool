@@ -201,6 +201,7 @@ async def seed_attempt_and_offer(
     task_id: TaskId,
     *,
     label: str,
+    confirmed_target_revision: bool = False,
 ) -> TaskCommandRecord:
     database = Database.from_url(database_url)
     attempt_id = ExecutionAttemptId.new()
@@ -221,7 +222,11 @@ async def seed_attempt_and_offer(
                     tasks.c.id == task_id.uuid,
                     tasks.c.installation_id == installation_id.uuid,
                 )
-                .values(status=TaskStatus.QUEUED.value, updated_at=now)
+                .values(
+                    status=TaskStatus.QUEUED.value,
+                    revision=2 if confirmed_target_revision else 1,
+                    updated_at=now,
+                )
             )
             await session.execute(
                 insert(execution_attempts).values(

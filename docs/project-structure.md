@@ -252,7 +252,7 @@ backend/
 │       │   ├── application/       # 注册、凭据、任务、配置、内容和工作流用例
 │       │   ├── domain/            # 稳定 ID、Task 执行状态、版本事件、快照与 Command 契约
 │       │   └── infrastructure/
-│       │       ├── database/      # PostgreSQL 注册认证、任务与 A7-14 动作结果/连续失败 circuit
+│       │       ├── database/      # PostgreSQL 注册认证、任务、动作 evidence/连续失败与目标结果投影
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
 │       │       ├── events/
 │       │       ├── object_storage/
@@ -270,6 +270,7 @@ backend/
 │       │   ├── rpa/douyin/comment_page.py # A7-08 评论输入/提交/最终确认的唯一 selector 所有者
 │       │   ├── rpa/douyin/direct_message_action.py # A7-12 会话恢复/唯一发送/权限/receipt 私信编排
 │       │   ├── rpa/douyin/direct_message_page.py # A7-09 私信会话/发送/权限/最终确认的唯一 selector 所有者
+│       │   ├── rpa/douyin/action_result.py # A7-15 动作/恢复 receipt → 封闭 Task event evidence
 │       │   ├── rpa/douyin/profile_page.py # A7-10 通用用户主页/登录/风控 Page Object
 │       │   ├── rpa/douyin/side_effect_recovery.py # A7-13 dispatched 只读核对/终态结算
 │       │   ├── cli.py             # automation-tool-executor 正式控制台入口与信号映射
@@ -300,6 +301,7 @@ backend/
 │       │       ├── desktop/
 │       │       └── logging/
 │       ├── protocol/              # Control Plane ↔ Executor 版本化协议
+│       │   ├── action_result.py   # A7-15 成功/失败/跳过/不确定证据词汇与封闭集合
 │       │   ├── action_message_template.py # A7-05 固定文案/单变量封闭校验
 │       │   ├── douyin_candidate.py # 最小 Candidate、来源与稳定去重键
 │       │   ├── douyin_search.py   # 双端共享关键词/目标上限与脱敏输入对象
@@ -391,6 +393,10 @@ A7-12 的 `executor/rpa/douyin/direct_message_action.py` 只组合 A7-04 gate、
 A7-13 的 `executor/rpa/douyin/side_effect_recovery.py` 复用两类动作导出的验证摘要与既有 Page Object，只对 SQLite `dispatched` 执行最终锚点只读核对；prepared/verified/uncertain 原样投影，恢复层不拥有导航、selector 或任何动作 locator。`tests/integration/test_douyin_side_effect_recovery_browser.py` 以生产 BrowserRuntime、无头系统 Chrome、官方-origin 隔离页和两条真实 dispatched 事实验证评论/私信均可只读结算，页面评论提交、会话入口和私信发送计数保持 0；H8-05 才把该单次能力装入崩溃启动编排。
 
 A7-14 不新增独立服务目录：现有 `action_risk_authorization_repository.py` 在精确重放后阻止 open circuit 的新授权，`task_event_convergence_repository.py` 在正式 Executor 结果事务中维护连续失败与 handoff，`schema.py` 和迁移 `20260721_0023_action_failure_circuits.py` 定义 `action_risk_results/action_failure_circuits` 及完整 scope 外键。`tests/integration/test_action_risk_authorization_lifecycle.py` 覆盖计数、并发、恢复、故障注入和认证 WebSocket 原入口，`test_action_failure_circuit_lifecycle.py` 覆盖迁移精确结构与降级；没有新增 App、浏览器、HTTP 业务接口或第二份结果协议。
+
+A7-15 的共享证据位于 `protocol/action_result.py`，Executor 适配只存在于 `executor/rpa/douyin/action_result.py`；即时评论/私信和只读恢复 receipt 仍由各自模块拥有，适配器只输出正式 Task event 所需的 message type、Action ID 与封闭 evidence。Control Plane 按 `api/task_target_results.py`、`application/task_target_results.py`、`infrastructure/database/task_target_result_repository.py`、`bootstrap/task_target_results.py` 分层提供 Installation-scoped 只读投影；`schema.py` 与迁移 `20260721_0024_task_action_evidence.py` 将 evidence 和 Action outcome 一致性锁进 PostgreSQL。前端沿 `api/control-plane/task-target-results.ts`、`platform/tauri/task-target-result-source.ts`、Rust `control_plane.rs/lib.rs` 注入既有 `TaskRunDetails.tsx`，没有第二个详情页、Web 路由、Executor SQLite 读取或任意 IPC/URL 面。
+
+`scripts/run_t3_18_acceptance.py` 是 A7-15 的原调用方验收：它只使用 `visible=false` Tauri 配置、专属 Compose project/随机端口/PostgreSQL/AppData 和正式 App Session，WebdriverIO 从现有运行详情触发固定 Tauri Command 并核对四类目标终态及受限证据。测试准备数据和 FakeExecutor 只提供远端边界的确定事实，页面请求必须真实经过 TypeScript、Rust、Uvicorn 与数据库；退出后 runner 回收 App、服务、端口、容器与私有目录。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 

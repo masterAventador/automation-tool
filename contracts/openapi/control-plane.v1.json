@@ -1,6 +1,40 @@
 {
   "components": {
     "schemas": {
+      "ActionResultEvidence": {
+        "enum": [
+          "awaiting_execution",
+          "action_pending",
+          "action_in_progress",
+          "profile_visible",
+          "comment_confirmed",
+          "message_confirmed",
+          "executor_reported_success",
+          "user_excluded",
+          "duplicate_in_task",
+          "duplicate_in_history",
+          "blacklisted",
+          "action_cancelled",
+          "admission_rejected",
+          "local_safety_limit",
+          "login_required",
+          "dialog_blocked",
+          "messaging_not_allowed",
+          "follow_required",
+          "timed_out",
+          "page_version_unknown",
+          "conflicting_anchors",
+          "page_unavailable",
+          "verification_unavailable",
+          "executor_reported_failure",
+          "dispatch_timed_out",
+          "dispatch_unavailable",
+          "final_state_unconfirmed",
+          "recovery_unconfirmed"
+        ],
+        "title": "ActionResultEvidence",
+        "type": "string"
+      },
       "DeviceSessionCapability": {
         "enum": [
           "app.control-plane",
@@ -947,6 +981,123 @@
         ],
         "title": "TaskTargetPreviewResponse",
         "type": "object"
+      },
+      "TaskTargetResultItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actionid"
+          },
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ActionResultEvidence"
+          },
+          "ordinal": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "publicHandle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publichandle"
+          },
+          "resultStatus": {
+            "$ref": "#/components/schemas/TaskTargetResultStatus"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId",
+          "ordinal",
+          "displayName",
+          "publicHandle",
+          "resultStatus",
+          "evidence",
+          "actionId",
+          "updatedAt"
+        ],
+        "title": "TaskTargetResultItemResponse",
+        "type": "object"
+      },
+      "TaskTargetResultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskTargetResultItemResponse"
+            },
+            "maxItems": 100,
+            "title": "Items",
+            "type": "array"
+          },
+          "lastEventSequence": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          },
+          "taskRevision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Taskrevision",
+            "type": "integer"
+          },
+          "taskStatus": {
+            "$ref": "#/components/schemas/TaskStatus"
+          }
+        },
+        "required": [
+          "taskId",
+          "taskStatus",
+          "taskRevision",
+          "lastEventSequence",
+          "items"
+        ],
+        "title": "TaskTargetResultResponse",
+        "type": "object"
+      },
+      "TaskTargetResultStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "skipped",
+          "failed",
+          "outcome_uncertain"
+        ],
+        "title": "TaskTargetResultStatus",
+        "type": "string"
       },
       "ValidationError": {
         "properties": {
@@ -2121,6 +2272,53 @@
           }
         ],
         "summary": "Replace Task Target Exclusions",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/target-results": {
+      "get": {
+        "operationId": "getTaskTargetResults",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTargetResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Task Target Results",
         "tags": [
           "tasks"
         ]

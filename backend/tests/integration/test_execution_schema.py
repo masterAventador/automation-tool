@@ -30,7 +30,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0006"
-HEAD_REVISION = "20260721_0023"
+HEAD_REVISION = "20260721_0024"
 NOW = datetime(2026, 7, 18, 16, 0, tzinfo=UTC)
 EXPECTED_ATTEMPT_COLUMNS = {
     "id",
@@ -52,6 +52,7 @@ EXPECTED_ACTION_COLUMNS = {
     "ordinal",
     "status",
     "outcome",
+    "evidence_code",
     "revision",
     "created_at",
     "updated_at",
@@ -81,6 +82,7 @@ EXPECTED_ACTION_CONSTRAINTS = {
     "ck_task_actions_outcome",
     "ck_task_actions_time_order",
     "ck_task_actions_result_coherence",
+    "ck_task_actions_evidence_coherence",
 }
 
 
@@ -428,6 +430,7 @@ async def test_action_binding_ordinal_phase_and_outcome_are_database_enforced(
             )
         assert created["status"] == ActionStatus.PLANNED.value
         assert created["outcome"] == ActionOutcome.PENDING.value
+        assert created["evidence_code"] is None
         assert created["revision"] == 1
         assert created["finished_at"] is None
 
@@ -472,6 +475,7 @@ async def test_action_binding_ordinal_phase_and_outcome_are_database_enforced(
                 {
                     "status": ActionStatus.VERIFIED.value,
                     "outcome": ActionOutcome.SUCCEEDED.value,
+                    "evidence_code": "executor_reported_success",
                     "updated_at": NOW + timedelta(seconds=1),
                     "finished_at": NOW + timedelta(seconds=1),
                 }

@@ -119,7 +119,7 @@ from automation_tool.protocol import (
 )
 
 PREVIOUS_REVISION = "20260720_0019"
-HEAD_REVISION = "20260721_0023"
+HEAD_REVISION = "20260721_0024"
 NOW = datetime(2026, 7, 20, 1, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "action_id",

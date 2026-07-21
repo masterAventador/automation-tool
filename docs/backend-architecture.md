@@ -372,6 +372,12 @@ A7-14 把“动作执行结果”接到服务端风险 scope，而不是在 Exec
 
 未打开 circuit 时，成功把连续失败清零，失败递增；达到当前 ActionAuthorization 中持久化的阈值快照时，首次触发者把 Task/Attempt 转为 `awaiting_human`，事件投影为既有 `task.awaiting_human`。授权仓储在返回精确 Action ID 重放后检查 circuit，确保既有授权事实仍可幂等读取而任何新 Action ID 都被 `consecutive_failure_circuit` 拒绝。circuit 打开后，跨 Task 晚到成功只记录审计而不能自动恢复；恢复只复用已 ACK 的正式 `task.resumed`，且必须是打开该 circuit 的 Task、时间单调、事务完整。服务端因此是计数与接管总指挥，本机 A7-04 硬下限和紧停仍独立生效，任何一层都不能放宽另一层。
 
+A7-15 不新增第二条结果总线。共享 `action-result-evidence.v1` 只给既有 Executor Task event 增加封闭、无正文的 evidence/version；`executor/rpa/douyin/action_result.py` 将 A7-11/A7-12 即时 receipt 与 A7-13 恢复 receipt 映射为 `step.completed`、`step.failed` 或 `task.outcome_uncertain`。应用层在数据库事务前验证事件类型与 success/failed/uncertain 证据集合，仓储把 evidence 与 Action 终态一起持久化；迁移 `20260721_0024` 回填历史终态并以 PostgreSQL check constraint 阻止跨 outcome、空终态或非封闭证据。旧 Executor 没有 evidence 时仍只按已存在的终态使用明确 generic fallback，不能猜测平台页面证据。
+
+目标结果读取遵循 `api/task_target_results.py → application/task_target_results.py → infrastructure/database/task_target_result_repository.py` 单向分层。唯一 `GET /api/v1/tasks/{task_id}/target-results` 受 `app.control-plane` Session 和 Installation scope 保护，仓储只连接 Task 的 current Attempt 授权/Action，并按 Target ordinal 合并用户排除、候选 disposition 与 Action 状态，返回 pending/running/succeeded/skipped/failed/outcome_uncertain 和固定 evidence；无 Task、跨 Installation、非法 ID、损坏持久事实或数据库故障分别收敛为不可见/校验失败/脱敏不可用。响应只含公开目标摘要、状态、证据、可选 Action ID 与 UTC 时间，不含文案、页面内容、Cookie、Profile、URL、路径、SQLite 内容或策略内部字段。
+
+桌面端沿正式 `TypeScript source → 固定 Tauri Command → Rust ControlPlaneClient → HTTPS` 路径读取该投影，React 继续复用 T3-18 `TaskRunDetails`，不创建 Web 产品或第二个任务详情页。Task SSE 前进、控制成功和用户重试只触发权威查询失效；UI 不从事件文本或本地状态推断结果。T3-18 隐藏验收以唯一 `visible=false` App、真实 Uvicorn/Alembic/PostgreSQL 和 App Session 从原页面请求并展示四类终态，同时保留既有控制验收；测试配置、FakeExecutor 和准备数据不进入正式构建。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

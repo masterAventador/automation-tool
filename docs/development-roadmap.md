@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-14 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-15 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-15 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，不阻塞依赖已经满足的 Wave 8 离线主线 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -321,7 +321,7 @@
 | A7-12 | 私信动作执行 | 授权校验→账本→发送→最终验证→结构化 receipt | A7-07,A7-09 | ✅ 已完成 |
 | A7-13 | 结果不确定处理 | dispatched 未 verified 先查询；无法确认不重放 | A7-11,A7-12 | ✅ 已完成 |
 | A7-14 | 连续失败熔断 | 达阈值停止新动作、打开 handoff、保持审计 | A7-02,A7-13 | ✅ 已完成 |
-| A7-15 | 目标级结果 UI | 成功/跳过/失败/不确定和证据摘要 | A7-13,T3-18 | 🧪 RED |
+| A7-15 | 目标级结果 UI | 成功/跳过/失败/不确定和证据摘要 | A7-13,T3-18 | ✅ 已完成 |
 | A7-16 | 评论真实验收 | 仅自有/授权目标；平台最终状态与服务端一致 | A7-15 | 🔍 待真实账号 |
 | A7-17 | 私信真实验收 | 仅自有/授权目标；重复/断网/确认丢失覆盖 | A7-15 | 🔍 待真实账号 |
 | A7-18 | 风险护栏对抗测试 | 篡改授权、超频、重放、取消竞态和服务器放宽均失败 | A7-16,A7-17 | ⬜ 未开始 |
@@ -2345,11 +2345,28 @@
 - 资源与文档：数据库测试只使用 `automation-tool-pytest-*` 专属 Compose project、随机 loopback PostgreSQL 端口、独立容器/网络/Volume，并由 fixture 回收；WebSocket 验收使用进程内正式 ASGI 路由且关闭无关出站 Command 轮询，结束后连接池无未归还警告。没有启动 Tauri、可见浏览器、用户 Profile、真实账号或系统钥匙串；Frontend UI 保持 headless。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `A7-15`，把既有 Action/Task event 与 A7-13 receipt 收敛为目标级成功、跳过、失败、不确定和受限证据摘要 UI；先复用 T3-18 运行详情，不新增第二个任务详情页
 
+### A7-15 目标级结果 UI
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、闭合证据协议、PostgreSQL 结果投影、App API/Rust 桥/现有运行详情 UI、迁移、原调用方验收和文档属于单一 `feat: 完成目标级结果界面` 提交；完成后立即推送 `main`
+- RED 与唯一事实源：先把台账置为 `🧪 RED`，从既有 A7-11/A7-12 receipt、A7-13 恢复结果、正式 Executor Task event 和 T3-18 运行详情反推边界。目标结果不是 React 本地推断、Executor SQLite 直读或第二套详情模型；Control Plane PostgreSQL 中当前 Task/Target/Action 与终态 evidence 是唯一权威，App 只读展示
+- 证据协议与收敛：新增 `action-result-evidence.v1` 封闭词汇，把评论/私信即时 receipt 和崩溃恢复 receipt 映射成带 `evidence/evidence_version` 的正式 `step.completed`、`step.failed` 或 `task.outcome_uncertain` payload。服务端逐字段校验版本、动作终态与 evidence 集合的一致性，再由原有认证 Executor WebSocket 收敛；未知、跨结果或半套证据全部拒绝。迁移 `20260721_0024` 为 `task_actions` 增加最小 `evidence_code`，回填旧终态并用数据库约束锁定 success/failed/cancelled/uncertain 的封闭组合，不保存正文、页面原文、Cookie、Profile、URL 或路径
+- 目标级投影：`GET /api/v1/tasks/{task_id}/target-results` 只接受当前 `app.control-plane` Session 和 Installation scope，按目标 ordinal 返回公开显示名、公开号、目标状态、封闭 evidence、可选 Action ID 与 UTC 更新时间。仓储在 PostgreSQL 中把用户排除、任务内/历史重复、黑名单、等待授权、已发送、取消、确定成功/失败和结果不确定统一投影；只关联当前 Attempt 的授权/Action，非法或跨 Installation Task 与不存在 Task 同样不可见，数据库或持久证据异常固定 503/422 且不泄露内部信息
+- App 复用：生成 OpenAPI DTO 后新增严格 TypeScript parser/source、固定 Rust `getTaskTargetResults` operation/Tauri Command 与既有依赖注入链；没有任意 URL、任意 command 或第二个 Web 页面。T3-18 的 `TaskRunDetails` 在原页面展示成功、跳过、失败、不确定以及待执行/进行中，证据只翻译成固定中文摘要；查询 loading/empty/failure 独立且可重试，Task SSE 或控制成功时失效并重取权威结果，页面不展示消息正文、平台页面内容或敏感本机事实
+- 原调用方验收：扩展 T3-18 隔离 runner，在启动前检查随机端口并使用专属 Compose project、PostgreSQL、AppData、设备凭据和隐藏配置；唯一 `visible=false` Tauri App 从现有运行详情真实发出 TypeScript source → Tauri IPC → Rust Session 网络桥 → Uvicorn/FastAPI → PostgreSQL 请求。正式 Executor 事件与预置目标共同形成成功、跳过、失败和不确定结果，WebdriverIO 从真实 App DOM 核对固定证据文案与既有暂停/恢复/取消/紧停控件；没有用 Mock、直接 HTTP 或可见浏览器冒充 App 验收
+- 失败与一致性矩阵：覆盖 evidence 版本/类型/集合错配、无 Action 携带证据、终态回放、success/failed/uncertain 收敛、所有 comment/direct-message receipt 分支、恢复映射、目标排序/重复/身份/时间/摘要异常、所有投影状态、旧数据 fallback、Installation 隔离、仓储/服务/API 错误脱敏、迁移升降级与数据库直写约束。前端覆盖 DTO 额外字段/时间/枚举/资源上限、取消信号、Rust 响应严格解析、UI loading/empty/error/retry 与四类终态
+- 门禁：Backend 全量 `1869 passed, 5 skipped in 141.46s`，11864 条语句/2600 个分支覆盖率 100%，322 个 Python 文件格式、Ruff、严格 Mypy 297 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend 102 项 Node 契约、195 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿；T3-18 隐藏真实 App 纵向验收通过
+- 资源与文档：验收结束后确认专属 AppData、1420/随机 Control Plane/PostgreSQL 端口、Tauri App、Uvicorn、WebdriverIO、Chrome/Playwright、Compose 容器/网络/Volume 均零残留；全程不打开可见 App/浏览器、不触碰用户默认 Profile、真实账号、系统钥匙串或其他项目资源。同步根/Backend README、后端架构、工程结构与本唯一台账，没有新增重复规划文档
+- 后续：`A7-16/A7-17` 必须在用户明确指定的自有/授权目标上完成真实评论/私信证据，当前保持 `🔍 待真实账号`；`A7-18` 受其依赖阻塞。按用户“真实账号任务不可用时先跳过”的约定，先进入依赖已满足的 `H8-01` 端到端暂停
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-15`（🧪 RED）：正在核对 T3-18 运行详情、现有 Action 投影与 A7-13 receipt 边界，固定成功、跳过、失败、不确定和受限证据摘要的唯一目标级 UI；
-2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
-3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
-4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。
+1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
+2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
+3. `H8-01`（下一离线任务）：从既有暂停 Command、ACK 与 Executor 安全检查点开始，先 RED 再实现端到端暂停；
+4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
+5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
+6. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

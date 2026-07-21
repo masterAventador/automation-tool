@@ -114,7 +114,7 @@ T3-16 的工作台纵向验收执行 `uv run python ../scripts/run_t3_16_accepta
 
 T3-17/A7-05 的新建任务纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`。唯一 `visible=false` 真实 App 从页面进入“新建任务”，先证明未知变量在表单层被拒绝且不发起请求，再提交唯一合法 `{{target_display_name}}` 个性化文案；请求经正式 `TauriTaskCreationGateway`、固定 Rust Command、真实 Uvicorn/PostgreSQL 写入精确 `douyin.search_exposure.v1` 定义。App 不弹窗、不读取系统钥匙串，验收结束清理隔离 App 数据和后端资源。
 
-T3-18 的运行详情纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_18_acceptance.py`。唯一 `visible=false` 真实 App 打开两个有持久事件的 Task，从页面依次真实点击暂停、恢复、取消和紧急停止；正式 gateway/Rust/后端 Outbox/HOLD FakeExecutor 链路将命令全部 ACK，并把两个任务分别收敛为 `cancelled` 与 `outcome_uncertain`。验收不操作社交平台，结束后清理隔离 App 数据、服务、端口和 PostgreSQL 资源。
+T3-18/A7-15 的运行详情纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_18_acceptance.py`。唯一 `visible=false` 真实 App 打开两个有持久事件和目标结果的 Task，从页面发出固定目标结果查询并核对成功、跳过、失败、不确定及受限证据，再依次真实点击暂停、恢复、取消和紧急停止；正式 TypeScript source/gateway、Tauri IPC、Rust Session 网络桥、后端 Outbox/HOLD FakeExecutor/PostgreSQL 链路将命令全部 ACK，并把两个任务分别收敛为 `cancelled` 与 `outcome_uncertain`。验收不操作社交平台、不读取 Executor SQLite，结束后清理隔离 App 数据、服务、端口和 PostgreSQL/Compose 资源。
 
 T3-19 的完整生命周期纵向验收在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_19_acceptance.py`。唯一 `visible=false` 真实 App 从页面创建两个 Task：首个依次真实点击暂停、恢复、取消，第二个由受控 Executor 收敛为成功；随后整页刷新并从工作台重新进入成功详情。正式 TypeScript gateway、固定 Rust Command、真实 Uvicorn/PostgreSQL、Outbox 和 Executor 链路全部参与，最终核对命令 ACK、事件、revision、水位与两个页面创建的定义；设备秘密只在隔离 `app_data_dir`，结束后精确清理。
 

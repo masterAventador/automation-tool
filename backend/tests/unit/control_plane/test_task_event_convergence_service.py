@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
+from sqlalchemy.engine import RowMapping
 
 from automation_tool.control_plane.application.task_event_convergence import (
     PendingTaskEvent,
@@ -26,7 +27,15 @@ from automation_tool.control_plane.domain import (
     TaskSnapshotProjection,
     TaskStatus,
 )
-from automation_tool.protocol import TaskEventEnvelope, parse_executor_message
+from automation_tool.control_plane.infrastructure.database import (
+    task_event_convergence_repository,
+)
+from automation_tool.protocol import (
+    ACTION_RESULT_EVIDENCE_VERSION,
+    ActionResultEvidence,
+    TaskEventEnvelope,
+    parse_executor_message,
+)
 
 NOW = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
@@ -257,6 +266,140 @@ async def test_action_projection_requires_an_explicit_bound_action_id(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message_type", "evidence", "action_status", "action_outcome"),
+    (
+        (
+            "step.completed",
+            ActionResultEvidence.COMMENT_CONFIRMED,
+            ActionStatus.VERIFIED,
+            ActionOutcome.SUCCEEDED,
+        ),
+        (
+            "step.failed",
+            ActionResultEvidence.LOGIN_REQUIRED,
+            ActionStatus.VERIFIED,
+            ActionOutcome.FAILED,
+        ),
+        (
+            "task.outcome_uncertain",
+            ActionResultEvidence.DISPATCH_TIMED_OUT,
+            ActionStatus.OUTCOME_UNCERTAIN,
+            ActionOutcome.OUTCOME_UNCERTAIN,
+        ),
+    ),
+)
+async def test_action_projection_accepts_only_versioned_outcome_evidence(
+    message_type: str,
+    evidence: ActionResultEvidence,
+    action_status: ActionStatus,
+    action_outcome: ActionOutcome,
+) -> None:
+    repository = RecordingRepository()
+    service = TaskEventConvergenceService(repository=repository, clock=MutableClock())
+
+    await service.receive(
+        event(
+            message_type,
+            payload={
+                "action_id": ACTION_ID,
+                "evidence": evidence.value,
+                "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+            },
+        )
+    )
+
+    pending = repository.pending[0]
+    assert pending.target_action_status is action_status
+    assert pending.target_action_outcome is action_outcome
+    assert pending.action_evidence is evidence
+
+
+@pytest.mark.asyncio
+async def test_uncertain_action_projection_requires_a_dispatched_pending_action() -> None:
+    repository = RecordingRepository()
+    service = TaskEventConvergenceService(repository=repository, clock=MutableClock())
+    await service.receive(event("task.outcome_uncertain", payload={"action_id": ACTION_ID}))
+    pending = repository.pending[0]
+    assert pending.action_evidence is ActionResultEvidence.FINAL_STATE_UNCONFIRMED
+    assert task_event_convergence_repository._validate_action(
+        cast(RowMapping, {"status": "dispatched", "outcome": "pending"}),
+        pending,
+    ) == (ActionStatus.OUTCOME_UNCERTAIN, ActionOutcome.OUTCOME_UNCERTAIN)
+    with pytest.raises(TaskEventConvergenceRejected):
+        task_event_convergence_repository._validate_action(
+            cast(RowMapping, {"status": "prepared", "outcome": "pending"}),
+            pending,
+        )
+
+
+@pytest.mark.asyncio
+async def test_action_projection_rejects_partial_malformed_or_cross_outcome_evidence() -> None:
+    repository = RecordingRepository()
+    service = TaskEventConvergenceService(repository=repository, clock=MutableClock())
+    invalid_payloads = (
+        {
+            "action_id": ACTION_ID,
+            "evidence": "comment_confirmed",
+        },
+        {
+            "action_id": ACTION_ID,
+            "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+        },
+        {
+            "evidence": "comment_confirmed",
+            "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+        },
+        {
+            "action_id": ACTION_ID,
+            "evidence": 1,
+            "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+        },
+        {
+            "action_id": ACTION_ID,
+            "evidence": "comment_confirmed",
+            "evidence_version": "private-version",
+        },
+        {
+            "action_id": ACTION_ID,
+            "evidence": "private-evidence",
+            "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+        },
+    )
+    for payload in invalid_payloads:
+        with pytest.raises(TaskEventConvergenceRejected):
+            await service.receive(event("step.completed", payload=payload))
+
+    for message_type, evidence in (
+        ("step.completed", "login_required"),
+        ("step.failed", "comment_confirmed"),
+        ("task.outcome_uncertain", "comment_confirmed"),
+    ):
+        with pytest.raises(TaskEventConvergenceRejected):
+            await service.receive(
+                event(
+                    message_type,
+                    payload={
+                        "action_id": ACTION_ID,
+                        "evidence": evidence,
+                        "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+                    },
+                )
+            )
+    with pytest.raises(TaskEventConvergenceRejected):
+        await service.receive(
+            event(
+                "task.outcome_uncertain",
+                payload={
+                    "evidence": "dispatch_timed_out",
+                    "evidence_version": ACTION_RESULT_EVIDENCE_VERSION,
+                },
+            )
+        )
+    assert repository.pending == []
+
+
+@pytest.mark.asyncio
 async def test_service_rejects_expired_unknown_or_unsafe_payloads_without_persistence() -> None:
     repository = RecordingRepository()
     service = TaskEventConvergenceService(repository=repository, clock=MutableClock())
@@ -316,6 +459,14 @@ async def test_service_and_internal_models_reject_wrong_runtime_types() -> None:
         await service.receive(cast(TaskEventEnvelope, object()))
     await service.receive(event("step.progress", payload={"progress_percent": 50}))
     valid = repository.pending[0]
+    fallback = replace(
+        valid,
+        action_id=ActionId.parse(ACTION_ID),
+        target_action_status=ActionStatus.VERIFIED,
+        target_action_outcome=ActionOutcome.SUCCEEDED,
+        action_evidence=None,
+    )
+    assert fallback.action_evidence is ActionResultEvidence.EXECUTOR_REPORTED_SUCCESS
     invalid_pending: tuple[Callable[[], PendingTaskEvent], ...] = (
         lambda: replace(valid, message=cast(TaskEventEnvelope, object())),
         lambda: replace(valid, event_type=cast(TaskEventType, "step.progress")),
@@ -329,6 +480,19 @@ async def test_service_and_internal_models_reject_wrong_runtime_types() -> None:
         lambda: replace(valid, target_action_outcome=cast(ActionOutcome, "failed")),
         lambda: replace(valid, action_id=None, target_action_status=ActionStatus.VERIFIED),
         lambda: replace(valid, action_id=None, target_action_outcome=ActionOutcome.FAILED),
+        lambda: replace(
+            valid,
+            action_id=None,
+            action_evidence=ActionResultEvidence.LOGIN_REQUIRED,
+        ),
+        lambda: replace(
+            fallback,
+            action_evidence=ActionResultEvidence.LOGIN_REQUIRED,
+        ),
+        lambda: replace(
+            fallback,
+            action_evidence=cast(ActionResultEvidence, "executor_reported_success"),
+        ),
         lambda: replace(valid, progress_percent=cast(int, True)),
         lambda: replace(valid, progress_percent=101),
         lambda: replace(valid, source_fingerprint=cast(bytes, bytearray(32))),

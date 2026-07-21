@@ -1000,6 +1000,19 @@ async fn get_task_snapshot(
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
+async fn get_task_target_results(
+    task_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::TaskTargetResults, ControlPlaneCommandError> {
+    client
+        .get_task_target_results(&vault, &task_id)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
 async fn list_task_snapshots(
     cursor: Option<String>,
     limit: u16,
@@ -2158,6 +2171,7 @@ pub fn run() {
         cancel_task_run,
         emergency_stop_task_run,
         get_task_snapshot,
+        get_task_target_results,
         list_task_snapshots,
         stream_task_projection_events,
         get_executor_status,
@@ -2186,6 +2200,7 @@ pub fn run() {
         cancel_task_run,
         emergency_stop_task_run,
         get_task_snapshot,
+        get_task_target_results,
         list_task_snapshots,
         stream_task_projection_events,
         run_control_plane_acceptance,

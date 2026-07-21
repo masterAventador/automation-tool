@@ -78,6 +78,21 @@ describe("Task run production-path acceptance", () => {
     );
 
     await openTask(preparation.controlledTaskId);
+    await waitForRenderedText(
+      "目标结果",
+      "成功目标",
+      "成功",
+      "平台页面已确认评论成功",
+      "用户排除目标",
+      "跳过",
+      "用户在预览中排除此目标",
+      "失败目标",
+      "失败",
+      "平台登录状态需要人工处理",
+      "不确定目标",
+      "结果不确定",
+      "已发送，但平台最终状态无法确认",
+    );
     await clickTwoCharacterButton("暂", "停");
     await waitForRenderedText("暂停命令已提交", "已暂停", "任务已暂停");
     await clickTwoCharacterButton("恢", "复");

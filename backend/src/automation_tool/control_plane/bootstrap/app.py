@@ -34,6 +34,9 @@ from automation_tool.control_plane.api.task_event_stream import router as task_e
 from automation_tool.control_plane.api.task_target_previews import (
     router as task_target_preview_router,
 )
+from automation_tool.control_plane.api.task_target_results import (
+    router as task_target_result_router,
+)
 from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.api.workbench import router as workbench_router
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
@@ -63,6 +66,9 @@ from automation_tool.control_plane.application.task_event_stream import TaskEven
 from automation_tool.control_plane.application.task_queries import TaskQueryService
 from automation_tool.control_plane.application.task_target_previews import (
     TaskTargetPreviewService,
+)
+from automation_tool.control_plane.application.task_target_results import (
+    TaskTargetResultService,
 )
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
@@ -95,6 +101,9 @@ from automation_tool.control_plane.bootstrap.task_events import (
 )
 from automation_tool.control_plane.bootstrap.task_target_previews import (
     task_target_preview_service as build_task_target_preview_service,
+)
+from automation_tool.control_plane.bootstrap.task_target_results import (
+    task_target_result_service as build_task_target_result_service,
 )
 from automation_tool.control_plane.bootstrap.tasks import (
     task_creation_service as build_task_creation_service,
@@ -162,6 +171,7 @@ def create_app(
     task_discovery_start_service: TaskDiscoveryStartService | None = None,
     task_discovery_convergence_service: TaskDiscoveryConvergenceService | None = None,
     task_target_preview_service: TaskTargetPreviewService | None = None,
+    task_target_result_service: TaskTargetResultService | None = None,
     task_event_convergence_service: TaskEventConvergenceService | None = None,
     task_event_stream_service: TaskEventStreamService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
@@ -190,6 +200,7 @@ def create_app(
     resolved_task_discovery_start_service = task_discovery_start_service
     resolved_task_discovery_convergence_service = task_discovery_convergence_service
     resolved_task_target_preview_service = task_target_preview_service
+    resolved_task_target_result_service = task_target_result_service
     resolved_task_event_convergence_service = task_event_convergence_service
     resolved_task_event_stream_service = task_event_stream_service
     if (
@@ -232,6 +243,8 @@ def create_app(
         ) = build_task_discovery_services(resolved_database)
     if resolved_task_target_preview_service is None and isinstance(resolved_database, Database):
         resolved_task_target_preview_service = build_task_target_preview_service(resolved_database)
+    if resolved_task_target_result_service is None and isinstance(resolved_database, Database):
+        resolved_task_target_result_service = build_task_target_result_service(resolved_database)
     if resolved_task_event_convergence_service is None and isinstance(resolved_database, Database):
         resolved_task_event_convergence_service = build_task_event_convergence_service(
             resolved_database
@@ -272,6 +285,7 @@ def create_app(
     app.state.task_discovery_start_service = resolved_task_discovery_start_service
     app.state.task_discovery_convergence_service = resolved_task_discovery_convergence_service
     app.state.task_target_preview_service = resolved_task_target_preview_service
+    app.state.task_target_result_service = resolved_task_target_result_service
     app.state.task_event_convergence_service = resolved_task_event_convergence_service
     app.state.task_event_stream_service = resolved_task_event_stream_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
@@ -290,6 +304,7 @@ def create_app(
     app.include_router(task_event_stream_router)
     app.include_router(task_control_router)
     app.include_router(task_target_preview_router)
+    app.include_router(task_target_result_router)
     app.include_router(task_discovery_router)
     app.include_router(task_router)
     app.include_router(workbench_router)

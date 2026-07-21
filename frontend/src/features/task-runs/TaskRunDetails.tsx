@@ -25,6 +25,13 @@ import {
   type TaskStatus,
 } from "../../api/control-plane/task-projections";
 import type { TaskTargetPreviewSource } from "../../api/control-plane/task-target-previews";
+import {
+  taskTargetResultKeys,
+  taskTargetResultQueryOptions,
+  type TaskTargetResultEvidence,
+  type TaskTargetResultSource,
+  type TaskTargetResultStatus,
+} from "../../api/control-plane/task-target-results";
 import { TaskTargetPreviewPanel } from "./TaskTargetPreview";
 import type {
   TaskRunControlGateway,
@@ -114,6 +121,7 @@ interface TaskRunDetailsProps {
   readonly taskSource: TaskProjectionSource;
   readonly controlGateway: TaskRunControlGateway;
   readonly taskTargetPreviewSource: TaskTargetPreviewSource;
+  readonly taskTargetResultSource: TaskTargetResultSource;
   readonly onBack: () => void;
 }
 
@@ -124,12 +132,6 @@ interface ControlRequest {
 
 interface SubmittedControl extends ControlRequest {
   readonly receipt: TaskRunControlReceipt;
-}
-
-interface ActionProjection {
-  readonly actionId: string;
-  readonly status: "running" | "succeeded" | "failed";
-  readonly updatedAt: string;
 }
 
 function statusColor(status: TaskStatus): string {
@@ -161,23 +163,52 @@ function projectSnapshot(snapshot: TaskSnapshot, events: readonly TaskEvent[]): 
   return projected;
 }
 
-function actionProjections(events: readonly TaskEvent[]): readonly ActionProjection[] {
-  const projections = new Map<string, ActionProjection>();
-  for (const event of events) {
-    if (event.actionId === null || !event.eventType.startsWith("step.")) continue;
-    const status =
-      event.eventType === "step.completed"
-        ? "succeeded"
-        : event.eventType === "step.failed"
-          ? "failed"
-          : "running";
-    projections.set(event.actionId, {
-      actionId: event.actionId,
-      status,
-      updatedAt: event.recordedAt,
-    });
-  }
-  return [...projections.values()];
+const RESULT_LABELS: Record<TaskTargetResultStatus, string> = {
+  pending: "待执行",
+  running: "进行中",
+  succeeded: "成功",
+  skipped: "跳过",
+  failed: "失败",
+  outcome_uncertain: "结果不确定",
+};
+
+const EVIDENCE_LABELS: Record<TaskTargetResultEvidence, string> = {
+  awaiting_execution: "目标已确认，等待执行",
+  action_pending: "动作已授权，尚未发送",
+  action_in_progress: "动作已发送，等待最终确认",
+  profile_visible: "目标主页已确认可见",
+  comment_confirmed: "平台页面已确认评论成功",
+  message_confirmed: "平台页面已确认私信成功",
+  executor_reported_success: "执行器已确认动作成功",
+  user_excluded: "用户在预览中排除此目标",
+  duplicate_in_task: "本任务内目标重复",
+  duplicate_in_history: "近期任务已处理此目标",
+  blacklisted: "目标命中黑名单",
+  action_cancelled: "动作在执行前已取消",
+  admission_rejected: "动作授权或本机准入被拒绝",
+  local_safety_limit: "本机安全限额阻止动作",
+  login_required: "平台登录状态需要人工处理",
+  dialog_blocked: "平台风控或阻塞弹窗中断动作",
+  messaging_not_allowed: "目标不允许主动私信",
+  follow_required: "平台要求先关注目标",
+  timed_out: "页面操作或确认超时",
+  page_version_unknown: "页面版本无法安全识别",
+  conflicting_anchors: "页面出现冲突状态标记",
+  page_unavailable: "平台页面当前不可用",
+  verification_unavailable: "最终确认写入失败",
+  executor_reported_failure: "执行器已确认动作失败",
+  dispatch_timed_out: "动作发送后响应超时",
+  dispatch_unavailable: "动作发送后执行器不可用",
+  final_state_unconfirmed: "已发送，但平台最终状态无法确认",
+  recovery_unconfirmed: "崩溃恢复后仍无法确认最终状态",
+};
+
+function resultColor(status: TaskTargetResultStatus): string {
+  if (status === "succeeded") return "green";
+  if (status === "failed") return "red";
+  if (status === "outcome_uncertain") return "gold";
+  if (status === "skipped") return "default";
+  return "blue";
 }
 
 function formatTimestamp(value: string): string {
@@ -203,10 +234,14 @@ export function TaskRunDetails({
   taskSource,
   controlGateway,
   taskTargetPreviewSource,
+  taskTargetResultSource,
   onBack,
 }: TaskRunDetailsProps) {
   const queryClient = useQueryClient();
   const taskQuery = useQuery(taskSnapshotQueryOptions(taskSource, taskId));
+  const targetResultQuery = useQuery(
+    taskTargetResultQueryOptions(taskTargetResultSource, taskId),
+  );
   const [events, setEvents] = useState<readonly TaskEvent[]>([]);
   const [streamError, setStreamError] = useState(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
@@ -250,6 +285,15 @@ export function TaskRunDetails({
             setEvents((current) =>
               [...current, event].slice(-MAX_RETAINED_TIMELINE_EVENTS),
             );
+            if (
+              event.eventType === "step.completed" ||
+              event.eventType === "step.failed" ||
+              event.eventType === "task.outcome_uncertain"
+            ) {
+              void queryClient.invalidateQueries({
+                queryKey: taskTargetResultKeys.detail(taskId),
+              });
+            }
           },
           { signal: controller.signal },
         );
@@ -272,7 +316,7 @@ export function TaskRunDetails({
         if (!controller.signal.aborted) setStreamError(true);
       });
     return () => controller.abort();
-  }, [streamGeneration, taskId, taskSource]);
+  }, [queryClient, streamGeneration, taskId, taskSource]);
 
   useEffect(
     () => () => {
@@ -348,7 +392,7 @@ export function TaskRunDetails({
     .find((event) => event.progressPercent !== null)?.progressPercent;
   const progress = status === "succeeded" ? 100 : (latestProgress ?? 0);
   const latestStep = [...events].reverse().find((event) => event.eventType.startsWith("step."));
-  const results = actionProjections(events);
+  const results = targetResultQuery.data?.items ?? [];
   const busy = controls.isPending;
   const effectiveSubmitted =
     submitted !== null && submitted.baselineRevision >= projectedSnapshot.revision
@@ -486,27 +530,33 @@ export function TaskRunDetails({
       ) : null}
 
       <Card title="目标结果">
-        {results.length === 0 ? (
-          <Empty description="还没有带 Action 标识的目标结果" />
+        {targetResultQuery.isError ? (
+          <Alert
+            type="warning"
+            showIcon
+            title="目标结果暂时不可用"
+            description="页面不会根据不完整事件猜测结果；可重新读取服务端权威事实。"
+            action={<Button onClick={() => void targetResultQuery.refetch()}>重新加载结果</Button>}
+          />
+        ) : targetResultQuery.isPending ? (
+          <Card loading variant="borderless" />
+        ) : results.length === 0 ? (
+          <Empty description="还没有已发现的目标" />
         ) : (
           <ul className="task-result-list">
             {results.map((result) => (
-              <li key={result.actionId}>
-                <Typography.Text>目标 {result.actionId.slice(-8)}</Typography.Text>
-                <Tag
-                  color={
-                    result.status === "succeeded"
-                      ? "green"
-                      : result.status === "failed"
-                        ? "red"
-                        : "blue"
-                  }
-                >
-                  {result.status === "succeeded"
-                    ? "成功"
-                    : result.status === "failed"
-                      ? "失败"
-                      : "进行中"}
+              <li key={result.targetId}>
+                <Space orientation="vertical" size={0}>
+                  <Typography.Text strong>{result.displayName}</Typography.Text>
+                  {result.publicHandle === null ? null : (
+                    <Typography.Text type="secondary">@{result.publicHandle}</Typography.Text>
+                  )}
+                  <Typography.Text type="secondary">
+                    证据摘要：{EVIDENCE_LABELS[result.evidence]}
+                  </Typography.Text>
+                </Space>
+                <Tag color={resultColor(result.resultStatus)}>
+                  {RESULT_LABELS[result.resultStatus]}
                 </Tag>
               </li>
             ))}

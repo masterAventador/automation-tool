@@ -4,6 +4,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { desktopQueryClient } from "./query-client";
 import type { TaskProjectionSource } from "../api/control-plane/task-projections";
 import type { TaskTargetPreviewSource } from "../api/control-plane/task-target-previews";
+import type { TaskTargetResultSource } from "../api/control-plane/task-target-results";
 import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 import type { TaskCreationGateway } from "../features/task-create/task-creation-gateway";
 import type { TaskRunControlGateway } from "../features/task-runs/task-run-controls";
@@ -21,6 +22,7 @@ interface AppProps {
   taskCreationGateway?: TaskCreationGateway;
   taskRunControlGateway?: TaskRunControlGateway;
   taskTargetPreviewSource?: TaskTargetPreviewSource;
+  taskTargetResultSource?: TaskTargetResultSource;
   platformAdapter?: PlatformAdapter;
   platformSessionGateway?: PlatformSessionGateway;
 }
@@ -33,6 +35,7 @@ export function App({
   taskCreationGateway,
   taskRunControlGateway,
   taskTargetPreviewSource,
+  taskTargetResultSource,
   platformAdapter,
   platformSessionGateway,
 }: AppProps) {
@@ -56,6 +59,7 @@ export function App({
               taskCreationGateway={taskCreationGateway}
               taskRunControlGateway={taskRunControlGateway}
               taskTargetPreviewSource={taskTargetPreviewSource}
+              taskTargetResultSource={taskTargetResultSource}
               platformAdapter={platformAdapter}
               platformSessionGateway={platformSessionGateway}
             />

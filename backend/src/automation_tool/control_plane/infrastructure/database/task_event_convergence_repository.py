@@ -47,6 +47,7 @@ from automation_tool.control_plane.infrastructure.database.schema import (
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
+from automation_tool.protocol import ActionResultEvidence
 
 _CONTROL_EVENT_COMMANDS = {
     "task.paused": frozenset({TaskCommandType.TASK_PAUSE}),
@@ -196,6 +197,18 @@ def _validate_action(
         ActionOutcome.SUCCEEDED,
         ActionOutcome.FAILED,
     }:
+        allowed_current = (
+            {ActionStatus.DISPATCHED}
+            if target_outcome is ActionOutcome.SUCCEEDED
+            else {ActionStatus.AUTHORIZED, ActionStatus.PREPARED, ActionStatus.DISPATCHED}
+        )
+        if current_status not in allowed_current or current_outcome is not ActionOutcome.PENDING:
+            raise TaskEventConvergenceRejected
+        return target_status, target_outcome
+    if (
+        target_status is ActionStatus.OUTCOME_UNCERTAIN
+        and target_outcome is ActionOutcome.OUTCOME_UNCERTAIN
+    ):
         if (
             current_status is not ActionStatus.DISPATCHED
             or current_outcome is not ActionOutcome.PENDING
@@ -633,8 +646,13 @@ class SqlAlchemyTaskEventConvergenceRepository:
                             "revision": cast(int, action_row["revision"]) + 1,
                             "updated_at": pending.received_at,
                         }
-                        if next_action[0] is ActionStatus.VERIFIED:
+                        if next_action[0] in {
+                            ActionStatus.VERIFIED,
+                            ActionStatus.OUTCOME_UNCERTAIN,
+                        }:
+                            action_evidence = cast(ActionResultEvidence, pending.action_evidence)
                             action_values["finished_at"] = pending.received_at
+                            action_values["evidence_code"] = action_evidence.value
                         updated_action = await session.execute(
                             update(task_actions)
                             .where(

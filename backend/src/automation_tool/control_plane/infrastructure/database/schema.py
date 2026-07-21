@@ -48,10 +48,14 @@ from automation_tool.control_plane.domain import (
     TaskStatus,
 )
 from automation_tool.protocol import (
+    FAILED_ACTION_RESULT_EVIDENCE,
     MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
     MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS,
     MAX_DOUYIN_TARGET_ID_CHARACTERS,
     MAX_EXECUTOR_SEQUENCE,
+    SUCCESS_ACTION_RESULT_EVIDENCE,
+    UNCERTAIN_ACTION_RESULT_EVIDENCE,
+    ActionResultEvidence,
     DouyinCandidateSource,
 )
 
@@ -891,6 +895,7 @@ task_actions = Table(
         nullable=False,
         server_default=text(f"'{ActionOutcome.PENDING.value}'"),
     ),
+    Column("evidence_code", String(length=64), nullable=True),
     Column("revision", BigInteger(), nullable=False, server_default=text("1")),
     Column(
         "created_at",
@@ -928,13 +933,30 @@ task_actions = Table(
     ),
     CheckConstraint(
         "(status in ('planned', 'authorized', 'prepared', 'dispatched') "
-        "and outcome = 'pending' and finished_at is null) or "
+        "and outcome = 'pending' and evidence_code is null and finished_at is null) or "
         "(status = 'verified' and outcome in ('succeeded', 'failed') "
+        "and evidence_code is not null and finished_at is not null) or "
+        "(status = 'cancelled' and outcome = 'cancelled' "
+        f"and evidence_code = '{ActionResultEvidence.ACTION_CANCELLED.value}' "
         "and finished_at is not null) or "
-        "(status = 'cancelled' and outcome = 'cancelled' and finished_at is not null) or "
         "(status = 'outcome_uncertain' and outcome = 'outcome_uncertain' "
-        "and finished_at is not null)",
+        "and evidence_code is not null and finished_at is not null)",
         name="ck_task_actions_result_coherence",
+    ),
+    CheckConstraint(
+        "evidence_code is null or "
+        "(outcome = 'succeeded' and evidence_code in ("
+        + ", ".join(f"'{value.value}'" for value in sorted(SUCCESS_ACTION_RESULT_EVIDENCE, key=str))
+        + ")) or (outcome = 'failed' and evidence_code in ("
+        + ", ".join(f"'{value.value}'" for value in sorted(FAILED_ACTION_RESULT_EVIDENCE, key=str))
+        + ")) or (outcome = 'cancelled' and evidence_code = "
+        f"'{ActionResultEvidence.ACTION_CANCELLED.value}') or "
+        "(outcome = 'outcome_uncertain' and evidence_code in ("
+        + ", ".join(
+            f"'{value.value}'" for value in sorted(UNCERTAIN_ACTION_RESULT_EVIDENCE, key=str)
+        )
+        + "))",
+        name="ck_task_actions_evidence_coherence",
     ),
     ForeignKeyConstraint(
         ["execution_attempt_id", "task_id", "installation_id"],

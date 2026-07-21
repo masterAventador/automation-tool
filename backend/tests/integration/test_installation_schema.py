@@ -11,7 +11,7 @@ from automation_tool.control_plane.domain import InstallationId, InstallationSta
 from automation_tool.control_plane.infrastructure.database import Database, installations
 
 BASELINE_REVISION = "20260718_0001"
-HEAD_REVISION = "20260721_0023"
+HEAD_REVISION = "20260721_0024"
 EXPECTED_CONSTRAINTS = {
     "pk_installations",
     "uq_installations_device_public_key",

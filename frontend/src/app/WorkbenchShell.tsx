@@ -9,6 +9,10 @@ import {
   TaskTargetPreviewSourceError,
   type TaskTargetPreviewSource,
 } from "../api/control-plane/task-target-previews";
+import {
+  TaskTargetResultSourceError,
+  type TaskTargetResultSource,
+} from "../api/control-plane/task-target-results";
 import { TaskCreate } from "../features/task-create/TaskCreate";
 import {
   TaskCreationGatewayError,
@@ -96,6 +100,12 @@ const shellTaskTargetPreviewSource: TaskTargetPreviewSource = {
   },
 };
 
+const shellTaskTargetResultSource: TaskTargetResultSource = {
+  async getResults() {
+    throw new TaskTargetResultSourceError("transport_unavailable", true);
+  },
+};
+
 const shellPlatformAdapter: PlatformAdapter = {
   async getBrowserSettings() {
     return { availableBrowsers: [], selectedBrowser: null };
@@ -138,6 +148,7 @@ interface WorkbenchShellProps {
   readonly taskCreationGateway?: TaskCreationGateway | undefined;
   readonly taskRunControlGateway?: TaskRunControlGateway | undefined;
   readonly taskTargetPreviewSource?: TaskTargetPreviewSource | undefined;
+  readonly taskTargetResultSource?: TaskTargetResultSource | undefined;
   readonly platformAdapter?: PlatformAdapter | undefined;
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
 }
@@ -148,6 +159,7 @@ export function WorkbenchShell({
   taskCreationGateway = shellTaskCreationGateway,
   taskRunControlGateway = shellTaskRunControlGateway,
   taskTargetPreviewSource = shellTaskTargetPreviewSource,
+  taskTargetResultSource = shellTaskTargetResultSource,
   platformAdapter = shellPlatformAdapter,
   platformSessionGateway = shellPlatformSessionGateway,
 }: WorkbenchShellProps) {
@@ -263,6 +275,7 @@ export function WorkbenchShell({
                 taskSource={taskSource}
                 controlGateway={taskRunControlGateway}
                 taskTargetPreviewSource={taskTargetPreviewSource}
+                taskTargetResultSource={taskTargetResultSource}
                 onBack={() => setActivePage("workbench")}
               />
             ) : showingTaskRun ? (

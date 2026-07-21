@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线与 Wave 7 A7-01～A7-14 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进目标级结果 UI。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线与 Wave 7 A7-01～A7-15 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进依赖已经满足的 Wave 8 恢复主线。
 
 ## 第一阶段
 
@@ -113,9 +113,10 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - A7-12 已建立 `douyin.direct-message-action-execution.v1` 单次主动私信执行：沿用同一 ActionAuthorization、本机硬下限和副作用账本，在 `prepared` 后允许从用户主页进入会话或从已打开会话恢复；进入会话不是发送许可，只有填入最终受限文案并重新取得 send locator 后，唯一 dispatch 原子赢家才能发送一次。“暂时无法私信”和“关注后才能私信”在发送前、发送后均保留不同 evidence；发送前失败保持可恢复 prepared，发送后任何超时、权限变化、页面漂移或结算失败都进入 uncertain 且重放零 DOM。生产 BrowserRuntime 已在官方-origin 隔离页用无头系统 Chrome 和真实私有 SQLite 证明首次进入/发送各一次、精确重放均不增加，但真实平台最终状态仍归 A7-17；
 - A7-13 已建立 `douyin.side-effect-recovery.v1` 只读结果恢复：只接收本机账本中已存在的 Action ID，prepared、verified、uncertain 分别直接投影且零 DOM；只有崩溃窗口残留的 dispatched 才按持久 action 类型选择评论/私信 Page Object，读取并二次取得最终确认。证据充分时沿用与即时动作完全相同的验证摘要结算 verified，登录、风控、权限、超时、页面漂移或验证失败结算 uncertain；并发 opposite terminal 只接受账本赢家，结算存储不可用则至少保留 dispatched，恢复源码没有填写、点击、导航、selector、任意 URL、HTTP、OCR 或 LLM。无头生产 BrowserRuntime 已证明评论/私信恢复后提交、进入会话和发送计数全部为 0；
 - A7-14 已把确定动作结果接入 PostgreSQL 连续失败熔断：`action_risk_results` 为每个已授权 Action 保存成功/失败、授权阈值、结果后计数和是否触发接管，`action_failure_circuits` 按 Installation/平台/动作保存当前 circuit；复合外键保证结果、授权和 circuit 不可跨 scope 拼接。失败达到该 Action 的授权快照阈值时，同一事务把当前 Task/Attempt 投影为 `awaiting_human` 并写 `task.awaiting_human`，后续新 Action ID 在服务端授权入口被拒绝；精确授权和事件重放不重复计数。成功只清零尚未打开的 streak，晚到成功不能自动关 circuit；只有打开该 circuit 的 Task 经正式已确认 `task.resumed` 才能清零恢复。认证 Executor WebSocket 已从 `/api/v1/executors/connect` 原入口触发完整持久化与后续授权拒绝；
+- A7-15 已把 Executor 动作 receipt 收敛为 `action-result-evidence.v1` 封闭证据，并由正式 Task event 写入 PostgreSQL `task_actions.evidence_code`；数据库约束锁定成功、失败、取消与不确定证据的一致性。受 App Session 和 Installation scope 保护的 `GET /api/v1/tasks/{task_id}/target-results` 只投影当前 Attempt 的目标级待执行/进行中/成功/跳过/失败/不确定和固定摘要；现有运行详情通过严格 TypeScript DTO、固定 Tauri Command 与 Rust 网络桥展示结果，不读取 Executor SQLite、不显示正文或页面事实。唯一 `visible=false` App 已从原页面经真实 Uvicorn/PostgreSQL 验证四类终态、重试和控制链；
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Windows x86_64 原生 runner 均已实测，Hosted Windows CI 的 Billing 限制只保留为持续集成覆盖缺口；
 - E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS arm64 与 Windows x86_64 release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；该能力只保留用于本地验收、隔离测试和明确迁移，不作为客户安装、配对或审批机制；
-- React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件投影和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；“新建任务”提供受约束的抖音搜索曝光表单。运行详情展示权威状态、进度、事件时间线和已有 Action 结果，并通过四个固定 Rust operation 提交暂停、恢复、取消与紧停，最终仍以 Executor 事实收敛。正式 Local Executor 最小进程已能联网和健康退出，真实任务处理与 RPA 尚未实现；
+- React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件投影和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；“新建任务”提供受约束的抖音搜索曝光表单。运行详情展示权威状态、进度、事件时间线与目标级待执行/进行中/成功/跳过/失败/不确定证据，并通过四个固定 Rust operation 提交暂停、恢复、取消与紧停，最终仍以 Executor/PostgreSQL 事实收敛；
 - 尚未部署任何服务或执行真实社交平台动作。

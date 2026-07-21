@@ -32,6 +32,7 @@ from .task_discovery_repository import SqlAlchemyTaskDiscoveryRepository
 from .task_event_convergence_repository import SqlAlchemyTaskEventConvergenceRepository
 from .task_event_stream_repository import SqlAlchemyTaskEventStreamRepository
 from .task_target_repository import SqlAlchemyTaskTargetRepository
+from .task_target_result_repository import SqlAlchemyTaskTargetResultRepository
 
 __all__ = [
     "Database",
@@ -43,6 +44,7 @@ __all__ = [
     "SqlAlchemyTaskEventConvergenceRepository",
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",
+    "SqlAlchemyTaskTargetResultRepository",
     "action_failure_circuits",
     "action_risk_authorizations",
     "action_risk_results",

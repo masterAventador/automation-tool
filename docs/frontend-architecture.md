@@ -98,6 +98,10 @@ T3-16 将投影接入正式 RPA 工作台：`Workbench` 展示 Control Plane/Exe
 
 T3-18 将工作台 Task 入口接到正式 `TaskRunDetails`。页面先读 TanStack Query 权威快照，再从持久事件起点通过同一 Rust SSE/Tauri Channel 重放并跟随时间线；只投影明确的进度、step 与 `actionId` 事实，缺少目标或平台证据时显示空态。`TauriTaskRunControlGateway` 暴露四个窄方法，对应四个固定 Rust Command；按钮按权威状态启停，取消/紧停二次确认，不确定重试在同 revision 复用幂等键，提交回执不会冒充 Executor 已执行。事件畸形、错 Task 或缺口会 fail closed 并要求显式重载。唯一 `visible=false` App 已真实点击四类控制并经后端与 HOLD FakeExecutor 收敛最终事实。
 
+A7-15 在同一运行详情增加只读 `TaskTargetResultSource`，没有第二个页面或 Web 路由。正式实现只调用固定 `getTaskTargetResults` Tauri Command；Rust 自行换 `app.control-plane` Session、构造 `/api/v1/tasks/{task_id}/target-results` 固定路径并严格校验 Task/Target/Action UUID、ordinal、UTC 时间、封闭状态/evidence 与响应大小，React 不接触 bearer、Header、baseUrl、Executor SQLite 或任意响应。TanStack Query 独立管理 loading/empty/error/retry；Task SSE 前进与控制成功只失效查询并重取 PostgreSQL 权威投影，UI 不从事件 label 或本地控制回执推断目标结果。
+
+页面按 pending/running/succeeded/skipped/failed/outcome_uncertain 展示固定状态标签，并把 `action-result-evidence.v1` 翻译成内置中文摘要；不回显消息正文、页面文本、URL、Profile、Cookie、路径、策略内部字段或错误原文。扩展后的 T3-18 runner 仍使用唯一 `visible=false` App，从现有详情真实发出 TypeScript source → IPC → Rust → Uvicorn/PostgreSQL 请求并核对成功、跳过、失败、不确定；测试准备数据与 FakeExecutor 不替代页面调用，退出后 App/WebdriverIO/服务/端口/Compose/AppData 全部回收。
+
 ### 4.2 Feature 层
 
 第一期 Feature：

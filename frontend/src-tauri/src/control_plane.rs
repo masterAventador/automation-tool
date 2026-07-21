@@ -55,6 +55,7 @@ enum ControlPlaneOperation {
     ConfirmTaskTargetPreview,
     ListTasks,
     GetTask,
+    GetTaskTargetResults,
     StreamTaskEvents,
     PauseTask,
     ResumeTask,
@@ -72,6 +73,7 @@ impl ControlPlaneOperation {
             | Self::GetTaskTargetPreview
             | Self::ListTasks
             | Self::GetTask
+            | Self::GetTaskTargetResults
             | Self::StreamTaskEvents => "GET",
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
@@ -117,6 +119,7 @@ impl ControlPlaneOperation {
             }
             Self::ListTasks => "/api/v1/tasks",
             Self::GetTask => "/api/v1/tasks/{task_id}",
+            Self::GetTaskTargetResults => "/api/v1/tasks/{task_id}/target-results",
             Self::StreamTaskEvents => "/api/v1/tasks/{task_id}/events",
             Self::PauseTask => "/api/v1/tasks/{task_id}/pause",
             Self::ResumeTask => "/api/v1/tasks/{task_id}/resume",
@@ -137,6 +140,7 @@ impl ControlPlaneOperation {
             | Self::RevokeDeviceCredential
             | Self::ListTasks
             | Self::GetTask
+            | Self::GetTaskTargetResults
             | Self::StreamTaskEvents => 200,
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
@@ -771,6 +775,30 @@ impl ControlPlaneClient {
         parse_task_snapshot_body(&response_body)
     }
 
+    pub async fn get_task_target_results<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+    ) -> Result<TaskTargetResults, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(task_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::GetTaskTargetResults,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::Detail(task_id)),
+            )
+            .await?;
+        parse_task_target_results(&response_body, task_id)
+    }
+
     pub async fn start_task_discovery<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1226,9 +1254,18 @@ fn request_path(
             }
             Ok(path)
         }
-        (ControlPlaneOperation::GetTask, Some(ControlPlaneRequestTarget::Detail(task_id))) => {
+        (
+            operation @ (ControlPlaneOperation::GetTask
+            | ControlPlaneOperation::GetTaskTargetResults),
+            Some(ControlPlaneRequestTarget::Detail(task_id)),
+        ) => {
             require_canonical_uuid_v4(task_id)?;
-            Ok(format!("/api/v1/tasks/{task_id}"))
+            let suffix = match operation {
+                ControlPlaneOperation::GetTask => "",
+                ControlPlaneOperation::GetTaskTargetResults => "/target-results",
+                _ => return Err(protocol_invalid()),
+            };
+            Ok(format!("/api/v1/tasks/{task_id}{suffix}"))
         }
         (
             ControlPlaneOperation::GetTaskTargetPreview,
@@ -1295,6 +1332,7 @@ fn request_path(
         (
             ControlPlaneOperation::ListTasks
             | ControlPlaneOperation::GetTask
+            | ControlPlaneOperation::GetTaskTargetResults
             | ControlPlaneOperation::GetTaskTargetPreview
             | ControlPlaneOperation::ReplaceTaskTargetExclusions
             | ControlPlaneOperation::ConfirmTaskTargetPreview
@@ -1390,6 +1428,7 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::StartTaskDiscovery
                     | ControlPlaneOperation::ListTasks
                     | ControlPlaneOperation::GetTask
+                    | ControlPlaneOperation::GetTaskTargetResults
                     | ControlPlaneOperation::PauseTask
                     | ControlPlaneOperation::ResumeTask
                     | ControlPlaneOperation::CancelTask
@@ -1715,6 +1754,29 @@ struct TaskTargetPreviewResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskTargetResultItemResponse {
+    target_id: String,
+    ordinal: u16,
+    display_name: String,
+    public_handle: Option<String>,
+    result_status: String,
+    evidence: String,
+    action_id: Option<String>,
+    updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskTargetResultsResponse {
+    task_id: String,
+    task_status: String,
+    task_revision: u64,
+    last_event_sequence: u64,
+    items: Vec<TaskTargetResultItemResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskListResponse {
     items: Vec<TaskSnapshotResponse>,
     next_cursor: Option<String>,
@@ -1834,6 +1896,29 @@ pub struct TaskTargetPreview {
     confirmed_at: Option<String>,
     items: Vec<TaskTargetPreviewItem>,
     next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTargetResultItem {
+    target_id: String,
+    ordinal: u16,
+    display_name: String,
+    public_handle: Option<String>,
+    result_status: String,
+    evidence: String,
+    action_id: Option<String>,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTargetResults {
+    task_id: String,
+    task_status: String,
+    task_revision: u64,
+    last_event_sequence: u64,
+    items: Vec<TaskTargetResultItem>,
 }
 
 impl TaskTargetPreview {
@@ -2506,6 +2591,131 @@ fn parse_task_target_preview(
     })
 }
 
+fn target_result_evidence_matches(
+    result_status: &str,
+    evidence: &str,
+    action_present: bool,
+) -> bool {
+    let evidence_matches = match result_status {
+        "pending" => matches!(evidence, "awaiting_execution" | "action_pending"),
+        "running" => evidence == "action_in_progress",
+        "succeeded" => matches!(
+            evidence,
+            "profile_visible"
+                | "comment_confirmed"
+                | "message_confirmed"
+                | "executor_reported_success"
+        ),
+        "skipped" => matches!(
+            evidence,
+            "user_excluded"
+                | "duplicate_in_task"
+                | "duplicate_in_history"
+                | "blacklisted"
+                | "action_cancelled"
+        ),
+        "failed" => matches!(
+            evidence,
+            "admission_rejected"
+                | "local_safety_limit"
+                | "login_required"
+                | "dialog_blocked"
+                | "messaging_not_allowed"
+                | "follow_required"
+                | "timed_out"
+                | "page_version_unknown"
+                | "conflicting_anchors"
+                | "page_unavailable"
+                | "verification_unavailable"
+                | "executor_reported_failure"
+        ),
+        "outcome_uncertain" => matches!(
+            evidence,
+            "dispatch_timed_out"
+                | "dispatch_unavailable"
+                | "final_state_unconfirmed"
+                | "recovery_unconfirmed"
+        ),
+        _ => false,
+    };
+    let action_expected = matches!(
+        result_status,
+        "running" | "succeeded" | "failed" | "outcome_uncertain"
+    ) || result_status == "pending" && evidence == "action_pending"
+        || result_status == "skipped" && evidence == "action_cancelled";
+    evidence_matches && action_present == action_expected
+}
+
+fn parse_task_target_results(
+    body: &[u8],
+    expected_task_id: &str,
+) -> Result<TaskTargetResults, ControlPlaneError> {
+    let response: TaskTargetResultsResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.task_id)?;
+    if response.task_id != expected_task_id
+        || !valid_task_status(&response.task_status)
+        || response.task_revision == 0
+        || response.task_revision > MAX_CROSS_RUNTIME_SEQUENCE
+        || response.last_event_sequence > response.task_revision
+        || response.items.len() > MAX_TASK_TARGET_LIMIT as usize
+    {
+        return Err(protocol_invalid());
+    }
+    let mut seen = HashSet::with_capacity(response.items.len());
+    let mut previous_ordinal = 0_u16;
+    let mut items = Vec::with_capacity(response.items.len());
+    for item in response.items {
+        require_canonical_uuid_v4(&item.target_id)?;
+        require_safe_exact_text(&item.display_name, MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS)?;
+        if let Some(handle) = item.public_handle.as_deref() {
+            let mut bytes = handle.bytes();
+            if handle.len() > MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS
+                || !bytes
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                || !bytes
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+            {
+                return Err(protocol_invalid());
+            }
+        }
+        if let Some(action_id) = item.action_id.as_deref() {
+            require_canonical_uuid_v4(action_id)?;
+        }
+        require_bounded_timestamp(&item.updated_at)?;
+        if item.ordinal == 0
+            || item.ordinal > MAX_TASK_TARGET_LIMIT
+            || item.ordinal <= previous_ordinal
+            || !seen.insert(item.target_id.clone())
+            || !target_result_evidence_matches(
+                &item.result_status,
+                &item.evidence,
+                item.action_id.is_some(),
+            )
+        {
+            return Err(protocol_invalid());
+        }
+        previous_ordinal = item.ordinal;
+        items.push(TaskTargetResultItem {
+            target_id: item.target_id,
+            ordinal: item.ordinal,
+            display_name: item.display_name,
+            public_handle: item.public_handle,
+            result_status: item.result_status,
+            evidence: item.evidence,
+            action_id: item.action_id,
+            updated_at: item.updated_at,
+        });
+    }
+    Ok(TaskTargetResults {
+        task_id: response.task_id,
+        task_status: response.task_status,
+        task_revision: response.task_revision,
+        last_event_sequence: response.last_event_sequence,
+        items,
+    })
+}
+
 fn parse_task_list(body: &[u8]) -> Result<TaskListPage, ControlPlaneError> {
     let response: TaskListResponse = parse_exact_json(body)?;
     if response.items.len() > 100
@@ -2873,12 +3083,12 @@ mod tests {
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
         parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
         parse_task_discovery, parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
-        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
-        require_preview_cursor, required_credential, sse_frame_end, transport_error,
-        validate_preview_command, validate_response_metadata, validated_loopback_origin,
-        ControlPlaneErrorCode, ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap,
-        DeviceSessionCapability, DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition,
-        ResponseMetadata,
+        parse_task_target_results, parse_workbench_status, request_path, require_idempotency_key,
+        require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
+        transport_error, validate_preview_command, validate_response_metadata,
+        validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
+        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -4288,6 +4498,88 @@ mod tests {
     }
 
     #[test]
+    fn target_results_require_coherent_status_evidence_action_and_ordering() {
+        let action = "7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc";
+        let skipped_target = "df133e68-53ab-4105-9f91-8fd5812dcdb3";
+        let response = serde_json::json!({
+            "taskId": IDENTIFIER,
+            "taskStatus": "partially_succeeded",
+            "taskRevision": 8,
+            "lastEventSequence": 7,
+            "items": [
+                {
+                    "targetId": IDENTIFIER,
+                    "ordinal": 1,
+                    "displayName": "评论成功目标",
+                    "publicHandle": "success.target",
+                    "resultStatus": "succeeded",
+                    "evidence": "comment_confirmed",
+                    "actionId": action,
+                    "updatedAt": "2026-07-21T08:00:00Z"
+                },
+                {
+                    "targetId": skipped_target,
+                    "ordinal": 2,
+                    "displayName": "用户排除目标",
+                    "publicHandle": null,
+                    "resultStatus": "skipped",
+                    "evidence": "user_excluded",
+                    "actionId": null,
+                    "updatedAt": "2026-07-21T08:00:01Z"
+                }
+            ]
+        });
+        let parsed = parse_task_target_results(
+            &serde_json::to_vec(&response).expect("target results JSON"),
+            IDENTIFIER,
+        )
+        .expect("valid target results");
+        assert_eq!(parsed.items.len(), 2);
+        let public = serde_json::to_string(&parsed).expect("public target results");
+        assert!(public.contains("comment_confirmed"));
+        assert!(!public.contains("platformTargetId"));
+
+        for invalid in [
+            {
+                let mut value = response.clone();
+                value["items"][0]["evidence"] = serde_json::json!("user_excluded");
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][0]["actionId"] = serde_json::Value::Null;
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][1]["ordinal"] = serde_json::json!(1);
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["items"][1]["displayName"] = serde_json::json!("password=private");
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["lastEventSequence"] = serde_json::json!(9);
+                value
+            },
+            {
+                let mut value = response.clone();
+                value["privatePath"] = serde_json::json!("/Users/private");
+                value
+            },
+        ] {
+            assert!(parse_task_target_results(
+                &serde_json::to_vec(&invalid).expect("invalid target results JSON"),
+                IDENTIFIER,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn credential_loading_distinguishes_missing_corrupt_and_storage_failure() {
         let missing = DeviceCredentialVault::new(MemorySecretStore {
             value: None,
@@ -4351,6 +4643,7 @@ mod tests {
             ControlPlaneOperation::CreateTask,
             ControlPlaneOperation::ListTasks,
             ControlPlaneOperation::GetTask,
+            ControlPlaneOperation::GetTaskTargetResults,
         ] {
             let error = transport_error(operation);
             assert_eq!(error.code(), ControlPlaneErrorCode::TransportUnavailable);

@@ -30,13 +30,21 @@ from run_t3_06_acceptance import (
     wait_for_control_plane,
 )
 from run_t3_14_acceptance import fake_executor_client, seed_attempt_and_offer
-from sqlalchemy import select, text
+from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from automation_tool.control_plane.application.task_command_delivery import TaskCommandRecord
+from automation_tool.control_plane.application.task_command_delivery import (
+    TaskCommandRecord,
+)
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+    TaskTargetConfirmationIntent,
+)
 from automation_tool.control_plane.domain import (
+    ActionId,
     ExecutionAttemptStatus,
     InstallationId,
+    TargetId,
     TaskCommandStatus,
     TaskCommandType,
     TaskEventType,
@@ -45,12 +53,25 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
+    action_risk_authorizations,
     execution_attempts,
+    task_actions,
     task_commands,
     task_events,
+    task_target_confirmations,
+    task_target_exclusions,
     tasks,
 )
-from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
+from automation_tool.control_plane.infrastructure.database.task_target_repository import (
+    SqlAlchemyTaskTargetRepository,
+)
+from automation_tool.protocol import (
+    MAX_EXECUTOR_MESSAGE_BYTES,
+    DouyinCandidate,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+    DouyinSearchExposureAction,
+)
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-run-e2e.conf.json"
 CONTROL_PLANE_PORT = 8765
@@ -114,7 +135,9 @@ def signed_bootstrap() -> tuple[str, str]:
 
 def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
     environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("AUTOMATION_TOOL_")
     }
     database_password = secrets.token_hex(24)
     database_url = (
@@ -176,11 +199,15 @@ async def wait_for_app_tasks(
                 controlled = by_key[CONTROLLED_TASK_KEY]
                 emergency = by_key[EMERGENCY_TASK_KEY]
                 if controlled[1] != emergency[1]:
-                    raise RuntimeError("T3-18 Task fixtures escaped their Installation scope")
+                    raise RuntimeError(
+                        "T3-18 Task fixtures escaped their Installation scope"
+                    )
                 try:
                     credential = credential_path.read_text(encoding="ascii")
                 except (OSError, UnicodeError) as error:
-                    raise RuntimeError("T3-18 App credential vault is unreadable") from error
+                    raise RuntimeError(
+                        "T3-18 App credential vault is unreadable"
+                    ) from error
                 return (
                     InstallationId.parse(controlled[1]),
                     TaskId.parse(controlled[2]),
@@ -218,7 +245,7 @@ async def verify_database_state(
             ],
             TaskStatus.CANCELLED,
             ExecutionAttemptStatus.CANCELLED,
-            7,
+            8,
         ),
         (
             emergency_offer,
@@ -230,7 +257,7 @@ async def verify_database_state(
             ],
             TaskStatus.OUTCOME_UNCERTAIN,
             ExecutionAttemptStatus.OUTCOME_UNCERTAIN,
-            5,
+            6,
         ),
     )
     try:
@@ -266,7 +293,11 @@ async def verify_database_state(
                     .all()
                 )
                 task = (
-                    (await session.execute(select(tasks).where(tasks.c.id == offer.task_id.uuid)))
+                    (
+                        await session.execute(
+                            select(tasks).where(tasks.c.id == offer.task_id.uuid)
+                        )
+                    )
                     .mappings()
                     .one()
                 )
@@ -274,7 +305,8 @@ async def verify_database_state(
                     (
                         await session.execute(
                             select(execution_attempts).where(
-                                execution_attempts.c.id == offer.execution_attempt_id.uuid
+                                execution_attempts.c.id
+                                == offer.execution_attempt_id.uuid
                             )
                         )
                     )
@@ -283,8 +315,13 @@ async def verify_database_state(
                 )
                 if [row["command_type"] for row in commands] != [
                     command_type.value for command_type in command_types
-                ] or any(row["status"] != TaskCommandStatus.ACKNOWLEDGED.value for row in commands):
-                    raise RuntimeError("T3-18 Task commands were not exactly acknowledged")
+                ] or any(
+                    row["status"] != TaskCommandStatus.ACKNOWLEDGED.value
+                    for row in commands
+                ):
+                    raise RuntimeError(
+                        "T3-18 Task commands were not exactly acknowledged"
+                    )
                 if [row["event_type"] for row in events] != [
                     event_type.value for event_type in event_types
                 ]:
@@ -296,15 +333,185 @@ async def verify_database_state(
                     or attempt["status"] != attempt_status.value
                     or attempt["finished_at"] is None
                 ):
-                    raise RuntimeError("T3-18 final Task projection is invalid")
+                    raise RuntimeError(
+                        "T3-18 final Task projection is invalid: "
+                        f"task_status={task['status']!r}, revision={task['revision']!r}, "
+                        f"last_event_sequence={task['last_event_sequence']!r}, "
+                        f"attempt_status={attempt['status']!r}, "
+                        f"attempt_finished={attempt['finished_at'] is not None!r}"
+                    )
             capabilities = list(
-                await session.scalars(text("select capability from device_sessions order by id"))
+                await session.scalars(
+                    text("select capability from device_sessions order by id")
+                )
             )
         if capabilities.count("executor.connect") != 1 or any(
             capability not in {"app.control-plane", "executor.connect"}
             for capability in capabilities
         ):
             raise RuntimeError("T3-18 used an unexpected Session capability")
+    finally:
+        await database.close()
+
+
+async def seed_task_confirmation(
+    database_url: str,
+    installation_id: InstallationId,
+    task_id: TaskId,
+    *,
+    include_target_results: bool,
+) -> tuple[TargetId, ...]:
+    """Seed the current confirmation required by the production offer guard."""
+    database = Database.from_url(database_url)
+    now = datetime.now(UTC)
+    candidate_facts = (
+        (
+            ("a715-success", "成功目标", "a715_success"),
+            ("a715-skipped", "用户排除目标", "a715_skipped"),
+            ("a715-failed", "失败目标", "a715_failed"),
+            ("a715-uncertain", "不确定目标", "a715_uncertain"),
+        )
+        if include_target_results
+        else (("t318-emergency", "紧停目标", "t318_emergency"),)
+    )
+    candidates = tuple(
+        DouyinCandidate(
+            platform_target_id=platform_target_id,
+            summary=DouyinCandidateSummary(
+                display_name=display_name,
+                public_handle=public_handle,
+            ),
+            source=DouyinCandidateSource.GENERAL_SEARCH_AUTHOR,
+            page_revision=1,
+        )
+        for platform_target_id, display_name, public_handle in candidate_facts
+    )
+    try:
+        targets = await SqlAlchemyTaskTargetRepository(database).evaluate_and_replace(
+            task_id=task_id,
+            installation_id=installation_id,
+            candidates=candidates,
+            blacklist=(),
+            evaluated_at=now,
+        )
+        selected_target_ids = tuple(
+            target.target_id
+            for index, target in enumerate(targets)
+            if not include_target_results or index != 1
+        )
+        intent = TaskTargetConfirmationIntent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=1,
+            confirmation_revision=1,
+            action=DouyinSearchExposureAction.COMMENT,
+            message_template="您好 {{target_display_name}} 期待您的分享",
+            selected_target_ids=selected_target_ids,
+        )
+        async with database.session() as session:
+            if include_target_results:
+                await session.execute(
+                    insert(task_target_exclusions).values(
+                        target_id=targets[1].target_id.uuid,
+                        task_id=task_id.uuid,
+                        installation_id=installation_id.uuid,
+                        page_revision=1,
+                        excluded_at=now,
+                    )
+                )
+            await session.execute(
+                insert(task_target_confirmations).values(
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    page_revision=1,
+                    selection_task_revision=1,
+                    confirmed_task_revision=2,
+                    selected_target_count=intent.selected_target_count,
+                    action=intent.action.value,
+                    message_template=intent.message_template,
+                    intent_version=TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+                    intent_fingerprint=intent.fingerprint(),
+                    source_message_id=TaskId.new().uuid,
+                    source_idempotency_key=f"task:t318:confirm:{task_id}",
+                    source_fingerprint=secrets.token_bytes(32),
+                    confirmed_at=now,
+                    created_at=now,
+                )
+            )
+        return tuple(target.target_id for target in targets)
+    finally:
+        await database.close()
+
+
+async def seed_target_results(
+    database_url: str,
+    installation_id: InstallationId,
+    controlled_offer: TaskCommandRecord,
+    target_ids: tuple[TargetId, ...],
+) -> None:
+    """Seed A7-15 facts; the hidden App must read them through its production API."""
+    if len(target_ids) != 4:
+        raise RuntimeError("A7-15 target-result fixture must contain four targets")
+    database = Database.from_url(database_url)
+    now = datetime.now(UTC)
+    try:
+        async with database.session() as session:
+            for count, (target_id, ordinal, outcome, evidence) in enumerate(
+                (
+                    (target_ids[0], 1, "succeeded", "comment_confirmed"),
+                    (target_ids[2], 3, "failed", "login_required"),
+                    (target_ids[3], 4, "outcome_uncertain", "final_state_unconfirmed"),
+                ),
+                start=1,
+            ):
+                action_id = ActionId.new()
+                await session.execute(
+                    insert(task_actions).values(
+                        id=action_id.uuid,
+                        execution_attempt_id=controlled_offer.execution_attempt_id.uuid,
+                        task_id=controlled_offer.task_id.uuid,
+                        installation_id=installation_id.uuid,
+                        ordinal=ordinal,
+                        status=(
+                            "outcome_uncertain"
+                            if outcome == "outcome_uncertain"
+                            else "verified"
+                        ),
+                        outcome=outcome,
+                        evidence_code=evidence,
+                        revision=3,
+                        created_at=now,
+                        updated_at=now,
+                        finished_at=now,
+                    )
+                )
+                await session.execute(
+                    insert(action_risk_authorizations).values(
+                        action_id=action_id.uuid,
+                        target_id=target_id.uuid,
+                        execution_attempt_id=controlled_offer.execution_attempt_id.uuid,
+                        task_id=controlled_offer.task_id.uuid,
+                        installation_id=installation_id.uuid,
+                        ordinal=ordinal,
+                        platform="douyin",
+                        action="comment",
+                        policy_version="action-risk-policy.v1",
+                        effective_minimum_interval_seconds=30,
+                        task_action_limit=10,
+                        daily_action_limit=100,
+                        consecutive_failure_threshold=3,
+                        task_count_after=count,
+                        daily_count_after=count,
+                        authorized_day=now.date(),
+                        authorized_at=now,
+                        created_at=now,
+                    )
+                )
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == controlled_offer.task_id.uuid)
+                .values(updated_at=now)
+            )
     finally:
         await database.close()
 
@@ -370,8 +577,24 @@ def main() -> None:
             cwd=FRONTEND_ROOT,
             env=environment,
         )
-        installation_id, controlled_task_id, emergency_task_id, credential = asyncio.run(
-            wait_for_app_tasks(database_url, private_app_data, app_process)
+        installation_id, controlled_task_id, emergency_task_id, credential = (
+            asyncio.run(wait_for_app_tasks(database_url, private_app_data, app_process))
+        )
+        controlled_target_ids = asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                controlled_task_id,
+                include_target_results=True,
+            )
+        )
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                emergency_task_id,
+                include_target_results=False,
+            )
         )
         controlled_offer = asyncio.run(
             seed_attempt_and_offer(
@@ -379,6 +602,15 @@ def main() -> None:
                 installation_id,
                 controlled_task_id,
                 label="task-run-controlled",
+                confirmed_target_revision=True,
+            )
+        )
+        asyncio.run(
+            seed_target_results(
+                database_url,
+                installation_id,
+                controlled_offer,
+                controlled_target_ids,
             )
         )
         emergency_offer = asyncio.run(
@@ -387,6 +619,7 @@ def main() -> None:
                 installation_id,
                 emergency_task_id,
                 label="task-run-emergency",
+                confirmed_target_revision=True,
             )
         )
         client = fake_executor_client(credential, installation_id)
@@ -415,7 +648,9 @@ def main() -> None:
         if processed != 6:
             raise RuntimeError("T3-18 FakeExecutor did not process all six commands")
         verify_app_private_data(private_app_data)
-        asyncio.run(verify_database_state(database_url, controlled_offer, emergency_offer))
+        asyncio.run(
+            verify_database_state(database_url, controlled_offer, emergency_offer)
+        )
         print("[T3-18] Hidden-App Task run details and all controls acceptance passed")
     finally:
         if app_process is not None and app_process.poll() is None:
