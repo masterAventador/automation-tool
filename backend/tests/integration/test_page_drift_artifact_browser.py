@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -11,6 +12,11 @@ from uuid import UUID
 import pytest
 
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
+from automation_tool.executor.browser_diagnostic_artifact import (
+    BROWSER_DIAGNOSTIC_RETENTION_SECONDS,
+    BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+    BROWSER_DIAGNOSTIC_TRACE_POLICY,
+)
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
     BrowserRuntime,
@@ -20,7 +26,11 @@ from automation_tool.executor.command_processor import ExecutorCommandProcessor
 from automation_tool.executor.discovery_operation import ProductionDouyinDiscoveryOperation
 from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.local_artifact import LocalArtifactStore
-from automation_tool.executor.page_drift_artifact import PAGE_DRIFT_ARTIFACT_POLICY
+from automation_tool.executor.page_drift_artifact import (
+    PAGE_DRIFT_ARTIFACT_POLICY,
+    PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS,
+    PageDriftArtifactStore,
+)
 from automation_tool.executor.rpa.douyin.page_version import DOUYIN_HOME_URL
 from automation_tool.protocol import PlatformSessionState, TaskDiscoveryCompletedEnvelope
 
@@ -136,6 +146,56 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
             headless=True,
         )
     )
+    stale_page_drift = PageDriftArtifactStore(
+        state_directory=state,
+        clock=Clock(),
+        id_source=Ids(),
+    ).capture(
+        evidence="page_version_unknown",
+        page_revision=6,
+        stage="search",
+    )
+    stale_screenshot = LocalArtifactStore(
+        root_directory=state,
+        policy=BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+        id_source=Ids(),
+    ).capture(b"stale-redacted-screenshot")
+    trace_store = LocalArtifactStore(
+        root_directory=state,
+        policy=BROWSER_DIAGNOSTIC_TRACE_POLICY,
+        id_source=Ids(),
+    )
+
+    def stale_trace_payload(artifact_id: UUID) -> bytes:
+        return json.dumps(
+            {
+                "artifact_id": str(artifact_id),
+                "artifact_version": "executor.browser-diagnostic-trace.v1",
+                "captured_at": NOW.isoformat().replace("+00:00", "Z"),
+                "operation": "douyin_target_discovery",
+                "page_revision": 6,
+                "platform": "douyin",
+                "redaction_version": "browser-skeleton.v1",
+                "screenshot_artifact_id": str(stale_screenshot.artifact_id),
+                "stage": "search",
+                "trigger": "failure",
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+
+    stale_trace = trace_store.capture_generated(stale_trace_payload)
+    expired = (
+        time.time()
+        - max(
+            PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS,
+            BROWSER_DIAGNOSTIC_RETENTION_SECONDS,
+        )
+        - 1
+    )
+    for reference in (stale_page_drift, stale_screenshot, stale_trace):
+        os.utime(state / reference.relative_path, (expired, expired))
     processor = ExecutorCommandProcessor(
         ledger=ledger,
         installation_id=INSTALLATION_ID,
@@ -163,6 +223,7 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
     )
     reference = local_artifacts.resolve(UUID(artifacts[0].stem))
     assert local_artifacts.list_references() == (reference,)
+    assert reference.artifact_id != stale_page_drift.artifact_id
     artifact_source = local_artifacts.read(reference).decode("utf-8")
     assert reference.relative_path == (
         f"artifacts/evidence/page-drift/{reference.artifact_id}.json"
@@ -172,6 +233,18 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
     assert "自动化运营私密关键词" not in artifact_source
     assert "页面契约漂移" not in artifact_source
     assert "url" not in artifact_source.lower()
+    screenshot_store = LocalArtifactStore(
+        root_directory=state,
+        policy=BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+    )
+    current_screenshots = screenshot_store.list_references()
+    current_traces = trace_store.list_references()
+    assert len(current_screenshots) == 1
+    assert len(current_traces) == 1
+    assert current_screenshots[0].artifact_id != stale_screenshot.artifact_id
+    assert current_traces[0].artifact_id != stale_trace.artifact_id
+    current_trace = json.loads(trace_store.read(current_traces[0]))
+    assert current_trace["screenshot_artifact_id"] == str(current_screenshots[0].artifact_id)
     assert len(RoutedRuntime.instances) == 1
     assert not RoutedRuntime.instances[0].runtime.is_running
     assert os.stat(profile).st_mode & 0o777 == 0o700

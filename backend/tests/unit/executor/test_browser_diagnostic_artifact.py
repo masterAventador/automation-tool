@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
+import time
 import zlib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +14,7 @@ import pytest
 
 from automation_tool.executor import browser_diagnostic_artifact as diagnostic_module
 from automation_tool.executor.browser_diagnostic_artifact import (
+    BROWSER_DIAGNOSTIC_RETENTION_SECONDS,
     BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
     BROWSER_DIAGNOSTIC_TRACE_POLICY,
     MAX_BROWSER_DIAGNOSTIC_ARTIFACTS,
@@ -27,6 +30,7 @@ from automation_tool.executor.browser_diagnostic_artifact import (
 )
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.local_artifact import LocalArtifactRef, LocalArtifactStore
+from automation_tool.protocol.limits import MAX_CROSS_RUNTIME_SEQUENCE
 
 NOW = datetime(2026, 7, 21, 16, 30, tzinfo=UTC)
 
@@ -173,7 +177,9 @@ def test_capture_stores_a_metadata_free_redacted_png_and_fixed_trace(tmp_path: P
     }
 
 
-def test_capture_limits_count_size_time_and_untrusted_callers(tmp_path: Path) -> None:
+def test_capture_rolls_complete_pairs_at_the_count_bound_and_rejects_untrusted_callers(
+    tmp_path: Path,
+) -> None:
     root = state(tmp_path)
     artifacts = BrowserDiagnosticArtifactStore(
         state_directory=root,
@@ -188,13 +194,26 @@ def test_capture_limits_count_size_time_and_untrusted_callers(tmp_path: Path) ->
             stage=BrowserDiagnosticStage.EXTRACTION,
             page_revision=revision,
         )
-    with pytest.raises(BrowserDiagnosticArtifactRejected):
-        artifacts.capture(
-            window=window(page),
-            trigger=BrowserDiagnosticTrigger.FAILURE,
-            stage=BrowserDiagnosticStage.SEARCH,
-            page_revision=MAX_BROWSER_DIAGNOSTIC_ARTIFACTS + 1,
-        )
+    rolled = artifacts.capture(
+        window=window(page),
+        trigger=BrowserDiagnosticTrigger.FAILURE,
+        stage=BrowserDiagnosticStage.SEARCH,
+        page_revision=MAX_BROWSER_DIAGNOSTIC_ARTIFACTS + 1,
+    )
+    screenshot_store = LocalArtifactStore(
+        root_directory=root,
+        policy=BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+    )
+    trace_store = LocalArtifactStore(
+        root_directory=root,
+        policy=BROWSER_DIAGNOSTIC_TRACE_POLICY,
+    )
+    screenshots = screenshot_store.list_references()
+    traces = trace_store.list_references()
+    assert len(screenshots) == MAX_BROWSER_DIAGNOSTIC_ARTIFACTS
+    assert len(traces) == MAX_BROWSER_DIAGNOSTIC_ARTIFACTS
+    assert rolled.screenshot in screenshots
+    assert rolled.trace in traces
 
     for invalid in (
         {"window": object()},
@@ -239,6 +258,168 @@ def test_capture_limits_count_size_time_and_untrusted_callers(tmp_path: Path) ->
             trigger=BrowserDiagnosticTrigger.FAILURE,
             stage=BrowserDiagnosticStage.SEARCH,
             page_revision=7,
+        )
+
+
+def test_retention_cleanup_deletes_expired_pairs_and_preserves_referenced_screenshot(
+    tmp_path: Path,
+) -> None:
+    root = state(tmp_path)
+    artifacts = BrowserDiagnosticArtifactStore(
+        state_directory=root,
+        clock=Clock(),
+        id_source=Ids(),
+    )
+    expired = artifacts.capture(
+        window=window(Page(png())),
+        trigger=BrowserDiagnosticTrigger.FAILURE,
+        stage=BrowserDiagnosticStage.SEARCH,
+        page_revision=1,
+    )
+    retained = artifacts.capture(
+        window=window(Page(png())),
+        trigger=BrowserDiagnosticTrigger.FAILURE,
+        stage=BrowserDiagnosticStage.SEARCH,
+        page_revision=2,
+    )
+    old = time.time() - BROWSER_DIAGNOSTIC_RETENTION_SECONDS - 1
+    for reference in (expired.screenshot, expired.trace, retained.screenshot):
+        os.utime(root / reference.relative_path, (old, old))
+
+    BrowserDiagnosticArtifactStore(
+        state_directory=root,
+        clock=Clock(),
+        id_source=Ids(),
+    )
+
+    screenshot_store = LocalArtifactStore(
+        root_directory=root,
+        policy=BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+    )
+    trace_store = LocalArtifactStore(
+        root_directory=root,
+        policy=BROWSER_DIAGNOSTIC_TRACE_POLICY,
+    )
+    assert screenshot_store.list_references() == (retained.screenshot,)
+    assert trace_store.list_references() == (retained.trace,)
+
+
+def test_trace_reference_parser_rejects_every_untrusted_shape(tmp_path: Path) -> None:
+    root = state(tmp_path)
+    store = BrowserDiagnosticArtifactStore(state_directory=root, clock=Clock(), id_source=Ids())
+    bundle = store.capture(
+        window=window(Page(png())),
+        trigger=BrowserDiagnosticTrigger.FAILURE,
+        stage=BrowserDiagnosticStage.SEARCH,
+        page_revision=7,
+    )
+    trace_store = LocalArtifactStore(
+        root_directory=root,
+        policy=BROWSER_DIAGNOSTIC_TRACE_POLICY,
+    )
+    valid = cast(dict[str, object], json.loads(trace_store.read(bundle.trace)))
+
+    with pytest.raises(ValueError):
+        diagnostic_module._trace_screenshot_id(
+            b'{"artifact_id":"first","artifact_id":"second"}',
+            bundle.trace.artifact_id,
+        )
+    invalid_documents: tuple[object, ...] = (
+        [],
+        {"artifact_id": str(bundle.trace.artifact_id)},
+    )
+    for invalid_document in invalid_documents:
+        with pytest.raises(ValueError):
+            diagnostic_module._trace_screenshot_id(
+                json.dumps(invalid_document).encode("utf-8"),
+                bundle.trace.artifact_id,
+            )
+
+    invalid_fields: tuple[tuple[str, object], ...] = (
+        ("artifact_id", str(UUID("923e4567-e89b-42d3-a456-426614174099"))),
+        ("artifact_version", "private-version"),
+        ("operation", "private-operation"),
+        ("platform", "private-platform"),
+        ("redaction_version", "private-redaction"),
+        ("stage", "private-stage"),
+        ("trigger", "private-trigger"),
+        ("page_revision", True),
+        ("page_revision", 0),
+        ("page_revision", MAX_CROSS_RUNTIME_SEQUENCE + 1),
+        ("captured_at", object()),
+        ("captured_at", ""),
+        ("captured_at", "2" * 33),
+        ("screenshot_artifact_id", object()),
+    )
+    for key, value in invalid_fields:
+        changed = dict(valid)
+        changed[key] = value
+        with pytest.raises((TypeError, ValueError)):
+            diagnostic_module._trace_screenshot_id(
+                json.dumps(changed, default=lambda _value: None).encode("utf-8"),
+                bundle.trace.artifact_id,
+            )
+
+    for captured_at in (
+        "2026-07-21T16:30:00+00:00",
+        "2026-07-21T16:30:00.000000Z",
+        "private-timeZ",
+    ):
+        changed = dict(valid)
+        changed["captured_at"] = captured_at
+        with pytest.raises(ValueError):
+            diagnostic_module._trace_screenshot_id(
+                json.dumps(changed).encode("utf-8"),
+                bundle.trace.artifact_id,
+            )
+
+    for screenshot_id in (
+        str(UUID("923e4567-e89b-12d3-a456-426614174001")),
+        str(bundle.screenshot.artifact_id).upper(),
+    ):
+        changed = dict(valid)
+        changed["screenshot_artifact_id"] = screenshot_id
+        with pytest.raises(ValueError):
+            diagnostic_module._trace_screenshot_id(
+                json.dumps(changed).encode("utf-8"),
+                bundle.trace.artifact_id,
+            )
+
+
+def test_store_rejects_duplicate_trace_references_and_invalid_internal_reservation(
+    tmp_path: Path,
+) -> None:
+    root = state(tmp_path)
+    store = BrowserDiagnosticArtifactStore(state_directory=root, clock=Clock(), id_source=Ids())
+    first = store.capture(
+        window=window(Page(png())),
+        trigger=BrowserDiagnosticTrigger.FAILURE,
+        stage=BrowserDiagnosticStage.SEARCH,
+        page_revision=1,
+    )
+    second = store.capture(
+        window=window(Page(png())),
+        trigger=BrowserDiagnosticTrigger.FAILURE,
+        stage=BrowserDiagnosticStage.SEARCH,
+        page_revision=2,
+    )
+    with pytest.raises(ValueError):
+        store._govern_artifacts(reserve_trace=cast(bool, object()))
+
+    trace_path = root / second.trace.relative_path
+    document = json.loads(trace_path.read_bytes())
+    document["screenshot_artifact_id"] = str(first.screenshot.artifact_id)
+    trace_path.write_bytes(
+        json.dumps(document, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
+    )
+    trace_path.chmod(0o600)
+    with pytest.raises(BrowserDiagnosticArtifactRejected):
+        BrowserDiagnosticArtifactStore(
+            state_directory=root,
+            clock=Clock(),
+            id_source=Ids(),
         )
 
 

@@ -12,6 +12,7 @@ from typing import Final, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
 from automation_tool.executor.local_artifact import (
+    DEFAULT_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES,
     LocalArtifactPolicy,
     LocalArtifactRef,
     LocalArtifactRejected,
@@ -24,12 +25,15 @@ PAGE_DRIFT_ARTIFACT_MEDIA_TYPE: Final = "application/vnd.automation-tool.page-dr
 PAGE_DRIFT_ARTIFACT_DIRECTORY: Final = "artifacts/evidence/page-drift"
 MAX_PAGE_DRIFT_ARTIFACT_BYTES: Final = 2_048
 MAX_PAGE_DRIFT_ARTIFACTS: Final = 20
+PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS: Final = 30 * 24 * 60 * 60
 PAGE_DRIFT_ARTIFACT_POLICY: Final = LocalArtifactPolicy(
     relative_directory=PAGE_DRIFT_ARTIFACT_DIRECTORY,
     file_extension="json",
     media_type=PAGE_DRIFT_ARTIFACT_MEDIA_TYPE,
     maximum_bytes=MAX_PAGE_DRIFT_ARTIFACT_BYTES,
     maximum_artifacts=MAX_PAGE_DRIFT_ARTIFACTS,
+    retention_seconds=PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS,
+    minimum_free_bytes=DEFAULT_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES,
 )
 
 _ALLOWED_EVIDENCE = frozenset({"page_version_unknown", "conflicting_anchors"})
@@ -92,6 +96,7 @@ class PageDriftArtifactStore:
                 policy=PAGE_DRIFT_ARTIFACT_POLICY,
                 id_source=id_source,
             )
+            self._artifacts.cleanup()
         except Exception:
             raise PageDriftArtifactRejected from None
 
@@ -171,6 +176,7 @@ __all__ = [
     "PAGE_DRIFT_ARTIFACT_DIRECTORY",
     "PAGE_DRIFT_ARTIFACT_MEDIA_TYPE",
     "PAGE_DRIFT_ARTIFACT_POLICY",
+    "PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS",
     "PAGE_DRIFT_ARTIFACT_VERSION",
     "PageDriftArtifactClock",
     "PageDriftArtifactRef",

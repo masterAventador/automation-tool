@@ -17,6 +17,7 @@ from automation_tool.executor.page_drift_artifact import (
     PAGE_DRIFT_ARTIFACT_DIRECTORY,
     PAGE_DRIFT_ARTIFACT_MEDIA_TYPE,
     PAGE_DRIFT_ARTIFACT_POLICY,
+    PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS,
     PageDriftArtifactRef,
     PageDriftArtifactRejected,
     PageDriftArtifactStore,
@@ -93,25 +94,31 @@ def test_capture_writes_one_bounded_private_fixed_schema_artifact(tmp_path: Path
         assert stat.S_IMODE(artifact_path.stat().st_mode) == 0o600
 
 
-def test_capture_is_exclusive_and_refuses_to_exceed_the_count_bound(tmp_path: Path) -> None:
+def test_capture_is_exclusive_and_rolls_the_oldest_at_the_count_bound(tmp_path: Path) -> None:
     active = store(tmp_path / "state")
 
+    first: PageDriftArtifactRef | None = None
     for revision in range(1, MAX_PAGE_DRIFT_ARTIFACTS + 1):
-        active.capture(
+        reference = active.capture(
             evidence="conflicting_anchors",
             page_revision=revision,
             stage="search",
         )
+        if first is None:
+            first = reference
 
-    with pytest.raises(PageDriftArtifactRejected):
-        active.capture(
-            evidence="page_version_unknown",
-            page_revision=MAX_PAGE_DRIFT_ARTIFACTS + 1,
-            stage="search",
-        )
+    newest = active.capture(
+        evidence="page_version_unknown",
+        page_revision=MAX_PAGE_DRIFT_ARTIFACTS + 1,
+        stage="search",
+    )
+    assert first is not None
     assert len(tuple((tmp_path / "state" / PAGE_DRIFT_ARTIFACT_DIRECTORY).iterdir())) == (
         MAX_PAGE_DRIFT_ARTIFACTS
     )
+    assert not (tmp_path / "state" / first.relative_path).exists()
+    assert (tmp_path / "state" / newest.relative_path).is_file()
+    assert PAGE_DRIFT_ARTIFACT_POLICY.retention_seconds == PAGE_DRIFT_ARTIFACT_RETENTION_SECONDS
 
 
 def test_invalid_inputs_and_private_path_replacement_fail_closed(tmp_path: Path) -> None:

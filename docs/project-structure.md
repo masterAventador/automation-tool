@@ -569,7 +569,8 @@ app-data/
 │   ├── package/
 │   └── state/
 │       ├── executor-ledger.sqlite3
-│       └── artifacts/evidence/page-drift/<artifact-id>.json
+│       ├── artifacts/evidence/page-drift/<artifact-id>.json
+│       └── artifacts/diagnostics/{screenshots,traces}/<artifact-id>.*
 ├── browser-profiles/
 │   └── douyin/<canonical-profile-uuid>/
 ├── logs/
@@ -581,7 +582,7 @@ app-data/
 
 - 目录和文件权限按当前用户最小化；
 - 浏览器 Profile 不进入普通备份、日志或导出；
-- Artifact、日志和诊断数据都有数量、大小和时间上限；
+- Artifact、日志和诊断数据都有数量、大小和时间上限；H8-12 由唯一 Local Artifact Store 在初始化和写入前执行到期清理、最小磁盘余量治理与精确引用保护；
 - 数据迁移必须有 schema version、备份或可回滚策略；
 - 测试使用临时目录，不能读写真实 App 数据。
 

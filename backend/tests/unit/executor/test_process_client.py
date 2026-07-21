@@ -1213,6 +1213,81 @@ def test_suspension_gap_closes_the_stale_transport_and_ignores_expired_command(
     assert not thread.is_alive()
 
 
+def test_suspension_gap_after_received_frame_reconnects_before_command_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OffsetMonotonic:
+        def __init__(self) -> None:
+            self.offset = 0.0
+
+        def now(self) -> float:
+            return time.monotonic() + self.offset
+
+    clock = OffsetMonotonic()
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    connections = count(1)
+    stale = expired_offer()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            connection_number = next(connections)
+            hello = parse_executor_message(connection.recv(timeout=3))
+            observed.put(hello)
+            if connection_number == 1:
+                connection.send(stale.model_dump_json())
+                with suppress(Exception):
+                    connection.recv(timeout=3)
+                return
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    diagnostics = StringIO()
+    try:
+        process, _ = process_for(
+            port,
+            tmp_path / "received-frame-gap-state",
+            monotonic_source=clock.now,
+            suspend_gap_threshold=timedelta(seconds=5),
+            diagnostic_output=diagnostics,
+        )
+        original_send_local_outbox = process._send_local_outbox
+        jumped = False
+
+        def jump_after_pre_receive_checks(websocket: ClientConnection) -> None:
+            nonlocal jumped
+            original_send_local_outbox(websocket)
+            if not jumped:
+                jumped = True
+                clock.offset += 10
+
+        monkeypatch.setattr(process, "_send_local_outbox", jump_after_pre_receive_checks)
+        process.run(stop)
+        first = observed.get(timeout=3)
+        second = observed.get(timeout=3)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        assert cast(ExecutorEnvelope, first).message_type == "executor.hello"
+        assert cast(ExecutorEnvelope, second).message_type == "executor.hello"
+        assert (
+            process._command_processor.ledger.get_checkpoint(str(stale.execution_attempt_id))
+            is None
+        )
+        assert diagnostics.getvalue().splitlines() == [
+            "executor.recovery system_suspension_detected"
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
 def test_long_command_processing_does_not_impersonate_system_suspension(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

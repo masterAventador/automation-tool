@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-12）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-13）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-11 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-12 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-12 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-13 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -341,7 +341,7 @@
 | H8-09 | Local Artifact | 稳定 ID、摘要、媒体类型、大小、相对路径和权限 | E4-11 | ✅ 已完成 |
 | H8-10 | 诊断截图/Trace | 只在失败/用户开启时保存，数量/大小/时间上限 | H8-09,D6-14 | ✅ 已完成 |
 | H8-11 | 日志脱敏 | 服务端、Rust、Executor 全链路凭据/页面/路径泄漏测试 | E4-10,H8-10 | ✅ 已完成 |
-| H8-12 | 清理与磁盘治理 | 保留策略、磁盘满、清理失败、正在引用 Artifact 保护 | H8-09,H8-10 | ⬜ 未开始 |
+| H8-12 | 清理与磁盘治理 | 保留策略、磁盘满、清理失败、正在引用 Artifact 保护 | H8-09,H8-10 | ✅ 已完成 |
 | H8-13 | 诊断导出 | 用户主动导出受限包；不含 Cookie/完整私信/绝对私有路径 | H8-11,H8-12 | ⬜ 未开始 |
 | H8-14 | 工作台指标 | 任务/动作成功、失败、接管、不确定；只读结构化事实 | A7-15,T3-16 | ⬜ 未开始 |
 | H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ⬜ 未开始 |
@@ -2090,9 +2090,9 @@
 - 提交：本记录、页面漂移专用 Artifact、发现编排/协议收紧、单元/真实浏览器/PostgreSQL 测试和文档属于单一 `feat: 完成页面漂移诊断与人工接管` 提交；完成后立即推送 `main`
 - RED：先把唯一台账置为 `🧪 RED`；新增聚焦测试最初在收集阶段准确失败于 `automation_tool.executor.page_drift_artifact` 不存在，随后用例还要求原有 `page_version_unknown/conflicting_anchors` 不再作为普通失败，而必须写入诊断并进入 handoff。失败落在 D6-14 产品能力，不是环境、浏览器或测试脚手架
 - 专用本机 Artifact：`executor/page_drift_artifact.py` 只接受固定 `page_version_unknown/conflicting_anchors` evidence、`search` 阶段与正 page revision。每份 JSON 最多 2 KiB、目录最多 20 份，文件名为 canonical UUIDv4；H8-09 已把底层迁移到唯一 Local Artifact Store，当前窄引用包含 SHA-256、固定 `application/vnd.automation-tool.page-drift+json` 媒体类型、大小和 `artifacts/evidence/page-drift/<id>.json` 受控相对路径。POSIX 目录/文件固定 `0700/0600`，不覆盖既有文件
-- 隐私与边界：Artifact Schema 只有固定版本、ID、平台、操作、阶段、evidence、page revision 与 UTC 观察时间，没有自由文本输入，因此关键词、URL、DOM、HTML、页面正文、截图、Cookie、Header、凭据和 Profile/私有路径无法进入文件。H8-09 已统一引用与本机字节边界，仍不提供任意文件浏览、导出、上传或截图/Trace；H8-10/H8-12 分别负责诊断捕获和保留治理
+- 隐私与边界：Artifact Schema 只有固定版本、ID、平台、操作、阶段、evidence、page revision 与 UTC 观察时间，没有自由文本输入，因此关键词、URL、DOM、HTML、页面正文、截图、Cookie、Header、凭据和 Profile/私有路径无法进入文件。H8-09 已统一引用与本机字节边界，H8-10/H8-12 已分别完成受限诊断捕获和保留治理；仍不提供任意文件浏览、导出或上传
 - 熔断与收敛：`ProductionDouyinDiscoveryOperation` 只对页面层已明确识别的版本未知或锚点冲突写诊断，并在写入后立即关闭 Runtime，不运行滚动或候选提取。上述两种 evidence 在 `DouyinDiscoveryExecutionResult` 与 Executor v1 语义校验中只能配对 `handoff_required`；Control Plane 复用既有发现收敛事务投影为 `awaiting_human` 且不保存 Target。诊断因磁盘、权限或路径问题不可写时也不能解除熔断，仍进入人工接管
-- 失败矩阵：覆盖坏 evidence/stage/revision、非 UUIDv4 ID、坏/naive 时钟、state 目录 identity 替换、非目录、未知目录项、单文件非法名称/类型/大小、超过 20 份、排他创建冲突、磁盘写入失败、write/fsync 中途失败及残片删除；发现层覆盖两种漂移、Artifact 写失败仍 handoff、登录/弹窗/普通不可用不误判、Runtime 总是关闭。现有 H8-12 仍负责完整过期保留、引用保护和清理治理
+- 失败矩阵：覆盖坏 evidence/stage/revision、非 UUIDv4 ID、坏/naive 时钟、state 目录 identity 替换、非目录、未知目录项、单文件非法名称/类型/大小、超过 20 份、排他创建冲突、磁盘写入失败、write/fsync 中途失败及残片删除；发现层覆盖两种漂移、Artifact 写失败仍 handoff、登录/弹窗/普通不可用不误判、Runtime 总是关闭。H8-12 已补齐过期保留、空间压力、引用篡改和清理竞态
 - 生产同路径验收：`tests/integration/test_page_drift_artifact_browser.py` 从正式 `ExecutorCommandProcessor.handle(task.discover)` 进入 `ProductionDouyinDiscoveryOperation`，使用隔离临时 Profile 与 `headless=true` 系统 Chrome 命中确定性锚点冲突页；最终正式 `task.discovery_completed` 为 `handoff_required/conflicting_anchors`，本机仅生成一份固定诊断，再由 H8-09 Store 按 Artifact ID 解析、枚举和校验读取，且不含测试关键词/页面文本/URL，BrowserRuntime 完整关闭。该能力没有 App API，故不启动 Tauri 或以直接 HTTP 冒充 App；原始调用方就是正式 Executor command processor
 - 数据库验证：真实 PostgreSQL 18.4、完整 Alembic 与既有发现收敛仓储分别接收 `blocking_dialog/page_version_unknown/conflicting_anchors` 三种 handoff，均把 Task 投影为 `awaiting_human`，不携带 Candidate。Executor Schema 的结构枚举未扩张，Pydantic 语义约束和确定性 Schema 漂移检查均通过
 - 测试：Backend 全量 `1397 passed, 5 skipped in 105.64s`，8996 条语句、1928 个分支覆盖率 100%；Ruff/格式 246 个文件、严格 Mypy 246 个源码/测试文件、uv lock、OpenAPI 与 Executor Schema 漂移全绿。聚焦新增 Artifact/发现编排模块分支覆盖率 100%，真实无头 Chrome 用例与真实 PostgreSQL handoff 矩阵均单独通过；本任务未修改 OpenAPI、Frontend、Rust、Tauri Command、数据库 Schema 或迁移
@@ -2533,13 +2533,28 @@
 - 隔离与清理：冻结 Executor 和隐藏 App 验收复用既有专属临时 AppData、SQLite、随机端口及 `automation-tool-e414-*` Compose 资源，成功/失败均回收；UI Harness 启动 1420 前确认空闲并在结束后确认释放。例行浏览器固定无头，不访问真实平台账号或默认 Profile，不产生平台副作用；最终复核本项目 App、Executor、WDIO、Vite/Uvicorn、浏览器、端口、容器/网络/Volume 和临时目录零残留
 - 后续：进入 `H8-12`，在 H8-09/H8-10 唯一 Store 上实现保留策略、磁盘满/清理失败和正在引用 Artifact 保护；不复制文件安全边界，不提前实现 H8-13 导出
 
+### H8-12 清理与磁盘治理
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、通用保留/容量治理、页面漂移与浏览器诊断引用保护、生产发现原调用方验收和权威文档属于单一 `feat: 完成 Artifact 清理与磁盘治理` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`；聚焦测试在收集阶段准确失败于通用最小剩余空间、页面漂移保留期和浏览器诊断保留期常量不存在，随后容量用例准确证明旧 Store 到达数量上限只会拒绝而不会滚动清理。H8-12 不新增 HTTP/Tauri/React、数据库、云端对象存储、任意路径浏览、用户导出、上传、调用方删除或系统钥匙串能力
+- 通用 Policy 与执行顺序：`LocalArtifactPolicy` 新增固定正整数 `retention_seconds` 和非负 `minimum_free_bytes`，通用默认分别为 7 天与 64 MiB，硬上限为 365 天与 4 GiB。页面漂移固定保留 30 天，浏览器截图/Trace 固定 7 天；Store 初始化和每次 capture 前统一治理，先删除到期且未受保护的项，再在数量上限或 `disk_usage(root).free < minimum_free_bytes + reserve_bytes` 时按 `(mtime, artifact_id)` 删除最旧未保护项，为本次文件预留一个数量槽和精确字节
+- 文件安全与失败隔离：清点、保留判断、删除和写入沿用 H8-09 根/叶 identity、固定扩展名、普通单链接文件、私有权限/ACL 与大小校验。负数/非整数磁盘事实、未来 mtime、目录或文件替换、删除竞态、unlink 返回但文件仍在、目录 fsync 失败、清理后空间再次下降和没有未保护候选都固定拒绝且不反射路径或原始错误；删除完成后 fsync 目录，失败不会伪报清理完成
+- 精确引用保护：所有受保护引用必须是当前 Policy 下仍可稳定读取且 ID、SHA-256、媒体类型、大小和相对路径完全匹配的唯一引用，伪类型、重复、篡改或跨 Policy 引用全部拒绝。浏览器诊断先治理 Trace，再逐份按固定 10 字段 Schema、canonical UTC、Trace 自身 UUIDv4 和截图 UUIDv4 解析引用；只有仍存活的合法 Trace 能保护对应截图，重复引用、坏 JSON/重复 key、未知字段、悬空截图和非 canonical 值均 fail closed
+- 原调用方验收：`uv run --frozen pytest tests/integration/test_page_drift_artifact_browser.py -q` 从正式 `ExecutorCommandProcessor.handle(task.discover)` 进入 `ProductionDouyinDiscoveryOperation` 和真实无头系统 Chrome。验收先在同一 Executor 私有 state 预置过期页面漂移、截图和合法 Trace，生产 Store 初始化时删除三份旧证据，页面锚点冲突随后从正式页面链新建一份漂移证据和一对截图/Trace；新 Trace 精确引用新截图，原任务仍收敛 `handoff_required/conflicting_anchors`，Runtime 完整关闭
+- 失败与覆盖矩阵：三个生产模块的 39 项聚焦测试覆盖到期/边界时刻、数量滚动、磁盘压力、无法恢复空间、受保护项、篡改/重复/悬空引用、Trace 全字段与 JSON 失败矩阵、未来时钟、清理异常、叶 identity 竞态、unlink 假成功、POSIX 目录同步与 Windows 分支，语句和分支覆盖率 100%。全量门禁首次稳定发现既有 runtime 收帧后休眠分支会受 socket 时序影响而漏覆盖，新增确定性原传输测试后不降阈值并恢复全绿
+- 门禁：Backend 最终全量 `1964 passed, 5 skipped`，13087 条语句/3012 个分支覆盖率 100%，333 个 Python 文件格式、Ruff、严格 Mypy 308 个源码文件、uv lock 全绿；Frontend 111 项 Node 契约、198 项 Vitest、5 项全局无头 Playwright、冻结安装、peer dependency、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套完整测试、Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿
+- 隔离与清理：业务原调用方验收只使用 pytest 私有 state/Profile 和无头系统 Chrome，不启动 Tauri、Uvicorn、PostgreSQL、Compose 或真实账号，不占用 8765/1420；通用 UI Harness 在确认 1420 空闲后启动并在结束时释放。全程避开另一个项目正在使用的 182xx 端口、进程和资源；本项目 BrowserRuntime、Playwright/Vite 和临时 Artifact 均在所有者退出时回收
+- 后续：进入 `H8-13`，只从用户主动操作导出受限诊断包，继续拒绝 Cookie、完整评论/私信、任意文件、绝对私有路径与隐式上传
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-12`（⬜ 未开始）：在唯一 Local Artifact Store 上实现保留策略、磁盘满/清理失败和正在引用 Artifact 保护，不提前增加导出或上传；
+3. `H8-13`（⬜ 未开始）：从用户主动入口导出受限诊断包，不含 Cookie、完整评论/私信、任意文件或绝对私有路径，也不隐式上传；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

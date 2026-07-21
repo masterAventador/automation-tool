@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import stat
 import sys
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
@@ -14,6 +16,9 @@ import pytest
 from automation_tool.executor import local_artifact as artifact_module
 from automation_tool.executor.local_artifact import (
     MAX_LOCAL_ARTIFACT_BYTES,
+    MAX_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES,
+    MAX_LOCAL_ARTIFACT_RETENTION_SECONDS,
+    LocalArtifactCleanupResult,
     LocalArtifactPolicy,
     LocalArtifactRef,
     LocalArtifactRejected,
@@ -33,13 +38,20 @@ class Ids:
         return UUID(f"923e4567-e89b-42d3-a456-{self.value:012d}")
 
 
-def policy(*, maximum_artifacts: int = 20) -> LocalArtifactPolicy:
+def policy(
+    *,
+    maximum_artifacts: int = 20,
+    retention_seconds: int = 7 * 24 * 60 * 60,
+    minimum_free_bytes: int = 0,
+) -> LocalArtifactPolicy:
     return LocalArtifactPolicy(
         relative_directory=DIRECTORY,
         file_extension="json",
         media_type=MEDIA_TYPE,
         maximum_bytes=2_048,
         maximum_artifacts=maximum_artifacts,
+        retention_seconds=retention_seconds,
+        minimum_free_bytes=minimum_free_bytes,
     )
 
 
@@ -86,10 +98,293 @@ def test_list_references_returns_stable_id_order(tmp_path: Path) -> None:
         active.capture(b"first"),
         active.capture(b"second"),
     )
-
     assert active.list_references() == tuple(
         sorted(references, key=lambda reference: str(reference.artifact_id))
     )
+
+
+def test_cleanup_removes_expired_artifacts_but_preserves_exact_protected_references(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    active = LocalArtifactStore(
+        root_directory=root,
+        policy=policy(retention_seconds=10),
+        id_source=Ids(),
+    )
+    expired = active.capture(b"expired")
+    protected = active.capture(b"protected")
+    old = time.time() - 11
+    for reference in (expired, protected):
+        os.utime(root / reference.relative_path, (old, old))
+
+    result = active.cleanup(protected_references=(protected,))
+
+    assert result == LocalArtifactCleanupResult(
+        removed_artifacts=1,
+        removed_bytes=len(b"expired"),
+        remaining_artifacts=1,
+    )
+    assert active.list_references() == (protected,)
+    with pytest.raises(LocalArtifactRejected):
+        active.resolve(expired.artifact_id)
+
+    tampered = LocalArtifactRef(
+        artifact_id=protected.artifact_id,
+        sha256="a" * 64,
+        media_type=protected.media_type,
+        size_bytes=protected.size_bytes,
+        relative_path=protected.relative_path,
+    )
+    with pytest.raises(LocalArtifactRejected):
+        active.cleanup(protected_references=(tampered,))
+
+
+def test_capture_reclaims_oldest_unprotected_artifact_for_count_and_disk_pressure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    count_root = tmp_path / "count-state"
+    count_root.mkdir(mode=0o700)
+    count_store = LocalArtifactStore(
+        root_directory=count_root,
+        policy=policy(maximum_artifacts=2, retention_seconds=MAX_LOCAL_ARTIFACT_RETENTION_SECONDS),
+        id_source=Ids(),
+    )
+    first = count_store.capture(b"first")
+    second = count_store.capture(b"second")
+    old = time.time() - 2
+    os.utime(count_root / first.relative_path, (old, old))
+
+    third = count_store.capture(b"third", protected_references=(second,))
+
+    assert count_store.list_references() == tuple(
+        sorted((second, third), key=lambda reference: str(reference.artifact_id))
+    )
+    with pytest.raises(LocalArtifactRejected):
+        count_store.resolve(first.artifact_id)
+
+    disk_root = tmp_path / "disk-state"
+    disk_root.mkdir(mode=0o700)
+    disk_store = LocalArtifactStore(
+        root_directory=disk_root,
+        policy=policy(
+            maximum_artifacts=3,
+            retention_seconds=MAX_LOCAL_ARTIFACT_RETENTION_SECONDS,
+            minimum_free_bytes=100,
+        ),
+        id_source=Ids(),
+    )
+    monkeypatch.setattr(artifact_module, "_available_bytes", lambda _path: 1_000)
+    disk_old = disk_store.capture(b"old")
+    disk_old_path = disk_root / disk_old.relative_path
+    monkeypatch.setattr(
+        artifact_module,
+        "_available_bytes",
+        lambda _path: 1_000 if not disk_old_path.exists() else 0,
+    )
+
+    disk_new = disk_store.capture(b"new")
+
+    assert disk_store.list_references() == (disk_new,)
+
+
+def test_unresolved_disk_pressure_cleanup_failure_and_future_timestamp_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir(mode=0o700)
+    unavailable = LocalArtifactStore(
+        root_directory=empty_root,
+        policy=policy(minimum_free_bytes=100),
+        id_source=Ids(),
+    )
+    monkeypatch.setattr(artifact_module, "_available_bytes", lambda _path: 0)
+    with pytest.raises(LocalArtifactRejected):
+        unavailable.capture(b"never-written")
+    assert tuple((empty_root / DIRECTORY).iterdir()) == ()
+
+    cleanup_root = tmp_path / "cleanup-failure"
+    cleanup_root.mkdir(mode=0o700)
+    monkeypatch.setattr(artifact_module, "_available_bytes", lambda _path: 1_000)
+    cleanup_store = LocalArtifactStore(
+        root_directory=cleanup_root,
+        policy=policy(retention_seconds=1),
+        id_source=Ids(),
+    )
+    reference = cleanup_store.capture(b"expired")
+    old = time.time() - 2
+    os.utime(cleanup_root / reference.relative_path, (old, old))
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda _path: (_ for _ in ()).throw(OSError("private cleanup failure")),
+    )
+    with pytest.raises(
+        LocalArtifactRejected,
+        match=r"^Local Artifact is unavailable$",
+    ) as captured:
+        cleanup_store.cleanup()
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+    future_root = tmp_path / "future"
+    future_root.mkdir(mode=0o700)
+    future_store = LocalArtifactStore(
+        root_directory=future_root,
+        policy=policy(retention_seconds=1),
+        id_source=Ids(),
+    )
+    future = future_store.capture(b"future")
+    future_time = time.time() + 60
+    os.utime(future_root / future.relative_path, (future_time, future_time))
+    with pytest.raises(LocalArtifactRejected):
+        future_store.cleanup()
+
+
+def test_cleanup_governance_rejects_invalid_reservations_and_unstable_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "state"
+    active = store(root)
+
+    with pytest.raises(ValueError):
+        active._govern(
+            protected_references=(),
+            reserve_artifacts=2,
+            reserve_bytes=0,
+        )
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            active,
+            "_govern",
+            lambda **_arguments: (_ for _ in ()).throw(ValueError),
+        )
+        with pytest.raises(LocalArtifactRejected):
+            active.prepare_capture()
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(time, "time_ns", lambda: cast(int, object()))
+        with pytest.raises(LocalArtifactRejected):
+            active.cleanup()
+
+    unstable_root = tmp_path / "unstable-space"
+    unstable_root.mkdir(mode=0o700)
+    unstable = LocalArtifactStore(
+        root_directory=unstable_root,
+        policy=policy(minimum_free_bytes=100),
+        id_source=Ids(),
+    )
+    available = iter((1_000, 0))
+    with monkeypatch.context() as scoped:
+        scoped.setattr(artifact_module, "_available_bytes", lambda _path: next(available))
+        with pytest.raises(LocalArtifactRejected):
+            unstable.cleanup()
+
+
+def test_cleanup_protected_reference_failure_matrix_is_exact(
+    tmp_path: Path,
+) -> None:
+    one_root = tmp_path / "one"
+    one_root.mkdir(mode=0o700)
+    one = LocalArtifactStore(
+        root_directory=one_root,
+        policy=policy(maximum_artifacts=1),
+        id_source=Ids(),
+    )
+    one_reference = one.capture(b"one")
+    with pytest.raises(LocalArtifactRejected):
+        one.cleanup(protected_references=(one_reference, one_reference))
+
+    root = tmp_path / "state"
+    active = store(root)
+    reference = active.capture(b"fixed")
+    mismatches = (
+        cast(LocalArtifactRef, object()),
+        LocalArtifactRef(
+            artifact_id=reference.artifact_id,
+            sha256=reference.sha256,
+            media_type="application/json",
+            size_bytes=reference.size_bytes,
+            relative_path=reference.relative_path,
+        ),
+        LocalArtifactRef(
+            artifact_id=reference.artifact_id,
+            sha256=reference.sha256,
+            media_type=reference.media_type,
+            size_bytes=2_049,
+            relative_path=reference.relative_path,
+        ),
+        LocalArtifactRef(
+            artifact_id=reference.artifact_id,
+            sha256=reference.sha256,
+            media_type=reference.media_type,
+            size_bytes=reference.size_bytes,
+            relative_path=f"private/{reference.artifact_id}.json",
+        ),
+    )
+    for mismatch in mismatches:
+        with pytest.raises(LocalArtifactRejected):
+            active.cleanup(protected_references=(mismatch,))
+    with pytest.raises(LocalArtifactRejected):
+        active.cleanup(protected_references=(reference, reference))
+
+
+def test_cleanup_detects_leaf_replacement_and_unlink_that_did_not_remove_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replacement_root = tmp_path / "replacement"
+    replacement_root.mkdir(mode=0o700)
+    replacement = LocalArtifactStore(
+        root_directory=replacement_root,
+        policy=policy(retention_seconds=1),
+        id_source=Ids(),
+    )
+    replacement_reference = replacement.capture(b"expired")
+    old = time.time() - 2
+    os.utime(replacement_root / replacement_reference.relative_path, (old, old))
+    identities = iter(((1, 1, 7, 1), (1, 2, 7, 1)))
+    with monkeypatch.context() as scoped:
+        scoped.setattr(artifact_module, "_file_identity", lambda _metadata: next(identities))
+        with pytest.raises(LocalArtifactRejected):
+            replacement.cleanup()
+
+    unlink_root = tmp_path / "unlink"
+    unlink_root.mkdir(mode=0o700)
+    unlink = LocalArtifactStore(
+        root_directory=unlink_root,
+        policy=policy(retention_seconds=1),
+        id_source=Ids(),
+    )
+    unlink_reference = unlink.capture(b"expired")
+    os.utime(unlink_root / unlink_reference.relative_path, (old, old))
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "unlink", lambda _path: None)
+        with pytest.raises(LocalArtifactRejected):
+            unlink.cleanup()
+
+
+def test_disk_capacity_and_directory_sync_platform_adapters_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            shutil,
+            "disk_usage",
+            lambda _path: SimpleNamespace(free=-1),
+        )
+        with pytest.raises(ValueError):
+            artifact_module._available_bytes(tmp_path)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, "name", "nt")
+        artifact_module._fsync_directory(tmp_path)
 
 
 def test_reference_policy_and_payload_shape_fail_closed() -> None:
@@ -124,6 +419,8 @@ def test_reference_policy_and_payload_shape_fail_closed() -> None:
         "media_type": MEDIA_TYPE,
         "maximum_bytes": 2_048,
         "maximum_artifacts": 20,
+        "retention_seconds": 7 * 24 * 60 * 60,
+        "minimum_free_bytes": 0,
     }
     for changes in (
         {"relative_directory": "/private"},
@@ -134,6 +431,12 @@ def test_reference_policy_and_payload_shape_fail_closed() -> None:
         {"maximum_bytes": True},
         {"maximum_bytes": 0},
         {"maximum_artifacts": 0},
+        {"retention_seconds": True},
+        {"retention_seconds": 0},
+        {"retention_seconds": MAX_LOCAL_ARTIFACT_RETENTION_SECONDS + 1},
+        {"minimum_free_bytes": True},
+        {"minimum_free_bytes": -1},
+        {"minimum_free_bytes": MAX_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES + 1},
     ):
         arguments = dict(valid_policy)
         arguments.update(changes)
@@ -166,15 +469,17 @@ def test_tamper_root_replacement_and_untrusted_entries_are_rejected(tmp_path: Pa
         other.list_references()
 
 
-def test_capacity_collision_and_write_failure_leave_no_partial_artifact(
+def test_capacity_rollover_and_write_failure_leave_no_partial_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "state"
     active = store(root, maximum_artifacts=1)
-    active.capture(b"first")
+    first = active.capture(b"first")
+    second = active.capture(b"second")
+    assert active.list_references() == (second,)
     with pytest.raises(LocalArtifactRejected):
-        active.capture(b"second")
+        active.resolve(first.artifact_id)
 
     failing_root = tmp_path / "failing-state"
     failing = store(failing_root)

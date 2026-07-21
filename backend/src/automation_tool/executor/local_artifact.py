@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import stat
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -15,6 +17,10 @@ from uuid import RFC_4122, UUID, uuid4
 
 MAX_LOCAL_ARTIFACT_BYTES: Final = 64 * 1024 * 1024
 MAX_LOCAL_ARTIFACTS_PER_POLICY: Final = 10_000
+MAX_LOCAL_ARTIFACT_RETENTION_SECONDS: Final = 365 * 24 * 60 * 60
+MAX_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES: Final = 4 * 1024 * 1024 * 1024
+DEFAULT_LOCAL_ARTIFACT_RETENTION_SECONDS: Final = 7 * 24 * 60 * 60
+DEFAULT_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES: Final = 64 * 1024 * 1024
 
 _MAX_RELATIVE_PATH_BYTES: Final = 512
 _MAX_DIRECTORY_SEGMENTS: Final = 8
@@ -40,6 +46,8 @@ class LocalArtifactPolicy:
     media_type: str
     maximum_bytes: int
     maximum_artifacts: int
+    retention_seconds: int = DEFAULT_LOCAL_ARTIFACT_RETENTION_SECONDS
+    minimum_free_bytes: int = DEFAULT_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES
 
     def __post_init__(self) -> None:
         if (
@@ -52,6 +60,10 @@ class LocalArtifactPolicy:
             or not 1 <= self.maximum_bytes <= MAX_LOCAL_ARTIFACT_BYTES
             or type(self.maximum_artifacts) is not int
             or not 1 <= self.maximum_artifacts <= MAX_LOCAL_ARTIFACTS_PER_POLICY
+            or type(self.retention_seconds) is not int
+            or not 1 <= self.retention_seconds <= MAX_LOCAL_ARTIFACT_RETENTION_SECONDS
+            or type(self.minimum_free_bytes) is not int
+            or not 0 <= self.minimum_free_bytes <= MAX_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES
         ):
             raise LocalArtifactRejected
 
@@ -88,6 +100,22 @@ class LocalArtifactRef:
             raise LocalArtifactRejected
 
 
+@dataclass(frozen=True, slots=True)
+class LocalArtifactCleanupResult:
+    """Bounded cleanup facts that expose no path or artifact identity."""
+
+    removed_artifacts: int
+    removed_bytes: int
+    remaining_artifacts: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactEntry:
+    artifact_id: UUID
+    path: Path
+    metadata: os.stat_result
+
+
 class LocalArtifactStore:
     """Create and revalidate one trusted artifact namespace below a private root."""
 
@@ -122,14 +150,24 @@ class LocalArtifactStore:
         if not initialized:
             raise LocalArtifactRejected
 
-    def capture(self, payload: bytes) -> LocalArtifactRef:
+    def capture(
+        self,
+        payload: bytes,
+        *,
+        protected_references: tuple[LocalArtifactRef, ...] = (),
+    ) -> LocalArtifactRef:
         """Persist already-bounded bytes with a new stable identifier."""
 
-        return self.capture_generated(lambda _artifact_id: payload)
+        return self.capture_generated(
+            lambda _artifact_id: payload,
+            protected_references=protected_references,
+        )
 
     def capture_generated(
         self,
         payload_factory: Callable[[UUID], object],
+        *,
+        protected_references: tuple[LocalArtifactRef, ...] = (),
     ) -> LocalArtifactRef:
         """Build fixed-schema bytes after the store chooses their stable identifier."""
 
@@ -137,7 +175,43 @@ class LocalArtifactStore:
         with suppress(Exception):
             if not callable(payload_factory):
                 raise ValueError
-            result = self._capture_generated(payload_factory)
+            result = self._capture_generated(payload_factory, protected_references)
+        if result is None:
+            raise LocalArtifactRejected
+        return result
+
+    def cleanup(
+        self,
+        *,
+        protected_references: tuple[LocalArtifactRef, ...] = (),
+    ) -> LocalArtifactCleanupResult:
+        """Remove expired or pressure-selected artifacts without deleting protected facts."""
+
+        result: LocalArtifactCleanupResult | None = None
+        with suppress(Exception):
+            result = self._govern(
+                protected_references=protected_references,
+                reserve_artifacts=0,
+                reserve_bytes=0,
+            )
+        if result is None:
+            raise LocalArtifactRejected
+        return result
+
+    def prepare_capture(
+        self,
+        *,
+        protected_references: tuple[LocalArtifactRef, ...] = (),
+    ) -> LocalArtifactCleanupResult:
+        """Reserve one maximum-sized slot before a coordinated multi-artifact capture."""
+
+        result: LocalArtifactCleanupResult | None = None
+        with suppress(Exception):
+            result = self._govern(
+                protected_references=protected_references,
+                reserve_artifacts=1,
+                reserve_bytes=self._policy.maximum_bytes,
+            )
         if result is None:
             raise LocalArtifactRejected
         return result
@@ -208,14 +282,18 @@ class LocalArtifactStore:
     def _capture_generated(
         self,
         payload_factory: Callable[[UUID], object],
+        protected_references: tuple[LocalArtifactRef, ...],
     ) -> LocalArtifactRef:
         self._revalidate_directories()
-        if self._inventory() >= self._policy.maximum_artifacts:
-            raise ValueError
         artifact_id = self._new_id()
         payload = payload_factory(artifact_id)
         if type(payload) is not bytes or not 1 <= len(payload) <= self._policy.maximum_bytes:
             raise ValueError
+        self._govern(
+            protected_references=protected_references,
+            reserve_artifacts=1,
+            reserve_bytes=len(payload),
+        )
         relative_path = self._policy.relative_path(artifact_id)
         artifact_path = self._root_directory / relative_path
         self._write_exclusive(artifact_path, payload)
@@ -235,21 +313,141 @@ class LocalArtifactStore:
         ):
             raise ValueError
 
+    def _govern(
+        self,
+        *,
+        protected_references: tuple[LocalArtifactRef, ...],
+        reserve_artifacts: int,
+        reserve_bytes: int,
+    ) -> LocalArtifactCleanupResult:
+        if (
+            type(protected_references) is not tuple
+            or type(reserve_artifacts) is not int
+            or reserve_artifacts not in {0, 1}
+            or type(reserve_bytes) is not int
+            or not 0 <= reserve_bytes <= self._policy.maximum_bytes
+            or (reserve_artifacts == 0 and reserve_bytes != 0)
+        ):
+            raise ValueError
+        self._revalidate_directories()
+        entries = list(self._inventory_entries())
+        now_nanoseconds = time.time_ns()
+        if type(now_nanoseconds) is not int or now_nanoseconds < 0:
+            raise ValueError
+        for entry in entries:
+            if entry.metadata.st_mtime_ns < 0 or entry.metadata.st_mtime_ns > now_nanoseconds:
+                raise ValueError
+        protected_ids = self._protected_ids(protected_references)
+        removed_artifacts = 0
+        removed_bytes = 0
+        retention_nanoseconds = self._policy.retention_seconds * 1_000_000_000
+
+        def remove(entry: _ArtifactEntry) -> None:
+            nonlocal removed_artifacts, removed_bytes
+            self._unlink_entry(entry)
+            entries.remove(entry)
+            removed_artifacts += 1
+            removed_bytes += entry.metadata.st_size
+
+        for entry in tuple(sorted(entries, key=_cleanup_order)):
+            if (
+                entry.artifact_id not in protected_ids
+                and now_nanoseconds - entry.metadata.st_mtime_ns >= retention_nanoseconds
+            ):
+                remove(entry)
+
+        while self._under_pressure(entries, reserve_artifacts, reserve_bytes):
+            candidate = next(
+                (
+                    entry
+                    for entry in sorted(entries, key=_cleanup_order)
+                    if entry.artifact_id not in protected_ids
+                ),
+                None,
+            )
+            if candidate is None:
+                raise ValueError
+            remove(candidate)
+
+        if removed_artifacts:
+            _fsync_directory(self._artifact_directory)
+        self._revalidate_directories()
+        if self._under_pressure(entries, reserve_artifacts, reserve_bytes):
+            raise ValueError
+        return LocalArtifactCleanupResult(
+            removed_artifacts=removed_artifacts,
+            removed_bytes=removed_bytes,
+            remaining_artifacts=len(entries),
+        )
+
+    def _protected_ids(
+        self,
+        references: tuple[LocalArtifactRef, ...],
+    ) -> frozenset[UUID]:
+        if len(references) > self._policy.maximum_artifacts:
+            raise ValueError
+        protected: set[UUID] = set()
+        for reference in references:
+            if not isinstance(reference, LocalArtifactRef) or reference.artifact_id in protected:
+                raise ValueError
+            expected_path = self._policy.relative_path(reference.artifact_id)
+            if (
+                reference.media_type != self._policy.media_type
+                or reference.relative_path != expected_path
+                or reference.size_bytes > self._policy.maximum_bytes
+            ):
+                raise ValueError
+            payload = self._read_stable(self._root_directory / expected_path)
+            if not _same_reference(
+                self._reference(reference.artifact_id, expected_path, payload),
+                reference,
+            ):
+                raise ValueError
+            protected.add(reference.artifact_id)
+        return frozenset(protected)
+
+    def _under_pressure(
+        self,
+        entries: list[_ArtifactEntry],
+        reserve_artifacts: int,
+        reserve_bytes: int,
+    ) -> bool:
+        return (
+            len(entries) + reserve_artifacts > self._policy.maximum_artifacts
+            or _available_bytes(self._root_directory)
+            < self._policy.minimum_free_bytes + reserve_bytes
+        )
+
+    def _unlink_entry(self, entry: _ArtifactEntry) -> None:
+        self._revalidate_directories()
+        current = entry.path.lstat()
+        _validate_private_file(entry.path, current, self._policy.maximum_bytes)
+        if _file_identity(current) != _file_identity(entry.metadata):
+            raise ValueError
+        entry.path.unlink()
+        with suppress(FileNotFoundError):
+            entry.path.lstat()
+            raise ValueError
+        self._revalidate_directories()
+
     def _inventory(self) -> int:
         return len(self._inventory_ids())
 
     def _inventory_ids(self) -> tuple[UUID, ...]:
-        artifact_ids: list[UUID] = []
+        return tuple(entry.artifact_id for entry in self._inventory_entries())
+
+    def _inventory_entries(self) -> tuple[_ArtifactEntry, ...]:
+        entries: list[_ArtifactEntry] = []
         for entry in self._artifact_directory.iterdir():
             artifact_id = _artifact_id_from_name(entry.name, self._policy.file_extension)
             if artifact_id is None:
                 raise ValueError
             metadata = entry.lstat()
             _validate_private_file(entry, metadata, self._policy.maximum_bytes)
-            artifact_ids.append(artifact_id)
-            if len(artifact_ids) > self._policy.maximum_artifacts:
+            entries.append(_ArtifactEntry(artifact_id=artifact_id, path=entry, metadata=metadata))
+            if len(entries) > self._policy.maximum_artifacts:
                 raise ValueError
-        return tuple(sorted(artifact_ids, key=str))
+        return tuple(sorted(entries, key=lambda item: str(item.artifact_id)))
 
     def _new_id(self) -> UUID:
         artifact_id = self._id_source()
@@ -465,9 +663,46 @@ def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
     return metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns
 
 
+def _cleanup_order(entry: _ArtifactEntry) -> tuple[int, str]:
+    return entry.metadata.st_mtime_ns, str(entry.artifact_id)
+
+
+def _same_reference(left: LocalArtifactRef, right: LocalArtifactRef) -> bool:
+    return (
+        left.artifact_id == right.artifact_id
+        and left.sha256 == right.sha256
+        and left.media_type == right.media_type
+        and left.size_bytes == right.size_bytes
+        and left.relative_path == right.relative_path
+    )
+
+
+def _available_bytes(path: Path) -> int:
+    free = shutil.disk_usage(path).free
+    if type(free) is not int or free < 0:
+        raise ValueError
+    return free
+
+
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | cast(int, getattr(os, "O_DIRECTORY", 0))
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 __all__ = [
+    "DEFAULT_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES",
+    "DEFAULT_LOCAL_ARTIFACT_RETENTION_SECONDS",
     "MAX_LOCAL_ARTIFACTS_PER_POLICY",
     "MAX_LOCAL_ARTIFACT_BYTES",
+    "MAX_LOCAL_ARTIFACT_MINIMUM_FREE_BYTES",
+    "MAX_LOCAL_ARTIFACT_RETENTION_SECONDS",
+    "LocalArtifactCleanupResult",
     "LocalArtifactPolicy",
     "LocalArtifactRef",
     "LocalArtifactRejected",
