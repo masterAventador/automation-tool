@@ -19,6 +19,11 @@ import type {
   TaskTargetResultSource,
 } from "../../api/control-plane/task-target-results";
 import { TaskRunDetails } from "./TaskRunDetails";
+import {
+  TaskDiscoveryGatewayError,
+  type TaskDiscoveryGateway,
+  type TaskDiscoveryReceipt,
+} from "./task-discovery";
 import type {
   TaskRunControlGateway,
   TaskRunControlReceipt,
@@ -115,6 +120,39 @@ function gateway(): TaskRunControlGateway {
     resumeTask: vi.fn(async () => receipt("task.resume")),
     cancelTask: vi.fn(async () => receipt("task.cancel")),
     emergencyStopTask: vi.fn(async () => receipt("task.emergency_stop")),
+  };
+}
+
+function discoveryReceipt(): TaskDiscoveryReceipt {
+  return {
+    taskId: TASK_ID,
+    taskStatus: "discovering_targets",
+    taskRevision: 2,
+    lastEventSequence: 1,
+    commandId: "16fd2706-8baf-433b-82eb-8c7fada847da",
+    executionAttemptId: ATTEMPT_ID,
+    commandStatus: "pending",
+  };
+}
+
+function discoveryGateway(): TaskDiscoveryGateway {
+  return { startDiscovery: vi.fn(async () => discoveryReceipt()) };
+}
+
+function idleSource(taskSnapshot: TaskSnapshot): TaskProjectionSource {
+  return {
+    getTask: vi.fn(async () => taskSnapshot),
+    listTasks: vi.fn(async () => ({ items: [taskSnapshot], nextCursor: null })),
+    streamTaskEvents: vi.fn(
+      async (_taskId, afterSequence, _onEvent, options = {}) =>
+        new Promise<{ lastSequence: number; terminal: boolean }>((resolve) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => resolve({ lastSequence: afterSequence, terminal: false }),
+            { once: true },
+          );
+        }),
+    ),
   };
 }
 
@@ -216,6 +254,8 @@ function renderDetails(
   controlGateway = gateway(),
   taskTargetPreviewSource = targetSource(),
   taskTargetResultSource = targetResultSource(),
+  taskDiscoveryGateway = discoveryGateway(),
+  onOpenPlatformSession = () => undefined,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -230,9 +270,11 @@ function renderDetails(
           taskId={TASK_ID}
           taskSource={taskSource}
           controlGateway={controlGateway}
+          discoveryGateway={taskDiscoveryGateway}
           taskTargetPreviewSource={taskTargetPreviewSource}
           taskTargetResultSource={taskTargetResultSource}
           onBack={() => undefined}
+          onOpenPlatformSession={onOpenPlatformSession}
         />
       </QueryClientProvider>,
     ),
@@ -240,6 +282,60 @@ function renderDetails(
 }
 
 describe("Task run details", () => {
+  it("starts discovery from the real draft page with a stable idempotency key", async () => {
+    const taskDiscoveryGateway = discoveryGateway();
+    const user = userEvent.setup();
+    renderDetails(
+      idleSource(snapshot({ status: "draft", revision: 1, lastEventSequence: 0 })),
+      gateway(),
+      targetSource(),
+      targetResultSource(),
+      taskDiscoveryGateway,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "开始目标发现" }));
+    await waitFor(() =>
+      expect(taskDiscoveryGateway.startDiscovery).toHaveBeenCalledTimes(1),
+    );
+    const [taskId, key] = vi.mocked(taskDiscoveryGateway.startDiscovery).mock.calls[0] ?? [];
+    expect(taskId).toBe(TASK_ID);
+    expect(key).toMatch(/^task:discover:start:[0-9a-f-]{36}$/u);
+    expect(
+      await screen.findByText("目标发现命令已提交，等待 Executor 返回候选"),
+    ).toBeVisible();
+  });
+
+  it("reuses the discovery intent and opens platform repair after a safe rejection", async () => {
+    const startDiscovery = vi
+      .fn<TaskDiscoveryGateway["startDiscovery"]>()
+      .mockRejectedValueOnce(new TaskDiscoveryGatewayError("discovery_rejected", false))
+      .mockResolvedValueOnce(discoveryReceipt());
+    const onOpenPlatformSession = vi.fn();
+    const user = userEvent.setup();
+    renderDetails(
+      idleSource(snapshot({ status: "awaiting_human", revision: 4 })),
+      gateway(),
+      targetSource(),
+      targetResultSource(),
+      { startDiscovery },
+      onOpenPlatformSession,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "开始目标发现" }));
+    expect(
+      await screen.findByText(
+        "当前平台登录或任务状态尚未满足目标发现条件，请先处理平台状态后重试",
+      ),
+    ).toBeVisible();
+    await user.click(screen.getAllByRole("button", { name: "打开平台状态" })[0]!);
+    expect(onOpenPlatformSession).toHaveBeenCalledOnce();
+
+    const firstKey = startDiscovery.mock.calls[0]?.[1];
+    await user.click(screen.getByRole("button", { name: "开始目标发现" }));
+    await waitFor(() => expect(startDiscovery).toHaveBeenCalledTimes(2));
+    expect(startDiscovery.mock.calls[1]?.[1]).toBe(firstKey);
+  });
+
   it("opens the target preview inside details only while confirmation is required", async () => {
     const previewSource = targetSource();
     renderDetails(
@@ -285,9 +381,11 @@ describe("Task run details", () => {
           taskId={taskId}
           taskSource={taskSource}
           controlGateway={gateway()}
+          discoveryGateway={discoveryGateway()}
           taskTargetPreviewSource={previewSource}
           taskTargetResultSource={targetResultSource()}
           onBack={() => undefined}
+          onOpenPlatformSession={() => undefined}
         />
       </QueryClientProvider>
     );

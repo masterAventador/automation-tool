@@ -20,6 +20,10 @@ import {
 } from "../features/task-create/task-creation-gateway";
 import { TaskRunDetails } from "../features/task-runs/TaskRunDetails";
 import {
+  TaskDiscoveryGatewayError,
+  type TaskDiscoveryGateway,
+} from "../features/task-runs/task-discovery";
+import {
   TaskRunControlGatewayError,
   type TaskRunControlGateway,
 } from "../features/task-runs/task-run-controls";
@@ -101,6 +105,12 @@ const shellTaskRunControlGateway: TaskRunControlGateway = {
   },
 };
 
+const shellTaskDiscoveryGateway: TaskDiscoveryGateway = {
+  async startDiscovery() {
+    throw new TaskDiscoveryGatewayError("transport_unavailable", true);
+  },
+};
+
 const shellTaskTargetPreviewSource: TaskTargetPreviewSource = {
   async getPreview() {
     throw new TaskTargetPreviewSourceError("transport_unavailable", true);
@@ -169,6 +179,7 @@ interface WorkbenchShellProps {
   readonly gateway?: WorkbenchGateway | undefined;
   readonly taskCreationGateway?: TaskCreationGateway | undefined;
   readonly taskRunControlGateway?: TaskRunControlGateway | undefined;
+  readonly taskDiscoveryGateway?: TaskDiscoveryGateway | undefined;
   readonly taskTargetPreviewSource?: TaskTargetPreviewSource | undefined;
   readonly taskTargetResultSource?: TaskTargetResultSource | undefined;
   readonly platformAdapter?: PlatformAdapter | undefined;
@@ -180,6 +191,7 @@ export function WorkbenchShell({
   gateway = shellWorkbenchGateway,
   taskCreationGateway = shellTaskCreationGateway,
   taskRunControlGateway = shellTaskRunControlGateway,
+  taskDiscoveryGateway = shellTaskDiscoveryGateway,
   taskTargetPreviewSource = shellTaskTargetPreviewSource,
   taskTargetResultSource = shellTaskTargetResultSource,
   platformAdapter = shellPlatformAdapter,
@@ -296,9 +308,11 @@ export function WorkbenchShell({
                 taskId={selectedTaskId}
                 taskSource={taskSource}
                 controlGateway={taskRunControlGateway}
+                discoveryGateway={taskDiscoveryGateway}
                 taskTargetPreviewSource={taskTargetPreviewSource}
                 taskTargetResultSource={taskTargetResultSource}
                 onBack={() => setActivePage("workbench")}
+                onOpenPlatformSession={() => setActivePage("platform")}
               />
             ) : showingTaskRun ? (
               <div className="task-run-empty">

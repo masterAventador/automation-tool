@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16 已完成，下一项 H8-16A）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16A 已完成，下一项 H8-16B）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16 已完成；规格复审确认分层能力尚有六项纵向组合缺口，进入 H8-16A；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16A 已完成；下一项 H8-16B 修正 Installation 单活任务约束；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -346,7 +346,7 @@
 | H8-14 | 工作台指标 | 任务/动作成功、失败、接管、不确定；只读结构化事实 | A7-15,T3-16 | ✅ 已完成 |
 | H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ✅ 已完成 |
 | H8-16 | 规格复审 | 从分叉点审查完整实现是否满足产品/MVP/文档 | H8-15 | ✅ 已完成 |
-| H8-16A | 桌面发现入口闭环 | 正式页面从 Task 草稿/登录接管状态启动或重试发现，调用固定 Tauri→API 原路径 | H8-16 | ⬜ 未开始 |
+| H8-16A | 桌面发现入口闭环 | 正式页面从 Task 草稿/登录接管状态启动或重试发现，调用固定 Tauri→API 原路径 | H8-16 | ✅ 已完成 |
 | H8-16B | Installation 单活任务 | 同一 Installation 只能有一个未终结 RPA Attempt，数据库并发单赢家且 UI 明确提示 | H8-16A | ⬜ 未开始 |
 | H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ⬜ 未开始 |
 | H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ⬜ 未开始 |
@@ -2610,13 +2610,27 @@
 - 门禁：Frontend 118 项 Node 契约、ESLint 与严格 TypeScript 全绿；规格契约单独 1/1 通过，JSON 证据路径/锚点和六个修复任务逐项校验。未修改 Python/Rust/运行时资产，因此不伪跑无关纵向验收充数
 - 后续：进入 `H8-16A`，把已有发现 Command 接到正式任务详情，并由唯一隐藏 App 从创建后的真实页面启动发现；真实抖音账号不可用时继续使用官方-origin 隔离页，不把它冒充 D6-16
 
+### H8-16A 桌面发现入口闭环
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、严格 TypeScript 发现 Gateway、正式 Tauri Adapter、任务详情入口、隐藏 App 原调用方验收与规格审计收敛属于单一 `feat: 完成桌面目标发现入口` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`；Node 生产组合契约准确失败于 `task-discovery-gateway.ts` 不存在，Vitest 又准确因发现领域/Gateway 模块缺失而无法加载。实现没有新建 HTTP、通用 IPC、第二个详情页或 Web 产品，只消费 D6-10 已有固定 Command
+- 桌面正式入口：新增 strict Zod `TaskDiscoveryGateway`/receipt 和唯一 `TauriTaskDiscoveryGateway`，只调用 `start_task_discovery(taskId,idempotencyKey)`；`main.tsx → App → WorkbenchShell → TaskRunDetails` 显式注入。草稿、等待登录、等待确认和人工接管状态展示启动/重新发现，登录或接管状态同时提供“打开平台状态”修复入口；同一 Task revision 的不确定重试复用幂等键，组件卸载取消等待，错误只显示固定安全文案
+- 原调用方验收：`scripts/run_d6_10_acceptance.py` 先由 `control-plane-e2e` 专用准备 Command 只注册 Installation 并创建 draft Task，再由唯一 `visible=false` Tauri App 刷新正式工作台、进入运行详情并实际点击“开始目标发现”。正式 TypeScript Gateway → Tauri IPC → Rust App Session/HTTP → 真实 Uvicorn/PostgreSQL → 正式 LocalExecutorProcess 收敛 `awaiting_confirmation`，页面实际展示提交提示、目标预览和 2 个候选；runner 继续核对 command/attempt/event/target 权威事实。准备 Command 不再调用 `start_task_discovery`，因此不能绕过产品入口制造假绿
+- 真实边界：本轮 Executor 使用 D6-10 的确定性无副作用 discovery adapter，只证明桌面到 Control Plane/Executor/预览的正式组合路径；没有读取默认浏览器 Profile、Cookie 或真实抖音页面，也没有评论/私信副作用。真实搜索与候选最终状态仍属于 `D6-16 🔍 待真实账号`，MVP-AC-05 从“组合缺口”收敛为“待真实平台”，MVP-AC-03 的自动等待登录并拉起可见运营浏览器仍由后续 H8-16F 收口
+- 失败与安全：输入要求规范 Task UUIDv4 和受限幂等键；响应拒绝未知字段、跨 Task、非法状态/revision/watermark/Command/Attempt；原生 Installation 拒绝、操作拒绝、传输不可用、协议漂移和取消分别映射为封闭错误。页面不会展示 Target UUID、平台目标 ID、Cookie、Profile 路径、原生错误或产品账号入口
+- 门禁：Backend 标准全量 `1979 passed, 5 skipped in 224.68s`，13211 条语句/3028 个分支覆盖率 100%，340 个 Python 文件格式、Ruff、严格 Mypy 315 个源码文件与冻结依赖全绿；Frontend 118 项 Node 契约、206 项 Vitest、5 项全局无头 Playwright、冻结安装、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套完整测试、Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿；H8-16A 隐藏真实 App 纵向验收 1/1 通过
+- 隔离与清理：启动固定 8765/1420 前确认空闲；纵向验收使用 `automation-tool-d610-<pid>` 专属 Compose project、随机 PostgreSQL 端口、唯一 AppData/Executor state 和隐藏 App，finally 回收 WDIO/App/Executor/Uvicorn、容器/网络/Volume、端口和临时目录。例行 UI 全局无头，验收没有启动外部浏览器；结束后复核本项目 App、WebDriver、浏览器、监听端口和 Compose 资源零残留
+- 后续：进入 `H8-16B`，把单活约束从“同一 Task 一个活动 Attempt”改为“同一 Installation 一个未终结 RPA Attempt”，并由数据库并发单赢家和 App 明确提示证明
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-16A`（⬜ 未开始）：从正式任务详情接入发现启动/重试，补隐藏 App 原入口验收；
+3. `H8-16B`（⬜ 未开始）：修正 Installation 单活任务数据库约束、并发单赢家与 App 明确提示；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

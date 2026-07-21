@@ -91,8 +91,12 @@
     {
       "id": "MVP-AC-05",
       "criterion": "用户能创建关键词任务，看到真实目标预览并排除目标",
-      "disposition": "remediation_required",
-      "evidence": [{"path": "frontend/src/features/task-create/TaskCreate.tsx", "anchor": "setCreatedTaskId(task.taskId)"}]
+      "disposition": "pending_real_platform",
+      "evidence": [
+        {"path": "frontend/src/features/task-create/TaskCreate.tsx", "anchor": "setCreatedTaskId(task.taskId)"},
+        {"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "开始目标发现"},
+        {"path": "docs/development-roadmap.md", "anchor": "### D6-16 真实目标发现验收（当前待补）"}
+      ]
     },
     {
       "id": "MVP-AC-06",
@@ -152,10 +156,15 @@
   "findings": [
     {
       "remediationTask": "H8-16A",
-      "state": "open",
+      "state": "resolved",
       "requirementRefs": ["MVP-AC-03", "MVP-AC-05"],
-      "summary": "Rust 已有固定发现 Command，但正式 React 组合根和任务详情没有 discovery gateway 或启动/重试入口",
-      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "const taskCreationGateway = new TauriTaskCreationGateway()"}]
+      "summary": "规格复审时 Rust 已有固定发现 Command，但正式 React 组合根和任务详情没有 discovery gateway 或启动/重试入口",
+      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "const taskCreationGateway = new TauriTaskCreationGateway()"}],
+      "resolutionEvidence": [
+        {"path": "frontend/src/main.tsx", "anchor": "const taskDiscoveryGateway = new TauriTaskDiscoveryGateway()"},
+        {"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "discoveryGateway.startDiscovery"},
+        {"path": "frontend/e2e-tauri/task-discovery.spec.ts", "anchor": "button=开始目标发现"}
+      ]
     },
     {
       "remediationTask": "H8-16B",

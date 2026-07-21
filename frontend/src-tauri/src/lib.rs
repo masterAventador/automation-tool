@@ -862,27 +862,21 @@ async fn prepare_target_preview_acceptance(
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TaskDiscoveryAcceptanceSummary {
+struct TaskDiscoveryAcceptancePreparation {
     installation_id: String,
     task_id: String,
-    command_id: String,
-    execution_attempt_id: String,
-    command_status: String,
-    started_status: String,
-    started_revision: u64,
-    started_event_sequence: u64,
-    final_status: String,
-    final_revision: u32,
-    final_event_sequence: u64,
+    task_status: String,
+    task_revision: u32,
+    last_event_sequence: u64,
 }
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
-async fn discover_task_for_acceptance(
+async fn prepare_task_discovery_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
-) -> Result<TaskDiscoveryAcceptanceSummary, ControlPlaneCommandError> {
+) -> Result<TaskDiscoveryAcceptancePreparation, ControlPlaneCommandError> {
     let token = std::env::var("AUTOMATION_TOOL_D610_BOOTSTRAP_TOKEN").map_err(|_| {
         ControlPlaneCommandError {
             code: "acceptance_configuration_unavailable",
@@ -929,52 +923,12 @@ async fn discover_task_for_acceptance(
         });
     }
 
-    let command = client
-        .start_task_discovery(
-            &vault,
-            task.task_id(),
-            "task:discovery:start:tauri-acceptance",
-        )
-        .await
-        .map_err(map_control_plane_error)?;
-    for _ in 0..240 {
-        let snapshot = client
-            .get_task(&vault, task.task_id())
-            .await
-            .map_err(map_control_plane_error)?;
-        if snapshot.status() == "awaiting_confirmation" {
-            return Ok(TaskDiscoveryAcceptanceSummary {
-                installation_id: registration.installation_id().to_owned(),
-                task_id: task.task_id().to_owned(),
-                command_id: command.command_id().to_owned(),
-                execution_attempt_id: command.execution_attempt_id().to_owned(),
-                command_status: command.command_status().to_owned(),
-                started_status: command.task_status().to_owned(),
-                started_revision: command.task_revision(),
-                started_event_sequence: command.last_event_sequence(),
-                final_status: snapshot.status().to_owned(),
-                final_revision: snapshot.revision(),
-                final_event_sequence: snapshot.last_event_sequence(),
-            });
-        }
-        if matches!(
-            snapshot.status(),
-            "failed"
-                | "cancelled"
-                | "outcome_uncertain"
-                | "awaiting_platform_login"
-                | "awaiting_human"
-        ) {
-            return Err(ControlPlaneCommandError {
-                code: "operation_unavailable",
-                retryable: false,
-            });
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    Err(ControlPlaneCommandError {
-        code: "operation_unavailable",
-        retryable: true,
+    Ok(TaskDiscoveryAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+        task_id: task.task_id().to_owned(),
+        task_status: task.status().to_owned(),
+        task_revision: task.revision(),
+        last_event_sequence: task.last_event_sequence(),
     })
 }
 
@@ -2659,7 +2613,7 @@ pub fn run() {
         prepare_workbench_metrics_for_acceptance,
         prepare_platform_session_for_acceptance,
         prepare_platform_session_reuse_for_acceptance,
-        discover_task_for_acceptance,
+        prepare_task_discovery_for_acceptance,
         preview_task_for_acceptance,
         prepare_task_target_preview_ui_for_acceptance,
         advance_task_target_confirmation_revision_for_acceptance,

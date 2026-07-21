@@ -7,6 +7,7 @@ import { TauriControlPlaneTransport } from "./platform/tauri/control-plane-trans
 import { TauriTaskProjectionSource } from "./platform/tauri/task-projection-source";
 import { TauriTaskCreationGateway } from "./platform/tauri/task-creation-gateway";
 import { TauriTaskRunControlGateway } from "./platform/tauri/task-run-control-gateway";
+import { TauriTaskDiscoveryGateway } from "./platform/tauri/task-discovery-gateway";
 import { TauriTaskTargetPreviewSource } from "./platform/tauri/task-target-preview-source";
 import { TauriTaskTargetResultSource } from "./platform/tauri/task-target-result-source";
 import { TauriWorkbenchGateway } from "./platform/tauri/workbench-gateway";
@@ -24,6 +25,7 @@ const startupCheck = createTransportStartupCheck(new TauriControlPlaneTransport(
 const taskSource = new TauriTaskProjectionSource();
 const taskCreationGateway = new TauriTaskCreationGateway();
 const taskRunControlGateway = new TauriTaskRunControlGateway();
+const taskDiscoveryGateway = new TauriTaskDiscoveryGateway();
 const taskTargetPreviewSource = new TauriTaskTargetPreviewSource();
 const taskTargetResultSource = new TauriTaskTargetResultSource();
 const workbenchGateway = new TauriWorkbenchGateway();
@@ -37,6 +39,7 @@ createRoot(root).render(
       taskSource={taskSource}
       taskCreationGateway={taskCreationGateway}
       taskRunControlGateway={taskRunControlGateway}
+      taskDiscoveryGateway={taskDiscoveryGateway}
       taskTargetPreviewSource={taskTargetPreviewSource}
       taskTargetResultSource={taskTargetResultSource}
       workbenchGateway={workbenchGateway}

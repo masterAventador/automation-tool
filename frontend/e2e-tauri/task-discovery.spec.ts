@@ -2,18 +2,12 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 
-interface TaskDiscoverySummary {
+interface TaskDiscoveryPreparation {
   readonly installationId: string;
   readonly taskId: string;
-  readonly commandId: string;
-  readonly executionAttemptId: string;
-  readonly commandStatus: string;
-  readonly startedStatus: string;
-  readonly startedRevision: number;
-  readonly startedEventSequence: number;
-  readonly finalStatus: string;
-  readonly finalRevision: number;
-  readonly finalEventSequence: number;
+  readonly taskStatus: string;
+  readonly taskRevision: number;
+  readonly lastEventSequence: number;
 }
 
 const UUID_V4 =
@@ -24,20 +18,39 @@ describe("Task discovery production-path acceptance", () => {
     const heading = await browser.$("h2");
     await expect(heading).toHaveText("RPA 运营工作台");
 
-    const summary = (await browser.tauri.execute(({ core }) =>
-      core.invoke("discover_task_for_acceptance"),
-    )) as TaskDiscoverySummary;
+    const preparation = (await browser.tauri.execute(({ core }) =>
+      core.invoke("prepare_task_discovery_for_acceptance"),
+    )) as TaskDiscoveryPreparation;
 
-    assert.match(summary.installationId, UUID_V4);
-    assert.match(summary.taskId, UUID_V4);
-    assert.match(summary.commandId, UUID_V4);
-    assert.match(summary.executionAttemptId, UUID_V4);
-    assert.equal(summary.commandStatus, "pending");
-    assert.equal(summary.startedStatus, "discovering_targets");
-    assert.equal(summary.startedRevision, 2);
-    assert.equal(summary.startedEventSequence, 1);
-    assert.equal(summary.finalStatus, "awaiting_confirmation");
-    assert.equal(summary.finalRevision, 3);
-    assert.equal(summary.finalEventSequence, 2);
+    assert.match(preparation.installationId, UUID_V4);
+    assert.match(preparation.taskId, UUID_V4);
+    assert.equal(preparation.taskStatus, "draft");
+    assert.equal(preparation.taskRevision, 1);
+    assert.equal(preparation.lastEventSequence, 0);
+
+    await browser.refresh();
+    const body = await browser.$("body");
+    await browser.waitUntil(
+      async () => (await body.getText()).includes(preparation.taskId),
+      { timeout: 60_000, timeoutMsg: "Workbench did not load the prepared discovery Task" },
+    );
+    await browser.$("button=查看运行详情").click();
+    await expect(await browser.$("h3=任务运行详情")).toExist();
+    await browser.$("button=开始目标发现").click();
+    await browser.waitUntil(
+      async () => {
+        const text = await body.getText();
+        return (
+          text.includes("目标发现命令已提交") &&
+          text.includes("等待确认") &&
+          text.includes("目标预览") &&
+          text.includes("验收目标 1") &&
+          text.includes("验收目标 2")
+        );
+      },
+      { timeout: 120_000, timeoutMsg: "UI-started discovery did not converge to preview" },
+    );
+    const text = await body.getText();
+    assert.doesNotMatch(text, /acceptance-author-|产品登录|注册账号|账号登录/);
   });
 });

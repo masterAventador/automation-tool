@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-16 已完成；规格复审确认分层能力尚未组合成正式用户纵向闭环，已新增 H8-16A～H8-16F 修复链，真实账号证据继续独立待补，下一项为 H8-16A 桌面发现入口闭环。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-16A 已完成；规格复审的首个纵向缺口已关闭，真实账号证据继续独立待补，下一项为 H8-16B Installation 单活任务闭环。
 
 ## 第一阶段
 
@@ -62,7 +62,8 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期、短期 Session 交换、工作台运行状态/结构化指标，以及 Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用、重试恢复，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter，代表流程另由隐藏真实 Tauri App 从产品入口验收；
 - MVP 失败矩阵已固化为 `contracts/quality/mvp-failure-matrix.v1.json`：15 类边界、78 个可自动化失败分支逐项绑定现有正式测试文件和精确测试锚点；Node 门禁同步校验台账词汇、证据文件/锚点、唯一性和真实账号待验收集合，不能用测试总数或 Fake 页面冒充覆盖。PostgreSQL 迁移失败/连接池耗尽和生产安装包误带 Profile、Cookie、SQLite、诊断资料的缺口已补齐；B5-15、D6-16、A7-16、A7-17 继续独立等待真实平台最终证据；
-- MVP 规格复审已固化为 `contracts/quality/mvp-spec-review.v1.json`：10 项产品/架构决策全部符合，14 条最终验收中 6 条自动化完成、1 条待真实登录态、2 条待正式安装包、5 条存在组合缺口。审计明确发现正式页面没有目标发现入口、确认后没有逐目标授权/投递、Executor 的 `task.offer` 仍返回固定成功批次、Installation 单活索引作用域错误，以及启动环境诊断不完整；这些缺口已拆为 H8-16A～H8-16F，不能被既有分层测试假绿；
+- MVP 规格复审已固化为 `contracts/quality/mvp-spec-review.v1.json`：10 项产品/架构决策全部符合；H8-16A 已关闭正式页面没有目标发现入口的组合缺口，14 条最终验收当前为 6 条自动化完成、2 条待真实平台、2 条待正式安装包、4 条仍需组合修复。确认后逐目标授权/投递、Executor 真实动作、Installation 单活、启动环境诊断和整条用户旅程继续由 H8-16B～H8-16F 收口，不能被既有分层测试假绿；
+- H8-16A 已把 D6-10 的固定目标发现 Command 接到正式 `TaskRunDetails`：草稿、等待登录、等待确认和人工接管状态可启动或重新发现，登录/接管时可直接进入平台状态；同 revision 不确定重试复用幂等键，错误与返回结构均严格校验且不泄露平台私密事实。唯一隐藏 Tauri App 已从真实工作台按钮经正式 TypeScript/IPC/Rust、Uvicorn/PostgreSQL 和 LocalExecutorProcess 收敛到目标预览，测试准备 Command 只创建 draft Task，不再代替用户启动发现；真实抖音候选仍归 D6-16 待账号验收；
 - Control Plane 已在隐藏真实 App 运行期间完成同库停服/重启验收：PostgreSQL 保留 Task/Attempt/Command/Event/定义，FakeExecutor 有界自动重连并消费原 pending Command，App 刷新经历不可用页后恢复权威取消终态；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
 - GitHub Actions 已建立 Backend、Frontend、Rust 三路质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵；所有第三方 Action 固定完整提交 SHA，工作流只读且不发布、不部署；

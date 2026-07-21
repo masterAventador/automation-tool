@@ -314,6 +314,8 @@ D6-09 以 Alembic `20260718_0016` 增加 `task_targets`。每行只持有 UUIDv4
 
 D6-10 新增 `TaskDiscoveryStartService`、`TaskDiscoveryConvergenceService` 与唯一 `SqlAlchemyTaskDiscoveryRepository`。`POST /api/v1/tasks/{task_id}/discoveries` 复用 `app.control-plane` Session，只在 active Installation、健康抖音 Session、无 logout gate 且 Task 状态可达时启动；一个事务创建 Attempt、`task.discover` 持久命令、`task.discovery_started` 事件并把 Task 推进到 `discovering_targets`。命令 payload 由已持久化 Task 定义生成，不接受客户端提供关键词、Target 或浏览器事实；Idempotency-Key 同任务精确重放返回原 command，跨任务复用拒绝。
 
+H8-16A 没有改变上述服务端事务、API 或 Executor wire，只补齐其正式桌面调用方。唯一隐藏 Tauri App 从 `TaskRunDetails` 的“开始目标发现”按钮经 strict TypeScript Gateway、固定 Tauri Command 和 Rust App Session 请求该端点；验收准备 Command 只创建 draft Task，发现启动必须由页面原入口发生。真实 LocalExecutorProcess 随后消费同一 Outbox 并回传候选，App 最终从权威快照/预览 API 展示 2 个确定性无副作用目标；真实抖音搜索仍单独归 D6-16，不由该确定性 Adapter 替代。
+
 Executor 的 `browser_authority.py` 把登录窗口创建的受信浏览器请求收敛成单一可撤销 lease；`discovery_operation.py` 只有拿到健康本机 Session 与该 lease 后，才能依次调用 D6-04 搜索、D6-05 有界滚动和 D6-07 最小提取。`ExecutorCommandProcessor` 先将 `task.discover` 写入 D6-10 当时的 SQLite v3，再把最多 100 条 Candidate 拆成每批最多 10 条的 `task.discovery_batch`，最后写入唯一 `task.discovery_completed`；命令结果、所有批次与完成事实在一个本机事务进入 outbox，重启只精确重放，不重跑浏览器动作。A7-04/A7-07 已在保留全部命令、checkpoint、outbox 与平台 Session 的前提下依次原地迁移到 v4/v5，并增加动作策略、紧停、准入与最小副作用事实。
 
 Control Plane 只在认证 Executor WebSocket 接收 batch/completed。内存 accumulator 最多保留 32 个 Attempt，要求 batch 从 1 开始、连续、总批数一致且同批重放指纹完全一致；每批先经 PostgreSQL 核对当前已确认 discover command。completed 到达后复验候选数、page revision、Installation/Task/Attempt/correlation 和 deadline，在一个事务调用 D6-09 替换 Target、完成 Attempt、追加事件并把 Task 收敛到 `awaiting_confirmation`。缺批、乱序、篡改和过期拒绝；登录失效、人工接管或失败不保存 Target，并分别投影到封闭状态。断线后的完整 batch/completed 重放必须与已持久化 Target 和 command 精确一致。

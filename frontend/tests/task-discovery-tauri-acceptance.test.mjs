@@ -30,9 +30,16 @@ test("discovery acceptance uses the production bridge from one hidden App", asyn
   assert.equal(config.app.windows[0].visible, false);
   assert.equal(config.identifier, "com.aventador.automationtool.d610acceptance");
   assert.match(wdio, /specs:\s*\["\.\/e2e-tauri\/task-discovery\.spec\.ts"\]/u);
-  assert.match(spec, /core\.invoke\("discover_task_for_acceptance"\)/u);
+  assert.match(spec, /core\.invoke\("prepare_task_discovery_for_acceptance"\)/u);
+  assert.match(spec, /button=开始目标发现/u);
+  assert.match(spec, /目标发现命令已提交/u);
   assert.match(rustClient, /pub async fn start_task_discovery/u);
-  assert.match(rustEntry, /\.start_task_discovery\(/u);
+  assert.match(rustEntry, /async fn start_task_discovery\(/u);
+  const preparation = rustEntry.match(
+    /async fn prepare_task_discovery_for_acceptance[\s\S]*?\n\}\n/u,
+  );
+  assert.ok(preparation);
+  assert.doesNotMatch(preparation[0], /\.start_task_discovery\(/u);
   assert.match(orchestrator, /LocalExecutorProcess/u);
   assert.match(orchestrator, /ExecutorCommandProcessor/u);
   assert.match(orchestrator, /test:task-discovery-tauri/u);

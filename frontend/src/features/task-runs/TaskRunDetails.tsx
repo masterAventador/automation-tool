@@ -33,6 +33,10 @@ import {
   type TaskTargetResultStatus,
 } from "../../api/control-plane/task-target-results";
 import { TaskTargetPreviewPanel } from "./TaskTargetPreview";
+import {
+  TaskDiscoveryGatewayError,
+  type TaskDiscoveryGateway,
+} from "./task-discovery";
 import type {
   TaskRunControlGateway,
   TaskRunControlOperation,
@@ -116,13 +120,22 @@ const EMERGENCY_STOPPABLE_STATUSES = new Set<TaskStatus>([
   "awaiting_human",
 ]);
 
+const DISCOVERY_STARTABLE_STATUSES = new Set<TaskStatus>([
+  "draft",
+  "awaiting_platform_login",
+  "awaiting_confirmation",
+  "awaiting_human",
+]);
+
 interface TaskRunDetailsProps {
   readonly taskId: string;
   readonly taskSource: TaskProjectionSource;
   readonly controlGateway: TaskRunControlGateway;
   readonly taskTargetPreviewSource: TaskTargetPreviewSource;
   readonly taskTargetResultSource: TaskTargetResultSource;
+  readonly discoveryGateway: TaskDiscoveryGateway;
   readonly onBack: () => void;
+  readonly onOpenPlatformSession: () => void;
 }
 
 interface ControlRequest {
@@ -235,7 +248,9 @@ export function TaskRunDetails({
   controlGateway,
   taskTargetPreviewSource,
   taskTargetResultSource,
+  discoveryGateway,
   onBack,
+  onOpenPlatformSession,
 }: TaskRunDetailsProps) {
   const queryClient = useQueryClient();
   const taskQuery = useQuery(taskSnapshotQueryOptions(taskSource, taskId));
@@ -246,12 +261,15 @@ export function TaskRunDetails({
   const [streamError, setStreamError] = useState(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [discoveryNotice, setDiscoveryNotice] = useState<string | null>(null);
   const [confirmedPreviewTaskId, setConfirmedPreviewTaskId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<SubmittedControl | null>(null);
   const commandKeys = useRef(
     new Map<TaskRunControlOperation, { revision: number; key: string }>(),
   );
   const commandAbort = useRef<AbortController | null>(null);
+  const discoveryKey = useRef<{ revision: number; key: string } | null>(null);
+  const discoveryAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -321,6 +339,7 @@ export function TaskRunDetails({
   useEffect(
     () => () => {
       commandAbort.current?.abort();
+      discoveryAbort.current?.abort();
     },
     [],
   );
@@ -365,6 +384,40 @@ export function TaskRunDetails({
     },
     onSettled: () => {
       commandAbort.current = null;
+    },
+  });
+
+  const discovery = useMutation({
+    mutationFn: async (baselineRevision: number) => {
+      if (discoveryKey.current?.revision !== baselineRevision) {
+        discoveryKey.current = {
+          revision: baselineRevision,
+          key: `task:discover:start:${globalThis.crypto.randomUUID()}`,
+        };
+      }
+      const controller = new AbortController();
+      discoveryAbort.current = controller;
+      return discoveryGateway.startDiscovery(taskId, discoveryKey.current.key, {
+        signal: controller.signal,
+      });
+    },
+    onSuccess: async () => {
+      discoveryKey.current = null;
+      setDiscoveryNotice("目标发现命令已提交，等待 Executor 返回候选");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskProjectionKeys.detail(taskId) }),
+        queryClient.invalidateQueries({ queryKey: taskProjectionKeys.lists() }),
+      ]);
+    },
+    onError: (error) => {
+      setDiscoveryNotice(
+        error instanceof TaskDiscoveryGatewayError && error.code === "discovery_rejected"
+          ? "当前平台登录或任务状态尚未满足目标发现条件，请先处理平台状态后重试"
+          : "目标发现结果暂时无法确认，请查看权威状态后重试",
+      );
+    },
+    onSettled: () => {
+      discoveryAbort.current = null;
     },
   });
 
@@ -441,6 +494,48 @@ export function TaskRunDetails({
         </Descriptions>
         <Progress percent={progress} status={status === "failed" ? "exception" : "normal"} />
       </Card>
+
+      {DISCOVERY_STARTABLE_STATUSES.has(status) ? (
+        <Card title="目标发现">
+          <Space orientation="vertical" size="middle">
+            <Typography.Text type="secondary">
+              目标发现只读取抖音公开搜索结果；平台未登录、出现验证码或风控时不会继续操作。
+            </Typography.Text>
+            <Flex gap={10} wrap>
+              <Button
+                type="primary"
+                loading={discovery.isPending}
+                disabled={discovery.isPending}
+                onClick={() => {
+                  setDiscoveryNotice(null);
+                  discovery.mutate(projectedSnapshot.revision);
+                }}
+              >
+                {status === "awaiting_confirmation" ? "重新发现目标" : "开始目标发现"}
+              </Button>
+              {status === "awaiting_platform_login" || status === "awaiting_human" ? (
+                <Button disabled={discovery.isPending} onClick={onOpenPlatformSession}>
+                  打开平台状态
+                </Button>
+              ) : null}
+            </Flex>
+            {discoveryNotice === null ? null : (
+              <Alert
+                type="info"
+                showIcon
+                title={discoveryNotice}
+                action={
+                  discovery.isError ? (
+                    <Button size="small" onClick={onOpenPlatformSession}>
+                      打开平台状态
+                    </Button>
+                  ) : undefined
+                }
+              />
+            )}
+          </Space>
+        </Card>
+      ) : null}
 
       {status === "awaiting_confirmation" || confirmedPreviewTaskId === taskId ? (
         <TaskTargetPreviewPanel

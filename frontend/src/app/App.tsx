@@ -8,6 +8,7 @@ import type { TaskTargetResultSource } from "../api/control-plane/task-target-re
 import type { WorkbenchGateway } from "../features/workbench/workbench-gateway";
 import type { TaskCreationGateway } from "../features/task-create/task-creation-gateway";
 import type { TaskRunControlGateway } from "../features/task-runs/task-run-controls";
+import type { TaskDiscoveryGateway } from "../features/task-runs/task-discovery";
 import type { PlatformAdapter } from "../platform/types";
 import type { PlatformSessionGateway } from "../features/platform-sessions/platform-session-gateway";
 import { StartupGate } from "./StartupGate";
@@ -21,6 +22,7 @@ interface AppProps {
   workbenchGateway?: WorkbenchGateway;
   taskCreationGateway?: TaskCreationGateway;
   taskRunControlGateway?: TaskRunControlGateway;
+  taskDiscoveryGateway?: TaskDiscoveryGateway;
   taskTargetPreviewSource?: TaskTargetPreviewSource;
   taskTargetResultSource?: TaskTargetResultSource;
   platformAdapter?: PlatformAdapter;
@@ -34,6 +36,7 @@ export function App({
   workbenchGateway,
   taskCreationGateway,
   taskRunControlGateway,
+  taskDiscoveryGateway,
   taskTargetPreviewSource,
   taskTargetResultSource,
   platformAdapter,
@@ -58,6 +61,7 @@ export function App({
               gateway={workbenchGateway}
               taskCreationGateway={taskCreationGateway}
               taskRunControlGateway={taskRunControlGateway}
+              taskDiscoveryGateway={taskDiscoveryGateway}
               taskTargetPreviewSource={taskTargetPreviewSource}
               taskTargetResultSource={taskTargetResultSource}
               platformAdapter={platformAdapter}
