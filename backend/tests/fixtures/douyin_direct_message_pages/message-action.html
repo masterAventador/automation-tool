@@ -11,11 +11,15 @@
       <div role="status" hidden>私信发送成功</div>
     </main>
     <script>
+      window.__conversationEntries = 0;
+      window.__messageDispatches = 0;
       document.querySelector("#entry").addEventListener("click", () => {
+        window.__conversationEntries += 1;
         document.querySelector("#entry").hidden = true;
         document.querySelector("#conversation").hidden = false;
       });
       document.querySelector("#send").addEventListener("click", () => {
+        window.__messageDispatches += 1;
         document.querySelector('[role="status"]').hidden = false;
       });
     </script>

@@ -360,6 +360,10 @@ A7-11 将评论执行收敛在 Executor 内部 `douyin.comment-action-execution.
 
 结构化 receipt 只允许 `not_dispatched/verified/outcome_uncertain` 和阶段化固定 evidence，并绑定 Action/Target、账本状态/revision 与重放位。许可前的登录、风控、陈旧确认、页面版本/锚点漂移、填写或 dispatch 许可失败不点击且保持 prepared；许可后的 Playwright 超时/异常、登录或风控变化、最终确认缺失/漂移、时钟或结算失败都不能回到失败重试，而是持久化 uncertain 或至少保留 dispatched 事实。prepare/dispatch 竞争返回的 dispatched/uncertain/verified 重放立即投影既有事实且不访问 DOM；只有 prepared 重放仍可重新观察页面并竞争尚未授出的唯一许可。该模块当前没有 Executor wire、Control Plane API、Tauri Command 或 React 入口，A7-15 才消费目标级结果，A7-16 才能以真实平台最终状态完成评论验收。
 
+A7-12 将主动私信执行收敛在 Executor 内部 `douyin.direct-message-action-execution.v1`，复用与评论动作相同的授权、模板再校验、域隔离 effect/verification 摘要和 receipt 不变量。顺序固定为准入 → prepared → 已打开会话恢复或一次入口点击 → conversation 复验 → 填写 → send locator 复验 → 原子 dispatch 许可 → 单次发送 → final 二次复验 → verified；进入会话不等于副作用许可，入口失败仍可从 prepared 恢复。
+
+“暂时无法私信”与“关注后才能私信”不会合并成通用失败：发送前分别保持 prepared evidence，发送后分别结算 uncertain evidence。登录、风控、未知版本、锚点冲突、入口/填写失败和 dispatch 许可失败均在发送前停止；获得发送许可后任何点击、权限变化、确认缺失、页面/时钟/账本异常都不能自动重发。既有 dispatched/uncertain/verified 在页面访问前返回，只有 prepared 可恢复会话并再次竞争尚未授出的许可。当前模块仍是 Local Executor 原调用面，不新增 HTTP/Tauri/React 入口；A7-13 统一处理结果查询，A7-15 投影目标级 UI，A7-17 才完成真实平台私信验收。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

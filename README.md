@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线与 Wave 7 A7-01～A7-11 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进受控主动私信执行。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线与 Wave 7 A7-01～A7-12 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进动作结果不确定处理。
 
 ## 第一阶段
 
@@ -110,6 +110,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - A7-09 已新增不执行动作的抖音主动私信 Page Object：共享页面版本模型只接受 canonical 官方 `/user/<目标 ID>` 主页路由，进入会话、私信输入/发送、最终确认以及“暂时无法私信/关注后才能私信”权限差异均由固定 selector 组唯一定位；登录/风控优先熔断，半套、重复、冲突、未知路由、驱动异常和中途漂移全部 fail closed。隔离 Fake 页面已通过无头系统 Chrome 的正式 `BrowserRuntime` 原入口回放 profile→conversation→confirmed、权限拒绝和漂移，但不冒充真实账号私信验收；真实动作仍由 A7-12 在 A7-07 唯一许可后编排；
 - A7-10 已建立无发送副作用的单次目标浏览基线：只接受 D6-10 最小 `DouyinCandidate`，由共享路由模型构造 canonical 官方用户页，固定一次 `domcontentloaded` 导航并经独立通用 Profile Page Object 确认最终主页锚点；开始、导航后和最终成功前都有取消检查。登录、风控、超时、未知版本、锚点冲突、驱动异常或最后一刻 DOM 漂移全部 fail closed；隔离主页中的评论/私信陷阱按钮触发数保持 0，生产 `BrowserRuntime` 无头回放后完整关闭。该内部 RPA 能力不新增 App/API/Executor wire，A7-11/A7-12 再接入高风险动作链；
 - A7-11 已建立 `douyin.comment-action-execution.v1` 单次评论执行：完整 ActionAuthorization 先经本机硬下限准入，精确渲染固定文案或唯一目标显示名变量后只把域隔离 SHA-256 写入 SQLite；Page Object ready 后填写正文，只有 `begin_side_effect_dispatch()` 唯一赢家才能单击提交，最终锚点二次复验后才结算 `verified`。登录、风控、陈旧确认、页面漂移和填充失败保持 `prepared/not_dispatched`；获得许可后的点击、最终确认或持久化失败一律结算或保留 `outcome_uncertain`，重放看到 dispatched/uncertain/verified 都不再点击。结构化 receipt 只含资源 ID、封闭状态/evidence、账本状态/revision 和重放标记，不含正文、Token、页面内容或路径；无头系统 Chrome 已沿生产 BrowserRuntime、真实 locator 和私有 SQLite 在官方-origin 隔离页证明首次单击一次、精确重放零单击，但真实平台最终状态仍归 A7-16；
+- A7-12 已建立 `douyin.direct-message-action-execution.v1` 单次主动私信执行：沿用同一 ActionAuthorization、本机硬下限和副作用账本，在 `prepared` 后允许从用户主页进入会话或从已打开会话恢复；进入会话不是发送许可，只有填入最终受限文案并重新取得 send locator 后，唯一 dispatch 原子赢家才能发送一次。“暂时无法私信”和“关注后才能私信”在发送前、发送后均保留不同 evidence；发送前失败保持可恢复 prepared，发送后任何超时、权限变化、页面漂移或结算失败都进入 uncertain 且重放零 DOM。生产 BrowserRuntime 已在官方-origin 隔离页用无头系统 Chrome 和真实私有 SQLite 证明首次进入/发送各一次、精确重放均不增加，但真实平台最终状态仍归 A7-17；
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Windows x86_64 原生 runner 均已实测，Hosted Windows CI 的 Billing 限制只保留为持续集成覆盖缺口；
 - E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS arm64 与 Windows x86_64 release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App；

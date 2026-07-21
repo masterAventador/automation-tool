@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-11 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-12 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-12 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-13 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -318,7 +318,7 @@
 | A7-09 | 抖音私信 Page Object | 进入会话/输入/发送/最终状态；权限差异处理 | D6-02,A7-05 | ✅ 已完成 |
 | A7-10 | 只浏览动作 | 无发送副作用的目标访问，作为低风险基线 | D6-10 | ✅ 已完成 |
 | A7-11 | 评论动作执行 | 授权校验→账本→点击→最终验证→结构化 receipt | A7-07,A7-08 | ✅ 已完成 |
-| A7-12 | 私信动作执行 | 授权校验→账本→发送→最终验证→结构化 receipt | A7-07,A7-09 | ⬜ 未开始 |
+| A7-12 | 私信动作执行 | 授权校验→账本→发送→最终验证→结构化 receipt | A7-07,A7-09 | ✅ 已完成 |
 | A7-13 | 结果不确定处理 | dispatched 未 verified 先查询；无法确认不重放 | A7-11,A7-12 | ⬜ 未开始 |
 | A7-14 | 连续失败熔断 | 达阈值停止新动作、打开 handoff、保持审计 | A7-02,A7-13 | ⬜ 未开始 |
 | A7-15 | 目标级结果 UI | 成功/跳过/失败/不确定和证据摘要 | A7-13,T3-18 | ⬜ 未开始 |
@@ -2297,11 +2297,27 @@
 - 资源与文档：运行浏览器前确认 1420 端口空闲；所有 BrowserRuntime/Playwright、Vite、pytest、Uvicorn 与项目隔离 PostgreSQL fixture 已退出，复查无无头 Chrome、Playwright driver、监听端口或 `automation-tool-pytest-*` 容器残留，两个本轮 coverage 缓存已精确删除。未启动可见 App、未接触默认浏览器 Profile、系统钥匙串、真实平台账号或其他项目资源。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
 - 后续：进入 `A7-12` 私信动作执行；复用同一授权/账本/receipt 原则和 A7-09 权限差异，D6-16/B5-15/A7-16/A7-17 真实账号证据继续独立保留，不阻塞离线主线
 
+### A7-12 私信动作执行
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本任务提交
+- RED：先把唯一台账置为 `🧪 RED`，再从原调用面导入尚不存在的 `automation_tool.executor.rpa.douyin.direct_message_action`；Pytest 收集准确失败于 `ModuleNotFoundError`，证明没有沿用 Page Object 演示或 Fake 结果冒充私信执行。随后先固定版本契约，再补齐完整授权、prepared 恢复、会话入口、唯一 send dispatch、最终验证、权限差异、重放和故障矩阵
+- 输入与摘要：`DouyinDirectMessageActionIntent` 只接受 action=direct_message 的完整 A7-03 expectation、A7-05 `ActionMessageTemplate` 和 D6-06 最小目标摘要。固定文案或唯一目标显示名变量只在内存展开，展开后再次执行长度、安全文本与零剩余变量校验；effect SHA-256 用独立 direct-message 域和 canonical ASCII JSON 绑定完整授权 scope、最终文案与模板版本，SQLite/receipt/repr/异常均不保存或回显私信正文
+- 会话与唯一发送：每个 execution 实例只运行一次。A7-04 完整验签和本机紧停/最小间隔/任务上限先于 A7-07 `prepared`；随后既可从 `profile_ready` 单击一次入口并等待 `conversation_ready`，也可从已打开会话直接恢复。入口点击不取得发送许可；输入最终文案并重新取得 send locator 后，只有 `begin_side_effect_dispatch()` 返回 `replayed=false` 的原子赢家可执行唯一一次 `message_send.click()`。final confirmation 再次取得后才写域隔离验证摘要并结算 verified
+- 权限与恢复：发送前的“暂时无法私信”和“关注后才能私信”分别返回 `ready_messaging_not_allowed/ready_follow_required`，入口超时/异常、会话未出现、登录、风控、陈旧确认、未知版本、锚点冲突、填写或账本许可失败均保持 `not_dispatched/prepared`，可从当前会话恢复但不改变 effect。发送后的两类权限分别返回 `final_messaging_not_allowed/final_follow_required` 并结算 uncertain；点击超时/异常、确认缺失/漂移、时钟或验证持久化失败同样不得转回可重试失败
+- 重放与 Receipt：prepared 重放可重新观察页面并竞争尚未授出的唯一许可，文案变化因 effect 摘要不一致而拒绝；dispatched/uncertain/verified 重放在任何 DOM 查询、入口、填写或发送前直接投影既有事实。`DouyinDirectMessageActionReceipt` 仅允许 `not_dispatched/verified/outcome_uncertain` 与阶段化封闭 evidence、强类型 Action/Target、账本状态/revision 和重放位的合法组合；非法 ID/type/state/evidence/revision/version 或 execution 二次运行全部脱敏拒绝
+- 原调用方验收：生产 `BrowserRuntime → BrowserWindow → DouyinDirectMessageActionExecution → DouyinDirectMessagePage` 使用一次性 0700 Profile、无头系统 Chrome、官方-origin 隔离用户页、正式 gate 和真实私有 SQLite。真实 locator 完成 entry→input→send→final，页面计数证明首次 entry/send 各 1 次，同 token/intent verified 重放仍各为 1；Runtime 退出后浏览器完整关闭。本任务没有 App/API/Executor wire，因此原调用方是 Python RPA 执行层；没有访问真实账号，也不冒充 A7-17 的真实抖音最终状态
+- 失败矩阵：41 项单元场景覆盖坏 token、三类本机限制、prepare/dispatch/settle 故障、不同文案重放、prepared 从会话恢复、verified/uncertain 重放、dispatch 竞争输家、入口超时/异常/未进入会话、两类权限在入口前/后和发送后变化、fill 超时/异常与填后漂移、send 超时/异常、ready/final 登录/风控/超时/未知版本/重复锚点/驱动故障、陈旧确认、最终锚点失效、UTC 时钟异常以及 intent/execution/receipt 篡改；许可前 send 零点击，许可后未知结果永不重放
+- 门禁：A7-12 聚焦 `44 passed`（含既有 A7-09 浏览器语料复验），新 `direct_message_action.py` 254 条语句/52 个分支覆盖率 100%；Backend 标准全量 `1739 passed, 5 skipped`，11216 条语句/2418 个分支覆盖率 100%，305 个 Python 文件格式、Ruff、严格 Mypy 282 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 99 项 Node 契约、186 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿
+- 资源与文档：浏览器/UI 验收均使用 headless；运行前确认 1420 空闲，运行后确认 1420 无监听且无项目 Playwright、无头 Chrome、Vite、pytest 或 Uvicorn 进程残留。未启动可见 App、未接触默认浏览器 Profile、系统钥匙串、真实平台账号或其他项目资源。同步根/Backend README、后端架构、工程结构与本唯一台账，没有新增重复规划文档
+- 后续：进入 `A7-13`，把两个动作的 dispatched/uncertain 恢复统一收敛为先查询最终页面事实、无法证明则维持不确定且绝不重放；D6-16/B5-15/A7-16/A7-17 真实账号证据继续独立保留
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-12`（⬜ 未开始）：复用 A7-11 的 ActionAuthorization、本机硬下限、副作用账本、唯一 dispatch、最终页面验证和结构化 receipt，接入 A7-09 profile→conversation→输入/发送与两类权限差异；
+1. `A7-13`（⬜ 未开始）：统一评论/私信 dispatched/uncertain 的恢复查询；只有最终页面事实足以证明时才结算 verified，无法确认时保持 uncertain 且绝不重放；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。
