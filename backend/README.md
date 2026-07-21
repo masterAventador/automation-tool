@@ -78,6 +78,8 @@ E4-02 增加正式控制台入口 `automation-tool-executor`。`executor/bootstr
 
 `GET /api/v1/workbench/status` 复用 `require_current_installation_access`，从 Registry 只投影 `ready`、Executor `online/offline` 与服务端最后心跳时间，统一 `no-store`，不返回 Installation、Executor、Connection ID 或底层异常。该状态是工作台只读在线事实，任务状态仍只来自 PostgreSQL 快照与事件。
 
+`GET /api/v1/workbench/metrics` 同样要求 `app.control-plane` Session，并在一条 PostgreSQL 语句中按当前 Installation 汇总累计任务和动作事实。公开 `workbench.metrics.v1` 只含安全整数计数：Task 总数、成功、失败、当前需接管、结果不确定，以及 Action 总数、成功、失败、结果不确定；不返回 Installation ID、诊断文本、平台内容、路径或底层错误。端点固定 `no-store`、只读且无副作用，数据库失败统一返回可重试的脱敏 503。
+
 真实网络基础认证验收在 `backend/` 执行 `uv run python ../scripts/run_i2_13_acceptance.py`；持久命令验收执行 `uv run python ../scripts/run_t3_09_acceptance.py`；FakeExecutor 正式路径验收执行 `uv run python ../scripts/run_t3_10_acceptance.py`；事件闭环执行 `uv run python ../scripts/run_t3_11_acceptance.py`；SSE App 入口执行 `uv run python ../scripts/run_t3_12_acceptance.py`；暂停/恢复入口执行 `uv run python ../scripts/run_t3_13_acceptance.py`；取消/紧停入口执行 `uv run python ../scripts/run_t3_14_acceptance.py`；Query/Reducer/Tauri Channel 入口执行 `uv run python ../scripts/run_t3_15_acceptance.py`；工作台真实页面入口执行 `uv run python ../scripts/run_t3_16_acceptance.py`；新建任务表单、运行详情、完整生命周期与 Control Plane 重启入口分别在仓库根目录执行 `backend/.venv/bin/python scripts/run_t3_17_acceptance.py`、`backend/.venv/bin/python scripts/run_t3_18_acceptance.py`、`backend/.venv/bin/python scripts/run_t3_19_acceptance.py` 和 `backend/.venv/bin/python scripts/run_t3_20_acceptance.py`；D6-10 目标发现闭环执行 `backend/.venv/bin/python scripts/run_d6_10_acceptance.py`，D6-11 目标预览 API 闭环执行 `backend/.venv/bin/python scripts/run_d6_11_acceptance.py`，D6-12 用户页面闭环执行 `backend/.venv/bin/python scripts/run_d6_12_acceptance.py`，三者都由各自唯一隐藏 Tauri App 经正式 Rust 命令和真实 Uvicorn/PostgreSQL 验收。E4-02/E4-11 的正式进程入口验收执行 `uv run pytest tests/integration/test_local_executor_process.py`：测试经安装后的 `automation-tool-executor`、stdin、真实 Uvicorn、正式 Session 认证和 Registry 验证 Hello/Heartbeat、固定健康输出、SQLite identity/秘密不落库与 SIGTERM 清理；仓库根的 `uv run --project backend python scripts/run_e4_07_acceptance.py` 另验证 signed PyInstaller→公开 Rust Manager→真实 Uvicorn→同一 SQLite。B5-12 的最小 Session 投影验收执行 `uv run --project backend python scripts/run_b5_12_acceptance.py`，经后台系统 Chrome、生产 detector/reporter、正式认证 WebSocket、真实 Uvicorn/Alembic/PostgreSQL 核对六列 projection。所有验收都使用项目专属隔离 PostgreSQL、唯一端口/网络/卷；结束后回收对应 App、浏览器、进程、端口、容器、网络和卷。
 
 H8-01 安全暂停原入口在仓库根执行 `backend/.venv/bin/python scripts/run_h8_01_acceptance.py`：唯一隐藏 App 经正式网络控制 API 驱动真实 Executor，验证已有 dispatched 先结算、暂停命令落账后零新增 dispatch、runtime 自动 PAUSED 与 App 恢复 RUNNING；FakeExecutor 只负责建立初始服务端 running 事实，不冒充本机安全检查点。
@@ -257,6 +259,7 @@ AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY=<32-byte-ed25519-public-key-base64url>
 - `POST http://127.0.0.1:8765/api/v1/device-sessions`
 - `POST http://127.0.0.1:8765/api/v1/tasks`
 - `GET http://127.0.0.1:8765/api/v1/workbench/status`
+- `GET http://127.0.0.1:8765/api/v1/workbench/metrics`
 - `GET http://127.0.0.1:8765/api/v1/tasks`
 - `GET http://127.0.0.1:8765/api/v1/tasks/{task_id}`
 - `WS ws://127.0.0.1:8765/api/v1/executors/connect`

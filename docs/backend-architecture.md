@@ -509,6 +509,8 @@ T3-08 在认证入口之后增加单进程 `ExecutorConnectionRegistry`。Regist
 
 T3-16 增加 Installation-scoped `GET /api/v1/workbench/status`。路由强制复用 `require_current_installation_access`，从 Registry 只投影 Control Plane `ready`、Executor `online/offline` 和可空服务端最后心跳时间，固定 `no-store`；不返回 Installation、Executor、Connection ID、channel、Session 或底层错误。该端点只描述当前进程的在线事实，Task 状态与指标仍从 PostgreSQL 权威快照/事件计算；MVP/Demo 多副本前必须先建设跨实例 Executor 路由，不能把单进程 Registry 冒充集群在线状态。
 
+H8-14 在同一路由域增加 Installation-scoped `GET /api/v1/workbench/metrics`，但不把 PostgreSQL 聚合塞进 1 秒运行状态轮询。`WorkbenchMetricsService` 只接受强类型 Installation，数据库适配器用一条 SQL 和两个聚合 CTE 统计累计 Task/Action 事实：`succeeded` Task 包含 succeeded 与 partially_succeeded，接管只表示当前 awaiting_human，结果不确定保持独立；Action 直接按持久 outcome 汇总。响应固定为 `workbench.metrics.v1`、`no-store` 和 JavaScript 安全整数，并校验分类和不超过总数。它不返回 ID、诊断、Cookie、评论/私信、页面内容或路径，仓储异常和畸形计数统一 fail closed 为脱敏可重试 503；读取不新增数据库表、缓存、写入或副作用。
+
 Registry 为 T3-09 提供 `send_current(installation_id, connection_id, wire)`：只接受 1..32 KiB UTF-8 文本，写入前后都确认目标仍是 current；传输失败与写入期间替换分别返回不泄密的 unavailable/stale 结果，调用者不能把 socket write 当成 Executor ACK。应用 lifespan 用 1012 清空所有连接。Registry 是单实例瞬时路由，不持久化认证、任务、命令或事件；PostgreSQL 仍是认证和业务事实源。
 
 T3-09 在每次连接重认证之后调用持久投递服务。仓储先把 deadline 已到的 pending/in-flight/delivered 批量置为 expired，再用 PostgreSQL `FOR UPDATE SKIP LOCKED` 按 deadline/创建顺序抢占 pending、lease 已过期的 in-flight，或 ACK 超时的 delivered；抢占时 revision 与 delivery attempts 同步递增并持有不越 deadline 的短 lease。同一连接内按有界批次发送，失败或 stale current 只释放成带延迟的 pending；写入成功清 lease 并记 delivered，不能改 Task/Attempt 状态。

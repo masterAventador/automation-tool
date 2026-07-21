@@ -94,7 +94,9 @@ T3-14 继续在同一 Rust client 增加固定 `CancelTask`/`EmergencyStopTask` 
 
 T3-15 建立正式 Task 投影边界：`TauriTaskProjectionSource` 只 invoke 固定快照、列表和事件 Channel Command，Rust 从私有 vault 换票并返回精确公开 DTO；`taskProjectionKeys`/Query options 管理服务端快照，纯 Reducer 以 status/revision/lastEventSequence 为权威。水位内事件直接去重；下一序号缺口、Task/revision 回退、未知版本/类型或畸形 DTO 只进入 `refresh_required`，先失效并回拉 Query 快照再续订；连续不兼容超过有界预算进入 `degraded`，不从事件名猜状态。正常 SSE 限时关闭也先读新快照再续订，不计作协议降级。唯一 `visible=false` App 已从 WebView 正式 TypeScript source 经 Rust/真实后端/FakeExecutor 收敛 sequence 1..5 到 succeeded。
 
-T3-16 将投影接入正式 RPA 工作台：`Workbench` 展示 Control Plane/Executor 状态、今日任务指标、当前任务和最近任务，较新的实时快照会覆盖列表旧状态。`TauriWorkbenchGateway` 只允许固定工作台状态与紧停 Command；全局紧停必须二次确认，同一 Task 的不确定重试复用幂等键，提交后回拉列表/详情/运行状态，最终状态仍只认 Executor 事件。运行状态轮询设置为隐藏窗口继续执行，满足后台 App 验收。唯一 `visible=false` App 已从页面点击紧停，经正式 Rust/后端/Outbox/FakeExecutor ACK 收敛到 `outcome_uncertain`；长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。
+T3-16 将投影接入正式 RPA 工作台：`Workbench` 展示 Control Plane/Executor 状态、当前任务和最近任务，较新的实时快照会覆盖列表旧状态。H8-14 移除从最近 20 条客户端任务估算的“今日”指标，改由独立 10 秒 Query 调用固定 `get_workbench_metrics`，展示当前 Installation 的累计任务/动作成功、失败、接管和结果不确定事实；Zod 与 Rust 都严格校验 `workbench.metrics.v1`、安全整数、未知字段和分类总数一致性。运行状态继续 1 秒轮询，不被数据库指标查询放大。
+
+`TauriWorkbenchGateway` 只允许固定工作台状态、只读指标与紧停 Command；全局紧停必须二次确认，同一 Task 的不确定重试复用幂等键，提交后回拉列表/详情/运行状态/指标，最终状态仍只认 Executor 事件。两类轮询都允许隐藏窗口继续执行。H8-14 的唯一 `visible=false` App 已从正式页面经 TypeScript gateway、Tauri IPC、Rust 固定 operation、真实 Uvicorn/App Session 和隔离 PostgreSQL 渲染结构化指标，并证明其他 Installation 不可见、读取前后事实不变；长期凭据仍只在 `app_data_dir`，不使用系统钥匙串。
 
 T3-18 将工作台 Task 入口接到正式 `TaskRunDetails`。页面先读 TanStack Query 权威快照，再从持久事件起点通过同一 Rust SSE/Tauri Channel 重放并跟随时间线；只投影明确的进度、step 与 `actionId` 事实，缺少目标或平台证据时显示空态。`TauriTaskRunControlGateway` 暴露四个窄方法，对应四个固定 Rust Command；按钮按权威状态启停，取消/紧停二次确认，不确定重试在同 revision 复用幂等键，提交回执不会冒充 Executor 已执行。事件畸形、错 Task 或缺口会 fail closed 并要求显式重载。唯一 `visible=false` App 已真实点击四类控制并经后端与 HOLD FakeExecutor 收敛最终事实。
 

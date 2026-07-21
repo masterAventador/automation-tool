@@ -3,10 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   WorkbenchGatewayError,
   parseEmergencyStopReceipt,
+  parseWorkbenchMetrics,
   parseWorkbenchRuntimeStatus,
   validateEmergencyStopInput,
   type EmergencyStopReceipt,
   type WorkbenchGateway,
+  type WorkbenchMetrics,
   type WorkbenchRequestOptions,
   type WorkbenchRuntimeStatus,
 } from "../../features/workbench/workbench-gateway";
@@ -86,6 +88,11 @@ export class TauriWorkbenchGateway implements WorkbenchGateway {
     return parseWorkbenchRuntimeStatus(response);
   }
 
+  async getMetrics(options: WorkbenchRequestOptions = {}): Promise<WorkbenchMetrics> {
+    const response = await safeInvoke("get_workbench_metrics", {}, options.signal);
+    return parseWorkbenchMetrics(response);
+  }
+
   async emergencyStopTask(
     taskId: string,
     idempotencyKey: string,
@@ -104,4 +111,3 @@ export class TauriWorkbenchGateway implements WorkbenchGateway {
     return receipt;
   }
 }
-

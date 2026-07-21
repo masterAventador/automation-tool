@@ -1168,6 +1168,66 @@
         "title": "VersionResponse",
         "type": "object"
       },
+      "WorkbenchActionMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "outcomeUncertain": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Outcomeuncertain",
+            "type": "integer"
+          },
+          "succeeded": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "outcomeUncertain"
+        ],
+        "title": "WorkbenchActionMetricsResponse",
+        "type": "object"
+      },
+      "WorkbenchMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "$ref": "#/components/schemas/WorkbenchActionMetricsResponse"
+          },
+          "tasks": {
+            "$ref": "#/components/schemas/WorkbenchTaskMetricsResponse"
+          },
+          "version": {
+            "const": "workbench.metrics.v1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "tasks",
+          "actions"
+        ],
+        "title": "WorkbenchMetricsResponse",
+        "type": "object"
+      },
       "WorkbenchStatusResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1203,6 +1263,50 @@
           "executorLastHeartbeatAt"
         ],
         "title": "WorkbenchStatusResponse",
+        "type": "object"
+      },
+      "WorkbenchTaskMetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "handoffRequired": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Handoffrequired",
+            "type": "integer"
+          },
+          "outcomeUncertain": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Outcomeuncertain",
+            "type": "integer"
+          },
+          "succeeded": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "handoffRequired",
+          "outcomeUncertain"
+        ],
+        "title": "WorkbenchTaskMetricsResponse",
         "type": "object"
       }
     },
@@ -2342,6 +2446,32 @@
         "summary": "Version",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/workbench/metrics": {
+      "get": {
+        "operationId": "getWorkbenchMetrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Workbench Metrics",
+        "tags": [
+          "workbench"
         ]
       }
     },

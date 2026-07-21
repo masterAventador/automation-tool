@@ -71,6 +71,7 @@ from automation_tool.control_plane.application.task_target_results import (
     TaskTargetResultService,
 )
 from automation_tool.control_plane.application.tasks import TaskCreationService
+from automation_tool.control_plane.application.workbench_metrics import WorkbenchMetricsService
 from automation_tool.control_plane.bootstrap.database import database_from_environment
 from automation_tool.control_plane.bootstrap.device_credentials import (
     device_credential_service as build_device_credential_service,
@@ -110,6 +111,9 @@ from automation_tool.control_plane.bootstrap.tasks import (
 )
 from automation_tool.control_plane.bootstrap.tasks import (
     task_query_service as build_task_query_service,
+)
+from automation_tool.control_plane.bootstrap.workbench import (
+    workbench_metrics_service as build_workbench_metrics_service,
 )
 from automation_tool.control_plane.domain import DatabaseLifecycle
 from automation_tool.control_plane.infrastructure.database import Database
@@ -175,6 +179,7 @@ def create_app(
     task_target_result_service: TaskTargetResultService | None = None,
     task_event_convergence_service: TaskEventConvergenceService | None = None,
     task_event_stream_service: TaskEventStreamService | None = None,
+    workbench_metrics_service: WorkbenchMetricsService | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
     task_event_stream_poll_interval_seconds: float = 0.25,
@@ -205,6 +210,7 @@ def create_app(
     resolved_task_target_result_service = task_target_result_service
     resolved_task_event_convergence_service = task_event_convergence_service
     resolved_task_event_stream_service = task_event_stream_service
+    resolved_workbench_metrics_service = workbench_metrics_service
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -253,6 +259,8 @@ def create_app(
         )
     if resolved_task_event_stream_service is None and isinstance(resolved_database, Database):
         resolved_task_event_stream_service = build_task_event_stream_service(resolved_database)
+    if resolved_workbench_metrics_service is None and isinstance(resolved_database, Database):
+        resolved_workbench_metrics_service = build_workbench_metrics_service(resolved_database)
     hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
     recheck_interval_seconds = _positive_finite_seconds(
         executor_connection_recheck_interval_seconds
@@ -290,6 +298,7 @@ def create_app(
     app.state.task_target_result_service = resolved_task_target_result_service
     app.state.task_event_convergence_service = resolved_task_event_convergence_service
     app.state.task_event_stream_service = resolved_task_event_stream_service
+    app.state.workbench_metrics_service = resolved_workbench_metrics_service
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     app.state.task_event_stream_poll_interval_seconds = stream_poll_interval_seconds

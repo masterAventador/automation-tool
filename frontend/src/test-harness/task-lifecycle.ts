@@ -20,6 +20,7 @@ import type {
 import type {
   EmergencyStopReceipt,
   WorkbenchGateway,
+  WorkbenchMetrics,
   WorkbenchRequestOptions,
   WorkbenchRuntimeStatus,
 } from "../features/workbench/workbench-gateway";
@@ -360,6 +361,27 @@ export class TestHarnessTaskLifecycle
       controlPlaneStatus: "ready",
       executorStatus: "online",
       executorLastHeartbeatAt: new Date().toISOString(),
+    };
+  }
+
+  async getMetrics(options: WorkbenchRequestOptions = {}): Promise<WorkbenchMetrics> {
+    checkSignal(options);
+    const tasks = this.read().tasks.map((task) => task.snapshot);
+    const succeeded = tasks.filter((task) =>
+      ["succeeded", "partially_succeeded"].includes(task.status),
+    ).length;
+    const failed = tasks.filter((task) => task.status === "failed").length;
+    const handoffRequired = tasks.filter((task) => task.status === "awaiting_human").length;
+    const outcomeUncertain = tasks.filter((task) => task.status === "outcome_uncertain").length;
+    return {
+      version: "workbench.metrics.v1",
+      tasks: { total: tasks.length, succeeded, failed, handoffRequired, outcomeUncertain },
+      actions: {
+        total: tasks.length,
+        succeeded,
+        failed,
+        outcomeUncertain,
+      },
     };
   }
 }

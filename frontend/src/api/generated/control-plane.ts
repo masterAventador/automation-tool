@@ -379,6 +379,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workbench/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Workbench Metrics */
+        get: operations["getWorkbenchMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workbench/status": {
         parameters: {
             query?: never;
@@ -842,6 +859,27 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** WorkbenchActionMetricsResponse */
+        WorkbenchActionMetricsResponse: {
+            /** Failed */
+            failed: number;
+            /** Outcomeuncertain */
+            outcomeUncertain: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Total */
+            total: number;
+        };
+        /** WorkbenchMetricsResponse */
+        WorkbenchMetricsResponse: {
+            actions: components["schemas"]["WorkbenchActionMetricsResponse"];
+            tasks: components["schemas"]["WorkbenchTaskMetricsResponse"];
+            /**
+             * Version
+             * @constant
+             */
+            version: "workbench.metrics.v1";
+        };
         /** WorkbenchStatusResponse */
         WorkbenchStatusResponse: {
             /**
@@ -856,6 +894,19 @@ export interface components {
              * @enum {string}
              */
             executorStatus: "online" | "offline";
+        };
+        /** WorkbenchTaskMetricsResponse */
+        WorkbenchTaskMetricsResponse: {
+            /** Failed */
+            failed: number;
+            /** Handoffrequired */
+            handoffRequired: number;
+            /** Outcomeuncertain */
+            outcomeUncertain: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Total */
+            total: number;
         };
     };
     responses: never;
@@ -1552,6 +1603,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionResponse"];
+                };
+            };
+        };
+    };
+    getWorkbenchMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchMetricsResponse"];
                 };
             };
         };

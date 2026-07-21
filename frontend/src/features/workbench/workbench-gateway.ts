@@ -59,6 +59,40 @@ const workbenchRuntimeStatusSchema = z
       (value.executorLastHeartbeatAt !== null),
   );
 
+const metricCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const workbenchMetricsSchema = z
+  .object({
+    version: z.literal("workbench.metrics.v1"),
+    tasks: z
+      .object({
+        total: metricCount,
+        succeeded: metricCount,
+        failed: metricCount,
+        handoffRequired: metricCount,
+        outcomeUncertain: metricCount,
+      })
+      .strict(),
+    actions: z
+      .object({
+        total: metricCount,
+        succeeded: metricCount,
+        failed: metricCount,
+        outcomeUncertain: metricCount,
+      })
+      .strict(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.tasks.succeeded +
+        value.tasks.failed +
+        value.tasks.handoffRequired +
+        value.tasks.outcomeUncertain <=
+        value.tasks.total &&
+      value.actions.succeeded + value.actions.failed + value.actions.outcomeUncertain <=
+        value.actions.total,
+  );
+
 const emergencyStopReceiptSchema = z
   .object({
     commandId: z.string().regex(canonicalUuidV4),
@@ -71,6 +105,7 @@ const emergencyStopReceiptSchema = z
   .strict();
 
 export type WorkbenchRuntimeStatus = z.infer<typeof workbenchRuntimeStatusSchema>;
+export type WorkbenchMetrics = z.infer<typeof workbenchMetricsSchema>;
 export type EmergencyStopReceipt = z.infer<typeof emergencyStopReceiptSchema>;
 
 export interface WorkbenchRequestOptions {
@@ -79,6 +114,7 @@ export interface WorkbenchRequestOptions {
 
 export interface WorkbenchGateway {
   getRuntimeStatus(options?: WorkbenchRequestOptions): Promise<WorkbenchRuntimeStatus>;
+  getMetrics(options?: WorkbenchRequestOptions): Promise<WorkbenchMetrics>;
   emergencyStopTask(
     taskId: string,
     idempotencyKey: string,
@@ -125,6 +161,10 @@ export function parseWorkbenchRuntimeStatus(value: unknown): WorkbenchRuntimeSta
   return parseValue(workbenchRuntimeStatusSchema, value);
 }
 
+export function parseWorkbenchMetrics(value: unknown): WorkbenchMetrics {
+  return parseValue(workbenchMetricsSchema, value);
+}
+
 export function parseEmergencyStopReceipt(value: unknown): EmergencyStopReceipt {
   return parseValue(emergencyStopReceiptSchema, value);
 }
@@ -138,6 +178,7 @@ export function validateEmergencyStopInput(taskId: string, key: string): void {
 export const workbenchKeys = {
   all: ["workbench"] as const,
   runtimeStatus: () => [...workbenchKeys.all, "runtime-status"] as const,
+  metrics: () => [...workbenchKeys.all, "metrics"] as const,
 };
 
 export function workbenchRuntimeStatusQueryOptions(gateway: WorkbenchGateway) {
@@ -147,6 +188,17 @@ export function workbenchRuntimeStatusQueryOptions(gateway: WorkbenchGateway) {
     retry: false,
     staleTime: 5_000,
     refetchInterval: 1_000,
+    refetchIntervalInBackground: true,
+  });
+}
+
+export function workbenchMetricsQueryOptions(gateway: WorkbenchGateway) {
+  return queryOptions({
+    queryKey: workbenchKeys.metrics(),
+    queryFn: ({ signal }) => gateway.getMetrics({ signal }),
+    retry: false,
+    staleTime: 10_000,
+    refetchInterval: 10_000,
     refetchIntervalInBackground: true,
   });
 }

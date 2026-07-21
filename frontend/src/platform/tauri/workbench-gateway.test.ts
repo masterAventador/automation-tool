@@ -6,6 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import {
   WorkbenchGatewayError,
+  workbenchMetricsQueryOptions,
   workbenchRuntimeStatusQueryOptions,
 } from "../../features/workbench/workbench-gateway";
 import { TauriWorkbenchGateway } from "./workbench-gateway";
@@ -24,14 +25,28 @@ describe("Tauri workbench gateway", () => {
 
     expect(options.refetchInterval).toBe(1_000);
     expect(options.refetchIntervalInBackground).toBe(true);
+    const metrics = workbenchMetricsQueryOptions(new TauriWorkbenchGateway());
+    expect(metrics.refetchInterval).toBe(10_000);
+    expect(metrics.refetchIntervalInBackground).toBe(true);
   });
 
-  it("uses only fixed runtime status and emergency-stop Commands", async () => {
+  it("uses only fixed runtime status, metrics, and emergency-stop Commands", async () => {
     invoke
       .mockResolvedValueOnce({
         controlPlaneStatus: "ready",
         executorStatus: "offline",
         executorLastHeartbeatAt: null,
+      })
+      .mockResolvedValueOnce({
+        version: "workbench.metrics.v1",
+        tasks: {
+          total: 9,
+          succeeded: 3,
+          failed: 2,
+          handoffRequired: 1,
+          outcomeUncertain: 1,
+        },
+        actions: { total: 12, succeeded: 7, failed: 2, outcomeUncertain: 1 },
       })
       .mockResolvedValueOnce({
         commandId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
@@ -47,6 +62,11 @@ describe("Tauri workbench gateway", () => {
       controlPlaneStatus: "ready",
       executorStatus: "offline",
     });
+    await expect(gateway.getMetrics()).resolves.toMatchObject({
+      version: "workbench.metrics.v1",
+      tasks: { total: 9 },
+      actions: { total: 12 },
+    });
     await expect(
       gateway.emergencyStopTask(TASK_ID, IDEMPOTENCY_KEY),
     ).resolves.toMatchObject({
@@ -55,6 +75,7 @@ describe("Tauri workbench gateway", () => {
     });
     expect(invoke.mock.calls).toEqual([
       ["get_workbench_status", {}],
+      ["get_workbench_metrics", {}],
       ["emergency_stop_workbench_task", { taskId: TASK_ID, idempotencyKey: IDEMPOTENCY_KEY }],
     ]);
   });
@@ -70,6 +91,19 @@ describe("Tauri workbench gateway", () => {
       code: "protocol_mismatch",
       message: "Workbench protocol is incompatible",
     });
+
+    invoke.mockResolvedValueOnce({
+      version: "workbench.metrics.v1",
+      tasks: {
+        total: 1,
+        succeeded: 1,
+        failed: 1,
+        handoffRequired: 0,
+        outcomeUncertain: 0,
+      },
+      actions: { total: 0, succeeded: 0, failed: 0, outcomeUncertain: 0 },
+    });
+    await expect(gateway.getMetrics()).rejects.toMatchObject({ code: "protocol_mismatch" });
 
     invoke.mockResolvedValueOnce({
       controlPlaneStatus: "ready",

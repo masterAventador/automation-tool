@@ -41,6 +41,7 @@ enum ControlPlaneOperation {
     GetSystemHealth,
     GetCurrentInstallationAccess,
     GetWorkbenchStatus,
+    GetWorkbenchMetrics,
     GetDouyinPlatformSession,
     PrepareDouyinPlatformSessionLogout,
     IssueInstallationRegistrationChallenge,
@@ -69,6 +70,7 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
+            | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
             | Self::GetTaskTargetPreview
             | Self::ListTasks
@@ -97,6 +99,7 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth => "/api/v1/health",
             Self::GetCurrentInstallationAccess => "/api/v1/installations/current",
             Self::GetWorkbenchStatus => "/api/v1/workbench/status",
+            Self::GetWorkbenchMetrics => "/api/v1/workbench/metrics",
             Self::GetDouyinPlatformSession => "/api/v1/platform-sessions/douyin",
             Self::PrepareDouyinPlatformSessionLogout => {
                 "/api/v1/platform-sessions/douyin/logout/prepare"
@@ -133,6 +136,7 @@ impl ControlPlaneOperation {
             Self::GetSystemHealth
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
+            | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
             | Self::GetTaskTargetPreview
             | Self::ReplaceTaskTargetExclusions
@@ -675,6 +679,28 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_workbench_status(&response_body)
+    }
+
+    pub async fn get_workbench_metrics<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<WorkbenchMetrics, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response_body = self
+            .execute(
+                ControlPlaneOperation::GetWorkbenchMetrics,
+                Some(session.token()),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_workbench_metrics(&response_body)
     }
 
     pub async fn get_douyin_platform_session<S>(
@@ -1676,6 +1702,33 @@ struct WorkbenchStatusResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkbenchMetricsResponse {
+    version: String,
+    tasks: WorkbenchTaskMetricsResponse,
+    actions: WorkbenchActionMetricsResponse,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkbenchTaskMetricsResponse {
+    total: u64,
+    succeeded: u64,
+    failed: u64,
+    handoff_required: u64,
+    outcome_uncertain: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkbenchActionMetricsResponse {
+    total: u64,
+    succeeded: u64,
+    failed: u64,
+    outcome_uncertain: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlatformSessionResponse {
     platform: String,
     state: String,
@@ -2027,6 +2080,33 @@ pub struct WorkbenchRuntimeStatus {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkbenchMetrics {
+    version: &'static str,
+    tasks: WorkbenchTaskMetrics,
+    actions: WorkbenchActionMetrics,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkbenchTaskMetrics {
+    total: u64,
+    succeeded: u64,
+    failed: u64,
+    handoff_required: u64,
+    outcome_uncertain: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkbenchActionMetrics {
+    total: u64,
+    succeeded: u64,
+    failed: u64,
+    outcome_uncertain: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlatformSessionStatus {
     platform: String,
     state: String,
@@ -2324,6 +2404,59 @@ fn parse_workbench_status(body: &[u8]) -> Result<WorkbenchRuntimeStatus, Control
         control_plane_status: response.control_plane_status,
         executor_status: response.executor_status,
         executor_last_heartbeat_at: response.executor_last_heartbeat_at,
+    })
+}
+
+fn parse_workbench_metrics(body: &[u8]) -> Result<WorkbenchMetrics, ControlPlaneError> {
+    let response: WorkbenchMetricsResponse = parse_exact_json(body)?;
+    let task_accounted = response
+        .tasks
+        .succeeded
+        .checked_add(response.tasks.failed)
+        .and_then(|value| value.checked_add(response.tasks.handoff_required))
+        .and_then(|value| value.checked_add(response.tasks.outcome_uncertain))
+        .ok_or_else(protocol_invalid)?;
+    let action_accounted = response
+        .actions
+        .succeeded
+        .checked_add(response.actions.failed)
+        .and_then(|value| value.checked_add(response.actions.outcome_uncertain))
+        .ok_or_else(protocol_invalid)?;
+    let counts = [
+        response.tasks.total,
+        response.tasks.succeeded,
+        response.tasks.failed,
+        response.tasks.handoff_required,
+        response.tasks.outcome_uncertain,
+        response.actions.total,
+        response.actions.succeeded,
+        response.actions.failed,
+        response.actions.outcome_uncertain,
+    ];
+    if response.version != "workbench.metrics.v1"
+        || counts
+            .iter()
+            .any(|count| *count > MAX_CROSS_RUNTIME_SEQUENCE)
+        || task_accounted > response.tasks.total
+        || action_accounted > response.actions.total
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(WorkbenchMetrics {
+        version: "workbench.metrics.v1",
+        tasks: WorkbenchTaskMetrics {
+            total: response.tasks.total,
+            succeeded: response.tasks.succeeded,
+            failed: response.tasks.failed,
+            handoff_required: response.tasks.handoff_required,
+            outcome_uncertain: response.tasks.outcome_uncertain,
+        },
+        actions: WorkbenchActionMetrics {
+            total: response.actions.total,
+            succeeded: response.actions.succeeded,
+            failed: response.actions.failed,
+            outcome_uncertain: response.actions.outcome_uncertain,
+        },
     })
 }
 
@@ -3089,9 +3222,9 @@ mod tests {
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
         parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
         parse_task_discovery, parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
-        parse_task_target_results, parse_workbench_status, request_path, require_idempotency_key,
-        require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
-        transport_error, validate_preview_command, validate_response_metadata,
+        parse_task_target_results, parse_workbench_metrics, parse_workbench_status, request_path,
+        require_idempotency_key, require_list_cursor, require_preview_cursor, required_credential,
+        sse_frame_end, transport_error, validate_preview_command, validate_response_metadata,
         validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
         ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
@@ -3176,6 +3309,12 @@ mod tests {
                 ControlPlaneOperation::GetWorkbenchStatus,
                 "GET",
                 "/api/v1/workbench/status",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetWorkbenchMetrics,
+                "GET",
+                "/api/v1/workbench/metrics",
                 200,
             ),
             (
@@ -4038,6 +4177,84 @@ mod tests {
     }
 
     #[test]
+    fn workbench_metrics_parser_accepts_only_exact_coherent_safe_counts() {
+        let valid = serde_json::json!({
+            "version": "workbench.metrics.v1",
+            "tasks": {
+                "total": 9,
+                "succeeded": 3,
+                "failed": 2,
+                "handoffRequired": 1,
+                "outcomeUncertain": 1
+            },
+            "actions": {
+                "total": 12,
+                "succeeded": 7,
+                "failed": 2,
+                "outcomeUncertain": 1
+            }
+        });
+        let parsed =
+            parse_workbench_metrics(&serde_json::to_vec(&valid).expect("workbench metrics JSON"))
+                .expect("valid workbench metrics");
+        assert_eq!(
+            serde_json::to_value(parsed).expect("public workbench metrics JSON"),
+            valid
+        );
+
+        for invalid in [
+            serde_json::json!({
+                "version": "private",
+                "tasks": valid["tasks"],
+                "actions": valid["actions"]
+            }),
+            serde_json::json!({
+                "version": "workbench.metrics.v1",
+                "tasks": {
+                    "total": 1,
+                    "succeeded": 1,
+                    "failed": 1,
+                    "handoffRequired": 0,
+                    "outcomeUncertain": 0
+                },
+                "actions": valid["actions"]
+            }),
+            serde_json::json!({
+                "version": "workbench.metrics.v1",
+                "tasks": valid["tasks"],
+                "actions": {
+                    "total": 1,
+                    "succeeded": 2,
+                    "failed": 0,
+                    "outcomeUncertain": 0
+                }
+            }),
+            serde_json::json!({
+                "version": "workbench.metrics.v1",
+                "tasks": valid["tasks"],
+                "actions": valid["actions"],
+                "diagnostics": "private"
+            }),
+            serde_json::json!({
+                "version": "workbench.metrics.v1",
+                "tasks": {
+                    "total": 9007199254740992_u64,
+                    "succeeded": 0,
+                    "failed": 0,
+                    "handoffRequired": 0,
+                    "outcomeUncertain": 0
+                },
+                "actions": valid["actions"]
+            }),
+        ] {
+            assert!(parse_workbench_metrics(
+                &serde_json::to_vec(&invalid).expect("invalid workbench metrics JSON")
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn platform_session_parser_accepts_only_exact_non_sensitive_health() {
         let healthy = serde_json::json!({
             "platform": "douyin",
@@ -4645,6 +4862,7 @@ mod tests {
             ControlPlaneOperation::GetSystemHealth,
             ControlPlaneOperation::GetCurrentInstallationAccess,
             ControlPlaneOperation::GetWorkbenchStatus,
+            ControlPlaneOperation::GetWorkbenchMetrics,
             ControlPlaneOperation::IssueInstallationRegistrationChallenge,
             ControlPlaneOperation::CreateTask,
             ControlPlaneOperation::ListTasks,

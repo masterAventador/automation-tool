@@ -15,6 +15,7 @@ import { Workbench } from "./Workbench";
 import type {
   EmergencyStopReceipt,
   WorkbenchGateway,
+  WorkbenchMetrics,
   WorkbenchRuntimeStatus,
 } from "./workbench-gateway";
 
@@ -85,6 +86,17 @@ function gateway(): WorkbenchGateway {
       executorStatus: "online",
       executorLastHeartbeatAt: "2026-07-18T14:05:01Z",
     })),
+    getMetrics: vi.fn(async (): Promise<WorkbenchMetrics> => ({
+      version: "workbench.metrics.v1",
+      tasks: {
+        total: 9,
+        succeeded: 3,
+        failed: 2,
+        handoffRequired: 1,
+        outcomeUncertain: 1,
+      },
+      actions: { total: 12, succeeded: 7, failed: 2, outcomeUncertain: 1 },
+    })),
     emergencyStopTask: vi.fn(async (taskId): Promise<EmergencyStopReceipt> => ({
       commandId: "16fd2706-8baf-433b-82eb-8c7fada847da",
       taskId,
@@ -122,9 +134,11 @@ describe("RPA workbench", () => {
     expect(screen.getByRole("heading", { name: "最近任务" })).toBeVisible();
     expect(screen.getByText(COMPLETED_TASK_ID)).toBeVisible();
     expect(screen.getByText("已成功")).toBeVisible();
-    const today = screen.getByText("今日任务").closest(".ant-statistic");
-    expect(today).toBeVisible();
-    await waitFor(() => expect(today).toHaveTextContent("2"));
+    const total = screen.getByText("累计任务").closest(".ant-statistic");
+    expect(total).toBeVisible();
+    await waitFor(() => expect(total).toHaveTextContent("9"));
+    expect(screen.getByText("当前需接管").closest(".ant-statistic")).toHaveTextContent("1");
+    expect(screen.getByText("动作结果待确认").closest(".ant-statistic")).toHaveTextContent("1");
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
   });
 

@@ -62,6 +62,19 @@ const shellWorkbenchGateway: WorkbenchGateway = {
       executorLastHeartbeatAt: null,
     };
   },
+  async getMetrics() {
+    return {
+      version: "workbench.metrics.v1",
+      tasks: {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        handoffRequired: 0,
+        outcomeUncertain: 0,
+      },
+      actions: { total: 0, succeeded: 0, failed: 0, outcomeUncertain: 0 },
+    };
+  },
   async emergencyStopTask() {
     throw new Error("Workbench emergency stop is unavailable");
   },

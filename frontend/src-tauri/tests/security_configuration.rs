@@ -357,6 +357,32 @@ fn workbench_acceptance_is_isolated_and_hidden() {
 }
 
 #[test]
+fn workbench_metrics_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.workbench-metrics-e2e.conf.json");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.h814acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{
+            "label": "main",
+            "title": "自动化运营工具",
+            "width": 1280,
+            "height": 1600,
+            "visible": false
+        }])
+    );
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(capabilities[1]["identifier"], "wdio-workbench-metrics");
+    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+}
+
+#[test]
 fn task_create_form_acceptance_is_isolated_and_hidden() {
     let config = read_json("tauri.task-create-form-e2e.conf.json");
     let capabilities = config["app"]["security"]["capabilities"]

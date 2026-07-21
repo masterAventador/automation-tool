@@ -117,7 +117,7 @@ frontend/
 │   │   │   ├── task-run-control-gateway.ts # 固定暂停/恢复/取消/紧停 Command
 │   │   │   ├── platform-adapter.ts         # 固定 Executor 状态/重启/诊断/本机紧停 Command
 │   │   │   ├── platform-session-gateway.ts # 固定抖音状态查询/打开处理/重新检查 Command
-│   │   │   └── workbench-gateway.ts       # 固定运行状态与全局紧停 gateway
+│   │   │   └── workbench-gateway.ts       # 固定运行状态、只读指标与全局紧停 gateway
 │   │   ├── types.ts               # PlatformAdapter 公共接口
 │   │   └── test-harness.ts        # 仅测试构建可用
 │   ├── schemas/                   # Zod 运行时校验
@@ -186,7 +186,8 @@ frontend/
 │   ├── tauri.platform-session-e2e.conf.json # 后台隐藏的平台状态与无头浏览器验收
 │   ├── tauri.platform-session-reuse-e2e.conf.json # 后台隐藏的登录复用/失效接管验收
 │   ├── tauri.default-profile-isolation-e2e.conf.json # 后台隐藏的默认 Profile 隔离验收
-│   └── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
+│   ├── tauri.workbench-e2e.conf.json # 后台隐藏的工作台真实紧停验收
+│   └── tauri.workbench-metrics-e2e.conf.json # 后台隐藏的工作台权威指标验收
 ├── public/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -212,6 +213,7 @@ frontend/
 ├── wdio.platform-session-reuse.conf.ts
 ├── wdio.default-profile-isolation.conf.ts
 ├── wdio.workbench.conf.ts
+├── wdio.workbench-metrics.conf.ts
 ├── tsconfig.json
 └── README.md
 ```
@@ -255,10 +257,10 @@ backend/
 │       │   ├── logging.py         # H8-11 进程级 LogRecord/Uvicorn 脱敏与限界
 │       │   ├── bootstrap/         # 配置、注册、设备凭据和 Session 依赖装配
 │       │   ├── api/               # REST、设备认证、SSE/WebSocket 和错误映射
-│       │   ├── application/       # 注册、凭据、任务、配置、内容和工作流用例
+│       │   ├── application/       # 注册、凭据、任务、工作台指标、配置、内容和工作流用例
 │       │   ├── domain/            # 稳定 ID、Task 执行状态、版本事件、快照与 Command 契约
 │       │   └── infrastructure/
-│       │       ├── database/      # PostgreSQL 注册认证、任务、动作 evidence/连续失败与目标结果投影
+│       │       ├── database/      # PostgreSQL 注册认证、任务、动作 evidence/连续失败、目标结果与工作台指标投影
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
 │       │       ├── events/
 │       │       ├── object_storage/
@@ -425,6 +427,8 @@ D6-12 的用户页面位于既有 `features/task-runs/`：`TaskTargetPreview.tsx
 D6-13 复用既有 `application/task_command_delivery.py` 与 `infrastructure/database/task_command_repository.py`，没有新增 dispatcher、消息队列或第二协议。`schema.py`/Alembic `20260720_0019` 只给 Outbox 增加确认 message 绑定；仓储以 typed Task definition 判断 offer 是否可能承载业务动作，在 enqueue 固定当前确认并在 claim 关联复验。`scripts/run_d6_13_acceptance.py` 复用共享隔离 PostgreSQL/Uvicorn/WebSocket 脚手架，证明未绑定和确认失效命令不离开数据库、当前绑定命令才到达正式 Executor 网络入口；它不调用 App API、不启动 Tauri/浏览器，也不伪造 Wave 7 ActionAuthorization 或平台动作。
 
 D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移固定 Schema、Policy 与窄引用；H8-09 的 `executor/local_artifact.py` 统一拥有稳定 ID、摘要、媒体类型、大小、受控相对路径、独占写入、按 ID 解析/枚举/读取和文件系统权限边界。H8-10 的 `executor/browser_diagnostic_artifact.py` 复用同一 Store，只生产脱敏 viewport PNG 与固定结构 Trace；`discovery_operation.py` 对失败自动触发，对成功只接受 bootstrap 的用户设置。设置链位于既有 `Diagnostics.tsx` → `platform-adapter.ts` → `lib.rs` → `executor_platform.rs` → `executor_manager.rs`/`executor_bootstrap.rs`，AppData 只保存 exact bool，不暴露 Artifact 路径。`tests/integration/test_douyin_discovery_fake_pages.py` 从正式 command processor 与无头系统 Chrome 覆盖失败/默认成功/用户开启成功，E4-14 隐藏 App 验收覆盖真实设置与 signed Executor 启动。当前没有新增数据库表、通用文件浏览器、上传或删除通道。
+
+H8-14 沿现有工作台分层增加唯一只读指标链：`control_plane/application/workbench_metrics.py` 定义结构化快照和安全不变量，`infrastructure/database/workbench_metrics_repository.py` 以单条 Installation-scoped SQL 聚合既有 `tasks`/`task_actions`，`bootstrap/workbench.py` 装配，`api/workbench.py` 暴露固定 `/metrics`。桌面侧继续使用 `features/workbench/`、`platform/tauri/workbench-gateway.ts` 和既有 Rust `control_plane.rs`/`lib.rs`，没有第二个页面、通用 HTTP/IPC、客户端数据库或新表。`tauri.workbench-metrics-e2e.conf.json`、WDIO spec 与 `scripts/run_h8_14_acceptance.py` 只用于唯一隐藏 App 的真实 PostgreSQL/跨 Installation/只读验收，并在结束后回收专属 AppData、端口和 Compose 资源。
 
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 

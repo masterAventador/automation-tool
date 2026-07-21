@@ -649,6 +649,18 @@ async fn get_workbench_status(
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
+async fn get_workbench_metrics(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::WorkbenchMetrics, ControlPlaneCommandError> {
+    client
+        .get_workbench_metrics(&vault)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
 async fn get_douyin_platform_session(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
@@ -1362,6 +1374,14 @@ struct WorkbenchAcceptancePreparation {
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct WorkbenchMetricsAcceptancePreparation {
+    installation_id: String,
+    task_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TaskControlAcceptanceSummary {
     installation_id: String,
     task_id: String,
@@ -1785,6 +1805,45 @@ async fn prepare_workbench_for_acceptance(
         .await
         .map_err(map_control_plane_error)?;
     Ok(WorkbenchAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+        task_id: task.task_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn prepare_workbench_metrics_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<WorkbenchMetricsAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_H814_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_H814_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    let task = client
+        .create_task(
+            &vault,
+            "task:workbench-metrics:tauri-acceptance",
+            &acceptance_task_definition(),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(WorkbenchMetricsAcceptancePreparation {
         installation_id: registration.installation_id().to_owned(),
         task_id: task.task_id().to_owned(),
     })
@@ -2533,6 +2592,7 @@ pub fn run() {
         confirm_task_target_preview,
         get_douyin_platform_session,
         get_workbench_status,
+        get_workbench_metrics,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -2565,6 +2625,7 @@ pub fn run() {
         confirm_task_target_preview,
         get_douyin_platform_session,
         get_workbench_status,
+        get_workbench_metrics,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -2595,6 +2656,7 @@ pub fn run() {
         prepare_system_resume_for_acceptance,
         app_process_id_for_acceptance,
         prepare_workbench_for_acceptance,
+        prepare_workbench_metrics_for_acceptance,
         prepare_platform_session_for_acceptance,
         prepare_platform_session_reuse_for_acceptance,
         discover_task_for_acceptance,

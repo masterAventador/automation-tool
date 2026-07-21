@@ -26,6 +26,7 @@ import {
 import { followTaskProjection } from "../task-runs/task-projection-controller";
 import {
   workbenchKeys,
+  workbenchMetricsQueryOptions,
   workbenchRuntimeStatusQueryOptions,
   type WorkbenchGateway,
 } from "./workbench-gateway";
@@ -57,27 +58,10 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   outcome_uncertain: "结果待确认",
 };
 
-const NEEDS_HUMAN = new Set<TaskStatus>([
-  "awaiting_platform_login",
-  "awaiting_confirmation",
-  "awaiting_human",
-  "outcome_uncertain",
-]);
-
 interface WorkbenchProps {
   readonly taskSource: TaskProjectionSource;
   readonly gateway: WorkbenchGateway;
   readonly onOpenTask?: (taskId: string) => void;
-}
-
-function isToday(timestamp: string): boolean {
-  const value = new Date(timestamp);
-  const today = new Date();
-  return (
-    value.getFullYear() === today.getFullYear() &&
-    value.getMonth() === today.getMonth() &&
-    value.getDate() === today.getDate()
-  );
 }
 
 function statusColor(status: TaskStatus): string {
@@ -96,6 +80,7 @@ export function Workbench({
   const queryClient = useQueryClient();
   const taskList = useQuery(taskListQueryOptions(taskSource, null, 20));
   const runtime = useQuery(workbenchRuntimeStatusQueryOptions(gateway));
+  const metrics = useQuery(workbenchMetricsQueryOptions(gateway));
   const [currentProjection, setCurrentProjection] = useState<TaskSnapshot | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const emergencyKey = useRef<{ taskId: string; key: string } | null>(null);
@@ -146,6 +131,7 @@ export function Workbench({
         queryClient.invalidateQueries({ queryKey: taskProjectionKeys.detail(receipt.taskId) }),
         queryClient.invalidateQueries({ queryKey: taskProjectionKeys.lists() }),
         queryClient.invalidateQueries({ queryKey: workbenchKeys.runtimeStatus() }),
+        queryClient.invalidateQueries({ queryKey: workbenchKeys.metrics() }),
       ]);
     },
     onError: () => {
@@ -153,13 +139,12 @@ export function Workbench({
     },
   });
 
-  const unavailable = taskList.isError || runtime.isError;
+  const unavailable = taskList.isError || runtime.isError || metrics.isError;
   const projectedTasks = tasks.map((task) =>
     currentProjection?.taskId === task.taskId && currentProjection.revision >= task.revision
       ? currentProjection
       : task,
   );
-  const todayTasks = projectedTasks.filter((task) => isToday(task.createdAt));
   const latestCurrent =
     currentProjection?.taskId === currentTask?.taskId ? currentProjection : currentTask;
 
@@ -176,6 +161,7 @@ export function Workbench({
               onClick={() => {
                 void taskList.refetch();
                 void runtime.refetch();
+                void metrics.refetch();
               }}
             >
               重新加载工作台
@@ -186,7 +172,7 @@ export function Workbench({
     );
   }
 
-  if (taskList.isPending || runtime.isPending) {
+  if (taskList.isPending || runtime.isPending || metrics.isPending) {
     return <Card className="workbench-state-card" loading />;
   }
 
@@ -199,32 +185,48 @@ export function Workbench({
         </Tag>
       </Flex>
 
-      <Row className="overview-grid" gutter={16}>
+      <Row className="overview-grid" gutter={[16, 16]}>
         <Col span={6}>
-          <Card><Statistic title="今日任务" value={todayTasks.length} /></Card>
+          <Card><Statistic title="累计任务" value={metrics.data.tasks.total} /></Card>
         </Col>
         <Col span={6}>
           <Card>
             <Statistic
-              title="成功"
-              value={todayTasks.filter((task) => task.status === "succeeded").length}
+              title="成功任务"
+              value={metrics.data.tasks.succeeded}
             />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
             <Statistic
-              title="失败"
-              value={todayTasks.filter((task) => task.status === "failed").length}
+              title="失败任务"
+              value={metrics.data.tasks.failed}
             />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
             <Statistic
-              title="待人工处理"
-              value={projectedTasks.filter((task) => NEEDS_HUMAN.has(task.status)).length}
+              title="当前需接管"
+              value={metrics.data.tasks.handoffRequired}
             />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic title="任务结果待确认" value={metrics.data.tasks.outcomeUncertain} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card><Statistic title="成功动作" value={metrics.data.actions.succeeded} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card><Statistic title="失败动作" value={metrics.data.actions.failed} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic title="动作结果待确认" value={metrics.data.actions.outcomeUncertain} />
           </Card>
         </Col>
       </Row>

@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-12 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，下一项为 H8-13 诊断导出。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-14 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，下一项为 H8-15 完整失败矩阵自动化。
 
 ## 第一阶段
 
@@ -54,12 +54,12 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Frontend 已锁定 React、TypeScript、Vite、Ant Design、TanStack Query 和 Zod，严格类型、Lint、冻结安装与生产资产构建通过；Vite 仅绑定 loopback 且仓库没有 Web 部署入口；
 - Tauri v2 已具备真实 macOS 主窗口、生产 CSP、零 IPC 权限 Capability、桌面图标与 Cargo 锁文件，Rust/Clippy/无 bundle 构建通过；
 - Tauri 首启设备身份已在 Rust 内生成 Ed25519 密钥：私钥和长期设备凭据只进入 `app_data_dir` 下由 Rust 管理的 App 私有文件，不进入 React、Tauri IPC、`localStorage` 或普通配置，也不调用系统钥匙串；
-- App 打开后直接进入真实 RPA 运营工作台，展示当前/最近任务、运行状态和基础指标；Control Plane 不可用与 Installation 已吊销分别显示脱敏诊断和重试状态，页面不存在产品登录或注册入口；
+- App 打开后直接进入真实 RPA 运营工作台，展示当前/最近任务、运行状态，以及按当前 Installation 从 PostgreSQL 权威事实汇总的任务/动作成功、失败、接管和结果不确定指标；Control Plane 不可用与 Installation 已吊销分别显示脱敏诊断和重试状态，页面不存在产品登录或注册入口；
 - 上述无登录入口仅是当前 P9 本地 MVP 状态；任何客户 Demo 交付前必须完成 U9 产品账号、登录/恢复、Session 和账号设备归属，未登录不进入工作台，登录后设备自动绑定账号；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已接入正式 Tauri IPC/Rust 网络桥：生产入口由真实 App 发起 Health 请求；Rust 侧以固定 origin、封闭 operation allowlist、禁止重定向/代理、请求与响应大小/时间上限和关联 ID 调用 Control Plane，不暴露任意 URL 代理；
 - Installation 注册、长期凭据轮换/吊销、两类短期 Session，以及 Task 幂等创建、分页列表、详情、事件 SSE、暂停/恢复和取消/紧停，已通过测试版真实隐藏 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；
-- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期、短期 Session 交换、工作台运行状态，以及 Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，后端/前端分别具备确定性漂移检查；
+- FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期、短期 Session 交换、工作台运行状态/结构化指标，以及 Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用、重试恢复，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter，代表流程另由隐藏真实 Tauri App 从产品入口验收；
 - Control Plane 已在隐藏真实 App 运行期间完成同库停服/重启验收：PostgreSQL 保留 Task/Attempt/Command/Event/定义，FakeExecutor 有界自动重连并消费原 pending Command，App 刷新经历不可用页后恢复权威取消终态；
 - 桌面端已建立 Vitest、Playwright、Rust、WebdriverIO 四层统一门禁；WebdriverIO 使用 embedded provider 在真实 macOS Tauri/WKWebView 中验证无登录工作台和原生窗口标签，测试插件只由 `desktop-e2e` 特性启用；
