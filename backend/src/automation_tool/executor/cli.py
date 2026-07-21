@@ -23,6 +23,10 @@ from automation_tool.executor.command_processor import (
     ExecutorCommandProcessor,
     ExecutorCommandRejected,
 )
+from automation_tool.executor.crash_recovery import (
+    ExecutorCrashRecoveryCoordinator,
+    ExecutorCrashRecoveryRejected,
+)
 from automation_tool.executor.discovery_operation import ProductionDouyinDiscoveryOperation
 from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
 from automation_tool.executor.platform_commands import (
@@ -106,6 +110,12 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                     browser_authority=browser_authority,
                 ),
             )
+            metadata = RuntimeMetadata.detect()
+            if bootstrap.crash_recovery:
+                ExecutorCrashRecoveryCoordinator(
+                    ledger=ledger,
+                    clock=metadata,
+                ).run()
             local_outbox: Queue[object] = Queue()
             reporter = ExecutorProcessReporter(stdout, authenticator)
             platform_worker = PlatformCommandWorker(
@@ -120,7 +130,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
             )
             process = LocalExecutorProcess(
                 bootstrap=bootstrap,
-                metadata=RuntimeMetadata.detect(),
+                metadata=metadata,
                 reporter=reporter,
                 command_processor=command_processor,
                 local_outbox=local_outbox,
@@ -149,6 +159,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
     except (
         ExecutorLedgerRejected,
         ExecutorCommandRejected,
+        ExecutorCrashRecoveryRejected,
         ExecutorProcessRejected,
         LocalSessionAuthenticationRejected,
         PlatformCommandRejected,

@@ -207,10 +207,30 @@ class DouyinSideEffectRecovery:
             or not isinstance(clock, DouyinSideEffectRecoveryClock)
         ):
             raise DouyinSideEffectRecoveryRejected
-        self._window = window
+        self._window: BrowserWindow | None = window
         self._ledger = ledger
         self._clock = clock
         self._executed = False
+
+    @classmethod
+    def without_page_context(
+        cls,
+        *,
+        ledger: ExecutorLedger,
+        clock: DouyinSideEffectRecoveryClock,
+    ) -> DouyinSideEffectRecovery:
+        """Fail closed when a crashed process no longer owns a verifiable page."""
+
+        if not isinstance(ledger, ExecutorLedger) or not isinstance(
+            clock, DouyinSideEffectRecoveryClock
+        ):
+            raise DouyinSideEffectRecoveryRejected
+        recovery = cls.__new__(cls)
+        recovery._window = None
+        recovery._ledger = ledger
+        recovery._clock = clock
+        recovery._executed = False
+        return recovery
 
     def __repr__(self) -> str:
         return "DouyinSideEffectRecovery(<redacted>)"
@@ -235,13 +255,18 @@ class DouyinSideEffectRecovery:
         existing = _existing_receipt(effect)
         if existing is not None:
             return existing
+        if self._window is None:
+            return self._settle_uncertain(
+                effect,
+                DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE,
+            )
         if effect.action is DouyinSearchExposureAction.COMMENT:
             return self._recover_comment(effect)
         return self._recover_message(effect)
 
     def _recover_comment(self, effect: LocalSideEffect) -> DouyinSideEffectRecoveryReceipt:
         try:
-            page = DouyinCommentPage(self._window)
+            page = DouyinCommentPage(cast(BrowserWindow, self._window))
             observation = page.wait_for_final(timeout_milliseconds=_FINAL_TIMEOUT_MILLISECONDS)
         except Exception:
             return self._settle_uncertain(effect, DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE)
@@ -262,7 +287,7 @@ class DouyinSideEffectRecovery:
 
     def _recover_message(self, effect: LocalSideEffect) -> DouyinSideEffectRecoveryReceipt:
         try:
-            page = DouyinDirectMessagePage(self._window)
+            page = DouyinDirectMessagePage(cast(BrowserWindow, self._window))
             observation = page.wait_for_final(timeout_milliseconds=_FINAL_TIMEOUT_MILLISECONDS)
         except Exception:
             return self._settle_uncertain(effect, DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE)

@@ -366,7 +366,7 @@ A7-12 将主动私信执行收敛在 Executor 内部 `douyin.direct-message-acti
 
 A7-13 将点击/发送后进程退出留下的 `dispatched` 崩溃窗口收敛为 Executor 内部 `douyin.side-effect-recovery.v1`。恢复输入只有强类型 Action ID；先从 App 私有 SQLite 读取完整绑定的 `LocalSideEffect`，prepared 不得伪造外部结果，verified/uncertain 作为既有终态直接返回且不访问页面。只有 dispatched 按账本 action 选择评论或私信 Page Object，在调用方已恢复的动作页面只执行有界 `wait_for_final()` 和最终 locator 二次取得，不导航、不填写、不点击，也不读取正文、Cookie/storage 或页面 body。
 
-最终证据充分时，恢复层使用 A7-11/A7-12 与即时执行共用的 action-specific effect→selector-version→final-evidence 验证摘要结算 verified；登录、风控、两类私信权限、等待超时、未知路由、锚点冲突、驱动或最终复验失败结算 uncertain。若 SQLite 结算不可用则保留 revision 2 dispatched，不能假装 uncertain 已落盘；并发同向重放投影首次 verified/uncertain，opposite terminal 竞争只接受 `BEGIN IMMEDIATE` 的账本赢家。A7-07 的 uncertain 终态没有被 A7-13 放宽，后续人工核对必须走明确用户操作；H8-05 才负责启动时枚举 unresolved 并把正确页面上下文交给本能力。
+最终证据充分时，恢复层使用 A7-11/A7-12 与即时执行共用的 action-specific effect→selector-version→final-evidence 验证摘要结算 verified；登录、风控、两类私信权限、等待超时、未知路由、锚点冲突、驱动或最终复验失败结算 uncertain。若 SQLite 结算不可用则保留 revision 2 dispatched，不能假装 uncertain 已落盘；并发同向重放投影首次 verified/uncertain，opposite terminal 竞争只接受 `BEGIN IMMEDIATE` 的账本赢家。A7-07 的 uncertain 终态没有被 A7-13 放宽，后续人工核对必须走明确用户操作；H8-05 已在 crash-only 启动时枚举可恢复 Action，有明确 BrowserWindow 才交给本能力，进程树已清理时以 page unavailable 保守结算。
 
 A7-14 把“动作执行结果”接到服务端风险 scope，而不是在 Executor 再造一套阈值。`step.completed/step.failed` 仍由认证 Executor WebSocket 进入 `TaskEventConvergenceService`；PostgreSQL 仓储先按与授权相同的顺序锁 Installation，再锁 Task/Attempt/Action，在一个事务中更新动作终态、写不可变 `action_risk_results`、更新 `(Installation, douyin, action)` 的 `action_failure_circuits`，最后追加 Task event 和权威快照。复合外键从 result 到 ActionAuthorization、从 circuit 到最后/打开 result 固定同一 Installation/平台/动作，避免只靠应用查询条件维持审计归属。
 
@@ -544,6 +544,8 @@ H8-02 沿同一路径加入普通协作式取消。`task.cancel` 不能创建本
 H8-02 原调用方验收复用 T3-14 唯一隐藏 task-termination App。HOLD FakeExecutor 只建立最初的服务端 running 事实；随后正式 `python -m automation_tool.executor` 经认证 WebSocket 消费 App 发出的 cancel。真实 SQLite 预置一条 dispatched 和一条 prepared，验收证明 ACK 时 PostgreSQL 仍为 CANCELLING、第二条派发被拒绝、首条结算 uncertain 后 App/PostgreSQL/SQLite 一致进入 outcome uncertain。该阶段对 `task.emergency_stop` 继续 fail closed；H8-03 已在不改变 cancel 语义的前提下，以 AppData 持久 latch、完整进程树硬停、SQLite 原子 uncertain 和报告型重连补报独立实现紧停。
 
 H8-04 没有给 Control Plane 增加“App 恢复”写接口：App 是只读投影与命令发起端，PostgreSQL Task/Attempt/Command/Event 和在线 Executor registry/heartbeat 仍是唯一云端事实。第一个 App 被精确 `SIGKILL` 后，签名 Executor 的认证 WebSocket 与 heartbeat 不依赖 App WebView 继续运行；第二个 App 复用 AppData 身份，通过既有 workbench、Task Query 和事件接口恢复同一 running 快照。纵向验收在两个 App 之间逐字段比较所有任务业务行和本机 verified/prepared 副作用，确认没有新 Task、Attempt、Command、Event、Executor Session 或 dispatch 许可。
+
+H8-05 的恢复触发属于 Rust supervisor 控制面，而不是 HTTP 协议扩展。初次 `spawn_executor(..., restart_count=0)` 明确传 `crash_recovery=false`；只有异常退出并消耗有界预算后的新进程收到 true。Python 在建立 WebSocket 前运行一次恢复协调器：从 App 私有 SQLite 读取仍属 running/paused Attempt 的 Action，复用 A7-13 只读验证；进程树已清理且没有稳定页面上下文时直接 fail-closed 为 uncertain。副作用终态、Attempt checkpoint 和带 `executor:recovery:<action_id>` 幂等键的 outbox 在本机原子对齐，随后由既有 `recover_outbox()` 和认证 WebSocket 重放。Control Plane 仍只接收标准 `task.outcome_uncertain`，不感知本地 supervisor，也不接受重新点击请求。
 
 T3-14 在同一 API/Outbox 边界增加 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop`。首次请求锁定 active Installation、Task/current Attempt，在领域状态机允许取消且 Attempt 尚未终止时，原子写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `CANCELLING`；不写伪造的取消终态，也不占用 Executor 持有的事件 sequence。相同 scope/key/意图重放返回原 Command 且不重复增 revision；改意图、再次终止、终态、错 scope、时间回退和不相容投影均 fail closed。
 

@@ -907,6 +907,29 @@ fn background_supervisor_recovers_two_crashes_and_reports_the_consumed_budget() 
 }
 
 #[test]
+fn supervisor_marks_only_relaunched_processes_as_crash_recovery() {
+    let counter = LaunchCounter::new();
+    let package = TemporaryPackage::new(&supervised_fixture(
+        &counter,
+        r#"assert bootstrap["crash_recovery"] is (count > 1)
+if count == 1: os.kill(os.getpid(), signal.SIGKILL)"#,
+    ));
+    let manager = manager(&package);
+
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("initial start");
+    counter.wait_for(2);
+    wait_for_state(&manager, ExecutorManagerState::Running);
+    assert_eq!(
+        manager.status().expect("recovered status").restart_count(),
+        1
+    );
+
+    manager.stop().expect("stop recovered process");
+}
+
+#[test]
 fn crash_recovery_cleans_the_previous_process_tree_before_relaunching() {
     let counter = LaunchCounter::new();
     let marker = DescendantMarker::new();

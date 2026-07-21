@@ -19,6 +19,7 @@ from uuid import RFC_4122, UUID
 from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_CLOCK_SKEW,
+    ACTION_RESULT_EVIDENCE_VERSION,
     ActionAuthorizationClaims,
     DouyinSearchExposureAction,
     PlatformSessionState,
@@ -562,6 +563,74 @@ class ExecutorLedger:
                     (limit,),
                 ).fetchall()
             return tuple(_side_effect(row, replayed=False) for row in rows)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def list_crash_recovery_side_effects(self, *, limit: int) -> tuple[LocalSideEffect, ...]:
+        """List action facts whose non-terminal Attempt may need crash reconciliation."""
+
+        try:
+            if type(limit) is not int or not 1 <= limit <= _MAX_UNRESOLVED_SIDE_EFFECTS:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    _SIDE_EFFECT_SELECT
+                    + " JOIN executor_attempt_checkpoints p"
+                    + " ON p.attempt_id = a.execution_attempt_id"
+                    + " WHERE p.state IN ('running', 'paused', 'outcome_uncertain')"
+                    + " ORDER BY s.prepared_at, s.action_id LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return tuple(_side_effect(row, replayed=False) for row in rows)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def get_side_effect_recovery_event(self, action_id: str) -> TaskEventEnvelope | None:
+        """Return the one durable recovery projection for an Action, if present."""
+
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    """
+                    SELECT envelope FROM executor_outbox
+                    WHERE idempotency_key = ?
+                    """,
+                    (f"executor:recovery:{canonical_action_id}",),
+                ).fetchone()
+            if row is None:
+                return None
+            message = _parse_outbound(str(row[0]))
+            if (
+                not isinstance(message, TaskEventEnvelope)
+                or message.message_type not in {"step.completed", "task.outcome_uncertain"}
+                or message.payload.get("action_id") != canonical_action_id
+                or message.payload.get("evidence_version") != ACTION_RESULT_EVIDENCE_VERSION
+            ):
+                raise ValueError
+            return message
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def initial_task_command(self, attempt_id: str) -> TaskCommandEnvelope:
+        """Load the original task.offer used as the recovery event source."""
+
+        try:
+            canonical_attempt_id = _canonical_uuid_v4(attempt_id)
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT envelope FROM executor_commands
+                    WHERE attempt_id = ? AND message_type = 'task.offer' AND sequence = 1
+                    """,
+                    (canonical_attempt_id,),
+                ).fetchall()
+            if len(rows) != 1:
+                raise ValueError
+            message = parse_executor_message(str(rows[0][0]))
+            if not isinstance(message, TaskCommandEnvelope) or message.message_type != "task.offer":
+                raise ValueError
+            return message
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -1713,6 +1782,153 @@ class ExecutorLedger:
                 return OutboxEntry(
                     message=message,
                     source_message_id=canonical_source_id,
+                    replayed=False,
+                )
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def commit_side_effect_recovery(
+        self,
+        *,
+        action_id: str,
+        expected_checkpoint_revision: int,
+        event: TaskEventEnvelope,
+    ) -> OutboxEntry:
+        """Atomically align a settled side effect, checkpoint, and recovery outbox event."""
+
+        try:
+            canonical_action_id = _canonical_uuid_v4(action_id)
+            if (
+                type(expected_checkpoint_revision) is not int
+                or expected_checkpoint_revision <= 0
+                or not isinstance(event, TaskEventEnvelope)
+                or event.message_type not in {"step.completed", "task.outcome_uncertain"}
+                or str(event.idempotency_key) != f"executor:recovery:{canonical_action_id}"
+                or event.payload.get("action_id") != canonical_action_id
+                or event.payload.get("evidence_version") != ACTION_RESULT_EVIDENCE_VERSION
+            ):
+                raise ValueError
+            self._require_outbound_identity(event)
+            envelope = _canonical_message(event)
+            fingerprint = hashlib.sha256(envelope.encode("utf-8")).digest()
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    """
+                    SELECT envelope, source_message_id
+                    FROM executor_outbox WHERE idempotency_key = ?
+                    """,
+                    (f"executor:recovery:{canonical_action_id}",),
+                ).fetchone()
+                if existing is not None:
+                    replay = _parse_outbound(str(existing[0]))
+                    if (
+                        not isinstance(replay, TaskEventEnvelope)
+                        or replay.message_type != event.message_type
+                        or replay.payload != event.payload
+                    ):
+                        raise ValueError
+                    connection.commit()
+                    return OutboxEntry(
+                        message=replay,
+                        source_message_id=str(existing[1]),
+                        replayed=True,
+                    )
+                row = connection.execute(
+                    """
+                    SELECT a.task_id, a.execution_attempt_id, a.installation_id,
+                           a.executor_id, a.action, s.state,
+                           p.last_event_sequence, p.state, p.revision,
+                           c.message_id, c.correlation_id
+                    FROM executor_side_effects s
+                    JOIN executor_action_admissions a ON a.action_id = s.action_id
+                    JOIN executor_attempt_checkpoints p
+                      ON p.attempt_id = a.execution_attempt_id
+                    JOIN executor_commands c
+                      ON c.attempt_id = a.execution_attempt_id
+                     AND c.message_type = 'task.offer' AND c.sequence = 1
+                    WHERE s.action_id = ?
+                    """,
+                    (canonical_action_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError
+                expected_evidence = (
+                    "recovery_unconfirmed"
+                    if event.message_type == "task.outcome_uncertain"
+                    else (
+                        "comment_confirmed"
+                        if str(row[4]) == DouyinSearchExposureAction.COMMENT.value
+                        else "message_confirmed"
+                    )
+                )
+                expected_side_effect_state = (
+                    SideEffectState.UNCERTAIN.value
+                    if event.message_type == "task.outcome_uncertain"
+                    else SideEffectState.VERIFIED.value
+                )
+                if (
+                    str(row[0]) != str(event.task_id)
+                    or str(row[1]) != str(event.execution_attempt_id)
+                    or str(row[2]) != str(event.installation_id)
+                    or str(row[3]) != str(event.executor_id)
+                    or str(row[5]) != expected_side_effect_state
+                    or event.payload.get("evidence") != expected_evidence
+                    or int(row[6]) + 1 != event.sequence
+                    or str(row[7])
+                    not in {
+                        AttemptCheckpointState.RUNNING.value,
+                        AttemptCheckpointState.PAUSED.value,
+                    }
+                    or int(row[8]) != expected_checkpoint_revision
+                    or str(row[10]) != str(event.correlation_id)
+                ):
+                    raise ValueError
+                checkpoint_state = (
+                    AttemptCheckpointState.OUTCOME_UNCERTAIN.value
+                    if event.message_type == "task.outcome_uncertain"
+                    else str(row[7])
+                )
+                updated = connection.execute(
+                    """
+                    UPDATE executor_attempt_checkpoints
+                    SET state = ?, last_event_sequence = ?, revision = revision + 1
+                    WHERE attempt_id = ? AND revision = ?
+                    """,
+                    (
+                        checkpoint_state,
+                        event.sequence,
+                        str(row[1]),
+                        expected_checkpoint_revision,
+                    ),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - same locked revision selected above
+                    raise ValueError
+                next_ordinal = int(
+                    connection.execute(
+                        "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM executor_outbox"
+                    ).fetchone()[0]
+                )
+                connection.execute(
+                    """
+                    INSERT INTO executor_outbox (
+                        ordinal, message_id, idempotency_key, intent_sha256,
+                        envelope, source_message_id, delivered
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        next_ordinal,
+                        str(event.message_id),
+                        str(event.idempotency_key),
+                        fingerprint,
+                        envelope,
+                        str(row[9]),
+                    ),
+                )
+                connection.commit()
+                return OutboxEntry(
+                    message=event,
+                    source_message_id=str(row[9]),
                     replayed=False,
                 )
         except Exception:

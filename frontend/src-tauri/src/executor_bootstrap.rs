@@ -196,6 +196,7 @@ impl LocalSessionToken {
             heartbeat_interval_seconds: input.heartbeat_interval_seconds,
             state_directory: input.state_directory,
             local_emergency_stop: input.local_emergency_stop,
+            crash_recovery: input.crash_recovery,
         };
         let mut serialized = Zeroizing::new(
             serde_json::to_vec(&document)
@@ -477,6 +478,14 @@ pub struct ExecutorBootstrapInput<'a> {
     heartbeat_interval_seconds: u8,
     state_directory: &'a Path,
     local_emergency_stop: bool,
+    crash_recovery: bool,
+}
+
+#[derive(Clone, Copy)]
+enum ExecutorBootstrapMode {
+    Normal,
+    EmergencyReport,
+    CrashRecovery,
 }
 
 impl<'a> ExecutorBootstrapInput<'a> {
@@ -495,7 +504,26 @@ impl<'a> ExecutorBootstrapInput<'a> {
             executor_id,
             state_directory,
             heartbeat_interval_seconds,
-            false,
+            ExecutorBootstrapMode::Normal,
+        )
+    }
+
+    pub fn new_crash_recovery(
+        websocket_url: &'a str,
+        control_plane_session: &'a str,
+        installation_id: &str,
+        executor_id: &str,
+        state_directory: &'a Path,
+        heartbeat_interval_seconds: u8,
+    ) -> Result<Self, ExecutorBootstrapError> {
+        Self::build(
+            websocket_url,
+            control_plane_session,
+            installation_id,
+            executor_id,
+            state_directory,
+            heartbeat_interval_seconds,
+            ExecutorBootstrapMode::CrashRecovery,
         )
     }
 
@@ -514,7 +542,7 @@ impl<'a> ExecutorBootstrapInput<'a> {
             executor_id,
             state_directory,
             heartbeat_interval_seconds,
-            true,
+            ExecutorBootstrapMode::EmergencyReport,
         )
     }
 
@@ -525,7 +553,7 @@ impl<'a> ExecutorBootstrapInput<'a> {
         executor_id: &str,
         state_directory: &'a Path,
         heartbeat_interval_seconds: u8,
-        local_emergency_stop: bool,
+        mode: ExecutorBootstrapMode,
     ) -> Result<Self, ExecutorBootstrapError> {
         require_endpoint(websocket_url)?;
         if control_plane_session.is_empty()
@@ -545,7 +573,8 @@ impl<'a> ExecutorBootstrapInput<'a> {
             executor_id,
             heartbeat_interval_seconds,
             state_directory,
-            local_emergency_stop,
+            local_emergency_stop: matches!(mode, ExecutorBootstrapMode::EmergencyReport),
+            crash_recovery: matches!(mode, ExecutorBootstrapMode::CrashRecovery),
         })
     }
 }
@@ -560,12 +589,8 @@ struct ExecutorBootstrapDocument<'a> {
     executor_id: String,
     heartbeat_interval_seconds: u8,
     state_directory: &'a Path,
-    #[serde(skip_serializing_if = "is_false")]
     local_emergency_stop: bool,
-}
-
-const fn is_false(value: &bool) -> bool {
-    !*value
+    crash_recovery: bool,
 }
 
 fn require_uuid_v4(source: &str) -> Result<Uuid, ExecutorBootstrapError> {

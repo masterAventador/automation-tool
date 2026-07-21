@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-04 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-05 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-05 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-06 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -334,7 +334,7 @@
 | H8-02 | 端到端取消 | CANCELLING→确认终态；最后动作不明进入 uncertain | H8-01,T3-14 | ✅ 已完成 |
 | H8-03 | 离线紧急停止 | 不依赖网络停止新副作用和完整进程树；重连补报 | E4-09,A7-07 | ✅ 已完成 |
 | H8-04 | App 崩溃恢复 | UI 恢复快照，任务不中断或重复 | T3-20,H8-01 | ✅ 已完成 |
-| H8-05 | Executor 崩溃恢复 | restart budget、账本对齐、dispatched 未验证处理 | E4-08,A7-13 | ⬜ 未开始 |
+| H8-05 | Executor 崩溃恢复 | restart budget、账本对齐、dispatched 未验证处理 | E4-08,A7-13 | ✅ 已完成 |
 | H8-06 | Control Plane 重启恢复 | Executor 重连、命令/事件幂等、任务收敛 | T3-20,E4-12 | ⬜ 未开始 |
 | H8-07 | 断网/抖动 | 停在安全点、事件 spool、重连续传、不烧无限重试 | H8-05,H8-06 | ⬜ 未开始 |
 | H8-08 | 休眠/锁屏 | 时钟跳变、deadline、窗口不可用和恢复诊断 | H8-07 | ⬜ 未开始 |
@@ -2320,7 +2320,7 @@
 - 提交：本任务提交
 - RED 与范围校正：台账先置为 `🧪 RED`，新增测试从原调用面导入不存在的 `automation_tool.executor.rpa.douyin.side_effect_recovery`，Pytest 准确收集失败。随后核对 A7-07 状态机与产品规则，确认本任务只自动核对仍为 revision 2 `dispatched` 的崩溃窗口；既有 uncertain 是明确终态，不能因后台查询偷偷翻回成功，后续只能由明确人工结算能力处理
 - 恢复契约：`DouyinSideEffectRecovery` 每实例只运行一次且输入仅为强类型 Action ID；先从真实 `ExecutorLedger` 取得完整 Action/Target/Attempt/Task/Installation/Executor/action/effect 绑定。不存在、错类型、账本错误或构造漂移统一脱敏拒绝；prepared 返回 `not_dispatched/prepared_not_dispatched`，verified/uncertain 返回相应 terminal replay，三者均在任何 DOM 查询前结束
-- 只读核对：只有 dispatched 按持久 action 选择 A7-08 `DouyinCommentPage` 或 A7-09 `DouyinDirectMessagePage`，执行唯一有界 final wait 和最终锚点二次取得。恢复模块源码没有 click/fill/press、会话入口、评论/私信输入或发送、导航、selector、官方 URL、Cookie/storage、HTTP、OCR、LLM，也不接收正文；目标页面上下文由后续 H8-05 崩溃恢复编排负责恢复
+- 只读核对：只有 dispatched 按持久 action 选择 A7-08 `DouyinCommentPage` 或 A7-09 `DouyinDirectMessagePage`，执行唯一有界 final wait 和最终锚点二次取得。恢复模块源码没有 click/fill/press、会话入口、评论/私信输入或发送、导航、selector、官方 URL、Cookie/storage、HTTP、OCR、LLM，也不接收正文；H8-05 仅在仍有可验证页面上下文时传入，supervisor 已清理进程树且上下文不存在时明确按 page unavailable 收敛 uncertain，绝不猜测 URL 或重开动作页
 - 结算与竞态：评论/私信即时执行各自导出原验证摘要函数，A7-13 对相同 effect 使用相同 action domain、Page Object selector version 与 final evidence，证据充分才调用既有 `verify_side_effect()`；登录、风控、两类私信权限、final 超时、未知路由、锚点冲突、页面/最终复验/时钟/验证错误转 `mark_side_effect_uncertain()`。结算异常时重新读取账本：接受并发赢家的 verified/uncertain；仍不可读或未落盘则结构化 receipt 保留 dispatched revision 2，绝不伪报持久化成功
 - Receipt：`DouyinSideEffectRecoveryReceipt` 只允许 `not_dispatched/verified/outcome_uncertain` 与 prepared、新/既有 verified、新/既有 uncertain 的合法 evidence/state/revision/replayed 组合，绑定强类型 Action/Target/action 与固定恢复版本；ID、状态、evidence、revision、重放位、action 或版本篡改全部拒绝，repr 不回显资源 ID、页面、URL、路径、摘要或底层异常
 - 原调用方验收：生产 `BrowserRuntime → BrowserWindow → DouyinSideEffectRecovery → A7-08/A7-09 Page Object` 使用一次性 0700 Profile、无头系统 Chrome、官方-origin 隔离评论/私信页和同一真实私有 SQLite 中两条 dispatched 事实。测试只预置最终 confirmation 后从恢复入口结算，两条事实均 verified；页面计数证明评论 submit=0、私信 entry=0、send=0，两个 textarea 均为空，terminal replay 仍零动作。Runtime 退出后浏览器完整关闭；当前无 App/API/Executor wire，H8-05 才装配启动恢复，本证据也不替代 A7-16/A7-17 真实平台验收
@@ -2421,13 +2421,30 @@
 - 隔离、秘密与清理：固定 8765 与随机 PostgreSQL 端口均在启动前检查；独立 Compose project、网络、Volume、AppData、SQLite 和信号目录不复用其他项目。两个 App 全程隐藏，不启动运营浏览器、不访问真实账号；长期设备凭据只在 AppData 私有文件，SQLite 不含凭据。成功与每次失败均精确回收 App/WDIO/Executor/Uvicorn、端口、容器/网络/Volume 和私有目录，最终复核零 H8-04 监听、容器、App/Executor 进程与 AppData 残留
 - 后续：进入 `H8-05`，从现有 E4-08 有界 supervisor、A7-13 只读副作用恢复和 H8-01/H8-02 安全 checkpoint 出发，验证真实 Executor 崩溃后的 restart budget、SQLite/outbox 对齐，以及 dispatched 未验证动作只读收敛且绝不重复点击
 
+### H8-05 Executor 崩溃恢复
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、crash-only bootstrap、恢复协调器与 SQLite 原子投影、H8-05 独立隐藏 App 配置/WDIO/runner 和文档属于单一 `feat: 完成 Executor 崩溃恢复验收` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`；Python bootstrap 测试准确失败于 `crash_recovery` 不存在，Rust bootstrap/manager 测试要求首次 false、supervisor relaunch true；恢复测试先因 `automation_tool.executor.crash_recovery` 不存在而收集失败，隐藏 App 工程契约再因专用 Tauri 配置不存在失败。E4-08 只证明有界进程重启，A7-13 只证明给定页面时只读结算，均不能单独冒充 H8-05 的跨进程账本与服务端收敛
+- 启动语义：Rust `spawn_executor` 使用既有 `restart_count` 生成 bootstrap；首次启动始终 `crash_recovery=false`，只有异常退出且仍在最多两次预算内的 supervisor relaunch 为 true，每次仍重新验包并生成新的 256-bit 本机认证令牌。正常启动、显式停止、固定退出、紧停报告和 App 重启不会误触发崩溃扫描；Python 只在 true 时于建立 WebSocket 前运行一次协调器
+- 只读恢复与零重复：协调器只扫描 running/paused/outcome-uncertain Attempt 的 App 私有 SQLite Action。prepared 在任何页面调用前跳过；verified/uncertain 重放终态；dispatched 若仍有显式 `BrowserWindow` 就复用 A7-13 Page Object 只读 final 核对。生产 supervisor 会先清理原完整 Executor/浏览器进程树，而账本按隐私设计不保存 URL、页面正文或 DOM，因此没有可证明页面上下文时直接以 `page_unavailable/recovery_unconfirmed` 结算 uncertain，绝不导航、填充、点击或重新 dispatch
+- 原子账本与重放：新增 crash recovery 查询只从原 `task.offer`、Attempt checkpoint、Action admission/side-effect 和 outbox 构造事实。side-effect 已先按 A7-13 结算；随后 `commit_side_effect_recovery()` 在单个 `BEGIN IMMEDIATE` 中复核 Installation/Executor/Task/Attempt/Action/correlation、state/evidence/sequence/revision，把 checkpoint 与 `step.completed` 或 `task.outcome_uncertain` outbox 一起推进。稳定 `executor:recovery:<action_id>` 幂等键使二次崩溃返回首次事件；结算后投影前若再崩溃，下次仍能从 terminal side-effect 补齐，prepared 永远不能借恢复取得 dispatch 许可
+- 原调用方验收：`scripts/run_h8_05_acceptance.py` 构建并签名真实 PyInstaller Executor、独立 `visible=false` H8-05 Tauri App、`automation-tool-h805-*` PostgreSQL/完整 Alembic/真实 Uvicorn/AppData/SQLite。App 从真实表单创建 comment Task，runner 只预置一条 dispatched 和一条 prepared 以及匹配服务端 Action；页面经正式 `restart_executor` 启动包，再从正式 IPC 注入异常崩溃。页面最终显示“自动恢复次数 1”、工作台/详情“结果待确认”，进程始终只有一个签名 Executor
+- 精确收敛：PostgreSQL 最终严格只有 1 Task、1 Attempt、1 acknowledged offer、1 Action 和 started/step-started/outcome-uncertain 三条连续 Event；Task/Attempt/Action 分别为 outcome uncertain，Action evidence 为 `recovery_unconfirmed`。同一 Manager 重用首次签发的 Executor Session，因此 `executor.connect` 总数精确为准备夹具 1 + 签名 Executor 1，不因 supervisor relaunch 再换票。本机 checkpoint 为 outcome_uncertain/sequence 3/revision 3，副作用恰为 uncertain revision 3 + prepared revision 1，唯一 recovery outbox 已 delivered，长期设备凭据不在 SQLite
+- 失败发现与修正：首次纵向运行已经完成崩溃、重启和 UI 收敛，但 runner 误期望 supervisor 新签一张 Session；正式 Manager 实际安全复用同一短期 Session，精确计数从错误的 3 修正为设计值 2 后完整重跑通过，没有改生产行为或放宽 Task/Action/outbox 断言。全量门禁第一次误用 `.venv/bin/pytest`，测试内部 `alembic` 子进程因 PATH 缺失产生基础设施假失败；按仓库权威 `uv run pytest` 重跑全绿
+- 失败与覆盖矩阵：覆盖 bootstrap 缺省/true/非严格布尔、首次/重启分离、两次 restart budget 与完整进程树清理、prepared/verified/uncertain/dispatched、评论/私信成功 evidence、无页面 fail-closed、重复恢复、坏 clock/ID/checkpoint/effect/commit、非法 limit/存储、命令/事件漂移、缺 Action、错误 evidence、并发原子 replay 和秘密脱敏；协调器与全仓语句/分支均 100%，不可达的同一锁内 revision 漂移仅保留明确 pragma
+- 门禁：Backend 全量 `1907 passed, 5 skipped`，12211 条语句/2728 个分支覆盖率 100%，327 个 Python 文件格式、Ruff、严格 Mypy 301 个源码文件与 uv lock 全绿。Frontend 107 项 Node 契约、197 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、20 项安全配置、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿；H8-05 隐藏 App 纵向验收最终 1/1 通过
+- 隔离与清理：固定 8765 与随机 PostgreSQL 端口启动前均检查；专属 Compose project/network/volume、App identifier/AppData、SQLite 和临时信号目录不复用其他项目。App 全程隐藏，不启动运营浏览器、不访问真实账号或默认 Profile。首次断言失败与最终成功都清理 WDIO/App/Executor/Uvicorn、端口、容器/网络/Volume/AppData，最终复核零 H8-05 残留
+- 后续：进入 `H8-06`，验证 Control Plane 在 Task/Executor 运行中重启后，Executor 使用现有重连/幂等命令事件边界恢复在线并使任务收敛；不得把 T3-20 的局部 App 观察证据直接冒充完成
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-05`（⬜ 未开始）：验证真实 Executor 崩溃后的有界重启、SQLite/outbox 对齐，以及 dispatched 未验证动作只读恢复且不重复平台副作用；
+3. `H8-06`（⬜ 未开始）：验证真实 Control Plane 重启后的 Executor 重连、命令/事件幂等和 Task 最终收敛；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

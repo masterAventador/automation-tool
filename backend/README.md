@@ -44,6 +44,8 @@ H8-03 的 `task.emergency_stop` 在 App 网络调用前先持久化最小本机�
 
 H8-04 不在 Backend 增加 App 恢复 API 或第二份任务状态。第一个隐藏 App 被硬杀后，原签名 Executor 继续通过既有认证 WebSocket/heartbeat 在线，PostgreSQL 保持 Task/Attempt 权威 running；第二个 App 只凭原 AppData 身份调用既有工作台、Task Query 和事件路径恢复 UI。严格验收逐字段锁定 Task/Attempt/Command/Event 与本机副作用账本未变化，证明 App 重启不会重建任务、控制命令或平台动作。
 
+H8-05 在 stdin bootstrap 增加严格布尔 `crash_recovery`，只由 Rust supervisor 的异常重启设置，正常启动绝不扫描或改写副作用。`ExecutorCrashRecoveryCoordinator` 在网络连接前读取当前 Attempt 的 SQLite Action 事实；已有页面上下文时沿用 A7-13 只读核对，没有上下文时把 dispatched fail-closed 结算为 uncertain，prepared 不动。恢复事件、checkpoint 和 outbox 原子对齐后仍经正式认证 WebSocket 收敛到 PostgreSQL；不保存 URL、正文、DOM、Cookie、Profile 或凭据，也不重新 dispatch。
+
 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
 
 当前 offer payload 仍保持空的安全骨架；T3-17 已建立受约束 Task 定义事实，但尚未发布 Executor 业务 payload 版本，后续只能从这些明确列构造，不能退回任意 JSON。FakeExecutor 继续按相同正式 envelope 做无副作用回放；T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
@@ -76,7 +78,7 @@ H8-01 安全暂停原入口在仓库根执行 `backend/.venv/bin/python scripts/
 
 H8-02 协作式取消原入口执行 `backend/.venv/bin/python scripts/run_h8_02_acceptance.py`：唯一 `visible=false` task-termination App 经正式 Rust 控制调用、Uvicorn/PostgreSQL 和认证 WebSocket 发出普通取消；真实 Executor 先 ACK 并阻止新 dispatch，既有 dispatched 被标记无法确认后自动上报 `task.outcome_uncertain`。同一 App 的紧停半程仍由既有 HOLD FakeExecutor 夹具完成，只用于跑完原页面流程，不冒充 H8-03 离线硬停止。
 
-H8-03 离线紧停原入口执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py`；H8-04 App 崩溃恢复原入口执行 `backend/.venv/bin/python scripts/run_h8_04_acceptance.py`。两者均使用唯一隐藏 Tauri App 配置、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收各自拥有的进程、端口、容器、网络、卷和私有目录；H8-04 会连续启动两个 App 进程，但第二个 App 不调用任何准备、创建、控制或 Executor restart Command。
+H8-03 离线紧停、H8-04 App 崩溃恢复与 H8-05 Executor 崩溃恢复原入口分别执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_04_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_05_acceptance.py`。三者均使用隐藏 Tauri App、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收自有进程、端口、容器、网络、卷和私有目录；H8-05 由真实 App IPC 注入崩溃并严格核对 restart budget、服务端 Action/Task 和本机 ledger/outbox。
 
 D6-13 未确认副作用守卫在仓库根目录执行 `backend/.venv/bin/python scripts/run_d6_13_acceptance.py`。该 runner 通过正式 Uvicorn/Executor WebSocket 验证无绑定与旧确认的业务 offer 零投递、当前确认 offer 正常投递；它不调用 App API、不启动 Tauri 或运营浏览器。D6-11/D6-12 已独立证明确认事实来自真实 App 原入口，本任务只验收后端到 Executor 的原始生产边界。
 

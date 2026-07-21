@@ -239,9 +239,21 @@ impl ExecutorLaunchConfiguration {
         })
     }
 
-    fn bootstrap_input(&self) -> Result<ExecutorBootstrapInput<'_>, ExecutorManagerError> {
+    fn bootstrap_input(
+        &self,
+        restart_count: u8,
+    ) -> Result<ExecutorBootstrapInput<'_>, ExecutorManagerError> {
         let input = if self.local_emergency_stop {
             ExecutorBootstrapInput::new_emergency_report(
+                &self.websocket_url,
+                &self.control_plane_session,
+                &self.installation_id,
+                &self.executor_id,
+                &self.state_directory,
+                self.heartbeat_interval_seconds,
+            )
+        } else if restart_count > 0 {
+            ExecutorBootstrapInput::new_crash_recovery(
                 &self.websocket_url,
                 &self.control_plane_session,
                 &self.installation_id,
@@ -847,7 +859,7 @@ fn spawn_executor(
         let (lifecycle_events, stdout_thread) = spawn_stdout_reader(stdout);
         let stderr_thread = spawn_stderr_drain(stderr, diagnostics);
         token
-            .write_bootstrap(&mut stdin, &launch.bootstrap_input()?)
+            .write_bootstrap(&mut stdin, &launch.bootstrap_input(restart_count)?)
             .map_err(map_bootstrap_error)?;
         Ok((stdin, lifecycle_events, stdout_thread, stderr_thread))
     })();

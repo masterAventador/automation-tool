@@ -86,8 +86,32 @@ fn bootstrap_writes_a_fresh_256_bit_token_only_to_the_stdin_document() {
     assert_eq!(first_document["session_token"], CONTROL_PLANE_SESSION);
     assert_ne!(first_token, CONTROL_PLANE_SESSION);
     assert_eq!(first_document["state_directory"], STATE_DIRECTORY);
+    assert_eq!(first_document["crash_recovery"], false);
     assert!(!format!("{first:?}").contains(first_token));
     assert!(!format!("{first:?}").contains(CONTROL_PLANE_SESSION));
+}
+
+#[test]
+fn crash_recovery_bootstrap_is_explicit_and_separate_from_emergency_stop() {
+    let recovery = ExecutorBootstrapInput::new_crash_recovery(
+        "ws://127.0.0.1:8765/api/v1/executors/connect",
+        CONTROL_PLANE_SESSION,
+        "123e4567-e89b-42d3-a456-426614174003",
+        "123e4567-e89b-42d3-a456-426614174004",
+        Path::new(STATE_DIRECTORY),
+        1,
+    )
+    .expect("crash recovery bootstrap");
+    let token = LocalSessionToken::generate().expect("random local session");
+    let mut stdin = Vec::new();
+
+    token
+        .write_bootstrap(&mut stdin, &recovery)
+        .expect("write crash recovery bootstrap");
+    let document: Value = serde_json::from_slice(&stdin).expect("recovery bootstrap JSON");
+
+    assert_eq!(document["crash_recovery"], true);
+    assert_eq!(document["local_emergency_stop"], false);
 }
 
 #[test]

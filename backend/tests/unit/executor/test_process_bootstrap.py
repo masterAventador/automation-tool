@@ -51,6 +51,7 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
     assert str(bootstrap.executor_id) == EXECUTOR_ID
     assert bootstrap.heartbeat_interval_seconds == 1
     assert bootstrap.state_directory == STATE_DIRECTORY
+    assert bootstrap.crash_recovery is False
     assert stream.readline() == b"second-line-is-not-consumed\n"
     assert SESSION_TOKEN not in repr(bootstrap)
     assert SESSION_TOKEN not in bootstrap.model_dump_json()
@@ -61,6 +62,9 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
         BytesIO(bootstrap_source(websocket_url="wss://demo.example.com/api/v1/executors/connect"))
     )
     assert remote.websocket_url == "wss://demo.example.com/api/v1/executors/connect"
+
+    recovered = read_executor_bootstrap(BytesIO(bootstrap_source(crash_recovery=True)))
+    assert recovered.crash_recovery is True
 
 
 @pytest.mark.parametrize(
@@ -94,6 +98,8 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
         bootstrap_source(heartbeat_interval_seconds=cast(int, True)),
         bootstrap_source(heartbeat_interval_seconds=0),
         bootstrap_source(heartbeat_interval_seconds=61),
+        bootstrap_source(crash_recovery=cast(bool, 1)),
+        bootstrap_source(crash_recovery="true"),
         bootstrap_source(state_directory="relative/executor-state"),
         bootstrap_source(state_directory="/"),
         bootstrap_source(state_directory="/tmp/../private-state"),
