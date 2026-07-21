@@ -18,12 +18,19 @@ export interface BrowserDiagnosticSettingsSnapshot {
   readonly captureSuccessfulRuns: boolean;
 }
 
+export interface DiagnosticExportReceipt {
+  readonly fileName: string;
+  readonly entryCount: number;
+  readonly totalBytes: number;
+}
+
 export interface PlatformAdapter {
   getBrowserSettings(): Promise<BrowserSettingsSnapshot>;
   selectBrowser(browser: SupportedBrowserId): Promise<BrowserSettingsSnapshot>;
   getExecutorStatus(): Promise<ExecutorManagerStatus>;
   restartExecutor(): Promise<ExecutorManagerStatus>;
   getExecutorDiagnostics(): Promise<readonly string[]>;
+  exportDiagnostics(): Promise<DiagnosticExportReceipt>;
   emergencyStopExecutor(): Promise<ExecutorManagerStatus>;
   getBrowserDiagnosticSettings(): Promise<BrowserDiagnosticSettingsSnapshot>;
   setCaptureSuccessfulDiagnostics(enabled: boolean): Promise<BrowserDiagnosticSettingsSnapshot>;

@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-13）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-14）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-12 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-13 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-13 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-14 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -342,7 +342,7 @@
 | H8-10 | 诊断截图/Trace | 只在失败/用户开启时保存，数量/大小/时间上限 | H8-09,D6-14 | ✅ 已完成 |
 | H8-11 | 日志脱敏 | 服务端、Rust、Executor 全链路凭据/页面/路径泄漏测试 | E4-10,H8-10 | ✅ 已完成 |
 | H8-12 | 清理与磁盘治理 | 保留策略、磁盘满、清理失败、正在引用 Artifact 保护 | H8-09,H8-10 | ✅ 已完成 |
-| H8-13 | 诊断导出 | 用户主动导出受限包；不含 Cookie/完整私信/绝对私有路径 | H8-11,H8-12 | ⬜ 未开始 |
+| H8-13 | 诊断导出 | 用户主动导出受限包；不含 Cookie/完整私信/绝对私有路径 | H8-11,H8-12 | ✅ 已完成 |
 | H8-14 | 工作台指标 | 任务/动作成功、失败、接管、不确定；只读结构化事实 | A7-15,T3-16 | ⬜ 未开始 |
 | H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ⬜ 未开始 |
 | H8-16 | 规格复审 | 从分叉点审查完整实现是否满足产品/MVP/文档 | H8-15 | ⬜ 未开始 |
@@ -2548,13 +2548,27 @@
 - 隔离与清理：业务原调用方验收只使用 pytest 私有 state/Profile 和无头系统 Chrome，不启动 Tauri、Uvicorn、PostgreSQL、Compose 或真实账号，不占用 8765/1420；通用 UI Harness 在确认 1420 空闲后启动并在结束时释放。全程避开另一个项目正在使用的 182xx 端口、进程和资源；本项目 BrowserRuntime、Playwright/Vite 和临时 Artifact 均在所有者退出时回收
 - 后续：进入 `H8-13`，只从用户主动操作导出受限诊断包，继续拒绝 Cookie、完整评论/私信、任意文件、绝对私有路径与隐式上传
 
+### H8-13 诊断导出
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、固定白名单 Rust ZIP 导出器、无参数 Tauri Command、正式 PlatformAdapter/诊断页入口和隐藏 App 验收属于单一 `feat: 完成受限诊断导出` 提交；完成后立即推送 `main`
+- SDK 评估与边界：采用维护中的 Rust `zip 8.6.0`，关闭默认特性并只使用 `Stored` 写入；不自研 ZIP 协议，也不引入上传、遥测或云存储 SDK。Rust 从 Tauri `app_data_dir/local-executor/state` 派生唯一源根，只读取 `artifacts/evidence/page-drift`、`artifacts/diagnostics/traces`、`artifacts/diagnostics/screenshots` 和内存中的执行器脱敏日志；WebView 不提交路径、Artifact ID、文件内容或导出选项，Command 也不接收业务参数
+- 固定内容与隐私：导出前再次按各 Artifact 的 canonical UUIDv4 文件名、固定 JSON Schema/字段枚举、canonical UTC、跨 Runtime 安全整数、Trace→截图唯一引用、PNG 安全关键 Chunk/CRC/尺寸、文件数量和字节上限逐项校验；执行器日志再次经过共享 Redactor。ZIP 只包含 `manifest.json`、`executor/diagnostics.txt`、页面漂移 JSON、合法 Trace 和其引用的脱敏 PNG，不读取 SQLite、浏览器 Profile、登录凭据、完整评论/私信或任意路径，不写绝对源路径
+- 原子输出与回执：系统下载目录由 Rust/Tauri 自己解析，测试环境只能通过编译为 `desktop-e2e` 的固定环境变量覆盖到隔离临时目录；文件名由新 UUIDv4 生成，`create_new(true)` 防覆盖，失败删除精确半成品，完成后同步文件并执行 12 MiB 总上限。WebView 只收到 exact `{fileName,entryCount,totalBytes}`，适配器拒绝额外字段、非 canonical 文件名和越界数字，页面只显示公开文件名、条目数和大小，不反射原生错误或私有路径
+- 用户入口：设置与诊断页常驻展示“只含脱敏资料、不会上传、保存到系统下载目录”的披露，用户点击“确认导出”才调用正式 `PlatformAdapter.exportDiagnostics()`；组件用例验证未点击时零调用、点击后只调用一次并显示安全回执。导出不经 Control Plane，不需要账号、真实平台 Session、系统钥匙串或文件选择授权
+- 隐藏 App 原入口：`scripts/run_h8_13_acceptance.py` 检查并占用动态空闲 WebDriver 端口，使用唯一 `com.aventador.automationtool.h813acceptance`、`visible=false` AppData 和隔离导出目录，预置一份 canonical 页面漂移和一对 Trace/脱敏 PNG。真实设置页核对披露及确认入口，并从同一 App WebView 发出正式无参数 `export_diagnostics` Command；退出后 Python `ZipFile` 精确核对 5 个白名单条目、Stored 方法、Manifest 大小/SHA-256、源字节一致和敏感词/私有路径不存在。组件与适配器测试覆盖页面按钮到同一 Command 的生产调用关系；该拆分规避 macOS `visible=false` WebDriver 对视口下半区坐标点击不投递的问题，不用 Mock Command 冒充原生导出
+- 失败与隔离：相对/含父级路径、目录或文件 Symlink、未知文件名、空/超限/读取中变化文件、重复截图引用、悬空截图、重复 ZIP 路径、坏 JSON/时间/UUID/PNG/CRC、日志越界、输出碰撞、目录不可用和 ZIP 失败全部 fail closed；不删除源 Artifact。验收结束恢复 production Vite 资产，删除精确测试 AppData/临时 ZIP，确认专属 WebDriver 端口关闭且没有遗留 App/浏览器进程
+- 门禁：Backend 全量 `1964 passed, 5 skipped`，13087 条语句/3012 个分支覆盖率 100%，334 个 Python 文件格式、Ruff、严格 Mypy 308 个源码文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 113 项 Node 契约、199 项 Vitest、5 项全局无头 Playwright、冻结安装、peer dependency、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套完整测试、Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿；H8-13 隐藏真实 Tauri App 导出验收 1/1 通过
+- 后续：进入 `H8-14`，只从既有任务/动作结构化事实提供只读工作台指标，不把诊断文本、Cookie、完整评论/私信或本机路径送入指标
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-13`（⬜ 未开始）：从用户主动入口导出受限诊断包，不含 Cookie、完整评论/私信、任意文件或绝对私有路径，也不隐式上传；
+3. `H8-14`（⬜ 未开始）：从既有任务/动作成功、失败、接管和结果不确定事实提供只读工作台指标，不新增副作用；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

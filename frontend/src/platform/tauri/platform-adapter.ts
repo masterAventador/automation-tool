@@ -4,6 +4,7 @@ import {
   PlatformAdapterError,
   type BrowserDiagnosticSettingsSnapshot,
   type BrowserSettingsSnapshot,
+  type DiagnosticExportReceipt,
   type ExecutorManagerState,
   type ExecutorManagerStatus,
   type PlatformAdapter,
@@ -15,12 +16,17 @@ const STATUS_KEYS = ["buildId", "restartCount", "state", "version"];
 const DIAGNOSTIC_KEYS = ["lines"];
 const BROWSER_SETTINGS_KEYS = ["availableBrowsers", "selectedBrowser"];
 const BROWSER_DIAGNOSTIC_SETTINGS_KEYS = ["captureSuccessfulRuns"];
+const DIAGNOSTIC_EXPORT_KEYS = ["entryCount", "fileName", "totalBytes"];
 const SUPPORTED_BROWSERS = ["google_chrome", "microsoft_edge"] as const;
 const MAX_DIAGNOSTIC_LINES = 200;
 const MAX_DIAGNOSTIC_LINE_BYTES = 4096;
 const MAX_RESTART_COUNT = 8;
+const MAX_DIAGNOSTIC_EXPORT_BYTES = 12 * 1024 * 1024;
+const MAX_DIAGNOSTIC_EXPORT_ENTRIES = 38;
 const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 const SAFE_BUILD_ID = /^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/u;
+const SAFE_DIAGNOSTIC_EXPORT_FILE =
+  /^automation-tool-diagnostics-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.zip$/u;
 const NATIVE_ERROR_CODES = new Set<PlatformAdapterErrorCode>([
   "already_running",
   "authentication_rejected",
@@ -168,6 +174,29 @@ function parseBrowserDiagnosticSettings(value: unknown): BrowserDiagnosticSettin
   return { captureSuccessfulRuns: value.captureSuccessfulRuns };
 }
 
+function parseDiagnosticExportReceipt(value: unknown): DiagnosticExportReceipt {
+  if (
+    !isExactRecord(value, DIAGNOSTIC_EXPORT_KEYS) ||
+    typeof value.fileName !== "string" ||
+    !SAFE_DIAGNOSTIC_EXPORT_FILE.test(value.fileName) ||
+    typeof value.entryCount !== "number" ||
+    !Number.isInteger(value.entryCount) ||
+    value.entryCount < 2 ||
+    value.entryCount > MAX_DIAGNOSTIC_EXPORT_ENTRIES ||
+    typeof value.totalBytes !== "number" ||
+    !Number.isSafeInteger(value.totalBytes) ||
+    value.totalBytes < 1 ||
+    value.totalBytes > MAX_DIAGNOSTIC_EXPORT_BYTES
+  ) {
+    throw protocolMismatch();
+  }
+  return {
+    fileName: value.fileName,
+    entryCount: value.entryCount,
+    totalBytes: value.totalBytes,
+  };
+}
+
 function protocolMismatch(): PlatformAdapterError {
   return new PlatformAdapterError("protocol_mismatch", false);
 }
@@ -223,6 +252,14 @@ export class TauriPlatformAdapter implements PlatformAdapter {
   async getExecutorDiagnostics(): Promise<readonly string[]> {
     try {
       return parseDiagnostics(await invoke<unknown>("get_executor_diagnostics"));
+    } catch (error) {
+      throw safeNativeError(error);
+    }
+  }
+
+  async exportDiagnostics(): Promise<DiagnosticExportReceipt> {
+    try {
+      return parseDiagnosticExportReceipt(await invoke<unknown>("export_diagnostics"));
     } catch (error) {
       throw safeNativeError(error);
     }

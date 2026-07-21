@@ -522,7 +522,7 @@ fn ensure_safe_package_root(package_root: &Path) -> Result<(), ExecutorPackageEr
     Ok(())
 }
 
-fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> {
+pub(crate) fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -563,7 +563,10 @@ fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> 
     Ok(())
 }
 
-fn read_bounded_regular_file(path: &Path, maximum: usize) -> Result<Vec<u8>, ExecutorPackageError> {
+pub(crate) fn read_bounded_regular_file(
+    path: &Path,
+    maximum: usize,
+) -> Result<Vec<u8>, ExecutorPackageError> {
     let (file, identity) = open_stable_regular_file(path)?;
     let mut contents = Vec::with_capacity(
         usize::try_from(identity.length)

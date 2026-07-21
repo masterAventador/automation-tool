@@ -368,6 +368,28 @@ body {
   border-radius: 8px;
 }
 
+.diagnostics-export-confirm {
+  padding: 16px;
+  margin-top: 12px;
+  background: #f8fafc;
+  border: 1px solid #d8e0ec;
+  border-radius: 8px;
+}
+
+.diagnostics-export-confirm-button {
+  padding: 6px 15px;
+  color: #fff;
+  cursor: pointer;
+  background: #2f6fed;
+  border: 0;
+  border-radius: 6px;
+}
+
+.diagnostics-export-confirm-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .workbench-state-card {
   min-height: 180px;
   margin-top: 20px;

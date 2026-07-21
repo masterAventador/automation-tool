@@ -23,6 +23,7 @@ function platformAdapter(): PlatformAdapter {
     }),
     restartExecutor: vi.fn(),
     getExecutorDiagnostics: vi.fn().mockResolvedValue([]),
+    exportDiagnostics: vi.fn(),
     emergencyStopExecutor: vi.fn(),
     getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
     setCaptureSuccessfulDiagnostics: vi.fn(),

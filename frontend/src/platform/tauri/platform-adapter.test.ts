@@ -36,6 +36,11 @@ describe("Tauri PlatformAdapter", () => {
         restartCount: 0,
       })
       .mockResolvedValueOnce({ lines: ["safe diagnostic"] })
+      .mockResolvedValueOnce({
+        fileName: "automation-tool-diagnostics-123e4567-e89b-42d3-a456-426614174000.zip",
+        entryCount: 2,
+        totalBytes: 512,
+      })
       .mockResolvedValueOnce(stopped)
       .mockResolvedValueOnce({ captureSuccessfulRuns: false })
       .mockResolvedValueOnce({ captureSuccessfulRuns: true });
@@ -52,6 +57,11 @@ describe("Tauri PlatformAdapter", () => {
     await expect(adapter.getExecutorStatus()).resolves.toEqual(stopped);
     await expect(adapter.restartExecutor()).resolves.toMatchObject({ state: "running" });
     await expect(adapter.getExecutorDiagnostics()).resolves.toEqual(["safe diagnostic"]);
+    await expect(adapter.exportDiagnostics()).resolves.toEqual({
+      fileName: "automation-tool-diagnostics-123e4567-e89b-42d3-a456-426614174000.zip",
+      entryCount: 2,
+      totalBytes: 512,
+    });
     await expect(adapter.emergencyStopExecutor()).resolves.toEqual(stopped);
     await expect(adapter.getBrowserDiagnosticSettings()).resolves.toEqual({
       captureSuccessfulRuns: false,
@@ -65,6 +75,7 @@ describe("Tauri PlatformAdapter", () => {
       ["get_executor_status"],
       ["restart_executor"],
       ["get_executor_diagnostics"],
+      ["export_diagnostics"],
       ["emergency_stop_executor"],
       ["get_browser_diagnostic_settings"],
       ["set_capture_successful_diagnostics", { enabled: true }],
@@ -116,6 +127,15 @@ describe("Tauri PlatformAdapter", () => {
 
     invoke.mockResolvedValueOnce({ captureSuccessfulRuns: 1 });
     await expect(adapter.getBrowserDiagnosticSettings()).rejects.toMatchObject({
+      code: "protocol_mismatch",
+    });
+
+    invoke.mockResolvedValueOnce({
+      fileName: "/private/diagnostics.zip",
+      entryCount: 2,
+      totalBytes: 512,
+    });
+    await expect(adapter.exportDiagnostics()).rejects.toMatchObject({
       code: "protocol_mismatch",
     });
   });

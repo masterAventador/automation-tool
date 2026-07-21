@@ -13,7 +13,11 @@ import {
 } from "antd";
 import { useEffect, useState } from "react";
 
-import type { ExecutorManagerStatus, PlatformAdapter } from "../../platform/types";
+import type {
+  DiagnosticExportReceipt,
+  ExecutorManagerStatus,
+  PlatformAdapter,
+} from "../../platform/types";
 
 const SAFE_FAILURE_MESSAGE = "暂时无法读取本地执行器状态。请稍后重试。";
 
@@ -50,6 +54,7 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
   const [failure, setFailure] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
+  const [exportReceipt, setExportReceipt] = useState<DiagnosticExportReceipt | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -132,6 +137,19 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
     }
   };
 
+  const exportDiagnostics = async () => {
+    setBusy(true);
+    setFailure(false);
+    setExportReceipt(null);
+    try {
+      setExportReceipt(await platform.exportDiagnostics());
+    } catch {
+      setFailure(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="diagnostics-content" aria-label="本地执行器诊断">
       {failure ? <Alert type="error" showIcon message={SAFE_FAILURE_MESSAGE} /> : null}
@@ -172,6 +190,14 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
       </Card>
 
       <Card title="安全诊断记录" className="diagnostics-log-card">
+        {exportReceipt === null ? null : (
+          <Alert
+            type="success"
+            showIcon
+            message={`诊断包已保存：${exportReceipt.fileName}`}
+            description={`共 ${exportReceipt.entryCount} 个受限文件，${exportReceipt.totalBytes} 字节。`}
+          />
+        )}
         {diagnostics.length === 0 ? (
           <Typography.Text type="secondary">暂无本地执行器诊断记录。</Typography.Text>
         ) : (
@@ -181,6 +207,27 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
             ))}
           </ol>
         )}
+        <div
+          role="dialog"
+          aria-label="导出本机诊断包"
+          className="diagnostics-export-confirm"
+        >
+          <Typography.Title level={5}>导出诊断包</Typography.Title>
+          <Typography.Paragraph>
+            诊断包只包含脱敏执行器日志、页面结构漂移记录和脱敏浏览器截图，不包含登录凭据、完整评论或私信内容，也不会上传；文件会保存到系统下载目录。
+          </Typography.Paragraph>
+          <Flex gap={8} justify="end">
+            <button
+              id="confirm-diagnostic-export"
+              type="button"
+              className="diagnostics-export-confirm-button"
+              disabled={busy}
+              onClick={() => void exportDiagnostics()}
+            >
+              {busy ? "正在导出" : "确认导出"}
+            </button>
+          </Flex>
+        </div>
       </Card>
 
       <Card title="浏览器诊断采集" className="diagnostics-log-card">

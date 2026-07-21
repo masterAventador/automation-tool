@@ -4,6 +4,7 @@ pub mod browser_settings;
 pub mod control_plane;
 pub mod device_credentials;
 pub mod device_identity;
+mod diagnostic_export;
 pub mod executor_bootstrap;
 mod executor_diagnostics;
 pub mod executor_manager;
@@ -47,6 +48,25 @@ struct ExecutorDiagnosticsSnapshot {
 struct BrowserSettingsCommandError {
     code: &'static str,
     retryable: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticExportCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+fn map_diagnostic_export_error(
+    error: diagnostic_export::DiagnosticExportError,
+) -> DiagnosticExportCommandError {
+    let code = match error.code() {
+        diagnostic_export::DiagnosticExportErrorCode::StorageUnavailable => "storage_unavailable",
+    };
+    DiagnosticExportCommandError {
+        code,
+        retryable: false,
+    }
 }
 
 fn map_browser_settings_error(
@@ -162,6 +182,48 @@ fn get_executor_diagnostics(
         .diagnostics()
         .map(|lines| ExecutorDiagnosticsSnapshot { lines })
         .map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
+async fn export_diagnostics(
+    app: tauri::AppHandle,
+    exporter: tauri::State<'_, diagnostic_export::DiagnosticExportService>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<diagnostic_export::DiagnosticExportReceipt, DiagnosticExportCommandError> {
+    let diagnostics = platform
+        .diagnostics()
+        .map_err(map_executor_platform_error)
+        .map_err(|error| DiagnosticExportCommandError {
+            code: error.code,
+            retryable: error.retryable,
+        })?;
+    #[cfg(feature = "desktop-e2e")]
+    let export_directory = match std::env::var_os("AUTOMATION_TOOL_H813_EXPORT_DIRECTORY") {
+        Some(directory) => std::path::PathBuf::from(directory),
+        None => app
+            .path()
+            .download_dir()
+            .map_err(|_| DiagnosticExportCommandError {
+                code: "storage_unavailable",
+                retryable: false,
+            })?,
+    };
+    #[cfg(not(feature = "desktop-e2e"))]
+    let export_directory = app
+        .path()
+        .download_dir()
+        .map_err(|_| DiagnosticExportCommandError {
+            code: "storage_unavailable",
+            retryable: false,
+        })?;
+    let service = exporter.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.export(&export_directory, &diagnostics))
+        .await
+        .map_err(|_| DiagnosticExportCommandError {
+            code: "storage_unavailable",
+            retryable: false,
+        })?
+        .map_err(map_diagnostic_export_error)
 }
 
 #[tauri::command]
@@ -2419,6 +2481,9 @@ pub fn run() {
         app.manage(executor_platform::ExecutorPlatformService::initialize(
             &app_data_directory,
         )?);
+        app.manage(diagnostic_export::DiagnosticExportService::initialize(
+            &app_data_directory,
+        )?);
         #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
         {
             let _production_identity_boundary = device_identity::initialize_production_identity;
@@ -2451,6 +2516,7 @@ pub fn run() {
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
+        export_diagnostics,
         emergency_stop_executor,
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,
@@ -2482,6 +2548,7 @@ pub fn run() {
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
+        export_diagnostics,
         emergency_stop_executor,
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,
@@ -2539,6 +2606,7 @@ pub fn run() {
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
+        export_diagnostics,
         emergency_stop_executor,
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,

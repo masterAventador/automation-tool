@@ -25,6 +25,11 @@ function platformAdapter(): PlatformAdapter {
       restartCount: 0,
     }),
     getExecutorDiagnostics: vi.fn().mockResolvedValue(["safe diagnostic"]),
+    exportDiagnostics: vi.fn().mockResolvedValue({
+      fileName: "automation-tool-diagnostics-123e4567-e89b-42d3-a456-426614174000.zip",
+      entryCount: 2,
+      totalBytes: 512,
+    }),
     getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
     setCaptureSuccessfulDiagnostics: vi
       .fn()
@@ -60,7 +65,7 @@ describe("Executor diagnostics", () => {
 
     expect(await screen.findByText("本地执行器已停止")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "本地紧急停止" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: "仅停止本机执行器进程树" });
     expect(within(dialog).getByText("仅停止本机执行器进程树")).toBeInTheDocument();
     expect(adapter.emergencyStopExecutor).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "确认停止" }));
@@ -105,6 +110,26 @@ describe("Executor diagnostics", () => {
     expect(await screen.findByText("本地执行器运行中")).toBeVisible();
     expect(screen.getByText("recovered-build")).toBeVisible();
     expect(adapter.getExecutorStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("exports only after explicit confirmation and shows the safe receipt", async () => {
+    const adapter = platformAdapter();
+    const user = userEvent.setup();
+
+    render(<Diagnostics platform={adapter} />);
+
+    expect(await screen.findByText("本地执行器已停止")).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "导出本机诊断包" });
+    expect(within(dialog).getByText(/不会上传/u)).toBeInTheDocument();
+    expect(adapter.exportDiagnostics).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "确认导出" }));
+
+    expect(adapter.exportDiagnostics).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByText(
+        "诊断包已保存：automation-tool-diagnostics-123e4567-e89b-42d3-a456-426614174000.zip",
+      ),
+    ).toBeVisible();
   });
 
   it("shows only a fixed safe message when native calls fail", async () => {

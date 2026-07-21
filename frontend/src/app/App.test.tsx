@@ -89,6 +89,7 @@ describe("desktop startup", () => {
       }),
       restartExecutor: vi.fn(),
       getExecutorDiagnostics: vi.fn().mockResolvedValue(["safe app diagnostic"]),
+      exportDiagnostics: vi.fn(),
       emergencyStopExecutor: vi.fn(),
       getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
       setCaptureSuccessfulDiagnostics: vi.fn(),

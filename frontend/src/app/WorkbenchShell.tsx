@@ -122,6 +122,9 @@ const shellPlatformAdapter: PlatformAdapter = {
   async getExecutorDiagnostics() {
     return [];
   },
+  async exportDiagnostics() {
+    throw new Error("Diagnostic export is unavailable");
+  },
   async emergencyStopExecutor() {
     return { state: "stopped", version: null, buildId: null, restartCount: 0 };
   },
