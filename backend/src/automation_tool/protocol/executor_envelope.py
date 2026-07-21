@@ -23,6 +23,10 @@ from pydantic import (
 )
 from pydantic_core import CoreSchema, core_schema
 
+from automation_tool.protocol.action_message_template import (
+    ACTION_MESSAGE_TEMPLATE_VERSION,
+    ActionMessageTemplate,
+)
 from automation_tool.protocol.douyin_candidate import (
     MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
     MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS,
@@ -34,6 +38,7 @@ from automation_tool.protocol.douyin_candidate import (
 from automation_tool.protocol.douyin_search import (
     MAX_SEARCH_KEYWORD_CHARACTERS,
     MAX_TASK_TARGET_LIMIT,
+    DouyinSearchExposureAction,
     DouyinSearchInput,
 )
 from automation_tool.protocol.json_object import decode_bounded_json_object
@@ -49,6 +54,7 @@ MAX_EXECUTOR_COLLECTION_ITEMS = 64
 MAX_EXECUTOR_STRING_LENGTH = 4096
 MAX_EXECUTOR_SEQUENCE = MAX_CROSS_RUNTIME_SEQUENCE
 DOUYIN_DISCOVERY_PROTOCOL_VERSION = "douyin.discovery.v1"
+DOUYIN_ACTION_COMMAND_VERSION = "douyin.action-command.v1"
 MAX_DISCOVERY_BATCH_CANDIDATES = 10
 MAX_DISCOVERY_BATCH_COUNT = MAX_TASK_TARGET_LIMIT // MAX_DISCOVERY_BATCH_CANDIDATES
 
@@ -476,6 +482,66 @@ class DouyinDiscoveryCompletedPayload(_ProtocolModel):
         return self
 
 
+class DouyinActionCommandPayload(_ProtocolModel):
+    """One exact server-authorized action built from durable Control Plane facts."""
+
+    action_version: Literal["douyin.action-command.v1"]
+    action_id: ProtocolActionId
+    target_id: ProtocolTargetId
+    action: DouyinSearchExposureAction
+    signed_authority: Annotated[
+        str,
+        Field(
+            strict=True,
+            min_length=1,
+            max_length=2048,
+            pattern=r"^ataa1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
+        ),
+    ]
+    platform_target_id: Annotated[
+        str,
+        Field(strict=True, min_length=1, max_length=MAX_DOUYIN_TARGET_ID_CHARACTERS),
+    ]
+    display_name: Annotated[
+        str,
+        Field(strict=True, min_length=1, max_length=MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS),
+    ]
+    public_handle: (
+        Annotated[
+            str,
+            Field(strict=True, min_length=1, max_length=MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS),
+        ]
+        | None
+    )
+    source: Literal["general_search_author"]
+    page_revision: Annotated[int, Field(strict=True, ge=1, le=MAX_EXECUTOR_SEQUENCE)]
+    message_template_version: Literal["action-message-template.v1"] | None
+    message_template: str | None
+
+    @model_validator(mode="after")
+    def require_closed_action_intent(self) -> DouyinActionCommandPayload:
+        DouyinCandidate(
+            platform_target_id=self.platform_target_id,
+            summary=DouyinCandidateSummary(
+                display_name=self.display_name,
+                public_handle=self.public_handle,
+            ),
+            source=DouyinCandidateSource(self.source),
+            page_revision=self.page_revision,
+        )
+        if self.action is DouyinSearchExposureAction.BROWSE:
+            if self.message_template_version is not None or self.message_template is not None:
+                raise ValueError("browse action cannot include a message template")
+        elif (
+            self.message_template_version != ACTION_MESSAGE_TEMPLATE_VERSION
+            or self.message_template is None
+        ):
+            raise ValueError("side-effect action requires a message template")
+        else:
+            ActionMessageTemplate(source=self.message_template)
+        return self
+
+
 class TaskCommandEnvelope(_TaskEnvelopeBase):
     """Control Plane commands that target one execution attempt."""
 
@@ -495,10 +561,29 @@ class TaskDiscoveryCommandEnvelope(_TaskEnvelopeBase):
     payload: DouyinDiscoveryCommandPayload  # type: ignore[assignment]
 
 
+class TaskActionCommandEnvelope(_TaskEnvelopeBase):
+    """One typed and signed action command for a single confirmed target."""
+
+    message_type: Literal["action.execute"]
+    payload: DouyinActionCommandPayload  # type: ignore[assignment]
+
+    @model_validator(mode="after")
+    def require_action_idempotency(self) -> TaskActionCommandEnvelope:
+        if self.idempotency_key != f"action:{self.payload.action_id}":
+            raise ValueError("action command idempotency is inconsistent")
+        return self
+
+
 class TaskCommandResultEnvelope(_TaskEnvelopeBase):
     """Executor acknowledgements and decisions for a command."""
 
-    message_type: Literal["task.accept", "task.reject", "task.control_ack"]
+    message_type: Literal[
+        "task.accept",
+        "task.reject",
+        "task.control_ack",
+        "action.accept",
+        "action.reject",
+    ]
 
 
 class TaskEventEnvelope(_TaskEnvelopeBase):
@@ -541,6 +626,7 @@ type ExecutorEnvelope = Annotated[
     | PlatformSessionHealthEnvelope
     | TaskCommandEnvelope
     | TaskDiscoveryCommandEnvelope
+    | TaskActionCommandEnvelope
     | TaskCommandResultEnvelope
     | TaskEventEnvelope
     | TaskDiscoveryBatchEnvelope
@@ -609,12 +695,14 @@ def parse_executor_message(value: str | bytes) -> ExecutorEnvelope:
 
 
 __all__ = [
+    "DOUYIN_ACTION_COMMAND_VERSION",
     "DOUYIN_DISCOVERY_PROTOCOL_VERSION",
     "EXECUTOR_PROTOCOL_VERSION",
     "MAX_DISCOVERY_BATCH_CANDIDATES",
     "MAX_DISCOVERY_BATCH_COUNT",
     "MAX_EXECUTOR_MESSAGE_BYTES",
     "CorrelationId",
+    "DouyinActionCommandPayload",
     "DouyinDiscoveryBatchPayload",
     "DouyinDiscoveryCandidatePayload",
     "DouyinDiscoveryCommandPayload",
@@ -631,6 +719,7 @@ __all__ = [
     "ProtocolInstallationId",
     "ProtocolTargetId",
     "ProtocolTaskId",
+    "TaskActionCommandEnvelope",
     "TaskCommandEnvelope",
     "TaskCommandResultEnvelope",
     "TaskDiscoveryBatchEnvelope",

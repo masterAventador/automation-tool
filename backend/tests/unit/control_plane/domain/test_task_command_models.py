@@ -13,6 +13,7 @@ def test_task_command_types_match_the_executor_v1_command_vocabulary() -> None:
     assert tuple(command.value for command in TaskCommandType) == (
         "task.offer",
         "task.discover",
+        "action.execute",
         "task.pause",
         "task.resume",
         "task.cancel",
@@ -22,6 +23,8 @@ def test_task_command_types_match_the_executor_v1_command_vocabulary() -> None:
         "task.accept",
         "task.reject",
         "task.control_ack",
+        "action.accept",
+        "action.reject",
     )
 
 

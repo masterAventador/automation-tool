@@ -22,6 +22,8 @@ INVALID_FIXTURE_ROOT = FIXTURE_ROOT / "invalid"
 FIXTURE_DOCUMENT = FIXTURE_ROOT / "README.md"
 
 EXPECTED_VALID_FIXTURES = {
+    "action-accept.json",
+    "action-execute.json",
     "executor-heartbeat.json",
     "executor-hello.json",
     "microsecond-deadline.json",
@@ -148,7 +150,7 @@ def test_fixture_inventory_is_exact_documented_and_nontrivial() -> None:
 
     assert fixture_names(VALID_FIXTURE_ROOT) == EXPECTED_VALID_FIXTURES
     assert fixture_names(INVALID_FIXTURE_ROOT) == EXPECTED_INVALID_FIXTURES
-    assert len(EXPECTED_VALID_FIXTURES) == 10
+    assert len(EXPECTED_VALID_FIXTURES) == 12
     assert len(EXPECTED_INVALID_FIXTURES) == 27
     assert len(SEMANTIC_ONLY_INVALID_FIXTURES) == 10
     for fixture_name in sorted(SEMANTIC_ONLY_INVALID_FIXTURES):

@@ -8,10 +8,14 @@ from uuid import UUID
 import pytest
 
 from automation_tool.control_plane.application import task_command_delivery as delivery_module
+from automation_tool.control_plane.application.action_risk_authorizations import (
+    ActionRiskAuthorization,
+)
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
 )
 from automation_tool.control_plane.application.task_command_delivery import (
+    ActionCommandContext,
     CommandDeliveryResult,
     PendingTaskCommand,
     TaskCommandDeliveryRejected,
@@ -20,16 +24,29 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandRecord,
 )
 from automation_tool.control_plane.domain import (
+    ACTION_RISK_POLICY_VERSION,
+    ActionId,
+    ActionRiskPlatform,
+    DouyinSearchExposureAction,
     ExecutionAttemptId,
     ExecutorConnectionId,
     ExecutorId,
     InstallationId,
+    TargetId,
     TaskCommandResponseType,
     TaskCommandStatus,
     TaskCommandType,
     TaskId,
 )
-from automation_tool.protocol import DouyinDiscoveryCommandPayload, TaskCommandResultEnvelope
+from automation_tool.protocol import (
+    DouyinCandidate,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+    DouyinDiscoveryCommandPayload,
+    TaskActionCommandEnvelope,
+    TaskCommandResultEnvelope,
+    parse_executor_message,
+)
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 INSTALLATION_ID = InstallationId.parse("123e4567-e89b-42d3-a456-426614174003")
@@ -173,6 +190,23 @@ class FakeRegistry(ExecutorConnectionRegistry):
         self.sent.append(str(values["source"]))
 
 
+@dataclass(frozen=True)
+class FakeIssuedAuthority:
+    token: str = "ataa1.Y2Fub25pY2Fs.c2lnbmF0dXJl"
+
+
+class FakeActionAuthorityIssuer:
+    @staticmethod
+    def issue(
+        *,
+        authorization: ActionRiskAuthorization,
+        executor_id: ExecutorId,
+    ) -> FakeIssuedAuthority:
+        assert authorization.action_id == ACTION_ID
+        assert executor_id == EXECUTOR_ID
+        return FakeIssuedAuthority()
+
+
 def pending_command() -> PendingTaskCommand:
     return PendingTaskCommand(
         message_id=MESSAGE_ID,
@@ -185,6 +219,66 @@ def pending_command() -> PendingTaskCommand:
         idempotency_key="task:offer:attempt:1",
         deadline_at=NOW + timedelta(minutes=5),
         created_at=NOW,
+    )
+
+
+ACTION_ID = ActionId.parse("923e4567-e89b-42d3-a456-426614174001")
+TARGET_ID = TargetId.parse("a23e4567-e89b-42d3-a456-426614174001")
+
+
+def action_command() -> TaskCommandRecord:
+    authorization = ActionRiskAuthorization(
+        action_id=ACTION_ID,
+        target_id=TARGET_ID,
+        execution_attempt_id=ATTEMPT_ID,
+        task_id=TASK_ID,
+        installation_id=INSTALLATION_ID,
+        ordinal=1,
+        platform=ActionRiskPlatform.DOUYIN,
+        action=DouyinSearchExposureAction.COMMENT,
+        policy_version=ACTION_RISK_POLICY_VERSION,
+        effective_minimum_interval_seconds=5,
+        task_action_limit=10,
+        daily_action_limit=100,
+        consecutive_failure_threshold=3,
+        task_count_after=1,
+        daily_count_after=1,
+        authorized_day=NOW.date(),
+        authorized_at=NOW,
+        created_at=NOW,
+    )
+    base = PendingTaskCommand(
+        message_id=MESSAGE_ID,
+        correlation_id=CORRELATION_ID,
+        installation_id=INSTALLATION_ID,
+        task_id=TASK_ID,
+        execution_attempt_id=ATTEMPT_ID,
+        sequence=2,
+        command_type=TaskCommandType.ACTION_EXECUTE,
+        idempotency_key=f"action:{ACTION_ID}",
+        deadline_at=NOW + timedelta(minutes=5),
+        created_at=NOW,
+    )
+    return replace(
+        TaskCommandRecord.from_pending(base),
+        action_id=ACTION_ID,
+        action_context=ActionCommandContext(
+            authorization=authorization,
+            candidate=candidate(),
+            message_template="您好 {{target_display_name}}",
+        ),
+    )
+
+
+def candidate() -> DouyinCandidate:
+    return DouyinCandidate(
+        platform_target_id="douyin-user-1",
+        summary=DouyinCandidateSummary(
+            display_name="目标一",
+            public_handle="target-one",
+        ),
+        source=DouyinCandidateSource.GENERAL_SEARCH_AUTHOR,
+        page_revision=1,
     )
 
 
@@ -234,6 +328,135 @@ async def test_pending_offer_is_claimed_sent_and_only_marked_delivered() -> None
     assert wire["correlation_id"] == str(CORRELATION_ID)
     assert wire["executor_id"] == str(EXECUTOR_ID)
     assert wire["payload"] == {}
+
+
+@pytest.mark.asyncio
+async def test_action_command_is_signed_and_typed_at_the_real_delivery_boundary() -> None:
+    repository = FakeRepository(action_command())
+    registry = FakeRegistry()
+    service = TaskCommandDeliveryService(
+        repository=repository,
+        registry=registry,
+        clock=MutableClock(),
+        action_authority_issuer=FakeActionAuthorityIssuer(),
+    )
+
+    result = await service.dispatch_current(
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+        connection_id=CONNECTION_ID,
+    )
+
+    assert result == CommandDeliveryResult(delivered=1, expired=0)
+    parsed = parse_executor_message(registry.sent[0])
+    assert isinstance(parsed, TaskActionCommandEnvelope)
+    assert str(parsed.payload.action_id) == str(ACTION_ID)
+    assert str(parsed.payload.target_id) == str(TARGET_ID)
+    assert parsed.payload.message_template == "您好 {{target_display_name}}"
+    assert parsed.payload.signed_authority == FakeIssuedAuthority().token
+
+
+def test_action_command_context_and_wire_fail_closed_on_inconsistent_authority() -> None:
+    command = action_command()
+    assert command.action_context is not None
+    authorization = command.action_context.authorization
+    browse_authorization = replace(
+        authorization,
+        action=DouyinSearchExposureAction.BROWSE,
+    )
+    browse_context = ActionCommandContext(
+        authorization=browse_authorization,
+        candidate=candidate(),
+        message_template=None,
+    )
+    assert repr(browse_context) == "ActionCommandContext(<redacted>)"
+
+    invalid_contexts = (
+        {
+            "authorization": browse_authorization,
+            "candidate": candidate(),
+            "message_template": "browse must not have a template",
+        },
+        {
+            "authorization": authorization,
+            "candidate": candidate(),
+            "message_template": " ",
+        },
+        {
+            "authorization": authorization,
+            "candidate": candidate(),
+            "message_template": None,
+        },
+        {
+            "authorization": object(),
+            "candidate": candidate(),
+            "message_template": "您好 {{target_display_name}}",
+        },
+        {
+            "authorization": authorization,
+            "candidate": object(),
+            "message_template": "您好 {{target_display_name}}",
+        },
+    )
+    for values in invalid_contexts:
+        with pytest.raises(TaskCommandDeliveryRejected):
+            ActionCommandContext(**values)  # type: ignore[arg-type]
+
+    different_authorization = replace(
+        authorization,
+        action_id=ActionId.parse("b23e4567-e89b-42d3-a456-426614174001"),
+    )
+    inconsistent_commands = (
+        replace(command, action_id=None),
+        replace(command, action_context=None),
+        replace(
+            command,
+            action_context=replace(
+                command.action_context,
+                authorization=different_authorization,
+            ),
+        ),
+    )
+    for inconsistent in inconsistent_commands:
+        with pytest.raises(TaskCommandDeliveryRejected):
+            delivery_module._command_wire(
+                inconsistent,
+                executor_id=EXECUTOR_ID,
+                sent_at=NOW,
+                action_authority_issuer=FakeActionAuthorityIssuer(),
+            )
+
+    with pytest.raises(TaskCommandDeliveryRejected):
+        delivery_module._command_wire(command, executor_id=EXECUTOR_ID, sent_at=NOW)
+
+    class InvalidIssuer:
+        @staticmethod
+        def issue(**values: object) -> object:
+            return object()
+
+    with pytest.raises(TaskCommandDeliveryRejected):
+        delivery_module._command_wire(
+            command,
+            executor_id=EXECUTOR_ID,
+            sent_at=NOW,
+            action_authority_issuer=InvalidIssuer(),
+        )
+
+    discovery_payload = DouyinDiscoveryCommandPayload.model_validate(
+        {
+            "discovery_version": "douyin.discovery.v1",
+            "keyword": "自动化运营",
+            "target_limit": 10,
+            "page_revision": 1,
+        }
+    )
+    with pytest.raises(TaskCommandDeliveryRejected):
+        delivery_module._command_wire(
+            replace(command, discovery_payload=discovery_payload),
+            executor_id=EXECUTOR_ID,
+            sent_at=NOW,
+            action_authority_issuer=FakeActionAuthorityIssuer(),
+        )
 
 
 @pytest.mark.asyncio

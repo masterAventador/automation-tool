@@ -1,5 +1,8 @@
 """Async PostgreSQL infrastructure."""
 
+from .action_execution_orchestration_repository import (
+    SqlAlchemyActionExecutionOrchestrationRepository,
+)
 from .action_risk_authorization_repository import (
     SqlAlchemyActionRiskAuthorizationRepository,
 )
@@ -36,6 +39,7 @@ from .task_target_result_repository import SqlAlchemyTaskTargetResultRepository
 
 __all__ = [
     "Database",
+    "SqlAlchemyActionExecutionOrchestrationRepository",
     "SqlAlchemyActionRiskAuthorizationRepository",
     "SqlAlchemyInstallationRevocationRepository",
     "SqlAlchemyPlatformSessionHealthRepository",

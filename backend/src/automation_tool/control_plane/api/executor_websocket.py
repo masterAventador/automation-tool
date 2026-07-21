@@ -11,6 +11,11 @@ from fastapi import APIRouter, WebSocket
 from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
+from automation_tool.control_plane.application.action_execution_orchestration import (
+    ActionExecutionOrchestrationRejected,
+    ActionExecutionOrchestrationService,
+    ActionExecutionOrchestrationUnavailable,
+)
 from automation_tool.control_plane.application.executor_connection_registry import (
     EXECUTOR_CONNECTION_REPLACED_CODE,
     EXECUTOR_CONNECTION_REPLACED_REASON,
@@ -131,6 +136,7 @@ async def connect_executor(websocket: WebSocket) -> None:
     service = websocket.app.state.executor_connection_service
     registry = websocket.app.state.executor_connection_registry
     delivery = websocket.app.state.task_command_delivery_service
+    action_execution = websocket.app.state.action_execution_orchestration_service
     event_convergence = websocket.app.state.task_event_convergence_service
     discovery_convergence = websocket.app.state.task_discovery_convergence_service
     session_health = websocket.app.state.platform_session_health_service
@@ -259,6 +265,31 @@ async def connect_executor(websocket: WebSocket) -> None:
                     reason=_INTERNAL_ERROR_REASON,
                 )
                 return
+
+            if action_execution is not None:
+                if not isinstance(action_execution, ActionExecutionOrchestrationService):
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
+                try:
+                    await action_execution.advance(
+                        bound.installation_id,
+                        bound.executor_id,
+                    )
+                except (
+                    ActionExecutionOrchestrationRejected,
+                    ActionExecutionOrchestrationUnavailable,
+                ):
+                    logger.error("Action execution orchestration failed")
+                    await _close(
+                        websocket,
+                        code=EXECUTOR_CLOSE_INTERNAL_ERROR,
+                        reason=_INTERNAL_ERROR_REASON,
+                    )
+                    return
 
             if delivery is not None:
                 if not isinstance(delivery, TaskCommandDeliveryService):

@@ -35,7 +35,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0007"
-HEAD_REVISION = "20260721_0025"
+HEAD_REVISION = "20260721_0026"
 NOW = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)
 EXPECTED_EVENT_COLUMNS = {
     "task_id",

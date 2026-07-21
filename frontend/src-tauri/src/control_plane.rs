@@ -2300,6 +2300,10 @@ fn require_action_message_template(value: &str) -> Result<(), ControlPlaneError>
     Ok(())
 }
 
+pub(crate) fn action_message_template_is_valid(value: &str) -> bool {
+    require_action_message_template(value).is_ok()
+}
+
 fn require_list_cursor(value: &str) -> Result<(), ControlPlaneError> {
     if value.is_empty()
         || value.len() > 256

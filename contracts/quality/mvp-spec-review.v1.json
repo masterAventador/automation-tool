@@ -181,10 +181,16 @@
     },
     {
       "remediationTask": "H8-16C",
-      "state": "open",
+      "state": "resolved",
       "requirementRefs": ["MVP-AC-06", "MVP-AC-07"],
       "summary": "确认只把 Task 改为 queued，生产应用没有创建逐目标动作授权和可执行 typed Outbox 的入口",
-      "evidence": [{"path": "backend/src/automation_tool/control_plane/infrastructure/database/task_target_preview_repository.py", "anchor": "target_status=TaskStatus.QUEUED"}]
+      "evidence": [{"path": "backend/src/automation_tool/control_plane/infrastructure/database/task_target_preview_repository.py", "anchor": "target_status=TaskStatus.QUEUED"}],
+      "resolutionEvidence": [
+        {"path": "backend/src/automation_tool/control_plane/api/executor_websocket.py", "anchor": "await action_execution.advance"},
+        {"path": "backend/src/automation_tool/control_plane/infrastructure/database/action_execution_orchestration_repository.py", "anchor": "TaskCommandType.ACTION_EXECUTE"},
+        {"path": "backend/src/automation_tool/control_plane/application/task_command_delivery.py", "anchor": "TaskActionCommandEnvelope.model_validate"},
+        {"path": "backend/tests/integration/test_action_execution_orchestration_lifecycle.py", "anchor": "test_confirmed_task_is_offered_then_authorized_one_target_at_a_time"}
+      ]
     },
     {
       "remediationTask": "H8-16D",

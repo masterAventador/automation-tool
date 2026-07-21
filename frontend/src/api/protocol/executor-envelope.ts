@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { douyinActionMessageTemplateSchema } from "../control-plane/douyin-search-exposure";
+
 const MAX_MESSAGE_BYTES = 32 * 1024;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_PAYLOAD_DEPTH = 8;
@@ -247,6 +249,38 @@ const taskDiscoveryCommandEnvelope = commonEnvelope.extend({
     })
     .strict(),
 });
+const taskActionCommandEnvelope = commonEnvelope
+  .extend({
+    ...taskScope,
+    message_type: z.literal("action.execute"),
+    payload: z
+      .object({
+        action_version: z.literal("douyin.action-command.v1"),
+        action_id: z.string().regex(canonicalUuidV4),
+        target_id: z.string().regex(canonicalUuidV4),
+        action: z.enum(["browse", "comment", "direct_message"]),
+        signed_authority: z
+          .string()
+          .min(1)
+          .max(2048)
+          .regex(/^ataa1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/),
+        platform_target_id: platformIdentifier(128),
+        display_name: discoverySafeText(80),
+        public_handle: platformIdentifier(64).nullable(),
+        source: z.literal("general_search_author"),
+        page_revision: discoverySequence,
+        message_template_version: z.literal("action-message-template.v1").nullable(),
+        message_template: douyinActionMessageTemplateSchema.nullable(),
+      })
+      .strict()
+      .refine((payload) =>
+        payload.action === "browse"
+          ? payload.message_template_version === null && payload.message_template === null
+          : payload.message_template_version === "action-message-template.v1" &&
+            payload.message_template !== null,
+      ),
+  })
+  .refine((message) => message.idempotency_key === `action:${message.payload.action_id}`);
 const taskDiscoveryBatchEnvelope = commonEnvelope.extend({
   ...taskScope,
   message_type: z.literal("task.discovery_batch"),
@@ -321,7 +355,13 @@ const taskDiscoveryCompletedEnvelope = commonEnvelope.extend({
 });
 const taskCommandResultEnvelope = commonEnvelope.extend({
   ...taskScope,
-  message_type: z.enum(["task.accept", "task.reject", "task.control_ack"]),
+  message_type: z.enum([
+    "task.accept",
+    "task.reject",
+    "task.control_ack",
+    "action.accept",
+    "action.reject",
+  ]),
 });
 const taskEventEnvelope = commonEnvelope.extend({
   ...taskScope,
@@ -348,6 +388,7 @@ const executorEnvelopeSchema = z
     platformSessionHealthEnvelope,
     taskCommandEnvelope,
     taskDiscoveryCommandEnvelope,
+    taskActionCommandEnvelope,
     taskCommandResultEnvelope,
     taskDiscoveryBatchEnvelope,
     taskDiscoveryCompletedEnvelope,

@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16B 已完成，下一项 H8-16C）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16C 服务端动作执行编排已完成，下一项 H8-16D）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16B 已完成；下一项 H8-16C 建立服务端动作执行编排；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16C 已完成；下一项 H8-16D 接入 Executor 真实动作编排；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -57,7 +57,7 @@
 | Tauri 桌面壳 | `✅ 已完成` v2 真实 macOS 窗口、生产 CSP、零权限 Capability、Cargo 锁文件与桌面构建已验证 |
 | 设备身份与凭据存储 | `✅ 已完成` Ed25519 首启生成、Rust 管理的 `app_data_dir` 私有文件、长期凭据替换/删除、React/IPC 零暴露和无系统钥匙串授权已验证 |
 | 前端 Transport | `✅ 已完成` 生产 `main.tsx` 已经真实 Tauri IPC/Rust 桥调用 Health；Rust 固定 origin/operation allowlist、凭据注入与严格响应边界已验证，注册/凭据/Session 纵向链路不向 React 暴露秘密 |
-| Executor v1 协议 | `✅ 已完成` 28 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 37 个公共 fixtures 已验证 |
+| Executor v1 协议 | `✅ 已完成` 31 种消息三端判别解析、显式版本、用途隔离 UUIDv4、UTC 微秒 deadline、幂等键、安全整数序号、安全 payload、Draft 2020-12 Schema 与 39 个公共 fixtures 已验证 |
 | Target 发现命令闭环 | `✅ 已完成` 隐藏 Tauri App 已经正式 Rust bridge 启动发现；Control Plane 原子创建 Attempt/Discover Command，Local Executor 经生产 Processor 上报有界 Candidate 批次并持久 Outbox，PostgreSQL 原子替换 Target、追加事件和收敛 Task；成功、登录失效、人工接管、失败、重试与精确重放矩阵已验证 |
 | Executor WebSocket | `✅ 已完成` 真实 Uvicorn、精确子协议、Session/Installation/Executor/版本绑定、连接 ID、32 KiB 传输上限、周期重认证、吊销断连和旧 Session 拒绝已验证 |
 | Executor Playwright onedir | `✅ 已完成` macOS arm64 与 Windows x86_64 正式 onedir 均已包含 Python Playwright driver 且无浏览器缓存；冻结生产 primitive 已用受信系统浏览器、私有 Profile 与原生锁启动 headed context |
@@ -348,7 +348,7 @@
 | H8-16 | 规格复审 | 从分叉点审查完整实现是否满足产品/MVP/文档 | H8-15 | ✅ 已完成 |
 | H8-16A | 桌面发现入口闭环 | 正式页面从 Task 草稿/登录接管状态启动或重试发现，调用固定 Tauri→API 原路径 | H8-16 | ✅ 已完成 |
 | H8-16B | Installation 单活任务 | 同一 Installation 只能有一个未终结 RPA Attempt，数据库并发单赢家且 UI 明确提示 | H8-16A | ✅ 已完成 |
-| H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ⬜ 未开始 |
+| H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ✅ 已完成 |
 | H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ⬜ 未开始 |
 | H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ⬜ 未开始 |
 | H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | ⬜ 未开始 |
@@ -2638,13 +2638,29 @@
 - 隔离与清理：数据库测试使用 `automation-tool-pytest-*` 专属 Compose project 与随机 PostgreSQL 端口；纵向验收使用 `automation-tool-d610-<pid>`、唯一 AppData/Executor SQLite 和启动前检查的 8765，窗口固定隐藏且不启动运营浏览器。失败/中断/成功路径均由 finally 回收 App、WDIO、Executor、Uvicorn、容器、网络、Volume、AppData 与监听；一次主动中断后 macOS 短暂保留端口状态，脚本正确拒绝复用，确认可绑定后才重跑
 - 后续：进入 `H8-16C`，在当前确认快照之上按目标创建服务端授权并投递 typed 动作命令，不让 H8-16B 的互斥错误或测试同步面扩展成通用协议
 
+### H8-16C 服务端动作执行编排
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- RED：先新增正式 Executor wire 的协议测试，聚焦运行在收集阶段准确失败于缺少 `DOUYIN_ACTION_COMMAND_VERSION`、`DouyinActionCommandPayload` 与 `TaskActionCommandEnvelope`；不能继续用空 payload 的 `task.offer`、固定 success batch 或 FakeExecutor 结果冒充逐目标动作命令
+- 目标边界：确认后的 `queued` 任务由服务端持久创建执行 Attempt/offer；Attempt 进入 running 后每次只为下一个已确认目标生成一条 A7-02 风险授权和一条 `action.execute` Outbox。投递时从 PostgreSQL 权威授权、Target、确认和定义即时构造短期 Ed25519 payload，不把授权 token、评论/私信正文或任意 JSON 持久化进 Outbox
+- 安全顺序：继续要求当前确认指纹、healthy 平台 Session、Installation 单活、服务端与任务间隔取较严值、任务/UTC 日额度、连续失败 circuit、Action/Target/Attempt 全 scope 幂等；上一动作未结算时不得授权下一目标，进程在事件落库与下一条命令之间崩溃时由 WebSocket 循环从持久事实补推进
+- 服务端推进：`ActionExecutionOrchestrationService` 由已认证 Executor WebSocket 的正式循环调用。没有非终态 Attempt 时，PostgreSQL 在 Installation 行锁内选择一个当前确认的 queued Task，原子创建唯一 offered Attempt、确认绑定的 `task.offer` Outbox 并写回 `current_attempt_id`；Attempt 进入 running 后只选择下一个 eligible、未排除且从未授权的 Target。上一 Action 仍为 authorized/prepared/dispatched 时固定 idle，结算后才允许下一条
+- 授权与补偿：下一 Target 继续通过既有 A7-02 Repository 获取服务端风险授权；授权事实与 `action.execute` Outbox 之间若发生进程中断，下一轮先寻找 authorized 且没有 Command 的 Action 并补齐 Outbox。竞争推进只有一个 Action/ordinal 赢家，另一方限流或 idle；Outbox 只保存 `action_id`、确认 message 和资源 scope，不保存签名、模板副本或任意 JSON
+- Typed 投递：Alembic `20260721_0026` 为 `task_commands` 增加可空 `action_id`、Action 复合外键、唯一绑定和 command/response coherence；正式 claim 从 PostgreSQL 的 Authorization、Target、Definition 即时构造候选与原始模板，Control Plane-only Ed25519 issuer 在发送前生成最长五分钟的 `signed_authority`。共享 `action.execute`、`action.accept/reject` 契约由 Python、TypeScript、Rust 和 12 个 valid/27 个 invalid fixture 同步回放
+- 部署配置：动作执行仅在 `AUTOMATION_TOOL_ACTION_AUTHORIZATION_PRIVATE_KEY` 与 minimum interval、task limit、daily limit、consecutive failure threshold 五项同时存在时启用；私钥必须是非零 32-byte canonical base64url seed，缺项或非法值 fail closed 且不反射。数据库 URL 和动作 Secret 仍属于云端 Control Plane；App 私有密钥规则与系统钥匙串策略不变
+- 原始入口与门禁：真实 PostgreSQL 生命周期从 confirmed Task 验证 offer→running→首目标授权/Outbox→崩溃补写→正式 claim/`action.accept`→未结算阻断→频控→并发次目标单赢家；已认证真实 WebSocket 验证正式循环确实调用编排，`TaskCommandDeliveryService.dispatch_current` 验证 claim 后生成签名 typed wire，而不是 Mock HTTP 或直接拼 JSON。Backend 全量 `2018 passed, 5 skipped in 227.41s`，13611 条语句/3132 个分支覆盖率 100%，其中 unit 1587 项、integration 217 项、contract 219 项；350 个 Python 文件格式/Ruff、严格 Mypy 323 个源码文件与 uv lock 全绿。Frontend 118 项 Node 契约、210 项 Vitest、5 项全局无头 Playwright、peer/API/Lint/Type/生产构建边界全绿；Rust 默认 `154 passed/4 ignored`、`desktop-e2e` `151 passed/4 ignored`、`control-plane-e2e` `155 passed/6 ignored`，三套全目标 Clippy、Rustfmt 与 Actionlint 全绿
+- 清理：PostgreSQL 集成测试使用随机 loopback 端口和 `automation-tool-pytest-*` 专属 Compose project，结束后容器、网络、Volume 和项目浏览器进程复查为空；本任务没有启动运营浏览器、读取真实 Profile、触碰默认 Chrome/Edge 或系统钥匙串
+- 后续：进入 `H8-16D`，让正式 `ExecutorCommandProcessor` 消费 `action.execute`、验签并调用已有 browse/comment/direct-message 与副作用账本；本任务不把服务端投递成功冒充平台动作完成
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
-2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-16C`（⬜ 未开始）：确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛；
-4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
-5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
-6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。
+1. `H8-16D`：正式 Executor 消费 `action.execute` 并调用 browse/comment/direct-message 生产实现与副作用账本；
+2. `H8-16E`：把 Control Plane、Executor、受信浏览器和 App 私有数据目录合并进启动环境诊断；
+3. `H8-16F`：校准可选过滤/黑名单、截图直览、结果导出和存储控制范围，并跑通隐藏 App 整条用户旅程；
+4. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
+5. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
+6. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；
+7. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

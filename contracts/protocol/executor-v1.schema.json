@@ -1,5 +1,115 @@
 {
   "$defs": {
+    "DouyinActionCommandPayload": {
+      "additionalProperties": false,
+      "description": "One exact server-authorized action built from durable Control Plane facts.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/DouyinSearchExposureAction"
+        },
+        "action_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "action_version": {
+          "const": "douyin.action-command.v1",
+          "title": "Action Version",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "message_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message Template"
+        },
+        "message_template_version": {
+          "anyOf": [
+            {
+              "const": "action-message-template.v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message Template Version"
+        },
+        "page_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Page Revision",
+          "type": "integer"
+        },
+        "platform_target_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Platform Target Id",
+          "type": "string"
+        },
+        "public_handle": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Public Handle"
+        },
+        "signed_authority": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "pattern": "^ataa1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+          "title": "Signed Authority",
+          "type": "string"
+        },
+        "source": {
+          "const": "general_search_author",
+          "title": "Source",
+          "type": "string"
+        },
+        "target_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Target Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_version",
+        "action_id",
+        "target_id",
+        "action",
+        "signed_authority",
+        "platform_target_id",
+        "display_name",
+        "public_handle",
+        "source",
+        "page_revision",
+        "message_template_version",
+        "message_template"
+      ],
+      "title": "DouyinActionCommandPayload",
+      "type": "object"
+    },
     "DouyinDiscoveryBatchPayload": {
       "additionalProperties": false,
       "description": "One bounded replayable Candidate chunk.",
@@ -213,9 +323,21 @@
       "title": "DouyinDiscoveryCompletedPayload",
       "type": "object"
     },
+    "DouyinSearchExposureAction": {
+      "enum": [
+        "browse",
+        "comment",
+        "direct_message"
+      ],
+      "title": "DouyinSearchExposureAction",
+      "type": "string"
+    },
     "ExecutorEnvelope": {
       "discriminator": {
         "mapping": {
+          "action.accept": "#/$defs/TaskCommandResultEnvelope",
+          "action.execute": "#/$defs/TaskActionCommandEnvelope",
+          "action.reject": "#/$defs/TaskCommandResultEnvelope",
           "executor.heartbeat": "#/$defs/ExecutorLifecycleEnvelope",
           "executor.hello": "#/$defs/ExecutorLifecycleEnvelope",
           "handoff.requested": "#/$defs/TaskEventEnvelope",
@@ -259,6 +381,9 @@
         },
         {
           "$ref": "#/$defs/TaskDiscoveryCommandEnvelope"
+        },
+        {
+          "$ref": "#/$defs/TaskActionCommandEnvelope"
         },
         {
           "$ref": "#/$defs/TaskCommandResultEnvelope"
@@ -503,6 +628,110 @@
       "title": "PlatformSessionState",
       "type": "string"
     },
+    "TaskActionCommandEnvelope": {
+      "additionalProperties": false,
+      "description": "One typed and signed action command for a single confirmed target.",
+      "properties": {
+        "correlation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "execution_attempt_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Execution Attempt Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "message_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "message_type": {
+          "const": "action.execute",
+          "title": "Message Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/DouyinActionCommandPayload",
+          "maxProperties": 64
+        },
+        "protocol_version": {
+          "const": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+          "title": "Sent At",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "message_id",
+        "sent_at",
+        "deadline_at",
+        "installation_id",
+        "executor_id",
+        "correlation_id",
+        "idempotency_key",
+        "sequence",
+        "payload",
+        "task_id",
+        "execution_attempt_id",
+        "message_type"
+      ],
+      "title": "TaskActionCommandEnvelope",
+      "type": "object"
+    },
     "TaskCommandEnvelope": {
       "additionalProperties": false,
       "description": "Control Plane commands that target one execution attempt.",
@@ -673,7 +902,9 @@
           "enum": [
             "task.accept",
             "task.reject",
-            "task.control_ack"
+            "task.control_ack",
+            "action.accept",
+            "action.reject"
           ],
           "title": "Message Type",
           "type": "string"

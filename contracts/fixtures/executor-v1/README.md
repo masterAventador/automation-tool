@@ -1,6 +1,6 @@
 # Executor v1 fixtures
 
-本目录是 Python、Rust 和 TypeScript 共同回放的协议事实源。`valid/` 中 10 个样例必须同时通过 Draft 2020-12 JSON Schema 和正式语义解析器；`invalid/` 中 27 个样例必须由正式解析器统一拒绝。
+本目录是 Python、Rust 和 TypeScript 共同回放的协议事实源。`valid/` 中 12 个样例必须同时通过 Draft 2020-12 JSON Schema 和正式语义解析器；`invalid/` 中 27 个样例必须由正式解析器统一拒绝。
 
 JSON Schema 能表达字段、判别枚举、required、unknown field、UUID/幂等键 pattern、序号和 UTC RFC3339 pattern。以下 10 个语义层无效样例需要语言适配器显式实现 Schema 扩展 `x-semantic-validation-required`，不能因为标准 Schema 接受就放行：
 

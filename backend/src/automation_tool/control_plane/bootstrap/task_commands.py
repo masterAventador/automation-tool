@@ -4,6 +4,7 @@ from automation_tool.control_plane.application.executor_connection_registry impo
     ExecutorConnectionRegistry,
 )
 from automation_tool.control_plane.application.task_command_delivery import (
+    ActionAuthorityIssuer,
     TaskCommandDeliveryService,
 )
 from automation_tool.control_plane.application.task_controls import TaskControlService
@@ -16,10 +17,13 @@ from automation_tool.control_plane.infrastructure.database import (
 def task_command_delivery_service(
     database: Database,
     registry: ExecutorConnectionRegistry,
+    *,
+    action_authority_issuer: ActionAuthorityIssuer | None = None,
 ) -> TaskCommandDeliveryService:
     return TaskCommandDeliveryService(
         repository=SqlAlchemyTaskCommandRepository(database),
         registry=registry,
+        action_authority_issuer=action_authority_issuer,
     )
 
 

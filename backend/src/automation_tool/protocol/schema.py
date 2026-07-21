@@ -52,6 +52,7 @@ def executor_schema() -> dict[str, Any]:
     for model_name in (
         "ExecutorLifecycleEnvelope",
         "PlatformSessionHealthEnvelope",
+        "TaskActionCommandEnvelope",
         "TaskCommandEnvelope",
         "TaskCommandResultEnvelope",
         "TaskDiscoveryBatchEnvelope",

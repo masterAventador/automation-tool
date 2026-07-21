@@ -12,6 +12,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from automation_tool.control_plane.application.task_command_delivery import (
+    ActionCommandContext,
     PendingTaskCommand,
     TaskCommandDeliveryRejected,
     TaskCommandRecord,
@@ -23,6 +24,7 @@ from automation_tool.control_plane.application.task_controls import (
     TaskControlNotFound,
 )
 from automation_tool.control_plane.domain import (
+    ActionId,
     ExecutionAttemptId,
     ExecutionAttemptStatus,
     InstallationId,
@@ -35,19 +37,28 @@ from automation_tool.control_plane.domain import (
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
+    action_risk_authorizations,
     douyin_search_exposure_definitions,
     execution_attempts,
     installations,
     platform_session_gates,
     task_commands,
     task_target_confirmations,
+    task_targets,
     tasks,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
 from automation_tool.protocol import (
     DOUYIN_DISCOVERY_PROTOCOL_VERSION,
+    DouyinCandidate,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
     DouyinDiscoveryCommandPayload,
     TaskCommandResultEnvelope,
+)
+
+from .action_risk_authorization_repository import (
+    _record as action_authorization_record_from_row,
 )
 
 
@@ -72,6 +83,7 @@ def _record(row: RowMapping) -> TaskCommandRecord:
                 UUID | None,
                 row["target_confirmation_message_id"],
             ),
+            action_id=(None if row["action_id"] is None else ActionId.parse(row["action_id"])),
             status=TaskCommandStatus(cast(str, row["status"])),
             idempotency_key=cast(str, row["idempotency_key"]),
             revision=cast(int, row["revision"]),
@@ -111,9 +123,15 @@ def _same_intent(
 
 
 def _response_payload_is_valid(response: TaskCommandResultEnvelope) -> bool:
-    if response.message_type == TaskCommandResponseType.TASK_ACCEPT.value:
+    if response.message_type in {
+        TaskCommandResponseType.TASK_ACCEPT.value,
+        TaskCommandResponseType.ACTION_ACCEPT.value,
+    }:
         return response.payload == {"accepted": True}
-    if response.message_type == TaskCommandResponseType.TASK_REJECT.value:
+    if response.message_type in {
+        TaskCommandResponseType.TASK_REJECT.value,
+        TaskCommandResponseType.ACTION_REJECT.value,
+    }:
         return response.payload == {"accepted": False}
     return response.payload == {"acknowledged": True}
 
@@ -126,6 +144,11 @@ def _response_matches_command(
         return response_type in {
             TaskCommandResponseType.TASK_ACCEPT,
             TaskCommandResponseType.TASK_REJECT,
+        }
+    if command_type is TaskCommandType.ACTION_EXECUTE:
+        return response_type in {
+            TaskCommandResponseType.ACTION_ACCEPT,
+            TaskCommandResponseType.ACTION_REJECT,
         }
     return response_type is TaskCommandResponseType.TASK_CONTROL_ACK
 
@@ -586,7 +609,12 @@ class SqlAlchemyTaskCommandRepository:
                 task_commands.c.updated_at <= timestamp,
                 due,
                 or_(
-                    task_commands.c.command_type != TaskCommandType.TASK_OFFER.value,
+                    task_commands.c.command_type.not_in(
+                        (
+                            TaskCommandType.TASK_OFFER.value,
+                            TaskCommandType.ACTION_EXECUTE.value,
+                        )
+                    ),
                     and_(
                         task_commands.c.target_confirmation_message_id.is_(None),
                         ~exists(
@@ -627,10 +655,7 @@ class SqlAlchemyTaskCommandRepository:
                                 task_target_confirmations.c.source_message_id
                                 == task_commands.c.target_confirmation_message_id,
                                 tasks.c.status.in_(
-                                    (
-                                        TaskStatus.QUEUED.value,
-                                        TaskStatus.RUNNING.value,
-                                    )
+                                    (TaskStatus.QUEUED.value, TaskStatus.RUNNING.value)
                                 ),
                                 tasks.c.revision
                                 >= task_target_confirmations.c.confirmed_task_revision,
@@ -735,6 +760,72 @@ class SqlAlchemyTaskCommandRepository:
                             "target_limit": definition["target_limit"],
                             "page_revision": definition["attempt_number"],
                         }
+                    ),
+                )
+            elif record.command_type is TaskCommandType.ACTION_EXECUTE:
+                if record.action_id is None:
+                    raise TaskCommandDeliveryRejected
+                context_row = (
+                    (
+                        await session.execute(
+                            select(
+                                action_risk_authorizations,
+                                task_targets.c.platform_target_id,
+                                task_targets.c.display_name,
+                                task_targets.c.public_handle,
+                                task_targets.c.source,
+                                task_targets.c.page_revision,
+                                douyin_search_exposure_definitions.c.message_template,
+                            )
+                            .select_from(
+                                action_risk_authorizations.join(
+                                    task_targets,
+                                    and_(
+                                        task_targets.c.id == action_risk_authorizations.c.target_id,
+                                        task_targets.c.task_id
+                                        == action_risk_authorizations.c.task_id,
+                                        task_targets.c.installation_id
+                                        == action_risk_authorizations.c.installation_id,
+                                    ),
+                                ).join(
+                                    douyin_search_exposure_definitions,
+                                    and_(
+                                        douyin_search_exposure_definitions.c.task_id
+                                        == action_risk_authorizations.c.task_id,
+                                        douyin_search_exposure_definitions.c.installation_id
+                                        == action_risk_authorizations.c.installation_id,
+                                    ),
+                                )
+                            )
+                            .where(
+                                action_risk_authorizations.c.action_id == record.action_id.uuid,
+                                action_risk_authorizations.c.execution_attempt_id
+                                == record.execution_attempt_id.uuid,
+                                action_risk_authorizations.c.task_id == record.task_id.uuid,
+                                action_risk_authorizations.c.installation_id
+                                == record.installation_id.uuid,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if context_row is None:
+                    raise TaskCommandDeliveryRejected
+                record = replace(
+                    record,
+                    action_context=ActionCommandContext(
+                        authorization=action_authorization_record_from_row(context_row),
+                        candidate=DouyinCandidate(
+                            platform_target_id=cast(str, context_row["platform_target_id"]),
+                            summary=DouyinCandidateSummary(
+                                display_name=cast(str, context_row["display_name"]),
+                                public_handle=cast(str | None, context_row["public_handle"]),
+                            ),
+                            source=DouyinCandidateSource(cast(str, context_row["source"])),
+                            page_revision=cast(int, context_row["page_revision"]),
+                        ),
+                        message_template=cast(str | None, context_row["message_template"]),
                     ),
                 )
             return record
@@ -926,7 +1017,11 @@ class SqlAlchemyTaskCommandRepository:
                     return _record(expired)
                 final_status = (
                     TaskCommandStatus.REJECTED
-                    if response_type is TaskCommandResponseType.TASK_REJECT
+                    if response_type
+                    in {
+                        TaskCommandResponseType.TASK_REJECT,
+                        TaskCommandResponseType.ACTION_REJECT,
+                    }
                     else TaskCommandStatus.ACKNOWLEDGED
                 )
                 acknowledged = (

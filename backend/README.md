@@ -2,11 +2,11 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 最小进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。未终结 Attempt 以 Installation 为数据库单活键；正式 App 的竞争启动会得到固定 `423 installation_task_active`，不泄漏活动 Task 身份。React 工作台已消费 Control Plane 权威事实；正式 Executor 当前完成 bootstrap、Hello/Heartbeat、信号退出和抖音 Session 最小健康上报，尚不执行业务任务或平台副作用。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 最小进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。未终结 Attempt 以 Installation 为数据库单活键；正式 App 的竞争启动会得到固定 `423 installation_task_active`，不泄漏活动 Task 身份。确认后的 Task 由服务端建立 Attempt/offer，运行后按确认目标逐个授权并投递签名 `action.execute`；正式 Executor 当前仍未消费该动作命令执行平台副作用，由 H8-16D 承接。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
-权威 Schema 固定为 `contracts/protocol/executor-v1.schema.json`，只能由 Pydantic 源通过 `automation-tool-export-executor-schema` 生成。`contracts/fixtures/executor-v1/` 包含 10 个 valid 和 27 个 invalid wire 样例；标准 Draft 2020-12 validator 负责 17 个结构层失败，Python、Rust、TypeScript 正式解析器另外实现 Schema `x-semantic-validation-required` 声明的 10 个 deadline、重复 key、敏感信息、私有路径、inline data、非有限数字和递归资源失败。三端必须回放同一目录，不能复制另一套 fixture。
+权威 Schema 固定为 `contracts/protocol/executor-v1.schema.json`，只能由 Pydantic 源通过 `automation-tool-export-executor-schema` 生成。`contracts/fixtures/executor-v1/` 包含 12 个 valid 和 27 个 invalid wire 样例；标准 Draft 2020-12 validator 负责 17 个结构层失败，Python、Rust、TypeScript 正式解析器另外实现 Schema `x-semantic-validation-required` 声明的 10 个 deadline、重复 key、敏感信息、私有路径、inline data、非有限数字和递归资源失败。三端必须回放同一目录，不能复制另一套 fixture。
 
 资源 ID 统一使用规范小写 UUIDv4，并通过 `InstallationId`、`ExecutorId`、`TaskId`、`ExecutionAttemptId`、`ActionId` 和 `ArtifactId` 值对象隔离；一次在线连接另使用短生命周期的 `ExecutorConnectionId`。外部字符串必须先调用对应类型的 `parse`，新资源调用 `new`；不能把普通字符串、另一类资源 ID 或非 UUIDv4 值直接带入领域层。
 
@@ -208,7 +208,7 @@ D6-15 的权威 Fake 页面只位于 `tests/fixtures/douyin_discovery_pages/`。
 
 D6-16 首轮真实 Profile 验收暴露首页风控 iframe 未被搜索 Page Object 识别、只能等到 `home_ready_timed_out`。`session.py` 现公开唯一 `DOUYIN_RISK_CHALLENGE_SELECTORS`，`search_page.py` 复用它并保持登录弹窗优先级；官方验证码 iframe 或 captcha container 与普通阻塞 dialog 一样立即返回 `DIALOG_BLOCKED/BLOCKING_DIALOG`，D6-04/D6-10 最终形成 `handoff_required`。该修复没有增加绕过、自动解题或验证码交互，也没有把 iframe URL、页面内容或 Session 数据写入 Artifact/日志。真实 Profile 已证明受保护页健康，但首页挑战尚未解除，真实候选/预览继续待补。
 
-Local Executor 的 `ExecutorCommandProcessor` 在 D6-10 的 SQLite v3 中先保存 `task.discover`，只通过 `ProductionDouyinDiscoveryOperation` 组合现有搜索、有界滚动和最小提取器，并将结果以最多 10 条 Candidate 的 `task.discovery_batch` 和唯一 `task.discovery_completed` 写入持久 outbox 后发送；A7-04/A7-07 已在不丢失这些事实的前提下依次原地迁移到 SQLite v4/v5。Control Plane 的 bounded accumulator 只接受当前已确认命令的连续批次；完成时在同一 PostgreSQL 事务复验 Installation/Task/Attempt/correlation/page revision、调用 D6-09 替换 Target、追加终态事件并把 Task 收敛到 `awaiting_confirmation`。登录失效、人工接管和失败分别进入封闭状态，不保存 Target；断线完整重放必须与已持久化快照精确一致。三端 Schema/解析器现共同覆盖 28 种消息、10 个 valid 和 27 个 invalid fixture。
+Local Executor 的 `ExecutorCommandProcessor` 在 D6-10 的 SQLite v3 中先保存 `task.discover`，只通过 `ProductionDouyinDiscoveryOperation` 组合现有搜索、有界滚动和最小提取器，并将结果以最多 10 条 Candidate 的 `task.discovery_batch` 和唯一 `task.discovery_completed` 写入持久 outbox 后发送；A7-04/A7-07 已在不丢失这些事实的前提下依次原地迁移到 SQLite v4/v5。Control Plane 的 bounded accumulator 只接受当前已确认命令的连续批次；完成时在同一 PostgreSQL 事务复验 Installation/Task/Attempt/correlation/page revision、调用 D6-09 替换 Target、追加终态事件并把 Task 收敛到 `awaiting_confirmation`。登录失效、人工接管和失败分别进入封闭状态，不保存 Target；断线完整重放必须与已持久化快照精确一致。三端 Schema/解析器现共同覆盖 31 种消息、12 个 valid 和 27 个 invalid fixture。
 
 B5-11 把 flow 契约升级为 `douyin.qr-login.v2`，当前状态固定为 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/handoff_required/unknown`。B5-09 发现 ByteDance 验证中心外层挑战后只投影 `handoff_required/risk_challenge`，不读取跨源挑战内容，也没有点击、填写、拖拽、验证码识别或绕过路径；同一个可见窗口留给用户处理。无参数 `recheck()` 只有重新观察到 `healthy` 才关闭熔断，挑战仍在、页面未知或登录失效都继续阻止副作用。代码不调用 Cookie/storage-state API，页面、二维码、验证码、Profile 路径和账号信息不进入协议、Tauri IPC 或日志。B5-13 已提供平台状态与重新检查，B5-14 已启用带二次确认的安全注销。
 
@@ -245,6 +245,16 @@ uv run --env-file ../.env automation-tool-control-plane
 ```bash
 AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID=demo-cn-1
 AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY=<32-byte-ed25519-public-key-base64url>
+```
+
+动作执行默认关闭；启用时必须同时提供独立的 Ed25519 私钥 seed 与四项服务端硬限制，任何缺项、零值、越界或非 canonical key 都会启动失败且不回显输入。私钥只进入 Control Plane 部署 Secret，不能进入 App、Executor、数据库、Outbox 或日志；Executor 发布包只持有匹配公钥：
+
+```bash
+AUTOMATION_TOOL_ACTION_AUTHORIZATION_PRIVATE_KEY=<32-byte-ed25519-private-seed-base64url>
+AUTOMATION_TOOL_ACTION_MINIMUM_INTERVAL_SECONDS=5
+AUTOMATION_TOOL_ACTION_TASK_LIMIT=20
+AUTOMATION_TOOL_ACTION_DAILY_LIMIT=100
+AUTOMATION_TOOL_ACTION_CONSECUTIVE_FAILURE_THRESHOLD=3
 ```
 
 服务只绑定 `127.0.0.1:8765`。启动时配置缺失会 fail closed；数据库断开时 Health 返回可重试的结构化 `503 dependency_unavailable`。当前端点为：

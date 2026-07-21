@@ -1460,6 +1460,7 @@ task_commands = Table(
     Column("sequence", BigInteger(), nullable=False),
     Column("command_type", String(length=32), nullable=False),
     Column("target_confirmation_message_id", UUID(as_uuid=True), nullable=True),
+    Column("action_id", UUID(as_uuid=True), nullable=True),
     Column(
         "status",
         String(length=16),
@@ -1517,6 +1518,12 @@ task_commands = Table(
         name="ck_task_commands_target_confirmation_uuid_v4",
     ),
     CheckConstraint(
+        "action_id is null or ("
+        "substring(action_id::text from 15 for 1) = '4' "
+        "and substring(action_id::text from 20 for 1) in ('8', '9', 'a', 'b'))",
+        name="ck_task_commands_action_uuid_v4",
+    ),
+    CheckConstraint(
         f"sequence between 1 and {MAX_TASK_EVENT_SEQUENCE}",
         name="ck_task_commands_sequence_range",
     ),
@@ -1567,11 +1574,12 @@ task_commands = Table(
         "and next_delivery_at is null and lease_expires_at is null "
         "and delivered_at is not null and acknowledged_at is not null "
         "and response_message_id is not null "
-        "and response_type in ('task.accept', 'task.control_ack')) or "
+        "and response_type in ('task.accept', 'task.control_ack', 'action.accept')) or "
         "(status = 'rejected' and delivery_attempts > 0 "
         "and next_delivery_at is null and lease_expires_at is null "
         "and delivered_at is not null and acknowledged_at is not null "
-        "and response_message_id is not null and response_type = 'task.reject') or "
+        "and response_message_id is not null "
+        "and response_type in ('task.reject', 'action.reject')) or "
         "(status = 'expired' and next_delivery_at is null "
         "and lease_expires_at is null and acknowledged_at is null "
         "and response_message_id is null and response_type is null "
@@ -1582,13 +1590,22 @@ task_commands = Table(
         "response_type is null or "
         "(command_type in ('task.offer', 'task.discover') "
         "and response_type in ('task.accept', 'task.reject')) or "
+        "(command_type = 'action.execute' "
+        "and response_type in ('action.accept', 'action.reject')) or "
         "(command_type in ('task.pause', 'task.resume', 'task.cancel', "
         "'task.emergency_stop') and response_type = 'task.control_ack')",
         name="ck_task_commands_response_coherence",
     ),
     CheckConstraint(
-        "target_confirmation_message_id is null or command_type = 'task.offer'",
+        "target_confirmation_message_id is null or "
+        "command_type in ('task.offer', 'action.execute')",
         name="ck_task_commands_target_confirmation_scope",
+    ),
+    CheckConstraint(
+        "(command_type = 'action.execute' and action_id is not null "
+        "and target_confirmation_message_id is not null) or "
+        "(command_type <> 'action.execute' and action_id is null)",
+        name="ck_task_commands_action_scope",
     ),
     ForeignKeyConstraint(
         ["execution_attempt_id", "task_id", "installation_id"],
@@ -1598,6 +1615,17 @@ task_commands = Table(
             "execution_attempts.installation_id",
         ],
         name="fk_task_commands_attempt_binding",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["action_id", "execution_attempt_id", "task_id", "installation_id"],
+        [
+            "task_actions.id",
+            "task_actions.execution_attempt_id",
+            "task_actions.task_id",
+            "task_actions.installation_id",
+        ],
+        name="fk_task_commands_action_binding",
         ondelete="RESTRICT",
     ),
     PrimaryKeyConstraint("message_id", name="pk_task_commands"),
@@ -1616,6 +1644,7 @@ task_commands = Table(
         "response_message_id",
         name="uq_task_commands_response_message",
     ),
+    UniqueConstraint("action_id", name="uq_task_commands_action"),
 )
 
 Index(

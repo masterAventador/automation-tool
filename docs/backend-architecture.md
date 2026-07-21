@@ -380,6 +380,10 @@ A7-14 把“动作执行结果”接到服务端风险 scope，而不是在 Exec
 
 A7-15 不新增第二条结果总线。共享 `action-result-evidence.v1` 只给既有 Executor Task event 增加封闭、无正文的 evidence/version；`executor/rpa/douyin/action_result.py` 将 A7-11/A7-12 即时 receipt 与 A7-13 恢复 receipt 映射为 `step.completed`、`step.failed` 或 `task.outcome_uncertain`。应用层在数据库事务前验证事件类型与 success/failed/uncertain 证据集合，仓储把 evidence 与 Action 终态一起持久化；迁移 `20260721_0024` 回填历史终态并以 PostgreSQL check constraint 阻止跨 outcome、空终态或非封闭证据。旧 Executor 没有 evidence 时仍只按已存在的终态使用明确 generic fallback，不能猜测平台页面证据。
 
+H8-16C 把确认后的执行缺口接回同一 Control Plane/Executor 长连接，不新增 HTTP dispatcher 或消息队列。已认证 WebSocket 每轮先调用 `ActionExecutionOrchestrationService.advance()`：Installation 行锁下没有活动 Attempt 时为当前 confirmed queued Task 建立 offered Attempt 与确认绑定 offer；running 后仅在上一 Action 终结时选取下一个 eligible、未排除、未授权 Target，并复用 A7-02 风险仓储创建授权。授权已提交而 Outbox 尚未写入的崩溃空窗由下一轮优先补齐，Action/ordinal 唯一约束和服务端频控保证并发只有一个赢家。
+
+Alembic `20260721_0026` 让 `task_commands.action_id` 通过复合外键绑定 Action/Attempt/Task/Installation，并限定只有 `action.execute` 可非空且必须同时绑定确认；`action.accept/reject` 与 command/status coherence 由数据库和应用双重约束。Outbox 不保存 token、正文副本或 JSON payload；claim 时才从 Authorization、Target、Definition 读取权威事实，Control Plane 私钥即时签发最长五分钟 Ed25519 authority 并构造 exact typed envelope。部署必须一次性提供专用私钥 seed 与四项服务端限制，Local Executor 只持匹配公钥，App、React、SQLite 和系统钥匙串都不接触服务端私钥。
+
 目标结果读取遵循 `api/task_target_results.py → application/task_target_results.py → infrastructure/database/task_target_result_repository.py` 单向分层。唯一 `GET /api/v1/tasks/{task_id}/target-results` 受 `app.control-plane` Session 和 Installation scope 保护，仓储只连接 Task 的 current Attempt 授权/Action，并按 Target ordinal 合并用户排除、候选 disposition 与 Action 状态，返回 pending/running/succeeded/skipped/failed/outcome_uncertain 和固定 evidence；无 Task、跨 Installation、非法 ID、损坏持久事实或数据库故障分别收敛为不可见/校验失败/脱敏不可用。响应只含公开目标摘要、状态、证据、可选 Action ID 与 UTC 时间，不含文案、页面内容、Cookie、Profile、URL、路径、SQLite 内容或策略内部字段。
 
 桌面端沿正式 `TypeScript source → 固定 Tauri Command → Rust ControlPlaneClient → HTTPS` 路径读取该投影，React 继续复用 T3-18 `TaskRunDetails`，不创建 Web 产品或第二个任务详情页。Task SSE 前进、控制成功和用户重试只触发权威查询失效；UI 不从事件文本或本地状态推断结果。T3-18 隐藏验收以唯一 `visible=false` App、真实 Uvicorn/Alembic/PostgreSQL 和 App Session 从原页面请求并展示四类终态，同时保留既有控制验收；测试配置、FakeExecutor 和准备数据不进入正式构建。
@@ -503,7 +507,7 @@ I2-10 的正式 Pydantic 入口是 `parse_executor_message`。Envelope 以 `mess
 
 I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executor-v1.schema.json`，dialect 固定 Draft 2020-12，并内嵌 `$id`、wire/payload 资源上限和 `x-semantic-validation-required`。Schema 尽可能结构化表达当前 28 种 message type、required/unknown field、用途 ID pattern、幂等键、序号、任务作用域、payload 顶层项数和 UTC RFC3339 pattern；无法由标准 JSON Schema表达的 deadline 先后、重复 key、递归 payload 限制和隐私文本由显式语义扩展声明，不能静默省略。
 
-公共 `contracts/fixtures/executor-v1` 当前固定 10 个 valid 与 27 个 invalid wire 文件：17 个结构层无效样例必须由标准 Schema 和正式解析器同时拒绝，另 10 个语义层无效样例允许标准 Schema 接受但必须由正式解析器拒绝。Schema 生成器提供 write/check 两种模式，缺失或逐字漂移都用固定错误失败；Backend CI 在测试前执行 `--check`。Python、Rust、TypeScript 只能回放这套公共 fixtures 并实现相同语义扩展，不得各自另造“等价”样例。
+公共 `contracts/fixtures/executor-v1` 当前固定 12 个 valid 与 27 个 invalid wire 文件：17 个结构层无效样例必须由标准 Schema 和正式解析器同时拒绝，另 10 个语义层无效样例允许标准 Schema 接受但必须由正式解析器拒绝。Schema 生成器提供 write/check 两种模式，缺失或逐字漂移都用固定错误失败；Backend CI 在测试前执行 `--check`。Python、Rust、TypeScript 只能回放这套公共 fixtures 并实现相同语义扩展，不得各自另造“等价”样例。
 
 I2-12 已实现三端一致性：TypeScript 以严格 Zod 判别联合校验完整 envelope，并在普通 `JSON.parse` 前扫描所有对象的重复 key；Rust 以 `serde(deny_unknown_fields)` DTO、递归唯一 key visitor 和同一资源/隐私策略完成正式解析。两端都只暴露固定 `ExecutorProtocolError`，不保留或反射被拒绝的 wire。时间比较精确到 RFC3339 允许的 6 位小数，`-00:00` 不作为 canonical UTC 接受；sequence 上限固定为三端都能无损表示的 `2^53-1`。
 

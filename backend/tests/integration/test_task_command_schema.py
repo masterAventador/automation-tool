@@ -33,7 +33,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0008"
-HEAD_REVISION = "20260721_0025"
+HEAD_REVISION = "20260721_0026"
 NOW = datetime(2026, 7, 18, 5, 30, tzinfo=UTC)
 DEADLINE = NOW + timedelta(minutes=5)
 EXPECTED_COLUMNS = {
@@ -45,6 +45,7 @@ EXPECTED_COLUMNS = {
     "sequence",
     "command_type",
     "target_confirmation_message_id",
+    "action_id",
     "status",
     "idempotency_key",
     "revision",
@@ -62,13 +63,17 @@ EXPECTED_COLUMNS = {
 EXPECTED_CONSTRAINTS = {
     "pk_task_commands",
     "fk_task_commands_attempt_binding",
+    "fk_task_commands_action_binding",
     "uq_task_commands_attempt_sequence",
     "uq_task_commands_idempotency",
     "uq_task_commands_response_message",
+    "uq_task_commands_action",
     "ck_task_commands_message_uuid_v4",
     "ck_task_commands_correlation_uuid_v4",
     "ck_task_commands_response_uuid_v4",
     "ck_task_commands_target_confirmation_uuid_v4",
+    "ck_task_commands_action_uuid_v4",
+    "ck_task_commands_action_scope",
     "ck_task_commands_target_confirmation_scope",
     "ck_task_commands_sequence_range",
     "ck_task_commands_type",

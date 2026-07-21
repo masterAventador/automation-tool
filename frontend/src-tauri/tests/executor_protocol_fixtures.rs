@@ -6,7 +6,9 @@ use automation_tool_desktop_lib::executor_protocol::{
     parse_executor_message, ExecutorEnvelopeKind,
 };
 
-const VALID_FIXTURES: [&str; 10] = [
+const VALID_FIXTURES: [&str; 12] = [
+    "action-accept.json",
+    "action-execute.json",
     "executor-heartbeat.json",
     "executor-hello.json",
     "microsecond-deadline.json",
@@ -98,6 +100,7 @@ fn rust_formal_parser_accepts_every_shared_valid_fixture() {
         BTreeSet::from([
             ExecutorEnvelopeKind::Lifecycle,
             ExecutorEnvelopeKind::PlatformSessionHealth,
+            ExecutorEnvelopeKind::TaskActionCommand,
             ExecutorEnvelopeKind::TaskCommand,
             ExecutorEnvelopeKind::TaskCommandResult,
             ExecutorEnvelopeKind::TaskDiscoveryBatch,

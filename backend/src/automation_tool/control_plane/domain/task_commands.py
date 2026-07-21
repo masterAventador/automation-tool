@@ -7,6 +7,7 @@ from typing import Final
 class TaskCommandType(StrEnum):
     TASK_OFFER = "task.offer"
     TASK_DISCOVER = "task.discover"
+    ACTION_EXECUTE = "action.execute"
     TASK_PAUSE = "task.pause"
     TASK_RESUME = "task.resume"
     TASK_CANCEL = "task.cancel"
@@ -17,6 +18,8 @@ class TaskCommandResponseType(StrEnum):
     TASK_ACCEPT = "task.accept"
     TASK_REJECT = "task.reject"
     TASK_CONTROL_ACK = "task.control_ack"
+    ACTION_ACCEPT = "action.accept"
+    ACTION_REJECT = "action.reject"
 
 
 class TaskCommandStatus(StrEnum):

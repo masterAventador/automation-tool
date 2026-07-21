@@ -1,0 +1,28 @@
+{
+  "protocol_version": "1.0",
+  "message_id": "323e4567-e89b-42d3-a456-426614174010",
+  "message_type": "action.execute",
+  "sent_at": "2026-07-21T07:00:00Z",
+  "deadline_at": "2026-07-21T07:05:00Z",
+  "installation_id": "123e4567-e89b-42d3-a456-426614174003",
+  "executor_id": "123e4567-e89b-42d3-a456-426614174004",
+  "correlation_id": "323e4567-e89b-42d3-a456-426614174011",
+  "idempotency_key": "action:923e4567-e89b-42d3-a456-426614174001",
+  "sequence": 2,
+  "payload": {
+    "action_version": "douyin.action-command.v1",
+    "action_id": "923e4567-e89b-42d3-a456-426614174001",
+    "target_id": "a23e4567-e89b-42d3-a456-426614174001",
+    "action": "comment",
+    "signed_authority": "ataa1.Zml4dHVyZQ.c2lnbmF0dXJl",
+    "platform_target_id": "douyin-user-1",
+    "display_name": "目标一",
+    "public_handle": "target-one",
+    "source": "general_search_author",
+    "page_revision": 1,
+    "message_template_version": "action-message-template.v1",
+    "message_template": "您好 {{target_display_name}}"
+  },
+  "task_id": "123e4567-e89b-42d3-a456-426614174005",
+  "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006"
+}

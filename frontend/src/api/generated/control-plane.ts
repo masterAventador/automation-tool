@@ -618,7 +618,7 @@ export interface components {
          * TaskCommandType
          * @enum {string}
          */
-        TaskCommandType: "task.offer" | "task.discover" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop";
+        TaskCommandType: "task.offer" | "task.discover" | "action.execute" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop";
         /** TaskControlRequest */
         TaskControlRequest: Record<string, never>;
         /** TaskControlResponse */

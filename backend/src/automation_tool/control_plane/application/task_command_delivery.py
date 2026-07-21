@@ -9,6 +9,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
+from automation_tool.control_plane.application.action_risk_authorizations import (
+    ActionRiskAuthorization,
+)
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
     ExecutorConnectionUnavailable,
@@ -16,6 +19,8 @@ from automation_tool.control_plane.application.executor_connection_registry impo
 )
 from automation_tool.control_plane.domain import (
     MAX_TASK_EVENT_SEQUENCE,
+    ActionId,
+    DouyinSearchExposureAction,
     ExecutionAttemptId,
     ExecutorConnectionId,
     ExecutorId,
@@ -26,9 +31,15 @@ from automation_tool.control_plane.domain import (
     TaskId,
 )
 from automation_tool.protocol import (
+    ACTION_MESSAGE_TEMPLATE_VERSION,
+    DOUYIN_ACTION_COMMAND_VERSION,
     EXECUTOR_PROTOCOL_VERSION,
+    ActionMessageTemplate,
+    DouyinActionCommandPayload,
+    DouyinCandidate,
     DouyinDiscoveryCommandPayload,
     IdempotencyKey,
+    TaskActionCommandEnvelope,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
     TaskDiscoveryCommandEnvelope,
@@ -56,6 +67,21 @@ class TaskCommandDeliveryClock(Protocol):
 class SystemTaskCommandDeliveryClock:
     def now(self) -> datetime:
         return datetime.now(UTC)
+
+
+@runtime_checkable
+class IssuedActionAuthority(Protocol):
+    token: str
+
+
+@runtime_checkable
+class ActionAuthorityIssuer(Protocol):
+    def issue(
+        self,
+        *,
+        authorization: ActionRiskAuthorization,
+        executor_id: ExecutorId,
+    ) -> object: ...
 
 
 def _aware_utc(value: object) -> datetime:
@@ -114,6 +140,33 @@ class PendingTaskCommand:
         object.__setattr__(self, "deadline_at", deadline_at)
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class ActionCommandContext:
+    authorization: ActionRiskAuthorization
+    candidate: DouyinCandidate
+    message_template: str | None
+
+    def __post_init__(self) -> None:
+        valid_template = False
+        try:
+            if self.authorization.action is DouyinSearchExposureAction.BROWSE:
+                valid_template = self.message_template is None
+            elif isinstance(self.message_template, str):
+                ActionMessageTemplate(source=self.message_template)
+                valid_template = True
+        except Exception:
+            valid_template = False
+        if (
+            not isinstance(self.authorization, ActionRiskAuthorization)
+            or not isinstance(self.candidate, DouyinCandidate)
+            or not valid_template
+        ):
+            raise TaskCommandDeliveryRejected
+
+    def __repr__(self) -> str:
+        return "ActionCommandContext(<redacted>)"
+
+
 @dataclass(frozen=True, slots=True)
 class TaskCommandRecord:
     message_id: UUID
@@ -137,7 +190,9 @@ class TaskCommandRecord:
     created_at: datetime
     updated_at: datetime
     target_confirmation_message_id: UUID | None = None
+    action_id: ActionId | None = None
     discovery_payload: DouyinDiscoveryCommandPayload | None = None
+    action_context: ActionCommandContext | None = None
 
     @classmethod
     def from_pending(cls, command: PendingTaskCommand) -> TaskCommandRecord:
@@ -152,6 +207,7 @@ class TaskCommandRecord:
             sequence=command.sequence,
             command_type=command.command_type,
             target_confirmation_message_id=None,
+            action_id=None,
             status=TaskCommandStatus.PENDING,
             idempotency_key=command.idempotency_key,
             revision=1,
@@ -234,11 +290,16 @@ class TaskCommandDeliveryService:
         acknowledgement_timeout: timedelta = timedelta(seconds=5),
         maximum_batch_size: int = 32,
         id_source: Callable[[], object] = uuid4,
+        action_authority_issuer: ActionAuthorityIssuer | None = None,
     ) -> None:
         if (
             not isinstance(repository, TaskCommandRepository)
             or not isinstance(registry, ExecutorConnectionRegistry)
             or not callable(id_source)
+            or (
+                action_authority_issuer is not None
+                and not isinstance(action_authority_issuer, ActionAuthorityIssuer)
+            )
             or type(maximum_batch_size) is not int
             or not 1 <= maximum_batch_size <= 256
         ):
@@ -251,6 +312,7 @@ class TaskCommandDeliveryService:
         self._acknowledgement_timeout = _positive_seconds(acknowledgement_timeout)
         self._maximum_batch_size = maximum_batch_size
         self._id_source = id_source
+        self._action_authority_issuer = action_authority_issuer
 
     def _now(self) -> datetime:
         try:
@@ -352,7 +414,12 @@ class TaskCommandDeliveryService:
                 or claimed_at >= command.deadline_at
             ):
                 raise TaskCommandDeliveryRejected
-            source = _command_wire(command, executor_id=executor_id, sent_at=claimed_at)
+            source = _command_wire(
+                command,
+                executor_id=executor_id,
+                sent_at=claimed_at,
+                action_authority_issuer=self._action_authority_issuer,
+            )
             try:
                 await self._registry.send_current(
                     installation_id=installation_id,
@@ -410,8 +477,48 @@ def _command_wire(
     *,
     executor_id: ExecutorId,
     sent_at: datetime,
+    action_authority_issuer: ActionAuthorityIssuer | None = None,
 ) -> str:
     try:
+        payload: dict[str, object]
+        if command.command_type is TaskCommandType.ACTION_EXECUTE:
+            if (
+                command.action_id is None
+                or command.action_context is None
+                or command.action_context.authorization.action_id != command.action_id
+                or action_authority_issuer is None
+            ):
+                raise ValueError
+            context = command.action_context
+            authority = action_authority_issuer.issue(
+                authorization=context.authorization,
+                executor_id=executor_id,
+            )
+            if not isinstance(authority, IssuedActionAuthority):
+                raise ValueError
+            template = context.message_template
+            payload = DouyinActionCommandPayload.model_validate(
+                {
+                    "action_version": DOUYIN_ACTION_COMMAND_VERSION,
+                    "action_id": str(context.authorization.action_id),
+                    "target_id": str(context.authorization.target_id),
+                    "action": context.authorization.action.value,
+                    "signed_authority": authority.token,
+                    "platform_target_id": context.candidate.platform_target_id,
+                    "display_name": context.candidate.summary.display_name,
+                    "public_handle": context.candidate.summary.public_handle,
+                    "source": context.candidate.source.value,
+                    "page_revision": context.candidate.page_revision,
+                    "message_template_version": (
+                        None if template is None else ACTION_MESSAGE_TEMPLATE_VERSION
+                    ),
+                    "message_template": template,
+                }
+            ).model_dump(mode="json")
+        elif command.discovery_payload is not None:
+            payload = command.discovery_payload.model_dump(mode="json")
+        else:
+            payload = {}
         source = {
             "protocol_version": EXECUTOR_PROTOCOL_VERSION,
             "message_id": str(command.message_id),
@@ -423,21 +530,21 @@ def _command_wire(
             "correlation_id": str(command.correlation_id),
             "idempotency_key": command.idempotency_key,
             "sequence": command.sequence,
-            "payload": (
-                command.discovery_payload.model_dump(mode="json")
-                if command.discovery_payload is not None
-                else {}
-            ),
+            "payload": payload,
             "task_id": str(command.task_id),
             "execution_attempt_id": str(command.execution_attempt_id),
         }
-        envelope: TaskDiscoveryCommandEnvelope | TaskCommandEnvelope
+        envelope: TaskActionCommandEnvelope | TaskDiscoveryCommandEnvelope | TaskCommandEnvelope
         if command.command_type is TaskCommandType.TASK_DISCOVER:
             if command.discovery_payload is None:
                 raise ValueError
             envelope = TaskDiscoveryCommandEnvelope.model_validate(source)
+        elif command.command_type is TaskCommandType.ACTION_EXECUTE:
+            if command.discovery_payload is not None or command.action_context is None:
+                raise ValueError
+            envelope = TaskActionCommandEnvelope.model_validate(source)
         else:
-            if command.discovery_payload is not None:
+            if command.discovery_payload is not None or command.action_context is not None:
                 raise ValueError
             envelope = TaskCommandEnvelope.model_validate(source)
         return json.dumps(
@@ -451,6 +558,8 @@ def _command_wire(
 
 
 __all__ = [
+    "ActionAuthorityIssuer",
+    "ActionCommandContext",
     "CommandDeliveryResult",
     "PendingTaskCommand",
     "SystemTaskCommandDeliveryClock",

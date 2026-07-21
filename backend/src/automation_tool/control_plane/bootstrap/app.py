@@ -39,6 +39,9 @@ from automation_tool.control_plane.api.task_target_results import (
 )
 from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.api.workbench import router as workbench_router
+from automation_tool.control_plane.application.action_execution_orchestration import (
+    ActionExecutionOrchestrationService,
+)
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
 from automation_tool.control_plane.application.executor_connection_registry import (
@@ -72,6 +75,9 @@ from automation_tool.control_plane.application.task_target_results import (
 )
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.application.workbench_metrics import WorkbenchMetricsService
+from automation_tool.control_plane.bootstrap.action_execution import (
+    action_execution_runtime_from_environment,
+)
 from automation_tool.control_plane.bootstrap.database import database_from_environment
 from automation_tool.control_plane.bootstrap.device_credentials import (
     device_credential_service as build_device_credential_service,
@@ -172,6 +178,7 @@ def create_app(
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
+    action_execution_orchestration_service: ActionExecutionOrchestrationService | None = None,
     task_control_service: TaskControlService | None = None,
     task_discovery_start_service: TaskDiscoveryStartService | None = None,
     task_discovery_convergence_service: TaskDiscoveryConvergenceService | None = None,
@@ -203,6 +210,7 @@ def create_app(
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
+    resolved_action_execution_orchestration_service = action_execution_orchestration_service
     resolved_task_control_service = task_control_service
     resolved_task_discovery_start_service = task_discovery_start_service
     resolved_task_discovery_convergence_service = task_discovery_convergence_service
@@ -233,10 +241,21 @@ def create_app(
         resolved_task_creation_service = build_task_creation_service(resolved_database)
     if resolved_task_query_service is None and isinstance(resolved_database, Database):
         resolved_task_query_service = build_task_query_service(resolved_database)
+    action_execution_runtime = None
+    if isinstance(database, _FromEnvironment) and isinstance(resolved_database, Database):
+        action_execution_runtime = action_execution_runtime_from_environment(resolved_database)
+        if (
+            resolved_action_execution_orchestration_service is None
+            and action_execution_runtime is not None
+        ):
+            resolved_action_execution_orchestration_service = action_execution_runtime.service
     if resolved_task_command_delivery_service is None and isinstance(resolved_database, Database):
         resolved_task_command_delivery_service = build_task_command_delivery_service(
             resolved_database,
             resolved_executor_connection_registry,
+            action_authority_issuer=(
+                None if action_execution_runtime is None else action_execution_runtime.issuer
+            ),
         )
     if resolved_task_control_service is None and isinstance(resolved_database, Database):
         resolved_task_control_service = build_task_control_service(resolved_database)
@@ -291,6 +310,9 @@ def create_app(
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
+    app.state.action_execution_orchestration_service = (
+        resolved_action_execution_orchestration_service
+    )
     app.state.task_control_service = resolved_task_control_service
     app.state.task_discovery_start_service = resolved_task_discovery_start_service
     app.state.task_discovery_convergence_service = resolved_task_discovery_convergence_service

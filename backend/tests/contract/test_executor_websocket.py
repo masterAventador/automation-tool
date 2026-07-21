@@ -23,6 +23,14 @@ from automation_tool.control_plane.api.executor_websocket import (
     EXECUTOR_CLOSE_INTERNAL_ERROR,
     EXECUTOR_CLOSE_PROTOCOL_REJECTED,
 )
+from automation_tool.control_plane.application.action_execution_orchestration import (
+    ActionExecutionAdvanceResult,
+    ActionExecutionLimits,
+    ActionExecutionOrchestrationRejected,
+    ActionExecutionOrchestrationService,
+    ActionExecutionOrchestrationUnavailable,
+    PendingActionExecutionAdvance,
+)
 from automation_tool.control_plane.application.device_credentials import ParsedDeviceCredential
 from automation_tool.control_plane.application.device_sessions import (
     AuthenticatedDeviceSession,
@@ -1398,6 +1406,68 @@ def test_live_connection_is_closed_when_periodic_session_revalidation_fails() ->
     assert captured.value.code == EXECUTOR_CLOSE_AUTHENTICATION_REJECTED
     assert captured.value.reason == "Executor authentication is rejected"
     assert token not in captured.value.reason
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        ActionExecutionOrchestrationRejected(),
+        ActionExecutionOrchestrationUnavailable(),
+    ),
+)
+def test_action_orchestration_failure_closes_without_private_details(
+    failure: Exception,
+) -> None:
+    class FailingActionExecutionRepository:
+        async def advance(
+            self,
+            pending: PendingActionExecutionAdvance,
+        ) -> ActionExecutionAdvanceResult:
+            raise failure
+
+    app, _, token = app_with_live_session()
+    app.state.action_execution_orchestration_service = ActionExecutionOrchestrationService(
+        repository=FailingActionExecutionRepository(),
+        limits=ActionExecutionLimits(
+            minimum_interval_seconds=5,
+            task_action_limit=20,
+            daily_action_limit=100,
+            consecutive_failure_threshold=3,
+        ),
+        clock=FixedClock(),
+        id_source=uuid4,
+        command_lifetime=timedelta(minutes=5),
+    )
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == EXECUTOR_CLOSE_INTERNAL_ERROR
+    assert captured.value.reason == "Executor connection failed"
+    assert "private" not in captured.value.reason
+
+
+def test_miswired_action_orchestration_closes_as_internal_error() -> None:
+    app, _, token = app_with_live_session()
+    app.state.action_execution_orchestration_service = object()
+
+    with TestClient(app).websocket_connect(
+        "/api/v1/executors/connect",
+        headers={"authorization": f"Bearer {token}"},
+        subprotocols=[EXECUTOR_WEBSOCKET_SUBPROTOCOL],
+    ) as websocket:
+        websocket.send_text(hello())
+        with pytest.raises(WebSocketDisconnect) as captured:
+            websocket.receive_text()
+
+    assert captured.value.code == EXECUTOR_CLOSE_INTERNAL_ERROR
+    assert captured.value.reason == "Executor connection failed"
 
 
 def test_bound_executor_can_disconnect_cleanly() -> None:

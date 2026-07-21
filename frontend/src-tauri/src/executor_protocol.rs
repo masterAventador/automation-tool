@@ -5,6 +5,8 @@ use std::fmt::{self, Debug, Display, Formatter};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
+
+use crate::control_plane::action_message_template_is_valid;
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 use uuid::Variant;
@@ -60,6 +62,7 @@ const SENSITIVE_PAYLOAD_SEGMENTS: [&str; 9] = [
 pub enum ExecutorEnvelopeKind {
     Lifecycle,
     PlatformSessionHealth,
+    TaskActionCommand,
     TaskCommand,
     TaskCommandResult,
     TaskDiscoveryBatch,
@@ -262,6 +265,7 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
             validate_platform_session_health(&raw.payload.0, sent_at)?;
         }
         ExecutorEnvelopeKind::TaskCommand
+        | ExecutorEnvelopeKind::TaskActionCommand
         | ExecutorEnvelopeKind::TaskCommandResult
         | ExecutorEnvelopeKind::TaskDiscoveryBatch
         | ExecutorEnvelopeKind::TaskDiscoveryCommand
@@ -276,6 +280,9 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
                 return Err(());
             }
             match kind {
+                ExecutorEnvelopeKind::TaskActionCommand => {
+                    validate_action_command(&raw.payload.0, &raw.idempotency_key)?;
+                }
                 ExecutorEnvelopeKind::TaskDiscoveryCommand => {
                     validate_discovery_command(&raw.payload.0)?;
                 }
@@ -301,10 +308,11 @@ fn message_kind(message_type: &str) -> Option<ExecutorEnvelopeKind> {
         "task.offer" | "task.pause" | "task.resume" | "task.cancel" | "task.emergency_stop" => {
             Some(ExecutorEnvelopeKind::TaskCommand)
         }
+        "action.execute" => Some(ExecutorEnvelopeKind::TaskActionCommand),
         "task.discover" => Some(ExecutorEnvelopeKind::TaskDiscoveryCommand),
         "task.discovery_batch" => Some(ExecutorEnvelopeKind::TaskDiscoveryBatch),
         "task.discovery_completed" => Some(ExecutorEnvelopeKind::TaskDiscoveryCompleted),
-        "task.accept" | "task.reject" | "task.control_ack" => {
+        "task.accept" | "task.reject" | "task.control_ack" | "action.accept" | "action.reject" => {
             Some(ExecutorEnvelopeKind::TaskCommandResult)
         }
         "task.started"
@@ -334,6 +342,106 @@ fn bounded_sequence(object: &Map<String, Value>, name: &str, maximum: u64) -> Op
         .get(name)
         .and_then(Value::as_u64)
         .filter(|value| (1..=maximum).contains(value))
+}
+
+fn validate_action_command(payload: &Value, idempotency: &str) -> Result<(), ()> {
+    let object = payload.as_object().ok_or(())?;
+    if !has_exact_keys(
+        object,
+        &[
+            "action_version",
+            "action_id",
+            "target_id",
+            "action",
+            "signed_authority",
+            "platform_target_id",
+            "display_name",
+            "public_handle",
+            "source",
+            "page_revision",
+            "message_template_version",
+            "message_template",
+        ],
+    ) || object.get("action_version").and_then(Value::as_str) != Some("douyin.action-command.v1")
+        || object.get("source").and_then(Value::as_str) != Some("general_search_author")
+        || !object
+            .get("action_id")
+            .and_then(Value::as_str)
+            .is_some_and(is_canonical_uuid_v4)
+        || !object
+            .get("target_id")
+            .and_then(Value::as_str)
+            .is_some_and(is_canonical_uuid_v4)
+        || !object
+            .get("signed_authority")
+            .and_then(Value::as_str)
+            .is_some_and(valid_signed_authority)
+        || !object
+            .get("platform_target_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| valid_platform_identifier(value, 128))
+        || !object
+            .get("display_name")
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                !value.is_empty()
+                    && value.trim() == value
+                    && value.chars().count() <= 80
+                    && !unsafe_payload_string(value)
+            })
+        || bounded_sequence(object, "page_revision", MAX_SEQUENCE).is_none()
+    {
+        return Err(());
+    }
+    match object.get("public_handle") {
+        Some(Value::Null) => {}
+        Some(Value::String(value)) if valid_platform_identifier(value, 64) => {}
+        _ => return Err(()),
+    }
+    let action_id = object.get("action_id").and_then(Value::as_str).ok_or(())?;
+    if idempotency != format!("action:{action_id}") {
+        return Err(());
+    }
+    match object.get("action").and_then(Value::as_str) {
+        Some("browse") => {
+            if object.get("message_template_version") != Some(&Value::Null)
+                || object.get("message_template") != Some(&Value::Null)
+            {
+                return Err(());
+            }
+        }
+        Some("comment" | "direct_message") => {
+            if object
+                .get("message_template_version")
+                .and_then(Value::as_str)
+                != Some("action-message-template.v1")
+                || !object
+                    .get("message_template")
+                    .and_then(Value::as_str)
+                    .is_some_and(action_message_template_is_valid)
+            {
+                return Err(());
+            }
+        }
+        _ => return Err(()),
+    }
+    Ok(())
+}
+
+fn valid_signed_authority(value: &str) -> bool {
+    let mut segments = value.split('.');
+    segments.next() == Some("ataa1")
+        && segments.next().is_some_and(base64url_segment)
+        && segments.next().is_some_and(base64url_segment)
+        && segments.next().is_none()
+        && value.len() <= 2048
+}
+
+fn base64url_segment(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn validate_discovery_command(payload: &Value) -> Result<(), ()> {

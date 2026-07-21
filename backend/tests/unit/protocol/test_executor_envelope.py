@@ -345,6 +345,9 @@ def test_schema_publishes_one_exact_discriminator_and_explicit_required_core_fie
     schema = ExecutorMessage.model_json_schema()
     envelope_schema = schema["$defs"]["ExecutorEnvelope"]
     expected_message_types = {
+        "action.accept",
+        "action.execute",
+        "action.reject",
         "executor.heartbeat",
         "executor.hello",
         "platform.session_health",
@@ -380,6 +383,7 @@ def test_schema_publishes_one_exact_discriminator_and_explicit_required_core_fie
     for model_name in (
         "ExecutorLifecycleEnvelope",
         "PlatformSessionHealthEnvelope",
+        "TaskActionCommandEnvelope",
         "TaskCommandEnvelope",
         "TaskCommandResultEnvelope",
         "TaskDiscoveryBatchEnvelope",

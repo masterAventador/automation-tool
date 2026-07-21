@@ -12,6 +12,8 @@ const fixtureRoot = resolve(process.cwd(), "../contracts/fixtures/executor-v1");
 const validRoot = resolve(fixtureRoot, "valid");
 const invalidRoot = resolve(fixtureRoot, "invalid");
 const expectedValid = [
+  "action-accept.json",
+  "action-execute.json",
   "executor-heartbeat.json",
   "executor-hello.json",
   "microsecond-deadline.json",
