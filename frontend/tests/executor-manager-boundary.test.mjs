@@ -160,7 +160,7 @@ test("E4-11 keeps the durable command ledger inside the private Executor state d
   assert.doesNotMatch(ledger, /control_plane|FakeExecutor|:memory:/);
 });
 
-test("E4-12 consumes real offers only through the durable no-side-effect protocol path", async () => {
+test("E4-12 consumes real offers and closed controls through the durable protocol path", async () => {
   const [cli, processor, runtime, acceptance] = await Promise.all([
     readFile(
       new URL("../backend/src/automation_tool/executor/cli.py", frontendRoot),
@@ -184,7 +184,10 @@ test("E4-12 consumes real offers only through the durable no-side-effect protoco
   ]);
 
   assert.match(cli, /ExecutorCommandProcessor\(/);
-  assert.match(processor, /command\.message_type != "task\.offer"/);
+  assert.match(
+    processor,
+    /command\.message_type not in \{"task\.offer", "task\.pause", "task\.resume"\}/,
+  );
   assert.match(processor, /commit_outcome\(/);
   assert.match(processor, /AttemptCheckpointState\.TERMINAL/);
   assert.match(runtime, /recover_outbox\(\)/);

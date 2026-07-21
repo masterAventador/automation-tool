@@ -63,6 +63,7 @@ automation-tool/
 │   ├── run_t3_18_acceptance.py   # 隐藏 Tauri 运行详情→四类控制→事件终态验收
 │   ├── run_t3_19_acceptance.py   # 隐藏 Tauri 创建/控制/成功→整页刷新恢复验收
 │   ├── run_t3_20_acceptance.py   # 隐藏 Tauri→Control Plane 同库重启→Executor 恢复验收
+│   ├── run_h8_01_acceptance.py   # 隐藏 Tauri→真实 Executor 安全暂停/恢复验收
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
@@ -397,6 +398,8 @@ A7-14 不新增独立服务目录：现有 `action_risk_authorization_repository
 A7-15 的共享证据位于 `protocol/action_result.py`，Executor 适配只存在于 `executor/rpa/douyin/action_result.py`；即时评论/私信和只读恢复 receipt 仍由各自模块拥有，适配器只输出正式 Task event 所需的 message type、Action ID 与封闭 evidence。Control Plane 按 `api/task_target_results.py`、`application/task_target_results.py`、`infrastructure/database/task_target_result_repository.py`、`bootstrap/task_target_results.py` 分层提供 Installation-scoped 只读投影；`schema.py` 与迁移 `20260721_0024_task_action_evidence.py` 将 evidence 和 Action outcome 一致性锁进 PostgreSQL。前端沿 `api/control-plane/task-target-results.ts`、`platform/tauri/task-target-result-source.ts`、Rust `control_plane.rs/lib.rs` 注入既有 `TaskRunDetails.tsx`，没有第二个详情页、Web 路由、Executor SQLite 读取或任意 IPC/URL 面。
 
 `scripts/run_t3_18_acceptance.py` 是 A7-15 的原调用方验收：它只使用 `visible=false` Tauri 配置、专属 Compose project/随机端口/PostgreSQL/AppData 和正式 App Session，WebdriverIO 从现有运行详情触发固定 Tauri Command 并核对四类目标终态及受限证据。测试准备数据和 FakeExecutor 只提供远端边界的确定事实，页面请求必须真实经过 TypeScript、Rust、Uvicorn 与数据库；退出后 runner 回收 App、服务、端口、容器与私有目录。
+
+H8-01 不新增第二套控制服务或 SQLite 表：`executor/command_processor.py` 接受正式 pause/resume 并生成 ACK/事件，`executor/ledger.py` 复用 command、checkpoint、outbox、action admission 与 side-effect 表实现安全检查点，`executor/runtime.py` 在恢复和空闲轮询推进待生效控制。`scripts/run_h8_01_acceptance.py` 复用既有隐藏 task-control App 入口，但在服务端 running 准备完成后切换到真实 Executor 进程；专属 Compose project、随机 PostgreSQL 端口、私有 AppData/Executor state 和后台窗口均在退出时清理。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 

@@ -320,11 +320,13 @@ class LocalExecutorProcess:
                     )
                 )
                 self._send_outbox(websocket, self._command_processor.recover_outbox())
+                self._send_outbox(websocket, self._command_processor.poll_controls())
                 sequence = 1
                 healthy = False
                 heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
                 heartbeat_deadline = time.monotonic() + heartbeat_interval
                 while not stop.is_set():
+                    self._send_outbox(websocket, self._command_processor.poll_controls())
                     self._send_local_outbox(websocket)
                     remaining = heartbeat_deadline - time.monotonic()
                     receive_timeout = max(0.001, min(0.25, remaining))

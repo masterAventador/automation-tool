@@ -21,7 +21,7 @@ from websockets.typing import Subprotocol
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
 from automation_tool.executor.command_processor import ExecutorCommandProcessor
-from automation_tool.executor.ledger import ExecutorLedger
+from automation_tool.executor.ledger import AttemptCheckpointState, ExecutorLedger
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
     ExecutorProcessReporter,
@@ -174,6 +174,32 @@ def offer() -> TaskCommandEnvelope:
             "payload": {},
             "task_id": "123e4567-e89b-42d3-a456-426614174005",
             "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
+        }
+    )
+
+
+def control(
+    message_type: str,
+    *,
+    sequence: int,
+    message_id: str,
+    correlation_id: str,
+) -> TaskCommandEnvelope:
+    return TaskCommandEnvelope.model_validate(
+        {
+            "protocol_version": "1.0",
+            "message_id": message_id,
+            "message_type": message_type,
+            "sent_at": NOW,
+            "deadline_at": NOW + timedelta(minutes=5),
+            "installation_id": INSTALLATION_ID,
+            "executor_id": EXECUTOR_ID,
+            "correlation_id": correlation_id,
+            "idempotency_key": f"executor-real:{message_type}:{sequence}",
+            "sequence": sequence,
+            "payload": {},
+            "task_id": str(offer().task_id),
+            "execution_attempt_id": str(offer().execution_attempt_id),
         }
     )
 
@@ -362,6 +388,78 @@ def test_process_consumes_a_formal_offer_and_sends_the_durable_outcome_batch(
             "step.completed",
             "task.completed",
         ]
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.stopped"
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_process_consumes_pause_and_resume_over_the_formal_socket(
+    tmp_path: Path,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    state_directory = tmp_path / "pause-state"
+    opened = ExecutorLedger(
+        state_directory=state_directory,
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+    offered = offer()
+    opened.receive_command(offered)
+    opened.compare_and_set_checkpoint(
+        attempt_id=str(offered.execution_attempt_id),
+        expected_revision=1,
+        state=AttemptCheckpointState.RUNNING,
+        last_event_sequence=2,
+    )
+    pause = control(
+        "task.pause",
+        sequence=2,
+        message_id="323e4567-e89b-42d3-a456-426614174011",
+        correlation_id="323e4567-e89b-42d3-a456-426614174012",
+    )
+    resume = control(
+        "task.resume",
+        sequence=3,
+        message_id="323e4567-e89b-42d3-a456-426614174013",
+        correlation_id="323e4567-e89b-42d3-a456-426614174014",
+    )
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.send(pause.model_dump_json())
+            paused = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
+            connection.send(resume.model_dump_json())
+            resumed = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
+            observed.put((*paused, *resumed))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(port, state_directory)
+        process.run(stop)
+        messages = observed.get(timeout=2)
+        if isinstance(messages, Exception):
+            raise messages
+        assert [
+            message.message_type for message in cast(tuple[ExecutorEnvelope, ...], messages)
+        ] == [
+            "task.control_ack",
+            "task.paused",
+            "task.control_ack",
+            "task.resumed",
+        ]
+        checkpoint = opened.get_checkpoint(str(offered.execution_attempt_id))
+        assert checkpoint is not None
+        assert checkpoint.state is AttemptCheckpointState.RUNNING
+        assert checkpoint.last_event_sequence == 4
         assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
             "executor.stopped"
         ]

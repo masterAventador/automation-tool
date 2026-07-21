@@ -110,6 +110,9 @@ class ExecutorCommandProcessor:
     def recover_outbox(self) -> tuple[ExecutorOutboundMessage, ...]:
         return _collapse_failure(self._recover_outbox)
 
+    def poll_controls(self) -> tuple[ExecutorOutboundMessage, ...]:
+        return _collapse_failure(self._poll_controls)
+
     def mark_delivered(self, message_id: str) -> bool:
         return _collapse_failure(lambda: self._ledger.mark_outbox_delivered(message_id))
 
@@ -117,12 +120,20 @@ class ExecutorCommandProcessor:
         command = parse_executor_message(source)
         if (
             not isinstance(command, (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope))
-            or (isinstance(command, TaskCommandEnvelope) and command.message_type != "task.offer")
+            or (
+                isinstance(command, TaskCommandEnvelope)
+                and command.message_type not in {"task.offer", "task.pause", "task.resume"}
+            )
             or str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
             or self._now() >= command.deadline_at
         ):
             raise ValueError
+        if isinstance(command, TaskCommandEnvelope) and command.message_type in {
+            "task.pause",
+            "task.resume",
+        }:
+            return self._handle_control(command)
         receipt = self._ledger.receive_command(command)
         existing = self._ledger.outbox_for_command(receipt.message_id)
         if existing:
@@ -164,6 +175,23 @@ class ExecutorCommandProcessor:
             return tuple(entry.message for entry in replay)
         return tuple(entry.message for entry in entries)
 
+    def _handle_control(
+        self,
+        command: TaskCommandEnvelope,
+    ) -> tuple[ExecutorOutboundMessage, ...]:
+        receipt = self._ledger.receive_command(command)
+        existing = self._ledger.outbox_for_command(receipt.message_id)
+        if not existing:
+            self._ledger.enqueue_outbox(
+                source_message_id=receipt.message_id,
+                message=self._control_ack(command, source_message_id=receipt.message_id),
+            )
+        self._advance_controls(source_message_id=receipt.message_id)
+        entries = self._ledger.outbox_for_command(receipt.message_id)
+        if not entries or entries[0].message.message_type != "task.control_ack":
+            raise ValueError
+        return tuple(entry.message for entry in entries)
+
     def _pending_outbox(self) -> tuple[ExecutorOutboundMessage, ...]:
         return tuple(
             entry.message for entry in self._ledger.pending_outbox(limit=_MAX_PENDING_OUTBOX)
@@ -172,6 +200,34 @@ class ExecutorCommandProcessor:
     def _recover_outbox(self) -> tuple[ExecutorOutboundMessage, ...]:
         self._ledger.requeue_delivered_outbox()
         return self._pending_outbox()
+
+    def _poll_controls(self) -> tuple[ExecutorOutboundMessage, ...]:
+        return self._advance_controls(source_message_id=None)
+
+    def _advance_controls(
+        self,
+        *,
+        source_message_id: str | None,
+    ) -> tuple[ExecutorOutboundMessage, ...]:
+        projected: list[ExecutorOutboundMessage] = []
+        for pending in self._ledger.pending_task_controls(limit=100):
+            command = pending.command
+            if source_message_id is not None and str(command.message_id) != source_message_id:
+                continue
+            event_type = "task.paused" if command.message_type == "task.pause" else "task.resumed"
+            event = self._event(
+                command,
+                message_type=event_type,
+                sequence=pending.next_event_sequence,
+            )
+            completed = self._ledger.complete_task_control(
+                source_message_id=str(command.message_id),
+                expected_checkpoint_revision=pending.checkpoint_revision,
+                event=event,
+            )
+            if completed is not None and not completed.replayed:
+                projected.append(completed.message)
+        return tuple(projected)
 
     def _now(self) -> datetime:
         value = self._clock.now()
@@ -245,6 +301,31 @@ class ExecutorCommandProcessor:
                 "idempotency_key": f"executor:result:{command.message_id}",
                 "sequence": command.sequence,
                 "payload": {"accepted": True},
+                "task_id": str(command.task_id),
+                "execution_attempt_id": str(command.execution_attempt_id),
+            }
+        )
+
+    def _control_ack(
+        self,
+        command: TaskCommandEnvelope,
+        *,
+        source_message_id: str,
+    ) -> TaskCommandResultEnvelope:
+        now = self._now()
+        return TaskCommandResultEnvelope.model_validate(
+            {
+                "protocol_version": EXECUTOR_PROTOCOL_VERSION,
+                "message_id": self._new_id(),
+                "message_type": "task.control_ack",
+                "sent_at": now,
+                "deadline_at": now + _MESSAGE_DEADLINE,
+                "installation_id": self._installation_id,
+                "executor_id": self._executor_id,
+                "correlation_id": str(command.correlation_id),
+                "idempotency_key": f"executor:result:{source_message_id}",
+                "sequence": command.sequence,
+                "payload": {"acknowledged": True},
                 "task_id": str(command.task_id),
                 "execution_attempt_id": str(command.execution_attempt_id),
             }

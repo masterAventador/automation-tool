@@ -40,3 +40,39 @@ test("pause and resume acceptance uses the formal Rust bridge from one hidden Ap
   assert.match(orchestrator, /test:task-control-tauri/);
   assert.match(orchestrator, /visible=false/);
 });
+
+test("H8-01 waits for the durable side-effect checkpoint through the real Executor", async () => {
+  const [orchestrator, processor, ledger, runtime, spec] = await Promise.all([
+    readFile(new URL("../../scripts/run_h8_01_acceptance.py", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../../backend/src/automation_tool/executor/command_processor.py",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../../backend/src/automation_tool/executor/ledger.py", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../../backend/src/automation_tool/executor/runtime.py", import.meta.url),
+      "utf8",
+    ),
+    readProjectFile("e2e-tauri/task-control.spec.ts"),
+  ]);
+
+  assert.match(orchestrator, /test:task-control-tauri/);
+  assert.match(orchestrator, /max_commands=1/);
+  assert.match(orchestrator, /"-m",\s*"automation_tool\.executor"/);
+  assert.match(orchestrator, /wait_for_pause_acknowledgement/);
+  assert.match(orchestrator, /verify_side_effect/);
+  assert.match(orchestrator, /pause request allowed a new side-effect dispatch/);
+  assert.match(processor, /command\.message_type not in \{"task\.offer", "task\.pause", "task\.resume"\}/);
+  assert.match(processor, /def poll_controls/);
+  assert.match(ledger, /c\.message_type = 'task\.pause'/);
+  assert.match(ledger, /s\.state = 'dispatched'/);
+  assert.match(ledger, /AttemptCheckpointState\.PAUSED/);
+  assert.match(runtime, /self\._command_processor\.poll_controls\(\)/);
+  assert.match(spec, /core\.invoke\("control_task_for_acceptance"\)/);
+});

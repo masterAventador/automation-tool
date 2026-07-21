@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 7 抖音受控评论与主动私信
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-15 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，不阻塞依赖已经满足的 Wave 8 离线主线 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-02 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -330,7 +330,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| H8-01 | 端到端暂停 | 安全检查点确认后才 PAUSED；运行中原子动作不伪装撤销 | A7-13,T3-13 | ⬜ 未开始 |
+| H8-01 | 端到端暂停 | 安全检查点确认后才 PAUSED；运行中原子动作不伪装撤销 | A7-13,T3-13 | ✅ 已完成 |
 | H8-02 | 端到端取消 | CANCELLING→确认终态；最后动作不明进入 uncertain | H8-01,T3-14 | ⬜ 未开始 |
 | H8-03 | 离线紧急停止 | 不依赖网络停止新副作用和完整进程树；重连补报 | E4-09,A7-07 | ⬜ 未开始 |
 | H8-04 | App 崩溃恢复 | UI 恢复快照，任务不中断或重复 | T3-20,H8-01 | ⬜ 未开始 |
@@ -2360,13 +2360,28 @@
 - 资源与文档：验收结束后确认专属 AppData、1420/随机 Control Plane/PostgreSQL 端口、Tauri App、Uvicorn、WebdriverIO、Chrome/Playwright、Compose 容器/网络/Volume 均零残留；全程不打开可见 App/浏览器、不触碰用户默认 Profile、真实账号、系统钥匙串或其他项目资源。同步根/Backend README、后端架构、工程结构与本唯一台账，没有新增重复规划文档
 - 后续：`A7-16/A7-17` 必须在用户明确指定的自有/授权目标上完成真实评论/私信证据，当前保持 `🔍 待真实账号`；`A7-18` 受其依赖阻塞。按用户“真实账号任务不可用时先跳过”的约定，先进入依赖已满足的 `H8-01` 端到端暂停
 
+### H8-01 端到端暂停
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、正式 Executor 控制处理、安全检查点、隐藏 App 原调用方验收和文档属于单一 `feat: 完成端到端安全暂停` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`，新增正式 Processor/SQLite 用例后 3 项准确失败于 `task.pause/task.resume` 被拒绝，证明既有 T3-13 只有 HOLD FakeExecutor 的协议投影，尚未约束真实平台动作检查点。H8-01 不改变 App 控制 API、PostgreSQL 状态机、A7-07 副作用状态或 SQLite schema，只把安全暂停语义补到正式 Local Executor
+- 持久控制：`ExecutorLedger.receive_command()` 只允许 pause/resume 附着到已有 Attempt，pause 要求 running、resume 要求 paused；command 先落入既有 `executor_commands` 并推进 checkpoint 的 command sequence/revision。Processor 立即持久化封闭 `task.control_ack`，但 ACK 仅表示已接收，不表示外部副作用已经停止
+- 安全检查点：pause 一旦成为 Attempt 最新持久命令，`begin_side_effect_dispatch()` 会在同一 `BEGIN IMMEDIATE` 边界拒绝任何新的 prepared→dispatched；已是 dispatched 的动作保持真实状态，不能回滚或伪装撤销。`pending_task_controls()` 只有在该 Attempt 已无 dispatched 时才暴露 pause，因而 ACK 可先到、`task.paused` 必须等原子动作完成或按 A7-13 结算
+- 原子投影与恢复：`complete_task_control()` 在一个 SQLite 事务内要求既有 ACK，复验 Installation/Executor、Task/Attempt、correlation、command/event sequence、checkpoint revision/state，并一起提交本机 paused/running checkpoint 与 `task.paused/task.resumed` Outbox；精确重放返回既有事实。`ExecutorProcessRuntime` 在 Outbox 恢复后及每轮空闲时推进待生效控制，所以 dispatched 结算后不需要服务端重发 pause，resume 原子完成后才重新开放 dispatch
+- 原调用方验收：`scripts/run_h8_01_acceptance.py` 使用项目专属 Compose project、随机 PostgreSQL 端口、独立 AppData/Executor state、真实 Alembic/Uvicorn 和唯一 `visible=false` Tauri App。HOLD FakeExecutor 只消费一次 offer 以建立权威 running 事实；随后正式 `python -m automation_tool.executor` 经真实 `executor.connect` Session/WebSocket 消费 App 发出的 pause/resume。本机账本预置一条 dispatched 和一条 prepared，验收证明 ACK 后服务端仍 running、第二条 dispatch 被拒绝、首条验证后 runtime 自动上报 paused，最终 App/PostgreSQL/SQLite 全部恢复 running
+- 失败、重放与损坏矩阵：覆盖安全点立即暂停、已有 dispatched 延迟暂停、暂停后阻止新 dispatch、恢复后才重新开放、非法状态/控制类型不污染 Attempt、进程级 WebSocket 暂停恢复、命令/事件精确重放、无 ACK、错 identity/correlation/sequence/revision/state、未知命令、损坏 envelope、非法 limit、并发投影赢家和非 ACK Outbox。所有失败统一脱敏拒绝，不保存 wire 凭据或平台内容
+- 门禁：H8-01 聚焦 Processor/Ledger/真实进程测试通过；Backend 干净全量 `1877 passed, 5 skipped in 141.89s`，11960 条语句/2634 个分支覆盖率 100%，323 个 Python 文件格式、Ruff、严格 Mypy 298 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend 103 项 Node 契约、195 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿；H8-01 隐藏真实 App 纵向验收通过
+- 资源与隐私：隐藏 App 全程不显示、不抢焦点；验收未启动运营浏览器或访问真实账号，私有 SQLite 只在 App sandbox 路径保存摘要状态，明文本机会话票据、Executor Session 和设备凭据均未落账。runner 结束后回收 App、Executor、Uvicorn、WebdriverIO、端口、Compose 容器/网络/Volume 和私有目录，不触碰系统钥匙串、默认浏览器 Profile 或其他项目资源
+- 后续：进入 `H8-02`，把正式 Executor 的取消从 ACK 扩展为 CANCELLING 后的协作式终止；如果最后平台动作已经 dispatch 且无法证明结果，必须收敛 outcome uncertain，不能伪报 cancelled
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-01`（下一离线任务）：从既有暂停 Command、ACK 与 Executor 安全检查点开始，先 RED 再实现端到端暂停；
+3. `H8-02`（⬜ 未开始）：从既有取消/紧停 Command、ACK、Executor SQLite checkpoint 与 A7-07/A7-13 副作用账本固定协作式终止和最后动作不明矩阵；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

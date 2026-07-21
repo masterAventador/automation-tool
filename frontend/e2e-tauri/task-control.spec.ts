@@ -43,6 +43,7 @@ describe("Task control production-path acceptance", () => {
     assert.equal(summary.resumeSequence, 3);
     assert.equal(summary.resumedEventType, "task.resumed");
     assert.equal(summary.finalStatus, "running");
-    assert.equal(summary.finalRevision, 5);
+    // Target confirmation establishes revision 2 before the four executor events.
+    assert.equal(summary.finalRevision, 6);
   });
 });

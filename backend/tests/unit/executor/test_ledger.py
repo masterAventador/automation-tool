@@ -362,6 +362,12 @@ def test_commands_are_durable_idempotent_and_attempt_sequences_are_contiguous(
             "idempotency_key": second_identity.idempotency_key,
         }
     )
+    opened.compare_and_set_checkpoint(
+        attempt_id=ATTEMPT_ID,
+        expected_revision=1,
+        state=AttemptCheckpointState.RUNNING,
+        last_event_sequence=0,
+    )
     opened.receive_command(second_identity)
     with pytest.raises(ExecutorLedgerRejected):
         opened.receive_command(collision)

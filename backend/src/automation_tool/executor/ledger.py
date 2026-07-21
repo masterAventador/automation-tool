@@ -123,6 +123,24 @@ class AttemptCheckpoint:
     revision: int
 
 
+@dataclass(frozen=True, slots=True)
+class PendingTaskControl:
+    command: TaskCommandEnvelope
+    checkpoint_revision: int
+    next_event_sequence: int
+
+    def __post_init__(self) -> None:
+        expected_state = self.command.message_type in {"task.pause", "task.resume"}
+        if (
+            not expected_state
+            or type(self.checkpoint_revision) is not int
+            or self.checkpoint_revision <= 0
+            or type(self.next_event_sequence) is not int
+            or not 1 <= self.next_event_sequence <= _MAX_CROSS_RUNTIME_SEQUENCE
+        ):
+            raise ExecutorLedgerRejected
+
+
 type InboundTaskCommand = TaskCommandEnvelope | TaskDiscoveryCommandEnvelope
 type OutboundExecutorMessage = (
     TaskCommandResultEnvelope
@@ -641,9 +659,23 @@ class ExecutorLedger:
                         cast(sqlite3.Row | tuple[object, ...], row),
                         replayed=True,
                     )
+                pause_requested = connection.execute(
+                    """
+                    SELECT 1
+                    FROM executor_commands c
+                    JOIN executor_attempt_checkpoints p ON p.attempt_id = c.attempt_id
+                    WHERE c.attempt_id = ?
+                      AND c.sequence = p.last_command_sequence
+                      AND c.message_type = 'task.pause'
+                      AND p.state IN ('running', 'paused')
+                    LIMIT 1
+                    """,
+                    (current.execution_attempt_id,),
+                ).fetchone()
                 if (
                     canonical_dispatched_at < current.prepared_at
                     or canonical_dispatched_at >= _decode_utc(cast(tuple[object, ...], row)[16])
+                    or pause_requested is not None
                     or _action_emergency_stop(
                         cast(
                             sqlite3.Row | tuple[object, ...],
@@ -926,7 +958,12 @@ class ExecutorLedger:
                     (str(command.execution_attempt_id),),
                 ).fetchone()
                 if checkpoint is None:
-                    if command.sequence != 1:
+                    if command.sequence != 1 or command.message_type in {
+                        "task.pause",
+                        "task.resume",
+                        "task.cancel",
+                        "task.emergency_stop",
+                    }:
                         raise ValueError
                     connection.execute(
                         """
@@ -942,9 +979,17 @@ class ExecutorLedger:
                         ),
                     )
                 else:
+                    required_control_state = {
+                        "task.pause": AttemptCheckpointState.RUNNING,
+                        "task.resume": AttemptCheckpointState.PAUSED,
+                    }.get(command.message_type)
                     if (
                         str(checkpoint[0]) != str(command.task_id)
                         or command.sequence != int(checkpoint[1]) + 1
+                        or (
+                            required_control_state is not None
+                            and str(checkpoint[3]) != required_control_state.value
+                        )
                     ):
                         raise ValueError
                     connection.execute(
@@ -1154,6 +1199,219 @@ class ExecutorLedger:
                 ).fetchone()
                 connection.commit()
                 return _checkpoint(cast(sqlite3.Row | tuple[object, ...], row))
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def pending_task_controls(self, *, limit: int) -> tuple[PendingTaskControl, ...]:
+        """Return latest pause/resume commands whose checkpoint event is still pending."""
+
+        try:
+            if type(limit) is not int or not 1 <= limit <= _MAX_OUTBOX_BATCH:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT c.envelope, p.revision, p.last_event_sequence
+                    FROM executor_commands c
+                    JOIN executor_attempt_checkpoints p ON p.attempt_id = c.attempt_id
+                    WHERE c.sequence = p.last_command_sequence
+                      AND (
+                        (c.message_type = 'task.pause' AND p.state = 'running')
+                        OR (c.message_type = 'task.resume' AND p.state = 'paused')
+                      )
+                      AND EXISTS (
+                        SELECT 1 FROM executor_outbox acknowledgement
+                        WHERE acknowledgement.source_message_id = c.message_id
+                          AND json_extract(
+                            acknowledgement.envelope, '$.message_type'
+                          ) = 'task.control_ack'
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1 FROM executor_outbox projected
+                        WHERE projected.source_message_id = c.message_id
+                          AND json_extract(projected.envelope, '$.message_type') = CASE
+                            WHEN c.message_type = 'task.pause' THEN 'task.paused'
+                            ELSE 'task.resumed'
+                          END
+                      )
+                      AND (
+                        c.message_type != 'task.pause'
+                        OR NOT EXISTS (
+                          SELECT 1
+                          FROM executor_side_effects s
+                          JOIN executor_action_admissions a ON a.action_id = s.action_id
+                          WHERE a.execution_attempt_id = c.attempt_id
+                            AND s.state = 'dispatched'
+                        )
+                      )
+                    ORDER BY c.rowid
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            pending: list[PendingTaskControl] = []
+            for row in rows:
+                parsed = parse_executor_message(cast(str, row[0]))
+                if not isinstance(parsed, TaskCommandEnvelope):
+                    raise ValueError
+                pending.append(
+                    PendingTaskControl(
+                        command=parsed,
+                        checkpoint_revision=cast(int, row[1]),
+                        next_event_sequence=cast(int, row[2]) + 1,
+                    )
+                )
+            return tuple(pending)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def complete_task_control(
+        self,
+        *,
+        source_message_id: str,
+        expected_checkpoint_revision: int,
+        event: TaskEventEnvelope,
+    ) -> OutboxEntry | None:
+        """Atomically project one acknowledged control at its safe local checkpoint."""
+
+        try:
+            canonical_source_id = _canonical_uuid_v4(source_message_id)
+            if (
+                type(expected_checkpoint_revision) is not int
+                or expected_checkpoint_revision <= 0
+                or not isinstance(event, TaskEventEnvelope)
+            ):
+                raise ValueError
+            self._require_outbound_identity(event)
+            envelope = _canonical_message(event)
+            fingerprint = hashlib.sha256(envelope.encode("utf-8")).digest()
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT c.task_id, c.attempt_id, c.correlation_id,
+                           c.message_type, c.sequence, p.state, p.revision,
+                           p.last_command_sequence, p.last_event_sequence
+                    FROM executor_commands c
+                    JOIN executor_attempt_checkpoints p ON p.attempt_id = c.attempt_id
+                    WHERE c.message_id = ?
+                    """,
+                    (canonical_source_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError
+                command_type = cast(str, row[3])
+                expected = {
+                    "task.pause": (
+                        AttemptCheckpointState.RUNNING,
+                        AttemptCheckpointState.PAUSED,
+                        "task.paused",
+                    ),
+                    "task.resume": (
+                        AttemptCheckpointState.PAUSED,
+                        AttemptCheckpointState.RUNNING,
+                        "task.resumed",
+                    ),
+                }.get(command_type)
+                if expected is None:
+                    raise ValueError
+                current_state, target_state, event_type = expected
+                existing = connection.execute(
+                    """
+                    SELECT envelope, source_message_id
+                    FROM executor_outbox
+                    WHERE source_message_id = ?
+                      AND json_extract(envelope, '$.message_type') = ?
+                    """,
+                    (canonical_source_id, event_type),
+                ).fetchone()
+                if existing is not None:
+                    connection.commit()
+                    return OutboxEntry(
+                        message=_parse_outbound(cast(str, existing[0])),
+                        source_message_id=cast(str, existing[1]),
+                        replayed=True,
+                    )
+                acknowledged = connection.execute(
+                    """
+                    SELECT 1 FROM executor_outbox
+                    WHERE source_message_id = ?
+                      AND json_extract(envelope, '$.message_type') = 'task.control_ack'
+                    LIMIT 1
+                    """,
+                    (canonical_source_id,),
+                ).fetchone()
+                if (
+                    acknowledged is None
+                    or str(row[0]) != str(event.task_id)
+                    or str(row[1]) != str(event.execution_attempt_id)
+                    or str(row[2]) != str(event.correlation_id)
+                    or event.message_type != event_type
+                    or int(row[4]) != int(row[7])
+                    or str(row[5]) != current_state.value
+                    or int(row[6]) != expected_checkpoint_revision
+                    or event.sequence != int(row[8]) + 1
+                ):
+                    raise ValueError
+                if command_type == "task.pause":
+                    dispatched = connection.execute(
+                        """
+                        SELECT 1
+                        FROM executor_side_effects s
+                        JOIN executor_action_admissions a ON a.action_id = s.action_id
+                        WHERE a.execution_attempt_id = ? AND s.state = 'dispatched'
+                        LIMIT 1
+                        """,
+                        (str(row[1]),),
+                    ).fetchone()
+                    if dispatched is not None:
+                        connection.commit()
+                        return None
+                updated = connection.execute(
+                    """
+                    UPDATE executor_attempt_checkpoints
+                    SET state = ?, last_event_sequence = ?, revision = revision + 1
+                    WHERE attempt_id = ? AND revision = ?
+                      AND state = ? AND last_command_sequence = ?
+                    """,
+                    (
+                        target_state.value,
+                        event.sequence,
+                        str(row[1]),
+                        expected_checkpoint_revision,
+                        current_state.value,
+                        int(row[4]),
+                    ),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - locked row cannot drift
+                    raise ValueError
+                next_ordinal = int(
+                    connection.execute(
+                        "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM executor_outbox"
+                    ).fetchone()[0]
+                )
+                connection.execute(
+                    """
+                    INSERT INTO executor_outbox (
+                        ordinal, message_id, idempotency_key, intent_sha256,
+                        envelope, source_message_id, delivered
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        next_ordinal,
+                        str(event.message_id),
+                        str(event.idempotency_key),
+                        fingerprint,
+                        envelope,
+                        canonical_source_id,
+                    ),
+                )
+                connection.commit()
+                return OutboxEntry(
+                    message=event,
+                    source_message_id=canonical_source_id,
+                    replayed=False,
+                )
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -2107,6 +2365,7 @@ __all__ = [
     "LocalPlatformSession",
     "LocalSideEffect",
     "OutboxEntry",
+    "PendingTaskControl",
     "PlatformSessionState",
     "SideEffectState",
 ]
