@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-03 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-04 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-04 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-05 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -333,7 +333,7 @@
 | H8-01 | 端到端暂停 | 安全检查点确认后才 PAUSED；运行中原子动作不伪装撤销 | A7-13,T3-13 | ✅ 已完成 |
 | H8-02 | 端到端取消 | CANCELLING→确认终态；最后动作不明进入 uncertain | H8-01,T3-14 | ✅ 已完成 |
 | H8-03 | 离线紧急停止 | 不依赖网络停止新副作用和完整进程树；重连补报 | E4-09,A7-07 | ✅ 已完成 |
-| H8-04 | App 崩溃恢复 | UI 恢复快照，任务不中断或重复 | T3-20,H8-01 | ⬜ 未开始 |
+| H8-04 | App 崩溃恢复 | UI 恢复快照，任务不中断或重复 | T3-20,H8-01 | ✅ 已完成 |
 | H8-05 | Executor 崩溃恢复 | restart budget、账本对齐、dispatched 未验证处理 | E4-08,A7-13 | ⬜ 未开始 |
 | H8-06 | Control Plane 重启恢复 | Executor 重连、命令/事件幂等、任务收敛 | T3-20,E4-12 | ⬜ 未开始 |
 | H8-07 | 断网/抖动 | 停在安全点、事件 spool、重连续传、不烧无限重试 | H8-05,H8-06 | ⬜ 未开始 |
@@ -2407,13 +2407,27 @@
 - 资源与隐私：所有验收启动前检查固定 8765 和随机 PostgreSQL 端口，使用专属 Compose project、网络、Volume、AppData 和 SQLite；App 全程隐藏，不启动运营浏览器、不访问真实账号。每次退出均精确回收 App process group、Executor、Uvicorn、WebdriverIO、Chromium、端口、容器/网络/Volume 与私有目录；最终再次确认零监听、零 H8-03 容器、零 App/Executor 进程，不触碰默认 Profile、系统钥匙串或其他项目资源
 - 后续：进入 `H8-04`，验证 App 在任务运行中崩溃/被杀后从服务端权威快照和本机状态恢复 UI，且不会重复启动任务、重复发控制命令或重复平台副作用
 
+### H8-04 App 崩溃恢复
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、H8-04 独立隐藏 App 配置、两阶段 WDIO 场景、feature-gated 验收准备/PID 探针、严格跨进程 runner 与文档属于单一 `feat: 完成 App 崩溃恢复验收` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`，新增工程契约准确失败于 H8-04 专用 Tauri 配置、WDIO 场景和 runner 不存在。T3-20 只证明 Control Plane 重启期间 App 保持运行，不能冒充 App 本身崩溃；H8-04 必须真实销毁第一个 App 进程并启动第二个 App。生产业务状态仍只属于 PostgreSQL/Executor，本任务不新增 App 内任务副本、恢复状态机、Web 页面、账号、平台动作或系统钥匙串依赖
+- 原调用方与硬崩溃：`scripts/run_h8_04_acceptance.py` 构建一次 H8-04 独立 `visible=false` Tauri 二进制和真实签名 PyInstaller Executor，使用 `automation-tool-h804-*` 专属 PostgreSQL/完整 Alembic/真实 Uvicorn/AppData/SQLite。第一个 App 从真实页面选择评论、填写封闭模板并创建 Task，经正式 Rust Session、HTTP/PostgreSQL、认证 WebSocket 建立 running；页面再从正式 `restart_executor` IPC 启动唯一签名 Executor。runner 只接受 feature-gated App 自报 PID，经系统进程名复核后仅对该 App 发 `SIGKILL`，不杀 WDIO process group 或 Executor
+- Executor 与 UI 连续性：App 被硬杀后，签名 Executor 保持唯一进程并继续向服务端发送在线心跳，Task/Attempt 保持 running。第二个 App 不调用注册/准备/创建/控制或 Executor restart，只复用同一 AppData 身份与长期凭据，通过正式工作台查询恢复 `Executor 在线`、原 Task ID 和 `运行中`，再从原任务按钮进入详情读取 `任务开始/步骤开始` 权威时间线；没有用整页刷新、Mock、直接组件注入或第二个测试 Adapter 冒充重启
+- 精确不重复证据：崩溃前后 PostgreSQL 严格保持 1 个 Task、1 个 Attempt、1 个 acknowledged offer、2 个原 source message ID 的 started/step-started Event、1 份页面创建定义和 0 个服务端 Action；Task/Attempt 行、revision、水位、created/started 时间、Command/Event ID、幂等键和完整公开事件事实逐字段相同。`executor.connect` 始终只有 HOLD 准备 Executor 与签名 Executor 两张 Session，第二个 App 没有重复启动 Executor。本机 SQLite 的 offer/checkpoint 以及两条平台副作用事实逐字段不变，状态始终精确为一条 `verified`、一条 `prepared`，没有重新取得 dispatch 许可
+- 失败发现与修正：首次真实运行发现 UI 默认 browse 与确认夹具 comment 意图不一致，服务端按正式 offer guard 正确拒绝；页面改为真实选择 comment 并填入相同受限模板。随后三次失败分别来自 runner 误用不存在的 PostgreSQL `payload`、SQLite command `state` 列，以及把 `ps` 的“PID 已不存在”退出码 1 当异常；均按正式 schema/系统语义修正，没有改生产状态、放宽业务断言或把失败复跑冒充通过。最终运行真实完成 SIGKILL、Executor 存活、第二 App 恢复与前后双快照核对
+- 门禁：Backend 全量 `1893 passed, 5 skipped`，12037 条语句/2674 个分支覆盖率 100%，325 个 Python 文件格式、Ruff、严格 Mypy 299 个源码文件、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend 106 项 Node 契约、197 项 Vitest、5 项无头 Playwright、锁文件、peer dependency、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、19 项安全配置、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿；H8-04 隐藏双 App 纵向验收 1/1 通过
+- 隔离、秘密与清理：固定 8765 与随机 PostgreSQL 端口均在启动前检查；独立 Compose project、网络、Volume、AppData、SQLite 和信号目录不复用其他项目。两个 App 全程隐藏，不启动运营浏览器、不访问真实账号；长期设备凭据只在 AppData 私有文件，SQLite 不含凭据。成功与每次失败均精确回收 App/WDIO/Executor/Uvicorn、端口、容器/网络/Volume 和私有目录，最终复核零 H8-04 监听、容器、App/Executor 进程与 AppData 残留
+- 后续：进入 `H8-05`，从现有 E4-08 有界 supervisor、A7-13 只读副作用恢复和 H8-01/H8-02 安全 checkpoint 出发，验证真实 Executor 崩溃后的 restart budget、SQLite/outbox 对齐，以及 dispatched 未验证动作只读收敛且绝不重复点击
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-04`（⬜ 未开始）：验证 App 崩溃/被杀后从服务端权威快照和本机状态恢复 UI，任务不中断、不重复启动、不重复控制或执行平台副作用；
+3. `H8-05`（⬜ 未开始）：验证真实 Executor 崩溃后的有界重启、SQLite/outbox 对齐，以及 dispatched 未验证动作只读恢复且不重复平台副作用；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

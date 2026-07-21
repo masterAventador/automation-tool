@@ -190,6 +190,26 @@ fn task_restart_acceptance_is_isolated_and_hidden() {
 }
 
 #[test]
+fn app_crash_recovery_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.app-crash-recovery-e2e.conf.json");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.h804acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{ "label": "main", "title": "自动化运营工具", "visible": false }])
+    );
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(capabilities[1]["identifier"], "wdio-app-crash-recovery");
+    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+}
+
+#[test]
 fn task_query_acceptance_is_isolated_and_hidden() {
     let config = read_json("tauri.task-query-e2e.conf.json");
     let capabilities = config["app"]["security"]["capabilities"]

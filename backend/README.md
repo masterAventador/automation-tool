@@ -38,7 +38,11 @@ SSE 使用标准十进制 `Last-Event-ID`，拒绝非规范、越界或超前水
 
 H8-01 在正式 `ExecutorCommandProcessor` 和 SQLite v5 账本上补齐本机安全检查点，不新增 schema。pause/resume 只能附着到已有 Attempt，pause 仅接受 running、resume 仅接受 paused；控制命令与 ACK 先持久化。pause 成为最新命令后，`begin_side_effect_dispatch()` 在同一个 `BEGIN IMMEDIATE` 边界拒绝任何新的 prepared→dispatched；已有 dispatched 事实不会被伪装撤销，只有全部结算后 `pending_task_controls()` 才可见该 pause。`complete_task_control()` 再原子核对 ACK、身份、correlation、command/event sequence、checkpoint revision/state，把 checkpoint 与 `task.paused/task.resumed` Outbox 一次提交；进程运行循环会在恢复 Outbox 后和每轮空闲时继续推进，因此无需服务端重复下发命令。
 
-H8-02 复用上述 command/checkpoint/outbox/side-effect 表实现普通协作式取消，不新增 schema 或第二状态机。`task.cancel` 只接受 running/paused Attempt；命令一经持久化，新的 prepared→dispatched 就在同一 SQLite 锁边界被拒绝。无在途 dispatched 时，checkpoint 与 `task.cancelled` 原子提交为 terminal；已有动作必须先由原执行/恢复边界结算，verified 后才 cancelled，uncertain 后只能提交 `task.outcome_uncertain` 与 outcome_uncertain checkpoint。ACK 只表示已接收，不能提前伪造终态；终态事件类型在提交事务内按最新副作用事实重新核对，重放返回首次持久事实。`task.emergency_stop` 仍由 H8-03 的离线硬停止负责，当前正式 Processor 明确拒绝。
+H8-02 复用上述 command/checkpoint/outbox/side-effect 表实现普通协作式取消，不新增 schema 或第二状态机。`task.cancel` 只接受 running/paused Attempt；命令一经持久化，新的 prepared→dispatched 就在同一 SQLite 锁边界被拒绝。无在途 dispatched 时，checkpoint 与 `task.cancelled` 原子提交为 terminal；已有动作必须先由原执行/恢复边界结算，verified 后才 cancelled，uncertain 后只能提交 `task.outcome_uncertain` 与 outcome_uncertain checkpoint。ACK 只表示已接收，不能提前伪造终态；终态事件类型在提交事务内按最新副作用事实重新核对，重放返回首次持久事实。H8-02 阶段对 `task.emergency_stop` 明确拒绝；H8-03 现已通过独立本机持久 latch、进程树硬停和报告型恢复链实现该命令，不改变普通 cancel 语义。
+
+H8-03 的 `task.emergency_stop` 在 App 网络调用前先持久化最小本机意图并硬停完整 Executor/浏览器进程树；Executor SQLite 以单个 `BEGIN IMMEDIATE` 封锁新 dispatch、把已派发未确认动作收敛为 uncertain，并把 ACK、`task.outcome_uncertain` 与 checkpoint/outbox 原子落账。App 网络恢复后从原工作台/详情轮询认领同一 marker，向 Control Plane 幂等补发并启动只报告既有账本事实的签名 Executor，服务端与本机最终精确收敛。
+
+H8-04 不在 Backend 增加 App 恢复 API 或第二份任务状态。第一个隐藏 App 被硬杀后，原签名 Executor 继续通过既有认证 WebSocket/heartbeat 在线，PostgreSQL 保持 Task/Attempt 权威 running；第二个 App 只凭原 AppData 身份调用既有工作台、Task Query 和事件路径恢复 UI。严格验收逐字段锁定 Task/Attempt/Command/Event 与本机副作用账本未变化，证明 App 重启不会重建任务、控制命令或平台动作。
 
 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
 
@@ -71,6 +75,8 @@ E4-02 增加正式控制台入口 `automation-tool-executor`。`executor/bootstr
 H8-01 安全暂停原入口在仓库根执行 `backend/.venv/bin/python scripts/run_h8_01_acceptance.py`：唯一隐藏 App 经正式网络控制 API 驱动真实 Executor，验证已有 dispatched 先结算、暂停命令落账后零新增 dispatch、runtime 自动 PAUSED 与 App 恢复 RUNNING；FakeExecutor 只负责建立初始服务端 running 事实，不冒充本机安全检查点。
 
 H8-02 协作式取消原入口执行 `backend/.venv/bin/python scripts/run_h8_02_acceptance.py`：唯一 `visible=false` task-termination App 经正式 Rust 控制调用、Uvicorn/PostgreSQL 和认证 WebSocket 发出普通取消；真实 Executor 先 ACK 并阻止新 dispatch，既有 dispatched 被标记无法确认后自动上报 `task.outcome_uncertain`。同一 App 的紧停半程仍由既有 HOLD FakeExecutor 夹具完成，只用于跑完原页面流程，不冒充 H8-03 离线硬停止。
+
+H8-03 离线紧停原入口执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py`；H8-04 App 崩溃恢复原入口执行 `backend/.venv/bin/python scripts/run_h8_04_acceptance.py`。两者均使用唯一隐藏 Tauri App 配置、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收各自拥有的进程、端口、容器、网络、卷和私有目录；H8-04 会连续启动两个 App 进程，但第二个 App 不调用任何准备、创建、控制或 Executor restart Command。
 
 D6-13 未确认副作用守卫在仓库根目录执行 `backend/.venv/bin/python scripts/run_d6_13_acceptance.py`。该 runner 通过正式 Uvicorn/Executor WebSocket 验证无绑定与旧确认的业务 offer 零投递、当前确认 offer 正常投递；它不调用 App API、不启动 Tauri 或运营浏览器。D6-11/D6-12 已独立证明确认事实来自真实 App 原入口，本任务只验收后端到 Executor 的原始生产边界。
 

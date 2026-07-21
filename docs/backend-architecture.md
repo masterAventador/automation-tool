@@ -541,7 +541,9 @@ H8-01 把同一语义延伸到正式 Local Executor。控制命令不能创建�
 
 H8-02 沿同一路径加入普通协作式取消。`task.cancel` 不能创建本机 Attempt，只能附着到 running/paused checkpoint；command 与 ACK 先持久化，最新 cancel 与 pause 一样在 `BEGIN IMMEDIATE` 派发门内阻止任何新 prepared→dispatched。无 dispatched 时可以直接原子提交 terminal checkpoint 与 `task.cancelled`；有 dispatched 时仅 ACK 并等待原动作边界结算，verified 允许 cancelled，uncertain 则只能原子提交 outcome_uncertain checkpoint 与 `task.outcome_uncertain`。终态选择在提交事务中按账本事实重新计算，调用方不能用陈旧观察或错误事件类型把不明动作伪造成取消成功；terminal/outcome_uncertain 后 prepared 事实永久不能再派发。
 
-H8-02 原调用方验收复用 T3-14 唯一隐藏 task-termination App。HOLD FakeExecutor 只建立最初的服务端 running 事实；随后正式 `python -m automation_tool.executor` 经认证 WebSocket 消费 App 发出的 cancel。真实 SQLite 预置一条 dispatched 和一条 prepared，验收证明 ACK 时 PostgreSQL 仍为 CANCELLING、第二条派发被拒绝、首条结算 uncertain 后 App/PostgreSQL/SQLite 一致进入 outcome uncertain。`task.emergency_stop` 在正式 Processor 中继续 fail closed，离线 latch、完整进程树停止和重连补报由 H8-03 单独实现。
+H8-02 原调用方验收复用 T3-14 唯一隐藏 task-termination App。HOLD FakeExecutor 只建立最初的服务端 running 事实；随后正式 `python -m automation_tool.executor` 经认证 WebSocket 消费 App 发出的 cancel。真实 SQLite 预置一条 dispatched 和一条 prepared，验收证明 ACK 时 PostgreSQL 仍为 CANCELLING、第二条派发被拒绝、首条结算 uncertain 后 App/PostgreSQL/SQLite 一致进入 outcome uncertain。该阶段对 `task.emergency_stop` 继续 fail closed；H8-03 已在不改变 cancel 语义的前提下，以 AppData 持久 latch、完整进程树硬停、SQLite 原子 uncertain 和报告型重连补报独立实现紧停。
+
+H8-04 没有给 Control Plane 增加“App 恢复”写接口：App 是只读投影与命令发起端，PostgreSQL Task/Attempt/Command/Event 和在线 Executor registry/heartbeat 仍是唯一云端事实。第一个 App 被精确 `SIGKILL` 后，签名 Executor 的认证 WebSocket 与 heartbeat 不依赖 App WebView 继续运行；第二个 App 复用 AppData 身份，通过既有 workbench、Task Query 和事件接口恢复同一 running 快照。纵向验收在两个 App 之间逐字段比较所有任务业务行和本机 verified/prepared 副作用，确认没有新 Task、Attempt、Command、Event、Executor Session 或 dispatch 许可。
 
 T3-14 在同一 API/Outbox 边界增加 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop`。首次请求锁定 active Installation、Task/current Attempt，在领域状态机允许取消且 Attempt 尚未终止时，原子写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `CANCELLING`；不写伪造的取消终态，也不占用 Executor 持有的事件 sequence。相同 scope/key/意图重放返回原 Command 且不重复增 revision；改意图、再次终止、终态、错 scope、时间回退和不相容投影均 fail closed。
 
