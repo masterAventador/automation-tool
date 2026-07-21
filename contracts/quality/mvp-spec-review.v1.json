@@ -1,0 +1,196 @@
+{
+  "version": "mvp.spec-review.v1",
+  "scope": "p9.local-single-device-mvp",
+  "architectureDecisions": [
+    {
+      "id": "MVP-ADR-01",
+      "decision": "RPA 运营优先于内容生产与分发，后者优先于 AI 员工与工作流",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/product-plan.md", "anchor": "固定优先级："}]
+    },
+    {
+      "id": "MVP-ADR-02",
+      "decision": "只交付 Tauri 桌面客户端，Vite 仅为测试 Harness",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/frontend-architecture.md", "anchor": "不建设面向用户的 Web 产品"}]
+    },
+    {
+      "id": "MVP-ADR-03",
+      "decision": "P9 本地 MVP 无产品登录，客户 Demo 必须先完成 U9",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/product-plan.md", "anchor": "在任何客户 Demo 交付前，必须完成 U9-01～U9-06"}]
+    },
+    {
+      "id": "MVP-ADR-04",
+      "decision": "Control Plane 独立部署，开发时本机启动且只切换 baseUrl",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/backend-architecture.md", "anchor": "Control Plane（本地开发 / 云端 Demo）"}]
+    },
+    {
+      "id": "MVP-ADR-05",
+      "decision": "Local Executor 永远位于用户电脑并由 Tauri 监管",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/backend-architecture.md", "anchor": "Local Executor（永远在用户电脑）"}]
+    },
+    {
+      "id": "MVP-ADR-06",
+      "decision": "运营自动化使用可见的外部 Chrome 或 Edge，不内嵌浏览器",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/product-plan.md", "anchor": "ADR-P002：不内嵌运营浏览器"}]
+    },
+    {
+      "id": "MVP-ADR-07",
+      "decision": "平台登录态只进入 App 独立 Profile，不读取默认 Profile 或 Cookie",
+      "disposition": "conforms",
+      "evidence": [{"path": "frontend/src/features/platform-sessions/PlatformSessions.tsx", "anchor": "App 使用独立运营 Profile"}]
+    },
+    {
+      "id": "MVP-ADR-08",
+      "decision": "设备密钥和长期凭据只保存在 App 私有目录，不使用系统钥匙串",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/frontend-architecture.md", "anchor": "不调用系统钥匙串，也不进入 React"}]
+    },
+    {
+      "id": "MVP-ADR-09",
+      "decision": "PostgreSQL 保存服务端权威事实，SQLite 仅保存本机恢复与幂等最小事实",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/backend-architecture.md", "anchor": "SQLite：仅保存本机执行幂等、恢复和 Artifact spool 元数据"}]
+    },
+    {
+      "id": "MVP-ADR-10",
+      "decision": "例行自动化测试全局无头，正式扫码、人工接管和平台动作保持可见",
+      "disposition": "conforms",
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "正式产品扫码/人工接管浏览器仍保持可见"}]
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "MVP-AC-01",
+      "criterion": "全新安装后打开 App，不出现产品注册或登录页面",
+      "disposition": "automated_complete",
+      "evidence": [{"path": "frontend/src/app/StartupGate.tsx", "anchor": "type StartupState = \"checking\" | \"ready\" | \"unavailable\" | \"revoked\""}]
+    },
+    {
+      "id": "MVP-AC-02",
+      "criterion": "App 自动完成 Control Plane 连通性、Local Executor、浏览器和数据目录诊断",
+      "disposition": "remediation_required",
+      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "createTransportStartupCheck(new TauriControlPlaneTransport())"}]
+    },
+    {
+      "id": "MVP-AC-03",
+      "criterion": "未登录抖音时，任务进入“等待平台登录”，并拉起可见的外部浏览器",
+      "disposition": "remediation_required",
+      "evidence": [{"path": "frontend/src-tauri/src/lib.rs", "anchor": "async fn start_task_discovery("}]
+    },
+    {
+      "id": "MVP-AC-04",
+      "criterion": "用户扫码一次后，App 能检测登录并在下一次启动复用平台登录态",
+      "disposition": "pending_real_platform",
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "### B5-15 登录复用验收"}]
+    },
+    {
+      "id": "MVP-AC-05",
+      "criterion": "用户能创建关键词任务，看到真实目标预览并排除目标",
+      "disposition": "remediation_required",
+      "evidence": [{"path": "frontend/src/features/task-create/TaskCreate.tsx", "anchor": "setCreatedTaskId(task.taskId)"}]
+    },
+    {
+      "id": "MVP-AC-06",
+      "criterion": "用户确认后能在可见浏览器中完成受控动作",
+      "disposition": "remediation_required",
+      "evidence": [{"path": "backend/src/automation_tool/executor/command_processor.py", "anchor": "batch = self._success_batch(command)"}]
+    },
+    {
+      "id": "MVP-AC-07",
+      "criterion": "每个目标都有结构化结果，成功必须由页面最终状态或平台可核对结果证明",
+      "disposition": "remediation_required",
+      "evidence": [{"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "证据摘要：{EVIDENCE_LABELS[result.evidence]}"}]
+    },
+    {
+      "id": "MVP-AC-08",
+      "criterion": "用户可以暂停、恢复、取消和紧急停止",
+      "disposition": "automated_complete",
+      "evidence": [{"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "const COMMAND_LABELS: Record<TaskRunControlOperation, string>"}]
+    },
+    {
+      "id": "MVP-AC-09",
+      "criterion": "遇到验证码、风控、登录失效或未知页面时不误点、不自动绕过，进入人工处理",
+      "disposition": "automated_complete",
+      "evidence": [{"path": "frontend/src/features/platform-sessions/PlatformSessions.tsx", "anchor": "页面需要人工处理，请在运营浏览器中完成后重新检查"}]
+    },
+    {
+      "id": "MVP-AC-10",
+      "criterion": "App、Control Plane 或 Local Executor 崩溃重启后，不重复已经确认完成的副作用，并能恢复任务快照",
+      "disposition": "automated_complete",
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "### H8-04 App 崩溃恢复"}]
+    },
+    {
+      "id": "MVP-AC-11",
+      "criterion": "结果不确定的动作不会自动重试",
+      "disposition": "automated_complete",
+      "evidence": [{"path": "backend/src/automation_tool/executor/side_effect_ledger.py", "anchor": "self.state is SideEffectState.UNCERTAIN"}]
+    },
+    {
+      "id": "MVP-AC-12",
+      "criterion": "日志、事件和截图不泄漏 Cookie、Token、完整页面私密内容或本机私有路径",
+      "disposition": "automated_complete",
+      "evidence": [{"path": "frontend/src/features/diagnostics/Diagnostics.tsx", "anchor": "不包含登录凭据、完整评论或私信内容"}]
+    },
+    {
+      "id": "MVP-AC-13",
+      "criterion": "macOS 和 Windows 分别完成安装、启动、外部浏览器、Local Executor 生命周期和真实测试账号验收",
+      "disposition": "pending_packaging",
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "| P9-06 | macOS 干净安装 |"}]
+    },
+    {
+      "id": "MVP-AC-14",
+      "criterion": "正式安装包不包含测试驱动、调试端口、测试凭据或真实运行数据",
+      "disposition": "pending_packaging",
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "| P9-05 | 正式包内容审计 |"}]
+    }
+  ],
+  "findings": [
+    {
+      "remediationTask": "H8-16A",
+      "state": "open",
+      "requirementRefs": ["MVP-AC-03", "MVP-AC-05"],
+      "summary": "Rust 已有固定发现 Command，但正式 React 组合根和任务详情没有 discovery gateway 或启动/重试入口",
+      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "const taskCreationGateway = new TauriTaskCreationGateway()"}]
+    },
+    {
+      "remediationTask": "H8-16B",
+      "state": "open",
+      "requirementRefs": ["MVP-AC-06"],
+      "summary": "单活索引当前按 task_id 限制同一任务 Attempt，而不是按 installation_id 限制单安装实例活动任务",
+      "evidence": [{"path": "backend/src/automation_tool/control_plane/infrastructure/database/schema.py", "anchor": "\"uq_execution_attempts_one_active_task\""}]
+    },
+    {
+      "remediationTask": "H8-16C",
+      "state": "open",
+      "requirementRefs": ["MVP-AC-06", "MVP-AC-07"],
+      "summary": "确认只把 Task 改为 queued，生产应用没有创建逐目标动作授权和可执行 typed Outbox 的入口",
+      "evidence": [{"path": "backend/src/automation_tool/control_plane/infrastructure/database/task_target_preview_repository.py", "anchor": "target_status=TaskStatus.QUEUED"}]
+    },
+    {
+      "remediationTask": "H8-16D",
+      "state": "open",
+      "requirementRefs": ["MVP-AC-06", "MVP-AC-07", "MVP-AC-11"],
+      "summary": "正式 Executor 对 task.offer 仍生成固定 success batch，没有调用已完成的 browse/comment/direct-message 与副作用账本实现",
+      "evidence": [{"path": "backend/src/automation_tool/executor/command_processor.py", "anchor": "batch = self._success_batch(command)"}]
+    },
+    {
+      "remediationTask": "H8-16E",
+      "state": "open",
+      "requirementRefs": ["MVP-AC-02"],
+      "summary": "启动 Gate 只组合 Control Plane Transport，Executor、受信浏览器与 App 私有数据目录需用户进入设置后分别查看",
+      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "const startupCheck = createTransportStartupCheck"}]
+    },
+    {
+      "remediationTask": "H8-16F",
+      "state": "open",
+      "requirementRefs": ["MVP-AC-01", "MVP-AC-03", "MVP-AC-05", "MVP-AC-06", "MVP-AC-07"],
+      "summary": "产品页仍把可选过滤/用户黑名单、截图直览、结果导出和存储控制写成当前 MVP，而实现只具备目标排除、固定保留、结构化结果与诊断包导出；需明确实现或后置并完成整条隐藏 App 验收",
+      "evidence": [{"path": "docs/product-plan.md", "anchor": "#### F. 本地设置与诊断"}]
+    }
+  ]
+}

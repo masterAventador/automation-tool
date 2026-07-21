@@ -32,7 +32,8 @@ automation-tool/
 │   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
 │   ├── quality/
-│   │   └── mvp-failure-matrix.v1.json # H8-15 可执行失败矩阵与测试证据登记
+│   │   ├── mvp-failure-matrix.v1.json # H8-15 可执行失败矩阵与测试证据登记
+│   │   └── mvp-spec-review.v1.json # H8-16 MVP 决策、验收状态与修复任务登记
 │   └── fixtures/
 │       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
@@ -433,6 +434,8 @@ D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移固定 Schema�
 H8-14 沿现有工作台分层增加唯一只读指标链：`control_plane/application/workbench_metrics.py` 定义结构化快照和安全不变量，`infrastructure/database/workbench_metrics_repository.py` 以单条 Installation-scoped SQL 聚合既有 `tasks`/`task_actions`，`bootstrap/workbench.py` 装配，`api/workbench.py` 暴露固定 `/metrics`。桌面侧继续使用 `features/workbench/`、`platform/tauri/workbench-gateway.ts` 和既有 Rust `control_plane.rs`/`lib.rs`，没有第二个页面、通用 HTTP/IPC、客户端数据库或新表。`tauri.workbench-metrics-e2e.conf.json`、WDIO spec 与 `scripts/run_h8_14_acceptance.py` 只用于唯一隐藏 App 的真实 PostgreSQL/跨 Installation/只读验收，并在结束后回收专属 AppData、端口和 Compose 资源。
 
 H8-15 不新增运行时服务，而以 `contracts/quality/mvp-failure-matrix.v1.json` 作为第 4.1 节失败矩阵的可执行证据登记：15 类边界、78 个原子失败分支逐项绑定仓库内测试文件和精确测试锚点。`frontend/tests/mvp-failure-matrix.test.mjs` 校验边界顺序、词汇同步、唯一性、证据路径/锚点与真实平台待验收集合；B5-15、D6-16、A7-16、A7-17 仍保持独立真实证据，不能被 Fake 页面或分层测试替代。审计补齐了 PostgreSQL 未知迁移目标不改变当前 revision、连接池耗尽安全映射，以及生产安装包拒绝 Profile、Cookie、Executor SQLite 与诊断资料的门禁。
+
+H8-16 的 `contracts/quality/mvp-spec-review.v1.json` 把产品规划 14 条 MVP 验收与 10 项关键架构决策逐项绑定到当前证据，并把不符合项映射到 H8-16A～H8-16F。审计不把“底层模块存在”当成“用户闭环完成”：正式 React 组合根尚未消费已有 `start_task_discovery`，确认事务只收敛到 `queued`，生产端没有逐目标授权/投递，`ExecutorCommandProcessor` 对 `task.offer` 仍生成固定 success batch，数据库单活索引当前按 Task 而非 Installation，启动 Gate 也只检查 Control Plane。`frontend/tests/mvp-spec-review.test.mjs` 持续校验产品验收原文、状态枚举、修复任务与源码锚点，后续每个修复任务必须将对应 finding 从 open 收敛并更新原调用方证据。
 
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 
