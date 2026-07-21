@@ -36,5 +36,7 @@ test("cancel and emergency stop use the formal Rust bridge from one hidden App",
   assert.match(rustEntry, /\.cancel_task\(\s*&vault/);
   assert.match(rustEntry, /\.emergency_stop_task\(\s*&vault/);
   assert.match(orchestrator, /test:task-termination-tauri/);
+  assert.match(orchestrator, /seed_task_confirmation/);
+  assert.match(orchestrator, /AUTOMATION_TOOL_TASK_TERMINATION_CONFIRMED_REVISION/);
   assert.match(orchestrator, /visible=false/);
 });

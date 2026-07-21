@@ -122,7 +122,8 @@ class ExecutorCommandProcessor:
             not isinstance(command, (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope))
             or (
                 isinstance(command, TaskCommandEnvelope)
-                and command.message_type not in {"task.offer", "task.pause", "task.resume"}
+                and command.message_type
+                not in {"task.offer", "task.pause", "task.resume", "task.cancel"}
             )
             or str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
@@ -132,6 +133,7 @@ class ExecutorCommandProcessor:
         if isinstance(command, TaskCommandEnvelope) and command.message_type in {
             "task.pause",
             "task.resume",
+            "task.cancel",
         }:
             return self._handle_control(command)
         receipt = self._ledger.receive_command(command)
@@ -214,10 +216,9 @@ class ExecutorCommandProcessor:
             command = pending.command
             if source_message_id is not None and str(command.message_id) != source_message_id:
                 continue
-            event_type = "task.paused" if command.message_type == "task.pause" else "task.resumed"
             event = self._event(
                 command,
-                message_type=event_type,
+                message_type=pending.event_type,
                 sequence=pending.next_event_sequence,
             )
             completed = self._ledger.complete_task_control(

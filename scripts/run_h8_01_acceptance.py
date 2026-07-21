@@ -36,8 +36,7 @@ from run_t3_13_acceptance import (
     require_hidden_tauri_configuration,
     wait_for_app_task,
 )
-from run_t3_14_acceptance import seed_attempt_and_offer
-from run_t3_18_acceptance import seed_task_confirmation
+from run_t3_14_acceptance import seed_attempt_and_offer, seed_task_confirmation
 from sqlalchemy import select
 
 from automation_tool.control_plane.application.device_sessions import (
@@ -305,17 +304,12 @@ async def wait_for_pause_acknowledgement(
                         .order_by(task_events.c.sequence)
                     )
                 )
-            if (
-                pause is not None
-                and pause["status"] == TaskCommandStatus.ACKNOWLEDGED.value
-            ):
+            if pause is not None and pause["status"] == TaskCommandStatus.ACKNOWLEDGED.value:
                 if task["status"] != TaskStatus.RUNNING.value or event_types != [
                     "task.started",
                     "step.started",
                 ]:
-                    raise RuntimeError(
-                        "H8-01 projected PAUSED before the atomic action settled"
-                    )
+                    raise RuntimeError("H8-01 projected PAUSED before the atomic action settled")
                 return
             if time.monotonic() >= deadline:
                 raise RuntimeError("H8-01 pause command was not acknowledged in time")
@@ -354,11 +348,7 @@ async def verify_final_database_state(
                 .all()
             )
             task = (
-                (
-                    await session.execute(
-                        select(tasks).where(tasks.c.id == original.task_id.uuid)
-                    )
-                )
+                (await session.execute(select(tasks).where(tasks.c.id == original.task_id.uuid)))
                 .mappings()
                 .one()
             )
@@ -366,8 +356,7 @@ async def verify_final_database_state(
                 (
                     await session.execute(
                         select(execution_attempts).where(
-                            execution_attempts.c.id
-                            == original.execution_attempt_id.uuid
+                            execution_attempts.c.id == original.execution_attempt_id.uuid
                         )
                     )
                 )
@@ -378,9 +367,7 @@ async def verify_final_database_state(
             TaskCommandType.TASK_OFFER.value,
             TaskCommandType.TASK_PAUSE.value,
             TaskCommandType.TASK_RESUME.value,
-        ] or any(
-            row["status"] != TaskCommandStatus.ACKNOWLEDGED.value for row in commands
-        ):
+        ] or any(row["status"] != TaskCommandStatus.ACKNOWLEDGED.value for row in commands):
             raise RuntimeError("H8-01 command history is invalid")
         if [row["event_type"] for row in events] != [
             TaskEventType.TASK_STARTED.value,
@@ -402,9 +389,7 @@ async def verify_final_database_state(
 
 
 def stop_executor(process: subprocess.Popen[str]) -> tuple[str, str]:
-    stop_signal = (
-        vars(signal)["CTRL_BREAK_EVENT"] if sys.platform == "win32" else signal.SIGTERM
-    )
+    stop_signal = vars(signal)["CTRL_BREAK_EVENT"] if sys.platform == "win32" else signal.SIGTERM
     process.send_signal(stop_signal)
     return process.communicate(timeout=10)
 
@@ -499,13 +484,11 @@ def main() -> None:
             original,
             executor_id,
         )
-        executor_process, local_session_token, executor_session_token = (
-            start_real_executor(
-                credential=credential,
-                installation_id=installation_id,
-                executor_id=executor_id,
-                state_directory=state_directory,
-            )
+        executor_process, local_session_token, executor_session_token = start_real_executor(
+            credential=credential,
+            installation_id=installation_id,
+            executor_id=executor_id,
+            state_directory=state_directory,
         )
         asyncio.run(wait_for_pause_acknowledgement(database_url, original, app_process))
         try:
@@ -539,9 +522,7 @@ def main() -> None:
             or checkpoint.last_command_sequence != 3
             or checkpoint.last_event_sequence != 4
         ):
-            raise RuntimeError(
-                "H8-01 local checkpoint did not resume from the safe pause"
-            )
+            raise RuntimeError("H8-01 local checkpoint did not resume from the safe pause")
         if executor_process.poll() is not None:
             raise RuntimeError("H8-01 real Executor exited before cleanup")
         stdout, stderr = stop_executor(executor_process)
@@ -549,9 +530,7 @@ def main() -> None:
             raise RuntimeError("H8-01 real Executor did not stop cleanly")
         executor_process = None
         if "executor.stopped" not in stdout:
-            raise RuntimeError(
-                "H8-01 real Executor omitted its authenticated stop event"
-            )
+            raise RuntimeError("H8-01 real Executor omitted its authenticated stop event")
         private_bytes = ledger.database_path.read_bytes()
         for secret in (local_session_token, executor_session_token, credential):
             if secret.encode() in private_bytes:

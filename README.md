@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进 H8-02 端到端取消。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-02 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进 H8-03 离线紧急停止。
 
 ## 第一阶段
 
@@ -115,6 +115,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - A7-14 已把确定动作结果接入 PostgreSQL 连续失败熔断：`action_risk_results` 为每个已授权 Action 保存成功/失败、授权阈值、结果后计数和是否触发接管，`action_failure_circuits` 按 Installation/平台/动作保存当前 circuit；复合外键保证结果、授权和 circuit 不可跨 scope 拼接。失败达到该 Action 的授权快照阈值时，同一事务把当前 Task/Attempt 投影为 `awaiting_human` 并写 `task.awaiting_human`，后续新 Action ID 在服务端授权入口被拒绝；精确授权和事件重放不重复计数。成功只清零尚未打开的 streak，晚到成功不能自动关 circuit；只有打开该 circuit 的 Task 经正式已确认 `task.resumed` 才能清零恢复。认证 Executor WebSocket 已从 `/api/v1/executors/connect` 原入口触发完整持久化与后续授权拒绝；
 - A7-15 已把 Executor 动作 receipt 收敛为 `action-result-evidence.v1` 封闭证据，并由正式 Task event 写入 PostgreSQL `task_actions.evidence_code`；数据库约束锁定成功、失败、取消与不确定证据的一致性。受 App Session 和 Installation scope 保护的 `GET /api/v1/tasks/{task_id}/target-results` 只投影当前 Attempt 的目标级待执行/进行中/成功/跳过/失败/不确定和固定摘要；现有运行详情通过严格 TypeScript DTO、固定 Tauri Command 与 Rust 网络桥展示结果，不读取 Executor SQLite、不显示正文或页面事实。唯一 `visible=false` App 已从原页面经真实 Uvicorn/PostgreSQL 验证四类终态、重试和控制链；
 - H8-01 已把正式 Local Executor 的暂停从“收到命令即宣称暂停”收紧为持久安全检查点：`task.control_ack` 可立即出站，但只在该 Attempt 没有 `dispatched` 副作用时，才把本机 checkpoint 与 `task.paused` Outbox 在同一 SQLite 事务中提交；已有 dispatched 动作先结算，暂停命令一旦落账就阻止任何新的 prepared→dispatched。运行循环会持续推进待生效控制，恢复命令同样以 ACK、checkpoint 和 `task.resumed` 原子收敛后才重新开放 dispatch。隐藏 Tauri App 已经正式 Rust/FastAPI/PostgreSQL/WebSocket/真实 Executor 证明暂停等待、零新增点击、自动 PAUSED 与恢复 RUNNING；本机账本未新增表或保存凭据；
+- H8-02 已把普通取消接入同一正式 Local Executor 安全边界：`task.cancel` 只附着到 running/paused checkpoint，命令与 `task.control_ack` 先持久化并立即封锁新 dispatch；已有 dispatched 动作必须先结算，已验证则原子收敛 `task.cancelled`，无法确认则原子收敛 `task.outcome_uncertain`，prepared 动作永不再获得派发许可。唯一隐藏 Tauri App 已从原取消入口经正式 Rust/Uvicorn/PostgreSQL/WebSocket 驱动真实 Executor，证明服务端先保持 `CANCELLING`、最后动作不明时三端一致进入不确定终态；本任务不把 H8-03 的离线硬紧停混入普通取消；
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Windows x86_64 原生 runner 均已实测，Hosted Windows CI 的 Billing 限制只保留为持续集成覆盖缺口；
 - E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS arm64 与 Windows x86_64 release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App；

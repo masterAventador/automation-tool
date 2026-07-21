@@ -68,11 +68,45 @@ test("H8-01 waits for the durable side-effect checkpoint through the real Execut
   assert.match(orchestrator, /wait_for_pause_acknowledgement/);
   assert.match(orchestrator, /verify_side_effect/);
   assert.match(orchestrator, /pause request allowed a new side-effect dispatch/);
-  assert.match(processor, /command\.message_type not in \{"task\.offer", "task\.pause", "task\.resume"\}/);
+  assert.match(
+    processor,
+    /not in \{"task\.offer", "task\.pause", "task\.resume", "task\.cancel"\}/,
+  );
   assert.match(processor, /def poll_controls/);
   assert.match(ledger, /c\.message_type = 'task\.pause'/);
   assert.match(ledger, /s\.state = 'dispatched'/);
   assert.match(ledger, /AttemptCheckpointState\.PAUSED/);
   assert.match(runtime, /self\._command_processor\.poll_controls\(\)/);
   assert.match(spec, /core\.invoke\("control_task_for_acceptance"\)/);
+});
+
+test("H8-02 converges cooperative cancellation from the original hidden App path", async () => {
+  const [orchestrator, processor, ledger, spec] = await Promise.all([
+    readFile(new URL("../../scripts/run_h8_02_acceptance.py", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../../backend/src/automation_tool/executor/command_processor.py",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../../backend/src/automation_tool/executor/ledger.py", import.meta.url),
+      "utf8",
+    ),
+    readProjectFile("e2e-tauri/task-termination.spec.ts"),
+  ]);
+
+  assert.match(orchestrator, /test:task-termination-tauri/);
+  assert.match(orchestrator, /AUTOMATION_TOOL_H802_CANCEL_OUTCOME_UNCERTAIN/);
+  assert.match(orchestrator, /AUTOMATION_TOOL_TASK_TERMINATION_CONFIRMED_REVISION/);
+  assert.match(orchestrator, /wait_for_cancel_acknowledgement/);
+  assert.match(orchestrator, /mark_side_effect_uncertain/);
+  assert.match(orchestrator, /cancel request allowed a new side-effect dispatch/);
+  assert.match(orchestrator, /start_real_executor\(/);
+  assert.match(processor, /"task\.cancel"/);
+  assert.match(ledger, /task\.outcome_uncertain/);
+  assert.match(ledger, /c\.message_type IN \('task\.pause', 'task\.cancel'\)/);
+  assert.match(spec, /AUTOMATION_TOOL_H802_CANCEL_OUTCOME_UNCERTAIN/);
+  assert.match(spec, /core\.invoke\("terminate_tasks_for_acceptance"\)/);
 });

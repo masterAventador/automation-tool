@@ -43,10 +43,15 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandDeliveryService,
     TaskCommandRecord,
 )
+from automation_tool.control_plane.application.task_target_previews import (
+    TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+    TaskTargetConfirmationIntent,
+)
 from automation_tool.control_plane.domain import (
     ExecutionAttemptId,
     ExecutionAttemptStatus,
     InstallationId,
+    TargetId,
     TaskCommandStatus,
     TaskCommandType,
     TaskEventType,
@@ -59,7 +64,12 @@ from automation_tool.control_plane.infrastructure.database import (
     execution_attempts,
     task_commands,
     task_events,
+    task_target_confirmations,
+    task_target_exclusions,
     tasks,
+)
+from automation_tool.control_plane.infrastructure.database.task_target_repository import (
+    SqlAlchemyTaskTargetRepository,
 )
 from automation_tool.executor import (
     FakeExecutorClient,
@@ -67,7 +77,13 @@ from automation_tool.executor import (
     FakeExecutorEngine,
     FakeExecutorScenario,
 )
-from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
+from automation_tool.protocol import (
+    MAX_EXECUTOR_MESSAGE_BYTES,
+    DouyinCandidate,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+    DouyinSearchExposureAction,
+)
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-termination-e2e.conf.json"
 CONTROL_PLANE_PORT = 8765
@@ -261,6 +277,95 @@ async def seed_attempt_and_offer(
         await database.close()
 
 
+async def seed_task_confirmation(
+    database_url: str,
+    installation_id: InstallationId,
+    task_id: TaskId,
+    *,
+    include_target_results: bool,
+) -> tuple[TargetId, ...]:
+    """Seed the current confirmation required by the production offer guard."""
+    database = Database.from_url(database_url)
+    now = datetime.now(UTC)
+    candidate_facts = (
+        (
+            ("a715-success", "成功目标", "a715_success"),
+            ("a715-skipped", "用户排除目标", "a715_skipped"),
+            ("a715-failed", "失败目标", "a715_failed"),
+            ("a715-uncertain", "不确定目标", "a715_uncertain"),
+        )
+        if include_target_results
+        else (("acceptance-controlled", "受控目标", "acceptance_controlled"),)
+    )
+    candidates = tuple(
+        DouyinCandidate(
+            platform_target_id=platform_target_id,
+            summary=DouyinCandidateSummary(
+                display_name=display_name,
+                public_handle=public_handle,
+            ),
+            source=DouyinCandidateSource.GENERAL_SEARCH_AUTHOR,
+            page_revision=1,
+        )
+        for platform_target_id, display_name, public_handle in candidate_facts
+    )
+    try:
+        targets = await SqlAlchemyTaskTargetRepository(database).evaluate_and_replace(
+            task_id=task_id,
+            installation_id=installation_id,
+            candidates=candidates,
+            blacklist=(),
+            evaluated_at=now,
+        )
+        selected_target_ids = tuple(
+            target.target_id
+            for index, target in enumerate(targets)
+            if not include_target_results or index != 1
+        )
+        intent = TaskTargetConfirmationIntent(
+            installation_id=installation_id,
+            task_id=task_id,
+            page_revision=1,
+            confirmation_revision=1,
+            action=DouyinSearchExposureAction.COMMENT,
+            message_template="您好 {{target_display_name}} 期待您的分享",
+            selected_target_ids=selected_target_ids,
+        )
+        async with database.session() as session:
+            if include_target_results:
+                await session.execute(
+                    insert(task_target_exclusions).values(
+                        target_id=targets[1].target_id.uuid,
+                        task_id=task_id.uuid,
+                        installation_id=installation_id.uuid,
+                        page_revision=1,
+                        excluded_at=now,
+                    )
+                )
+            await session.execute(
+                insert(task_target_confirmations).values(
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    page_revision=1,
+                    selection_task_revision=1,
+                    confirmed_task_revision=2,
+                    selected_target_count=intent.selected_target_count,
+                    action=intent.action.value,
+                    message_template=intent.message_template,
+                    intent_version=TASK_TARGET_CONFIRMATION_INTENT_VERSION,
+                    intent_fingerprint=intent.fingerprint(),
+                    source_message_id=TaskId.new().uuid,
+                    source_idempotency_key=f"task:acceptance:confirm:{task_id}",
+                    source_fingerprint=secrets.token_bytes(32),
+                    confirmed_at=now,
+                    created_at=now,
+                )
+            )
+        return tuple(target.target_id for target in targets)
+    finally:
+        await database.close()
+
+
 def fake_executor_client(credential: str, installation_id: InstallationId) -> FakeExecutorClient:
     exchanged = post_json(
         CONTROL_PLANE_PORT,
@@ -367,7 +472,7 @@ async def verify_database_state(
                     raise RuntimeError("T3-14 event timeline is invalid")
                 if (
                     task_row["status"] != task_status.value
-                    or task_row["revision"] != 5
+                    or task_row["revision"] != 6
                     or task_row["last_event_sequence"] != 3
                     or attempt_row["status"] != attempt_status.value
                     or attempt_row["revision"] != 4
@@ -401,6 +506,7 @@ def main() -> None:
     project_name = f"automation-tool-t314-{os.getpid()}"
     database_port = unused_loopback_port()
     environment, database_url = isolated_environment(database_port)
+    environment["AUTOMATION_TOOL_TASK_TERMINATION_CONFIRMED_REVISION"] = "1"
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
     app_process: subprocess.Popen[bytes] | None = None
@@ -460,12 +566,21 @@ def main() -> None:
                 CANCEL_TASK_KEY,
             )
         )
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                cancel_task_id,
+                include_target_results=False,
+            )
+        )
         cancel_offer = asyncio.run(
             seed_attempt_and_offer(
                 database_url,
                 installation_id,
                 cancel_task_id,
                 label="cancel",
+                confirmed_target_revision=True,
             )
         )
         client = fake_executor_client(credential, installation_id)
@@ -488,12 +603,21 @@ def main() -> None:
         )
         if second_installation != installation_id:
             raise RuntimeError("T3-14 Tasks crossed Installation scope")
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                emergency_task_id,
+                include_target_results=False,
+            )
+        )
         emergency_offer = asyncio.run(
             seed_attempt_and_offer(
                 database_url,
                 installation_id,
                 emergency_task_id,
                 label="emergency",
+                confirmed_target_revision=True,
             )
         )
         try:

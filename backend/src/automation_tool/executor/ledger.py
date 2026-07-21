@@ -128,17 +128,32 @@ class PendingTaskControl:
     command: TaskCommandEnvelope
     checkpoint_revision: int
     next_event_sequence: int
+    outcome_uncertain: bool = False
 
     def __post_init__(self) -> None:
-        expected_state = self.command.message_type in {"task.pause", "task.resume"}
+        expected_state = self.command.message_type in {
+            "task.pause",
+            "task.resume",
+            "task.cancel",
+        }
         if (
             not expected_state
             or type(self.checkpoint_revision) is not int
             or self.checkpoint_revision <= 0
             or type(self.next_event_sequence) is not int
             or not 1 <= self.next_event_sequence <= _MAX_CROSS_RUNTIME_SEQUENCE
+            or type(self.outcome_uncertain) is not bool
+            or (self.outcome_uncertain and self.command.message_type != "task.cancel")
         ):
             raise ExecutorLedgerRejected
+
+    @property
+    def event_type(self) -> str:
+        if self.command.message_type == "task.pause":
+            return "task.paused"
+        if self.command.message_type == "task.resume":
+            return "task.resumed"
+        return "task.outcome_uncertain" if self.outcome_uncertain else "task.cancelled"
 
 
 type InboundTaskCommand = TaskCommandEnvelope | TaskDiscoveryCommandEnvelope
@@ -659,15 +674,20 @@ class ExecutorLedger:
                         cast(sqlite3.Row | tuple[object, ...], row),
                         replayed=True,
                     )
-                pause_requested = connection.execute(
+                dispatch_blocked = connection.execute(
                     """
                     SELECT 1
                     FROM executor_commands c
                     JOIN executor_attempt_checkpoints p ON p.attempt_id = c.attempt_id
                     WHERE c.attempt_id = ?
-                      AND c.sequence = p.last_command_sequence
-                      AND c.message_type = 'task.pause'
-                      AND p.state IN ('running', 'paused')
+                      AND (
+                        p.state IN ('terminal', 'outcome_uncertain')
+                        OR (
+                          c.sequence = p.last_command_sequence
+                          AND c.message_type IN ('task.pause', 'task.cancel')
+                          AND p.state IN ('running', 'paused')
+                        )
+                      )
                     LIMIT 1
                     """,
                     (current.execution_attempt_id,),
@@ -675,7 +695,7 @@ class ExecutorLedger:
                 if (
                     canonical_dispatched_at < current.prepared_at
                     or canonical_dispatched_at >= _decode_utc(cast(tuple[object, ...], row)[16])
-                    or pause_requested is not None
+                    or dispatch_blocked is not None
                     or _action_emergency_stop(
                         cast(
                             sqlite3.Row | tuple[object, ...],
@@ -979,16 +999,21 @@ class ExecutorLedger:
                         ),
                     )
                 else:
-                    required_control_state = {
-                        "task.pause": AttemptCheckpointState.RUNNING,
-                        "task.resume": AttemptCheckpointState.PAUSED,
+                    required_control_states = {
+                        "task.pause": (AttemptCheckpointState.RUNNING,),
+                        "task.resume": (AttemptCheckpointState.PAUSED,),
+                        "task.cancel": (
+                            AttemptCheckpointState.RUNNING,
+                            AttemptCheckpointState.PAUSED,
+                        ),
                     }.get(command.message_type)
                     if (
                         str(checkpoint[0]) != str(command.task_id)
                         or command.sequence != int(checkpoint[1]) + 1
                         or (
-                            required_control_state is not None
-                            and str(checkpoint[3]) != required_control_state.value
+                            required_control_states is not None
+                            and str(checkpoint[3])
+                            not in {state.value for state in required_control_states}
                         )
                     ):
                         raise ValueError
@@ -1203,7 +1228,7 @@ class ExecutorLedger:
             raise ExecutorLedgerRejected from None
 
     def pending_task_controls(self, *, limit: int) -> tuple[PendingTaskControl, ...]:
-        """Return latest pause/resume commands whose checkpoint event is still pending."""
+        """Return latest cooperative controls whose checkpoint event is still pending."""
 
         try:
             if type(limit) is not int or not 1 <= limit <= _MAX_OUTBOX_BATCH:
@@ -1211,13 +1236,28 @@ class ExecutorLedger:
             with closing(self._connect()) as connection:
                 rows = connection.execute(
                     """
-                    SELECT c.envelope, p.revision, p.last_event_sequence
+                    SELECT c.envelope, p.revision, p.last_event_sequence,
+                           CASE
+                             WHEN c.message_type = 'task.cancel' AND EXISTS (
+                               SELECT 1
+                               FROM executor_side_effects uncertain_effect
+                               JOIN executor_action_admissions uncertain_action
+                                 ON uncertain_action.action_id = uncertain_effect.action_id
+                               WHERE uncertain_action.execution_attempt_id = c.attempt_id
+                                 AND uncertain_effect.state = 'uncertain'
+                             ) THEN 1
+                             ELSE 0
+                           END AS outcome_uncertain
                     FROM executor_commands c
                     JOIN executor_attempt_checkpoints p ON p.attempt_id = c.attempt_id
                     WHERE c.sequence = p.last_command_sequence
                       AND (
                         (c.message_type = 'task.pause' AND p.state = 'running')
                         OR (c.message_type = 'task.resume' AND p.state = 'paused')
+                        OR (
+                          c.message_type = 'task.cancel'
+                          AND p.state IN ('running', 'paused')
+                        )
                       )
                       AND EXISTS (
                         SELECT 1 FROM executor_outbox acknowledgement
@@ -1229,13 +1269,20 @@ class ExecutorLedger:
                       AND NOT EXISTS (
                         SELECT 1 FROM executor_outbox projected
                         WHERE projected.source_message_id = c.message_id
-                          AND json_extract(projected.envelope, '$.message_type') = CASE
-                            WHEN c.message_type = 'task.pause' THEN 'task.paused'
-                            ELSE 'task.resumed'
-                          END
+                          AND (
+                            (c.message_type = 'task.pause' AND json_extract(
+                              projected.envelope, '$.message_type'
+                            ) = 'task.paused')
+                            OR (c.message_type = 'task.resume' AND json_extract(
+                              projected.envelope, '$.message_type'
+                            ) = 'task.resumed')
+                            OR (c.message_type = 'task.cancel' AND json_extract(
+                              projected.envelope, '$.message_type'
+                            ) IN ('task.cancelled', 'task.outcome_uncertain'))
+                          )
                       )
                       AND (
-                        c.message_type != 'task.pause'
+                        c.message_type NOT IN ('task.pause', 'task.cancel')
                         OR NOT EXISTS (
                           SELECT 1
                           FROM executor_side_effects s
@@ -1259,6 +1306,7 @@ class ExecutorLedger:
                         command=parsed,
                         checkpoint_revision=cast(int, row[1]),
                         next_event_sequence=cast(int, row[2]) + 1,
+                        outcome_uncertain=bool(row[3]) if row[3] in (0, 1) else cast(bool, row[3]),
                     )
                 )
             return tuple(pending)
@@ -1301,34 +1349,53 @@ class ExecutorLedger:
                 if row is None:
                     raise ValueError
                 command_type = cast(str, row[3])
-                expected = {
-                    "task.pause": (
+                allowed_states = {
+                    "task.pause": {AttemptCheckpointState.RUNNING},
+                    "task.resume": {AttemptCheckpointState.PAUSED},
+                    "task.cancel": {
                         AttemptCheckpointState.RUNNING,
                         AttemptCheckpointState.PAUSED,
-                        "task.paused",
-                    ),
-                    "task.resume": (
-                        AttemptCheckpointState.PAUSED,
-                        AttemptCheckpointState.RUNNING,
-                        "task.resumed",
-                    ),
+                    },
                 }.get(command_type)
-                if expected is None:
+                allowed_event_types = {
+                    "task.pause": {"task.paused"},
+                    "task.resume": {"task.resumed"},
+                    "task.cancel": {"task.cancelled", "task.outcome_uncertain"},
+                }.get(command_type)
+                if allowed_states is None or allowed_event_types is None:
                     raise ValueError
-                current_state, target_state, event_type = expected
                 existing = connection.execute(
                     """
                     SELECT envelope, source_message_id
                     FROM executor_outbox
                     WHERE source_message_id = ?
-                      AND json_extract(envelope, '$.message_type') = ?
+                      AND json_extract(envelope, '$.message_type') IN (
+                        'task.paused', 'task.resumed',
+                        'task.cancelled', 'task.outcome_uncertain'
+                      )
                     """,
-                    (canonical_source_id, event_type),
+                    (canonical_source_id,),
                 ).fetchone()
                 if existing is not None:
+                    existing_message = _parse_outbound(cast(str, existing[0]))
+                    if (
+                        not isinstance(existing_message, TaskEventEnvelope)
+                        or existing_message.message_type not in allowed_event_types
+                        or existing_message.message_type != event.message_type
+                        or str(existing_message.task_id) != str(row[0])
+                        or str(existing_message.execution_attempt_id) != str(row[1])
+                        or str(existing_message.correlation_id) != str(row[2])
+                        or existing_message.sequence != int(row[8])
+                        or str(event.task_id) != str(existing_message.task_id)
+                        or str(event.execution_attempt_id)
+                        != str(existing_message.execution_attempt_id)
+                        or str(event.correlation_id) != str(existing_message.correlation_id)
+                        or event.sequence != existing_message.sequence
+                    ):
+                        raise ValueError
                     connection.commit()
                     return OutboxEntry(
-                        message=_parse_outbound(cast(str, existing[0])),
+                        message=existing_message,
                         source_message_id=cast(str, existing[1]),
                         replayed=True,
                     )
@@ -1346,14 +1413,14 @@ class ExecutorLedger:
                     or str(row[0]) != str(event.task_id)
                     or str(row[1]) != str(event.execution_attempt_id)
                     or str(row[2]) != str(event.correlation_id)
-                    or event.message_type != event_type
+                    or event.message_type not in allowed_event_types
                     or int(row[4]) != int(row[7])
-                    or str(row[5]) != current_state.value
+                    or str(row[5]) not in {state.value for state in allowed_states}
                     or int(row[6]) != expected_checkpoint_revision
                     or event.sequence != int(row[8]) + 1
                 ):
                     raise ValueError
-                if command_type == "task.pause":
+                if command_type in {"task.pause", "task.cancel"}:
                     dispatched = connection.execute(
                         """
                         SELECT 1
@@ -1367,6 +1434,32 @@ class ExecutorLedger:
                     if dispatched is not None:
                         connection.commit()
                         return None
+                if command_type == "task.pause":
+                    target_state = AttemptCheckpointState.PAUSED
+                    expected_event_type = "task.paused"
+                elif command_type == "task.resume":
+                    target_state = AttemptCheckpointState.RUNNING
+                    expected_event_type = "task.resumed"
+                else:
+                    uncertain = connection.execute(
+                        """
+                        SELECT 1
+                        FROM executor_side_effects s
+                        JOIN executor_action_admissions a ON a.action_id = s.action_id
+                        WHERE a.execution_attempt_id = ? AND s.state = 'uncertain'
+                        LIMIT 1
+                        """,
+                        (str(row[1]),),
+                    ).fetchone()
+                    if uncertain is None:
+                        target_state = AttemptCheckpointState.TERMINAL
+                        expected_event_type = "task.cancelled"
+                    else:
+                        target_state = AttemptCheckpointState.OUTCOME_UNCERTAIN
+                        expected_event_type = "task.outcome_uncertain"
+                if event.message_type != expected_event_type:
+                    raise ValueError
+                current_state = str(row[5])
                 updated = connection.execute(
                     """
                     UPDATE executor_attempt_checkpoints
@@ -1379,7 +1472,7 @@ class ExecutorLedger:
                         event.sequence,
                         str(row[1]),
                         expected_checkpoint_revision,
-                        current_state.value,
+                        current_state,
                         int(row[4]),
                     ),
                 )

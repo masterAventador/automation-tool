@@ -22,6 +22,10 @@ interface TaskTerminationSummary {
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const CANCEL_OUTCOME_UNCERTAIN =
+  process.env.AUTOMATION_TOOL_H802_CANCEL_OUTCOME_UNCERTAIN === "1";
+const CONFIRMED_TASK_REVISION =
+  process.env.AUTOMATION_TOOL_TASK_TERMINATION_CONFIRMED_REVISION === "1";
 
 describe("Task termination production-path acceptance", () => {
   it("cancels and emergency-stops through the hidden real App and formal Executor", async () => {
@@ -39,14 +43,20 @@ describe("Task termination production-path acceptance", () => {
     assert.equal(summary.cancelCommandType, "task.cancel");
     assert.equal(summary.cancelCommandStatus, "pending");
     assert.equal(summary.cancelSequence, 2);
-    assert.equal(summary.cancelEventType, "task.cancelled");
-    assert.equal(summary.cancelFinalStatus, "cancelled");
-    assert.equal(summary.cancelFinalRevision, 5);
+    assert.equal(
+      summary.cancelEventType,
+      CANCEL_OUTCOME_UNCERTAIN ? "task.outcome_uncertain" : "task.cancelled",
+    );
+    assert.equal(
+      summary.cancelFinalStatus,
+      CANCEL_OUTCOME_UNCERTAIN ? "outcome_uncertain" : "cancelled",
+    );
+    assert.equal(summary.cancelFinalRevision, CONFIRMED_TASK_REVISION ? 6 : 5);
     assert.equal(summary.emergencyCommandType, "task.emergency_stop");
     assert.equal(summary.emergencyCommandStatus, "pending");
     assert.equal(summary.emergencySequence, 2);
     assert.equal(summary.emergencyEventType, "task.outcome_uncertain");
     assert.equal(summary.emergencyFinalStatus, "outcome_uncertain");
-    assert.equal(summary.emergencyFinalRevision, 5);
+    assert.equal(summary.emergencyFinalRevision, CONFIRMED_TASK_REVISION ? 6 : 5);
   });
 });

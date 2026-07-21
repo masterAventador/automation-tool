@@ -469,6 +469,66 @@ def test_process_consumes_pause_and_resume_over_the_formal_socket(
     assert not thread.is_alive()
 
 
+def test_process_consumes_cancel_and_confirms_the_safe_terminal_checkpoint(
+    tmp_path: Path,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    state_directory = tmp_path / "cancel-state"
+    opened = ExecutorLedger(
+        state_directory=state_directory,
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+    offered = offer()
+    opened.receive_command(offered)
+    opened.compare_and_set_checkpoint(
+        attempt_id=str(offered.execution_attempt_id),
+        expected_revision=1,
+        state=AttemptCheckpointState.RUNNING,
+        last_event_sequence=2,
+    )
+    cancel = control(
+        "task.cancel",
+        sequence=2,
+        message_id="323e4567-e89b-42d3-a456-426614174021",
+        correlation_id="323e4567-e89b-42d3-a456-426614174022",
+    )
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.send(cancel.model_dump_json())
+            terminal = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
+            observed.put(terminal)
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(port, state_directory)
+        process.run(stop)
+        messages = observed.get(timeout=2)
+        if isinstance(messages, Exception):
+            raise messages
+        assert [
+            message.message_type for message in cast(tuple[ExecutorEnvelope, ...], messages)
+        ] == ["task.control_ack", "task.cancelled"]
+        checkpoint = opened.get_checkpoint(str(offered.execution_attempt_id))
+        assert checkpoint is not None
+        assert checkpoint.state is AttemptCheckpointState.TERMINAL
+        assert checkpoint.last_command_sequence == 2
+        assert checkpoint.last_event_sequence == 3
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.stopped"
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
 def test_process_collapses_outbox_delivery_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

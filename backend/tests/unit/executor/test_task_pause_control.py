@@ -333,14 +333,14 @@ def test_control_state_and_type_fail_closed_without_poisoning_the_attempt(
         message_id=resource_id(6),
         correlation_id=resource_id(106),
     )
-    cancel = command(
-        "task.cancel",
+    emergency_stop = command(
+        "task.emergency_stop",
         sequence=2,
         message_id=resource_id(7),
         correlation_id=resource_id(107),
     )
 
-    for rejected in (invalid_resume, cancel):
+    for rejected in (invalid_resume, emergency_stop):
         with pytest.raises(ExecutorCommandRejected):
             processor.handle(source(rejected))
         checkpoint = processor.ledger.get_checkpoint(str(ATTEMPT_ID))
