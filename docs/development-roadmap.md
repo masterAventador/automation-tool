@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-09）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-07 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-08 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-08 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-09 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -337,7 +337,7 @@
 | H8-05 | Executor 崩溃恢复 | restart budget、账本对齐、dispatched 未验证处理 | E4-08,A7-13 | ✅ 已完成 |
 | H8-06 | Control Plane 重启恢复 | Executor 重连、命令/事件幂等、任务收敛 | T3-20,E4-12 | ✅ 已完成 |
 | H8-07 | 断网/抖动 | 停在安全点、事件 spool、重连续传、不烧无限重试 | H8-05,H8-06 | ✅ 已完成 |
-| H8-08 | 休眠/锁屏 | 时钟跳变、deadline、窗口不可用和恢复诊断 | H8-07 | ⬜ 未开始 |
+| H8-08 | 休眠/锁屏 | 时钟跳变、deadline、窗口不可用和恢复诊断 | H8-07 | ✅ 已完成 |
 | H8-09 | Local Artifact | 稳定 ID、摘要、媒体类型、大小、相对路径和权限 | E4-11 | ⬜ 未开始 |
 | H8-10 | 诊断截图/Trace | 只在失败/用户开启时保存，数量/大小/时间上限 | H8-09,D6-14 | ⬜ 未开始 |
 | H8-11 | 日志脱敏 | 服务端、Rust、Executor 全链路凭据/页面/路径泄漏测试 | E4-10,H8-10 | ⬜ 未开始 |
@@ -2472,13 +2472,29 @@
 - 隔离与清理：固定 8765/1420 与随机 PostgreSQL 端口启动前均检查；专属 Compose project/network/volume、App identifier/AppData、SQLite 和临时信号目录不复用其他项目。两次真实验收（含首轮严格断言失败）都在 finally 回收隐藏 App/WDIO、签名 Executor、Uvicorn、容器/网络/Volume、AppData 和端口；无 Playwright/Chrome/业务 Profile 或真实账号副作用。全量无头 Playwright 结束后同样复核 Vite/浏览器无残留
 - 后续：进入 `H8-08`，覆盖电脑休眠/锁屏造成的单调时钟跳变、deadline 过期、桌面窗口不可用与恢复诊断；继续复用 H8-07 网络闸门和有界传输恢复，不建立第二套生命周期状态机
 
+### H8-08 休眠/锁屏恢复
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、单调调度间隙守卫、过期命令分类、固定恢复诊断、浏览器窗口恢复诊断、H8-08 独立隐藏 App/无头浏览器验收和文档属于单一 `feat: 完成休眠与锁屏恢复验收` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`；命令测试准确失败于没有独立过期类型，诊断/浏览器测试准确失败于固定恢复诊断器不存在，真实 WebSocket 测试证明单调调度跳变仍会在旧连接处理帧，隐藏 App 工程契约再因 H8-08 配置、WDIO 场景和 runner 不存在失败。H8-08 不调用整机休眠或真实锁屏，不新增系统电源 API、第二网络状态机、业务协议、数据库迁移、账号或系统钥匙串依赖
+- 安全恢复：正式 `LocalExecutorProcess` 在循环开始、socket timeout 后和收到业务帧后三处比较同一单调时钟；超过固定 5 秒的调度间隙在读取陈旧帧或发 heartbeat 前进入 H8-07 专用可恢复断线，外层先把 SQLite `network_connected` 复位，再用原 120×250ms 有界预算重连。只有恢复连接收到有效 heartbeat 才清空恢复标记；单调时钟倒退、非有限值、坏阈值和存储失败继续固定退出
+- 误报与 deadline：正式命令/页面处理完成后重置观测基线，真实 WebSocket 反向用例证明 10 秒业务耗时不会冒充休眠，而循环边界、timeout 和收帧三种 10 秒跳变仍安全重连。命令结构、身份和类型先按原协议验证，只有合法但本机 UTC 已达到 `deadline_at` 的帧细分为固定 `ExecutorCommandExpired`；runtime 忽略并记录固定诊断，不写 command/checkpoint/outbox，其他坏协议仍让进程 fail closed
+- 窗口与诊断：新增的 `ExecutorRecoveryDiagnostics` 不接收调用方字符串，只能写 `system_suspension_detected`、`command_deadline_expired`、`transport_recovered`、`browser_window_unavailable` 和 `browser_window_recovered` 五种固定事实；输出失败不反射异常。`BrowserRuntime` 在 context/window 操作失败时只标记一次 unavailable，共享诊断器看到后续隔离 runtime 成功启动才记录 recovered。Rust Manager 继续按 E4-10 对所有 stderr 做 4096-byte 读取、二次脱敏和 200 行/64 KiB 滚动保留
+- 原调用方验收：`backend/.venv/bin/python scripts/run_h8_08_acceptance.py` 先用系统 Chrome、两个 0700 临时 Profile 和 `headless=true` 运行真实 `BrowserRuntime`，主动关闭 context 后准确得到窗口不可用，再启动第二 runtime 得到恢复；随后构建并签名 PyInstaller Executor、唯一 `visible=false` H8-08 Tauri App、`automation-tool-h808-*` PostgreSQL/完整 Alembic/真实 Uvicorn/AppData/SQLite。App 经正式注册和 `restart_executor` 启动签名进程，runner 只暂停系统复核的精确 PID 6.25 秒再恢复
+- 纵向事实：恢复后 App 从原 `get_executor_diagnostics` IPC 读到精确休眠/传输恢复代码，不含 token、私有路径或异常原文；同一签名 Executor PID 始终存在、Rust `restartCount=0`、持久网络闸门恢复为 online，本机 command/outbox 均为 0。验收没有真实锁屏、没有可见 App/浏览器、没有默认 Profile 或真实账号访问，也没有把进程暂停冒充整机平台验收
+- 失败发现与修正：首次无头验收暴露 macOS `/var` 是 `/private/var` 符号链接而生产路径守卫正确拒绝，runner 改用真实解析后的隔离路径；第二轮暴露 WDIO 把诊断快照错误当数组，按正式 IPC `{ lines }` 形状修正并补失败日志清理；第三轮完整通过。提交前反向审查再发现 5 秒以上正常页面任务会在下一循环被误报休眠，新增真实 WebSocket RED 后只在命令完成处重置基线，休眠三个检测边界保持不变
+- 门禁：Backend 独占全量 `1927 passed, 5 skipped in 243.23s`，12485 条语句/2810 个分支覆盖率 100%，327 个 Python 文件格式、Ruff、严格 Mypy 301 个源码文件、uv lock/sync、OpenAPI 与 Executor Schema 全绿；Frontend 110 项 Node 契约、197 项 Vitest、5 项无头 Playwright、冻结安装、peer dependency、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套完整测试、Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿。三组门禁并行重负载时既有 WebSocket 合约时序断言波动一次，未修改超时或产品逻辑；随后该合约文件及 Backend 独占全量均稳定通过。H8-08 隐藏真实 App/无头浏览器纵向验收 1/1 通过
+- 隔离与清理：固定 8765/1420 与随机 PostgreSQL 端口启动前检查，使用专属 Compose project/network/volume、App identifier/AppData、SQLite 与临时 Profile。三轮纵向运行的成功和失败路径均在 finally 回收 WDIO/App、签名 Executor、Uvicorn、Chrome、容器/网络/Volume、AppData 和临时目录；最终复核零 H8-08 监听、容器、App/Executor/浏览器进程与 AppData 残留
+- 后续：进入 `H8-09` Local Artifact，冻结稳定 ID、摘要、媒体类型、大小、相对路径和权限；本次固定诊断不承载截图/Trace，H8-10 继续在 Artifact 边界上实现
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-08`（⬜ 未开始）：下一项覆盖休眠/锁屏下的时钟跳变、deadline、窗口不可用与恢复诊断；
+3. `H8-09`（⬜ 未开始）：建立 Local Artifact 的稳定 ID、摘要、媒体类型、大小、相对路径和权限边界；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

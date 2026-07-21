@@ -2043,6 +2043,23 @@ async fn prepare_network_recovery_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_system_resume_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskCreateFormAcceptancePreparation, ControlPlaneCommandError> {
+    prepare_recovery_for_acceptance(
+        client.inner(),
+        identity.inner(),
+        vault.inner(),
+        "AUTOMATION_TOOL_H808_BOOTSTRAP_TOKEN",
+        "AUTOMATION_TOOL_H808_ENVIRONMENT_ID",
+    )
+    .await
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 fn app_process_id_for_acceptance() -> u32 {
     std::process::id()
 }
@@ -2438,6 +2455,7 @@ pub fn run() {
         prepare_executor_crash_recovery_for_acceptance,
         prepare_control_plane_recovery_for_acceptance,
         prepare_network_recovery_for_acceptance,
+        prepare_system_resume_for_acceptance,
         app_process_id_for_acceptance,
         prepare_workbench_for_acceptance,
         prepare_platform_session_for_acceptance,

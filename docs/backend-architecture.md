@@ -553,6 +553,10 @@ H8-06 的恢复触发属于同一个 Python Executor 进程内的传输恢复，
 
 H8-07 将传输恢复从 `1012` 服务重启特例扩展到真正的网络中断：初次连接 `OSError/TimeoutError`、已连接 socket 无关闭帧消失及 durable/local outbox 发送网络错误都进入同一个默认 120 次、250ms 的有界预算；预算只在恢复后收到健康心跳时重置，stop 可打断退避，协议解析、应用逻辑和非恢复关闭继续固定失败。durable outbox 按批次持续排空；内存平台健康队列只保留当前未发送的同一 envelope，不因重连生成替代消息。
 
+H8-08 不新增系统电源事件协议，而是在正式 Executor socket 循环的三个安全边界比较同一单调时钟：循环开始、接收超时后、收到业务帧后。超过固定 5 秒的调度间隙先抛入 H8-07 的专用可恢复断线分类，外层立即把持久 `network_connected` 复位，再以原预算重建连接；只有恢复连接的有效 heartbeat 会清空恢复标记。正常命令处理完成后更新单调基线，因此有界页面等待不会伪装成休眠。单调时钟倒退、非有限值、坏阈值仍固定失败。
+
+命令层仍以服务端签发的 UTC `deadline_at` 为权威。H8-08 只把“结构与身份均合法但到达时已经过期”细分为固定 `ExecutorCommandExpired`，运行循环可安全忽略并写固定诊断；该命令不会进入 SQLite，坏 envelope、错身份和不支持类型仍走原固定进程失败。恢复诊断不接受调用方字符串：休眠、过期命令、窗口不可用、窗口恢复和传输恢复只有五个固定代码，经 Executor stderr 进入 Rust 既有 4096-byte 行读取、二次脱敏及 200 行/64 KiB 队列。浏览器 `BrowserRuntime` 只在 context/window 操作失败时标记不可用，下一次隔离 runtime 成功启动才记录恢复，不保存页面、URL、Profile 或异常原文。
+
 本机账本原地迁移到 v6，在既有 singleton 动作 guard 增加严格布尔 `network_connected`。独立账本默认在线以保持动作层单独可用，但正式 `LocalExecutorProcess` 构造时先持久置离线；只有 Hello、原 outbox 回放与控制轮询全部完成后置在线，任何连接退出先置离线。`begin_side_effect_dispatch()` 在同一 `BEGIN IMMEDIATE` 中同时检查紧停 latch 和网络闸门，所以已开始动作允许按既有语义结算，prepared 新动作在离线期间绝不能跨过安全点。未交付 outbox 同时受 1000 条和 16 MiB 硬上限约束；command、普通 outbox、崩溃恢复与 outcome 四个生产写入入口都在更新 checkpoint/副作用前原子核容，超限不留下半状态。
 
 T3-14 在同一 API/Outbox 边界增加 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop`。首次请求锁定 active Installation、Task/current Attempt，在领域状态机允许取消且 Attempt 尚未终止时，原子写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `CANCELLING`；不写伪造的取消终态，也不占用 Executor 持有的事件 sequence。相同 scope/key/意图重放返回原 Command 且不重复增 revision；改意图、再次终止、终态、错 scope、时间回退和不相容投影均 fail closed。

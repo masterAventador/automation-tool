@@ -26,6 +26,7 @@ import automation_tool.executor.transport as executor_transport
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
 from automation_tool.executor.command_processor import ExecutorCommandProcessor
+from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
 from automation_tool.executor.ledger import AttemptCheckpointState, ExecutorLedger
 from automation_tool.executor.runtime import (
     ExecutorProcessRejected,
@@ -117,6 +118,9 @@ def process_for(
     local_emergency_stop: bool = False,
     restart_reconnect_attempts: int | None = 2,
     restart_reconnect_delay: timedelta | None = timedelta(milliseconds=1),
+    monotonic_source: Callable[[], float] | None = None,
+    suspend_gap_threshold: timedelta | None = None,
+    diagnostic_output: StringIO | None = None,
 ) -> tuple[LocalExecutorProcess, StringIO]:
     target = output or StringIO()
     values: dict[str, object] = {
@@ -154,6 +158,12 @@ def process_for(
         values["restart_reconnect_attempts"] = restart_reconnect_attempts
     if restart_reconnect_delay is not None:
         values["restart_reconnect_delay"] = restart_reconnect_delay
+    if monotonic_source is not None:
+        values["monotonic_source"] = monotonic_source
+    if suspend_gap_threshold is not None:
+        values["suspend_gap_threshold"] = suspend_gap_threshold
+    if diagnostic_output is not None:
+        values["diagnostics"] = ExecutorRecoveryDiagnostics(diagnostic_output)
     return LocalExecutorProcess(**values), target  # type: ignore[arg-type]
 
 
@@ -196,6 +206,16 @@ def offer() -> TaskCommandEnvelope:
             "payload": {},
             "task_id": "123e4567-e89b-42d3-a456-426614174005",
             "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
+        }
+    )
+
+
+def expired_offer() -> TaskCommandEnvelope:
+    return TaskCommandEnvelope.model_validate(
+        {
+            **offer().model_dump(),
+            "sent_at": NOW - timedelta(seconds=2),
+            "deadline_at": NOW - timedelta(seconds=1),
         }
     )
 
@@ -1112,6 +1132,316 @@ def test_abnormal_network_disconnect_reconnects_and_replays_exact_durable_outbox
         server.shutdown()
         thread.join(timeout=3)
     assert not thread.is_alive()
+
+
+def test_suspension_gap_closes_the_stale_transport_and_ignores_expired_command(
+    tmp_path: Path,
+) -> None:
+    class OffsetMonotonic:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._offset = 0.0
+
+        def now(self) -> float:
+            with self._lock:
+                return time.monotonic() + self._offset
+
+        def jump(self, seconds: float) -> None:
+            with self._lock:
+                self._offset += seconds
+
+    clock = OffsetMonotonic()
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    connections = count(1)
+    stale = expired_offer()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            connection_number = next(connections)
+            hello = parse_executor_message(connection.recv(timeout=3))
+            if connection_number == 1:
+                heartbeat = parse_executor_message(connection.recv(timeout=3))
+                clock.jump(10)
+                connection.send(stale.model_dump_json())
+                observed.put((hello, heartbeat))
+                return
+            connection.send(stale.model_dump_json())
+            recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
+            observed.put((hello, recovered_heartbeat))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    diagnostics = StringIO()
+    state_directory = tmp_path / "suspension-state"
+    try:
+        process, _ = process_for(
+            port,
+            state_directory,
+            monotonic_source=clock.now,
+            suspend_gap_threshold=timedelta(seconds=5),
+            diagnostic_output=diagnostics,
+        )
+        process.run(stop)
+        first = observed.get(timeout=3)
+        second = observed.get(timeout=3)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        assert all(
+            message.message_type in {"executor.hello", "executor.heartbeat"}
+            for pair in (first, second)
+            for message in cast(tuple[ExecutorEnvelope, ...], pair)
+        )
+        assert (
+            process._command_processor.ledger.get_checkpoint(str(stale.execution_attempt_id))
+            is None
+        )
+        assert diagnostics.getvalue().splitlines() == [
+            "executor.recovery system_suspension_detected",
+            "executor.recovery command_deadline_expired",
+            "executor.recovery transport_recovered",
+        ]
+        assert process._command_processor.ledger.transport_connected() is False
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_long_command_processing_does_not_impersonate_system_suspension(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OffsetMonotonic:
+        def __init__(self) -> None:
+            self.offset = 0.0
+
+        def now(self) -> float:
+            return time.monotonic() + self.offset
+
+    clock = OffsetMonotonic()
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            hello = parse_executor_message(connection.recv(timeout=3))
+            connection.send(offer().model_dump_json())
+            batch = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            heartbeat = parse_executor_message(connection.recv(timeout=3))
+            observed.put((hello, batch, heartbeat))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    diagnostics = StringIO()
+    try:
+        process, _ = process_for(
+            port,
+            tmp_path / "long-command-state",
+            monotonic_source=clock.now,
+            suspend_gap_threshold=timedelta(seconds=5),
+            diagnostic_output=diagnostics,
+        )
+        original_handle = process._command_processor.handle
+
+        def delayed_handle(source: str | bytes) -> tuple[ExecutorEnvelope, ...]:
+            outcome = original_handle(source)
+            clock.offset += 10
+            return outcome
+
+        monkeypatch.setattr(process._command_processor, "handle", delayed_handle)
+        process.run(stop)
+        messages = observed.get(timeout=3)
+        if isinstance(messages, Exception):
+            raise messages
+        hello, batch, heartbeat = cast(
+            tuple[ExecutorEnvelope, tuple[ExecutorEnvelope, ...], ExecutorEnvelope], messages
+        )
+        assert hello.message_type == "executor.hello"
+        assert len(batch) == 6
+        assert heartbeat.message_type == "executor.heartbeat"
+        assert diagnostics.getvalue() == ""
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_gap_between_heartbeat_iterations_uses_the_same_safe_reconnect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OffsetMonotonic:
+        def __init__(self) -> None:
+            self.offset = 0.0
+
+        def now(self) -> float:
+            return time.monotonic() + self.offset
+
+    clock = OffsetMonotonic()
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    connections = count(1)
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            connection_number = next(connections)
+            hello = parse_executor_message(connection.recv(timeout=3))
+            heartbeat = parse_executor_message(connection.recv(timeout=3))
+            observed.put((hello, heartbeat))
+            if connection_number == 1:
+                with suppress(Exception):
+                    connection.recv(timeout=3)
+            else:
+                stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(
+            port,
+            tmp_path / "between-heartbeats-state",
+            monotonic_source=clock.now,
+            suspend_gap_threshold=timedelta(seconds=5),
+        )
+        original_healthy = process._reporter.healthy
+
+        def healthy_then_suspend() -> None:
+            original_healthy()
+            clock.offset += 10
+
+        monkeypatch.setattr(process._reporter, "healthy", healthy_then_suspend)
+        process.run(stop)
+        first = observed.get(timeout=3)
+        second = observed.get(timeout=3)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        assert all(
+            message.message_type in {"executor.hello", "executor.heartbeat"}
+            for pair in (first, second)
+            for message in cast(tuple[ExecutorEnvelope, ...], pair)
+        )
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.healthy",
+            "executor.stopped",
+        ]
+        process._report_expired_command()
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_gap_observed_after_socket_timeout_reconnects_before_heartbeat(
+    tmp_path: Path,
+) -> None:
+    class TimeoutGapMonotonic:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.offset = 0.0
+
+        def now(self) -> float:
+            self.calls += 1
+            if self.calls == 3:
+                self.offset = 10.0
+            return time.monotonic() + self.offset
+
+    clock = TimeoutGapMonotonic()
+    observed: queue.Queue[object] = queue.Queue()
+    stop = threading.Event()
+    connections = count(1)
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            connection_number = next(connections)
+            hello = parse_executor_message(connection.recv(timeout=3))
+            if connection_number == 1:
+                with suppress(Exception):
+                    connection.recv(timeout=3)
+                observed.put(hello)
+                return
+            heartbeat = parse_executor_message(connection.recv(timeout=3))
+            observed.put((hello, heartbeat))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    diagnostics = StringIO()
+    try:
+        process, _ = process_for(
+            port,
+            tmp_path / "timeout-gap-state",
+            monotonic_source=clock.now,
+            suspend_gap_threshold=timedelta(seconds=5),
+            diagnostic_output=diagnostics,
+        )
+        process.run(stop)
+        first = observed.get(timeout=3)
+        second = observed.get(timeout=3)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        assert cast(ExecutorEnvelope, first).message_type == "executor.hello"
+        assert [message.message_type for message in cast(tuple[ExecutorEnvelope, ...], second)] == [
+            "executor.hello",
+            "executor.heartbeat",
+        ]
+        assert diagnostics.getvalue().splitlines() == [
+            "executor.recovery system_suspension_detected",
+            "executor.recovery transport_recovered",
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_monotonic_clock_and_suspend_threshold_fail_closed(tmp_path: Path) -> None:
+    with pytest.raises(ExecutorProcessRejected):
+        process_for(
+            9,
+            tmp_path / "threshold-too-large",
+            suspend_gap_threshold=timedelta(minutes=11),
+        )
+
+    def failing_source() -> float:
+        raise RuntimeError("private monotonic failure")
+
+    for index, source in enumerate(
+        (
+            lambda: True,
+            lambda: cast(float, object()),
+            lambda: float("inf"),
+            lambda: -1.0,
+            failing_source,
+        )
+    ):
+        process, _ = process_for(
+            9,
+            tmp_path / f"invalid-monotonic-{index}",
+            monotonic_source=source,
+        )
+        with pytest.raises(ExecutorProcessRejected):
+            process._monotonic_now()
+
+    process, _ = process_for(9, tmp_path / "backwards-monotonic")
+    with pytest.raises(ExecutorProcessRejected):
+        process._suspension_detected(2.0, 1.0)
 
 
 def test_initial_network_outage_retries_but_protocol_close_remains_fixed(

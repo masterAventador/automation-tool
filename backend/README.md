@@ -50,6 +50,8 @@ H8-06 在现有 `LocalExecutorProcess` 内增加只针对 WebSocket `1012` 服�
 
 H8-07 把“初次连接不可达、异常无关闭帧和发送期网络错误”纳入同一有界传输恢复，但协议错误、应用错误和非恢复关闭仍 fail closed。`executor-ledger.sqlite3` v6 在既有动作 guard 增加持久 `network_connected`：构造 Executor 先置离线，只有 Hello、持久 outbox 回放和控制轮询完成后置在线，断线立即复位；`begin_side_effect_dispatch()` 与紧停状态在同一事务检查，因此离线 prepared 动作不能进入 dispatched。未交付 outbox 固定最多 1000 条/16 MiB，所有生成入口在更新 checkpoint/副作用前原子核容，超限整笔回滚；本机平台健康消息在发送失败时保留同一 envelope 等待重发。
 
+H8-08 继续复用 H8-07 的网络闸门和重连预算，不增加第二套生命周期状态机。正式 Executor 用单调时钟检测超过 5 秒的调度停顿，在读取陈旧 socket 帧或发送 heartbeat 前先转离线并重建连接；恢复后的有效 heartbeat 才解除恢复态。正常命令或页面处理耗时会在完成后重置观测基线，避免误报休眠。通过协议校验且已超过 UTC deadline 的命令有独立固定异常，运行循环只记固定诊断并忽略，既不写 command/checkpoint/outbox，也不把其他协议错误降级为可恢复。浏览器窗口不可用/恢复使用同一个无参数诊断器写入 stderr，Rust Manager 继续有界保留并二次脱敏，不接收 URL、路径、页面内容或调用方文本。
+
 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
 
 当前 offer payload 仍保持空的安全骨架；T3-17 已建立受约束 Task 定义事实，但尚未发布 Executor 业务 payload 版本，后续只能从这些明确列构造，不能退回任意 JSON。FakeExecutor 继续按相同正式 envelope 做无副作用回放；T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
@@ -82,7 +84,7 @@ H8-01 安全暂停原入口在仓库根执行 `backend/.venv/bin/python scripts/
 
 H8-02 协作式取消原入口执行 `backend/.venv/bin/python scripts/run_h8_02_acceptance.py`：唯一 `visible=false` task-termination App 经正式 Rust 控制调用、Uvicorn/PostgreSQL 和认证 WebSocket 发出普通取消；真实 Executor 先 ACK 并阻止新 dispatch，既有 dispatched 被标记无法确认后自动上报 `task.outcome_uncertain`。同一 App 的紧停半程仍由既有 HOLD FakeExecutor 夹具完成，只用于跑完原页面流程，不冒充 H8-03 离线硬停止。
 
-H8-03 离线紧停、H8-04 App 崩溃恢复、H8-05 Executor 崩溃恢复、H8-06 Control Plane 重启恢复与 H8-07 网络抖动恢复原入口分别执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_04_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_05_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_06_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_07_acceptance.py`。五者均使用隐藏 Tauri App、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收自有进程、端口、容器、网络、卷和私有目录；H8-07 真实强杀 Uvicorn 制造无关闭帧断网，在同一 Executor PID 上核对离线 dispatch 拒绝、两条取消事件本机 spool、服务恢复精确续传和后续两次抖动，最终 `restartCount=0` 且双账本唯一收敛。
+H8-03 离线紧停、H8-04 App 崩溃恢复、H8-05 Executor 崩溃恢复、H8-06 Control Plane 重启恢复、H8-07 网络抖动恢复与 H8-08 休眠恢复原入口分别执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py` 至 `backend/.venv/bin/python scripts/run_h8_08_acceptance.py`。六者均使用隐藏 Tauri App、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收自有进程、端口、容器、网络、卷和私有目录；H8-08 额外用无头系统浏览器与两个 0700 隔离 Profile 验证窗口失效/恢复，再只暂停精确签名 Executor PID 6.25 秒，由同一个 App 的正式 `get_executor_diagnostics` IPC 核对固定休眠/恢复诊断、同 PID、`restartCount=0` 和空白本机业务账本。
 
 D6-13 未确认副作用守卫在仓库根目录执行 `backend/.venv/bin/python scripts/run_d6_13_acceptance.py`。该 runner 通过正式 Uvicorn/Executor WebSocket 验证无绑定与旧确认的业务 offer 零投递、当前确认 offer 正常投递；它不调用 App API、不启动 Tauri 或运营浏览器。D6-11/D6-12 已独立证明确认事实来自真实 App 原入口，本任务只验收后端到 Executor 的原始生产边界。
 

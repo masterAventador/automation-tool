@@ -53,6 +53,13 @@ class ExecutorCommandRejected(ValueError):
         super().__init__("Local Executor command is rejected")
 
 
+class ExecutorCommandExpired(ExecutorCommandRejected):
+    """A valid command arrived after its server-authored UTC deadline."""
+
+    def __init__(self) -> None:
+        ValueError.__init__(self, "Local Executor command deadline has expired")
+
+
 @runtime_checkable
 class ExecutorCommandClock(Protocol):
     def now(self) -> datetime: ...
@@ -102,7 +109,16 @@ class ExecutorCommandProcessor:
         return self._ledger
 
     def handle(self, source: str | bytes) -> tuple[ExecutorOutboundMessage, ...]:
-        return _collapse_failure(lambda: self._handle(source))
+        expired = False
+        try:
+            return self._handle(source)
+        except ExecutorCommandExpired:
+            expired = True
+        except Exception:
+            pass
+        if expired:
+            raise ExecutorCommandExpired
+        raise ExecutorCommandRejected
 
     def pending_outbox(self) -> tuple[ExecutorOutboundMessage, ...]:
         return _collapse_failure(self._pending_outbox)
@@ -136,9 +152,10 @@ class ExecutorCommandProcessor:
             )
             or str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
-            or self._now() >= command.deadline_at
         ):
             raise ValueError
+        if self._now() >= command.deadline_at:
+            raise ExecutorCommandExpired
         if isinstance(command, TaskCommandEnvelope) and command.message_type in {
             "task.pause",
             "task.resume",
@@ -480,6 +497,7 @@ def _collapse_failure[Result](operation: Callable[[], Result]) -> Result:
 
 __all__ = [
     "ExecutorCommandClock",
+    "ExecutorCommandExpired",
     "ExecutorCommandProcessor",
     "ExecutorCommandRejected",
     "ExecutorOutboundMessage",

@@ -9,7 +9,11 @@ from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
-from automation_tool.executor.browser_runtime import BrowserRuntime, BrowserWindow
+from automation_tool.executor.browser_runtime import (
+    BrowserLaunchRequest,
+    BrowserRuntime,
+    BrowserWindow,
+)
 from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.page_drift_artifact import (
     PageDriftArtifactRejected,
@@ -122,7 +126,7 @@ class DouyinDiscoveryOperation(Protocol):
 
 
 class _Runtime(Protocol):
-    def start(self, request: object) -> None: ...
+    def start(self, request: BrowserLaunchRequest) -> None: ...
 
     def primary_window(self) -> BrowserWindow: ...
 
@@ -161,7 +165,7 @@ class ProductionDouyinDiscoveryOperation:
         *,
         ledger: ExecutorLedger,
         browser_authority: BrowserLaunchAuthority,
-        runtime_factory: Callable[[], _Runtime] = BrowserRuntime,  # type: ignore[assignment]
+        runtime_factory: Callable[[], _Runtime] = BrowserRuntime,
         search_factory: Callable[[BrowserWindow, object], _Search] = DouyinSearchExecution,  # type: ignore[assignment]
         scroll_factory: Callable[
             [BrowserWindow, object, DouyinSearchExecutionObservation, Callable[[], bool]],

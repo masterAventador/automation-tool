@@ -19,6 +19,7 @@ from automation_tool.executor.authentication import (
 )
 from automation_tool.executor.bootstrap import ExecutorBootstrapRejected, read_executor_bootstrap
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
+from automation_tool.executor.browser_runtime import BrowserRuntime
 from automation_tool.executor.command_processor import (
     ExecutorCommandProcessor,
     ExecutorCommandRejected,
@@ -27,6 +28,7 @@ from automation_tool.executor.crash_recovery import (
     ExecutorCrashRecoveryCoordinator,
     ExecutorCrashRecoveryRejected,
 )
+from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
 from automation_tool.executor.discovery_operation import ProductionDouyinDiscoveryOperation
 from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
 from automation_tool.executor.platform_commands import (
@@ -93,6 +95,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
     try:
         authenticator = LocalSessionAuthenticator(bootstrap.local_session_token)
         try:
+            recovery_diagnostics = ExecutorRecoveryDiagnostics(stderr)
             ledger = ExecutorLedger(
                 state_directory=Path(bootstrap.state_directory),
                 installation_id=str(bootstrap.installation_id),
@@ -108,6 +111,9 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 discovery_operation=ProductionDouyinDiscoveryOperation(
                     ledger=ledger,
                     browser_authority=browser_authority,
+                    runtime_factory=lambda: BrowserRuntime(
+                        diagnostics=recovery_diagnostics,
+                    ),
                 ),
             )
             metadata = RuntimeMetadata.detect()
@@ -125,6 +131,9 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                     health_reporter=DouyinSessionHealthReporter(ledger=ledger),
                     outbound=local_outbox,
                     browser_authority=browser_authority,
+                    runtime_factory=lambda: BrowserRuntime(
+                        diagnostics=recovery_diagnostics,
+                    ),
                 ),
                 result_writer=reporter.platform_command_result,
             )
@@ -134,6 +143,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 reporter=reporter,
                 command_processor=command_processor,
                 local_outbox=local_outbox,
+                diagnostics=recovery_diagnostics,
             )
             with stop_signal_event() as stop:
                 worker_failed = threading.Event()

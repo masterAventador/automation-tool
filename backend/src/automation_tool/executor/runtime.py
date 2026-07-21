@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import platform as host_platform
 import re
 import threading
@@ -22,9 +23,11 @@ from automation_tool import __version__
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import ExecutorBootstrap
 from automation_tool.executor.command_processor import (
+    ExecutorCommandExpired,
     ExecutorCommandProcessor,
     ExecutorOutboundMessage,
 )
+from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
 from automation_tool.executor.transport import (
     ExecutorTransportRejected,
     connect_executor_websocket,
@@ -46,6 +49,8 @@ _MESSAGE_DEADLINE = timedelta(seconds=30)
 _CONTROL_PLANE_RESTART_CLOSE_CODE = 1012
 _MAX_RESTART_RECONNECT_ATTEMPTS = 1000
 _MAX_RESTART_RECONNECT_DELAY = timedelta(seconds=5)
+_DEFAULT_SUSPEND_GAP_THRESHOLD = timedelta(seconds=5)
+_MAX_SUSPEND_GAP_THRESHOLD = timedelta(minutes=10)
 
 
 class ExecutorProcessRejected(ConnectionError):
@@ -227,6 +232,9 @@ class LocalExecutorProcess:
         local_outbox: Queue[object] | None = None,
         restart_reconnect_attempts: int = 120,
         restart_reconnect_delay: timedelta = timedelta(milliseconds=250),
+        monotonic_source: Callable[[], float] = time.monotonic,
+        suspend_gap_threshold: timedelta = _DEFAULT_SUSPEND_GAP_THRESHOLD,
+        diagnostics: ExecutorRecoveryDiagnostics | None = None,
     ) -> None:
         resolved_clock = metadata if clock is None else clock
         if (
@@ -239,6 +247,10 @@ class LocalExecutorProcess:
             or (local_outbox is not None and not isinstance(local_outbox, Queue))
             or type(restart_reconnect_attempts) is not int
             or not 1 <= restart_reconnect_attempts <= _MAX_RESTART_RECONNECT_ATTEMPTS
+            or not callable(monotonic_source)
+            or (
+                diagnostics is not None and not isinstance(diagnostics, ExecutorRecoveryDiagnostics)
+            )
         ):
             raise ExecutorProcessRejected
         self._bootstrap = bootstrap
@@ -253,6 +265,11 @@ class LocalExecutorProcess:
         self._pending_local_message: PlatformSessionHealthEnvelope | None = None
         self._restart_reconnect_attempts = restart_reconnect_attempts
         self._restart_reconnect_delay = _restart_reconnect_delay(restart_reconnect_delay)
+        self._monotonic_source = monotonic_source
+        self._suspend_gap_threshold = _positive_duration(suspend_gap_threshold)
+        if self._suspend_gap_threshold > _MAX_SUSPEND_GAP_THRESHOLD:
+            raise ExecutorProcessRejected
+        self._diagnostics = diagnostics
         try:
             self._command_processor.ledger.set_transport_connected(False)
         except Exception:
@@ -283,6 +300,33 @@ class LocalExecutorProcess:
             return str(value)
         except Exception:
             raise ExecutorProcessRejected from None
+
+    def _monotonic_now(self) -> float:
+        try:
+            value = self._monotonic_source()
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError
+            return float(value)
+        except Exception:
+            raise ExecutorProcessRejected from None
+
+    def _suspension_detected(self, previous: float, current: float) -> bool:
+        if current < previous:
+            raise ExecutorProcessRejected
+        return current - previous >= self._suspend_gap_threshold.total_seconds()
+
+    def _report_suspension(self) -> None:
+        if self._diagnostics is not None:
+            self._diagnostics.system_suspension_detected()
+
+    def _report_expired_command(self) -> None:
+        if self._diagnostics is not None:
+            self._diagnostics.command_deadline_expired()
 
     def _lifecycle(self, *, message_type: str, sequence: int) -> ExecutorLifecycleEnvelope:
         now = self._now()
@@ -379,6 +423,7 @@ class LocalExecutorProcess:
         failed = False
         healthy = False
         recovering_transport = False
+        recovering_from_suspension = False
         reconnect_attempts = 0
         reconnect_delay_seconds = self._restart_reconnect_delay.total_seconds()
         first_connection = True
@@ -431,18 +476,31 @@ class LocalExecutorProcess:
                         return
                     sequence = 1
                     heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
-                    heartbeat_deadline = time.monotonic() + heartbeat_interval
+                    last_monotonic = self._monotonic_now()
+                    heartbeat_deadline = last_monotonic + heartbeat_interval
                     while not stop.is_set():
+                        current_monotonic = self._monotonic_now()
+                        if self._suspension_detected(last_monotonic, current_monotonic):
+                            self._report_suspension()
+                            recovering_from_suspension = True
+                            raise _ExecutorNetworkDisconnected
+                        last_monotonic = current_monotonic
                         self._send_outbox(websocket, self._command_processor.poll_controls())
                         self._send_local_outbox(websocket)
-                        remaining = heartbeat_deadline - time.monotonic()
+                        remaining = heartbeat_deadline - current_monotonic
                         receive_timeout = max(0.001, min(0.25, remaining))
                         try:
                             source = websocket.recv(timeout=receive_timeout)
                         except TimeoutError:
                             if stop.is_set():
                                 break
-                            if time.monotonic() < heartbeat_deadline:
+                            current_monotonic = self._monotonic_now()
+                            if self._suspension_detected(last_monotonic, current_monotonic):
+                                self._report_suspension()
+                                recovering_from_suspension = True
+                                raise _ExecutorNetworkDisconnected from None
+                            last_monotonic = current_monotonic
+                            if current_monotonic < heartbeat_deadline:
                                 continue
                             sequence += 1
                             websocket.send(
@@ -459,7 +517,11 @@ class LocalExecutorProcess:
                             if recovering_transport:
                                 recovering_transport = False
                                 reconnect_attempts = 0
-                            heartbeat_deadline = time.monotonic() + heartbeat_interval
+                                if recovering_from_suspension:
+                                    if self._diagnostics is not None:
+                                        self._diagnostics.transport_recovered()
+                                    recovering_from_suspension = False
+                            heartbeat_deadline = current_monotonic + heartbeat_interval
                             continue
                         except Exception:
                             if stop.is_set():
@@ -467,7 +529,19 @@ class LocalExecutorProcess:
                             raise
                         if stop.is_set():
                             break
-                        self._send_outbox(websocket, self._command_processor.handle(source))
+                        current_monotonic = self._monotonic_now()
+                        if self._suspension_detected(last_monotonic, current_monotonic):
+                            self._report_suspension()
+                            recovering_from_suspension = True
+                            raise _ExecutorNetworkDisconnected
+                        last_monotonic = current_monotonic
+                        try:
+                            outcome = self._command_processor.handle(source)
+                        except ExecutorCommandExpired:
+                            self._report_expired_command()
+                            continue
+                        self._send_outbox(websocket, outcome)
+                        last_monotonic = self._monotonic_now()
                         if self._command_processor.emergency_stop_received():
                             break
             except Exception as error:

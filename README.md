@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-07 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，当前继续推进 H8-08 休眠/锁屏恢复。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-08 已完成；真实账号的 App 双重启、目标发现和平台最终动作证据保持独立待补，下一项为 H8-09 Local Artifact。
 
 ## 第一阶段
 
@@ -121,6 +121,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - H8-05 已把 supervisor restart 与首次启动明确区分：Rust 只在异常重启 bootstrap 中设置 `crash_recovery=true`，Python 在联网和 outbox replay 前只读结算现有副作用。进程树清理后若没有可验证页面上下文，dispatched 只会变成 uncertain，prepared 原样保留；checkpoint 与 `task.outcome_uncertain` outbox 在同一 SQLite 事务推进，稳定幂等键保证重复崩溃不重复上报或点击。唯一隐藏 App 已经正式 IPC 注入真实签名 Executor 崩溃，并从 PostgreSQL/工作台读到“结果待确认”；
 - H8-06 已让同一个签名 Executor 进程在收到 Control Plane 的 WebSocket `1012` 服务重启关闭码后原进程内有界重连：首次连接失败和非重启关闭仍固定失败，重连预算只在恢复连接完成健康心跳后重置，停止请求可立即打断等待。App 在 Executor 暂停期间从正式详情页发出的取消命令先持久化为 delivered；真实 Uvicorn 同库停服/重启后，Executor 以相同 PID、相同 Session 和 `restartCount=0` 重连，SQLite 按原 message/idempotency 精确重放命令与 outbox，PostgreSQL 最终只产生一份取消 ACK/终态事件；
 - H8-07 把异常断网和网络抖动纳入同一进程的有界恢复：SQLite v6 的持久网络闸门与紧停闸门在一次事务内阻止离线新 dispatch，未交付事件 spool 固定最多 1000 条/16 MiB；异常无关闭帧、初次网络不可达和发送期 `OSError/TimeoutError` 进入原 120×250ms 预算，协议/应用错误仍固定失败。隐藏 App 经真实 Rust 桥和签名 Executor 完成一次硬断网、两次抖动、离线取消落盘及精确续传，同一 PID、`restartCount=0`，云端与本机最终各只有一份事实；
+- H8-08 在同一 `LocalExecutorProcess` 中用 5 秒有界单调调度间隙识别整机休眠/锁屏后的陈旧连接：先复位 H8-07 网络闸门，再复用原有有界重连，稳定心跳后才报告恢复；正常长页面任务完成时重置观测基线，不冒充休眠。合法但已过 UTC deadline 的命令以独立固定结果忽略且不落账，其他坏协议继续 fail closed。浏览器窗口失效和重新建立只写固定无参数诊断，Rust 仍执行二次脱敏与 200 行/64 KiB 滚动限制。独立隐藏 App 已真实暂停/恢复签名 Executor，同一 PID、`restartCount=0`，并从正式 IPC 读到休眠与传输恢复诊断；另用无头系统浏览器和隔离 Profile 验证窗口丢失/恢复，全程不锁屏整机、不触碰默认 Profile；
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Windows x86_64 原生 runner 均已实测，Hosted Windows CI 的 Billing 限制只保留为持续集成覆盖缺口；
 - E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS arm64 与 Windows x86_64 release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App；

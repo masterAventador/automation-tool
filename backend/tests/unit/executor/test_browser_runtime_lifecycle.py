@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import AbstractContextManager
+from io import StringIO
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,6 +16,7 @@ from automation_tool.executor.browser_runtime import (
     BrowserRuntimeTimedOut,
     BrowserWindow,
 )
+from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
 
 
 class FakePage:
@@ -338,6 +340,37 @@ def test_start_and_window_failure_matrix_is_fixed_and_cleans_partial_resources(
     with pytest.raises(BrowserRuntimeRejected):
         runtime.open_window()
     runtime.close()
+
+
+def test_unavailable_window_and_later_runtime_recovery_emit_only_fixed_diagnostics(
+    tmp_path: Path,
+) -> None:
+    output = StringIO()
+    diagnostics = ExecutorRecoveryDiagnostics(output)
+    first_context = FakeContext()
+    runtime = BrowserRuntime(
+        starter=lambda: FakePlaywright(first_context),
+        diagnostics=diagnostics,
+    )
+    runtime.start(request(tmp_path / "first"))
+    first_context.pages = cast(Any, None)
+
+    with pytest.raises(BrowserRuntimeRejected):
+        runtime.primary_window()
+
+    first_context.pages = []
+    runtime.close()
+    recovered = BrowserRuntime(
+        starter=lambda: FakePlaywright(FakeContext()),
+        diagnostics=diagnostics,
+    )
+    recovered.start(request(tmp_path / "recovered"))
+    recovered.close()
+
+    assert output.getvalue().splitlines() == [
+        "executor.recovery browser_window_unavailable",
+        "executor.recovery browser_window_recovered",
+    ]
 
 
 def test_start_revalidates_browser_and_profile_paths_immediately_before_launch(

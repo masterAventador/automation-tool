@@ -12,6 +12,7 @@ from uuid import UUID
 import pytest
 
 from automation_tool.executor.command_processor import (
+    ExecutorCommandExpired,
     ExecutorCommandProcessor,
     ExecutorCommandRejected,
     SystemExecutorCommandClock,
@@ -175,6 +176,21 @@ def test_invalid_expired_or_effectful_commands_fail_closed_without_an_outbox(
         assert captured.value.__context__ is None
         assert "private" not in str(captured.value).lower()
     assert active.pending_outbox() == ()
+
+
+def test_expired_command_has_a_distinct_safe_failure_without_persistence(tmp_path: Path) -> None:
+    active = processor(tmp_path / "expired-command")
+
+    with pytest.raises(
+        ExecutorCommandExpired,
+        match=r"^Local Executor command deadline has expired$",
+    ) as captured:
+        active.handle(command(sent_at=NOW - timedelta(seconds=1), deadline_at=NOW))
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert active.pending_outbox() == ()
+    assert active.ledger.get_checkpoint(ATTEMPT_ID) is None
 
 
 def test_generation_failure_leaves_only_the_received_checkpoint_and_retry_recovers(

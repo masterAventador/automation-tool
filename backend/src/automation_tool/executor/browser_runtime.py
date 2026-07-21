@@ -14,6 +14,8 @@ from typing import Protocol, Self, cast
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
+from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
+
 _START_TIMEOUT_MILLISECONDS = 30_000
 _ACTION_TIMEOUT_MILLISECONDS = 15_000
 _NAVIGATION_TIMEOUT_MILLISECONDS = 30_000
@@ -133,10 +135,18 @@ class BrowserWindow:
 class BrowserRuntime:
     """Own exactly one thread-confined persistent context and all of its windows."""
 
-    def __init__(self, starter: Callable[[], _Playwright] = _start_playwright) -> None:
-        if not callable(starter):
+    def __init__(
+        self,
+        starter: Callable[[], _Playwright] = _start_playwright,
+        *,
+        diagnostics: ExecutorRecoveryDiagnostics | None = None,
+    ) -> None:
+        if not callable(starter) or (
+            diagnostics is not None and not isinstance(diagnostics, ExecutorRecoveryDiagnostics)
+        ):
             raise BrowserRuntimeRejected
         self._starter = starter
+        self._diagnostics = diagnostics
         self._owner = object()
         self._owner_thread: int | None = None
         self._context: _BrowserContext | None = None
@@ -161,10 +171,13 @@ class BrowserRuntime:
             context.set_default_navigation_timeout(_NAVIGATION_TIMEOUT_MILLISECONDS)
         except Exception:
             _best_effort_close(context, playwright)
+            self._window_unavailable()
             raise BrowserRuntimeRejected from None
         self._owner_thread = get_ident()
         self._context = context
         self._playwright = playwright
+        if self._diagnostics is not None:
+            self._diagnostics.browser_window_available()
 
     @contextmanager
     def running(self, request: BrowserLaunchRequest) -> Iterator[BrowserRuntime]:
@@ -179,6 +192,7 @@ class BrowserRuntime:
         try:
             return tuple(self._window(page) for page in context.pages)
         except Exception:
+            self._window_unavailable()
             raise BrowserRuntimeRejected from None
 
     def primary_window(self) -> BrowserWindow:
@@ -188,6 +202,7 @@ class BrowserRuntime:
             page = pages[0] if pages else context.new_page()
             return self._window(page)
         except Exception:
+            self._window_unavailable()
             raise BrowserRuntimeRejected from None
 
     def open_window(self) -> BrowserWindow:
@@ -195,6 +210,7 @@ class BrowserRuntime:
         try:
             return self._window(context.new_page())
         except Exception:
+            self._window_unavailable()
             raise BrowserRuntimeRejected from None
 
     def capture_window(
@@ -216,6 +232,7 @@ class BrowserRuntime:
         except BrowserRuntimeTimedOut:
             raise
         except Exception:
+            self._window_unavailable()
             raise BrowserRuntimeRejected from None
 
     def close_window(self, window: BrowserWindow) -> None:
@@ -230,6 +247,7 @@ class BrowserRuntime:
                 run_before_unload=False,
             )
         except Exception:
+            self._window_unavailable()
             raise BrowserRuntimeRejected from None
 
     def close(self) -> None:
@@ -251,6 +269,7 @@ class BrowserRuntime:
         except Exception:
             failed = True
         if failed:
+            self._window_unavailable()
             raise BrowserRuntimeRejected
 
     def _require_running(self) -> _BrowserContext:
@@ -265,6 +284,10 @@ class BrowserRuntime:
 
     def _window(self, page: _Page) -> BrowserWindow:
         return BrowserWindow._for_runtime(self._owner, page)
+
+    def _window_unavailable(self) -> None:
+        if self._diagnostics is not None:
+            self._diagnostics.browser_window_unavailable()
 
 
 class BrowserRuntimeLease:
