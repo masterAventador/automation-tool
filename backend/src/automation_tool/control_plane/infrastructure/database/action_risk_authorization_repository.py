@@ -36,6 +36,7 @@ from automation_tool.control_plane.domain import (
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
+    action_failure_circuits,
     action_risk_authorizations,
     douyin_search_exposure_definitions,
     execution_attempts,
@@ -180,6 +181,18 @@ class SqlAlchemyActionRiskAuthorizationRepository:
                     ):
                         raise ActionRiskAuthorizationRejected
                     return existing
+
+                circuit_open = await session.scalar(
+                    select(action_failure_circuits.c.circuit_open).where(
+                        action_failure_circuits.c.installation_id == installation_id.uuid,
+                        action_failure_circuits.c.platform == policy.scope.platform.value,
+                        action_failure_circuits.c.action == policy.scope.action.value,
+                    )
+                )
+                if circuit_open is True:
+                    raise ActionRiskAuthorizationLimited(
+                        ActionRiskLimitReason.CONSECUTIVE_FAILURE_CIRCUIT
+                    )
 
                 task_row = (
                     (

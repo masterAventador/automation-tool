@@ -368,6 +368,10 @@ A7-13 将点击/发送后进程退出留下的 `dispatched` 崩溃窗口收敛�
 
 最终证据充分时，恢复层使用 A7-11/A7-12 与即时执行共用的 action-specific effect→selector-version→final-evidence 验证摘要结算 verified；登录、风控、两类私信权限、等待超时、未知路由、锚点冲突、驱动或最终复验失败结算 uncertain。若 SQLite 结算不可用则保留 revision 2 dispatched，不能假装 uncertain 已落盘；并发同向重放投影首次 verified/uncertain，opposite terminal 竞争只接受 `BEGIN IMMEDIATE` 的账本赢家。A7-07 的 uncertain 终态没有被 A7-13 放宽，后续人工核对必须走明确用户操作；H8-05 才负责启动时枚举 unresolved 并把正确页面上下文交给本能力。
 
+A7-14 把“动作执行结果”接到服务端风险 scope，而不是在 Executor 再造一套阈值。`step.completed/step.failed` 仍由认证 Executor WebSocket 进入 `TaskEventConvergenceService`；PostgreSQL 仓储先按与授权相同的顺序锁 Installation，再锁 Task/Attempt/Action，在一个事务中更新动作终态、写不可变 `action_risk_results`、更新 `(Installation, douyin, action)` 的 `action_failure_circuits`，最后追加 Task event 和权威快照。复合外键从 result 到 ActionAuthorization、从 circuit 到最后/打开 result 固定同一 Installation/平台/动作，避免只靠应用查询条件维持审计归属。
+
+未打开 circuit 时，成功把连续失败清零，失败递增；达到当前 ActionAuthorization 中持久化的阈值快照时，首次触发者把 Task/Attempt 转为 `awaiting_human`，事件投影为既有 `task.awaiting_human`。授权仓储在返回精确 Action ID 重放后检查 circuit，确保既有授权事实仍可幂等读取而任何新 Action ID 都被 `consecutive_failure_circuit` 拒绝。circuit 打开后，跨 Task 晚到成功只记录审计而不能自动恢复；恢复只复用已 ACK 的正式 `task.resumed`，且必须是打开该 circuit 的 Task、时间单调、事务完整。服务端因此是计数与接管总指挥，本机 A7-04 硬下限和紧停仍独立生效，任何一层都不能放宽另一层。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

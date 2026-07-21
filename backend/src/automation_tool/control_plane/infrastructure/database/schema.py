@@ -1078,6 +1078,13 @@ action_risk_authorizations = Table(
     ),
     PrimaryKeyConstraint("action_id", name="pk_action_risk_authorizations"),
     UniqueConstraint(
+        "action_id",
+        "installation_id",
+        "platform",
+        "action",
+        name="uq_action_risk_authorizations_result_binding",
+    ),
+    UniqueConstraint(
         "task_id",
         "platform",
         "action",
@@ -1092,6 +1099,171 @@ action_risk_authorizations = Table(
         "daily_count_after",
         name="uq_action_risk_authorizations_daily_count",
     ),
+)
+
+action_risk_results = Table(
+    "action_risk_results",
+    metadata,
+    Column("action_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("platform", String(length=32), nullable=False),
+    Column("action", String(length=32), nullable=False),
+    Column("outcome", String(length=32), nullable=False),
+    Column("consecutive_failures_after", BigInteger(), nullable=False),
+    Column("consecutive_failure_threshold", BigInteger(), nullable=False),
+    Column("circuit_open_after", Boolean(), nullable=False),
+    Column("triggered_handoff", Boolean(), nullable=False),
+    Column("observed_at", DateTime(timezone=True), nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "platform in (" + ", ".join(f"'{platform.value}'" for platform in ActionRiskPlatform) + ")",
+        name="ck_action_risk_results_platform",
+    ),
+    CheckConstraint(
+        "action in ("
+        + ", ".join(f"'{action.value}'" for action in DouyinSearchExposureAction)
+        + ")",
+        name="ck_action_risk_results_action",
+    ),
+    CheckConstraint(
+        "outcome in ('succeeded', 'failed')",
+        name="ck_action_risk_results_outcome",
+    ),
+    CheckConstraint(
+        f"consecutive_failures_after between 0 and {MAX_ACTION_RISK_LIMIT} "
+        f"and consecutive_failure_threshold between 1 and {MAX_ACTION_RISK_LIMIT}",
+        name="ck_action_risk_results_limits",
+    ),
+    CheckConstraint(
+        "(outcome = 'failed' and consecutive_failures_after > 0) or "
+        "(outcome = 'succeeded' and "
+        "(consecutive_failures_after = 0 or circuit_open_after))",
+        name="ck_action_risk_results_failure_count",
+    ),
+    CheckConstraint(
+        "not triggered_handoff or (outcome = 'failed' and circuit_open_after "
+        "and consecutive_failures_after >= consecutive_failure_threshold)",
+        name="ck_action_risk_results_handoff",
+    ),
+    CheckConstraint(
+        "created_at >= observed_at",
+        name="ck_action_risk_results_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["action_id", "installation_id", "platform", "action"],
+        [
+            "action_risk_authorizations.action_id",
+            "action_risk_authorizations.installation_id",
+            "action_risk_authorizations.platform",
+            "action_risk_authorizations.action",
+        ],
+        name="fk_action_risk_results_authorization",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("action_id", name="pk_action_risk_results"),
+    UniqueConstraint(
+        "action_id",
+        "installation_id",
+        "platform",
+        "action",
+        name="uq_action_risk_results_scope_binding",
+    ),
+)
+
+action_failure_circuits = Table(
+    "action_failure_circuits",
+    metadata,
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("platform", String(length=32), nullable=False),
+    Column("action", String(length=32), nullable=False),
+    Column("consecutive_failures", BigInteger(), nullable=False),
+    Column("circuit_open", Boolean(), nullable=False),
+    Column("revision", BigInteger(), nullable=False),
+    Column("last_action_id", UUID(as_uuid=True), nullable=False),
+    Column("opened_by_action_id", UUID(as_uuid=True), nullable=True),
+    Column("opened_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "platform in (" + ", ".join(f"'{platform.value}'" for platform in ActionRiskPlatform) + ")",
+        name="ck_action_failure_circuits_platform",
+    ),
+    CheckConstraint(
+        "action in ("
+        + ", ".join(f"'{action.value}'" for action in DouyinSearchExposureAction)
+        + ")",
+        name="ck_action_failure_circuits_action",
+    ),
+    CheckConstraint(
+        f"consecutive_failures between 0 and {MAX_ACTION_RISK_LIMIT} and revision > 0",
+        name="ck_action_failure_circuits_counters",
+    ),
+    CheckConstraint(
+        "(circuit_open and consecutive_failures > 0 "
+        "and opened_by_action_id is not null and opened_at is not null) or "
+        "(not circuit_open and opened_by_action_id is null and opened_at is null)",
+        name="ck_action_failure_circuits_open_state",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at "
+        "and (opened_at is null or (opened_at >= created_at and updated_at >= opened_at))",
+        name="ck_action_failure_circuits_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_action_failure_circuits_installation",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["last_action_id", "installation_id", "platform", "action"],
+        [
+            "action_risk_results.action_id",
+            "action_risk_results.installation_id",
+            "action_risk_results.platform",
+            "action_risk_results.action",
+        ],
+        name="fk_action_failure_circuits_last_result",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["opened_by_action_id", "installation_id", "platform", "action"],
+        [
+            "action_risk_results.action_id",
+            "action_risk_results.installation_id",
+            "action_risk_results.platform",
+            "action_risk_results.action",
+        ],
+        name="fk_action_failure_circuits_open_result",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint(
+        "installation_id",
+        "platform",
+        "action",
+        name="pk_action_failure_circuits",
+    ),
+)
+
+Index(
+    "ix_action_risk_results_observed",
+    action_risk_results.c.observed_at,
+    action_risk_results.c.action_id,
 )
 
 Index(

@@ -725,6 +725,13 @@ async def test_illegal_task_attempt_and_action_states_are_rejected_before_append
                 {"progress_percent": 25},
             ),
             (
+                TaskStatus.PAUSED,
+                ExecutionAttemptStatus.RUNNING,
+                ActionStatus.DISPATCHED,
+                "step.progress",
+                {"progress_percent": 25},
+            ),
+            (
                 TaskStatus.RUNNING,
                 ExecutionAttemptStatus.ACCEPTED,
                 ActionStatus.DISPATCHED,
@@ -1021,3 +1028,69 @@ async def test_cross_task_idempotency_race_has_one_winner_and_database_failure_i
         assert "unused" not in str(captured.value)
     finally:
         await unavailable_database.close()
+
+
+@pytest.mark.asyncio
+async def test_missing_installation_and_hidden_sequence_conflict_fail_closed(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        with pytest.raises(TaskEventConvergenceRejected):
+            await service(database).receive(
+                event(
+                    InstallationId.new(),
+                    TaskId.new(),
+                    ExecutionAttemptId.new(),
+                    "task.started",
+                    sequence=1,
+                )
+            )
+
+        installation_id, task_id, attempt_id, _ = await seed_chain(database)
+        async with database.session() as session:
+            await session.execute(
+                insert(task_events).values(
+                    task_id=task_id.uuid,
+                    installation_id=installation_id.uuid,
+                    sequence=1,
+                    event_version="1.0",
+                    event_type=TaskEventType.TASK_STARTED.value,
+                    task_revision=4,
+                    task_status=TaskStatus.RUNNING.value,
+                    execution_attempt_id=attempt_id.uuid,
+                    action_id=None,
+                    source_message_id=TaskId.new().uuid,
+                    source_idempotency_key=f"task:t311:hidden:{task_id}",
+                    source_fingerprint=b"h" * 32,
+                    progress_percent=None,
+                    occurred_at=NOW,
+                    recorded_at=NOW,
+                    safe_message=None,
+                )
+            )
+        with pytest.raises(TaskEventConvergenceRejected):
+            await service(database).receive(
+                event(
+                    installation_id,
+                    task_id,
+                    attempt_id,
+                    "task.started",
+                    sequence=1,
+                    message_id=str(TaskId.new()),
+                    idempotency_key=f"task:t311:conflict:{task_id}",
+                )
+            )
+        async with database.session() as session:
+            assert (
+                await session.scalar(
+                    select(tasks.c.last_event_sequence).where(tasks.c.id == task_id.uuid)
+                )
+                == 0
+            )
+    finally:
+        await reset_data(database)
+        await database.close()

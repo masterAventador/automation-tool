@@ -10,7 +10,7 @@ from automation_tool.control_plane.application.task_event_convergence import (
 from automation_tool.control_plane.application.task_event_stream import TaskEventStreamService
 from automation_tool.control_plane.infrastructure.database import Database
 
-HEAD_REVISION = "20260720_0022"
+HEAD_REVISION = "20260721_0023"
 
 
 @pytest.mark.asyncio

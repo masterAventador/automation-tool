@@ -35,6 +35,7 @@ class ActionRiskLimitReason(StrEnum):
     MINIMUM_INTERVAL = "minimum_interval"
     TASK_ACTION_LIMIT = "task_action_limit"
     DAILY_ACTION_LIMIT = "daily_action_limit"
+    CONSECUTIVE_FAILURE_CIRCUIT = "consecutive_failure_circuit"
 
 
 class ActionRiskAuthorizationLimited(PermissionError):

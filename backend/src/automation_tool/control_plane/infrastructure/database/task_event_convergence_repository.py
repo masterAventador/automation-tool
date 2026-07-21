@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import desc, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from automation_tool.control_plane.application.task_event_convergence import (
     PendingTaskEvent,
@@ -17,6 +18,7 @@ from automation_tool.control_plane.application.task_event_convergence import (
     TaskEventConvergenceUnavailable,
 )
 from automation_tool.control_plane.domain import (
+    MAX_ACTION_RISK_LIMIT,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionOutcome,
     ActionStatus,
@@ -25,6 +27,7 @@ from automation_tool.control_plane.domain import (
     TaskCommandResponseType,
     TaskCommandStatus,
     TaskCommandType,
+    TaskEventType,
     TaskEventVersion,
     TaskId,
     TaskSnapshotProjection,
@@ -32,7 +35,12 @@ from automation_tool.control_plane.domain import (
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
+    action_failure_circuits,
+    action_risk_authorizations,
+    action_risk_results,
+    douyin_search_exposure_definitions,
     execution_attempts,
+    installations,
     task_actions,
     task_commands,
     task_events,
@@ -197,6 +205,193 @@ def _validate_action(
     raise TaskEventConvergenceRejected
 
 
+async def _record_action_risk_result(
+    session: AsyncSession,
+    *,
+    pending: PendingTaskEvent,
+) -> bool:
+    """Persist one authorized final result and return whether it opened the circuit."""
+
+    action_id = pending.action_id
+    outcome = pending.target_action_outcome
+    if (
+        action_id is None
+        or pending.message.message_type not in {"step.completed", "step.failed"}
+        or outcome not in {ActionOutcome.SUCCEEDED, ActionOutcome.FAILED}
+    ):
+        return False
+    authorization = (
+        (
+            await session.execute(
+                select(
+                    action_risk_authorizations.c.installation_id,
+                    action_risk_authorizations.c.platform,
+                    action_risk_authorizations.c.action,
+                    action_risk_authorizations.c.consecutive_failure_threshold,
+                )
+                .where(action_risk_authorizations.c.action_id == action_id.uuid)
+                .with_for_update()
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if authorization is None:
+        return False
+    if (
+        await session.scalar(
+            select(action_risk_results.c.action_id).where(
+                action_risk_results.c.action_id == action_id.uuid
+            )
+        )
+        is not None
+    ):
+        raise TaskEventConvergenceRejected
+
+    scope = (
+        action_failure_circuits.c.installation_id == authorization["installation_id"],
+        action_failure_circuits.c.platform == authorization["platform"],
+        action_failure_circuits.c.action == authorization["action"],
+    )
+    circuit = (
+        (await session.execute(select(action_failure_circuits).where(*scope).with_for_update()))
+        .mappings()
+        .one_or_none()
+    )
+    prior_failures = 0 if circuit is None else cast(int, circuit["consecutive_failures"])
+    already_open = False if circuit is None else cast(bool, circuit["circuit_open"])
+    if circuit is not None and pending.received_at < cast(datetime, circuit["updated_at"]):
+        raise TaskEventConvergenceRejected
+
+    if outcome is ActionOutcome.SUCCEEDED:
+        failures_after = prior_failures if already_open else 0
+    else:
+        if prior_failures >= MAX_ACTION_RISK_LIMIT:
+            raise TaskEventConvergenceRejected
+        failures_after = prior_failures + 1
+    threshold = cast(int, authorization["consecutive_failure_threshold"])
+    opened_now = (
+        outcome is ActionOutcome.FAILED and not already_open and failures_after >= threshold
+    )
+    open_after = already_open or opened_now
+
+    await session.execute(
+        insert(action_risk_results).values(
+            action_id=action_id.uuid,
+            installation_id=authorization["installation_id"],
+            platform=authorization["platform"],
+            action=authorization["action"],
+            outcome=outcome.value,
+            consecutive_failures_after=failures_after,
+            consecutive_failure_threshold=threshold,
+            circuit_open_after=open_after,
+            triggered_handoff=opened_now,
+            observed_at=pending.received_at,
+            created_at=pending.received_at,
+        )
+    )
+    if circuit is None:
+        await session.execute(
+            insert(action_failure_circuits).values(
+                installation_id=authorization["installation_id"],
+                platform=authorization["platform"],
+                action=authorization["action"],
+                consecutive_failures=failures_after,
+                circuit_open=open_after,
+                revision=1,
+                last_action_id=action_id.uuid,
+                opened_by_action_id=action_id.uuid if opened_now else None,
+                opened_at=pending.received_at if opened_now else None,
+                created_at=pending.received_at,
+                updated_at=pending.received_at,
+            )
+        )
+    else:
+        values: dict[str, object] = {
+            "consecutive_failures": failures_after,
+            "circuit_open": open_after,
+            "revision": cast(int, circuit["revision"]) + 1,
+            "last_action_id": action_id.uuid,
+            "updated_at": pending.received_at,
+        }
+        if opened_now:
+            values["opened_by_action_id"] = action_id.uuid
+            values["opened_at"] = pending.received_at
+        updated = await session.execute(
+            update(action_failure_circuits)
+            .where(*scope, action_failure_circuits.c.revision == circuit["revision"])
+            .values(**values)
+            .returning(action_failure_circuits.c.revision)
+        )
+        updated.scalar_one()
+    return opened_now
+
+
+async def _clear_owned_failure_circuit(
+    session: AsyncSession,
+    *,
+    pending: PendingTaskEvent,
+) -> None:
+    if pending.message.message_type != "task.resumed":
+        return
+    installation_id = UUID(str(pending.message.installation_id))
+    task_id = UUID(str(pending.message.task_id))
+    action = await session.scalar(
+        select(douyin_search_exposure_definitions.c.action).where(
+            douyin_search_exposure_definitions.c.task_id == task_id,
+            douyin_search_exposure_definitions.c.installation_id == installation_id,
+        )
+    )
+    if action is None:
+        return
+    circuit = (
+        (
+            await session.execute(
+                select(action_failure_circuits)
+                .where(
+                    action_failure_circuits.c.installation_id == installation_id,
+                    action_failure_circuits.c.platform == "douyin",
+                    action_failure_circuits.c.action == action,
+                    action_failure_circuits.c.circuit_open.is_(True),
+                )
+                .with_for_update()
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if circuit is None:
+        return
+    opened_task_id = await session.scalar(
+        select(action_risk_authorizations.c.task_id).where(
+            action_risk_authorizations.c.action_id == circuit["opened_by_action_id"]
+        )
+    )
+    if opened_task_id != task_id:
+        return
+    if pending.received_at < cast(datetime, circuit["updated_at"]):
+        raise TaskEventConvergenceRejected
+    updated = await session.execute(
+        update(action_failure_circuits)
+        .where(
+            action_failure_circuits.c.installation_id == installation_id,
+            action_failure_circuits.c.platform == "douyin",
+            action_failure_circuits.c.action == action,
+            action_failure_circuits.c.revision == circuit["revision"],
+        )
+        .values(
+            consecutive_failures=0,
+            circuit_open=False,
+            revision=cast(int, circuit["revision"]) + 1,
+            opened_by_action_id=None,
+            opened_at=None,
+            updated_at=pending.received_at,
+        )
+        .returning(action_failure_circuits.c.revision)
+    )
+    updated.scalar_one()
+
+
 class SqlAlchemyTaskEventConvergenceRepository:
     """Lock one Task and atomically append its next event and all bound projections."""
 
@@ -215,6 +410,14 @@ class SqlAlchemyTaskEventConvergenceRepository:
         message_id = UUID(str(message.message_id))
         try:
             async with self._database.session() as session:
+                installation_id = UUID(str(message.installation_id))
+                installation = await session.scalar(
+                    select(installations.c.id)
+                    .where(installations.c.id == installation_id)
+                    .with_for_update()
+                )
+                if installation is None:
+                    raise TaskEventConvergenceRejected
                 task_row = (
                     (
                         await session.execute(
@@ -351,9 +554,6 @@ class SqlAlchemyTaskEventConvergenceRepository:
                     ):
                         raise TaskEventConvergenceRejected
 
-                next_task_status = _next_task_status(current_task_status, pending)
-                next_attempt_status = _next_attempt_status(current_attempt_status, pending)
-
                 action_row: RowMapping | None = None
                 next_action: tuple[ActionStatus, ActionOutcome] | None = None
                 if pending.action_id is not None:
@@ -378,6 +578,23 @@ class SqlAlchemyTaskEventConvergenceRepository:
                     ):
                         raise TaskEventConvergenceRejected
                     next_action = _validate_action(action_row, pending)
+
+                opened_failure_circuit = await _record_action_risk_result(
+                    session,
+                    pending=pending,
+                )
+                persisted_event_type = pending.event_type
+                if opened_failure_circuit and current_task_status is TaskStatus.RUNNING:
+                    next_task_status = TaskStateMachine.transition(
+                        current_task_status,
+                        TaskStatus.AWAITING_HUMAN,
+                    )
+                    next_attempt_status = ExecutionAttemptStatus.AWAITING_HUMAN
+                    persisted_event_type = TaskEventType.TASK_AWAITING_HUMAN
+                else:
+                    next_task_status = _next_task_status(current_task_status, pending)
+                    next_attempt_status = _next_attempt_status(current_attempt_status, pending)
+                await _clear_owned_failure_circuit(session, pending=pending)
 
                 if next_attempt_status is not current_attempt_status:
                     attempt_values: dict[str, object] = {
@@ -436,7 +653,7 @@ class SqlAlchemyTaskEventConvergenceRepository:
                         installation_id=installation_id,
                         sequence=message.sequence,
                         event_version=TaskEventVersion.V1.value,
-                        event_type=pending.event_type.value,
+                        event_type=persisted_event_type.value,
                         task_revision=next_revision,
                         task_status=next_task_status.value,
                         execution_attempt_id=attempt_id,

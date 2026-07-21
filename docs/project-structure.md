@@ -252,7 +252,7 @@ backend/
 │       │   ├── application/       # 注册、凭据、任务、配置、内容和工作流用例
 │       │   ├── domain/            # 稳定 ID、Task 执行状态、版本事件、快照与 Command 契约
 │       │   └── infrastructure/
-│       │       ├── database/      # PostgreSQL 注册认证与 Task/Attempt/Action/Event/Command 持久化
+│       │       ├── database/      # PostgreSQL 注册认证、任务与 A7-14 动作结果/连续失败 circuit
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
 │       │       ├── events/
 │       │       ├── object_storage/
@@ -389,6 +389,8 @@ A7-11 的 `executor/rpa/douyin/comment_action.py` 只编排既有 A7-04 `Executo
 A7-12 的 `executor/rpa/douyin/direct_message_action.py` 只组合 A7-04 gate、A7-07 ledger 与 A7-09 Page Object。`prepared` 后可进入会话或从已打开会话恢复，填入仅驻内存的最终文案后才竞争唯一 send dispatch；两类权限在准备阶段和发送后分别投影，许可后不确定永不重发。`tests/integration/test_douyin_direct_message_action_browser.py` 从生产 BrowserRuntime 在无头官方-origin 隔离页执行真实 entry/input/send/final locator 与私有 SQLite，验证首次 entry/send 各一次、verified 重放零新增；Fake 页面和测试计数不进入生产包，也不替代 A7-17 真实账号最终状态验收。
 
 A7-13 的 `executor/rpa/douyin/side_effect_recovery.py` 复用两类动作导出的验证摘要与既有 Page Object，只对 SQLite `dispatched` 执行最终锚点只读核对；prepared/verified/uncertain 原样投影，恢复层不拥有导航、selector 或任何动作 locator。`tests/integration/test_douyin_side_effect_recovery_browser.py` 以生产 BrowserRuntime、无头系统 Chrome、官方-origin 隔离页和两条真实 dispatched 事实验证评论/私信均可只读结算，页面评论提交、会话入口和私信发送计数保持 0；H8-05 才把该单次能力装入崩溃启动编排。
+
+A7-14 不新增独立服务目录：现有 `action_risk_authorization_repository.py` 在精确重放后阻止 open circuit 的新授权，`task_event_convergence_repository.py` 在正式 Executor 结果事务中维护连续失败与 handoff，`schema.py` 和迁移 `20260721_0023_action_failure_circuits.py` 定义 `action_risk_results/action_failure_circuits` 及完整 scope 外键。`tests/integration/test_action_risk_authorization_lifecycle.py` 覆盖计数、并发、恢复、故障注入和认证 WebSocket 原入口，`test_action_failure_circuit_lifecycle.py` 覆盖迁移精确结构与降级；没有新增 App、浏览器、HTTP 业务接口或第二份结果协议。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 

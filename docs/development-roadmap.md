@@ -32,7 +32,7 @@
 
 ## 3. 当前进度快照
 
-快照日期：2026-07-20。
+快照日期：2026-07-21。
 
 | 范围 | 当前结果 |
 | --- | --- |
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-13 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-14 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-14 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-15 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -320,8 +320,8 @@
 | A7-11 | 评论动作执行 | 授权校验→账本→点击→最终验证→结构化 receipt | A7-07,A7-08 | ✅ 已完成 |
 | A7-12 | 私信动作执行 | 授权校验→账本→发送→最终验证→结构化 receipt | A7-07,A7-09 | ✅ 已完成 |
 | A7-13 | 结果不确定处理 | dispatched 未 verified 先查询；无法确认不重放 | A7-11,A7-12 | ✅ 已完成 |
-| A7-14 | 连续失败熔断 | 达阈值停止新动作、打开 handoff、保持审计 | A7-02,A7-13 | ⬜ 未开始 |
-| A7-15 | 目标级结果 UI | 成功/跳过/失败/不确定和证据摘要 | A7-13,T3-18 | ⬜ 未开始 |
+| A7-14 | 连续失败熔断 | 达阈值停止新动作、打开 handoff、保持审计 | A7-02,A7-13 | ✅ 已完成 |
+| A7-15 | 目标级结果 UI | 成功/跳过/失败/不确定和证据摘要 | A7-13,T3-18 | 🧪 RED |
 | A7-16 | 评论真实验收 | 仅自有/授权目标；平台最终状态与服务端一致 | A7-15 | 🔍 待真实账号 |
 | A7-17 | 私信真实验收 | 仅自有/授权目标；重复/断网/确认丢失覆盖 | A7-15 | 🔍 待真实账号 |
 | A7-18 | 风险护栏对抗测试 | 篡改授权、超频、重放、取消竞态和服务器放宽均失败 | A7-16,A7-17 | ⬜ 未开始 |
@@ -2329,11 +2329,27 @@
 - 资源与文档：运行 UI 前确认 1420 空闲，所有 BrowserRuntime/Playwright、Vite、pytest、Uvicorn 与端口在测试后零残留；未启动可见 App、未接触默认浏览器 Profile、系统钥匙串、真实账号或其他项目资源。同步根/Backend README、后端架构、工程结构与本唯一台账，不新增重复规划文档
 - 后续：进入 `A7-14`，用持久连续失败事实在阈值到达时阻止新动作、打开人工接管并保持可审计恢复；D6-16/B5-15/A7-16/A7-17 真实账号证据继续独立保留
 
+### A7-14 连续失败熔断
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、PostgreSQL 动作结果/circuit、事件收敛与授权门禁、迁移/测试和文档属于单一 `feat: 完成连续失败熔断` 提交；完成后立即推送 `main`
+- RED 与权威边界：先把唯一台账置为 `🧪 RED`；首个聚焦测试在收集阶段准确失败于 `action_failure_circuits` 无法从正式数据库包导入，证明 A7-01 阈值只停留在授权快照、尚无计数或熔断事实。随后核对 A7-02 与正式 Task event，确定 Control Plane PostgreSQL 是连续失败和 handoff 的唯一权威；没有在 Executor、本机 SQLite、App 或浏览器层复制阈值
+- 持久事实：迁移 `20260721_0023` 新增不可变 `action_risk_results` 和当前 `action_failure_circuits`。每个确定成功/失败结果保存 Action ID、授权 scope、授权快照阈值、结果后连续失败数、circuit 是否打开及是否为首次 handoff 触发者；current circuit 以 Installation/平台/动作作主键，保存 revision、最后结果和首次打开结果。result→ActionAuthorization、circuit→最后/打开 result 均用复合外键绑定相同 Installation/平台/动作，跨 scope 拼接由数据库拒绝
+- 原子计数与接管：正式 `step.completed/step.failed` 仍从 `TaskEventConvergenceService` 进入；仓储先按与授权相同的顺序锁 Installation，再锁 Task/Attempt/Action，在一个事务中完成动作终态、结果审计、streak/circuit、Task event 和权威快照。未打开时成功清零、失败递增；首次达到当前 ActionAuthorization 持久阈值时把当前 Task/Attempt 改为 `awaiting_human`，事件投影为既有 `task.awaiting_human`。精确事件重放在任何计数前返回，不能重复累加或再开 handoff
+- 停止新动作：A7-02 授权仓储在同一 Installation 行锁下，先允许完全一致的既有 Action ID 返回原事实，再检查对应 scope circuit；open 时所有新 Action ID 固定返回 `consecutive_failure_circuit`，且早于 Task 状态、间隔和额度判断。这样既保留审计/幂等读取，又不会因重放语义重新放行动作；A7-04 本机硬下限和紧停继续独立生效，服务器 circuit 不能放宽本机限制
+- 安全恢复：circuit 打开后，其他已授权 Task 的晚到成功只写成功结果且保持 circuit，不能用偶然成功自动解除人工接管；另一个 Task 的 resume 也不能代清。只有打开该 circuit 的 Task 经过现有已 ACK `task.resumed` 控制链、服务端时间不回退并在同一事务完成状态恢复时，才能把 streak 清零、关闭 circuit 和递增 revision。非 circuit handoff 的 resume 不创建空风险状态
+- 原调用方验收：当前能力没有 App HTTP/Tauri/React API，原始调用方是认证 Local Executor WebSocket。真实 PostgreSQL、完整 Alembic、正式 `create_app`、`ExecutorConnectionService`、短期 `executor.connect` Session 和 `/api/v1/executors/connect` 完成正式子协议/Hello；随后从该 socket 发送绑定已授权 Action 的 `step.failed`，再以 heartbeat 证明前序已处理。最终数据库精确得到一条失败结果、open circuit、`task.awaiting_human`，同 scope 下一 Target 的新授权被 circuit 原因拒绝；测试没有以直接 HTTP 或 App Mock 冒充该入口
+- 失败与并发矩阵：覆盖三连失败阈值、成功清零、open 后跨 Task 晚到成功、精确授权/事件重放、两 Task 并发失败串行且仅一个触发者、结果重复、circuit 时钟回退、计数结构上界、错误 Task 恢复、owner 恢复时钟回退、非 circuit handoff、Installation 缺失、隐藏 sequence 唯一冲突、数据库不可用、迁移 exact schema/约束/升降级和原有事件状态矩阵。任何失败均不留下半条结果、半次计数或伪 handoff
+- 门禁：A7-14 风险/事件/迁移聚焦 `35 passed`，认证 WebSocket 单项独立通过且修正测试退出时无关 Outbox 轮询造成的连接取消警告；Backend 全量 `1790 passed, 5 skipped in 136.50s`，11479 条语句/2502 个分支覆盖率 100%，310 个 Python 文件格式、Ruff、严格 Mypy 286 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend 101 项 Node 契约、186 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿
+- 资源与文档：数据库测试只使用 `automation-tool-pytest-*` 专属 Compose project、随机 loopback PostgreSQL 端口、独立容器/网络/Volume，并由 fixture 回收；WebSocket 验收使用进程内正式 ASGI 路由且关闭无关出站 Command 轮询，结束后连接池无未归还警告。没有启动 Tauri、可见浏览器、用户 Profile、真实账号或系统钥匙串；Frontend UI 保持 headless。同步根/Backend README、后端架构、工程结构和本唯一台账，没有新增重复规划文档
+- 后续：进入 `A7-15`，把既有 Action/Task event 与 A7-13 receipt 收敛为目标级成功、跳过、失败、不确定和受限证据摘要 UI；先复用 T3-18 运行详情，不新增第二个任务详情页
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-14`（⬜ 未开始）：建立持久连续失败计数与熔断，达到策略阈值后停止新动作、打开人工接管，并保留审计与安全恢复语义；
+1. `A7-15`（🧪 RED）：正在核对 T3-18 运行详情、现有 Action 投影与 A7-13 receipt 边界，固定成功、跳过、失败、不确定和受限证据摘要的唯一目标级 UI；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

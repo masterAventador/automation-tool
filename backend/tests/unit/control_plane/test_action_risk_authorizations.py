@@ -133,6 +133,7 @@ def test_limit_reason_is_a_closed_public_contract() -> None:
         ActionRiskLimitReason.MINIMUM_INTERVAL,
         ActionRiskLimitReason.TASK_ACTION_LIMIT,
         ActionRiskLimitReason.DAILY_ACTION_LIMIT,
+        ActionRiskLimitReason.CONSECUTIVE_FAILURE_CIRCUIT,
     )
 
 

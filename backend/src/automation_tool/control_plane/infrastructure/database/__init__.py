@@ -6,7 +6,9 @@ from .action_risk_authorization_repository import (
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
+    action_failure_circuits,
     action_risk_authorizations,
+    action_risk_results,
     device_credentials,
     device_sessions,
     douyin_search_exposure_definitions,
@@ -41,7 +43,9 @@ __all__ = [
     "SqlAlchemyTaskEventConvergenceRepository",
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",
+    "action_failure_circuits",
     "action_risk_authorizations",
+    "action_risk_results",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
