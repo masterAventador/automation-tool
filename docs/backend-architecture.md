@@ -551,6 +551,10 @@ H8-06 的恢复触发属于同一个 Python Executor 进程内的传输恢复，
 
 重连沿用原 bootstrap、短期 Executor Session、进程 PID 和本机账本。`recover_outbox()` 只把未交付 envelope 以原 message ID、source message ID 和 idempotency key 重新排队，不生成替代事实；Control Plane 的持久 Command lease/ACK 和 Event 双键去重继续作为服务端权威。Rust manager 因进程未退出而保持 `restartCount=0`，H8-05 的 crash recovery 扫描不会误触发。本任务不新增 HTTP/WebSocket 消息、数据库迁移、React 状态机或凭据存储。
 
+H8-07 将传输恢复从 `1012` 服务重启特例扩展到真正的网络中断：初次连接 `OSError/TimeoutError`、已连接 socket 无关闭帧消失及 durable/local outbox 发送网络错误都进入同一个默认 120 次、250ms 的有界预算；预算只在恢复后收到健康心跳时重置，stop 可打断退避，协议解析、应用逻辑和非恢复关闭继续固定失败。durable outbox 按批次持续排空；内存平台健康队列只保留当前未发送的同一 envelope，不因重连生成替代消息。
+
+本机账本原地迁移到 v6，在既有 singleton 动作 guard 增加严格布尔 `network_connected`。独立账本默认在线以保持动作层单独可用，但正式 `LocalExecutorProcess` 构造时先持久置离线；只有 Hello、原 outbox 回放与控制轮询全部完成后置在线，任何连接退出先置离线。`begin_side_effect_dispatch()` 在同一 `BEGIN IMMEDIATE` 中同时检查紧停 latch 和网络闸门，所以已开始动作允许按既有语义结算，prepared 新动作在离线期间绝不能跨过安全点。未交付 outbox 同时受 1000 条和 16 MiB 硬上限约束；command、普通 outbox、崩溃恢复与 outcome 四个生产写入入口都在更新 checkpoint/副作用前原子核容，超限不留下半状态。
+
 T3-14 在同一 API/Outbox 边界增加 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop`。首次请求锁定 active Installation、Task/current Attempt，在领域状态机允许取消且 Attempt 尚未终止时，原子写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `CANCELLING`；不写伪造的取消终态，也不占用 Executor 持有的事件 sequence。相同 scope/key/意图重放返回原 Command 且不重复增 revision；改意图、再次终止、终态、错 scope、时间回退和不相容投影均 fail closed。
 
 `task.cancelled` 及 cancelling 下的 `task.outcome_uncertain` 收敛前必须锁定最新 cancel/emergency-stop Command，并核对 acknowledged、control ACK、correlation 和确认时间。完成、部分完成或失败事实与取消并发时不要求伪造取消 ACK，可从 CANCELLING 收敛到 Executor 已确认的真实终态。HOLD FakeExecutor 对正常 cancel 回报 cancelled，对硬 emergency-stop 保守回报 outcome uncertain；同一 `visible=false` App 已经通过正式 Rust/Uvicorn/PostgreSQL/WebSocket 跑通两个路径。

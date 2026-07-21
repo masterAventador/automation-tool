@@ -22,6 +22,7 @@ from websockets.sync.server import Server, ServerConnection, serve
 from websockets.typing import Subprotocol
 
 import automation_tool.executor.runtime as executor_runtime
+import automation_tool.executor.transport as executor_transport
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
 from automation_tool.executor.command_processor import ExecutorCommandProcessor
@@ -114,8 +115,8 @@ def process_for(
     id_source: object = None,
     local_outbox: queue.Queue[object] | None = None,
     local_emergency_stop: bool = False,
-    restart_reconnect_attempts: int | None = None,
-    restart_reconnect_delay: timedelta | None = None,
+    restart_reconnect_attempts: int | None = 2,
+    restart_reconnect_delay: timedelta | None = timedelta(milliseconds=1),
 ) -> tuple[LocalExecutorProcess, StringIO]:
     target = output or StringIO()
     values: dict[str, object] = {
@@ -277,6 +278,7 @@ def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly(
             "executor.healthy",
             "executor.stopped",
         ]
+        assert process._command_processor.ledger.transport_connected() is False
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -325,22 +327,30 @@ def test_local_platform_health_queue_rejects_invalid_messages_and_socket_failure
     class Socket:
         def __init__(self, *, fail: bool = False) -> None:
             self.fail = fail
+            self.sources: list[str] = []
 
         def send(self, source: str) -> None:
             if self.fail:
                 raise OSError("private socket failure")
+            self.sources.append(source)
 
     invalid: queue.Queue[object] = queue.Queue()
     invalid.put(object())
     process, _ = process_for(9, tmp_path / "invalid-local-outbox", local_outbox=invalid)
-    with pytest.raises(ExecutorProcessRejected):
+    with pytest.raises(ExecutorProcessRejected) as captured:
         process._send_local_outbox(cast(object, Socket()))  # type: ignore[arg-type]
+    assert executor_runtime._is_recoverable_transport_error(captured.value) is False
 
     failing: queue.Queue[object] = queue.Queue()
     failing.put(session_health())
     process, _ = process_for(9, tmp_path / "failing-local-outbox", local_outbox=failing)
-    with pytest.raises(ExecutorProcessRejected):
+    with pytest.raises(ExecutorProcessRejected) as captured:
         process._send_local_outbox(cast(object, Socket(fail=True)))  # type: ignore[arg-type]
+    assert executor_runtime._is_recoverable_transport_error(captured.value) is True
+    delivered = Socket()
+    process._send_local_outbox(cast(object, delivered))  # type: ignore[arg-type]
+    assert len(delivered.sources) == 1
+    assert failing.empty()
 
 
 @pytest.mark.parametrize("server_message", ("{}", b"private-binary-command"))
@@ -730,6 +740,7 @@ def test_process_collapses_outbox_delivery_failure(
 
 def test_process_rejects_transport_clock_ids_and_constructor_values_without_leakage(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     process, _ = process_for(9, tmp_path / "transport-state")
     with pytest.raises(ExecutorProcessRejected) as transport:
@@ -796,6 +807,33 @@ def test_process_rejects_transport_clock_ids_and_constructor_values_without_leak
             LocalExecutorProcess(**arguments)  # type: ignore[arg-type]
         assert captured.value.__cause__ is None
         assert captured.value.__context__ is None
+
+    valid_processor = ExecutorCommandProcessor(
+        ledger=ExecutorLedger(
+            state_directory=tmp_path / "constructor-network-state",
+            installation_id=INSTALLATION_ID,
+            executor_id=EXECUTOR_ID,
+        ),
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            valid_processor.ledger,
+            "set_transport_connected",
+            lambda _connected: (_ for _ in ()).throw(RuntimeError("private ledger failure")),
+        )
+        with pytest.raises(ExecutorProcessRejected):
+            LocalExecutorProcess(
+                bootstrap=valid.bootstrap,
+                metadata=valid.metadata,
+                reporter=reporter(output),
+                command_processor=valid_processor,
+                clock=FixedClock(),
+                id_source=DeterministicIds(),
+                open_timeout=timedelta(milliseconds=10),
+                close_timeout=timedelta(milliseconds=10),
+            )
 
 
 @pytest.mark.parametrize(
@@ -1000,9 +1038,120 @@ def test_control_plane_restart_reconnects_and_replays_exact_durable_outbox(
             "executor.healthy",
             "executor.stopped",
         ]
+        assert process._command_processor.ledger.transport_connected() is False
     finally:
         server.shutdown()
         thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_abnormal_network_disconnect_reconnects_and_replays_exact_durable_outbox(
+    tmp_path: Path,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    connections = count(1)
+    stop = threading.Event()
+    offered = offer()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            connection_number = next(connections)
+            hello = parse_executor_message(connection.recv(timeout=3))
+            if connection_number == 1:
+                heartbeat = parse_executor_message(connection.recv(timeout=3))
+                connection.send(offered.model_dump_json())
+                original = tuple(
+                    parse_executor_message(connection.recv(timeout=3)) for _ in range(6)
+                )
+                observed.put((hello, heartbeat, original))
+                connection.close_socket()
+                return
+            recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
+            observed.put((hello, recovered, recovered_heartbeat))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(port, tmp_path / "network-recovery-state")
+        process.run(stop)
+        first = observed.get(timeout=3)
+        second = observed.get(timeout=3)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        first_hello, heartbeat, original = cast(
+            tuple[
+                ExecutorLifecycleEnvelope, ExecutorLifecycleEnvelope, tuple[ExecutorEnvelope, ...]
+            ],
+            first,
+        )
+        second_hello, recovered, recovered_heartbeat = cast(
+            tuple[
+                ExecutorLifecycleEnvelope,
+                tuple[ExecutorEnvelope, ...],
+                ExecutorLifecycleEnvelope,
+            ],
+            second,
+        )
+        assert first_hello.message_type == second_hello.message_type == "executor.hello"
+        assert heartbeat.message_type == recovered_heartbeat.message_type == "executor.heartbeat"
+        assert tuple(message.message_id for message in recovered) == tuple(
+            message.message_id for message in original
+        )
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.healthy",
+            "executor.stopped",
+        ]
+        assert process._command_processor.ledger.transport_connected() is False
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_initial_network_outage_retries_but_protocol_close_remains_fixed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    original_connect = executor_transport.connect_executor_websocket
+    stop = threading.Event()
+
+    def connect_after_outage(**values: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("private network unavailable")
+        return original_connect(**values)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(executor_runtime, "connect_executor_websocket", connect_after_outage)
+
+    def handler(connection: ServerConnection) -> None:
+        parse_executor_message(connection.recv(timeout=2))
+        parse_executor_message(connection.recv(timeout=2))
+        stop.set()
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(
+            port,
+            tmp_path / "initial-network-outage",
+            restart_reconnect_delay=timedelta(milliseconds=1),
+        )
+        process.run(stop)
+        assert attempts == 2
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.healthy",
+            "executor.stopped",
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
     assert not thread.is_alive()
 
 
@@ -1011,7 +1160,7 @@ def test_control_plane_restart_reconnect_is_bounded_and_stop_interruptible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connection_attempts = 0
-    original_connect = executor_runtime.connect_executor_websocket
+    original_connect = executor_transport.connect_executor_websocket
 
     def counted_connect(**values: object) -> object:
         nonlocal connection_attempts
@@ -1116,7 +1265,7 @@ def test_stop_interrupts_a_failed_connection_attempt_during_restart(
 ) -> None:
     stop = threading.Event()
     attempts = 0
-    original_connect = executor_runtime.connect_executor_websocket
+    original_connect = executor_transport.connect_executor_websocket
 
     def connect_then_stop(**values: object) -> object:
         nonlocal attempts
@@ -1175,6 +1324,67 @@ def test_restart_close_is_preserved_by_both_outbox_senders(tmp_path: Path) -> No
     )
     with pytest.raises(ConnectionClosedError):
         local_process._send_local_outbox(socket)
+
+    class DisconnectedSocket:
+        @staticmethod
+        def send(_source: str) -> None:
+            raise OSError("private network outage")
+
+    disconnected = cast(ClientConnection, DisconnectedSocket())
+    with pytest.raises(ExecutorProcessRejected) as captured:
+        process._send_outbox(disconnected, messages)
+    assert executor_runtime._is_recoverable_transport_error(captured.value) is True
+
+
+def test_fixed_connect_failure_and_transport_gate_storage_failures_do_not_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed, _ = process_for(9, tmp_path / "fixed-connect-failure")
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            executor_runtime,
+            "connect_executor_websocket",
+            lambda **_values: (_ for _ in ()).throw(ValueError("private protocol failure")),
+        )
+        with pytest.raises(ExecutorProcessRejected):
+            fixed.run(threading.Event())
+
+    for mode in ("disconnect", "final"):
+        stop = threading.Event()
+
+        def handler(
+            connection: ServerConnection,
+            current_mode: str = mode,
+            current_stop: threading.Event = stop,
+        ) -> None:
+            parse_executor_message(connection.recv(timeout=2))
+            if current_mode == "disconnect":
+                connection.close(code=1012, reason="control plane restart")
+                return
+            parse_executor_message(connection.recv(timeout=2))
+            current_stop.set()
+
+        server, thread, port = run_server(handler)
+        try:
+            process, _ = process_for(port, tmp_path / f"gate-storage-{mode}")
+
+            def fail_offline(connected: bool) -> bool:
+                if not connected:
+                    raise RuntimeError("private ledger failure")
+                return True
+
+            monkeypatch.setattr(
+                process._command_processor.ledger,
+                "set_transport_connected",
+                fail_offline,
+            )
+            with pytest.raises(ExecutorProcessRejected):
+                process.run(stop)
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+        assert not thread.is_alive()
 
 
 def test_stop_during_restart_close_from_outbox_is_a_clean_exit(

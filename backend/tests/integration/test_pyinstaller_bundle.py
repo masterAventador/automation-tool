@@ -113,7 +113,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         input=bootstrap(tmp_path / "executor-state"),
         capture_output=True,
         check=False,
-        timeout=20,
+        timeout=45,
         env={"PATH": os.defpath},
     )
     assert unavailable.returncode == 1

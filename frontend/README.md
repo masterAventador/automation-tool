@@ -126,6 +126,8 @@ H8-05 的 Executor 崩溃恢复纵向验收执行 `backend/.venv/bin/python scri
 
 H8-06 的 Control Plane 重启恢复纵向验收执行 `backend/.venv/bin/python scripts/run_h8_06_acceptance.py`。唯一 `visible=false` App 从真实表单创建并运行 comment Task，经正式诊断入口启动签名 Executor；runner 只暂停该精确 PID，App 从原详情页点击取消并确认服务端已持久化 delivered Command，随后真实停止并以同一 PostgreSQL 重启 Uvicorn。App 在停服时展示不可用，恢复后从正式工作台/详情读到取消终态；同一 Executor PID、Session、`restartCount=0` 和本机/云端唯一命令事件事实证明过程没有由 supervisor 重启或测试夹具代打。
 
+H8-07 的异常网络恢复纵向验收执行 `backend/.venv/bin/python scripts/run_h8_07_acceptance.py`。专用 `tauri.network-recovery-e2e.conf.json` 保持唯一窗口 `visible=false`；App 仍从正式表单、详情取消、Rust 网络桥和 Executor 生命周期命令发起调用。runner 强杀真实 Uvicorn 制造无 WebSocket close frame 的断网，核对同一 Executor PID 离线落盘且拒绝 prepared 动作 dispatch，再用同一 PostgreSQL 恢复服务并连续抖动两次；App 最终从工作台/详情读取 cancelled，`restartCount=0`，测试与生产配置隔离。
+
 D6-11 在既有 `ControlPlaneClient` 和 `TauriPlatformAdapter` 上增加三个固定操作：读取目标预览、精确替换排除集合、确认当前 revision。Rust 自行换取短期 App Session，只构造固定 task-scoped 路径并严格解析有界、脱敏 DTO；React 不能提交 base URL、Session、平台目标 ID、dedupe key 或浏览器事实。`task-target-preview-source.ts` 用同一 Zod 边界拒绝未知字段、乱序、非法状态和不一致计数。仓库根执行 `backend/.venv/bin/python scripts/run_d6_11_acceptance.py` 会从唯一 `visible=false` App 经正式 TypeScript source/Tauri Command/Rust 网络桥连接真实 Uvicorn/PostgreSQL，完成列表、排除、确认及幂等重放。
 
 A7-06 在同一目标预览 DTO 增加封闭 action、原始 message template 和 `confirmationRevision`。页面的最终确认区与 Popconfirm 同时展示动作、文案、数量和 revision；弹窗打开时用受控状态与同步 ref 冻结完整审阅快照，后台 Query/事件刷新不能把待提交 revision 偷换成新值。旧提交由正式 Rust Command 发往真实 Control Plane 后返回 `request_rejected`，专用 Tauri 错误适配保留该冲突语义，页面显示安全提示并回拉最新预览；其他原生错误仍不反射底层文本。`scripts/run_d6_12_acceptance.py` 已用隐藏真实 App 验证旧 revision 拒绝与重新审阅后成功确认。

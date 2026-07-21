@@ -18,6 +18,7 @@ import pytest
 from automation_tool.executor import ledger as ledger_module
 from automation_tool.executor.ledger import (
     EXECUTOR_LEDGER_FILE_NAME,
+    AttemptCheckpoint,
     AttemptCheckpointState,
     ExecutorLedger,
     ExecutorLedgerRejected,
@@ -78,6 +79,8 @@ def outbound(
     message_type: str = "task.accept",
     sequence: int = 1,
     payload: dict[str, object] | None = None,
+    task_id: str = TASK_ID,
+    attempt_id: str = ATTEMPT_ID,
 ) -> TaskCommandResultEnvelope | TaskEventEnvelope:
     model = TaskEventEnvelope if message_type == "task.started" else TaskCommandResultEnvelope
     return model.model_validate(
@@ -93,8 +96,8 @@ def outbound(
             "idempotency_key": idempotency_key,
             "sequence": sequence,
             "payload": payload or {},
-            "task_id": TASK_ID,
-            "execution_attempt_id": ATTEMPT_ID,
+            "task_id": task_id,
+            "execution_attempt_id": attempt_id,
         }
     )
 
@@ -107,14 +110,17 @@ def ledger(state_directory: Path) -> ExecutorLedger:
     )
 
 
-def test_empty_private_directory_migrates_to_the_exact_v5_schema(tmp_path: Path) -> None:
+def test_empty_private_directory_migrates_to_the_exact_v6_schema(tmp_path: Path) -> None:
     state_directory = tmp_path / "executor-state"
 
     opened = ledger(state_directory)
 
     assert opened.database_path == state_directory / EXECUTOR_LEDGER_FILE_NAME
     with sqlite3.connect(opened.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
+        assert connection.execute(
+            "SELECT network_connected FROM executor_action_guard WHERE singleton_id = 1"
+        ).fetchone() == (1,)
         assert connection.execute(
             """
             SELECT minimum_interval_seconds, task_action_limit
@@ -270,7 +276,7 @@ def test_v1_ledger_is_migrated_in_place_without_losing_commands(tmp_path: Path) 
 
     assert migrated.receive_command(source).replayed is True
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'executor_platform_sessions'"
@@ -303,7 +309,7 @@ def test_v3_ledger_adds_an_initial_local_action_guard_without_losing_state(
     assert migrated.get_action_emergency_stop().engaged is False
     assert migrated.get_action_emergency_stop().revision == 0
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
         assert connection.execute("SELECT COUNT(*) FROM executor_action_admissions").fetchone() == (
             0,
         )
@@ -572,6 +578,83 @@ def test_outbox_replays_exact_protocol_messages_and_delivery_is_durable(tmp_path
         opened.pending_outbox(limit=10)
 
 
+def test_pending_event_spool_is_bounded_and_overflow_rolls_back_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = ledger(tmp_path / "bounded-spool")
+    first_source = command(1)
+    opened.receive_command(first_source)
+    first = outbound(
+        message_id=_uuid(110),
+        idempotency_key="executor-ledger:spool:first",
+    )
+    opened.enqueue_outbox(source_message_id=str(first_source.message_id), message=first)
+    monkeypatch.setattr(ledger_module, "_MAX_PENDING_OUTBOX_ENTRIES", 1)
+    monkeypatch.setattr(ledger_module, "_MAX_PENDING_OUTBOX_BYTES", 1024 * 1024)
+
+    second_task = _uuid(710)
+    second_attempt = _uuid(711)
+    second_source = command(
+        1,
+        message_id=_uuid(112),
+        idempotency_key="executor-ledger:spool:second-source",
+        task_id=second_task,
+        attempt_id=second_attempt,
+    )
+    opened.receive_command(second_source)
+    second = outbound(
+        message_id=_uuid(113),
+        idempotency_key="executor-ledger:spool:second",
+        task_id=second_task,
+        attempt_id=second_attempt,
+    )
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.commit_outcome(
+            source_message_id=str(second_source.message_id),
+            expected_checkpoint_revision=1,
+            checkpoint_state=AttemptCheckpointState.TERMINAL,
+            last_event_sequence=0,
+            messages=(second,),
+        )
+    assert opened.get_checkpoint(second_attempt) == AttemptCheckpoint(
+        attempt_id=second_attempt,
+        task_id=second_task,
+        last_command_sequence=1,
+        last_event_sequence=0,
+        state=AttemptCheckpointState.RECEIVED,
+        revision=1,
+    )
+    assert opened.outbox_for_command(str(second_source.message_id)) == ()
+
+    assert opened.mark_outbox_delivered(str(first.message_id)) is True
+    committed = opened.commit_outcome(
+        source_message_id=str(second_source.message_id),
+        expected_checkpoint_revision=1,
+        checkpoint_state=AttemptCheckpointState.TERMINAL,
+        last_event_sequence=0,
+        messages=(second,),
+    )
+    assert [entry.message for entry in committed] == [second]
+
+    with sqlite3.connect(opened.database_path) as connection:
+        pending_bytes = int(
+            connection.execute(
+                "SELECT length(CAST(envelope AS BLOB)) FROM executor_outbox WHERE delivered = 0"
+            ).fetchone()[0]
+        )
+    monkeypatch.setattr(ledger_module, "_MAX_PENDING_OUTBOX_ENTRIES", 2)
+    monkeypatch.setattr(ledger_module, "_MAX_PENDING_OUTBOX_BYTES", pending_bytes)
+    third = outbound(
+        message_id=_uuid(114),
+        idempotency_key="executor-ledger:spool:third",
+        task_id=second_task,
+        attempt_id=second_attempt,
+    )
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.enqueue_outbox(source_message_id=str(second_source.message_id), message=third)
+
+
 def test_atomic_outcome_commit_and_recovery_reject_every_inconsistent_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -696,7 +779,7 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)
     with sqlite3.connect(opened.database_path) as connection:
-        connection.execute("PRAGMA user_version = 6")
+        connection.execute("PRAGMA user_version = 7")
     with pytest.raises(ExecutorLedgerRejected):
         ledger(state_directory)
 

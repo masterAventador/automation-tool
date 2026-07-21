@@ -55,6 +55,10 @@ class ExecutorProcessRejected(ConnectionError):
         super().__init__("Local Executor process is unavailable")
 
 
+class _ExecutorNetworkDisconnected(ExecutorProcessRejected):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeMetadata:
     executor_version: str
@@ -196,6 +200,16 @@ def _is_control_plane_restart(error: BaseException) -> bool:
     )
 
 
+def _is_recoverable_transport_error(error: BaseException) -> bool:
+    if isinstance(error, _ExecutorNetworkDisconnected):
+        return True
+    if isinstance(error, (ExecutorProcessRejected, ExecutorTransportRejected)):
+        return False
+    if isinstance(error, ConnectionClosed):
+        return _is_control_plane_restart(error) or (error.rcvd is None and error.sent is None)
+    return isinstance(error, (OSError, TimeoutError))
+
+
 class LocalExecutorProcess:
     """Connect, replay durable outcomes, and consume no-side-effect commands."""
 
@@ -236,8 +250,13 @@ class LocalExecutorProcess:
         self._open_timeout = _positive_duration(open_timeout)
         self._close_timeout = _positive_duration(close_timeout)
         self._local_outbox = local_outbox
+        self._pending_local_message: PlatformSessionHealthEnvelope | None = None
         self._restart_reconnect_attempts = restart_reconnect_attempts
         self._restart_reconnect_delay = _restart_reconnect_delay(restart_reconnect_delay)
+        try:
+            self._command_processor.ledger.set_transport_connected(False)
+        except Exception:
+            raise ExecutorProcessRejected from None
 
     @property
     def bootstrap(self) -> ExecutorBootstrap:
@@ -310,20 +329,45 @@ class LocalExecutorProcess:
                 self._command_processor.mark_delivered(str(message.message_id))
         except ConnectionClosed:
             raise
+        except (OSError, TimeoutError):
+            raise _ExecutorNetworkDisconnected from None
         except Exception:
             raise ExecutorProcessRejected from None
+
+    def _drain_durable_outbox(
+        self,
+        websocket: ClientConnection,
+        messages: tuple[ExecutorOutboundMessage, ...],
+    ) -> None:
+        pending = messages
+        while pending:
+            self._send_outbox(websocket, pending)
+            pending = self._command_processor.pending_outbox()
 
     def _send_local_outbox(self, websocket: ClientConnection) -> None:
         if self._local_outbox is None:
             return
         try:
             while True:
-                message = self._local_outbox.get_nowait()
-                if not isinstance(message, PlatformSessionHealthEnvelope):
+                candidate: object = self._pending_local_message
+                if candidate is None:
+                    candidate = self._local_outbox.get_nowait()
+                if not isinstance(candidate, PlatformSessionHealthEnvelope):
                     raise ValueError
-                websocket.send(serialize_executor_message(message))
+                message = candidate
+                try:
+                    websocket.send(serialize_executor_message(message))
+                except ConnectionClosed:
+                    self._pending_local_message = message
+                    raise
+                except (OSError, TimeoutError):
+                    self._pending_local_message = message
+                    raise _ExecutorNetworkDisconnected from None
+                self._pending_local_message = None
         except Empty:
             return
+        except _ExecutorNetworkDisconnected:
+            raise
         except ConnectionClosed:
             raise
         except Exception:
@@ -334,13 +378,13 @@ class LocalExecutorProcess:
             raise ExecutorProcessRejected
         failed = False
         healthy = False
-        recovering_from_restart = False
+        recovering_transport = False
         reconnect_attempts = 0
         reconnect_delay_seconds = self._restart_reconnect_delay.total_seconds()
         first_connection = True
         while first_connection or not stop.is_set():  # pragma: no branch
             first_connection = False
-            if recovering_from_restart:
+            if recovering_transport:
                 if reconnect_attempts >= self._restart_reconnect_attempts:
                     failed = True
                     break
@@ -356,10 +400,13 @@ class LocalExecutorProcess:
                     )
                 finally:
                     del session_token
-            except Exception:
-                if not recovering_from_restart:
+            except Exception as error:
+                if not _is_recoverable_transport_error(error):
                     failed = True
                     break
+                if not recovering_transport:
+                    recovering_transport = True
+                    reconnect_attempts = 0
                 if stop.wait(reconnect_delay_seconds):
                     break
                 continue
@@ -370,11 +417,16 @@ class LocalExecutorProcess:
                             self._lifecycle(message_type="executor.hello", sequence=1)
                         )
                     )
-                    self._send_outbox(websocket, self._command_processor.recover_outbox())
+                    self._drain_durable_outbox(
+                        websocket,
+                        self._command_processor.recover_outbox(),
+                    )
                     self._send_outbox(websocket, self._command_processor.poll_controls())
+                    self._command_processor.ledger.set_transport_connected(True)
                     if self._command_processor.emergency_stop_received():
                         if self._bootstrap.local_emergency_stop:
                             self._reporter.healthy()
+                        self._command_processor.ledger.set_transport_connected(False)
                         self._reporter.stopped()
                         return
                     sequence = 1
@@ -404,8 +456,8 @@ class LocalExecutorProcess:
                             if not healthy:
                                 self._reporter.healthy()
                                 healthy = True
-                            if recovering_from_restart:
-                                recovering_from_restart = False
+                            if recovering_transport:
+                                recovering_transport = False
                                 reconnect_attempts = 0
                             heartbeat_deadline = time.monotonic() + heartbeat_interval
                             continue
@@ -421,16 +473,25 @@ class LocalExecutorProcess:
             except Exception as error:
                 if stop.is_set():
                     break
-                if not _is_control_plane_restart(error):
+                try:
+                    self._command_processor.ledger.set_transport_connected(False)
+                except Exception:
                     failed = True
                     break
-                if not recovering_from_restart:
-                    recovering_from_restart = True
+                if not _is_recoverable_transport_error(error):
+                    failed = True
+                    break
+                if not recovering_transport:
+                    recovering_transport = True
                     reconnect_attempts = 0
                 if stop.wait(reconnect_delay_seconds):
                     break
                 continue
             break
+        try:
+            self._command_processor.ledger.set_transport_connected(False)
+        except Exception:
+            failed = True
         if failed:
             raise ExecutorProcessRejected from None
         if (

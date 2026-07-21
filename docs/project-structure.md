@@ -181,6 +181,7 @@ frontend/
 │   ├── tauri.task-lifecycle-e2e.conf.json # 后台隐藏的完整生命周期与刷新验收
 │   ├── tauri.task-restart-e2e.conf.json # 后台隐藏的 Control Plane 重启恢复验收
 │   ├── tauri.control-plane-recovery-e2e.conf.json # 后台隐藏的签名 Executor 重连验收
+│   ├── tauri.network-recovery-e2e.conf.json # 后台隐藏的异常断网/抖动恢复验收
 │   ├── tauri.executor-lifecycle-e2e.conf.json # 后台隐藏的 signed Executor 生命周期验收
 │   ├── tauri.platform-session-e2e.conf.json # 后台隐藏的平台状态与无头浏览器验收
 │   ├── tauri.platform-session-reuse-e2e.conf.json # 后台隐藏的登录复用/失效接管验收
@@ -202,6 +203,7 @@ frontend/
 ├── wdio.task-control.conf.ts
 ├── wdio.task-termination.conf.ts
 ├── wdio.task-projection.conf.ts
+├── wdio.network-recovery.conf.ts
 ├── wdio.task-run.conf.ts
 ├── wdio.task-lifecycle.conf.ts
 ├── wdio.task-restart.conf.ts
@@ -410,6 +412,8 @@ H8-05 的生产实现集中在 `executor_bootstrap.rs`/`executor_manager.rs` 的
 
 H8-06 只修改既有 `backend/src/automation_tool/executor/runtime.py` 传输循环：收到服务端 `1012` 后，同一进程有界重连并从原 SQLite outbox 精确续传；没有新增恢复服务、表或协议。纵向验收文件为 `tauri.control-plane-recovery-e2e.conf.json`、`wdio.control-plane-recovery.conf.ts`、`e2e-tauri/control-plane-recovery.spec.ts` 与 `scripts/run_h8_06_acceptance.py`；feature-gated 准备命令只用于唯一隐藏 App。runner 使用独立 AppData/Compose/SQLite，在同一签名 Executor PID 被暂停时由 App 发出正式取消，再真实停止/重启 Uvicorn 并核对原命令、事件、checkpoint 与 `restartCount=0`。
 
+H8-07 继续复用唯一 `runtime.py` 和 `ledger.py`，不新增第二个网络代理、事件队列或协议：SQLite v6 网络闸门与既有紧停 guard 原子阻止离线 dispatch，原 outbox 同时承担最多 1000 条/16 MiB 的有界 spool，异常 socket/初次网络错误走既有有界重连预算。纵向验收文件为 `tauri.network-recovery-e2e.conf.json`、`wdio.network-recovery.conf.ts`、`e2e-tauri/network-recovery.spec.ts` 与 `scripts/run_h8_07_acceptance.py`；runner 复用 H8-06 的签名包、双账本和进程辅助函数，强杀并反复恢复真实 Uvicorn，精确核对同一 PID、离线安全点、事件续传和 `restartCount=0`。
+
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 
 D6-12 的用户页面位于既有 `features/task-runs/`：`TaskTargetPreview.tsx` 管理目标摘要、策略标记、完整排除集合 Mutation、同意图幂等重试和确认，`TaskRunDetails.tsx` 只按当前 Task 状态/持久确认事件决定挂载，避免把预览状态带到另一个 Task。正式 source 仍由 `main.tsx` 在唯一组合根构造并逐层注入，不进入业务组件的 Tauri import。`e2e-tauri/task-target-preview-ui.spec.ts` 与 `scripts/run_d6_12_acceptance.py` 使用 D6-12 独立隐藏配置、AppData、Compose project、端口和 Executor state，从真实页面发出读取/排除/确认调用并核对 PostgreSQL；测试准备 Command 仅存在于 `control-plane-e2e` 特性，正式包不包含。
@@ -446,7 +450,7 @@ E4-09 仍不新建进程服务：`RunningExecutor` 直接拥有跨平台 `Proces
 
 E4-10 新建的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承担生命周期或业务日志。Manager Core 持有唯一内存队列，各次启动的 reader 共享它；输入以固定容量流式消费，超长/非法编码 fail closed，再按 `contracts/fixtures/executor-diagnostics-v1.json` 规则脱敏并执行行数/单行/总字节上限。Python `executor/diagnostics.py` 回放同一 fixtures，为未来 Executor 自身安全消息提供一致策略，但 Rust 仍对原始 stderr 独立重做脱敏，不能信任进程内结论。真实 signed 进程测试证明公开 Manager `diagnostics()` 原入口，不新增 Tauri Command 或持久日志。
 
-E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3`，从 v1 identity/commands/attempt checkpoints/outbox、v2 平台 Session、v3 发现状态、v4 动作策略/紧停/准入原地迁移到 A7-07 当前 v5 副作用状态。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS、协议 outbox、动作准入及 prepared/dispatched/verified/uncertain 状态均在该模块内事务化；`side_effect_ledger.py` 只承载封闭脱敏值对象。测试覆盖真实并发、重开恢复、逐版迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
+E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3`，从 v1 identity/commands/attempt checkpoints/outbox、v2 平台 Session、v3 发现状态、v4 动作策略/紧停/准入、v5 副作用状态原地迁移到 H8-07 当前 v6 网络闸门。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS、最多 1000 条/16 MiB 的未交付协议 outbox、动作准入及 prepared/dispatched/verified/uncertain 状态均在该模块内事务化；`side_effect_ledger.py` 只承载封闭脱敏值对象。测试覆盖真实并发、重开恢复、逐版迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
 
 E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 已完成隐藏 App 验收。
 

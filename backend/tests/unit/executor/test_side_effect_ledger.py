@@ -144,7 +144,7 @@ def test_a7_07_side_effect_state_machine_is_closed_and_redacted() -> None:
             replace(valid, **invalid)
 
 
-def test_v4_ledger_migrates_to_exact_v5_without_losing_action_admission(
+def test_v4_ledger_migrates_to_exact_v6_without_losing_action_admission(
     tmp_path: Path,
 ) -> None:
     state_directory = tmp_path / "legacy-v4"
@@ -152,6 +152,7 @@ def test_v4_ledger_migrates_to_exact_v5_without_losing_action_admission(
     authorization = admit(opened, 1)
     with sqlite3.connect(opened.database_path) as connection:
         connection.execute("DROP TABLE executor_side_effects")
+        connection.execute("ALTER TABLE executor_action_guard DROP COLUMN network_connected")
         connection.execute("PRAGMA user_version = 4")
 
     migrated = ledger(state_directory)
@@ -159,7 +160,7 @@ def test_v4_ledger_migrates_to_exact_v5_without_losing_action_admission(
     assert migrated.get_action_admission(str(authorization.action_id)) is not None
     assert migrated.get_side_effect(str(authorization.action_id)) is None
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(executor_side_effects)")}
         invalid_states = (
             ("prepared", None, None, b"p" * 32, 1),
@@ -299,6 +300,62 @@ def test_side_effect_lifecycle_is_exact_durable_and_never_redispatches(
     assert restarted.list_unresolved_side_effects(limit=100) == ()
     assert "323e4567" not in repr(verified)
     assert "private" not in restarted.database_path.read_bytes().decode("utf-8", errors="ignore")
+
+
+def test_network_gate_stops_new_dispatch_at_the_prepared_safe_point(tmp_path: Path) -> None:
+    opened = ledger(tmp_path / "network-gate")
+    authorization = admit(opened, 19)
+    fingerprint = effect_fingerprint(19)
+    opened.prepare_side_effect(
+        action_id=str(authorization.action_id),
+        effect_fingerprint=fingerprint,
+        prepared_at=NOW + timedelta(seconds=1),
+    )
+
+    assert opened.transport_connected() is True
+    assert opened.set_transport_connected(False) is True
+    assert opened.set_transport_connected(False) is False
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.begin_side_effect_dispatch(
+            action_id=str(authorization.action_id),
+            effect_fingerprint=fingerprint,
+            dispatched_at=NOW + timedelta(seconds=2),
+        )
+    retained = opened.get_side_effect(str(authorization.action_id))
+    assert retained is not None
+    assert retained.state is SideEffectState.PREPARED
+    assert retained.revision == 1
+
+    assert opened.set_transport_connected(True) is True
+    dispatched = opened.begin_side_effect_dispatch(
+        action_id=str(authorization.action_id),
+        effect_fingerprint=fingerprint,
+        dispatched_at=NOW + timedelta(seconds=3),
+    )
+    assert dispatched.state is SideEffectState.DISPATCHED
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.set_transport_connected(1)  # type: ignore[arg-type]
+
+    missing = ledger(tmp_path / "missing-network-gate")
+    missing_authorization = admit(missing, 20)
+    missing_fingerprint = effect_fingerprint(20)
+    missing.prepare_side_effect(
+        action_id=str(missing_authorization.action_id),
+        effect_fingerprint=missing_fingerprint,
+        prepared_at=NOW + timedelta(seconds=1),
+    )
+    with sqlite3.connect(missing.database_path) as connection:
+        connection.execute("DELETE FROM executor_action_guard")
+    with pytest.raises(ExecutorLedgerRejected):
+        missing.transport_connected()
+    with pytest.raises(ExecutorLedgerRejected):
+        missing.set_transport_connected(False)
+    with pytest.raises(ExecutorLedgerRejected):
+        missing.begin_side_effect_dispatch(
+            action_id=str(missing_authorization.action_id),
+            effect_fingerprint=missing_fingerprint,
+            dispatched_at=NOW + timedelta(seconds=2),
+        )
 
 
 def test_dispatched_side_effect_can_only_converge_to_verified_or_uncertain_once(

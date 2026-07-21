@@ -33,8 +33,10 @@ from automation_tool.protocol import (
 )
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 5
+_SCHEMA_VERSION: Final = 6
 _MAX_OUTBOX_BATCH: Final = 1000
+_MAX_PENDING_OUTBOX_ENTRIES: Final = 1000
+_MAX_PENDING_OUTBOX_BYTES: Final = 16 * 1024 * 1024
 _MAX_CROSS_RUNTIME_SEQUENCE: Final = 2**53 - 1
 _MAX_LOCAL_ACTION_INTERVAL_SECONDS: Final = 3600
 _MAX_LOCAL_TASK_ACTIONS: Final = 100
@@ -304,6 +306,44 @@ class ExecutorLedger:
     @property
     def executor_id(self) -> str:
         return self._executor_id
+
+    def transport_connected(self) -> bool:
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    "SELECT network_connected FROM executor_action_guard WHERE singleton_id = 1"
+                ).fetchone()
+            if row not in {(0,), (1,)}:
+                raise ValueError
+            return bool(row[0])
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def set_transport_connected(self, connected: bool) -> bool:
+        try:
+            if type(connected) is not bool:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT network_connected FROM executor_action_guard WHERE singleton_id = 1"
+                ).fetchone()
+                if row not in {(0,), (1,)}:
+                    raise ValueError
+                if bool(row[0]) is connected:
+                    connection.commit()
+                    return False
+                updated = connection.execute(
+                    "UPDATE executor_action_guard SET network_connected = ? "
+                    "WHERE singleton_id = 1 AND network_connected = ?",
+                    (int(connected), int(not connected)),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - row is locked above
+                    raise ValueError
+                connection.commit()
+                return True
+        except Exception:
+            raise ExecutorLedgerRejected from None
 
     def bind_action_hard_policy(
         self,
@@ -770,21 +810,20 @@ class ExecutorLedger:
                     """,
                     (current.execution_attempt_id,),
                 ).fetchone()
+                guard = connection.execute(
+                    """
+                    SELECT engaged, revision, changed_at, network_connected
+                    FROM executor_action_guard WHERE singleton_id = 1
+                    """
+                ).fetchone()
+                if guard is None:
+                    raise ValueError
                 if (
                     canonical_dispatched_at < current.prepared_at
                     or canonical_dispatched_at >= _decode_utc(cast(tuple[object, ...], row)[16])
                     or dispatch_blocked is not None
-                    or _action_emergency_stop(
-                        cast(
-                            sqlite3.Row | tuple[object, ...],
-                            connection.execute(
-                                """
-                                SELECT engaged, revision, changed_at
-                                FROM executor_action_guard WHERE singleton_id = 1
-                                """
-                            ).fetchone(),
-                        )
-                    ).engaged
+                    or _action_emergency_stop(cast(tuple[object, ...], tuple(guard[:3]))).engaged
+                    or guard[3] != 1
                 ):
                     raise ValueError
                 updated = connection.execute(
@@ -1658,6 +1697,7 @@ class ExecutorLedger:
                         expected_event_type = "task.outcome_uncertain"
                 if event.message_type != expected_event_type:
                     raise ValueError
+                _require_pending_outbox_capacity(connection, (envelope,))
                 current_state = str(row[5])
                 updated = connection.execute(
                     """
@@ -1757,6 +1797,7 @@ class ExecutorLedger:
                     or str(source[2]) != str(message.correlation_id)
                 ):
                     raise ValueError
+                _require_pending_outbox_capacity(connection, (envelope,))
                 next_ordinal = int(
                     connection.execute(
                         "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM executor_outbox"
@@ -1884,6 +1925,7 @@ class ExecutorLedger:
                     or str(row[10]) != str(event.correlation_id)
                 ):
                     raise ValueError
+                _require_pending_outbox_capacity(connection, (envelope,))
                 checkpoint_state = (
                     AttemptCheckpointState.OUTCOME_UNCERTAIN.value
                     if event.message_type == "task.outcome_uncertain"
@@ -2009,6 +2051,10 @@ class ExecutorLedger:
                 ).fetchone()
                 if checkpoint is None or not 0 <= int(checkpoint[0]) <= last_event_sequence:
                     raise ValueError
+                _require_pending_outbox_capacity(
+                    connection,
+                    tuple(envelope for _message, envelope, _fingerprint in prepared),
+                )
                 updated = connection.execute(
                     """
                     UPDATE executor_attempt_checkpoints
@@ -2271,6 +2317,9 @@ class ExecutorLedger:
             if version == 4:
                 _migrate_v5(connection)
                 version = 5
+            if version == 5:
+                _migrate_v6(connection)
+                version = 6
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -2569,6 +2618,38 @@ def _migrate_v5(connection: sqlite3.Connection) -> None:
         """
     )
     connection.execute("PRAGMA user_version = 5")
+
+
+def _migrate_v6(connection: sqlite3.Connection) -> None:
+    """Block new platform dispatch while the authenticated transport is offline."""
+
+    connection.execute(
+        """
+        ALTER TABLE executor_action_guard
+        ADD COLUMN network_connected INTEGER NOT NULL DEFAULT 1
+        CHECK (network_connected IN (0, 1))
+        """
+    )
+    connection.execute("PRAGMA user_version = 6")
+
+
+def _require_pending_outbox_capacity(
+    connection: sqlite3.Connection,
+    envelopes: tuple[str, ...],
+) -> None:
+    pending = connection.execute(
+        """
+        SELECT COUNT(*), COALESCE(SUM(length(CAST(envelope AS BLOB))), 0)
+        FROM executor_outbox WHERE delivered = 0
+        """
+    ).fetchone()
+    pending_entries, pending_bytes = cast(tuple[int, int], pending)
+    added_bytes = sum(len(envelope.encode("utf-8")) for envelope in envelopes)
+    if (
+        pending_entries + len(envelopes) > _MAX_PENDING_OUTBOX_ENTRIES
+        or pending_bytes + added_bytes > _MAX_PENDING_OUTBOX_BYTES
+    ):
+        raise ValueError
 
 
 def _canonical_uuid_v4(value: object) -> str:
