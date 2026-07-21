@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-14 已完成，下一项 H8-15）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-15 已完成，下一项 H8-16）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-14 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-15 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-15 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项 H8-16 规格复审 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -344,7 +344,7 @@
 | H8-12 | 清理与磁盘治理 | 保留策略、磁盘满、清理失败、正在引用 Artifact 保护 | H8-09,H8-10 | ✅ 已完成 |
 | H8-13 | 诊断导出 | 用户主动导出受限包；不含 Cookie/完整私信/绝对私有路径 | H8-11,H8-12 | ✅ 已完成 |
 | H8-14 | 工作台指标 | 任务/动作成功、失败、接管、不确定；只读结构化事实 | A7-15,T3-16 | ✅ 已完成 |
-| H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ⬜ 未开始 |
+| H8-15 | 完整失败矩阵自动化 | 本台账第 4.1 节所有可自动化分支有测试或不适用理由 | H8-01..H8-14 | ✅ 已完成 |
 | H8-16 | 规格复审 | 从分叉点审查完整实现是否满足产品/MVP/文档 | H8-15 | ⬜ 未开始 |
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16 | ⬜ 未开始 |
 | H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ⬜ 未开始 |
@@ -2576,13 +2576,27 @@
 - 资源与文档：隐藏 App 验收成功/失败都恢复 production Vite 资产，回收自身 App、WebDriver、Uvicorn、PostgreSQL 容器/网络/Volume、AppData 和全部端口；常规 Playwright 保持全局无头，没有访问真实平台、默认浏览器 Profile、系统钥匙串或其他项目资源。同步根/Backend README、产品规划、前后端架构、工程结构、OpenAPI/生成 DTO 和本唯一台账，没有新增重复规划文档
 - 后续：进入 `H8-15`，逐项审计本台账第 4.1 节失败矩阵，给所有可自动化分支补正式测试或登记不适用/需真实平台的明确理由，不把已有测试数量直接当完整矩阵证据
 
+### H8-15 完整失败矩阵自动化
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、可执行失败矩阵、PostgreSQL 失败缺口和生产安装包真实数据排除门禁属于单一 `test: 完成 MVP 失败矩阵自动化` 提交；完成后立即推送 `main`
+- RED：先把唯一台账置为 `🧪 RED`，新增 Node 契约测试准确失败于 `contracts/quality/mvp-failure-matrix.v1.json` 不存在；不以仓库已有测试总数、覆盖率或人工阅读替代逐项映射。矩阵建立后由同一契约测试持续阻止台账词汇、测试证据或真实待验收集合漂移
+- 可执行登记：`mvp.failure-matrix.v1` 按第 4.1 节固定顺序登记安装实例、Control Plane、PostgreSQL、Executor、两条跨进程链路、浏览器、平台登录、目标发现、外部动作、任务控制、恢复、Artifact、隐私和安装包共 15 类边界、78 个原子失败分支；每项都有唯一 ID、自动化 disposition、仓库内测试文件和精确测试锚点。Node 门禁逐项读取源码并确认锚点存在，台账表格增删或换词也会失败
+- 真实平台边界：B5-15 App 双重启登录态、D6-16 真实目标发现、A7-16 真实评论与 A7-17 真实私信固定登记在 `realPlatformEvidencePending`，仍按原任务保持待真实账号；隔离测试页、Fake Adapter、DOM 单元测试和离线无头浏览器证据不能把这些任务标绿，也不阻塞 H8-16 的无账号复审
+- 审计补缺：真实 PostgreSQL 增加单连接池耗尽到脱敏 `DependencyUnavailable(postgresql)` 的集成测试，以及未知 Alembic 目标失败后当前 revision 仍保持 head 的迁移测试；生产包审计同时检查 Tauri bundle resources 与最终制品文件名，拒绝 Browser Profile、Cookies、`executor-ledger.sqlite3`、Artifact/diagnostics 等运行数据进入发布包
+- 范围：本任务没有新增运行时 HTTP、Tauri Command、React 页面、数据库表或平台动作；失败矩阵是质量契约，不把测试组织元数据引入产品运行时，也没有访问默认浏览器 Profile、真实平台账号、系统钥匙串或其他项目资源
+- 门禁：Backend `1979 passed, 5 skipped in 221.18s`，13211 条语句/3028 个分支覆盖率 100%，340 个 Python 文件格式、Ruff、严格 Mypy 315 个源码文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 117 项 Node 契约、199 项 Vitest、5 项全局无头 Playwright、冻结安装、peer dependency、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套完整测试、Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿
+- 资源与文档：例行 Playwright 继续使用全局无头配置并在结束后关闭浏览器；PostgreSQL 集成使用项目专属 Compose project、随机端口和隔离 Volume，结束后回收。同步根 README、工程结构与本唯一台账，没有新增重复规划文档
+- 后续：进入 `H8-16`，从竞品证据、产品规划、前后端架构和当前实现的分叉点逐项复审 MVP 规格，不在复审任务中顺手扩展业务范围
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-15`（⬜ 未开始）：逐项审计第 4.1 节失败矩阵，补齐可自动化分支的正式测试或不适用理由；
+3. `H8-16`（⬜ 未开始）：从竞品证据、产品规划、架构与实现分叉点复审第一期 MVP 规格；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

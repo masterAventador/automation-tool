@@ -55,6 +55,13 @@ const forbiddenResourceMarkers = [
   "webdriver",
   "wdio",
 ];
+const forbiddenRuntimeDataMarkers = [
+  "browser-profiles",
+  "cookies",
+  "executor-ledger",
+  "artifacts/diagnostics",
+  ".sqlite",
+];
 
 function containsBytes(haystack, needle) {
   return haystack.indexOf(needle) !== -1;
@@ -107,6 +114,14 @@ function assertLeastPrivilegeTauriConfig(configuration) {
   ) {
     throw new Error("Production Tauri config contains a test resource or sidecar");
   }
+  if (
+    bundledPaths.some((path) => {
+      const normalized = path.toLowerCase();
+      return forbiddenRuntimeDataMarkers.some((marker) => normalized.includes(marker));
+    })
+  ) {
+    throw new Error("Production Tauri config contains runtime data");
+  }
 }
 
 function stringsIn(value) {
@@ -139,6 +154,9 @@ async function assertNoTestAssets(distributionPath) {
     const normalized = relative(distributionPath, path).toLowerCase();
     if (forbiddenResourceMarkers.some((marker) => normalized.includes(marker))) {
       throw new Error("Production assets contain a test resource");
+    }
+    if (forbiddenRuntimeDataMarkers.some((marker) => normalized.includes(marker))) {
+      throw new Error("Production assets contain runtime data");
     }
   }
 }

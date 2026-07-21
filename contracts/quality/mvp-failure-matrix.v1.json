@@ -1,0 +1,159 @@
+{
+  "version": "mvp.failure-matrix.v1",
+  "realPlatformEvidencePending": ["B5-15", "D6-16", "A7-16", "A7-17"],
+  "boundaries": [
+    {
+      "name": "安装实例",
+      "cases": [
+        {"name": "未注册", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/src/control_plane.rs", "anchor": "unregistered_installation_skips_the_authenticated_access_probe"}},
+        {"name": "过期", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_installation_registration_api.py", "anchor": "test_expired_challenge_is_rejected_without_installation_or_consumption"}},
+        {"name": "吊销", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/installation-revocation.spec.ts", "anchor": "moves the hidden real App from the workbench to the revoked diagnostic"}},
+        {"name": "重放", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_installation_registration_api.py", "anchor": "test_signed_registration_creates_one_installation_and_replay_is_rejected"}},
+        {"name": "跨环境", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_installation_registration_api.py", "anchor": "test_missing_invalid_or_cross_environment_bootstrap_is_rejected_before_persistence"}},
+        {"name": "冒充", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_installation_registration_api.py", "anchor": "test_impersonation_and_cross_bootstrap_attempts_do_not_consume_the_challenge"}}
+      ]
+    },
+    {
+      "name": "Control Plane",
+      "cases": [
+        {"name": "未启动", "disposition": "automated", "evidence": {"path": "frontend/e2e/ui-harness.spec.ts", "anchor": "unavailable Harness shows safe diagnostics instead of login"}},
+        {"name": "版本不兼容", "disposition": "automated", "evidence": {"path": "backend/tests/contract/test_system_api.py", "anchor": "test_version_contract_declares_api_and_executor_protocol_compatibility"}},
+        {"name": "数据库不可用", "disposition": "automated", "evidence": {"path": "backend/tests/unit/control_plane/test_database_errors.py", "anchor": "test_database_connection_failure_is_a_safe_retryable_health_error"}},
+        {"name": "重启", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/control-plane-recovery.spec.ts", "anchor": "keeps one Executor process and converges the App-submitted command exactly once"}},
+        {"name": "超时", "disposition": "automated", "evidence": {"path": "backend/tests/contract/test_executor_websocket.py", "anchor": "test_hello_timeout_closes_with_one_fixed_public_reason"}}
+      ]
+    },
+    {
+      "name": "PostgreSQL",
+      "cases": [
+        {"name": "唯一冲突", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_task_repository.py", "anchor": "test_repository_rejects_unknown_revoked_and_duplicate_create_targets_safely"}},
+        {"name": "revision CAS", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_task_repository.py", "anchor": "test_two_concurrent_transitions_have_one_revision_winner"}},
+        {"name": "事务回滚", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_task_event_convergence_lifecycle.py", "anchor": "test_scope_state_and_action_conflicts_roll_back_the_entire_event"}},
+        {"name": "迁移失败", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_database_baseline.py", "anchor": "test_unknown_migration_target_fails_without_changing_the_current_revision"}},
+        {"name": "连接耗尽", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_database_baseline.py", "anchor": "test_connection_pool_exhaustion_is_a_safe_dependency_failure"}}
+      ]
+    },
+    {
+      "name": "Executor",
+      "cases": [
+        {"name": "未安装", "disposition": "automated", "evidence": {"path": "frontend/tests/production-package-audit.test.mjs", "anchor": "rejects missing, malformed, absent, or development Executor trust roots"}},
+        {"name": "签名/版本错误", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_package.rs", "anchor": "version_range_rollback_platform_and_architecture_are_all_fail_closed"}},
+        {"name": "启动超时", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "startup_timeout_force_stops_the_child_and_leaves_the_manager_stopped"}},
+        {"name": "挂起", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "hung_stop_times_out_and_terminates_the_complete_executor_process_tree"}},
+        {"name": "崩溃循环", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "exhausted_restart_budget_converges_to_stopped_without_a_crash_loop"}}
+      ]
+    },
+    {
+      "name": "App ↔ Executor",
+      "cases": [
+        {"name": "token 错误", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "invalid_package_configuration_and_health_proof_fail_closed_without_leaks"}},
+        {"name": "协议漂移", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_protocol_fixtures.rs", "anchor": "rust_formal_parser_rejects_every_shared_invalid_fixture_with_one_safe_error"}},
+        {"name": "stdout 破损", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "invalid_package_configuration_and_health_proof_fail_closed_without_leaks"}},
+        {"name": "stop/invoke 竞争", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_process_client.py", "anchor": "test_stop_races_are_graceful_without_claiming_health"}}
+      ]
+    },
+    {
+      "name": "Executor ↔ Server",
+      "cases": [
+        {"name": "断网", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_process_client.py", "anchor": "test_abnormal_network_disconnect_reconnects_and_replays_exact_durable_outbox"}},
+        {"name": "乱序", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_task_event_convergence_lifecycle.py", "anchor": "test_exact_replays_are_idempotent_but_conflicts_gaps_and_late_events_reject"}},
+        {"name": "重复", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_fake_executor.py", "anchor": "test_command_replay_returns_identical_messages_without_duplicate_events"}},
+        {"name": "迟到事件", "disposition": "automated", "evidence": {"path": "backend/tests/integration/test_task_event_convergence_lifecycle.py", "anchor": "test_stale_server_times_and_malicious_cross_key_replay_are_rejected"}},
+        {"name": "心跳丢失", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_process_client.py", "anchor": "test_gap_between_heartbeat_iterations_uses_the_same_safe_reconnect"}},
+        {"name": "旧连接", "disposition": "automated", "evidence": {"path": "backend/tests/contract/test_executor_websocket.py", "anchor": "test_new_hello_replaces_old_installation_connection_and_heartbeat_projects_online"}}
+      ]
+    },
+    {
+      "name": "浏览器",
+      "cases": [
+        {"name": "未安装", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/src/browser_discovery.rs", "anchor": "missing_candidates_and_arbitrary_applications_are_not_discovered"}},
+        {"name": "路径失效", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/src/browser_discovery.rs", "anchor": "replaced_or_missing_path_is_invalidated_before_launch"}},
+        {"name": "Profile 锁", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/browser_profile_locks.rs", "anchor": "same_profile_is_exclusive_and_explicit_release_allows_reacquire"}},
+        {"name": "版本升级", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/src/browser_discovery.rs", "anchor": "replaced_or_missing_path_is_invalidated_before_launch"}},
+        {"name": "窗口关闭", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_qr_login.py", "anchor": "test_window_open_and_close_failures_are_fixed_and_close_before_begin_is_terminal"}},
+        {"name": "进程残留", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "dropping_the_manager_terminates_the_complete_executor_process_tree"}}
+      ]
+    },
+    {
+      "name": "平台登录",
+      "cases": [
+        {"name": "未登录", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_session.py", "anchor": "test_detector_maps_one_visible_page_fact_to_one_closed_state"}},
+        {"name": "二维码过期", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_qr_login.py", "anchor": "test_recheck_observes_scan_confirmation_and_real_session_health"}},
+        {"name": "登录过期", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/platform-session-reuse.spec.ts", "anchor": "waitForAuthoritativeState(\"expired\")"}},
+        {"name": "验证码", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_qr_login.py", "anchor": "test_platform_challenges_remain_in_handoff_until_page_health_is_rechecked"}},
+        {"name": "风控", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_search_page.py", "anchor": "test_non_login_dialog_or_risk_challenge_blocks_every_page_anchor"}},
+        {"name": "权限差异", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_direct_message_action.py", "anchor": "test_permission_change_after_entry_preserves_the_exact_reason"}}
+      ]
+    },
+    {
+      "name": "目标发现",
+      "cases": [
+        {"name": "空结果", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_candidate_extraction.py", "anchor": "test_empty_result_list_is_a_valid_minimum_snapshot"}},
+        {"name": "重复", "disposition": "automated", "evidence": {"path": "backend/tests/unit/domain/test_douyin_candidate_policy.py", "anchor": "test_same_key_is_stable_across_summary_changes_and_drives_task_deduplication"}},
+        {"name": "无限滚动", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_bounded_scroll.py", "anchor": "test_new_results_in_every_round_stops_at_fixed_round_limit"}},
+        {"name": "弹窗", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_search_execution.py", "anchor": "test_login_or_blocking_dialog_stops_before_any_search_action"}},
+        {"name": "页面改版", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_discovery_operation.py", "anchor": "test_production_discovery_saves_page_drift_artifact_and_enters_handoff"}},
+        {"name": "目标变化", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_candidate_extraction.py", "anchor": "test_page_drift_during_read_discards_the_entire_candidate_snapshot"}}
+      ]
+    },
+    {
+      "name": "外部动作",
+      "cases": [
+        {"name": "超频", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_action_gate.py", "anchor": "test_gate_enforces_local_interval_task_limit_and_exact_replay_durably"}},
+        {"name": "取消竞态", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_task_cancel_control.py", "anchor": "test_cancel_blocks_new_dispatch_and_waits_for_the_atomic_action"}},
+        {"name": "发送后断网", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_comment_action.py", "anchor": "test_uncertain_receipt_keeps_dispatched_fact_when_settlement_is_unavailable"}},
+        {"name": "验证失败", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_comment_action.py", "anchor": "test_unconfirmed_post_click_state_is_uncertain"}},
+        {"name": "重复执行", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_comment_action.py", "anchor": "test_verified_and_uncertain_replays_never_touch_the_page"}}
+      ]
+    },
+    {
+      "name": "任务控制",
+      "cases": [
+        {"name": "暂停/完成", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_task_pause_control.py", "anchor": "test_control_processor_handles_unrelated_pending_and_projection_races"}},
+        {"name": "取消/完成", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_task_cancel_control.py", "anchor": "test_cancel_rejects_received_and_terminal_attempts_without_poisoning"}},
+        {"name": "紧停/dispatch", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_task_cancel_control.py", "anchor": "test_emergency_stop_atomically_latches_and_settles_inflight_action_uncertain"}},
+        {"name": "重复控制", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_task_pause_control.py", "anchor": "test_control_ledger_boundaries_replay_and_corruption_fail_closed"}}
+      ]
+    },
+    {
+      "name": "恢复",
+      "cases": [
+        {"name": "App 崩溃", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/app-crash-recovery.spec.ts", "anchor": "restores the authoritative running Task without replaying work"}},
+        {"name": "Executor 崩溃", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/executor-crash-recovery.spec.ts", "anchor": "restarts once, aligns the ledger, and never redispatches the uncertain effect"}},
+        {"name": "Control Plane 崩溃", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/control-plane-recovery.spec.ts", "anchor": "keeps one Executor process and converges the App-submitted command exactly once"}},
+        {"name": "机器休眠", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/system-resume.spec.ts", "anchor": "keeps one Executor and exposes fixed recovery diagnostics through App IPC"}}
+      ]
+    },
+    {
+      "name": "Artifact",
+      "cases": [
+        {"name": "磁盘满", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_local_artifact.py", "anchor": "test_unresolved_disk_pressure_cleanup_failure_and_future_timestamp_fail_closed"}},
+        {"name": "过大", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_local_artifact.py", "anchor": "test_reference_policy_and_payload_shape_fail_closed"}},
+        {"name": "过多", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_local_artifact.py", "anchor": "test_capture_reclaims_oldest_unprotected_artifact_for_count_and_disk_pressure"}},
+        {"name": "权限拒绝", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_local_artifact.py", "anchor": "test_symlink_and_permission_expansion_fail_closed"}},
+        {"name": "路径替换", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_local_artifact.py", "anchor": "test_cleanup_detects_leaf_replacement_and_unlink_that_did_not_remove_file"}},
+        {"name": "清理失败", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_local_artifact.py", "anchor": "test_capacity_rollover_and_write_failure_leave_no_partial_artifact"}}
+      ]
+    },
+    {
+      "name": "隐私",
+      "cases": [
+        {"name": "Cookie", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_douyin_session.py", "anchor": "test_detector_rejects_non_window_input_and_never_reads_cookie_apis"}},
+        {"name": "Token", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_diagnostics.py", "anchor": "test_python_redactor_matches_every_shared_executor_diagnostic_fixture"}},
+        {"name": "页面", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_browser_diagnostic_artifact.py", "anchor": "test_capture_stores_a_metadata_free_redacted_png_and_fixed_trace"}},
+        {"name": "聊天", "disposition": "automated", "evidence": {"path": "frontend/tests/diagnostic-export-boundary.test.mjs", "anchor": "exports only a fixed local diagnostic package"}},
+        {"name": "绝对路径", "disposition": "automated", "evidence": {"path": "frontend/e2e-tauri/diagnostic-export.spec.ts", "anchor": "private-native-secret"}}
+      ]
+    },
+    {
+      "name": "安装包",
+      "cases": [
+        {"name": "测试驱动", "disposition": "automated", "evidence": {"path": "frontend/tests/production-package-audit.test.mjs", "anchor": "rejects test commands, drivers, sidecars, origins, and debug ports in the binary"}},
+        {"name": "调试权限", "disposition": "automated", "evidence": {"path": "frontend/tests/production-package-audit.test.mjs", "anchor": "rejects a test dependency, test resource, or non-production Tauri capability"}},
+        {"name": "真实数据", "disposition": "automated", "evidence": {"path": "frontend/tests/production-package-audit.test.mjs", "anchor": "H8-15 rejects runtime Profile, database, Cookie, and diagnostic data"}},
+        {"name": "错误平台二进制", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_package.rs", "anchor": "version_range_rollback_platform_and_architecture_are_all_fail_closed"}},
+        {"name": "未签名文件", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_package.rs", "anchor": "wrong_signature_and_payload_tampering_are_rejected_without_reflection"}}
+      ]
+    }
+  ]
+}

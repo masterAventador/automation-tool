@@ -31,6 +31,8 @@ automation-tool/
 │   ├── openapi/                   # FastAPI OpenAPI 快照
 │   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
+│   ├── quality/
+│   │   └── mvp-failure-matrix.v1.json # H8-15 可执行失败矩阵与测试证据登记
 │   └── fixtures/
 │       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
@@ -429,6 +431,8 @@ D6-13 复用既有 `application/task_command_delivery.py` 与 `infrastructure/da
 D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移固定 Schema、Policy 与窄引用；H8-09 的 `executor/local_artifact.py` 统一拥有稳定 ID、摘要、媒体类型、大小、受控相对路径、独占写入、按 ID 解析/枚举/读取和文件系统权限边界。H8-10 的 `executor/browser_diagnostic_artifact.py` 复用同一 Store，只生产脱敏 viewport PNG 与固定结构 Trace；`discovery_operation.py` 对失败自动触发，对成功只接受 bootstrap 的用户设置。设置链位于既有 `Diagnostics.tsx` → `platform-adapter.ts` → `lib.rs` → `executor_platform.rs` → `executor_manager.rs`/`executor_bootstrap.rs`，AppData 只保存 exact bool，不暴露 Artifact 路径。`tests/integration/test_douyin_discovery_fake_pages.py` 从正式 command processor 与无头系统 Chrome 覆盖失败/默认成功/用户开启成功，E4-14 隐藏 App 验收覆盖真实设置与 signed Executor 启动。当前没有新增数据库表、通用文件浏览器、上传或删除通道。
 
 H8-14 沿现有工作台分层增加唯一只读指标链：`control_plane/application/workbench_metrics.py` 定义结构化快照和安全不变量，`infrastructure/database/workbench_metrics_repository.py` 以单条 Installation-scoped SQL 聚合既有 `tasks`/`task_actions`，`bootstrap/workbench.py` 装配，`api/workbench.py` 暴露固定 `/metrics`。桌面侧继续使用 `features/workbench/`、`platform/tauri/workbench-gateway.ts` 和既有 Rust `control_plane.rs`/`lib.rs`，没有第二个页面、通用 HTTP/IPC、客户端数据库或新表。`tauri.workbench-metrics-e2e.conf.json`、WDIO spec 与 `scripts/run_h8_14_acceptance.py` 只用于唯一隐藏 App 的真实 PostgreSQL/跨 Installation/只读验收，并在结束后回收专属 AppData、端口和 Compose 资源。
+
+H8-15 不新增运行时服务，而以 `contracts/quality/mvp-failure-matrix.v1.json` 作为第 4.1 节失败矩阵的可执行证据登记：15 类边界、78 个原子失败分支逐项绑定仓库内测试文件和精确测试锚点。`frontend/tests/mvp-failure-matrix.test.mjs` 校验边界顺序、词汇同步、唯一性、证据路径/锚点与真实平台待验收集合；B5-15、D6-16、A7-16、A7-17 仍保持独立真实证据，不能被 Fake 页面或分层测试替代。审计补齐了 PostgreSQL 未知迁移目标不改变当前 revision、连接池耗尽安全映射，以及生产安装包拒绝 Profile、Cookie、Executor SQLite 与诊断资料的门禁。
 
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 

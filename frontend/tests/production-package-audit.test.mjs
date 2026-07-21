@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { auditProductionPackage } from "../scripts/audit-production-package.mjs";
@@ -185,6 +185,55 @@ test("E4-15 rejects a test dependency, test resource, or non-production Tauri ca
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
+  }
+});
+
+test("H8-15 rejects runtime Profile, database, Cookie, and diagnostic data", async () => {
+  for (const relativePath of [
+    "browser-profiles/douyin/profile-marker",
+    "Cookies",
+    "executor-ledger.sqlite3",
+    "artifacts/diagnostics/trace.json",
+  ]) {
+    const fixture = await createProductionFixture();
+    try {
+      const target = join(fixture.distribution, relativePath);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, "private-runtime-data");
+      await assert.rejects(
+        auditProductionPackage({
+          binaryPath: fixture.binary,
+          cargoManifestPath: fixture.cargoManifest,
+          dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+          distributionPath: fixture.distribution,
+          expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+          tauriConfigPath: fixture.tauriConfig,
+        }),
+        /Production assets contain runtime data/,
+      );
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }
+
+  const fixture = await createProductionFixture();
+  try {
+    const config = JSON.parse(await readFile(fixture.tauriConfig, "utf8"));
+    config.bundle.resources = ["executor-ledger.sqlite3"];
+    await writeFile(fixture.tauriConfig, JSON.stringify(config));
+    await assert.rejects(
+      auditProductionPackage({
+        binaryPath: fixture.binary,
+        cargoManifestPath: fixture.cargoManifest,
+        dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+        distributionPath: fixture.distribution,
+        expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+        tauriConfigPath: fixture.tauriConfig,
+      }),
+      /Production Tauri config contains runtime data/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
   }
 });
 
