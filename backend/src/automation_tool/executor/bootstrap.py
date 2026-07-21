@@ -45,6 +45,7 @@ class ExecutorBootstrap(BaseModel):
     state_directory: Annotated[str, Field(min_length=1, max_length=4096)]
     local_emergency_stop: bool = False
     crash_recovery: bool = False
+    capture_successful_diagnostics: bool = False
 
     @field_validator("websocket_url")
     @classmethod

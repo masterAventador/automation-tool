@@ -125,6 +125,12 @@ const shellPlatformAdapter: PlatformAdapter = {
   async emergencyStopExecutor() {
     return { state: "stopped", version: null, buildId: null, restartCount: 0 };
   },
+  async getBrowserDiagnosticSettings() {
+    return { captureSuccessfulRuns: false };
+  },
+  async setCaptureSuccessfulDiagnostics() {
+    return { captureSuccessfulRuns: false };
+  },
 };
 
 const shellPlatformSessionGateway: PlatformSessionGateway = {

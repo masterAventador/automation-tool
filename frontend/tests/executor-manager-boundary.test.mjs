@@ -220,6 +220,8 @@ test("E4-13 exposes only fixed Executor lifecycle Commands through PlatformAdapt
     "restart_executor",
     "get_executor_diagnostics",
     "emergency_stop_executor",
+    "get_browser_diagnostic_settings",
+    "set_capture_successful_diagnostics",
   ]) {
     assert.match(entry, new RegExp(`async fn ${command}|fn ${command}`));
     assert.match(tauriAdapter, new RegExp(`"${command}"`));
@@ -227,6 +229,8 @@ test("E4-13 exposes only fixed Executor lifecycle Commands through PlatformAdapt
   assert.match(entry, /app\.path\(\)\.app_data_dir\(\)/);
   assert.match(nativePlatform, /local-executor/);
   assert.match(nativePlatform, /executor-id-v1/);
+  assert.match(nativePlatform, /browser-diagnostic-settings-v1/);
+  assert.match(nativePlatform, /with_capture_successful_diagnostics/);
   assert.match(platformTypes, /export interface PlatformAdapter/);
   assert.doesNotMatch(tauriAdapter, /https?:|wss?:|session|token|packageRoot|stateDirectory/i);
   assert.doesNotMatch(nativePlatform, /#\[tauri::command\]/);
@@ -266,12 +270,16 @@ test("E4-14 drives the signed Executor lifecycle through one isolated hidden App
   assert.match(spec, /button=本地紧急停止/);
   assert.match(spec, /inject_executor_crash_for_acceptance/);
   assert.match(spec, /inject_executor_hang_for_acceptance/);
-  assert.match(spec, /process\.platform === "win32"/);
+  assert.match(spec, /stoppedOrTimedOut/);
+  assert.match(spec, /本地执行器已停止/);
+  assert.match(spec, /暂时无法读取本地执行器状态。请稍后重试。/);
+  assert.doesNotMatch(spec, /process\.platform/);
   assert.match(orchestrator, /build_signed_executor/);
   assert.match(orchestrator, /managed_test_postgres/);
   assert.match(orchestrator, /"pnpm.cmd" if sys.platform == "win32" else "pnpm"/);
   assert.match(orchestrator, /closing\(sqlite3\.connect/);
-  assert.match(orchestrator, /!= \(2,\):/);
+  assert.match(orchestrator, /!= \(6,\):/);
+  assert.match(orchestrator, /browser-diagnostic-settings-v1/);
   assert.match(orchestrator, /automation-tool-e414-/);
   assert.match(orchestrator, /require_port_available/);
   assert.match(orchestrator, /assert_no_executor_process/);

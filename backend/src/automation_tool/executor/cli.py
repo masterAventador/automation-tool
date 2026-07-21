@@ -114,6 +114,7 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                     runtime_factory=lambda: BrowserRuntime(
                         diagnostics=recovery_diagnostics,
                     ),
+                    capture_successful_diagnostics=bootstrap.capture_successful_diagnostics,
                 ),
             )
             metadata = RuntimeMetadata.detect()

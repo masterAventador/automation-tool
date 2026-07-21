@@ -283,6 +283,7 @@ backend/
 │       │   ├── discovery_operation.py # 搜索/滚动/提取的单次只读发现组合
 │       │   ├── ledger.py          # 本机 SQLite v6 命令/Session/准入/副作用/网络闸门账本
 │       │   ├── local_artifact.py  # H8-09 通用本机 Artifact 引用、权限和稳定读写边界
+│       │   ├── browser_diagnostic_artifact.py # H8-10 脱敏 viewport PNG/结构 Trace 固定 Policy
 │       │   ├── side_effect_ledger.py # A7-07 封闭且脱敏的副作用状态值对象
 │       │   ├── page_drift_artifact.py # 复用通用 Store 的页面漂移固定 Schema/Policy
 │       │   ├── platform_commands.py # 认证本机平台命令、扫码 flow 与健康队列
@@ -421,7 +422,7 @@ D6-12 的用户页面位于既有 `features/task-runs/`：`TaskTargetPreview.tsx
 
 D6-13 复用既有 `application/task_command_delivery.py` 与 `infrastructure/database/task_command_repository.py`，没有新增 dispatcher、消息队列或第二协议。`schema.py`/Alembic `20260720_0019` 只给 Outbox 增加确认 message 绑定；仓储以 typed Task definition 判断 offer 是否可能承载业务动作，在 enqueue 固定当前确认并在 claim 关联复验。`scripts/run_d6_13_acceptance.py` 复用共享隔离 PostgreSQL/Uvicorn/WebSocket 脚手架，证明未绑定和确认失效命令不离开数据库、当前绑定命令才到达正式 Executor 网络入口；它不调用 App API、不启动 Tauri/浏览器，也不伪造 Wave 7 ActionAuthorization 或平台动作。
 
-D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移固定 Schema、Policy 与窄引用；H8-09 的 `executor/local_artifact.py` 统一拥有稳定 ID、摘要、媒体类型、大小、受控相对路径、独占写入、按 ID 解析/枚举/读取和文件系统权限边界。`discovery_operation.py` 仍是唯一生产调用方，`protocol/executor_envelope.py` 只把两种明确漂移 evidence 收紧到 `handoff_required`，Control Plane 继续复用既有发现收敛仓储。`tests/integration/test_page_drift_artifact_browser.py` 从正式 command processor 进入生产编排，以无头系统 Chrome 和隔离 Profile 生成 Artifact，再从同一 Store 按 ID 读取并验证浏览器清理；PostgreSQL 集成矩阵验证两种 evidence 都投影为 `awaiting_human`。当前没有新增 App/API/数据库表、通用文件浏览器、截图/Trace、上传或删除通道。
+D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移固定 Schema、Policy 与窄引用；H8-09 的 `executor/local_artifact.py` 统一拥有稳定 ID、摘要、媒体类型、大小、受控相对路径、独占写入、按 ID 解析/枚举/读取和文件系统权限边界。H8-10 的 `executor/browser_diagnostic_artifact.py` 复用同一 Store，只生产脱敏 viewport PNG 与固定结构 Trace；`discovery_operation.py` 对失败自动触发，对成功只接受 bootstrap 的用户设置。设置链位于既有 `Diagnostics.tsx` → `platform-adapter.ts` → `lib.rs` → `executor_platform.rs` → `executor_manager.rs`/`executor_bootstrap.rs`，AppData 只保存 exact bool，不暴露 Artifact 路径。`tests/integration/test_douyin_discovery_fake_pages.py` 从正式 command processor 与无头系统 Chrome 覆盖失败/默认成功/用户开启成功，E4-14 隐藏 App 验收覆盖真实设置与 signed Executor 启动。当前没有新增数据库表、通用文件浏览器、上传或删除通道。
 
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 

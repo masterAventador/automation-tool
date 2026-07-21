@@ -36,7 +36,9 @@ describe("Tauri PlatformAdapter", () => {
         restartCount: 0,
       })
       .mockResolvedValueOnce({ lines: ["safe diagnostic"] })
-      .mockResolvedValueOnce(stopped);
+      .mockResolvedValueOnce(stopped)
+      .mockResolvedValueOnce({ captureSuccessfulRuns: false })
+      .mockResolvedValueOnce({ captureSuccessfulRuns: true });
     const adapter = new TauriPlatformAdapter();
 
     await expect(adapter.getBrowserSettings()).resolves.toEqual({
@@ -51,6 +53,12 @@ describe("Tauri PlatformAdapter", () => {
     await expect(adapter.restartExecutor()).resolves.toMatchObject({ state: "running" });
     await expect(adapter.getExecutorDiagnostics()).resolves.toEqual(["safe diagnostic"]);
     await expect(adapter.emergencyStopExecutor()).resolves.toEqual(stopped);
+    await expect(adapter.getBrowserDiagnosticSettings()).resolves.toEqual({
+      captureSuccessfulRuns: false,
+    });
+    await expect(adapter.setCaptureSuccessfulDiagnostics(true)).resolves.toEqual({
+      captureSuccessfulRuns: true,
+    });
     expect(invoke.mock.calls).toEqual([
       ["get_browser_settings"],
       ["select_browser", { browser: "google_chrome" }],
@@ -58,6 +66,8 @@ describe("Tauri PlatformAdapter", () => {
       ["restart_executor"],
       ["get_executor_diagnostics"],
       ["emergency_stop_executor"],
+      ["get_browser_diagnostic_settings"],
+      ["set_capture_successful_diagnostics", { enabled: true }],
     ]);
   });
 
@@ -103,5 +113,10 @@ describe("Tauri PlatformAdapter", () => {
     const error = await adapter.restartExecutor().catch((value: unknown) => value);
     expect(error).toBeInstanceOf(PlatformAdapterError);
     expect(String(error)).not.toContain("private-native-secret");
+
+    invoke.mockResolvedValueOnce({ captureSuccessfulRuns: 1 });
+    await expect(adapter.getBrowserDiagnosticSettings()).rejects.toMatchObject({
+      code: "protocol_mismatch",
+    });
   });
 });

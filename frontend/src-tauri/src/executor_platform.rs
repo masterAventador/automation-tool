@@ -38,6 +38,8 @@ const EXECUTOR_PACKAGE_DIRECTORY: &str = "package";
 const EXECUTOR_STATE_DIRECTORY: &str = "state";
 const TASK_EMERGENCY_STOP_FILE: &str = "task-emergency-stop-v1";
 const TASK_EMERGENCY_STOP_VERSION: &str = "1";
+const BROWSER_DIAGNOSTIC_SETTINGS_FILE: &str = "browser-diagnostic-settings-v1";
+const BROWSER_DIAGNOSTIC_SETTINGS_VERSION: &str = "1";
 const EXECUTOR_START_TIMEOUT_SECONDS: u64 = 30;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 const HEARTBEAT_INTERVAL_SECONDS: u8 = 15;
@@ -155,6 +157,30 @@ struct TaskEmergencyStopState {
     pending: Option<PendingTaskEmergencyStop>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserDiagnosticSettingsSnapshot {
+    capture_successful_runs: bool,
+}
+
+impl BrowserDiagnosticSettingsSnapshot {
+    pub const fn capture_successful_runs(self) -> bool {
+        self.capture_successful_runs
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct StoredBrowserDiagnosticSettings {
+    version: String,
+    capture_successful_runs: bool,
+}
+
+struct BrowserDiagnosticSettingsState {
+    store: AppDataSecretStore,
+    capture_successful_runs: bool,
+}
+
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 struct TaskEmergencyStopReconciliationGuard {
     active: Arc<AtomicBool>,
@@ -215,6 +241,7 @@ pub struct ExecutorPlatformService {
     manager: Arc<ExecutorManager>,
     platform_profile_lease: Arc<Mutex<Option<BrowserProfileLease>>>,
     task_emergency_stop: Arc<Mutex<TaskEmergencyStopState>>,
+    browser_diagnostic_settings: Arc<Mutex<BrowserDiagnosticSettingsState>>,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     task_emergency_stop_reconciliation_active: Arc<AtomicBool>,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -259,12 +286,34 @@ impl ExecutorPlatformService {
                     .validate()
             })
             .transpose()?;
+        let browser_diagnostic_settings_store = AppDataSecretStore::new(
+            &app_data_directory.join(EXECUTOR_DIRECTORY),
+            BROWSER_DIAGNOSTIC_SETTINGS_FILE,
+        )
+        .map_err(|_| storage_unavailable())?;
+        let capture_successful_runs = browser_diagnostic_settings_store
+            .load()
+            .map_err(|_| storage_unavailable())?
+            .map(|source| {
+                let stored = serde_json::from_slice::<StoredBrowserDiagnosticSettings>(&source)
+                    .map_err(|_| storage_unavailable())?;
+                if stored.version != BROWSER_DIAGNOSTIC_SETTINGS_VERSION {
+                    return Err(storage_unavailable());
+                }
+                Ok(stored.capture_successful_runs)
+            })
+            .transpose()?
+            .unwrap_or(false);
         Ok(Self {
             manager: Arc::new(manager),
             platform_profile_lease: Arc::new(Mutex::new(None)),
             task_emergency_stop: Arc::new(Mutex::new(TaskEmergencyStopState {
                 store: task_emergency_stop_store,
                 pending: pending_task_emergency_stop,
+            })),
+            browser_diagnostic_settings: Arc::new(Mutex::new(BrowserDiagnosticSettingsState {
+                store: browser_diagnostic_settings_store,
+                capture_successful_runs,
             })),
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
             task_emergency_stop_reconciliation_active: Arc::new(AtomicBool::new(false)),
@@ -281,6 +330,40 @@ impl ExecutorPlatformService {
 
     pub fn diagnostics(&self) -> Result<Vec<String>, ExecutorPlatformError> {
         self.manager.diagnostics().map_err(map_manager_error)
+    }
+
+    pub fn browser_diagnostic_settings(
+        &self,
+    ) -> Result<BrowserDiagnosticSettingsSnapshot, ExecutorPlatformError> {
+        self.browser_diagnostic_settings
+            .lock()
+            .map(|state| BrowserDiagnosticSettingsSnapshot {
+                capture_successful_runs: state.capture_successful_runs,
+            })
+            .map_err(|_| storage_unavailable())
+    }
+
+    pub fn set_capture_successful_diagnostics(
+        &self,
+        enabled: bool,
+    ) -> Result<BrowserDiagnosticSettingsSnapshot, ExecutorPlatformError> {
+        let mut state = self
+            .browser_diagnostic_settings
+            .lock()
+            .map_err(|_| storage_unavailable())?;
+        let serialized = serde_json::to_vec(&StoredBrowserDiagnosticSettings {
+            version: BROWSER_DIAGNOSTIC_SETTINGS_VERSION.to_owned(),
+            capture_successful_runs: enabled,
+        })
+        .map_err(|_| storage_unavailable())?;
+        state
+            .store
+            .save(&serialized)
+            .map_err(|_| storage_unavailable())?;
+        state.capture_successful_runs = enabled;
+        Ok(BrowserDiagnosticSettingsSnapshot {
+            capture_successful_runs: enabled,
+        })
     }
 
     pub fn emergency_stop(&self) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
@@ -442,7 +525,11 @@ impl ExecutorPlatformService {
             self.paths.state_directory().to_path_buf(),
             HEARTBEAT_INTERVAL_SECONDS,
         )
-        .map_err(map_manager_error)?;
+        .map_err(map_manager_error)?
+        .with_capture_successful_diagnostics(
+            self.browser_diagnostic_settings()?
+                .capture_successful_runs(),
+        );
         self.manager.start(launch).map_err(map_manager_error)
     }
 
@@ -636,7 +723,7 @@ const fn storage_unavailable() -> ExecutorPlatformError {
 
 #[cfg(all(test, any(not(feature = "desktop-e2e"), feature = "control-plane-e2e")))]
 mod tests {
-    use super::ExecutorPlatformService;
+    use super::{ExecutorPlatformErrorCode, ExecutorPlatformService};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -690,5 +777,59 @@ mod tests {
             .begin_task_emergency_stop_reconciliation()
             .expect("released reconciliation gate")
             .is_some());
+    }
+
+    #[test]
+    fn successful_diagnostic_capture_defaults_off_and_persists_inside_app_data() {
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        assert!(!service
+            .browser_diagnostic_settings()
+            .expect("read settings")
+            .capture_successful_runs());
+
+        let updated = service
+            .set_capture_successful_diagnostics(true)
+            .expect("save settings");
+        assert!(updated.capture_successful_runs());
+        drop(service);
+
+        let reopened = ExecutorPlatformService::initialize(&app_data.0).expect("reopen service");
+        assert!(reopened
+            .browser_diagnostic_settings()
+            .expect("read persisted settings")
+            .capture_successful_runs());
+        let stored = std::fs::read(
+            app_data
+                .0
+                .join("local-executor/browser-diagnostic-settings-v1"),
+        )
+        .expect("settings file");
+        assert_eq!(
+            std::str::from_utf8(&stored).expect("UTF-8 settings"),
+            r#"{"version":"1","capture_successful_runs":true}"#
+        );
+    }
+
+    #[test]
+    fn malformed_successful_diagnostic_setting_fails_closed() {
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        service
+            .set_capture_successful_diagnostics(true)
+            .expect("save settings");
+        drop(service);
+        std::fs::write(
+            app_data
+                .0
+                .join("local-executor/browser-diagnostic-settings-v1"),
+            br#"{"version":"1","capture_successful_runs":1}"#,
+        )
+        .expect("corrupt settings");
+
+        let error = ExecutorPlatformService::initialize(&app_data.0)
+            .err()
+            .expect("reject malformed settings");
+        assert_eq!(error.code(), ExecutorPlatformErrorCode::StorageUnavailable);
     }
 }

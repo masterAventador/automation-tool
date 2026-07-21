@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-10）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（下一项 H8-11）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-09 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-10 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-10 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，下一项为 H8-11 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -339,7 +339,7 @@
 | H8-07 | 断网/抖动 | 停在安全点、事件 spool、重连续传、不烧无限重试 | H8-05,H8-06 | ✅ 已完成 |
 | H8-08 | 休眠/锁屏 | 时钟跳变、deadline、窗口不可用和恢复诊断 | H8-07 | ✅ 已完成 |
 | H8-09 | Local Artifact | 稳定 ID、摘要、媒体类型、大小、相对路径和权限 | E4-11 | ✅ 已完成 |
-| H8-10 | 诊断截图/Trace | 只在失败/用户开启时保存，数量/大小/时间上限 | H8-09,D6-14 | ⬜ 未开始 |
+| H8-10 | 诊断截图/Trace | 只在失败/用户开启时保存，数量/大小/时间上限 | H8-09,D6-14 | ✅ 已完成 |
 | H8-11 | 日志脱敏 | 服务端、Rust、Executor 全链路凭据/页面/路径泄漏测试 | E4-10,H8-10 | ⬜ 未开始 |
 | H8-12 | 清理与磁盘治理 | 保留策略、磁盘满、清理失败、正在引用 Artifact 保护 | H8-09,H8-10 | ⬜ 未开始 |
 | H8-13 | 诊断导出 | 用户主动导出受限包；不含 Cookie/完整私信/绝对私有路径 | H8-11,H8-12 | ⬜ 未开始 |
@@ -2502,13 +2502,29 @@
 - 隔离与清理：H8-09 业务验收不启动 Uvicorn、PostgreSQL、Compose、Tauri App 或真实账号，也不占用固定业务端口；系统 Chrome 只使用 pytest 私有临时 Profile 且固定无头。通用 Frontend Playwright 门禁在启动 1420 前明确确认端口空闲，退出后再次确认释放。成功和失败路径都由 BrowserRuntime 关闭自有浏览器，门禁结束后将本轮精确 pytest 临时目录移入系统废纸篓；最终复核无项目 Chrome/Playwright/Vite/Uvicorn、监听端口、容器、AppData 或活动临时 Artifact 残留
 - 后续：进入 `H8-10`，只在失败或用户明确开启时基于当前 Policy/Store 保存受限诊断截图/Trace，并补数量、大小、时间和敏感内容边界；不复制文件安全实现，不在本任务提前加入上传或清理
 
+### H8-10 诊断截图/Trace
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、受限诊断生产器、发现任务触发链、App 私有设置、隐藏 App 原调用方验收和权威文档属于单一 `feat: 完成受限浏览器诊断` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`；聚焦测试最初准确失败于 `browser_diagnostic_artifact` 模块不存在，随后正式发现任务失败路径准确证明截图调用次数仍为 0，Rust/React 契约再准确失败于没有成功任务诊断设置和 Executor bootstrap 字段。H8-10 不提供任意截图/Trace API、文件浏览、导出、上传、自动清理或 Control Plane 数据面，也不把 Playwright 原始 Trace、DOM、网络、页面正文和调用方自由文本写入 Artifact
+- 受限诊断事实：新增唯一 `BrowserDiagnosticArtifactStore` 并复用 H8-09 `LocalArtifactStore`，截图固定保存到 `artifacts/diagnostics/screenshots`，只截当前 viewport，禁用动画并在截图前隐藏文字、表单值、图片、视频、Canvas、SVG、iframe、背景、阴影和滤镜；写入前严格验证 PNG signature/chunk/CRC/IHDR 与最大 4096×4096，只保留 IHDR/PLTE/IDAT/IEND，剥离全部 ancillary metadata。Trace 不是 Playwright 原始跟踪包，只是固定 JSON 事实：版本、Trace/截图 Artifact ID、平台、操作、页面 revision、阶段、触发原因、脱敏版本和 UTC 时间，不含 Task/Attempt ID、URL、DOM、HTML、请求、响应、Header、Cookie、页面快照或自由文本
+- 触发、上限与失败隔离：发现任务异常始终尝试保存一张受限截图和一份固定 Trace；成功任务默认不保存，只有 App 私有设置明确开启后才在下次 Executor 启动时通过 bootstrap 生效。截图固定 1 MiB、Trace 固定 4 KiB、各最多 8 个，截图本身有 5 秒超时；坏 PNG、超尺寸、CRC 错误、容量耗尽、存储/权限/时钟失败和浏览器截图失败都只产生固定非泄漏拒绝，绝不改变原任务成功/失败结果，也不回显不可信网页内容或本机路径
+- App 私有设置：Rust 只在 `app_data_dir/local-executor/browser-diagnostic-settings-v1` 保存精确 `{version:"1",capture_successful_runs:boolean}`，复用 App 私有文件存储并保持 POSIX `0600`，畸形内容以固定存储错误拒绝初始化；不使用系统钥匙串，不返回路径或密钥。设置页提供“保存成功任务的脱敏诊断”开关，失败任务始终保存；React 只经固定 `PlatformAdapter`/Tauri Command 读写布尔值，重启 Executor 时 Rust 把当前值写入 stdin bootstrap，崩溃恢复继续沿用同一启动配置
+- 原调用方验收：真实无头浏览器集成从 `ExecutorCommandProcessor.handle(task.discover)` 进入正式发现编排、`BrowserRuntime` 和系统 Chrome；失败任务自动生成受限截图/Trace，显式开启的成功任务生成，默认成功任务不生成，并从同一 Store 核验摘要、大小、相对路径、精确 Trace 字段和敏感内容缺失。`scripts/run_e4_14_acceptance.py` 再构建签名 Executor，从唯一 `visible=false` Tauri App 的设置开关、启动/崩溃恢复/挂起紧停/再次启动正式 IPC 链路验证设置文件、`0600`、SQLite v6 和 bootstrap；最终输出 `[E4-14] Hidden-App signed Executor lifecycle acceptance passed`
+- 失败发现与修正：真实 macOS 隐藏 App 证明挂起后的紧急停止既可能直接收敛为 stopped，也可能先返回固定安全失败再刷新收敛，因此删除旧的 Windows 专属分支，保留两条安全路径；runner 的历史 SQLite v2 断言同步到当前 v6，并新增诊断设置文件精确校验。Backend 全量期间发现两条旧的扫码/Session Fake 页面例行测试漏传 `headless=true`，先停止该轮测试并补显式无头参数，针对性回归后重新执行全量；真实扫码手工用例仍由环境变量显式门控，不会在例行门禁弹窗
+- 失败与覆盖矩阵：覆盖成功默认关闭/显式开启/设置重启持久化、失败自动捕获、成功或失败诊断写入自身失败、截图超时/异常/过大/畸形 signature/chunk/CRC/dimension/metadata、Trace 固定字段与大小、空/满 Store、坏时钟、目录/文件权限和不可信 ID/阶段/平台输入；浏览器运行时始终由确定所有者在成功、失败和截图异常后关闭，不读取默认 Profile、Cookie 或真实账号
+- 门禁：Backend 最终全量 `1948 passed, 5 skipped in 221.93s`，12877 条语句/2938 个分支覆盖率 100%，330 个 Python 文件格式、Ruff、严格 Mypy 305 个源码文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 110 项 Node 契约、198 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt、三套全目标 Clippy `-D warnings` 与 Actionlint 全绿。新诊断模块聚焦 19 项测试语句/分支覆盖率 100%，H8-10 相关真实浏览器聚焦 78 项通过，隐藏真实 App 纵向验收 1/1 通过
+- 隔离与清理：真实浏览器与 UI Harness 固定无头，Tauri App 固定隐藏；启动 1420 前确认端口空闲，结束后确认释放。隐藏验收使用专属 App identifier/AppData、随机 Control Plane/PostgreSQL 端口、`automation-tool-e414-*` Compose 资源和独立 SQLite，成功与失败路径都回收 WDIO/App/Executor/Uvicorn、浏览器、容器/网络/Volume 和临时 Profile；不访问真实平台账号，也不产生外部副作用
+- 后续：进入 `H8-11`，从服务端、Rust、Executor 和 App 原入口建立凭据、页面内容、URL、Header、Cookie、错误原文与本机私有路径的全链路日志泄漏矩阵；继续复用 E4-10 固定脱敏器和本任务受限 Artifact，不建立第二套日志或诊断存储
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-10`（⬜ 未开始）：基于 H8-09 Local Artifact 只在失败或用户明确开启时保存受限诊断截图/Trace，并落实数量、大小与时间上限；
+3. `H8-11`（⬜ 未开始）：覆盖服务端、Rust、Executor 和 App 全链路日志泄漏，确保凭据、页面内容、URL、Cookie、错误原文和本机私有路径只形成固定脱敏事实；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。其余本轮 Windows 原生验收已于 2026-07-20 补齐。

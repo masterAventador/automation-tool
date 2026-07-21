@@ -9,6 +9,12 @@ from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
+from automation_tool.executor.browser_diagnostic_artifact import (
+    BrowserDiagnosticArtifactRejected,
+    BrowserDiagnosticArtifactStore,
+    BrowserDiagnosticCapturePolicy,
+    BrowserDiagnosticStage,
+)
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
     BrowserRuntime,
@@ -173,6 +179,8 @@ class ProductionDouyinDiscoveryOperation:
         ] = DouyinBoundedScroll,  # type: ignore[assignment]
         extraction_factory: Callable[[BrowserWindow, int, int], _Extraction] = _default_extraction,
         page_drift_artifacts: PageDriftArtifactStore | None = None,
+        browser_diagnostic_artifacts: BrowserDiagnosticArtifactStore | None = None,
+        capture_successful_diagnostics: bool = False,
     ) -> None:
         if (
             not isinstance(ledger, ExecutorLedger)
@@ -181,6 +189,7 @@ class ProductionDouyinDiscoveryOperation:
             or not callable(search_factory)
             or not callable(scroll_factory)
             or not callable(extraction_factory)
+            or type(capture_successful_diagnostics) is not bool
         ):
             raise DouyinDiscoveryOperationRejected
         resolved_artifacts = (
@@ -190,6 +199,14 @@ class ProductionDouyinDiscoveryOperation:
         )
         if not isinstance(resolved_artifacts, PageDriftArtifactStore):
             raise DouyinDiscoveryOperationRejected
+        resolved_diagnostics = browser_diagnostic_artifacts
+        if resolved_diagnostics is None:
+            with suppress(BrowserDiagnosticArtifactRejected):
+                resolved_diagnostics = BrowserDiagnosticArtifactStore(
+                    state_directory=ledger.database_path.parent
+                )
+        elif not isinstance(resolved_diagnostics, BrowserDiagnosticArtifactStore):
+            raise DouyinDiscoveryOperationRejected
         self._ledger = ledger
         self._browser_authority = browser_authority
         self._runtime_factory = runtime_factory
@@ -197,6 +214,10 @@ class ProductionDouyinDiscoveryOperation:
         self._scroll_factory = scroll_factory
         self._extraction_factory = extraction_factory
         self._page_drift_artifacts = resolved_artifacts
+        self._browser_diagnostic_artifacts = resolved_diagnostics
+        self._browser_diagnostic_policy = BrowserDiagnosticCapturePolicy(
+            capture_successful_runs=capture_successful_diagnostics
+        )
 
     def run(
         self,
@@ -223,6 +244,8 @@ class ProductionDouyinDiscoveryOperation:
         try:
             with self._browser_authority.lease() as request:
                 runtime = self._runtime_factory()
+                window: BrowserWindow | None = None
+                stage = BrowserDiagnosticStage.SEARCH
                 try:
                     runtime.start(request)
                     window = runtime.primary_window()
@@ -235,6 +258,7 @@ class ProductionDouyinDiscoveryOperation:
                     }:
                         self._capture_page_drift(result)
                     if result is None:
+                        stage = BrowserDiagnosticStage.SCROLL
                         scroll = self._scroll_factory(
                             window,
                             search_input,
@@ -243,13 +267,18 @@ class ProductionDouyinDiscoveryOperation:
                         ).run()
                         result = _from_scroll(scroll, payload.page_revision)
                     if result is None:
+                        stage = BrowserDiagnosticStage.EXTRACTION
                         extraction = self._extraction_factory(
                             window,
                             payload.target_limit,
                             payload.page_revision,
                         ).run()
                         result = _from_extraction(extraction, payload.page_revision)
+                except Exception:
+                    result = _failed(payload.page_revision, "page_unavailable")
                 finally:
+                    if result is not None and window is not None:
+                        self._capture_browser_diagnostics(window, result, stage)
                     runtime.close()
         except Exception:
             result = _failed(payload.page_revision, "page_unavailable")
@@ -261,6 +290,25 @@ class ProductionDouyinDiscoveryOperation:
                 evidence=result.evidence,
                 page_revision=result.page_revision,
                 stage="search",
+            )
+
+    def _capture_browser_diagnostics(
+        self,
+        window: BrowserWindow,
+        result: DouyinDiscoveryExecutionResult,
+        stage: BrowserDiagnosticStage,
+    ) -> None:
+        trigger = self._browser_diagnostic_policy.trigger(
+            failed=result.state is not DouyinDiscoveryOperationState.COMPLETED
+        )
+        if trigger is None or self._browser_diagnostic_artifacts is None:
+            return
+        with suppress(BrowserDiagnosticArtifactRejected):
+            self._browser_diagnostic_artifacts.capture(
+                window=window,
+                trigger=trigger,
+                stage=stage,
+                page_revision=result.page_revision,
             )
 
 

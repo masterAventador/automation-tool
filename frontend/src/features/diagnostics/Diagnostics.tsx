@@ -1,4 +1,16 @@
-import { Alert, Button, Card, Descriptions, Flex, Modal, Space, Spin, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Flex,
+  Modal,
+  Space,
+  Spin,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
 import { useEffect, useState } from "react";
 
 import type { ExecutorManagerStatus, PlatformAdapter } from "../../platform/types";
@@ -34,17 +46,23 @@ interface DiagnosticsProps {
 export function Diagnostics({ platform }: DiagnosticsProps) {
   const [status, setStatus] = useState<ExecutorManagerStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<readonly string[]>([]);
+  const [captureSuccessfulRuns, setCaptureSuccessfulRuns] = useState(false);
   const [failure, setFailure] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([platform.getExecutorStatus(), platform.getExecutorDiagnostics()])
-      .then(([nextStatus, nextDiagnostics]) => {
+    void Promise.all([
+      platform.getExecutorStatus(),
+      platform.getExecutorDiagnostics(),
+      platform.getBrowserDiagnosticSettings(),
+    ])
+      .then(([nextStatus, nextDiagnostics, settings]) => {
         if (active) {
           setStatus(nextStatus);
           setDiagnostics(nextDiagnostics);
+          setCaptureSuccessfulRuns(settings.captureSuccessfulRuns);
           setFailure(false);
         }
       })
@@ -101,6 +119,19 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
     }
   };
 
+  const updateSuccessfulDiagnostics = async (enabled: boolean) => {
+    setBusy(true);
+    setFailure(false);
+    try {
+      const settings = await platform.setCaptureSuccessfulDiagnostics(enabled);
+      setCaptureSuccessfulRuns(settings.captureSuccessfulRuns);
+    } catch {
+      setFailure(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="diagnostics-content" aria-label="本地执行器诊断">
       {failure ? <Alert type="error" showIcon message={SAFE_FAILURE_MESSAGE} /> : null}
@@ -150,6 +181,23 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
             ))}
           </ol>
         )}
+      </Card>
+
+      <Card title="浏览器诊断采集" className="diagnostics-log-card">
+        <Flex justify="space-between" align="center" gap={16}>
+          <Space orientation="vertical" size={2}>
+            <Typography.Text>保存成功任务的脱敏诊断</Typography.Text>
+            <Typography.Text type="secondary">
+              失败任务始终保存；成功任务设置会在下次启动执行器时生效。
+            </Typography.Text>
+          </Space>
+          <Switch
+            aria-label="保存成功任务的脱敏诊断"
+            checked={captureSuccessfulRuns}
+            disabled={busy}
+            onChange={(enabled) => void updateSuccessfulDiagnostics(enabled)}
+          />
+        </Flex>
       </Card>
 
       <Modal

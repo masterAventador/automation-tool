@@ -30,6 +30,7 @@ def source(
     token: str = "private-session",
     local_emergency_stop: bool = False,
     crash_recovery: bool = False,
+    capture_successful_diagnostics: bool = False,
 ) -> bytes:
     document = {
         "bootstrap_version": "1",
@@ -45,6 +46,8 @@ def source(
         document["local_emergency_stop"] = True
     if crash_recovery:
         document["crash_recovery"] = True
+    if capture_successful_diagnostics:
+        document["capture_successful_diagnostics"] = True
     return (json.dumps(document, separators=(",", ":")) + "\n").encode()
 
 
@@ -107,6 +110,40 @@ def test_cli_returns_success_after_the_runtime_stops(
     )
 
     assert status == 0
+
+
+def test_cli_passes_the_private_success_diagnostic_setting_to_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    received: list[bool] = []
+
+    class Discovery:
+        @staticmethod
+        def run(_payload: object, *, cancellation_requested: object) -> object:
+            raise AssertionError((cancellation_requested, "discovery must not run in this test"))
+
+    def discovery(**keywords: object) -> Discovery:
+        received.append(bool(keywords["capture_successful_diagnostics"]))
+        return Discovery()
+
+    monkeypatch.setattr(cli, "ProductionDouyinDiscoveryOperation", discovery)
+    monkeypatch.setattr(LocalExecutorProcess, "run", lambda _self, _stop: None)
+
+    status = cli.run_executor(
+        BytesIO(
+            source(
+                websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
+                state_directory=tmp_path / "diagnostic-state",
+                capture_successful_diagnostics=True,
+            )
+        ),
+        StringIO(),
+        StringIO(),
+    )
+
+    assert status == 0
+    assert received == [True]
 
 
 def test_cli_persists_bootstrap_emergency_stop_before_network_runtime(

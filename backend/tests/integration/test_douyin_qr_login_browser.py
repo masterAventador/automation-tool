@@ -37,6 +37,7 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
         BrowserLaunchRequest(
             executable_path=MACOS_CHROME,
             profile_directory=profile,
+            headless=True,
         )
     ):
         initial_page = cast(Any, runtime.primary_window().playwright_page)

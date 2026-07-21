@@ -44,6 +44,7 @@ EXECUTOR_BUILD_ID = "e4-14-hidden-app"
 DEVICE_CREDENTIAL_FILE = "device-credential-v1"
 EXECUTOR_ID_FILE = "executor-id-v1"
 EXECUTOR_LEDGER_FILE = "executor-ledger.sqlite3"
+BROWSER_DIAGNOSTIC_SETTINGS_FILE = "browser-diagnostic-settings-v1"
 
 
 def require_port_available(port: int) -> None:
@@ -274,16 +275,26 @@ def verify_executor_app_data(private_app_data: Path, installation_id: str) -> No
     verify_app_private_data(private_app_data)
     executor_root = private_app_data / "local-executor"
     executor_id_path = executor_root / EXECUTOR_ID_FILE
+    diagnostic_settings_path = executor_root / BROWSER_DIAGNOSTIC_SETTINGS_FILE
     ledger_path = executor_root / "state" / EXECUTOR_LEDGER_FILE
-    if not executor_id_path.is_file() or not ledger_path.is_file():
+    if (
+        not executor_id_path.is_file()
+        or not diagnostic_settings_path.is_file()
+        or not ledger_path.is_file()
+    ):
         raise RuntimeError("E4-14 App-private Executor state is incomplete")
+    if json.loads(diagnostic_settings_path.read_bytes()) != {
+        "version": "1",
+        "capture_successful_runs": True,
+    }:
+        raise RuntimeError("E4-14 successful diagnostic setting was not persisted")
     executor_id_text = executor_id_path.read_text(encoding="ascii")
     executor_id = UUID(executor_id_text)
     if executor_id.version != 4 or str(executor_id) != executor_id_text:
         raise RuntimeError("E4-14 stable Executor identity is not canonical UUIDv4")
     with closing(sqlite3.connect(ledger_path)) as connection:
-        if connection.execute("PRAGMA user_version").fetchone() != (2,):
-            raise RuntimeError("E4-14 Executor ledger did not migrate to v2")
+        if connection.execute("PRAGMA user_version").fetchone() != (6,):
+            raise RuntimeError("E4-14 Executor ledger did not migrate to v6")
         identity = connection.execute(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchone()
@@ -297,6 +308,7 @@ def verify_executor_app_data(private_app_data: Path, installation_id: str) -> No
         for path, expected in [
             (executor_root, 0o700),
             (executor_id_path, 0o600),
+            (diagnostic_settings_path, 0o600),
             (executor_root / "state", 0o700),
             (ledger_path, 0o600),
         ]:

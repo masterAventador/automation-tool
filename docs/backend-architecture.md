@@ -833,12 +833,12 @@ MVP RPA 证据默认保存在本机：
 - 每类可信生产者以固定 `LocalArtifactPolicy` 声明小写目录、扩展名、媒体类型、单文件与数量硬上限，调用方不能提交任意路径或媒体类型；
 - Store 只提供独占 capture、按 ID resolve、完整引用校验 read 与稳定顺序 list；每次操作复验根/叶 identity，拒绝未知目录项、symlink/reparse、硬链接、宽权限和文件竞态，POSIX 固定 `0700/0600`，Windows 复用私有 ACL 校验；
 - Control Plane 只保存元数据，不保存绝对路径；
-- Tauri 后续只根据 Artifact ID 通过受控本机边界解析和展示，不接收 WebView 路径；H8-09 当前没有新增 App/API 或通用文件浏览器；
+- Tauri 后续只根据 Artifact ID 通过受控本机边界解析和展示，不接收 WebView 路径；H8-10 只新增成功采集 strict bool 设置，不向 React 暴露 Artifact 路径或通用文件浏览器；
 - 云端无法直接读取本地 Artifact；
 - 客户主动导出或后续启用上传时，使用短期上传授权；
 - 失败截图、Trace 和日志有数量、大小和保留期限上限。
 
-H8-09 的首个生产消费者是页面漂移固定证据：正式 `task.discover` 生成 `artifacts/evidence/page-drift/<id>.json` 后，可由同一 Store 以 Artifact ID 解析、枚举并校验摘要/大小/路径后读取。当前不提供覆盖、任意路径访问、上传、截图/Trace、导出、删除或保留治理；分别由 H8-10、H8-12 和 H8-13 承接。
+H8-09 的首个生产消费者是页面漂移固定证据：正式 `task.discover` 生成 `artifacts/evidence/page-drift/<id>.json` 后，可由同一 Store 以 Artifact ID 解析、枚举并校验摘要/大小/路径后读取。H8-10 又增加两个可信 Policy：`artifacts/diagnostics/screenshots/*.png` 固定 1 MiB/8 个，`artifacts/diagnostics/traces/*.json` 固定 4 KiB/8 个。失败发现自动采集，成功发现只在 App 私有 strict bool 开启后采集；截图为 5 秒内的当前 viewport 骨架，隐藏文字/表单/媒体/iframe/背景并剥离所有 PNG ancillary chunk；Trace 是固定枚举结构事实，不是可能携带 DOM/网络/页面快照的 Playwright 原始 trace。当前仍不提供覆盖、任意路径访问、上传、导出或删除；H8-12/H8-13 分别承接保留治理与主动导出。
 
 P2 内容素材和成片需要云端共享时再启用对象存储，继续使用同一 Artifact 领域接口。
 

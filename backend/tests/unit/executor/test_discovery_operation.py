@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import struct
+import zlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -12,6 +14,7 @@ from automation_tool.executor.browser_authority import (
     BrowserLaunchAuthority,
     BrowserLaunchAuthorityRejected,
 )
+from automation_tool.executor.browser_diagnostic_artifact import BrowserDiagnosticArtifactStore
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserWindow
 from automation_tool.executor.discovery_operation import (
     DouyinDiscoveryExecutionResult,
@@ -48,6 +51,21 @@ from automation_tool.protocol import (
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
 EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
 NOW = datetime(2026, 7, 19, 16, 0, tzinfo=UTC)
+
+
+def diagnostic_png() -> bytes:
+    def chunk(kind: bytes, source: bytes) -> bytes:
+        checksum = zlib.crc32(kind + source) & 0xFFFFFFFF
+        return struct.pack(">I", len(source)) + kind + source + struct.pack(">I", checksum)
+
+    return b"".join(
+        (
+            b"\x89PNG\r\n\x1a\n",
+            chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)),
+            chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")),
+            chunk(b"IEND", b""),
+        )
+    )
 
 
 def browser_request(tmp_path: Path) -> BrowserLaunchRequest:
@@ -397,6 +415,142 @@ def test_page_drift_artifact_failure_still_enters_handoff(
     assert result.evidence == "page_version_unknown"
 
 
+def test_discovery_captures_failed_and_explicitly_enabled_success_diagnostics(
+    tmp_path: Path,
+) -> None:
+    class Page:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def screenshot(self, **_options: object) -> bytes:
+            self.calls += 1
+            return diagnostic_png()
+
+    class Runtime:
+        def __init__(self, page: Page) -> None:
+            self.page = page
+            self.closed = False
+
+        def start(self, _request: BrowserLaunchRequest) -> None:
+            pass
+
+        def primary_window(self) -> BrowserWindow:
+            return BrowserWindow(object(), cast(Any, self.page))
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FailedSearch:
+        @staticmethod
+        def run() -> DouyinSearchExecutionObservation:
+            return DouyinSearchExecutionObservation(
+                state=DouyinSearchExecutionState.UNKNOWN,
+                evidence=DouyinSearchExecutionEvidence.PAGE_UNAVAILABLE,
+            )
+
+    class SuccessfulSearch:
+        @staticmethod
+        def run() -> DouyinSearchExecutionObservation:
+            return DouyinSearchExecutionObservation(
+                state=DouyinSearchExecutionState.SUCCEEDED,
+                evidence=DouyinSearchExecutionEvidence.RESULTS_READY,
+            )
+
+    class SuccessfulScroll:
+        @staticmethod
+        def run() -> DouyinBoundedScrollObservation:
+            return DouyinBoundedScrollObservation(
+                state=DouyinBoundedScrollState.COMPLETED,
+                evidence=DouyinBoundedScrollEvidence.TARGET_LIMIT_REACHED,
+                rounds_completed=1,
+                target_count=2,
+                target_limit=2,
+            )
+
+    class SuccessfulExtraction:
+        @staticmethod
+        def run() -> DouyinCandidateExtractionObservation:
+            return DouyinCandidateExtractionObservation(
+                state=DouyinCandidateExtractionState.COMPLETED,
+                evidence=DouyinCandidateExtractionEvidence.CANDIDATES_EXTRACTED,
+                candidates=(candidate(1),),
+                requested_limit=2,
+                page_revision=7,
+            )
+
+    failed_root = tmp_path / "failed"
+    failed_authority = BrowserLaunchAuthority()
+    failed_authority.authorize(browser_request(failed_root / "browser"))
+    failed_page = Page()
+    failed_runtime = Runtime(failed_page)
+    failed_ledger = healthy_ledger(failed_root / "ledger")
+    failed = ProductionDouyinDiscoveryOperation(
+        ledger=failed_ledger,
+        browser_authority=failed_authority,
+        runtime_factory=lambda: failed_runtime,
+        search_factory=lambda _window, _search: FailedSearch(),
+    ).run(payload(), cancellation_requested=lambda: False)
+
+    assert failed.state is DouyinDiscoveryOperationState.FAILED
+    assert failed_page.calls == 1
+    assert failed_runtime.closed is True
+    assert (
+        len(
+            tuple(
+                (failed_ledger.database_path.parent / "artifacts/diagnostics/screenshots").glob(
+                    "*.png"
+                )
+            )
+        )
+        == 1
+    )
+    assert (
+        len(
+            tuple(
+                (failed_ledger.database_path.parent / "artifacts/diagnostics/traces").glob("*.json")
+            )
+        )
+        == 1
+    )
+
+    for capture_successful_diagnostics, expected in ((False, 0), (True, 1)):
+        root = tmp_path / f"success-{capture_successful_diagnostics}"
+        authority = BrowserLaunchAuthority()
+        authority.authorize(browser_request(root / "browser"))
+        page = Page()
+        runtime = Runtime(page)
+        ledger = healthy_ledger(root / "ledger")
+        completed = ProductionDouyinDiscoveryOperation(
+            ledger=ledger,
+            browser_authority=authority,
+            runtime_factory=cast(Any, lambda runtime=runtime: runtime),
+            search_factory=lambda _window, _search: SuccessfulSearch(),
+            scroll_factory=lambda _window, _search, _result, _cancel: SuccessfulScroll(),
+            extraction_factory=lambda _window, _maximum, _revision: SuccessfulExtraction(),
+            capture_successful_diagnostics=capture_successful_diagnostics,
+        ).run(payload(), cancellation_requested=lambda: False)
+
+        assert completed.state is DouyinDiscoveryOperationState.COMPLETED
+        assert page.calls == expected
+        assert runtime.closed is True
+        assert (
+            len(
+                tuple(
+                    (ledger.database_path.parent / "artifacts/diagnostics/screenshots").glob(
+                        "*.png"
+                    )
+                )
+            )
+            == expected
+        )
+        assert (
+            len(
+                tuple((ledger.database_path.parent / "artifacts/diagnostics/traces").glob("*.json"))
+            )
+            == expected
+        )
+
+
 def test_production_discovery_requires_healthy_local_session_and_authorized_browser(
     tmp_path: Path,
 ) -> None:
@@ -464,6 +618,29 @@ def test_discovery_result_and_operation_inputs_fail_closed(tmp_path: Path) -> No
             browser_authority=authority,
             page_drift_artifacts=cast(Any, object()),
         )
+    with pytest.raises(DouyinDiscoveryOperationRejected):
+        ProductionDouyinDiscoveryOperation(
+            ledger=ledger,
+            browser_authority=authority,
+            browser_diagnostic_artifacts=cast(Any, object()),
+        )
+    with pytest.raises(DouyinDiscoveryOperationRejected):
+        ProductionDouyinDiscoveryOperation(
+            ledger=ledger,
+            browser_authority=authority,
+            capture_successful_diagnostics=cast(bool, 1),
+        )
+    explicit_diagnostics = BrowserDiagnosticArtifactStore(
+        state_directory=ledger.database_path.parent
+    )
+    assert isinstance(
+        ProductionDouyinDiscoveryOperation(
+            ledger=ledger,
+            browser_authority=authority,
+            browser_diagnostic_artifacts=explicit_diagnostics,
+        ),
+        ProductionDouyinDiscoveryOperation,
+    )
     operation = ProductionDouyinDiscoveryOperation(
         ledger=ledger,
         browser_authority=authority,

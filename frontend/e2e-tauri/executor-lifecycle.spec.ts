@@ -61,6 +61,15 @@ describe("E4-14 hidden App Executor lifecycle acceptance", () => {
 
     await openDiagnostics();
     await waitForText("本地执行器已停止", "暂无本地执行器诊断记录");
+    const successfulDiagnostics = await browser.$(
+      "[role='switch'][aria-label='保存成功任务的脱敏诊断']",
+    );
+    assert.equal(await successfulDiagnostics.getAttribute("aria-checked"), "false");
+    await successfulDiagnostics.click();
+    await browser.waitUntil(
+      async () => (await successfulDiagnostics.getAttribute("aria-checked")) === "true",
+      { timeout: 10_000, interval: 200 },
+    );
     await browser.$("button=启动执行器").click();
     const body = await browser.$("body");
     await browser.waitUntil(
@@ -79,10 +88,18 @@ describe("E4-14 hidden App Executor lifecycle acceptance", () => {
     );
     await browser.$("button=本地紧急停止").click();
     await browser.$("button=确认停止").click();
-    if (process.platform === "win32") {
-      await waitForText("本地执行器已停止");
-    } else {
-      await waitForText("暂时无法读取本地执行器状态。请稍后重试。");
+    await browser.waitUntil(
+      async () => {
+        const text = await browser.$("body").getText();
+        return (
+          text.includes("本地执行器已停止") ||
+          text.includes("暂时无法读取本地执行器状态。请稍后重试。")
+        );
+      },
+      { timeout: 90_000, interval: 500 },
+    );
+    const stoppedOrTimedOut = await browser.$("body").getText();
+    if (!stoppedOrTimedOut.includes("本地执行器已停止")) {
       await refreshUntil("本地执行器已停止");
     }
 

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import {
   PlatformAdapterError,
+  type BrowserDiagnosticSettingsSnapshot,
   type BrowserSettingsSnapshot,
   type ExecutorManagerState,
   type ExecutorManagerStatus,
@@ -13,6 +14,7 @@ import {
 const STATUS_KEYS = ["buildId", "restartCount", "state", "version"];
 const DIAGNOSTIC_KEYS = ["lines"];
 const BROWSER_SETTINGS_KEYS = ["availableBrowsers", "selectedBrowser"];
+const BROWSER_DIAGNOSTIC_SETTINGS_KEYS = ["captureSuccessfulRuns"];
 const SUPPORTED_BROWSERS = ["google_chrome", "microsoft_edge"] as const;
 const MAX_DIAGNOSTIC_LINES = 200;
 const MAX_DIAGNOSTIC_LINE_BYTES = 4096;
@@ -156,6 +158,16 @@ function parseBrowserSettings(value: unknown): BrowserSettingsSnapshot {
   };
 }
 
+function parseBrowserDiagnosticSettings(value: unknown): BrowserDiagnosticSettingsSnapshot {
+  if (
+    !isExactRecord(value, BROWSER_DIAGNOSTIC_SETTINGS_KEYS) ||
+    typeof value.captureSuccessfulRuns !== "boolean"
+  ) {
+    throw protocolMismatch();
+  }
+  return { captureSuccessfulRuns: value.captureSuccessfulRuns };
+}
+
 function protocolMismatch(): PlatformAdapterError {
   return new PlatformAdapterError("protocol_mismatch", false);
 }
@@ -218,5 +230,25 @@ export class TauriPlatformAdapter implements PlatformAdapter {
 
   emergencyStopExecutor(): Promise<ExecutorManagerStatus> {
     return invokeStatus("emergency_stop_executor");
+  }
+
+  async getBrowserDiagnosticSettings(): Promise<BrowserDiagnosticSettingsSnapshot> {
+    try {
+      return parseBrowserDiagnosticSettings(await invoke<unknown>("get_browser_diagnostic_settings"));
+    } catch (error) {
+      throw safeNativeError(error);
+    }
+  }
+
+  async setCaptureSuccessfulDiagnostics(
+    enabled: boolean,
+  ): Promise<BrowserDiagnosticSettingsSnapshot> {
+    try {
+      return parseBrowserDiagnosticSettings(
+        await invoke<unknown>("set_capture_successful_diagnostics", { enabled }),
+      );
+    } catch (error) {
+      throw safeNativeError(error);
+    }
   }
 }

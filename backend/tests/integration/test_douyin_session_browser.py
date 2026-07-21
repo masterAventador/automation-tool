@@ -37,6 +37,7 @@ def test_isolated_official_origin_pages_use_the_production_browser_detector(
         BrowserLaunchRequest(
             executable_path=MACOS_CHROME,
             profile_directory=profile,
+            headless=True,
         )
     ):
         window = runtime.primary_window()

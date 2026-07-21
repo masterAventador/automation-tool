@@ -25,6 +25,10 @@ function platformAdapter(): PlatformAdapter {
       restartCount: 0,
     }),
     getExecutorDiagnostics: vi.fn().mockResolvedValue(["safe diagnostic"]),
+    getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
+    setCaptureSuccessfulDiagnostics: vi
+      .fn()
+      .mockResolvedValue({ captureSuccessfulRuns: true }),
     emergencyStopExecutor: vi.fn().mockResolvedValue({
       state: "stopped",
       version: null,
@@ -61,6 +65,20 @@ describe("Executor diagnostics", () => {
     expect(adapter.emergencyStopExecutor).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "确认停止" }));
     expect(adapter.emergencyStopExecutor).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the user explicitly enable successful-run diagnostics in App-private settings", async () => {
+    const adapter = platformAdapter();
+    const user = userEvent.setup();
+
+    render(<Diagnostics platform={adapter} />);
+
+    const toggle = await screen.findByRole("switch", { name: "保存成功任务的脱敏诊断" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(adapter.setCaptureSuccessfulDiagnostics).toHaveBeenCalledWith(true);
+    expect(toggle).toBeChecked();
+    expect(screen.getByText("失败任务始终保存；成功任务设置会在下次启动执行器时生效。")).toBeVisible();
   });
 
   it("refreshes the native status without reloading the desktop window", async () => {

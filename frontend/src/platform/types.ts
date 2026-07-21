@@ -14,6 +14,10 @@ export interface BrowserSettingsSnapshot {
   readonly selectedBrowser: SupportedBrowserId | null;
 }
 
+export interface BrowserDiagnosticSettingsSnapshot {
+  readonly captureSuccessfulRuns: boolean;
+}
+
 export interface PlatformAdapter {
   getBrowserSettings(): Promise<BrowserSettingsSnapshot>;
   selectBrowser(browser: SupportedBrowserId): Promise<BrowserSettingsSnapshot>;
@@ -21,6 +25,8 @@ export interface PlatformAdapter {
   restartExecutor(): Promise<ExecutorManagerStatus>;
   getExecutorDiagnostics(): Promise<readonly string[]>;
   emergencyStopExecutor(): Promise<ExecutorManagerStatus>;
+  getBrowserDiagnosticSettings(): Promise<BrowserDiagnosticSettingsSnapshot>;
+  setCaptureSuccessfulDiagnostics(enabled: boolean): Promise<BrowserDiagnosticSettingsSnapshot>;
 }
 
 export type PlatformAdapterErrorCode =

@@ -137,6 +137,7 @@ pub struct ExecutorLaunchConfiguration {
     state_directory: PathBuf,
     heartbeat_interval_seconds: u8,
     local_emergency_stop: bool,
+    capture_successful_diagnostics: bool,
 }
 
 impl ExecutorLaunchConfiguration {
@@ -236,7 +237,14 @@ impl ExecutorLaunchConfiguration {
             state_directory,
             heartbeat_interval_seconds,
             local_emergency_stop,
+            capture_successful_diagnostics: false,
         })
+    }
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    pub(crate) fn with_capture_successful_diagnostics(mut self, enabled: bool) -> Self {
+        self.capture_successful_diagnostics = enabled;
+        self
     }
 
     fn bootstrap_input(
@@ -271,7 +279,11 @@ impl ExecutorLaunchConfiguration {
                 self.heartbeat_interval_seconds,
             )
         };
-        input.map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))
+        input
+            .map(|input| {
+                input.with_capture_successful_diagnostics(self.capture_successful_diagnostics)
+            })
+            .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))
     }
 }
 

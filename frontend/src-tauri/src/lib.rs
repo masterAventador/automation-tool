@@ -165,6 +165,25 @@ fn get_executor_diagnostics(
 }
 
 #[tauri::command]
+fn get_browser_diagnostic_settings(
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<executor_platform::BrowserDiagnosticSettingsSnapshot, ExecutorPlatformCommandError> {
+    platform
+        .browser_diagnostic_settings()
+        .map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
+fn set_capture_successful_diagnostics(
+    enabled: bool,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<executor_platform::BrowserDiagnosticSettingsSnapshot, ExecutorPlatformCommandError> {
+    platform
+        .set_capture_successful_diagnostics(enabled)
+        .map_err(map_executor_platform_error)
+}
+
+#[tauri::command]
 fn emergency_stop_executor(
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
@@ -2386,6 +2405,8 @@ pub fn run() {
         restart_executor,
         get_executor_diagnostics,
         emergency_stop_executor,
+        get_browser_diagnostic_settings,
+        set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser
     ]);
@@ -2415,6 +2436,8 @@ pub fn run() {
         restart_executor,
         get_executor_diagnostics,
         emergency_stop_executor,
+        get_browser_diagnostic_settings,
+        set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser
     ]);
@@ -2470,6 +2493,8 @@ pub fn run() {
         restart_executor,
         get_executor_diagnostics,
         emergency_stop_executor,
+        get_browser_diagnostic_settings,
+        set_capture_successful_diagnostics,
         inject_executor_crash_for_acceptance,
         inject_executor_hang_for_acceptance,
         exit_app_for_acceptance,

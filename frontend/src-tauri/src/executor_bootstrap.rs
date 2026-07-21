@@ -197,6 +197,7 @@ impl LocalSessionToken {
             state_directory: input.state_directory,
             local_emergency_stop: input.local_emergency_stop,
             crash_recovery: input.crash_recovery,
+            capture_successful_diagnostics: input.capture_successful_diagnostics,
         };
         let mut serialized = Zeroizing::new(
             serde_json::to_vec(&document)
@@ -479,6 +480,7 @@ pub struct ExecutorBootstrapInput<'a> {
     state_directory: &'a Path,
     local_emergency_stop: bool,
     crash_recovery: bool,
+    capture_successful_diagnostics: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -546,6 +548,11 @@ impl<'a> ExecutorBootstrapInput<'a> {
         )
     }
 
+    pub fn with_capture_successful_diagnostics(mut self, enabled: bool) -> Self {
+        self.capture_successful_diagnostics = enabled;
+        self
+    }
+
     fn build(
         websocket_url: &'a str,
         control_plane_session: &'a str,
@@ -575,6 +582,7 @@ impl<'a> ExecutorBootstrapInput<'a> {
             state_directory,
             local_emergency_stop: matches!(mode, ExecutorBootstrapMode::EmergencyReport),
             crash_recovery: matches!(mode, ExecutorBootstrapMode::CrashRecovery),
+            capture_successful_diagnostics: false,
         })
     }
 }
@@ -591,6 +599,7 @@ struct ExecutorBootstrapDocument<'a> {
     state_directory: &'a Path,
     local_emergency_stop: bool,
     crash_recovery: bool,
+    capture_successful_diagnostics: bool,
 }
 
 fn require_uuid_v4(source: &str) -> Result<Uuid, ExecutorBootstrapError> {
@@ -716,6 +725,32 @@ mod tests {
             command["authenticationProof"],
             "atlcp1._NWhd5jlSI3elRsNVLNm7d-CEDz4A08bB4gIL2USR64"
         );
+    }
+
+    #[test]
+    fn successful_diagnostic_capture_is_an_explicit_bootstrap_boolean() {
+        let token = LocalSessionToken {
+            bytes: std::array::from_fn(|index| index as u8),
+        };
+        for (enabled, expected) in [(false, false), (true, true)] {
+            let input = ExecutorBootstrapInput::new(
+                "ws://127.0.0.1:8765/api/v1/executors/connect",
+                "atds1.private-session",
+                "123e4567-e89b-42d3-a456-426614174003",
+                "123e4567-e89b-42d3-a456-426614174004",
+                Path::new("/private/tmp/automation-tool-executor-test"),
+                1,
+            )
+            .expect("valid bootstrap")
+            .with_capture_successful_diagnostics(enabled);
+            let mut serialized = Vec::new();
+            token
+                .write_bootstrap(&mut serialized, &input)
+                .expect("serialize bootstrap");
+            let document: serde_json::Value =
+                serde_json::from_slice(&serialized).expect("bootstrap JSON");
+            assert_eq!(document["capture_successful_diagnostics"], expected);
+        }
     }
 
     #[test]

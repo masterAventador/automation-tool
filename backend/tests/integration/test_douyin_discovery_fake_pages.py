@@ -12,6 +12,12 @@ from uuid import UUID
 import pytest
 
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
+from automation_tool.executor.browser_diagnostic_artifact import (
+    BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+    BROWSER_DIAGNOSTIC_TRACE_POLICY,
+    MAX_BROWSER_DIAGNOSTIC_SCREENSHOT_BYTES,
+    MAX_BROWSER_DIAGNOSTIC_TRACE_BYTES,
+)
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
     BrowserRuntime,
@@ -20,6 +26,7 @@ from automation_tool.executor.browser_runtime import (
 from automation_tool.executor.command_processor import ExecutorCommandProcessor
 from automation_tool.executor.discovery_operation import ProductionDouyinDiscoveryOperation
 from automation_tool.executor.ledger import ExecutorLedger
+from automation_tool.executor.local_artifact import LocalArtifactStore
 from automation_tool.executor.rpa.douyin.page_version import (
     DOUYIN_HOME_URL,
     DOUYIN_SESSION_PROBE_URL,
@@ -43,10 +50,18 @@ class Scenario:
     evidence: str
     candidate_count: int
     artifact_count: int = 0
+    capture_successful_diagnostics: bool = False
 
 
 SCENARIOS = (
-    Scenario("normal", 2, "completed", "candidates_extracted", 2),
+    Scenario(
+        "normal",
+        2,
+        "completed",
+        "candidates_extracted",
+        2,
+        capture_successful_diagnostics=True,
+    ),
     Scenario("empty", 2, "failed", "no_candidates", 0),
     Scenario("dialog", 2, "handoff_required", "blocking_dialog", 0),
     Scenario("login_redirect", 2, "login_required", "login_required", 0),
@@ -190,6 +205,7 @@ def test_formal_discovery_replays_every_fake_page_headlessly(
             ledger=ledger,
             browser_authority=authority,
             runtime_factory=lambda: runtime,
+            capture_successful_diagnostics=scenario.capture_successful_diagnostics,
         ),
     )
 
@@ -203,6 +219,49 @@ def test_formal_discovery_replays_every_fake_page_headlessly(
     assert len(tuple((state / "artifacts/evidence/page-drift").glob("*.json"))) == (
         scenario.artifact_count
     )
+    expected_diagnostics = int(
+        scenario.outcome != "completed" or scenario.capture_successful_diagnostics
+    )
+    screenshot_store = LocalArtifactStore(
+        root_directory=state,
+        policy=BROWSER_DIAGNOSTIC_SCREENSHOT_POLICY,
+    )
+    trace_store = LocalArtifactStore(
+        root_directory=state,
+        policy=BROWSER_DIAGNOSTIC_TRACE_POLICY,
+    )
+    screenshots = screenshot_store.list_references()
+    traces = trace_store.list_references()
+    assert len(screenshots) == expected_diagnostics
+    assert len(traces) == expected_diagnostics
+    if expected_diagnostics:
+        screenshot = screenshot_store.read(screenshots[0])
+        trace_source = trace_store.read(traces[0])
+        trace = json.loads(trace_source)
+        assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
+        assert b"tEXt" not in screenshot
+        assert b"iTXt" not in screenshot
+        assert "自动化运营".encode() not in screenshot
+        assert len(screenshot) <= MAX_BROWSER_DIAGNOSTIC_SCREENSHOT_BYTES
+        assert len(trace_source) <= MAX_BROWSER_DIAGNOSTIC_TRACE_BYTES
+        assert set(trace) == {
+            "artifact_id",
+            "artifact_version",
+            "captured_at",
+            "operation",
+            "page_revision",
+            "platform",
+            "redaction_version",
+            "screenshot_artifact_id",
+            "stage",
+            "trigger",
+        }
+        assert trace["screenshot_artifact_id"] == str(screenshots[0].artifact_id)
+        assert trace["trigger"] == (
+            "user_enabled" if scenario.outcome == "completed" else "failure"
+        )
+        assert "自动化运营" not in trace_source.decode("utf-8")
+        assert "douyin.com" not in trace_source.decode("utf-8")
     assert not runtime.runtime.is_running
     assert os.stat(profile).st_mode & 0o777 == 0o700
 
