@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-05 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-06 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-06 已完成；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补，当前进入 H8-07 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -335,7 +335,7 @@
 | H8-03 | 离线紧急停止 | 不依赖网络停止新副作用和完整进程树；重连补报 | E4-09,A7-07 | ✅ 已完成 |
 | H8-04 | App 崩溃恢复 | UI 恢复快照，任务不中断或重复 | T3-20,H8-01 | ✅ 已完成 |
 | H8-05 | Executor 崩溃恢复 | restart budget、账本对齐、dispatched 未验证处理 | E4-08,A7-13 | ✅ 已完成 |
-| H8-06 | Control Plane 重启恢复 | Executor 重连、命令/事件幂等、任务收敛 | T3-20,E4-12 | ⬜ 未开始 |
+| H8-06 | Control Plane 重启恢复 | Executor 重连、命令/事件幂等、任务收敛 | T3-20,E4-12 | ✅ 已完成 |
 | H8-07 | 断网/抖动 | 停在安全点、事件 spool、重连续传、不烧无限重试 | H8-05,H8-06 | ⬜ 未开始 |
 | H8-08 | 休眠/锁屏 | 时钟跳变、deadline、窗口不可用和恢复诊断 | H8-07 | ⬜ 未开始 |
 | H8-09 | Local Artifact | 稳定 ID、摘要、媒体类型、大小、相对路径和权限 | E4-11 | ⬜ 未开始 |
@@ -2438,13 +2438,29 @@
 - 隔离与清理：固定 8765 与随机 PostgreSQL 端口启动前均检查；专属 Compose project/network/volume、App identifier/AppData、SQLite 和临时信号目录不复用其他项目。App 全程隐藏，不启动运营浏览器、不访问真实账号或默认 Profile。首次断言失败与最终成功都清理 WDIO/App/Executor/Uvicorn、端口、容器/网络/Volume/AppData，最终复核零 H8-05 残留
 - 后续：进入 `H8-06`，验证 Control Plane 在 Task/Executor 运行中重启后，Executor 使用现有重连/幂等命令事件边界恢复在线并使任务收敛；不得把 T3-20 的局部 App 观察证据直接冒充完成
 
+### H8-06 Control Plane 重启恢复
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、Executor 进程内有界重连、精确 outbox 恢复、H8-06 独立隐藏 App 配置/WDIO/runner 和文档属于单一 `feat: 完成 Control Plane 重启恢复验收` 提交；完成后立即推送 `main`
+- RED 与边界：先把唯一台账置为 `🧪 RED`；Python 进程测试准确失败于已建立连接收到 `1012` 后仍抛出固定进程拒绝，隐藏 App 工程契约准确失败于 H8-06 配置、WDIO 场景和 runner 不存在。T3-20 只由 HOLD FakeExecutor 证明 App 面对同库服务重启可恢复，E4-12 只证明 Executor 整进程重启可重放 SQLite；本任务必须让同一个真实签名 Executor 进程跨越 Control Plane 停服/重启，并从真实 App 控制入口证明正式命令和事件收敛
+- 生产重连语义：`LocalExecutorProcess` 只有在已经建立的 WebSocket 收到服务重启关闭码 `1012` 后进入恢复态；初次连接失败、非 1012 关闭、协议错误和应用错误保持固定失败。恢复态默认最多 120 次、每次 250ms，构造边界限制为最多 1000 次/5 秒；连接打开失败与反复 1012 都持续消耗同一预算，stop event 可立即中断等待，只有恢复连接成功收到 heartbeat 才重置预算，避免服务抖动造成无界循环
+- 同进程与精确重放：重连沿用原 bootstrap、`executor.connect` Session、PID 和 Rust manager 记录，不退出进程、不触发 H8-05 supervisor，因此 `restartCount` 始终为 0。`recover_outbox()` 重排的仍是相同 envelope/message ID/source message ID/idempotency key；重复收到同一 command 返回首次持久 batch，`_send_outbox`/`_send_local_outbox` 保留 WebSocket close 分类，普通发送错误不会被误判为服务重启
+- 原调用方验收：`scripts/run_h8_06_acceptance.py` 构建、签名并安装真实 PyInstaller Executor，启动独立 `visible=false` H8-06 Tauri App、`automation-tool-h806-*` PostgreSQL/完整 Alembic/真实 Uvicorn/AppData/SQLite。App 从真实表单创建 comment Task，经正式诊断入口启动签名 Executor；runner 只暂停 App 自报并经系统复核的准确 Executor PID，App 再从原详情页点击取消。服务端确认同一 cancel 已持久化为 delivered 后真实停止 Uvicorn，恢复该 Executor，再以同一 PostgreSQL 重启 Uvicorn；App 先显示不可用，随后从工作台/详情恢复取消终态
+- 双账本精确事实：停服前 Task/Attempt 已进入 cancelling 且 cancel 未 ACK；重启后 PostgreSQL 只保留原 offer/cancel 两条 Command，cancel 由同一 Executor ACK，Event 精确为 started/step.started/cancelled 的 sequence 1/2/3，Task/Attempt 最终 cancelled。SQLite 只保留同一 offer/cancel，checkpoint 为 terminal/command 2/event 3/revision 4，outbox 只有 `task.control_ack` 与 `task.cancelled` 且均 delivered；数据库/SQLite 均无长期设备凭据。`executor.connect` Session 总数仍精确为 HOLD 准备夹具与签名 Executor两张，重连没有换票
+- 失败发现与修正：纵向 runner 首先错误假设暂停进程时 cancel 会停在 pending，真实 TCP 已接收后服务端正确记为 delivered；断言改为等待 delivered，以覆盖更强的“服务端已发出但未 ACK”重放窗口。随后按正式事务语义把 Attempt 预期从 running 修正为 cancelling，把本机 checkpoint 状态从业务文案 cancelled 修正为账本封闭值 terminal。失败清理还发现 WDIO 父进程退出后 Tauri 子进程可能重建空 AppData，runner 改为先依据 App 自报 PID 等待/精确停止自有进程，再删除目录；这些修正均只收紧测试脚手架，没有改变或放宽生产行为
+- 失败与覆盖矩阵：覆盖初次连接失败、非重启关闭、1012 后连接失败、重复 1012、预算耗尽、无效尝试/延迟配置、stop 打断退避、stop 与 outbox replay 竞争、durable/local outbox 发送时 1012、相同 command/outbox 精确重放及稳定 heartbeat 重置预算。固定失败仍由 Rust supervisor 按既有 H8-05 语义处理，服务重启恢复不冒充网络抖动；持续断网、随机抖动和事件 spool 上限继续由 H8-07 完成
+- 门禁：Backend 全量 `1913 passed, 5 skipped`，12262 条语句/2750 个分支覆盖率 100%，327 个 Python 文件格式、Ruff、严格 Mypy 143 个源码文件与 uv lock 全绿。Frontend 108 项 Node 契约、197 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整串行测试、20 项安全配置、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿；H8-06 隐藏真实 App 纵向验收最终 1/1 通过
+- 隔离与清理：固定 8765、1420 与随机 PostgreSQL 端口启动前均检查；专属 Compose project/network/volume、App identifier/AppData、SQLite 和临时目录不复用其他项目。App 全程隐藏，不启动运营浏览器、不访问真实账号或默认 Profile。成功和所有严格断言失败都回收 WDIO/App/Executor/Uvicorn、端口、容器/网络/Volume/AppData，最终复核零 H8-06 残留
+- 后续：进入 `H8-07`，在当前 1012 服务重启特例之外建立真实断网/随机抖动边界，要求 Executor 停在安全点、事件本机 spool 有界持久化、网络恢复精确续传且不会烧无限重试
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 2. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-3. `H8-06`（⬜ 未开始）：验证真实 Control Plane 重启后的 Executor 重连、命令/事件幂等和 Task 最终收敛；
+3. `H8-07`（⬜ 未开始）：下一步建立真实断网/抖动恢复，要求停在安全点、事件 spool 有界持久化、重连续传且不烧无限重试；
 4. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 5. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 6. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

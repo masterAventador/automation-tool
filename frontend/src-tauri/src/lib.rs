@@ -1981,6 +1981,36 @@ async fn prepare_executor_crash_recovery_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_control_plane_recovery_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<TaskCreateFormAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_H806_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_H806_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    Ok(TaskCreateFormAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 fn app_process_id_for_acceptance() -> u32 {
     std::process::id()
 }
@@ -2374,6 +2404,7 @@ pub fn run() {
         prepare_task_restart_for_acceptance,
         prepare_app_crash_recovery_for_acceptance,
         prepare_executor_crash_recovery_for_acceptance,
+        prepare_control_plane_recovery_for_acceptance,
         app_process_id_for_acceptance,
         prepare_workbench_for_acceptance,
         prepare_platform_session_for_acceptance,

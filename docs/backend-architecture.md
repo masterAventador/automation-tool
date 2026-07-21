@@ -547,6 +547,10 @@ H8-04 没有给 Control Plane 增加“App 恢复”写接口：App 是只读投
 
 H8-05 的恢复触发属于 Rust supervisor 控制面，而不是 HTTP 协议扩展。初次 `spawn_executor(..., restart_count=0)` 明确传 `crash_recovery=false`；只有异常退出并消耗有界预算后的新进程收到 true。Python 在建立 WebSocket 前运行一次恢复协调器：从 App 私有 SQLite 读取仍属 running/paused Attempt 的 Action，复用 A7-13 只读验证；进程树已清理且没有稳定页面上下文时直接 fail-closed 为 uncertain。副作用终态、Attempt checkpoint 和带 `executor:recovery:<action_id>` 幂等键的 outbox 在本机原子对齐，随后由既有 `recover_outbox()` 和认证 WebSocket 重放。Control Plane 仍只接收标准 `task.outcome_uncertain`，不感知本地 supervisor，也不接受重新点击请求。
 
+H8-06 的恢复触发属于同一个 Python Executor 进程内的传输恢复，而不是 Rust supervisor 崩溃恢复。只有已经建立的 WebSocket 收到 `1012` 服务重启关闭码才进入恢复态；初次连接失败、非 1012 关闭、协议错误与应用错误仍 fail closed。恢复态使用显式有界尝试次数和延迟，stop event 可中断等待；每次再次收到 1012 或连接打开失败都继续消耗同一预算，只有恢复连接收到有效 heartbeat 才重置预算，避免 Control Plane 抖动形成无限循环。
+
+重连沿用原 bootstrap、短期 Executor Session、进程 PID 和本机账本。`recover_outbox()` 只把未交付 envelope 以原 message ID、source message ID 和 idempotency key 重新排队，不生成替代事实；Control Plane 的持久 Command lease/ACK 和 Event 双键去重继续作为服务端权威。Rust manager 因进程未退出而保持 `restartCount=0`，H8-05 的 crash recovery 扫描不会误触发。本任务不新增 HTTP/WebSocket 消息、数据库迁移、React 状态机或凭据存储。
+
 T3-14 在同一 API/Outbox 边界增加 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop`。首次请求锁定 active Installation、Task/current Attempt，在领域状态机允许取消且 Attempt 尚未终止时，原子写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `CANCELLING`；不写伪造的取消终态，也不占用 Executor 持有的事件 sequence。相同 scope/key/意图重放返回原 Command 且不重复增 revision；改意图、再次终止、终态、错 scope、时间回退和不相容投影均 fail closed。
 
 `task.cancelled` 及 cancelling 下的 `task.outcome_uncertain` 收敛前必须锁定最新 cancel/emergency-stop Command，并核对 acknowledged、control ACK、correlation 和确认时间。完成、部分完成或失败事实与取消并发时不要求伪造取消 ACK，可从 CANCELLING 收敛到 Executor 已确认的真实终态。HOLD FakeExecutor 对正常 cancel 回报 cancelled，对硬 emergency-stop 保守回报 outcome uncertain；同一 `visible=false` App 已经通过正式 Rust/Uvicorn/PostgreSQL/WebSocket 跑通两个路径。

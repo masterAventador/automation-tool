@@ -15,6 +15,7 @@ from queue import Empty, Queue
 from typing import Literal, Protocol, TextIO, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
+from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection
 
 from automation_tool import __version__
@@ -42,6 +43,9 @@ _VERSION_PATTERN = re.compile(
     r"(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$"
 )
 _MESSAGE_DEADLINE = timedelta(seconds=30)
+_CONTROL_PLANE_RESTART_CLOSE_CODE = 1012
+_MAX_RESTART_RECONNECT_ATTEMPTS = 1000
+_MAX_RESTART_RECONNECT_DELAY = timedelta(seconds=5)
 
 
 class ExecutorProcessRejected(ConnectionError):
@@ -177,6 +181,21 @@ def _positive_duration(value: object) -> timedelta:
     return value
 
 
+def _restart_reconnect_delay(value: object) -> timedelta:
+    duration = _positive_duration(value)
+    if duration > _MAX_RESTART_RECONNECT_DELAY:
+        raise ExecutorProcessRejected
+    return duration
+
+
+def _is_control_plane_restart(error: BaseException) -> bool:
+    return (
+        isinstance(error, ConnectionClosed)
+        and error.rcvd is not None
+        and error.rcvd.code == _CONTROL_PLANE_RESTART_CLOSE_CODE
+    )
+
+
 class LocalExecutorProcess:
     """Connect, replay durable outcomes, and consume no-side-effect commands."""
 
@@ -192,6 +211,8 @@ class LocalExecutorProcess:
         open_timeout: timedelta = timedelta(seconds=5),
         close_timeout: timedelta = timedelta(seconds=2),
         local_outbox: Queue[object] | None = None,
+        restart_reconnect_attempts: int = 120,
+        restart_reconnect_delay: timedelta = timedelta(milliseconds=250),
     ) -> None:
         resolved_clock = metadata if clock is None else clock
         if (
@@ -202,6 +223,8 @@ class LocalExecutorProcess:
             or not isinstance(resolved_clock, ExecutorClock)
             or not callable(id_source)
             or (local_outbox is not None and not isinstance(local_outbox, Queue))
+            or type(restart_reconnect_attempts) is not int
+            or not 1 <= restart_reconnect_attempts <= _MAX_RESTART_RECONNECT_ATTEMPTS
         ):
             raise ExecutorProcessRejected
         self._bootstrap = bootstrap
@@ -213,6 +236,8 @@ class LocalExecutorProcess:
         self._open_timeout = _positive_duration(open_timeout)
         self._close_timeout = _positive_duration(close_timeout)
         self._local_outbox = local_outbox
+        self._restart_reconnect_attempts = restart_reconnect_attempts
+        self._restart_reconnect_delay = _restart_reconnect_delay(restart_reconnect_delay)
 
     @property
     def bootstrap(self) -> ExecutorBootstrap:
@@ -283,6 +308,8 @@ class LocalExecutorProcess:
             for message in messages:
                 websocket.send(serialize_executor_message(message))
                 self._command_processor.mark_delivered(str(message.message_id))
+        except ConnectionClosed:
+            raise
         except Exception:
             raise ExecutorProcessRejected from None
 
@@ -297,6 +324,8 @@ class LocalExecutorProcess:
                 websocket.send(serialize_executor_message(message))
         except Empty:
             return
+        except ConnectionClosed:
+            raise
         except Exception:
             raise ExecutorProcessRejected from None
 
@@ -305,68 +334,103 @@ class LocalExecutorProcess:
             raise ExecutorProcessRejected
         failed = False
         healthy = False
-        try:
-            session_token = self._bootstrap.session_token.get_secret_value()
-            websocket = connect_executor_websocket(
-                websocket_url=self._bootstrap.websocket_url,
-                session_token=session_token,
-                open_timeout=self._open_timeout,
-                close_timeout=self._close_timeout,
-            )
-            del session_token
-            with websocket:
-                websocket.send(
-                    serialize_executor_message(
-                        self._lifecycle(message_type="executor.hello", sequence=1)
+        recovering_from_restart = False
+        reconnect_attempts = 0
+        reconnect_delay_seconds = self._restart_reconnect_delay.total_seconds()
+        first_connection = True
+        while first_connection or not stop.is_set():  # pragma: no branch
+            first_connection = False
+            if recovering_from_restart:
+                if reconnect_attempts >= self._restart_reconnect_attempts:
+                    failed = True
+                    break
+                reconnect_attempts += 1
+            try:
+                session_token = self._bootstrap.session_token.get_secret_value()
+                try:
+                    websocket = connect_executor_websocket(
+                        websocket_url=self._bootstrap.websocket_url,
+                        session_token=session_token,
+                        open_timeout=self._open_timeout,
+                        close_timeout=self._close_timeout,
                     )
-                )
-                self._send_outbox(websocket, self._command_processor.recover_outbox())
-                self._send_outbox(websocket, self._command_processor.poll_controls())
-                if self._command_processor.emergency_stop_received():
-                    if self._bootstrap.local_emergency_stop:
-                        self._reporter.healthy()
-                    self._reporter.stopped()
-                    return
-                sequence = 1
-                heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
-                heartbeat_deadline = time.monotonic() + heartbeat_interval
-                while not stop.is_set():
+                finally:
+                    del session_token
+            except Exception:
+                if not recovering_from_restart:
+                    failed = True
+                    break
+                if stop.wait(reconnect_delay_seconds):
+                    break
+                continue
+            try:
+                with websocket:
+                    websocket.send(
+                        serialize_executor_message(
+                            self._lifecycle(message_type="executor.hello", sequence=1)
+                        )
+                    )
+                    self._send_outbox(websocket, self._command_processor.recover_outbox())
                     self._send_outbox(websocket, self._command_processor.poll_controls())
-                    self._send_local_outbox(websocket)
-                    remaining = heartbeat_deadline - time.monotonic()
-                    receive_timeout = max(0.001, min(0.25, remaining))
-                    try:
-                        source = websocket.recv(timeout=receive_timeout)
-                    except TimeoutError:
-                        if stop.is_set():
-                            break
-                        if time.monotonic() < heartbeat_deadline:
-                            continue
-                        sequence += 1
-                        websocket.send(
-                            serialize_executor_message(
-                                self._lifecycle(
-                                    message_type="executor.heartbeat",
-                                    sequence=sequence,
+                    if self._command_processor.emergency_stop_received():
+                        if self._bootstrap.local_emergency_stop:
+                            self._reporter.healthy()
+                        self._reporter.stopped()
+                        return
+                    sequence = 1
+                    heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
+                    heartbeat_deadline = time.monotonic() + heartbeat_interval
+                    while not stop.is_set():
+                        self._send_outbox(websocket, self._command_processor.poll_controls())
+                        self._send_local_outbox(websocket)
+                        remaining = heartbeat_deadline - time.monotonic()
+                        receive_timeout = max(0.001, min(0.25, remaining))
+                        try:
+                            source = websocket.recv(timeout=receive_timeout)
+                        except TimeoutError:
+                            if stop.is_set():
+                                break
+                            if time.monotonic() < heartbeat_deadline:
+                                continue
+                            sequence += 1
+                            websocket.send(
+                                serialize_executor_message(
+                                    self._lifecycle(
+                                        message_type="executor.heartbeat",
+                                        sequence=sequence,
+                                    )
                                 )
                             )
-                        )
-                        if not healthy:
-                            self._reporter.healthy()
-                            healthy = True
-                        heartbeat_deadline = time.monotonic() + heartbeat_interval
-                        continue
-                    except Exception:
+                            if not healthy:
+                                self._reporter.healthy()
+                                healthy = True
+                            if recovering_from_restart:
+                                recovering_from_restart = False
+                                reconnect_attempts = 0
+                            heartbeat_deadline = time.monotonic() + heartbeat_interval
+                            continue
+                        except Exception:
+                            if stop.is_set():
+                                break
+                            raise
                         if stop.is_set():
                             break
-                        raise
-                    if stop.is_set():
-                        break
-                    self._send_outbox(websocket, self._command_processor.handle(source))
-                    if self._command_processor.emergency_stop_received():
-                        break
-        except Exception:
-            failed = True
+                        self._send_outbox(websocket, self._command_processor.handle(source))
+                        if self._command_processor.emergency_stop_received():
+                            break
+            except Exception as error:
+                if stop.is_set():
+                    break
+                if not _is_control_plane_restart(error):
+                    failed = True
+                    break
+                if not recovering_from_restart:
+                    recovering_from_restart = True
+                    reconnect_attempts = 0
+                if stop.wait(reconnect_delay_seconds):
+                    break
+                continue
+            break
         if failed:
             raise ExecutorProcessRejected from None
         if (

@@ -15,9 +15,13 @@ from uuid import UUID
 
 import pytest
 from pydantic import SecretStr
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
+from websockets.sync.client import ClientConnection
 from websockets.sync.server import Server, ServerConnection, serve
 from websockets.typing import Subprotocol
 
+import automation_tool.executor.runtime as executor_runtime
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
 from automation_tool.executor.command_processor import ExecutorCommandProcessor
@@ -110,6 +114,8 @@ def process_for(
     id_source: object = None,
     local_outbox: queue.Queue[object] | None = None,
     local_emergency_stop: bool = False,
+    restart_reconnect_attempts: int | None = None,
+    restart_reconnect_delay: timedelta | None = None,
 ) -> tuple[LocalExecutorProcess, StringIO]:
     target = output or StringIO()
     values: dict[str, object] = {
@@ -143,6 +149,10 @@ def process_for(
         values["id_source"] = id_source
     if local_outbox is not None:
         values["local_outbox"] = local_outbox
+    if restart_reconnect_attempts is not None:
+        values["restart_reconnect_attempts"] = restart_reconnect_attempts
+    if restart_reconnect_delay is not None:
+        values["restart_reconnect_delay"] = restart_reconnect_delay
     return LocalExecutorProcess(**values), target  # type: ignore[arg-type]
 
 
@@ -757,6 +767,11 @@ def test_process_rejects_transport_clock_ids_and_constructor_values_without_leak
         {"id_source": object()},
         {"open_timeout": timedelta(0)},
         {"close_timeout": cast(timedelta, object())},
+        {"restart_reconnect_attempts": 0},
+        {"restart_reconnect_attempts": True},
+        {"restart_reconnect_attempts": 1001},
+        {"restart_reconnect_delay": timedelta(0)},
+        {"restart_reconnect_delay": timedelta(seconds=6)},
     ):
         arguments: dict[str, object] = {
             "bootstrap": valid.bootstrap,
@@ -914,13 +929,303 @@ def test_stop_races_are_graceful_without_claiming_health(
     assert not thread.is_alive()
 
 
-def test_server_close_without_stop_is_a_fixed_failure(tmp_path: Path) -> None:
+def test_control_plane_restart_reconnects_and_replays_exact_durable_outbox(
+    tmp_path: Path,
+) -> None:
+    observed: queue.Queue[object] = queue.Queue()
+    connections = count(1)
+    stop = threading.Event()
+    offered = offer()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            connection_number = next(connections)
+            hello = parse_executor_message(connection.recv(timeout=3))
+            if connection_number == 1:
+                heartbeat = parse_executor_message(connection.recv(timeout=3))
+                connection.send(offered.model_dump_json())
+                original = tuple(
+                    parse_executor_message(connection.recv(timeout=3)) for _ in range(6)
+                )
+                observed.put((hello, heartbeat, original))
+                connection.close(code=1012, reason="control plane restart")
+                return
+            recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            connection.send(offered.model_dump_json())
+            duplicate = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
+            observed.put((hello, recovered, duplicate, recovered_heartbeat))
+            stop.set()
+        except Exception as error:
+            observed.put(error)
+            stop.set()
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(port, tmp_path / "restart-state")
+        process.run(stop)
+        first = observed.get(timeout=3)
+        second = observed.get(timeout=3)
+        if isinstance(first, Exception):
+            raise first
+        if isinstance(second, Exception):
+            raise second
+        first_hello, heartbeat, original = cast(
+            tuple[
+                ExecutorLifecycleEnvelope, ExecutorLifecycleEnvelope, tuple[ExecutorEnvelope, ...]
+            ],
+            first,
+        )
+        second_hello, recovered, duplicate, recovered_heartbeat = cast(
+            tuple[
+                ExecutorLifecycleEnvelope,
+                tuple[ExecutorEnvelope, ...],
+                tuple[ExecutorEnvelope, ...],
+                ExecutorLifecycleEnvelope,
+            ],
+            second,
+        )
+        assert first_hello.message_type == second_hello.message_type == "executor.hello"
+        assert first_hello.idempotency_key == second_hello.idempotency_key
+        assert first_hello.message_id != second_hello.message_id
+        assert heartbeat.message_type == "executor.heartbeat"
+        assert tuple(message.message_id for message in recovered) == tuple(
+            message.message_id for message in original
+        )
+        assert tuple(message.message_id for message in duplicate) == tuple(
+            message.message_id for message in original
+        )
+        assert recovered_heartbeat.message_type == "executor.heartbeat"
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.healthy",
+            "executor.stopped",
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
+def test_control_plane_restart_reconnect_is_bounded_and_stop_interruptible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection_attempts = 0
+    original_connect = executor_runtime.connect_executor_websocket
+
+    def counted_connect(**values: object) -> object:
+        nonlocal connection_attempts
+        connection_attempts += 1
+        return original_connect(**values)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(executor_runtime, "connect_executor_websocket", counted_connect)
+    server_holder: list[Server] = []
+    closed = threading.Event()
+
+    def handler(connection: ServerConnection) -> None:
+        try:
+            parse_executor_message(connection.recv(timeout=2))
+            connection.close(code=1012, reason="control plane restart")
+            closed.set()
+            threading.Thread(target=server_holder[0].shutdown, daemon=True).start()
+        except Exception:
+            closed.set()
+
+    server, thread, port = run_server(handler)
+    server_holder.append(server)
+    try:
+        process, _ = process_for(
+            port,
+            tmp_path / "bounded-restart-state",
+            restart_reconnect_attempts=2,
+            restart_reconnect_delay=timedelta(milliseconds=50),
+        )
+        with pytest.raises(ExecutorProcessRejected):
+            process.run(threading.Event())
+        assert closed.is_set()
+        assert connection_attempts == 3
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+    stop = threading.Event()
+    interrupt_server_holder: list[Server] = []
+
+    def interrupt_handler(connection: ServerConnection) -> None:
+        parse_executor_message(connection.recv(timeout=2))
+        connection.close(code=1012, reason="control plane restart")
+        threading.Thread(
+            target=interrupt_server_holder[0].shutdown,
+            daemon=True,
+        ).start()
+        threading.Timer(0.05, stop.set).start()
+
+    interrupt_server, interrupt_thread, interrupt_port = run_server(interrupt_handler)
+    interrupt_server_holder.append(interrupt_server)
+    try:
+        process, output = process_for(
+            interrupt_port,
+            tmp_path / "interruptible-restart-state",
+            restart_reconnect_attempts=100,
+            restart_reconnect_delay=timedelta(seconds=1),
+        )
+        started_at = time.monotonic()
+        process.run(stop)
+        assert time.monotonic() - started_at < 0.5
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.stopped"
+        ]
+    finally:
+        interrupt_server.shutdown()
+        interrupt_thread.join(timeout=2)
+    assert not interrupt_thread.is_alive()
+
+
+def test_repeated_control_plane_restart_closes_consume_the_bounded_budget(
+    tmp_path: Path,
+) -> None:
+    connection_count = 0
+
+    def handler(connection: ServerConnection) -> None:
+        nonlocal connection_count
+        connection_count += 1
+        parse_executor_message(connection.recv(timeout=2))
+        connection.close(code=1012, reason="repeated control plane restart")
+
+    server, thread, port = run_server(handler)
+    try:
+        process, _ = process_for(
+            port,
+            tmp_path / "repeated-restart-state",
+            restart_reconnect_attempts=2,
+            restart_reconnect_delay=timedelta(milliseconds=1),
+        )
+        with pytest.raises(ExecutorProcessRejected):
+            process.run(threading.Event())
+        assert connection_count == 3
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_stop_interrupts_a_failed_connection_attempt_during_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = threading.Event()
+    attempts = 0
+    original_connect = executor_runtime.connect_executor_websocket
+
+    def connect_then_stop(**values: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return original_connect(**values)  # type: ignore[arg-type]
+        stop.set()
+        raise OSError("private unavailable endpoint")
+
+    monkeypatch.setattr(executor_runtime, "connect_executor_websocket", connect_then_stop)
+
+    def handler(connection: ServerConnection) -> None:
+        parse_executor_message(connection.recv(timeout=2))
+        connection.close(code=1012, reason="control plane restart")
+
+    server, thread, port = run_server(handler)
+    try:
+        process, output = process_for(
+            port,
+            tmp_path / "failed-reconnect-stop-state",
+            restart_reconnect_attempts=100,
+            restart_reconnect_delay=timedelta(seconds=1),
+        )
+        process.run(stop)
+        assert attempts == 2
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.stopped"
+        ]
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_restart_close_is_preserved_by_both_outbox_senders(tmp_path: Path) -> None:
+    class RestartingSocket:
+        @staticmethod
+        def send(_source: str) -> None:
+            raise ConnectionClosedError(
+                Close(1012, "control plane restart"),
+                None,
+            )
+
+    socket = cast(ClientConnection, RestartingSocket())
+    process, _ = process_for(9, tmp_path / "durable-outbox-close-state")
+    messages = process._command_processor.handle(offer().model_dump_json())
+    with pytest.raises(ConnectionClosedError):
+        process._send_outbox(socket, messages)
+
+    local_outbox: queue.Queue[object] = queue.Queue()
+    local_outbox.put(session_health())
+    local_process, _ = process_for(
+        9,
+        tmp_path / "local-outbox-close-state",
+        local_outbox=local_outbox,
+    )
+    with pytest.raises(ConnectionClosedError):
+        local_process._send_local_outbox(socket)
+
+
+def test_stop_during_restart_close_from_outbox_is_a_clean_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = threading.Event()
+
+    class StopDuringReplay:
+        def __init__(self) -> None:
+            self.send_count = 0
+
+        def __enter__(self) -> StopDuringReplay:
+            return self
+
+        def __exit__(self, *_values: object) -> None:
+            return None
+
+        def send(self, _source: str) -> None:
+            self.send_count += 1
+            if self.send_count == 2:
+                stop.set()
+                raise ConnectionClosedError(
+                    Close(1012, "control plane restart"),
+                    None,
+                )
+
+    websocket = StopDuringReplay()
+    monkeypatch.setattr(
+        executor_runtime,
+        "connect_executor_websocket",
+        lambda **_values: websocket,
+    )
+    process, output = process_for(9, tmp_path / "stop-during-outbox-state")
+    process._command_processor.handle(offer().model_dump_json())
+
+    process.run(stop)
+
+    assert websocket.send_count == 2
+    assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+        "executor.stopped"
+    ]
+
+
+def test_non_restart_server_close_without_stop_is_a_fixed_failure(tmp_path: Path) -> None:
     observed: queue.Queue[object] = queue.Queue()
 
     def handler(connection: ServerConnection) -> None:
         try:
             parse_executor_message(connection.recv(timeout=2))
-            connection.close(code=1012, reason="controlled restart")
+            connection.close(code=1011, reason="controlled failure")
             observed.put(True)
         except Exception as error:
             observed.put(error)

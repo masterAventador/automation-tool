@@ -180,6 +180,7 @@ frontend/
 │   ├── tauri.task-run-e2e.conf.json # 后台隐藏的运行详情四类控制验收
 │   ├── tauri.task-lifecycle-e2e.conf.json # 后台隐藏的完整生命周期与刷新验收
 │   ├── tauri.task-restart-e2e.conf.json # 后台隐藏的 Control Plane 重启恢复验收
+│   ├── tauri.control-plane-recovery-e2e.conf.json # 后台隐藏的签名 Executor 重连验收
 │   ├── tauri.executor-lifecycle-e2e.conf.json # 后台隐藏的 signed Executor 生命周期验收
 │   ├── tauri.platform-session-e2e.conf.json # 后台隐藏的平台状态与无头浏览器验收
 │   ├── tauri.platform-session-reuse-e2e.conf.json # 后台隐藏的登录复用/失效接管验收
@@ -406,6 +407,8 @@ H8-02 继续只修改 `executor/command_processor.py` 与 `executor/ledger.py`�
 H8-04 的新增文件只属于跨进程验收：`tauri.app-crash-recovery-e2e.conf.json`、`wdio.app-crash-recovery.conf.ts`、`e2e-tauri/app-crash-recovery.spec.ts` 与 `scripts/run_h8_04_acceptance.py`。Rust 的准备与 App PID 探针只在 `control-plane-e2e` feature 存在，正式生产 handler/Capability/二进制不包含；生产业务目录、API、数据库 schema 和 React 页面均未新增恢复分支。runner 复用既有签名 Executor、任务确认/offer、真实 Control Plane 与账本夹具，先硬杀第一个隐藏 App，再以同一 AppData 启动第二个 App 并精确比较前后事实。
 
 H8-05 的生产实现集中在 `executor_bootstrap.rs`/`executor_manager.rs` 的 crash-only bootstrap 标记，以及 `backend/src/automation_tool/executor/crash_recovery.py`、`ledger.py` 和 A7-13 recovery adapter；没有新增业务 HTTP API、页面状态机或云端表。纵向验收文件为 `tauri.executor-crash-recovery-e2e.conf.json`、`wdio.executor-crash-recovery.conf.ts`、`e2e-tauri/executor-crash-recovery.spec.ts` 与 `scripts/run_h8_05_acceptance.py`，专用 IPC 仍只存在于 `control-plane-e2e` feature。runner 使用独立 AppData/Compose/SQLite，真实注入签名 Executor 崩溃并核对本机/云端双账本。
+
+H8-06 只修改既有 `backend/src/automation_tool/executor/runtime.py` 传输循环：收到服务端 `1012` 后，同一进程有界重连并从原 SQLite outbox 精确续传；没有新增恢复服务、表或协议。纵向验收文件为 `tauri.control-plane-recovery-e2e.conf.json`、`wdio.control-plane-recovery.conf.ts`、`e2e-tauri/control-plane-recovery.spec.ts` 与 `scripts/run_h8_06_acceptance.py`；feature-gated 准备命令只用于唯一隐藏 App。runner 使用独立 AppData/Compose/SQLite，在同一签名 Executor PID 被暂停时由 App 发出正式取消，再真实停止/重启 Uvicorn 并核对原命令、事件、checkpoint 与 `restartCount=0`。
 
 D6-11 的服务端路径按 `api/task_target_previews.py`（App Session/HTTP DTO）、`application/task_target_previews.py`（强类型快照、cursor、排除/确认用例）、`infrastructure/database/task_target_preview_repository.py`（行锁、revision、幂等与事件事务）和 `bootstrap/task_target_previews.py`（装配）分层；迁移 `20260720_0018` 增加最小排除/确认关系。前端 `api/control-plane/task-target-previews.ts` 与 `platform/tauri/task-target-preview-source.ts` 只处理生成 DTO 和固定 Command；Rust `control_plane.rs`/`lib.rs` 负责 Session 注入、固定 URL 和严格响应解析。`scripts/run_d6_11_acceptance.py` 通过唯一 hidden App、真实 Uvicorn/PostgreSQL 验证列表、排除、确认和重放，且只清理本次 AppData、端口与 Compose 资源。
 

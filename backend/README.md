@@ -46,6 +46,8 @@ H8-04 不在 Backend 增加 App 恢复 API 或第二份任务状态。第一个�
 
 H8-05 在 stdin bootstrap 增加严格布尔 `crash_recovery`，只由 Rust supervisor 的异常重启设置，正常启动绝不扫描或改写副作用。`ExecutorCrashRecoveryCoordinator` 在网络连接前读取当前 Attempt 的 SQLite Action 事实；已有页面上下文时沿用 A7-13 只读核对，没有上下文时把 dispatched fail-closed 结算为 uncertain，prepared 不动。恢复事件、checkpoint 和 outbox 原子对齐后仍经正式认证 WebSocket 收敛到 PostgreSQL；不保存 URL、正文、DOM、Cookie、Profile 或凭据，也不重新 dispatch。
 
+H8-06 在现有 `LocalExecutorProcess` 内增加只针对 WebSocket `1012` 服务重启关闭码的有界重连。初次连接失败、非 1012 关闭、协议错误和应用错误仍固定失败；进入恢复态后连接失败按固定预算和延迟重试，停止信号可打断等待，只有恢复连接收到健康心跳才重置预算。进程不退出、不经过 Rust supervisor，也不更换 bootstrap/Session；本机 `recover_outbox()` 复用原 envelope、message ID 与 idempotency key，Control Plane 则继续依靠既有 Command/Event 幂等约束收敛，不新增 API、表或第二套恢复协议。
+
 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
 
 当前 offer payload 仍保持空的安全骨架；T3-17 已建立受约束 Task 定义事实，但尚未发布 Executor 业务 payload 版本，后续只能从这些明确列构造，不能退回任意 JSON。FakeExecutor 继续按相同正式 envelope 做无副作用回放；T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
@@ -78,7 +80,7 @@ H8-01 安全暂停原入口在仓库根执行 `backend/.venv/bin/python scripts/
 
 H8-02 协作式取消原入口执行 `backend/.venv/bin/python scripts/run_h8_02_acceptance.py`：唯一 `visible=false` task-termination App 经正式 Rust 控制调用、Uvicorn/PostgreSQL 和认证 WebSocket 发出普通取消；真实 Executor 先 ACK 并阻止新 dispatch，既有 dispatched 被标记无法确认后自动上报 `task.outcome_uncertain`。同一 App 的紧停半程仍由既有 HOLD FakeExecutor 夹具完成，只用于跑完原页面流程，不冒充 H8-03 离线硬停止。
 
-H8-03 离线紧停、H8-04 App 崩溃恢复与 H8-05 Executor 崩溃恢复原入口分别执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_04_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_05_acceptance.py`。三者均使用隐藏 Tauri App、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收自有进程、端口、容器、网络、卷和私有目录；H8-05 由真实 App IPC 注入崩溃并严格核对 restart budget、服务端 Action/Task 和本机 ledger/outbox。
+H8-03 离线紧停、H8-04 App 崩溃恢复、H8-05 Executor 崩溃恢复与 H8-06 Control Plane 重启恢复原入口分别执行 `backend/.venv/bin/python scripts/run_h8_03_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_04_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_05_acceptance.py`、`backend/.venv/bin/python scripts/run_h8_06_acceptance.py`。四者均使用隐藏 Tauri App、签名 PyInstaller Executor、真实 Uvicorn/PostgreSQL/认证 WebSocket、项目专属 Compose/AppData/SQLite，并在成功或失败后回收自有进程、端口、容器、网络、卷和私有目录；H8-05 由真实 App IPC 注入崩溃并严格核对 restart budget、服务端 Action/Task 和本机 ledger/outbox，H8-06 则暂停同一 Executor、由 App 发出正式取消、真实停止/重启 Control Plane 后核对相同 PID、`restartCount=0`、原命令精确重放和双账本唯一终态。
 
 D6-13 未确认副作用守卫在仓库根目录执行 `backend/.venv/bin/python scripts/run_d6_13_acceptance.py`。该 runner 通过正式 Uvicorn/Executor WebSocket 验证无绑定与旧确认的业务 offer 零投递、当前确认 offer 正常投递；它不调用 App API、不启动 Tauri 或运营浏览器。D6-11/D6-12 已独立证明确认事实来自真实 App 原入口，本任务只验收后端到 Executor 的原始生产边界。
 
