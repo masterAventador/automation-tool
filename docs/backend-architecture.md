@@ -364,6 +364,10 @@ A7-12 将主动私信执行收敛在 Executor 内部 `douyin.direct-message-acti
 
 “暂时无法私信”与“关注后才能私信”不会合并成通用失败：发送前分别保持 prepared evidence，发送后分别结算 uncertain evidence。登录、风控、未知版本、锚点冲突、入口/填写失败和 dispatch 许可失败均在发送前停止；获得发送许可后任何点击、权限变化、确认缺失、页面/时钟/账本异常都不能自动重发。既有 dispatched/uncertain/verified 在页面访问前返回，只有 prepared 可恢复会话并再次竞争尚未授出的许可。当前模块仍是 Local Executor 原调用面，不新增 HTTP/Tauri/React 入口；A7-13 统一处理结果查询，A7-15 投影目标级 UI，A7-17 才完成真实平台私信验收。
 
+A7-13 将点击/发送后进程退出留下的 `dispatched` 崩溃窗口收敛为 Executor 内部 `douyin.side-effect-recovery.v1`。恢复输入只有强类型 Action ID；先从 App 私有 SQLite 读取完整绑定的 `LocalSideEffect`，prepared 不得伪造外部结果，verified/uncertain 作为既有终态直接返回且不访问页面。只有 dispatched 按账本 action 选择评论或私信 Page Object，在调用方已恢复的动作页面只执行有界 `wait_for_final()` 和最终 locator 二次取得，不导航、不填写、不点击，也不读取正文、Cookie/storage 或页面 body。
+
+最终证据充分时，恢复层使用 A7-11/A7-12 与即时执行共用的 action-specific effect→selector-version→final-evidence 验证摘要结算 verified；登录、风控、两类私信权限、等待超时、未知路由、锚点冲突、驱动或最终复验失败结算 uncertain。若 SQLite 结算不可用则保留 revision 2 dispatched，不能假装 uncertain 已落盘；并发同向重放投影首次 verified/uncertain，opposite terminal 竞争只接受 `BEGIN IMMEDIATE` 的账本赢家。A7-07 的 uncertain 终态没有被 A7-13 放宽，后续人工核对必须走明确用户操作；H8-05 才负责启动时枚举 unresolved 并把正确页面上下文交给本能力。
+
 B5-10 的 `DouyinQrLoginFlow` 只组合生产 `BrowserRuntime` 与 B5-09 detector：每个 flow 通过 `open_window()` 拥有一个专用 headed Page，`begin()` 固定打开官方 `/user/self`，`recheck()` 无入参并只重新读取页面。初始登录页或证据不足时最多等待 10 秒的共享健康/二维码就绪事实；二维码选择器只使用真实页面可访问语义 `aria-label="二维码"`（兼容等价 `alt`），不读取二维码地址或内容。明确二维码失效、手机端待确认和健康分别投影到封闭状态；过期与确认同时可见、页面异常或未知结构 fail closed，冲突不会被自动刷新掩盖。
 
 B5-11 将同一 flow 契约升级到 `douyin.qr-login.v2`：B5-09 的 `risk` 页面证据在工作流层只能成为 `handoff_required/risk_challenge`，覆盖验证码、滑块和风控使用的 ByteDance 验证中心外层 iframe，不读取跨源挑战内部内容。生产模块没有自动点击、填写、拖拽、OCR、验证码识别或绕过路径；挑战窗口保持可见，用户处理后只能通过无参数 `recheck()` 重新读取页面，且仅真实 `healthy` 关闭熔断。当前仍是 Local Executor 内部页面能力，不新增 Control Plane、Tauri Command 或 React 状态；已有 `handoff.requested` 任务事件供后续真实 RPA runner 使用，但本任务没有 Task/Attempt 上下文，不伪造事件。B5-13 才从 App 平台页触发，且不得复制 Python 选择器。

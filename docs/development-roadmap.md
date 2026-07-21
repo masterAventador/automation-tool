@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-12 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-13 |
+| 产品代码 | `🚧` Wave 1～Wave 6 工程主线与 A7-01～A7-13 已完成；D6-16 真实账号首轮命中首页验证码并正确 handoff，B5-15 真实账号 App 双重启证据同样独立补验，均不阻塞下一项 A7-14 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -319,7 +319,7 @@
 | A7-10 | 只浏览动作 | 无发送副作用的目标访问，作为低风险基线 | D6-10 | ✅ 已完成 |
 | A7-11 | 评论动作执行 | 授权校验→账本→点击→最终验证→结构化 receipt | A7-07,A7-08 | ✅ 已完成 |
 | A7-12 | 私信动作执行 | 授权校验→账本→发送→最终验证→结构化 receipt | A7-07,A7-09 | ✅ 已完成 |
-| A7-13 | 结果不确定处理 | dispatched 未 verified 先查询；无法确认不重放 | A7-11,A7-12 | ⬜ 未开始 |
+| A7-13 | 结果不确定处理 | dispatched 未 verified 先查询；无法确认不重放 | A7-11,A7-12 | ✅ 已完成 |
 | A7-14 | 连续失败熔断 | 达阈值停止新动作、打开 handoff、保持审计 | A7-02,A7-13 | ⬜ 未开始 |
 | A7-15 | 目标级结果 UI | 成功/跳过/失败/不确定和证据摘要 | A7-13,T3-18 | ⬜ 未开始 |
 | A7-16 | 评论真实验收 | 仅自有/授权目标；平台最终状态与服务端一致 | A7-15 | 🔍 待真实账号 |
@@ -2311,13 +2311,29 @@
 - 失败矩阵：41 项单元场景覆盖坏 token、三类本机限制、prepare/dispatch/settle 故障、不同文案重放、prepared 从会话恢复、verified/uncertain 重放、dispatch 竞争输家、入口超时/异常/未进入会话、两类权限在入口前/后和发送后变化、fill 超时/异常与填后漂移、send 超时/异常、ready/final 登录/风控/超时/未知版本/重复锚点/驱动故障、陈旧确认、最终锚点失效、UTC 时钟异常以及 intent/execution/receipt 篡改；许可前 send 零点击，许可后未知结果永不重放
 - 门禁：A7-12 聚焦 `44 passed`（含既有 A7-09 浏览器语料复验），新 `direct_message_action.py` 254 条语句/52 个分支覆盖率 100%；Backend 标准全量 `1739 passed, 5 skipped`，11216 条语句/2418 个分支覆盖率 100%，305 个 Python 文件格式、Ruff、严格 Mypy 282 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 99 项 Node 契约、186 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿
 - 资源与文档：浏览器/UI 验收均使用 headless；运行前确认 1420 空闲，运行后确认 1420 无监听且无项目 Playwright、无头 Chrome、Vite、pytest 或 Uvicorn 进程残留。未启动可见 App、未接触默认浏览器 Profile、系统钥匙串、真实平台账号或其他项目资源。同步根/Backend README、后端架构、工程结构与本唯一台账，没有新增重复规划文档
-- 后续：进入 `A7-13`，把两个动作的 dispatched/uncertain 恢复统一收敛为先查询最终页面事实、无法证明则维持不确定且绝不重放；D6-16/B5-15/A7-16/A7-17 真实账号证据继续独立保留
+- 后续：进入 `A7-13`，把两个动作仍为 dispatched 的崩溃窗口统一收敛为先查询最终页面事实、无法证明则结算 uncertain 且绝不重放；既有 uncertain 继续保持终态，D6-16/B5-15/A7-16/A7-17 真实账号证据独立保留
+
+### A7-13 结果不确定处理
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本任务提交
+- RED 与范围校正：台账先置为 `🧪 RED`，新增测试从原调用面导入不存在的 `automation_tool.executor.rpa.douyin.side_effect_recovery`，Pytest 准确收集失败。随后核对 A7-07 状态机与产品规则，确认本任务只自动核对仍为 revision 2 `dispatched` 的崩溃窗口；既有 uncertain 是明确终态，不能因后台查询偷偷翻回成功，后续只能由明确人工结算能力处理
+- 恢复契约：`DouyinSideEffectRecovery` 每实例只运行一次且输入仅为强类型 Action ID；先从真实 `ExecutorLedger` 取得完整 Action/Target/Attempt/Task/Installation/Executor/action/effect 绑定。不存在、错类型、账本错误或构造漂移统一脱敏拒绝；prepared 返回 `not_dispatched/prepared_not_dispatched`，verified/uncertain 返回相应 terminal replay，三者均在任何 DOM 查询前结束
+- 只读核对：只有 dispatched 按持久 action 选择 A7-08 `DouyinCommentPage` 或 A7-09 `DouyinDirectMessagePage`，执行唯一有界 final wait 和最终锚点二次取得。恢复模块源码没有 click/fill/press、会话入口、评论/私信输入或发送、导航、selector、官方 URL、Cookie/storage、HTTP、OCR、LLM，也不接收正文；目标页面上下文由后续 H8-05 崩溃恢复编排负责恢复
+- 结算与竞态：评论/私信即时执行各自导出原验证摘要函数，A7-13 对相同 effect 使用相同 action domain、Page Object selector version 与 final evidence，证据充分才调用既有 `verify_side_effect()`；登录、风控、两类私信权限、final 超时、未知路由、锚点冲突、页面/最终复验/时钟/验证错误转 `mark_side_effect_uncertain()`。结算异常时重新读取账本：接受并发赢家的 verified/uncertain；仍不可读或未落盘则结构化 receipt 保留 dispatched revision 2，绝不伪报持久化成功
+- Receipt：`DouyinSideEffectRecoveryReceipt` 只允许 `not_dispatched/verified/outcome_uncertain` 与 prepared、新/既有 verified、新/既有 uncertain 的合法 evidence/state/revision/replayed 组合，绑定强类型 Action/Target/action 与固定恢复版本；ID、状态、evidence、revision、重放位、action 或版本篡改全部拒绝，repr 不回显资源 ID、页面、URL、路径、摘要或底层异常
+- 原调用方验收：生产 `BrowserRuntime → BrowserWindow → DouyinSideEffectRecovery → A7-08/A7-09 Page Object` 使用一次性 0700 Profile、无头系统 Chrome、官方-origin 隔离评论/私信页和同一真实私有 SQLite 中两条 dispatched 事实。测试只预置最终 confirmation 后从恢复入口结算，两条事实均 verified；页面计数证明评论 submit=0、私信 entry=0、send=0，两个 textarea 均为空，terminal replay 仍零动作。Runtime 退出后浏览器完整关闭；当前无 App/API/Executor wire，H8-05 才装配启动恢复，本证据也不替代 A7-16/A7-17 真实平台验收
+- 失败与并发矩阵：38 项恢复单元场景覆盖评论/私信 final 成功，prepared/verified/uncertain 零 DOM，ready/profile/conversation 超时，登录、风控、两类权限、未知版本、缺失/冲突锚点、locator/等待/最终复验错误，验证/uncertain 结算失败、坏 UTC 时钟、当前事实读失败/消失、同向双结算重放，以及 verified 与 uncertain opposite terminal 竞态；A7-11/A7-12 动作矩阵同步回归，公开验证摘要重构不改变即时执行结果
+- 门禁：聚焦 A7-11/A7-12/A7-13 单元与生产浏览器 `111 passed`，三个实现文件合计 671 条语句/144 个分支覆盖率 100%；Backend 标准全量 `1778 passed, 5 skipped`，11408 条语句/2470 个分支覆盖率 100%，308 个 Python 文件格式、Ruff、严格 Mypy 285 个源文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 100 项 Node 契约、186 项 Vitest、5 项无头 Playwright、ESLint、严格 TypeScript、API 漂移、production boundary 与 Vite build 全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套完整测试、Rustfmt 和三套全目标 Clippy `-D warnings` 全绿
+- 资源与文档：运行 UI 前确认 1420 空闲，所有 BrowserRuntime/Playwright、Vite、pytest、Uvicorn 与端口在测试后零残留；未启动可见 App、未接触默认浏览器 Profile、系统钥匙串、真实账号或其他项目资源。同步根/Backend README、后端架构、工程结构与本唯一台账，不新增重复规划文档
+- 后续：进入 `A7-14`，用持久连续失败事实在阈值到达时阻止新动作、打开人工接管并保持可审计恢复；D6-16/B5-15/A7-16/A7-17 真实账号证据继续独立保留
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `A7-13`（⬜ 未开始）：统一评论/私信 dispatched/uncertain 的恢复查询；只有最终页面事实足以证明时才结算 verified，无法确认时保持 uncertain 且绝不重放；
+1. `A7-14`（⬜ 未开始）：建立持久连续失败计数与熔断，达到策略阈值后停止新动作、打开人工接管，并保留审计与安全恢复语义；
 2. `D6-16` 真实账号补验：用户按正常平台流程解除首页验证码后，完成真实搜索、App 预览与零副作用核对；
 3. `B5-15` 真实账号补验：独立登录 Profile 再次可用时，从真实 App 连续重启两次验证直接健康；账号不可用时继续保持 `🔍`，不阻塞后续任务；
 4. `B5-02` 补验：在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID；其余本轮 Windows 原生验收已于 2026-07-20 补齐。

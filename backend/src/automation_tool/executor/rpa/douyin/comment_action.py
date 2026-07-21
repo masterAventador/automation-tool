@@ -362,7 +362,7 @@ class DouyinCommentActionExecution:
             verified = self._ledger.verify_side_effect(
                 action_id=str(expected.action_id),
                 effect_fingerprint=fingerprint,
-                verification_fingerprint=_verification_fingerprint(fingerprint),
+                verification_fingerprint=comment_action_verification_fingerprint(fingerprint),
                 verified_at=self._now(),
             )
         except Exception:
@@ -440,7 +440,7 @@ def _effect_fingerprint(intent: DouyinCommentActionIntent) -> bytes:
     return hashlib.sha256(encoded).digest()
 
 
-def _verification_fingerprint(effect_fingerprint: bytes) -> bytes:
+def comment_action_verification_fingerprint(effect_fingerprint: bytes) -> bytes:
     return hashlib.sha256(
         _VERIFICATION_FINGERPRINT_DOMAIN
         + effect_fingerprint
@@ -597,4 +597,5 @@ __all__ = [
     "DouyinCommentActionReceipt",
     "DouyinCommentActionRejected",
     "DouyinCommentActionState",
+    "comment_action_verification_fingerprint",
 ]
