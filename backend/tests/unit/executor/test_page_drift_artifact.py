@@ -11,10 +11,12 @@ from uuid import UUID
 
 import pytest
 
+from automation_tool.executor.local_artifact import LocalArtifactRef, LocalArtifactStore
 from automation_tool.executor.page_drift_artifact import (
     MAX_PAGE_DRIFT_ARTIFACTS,
     PAGE_DRIFT_ARTIFACT_DIRECTORY,
     PAGE_DRIFT_ARTIFACT_MEDIA_TYPE,
+    PAGE_DRIFT_ARTIFACT_POLICY,
     PageDriftArtifactRef,
     PageDriftArtifactRejected,
     PageDriftArtifactStore,
@@ -57,11 +59,17 @@ def test_capture_writes_one_bounded_private_fixed_schema_artifact(tmp_path: Path
         stage="search",
     )
 
+    assert isinstance(reference, LocalArtifactRef)
     expected_relative = f"{PAGE_DRIFT_ARTIFACT_DIRECTORY}/{reference.artifact_id}.json"
     assert reference.relative_path == expected_relative
     assert reference.media_type == PAGE_DRIFT_ARTIFACT_MEDIA_TYPE
     artifact_path = tmp_path / "state" / reference.relative_path
     payload = artifact_path.read_bytes()
+    generic_store = LocalArtifactStore(
+        root_directory=tmp_path / "state",
+        policy=PAGE_DRIFT_ARTIFACT_POLICY,
+    )
+    assert generic_store.read(reference) == payload
     assert reference.size_bytes == len(payload)
     assert reference.sha256 == hashlib.sha256(payload).hexdigest()
     assert reference.size_bytes <= 2048
@@ -125,7 +133,7 @@ def test_invalid_inputs_and_private_path_replacement_fail_closed(tmp_path: Path)
             active.capture(**cast(Any, arguments))
 
     artifact_directory = tmp_path / "state" / PAGE_DRIFT_ARTIFACT_DIRECTORY
-    artifact_directory.mkdir(mode=0o700)
+    artifact_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     (artifact_directory / "unexpected.txt").write_text("private", encoding="utf-8")
     with pytest.raises(PageDriftArtifactRejected):
         active.capture(evidence="page_version_unknown", page_revision=7, stage="search")
@@ -241,10 +249,13 @@ def test_invalid_clock_id_and_preexisting_overflow_fail_closed(tmp_path: Path) -
     overflow_state.mkdir(mode=0o700)
     overflow_store = PageDriftArtifactStore(state_directory=overflow_state)
     artifact_directory = overflow_state / PAGE_DRIFT_ARTIFACT_DIRECTORY
-    artifact_directory.mkdir(mode=0o700)
+    artifact_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     for index in range(1, MAX_PAGE_DRIFT_ARTIFACTS + 2):
         artifact_id = UUID(f"923e4567-e89b-42d3-a456-{index:012d}")
-        (artifact_directory / f"{artifact_id}.json").write_bytes(b"x")
+        artifact_path = artifact_directory / f"{artifact_id}.json"
+        artifact_path.write_bytes(b"x")
+        if os.name != "nt":
+            artifact_path.chmod(0o600)
     with pytest.raises(PageDriftArtifactRejected):
         overflow_store.capture(evidence="page_version_unknown", page_revision=7, stage="search")
 
@@ -260,7 +271,7 @@ def test_every_untrusted_artifact_directory_entry_fails_closed(
     state_directory.mkdir(mode=0o700)
     active = PageDriftArtifactStore(state_directory=state_directory)
     artifact_directory = state_directory / PAGE_DRIFT_ARTIFACT_DIRECTORY
-    artifact_directory.mkdir(mode=0o700)
+    artifact_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     artifact_id = UUID("923e4567-e89b-42d3-a456-426614174001")
     entry = artifact_directory / f"{artifact_id}.json"
     if entry_kind == "unknown":
@@ -292,18 +303,18 @@ def test_partial_write_failures_remove_the_exclusive_artifact(
         clock=Clock(),
         id_source=Ids(),
     )
-    original_fdopen = os.fdopen
+    original_write = os.write
     monkeypatch.setattr(
         os,
-        "fdopen",
-        lambda *_arguments, **_keywords: (_ for _ in ()).throw(OSError("private fdopen")),
+        "write",
+        lambda *_arguments, **_keywords: (_ for _ in ()).throw(OSError("private write")),
     )
     with pytest.raises(PageDriftArtifactRejected):
         active.capture(evidence="page_version_unknown", page_revision=7, stage="search")
     artifact_directory = state_directory / PAGE_DRIFT_ARTIFACT_DIRECTORY
     assert tuple(artifact_directory.iterdir()) == ()
 
-    monkeypatch.setattr(os, "fdopen", original_fdopen)
+    monkeypatch.setattr(os, "write", original_write)
     monkeypatch.setattr(
         os,
         "fsync",

@@ -19,6 +19,8 @@ from automation_tool.executor.browser_runtime import (
 from automation_tool.executor.command_processor import ExecutorCommandProcessor
 from automation_tool.executor.discovery_operation import ProductionDouyinDiscoveryOperation
 from automation_tool.executor.ledger import ExecutorLedger
+from automation_tool.executor.local_artifact import LocalArtifactStore
+from automation_tool.executor.page_drift_artifact import PAGE_DRIFT_ARTIFACT_POLICY
 from automation_tool.executor.rpa.douyin.page_version import DOUYIN_HOME_URL
 from automation_tool.protocol import PlatformSessionState, TaskDiscoveryCompletedEnvelope
 
@@ -153,9 +155,19 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
     assert isinstance(completed, TaskDiscoveryCompletedEnvelope)
     assert completed.payload.outcome == "handoff_required"
     assert completed.payload.evidence == "conflicting_anchors"
-    artifacts = tuple((state / "page-drift-artifacts").glob("*.json"))
+    artifacts = tuple((state / "artifacts/evidence/page-drift").glob("*.json"))
     assert len(artifacts) == 1
-    artifact_source = artifacts[0].read_text(encoding="utf-8")
+    local_artifacts = LocalArtifactStore(
+        root_directory=state,
+        policy=PAGE_DRIFT_ARTIFACT_POLICY,
+    )
+    reference = local_artifacts.resolve(UUID(artifacts[0].stem))
+    assert local_artifacts.list_references() == (reference,)
+    artifact_source = local_artifacts.read(reference).decode("utf-8")
+    assert reference.relative_path == (
+        f"artifacts/evidence/page-drift/{reference.artifact_id}.json"
+    )
+    assert not Path(reference.relative_path).is_absolute()
     assert len(artifact_source.encode("utf-8")) <= 2048
     assert "自动化运营私密关键词" not in artifact_source
     assert "页面契约漂移" not in artifact_source

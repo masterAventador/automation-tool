@@ -281,9 +281,10 @@ backend/
 │       │   ├── command_processor.py # 正式命令、SQLite checkpoint 和持久结果 outbox
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
 │       │   ├── discovery_operation.py # 搜索/滚动/提取的单次只读发现组合
-│       │   ├── ledger.py          # 本机 SQLite v5 命令/Session/准入/副作用原子账本
+│       │   ├── ledger.py          # 本机 SQLite v6 命令/Session/准入/副作用/网络闸门账本
+│       │   ├── local_artifact.py  # H8-09 通用本机 Artifact 引用、权限和稳定读写边界
 │       │   ├── side_effect_ledger.py # A7-07 封闭且脱敏的副作用状态值对象
-│       │   ├── page_drift_artifact.py # 固定 Schema/大小/数量的本机页面漂移诊断 spool
+│       │   ├── page_drift_artifact.py # 复用通用 Store 的页面漂移固定 Schema/Policy
 │       │   ├── platform_commands.py # 认证本机平台命令、扫码 flow 与健康队列
 │       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
 │       │   ├── runtime.py         # Hello/Heartbeat、固定健康投影和有界停止
@@ -420,7 +421,7 @@ D6-12 的用户页面位于既有 `features/task-runs/`：`TaskTargetPreview.tsx
 
 D6-13 复用既有 `application/task_command_delivery.py` 与 `infrastructure/database/task_command_repository.py`，没有新增 dispatcher、消息队列或第二协议。`schema.py`/Alembic `20260720_0019` 只给 Outbox 增加确认 message 绑定；仓储以 typed Task definition 判断 offer 是否可能承载业务动作，在 enqueue 固定当前确认并在 claim 关联复验。`scripts/run_d6_13_acceptance.py` 复用共享隔离 PostgreSQL/Uvicorn/WebSocket 脚手架，证明未绑定和确认失效命令不离开数据库、当前绑定命令才到达正式 Executor 网络入口；它不调用 App API、不启动 Tauri/浏览器，也不伪造 Wave 7 ActionAuthorization 或平台动作。
 
-D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移专用本机 spool 与窄引用；`discovery_operation.py` 仍是唯一调用方，`protocol/executor_envelope.py` 只把两种明确漂移 evidence 收紧到 `handoff_required`，Control Plane 继续复用既有发现收敛仓储。`tests/integration/test_page_drift_artifact_browser.py` 从正式 command processor 进入生产编排，以无头系统 Chrome 和隔离 Profile 验证 Artifact 与浏览器清理；PostgreSQL 集成矩阵验证两种 evidence 都投影为 `awaiting_human`。本任务没有新增 App/API/数据库表、通用文件浏览器、截图/Trace 或上传通道，H8-09/H8-12 仍负责通用 Artifact 与保留治理。
+D6-14 的 `executor/page_drift_artifact.py` 只拥有页面漂移固定 Schema、Policy 与窄引用；H8-09 的 `executor/local_artifact.py` 统一拥有稳定 ID、摘要、媒体类型、大小、受控相对路径、独占写入、按 ID 解析/枚举/读取和文件系统权限边界。`discovery_operation.py` 仍是唯一生产调用方，`protocol/executor_envelope.py` 只把两种明确漂移 evidence 收紧到 `handoff_required`，Control Plane 继续复用既有发现收敛仓储。`tests/integration/test_page_drift_artifact_browser.py` 从正式 command processor 进入生产编排，以无头系统 Chrome 和隔离 Profile 生成 Artifact，再从同一 Store 按 ID 读取并验证浏览器清理；PostgreSQL 集成矩阵验证两种 evidence 都投影为 `awaiting_human`。当前没有新增 App/API/数据库表、通用文件浏览器、截图/Trace、上传或删除通道。
 
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 
@@ -558,14 +559,16 @@ Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接和 PyInstal
 
 ```text
 app-data/
-├── device/
-│   ├── installation.json
-│   └── executor-state.db
+├── device-identity-ed25519-v1
+├── device-credential-v1
+├── local-executor/
+│   ├── executor-id-v1
+│   ├── package/
+│   └── state/
+│       ├── executor-ledger.sqlite3
+│       └── artifacts/evidence/page-drift/<artifact-id>.json
 ├── browser-profiles/
 │   └── douyin/<canonical-profile-uuid>/
-├── artifacts/
-│   ├── evidence/
-│   └── exports/
 ├── logs/
 ├── diagnostics/
 └── settings.json
@@ -674,7 +677,7 @@ ActorContext + tenant/RBAC/Entitlement + Core Approval/Audit/Artifact
 | --- | --- | --- |
 | `tenant_id`、owner、企业与 RBAC | 删除 | 第一期没有产品账号或租户；资源以强类型 `installation_id` 归属，不能引入隐式默认 tenant |
 | `approval_id`、`audit_correlation_id`、Core Approval/Audit | 删除 | MVP 的确认、人工接管、事件和安全结果使用当前 Task/Attempt/Action/Event 明确事实，不伪造旧治理资源 |
-| Core Artifact 引用和 `artifact_refs` | 删除旧模型 | 本机 Artifact 等到 `H8-09` 按当前稳定 ID、摘要、相对路径和最小元数据实现；Executor/Control Plane 都不接收旧 Core 对象 |
+| Core Artifact 引用和 `artifact_refs` | 删除旧模型 | H8-09 已按当前 UUIDv4、SHA-256、媒体类型、大小、受控相对路径和权限实现本机引用；Executor/Control Plane 仍不接收旧 Core 对象 |
 | `capability_id=social-operations`、`target_device_id` | 删除 | 当前连接身份是 Installation/Executor，任务类型由当前判别联合决定；React 不选择设备或 capability |
 | 任意 `extensions`、任意 input/result 和 Rust `serde_json::Value` | 删除 | 只接受 Pydantic 生成并由 Python/TypeScript/Rust 共享 fixtures 验证的封闭类型，未知字段 fail closed |
 | 同步逐行 stdio 任务通道 | 删除 | stdin 只在 `E4-02`/`E4-06` 传一次性 bootstrap；正式命令、ACK 和事件走当前出站 WebSocket |

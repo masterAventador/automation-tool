@@ -200,7 +200,9 @@ def test_formal_discovery_replays_every_fake_page_headlessly(
     assert completed.payload.outcome == scenario.outcome
     assert completed.payload.evidence == scenario.evidence
     assert completed.payload.candidate_count == scenario.candidate_count
-    assert len(tuple((state / "page-drift-artifacts").glob("*.json"))) == (scenario.artifact_count)
+    assert len(tuple((state / "artifacts/evidence/page-drift").glob("*.json"))) == (
+        scenario.artifact_count
+    )
     assert not runtime.runtime.is_running
     assert os.stat(profile).st_mode & 0o777 == 0o700
 

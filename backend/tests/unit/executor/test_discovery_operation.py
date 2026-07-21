@@ -348,7 +348,9 @@ def test_production_discovery_saves_page_drift_artifact_and_enters_handoff(
 
     assert result.state is DouyinDiscoveryOperationState.HANDOFF_REQUIRED
     assert result.evidence == evidence.value
-    artifacts = tuple((ledger.database_path.parent / "page-drift-artifacts").glob("*.json"))
+    artifacts = tuple(
+        (ledger.database_path.parent / "artifacts/evidence/page-drift").glob("*.json")
+    )
     assert len(artifacts) == 1
     assert json.loads(artifacts[0].read_text(encoding="utf-8"))["evidence"] == evidence.value
 

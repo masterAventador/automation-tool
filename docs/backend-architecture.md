@@ -320,7 +320,7 @@ D6-11 新增 `TaskTargetPreviewService` 与唯一 `SqlAlchemyTaskTargetPreviewRe
 
 D6-13 在动作承载命令离开 Control Plane 前增加第二道确认门。迁移 `20260720_0019` 只给 `task_commands` 增加可空、UUIDv4 且只允许用于 `task.offer` 的 `target_confirmation_message_id`；它引用确认的稳定 source identity，不复制选择列表、页面事实或动作 payload。带 `douyin.search_exposure.v1` 定义的业务 offer 在 enqueue 时必须看到 active Installation、`queued` Task、精确 confirmed revision 和当前 confirmation，并把 message ID 固定进 Outbox；同键重放不能换绑。claim 以 Task/Installation/确认 ID 关联复验确认仍存在、Task revision 未倒退且状态为 `queued/running`，否则行保持 pending 且不增加 delivery attempts。迁移前遗留的无绑定业务 offer、重新发现后失效的旧绑定和篡改行都不会发到 Executor；`task.discover`、pause/resume/cancel/emergency-stop 以及无业务定义的既有无副作用协议骨架不受误拦。该层不是 A7-03 ActionAuthorization，也不允许 Executor 执行真实评论/私信；它只消除“动作协议落地前可绕过用户确认”的投递空窗。
 
-D6-14 在 `ProductionDouyinDiscoveryOperation` 增加页面漂移专用本机证据边界。只有页面层已封闭确认的 `page_version_unknown` 或 `conflicting_anchors` 才触发 `PageDriftArtifactStore`；慢网络超时、登录、普通弹窗、隐私拒绝和一般页面不可用不会伪装成漂移。诊断文件位于 Tauri 已授权的 Executor 私有 state 根内，固定为最多 20 个、单个最多 2 KiB 的 JSON，携带 UUIDv4、SHA-256、固定媒体类型、受控相对路径、平台/阶段/evidence/page revision/UTC 时间；API 不接受自由文本，因此关键词、URL、DOM、页面正文、截图、Cookie、凭据和 Profile 路径无法进入文件。目录替换、未知文件、坏权限/磁盘/ID/时钟或部分写入全部拒绝并尽力移除残片；诊断不可写时仍保持熔断。上述两种 evidence 在 Executor v1 中只能配对 `handoff_required`，Control Plane 只收敛到 `awaiting_human`，不会继续滚动、提取或动作。H8-09 后续把这一专用引用纳入通用 Local Artifact 展示/上传/保留接口，H8-10 才允许受限失败截图或 Trace。
+D6-14 在 `ProductionDouyinDiscoveryOperation` 增加页面漂移专用本机证据边界。只有页面层已封闭确认的 `page_version_unknown` 或 `conflicting_anchors` 才触发 `PageDriftArtifactStore`；慢网络超时、登录、普通弹窗、隐私拒绝和一般页面不可用不会伪装成漂移。H8-09 已把字节存取下沉到唯一 `LocalArtifactStore`，页面层只保留固定 Schema、Policy 和窄 Ref；诊断位于 Tauri 已授权的 Executor 私有 state 根下 `artifacts/evidence/page-drift`，固定最多 20 个、单个最多 2 KiB，携带 UUIDv4、SHA-256、固定媒体类型、受控相对路径、平台/阶段/evidence/page revision/UTC 时间。API 不接受自由文本，因此关键词、URL、DOM、页面正文、截图、Cookie、凭据和 Profile 路径无法进入文件。目录替换、未知文件、坏权限/ACL/磁盘/ID/时钟、链接、文件竞态或部分写入全部拒绝并尽力移除残片；诊断不可写时仍保持熔断。上述两种 evidence 在 Executor v1 中只能配对 `handoff_required`，Control Plane 只收敛到 `awaiting_human`，不会继续滚动、提取或动作。H8-10 才允许受限失败截图或 Trace，H8-12 再增加保留清理。
 
 D6-15 不增加第二套 Adapter，而是在 `tests/fixtures/douyin_discovery_pages/` 固定生产页面契约的离线回归语料。所有场景仍从 `ExecutorCommandProcessor.handle(task.discover)` 进入 D6-10 编排，并由真实 `BrowserRuntime`/系统 Chrome 加载官方 URL 的测试路由；测试路由和 HTML 不进入发布包。正常、空结果、普通弹窗、Session probe 跳转、未知官方路径和每次 wheel 持续增长的无界源分别验证成功、`no_candidates`、人工接管、登录接管、D6-14 Artifact/handoff 和 D6-05 二十轮硬停止。语料禁止外部 URL/fetch/Cookie/storage 依赖；D6-04/D6-05/D6-07 浏览器集成测试复用相同首页/结果文件，避免维护另一套内联 DOM。
 
@@ -737,16 +737,17 @@ D6-13 将上述“无副作用骨架”和“业务动作承载 offer”按是�
 - Cookie、Token、页面原文、聊天全文和本机绝对路径不入库；
 - 删除任务不立即删除审计；Artifact 按保留策略异步清理。
 
-E4-11 建立并由 B5-12、D6-10、A7-04、A7-07 逐步升级到 v5 的 Executor 本机 SQLite 只保存：
+E4-11 建立并由 B5-12、D6-10、A7-04、A7-07、H8-07 逐步升级到 v6 的 Executor 本机 SQLite 只保存：
 
 - 已接收正式命令的封闭 envelope、message/idempotency 双键与意图 SHA-256；
 - 当前 Attempt 的 task 绑定、连续 command sequence、单调 event sequence、封闭 checkpoint state 和 revision；
 - 与来源命令、Task/Attempt/correlation 严格绑定的待发送正式回执/事件及 delivered 标记；
 - 每个平台最新的封闭健康状态、单调 `session_revision` 和观察时间；
 - 已准入评论/私信的最小资源绑定、effect/verification SHA-256、封闭副作用状态、UTC 时间和 revision；
+- 单例紧停与网络连接闸门、未交付 outbox 的有界计数/字节事实；
 - 不保存可由 Control Plane 恢复的第二套完整业务数据库。
 
-v1→v5 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；Artifact spool 仍由 H8 独立承接。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
+v1→v6 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；H8-09 Artifact 字节保存在同一私有 state 根的受控子目录，不塞入 SQLite blob。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
 B5-15 明确首次健康 Profile 的 epoch 语义：若本机尚无平台行，无论调用方是否标记“恢复”，都只能创建 revision 1；只有已有行之后的显式健康恢复才递增 revision。这样 App/Executor 重启后可从现存 Profile 直接建立首个健康事实，同时仍禁止已有非健康 epoch 被隐式健康覆盖。四轮隐藏 App 验收验证健康→健康(revision 2)→expired→risk，后两次非健康变化保持同一 revision，Control Plane 最终只保存最小 risk 投影。
 
@@ -828,12 +829,16 @@ T3-20 已验证上述单实例恢复契约：隐藏 App 页面创建并运行 Ta
 
 MVP RPA 证据默认保存在本机：
 
-- Executor 生成 `LocalArtifactRef`，包含稳定 ID、摘要、媒体类型、大小和受控相对路径；
+- Executor 通过唯一 `LocalArtifactStore` 生成 `LocalArtifactRef`，包含 canonical UUIDv4、SHA-256、媒体类型、大小和受控相对路径；
+- 每类可信生产者以固定 `LocalArtifactPolicy` 声明小写目录、扩展名、媒体类型、单文件与数量硬上限，调用方不能提交任意路径或媒体类型；
+- Store 只提供独占 capture、按 ID resolve、完整引用校验 read 与稳定顺序 list；每次操作复验根/叶 identity，拒绝未知目录项、symlink/reparse、硬链接、宽权限和文件竞态，POSIX 固定 `0700/0600`，Windows 复用私有 ACL 校验；
 - Control Plane 只保存元数据，不保存绝对路径；
-- Tauri 根据 Artifact ID 在本机解析和展示；
+- Tauri 后续只根据 Artifact ID 通过受控本机边界解析和展示，不接收 WebView 路径；H8-09 当前没有新增 App/API 或通用文件浏览器；
 - 云端无法直接读取本地 Artifact；
 - 客户主动导出或后续启用上传时，使用短期上传授权；
 - 失败截图、Trace 和日志有数量、大小和保留期限上限。
+
+H8-09 的首个生产消费者是页面漂移固定证据：正式 `task.discover` 生成 `artifacts/evidence/page-drift/<id>.json` 后，可由同一 Store 以 Artifact ID 解析、枚举并校验摘要/大小/路径后读取。当前不提供覆盖、任意路径访问、上传、截图/Trace、导出、删除或保留治理；分别由 H8-10、H8-12 和 H8-13 承接。
 
 P2 内容素材和成片需要云端共享时再启用对象存储，继续使用同一 Artifact 领域接口。
 

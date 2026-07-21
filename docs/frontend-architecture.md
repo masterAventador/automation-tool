@@ -283,6 +283,8 @@ E4-10 将所有代次共享的 `ExecutorDiagnostics` 放在 Manager Core，重�
 
 E4-11 仍不新增第二 Manager 或账本 WebView API。`ExecutorLaunchConfiguration` 持有经过绝对路径/长度/组件校验的 `state_directory: PathBuf`；E4-13 已从 Tauri 自身解析的 `app_data_dir` 派生固定 `local-executor/state`，React 不能提交路径。Rust 只把它放入受限 stdin bootstrap，Python CLI 在任何网络连接前完成 `executor-ledger.sqlite3` v1 迁移和 Installation/Executor 身份绑定。该数据库属于 Executor 的本机恢复边界，不是 Control Plane 副本：只保存正式协议命令身份/意图指纹、Attempt checkpoint 和 outbox，不保存 Session、Cookie、密钥、浏览器 Profile 或任意 App 配置，也不调用系统钥匙串。
 
+H8-09 同样不增加 WebView 路径参数、任意文件 Tauri Command 或第二个本机存储根。Python `LocalArtifactStore` 只接收上述 bootstrap 已固定的 `local-executor/state` 和代码内可信 Policy，公开引用只有 UUIDv4、SHA-256、媒体类型、大小与受控相对路径；页面漂移生产调用方已经按 ID 完成解析、枚举和校验读取。当前没有用户可调用的 App/API，因此原调用方验收从正式 Executor command processor 与无头 BrowserRuntime 进入；后续 Tauri 展示只能新增 Artifact ID allowlist 边界，不能把绝对/相对路径或任意媒体类型交给 React。
+
 E4-12 没有给 WebView 增加通用命令通道：Rust Manager 仍只监管正式 Python Executor，由 Python 在 Control Plane WebSocket 内消费 `task.offer` 并从同一 SQLite 精确重放 ACK/Event。macOS 已从公开 Manager 原入口两次启动 signed PyInstaller 产物验证同一状态目录恢复；React 不读取账本、不提交路径，也不能直接调用 Executor。
 
 E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.path().app_data_dir()` 派生 `local-executor/package`、`local-executor/state` 和 `executor-id-v1`；稳定 Executor UUIDv4 使用既有 App 私有原子存储，Unix 目录/文件为 `0700/0600`。重启时 Rust 依次换取 `app.control-plane` Session、校验当前 Installation，再换取独立 `executor.connect` Session 并启动 Manager；React 只能调用四个无参数 Command，不能传 URL、Session、路径、包根或身份。`emergency_stop_executor` 是本机完整进程树硬停止，与 T3-16/T3-18 的业务 Task 协作式紧停严格分离。E4-14 已从唯一 `visible=false` App 的诊断页面完成 WebView→IPC→Control Plane→signed Executor→退出清理的 macOS 生产同路径验收。

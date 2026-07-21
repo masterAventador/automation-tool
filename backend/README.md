@@ -88,7 +88,7 @@ H8-03 离线紧停、H8-04 App 崩溃恢复、H8-05 Executor 崩溃恢复、H8-0
 
 D6-13 未确认副作用守卫在仓库根目录执行 `backend/.venv/bin/python scripts/run_d6_13_acceptance.py`。该 runner 通过正式 Uvicorn/Executor WebSocket 验证无绑定与旧确认的业务 offer 零投递、当前确认 offer 正常投递；它不调用 App API、不启动 Tauri 或运营浏览器。D6-11/D6-12 已独立证明确认事实来自真实 App 原入口，本任务只验收后端到 Executor 的原始生产边界。
 
-D6-14 页面漂移同路径验收执行 `uv run pytest tests/integration/test_page_drift_artifact_browser.py`。用例从正式 `ExecutorCommandProcessor.handle(task.discover)` 进入生产发现编排，以隔离临时 Profile 和无头系统 Chrome 命中确定性锚点冲突页，核对 `handoff_required`、受限本机诊断内容与 BrowserRuntime 关闭；它没有 App API，因此不启动 Tauri，也不触碰用户默认 Profile 或真实账号。
+D6-14/H8-09 页面漂移与通用 Local Artifact 同路径验收执行 `uv run pytest tests/integration/test_page_drift_artifact_browser.py`。用例从正式 `ExecutorCommandProcessor.handle(task.discover)` 进入生产发现编排，以隔离临时 Profile 和无头系统 Chrome 命中确定性锚点冲突页，再从 Executor 私有 state 根按 Artifact ID 走正式 Store 的解析、枚举和校验读取，核对 `handoff_required`、受限本机诊断内容与 BrowserRuntime 关闭；该能力没有 App/API，因此不启动 Tauri，也不触碰用户默认 Profile 或真实账号。
 
 D6-15 Fake 页面回归执行 `uv run pytest tests/integration/test_douyin_discovery_fake_pages.py`。七个小型静态 HTML 文件覆盖正常、可见空结果、阻塞弹窗、登录跳转、未知版本和无限滚动，全部经正式 command processor 与生产发现编排在隔离 Profile 的无头系统 Chrome 中回放；语料没有外部 URL、fetch、Cookie 或 storage 依赖，不进入 PyInstaller/正式包。D6-04 搜索、D6-05 滚动与 D6-07 候选隐私浏览器测试也读取同一语料目录。
 
@@ -136,7 +136,7 @@ B5-16 默认 Profile 隔离验收执行 `backend/.venv/bin/python scripts/run_b5
 
 E4-10 的 `executor/diagnostics.py` 与 Rust Manager 共同回放根目录 `contracts/fixtures/executor-diagnostics-v1.json`，为 Python 后续结构化诊断提供同一 fail-closed 脱敏规则。它不改变正式 CLI 的固定 stderr，也不替代 Rust 对真实子进程 stderr 的独立流式限界和再次脱敏。
 
-E4-11 的 `executor/ledger.py` 使用 Python 内置 `sqlite3`，不引入第二 ORM 或服务端数据库依赖。v1 建立 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints` 和 `executor_outbox`；B5-12 迁移到 v2 增加 `executor_platform_sessions`，D6-10 的 v3 扩展只读发现重放，A7-04 的 v4 增加动作策略单例、紧停 latch 和最小准入事实，A7-07 的当前 v5 再增加最小副作用状态机。命令按 message/idempotency 双键与 SHA-256 意图指纹重放，Attempt 命令序号连续，checkpoint 用 revision/CAS 和单调事件序号更新，outbox 保存已通过正式协议模型的精确回执/事件并可持久标记 delivered；平台健康只保存平台、封闭状态、单调 revision 和观察时间。目录祖先 symlink/reparse point、宽权限、身份错绑、更新竞争、损坏/未来 schema 和文件替换均 fail closed。CLI 在联网前完成迁移；数据库只在 App 私有目录保存协议任务事实、非敏感平台健康、动作准入和副作用摘要最小事实，不保存 Control Plane Session、完整 ActionAuthorization token、Cookie、浏览器登录数据、密钥、正文、页面原文或任意配置，也不使用系统钥匙串。
+E4-11 的 `executor/ledger.py` 使用 Python 内置 `sqlite3`，不引入第二 ORM 或服务端数据库依赖。v1 建立 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints` 和 `executor_outbox`；B5-12 迁移到 v2 增加 `executor_platform_sessions`，D6-10 的 v3 扩展只读发现重放，A7-04 的 v4 增加动作策略单例、紧停 latch 和最小准入事实，A7-07 的 v5 增加最小副作用状态机，H8-07 的当前 v6 再增加持久网络闸门。命令按 message/idempotency 双键与 SHA-256 意图指纹重放，Attempt 命令序号连续，checkpoint 用 revision/CAS 和单调事件序号更新，outbox 保存已通过正式协议模型的精确回执/事件并可持久标记 delivered；平台健康只保存平台、封闭状态、单调 revision 和观察时间。目录祖先 symlink/reparse point、宽权限、身份错绑、更新竞争、损坏/未来 schema 和文件替换均 fail closed。CLI 在联网前完成迁移；数据库只在 App 私有目录保存协议任务事实、非敏感平台健康、动作准入和副作用摘要最小事实，不保存 Control Plane Session、完整 ActionAuthorization token、Cookie、浏览器登录数据、密钥、正文、页面原文或任意配置，也不使用系统钥匙串。
 
 真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询/事件端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名、凭据注入、任务定义复验与 SSE 严格解析，React 不接触任何秘密；T3-17 已由唯一 `visible=false` App 真实点击新建表单，经固定 Tauri Command、Uvicorn 和 PostgreSQL 原子创建匹配定义。
 
@@ -192,7 +192,9 @@ D6-11 的 `TaskTargetPreviewService` 与 `SqlAlchemyTaskTargetPreviewRepository`
 
 D6-13 的迁移 `20260720_0019` 为既有 `task_commands` 增加可空 `target_confirmation_message_id`，不复制 Target、文案或任意 payload。只有带 `douyin.search_exposure.v1` 定义、未来可能承载浏览/评论/私信执行的 `task.offer` 必须在 enqueue 时命中 `queued` Task 的当前 confirmation 并绑定其 UUIDv4 source message；同键重放也必须仍匹配同一确认。claim 使用关联 `EXISTS` 再验绑定、Task scope/status/revision，缺失、旧绑定、确认被清除和预确认命令都保持 `pending/delivery_attempts=0`；发现与控制命令继续可用，紧停不依赖确认。迁移前无绑定的业务 offer 会 fail closed 而不是补造授权；无业务定义的 T3 协议骨架保持兼容。该任务不签发 ActionAuthorization、不生成动作 payload，也不执行平台副作用。
 
-D6-14 的 `executor/page_drift_artifact.py` 是页面漂移专用、尚未上传的本机诊断 spool，不是 H8-09 通用 Artifact API。只在 D6-04 明确返回 `page_version_unknown/conflicting_anchors` 时写入；Schema 全部是固定枚举与数值，单文件上限 2 KiB、总数上限 20，文件名为 UUIDv4，引用带 SHA-256、固定媒体类型和 `page-drift-artifacts/<id>.json` 相对路径，目录/文件在 POSIX 分别收紧为 `0700/0600`。任意未知目录项、路径替换、坏 ID/时钟、磁盘/权限或部分写入都 fail closed，部分文件会回收；诊断失败不能解除页面熔断，发现结果仍经正式 Executor wire 收敛到 `handoff_required`，Control Plane 投影为 `awaiting_human`。关键词、URL、HTML、页面正文、Cookie、凭据和 Profile 路径没有输入字段，H8-09/H8-12 后续再统一展示、保留与清理接口。
+H8-09 的 `executor/local_artifact.py` 是本机 Artifact 唯一字节边界。可信生产者必须提供固定 `LocalArtifactPolicy`，声明受控小写相对目录、扩展名、媒体类型、单文件和数量上限；`LocalArtifactRef` 只返回 canonical UUIDv4、SHA-256、媒体类型、大小和相对路径。Store 支持独占 capture、按 ID resolve、完整引用校验 read 与稳定顺序 list，不提供任意路径、自由媒体类型、覆盖、上传、截图/Trace、导出或删除。每次操作都复验根目录和叶目录 identity、拒绝 symlink/reparse/硬链接/未知目录项/宽权限/文件竞态，写失败清理残片；POSIX 目录/文件固定 `0700/0600`，Windows 复用私有 ACL 适配器。
+
+D6-14 的 `executor/page_drift_artifact.py` 现在只保留页面漂移固定 Schema 和窄 Policy/Ref，底层复用 H8-09 Store，不再维护第二套文件安全实现。它只在 D6-04 明确返回 `page_version_unknown/conflicting_anchors` 时写入 `artifacts/evidence/page-drift/<id>.json`，单文件上限 2 KiB、总数上限 20；诊断失败不能解除页面熔断，发现结果仍经正式 Executor wire 收敛到 `handoff_required`，Control Plane 投影为 `awaiting_human`。关键词、URL、HTML、页面正文、Cookie、凭据和 Profile 路径没有输入字段；H8-10/H8-12 后续分别增加受限截图/Trace 和保留清理，不扩大当前字节边界。
 
 D6-15 的权威 Fake 页面只位于 `tests/fixtures/douyin_discovery_pages/`。`home.html` 提供唯一搜索入口；结果样例分别提供两条最小作者、可见但零 article 的空列表，以及每次 wheel 只增加一条作者的无界源；另三个入口样例封闭普通 dialog、302 Session probe 与未知官方路径。回归从服务端已生成的 `task.discover` wire 开始，不绕过 Page Object；正常结果收敛 2 个 Candidate，空结果为 `failed/no_candidates`，弹窗/未知版本进入 handoff，登录跳转进入 login required，无限源在本机 20 轮硬上限后只保留 21 个 Candidate。每个场景结束都关闭 BrowserRuntime，测试不点击登录、不执行平台副作用。
 
