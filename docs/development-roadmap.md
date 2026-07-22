@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16C 服务端动作执行编排已完成，下一项 H8-16D）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16D Executor 真实动作编排已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `🚧` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16C 已完成；下一项 H8-16D 接入 Executor 真实动作编排；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16D 已完成；下一项 H8-16E，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -349,7 +349,7 @@
 | H8-16A | 桌面发现入口闭环 | 正式页面从 Task 草稿/登录接管状态启动或重试发现，调用固定 Tauri→API 原路径 | H8-16 | ✅ 已完成 |
 | H8-16B | Installation 单活任务 | 同一 Installation 只能有一个未终结 RPA Attempt，数据库并发单赢家且 UI 明确提示 | H8-16A | ✅ 已完成 |
 | H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ✅ 已完成 |
-| H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ⬜ 未开始 |
+| H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ✅ 已完成 |
 | H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ⬜ 未开始 |
 | H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | ⬜ 未开始 |
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ⬜ 未开始 |
@@ -2653,14 +2653,28 @@
 - 清理：PostgreSQL 集成测试使用随机 loopback 端口和 `automation-tool-pytest-*` 专属 Compose project，结束后容器、网络、Volume 和项目浏览器进程复查为空；本任务没有启动运营浏览器、读取真实 Profile、触碰默认 Chrome/Edge 或系统钥匙串
 - 后续：进入 `H8-16D`，让正式 `ExecutorCommandProcessor` 消费 `action.execute`、验签并调用已有 browse/comment/direct-message 与副作用账本；本任务不把服务端投递成功冒充平台动作完成
 
+### H8-16D Executor 真实动作编排
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、正式动作 Operation、SQLite v7、Tauri 受信 bootstrap、原调用方浏览器验收与规格 finding 收敛属于单一 `feat: 完成 Executor 真实动作编排` 提交；完成后立即推送 `main`
+- RED：先新增 Processor 动作用例，准确失败于 `automation_tool.executor.action_operation` 不存在；随后分别先写 bootstrap、CLI 组合根和 Rust action runtime 测试，依次得到未知字段、缺少生产 Operation 和缺少 `ExecutorActionRuntimeInput` 的预期失败。移除旧固定 success batch 前，offer 用例准确得到六消息而非预期两消息；代码复审再新增“已结算副作用重放零浏览器”用例，准确得到 `page_unavailable`，证明旧编排仍会重复导航后才实现账本终态短路
+- Processor 与账本：`task.offer` 现在只原子提交 `task.accept/task.started` 并保持 running，不再提前伪造 step/task 完成。后续 typed `action.execute` 先以 message/idempotency/完整意图指纹进入 SQLite v7；持久 envelope 只留 message type/correlation 的脱敏投影，不保存完整 authority、展示名或文案。生产 Operation 返回后，Processor 复验 Action/Target 绑定并原子提交 `action.accept/step.started/step.completed|failed|task.outcome_uncertain`；精确命令/outbox 重放直接返回首次持久消息
+- 生产动作：唯一 `ProductionDouyinActionOperation` 先执行 A7-03/A7-04 授权与本机硬限制。browse 直接复用 A7-10；comment 先浏览目标主页、从版本化 Profile Page Object 取得唯一可见 canonical `/video/<id>` 入口，再复用 A7-11；direct-message 导航 canonical 用户页后复用 A7-12。三者只投影 A7-15 封闭证据并始终关闭 Runtime；登录、风控、页面漂移、超时、授权/硬限制和页面不可用不会折叠成成功
+- 崩溃与副作用：评论/私信在启动浏览器前先读同一 A7-07 账本；prepared 仍可沿生产页面恢复执行，verified/uncertain 直接走 A7-13/A7-15 只读投影，残留 dispatched 在无页面上下文时保守结算 uncertain。这样“平台已结算、Outbox 尚未提交”的崩溃窗口重放为零 BrowserRuntime/DOM，更不会再次点击或发送；普通已持久 Outbox 重放同样不再进入 Operation
+- 受信组合根：Tauri 只在 Rust 构建边界读取匹配服务端 signer 的 `AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY` 及两项本机硬限制；三项全缺保持无动作能力，部分存在、非 canonical/零公钥或越界配置均 fail closed。验证后的公开信任根随每次独立认证 stdin bootstrap 进入 Python CLI，初次、紧停报告和崩溃恢复共用同一不可变配置。服务端私钥、Control Plane 阈值、正文、Cookie、Profile 路径和浏览器句柄不进入 React、SQLite、普通环境配置或系统钥匙串
+- 原调用方验收：`tests/integration/test_action_command_processor_browser.py` 先从正式 Processor 对 browse/comment/direct-message 三类动作逐项运行真实 `BrowserRuntime`、系统 Chrome、官方-origin 隔离页和私有 SQLite，分别核对零发送、评论单击一次、会话进入/私信发送各一次及 verified 账本；第四条从真实 LocalExecutorProcess 受认证 WebSocket 接收 offer/action，再驱动同一评论生产链，证明正式网络调用面而非 Mock/直接内部调用。所有例行浏览器显式 `headless=True`，系统动态分配 loopback 端口；正式运营 BrowserAuthority 默认仍可见，方便扫码、验证码和人工接管
+- 门禁：Executor 变更模块聚焦 `743 passed/1 Windows-only skipped`，语句/分支覆盖率 100%；浏览器原调用方 4/4、评论封闭语料回归 2/2、终态零 DOM 与故障边界均通过。Backend 全量 `2052 passed/5 explicit skipped in 234.56s`，13819 条语句/3176 个分支覆盖率 100%；Frontend 118 项 Node/210 项 Vitest/5 项全局无头 Playwright、Lint/Type/API/生产构建，以及 Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套测试、Rustfmt/三套 Clippy 均在本提交完成前执行并保持全绿
+- 规格、隔离与清理：`mvp-spec-review.v1.json` 的 H8-16D finding 已 resolved，但 MVP-AC-06/07 仍保留 `remediation_required`，因为本任务的无头隔离页不能冒充 H8-16F 可见浏览器整条 App 用户旅程或 A7-16/A7-17 真实账号最终状态。测试 Profile、SQLite、WebSocket server/thread、Playwright driver 和 Chrome 均在 finally/Runtime close 回收；结束后本项目无浏览器、监听端口或容器残留，没有读取默认 Profile、真实账号或系统钥匙串
+- 后续：进入 `H8-16E`，把 Control Plane、Executor、受信浏览器和 App 私有数据目录合并进启动 Gate，并把“动作信任配置缺失”作为同一安全诊断而不是运行到命令时才失败
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-16D`：正式 Executor 消费 `action.execute` 并调用 browse/comment/direct-message 生产实现与副作用账本；
-2. `H8-16E`：把 Control Plane、Executor、受信浏览器和 App 私有数据目录合并进启动环境诊断；
-3. `H8-16F`：校准可选过滤/黑名单、截图直览、结果导出和存储控制范围，并跑通隐藏 App 整条用户旅程；
-4. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
-5. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-6. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；
-7. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `H8-16E`：把 Control Plane、Executor、受信浏览器和 App 私有数据目录合并进启动环境诊断；
+2. `H8-16F`：校准可选过滤/黑名单、截图直览、结果导出和存储控制范围，并跑通隐藏 App 整条用户旅程；
+3. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
+4. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
+5. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；
+6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

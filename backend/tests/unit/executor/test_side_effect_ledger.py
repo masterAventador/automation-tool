@@ -144,7 +144,7 @@ def test_a7_07_side_effect_state_machine_is_closed_and_redacted() -> None:
             replace(valid, **invalid)
 
 
-def test_v4_ledger_migrates_to_exact_v6_without_losing_action_admission(
+def test_v4_ledger_migrates_to_exact_v7_without_losing_action_admission(
     tmp_path: Path,
 ) -> None:
     state_directory = tmp_path / "legacy-v4"
@@ -160,7 +160,7 @@ def test_v4_ledger_migrates_to_exact_v6_without_losing_action_admission(
     assert migrated.get_action_admission(str(authorization.action_id)) is not None
     assert migrated.get_side_effect(str(authorization.action_id)) is None
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(executor_side_effects)")}
         invalid_states = (
             ("prepared", None, None, b"p" * 32, 1),

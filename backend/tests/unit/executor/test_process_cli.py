@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 import signal
+import sqlite3
 import subprocess
 import sys
 from io import BytesIO, StringIO, TextIOWrapper
@@ -12,6 +14,7 @@ import pytest
 from automation_tool.executor import cli
 from automation_tool.executor.authentication import LocalSessionAuthenticationRejected
 from automation_tool.executor.crash_recovery import ExecutorCrashRecoveryCoordinator
+from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.platform_commands import (
     PlatformCommandRejected,
     PlatformCommandWorker,
@@ -21,6 +24,7 @@ from automation_tool.executor.runtime import LocalExecutorProcess
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
 EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
 LOCAL_SESSION_TOKEN = "02" * 32
+ACTION_PUBLIC_KEY = base64.urlsafe_b64encode(bytes(range(32))).rstrip(b"=").decode("ascii")
 
 
 def source(
@@ -31,6 +35,7 @@ def source(
     local_emergency_stop: bool = False,
     crash_recovery: bool = False,
     capture_successful_diagnostics: bool = False,
+    action_runtime: dict[str, object] | None = None,
 ) -> bytes:
     document = {
         "bootstrap_version": "1",
@@ -48,6 +53,8 @@ def source(
         document["crash_recovery"] = True
     if capture_successful_diagnostics:
         document["capture_successful_diagnostics"] = True
+    if action_runtime is not None:
+        document["action_runtime"] = action_runtime
     return (json.dumps(document, separators=(",", ":")) + "\n").encode()
 
 
@@ -144,6 +151,59 @@ def test_cli_passes_the_private_success_diagnostic_setting_to_discovery(
 
     assert status == 0
     assert received == [True]
+
+
+def test_cli_wires_the_trusted_action_runtime_into_the_formal_processor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    received: list[dict[str, object]] = []
+
+    class ActionOperation:
+        @staticmethod
+        def run(_command: object) -> object:
+            raise AssertionError("action must not run in this composition test")
+
+    def action_operation(**keywords: object) -> ActionOperation:
+        received.append(keywords)
+        return ActionOperation()
+
+    state_directory = tmp_path / "action-runtime-state"
+    monkeypatch.setattr(cli, "ProductionDouyinActionOperation", action_operation)
+    monkeypatch.setattr(LocalExecutorProcess, "run", lambda _self, _stop: None)
+
+    status = cli.run_executor(
+        BytesIO(
+            source(
+                websocket_url="ws://127.0.0.1:8765/api/v1/executors/connect",
+                state_directory=state_directory,
+                action_runtime={
+                    "authorization_public_key": ACTION_PUBLIC_KEY,
+                    "minimum_interval_seconds": 30,
+                    "task_action_limit": 20,
+                },
+            )
+        ),
+        StringIO(),
+        StringIO(),
+    )
+
+    assert status == 0
+    assert len(received) == 1
+    assert set(received[0]) == {
+        "action_gate",
+        "browser_authority",
+        "clock",
+        "ledger",
+        "runtime_factory",
+    }
+    ledger = received[0]["ledger"]
+    assert isinstance(ledger, ExecutorLedger)
+    with sqlite3.connect(ledger.database_path) as connection:
+        assert connection.execute(
+            "SELECT minimum_interval_seconds, task_action_limit "
+            "FROM executor_action_policy WHERE singleton_id = 1"
+        ).fetchone() == (30, 20)
 
 
 def test_cli_persists_bootstrap_emergency_stop_before_network_runtime(

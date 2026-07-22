@@ -102,7 +102,7 @@
       "id": "MVP-AC-06",
       "criterion": "用户确认后能在可见浏览器中完成受控动作",
       "disposition": "remediation_required",
-      "evidence": [{"path": "backend/src/automation_tool/executor/command_processor.py", "anchor": "batch = self._success_batch(command)"}]
+      "evidence": [{"path": "backend/src/automation_tool/executor/action_operation.py", "anchor": "class ProductionDouyinActionOperation"}]
     },
     {
       "id": "MVP-AC-07",
@@ -194,10 +194,16 @@
     },
     {
       "remediationTask": "H8-16D",
-      "state": "open",
+      "state": "resolved",
       "requirementRefs": ["MVP-AC-06", "MVP-AC-07", "MVP-AC-11"],
       "summary": "正式 Executor 对 task.offer 仍生成固定 success batch，没有调用已完成的 browse/comment/direct-message 与副作用账本实现",
-      "evidence": [{"path": "backend/src/automation_tool/executor/command_processor.py", "anchor": "batch = self._success_batch(command)"}]
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "正式 `ExecutorCommandProcessor` 对 `task.offer` 仍调用 `_success_batch`"}],
+      "resolutionEvidence": [
+        {"path": "backend/src/automation_tool/executor/command_processor.py", "anchor": "if isinstance(command, TaskActionCommandEnvelope):"},
+        {"path": "backend/src/automation_tool/executor/action_operation.py", "anchor": "class ProductionDouyinActionOperation"},
+        {"path": "backend/src/automation_tool/executor/cli.py", "anchor": "if bootstrap.action_runtime is not None:"},
+        {"path": "backend/tests/integration/test_action_command_processor_browser.py", "anchor": "test_local_executor_websocket_drives_production_comment_through_a_headless_browser"}
+      ]
     },
     {
       "remediationTask": "H8-16E",

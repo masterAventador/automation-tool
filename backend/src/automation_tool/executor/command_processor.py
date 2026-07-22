@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast, runtime_checkable
 from uuid import RFC_4122, UUID, uuid4
 
+from automation_tool.executor.action_operation import DouyinActionOperation
 from automation_tool.executor.discovery_operation import (
     DouyinDiscoveryExecutionResult,
     DouyinDiscoveryOperation,
@@ -18,12 +19,14 @@ from automation_tool.executor.ledger import (
     ExecutorLedger,
     ExecutorLedgerRejected,
 )
+from automation_tool.executor.rpa.douyin.action_result import DouyinActionResultFact
 from automation_tool.protocol import (
     DOUYIN_CANDIDATE_VERSION,
     DOUYIN_DISCOVERY_PROTOCOL_VERSION,
     EXECUTOR_PROTOCOL_VERSION,
     MAX_DISCOVERY_BATCH_CANDIDATES,
     DouyinCandidate,
+    TaskActionCommandEnvelope,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
     TaskDiscoveryBatchEnvelope,
@@ -37,7 +40,9 @@ _MESSAGE_DEADLINE = timedelta(seconds=30)
 _MAX_PENDING_OUTBOX = 1000
 _MISSING = object()
 
-type ExecutorCommandMessage = TaskCommandEnvelope | TaskDiscoveryCommandEnvelope
+type ExecutorCommandMessage = (
+    TaskCommandEnvelope | TaskDiscoveryCommandEnvelope | TaskActionCommandEnvelope
+)
 type ExecutorOutboundMessage = (
     TaskCommandResultEnvelope
     | TaskEventEnvelope
@@ -82,6 +87,7 @@ class ExecutorCommandProcessor:
         clock: ExecutorCommandClock | None = None,
         id_source: Callable[[], object] = uuid4,
         discovery_operation: DouyinDiscoveryOperation | None = None,
+        action_operation: DouyinActionOperation | None = None,
     ) -> None:
         try:
             resolved_clock = SystemExecutorCommandClock() if clock is None else clock
@@ -93,6 +99,10 @@ class ExecutorCommandProcessor:
                     discovery_operation is not None
                     and not isinstance(discovery_operation, DouyinDiscoveryOperation)
                 )
+                or (
+                    action_operation is not None
+                    and not isinstance(action_operation, DouyinActionOperation)
+                )
             ):
                 raise ValueError
             self._installation_id = _canonical_uuid_v4(installation_id)
@@ -101,6 +111,7 @@ class ExecutorCommandProcessor:
             self._clock = resolved_clock
             self._id_source = id_source
             self._discovery_operation = discovery_operation
+            self._action_operation = action_operation
         except Exception:
             raise ExecutorCommandRejected from None
 
@@ -138,7 +149,10 @@ class ExecutorCommandProcessor:
     def _handle(self, source: str | bytes) -> tuple[ExecutorOutboundMessage, ...]:
         command = parse_executor_message(source)
         if (
-            not isinstance(command, (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope))
+            not isinstance(
+                command,
+                (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope, TaskActionCommandEnvelope),
+            )
             or (
                 isinstance(command, TaskCommandEnvelope)
                 and command.message_type
@@ -168,17 +182,40 @@ class ExecutorCommandProcessor:
         if existing:
             return tuple(entry.message for entry in existing)
         checkpoint = self._ledger.get_checkpoint(receipt.attempt_id)
-        if (
-            checkpoint is None
-            or checkpoint.state is not AttemptCheckpointState.RECEIVED
+        if checkpoint is None:
+            raise ValueError
+        checkpoint_state = AttemptCheckpointState.TERMINAL
+        if isinstance(command, TaskActionCommandEnvelope):
+            action_operation = self._action_operation
+            if action_operation is None or checkpoint.state is not AttemptCheckpointState.RUNNING:
+                raise ValueError
+            fact = action_operation.run(command)
+            if (
+                not isinstance(fact, DouyinActionResultFact)
+                or str(fact.action_id) != str(command.payload.action_id)
+                or str(fact.target_id) != str(command.payload.target_id)
+            ):
+                raise ValueError
+            batch = self._action_batch(command, fact, checkpoint.last_event_sequence)
+            last_event_sequence = checkpoint.last_event_sequence + 2
+            checkpoint_state = (
+                AttemptCheckpointState.OUTCOME_UNCERTAIN
+                if fact.message_type == "task.outcome_uncertain"
+                else AttemptCheckpointState.RUNNING
+            )
+        elif (
+            checkpoint.state is not AttemptCheckpointState.RECEIVED
             or checkpoint.last_event_sequence != 0
         ):
             raise ValueError
-        if isinstance(command, TaskDiscoveryCommandEnvelope):
-            operation = self._discovery_operation
-            if operation is None:
+        elif isinstance(command, TaskDiscoveryCommandEnvelope):
+            discovery_operation = self._discovery_operation
+            if discovery_operation is None:
                 raise ValueError
-            outcome = operation.run(command.payload, cancellation_requested=lambda: False)
+            outcome = discovery_operation.run(
+                command.payload,
+                cancellation_requested=lambda: False,
+            )
             if (
                 not isinstance(outcome, DouyinDiscoveryExecutionResult)
                 or outcome.page_revision != command.payload.page_revision
@@ -186,14 +223,16 @@ class ExecutorCommandProcessor:
             ):
                 raise ValueError
             batch = self._discovery_batch(command, outcome)
+            last_event_sequence = len(batch) - 1
         else:
-            batch = self._success_batch(command)
-        last_event_sequence = len(batch) - 1
+            batch = self._started_batch(command)
+            last_event_sequence = 1
+            checkpoint_state = AttemptCheckpointState.RUNNING
         try:
             entries = self._ledger.commit_outcome(
                 source_message_id=receipt.message_id,
                 expected_checkpoint_revision=checkpoint.revision,
-                checkpoint_state=AttemptCheckpointState.TERMINAL,
+                checkpoint_state=checkpoint_state,
                 last_event_sequence=last_event_sequence,
                 messages=batch,
             )
@@ -273,23 +312,33 @@ class ExecutorCommandProcessor:
             raise ValueError
         return str(value)
 
-    def _success_batch(
+    def _started_batch(
         self,
         command: TaskCommandEnvelope,
     ) -> tuple[ExecutorOutboundMessage, ...]:
-        result = self._result(command)
-        event_types = (
-            "task.started",
-            "step.started",
-            "step.progress",
-            "step.completed",
-            "task.completed",
+        return (
+            self._result(command),
+            self._event(command, message_type="task.started", sequence=1),
         )
-        events = tuple(
-            self._event(command, message_type=message_type, sequence=sequence)
-            for sequence, message_type in enumerate(event_types, start=1)
+
+    def _action_batch(
+        self,
+        command: TaskActionCommandEnvelope,
+        fact: DouyinActionResultFact,
+        last_event_sequence: int,
+    ) -> tuple[ExecutorOutboundMessage, ...]:
+        started_sequence = last_event_sequence + 1
+        result_sequence = started_sequence + 1
+        return (
+            self._result(command),
+            self._event(command, message_type="step.started", sequence=started_sequence),
+            self._event(
+                command,
+                message_type=fact.message_type,
+                sequence=result_sequence,
+                payload=fact.payload,
+            ),
         )
-        return (result, *events)
 
     def _discovery_batch(
         self,
@@ -320,11 +369,12 @@ class ExecutorCommandProcessor:
 
     def _result(self, command: ExecutorCommandMessage) -> TaskCommandResultEnvelope:
         now = self._now()
+        action = isinstance(command, TaskActionCommandEnvelope)
         return TaskCommandResultEnvelope.model_validate(
             {
                 "protocol_version": EXECUTOR_PROTOCOL_VERSION,
                 "message_id": self._new_id(),
-                "message_type": "task.accept",
+                "message_type": "action.accept" if action else "task.accept",
                 "sent_at": now,
                 "deadline_at": now + _MESSAGE_DEADLINE,
                 "installation_id": self._installation_id,
@@ -451,13 +501,26 @@ class ExecutorCommandProcessor:
 
     def _event(
         self,
-        command: TaskCommandEnvelope,
+        command: TaskCommandEnvelope | TaskActionCommandEnvelope,
         *,
         message_type: str,
         sequence: int,
+        payload: Mapping[str, object] | None = None,
     ) -> TaskEventEnvelope:
         now = self._now()
-        payload = {"progress_percent": 100} if message_type == "step.progress" else {}
+        resolved_payload = (
+            payload
+            if payload is not None
+            else (
+                {"progress_percent": 100}
+                if message_type == "step.progress"
+                else (
+                    {"action_id": str(command.payload.action_id)}
+                    if isinstance(command, TaskActionCommandEnvelope)
+                    else {}
+                )
+            )
+        )
         return TaskEventEnvelope.model_validate(
             {
                 "protocol_version": EXECUTOR_PROTOCOL_VERSION,
@@ -470,7 +533,7 @@ class ExecutorCommandProcessor:
                 "correlation_id": str(command.correlation_id),
                 "idempotency_key": f"executor:event:{command.task_id}:{sequence}",
                 "sequence": sequence,
-                "payload": payload,
+                "payload": resolved_payload,
                 "task_id": str(command.task_id),
                 "execution_attempt_id": str(command.execution_attempt_id),
             }

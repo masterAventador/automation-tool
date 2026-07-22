@@ -7,9 +7,15 @@ import pytest
 
 from automation_tool.executor.rpa.douyin.action_result import (
     DouyinActionResultRejected,
+    browse_action_result,
     comment_action_result,
     direct_message_action_result,
     recovered_action_result,
+)
+from automation_tool.executor.rpa.douyin.browse import (
+    DouyinBrowseExecutionEvidence,
+    DouyinBrowseExecutionObservation,
+    DouyinBrowseExecutionState,
 )
 from automation_tool.executor.rpa.douyin.comment_action import (
     DouyinCommentActionEvidence,
@@ -36,6 +42,34 @@ from automation_tool.protocol import (
 
 ACTION_ID = ProtocolActionId("123e4567-e89b-42d3-a456-426614174008")
 TARGET_ID = ProtocolTargetId("123e4567-e89b-42d3-a456-426614174006")
+
+
+def test_browse_observations_map_to_closed_success_and_failure_facts() -> None:
+    completed = browse_action_result(
+        action_id=ACTION_ID,
+        target_id=TARGET_ID,
+        observation=DouyinBrowseExecutionObservation(
+            state=DouyinBrowseExecutionState.COMPLETED,
+            evidence=DouyinBrowseExecutionEvidence.PROFILE_VISIBLE,
+        ),
+    )
+    failed = browse_action_result(
+        action_id=ACTION_ID,
+        target_id=TARGET_ID,
+        observation=DouyinBrowseExecutionObservation(
+            state=DouyinBrowseExecutionState.LOGIN_REQUIRED,
+            evidence=DouyinBrowseExecutionEvidence.LOGIN_REQUIRED,
+        ),
+    )
+
+    assert (completed.message_type, completed.evidence.value) == (
+        "step.completed",
+        "profile_visible",
+    )
+    assert (failed.message_type, failed.evidence.value) == (
+        "step.failed",
+        "login_required",
+    )
 
 
 def comment_receipt(
@@ -353,6 +387,11 @@ def test_direct_message_success_and_recovery_message_or_uncertain_are_exact() ->
 
 def test_action_result_mappers_reject_wrong_receipt_types_without_disclosure() -> None:
     invalid: tuple[Callable[[], object], ...] = (
+        lambda: browse_action_result(
+            action_id=cast(ProtocolActionId, object()),
+            target_id=TARGET_ID,
+            observation=cast(DouyinBrowseExecutionObservation, object()),
+        ),
         lambda: comment_action_result(cast(DouyinCommentActionReceipt, object())),
         lambda: direct_message_action_result(cast(DouyinDirectMessageActionReceipt, object())),
         lambda: recovered_action_result(cast(DouyinSideEffectRecoveryReceipt, object())),

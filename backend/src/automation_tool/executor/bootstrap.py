@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 
@@ -21,6 +24,7 @@ from automation_tool.protocol.json_object import decode_bounded_json_object
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 MAX_EXECUTOR_BOOTSTRAP_BYTES = 16 * 1024
+_BASE64URL_PUBLIC_KEY = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 
 
 class ExecutorBootstrapRejected(ValueError):
@@ -28,6 +32,33 @@ class ExecutorBootstrapRejected(ValueError):
 
     def __init__(self) -> None:
         super().__init__("Local Executor bootstrap is rejected")
+
+
+class ExecutorActionRuntimeBootstrap(BaseModel):
+    """Action trust and hard limits supplied only by the trusted Tauri parent."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    authorization_public_key: Annotated[str, Field(min_length=43, max_length=43)]
+    minimum_interval_seconds: Annotated[int, Field(ge=1, le=3600)]
+    task_action_limit: Annotated[int, Field(ge=1, le=100)]
+
+    @field_validator("authorization_public_key")
+    @classmethod
+    def require_canonical_public_key(cls, value: str) -> str:
+        try:
+            if _BASE64URL_PUBLIC_KEY.fullmatch(value) is None:
+                raise ValueError
+            decoded = base64.urlsafe_b64decode(value + "=")
+            canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+            if len(decoded) != 32 or decoded == bytes(32) or canonical != value:
+                raise ValueError
+        except (UnicodeError, ValueError, binascii.Error):
+            raise ValueError("invalid action authorization public key") from None
+        return value
+
+    def authorization_public_key_bytes(self) -> bytes:
+        return base64.urlsafe_b64decode(self.authorization_public_key + "=")
 
 
 class ExecutorBootstrap(BaseModel):
@@ -46,6 +77,7 @@ class ExecutorBootstrap(BaseModel):
     local_emergency_stop: bool = False
     crash_recovery: bool = False
     capture_successful_diagnostics: bool = False
+    action_runtime: ExecutorActionRuntimeBootstrap | None = None
 
     @field_validator("websocket_url")
     @classmethod
@@ -122,6 +154,7 @@ def read_executor_bootstrap(stream: BinaryIO) -> ExecutorBootstrap:
 
 __all__ = [
     "MAX_EXECUTOR_BOOTSTRAP_BYTES",
+    "ExecutorActionRuntimeBootstrap",
     "ExecutorBootstrap",
     "ExecutorBootstrapRejected",
     "read_executor_bootstrap",

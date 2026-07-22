@@ -29,6 +29,9 @@ LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
 RISK_CHALLENGE = 'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'
 PROFILE_GROUP = 'main[aria-label="用户主页"], [data-e2e="user-detail"], [data-e2e="user-profile"]'
+VIDEO_ENTRY = 'main[aria-label="用户主页"] a[href^="/video/"]'
+SECOND_PROFILE_ROOT = '[data-e2e="user-detail"]'
+SECOND_VIDEO_ENTRY = '[data-e2e="user-detail"] a[href^="/video/"]'
 
 
 class FakeLocator:
@@ -67,6 +70,11 @@ class FakeLocator:
         if not self.is_visible():
             raise PlaywrightTimeoutError("private wait timeout")
 
+    def get_attribute(self, name: str, *, timeout: float) -> str | None:
+        assert name == "href"
+        assert timeout > 0
+        return self.page.attributes.get(self.selector)
+
 
 class FakePage:
     def __init__(
@@ -82,6 +90,7 @@ class FakePage:
         self.failed_wait_selectors: set[str] = set()
         self.premature_wait_selectors: set[str] = set()
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
+        self.attributes: dict[str, str] = {}
         self.requested_selectors: list[str] = []
 
     def locator(self, selector: str) -> FakeLocator:
@@ -213,6 +222,34 @@ def test_profile_accessor_reobserves_and_rejects_mid_access_drift() -> None:
     for fail in (False, True):
         with pytest.raises(DouyinProfilePageRejected):
             DouyinProfilePage(window(DriftingProfilePage(fail=fail))).profile_root()
+
+
+def test_first_video_entry_is_validated_without_clicking_or_exposing_the_href() -> None:
+    page = FakePage(visible_selectors={PROFILE_ROOT, VIDEO_ENTRY})
+    page.attributes[VIDEO_ENTRY] = "/video/7351234567890123456"
+
+    entry = DouyinProfilePage(window(page)).first_video_entry()
+
+    assert cast(FakeLocator, entry).selector.startswith(VIDEO_ENTRY)
+    for href in (None, "/video/0", "/video/private", "https://evil.example/video/1"):
+        page.attributes[VIDEO_ENTRY] = cast(str, href)
+        if href is None:
+            page.attributes.pop(VIDEO_ENTRY)
+        with pytest.raises(DouyinProfilePageRejected):
+            DouyinProfilePage(window(page)).first_video_entry()
+
+    fallback = FakePage(visible_selectors={SECOND_PROFILE_ROOT, SECOND_VIDEO_ENTRY})
+    fallback.attributes[SECOND_VIDEO_ENTRY] = "/video/7351234567890123456"
+    assert cast(FakeLocator, DouyinProfilePage(window(fallback)).first_video_entry()).selector == (
+        SECOND_VIDEO_ENTRY
+    )
+
+    with pytest.raises(DouyinProfilePageRejected):
+        DouyinProfilePage(window(FakePage(visible_selectors={PROFILE_ROOT}))).first_video_entry()
+    with pytest.raises(DouyinProfilePageRejected):
+        DouyinProfilePage(
+            window(FakePage(visible_selectors={PROFILE_ROOT, LOGIN_DIALOG}))
+        ).first_video_entry()
 
 
 def test_bounded_wait_covers_ready_timeout_failure_expiry_and_early_stop(

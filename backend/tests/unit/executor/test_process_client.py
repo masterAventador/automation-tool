@@ -417,7 +417,7 @@ def test_process_consumes_a_formal_offer_and_sends_the_durable_outcome_batch(
         try:
             parse_executor_message(connection.recv(timeout=2))
             connection.send(offered.model_dump_json())
-            batch = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(6))
+            batch = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
             observed.put(batch)
             stop.set()
         except Exception as error:
@@ -434,10 +434,6 @@ def test_process_consumes_a_formal_offer_and_sends_the_durable_outcome_batch(
         assert [message.message_type for message in messages] == [
             "task.accept",
             "task.started",
-            "step.started",
-            "step.progress",
-            "step.completed",
-            "task.completed",
         ]
         assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
             "executor.stopped"
@@ -1003,14 +999,14 @@ def test_control_plane_restart_reconnects_and_replays_exact_durable_outbox(
                 heartbeat = parse_executor_message(connection.recv(timeout=3))
                 connection.send(offered.model_dump_json())
                 original = tuple(
-                    parse_executor_message(connection.recv(timeout=3)) for _ in range(6)
+                    parse_executor_message(connection.recv(timeout=3)) for _ in range(2)
                 )
                 observed.put((hello, heartbeat, original))
                 connection.close(code=1012, reason="control plane restart")
                 return
-            recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
             connection.send(offered.model_dump_json())
-            duplicate = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            duplicate = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
             recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
             observed.put((hello, recovered, duplicate, recovered_heartbeat))
             stop.set()
@@ -1081,12 +1077,12 @@ def test_abnormal_network_disconnect_reconnects_and_replays_exact_durable_outbox
                 heartbeat = parse_executor_message(connection.recv(timeout=3))
                 connection.send(offered.model_dump_json())
                 original = tuple(
-                    parse_executor_message(connection.recv(timeout=3)) for _ in range(6)
+                    parse_executor_message(connection.recv(timeout=3)) for _ in range(2)
                 )
                 observed.put((hello, heartbeat, original))
                 connection.close_socket()
                 return
-            recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
             recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
             observed.put((hello, recovered, recovered_heartbeat))
             stop.set()
@@ -1307,7 +1303,7 @@ def test_long_command_processing_does_not_impersonate_system_suspension(
         try:
             hello = parse_executor_message(connection.recv(timeout=3))
             connection.send(offer().model_dump_json())
-            batch = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(6))
+            batch = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
             heartbeat = parse_executor_message(connection.recv(timeout=3))
             observed.put((hello, batch, heartbeat))
             stop.set()
@@ -1341,7 +1337,7 @@ def test_long_command_processing_does_not_impersonate_system_suspension(
             tuple[ExecutorEnvelope, tuple[ExecutorEnvelope, ...], ExecutorEnvelope], messages
         )
         assert hello.message_type == "executor.hello"
-        assert len(batch) == 6
+        assert len(batch) == 2
         assert heartbeat.message_type == "executor.heartbeat"
         assert diagnostics.getvalue() == ""
     finally:

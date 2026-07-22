@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-16C 已完成；桌面发现入口、Installation 单活任务和服务端逐目标动作编排缺口均已关闭，真实账号证据继续独立待补，下一项为 H8-16D Executor 真实动作编排。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-16D 已完成；桌面发现入口、Installation 单活、服务端逐目标授权投递和 Executor 真实动作编排缺口均已关闭，真实账号证据继续独立待补，下一项为 H8-16E 启动环境诊断闭环。
 
 ## 第一阶段
 
@@ -62,7 +62,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 已覆盖 Health/Version、Installation 注册/访问、设备凭据生命周期、短期 Session 交换、工作台运行状态/结构化指标，以及 Task 创建/列表/详情/事件 SSE/暂停/恢复/取消/紧停，后端/前端分别具备确定性漂移检查；
 - Playwright UI Harness 已覆盖工作台、服务不可用、重试恢复，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 `dist/` 扫描证明不包含 Harness 页面或测试 Adapter，代表流程另由隐藏真实 Tauri App 从产品入口验收；
 - MVP 失败矩阵已固化为 `contracts/quality/mvp-failure-matrix.v1.json`：15 类边界、78 个可自动化失败分支逐项绑定现有正式测试文件和精确测试锚点；Node 门禁同步校验台账词汇、证据文件/锚点、唯一性和真实账号待验收集合，不能用测试总数或 Fake 页面冒充覆盖。PostgreSQL 迁移失败/连接池耗尽和生产安装包误带 Profile、Cookie、SQLite、诊断资料的缺口已补齐；B5-15、D6-16、A7-16、A7-17 继续独立等待真实平台最终证据；
-- MVP 规格复审已固化为 `contracts/quality/mvp-spec-review.v1.json`：10 项产品/架构决策全部符合；H8-16A～H8-16C 已关闭正式发现入口、Installation 单活任务和确认后逐目标授权/投递缺口，14 条最终验收当前为 6 条自动化完成、2 条待真实平台、2 条待正式安装包、4 条仍需组合修复。Executor 真实动作、启动环境诊断和整条用户旅程继续由 H8-16D～H8-16F 收口，不能被既有分层测试假绿；
+- MVP 规格复审已固化为 `contracts/quality/mvp-spec-review.v1.json`：10 项产品/架构决策全部符合；H8-16A～H8-16D 已关闭正式发现入口、Installation 单活、确认后逐目标授权/投递和 Executor 固定假成功缺口。14 条最终验收当前仍为 6 条自动化完成、2 条待真实平台、2 条待正式安装包、4 条需由启动诊断与整条桌面用户旅程组合收口；H8-16D 的无头隔离页证据不冒充 H8-16F 的可见浏览器/App 最终验收；
 - H8-16A 已把 D6-10 的固定目标发现 Command 接到正式 `TaskRunDetails`：草稿、等待登录、等待确认和人工接管状态可启动或重新发现，登录/接管时可直接进入平台状态；同 revision 不确定重试复用幂等键，错误与返回结构均严格校验且不泄露平台私密事实。唯一隐藏 Tauri App 已从真实工作台按钮经正式 TypeScript/IPC/Rust、Uvicorn/PostgreSQL 和 LocalExecutorProcess 收敛到目标预览，测试准备 Command 只创建 draft Task，不再代替用户启动发现；真实抖音候选仍归 D6-16 待账号验收；
 - H8-16B 已把未终结 Attempt 的部分唯一索引从 Task 提升到 Installation，并在同一 Installation 行锁事务中保证并发单赢家；竞争启动固定返回 `423 installation_task_active`，App 显示设备已有任务运行且不泄露占用者身份。隐藏 App 已从两个真实草稿 Task 的正式按钮验证“首个启动、第二个拒绝、首个继续收敛”，数据库最终只有一条 Attempt；
 - Control Plane 已在隐藏真实 App 运行期间完成同库停服/重启验收：PostgreSQL 保留 Task/Attempt/Command/Event/定义，FakeExecutor 有界自动重连并消费原 pending Command，App 刷新经历不可用页后恢复权威取消终态；
@@ -125,6 +125,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - H8-05 已把 supervisor restart 与首次启动明确区分：Rust 只在异常重启 bootstrap 中设置 `crash_recovery=true`，Python 在联网和 outbox replay 前只读结算现有副作用。进程树清理后若没有可验证页面上下文，dispatched 只会变成 uncertain，prepared 原样保留；checkpoint 与 `task.outcome_uncertain` outbox 在同一 SQLite 事务推进，稳定幂等键保证重复崩溃不重复上报或点击。唯一隐藏 App 已经正式 IPC 注入真实签名 Executor 崩溃，并从 PostgreSQL/工作台读到“结果待确认”；
 - H8-06 已让同一个签名 Executor 进程在收到 Control Plane 的 WebSocket `1012` 服务重启关闭码后原进程内有界重连：首次连接失败和非重启关闭仍固定失败，重连预算只在恢复连接完成健康心跳后重置，停止请求可立即打断等待。App 在 Executor 暂停期间从正式详情页发出的取消命令先持久化为 delivered；真实 Uvicorn 同库停服/重启后，Executor 以相同 PID、相同 Session 和 `restartCount=0` 重连，SQLite 按原 message/idempotency 精确重放命令与 outbox，PostgreSQL 最终只产生一份取消 ACK/终态事件；
 - H8-07 把异常断网和网络抖动纳入同一进程的有界恢复：SQLite v6 的持久网络闸门与紧停闸门在一次事务内阻止离线新 dispatch，未交付事件 spool 固定最多 1000 条/16 MiB；异常无关闭帧、初次网络不可达和发送期 `OSError/TimeoutError` 进入原 120×250ms 预算，协议/应用错误仍固定失败。隐藏 App 经真实 Rust 桥和签名 Executor 完成一次硬断网、两次抖动、离线取消落盘及精确续传，同一 PID、`restartCount=0`，云端与本机最终各只有一份事实；
+- H8-16D 已把正式 Executor 的 offer/action 两阶段接入真实生产动作：offer 只产生 `task.accept/task.started`，不会提前生成完成；typed `action.execute` 先经 Ed25519 授权、本机硬限制和 SQLite v7 脱敏持久化，再按动作调用 A7-10 浏览、A7-11 评论或 A7-12 私信，并只接受 A7-15 封闭页面证据。Tauri 通过编译期固定公钥和认证 stdin bootstrap 装配生产 Operation，不把私钥、正文、Cookie、Profile、路径或系统钥匙串引入 App。Processor 与真实 LocalExecutorProcess WebSocket 均已通过动态端口、隔离 Profile、全局无头系统 Chrome 验收，评论/私信点击计数和重放零副作用已核对；生产运营浏览器仍保持可见；
 - H8-08 在同一 `LocalExecutorProcess` 中用 5 秒有界单调调度间隙识别整机休眠/锁屏后的陈旧连接：先复位 H8-07 网络闸门，再复用原有有界重连，稳定心跳后才报告恢复；正常长页面任务完成时重置观测基线，不冒充休眠。合法但已过 UTC deadline 的命令以独立固定结果忽略且不落账，其他坏协议继续 fail closed。浏览器窗口失效和重新建立只写固定无参数诊断，Rust 仍执行二次脱敏与 200 行/64 KiB 滚动限制。独立隐藏 App 已真实暂停/恢复签名 Executor，同一 PID、`restartCount=0`，并从正式 IPC 读到休眠与传输恢复诊断；另用无头系统浏览器和隔离 Profile 验证窗口丢失/恢复，全程不锁屏整机、不触碰默认 Profile；
 - H8-09 新增唯一 `LocalArtifactStore`：可信生产者用固定 Policy 声明受控目录、扩展名、媒体类型、单文件和数量上限，存储返回 UUIDv4、SHA-256、媒体类型、大小与相对路径，不返回绝对路径。写入采用独占创建、稳定重读和目录/文件身份复验，POSIX 固定 `0700/0600`，Windows 复用私有 ACL 校验；页面漂移证据已删除重复文件边界并复用该 Store。正式 `task.discover` 无头浏览器链路已经按 Artifact ID 完成解析、枚举和读取；本任务没有新增 App/API、上传、截图/Trace 或清理策略；
 - H8-10 在同一 Store 上新增失败截图与结构化 Trace：失败发现自动采集，成功发现默认关闭且只能由用户在“设置与诊断”页显式开启；设置保存在 App 私有 `local-executor/browser-diagnostic-settings-v1`，经固定 Tauri Command 和严格 bootstrap 布尔值进入 signed Executor，不用系统钥匙串。截图只保留当前 viewport，经注入样式隐藏文字、表单、图片、媒体、iframe 与背景资源，并剥离 PNG 附加元数据；Trace 不是 Playwright 原始归档，只含固定平台/操作/阶段/触发/版本/时间/Artifact ID。两类各最多 8 个，截图最多 1 MiB、Trace 最多 4 KiB、截图调用最多 5 秒；无头真实 Processor 与隐藏 App 原入口均已通过；

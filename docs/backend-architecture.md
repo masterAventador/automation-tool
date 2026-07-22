@@ -210,7 +210,7 @@ E4-11 增加 Python `executor/ledger.py`，只使用标准库 `sqlite3` 并在�
 
 进程从自身运行环境确定 macOS/Windows 与 arm64/x86_64，向真实 Control Plane 发送正式 Hello，连接存活后按单调 sequence 发送 Heartbeat；首条心跳后 stdout 只投影固定 `executor.healthy`，SIGINT/SIGTERM 后关闭 WebSocket 并投影 `executor.stopped`。E4-12 已接入无副作用命令回放：只接受身份/deadline 合法的 `task.offer`，先持久 receipt，再以一个 SQLite 事务提交 terminal checkpoint 与固定 `task.accept` 加五条 success Event；其他命令和非法帧继续 fail closed。
 
-`executor/command_processor.py` 不复用 FakeExecutor 内存状态。message/idempotency 命中同一意图时读取首次持久 outbox；生成中断只保留 received checkpoint；并发提交失败时只接受已出现的赢家 outbox。runtime 在每次 Hello 后把已发送 outbox 重新排队并按 ordinal 发送，每帧成功写入 WebSocket 后才标 delivered，所以崩溃/部分发送只会重放原 ID/幂等键/正文。正式 E4-12 编排已用同一 SQLite 状态目录两次启动 signed PyInstaller Executor，Control Plane 的 acknowledged command 与五条 PostgreSQL Event 快照保持不变。该路径仍不执行浏览器、微信或平台账号副作用，后续 Adapter 才接入真实动作。
+`executor/command_processor.py` 不复用 FakeExecutor 内存状态。message/idempotency 命中同一意图时读取首次持久 outbox；生成中断只保留 received checkpoint；并发提交失败时只接受已出现的赢家 outbox。runtime 在每次 Hello 后把已发送 outbox 重新排队并按 ordinal 发送，每帧成功写入 WebSocket 后才标 delivered，所以崩溃/部分发送只会重放原 ID/幂等键/正文。E4-12 已用同一 SQLite 状态目录两次启动 signed PyInstaller Executor 证明基础重放；H8-16D 又把 offer 收紧为 `task.accept/task.started`，只有后续 typed `action.execute` 经生产动作编排获得页面证据后才产生目标结果，重放不会再次访问 DOM 或触发副作用。
 
 E4-03 将该入口锁为 PyInstaller 6.21.0 `onedir`：spec 直接执行 `executor/__main__.py`，冻结产物不依赖用户另装 Python；该任务完成时尚未加入 Python Playwright。B5-07 现已把 Playwright 1.61.0 作为正式运行依赖并由 spec 收集 Python driver，同时明确不执行浏览器安装、不把任何 Playwright 浏览器缓存塞入包。macOS arm64 与 Windows x86_64 本机均从冻结的生产 `browser_runtime.py` 以显式系统浏览器、私有 Profile、headed persistent context 完成真实启动/关闭；测试专用探针不属于正式入口，业务任务仍不会执行浏览器。GitHub macOS/Windows 矩阵使用同一实包验证；Hosted Windows Runner 仍受账户 Billing/Actions spending limit 限制，但实体机原生验收已补齐。目录 Manifest、签名、完整性和防降级仍由 E4-04/E4-05 承担，正式资源所有权由 B5-08 承担。
 
@@ -383,6 +383,10 @@ A7-15 不新增第二条结果总线。共享 `action-result-evidence.v1` 只给
 H8-16C 把确认后的执行缺口接回同一 Control Plane/Executor 长连接，不新增 HTTP dispatcher 或消息队列。已认证 WebSocket 每轮先调用 `ActionExecutionOrchestrationService.advance()`：Installation 行锁下没有活动 Attempt 时为当前 confirmed queued Task 建立 offered Attempt 与确认绑定 offer；running 后仅在上一 Action 终结时选取下一个 eligible、未排除、未授权 Target，并复用 A7-02 风险仓储创建授权。授权已提交而 Outbox 尚未写入的崩溃空窗由下一轮优先补齐，Action/ordinal 唯一约束和服务端频控保证并发只有一个赢家。
 
 Alembic `20260721_0026` 让 `task_commands.action_id` 通过复合外键绑定 Action/Attempt/Task/Installation，并限定只有 `action.execute` 可非空且必须同时绑定确认；`action.accept/reject` 与 command/status coherence 由数据库和应用双重约束。Outbox 不保存 token、正文副本或 JSON payload；claim 时才从 Authorization、Target、Definition 读取权威事实，Control Plane 私钥即时签发最长五分钟 Ed25519 authority 并构造 exact typed envelope。部署必须一次性提供专用私钥 seed 与四项服务端限制，Local Executor 只持匹配公钥，App、React、SQLite 和系统钥匙串都不接触服务端私钥。
+
+H8-16D 在 Local Executor 内建立唯一 `ProductionDouyinActionOperation`。正式 Processor 收到 offer 时只提交 accept/started 并保持 Attempt running；收到 `action.execute` 后先由 SQLite v7 保存不含完整 authority、展示名和文案的脱敏命令投影，再由 Operation 使用完整资源 expectation 通过 Ed25519 验签与本机硬限制。浏览只运行 A7-10；评论先浏览目标主页、通过版本化 Profile Page Object 取得唯一可见 canonical `/video/<id>` 入口，再运行 A7-11；私信导航 canonical 用户页后运行 A7-12。三者只接受 A7-15 封闭结果，Action/Target 不匹配或 Operation 缺失均拒绝，不生成假成功。
+
+动作信任配置不来自 React、HTTP payload、普通运行时环境、SQLite 或系统钥匙串。Tauri 构建时必须同时注入 `AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY`、`AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS` 与 `AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT`；Rust 组合根验证 canonical 非零 32-byte 公钥和范围后，随每次独立认证 stdin bootstrap 传给 Python。三项全缺时 Executor 保持无动作能力，部分存在或非法时 Manager 配置 fail closed；Control Plane 的签发私钥仍只存在于服务端部署。生产 BrowserAuthority 保持可见系统 Chrome/Edge，只有隔离自动化验收显式无头。
 
 目标结果读取遵循 `api/task_target_results.py → application/task_target_results.py → infrastructure/database/task_target_result_repository.py` 单向分层。唯一 `GET /api/v1/tasks/{task_id}/target-results` 受 `app.control-plane` Session 和 Installation scope 保护，仓储只连接 Task 的 current Attempt 授权/Action，并按 Target ordinal 合并用户排除、候选 disposition 与 Action 状态，返回 pending/running/succeeded/skipped/failed/outcome_uncertain 和固定 evidence；无 Task、跨 Installation、非法 ID、损坏持久事实或数据库故障分别收敛为不可见/校验失败/脱敏不可用。响应只含公开目标摘要、状态、证据、可选 Action ID 与 UTC 时间，不含文案、页面内容、Cookie、Profile、URL、路径、SQLite 内容或策略内部字段。
 
@@ -749,7 +753,7 @@ D6-13 将上述“无副作用骨架”和“业务动作承载 offer”按是�
 - Cookie、Token、页面原文、聊天全文和本机绝对路径不入库；
 - 删除任务不立即删除审计；Artifact 按保留策略异步清理。
 
-E4-11 建立并由 B5-12、D6-10、A7-04、A7-07、H8-07 逐步升级到 v6 的 Executor 本机 SQLite 只保存：
+E4-11 建立并由 B5-12、D6-10、A7-04、A7-07、H8-07、H8-16D 逐步升级到 v7 的 Executor 本机 SQLite 只保存：
 
 - 已接收正式命令的封闭 envelope、message/idempotency 双键与意图 SHA-256；
 - 当前 Attempt 的 task 绑定、连续 command sequence、单调 event sequence、封闭 checkpoint state 和 revision；
@@ -759,7 +763,7 @@ E4-11 建立并由 B5-12、D6-10、A7-04、A7-07、H8-07 逐步升级到 v6 的 
 - 单例紧停与网络连接闸门、未交付 outbox 的有界计数/字节事实；
 - 不保存可由 Control Plane 恢复的第二套完整业务数据库。
 
-v1→v6 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；H8-09 Artifact 字节保存在同一私有 state 根的受控子目录，不塞入 SQLite blob。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
+v1→v7 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；v7 只把 `action.execute` 纳入封闭命令类型，并用脱敏 envelope 保存资源/顺序重放所需事实，完整授权 Token、展示名和评论/私信模板不落盘。损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；H8-09 Artifact 字节保存在同一私有 state 根的受控子目录，不塞入 SQLite blob。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
 B5-15 明确首次健康 Profile 的 epoch 语义：若本机尚无平台行，无论调用方是否标记“恢复”，都只能创建 revision 1；只有已有行之后的显式健康恢复才递增 revision。这样 App/Executor 重启后可从现存 Profile 直接建立首个健康事实，同时仍禁止已有非健康 epoch 被隐式健康覆盖。四轮隐藏 App 验收验证健康→健康(revision 2)→expired→risk，后两次非健康变化保持同一 revision，Control Plane 最终只保存最小 risk 投影。
 

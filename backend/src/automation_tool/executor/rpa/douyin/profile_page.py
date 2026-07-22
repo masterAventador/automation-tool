@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
 from typing import Protocol, cast
+from urllib.parse import urljoin
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -25,6 +26,11 @@ _PROFILE_ROOT_SELECTORS = (
     '[data-e2e="user-detail"]',
     '[data-e2e="user-profile"]',
 )
+_PROFILE_VIDEO_ENTRY_SELECTORS = (
+    'main[aria-label="用户主页"] a[href^="/video/"]',
+    '[data-e2e="user-detail"] a[href^="/video/"]',
+    '[data-e2e="user-profile"] a[href^="/video/"]',
+)
 _LOGIN_DIALOG_SELECTORS = (
     '[role="dialog"]:has-text("扫码登录")',
     '[data-e2e="login-modal"]',
@@ -36,6 +42,7 @@ _BLOCKING_DIALOG_SELECTORS = (
     '[data-e2e="modal"]',
 )
 _MAX_WAIT_MILLISECONDS = 60_000
+_ATTRIBUTE_TIMEOUT_MILLISECONDS = 5_000
 
 
 class DouyinProfilePageRejected(RuntimeError):
@@ -176,6 +183,8 @@ class _Locator(Protocol):
 
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
+    def get_attribute(self, name: str, *, timeout: float) -> str | None: ...
+
 
 class _Page(Protocol):
     @property
@@ -269,6 +278,27 @@ class DouyinProfilePage:
         if locator is None:
             raise DouyinProfilePageRejected
         return locator
+
+    def first_video_entry(self) -> _Locator:
+        """Return one validated profile video locator without activating it."""
+
+        if self.observe().state is not DouyinProfilePageState.READY:
+            raise DouyinProfilePageRejected
+        try:
+            for selector in _PROFILE_VIDEO_ENTRY_SELECTORS:
+                locator = self._page.locator(selector).first
+                if not locator.is_visible():
+                    continue
+                href = locator.get_attribute(
+                    "href",
+                    timeout=_ATTRIBUTE_TIMEOUT_MILLISECONDS,
+                )
+                destination = urljoin("https://www.douyin.com/", href or "")
+                self._versions.require_entry(destination, DouyinPageEntry.VIDEO_DETAIL)
+                return locator
+        except Exception:
+            raise DouyinProfilePageRejected from None
+        raise DouyinProfilePageRejected
 
     def wait_for_ready(self, *, timeout_milliseconds: int) -> DouyinProfilePageObservation:
         if (

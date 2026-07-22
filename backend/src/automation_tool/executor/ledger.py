@@ -23,6 +23,7 @@ from automation_tool.protocol import (
     ActionAuthorizationClaims,
     DouyinSearchExposureAction,
     PlatformSessionState,
+    TaskActionCommandEnvelope,
     TaskCommandEnvelope,
     TaskCommandResultEnvelope,
     TaskDiscoveryBatchEnvelope,
@@ -33,7 +34,7 @@ from automation_tool.protocol import (
 )
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 6
+_SCHEMA_VERSION: Final = 7
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_PENDING_OUTBOX_ENTRIES: Final = 1000
 _MAX_PENDING_OUTBOX_BYTES: Final = 16 * 1024 * 1024
@@ -166,7 +167,9 @@ class PendingTaskControl:
         return "task.outcome_uncertain" if self.outcome_uncertain else "task.cancelled"
 
 
-type InboundTaskCommand = TaskCommandEnvelope | TaskDiscoveryCommandEnvelope
+type InboundTaskCommand = (
+    TaskCommandEnvelope | TaskDiscoveryCommandEnvelope | TaskActionCommandEnvelope
+)
 type OutboundExecutorMessage = (
     TaskCommandResultEnvelope
     | TaskEventEnvelope
@@ -1064,7 +1067,7 @@ class ExecutorLedger:
                 canonical_emergency_stop_at is not None
             ):
                 raise ValueError
-            envelope = _canonical_message(command)
+            envelope = _stored_command_envelope(command)
             fingerprint = _command_intent_fingerprint(command)
             with closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -1103,6 +1106,7 @@ class ExecutorLedger:
                         "task.resume",
                         "task.cancel",
                         "task.emergency_stop",
+                        "action.execute",
                     }:
                         raise ValueError
                     connection.execute(
@@ -1130,6 +1134,7 @@ class ExecutorLedger:
                             AttemptCheckpointState.RUNNING,
                             AttemptCheckpointState.PAUSED,
                         ),
+                        "action.execute": (AttemptCheckpointState.RUNNING,),
                     }.get(command.message_type)
                     if (
                         str(checkpoint[0]) != str(command.task_id)
@@ -2193,7 +2198,10 @@ class ExecutorLedger:
             raise ExecutorLedgerRejected from None
 
     def _require_command_identity(self, command: InboundTaskCommand) -> None:
-        if not isinstance(command, (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope)) or (
+        if not isinstance(
+            command,
+            (TaskCommandEnvelope, TaskDiscoveryCommandEnvelope, TaskActionCommandEnvelope),
+        ) or (
             str(command.installation_id) != self._installation_id
             or str(command.executor_id) != self._executor_id
         ):
@@ -2320,6 +2328,9 @@ class ExecutorLedger:
             if version == 5:
                 _migrate_v6(connection)
                 version = 6
+            if version == 6:
+                _migrate_v7(connection)
+                version = 7
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -2633,6 +2644,76 @@ def _migrate_v6(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 6")
 
 
+def _migrate_v7(connection: sqlite3.Connection) -> None:
+    """Accept typed actions while retaining only a redacted command projection."""
+
+    connection.execute("ALTER TABLE executor_outbox RENAME TO executor_outbox_v6")
+    connection.execute("ALTER TABLE executor_commands RENAME TO executor_commands_v6")
+    connection.execute(
+        """
+        CREATE TABLE executor_commands (
+            message_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            intent_sha256 BLOB NOT NULL CHECK (length(intent_sha256) = 32),
+            envelope TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            message_type TEXT NOT NULL CHECK (
+                message_type IN (
+                    'task.offer', 'task.discover', 'task.pause', 'task.resume',
+                    'task.cancel', 'task.emergency_stop', 'action.execute'
+                )
+            ),
+            correlation_id TEXT GENERATED ALWAYS AS (
+                json_extract(envelope, '$.correlation_id')
+            ) STORED,
+            UNIQUE (attempt_id, sequence),
+            FOREIGN KEY (attempt_id) REFERENCES executor_attempt_checkpoints(attempt_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO executor_commands (
+            message_id, idempotency_key, intent_sha256, envelope,
+            task_id, attempt_id, sequence, message_type
+        )
+        SELECT message_id, idempotency_key, intent_sha256, envelope,
+               task_id, attempt_id, sequence, message_type
+        FROM executor_commands_v6
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE executor_outbox (
+            ordinal INTEGER NOT NULL UNIQUE CHECK (ordinal >= 1),
+            message_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            intent_sha256 BLOB NOT NULL CHECK (length(intent_sha256) = 32),
+            envelope TEXT NOT NULL,
+            source_message_id TEXT NOT NULL,
+            delivered INTEGER NOT NULL CHECK (delivered IN (0, 1)),
+            FOREIGN KEY (source_message_id) REFERENCES executor_commands(message_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO executor_outbox (
+            ordinal, message_id, idempotency_key, intent_sha256,
+            envelope, source_message_id, delivered
+        )
+        SELECT ordinal, message_id, idempotency_key, intent_sha256,
+               envelope, source_message_id, delivered
+        FROM executor_outbox_v6
+        """
+    )
+    connection.execute("DROP TABLE executor_outbox_v6")
+    connection.execute("DROP TABLE executor_commands_v6")
+    connection.execute("PRAGMA user_version = 7")
+
+
 def _require_pending_outbox_capacity(
     connection: sqlite3.Connection,
     envelopes: tuple[str, ...],
@@ -2675,6 +2756,20 @@ def _canonical_message(
         message.model_dump(mode="json"),
         allow_nan=False,
         ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _stored_command_envelope(command: InboundTaskCommand) -> str:
+    if not isinstance(command, TaskActionCommandEnvelope):
+        return _canonical_message(command)
+    return json.dumps(
+        {
+            "correlation_id": str(command.correlation_id),
+            "message_type": command.message_type,
+        },
+        ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
     )

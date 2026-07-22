@@ -6,6 +6,9 @@ const EXECUTOR_VERIFYING_KEY_ENVIRONMENT: &str = "AUTOMATION_TOOL_EXECUTOR_VERIF
 
 fn main() {
     println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY");
+    println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY");
+    println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS");
+    println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT");
     require_release_executor_verifying_key();
     tauri_build::build()
 }

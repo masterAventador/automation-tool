@@ -104,7 +104,7 @@ def processor(
     )
 
 
-def test_offer_is_atomically_checkpointed_and_emits_the_fixed_no_side_effect_batch(
+def test_offer_is_atomically_checkpointed_without_fabricating_action_success(
     tmp_path: Path,
 ) -> None:
     state_directory = tmp_path / "state"
@@ -115,20 +115,15 @@ def test_offer_is_atomically_checkpointed_and_emits_the_fixed_no_side_effect_bat
     assert [message.message_type for message in batch] == [
         "task.accept",
         "task.started",
-        "step.started",
-        "step.progress",
-        "step.completed",
-        "task.completed",
     ]
     assert isinstance(batch[0], TaskCommandResultEnvelope)
     assert all(isinstance(message, TaskEventEnvelope) for message in batch[1:])
-    assert [message.sequence for message in batch] == [1, 1, 2, 3, 4, 5]
+    assert [message.sequence for message in batch] == [1, 1]
     assert batch[0].payload == {"accepted": True}
-    assert batch[3].payload == {"progress_percent": 100}
     checkpoint = active.ledger.get_checkpoint(ATTEMPT_ID)
     assert checkpoint is not None
-    assert checkpoint.state is AttemptCheckpointState.TERMINAL
-    assert checkpoint.last_event_sequence == 5
+    assert checkpoint.state is AttemptCheckpointState.RUNNING
+    assert checkpoint.last_event_sequence == 1
     assert checkpoint.revision == 2
 
     reopened = processor(state_directory, id_source=DeterministicIds())
@@ -197,7 +192,7 @@ def test_generation_failure_leaves_only_the_received_checkpoint_and_retry_recove
     tmp_path: Path,
 ) -> None:
     state_directory = tmp_path / "state"
-    failing = processor(state_directory, id_source=DeterministicIds(fail_at=3))
+    failing = processor(state_directory, id_source=DeterministicIds(fail_at=2))
 
     with pytest.raises(ExecutorCommandRejected):
         failing.handle(command())
@@ -210,7 +205,7 @@ def test_generation_failure_leaves_only_the_received_checkpoint_and_retry_recove
     assert failing.pending_outbox() == ()
 
     recovered = processor(state_directory, id_source=DeterministicIds())
-    assert len(recovered.handle(command())) == 6
+    assert len(recovered.handle(command())) == 2
 
 
 def test_constructor_clock_and_id_failures_do_not_reflect_private_details(tmp_path: Path) -> None:

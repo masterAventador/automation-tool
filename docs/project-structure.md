@@ -272,6 +272,7 @@ backend/
 │       │   ├── __main__.py        # 源码模式与 PyInstaller 共用的模块入口
 │       │   ├── action_authorization.py # A7-03 固定公钥验签和完整执行意图匹配
 │       │   ├── action_gate.py     # A7-04 验签 + SQLite 本机硬下限唯一动作准入门
+│       │   ├── action_operation.py # H8-16D 授权命令到浏览/评论/私信生产执行的唯一编排
 │       │   ├── authentication.py  # 本机启动令牌校验、可清零 HMAC 事件证明
 │       │   ├── bootstrap.py       # 一次性 stdin bootstrap、端点/Session/身份严格校验
 │       │   ├── browser_authority.py # 登录与发现共享的受信浏览器请求/lease 所有权
@@ -288,7 +289,7 @@ backend/
 │       │   ├── command_processor.py # 正式命令、SQLite checkpoint 和持久结果 outbox
 │       │   ├── diagnostics.py     # 与 Rust 共用 fixtures 的 fail-closed 文本脱敏
 │       │   ├── discovery_operation.py # 搜索/滚动/提取的单次只读发现组合
-│       │   ├── ledger.py          # 本机 SQLite v6 命令/Session/准入/副作用/网络闸门账本
+│       │   ├── ledger.py          # 本机 SQLite v7 命令/Session/准入/副作用/网络闸门账本
 │       │   ├── local_artifact.py  # H8-09 通用本机 Artifact 引用、权限和稳定读写边界
 │       │   ├── browser_diagnostic_artifact.py # H8-10 脱敏 viewport PNG/结构 Trace 固定 Policy
 │       │   ├── side_effect_ledger.py # A7-07 封闭且脱敏的副作用状态值对象
@@ -443,6 +444,8 @@ H8-16B 只扩展既有发现纵向切片：Alembic `20260721_0025` 与 `schema.p
 
 H8-16C 的唯一推进链为 `api/executor_websocket.py → application/action_execution_orchestration.py → infrastructure/database/action_execution_orchestration_repository.py → application/task_command_delivery.py`。仓储复用 A7-02 授权、既有确认/Target/Attempt/Outbox 表，只由迁移 `20260721_0026` 增加 `task_commands.action_id` 绑定；`protocol/executor_envelope.py` 拥有 `action.execute` typed payload，TypeScript/Rust 适配器只做同一共享 fixture 的严格解析。`bootstrap/action_execution.py` 是服务端私钥与风控阈值的唯一部署组合根；React、Tauri IPC、本机 SQLite 和系统钥匙串没有新入口。
 
+H8-16D 的 Executor 应用入口仍是 `executor/command_processor.py`，新 `executor/action_operation.py` 只负责把已持久接收的 typed `action.execute` 组合到 A7-03/A7-04 准入、A7-10 浏览、A7-11 评论、A7-12 私信和 A7-15 结果适配，不复制 Page Object、selector 或副作用状态机。`executor/cli.py` 只从 Tauri 认证 stdin bootstrap 取得编译期固定公钥与本机硬限制并构造生产 Operation；`executor_bootstrap.rs`/`executor_manager.rs` 不新增 WebView/HTTP 配置面。SQLite v7 仅扩展封闭命令类型并对动作 envelope 保存脱敏投影，完整 authority、展示名和文案仍只驻留当前内存。`tests/integration/test_action_command_processor_browser.py` 同时覆盖 Processor 原入口与真实 LocalExecutorProcess WebSocket 原入口，全部使用动态 loopback 端口、隔离 Profile 和无头系统浏览器。
+
 D6-15 只在 `tests/fixtures/douyin_discovery_pages/` 增加七个静态 HTML，并由 `tests/integration/test_douyin_discovery_fake_pages.py` 统一编排六种场景；生产 `executor/rpa/`、协议、Control Plane、Tauri 与打包配置零改动。D6-04/D6-05/D6-07 的三个真实浏览器集成测试改为读取同一首页和结果样例，删除重复内联 DOM。语料契约固定文件集合、16 KiB 单文件上限并拒绝外部 URL/fetch/Cookie/storage；正式 task command、Page Object、有界滚动、隐私提取、D6-14 Artifact 和 Runtime 清理仍是被测主体，Fake 只替代远端页面内容。
 
 D6-16 的 `scripts/run_d6_16_browser_acceptance.py` 是显式真实账号验收 runner，不进入 App/Executor 包。它只从进程环境接收既有 App 私有 Profile 路径，用无头系统 Chrome 先探测 Session，再构造正式 `task.discover` command；stdout 只允许封闭 session/outcome/evidence/candidate count，不输出候选摘要或路径。首轮真实运行确认 Session healthy，但首页验证码 iframe 进入 handoff；对应产品修复仅把 `session.py` 的同一风控 selector 导入 `search_page.py`，没有复制 selector 或新增验证码 Adapter。D6-16 仍待真实候选与隐藏 App 预览补验。
@@ -471,9 +474,9 @@ E4-09 仍不新建进程服务：`RunningExecutor` 直接拥有跨平台 `Proces
 
 E4-10/H8-11 的 `executor_diagnostics.rs` 只负责 stderr 安全文本，不承担生命周期或业务日志。Manager Core 持有唯一内存队列，各次启动的 reader 共享它；输入以固定容量流式消费，超长/非法编码 fail closed，再按 `contracts/fixtures/executor-diagnostics-v1.json` fixture v2 清除凭据、Header/Cookie、完整 URL、页面/消息内容、错误原文和私有路径，并执行行数/单行/总字节上限。Python `executor/diagnostics.py` 委托根级 `logging_redaction.py` 回放同一 fixtures，但 Rust 仍对原始 stderr 独立重做脱敏，不能信任进程内结论。真实 signed 进程测试证明公开 Manager `diagnostics()` 原入口；隐藏 App 继续从既有 `get_executor_diagnostics` 读取，不新增生产 Tauri Command 或持久日志。
 
-E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3`，从 v1 identity/commands/attempt checkpoints/outbox、v2 平台 Session、v3 发现状态、v4 动作策略/紧停/准入、v5 副作用状态原地迁移到 H8-07 当前 v6 网络闸门。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS、最多 1000 条/16 MiB 的未交付协议 outbox、动作准入及 prepared/dispatched/verified/uncertain 状态均在该模块内事务化；`side_effect_ledger.py` 只承载封闭脱敏值对象。测试覆盖真实并发、重开恢复、逐版迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
+E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入口，不复用 FakeExecutor 内存字典，也不导入 Control Plane 仓储。Rust `ExecutorLaunchConfiguration` 持有状态目录并经既有一次性 bootstrap 传递；Python CLI 在联网前创建固定 `executor-ledger.sqlite3`，从 v1 identity/commands/attempt checkpoints/outbox、v2 平台 Session、v3 发现状态、v4 动作策略/紧停/准入、v5 副作用状态、H8-07 v6 网络闸门原地迁移到 H8-16D 当前 v7 typed action/脱敏命令投影。command 双键/指纹、Attempt 连续 sequence、checkpoint revision/CAS、最多 1000 条/16 MiB 的未交付协议 outbox、动作准入及 prepared/dispatched/verified/uncertain 状态均在该模块内事务化；`side_effect_ledger.py` 只承载封闭脱敏值对象。测试覆盖真实并发、重开恢复、逐版迁移、身份错绑、损坏、symlink/reparse/权限/文件 identity 竞态。
 
-E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，不直接访问 Control Plane 仓储，也不执行平台副作用。当前只接受 `task.offer`，先持久 receipt，再用账本单事务提交 terminal checkpoint 与固定六消息 success outbox；`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered。`scripts/run_e4_12_acceptance.py` 用真实 PostgreSQL/Uvicorn、正式 Device Session、signed PyInstaller 和公开 Rust Manager 两次启动同一状态目录，证明精确消息重放且服务端事实不重复。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 已完成隐藏 App 验收。
+E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，也不直接访问 Control Plane 仓储。`task.offer` 现在只原子提交 `task.accept/task.started` 并保持 running，绝不再生成固定平台成功；H8-16D 的后续 `action.execute` 必须经过生产 Operation 才能提交 `action.accept/step.started/封闭结果`。`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered；精确重放不再次访问浏览器或副作用入口。既有 E4-12 验收继续证明进程/账本重放边界，H8-16D 浏览器集成测试证明真实动作入口。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 已完成隐藏 App 验收。
 
 E4-13 的 `src-tauri/src/executor_platform.rs` 是唯一 App 组合根：包、SQLite 状态和稳定 Executor UUID 都从 Tauri `app_data_dir/local-executor` 固定派生，不接受 WebView 路径；重启所需 Installation 和短期 `executor.connect` Session 只由 Rust Control Plane client 换取。`src/platform/tauri/platform-adapter.ts` 只 invoke 四个无参数生命周期 Command，并对状态和诊断 DTO fail closed；`features/diagnostics` 只消费该接口。账本、Session、PID、路径、包信任参数和原始 stderr 都不进入 React。
 

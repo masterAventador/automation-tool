@@ -25,6 +25,12 @@ const COMMAND_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-co
 const COMMAND_RESULT_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-result.v1\0";
 const COMMAND_PROOF_PREFIX: &str = "atlcp1.";
 const MAX_PLATFORM_COMMAND_BYTES: usize = 16 * 1024;
+const ACTION_AUTHORIZATION_PUBLIC_KEY: Option<&str> =
+    option_env!("AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY");
+const LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS: Option<&str> =
+    option_env!("AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS");
+const LOCAL_ACTION_TASK_LIMIT: Option<&str> =
+    option_env!("AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT");
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -198,6 +204,7 @@ impl LocalSessionToken {
             local_emergency_stop: input.local_emergency_stop,
             crash_recovery: input.crash_recovery,
             capture_successful_diagnostics: input.capture_successful_diagnostics,
+            action_runtime: input.action_runtime.as_ref(),
         };
         let mut serialized = Zeroizing::new(
             serde_json::to_vec(&document)
@@ -481,6 +488,62 @@ pub struct ExecutorBootstrapInput<'a> {
     local_emergency_stop: bool,
     crash_recovery: bool,
     capture_successful_diagnostics: bool,
+    action_runtime: Option<ExecutorActionRuntimeInput>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ExecutorActionRuntimeInput {
+    authorization_public_key: String,
+    minimum_interval_seconds: u16,
+    task_action_limit: u8,
+}
+
+impl ExecutorActionRuntimeInput {
+    pub fn new(
+        authorization_public_key: &str,
+        minimum_interval_seconds: u16,
+        task_action_limit: u8,
+    ) -> Result<Self, ExecutorBootstrapError> {
+        let decoded = URL_SAFE_NO_PAD
+            .decode(authorization_public_key)
+            .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?;
+        if decoded.len() != 32
+            || decoded.iter().all(|byte| *byte == 0)
+            || URL_SAFE_NO_PAD.encode(&decoded) != authorization_public_key
+            || !(1..=3600).contains(&minimum_interval_seconds)
+            || !(1..=100).contains(&task_action_limit)
+        {
+            return Err(ExecutorBootstrapError::bootstrap_rejected());
+        }
+        Ok(Self {
+            authorization_public_key: authorization_public_key.to_owned(),
+            minimum_interval_seconds,
+            task_action_limit,
+        })
+    }
+
+    pub(crate) fn from_compile_time_configuration() -> Result<Option<Self>, ExecutorBootstrapError>
+    {
+        let values = (
+            ACTION_AUTHORIZATION_PUBLIC_KEY,
+            LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS,
+            LOCAL_ACTION_TASK_LIMIT,
+        );
+        match values {
+            (None, None, None) => Ok(None),
+            (Some(public_key), Some(minimum_interval), Some(task_limit)) => Self::new(
+                public_key,
+                minimum_interval
+                    .parse()
+                    .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
+                task_limit
+                    .parse()
+                    .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
+            )
+            .map(Some),
+            _ => Err(ExecutorBootstrapError::bootstrap_rejected()),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -553,6 +616,11 @@ impl<'a> ExecutorBootstrapInput<'a> {
         self
     }
 
+    pub fn with_action_runtime(mut self, action_runtime: ExecutorActionRuntimeInput) -> Self {
+        self.action_runtime = Some(action_runtime);
+        self
+    }
+
     fn build(
         websocket_url: &'a str,
         control_plane_session: &'a str,
@@ -583,6 +651,7 @@ impl<'a> ExecutorBootstrapInput<'a> {
             local_emergency_stop: matches!(mode, ExecutorBootstrapMode::EmergencyReport),
             crash_recovery: matches!(mode, ExecutorBootstrapMode::CrashRecovery),
             capture_successful_diagnostics: false,
+            action_runtime: None,
         })
     }
 }
@@ -600,6 +669,8 @@ struct ExecutorBootstrapDocument<'a> {
     local_emergency_stop: bool,
     crash_recovery: bool,
     capture_successful_diagnostics: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action_runtime: Option<&'a ExecutorActionRuntimeInput>,
 }
 
 fn require_uuid_v4(source: &str) -> Result<Uuid, ExecutorBootstrapError> {

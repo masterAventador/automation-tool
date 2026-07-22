@@ -7,12 +7,25 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Queue
 from types import FrameType
 from typing import BinaryIO, TextIO
 
+from automation_tool.executor.action_authorization import (
+    ActionAuthorizationVerificationRejected,
+    Ed25519ActionAuthorizationVerifier,
+)
+from automation_tool.executor.action_gate import (
+    ActionGateRejected,
+    ExecutorActionGate,
+    LocalActionHardPolicy,
+)
+from automation_tool.executor.action_operation import (
+    DouyinActionOperationRejected,
+    ProductionDouyinActionOperation,
+)
 from automation_tool.executor.authentication import (
     LocalSessionAuthenticationRejected,
     LocalSessionAuthenticator,
@@ -104,6 +117,32 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
             if bootstrap.local_emergency_stop:
                 ledger.engage_action_emergency_stop(changed_at=datetime.now(UTC))
             browser_authority = BrowserLaunchAuthority()
+            metadata = RuntimeMetadata.detect()
+            action_operation = None
+            if bootstrap.action_runtime is not None:
+                action_gate = ExecutorActionGate(
+                    ledger=ledger,
+                    verifier=Ed25519ActionAuthorizationVerifier(
+                        public_key=(bootstrap.action_runtime.authorization_public_key_bytes()),
+                        clock=metadata,
+                    ),
+                    policy=LocalActionHardPolicy(
+                        minimum_interval=timedelta(
+                            seconds=bootstrap.action_runtime.minimum_interval_seconds
+                        ),
+                        task_action_limit=bootstrap.action_runtime.task_action_limit,
+                    ),
+                    clock=metadata,
+                )
+                action_operation = ProductionDouyinActionOperation(
+                    ledger=ledger,
+                    action_gate=action_gate,
+                    browser_authority=browser_authority,
+                    clock=metadata,
+                    runtime_factory=lambda: BrowserRuntime(
+                        diagnostics=recovery_diagnostics,
+                    ),
+                )
             command_processor = ExecutorCommandProcessor(
                 ledger=ledger,
                 installation_id=str(bootstrap.installation_id),
@@ -116,8 +155,8 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                     ),
                     capture_successful_diagnostics=bootstrap.capture_successful_diagnostics,
                 ),
+                action_operation=action_operation,
             )
-            metadata = RuntimeMetadata.detect()
             if bootstrap.crash_recovery:
                 ExecutorCrashRecoveryCoordinator(
                     ledger=ledger,
@@ -169,6 +208,9 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
             authenticator.close()
     except (
         ExecutorLedgerRejected,
+        ActionAuthorizationVerificationRejected,
+        ActionGateRejected,
+        DouyinActionOperationRejected,
         ExecutorCommandRejected,
         ExecutorCrashRecoveryRejected,
         ExecutorProcessRejected,

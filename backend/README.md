@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 最小进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。未终结 Attempt 以 Installation 为数据库单活键；正式 App 的竞争启动会得到固定 `423 installation_task_active`，不泄漏活动 Task 身份。确认后的 Task 由服务端建立 Attempt/offer，运行后按确认目标逐个授权并投递签名 `action.execute`；正式 Executor 当前仍未消费该动作命令执行平台副作用，由 H8-16D 承接。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、六类不可混用的稳定资源 ID、Installation 持久化表、无账号 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。未终结 Attempt 以 Installation 为数据库单活键；正式 App 的竞争启动会得到固定 `423 installation_task_active`，不泄漏活动 Task 身份。确认后的 Task 由服务端建立 Attempt/offer，运行后按确认目标逐个授权并投递签名 `action.execute`；正式 Executor 已在本机复验授权和硬限制，并调用 browse/comment/direct-message 生产实现返回页面证据，不再用固定 success batch 冒充平台完成。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -50,17 +50,19 @@ H8-06 在现有 `LocalExecutorProcess` 内增加只针对 WebSocket `1012` 服�
 
 H8-07 把“初次连接不可达、异常无关闭帧和发送期网络错误”纳入同一有界传输恢复，但协议错误、应用错误和非恢复关闭仍 fail closed。`executor-ledger.sqlite3` v6 在既有动作 guard 增加持久 `network_connected`：构造 Executor 先置离线，只有 Hello、持久 outbox 回放和控制轮询完成后置在线，断线立即复位；`begin_side_effect_dispatch()` 与紧停状态在同一事务检查，因此离线 prepared 动作不能进入 dispatched。未交付 outbox 固定最多 1000 条/16 MiB，所有生成入口在更新 checkpoint/副作用前原子核容，超限整笔回滚；本机平台健康消息在发送失败时保留同一 envelope 等待重发。
 
+H8-16D 新增唯一 `ProductionDouyinActionOperation`：Processor 持久接收 `action.execute` 后，先复验 ActionAuthorization 与本机硬下限；browse 复用 A7-10，comment 先从目标主页取得唯一 canonical 视频入口再复用 A7-11，direct-message 导航 canonical 用户页后复用 A7-12。每次只接受 A7-15 的封闭结果并总是关闭 BrowserRuntime；缺少生产 Operation、Attempt 非 running、Action/Target 不匹配或页面异常都拒绝/失败，绝不生成固定成功。Tauri 只把编译期固定公钥和两项本机限制经认证 stdin bootstrap 交给 Executor，服务端私钥、阈值、正文、Cookie 和路径不进入 React、SQLite 或系统钥匙串。
+
 H8-08 继续复用 H8-07 的网络闸门和重连预算，不增加第二套生命周期状态机。正式 Executor 用单调时钟检测超过 5 秒的调度停顿，在读取陈旧 socket 帧或发送 heartbeat 前先转离线并重建连接；恢复后的有效 heartbeat 才解除恢复态。正常命令或页面处理耗时会在完成后重置观测基线，避免误报休眠。通过协议校验且已超过 UTC deadline 的命令有独立固定异常，运行循环只记固定诊断并忽略，既不写 command/checkpoint/outbox，也不把其他协议错误降级为可恢复。浏览器窗口不可用/恢复使用同一个无参数诊断器写入 stderr，Rust Manager 继续有界保留并二次脱敏，不接收 URL、路径、页面内容或调用方文本。
 
 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop` 复用同一受认证控制边界和 Outbox。首次合法请求在一个事务内写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `cancelling`；同键同意图重放只返回原 Command，改意图、再次终止、终态、错 scope 和状态不一致均拒绝。`task.cancelled` 以及 cancelling 下的 `task.outcome_uncertain` 必须匹配最新 cancel/emergency-stop 的已确认 ACK/correlation；完成、部分完成或失败事实若与取消并发，则仍可从 cancelling 收敛为真实终态。HOLD FakeExecutor 对正常取消回报 cancelled，对硬紧停保守回报 outcome uncertain。
 
-当前 offer payload 仍保持空的安全骨架；T3-17 已建立受约束 Task 定义事实，但尚未发布 Executor 业务 payload 版本，后续只能从这些明确列构造，不能退回任意 JSON。FakeExecutor 继续按相同正式 envelope 做无副作用回放；T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
+`task.offer` payload 继续保持空的安全骨架，只负责把 Attempt 收敛到 running；逐目标业务参数只存在于服务端根据受约束定义即时构造的 typed `action.execute`，不能退回任意 JSON。FakeExecutor 继续按相同正式 envelope 做无副作用回放；T3-09 不因 ACK 提前修改 Task/Attempt，正式状态只通过上述 T3-11 持久事件事实收敛。
 
 `automation_tool.executor.fake` 是不依赖 Control Plane 内部实现的确定性协议引擎：严格复用正式 parser、身份、deadline、Attempt command sequence 和 task/attempt 绑定，按 message ID 与 idempotency key 双账本去重。它覆盖 accept/reject、成功、部分成功、失败、登录、人工接管、结果不确定和 hold 场景，并为 pause/resume/cancel/emergency-stop 生成正式 control ACK 与单调事件；生成中失败会原子回滚状态和事件水位。`fake_client` 只通过 `ws(s)://.../api/v1/executors/connect`、唯一正式子协议和 Bearer Session 出站连接，不执行 RPA、文件、子进程或数据库副作用。
 
 E4-02 增加正式控制台入口 `automation-tool-executor`。`executor/bootstrap.py` 只从 stdin 读取一条换行结尾、最多 16 KiB 的严格 JSON object，字段固定为 bootstrap 版本、Executor WebSocket URL、短期 `executor.connect` Session、Installation/Executor UUIDv4、`1..60` 秒心跳间隔和由 Rust 提供的 App 私有 Executor 状态目录；重复 key、未知字段、非法类型、相对/根/含 `..` 或控制字符的路径与超限统一拒绝。明文 `ws` 只允许带有效端口的 `127.0.0.1` 固定路径，远端只允许标准端口 `wss`，userinfo/query/fragment 全部拒绝。
 
-`executor/runtime.py` 从安装产物自身检测 macOS/Windows 与 arm64/x86_64，不相信 stdin 自报运行平台；它使用共享 `executor/transport.py` 的唯一子协议、Bearer Header、禁代理/压缩和 32 KiB 上限连接 Control Plane，发送正式 Hello，再以严格递增 sequence 发送 Heartbeat。第一条心跳存活后 stdout 只输出固定 `executor.healthy`，正常 SIGINT/SIGTERM 后输出固定 `executor.stopped`；Session、ID、URL、原始异常和服务端帧都不进入该投影或 stderr。E4-12 的 `command_processor.py` 已接入正式 `task.offer`：先写 E4-11 SQLite，再原子提交固定无副作用 ACK/Event outbox；重启只重放原消息，其他命令与非法帧固定拒绝。
+`executor/runtime.py` 从安装产物自身检测 macOS/Windows 与 arm64/x86_64，不相信 stdin 自报运行平台；它使用共享 `executor/transport.py` 的唯一子协议、Bearer Header、禁代理/压缩和 32 KiB 上限连接 Control Plane，发送正式 Hello，再以严格递增 sequence 发送 Heartbeat。第一条心跳存活后 stdout 只输出固定 `executor.healthy`，正常 SIGINT/SIGTERM 后输出固定 `executor.stopped`；Session、ID、URL、原始异常和服务端帧都不进入该投影或 stderr。`command_processor.py` 对正式 `task.offer` 只提交 `task.accept/task.started`，后续 discovery/control/action 命令分别进入自己的生产编排；动作结果和原命令 outbox 先持久化再发送，重启精确重放原消息而不重复访问页面。
 
 `installations` 表保存 UUIDv4 主键、唯一 32 字节 Ed25519 公钥、`active`/`revoked` 状态、正数 revision、创建/更新时间和吊销时间。数据库约束拒绝状态与吊销时间矛盾、倒序时间、非法 UUID 版本、重复公钥和非 32 字节公钥；revision 更新必须在语句中携带旧值作为 CAS 条件。
 
@@ -138,7 +140,7 @@ B5-16 默认 Profile 隔离验收执行 `backend/.venv/bin/python scripts/run_b5
 
 E4-10/H8-11 的 `executor/diagnostics.py` 委托根级 `logging_redaction.py`，并与 Rust Manager 共同回放根目录 `contracts/fixtures/executor-diagnostics-v1.json` fixture v2。规则固定清除凭据、Header/Cookie、任意 scheme 完整 URL、页面/DOM/评论/私信内容、错误原文、私有路径和控制字符；Python 的结论不替代 Rust 对真实子进程 stderr 的独立流式限界和再次脱敏。
 
-E4-11 的 `executor/ledger.py` 使用 Python 内置 `sqlite3`，不引入第二 ORM 或服务端数据库依赖。v1 建立 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints` 和 `executor_outbox`；B5-12 迁移到 v2 增加 `executor_platform_sessions`，D6-10 的 v3 扩展只读发现重放，A7-04 的 v4 增加动作策略单例、紧停 latch 和最小准入事实，A7-07 的 v5 增加最小副作用状态机，H8-07 的当前 v6 再增加持久网络闸门。命令按 message/idempotency 双键与 SHA-256 意图指纹重放，Attempt 命令序号连续，checkpoint 用 revision/CAS 和单调事件序号更新，outbox 保存已通过正式协议模型的精确回执/事件并可持久标记 delivered；平台健康只保存平台、封闭状态、单调 revision 和观察时间。目录祖先 symlink/reparse point、宽权限、身份错绑、更新竞争、损坏/未来 schema 和文件替换均 fail closed。CLI 在联网前完成迁移；数据库只在 App 私有目录保存协议任务事实、非敏感平台健康、动作准入和副作用摘要最小事实，不保存 Control Plane Session、完整 ActionAuthorization token、Cookie、浏览器登录数据、密钥、正文、页面原文或任意配置，也不使用系统钥匙串。
+E4-11 的 `executor/ledger.py` 使用 Python 内置 `sqlite3`，不引入第二 ORM 或服务端数据库依赖。v1 建立 `executor_identity`、`executor_commands`、`executor_attempt_checkpoints` 和 `executor_outbox`；B5-12 迁移到 v2 增加 `executor_platform_sessions`，D6-10 的 v3 扩展只读发现重放，A7-04 的 v4 增加动作策略单例、紧停 latch 和最小准入事实，A7-07 的 v5 增加最小副作用状态机，H8-07 的 v6 增加持久网络闸门，H8-16D 的当前 v7 再接纳 typed action 并只保存脱敏命令投影。命令按 message/idempotency 双键与 SHA-256 意图指纹重放，Attempt 命令序号连续，checkpoint 用 revision/CAS 和单调事件序号更新，outbox 保存已通过正式协议模型的精确回执/事件并可持久标记 delivered；平台健康只保存平台、封闭状态、单调 revision 和观察时间。目录祖先 symlink/reparse point、宽权限、身份错绑、更新竞争、损坏/未来 schema 和文件替换均 fail closed。CLI 在联网前完成迁移；数据库只在 App 私有目录保存协议任务事实、非敏感平台健康、动作准入和副作用摘要最小事实，不保存 Control Plane Session、完整 ActionAuthorization token、展示名、Cookie、浏览器登录数据、密钥、正文、页面原文或任意配置，也不使用系统钥匙串。
 
 真实测试版 Tauri App 已通过正式 Rust 网络桥消费 Health、Installation 注册/访问、设备凭据轮换/吊销、Session 换票和 Task 创建/查询/事件端点。Rust 从 App 私有目录加载设备私钥和长期凭据，执行签名、凭据注入、任务定义复验与 SSE 严格解析，React 不接触任何秘密；T3-17 已由唯一 `visible=false` App 真实点击新建表单，经固定 Tauri Command、Uvicorn 和 PostgreSQL 原子创建匹配定义。
 

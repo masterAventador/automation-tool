@@ -1,8 +1,8 @@
 //! Linearized lifecycle for one verified Local Executor process.
 
 use crate::executor_bootstrap::{
-    ExecutorBootstrapErrorCode, ExecutorBootstrapInput, LocalExecutorEvent, LocalPlatformCommand,
-    LocalPlatformCommandResult, LocalSessionToken,
+    ExecutorActionRuntimeInput, ExecutorBootstrapErrorCode, ExecutorBootstrapInput,
+    LocalExecutorEvent, LocalPlatformCommand, LocalPlatformCommandResult, LocalSessionToken,
 };
 use crate::executor_diagnostics::{ExecutorDiagnostics, MAX_DIAGNOSTIC_LINE_BYTES};
 use crate::executor_package::{ExecutorPackageVerifier, VerifiedExecutorPackage};
@@ -138,6 +138,7 @@ pub struct ExecutorLaunchConfiguration {
     heartbeat_interval_seconds: u8,
     local_emergency_stop: bool,
     capture_successful_diagnostics: bool,
+    action_runtime: Option<ExecutorActionRuntimeInput>,
 }
 
 impl ExecutorLaunchConfiguration {
@@ -207,6 +208,10 @@ impl ExecutorLaunchConfiguration {
         heartbeat_interval_seconds: u8,
         local_emergency_stop: bool,
     ) -> Result<Self, ExecutorManagerError> {
+        let action_runtime = ExecutorActionRuntimeInput::from_compile_time_configuration()
+            .map_err(|_| {
+                ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid)
+            })?;
         let bootstrap = if local_emergency_stop {
             ExecutorBootstrapInput::new_emergency_report(
                 &websocket_url,
@@ -238,6 +243,7 @@ impl ExecutorLaunchConfiguration {
             heartbeat_interval_seconds,
             local_emergency_stop,
             capture_successful_diagnostics: false,
+            action_runtime,
         })
     }
 
@@ -281,7 +287,12 @@ impl ExecutorLaunchConfiguration {
         };
         input
             .map(|input| {
-                input.with_capture_successful_diagnostics(self.capture_successful_diagnostics)
+                let input =
+                    input.with_capture_successful_diagnostics(self.capture_successful_diagnostics);
+                match self.action_runtime.clone() {
+                    Some(action_runtime) => input.with_action_runtime(action_runtime),
+                    None => input,
+                }
             })
             .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))
     }

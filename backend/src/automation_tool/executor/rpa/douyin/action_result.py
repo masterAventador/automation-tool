@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from automation_tool.executor.rpa.douyin.browse import (
+    DouyinBrowseExecutionEvidence,
+    DouyinBrowseExecutionObservation,
+    DouyinBrowseExecutionState,
+)
 from automation_tool.executor.rpa.douyin.comment_action import (
     DouyinCommentActionEvidence,
     DouyinCommentActionReceipt,
@@ -94,6 +99,21 @@ _DIRECT_FAILURES = {
     ),
     DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE: ActionResultEvidence.PAGE_UNAVAILABLE,
 }
+_BROWSE_FAILURES = {
+    DouyinBrowseExecutionEvidence.LOGIN_REQUIRED: ActionResultEvidence.LOGIN_REQUIRED,
+    DouyinBrowseExecutionEvidence.BLOCKING_DIALOG: ActionResultEvidence.DIALOG_BLOCKED,
+    DouyinBrowseExecutionEvidence.NAVIGATION_TIMED_OUT: ActionResultEvidence.TIMED_OUT,
+    DouyinBrowseExecutionEvidence.PROFILE_READY_TIMED_OUT: ActionResultEvidence.TIMED_OUT,
+    DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN: ActionResultEvidence.PAGE_VERSION_UNKNOWN,
+    DouyinBrowseExecutionEvidence.CONFLICTING_ANCHORS: ActionResultEvidence.CONFLICTING_ANCHORS,
+    DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE: ActionResultEvidence.PAGE_UNAVAILABLE,
+    DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE: (
+        ActionResultEvidence.EXECUTOR_REPORTED_FAILURE
+    ),
+    DouyinBrowseExecutionEvidence.CANCELLATION_REQUESTED: (
+        ActionResultEvidence.EXECUTOR_REPORTED_FAILURE
+    ),
+}
 
 
 def _uncertain_evidence(value: object) -> ActionResultEvidence:
@@ -113,6 +133,36 @@ def _uncertain_evidence(value: object) -> ActionResultEvidence:
     }:
         return ActionResultEvidence.RECOVERY_UNCONFIRMED
     return ActionResultEvidence.FINAL_STATE_UNCONFIRMED
+
+
+def browse_action_result(
+    *,
+    action_id: ProtocolActionId,
+    target_id: ProtocolTargetId,
+    observation: DouyinBrowseExecutionObservation,
+) -> DouyinActionResultFact:
+    if (
+        type(action_id) is not ProtocolActionId
+        or type(target_id) is not ProtocolTargetId
+        or not isinstance(observation, DouyinBrowseExecutionObservation)
+    ):
+        raise DouyinActionResultRejected
+    if observation.state is DouyinBrowseExecutionState.COMPLETED:
+        return DouyinActionResultFact(
+            action_id,
+            target_id,
+            "step.completed",
+            ActionResultEvidence.PROFILE_VISIBLE,
+        )
+    return DouyinActionResultFact(
+        action_id,
+        target_id,
+        "step.failed",
+        _BROWSE_FAILURES.get(
+            observation.evidence,
+            ActionResultEvidence.EXECUTOR_REPORTED_FAILURE,
+        ),
+    )
 
 
 def comment_action_result(receipt: DouyinCommentActionReceipt) -> DouyinActionResultFact:
@@ -178,6 +228,7 @@ def recovered_action_result(receipt: DouyinSideEffectRecoveryReceipt) -> DouyinA
 __all__ = [
     "DouyinActionResultFact",
     "DouyinActionResultRejected",
+    "browse_action_result",
     "comment_action_result",
     "direct_message_action_result",
     "recovered_action_result",

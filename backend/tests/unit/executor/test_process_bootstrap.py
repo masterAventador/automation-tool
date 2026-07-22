@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from io import BytesIO
 from pathlib import Path
@@ -19,6 +20,7 @@ EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
 SESSION_TOKEN = "atds1.private-session-material"
 LOCAL_SESSION_TOKEN = "01" * 32
 STATE_DIRECTORY = str((Path.cwd() / ".automation-tool-executor-test").resolve())
+ACTION_PUBLIC_KEY = base64.urlsafe_b64encode(bytes(range(32))).rstrip(b"=").decode("ascii")
 
 
 def bootstrap_source(**overrides: object) -> bytes:
@@ -70,6 +72,87 @@ def test_bootstrap_reads_one_bounded_line_and_keeps_the_session_secret() -> None
         BytesIO(bootstrap_source(capture_successful_diagnostics=True))
     )
     assert diagnostics.capture_successful_diagnostics is True
+
+
+def test_bootstrap_accepts_one_complete_trusted_action_runtime_configuration() -> None:
+    bootstrap = read_executor_bootstrap(
+        BytesIO(
+            bootstrap_source(
+                action_runtime={
+                    "authorization_public_key": ACTION_PUBLIC_KEY,
+                    "minimum_interval_seconds": 30,
+                    "task_action_limit": 20,
+                }
+            )
+        )
+    )
+
+    assert bootstrap.action_runtime is not None
+    assert bootstrap.action_runtime.authorization_public_key_bytes() == bytes(range(32))
+    assert bootstrap.action_runtime.minimum_interval_seconds == 30
+    assert bootstrap.action_runtime.task_action_limit == 20
+
+
+@pytest.mark.parametrize(
+    "action_runtime",
+    (
+        {},
+        {"authorization_public_key": ACTION_PUBLIC_KEY},
+        {
+            "authorization_public_key": ACTION_PUBLIC_KEY,
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 20,
+            "extra": True,
+        },
+        {
+            "authorization_public_key": ACTION_PUBLIC_KEY + "=",
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 20,
+        },
+        {
+            "authorization_public_key": "A" * 42,
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 20,
+        },
+        {
+            "authorization_public_key": "!" + ("A" * 42),
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 20,
+        },
+        {
+            "authorization_public_key": base64.urlsafe_b64encode(bytes(32))
+            .rstrip(b"=")
+            .decode("ascii"),
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 20,
+        },
+        {
+            "authorization_public_key": ACTION_PUBLIC_KEY,
+            "minimum_interval_seconds": 0,
+            "task_action_limit": 20,
+        },
+        {
+            "authorization_public_key": ACTION_PUBLIC_KEY,
+            "minimum_interval_seconds": 3601,
+            "task_action_limit": 20,
+        },
+        {
+            "authorization_public_key": ACTION_PUBLIC_KEY,
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 0,
+        },
+        {
+            "authorization_public_key": ACTION_PUBLIC_KEY,
+            "minimum_interval_seconds": 30,
+            "task_action_limit": 101,
+        },
+    ),
+)
+def test_bootstrap_rejects_partial_or_invalid_action_runtime_configuration(
+    action_runtime: object,
+) -> None:
+    with pytest.raises(ExecutorBootstrapRejected):
+        read_executor_bootstrap(BytesIO(bootstrap_source(action_runtime=action_runtime)))
 
 
 @pytest.mark.parametrize(
