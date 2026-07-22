@@ -1,6 +1,11 @@
 name: Shared Chromium validation
 
 on:
+  push:
+    branches:
+      - feature/embedded-browser-video-studio
+    paths:
+      - .github/workflows/shared-chromium-validation.yml
   workflow_dispatch:
 
 permissions:
