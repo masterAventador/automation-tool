@@ -287,7 +287,7 @@ test("E4-14 drives the signed Executor lifecycle through one isolated hidden App
   assert.match(orchestrator, /managed_test_postgres/);
   assert.match(orchestrator, /"pnpm.cmd" if sys.platform == "win32" else "pnpm"/);
   assert.match(orchestrator, /closing\(sqlite3\.connect/);
-  assert.match(orchestrator, /!= \(6,\):/);
+  assert.match(orchestrator, /!= \(7,\):/);
   assert.match(orchestrator, /browser-diagnostic-settings-v1/);
   assert.match(orchestrator, /automation-tool-e414-/);
   assert.match(orchestrator, /require_port_available/);
