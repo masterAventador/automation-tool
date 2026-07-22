@@ -28,6 +28,8 @@ automation-tool/
 ├── frontend/                      # 桌面客户端 UI 与 Tauri 原生壳
 ├── backend/                       # Python 可部署业务后端和本地执行器
 ├── contracts/                     # 跨 Rust/TypeScript/Python 的生成协议
+│   ├── deployment/
+│   │   └── customer-demo-deployment.v1.json # C10-01 单实例 Demo 部署机器契约
 │   ├── openapi/                   # FastAPI OpenAPI 快照
 │   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
@@ -45,7 +47,9 @@ automation-tool/
 │   ├── project-structure.md
 │   ├── frontend-architecture.md
 │   ├── backend-architecture.md
+│   ├── customer-demo-deployment-design.md # C10-01 拓扑、资源、恢复与发布设计
 │   ├── development-roadmap.md
+│   ├── development/               # 每个任务独立的 RED/GREEN 与验收证据
 │   └── adr/                       # 后续重要架构决策
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
 │   ├── run_i2_09_acceptance.py   # 隐藏 Tauri→Rust→FastAPI/PostgreSQL 隔离验收

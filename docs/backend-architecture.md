@@ -955,10 +955,12 @@ Local Executor: uv 源码模式或测试构建
 
 ### 20.2 客户 Demo
 
+C10-01 的权威机器契约为 `contracts/deployment/customer-demo-deployment.v1.json`，配套说明为 `docs/customer-demo-deployment-design.md`。当前拓扑固定为唯一公网 HTTPS 反代、一个 Control Plane worker 和一个私网 PostgreSQL primary；不声明 HA、自动扩容或自动数据库回滚。资源、容量、RPO/RTO、备份保留、健康检查和发布顺序只能由后续 C10 任务按该契约落地，设计文档本身不构成部署授权或环境验收。
+
 - Control Plane 构建 Docker 镜像；
 - 执行同一 Alembic 迁移；
 - 使用云端 PostgreSQL；
-- 配置 HTTPS、域名、账号 Session 签发 Secret、密码 Pepper、设备签发密钥和限流；
+- 配置 HTTPS、域名、账号密码 Pepper/fingerprint key、运维 capability digest、动作授权私钥和限流；
 - 通过认证运维入口创建首个 Demo 账号，并验证停用、重置、全 Session 与设备吊销；
 - App `demo` Profile 指向云端 baseUrl，启动后先登录产品账号，再自动绑定当前设备；
 - 不使用匿名设备申请、配对码、轮询审批或随安装包分发的客户 bootstrap；
