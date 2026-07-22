@@ -196,7 +196,7 @@
             <tr><td>首期内容发布</td><td class="yes">只做 B站 + 抖音</td><td>B站走当前正式 API；抖音走 Browser Use + 可见内置 Chromium；快手、小红书、视频号列入后续但暂不实现。</td></tr>
             <tr><td>一句话直接生成整段长视频</td><td class="no">仅用于快速预览</td><td>人物、产品和叙事连续性不可控，也难以局部重做与控制成本。</td></tr>
             <tr><td>智能素材成片</td><td class="yes">作为低成本素材成片方式</td><td>适合口播知识类、资讯类，以及用城市、办公、生活等补充画面配合旁白的内容；不承担数字人、品牌人物一致性或真实文生视频。</td></tr>
-            <tr><td>品牌动效成片</td><td class="yes">作为品牌与信息动效方式</td><td>适合网址转产品视频、图表、标题、产品演示和品牌动效；已有说话人物可作为输入素材，但底层渲染器本身不生成人物。</td></tr>
+            <tr><td>品牌动效成片</td><td class="yes">作为品牌与信息动效方式</td><td>首期适合一句话生成图表、标题、产品演示和品牌动效；已有说话人物可作为输入素材，但底层渲染器本身不生成人物。网址转视频已调研，暂不实现。</td></tr>
             <tr><td>视频剪辑</td><td class="yes">独立模块，首期阿里云</td><td>用供应商无关 Timeline 与 VideoEditingProvider 隔离；未来接腾讯云时只增加 Adapter，不改上层业务。</td></tr>
           </tbody>
         </table>
@@ -515,7 +515,7 @@
       </div>
 
       <div class="flow" aria-label="品牌动效成片流水线">
-        <div class="node"><b>1. 输入</b><small>一句话、品牌资料，或获授权的公开网站 URL。</small></div>
+        <div class="node"><b>1. 输入</b><small>一句话和用户主动提供的品牌资料；首期不接受网站 URL。</small></div>
         <div class="node"><b>2. 脚本与分镜</b><small>锁定一个核心信息，拆成逐镜头文案、布局和节奏。</small></div>
         <div class="node"><b>3. 整体风格</b><small>从 12 套 frame.md 中选择，并映射品牌色、字体和 Logo。</small></div>
         <div class="node"><b>4. 动效零件</b><small>按镜头调用转场、字幕、图表、身份条和 3D 效果。</small></div>
@@ -538,14 +538,18 @@
       <p>AI 不是给每一帧单独写代码。它只写一套可 seek 的时间轴和动画规则；渲染器随后计算第 0 秒、第 1/30 秒、第 2/30 秒等状态并取图。因此自动创作阶段需要 AI，最终逐帧渲染阶段不需要 AI 持续在线。</p>
       <div class="callout warn">
         <strong>automation-tool 的“一句话自动制作”必须自带受限 AI 创作代理。</strong>
-        App 配置“视频创作模型”，使用 submodule 中锁定并审计过的 workflow/skill/reference，把 Brief 或网站抓取结果转成 DESIGN、SCRIPT、STORYBOARD 和 H5 Composition。Agent 只能调用 App 提供的抓取、配音、转写、检查、截图和渲染等封闭工具；模型只能产出封闭 Artifact 和 RenderJob 私有目录里的代码，不获得 Shell、任意文件、运营 Profile、密钥或任意网络工具。未配置模型时，只开放固定模板的文字/颜色/Logo/图片/视频替换与 Studio 手工精修，不能显示成一句话生成可用。
+        App 配置“视频创作模型”，使用 submodule 中锁定并审计过的 workflow/skill/reference，把 Brief 和用户主动提供的品牌资料转成 DESIGN、SCRIPT、STORYBOARD 和 H5 Composition。Agent 只能调用 App 提供的配音、转写、检查、截图和渲染等封闭工具；模型只能产出封闭 Artifact 和 RenderJob 私有目录里的代码，不获得 Shell、任意文件、运营 Profile、密钥或任意网络工具。未配置模型时，只开放固定模板的文字/颜色/Logo/图片/视频替换与 Studio 手工精修，不能显示成一句话生成可用。
       </div>
 
       <h3>网址转视频不是“录屏”，而是抓取品牌后重新编排</h3>
+      <div class="callout danger">
+        <strong>产品决策：暂不实现。</strong>
+        首期不提供 URL 输入框、网站抓取 Worker、网址转视频任务类型或相关用户入口。本节仅保留技术原理与未来安全边界，不能进入首期开发依赖或验收范围。
+      </div>
       <p>官网的 URL → Video 会抓取页面各滚动位置的截图、计算后的配色、字体文件、图片、SVG、Lottie、页面视频、可见文字、区块、按钮和动画，再由 Agent 生成品牌说明、脚本、分镜、旁白和 HTML 镜头。它可以做品牌短片、产品演示、发布预告或功能介绍，并支持 16:9 / 9:16、旁白、字幕、音乐、音效、声音和核心信息设置。</p>
       <div class="callout warn">
         <strong>不能直接调用官网私有接口，也不能裸用上游 capture 处理任意网址。</strong>
-        App 应使用 submodule 中公开的 capture 与工作流，在自己的 Worker 内执行。上游素材下载已对部分私网地址和重定向做拒绝，但主页面导航仍直接调用 <code>page.goto(url)</code>；外围必须补协议、DNS/IP、每次跳转、请求拦截、私网/云元数据、DNS 重绑定和网页指令注入防护。首期只抓用户拥有或获准使用的公开网站，不抓登录后页面。
+        未来若重新立项，App 应使用 submodule 中公开的 capture 与工作流，在自己的 Worker 内执行。上游素材下载已对部分私网地址和重定向做拒绝，但主页面导航仍直接调用 <code>page.goto(url)</code>；外围必须补协议、DNS/IP、每次跳转、请求拦截、私网/云元数据、DNS 重绑定和网页指令注入防护，并只抓用户拥有或获准使用的公开网站，不抓登录后页面。
       </div>
 
       <h3>官网当前公开的 12 套整体风格</h3>
@@ -765,7 +769,7 @@
         </div>
         <div class="milestone">
           <b>P3 · 30 秒视频闭环技术验证（2–3 周）</b>
-          <span>跑通“智能素材成片”和“品牌动效成片”两条路线，共用 ContentBrief、分镜、Timeline 与 Artifact；验证一句话成片、网址转产品视频、12 套整体风格、134 个离线动效零件，并记录质量、耗时和真实成本。真人生成不在本期任务内。</span>
+          <span>跑通“智能素材成片”和“品牌动效成片”两条路线，共用 ContentBrief、分镜、Timeline 与 Artifact；验证一句话成片、12 套整体风格、134 个离线动效零件，并记录质量、耗时和真实成本。网址转视频与真人生成都不在本期任务内。</span>
         </div>
         <div class="milestone">
           <b>P4 · 独立剪辑与双平台发布（约 2–3 周）</b>
