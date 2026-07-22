@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 安装包与发布准备（P9-02/P9-04 Windows 工程链与 P9-03 普通 macOS 候选已就绪，待原生/正式证书验收）
+> 当前阶段：Wave 9 安装包与发布准备（P9-02/P9-04 Windows 工程链、P9-03 macOS 候选与 P9-05 完整包审计已就绪，待原生/正式证书验收）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21 与 P9-01 已完成；P9-02 Windows Executor 隔离构建器、PE/依赖审计和原生验收入口已就绪，保持 `🔍 待 Windows 实机验收`。P9-03 的只读 Executor Resources、production-mode ad-hoc App/DMG 和最小 Capability/CSP 已通过，Developer ID/notarization 保持 `🔍 待验收`；P9-04 的 production-mode NSIS/currentUser 候选配置、只读 Executor Resources 与隔离安装/卸载 runner 已就绪，保持 `🔍 待 Windows 实机/Authenticode 验收`。H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据待补；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21 与 P9-01 已完成；P9-02 Windows Executor 隔离构建器、PE/依赖审计和原生验收入口已就绪，保持 `🔍 待 Windows 实机验收`。P9-03 的只读 Executor Resources、production-mode ad-hoc App/DMG 和最小 Capability/CSP 已通过，Developer ID/notarization 保持 `🔍 待验收`；P9-04 的 production-mode NSIS/currentUser 候选配置、只读 Executor Resources 与隔离安装/卸载 runner 已就绪，保持 `🔍 待 Windows 实机/Authenticode 验收`。P9-05 统一完整包 auditor 已在真实 macOS App/DMG 通过并接入 Windows 安装根，保持 `🔍 待 Windows 实机验收`。H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据待补；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -367,7 +367,7 @@
 | P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | 🔍 待验收 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | 🔍 待验收 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | 🔍 待验收 |
-| P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ⬜ 未开始 |
+| P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | 🔍 待验收 |
 | P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
 | P9-07 | Windows 干净安装 | 无 Python 前置；同上；DPI/杀进程/卸载行为 | P9-04,P9-05 | 🔍 待设备验收 |
 | P9-08 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-06,P9-07 | ⬜ 未开始 |
@@ -2858,12 +2858,27 @@
 - 待验收边界：当前 macOS 无法构建/运行 NSIS、PowerShell Authenticode、Windows 注册表或普通用户安装，因此 `NotSigned`、PE/App 哈希、HKCU-only、卸载零残留仍只是 runner 的硬断言，不是已观察事实。稍后在 Windows 实体机执行唯一命令补普通候选证据；正式发布再提供 Authenticode 证书并复验 signer/chain/SmartScreen 安装边界，全部通过后才能标记 `✅ 已完成`
 - 后续：不等待实机，下一独立任务按顺序进入 P9-05 正式包内容审计；把跨平台可静态/制品化的检查先统一，设备安装与签名结论继续留在各自 `🔍` 任务
 
+### P9-05 正式包内容审计
+
+- 状态：🔍 待 Windows 实机验收（macOS App/DMG 真实完整包已通过）
+- 日期：2026-07-22
+- 推进边界：P9-03/P9-04 的工程前置均已就绪，按用户授权先统一可审查的完整包规则；P9-03 真实 macOS 制品可在当前机器执行，Windows 规则只接入 P9-04 安装后根，不把 macOS 结果冒充双平台
+- RED：新增 P9-05 bundle fixture 失败矩阵，目标要求固定双平台 Executor Resources 布局、完整 Manifest metadata、无链接/特殊文件，以及拒绝运行期 Profile/SQLite/诊断/日志、用户素材、证书私钥、WDIO、调试 origin、测试 Session。首跑准确失败于 `audit-release-bundle.mjs` 不存在
+- 唯一完整包 auditor：`frontend/scripts/audit-release-bundle.mjs` 只接受 macOS `Contents/Resources/local-executor/package` 或 Windows `local-executor/package`，要求平台正式入口、`executor-manifest.v1.json/.sig` 全部存在。它不替代 E4-15 主二进制/config/Vite/Cargo tree 审计，而是在最终 `.app` 或安装根上递归补齐全树事实
+- 内容与资源边界：每个目录项先 `lstat`，symlink、特殊文件、超过 20,000 文件/16 GiB 全部固定拒绝；路径拒绝测试/fixture/node_modules、browser-profiles、Cookie/History/Login Data、SQLite、logs/diagnostics/artifacts、uploads/downloads/materials 及视频音频/私钥容器后缀。全部普通文件再按 1 MiB 流式扫描并保留最大 marker overlap，拒绝 Tauri WDIO/Harness、安装探针、1420 调试 origin、开发 Executor 公钥、测试 Session 和 PEM/OpenSSH 私钥头
+- 双平台接线：P9-03 在 production binary audit 后扫描 build `.app`，DMG 只读挂载后再次扫描其中 `.app`；P9-04 在非提权 currentUser 安装完成、资源/Manifest/PE/注册表核对后、专属卸载前扫描 Windows 安装根。`scripts/run_p9_05_acceptance.py` 只按当前 OS 分派既有 P9-03/P9-04，不创建第三种候选或复制打包逻辑；Desktop workflow 任一相关脚本变化都会触发，而平台 job 继续执行已内嵌该审计的候选 runner
+- macOS 真实 GREEN：`backend/.venv/bin/python scripts/run_p9_05_acceptance.py` 从 P9-01 重建 signed Executor 和 production-mode ad-hoc App/DMG；build `.app` 与 DMG 只读挂载副本各扫描 `304 files / 204,479,153 bytes`，其中 Executor 为 `301 files / 184,629,001 bytes`。两份都通过 E4-15、Manifest/Mach-O/资源一致性及新完整包规则，随后 DMG 卸载、临时 Cargo target/Executor/seed/App/DMG 全部删除；未启动 App、浏览器、服务或真实账号
+- 自动化门禁：P9-05 聚焦 5 项 bundle/接线测试覆盖双平台成功布局、10 类运行期/素材/凭据/测试内容、跨 1 MiB chunk marker、错位 Executor、symlink 和缺失签名 metadata；Frontend 全部 150 项 Node 契约与 33 个 Vitest 文件/241 项测试、ESLint、TypeScript、OpenAPI、生产构建/边界扫描全绿。三个 P9 runner 的 Ruff format/check、严格 Mypy、Python 编译、uv lock、`actionlint` 与 `git diff --check` 全绿；没有修改 Rust/React/Python 产品实现
+- 待验收边界：Windows auditor 已接在 P9-04 安装根，但当前未观察真实 NSIS 解包内容、reparse 行为或卸载前全树统计。稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-05-package-audit`，同一命令将经 P9-04 完成安装扫描与清理；取得输出后 P9-05 才能标记 `✅ 已完成`
+- 后续：不等待 Windows，下一独立工程任务进入 P9-06 macOS 干净安装验收入口；任何需要真实平台扫码/账号/用户交互的步骤只做显式 runner 和 fail-closed 前置，不自动产生外部副作用
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `P9-02`（🔍 待验收）：Windows Executor 构建器、PE/依赖审计、Manifest/冻结入口/UIAutomation/Job Object 原生 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor` 补最终事实；
 2. `P9-04`（🔍 待验收）：production-mode NSIS/currentUser 配置、只读 Executor Resources、非提权隔离安装/卸载/注册表/普通签名 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-04-windows-package`，正式发布再补 Authenticode；
-3. `P9-05`（⬜ 未开始）：立即统一审计 macOS/Windows 正式包不得含 WebDriver、调试端口、测试凭据、真实日志/Profile/素材；P9-08 在兼容前置具备后继续。P9-06/P9-07 的干净设备交互和 P9-09 最终 MVP 事实仍须对应平台/账号，不会以静态门禁冒充；
-4. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
-5. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+3. `P9-05`（🔍 待验收）：统一完整包 auditor 已在真实 macOS App/DMG 通过并接入 P9-04 Windows 安装根；稍后在 Windows 执行 `pnpm --dir frontend test:p9-05-package-audit` 补最终统计；
+4. `P9-06`（🔍 待设备验收）：下一步先把 macOS 干净安装、无 Python 前置、打开即用、浏览器/扫码/任务/恢复的显式验收入口工程化；真实平台账号和用户交互仍只在授权设备执行；P9-07 Windows 同理随后推进，P9-08 在兼容前置具备后继续；
+5. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+6. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。

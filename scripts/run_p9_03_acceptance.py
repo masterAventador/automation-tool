@@ -167,9 +167,7 @@ def one_file(parent: Path, suffix: str) -> Path:
 
 
 def app_binary(app: Path) -> Path:
-    candidates = sorted(
-        path for path in (app / "Contents/MacOS").iterdir() if path.is_file()
-    )
+    candidates = sorted(path for path in (app / "Contents/MacOS").iterdir() if path.is_file())
     if len(candidates) != 1:
         raise RuntimeError("P9-03 App does not contain one main binary")
     return candidates[0]
@@ -208,6 +206,21 @@ def verify_manifest_signature(package: Path, private_key: Ed25519PrivateKey) -> 
     private_key.public_key().verify(signature, manifest)
 
 
+def audit_release_bundle(bundle: Path, package: Path) -> None:
+    run_checked(
+        [
+            "node",
+            "scripts/audit-release-bundle.mjs",
+            "--bundle-root",
+            os.fspath(bundle),
+            "--executor-package",
+            os.fspath(package),
+            "--platform",
+            "macos",
+        ]
+    )
+
+
 def verify_packaged_executor(
     *,
     source: Path,
@@ -229,9 +242,7 @@ def verify_packaged_executor(
     return audit.file_count, audit.package_size
 
 
-def verify_dmg(
-    dmg: Path, temporary: Path, expected_inventory: dict[str, tuple[int, str]]
-) -> None:
+def verify_dmg(dmg: Path, temporary: Path, expected_inventory: dict[str, tuple[int, str]]) -> None:
     run_checked(["hdiutil", "verify", os.fspath(dmg)])
     mount = temporary / "mounted-dmg"
     mount.mkdir()
@@ -252,6 +263,7 @@ def verify_dmg(
         packaged = app / "Contents/Resources" / EXECUTOR_RESOURCE
         if package_files(packaged) != expected_inventory:
             raise RuntimeError("P9-03 DMG Executor inventory is inconsistent")
+        audit_release_bundle(app, packaged)
     finally:
         run_checked(["hdiutil", "detach", os.fspath(mount)])
 
@@ -327,6 +339,7 @@ def main() -> int:
             ],
             environment=environment,
         )
+        audit_release_bundle(app, packaged_executor)
         inventory = package_files(packaged_executor)
         verify_dmg(dmg, temporary, inventory)
 

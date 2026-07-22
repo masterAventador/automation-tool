@@ -88,6 +88,7 @@
     "test:p9-02-windows-executor": "uv run --project ../backend --locked python ../scripts/run_p9_02_acceptance.py",
     "test:p9-03-macos-package": "../backend/.venv/bin/python ../scripts/run_p9_03_acceptance.py",
     "test:p9-04-windows-package": "uv run --project ../backend --locked python ../scripts/run_p9_04_acceptance.py",
+    "test:p9-05-package-audit": "uv run --project ../backend --locked python ../scripts/run_p9_05_acceptance.py",
     "test:task-run-tauri": "pnpm build:tauri:task-run-test && wdio run wdio.task-run.conf.ts",
     "test:task-query-tauri": "pnpm build:tauri:task-query-test && wdio run wdio.task-query.conf.ts",
     "test:task-event-stream-tauri": "pnpm build:tauri:task-event-stream-test && wdio run wdio.task-event-stream.conf.ts",

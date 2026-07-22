@@ -556,6 +556,8 @@ P9-03 不新增 IPC、Capability 或运行时安装器。debug 仍从 AppData �
 
 P9-04 沿同一个 release Resources 组合根构建 Windows NSIS，不新增第二个 Executor 路径或安装服务。正式候选覆盖只声明 `targets=["nsis"]` 和 `installMode="currentUser"`，不覆盖 product/identifier/main binary、App、plugin、Capability、CSP、Updater passive 模式或 Windows 签名字段。原生 runner 从 P9-02 候选生成一次性 Manifest，以无测试 Feature release 执行 E4-15 审计；为避免破坏用户可能已有的正式安装，安装阶段才生成唯一隔离 identity，并在非提权进程中核对普通 `NotSigned` installer/App/uninstaller、主二进制版本/哈希、HKCU-only 卸载记录、LocalAppData 根、Resources 清单/Manifest/PE 以及专属卸载零残留。Windows 实机运行与正式 Authenticode 是独立待验收事实。
 
+P9-05 在 E4-15 既有主二进制、生产配置、Vite assets 和无测试 Feature Cargo tree 审计之外，新增最终 bundle 全树边界。`audit-release-bundle.mjs` 只接受 macOS `Contents/Resources/local-executor/package` 或 Windows `local-executor/package`，要求平台入口及 Manifest/签名 metadata 存在；递归读取时拒绝 symlink/特殊文件、20,000 文件/16 GiB 以上包、测试/WDIO/安装探针/1420 origin、开发公钥/测试 Session/private key，以及 Profile/Cookie/SQLite/log/diagnostic/upload/download/material 路径。扫描按 1 MiB 流式分块并保留最大 marker overlap。P9-03 已在真实 build App 和 DMG 挂载副本各通过 304 文件/204,479,153 bytes，P9-04 已在 Windows 卸载前接入同一规则；Windows 原生结果仍待补。
+
 正式构建通过 `AUTOMATION_TOOL_UPDATE_ENDPOINT` 与 `AUTOMATION_TOOL_UPDATE_PUBLIC_KEY` 注入公开发布配置；`build.rs` 在 release Profile 强制 endpoint 为包含一次 `target/arch/current_version` 占位符的 HTTPS URL，并对规范 Base64 包裹的 Minisign 公钥做实际解析。缺失、非 HTTPS、带凭据/fragment、占位符异常或坏公钥均在打包前失败。debug 仅在显式本机环境变量存在时启用更新，证书忽略开关只编译进 `desktop-e2e`；正式 App 不接受运行时端点覆盖。发布私钥始终只属于受控签名环境。
 
 ## 15. 禁止事项

@@ -514,6 +514,8 @@ P9-03 的 `tauri.macos-candidate.conf.json` 与 `scripts/run_p9_03_acceptance.py
 
 P9-04 的 `tauri.windows-candidate.conf.json` 与 `scripts/run_p9_04_acceptance.py` 把 P9-02 signed Executor 映射到 Windows release 的 `local-executor/package`。正式覆盖只选择 `currentUser` NSIS，不改变生产 identity/窗口/Capability/CSP/plugin 或签名字段；runner 使用独立临时 Cargo target 和一次性 Ed25519 seed，在无测试 Feature 构建中复用 E4-15 制品审计。安装阶段的唯一隔离 product/identifier 只保护现有正式安装，非提权原生验收必须核对 `NotSigned`、二进制版本/哈希、HKCU-only 注册表、LocalAppData、完整 Executor 清单/Manifest/PE 和专属卸载零残留；当前 macOS 只完成静态门禁，Windows 实机与 Authenticode 仍待补。
 
+P9-05 的 `frontend/scripts/audit-release-bundle.mjs` 是完整正式包树的唯一内容审计器，`scripts/run_p9_05_acceptance.py` 只按当前 OS 分派 P9-03/P9-04，不另建第三种包。auditor 固定双平台 Executor Resources 位置，流式扫描所有普通文件并拒绝链接、特殊文件、测试/调试/开发信任材料、私钥及运行期日志/Profile/Cookie/SQLite/诊断/素材；P9-03 同时用于 build App 和 DMG 挂载副本，P9-04 用于安装后根。真实 macOS 已通过，Windows 入口已就绪待实机。
+
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
 T3-14 复用同一 `task_controls.py`、HTTP router、Outbox repository 和事件收敛仓储：cancel/emergency-stop 首次请求在命令事务内把 Task/Attempt 投影到 CANCELLING，终态再由匹配最新 ACK/correlation 的 Executor 事件决定，完成竞态仍服从领域状态机。桌面侧仍只扩展同一个 `control_plane.rs` 固定 operation；T3-14 专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_14_acceptance.py` 顺序验证取消和紧停，不建立第二网络桥或第二状态源。

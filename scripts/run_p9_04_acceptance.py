@@ -170,6 +170,22 @@ def verify_manifest_signature(package: Path, private_key: Ed25519PrivateKey) -> 
     private_key.public_key().verify(signature, manifest)
 
 
+def audit_release_bundle(bundle: Path, package: Path) -> None:
+    run_checked(
+        [
+            "node",
+            "scripts/audit-release-bundle.mjs",
+            "--bundle-root",
+            os.fspath(bundle),
+            "--executor-package",
+            os.fspath(package),
+            "--platform",
+            "windows",
+        ],
+        environment=installer_environment(),
+    )
+
+
 def require_candidate_configuration() -> dict[str, Any]:
     configuration: dict[str, Any] = json.loads(CANDIDATE_TAURI_CONFIG.read_text(encoding="utf-8"))
     bundle = configuration.get("bundle", {})
@@ -428,6 +444,7 @@ def verify_installed_candidate(
     verify_manifest_signature(package, private_key)
     if package_files(package) != expected_inventory:
         raise RuntimeError("P9-04 installed Executor inventory is inconsistent")
+    audit_release_bundle(root, package)
     return audit.file_count, audit.package_size
 
 
