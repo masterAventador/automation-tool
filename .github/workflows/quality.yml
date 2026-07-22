@@ -17,6 +17,20 @@ env:
   CI: true
 
 jobs:
+  governance:
+    name: Roadmap / third-party / user-facing contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - run: git submodule foreach --recursive 'git fetch --tags --force origin'
+      - run: python3 scripts/check_embedded_browser_video_roadmap.py
+      - run: python3 scripts/check_third_party_sources.py
+      - run: python3 scripts/check_user_facing_branding.py
+
   backend:
     name: Backend / Python 3.12
     runs-on: ubuntu-latest

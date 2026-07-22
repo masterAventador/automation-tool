@@ -83,6 +83,8 @@ automation-tool/
 │   ├── check_third_party_sources.py # 上游 Gitlink/许可证/工作树/SBOM 防漂移门禁
 │   ├── run_av_03_acceptance.py   # 威胁模型、中文术语和用户品牌契约验收
 │   ├── check_user_facing_branding.py # UI 上游名称和未解释术语静态门禁
+│   ├── run_av_04_acceptance.py   # 87 行任务、汇总、独立证据和旧 Roadmap 隔离验收
+│   ├── check_embedded_browser_video_roadmap.py # 专项轻量台账与每任务证据 CI 门禁
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
