@@ -17,6 +17,8 @@ pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
+pub mod local_video_orchestrator;
+mod managed_process_tree;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
@@ -2879,6 +2881,10 @@ pub fn run() {
             )?);
             app.manage(startup_environment::StartupEnvironmentService::initialize(
                 &app_data_directory,
+            )?);
+            app.manage(local_video_orchestrator::LocalVideoOrchestrator::new(
+                local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
+                local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
             )?);
             app.manage(browser_profiles::BrowserProfileStore::initialize(
                 &app_data_directory,

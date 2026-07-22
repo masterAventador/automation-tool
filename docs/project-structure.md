@@ -501,6 +501,14 @@ VF-01 的 `control_plane/domain/video_creation.py` 不建立第二个 Artifact �
 数量有硬上限、时间为 UTC、Timeline 同轨不重叠且 RenderJob 终态事实自洽；
 VF-02/VF-03 才分别接生命周期与私有工作区。
 
+VF-02 的 Tauri 生命周期实现位于
+`frontend/src-tauri/src/local_video_orchestrator.rs`，跨平台完整进程树所有权下沉到
+`frontend/src-tauri/src/managed_process_tree.rs`，并由既有 Local Executor 与两类视频
+Worker 共同复用。对应真实进程/随机回环端口测试位于
+`frontend/src-tauri/tests/local_video_orchestrator.rs`，独立门禁为
+`scripts/run_vf_02_acceptance.py`。本任务没有增加 React 页面、Tauri Command、Worker
+发行物或第二套进程清理实现。
+
 U9-03 沿同一纵向切片新增 `application/account_sessions.py`、`api/account_sessions.py`、`bootstrap/account_sessions.py` 和唯一 `infrastructure/database/account_session_repository.py`；`schema.py`/Alembic `20260722_0029_account_sessions.py` 共同拥有产品 Session family/token、keyed 登录限流和运维恢复票据四张表。`tests/contract/test_account_session_api.py` 冻结五个公开 operation、三种专用 Bearer scheme 和统一脱敏错误；`tests/integration/test_account_session_lifecycle.py` 用真实 PostgreSQL 验证临时锁、来源限流、摘要持久化、refresh 单次轮换/重放整族吊销、注销、改密、恢复与迁移回滚；配置/工厂/数据库异常由两个单元测试文件覆盖。OpenAPI 与生成 TypeScript DTO 同步更新，但 U9-03 没有新增 React/Rust 存储或设备归属；这些分别留给 U9-04/U9-05。
 
 U9-04 在既有桌面分层中新增 `features/account-session/` 的安全投影与外层 Gate、`platform/tauri/account-session-gateway.ts` 的五个固定 invoke，以及 Rust `account_session_vault.rs`。正式 `main.tsx` 只为 `customer-demo` Profile 注入账号 gateway；默认 P9 Profile 行为不变。Rust vault 复用 `secure_store.rs`，把 access/refresh 作为单个 `product-account-session-v1` 记录留在 App 私有目录，`control_plane.rs` 只允许登录/refresh/注销/改密/恢复五条固定路径，`lib.rs` 只返回 unauthenticated 或 canonical active 账号投影。Gate 位于 `StartupGate` 外层，未登录不会挂载诊断或工作台；U9-05 的 Installation 自动归属不在本任务中提前实现。

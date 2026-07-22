@@ -341,6 +341,20 @@ ADR-0001 已替代外部 Chrome/Edge 生产方案。Tauri/Rust 后续只从安�
 - 外部模型调用前页面必须说明会离开本机的数据范围；任何密钥、绝对路径、运营 Profile、Cookie、原始 Worker 错误和上游名称都不能进入 WebView。
 - 静态扫描和 UI Harness 只能作为分层证据；用户功能仍要从正式 App 正常入口覆盖成功、失败、取消、人工接管、诊断和导出。
 
+### 6.3 VF-02 本地视频 Worker 生命周期
+
+`LocalVideoOrchestrator` 位于 Tauri Rust 边界，分别按 `Python`、`Node` 槽位线性管理两类
+视频 Worker；React、Control Plane 和 Worker 都不能自行发现、启动或复用其他进程。
+Worker 从标准输入一次性接收新生成的 256-bit 会话令牌，在自身绑定
+`127.0.0.1:0` 后返回端口、协议、精确版本和 HMAC 证明。Tauri 随后用同一会话在真实
+TCP `/health` 上复验，不把端口、令牌、可执行路径或原始错误暴露给 WebView。
+
+两个 Worker 与 Local Executor 复用 `ManagedProcessTree`：Unix 使用独立进程组，Windows
+使用 kill-on-close Job Object。启动失败、证明/版本不匹配、超时、取消、异常退出、恢复
+预算耗尽、显式停止和 App 释放都由该所有者清理完整进程树；崩溃恢复先杀后代再等待日志
+管道，避免渲染子进程继承句柄后卡死。VF-02 只提供内部生命周期，不注册用户 Command；
+后续 IM/BM Adapter 才提供受限业务调用，VF-06 才增加正常用户入口。
+
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
