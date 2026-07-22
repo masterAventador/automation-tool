@@ -1,18 +1,18 @@
-# 内置运营浏览器与双视频制作专项 Roadmap
+# 内置浏览器、Browser Use、双视频制作与独立剪辑专项 Roadmap
 
 > 文档状态：架构规划草案，尚未进入开发执行
 >
-> 调研与规划日期：2026-07-22
+> 调研与规划日期：2026-07-23
 >
 > 适用仓库：automation-tool
 >
-> 规划规模：6 条工作线、54 个候选小任务
+> 规划规模：10 条工作线、87 个候选小任务（其中自愈式自动化 7 项明确后置）
 >
 > 用户界面名称：智能素材成片、品牌动效成片
 
 ## 1. 这份 Roadmap 的定位
 
-docs/development-roadmap.md 仍是项目进度、任务状态和完成证据的唯一事实源。本文件只负责把“内置运营浏览器”和“两种视频制作方式”拆成可执行设计，不维护第二份实时进度。
+docs/development-roadmap.md 仍是项目进度、任务状态和完成证据的唯一事实源。本文件只负责把“内置运营浏览器”、Browser Use、“两种视频制作方式”、独立“视频剪辑”、首期双平台发布和后续自愈式自动化拆成可执行设计，不维护第二份实时进度。
 
 实施前必须先完成 AV-01 和 AV-04：
 
@@ -33,6 +33,7 @@ docs/development-roadmap.md 仍是项目进度、任务状态和完成证据的�
 - App 尚未发布，没有需要兼容或迁移的旧版用户数据；内置浏览器直接从一套全新的 App 私有 Profile 开始。
 - 现有 ActionGate、任务状态机、本地副作用账本、单次执行、结果不确定和独立最终状态验收全部保留。
 - 当前已实现的抖音登录、会话检测、搜索、浏览、候选提取、评论、私信和恢复链路全部迁移。当前代码没有正式“点赞”实现，因此点赞不是迁移项，要在未来单独立项。
+- 搜索、评论和私信当前已完成的第一版固定 Playwright 脚本先不做 AI 重构；本期只保持行为不变地迁移到内置 Chromium。Browser Use 先在新建的抖音作品发布链路验证，PB-08 通过后再为搜索/评论/私信建立单独的第二阶段改造，不与浏览器迁移绑在一起。
 - 用户默认浏览器 Profile、Cookie 和本机日常浏览器数据不得读取、复制或导入。
 
 ### 2.2 视频制作
@@ -44,18 +45,45 @@ docs/development-roadmap.md 仍是项目进度、任务状态和完成证据的�
 | 智能素材成片 | material_montage_v1 | MoneyPrinterTurbo | 知识讲解、新闻摘要、观点、榜单、教程、旁白配字幕，并自动匹配生活、办公、城市等补充画面 | 固定真人连续出镜、电影感剧情、精确产品动作、同一人物跨镜头一致 |
 | 品牌动效成片 | motion_composition_v1 | Hyperframes | 品牌宣传、产品发布、数据图表、网页或产品演示、标题动画、代码讲解、模板化批量视频 | 凭一句话生成逼真人物、自然运动、真实世界复杂镜头 |
 
-用户界面使用“视频制作方式”，不使用容易和文案模型混淆的英文 Provider。代码内部继续通过 VideoRenderProvider 或 VideoCreationProvider 隔离实现。
+用户界面使用“视频制作方式”，不使用容易和文案模型混淆的英文 Provider。代码内部继续通过 VideoCreationProvider 隔离实现。
 
 真人、电影感镜头和真实世界场景的生成属于未来第三种方案。本 Roadmap 只保留扩展接口，不拆任务、不引入依赖，也不把它展示成当前可选项。
 
 “品牌动效成片”还提供两种不同层级的能力：
 
 - 12 套整体风格：决定整条视频的配色、字体、留白、组件外观和镜头气质；
-- 100 个公开动效零件：决定某个镜头使用什么转场、字幕、人名条、图表、地图、社交卡片或 3D 效果。
+- 134 个可安装动效零件：决定某个镜头使用什么转场、字幕、人名条、图表、地图、社交卡片、代码演示或 3D 效果；其中官网当前公开预览 100 个。
 
 这两层不能在产品中混称为“视频风格”。
 
-### 2.3 名称与品牌边界
+### 2.3 Browser Use 接入边界
+
+- 这里的 Browser Use 指 `browser-use/browser-use` 开源 Python Agent 框架，不是 OpenAI Computer Use；后者不进入本期依赖或架构。
+- 锁定版本实查为 0.13.6。它通过直接 CDP 驱动 Chrome/Chromium，可显式传 `executable_path` 或连接 `cdp_url`，因此不需要第二套浏览器，但必须验证它与 Playwright 锁定的完整 Chromium 修订兼容。
+- 首期接入 Agent、BrowserSession、受限 Tools、结构化历史、安全门禁、测试页和健康检查，并只把它用于抖音作品发布；不设置通用 Browser Use 菜单，不允许用户输入任意网站和任意任务，不使用 Browser Use Cloud、stealth、代理或 CAPTCHA 绕过。
+- 独立验证使用同一内置 Chromium 二进制启动的独立进程与临时 Profile；抖音发布使用 App 持久运营 Profile，通过随机 loopback CDP 和独占 `BrowserSurfaceLease` 接管运营浏览器，原 Playwright 执行器必须暂停，绝不允许两个控制器同时操作页面。
+- 截图、页面文字和网页指令全部是不可信输入；域名/路径/动作白名单、敏感数据发送前确认、发布/评论/私信等外部副作用的临界点确认，以及 ActionGate/ledger/独立验收仍由本项目控制。
+- 默认 Tools 必须裁剪，只保留发布流程需要的观察、同域导航、点击、输入、选择和受控上传；任意 JS、文件读写、任意下载、跨域和 Shell 不可达。
+
+### 2.4 统一阿里百炼模型网关
+
+- 首期所有文本、视觉理解、脚本/分镜、动效 HTML 生成和 Browser Use Agent 模型调用统一经过 App 的 `BailianModelGateway`；两个上游 WebUI/Worker 不直接各自保存一套密钥。
+- Browser Use 0.13.6 自带 `ChatOpenAI(base_url=...)`，官方仓库也有 DashScope OpenAI-compatible + Qwen-VL 示例，因此可通过百炼兼容地址接入，不需要改 Browser Use 源码。
+- 截至 2026-07-23，百炼官方当前推荐/最新稳定 ID 为：`deepseek-v4-pro`、`glm-5.2`、`qwen3.7-max`。用户此前记忆的名称是正确的。
+- “最新”定义为任务开始时重新查询百炼官方模型目录和当前业务空间实际可选项，选该系列最新稳定版并写入 `ModelCatalogSnapshot`；发布构建必须锁定解析后的 model ID/快照、能力和验证日期，运行中的任务不因 alias 漂移自动换模型。
+- `deepseek-v4-pro` 官方明确只支持文本；`glm-5.2` 当前按文本/Function Calling 使用。它们可跑 Browser Use 的 DOM/结构化页面模式，但不能假装能看截图。
+- 百炼文档显示滚动 `qwen3.7-max` 当前等同文本快照 `qwen3.7-max-2026-05-20`，而 `qwen3.7-max-2026-06-08` 支持多模态。首期抖音 Browser Use 的视觉模式默认锁 `qwen3.7-max-2026-06-08`；若实施时已有更新的稳定多模态 Max，则重新验证后改锁最新版本。
+- 模型目录必须声明 `text`、`vision`、`function_calling`、`structured_output`、上下文、地域和兼容 API。用户选择不满足当前功能的模型时明确阻止，不静默关闭视觉或换模型；DOM-only 模式必须单独通过真实页面验收才可开放。
+
+### 2.5 独立视频剪辑模块
+
+- “视频剪辑”是独立产品模块和独立后端边界，不隶属于“智能素材成片”或“品牌动效成片”；两个制作方式只产出素材、镜头和初始 Timeline。
+- 领域层只认识 `EditingProject`、供应商无关 `Timeline`、`EditingJob`、`Artifact` 和 `VideoEditingProvider`，不出现阿里、腾讯等供应商 DTO。
+- 首期只实现阿里云 IMS/ICE 云剪辑；本地 FFmpeg 仍是受控媒体基础设施，不作为首期第二个用户可选云剪辑服务。
+- Provider registry、能力矩阵、Timeline 编译器、状态映射、回调/轮询对账和一致性契约必须先建好。以后接腾讯云或其他服务，只增加 Adapter 与映射，不修改上层业务、页面和项目数据。
+- 左侧“视频剪辑”入口、剪辑项目、任务和成片记录与“视频制作”入口分开；生成完成后可把素材一键送入剪辑模块，但两个模块没有共享的供应商状态机。
+
+### 2.6 名称与品牌边界
 
 真实上游项目名允许出现在以下内部位置：
 
@@ -71,6 +99,39 @@ docs/development-roadmap.md 仍是项目进度、任务状态和完成证据的�
 - WebView 页面标题、可访问性树、外链、崩溃页和版本提示。
 
 唯一例外是独立的“第三方软件声明”法务页面。该页面不得作为功能品牌入口。
+
+### 2.7 首期内容发布范围
+
+| 平台 | 首期路径 | 首期状态 | 说明 |
+| --- | --- | --- | --- |
+| B站 | 当前正式开放的视频投稿 API | 实现 | 服务端上传、创建稿件、状态查询、回执和对账；不让 Browser Use 替代可用 API |
+| 抖音 | Browser Use + App 内置可见 Chromium | 实现 | 使用运营 Profile 打开当前创作者发布页，视觉识别并填写；发布临界点确认、单次提交、独立核验 |
+| 快手 | 未来优先 Browser Use；届时重新复核正式 API | 暂不实现 | 只登记 capability，不建入口、不写半成品 Adapter |
+| 小红书 | 未来 Browser Use | 暂不实现 | 只登记 capability |
+| 微信视频号 | 未来 Browser Use | 暂不实现 | 只登记 capability |
+
+两条首期路径共用 `PublishJob`、Artifact、审批、内容哈希、单次 dispatch、`published/rejected/outcome_uncertain` 和审计，不共享平台原始 DTO。抖音页面截图和页面内容发给模型前必须按隐私策略处理；验证码、风险提示和账号异常交给用户。
+
+B 站采用“实现完成”和“真实凭据验收”分离的交付状态。用户尚未提供开放平台调用凭据时，PB-02～PB-04 仍必须完成正式接口契约、Adapter、Mock Server、固定 fixture、契约测试、幂等/限流/超时/错误矩阵和本地纵向链路；只把真实账号上传、投稿及状态查询标记为 `待凭据验收`，不得声称已经通过真实平台。缺少凭据不是任务执行阻塞条件：记录缺失的凭据类型和待补证据后，继续抖音发布、视频制作、剪辑和后续组合任务。凭据到位后再恢复 B 站真实验收，不返工已经通过的确定性测试。
+
+### 2.8 后续自愈式自动化（只规划，暂不实现）
+
+自愈不是“AI 自动修改 Playwright 代码”，而是把一次成功的 Browser Use 轨迹编译为受限、可审计、不可执行任意代码的声明式 `AutomationSkill` JSON：
+
+    首次 Browser Use 成功
+        → 清洗动作与页面证据
+        → 人工/自动门禁生成 skill v1
+        → 下次按页面特征选择 v1 并确定性回放
+        → 第 3 步前置/后置条件不匹配
+        → 从安全检查点切回 Browser Use
+        → 完成剩余步骤并收集差异
+        → 生成候选 skill v2，v1 保留
+
+每个版本至少记录：`skill_id`、`version`、`parent_version`、平台/域名/路径、入口页面指纹、语言/viewport、步骤序号、语义目标（role/name/附近文字/相对位置）、动作、前置条件、期望后置条件、超时、风险级别、副作用边界、可恢复检查点、成功证据和适用页面变体。原始坐标只能作为证据，不能成为主要定位方式；JSON 不含 Cookie、token、用户正文、截图、任意 JS、CSS selector 注入或 Shell。
+
+版本不可覆盖或删除。路由器按页面指纹、历史成功率、最近命中和账号/语言/viewport 选择最匹配版本，不简单使用最新版本；A/B 页面可以让 v1、v2 同时活跃。回放失败先判断是否已经 dispatch 外部副作用：未 dispatch 才能从当前安全点转给 Browser Use，已经 dispatch 且结果不明时必须进入 `outcome_uncertain` 并对账，禁止继续和重发。
+
+本期只让 PublishJob、ActionReceipt 和 Browser Use 事件模型保留未来所需的稳定字段，不实现 skill 编译、回放、自动修复、版本路由或管理 UI；这些全部属于 SA 工作线的后续任务。
 
 ## 3. 现状审计与迁移边界
 
@@ -102,9 +163,13 @@ docs/development-roadmap.md 仍是项目进度、任务状态和完成证据的�
 - 以系统浏览器 executable_path 为信任根的启动与诊断逻辑；
 - 外部浏览器选择配置和开发期 Profile 的生产入口；正式版本直接建立全新内置浏览器 Profile，不设计迁移分支。
 
-### 3.2 当前视频链路
+### 3.2 当前视频与剪辑链路
 
-App 左侧菜单目前没有“视频制作”入口。主路线图已经预留 Material、Timeline、RenderJob、PublishJob 和 Artifact，以及云剪辑、本地 FFmpeg、成片管理和平台发布任务。新方案必须细化和复用这些对象，不建立第二套视频任务、文件和发布状态。
+App 左侧菜单目前既没有“视频制作”，也没有独立“视频剪辑”入口。主路线图已经预留 Material、Timeline、RenderJob、PublishJob 和 Artifact，以及云剪辑、本地 FFmpeg、成片管理和平台发布任务。新方案必须细化和复用这些对象；制作任务与剪辑任务分别建模，但共用 Material、Timeline 和 Artifact，不建立重复文件或发布状态。
+
+### 3.3 当前没有 Browser Use 生产链路
+
+仓库已有同步 Playwright `BrowserRuntime`、页面对象、ActionGate 和副作用账本，但没有 Browser Use Agent/BrowserSession、受限 Tools、CDP 接管租约、百炼模型适配或 Browser Use 安全策略。专项接入必须从独立验证开始，再只接入新建的抖音发布流程，不能顺手改写现有搜索、评论和私信。
 
 ## 4. 目标架构
 
@@ -147,20 +212,25 @@ App 尚未发布，不存在需要保留的旧版用户 Profile、Cookie 或浏�
 
 开发期已经产生的测试 Profile 只按开发清理规则丢弃，不进入产品迁移逻辑。
 
-### 4.3 优先共用一套完整 Chromium
+### 4.3 三方优先共用一套完整 Chromium
 
-共用的是同一个经过签名和摘要校验的浏览器二进制，不是同一个运行进程、CDP 会话或 Profile：
+共用的是同一个经过签名和摘要校验的浏览器二进制。默认不是同一个运行进程、CDP 会话或 Profile；唯一例外是抖音发布通过独占租约串行接管运营浏览器：
 
 | 用途 | 进程与数据 | 启动方式 | 用户是否看见 |
 | --- | --- | --- | --- |
 | 运营 RPA | 独立可见进程 + 持久 App 私有 Profile | Playwright headed persistent context | 看见，可扫码和人工接管 |
+| Browser Use | 独立验证用临时 Profile；抖音发布复用持久运营 Profile | `BrowserSession(executable_path=...)` 启动同一二进制，或持有租约后经随机 loopback `cdp_url` 接管运营进程 | 抖音发布可见，支持人工接管 |
 | 品牌动效渲染 | 独立无头进程 + 每个 RenderJob 的临时数据目录 | Node Worker 把同一完整 Chromium 路径作为 `chromePath` 传入 | 不看见，只负责隔离渲染 |
+
+Browser Use 直接通过 CDP 驱动 Chrome/Chromium，支持 `executable_path` 和 `cdp_url`，没有强制绑定独立浏览器 major；但其默认发现/安装路径不能进入产品。App 必须只把 Rust 已验证的内置路径或本轮拥有者创建的随机 loopback CDP 地址交给它，禁止发现系统浏览器、用户默认 Profile、Browser Use Cloud 和任何下载 fallback。
+
+“共用”仍然不是让三个框架争抢一个页面。独立验证和动效渲染使用不同进程/Profile。抖音发布需要已有登录态时，确定性 Playwright 先取得 `BrowserSurfaceLease` 并暂停动作，Browser Use 再通过短生命周期 CDP 串行控制该运营进程，完成后关闭自己的会话并归还租约；Playwright 可以保持连接但不得同时发动作，CDP 只监听随机 loopback，任务结束立即撤销。
 
 不能让 RPA 反过来使用上游自带的 `chrome-headless-shell`：它是无头渲染壳，没有正常浏览器窗口，无法满足扫码、验证码和人工接管。可以让视频渲染使用 RPA 的完整 Chromium：上游明确支持 `chromePath` / `HYPERFRAMES_BROWSER_PATH`。
 
 上游不是在所有平台都只有一种取帧方式。锁定版本的实际分支是：macOS、Windows 即使用自带无头壳也默认通过 `Page.captureScreenshot` 逐帧取图；Linux 配合无头壳且未强制截图时优先使用 `HeadlessExperimental.beginFrame` 驱动合成器，方法不可用时再回退截图。因此本项目当前两个目标平台共用完整 Chromium 不会改变原本的取帧方式，验证重点是 Puppeteer/CDP 兼容、字体布局、GPU/WebGL/WebGPU、视频解码、透明画面、资源占用和结果稳定性。
 
-这项共用验证必须放在浏览器供应链最前面。EB-02 在任何正式打包和视频页面开发前，使用 Playwright 锁定的完整 Chromium 同时完成 RPA 启动与动效渲染矩阵。通过后，ADR 和 Manifest 只允许这一套 Chromium，后续所有任务都按共用基线开发；不再下载、缓存或打包 `chrome-headless-shell`。若失败，先尝试调整 Playwright/Chromium 的共同锁定组合并重跑；仍失败才暂停并单独决策是否接受第二套渲染内核，不能在后续任务里静默引入。
+这项共用验证必须放在浏览器供应链最前面。EB-02 在任何正式打包和视频页面开发前，使用 Playwright 锁定的完整 Chromium 同时完成可见 RPA、Browser Use 独立启动/租约接管与动效渲染矩阵。通过后，ADR 和 Manifest 只允许这一套 Chromium，后续所有任务都按共用基线开发；不再下载、缓存或打包 `chrome-headless-shell` 或 Browser Use 默认浏览器。若失败，先尝试调整 Browser Use/Playwright/Chromium 的共同锁定组合并重跑；仍失败才暂停并单独决策，不能在后续任务里静默引入第二套内核。
 
 ### 4.4 视频控制面与本地执行器
 
@@ -175,6 +245,17 @@ App 尚未发布，不存在需要保留的旧版用户 Profile、Cookie 或浏�
 生产 UI 不直接调用任一上游本地 HTTP 接口。Tauri 管理 Worker 的启动、随机 loopback 端口、高熵会话令牌、健康、崩溃恢复、取消和退出。Control Plane 保存业务状态和稳定 ID，不保存用户本机路径或第三方明文密钥。
 
 每个 RenderJob 使用独立私有目录，只允许访问声明的输入 Artifact。生成的 HTML、网页内容、文件名、模型输出和远程素材都视为不可信输入，禁止直接进入 Shell、任意路径或任意网络请求。
+
+### 4.5 独立视频剪辑控制面
+
+    React 视频剪辑模块
+        → Tauri 窄接口
+        → Control Plane：EditingProject / Timeline / EditingJob / Artifact
+        → VideoEditingProvider Registry
+            └─ 首期 AliyunImsEditingProvider
+        → Provider-neutral 状态、回调对账、成片入库
+
+`VideoEditingProvider` 的最小能力为 `capabilities()`、`validate(timeline)`、`submit()`、`get()`、`cancel()` 和 `fetch_artifacts()`。每个 Adapter 自己负责 Timeline 编译、供应商媒资暂存、Job ID、状态映射、回调验签和错误归一化；供应商原始 DTO 只保存在受限诊断区。首期不实现腾讯云 Adapter，但用假的第二 Provider 跑完整一致性测试，证明增加真实腾讯云实现时不需要改领域层和 UI。
 
 ## 5. “智能素材成片”集成设计
 
@@ -194,7 +275,7 @@ App 尚未发布，不存在需要保留的旧版用户 Profile、Cookie 或浏�
 
 上游当前稳定版本核对为 v1.3.2，计划以 Git submodule 固定在 vendor/moneyprinterturbo，并锁定 commit b1588e1。升级只能通过单独任务完成，不跟随 main 分支。
 
-### 5.2 为什么用户可能看不到模型厂商选择
+### 5.2 上游为什么看起来能选很多模型，以及本 App 怎么处理
 
 上游 WebUI 支持选择文案模型服务，但入口不在主表单：
 
@@ -204,7 +285,7 @@ App 尚未发布，不存在需要保留的旧版用户 Profile、Cookie 或浏�
 - 只有部分厂商会动态列模型，其余厂商主要靠默认值或手工输入模型名；
 - 旧版本界面或没有打开设置弹窗时，很容易误以为不支持切换。
 
-App 应把这一能力直接放在“视频制作设置 → 文案模型服务”中，至少展示服务商、模型、连接地址、密钥是否已配置和连接测试。这里可以展示 OpenAI、Kimi、DeepSeek 等模型服务商名称，因为它们是用户选择的外部服务，不是本产品底层视频引擎品牌。
+本 App 不把上游多套密钥和 Provider 设置原样暴露给用户。首期统一显示“阿里百炼”，用户只选择百炼当前业务空间可用且通过能力验证的模型系列；App 网关把 Base URL、API Key 和锁定 model ID 注入 Worker。上游设置弹窗必须隐藏或只读，避免出现一处选百炼、一处仍能改成其他直连服务的双重事实源。
 
 ### 5.3 不修改上游源码的 WebUI 方案
 
@@ -341,9 +422,9 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 上游已经对素材下载的部分 URL 和重定向做了私网拒绝，但主页面导航仍直接调用 page.goto。App 不能把这一点当作完整的 SSRF 防护，必须在外围网关和浏览器请求拦截中补齐。
 
-### 6.6 Catalog 的 100 个不是 100 套风格
+### 6.6 Catalog 全部 134 个可安装零件
 
-2026-07-22 实查官网 Catalog 页，页面明确展示 100 个可复用项。公开 catalog-index.json 中是 76 个完整画面块和 24 个局部组件。
+2026-07-23 实查官网 Catalog 页，页面仍明确展示 100 个可复用项。公开 catalog-index.json 中是 76 个完整画面块和 24 个局部组件。
 
 | 公开目录的主分类 | 数量 | 普通用户能理解的用途 |
 | --- | ---: | --- |
@@ -361,17 +442,30 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 官网的 Showcase 20、Captions 15、VFX 13、Transitions 30、Social 9、Data 7、Effects 5 和 Overlays 21 是可重叠标签，不能相加当总数。
 
-固定的 v0.7.68 仓库 registry 实际已经包含 134 个可安装零件（109 个画面块、25 个局部组件），比官网公开预览多 34 个；多出的主要是新代码动画等尚未进入当前公开画廊的内容。产品首期以“官网可预览的 100 个”为用户可见基线，其余 34 个不静默混入，等公开预览、权利和兼容性都完成后再通过升级任务增加。
+固定的 v0.7.68 仓库 registry 实际包含 134 个可安装零件（109 个完整画面块、25 个局部组件），比官网公开预览多 34 个。产品首期目标改为全部 134 个都进入 App 离线目录和中文高级选择器；官网 100 项只作为“有官方在线预览”的子集标记，不再限制产品数量。
 
-这些零件技术上可以用官方 add 命令安装到单个视频工程，但不能把官网预览或示例素材原样打包：
+这些零件技术上可以用官方 add 命令安装到单个视频工程，但不能把官网预览或示例素材原样打包。对 v0.7.68 安装目录的实扫结果是：134 项源文件约 31 MB，127 项仍包含运行时远程引用；其中 125 项引用 jsDelivr、54 项引用 Google Fonts、4 项引用 Cloudflare CDN、3 项引用 gstatic/Draco，另有地图数据。计数按“受影响零件”统计，分类会重叠。
 
-- 多个零件依赖 jsDelivr、Google Fonts、gstatic 或 Cloudflare CDN，正式包必须下载、锁版本、核摘要并改为本地资源；
-- 3D、WebGL、WebGPU 和 shader 零件要分别验证 macOS/Windows、无独立显卡、驱动异常和无头渲染；
-- 示例中存在人物头像、作者音效、Apple/macOS/iOS、TikTok、Instagram、X、Spotify 等商标或界面外观；
-- Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、音乐、字体、商标和第三方素材的商业使用权；
-- 产品应复用动效结构，把示例人物、Logo、账号、文字、音效和图片替换为用户自己的授权素材。
+离线内置方案：
 
-产品交互不让普通用户从 100 个技术名中盲选。默认由 AI 根据分镜和平台自动挑选；高级设置按“转场、字幕、身份条、图表地图、社交展示、3D 效果”等中文分组开放全部 100 个，并为每项提供预览、性能等级、适用场景和权利提示。
+1. submodule 始终只读；构建期从锁定 commit 生成 App 自有 `OfflineMotionCatalog`，不直接改上游文件；
+2. 把 GSAP、Three.js、D3、TopoJSON、Draco decoder 和地图数据下载到版本化资源目录，记录原 URL、版本、许可证、文件摘要和使用项；
+3. 把确认可再分发的字体文件本地化为 WOFF2，重写为 `@font-face`；缺少明确许可的字体换成 App 自有开放字体，不保留 Google Fonts 运行时请求；
+4. 对 134 项生成转换后的 HTML/资产清单并做静态扫描，任何 `http://`、`https://`、远程 CSS、远程脚本、远程字体、远程媒体或无摘要文件都使构建失败；
+5. 安装包运行时断网，渲染器只允许读取 App 资源和当前 RenderJob 的声明输入；不因用户电脑没有 VPN、无法访问 gstatic/jsDelivr 而降级；
+6. 每次上游升级重新生成、重新审计并跑 134 项逐项预览与渲染，不把构建产物回写 submodule。
+
+示例素材替换分为五类，不能全部用文生图一把替换：
+
+- 人物头像、壁纸、普通插画和纹理：用 Image Generation 生成全新中性资产，保存生成说明、模型版本、审核和文件摘要；不得仿照示例人物或品牌；
+- Logo、App 图标、社交卡片和 Apple/macOS/iOS 风格界面：改为 App 自有的虚构品牌、通用设备和中性界面，必要时手工重写 HTML/SVG；
+- 地图：使用许可证明确的矢量地理数据生成，不能用文生图替代真实地理边界；
+- 3D 手机/电脑模型：换成自有或明确允许再分发的 GLB，Draco decoder 本地化；文生图不能替代可旋转 3D 模型；
+- 音效、字体和纹理库：分别使用明确可再分发的音频、开放字体和有许可证台账的纹理；Image Generation 不能解决音频、字体和第三方库授权。
+
+Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、音乐、字体、商标和第三方素材的商业使用权。任何一项只要权利、来源或离线依赖未闭合，就不能把原示例资产带入发行包；应保留零件结构，用自有资源完成替换后再启用。
+
+产品交互不让普通用户从 134 个技术名中盲选。默认由 AI 根据分镜和平台自动挑选；高级设置按“转场、字幕、身份条、图表地图、社交展示、代码演示、3D 效果”等中文分组开放全部 134 个，并为每项提供离线预览、性能等级、适用场景、设备要求和资源来源状态。低配置设备可以显示“不支持当前设备”，但安装包仍包含该零件，不能偷偷联网补资源。
 
 ### 6.7 官网说话人像示例的真实边界
 
@@ -399,7 +493,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 1. 新建视频：输入一句话或获授权的公开网站 URL，再选择目标平台、时长、画幅、语言和品牌资料；
 2. 选择制作方式：展示“智能素材成片”和“品牌动效成片”两张卡片；
-3. 设置：根据所选方式显示素材来源/配音/字幕，或视频类型、12 套整体风格、品牌色、字体和 100 个动效零件的高级设置；
+3. 设置：根据所选方式显示素材来源/配音/字幕，或视频类型、12 套整体风格、品牌色、字体和 134 个动效零件的高级设置；
 4. 脚本与分镜：用户可修改文案和镜头；
 5. 预览与生成：显示预计耗时、磁盘、外部 API 需求、预算和本地资源；
 6. 成片：预览、下载、保留、删除和进入现有发布链路。
@@ -426,22 +520,26 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | H8-16E 启动环境诊断 | 从“系统浏览器是否可用”改为“内置发行物完整性和兼容性” |
 | P9 打包与正式包审计 | EB-16、EB-17 修改首发包内容、签名、干净机和卸载门禁 |
 | CT-01、CT-06～CT-13 | VF 系列细化领域对象、本地编排、Timeline 和 Artifact |
-| CT-14～CT-22 | 继续由主路线图负责平台发布、记录和内容日历，不在本文件重复拆分 |
+| CT-14～CT-22 | PB 系列细化首期 B站 API + 抖音 Browser Use；快手/小红书/视频号后置，发布记录和内容日历继续复用主路线图对象 |
 | CT-23 AI 视频 Provider | 重新表述为未来真人/真实场景生成方案，本期不实现 |
 
 ## 9. 任务拆分总览
 
-共 54 个候选小任务：
+共 87 个候选小任务，其中 SA 的 7 项只做后续规划，首期不激活：
 
 | 工作线 | 数量 |
 | --- | ---: |
 | 架构与治理 AV | 4 |
 | 内置运营浏览器 EB | 17 |
+| Browser Use CU | 7 |
 | 视频基础 VF | 7 |
 | 智能素材成片 IM | 8 |
-| 品牌动效成片 BM | 13 |
+| 品牌动效成片 BM | 16 |
+| 独立视频剪辑 VE | 8 |
+| 首期内容发布 PB | 8 |
+| 自愈式自动化 SA（后置） | 7 |
 | 组合质量 CQ | 5 |
-| 合计 | 54 |
+| 合计 | 87 |
 
 ### 9.1 架构与治理（4 项）
 
@@ -457,24 +555,36 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | ID | 任务 | 交付与验收 | 依赖 |
 | --- | --- | --- | --- |
 | EB-01 | Playwright 与 Chromium 兼容矩阵 | 锁定 Playwright、完整 Chromium 版本/修订、macOS arm64 和 Windows x86_64；安装包内版本不匹配时 fail closed | AV-04 |
-| EB-02 | 共用 Chromium 前置验证门禁 | 在 macOS/Windows 用 EB-01 同一完整 Chromium 分别启动可见 RPA 进程和独立无头渲染进程；渲染 12 套风格、公开 100 项单帧冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏，并验证与 RPA 并发、进程/Profile 隔离和无上游浏览器下载；通过后 ADR 固定为一套，失败则先调整共同版本重跑并暂停后续任务 | AV-02,EB-01 |
+| EB-02 | 三方共用 Chromium 前置验证门禁 | 在 macOS/Windows 用 EB-01 同一完整 Chromium 分别启动可见 RPA、Browser Use `executable_path`/随机 CDP 两种模式和独立无头渲染进程；渲染 12 套风格、全部 134 项单帧冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏，并验证三方并发、进程/Profile 隔离、控制权租约和无第二套浏览器下载；通过后 ADR 固定为一套，失败则先调整共同版本重跑并暂停后续任务 | AV-02,EB-01 |
 | EB-03 | macOS 浏览器构建暂存 | 构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动 | EB-02 |
 | EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 |
-| EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 |
+| EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 |
 | EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 |
 | EB-07 | Executor 启动协议迁移 | 复用 BrowserLaunchRequest 和现有线程归属；由 Rust 传已验证内置路径，移除运行时发现 fallback | EB-06 |
 | EB-08 | 启动健康状态迁移 | 用“浏览器组件正常/损坏/版本不兼容”替代“未安装/未选择 Chrome/Edge”，提供安全修复提示 | EB-06 |
 | EB-09 | 全新内置 Profile 契约 | 新根目录、权限、稳定路径、排他锁、首次创建、登录后复用和安全删除测试；没有迁移或旧版分支 | EB-06 |
 | EB-10 | 删除生产浏览器选择链路 | 先搜索所有引用，再移除设置项、启动门禁和生产消费者；系统浏览器发现代码不得继续存在可达的用户入口 | EB-08,EB-09 |
 | EB-11 | 登录与 Session 接入 | 抖音扫码、登录状态探测、失效接管、注销和重启复用在全新内置 Profile 走正式入口；验证码仍人工处理 | EB-07,EB-09 |
-| EB-12 | 搜索、浏览与候选提取迁移 | 现有确定性页面对象和语义定位候选在内置浏览器运行；页面变化和遮罩失败矩阵不降级 | EB-11 |
-| EB-13 | 评论链路迁移 | ActionGate、内容哈希、prepare/dispatch/verify、单次发送和 outcome_uncertain 全部保持 | EB-12 |
-| EB-14 | 私信与恢复链路迁移 | 目标校验、频控、单次发送、结果验收、暂停/取消/紧停、崩溃和重启恢复保持 | EB-12 |
-| EB-15 | 诊断、人工接管与进程清理 | headed 窗口、关闭顺序、进程树强杀、Profile 解锁、日志脱敏、休眠/退出/崩溃和手动关闭矩阵；渲染进程不得接触运营 Profile/CDP | EB-11..EB-14 |
+| EB-12 | 搜索、浏览与候选提取原样迁移 | 现有固定 Playwright 页面对象和语义不重写，只换内置 Chromium 启动来源；现有页面变化和遮罩失败矩阵不降级 | EB-11 |
+| EB-13 | 评论链路原样迁移 | 本期不接 Browser Use；现有 ActionGate、内容哈希、prepare/dispatch/verify、单次发送和 outcome_uncertain 全部保持 | EB-12 |
+| EB-14 | 私信与恢复链路原样迁移 | 本期不接 Browser Use；现有目标校验、频控、单次发送、结果验收、暂停/取消/紧停、崩溃和重启恢复保持 | EB-12 |
+| EB-15 | 诊断、人工接管与进程清理 | headed 窗口、关闭顺序、进程树强杀、Profile 解锁、日志脱敏、休眠/退出/崩溃和手动关闭矩阵；Browser Use 独立会话/渲染进程不得接触运营 Profile/CDP，抖音发布持有租约的短生命周期接管除外 | EB-11..EB-14 |
 | EB-16 | 首发安装包与签名 | 只打包一套完整 Chromium；macOS 内层签名/公证、Windows 签名、首次安装/卸载、包体积、进程退出和残留资源 | EB-15 |
-| EB-17 | 无浏览器干净机纵向验收 | macOS 和 Windows 都在未安装 Chrome/Edge 的全新环境，从 App 正式入口完成安装、RPA 启动、扫码、搜索、受控动作和动效渲染；运行时不下载第二套浏览器且无残留 | EB-16 |
+| EB-17 | 无浏览器干净机纵向验收 | macOS 和 Windows 都在未安装 Chrome/Edge 的全新环境，从 App 正式入口完成安装、RPA 启动、扫码、搜索、受控动作、Browser Use 隔离演示和动效渲染；运行时不下载第二套浏览器且无残留 | EB-16,BU-07 |
 
-### 9.3 视频基础（7 项）
+### 9.3 Browser Use（7 项）
+
+| ID | 任务 | 交付与验收 | 依赖 |
+| --- | --- | --- | --- |
+| BU-01 | Browser Use 版本与 API 契约 | 锁 `browser-use==0.13.6`、Python/依赖、Agent/BrowserSession/Tools/history API 和序列化 fixture；实现前再次核对是否有更新稳定版并单独升级验证 | AV-04 |
+| BU-02 | 单一 Chromium 双模式适配 | Rust 只下发已验证 `executable_path`；独立模式用临时 Profile，抖音模式用随机 loopback `cdp_url` 接管运营进程；关闭系统浏览器发现、默认安装/下载、Cloud 和 fallback | BU-01,EB-02 |
+| BU-03 | 受限 Agent 与 Tools | 只保留观察、同域导航、点击、输入、选择、滚动和受控上传；结构化结果、allowed_domains/routes、步骤/时长/批量动作上限；移除任意 JS/文件/下载/跨域/Shell | BU-02 |
+| BU-04 | 页面动作所有权租约 | 建立 `BrowserSurfaceLease`；抖音发布时 Browser Use 经 CDP 独占运营浏览器动作权，暂停原 Playwright 执行器，超时/崩溃必定断开 CDP 并归还 | BU-02,EB-07 |
+| BU-05 | 安全策略与确认门禁 | 页面内容不可信、敏感数据发送前确认、外部副作用临界点确认、ActionGate/ledger/Verifier 复用；模型历史、DOM 和截图脱敏且不持有 Cookie/token | BU-03,BU-04 |
+| BU-06 | 百炼模型与受限能力接入 | `ChatOpenAI` 指向百炼兼容地址；锁最新稳定模型及能力快照，视觉默认 qwen3.7-max 最新多模态版本，DeepSeek/GLM 仅在 DOM-only 验收后可选；无通用 Browser Use 菜单 | BU-05,VF-05 |
+| BU-07 | 双平台正式包与攻击矩阵 | macOS/Windows 正式包使用唯一 Chromium 完成独立 Agent 与租约接管；覆盖 prompt injection、DOM/截图差异、模型不兼容、断网、超时、并发租约、CDP 暴露、进程清理和零真实副作用 | BU-06,EB-16 |
+
+### 9.4 视频基础（7 项）
 
 | ID | 任务 | 交付与验收 | 依赖 |
 | --- | --- | --- | --- |
@@ -486,7 +596,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | VF-06 | 左侧“视频制作”入口与页面骨架 | 接入现有 WorkbenchShell，完成新建、脚本/分镜、设置、预览、任务和成片页面；无假数据冒充运行结果 | VF-01 |
 | VF-07 | 两种制作方式选择器 | 两张中文卡片清楚展示适用/不适用、示例、耗时、资源、网络和隐私；未来方案不展示 | VF-05,VF-06 |
 
-### 9.4 智能素材成片（8 项）
+### 9.5 智能素材成片（8 项）
 
 | ID | 任务 | 交付与验收 | 依赖 |
 | --- | --- | --- | --- |
@@ -499,7 +609,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | IM-07 | RenderJob 与 Artifact 对账 | WebUI 创建的任务进入 App 状态机；进度、取消、失败、成片摘要、保留和删除只有一个权威来源 | IM-06,VF-03 |
 | IM-08 | 代表性视频与正式包验收 | 知识讲解、资讯摘要、榜单三类样片；素材权利、字幕、配音、断网、API 失败、磁盘、取消、重启、macOS/Windows 包全部验证 | IM-07,VF-04 |
 
-### 9.5 品牌动效成片（13 项）
+### 9.6 品牌动效成片（16 项）
 
 | ID | 任务 | 交付与验收 | 依赖 |
 | --- | --- | --- | --- |
@@ -513,36 +623,87 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | BM-08 | App 原生编辑、Studio 精修与 Artifact 导入 | 不暴露上游 Studio 品牌；App 内编辑脚本/分镜/风格、播放预览、看进度、取消和管理成片；无模型时允许从固定模板替换声明变量/素材并手工精修，但不伪装成一句话生成 | BM-05,BM-07,VF-06 |
 | BM-09 | 公共网站抓取与安全网关 | 只允许获授权的公开 http/https URL；协议、DNS/IP、每跳重定向、请求拦截、私网/元数据拒绝、大小/时长/跨域限制和网页指令注入测试 | BM-04 |
 | BM-10 | 网址转产品视频工作流 | 抓取→品牌说明→脚本/分镜→风格→旁白/字幕/音乐→HTML→预览→渲染；支持横竖屏和品牌短片、产品演示、发布预告、功能介绍 | BM-05,BM-07,BM-09 |
-| BM-11 | 公开 100 项 Catalog 固定与权利审计 | 固定 76 个画面块、24 个局部组件的清单/摘要/中文分类；逐项审计远程依赖、字体、素材、作者、商标、GPU 要求和替换策略 | BM-01,AV-02 |
-| BM-12 | 100 项动效库自动选用与高级界面 | AI 可按分镜自动选，用户可按中文分类查看全部 100 项预览并覆盖；每项显示性能、适用、权利和离线状态；不把它们叫作整体风格 | BM-08,BM-10,BM-11 |
-| BM-13 | 确定性与正式包验收 | 同输入/版本/字体/资源生成稳定结果；一句话、网址转视频、无模型手工模板边界、12 套整体风格和公开 100 项逐项冒烟；并发、崩溃、休眠、磁盘和双平台包验证 | BM-08..BM-12,VF-04 |
+| BM-11 | 全部 134 项 Catalog 固定与权利审计 | 固定 109 个画面块、25 个局部组件的清单/摘要/中文分类；官网 100 项标记为有官方预览；逐项审计代码、远程依赖、字体、素材、作者、商标、GPU 和再分发权 | BM-01,AV-02 |
+| BM-12 | 远程依赖离线供应链 | 在不修改 submodule 的前提下生成 `OfflineMotionCatalog`；本地化并锁定 GSAP/Three.js/D3/TopoJSON/Draco/地图数据/开放字体，保存来源、许可证与摘要；134 项静态扫描零远程 URL | BM-11 |
+| BM-13 | 示例资产去品牌与原创替换 | Image Generation 生成原创头像/壁纸/插画/纹理；地图、3D、音效、字体和 SVG/UI 分别用有明确再分发权的资源或自研中性版本替换；建立资产来源、审核和摘要台账 | BM-11,AV-02 |
+| BM-14 | 134 项离线目录构建器 | 将上游代码、离线依赖和 App 资产 overlay 合成为只读版本化目录；不回写 submodule，构建可复现，缺项、远程引用、未登记资产或摘要漂移均失败 | BM-12,BM-13 |
+| BM-15 | 134 项自动选用与高级界面 | AI 可按分镜自动选；用户按中文分类查看全部 134 项离线预览并覆盖；每项显示性能、设备要求、适用和来源状态，不把零件叫作整体风格 | BM-08,BM-10,BM-14 |
+| BM-16 | 确定性与正式包验收 | 同输入/版本/字体/资源生成稳定结果；一句话、网址转视频、无模型手工模板边界、12 套整体风格和全部 134 项逐项预览/渲染；断网/VPN 缺失、低配置、并发、崩溃、休眠、磁盘和双平台包验证 | BM-08..BM-15,VF-04 |
 
-### 9.6 组合质量（5 项）
+### 9.7 独立视频剪辑（8 项）
 
 | ID | 任务 | 交付与验收 | 依赖 |
 | --- | --- | --- | --- |
-| CQ-01 | 普通用户可理解性验收 | 用户不看技术文档也能选对两种制作方式，分清 12 套整体风格和 100 个动效零件；界面无未解释行业词 | IM-08,BM-13 |
-| CQ-02 | 用户界面上游名称泄漏扫描 | 扫描 React、WebView、标题、可访问性树、加载、错误、日志、任务、文件名和导出；法务页单独白名单 | IM-08,BM-13,AV-03 |
-| CQ-03 | 资源与失败矩阵联合压力测试 | 两种视频任务与 RPA 共用 Chromium 二进制并发时覆盖 CPU、内存、磁盘、网络、取消、紧停、崩溃、休眠和 App 退出；进程/Profile 互不干扰 | EB-15,IM-08,BM-13 |
-| CQ-04 | macOS/Windows 正式包纵向验收 | 从全新安装的真实 App 一句话创建两类视频、预览、成片入库，再交给既有发布入口；验证单一 Chromium、安装、卸载和零残留 | EB-17,CQ-02,CQ-03 |
+| VE-01 | 独立剪辑领域与模块 ADR | 定义 EditingProject/Timeline/EditingJob/Artifact、与 VideoCreationProvider/PublishJob 的边界；“视频剪辑”是独立菜单和状态机 | AV-04,VF-01 |
+| VE-02 | VideoEditingProvider 契约与注册表 | `capabilities/validate/submit/get/cancel/fetch_artifacts`、统一错误/状态/幂等键；供应商 DTO 不进入领域层 | VE-01 |
+| VE-03 | 剪辑工作台与 Timeline 编辑 | 独立左侧入口；轨道、片段、字幕、音频、转场、预览、保存、提交和任务详情只消费内部 DTO | VE-01,VF-06 |
+| VE-04 | 阿里 IMS/ICE 凭据与媒资暂存 | 地域/账号/权限检查，OSS/IMS 同地域 staging、摘要、去重、生命周期、费用预估和密钥脱敏 | VE-02,VF-05 |
+| VE-05 | 阿里 Timeline 编译与任务提交 | 内部 Timeline 编译为阿里轨道/素材/特效，能力差异在提交前验证；一次提交并保存 JobId/请求哈希 | VE-03,VE-04 |
+| VE-06 | 回调、轮询、取消与对账 | MNS/回调验签、主动查询、乱序/重复事件、超时、取消、未知结果和崩溃恢复统一推进 EditingJob | VE-05 |
+| VE-07 | 成片导入、谱系、成本与清理 | 下载/登记视频、封面、字幕与 metadata；记录输入/Timeline/provider/version/费用，临时 OSS/IMS 资源按策略清理 | VE-06,VF-03 |
+| VE-08 | Provider 一致性与可替换验收 | 用阿里真实沙箱/账号样例和假的第二 Provider 跑同一契约、Timeline 与 UI；证明未来新增腾讯云 Adapter 不改领域层/页面；首期不实现腾讯云 | VE-02..VE-07 |
+
+### 9.8 首期内容发布（8 项）
+
+| ID | 任务 | 交付与验收 | 依赖 |
+| --- | --- | --- | --- |
+| PB-01 | 发布领域与首期 capability 冻结 | 复用 PublishJob/Artifact/审批/ledger；只启用 B站 `official_api` 和抖音 `browser_use`，快手/小红书/视频号明确 `deferred` 且无入口 | AV-04,VF-01 |
+| PB-02 | B站正式 API 授权与版本契约 | 复核当前开放平台文档/控制台 scope，锁请求/响应 fixture、授权续期、限流、错误和上传规格；凭据缺失时以官方契约、Mock Server 和 fixture 完成开发，不等待密钥；旧接口或非正式接口不得接入 | PB-01 |
+| PB-03 | B站上传与创建稿件 | 素材校验、分片/断点、封面/标题/简介/分区/标签，幂等准备后只创建一次；保存 resource/稿件 ID 与请求摘要；无真实凭据也必须完成实现、Mock 纵向测试和失败矩阵 | PB-02,VF-03 |
+| PB-04 | B站状态查询与对账 | 审核中、成功、拒绝、超时、回调/轮询、重启恢复和 `outcome_uncertain`；不得因超时重复投稿；凭据未提供时状态为“代码完成/待凭据验收”，不阻塞 PB-05 及后续任务 | PB-03 |
+| PB-05 | 抖音 Browser Use 发布前流程 | 用持久运营 Profile 和独占页面租约打开当前发布页；Browser Use 识别页面、选择/上传 Artifact、填写内容并停在提交前，覆盖改版/遮罩/登录失效/验证码 | BU-06,EB-11,VF-03 |
+| PB-06 | 抖音单次发布与独立验收 | 在发布临界点展示目标账号、视频摘要和文案并确认；ActionGate + ledger 后最多点击一次，使用页面/作品列表等独立证据验收，不明确即 `outcome_uncertain` | PB-05 |
+| PB-07 | 双平台发布界面与审计 | 发布页只展示 B站/抖音；平台适用性、授权、进度、审批、取消、失败、结果和审计使用统一 DTO，不暴露上游技术名；B站未配置凭据时显示可理解的“待配置”，不让整个发布模块启动失败 | PB-04,PB-06 |
+| PB-08 | 分平台真实账号纵向验收 | macOS/Windows 正式 App 完成抖音可见 Browser Use 投稿；B站有凭据时完成 API 投稿，无凭据时保留独立 `待凭据验收` 检查项并继续后续任务。逐平台验证单一 Chromium、单次副作用、结果对账、退出清理和风控边界，禁止把 Mock 当真实平台证据 | PB-07,EB-17 |
+
+### 9.9 自愈式自动化（7 项，后续规划，首期全部不实现）
+
+| ID | 任务 | 交付与验收 | 依赖 |
+| --- | --- | --- | --- |
+| SA-01 | 声明式 AutomationSkill Schema | JSON 只允许语义目标、受限动作、前置/后置条件、风险、检查点和证据；拒绝任意 JS/CSS 注入、Shell、秘密、用户正文和原始截图 | PB-08，后置激活 |
+| SA-02 | Browser Use 成功轨迹清洗器 | 把动作/页面事实清洗为候选步骤，去坐标依赖、秘密和偶然状态；外部副作用边界、账号/域名和成功证据不可丢失 | SA-01 |
+| SA-03 | Skill 编译、审核与签名 | 首次成功轨迹生成 immutable v1；schema/lint/回放沙箱/人工审核后签名发布，模型不能自行提升权限或直接覆盖线上版本 | SA-02 |
+| SA-04 | 确定性 Skill 回放器 | 按语义锚点与前后条件执行，不必每步调用视觉模型；每步有超时、最大一次副作用、独立验收和安全检查点 | SA-03 |
+| SA-05 | 失败点接管与差异收集 | 未 dispatch 时从首个失败安全点切回 Browser Use，完成剩余流程并记录差异；已 dispatch 且不明确时只对账，禁止继续/重发 | SA-04,BU-05 |
+| SA-06 | 不可变版本与页面变体路由 | 修复成功生成带 `parent_version` 的候选 v2，v1 永不删除；按页面指纹、语言、viewport、历史成功率和最近命中选择，支持 A/B 变体并存与回滚 | SA-05 |
+| SA-07 | 管理界面、灰度与长期质量 | 查看版本树、适用变体、成功率、失败步骤、审核/停用/回滚；真实站点快照回放、prompt injection、版本投毒、漂移和错误自愈矩阵 | SA-06 |
+
+### 9.10 组合质量（5 项）
+
+| ID | 任务 | 交付与验收 | 依赖 |
+| --- | --- | --- | --- |
+| CQ-01 | 普通用户可理解性验收 | 用户不看技术文档也能选对两种制作方式，分清 12 套整体风格、134 个动效零件和独立视频剪辑模块；界面无未解释行业词 | IM-08,BM-16,VE-08 |
+| CQ-02 | 用户界面上游名称泄漏扫描 | 扫描 React、WebView、标题、可访问性树、加载、错误、日志、任务、文件名和导出；法务页单独白名单 | IM-08,BM-16,VE-08,AV-03 |
+| CQ-03 | 资源与失败矩阵联合压力测试 | 两种视频任务、独立剪辑任务、Browser Use、双平台发布与 RPA 共用 Chromium/本机资源并发时覆盖 CPU、内存、磁盘、网络、取消、紧停、崩溃、休眠和 App 退出；进程/Profile 互不干扰；B站无凭据时使用 Mock/契约路径并保留待补真实证据 | EB-15,BU-07,IM-08,BM-16,VE-08,PB-08 |
+| CQ-04 | macOS/Windows 正式包纵向验收 | 从全新安装的真实 App 一句话创建两类视频、送入独立阿里云剪辑、预览、成片入库，再用抖音 Browser Use 完成真实发布；B站有凭据则同时真实发布，无凭据则核对完整实现、Mock/契约证据和 `待凭据验收` 状态，不阻塞本任务其余验收 | PB-08,CQ-02,CQ-03 |
 | CQ-05 | 文档、SBOM 与主路线图收口 | 更新用户帮助、架构、隐私、许可证、版本锁、故障排查和卸载说明；主路线图记录真实提交和证据后才能完成 | CQ-04 |
 
 ## 10. 建议执行顺序
 
     阶段 A：AV-01～AV-04，先消除基线冲突
         ↓
-    阶段 B0：EB-01～EB-02，最先验证一套完整 Chromium 同时满足 RPA 与渲染
+    阶段 B0：EB-01～EB-02，最先验证一套完整 Chromium 同时满足 RPA、Browser Use 与渲染
         ↓ 只有 EB-02 通过才继续
     阶段 B：EB-03～EB-10，完成单一浏览器供应链、启动和全新 Profile
         ↓
-    阶段 C：EB-11～EB-17，逐条迁移现有 RPA 并完成干净机验收
+    阶段 C：BU-01～BU-06 与 EB-11～EB-16
+              Browser Use 受限底座和现有 RPA 迁移可在共同浏览器稳定后并行
         ↓
-    阶段 D：VF-01～VF-07，建立视频共同底座和页面入口
+    阶段 D：BU-07、EB-17，完成三方共用浏览器与干净机验收
         ↓
-    阶段 E：IM-01～IM-08 与 BM-01～BM-13
+    阶段 E：VF-01～VF-07，建立视频共同底座和页面入口
+        ↓
+    阶段 F：IM-01～IM-08、BM-01～BM-16 与 VE-01～VE-08
               两条制作方式可以在共同底座稳定后并行
+              独立剪辑先完成 Provider 契约，再接阿里云实现
         ↓
-    阶段 F：CQ-01～CQ-05，联合压力、正式包和文档收口
+    阶段 G：PB-01～PB-08，只交付 B站 API + 抖音 Browser Use 发布
+        ↓
+    阶段 H：CQ-01～CQ-05，联合压力、正式包和文档收口
+
+    后续阶段（不属于首期）：SA-01～SA-07；
+    只有抖音 Browser Use 发布真实验收后，才另立搜索/评论/私信的 Browser Use 第二阶段改造任务；
+    B站缺少凭据只留下独立待验收项，不阻塞后续任务或上述第二阶段立项。
 
 内容发布仍按主路线图 CT-14～CT-22 执行，不因为视频制作完成就宣称自动发布能力完成。
 
@@ -560,15 +721,19 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 6. 同一提交更新代码、测试、主路线图状态和证据；
 7. 没有 macOS/Windows 正式包、真实 App 或真实平台证据时，只能标待验收，不能标完成。
 
+外部平台凭据缺失时，任务状态必须拆开记录为“代码与确定性测试完成”和“真实平台待凭据验收”。前者达到交付与测试标准后即可继续依赖链；不得把缺少用户尚未提供的密钥当作持续阻塞，也不得用 Mock/fixture 冒充真实平台验收。凭据补齐后只恢复对应平台的真实验收清单。
+
 文档调研本身不冒充任何实现任务完成。
 
 ### 11.2 浏览器失败矩阵
 
 - 发行物缺失、摘要错、版本错、平台或架构错；
-- 共用浏览器只通过 RPA 或只通过渲染、渲染器试图下载第二套浏览器、两个用途误用同一进程/Profile/CDP；
+- 共用浏览器只通过 RPA、Browser Use 或渲染中的一部分，任一组件试图下载第二套浏览器，三个用途误用同一进程/Profile/CDP；
 - 安装包资源缺失、版本错配、签名失败和 Executor/浏览器组合错误；
 - 全新 Profile 创建失败、已锁、权限错、路径被替换和磁盘满；
 - 浏览器启动超时、窗口被用户关闭、Playwright driver 崩溃和进程树残留；
+- Browser Use 页面观察与实际 viewport/DPI 不一致、未知动作、动作中途失败、两个控制器同时持有页面、租约超时未归还；
+- 网页 prompt injection、敏感数据传输、跨域、下载、扩展、本地文件、Shell 或外部副作用没有在临界点暂停确认；
 - 登录失效、验证码、风险页、页面改版、断网和电脑休眠；
 - 评论/私信 dispatch 后断线、最终状态不明确、暂停/取消/紧停竞争；
 - 无 Chrome/Edge、完全离线、普通用户权限和卸载重装。
@@ -587,21 +752,36 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 - 当前锁定版本内风格缺失、摘要变化或同一 RenderJob 无法重现；
 - 网站 URL 指向私网、云元数据、登录页、跳转换域、DNS 重绑定或超大页面；
 - 网页文字诱导模型执行工具、泄漏密钥或偏离用户视频目标；
-- Catalog 零件依赖远程 CDN、GPU 不兼容、示例人物/商标/音效未替换或权利不明；
+- 134 项 Catalog 任一缺失、仍依赖远程 CDN/Google Fonts/gstatic、GPU 不兼容、示例人物/商标/音效未替换或权利不明；
 - 成片导入成功但任务状态失败，或任务显示成功但 Artifact 不存在。
+
+### 11.4 独立剪辑失败矩阵
+
+- Provider 不支持某轨道/转场/字幕能力却静默降级，或供应商 DTO 泄漏进领域层/UI；
+- OSS/IMS 地域、权限、媒资、摘要、生命周期或临时资源清理错误；
+- Timeline 编译前后时长、层级、字幕、音轨、裁剪或比例不一致；
+- 重复提交、回调伪造/乱序/重复、轮询与回调竞争、取消后仍成功、状态未知却自动重投；
+- 阿里限流、超时、欠费、任务失败、成片下载损坏、费用超预算或 Artifact 谱系缺失；
+- 假的第二 Provider 不能通过同一契约，证明接口实际上仍绑死阿里；
+- 视频制作失败拖垮剪辑模块，或剪辑供应商故障修改/污染原始生成素材。
 
 ## 12. 阶段完成定义
 
 只有同时满足以下条件，专项方案才算完成：
 
 - 用户电脑没有 Chrome/Edge 也能安装并运行运营 RPA；
-- App、Executor、Playwright、RPA 和动效渲染共用的唯一 Chromium 发行物在首发安装包内版本兼容且可验证；
+- App、Executor、Playwright、RPA、Browser Use 和动效渲染共用的唯一 Chromium 发行物在首发安装包内版本兼容且可验证；
+- Browser Use Agent/BrowserSession、受限 Tools、隔离 harness、安全策略和健康检查已接入，首期只由抖音发布调用，没有任意网站通用入口；
 - 现有抖音登录、搜索、浏览、评论、私信和恢复链路在内置浏览器保持安全语义；
+- 搜索、评论和私信第一版本期只完成原样迁移，没有被误报为已经完成 Browser Use 重构；
 - 左侧存在“视频制作”，用户能从一句话完成两种视频制作方式；
 - “智能素材成片”功能完整且不修改上游源码；
 - “品牌动效成片”提供官网当前公开的全部 12 套整体风格，并能推荐、预览、微调和冻结；
 - 获授权的公开网站可以从 URL 生成品牌短片或产品演示，私网、登录页和未授权网站默认拒绝；
-- 官网公开的 100 个动效零件全部进入固定清单和兼容性测试，用户能按中文分类使用，但不会被误导为 100 套整体风格；
+- 锁定 registry 的全部 134 个动效零件都进入离线固定清单、原创/合规资产替换和双平台兼容性测试，用户能按中文分类使用，但不会被误导为 134 套整体风格；
+- 视频剪辑作为独立模块存在，首期阿里云剪辑通过正式 Provider 入口完成；假的第二 Provider 证明未来接腾讯云不需要改领域层和页面；
+- 首期发布只开放 B站 API 和抖音 Browser Use：抖音必须从正式 App 完成单次提交与结果对账；B站必须完成实现与确定性验证，有凭据时完成真实投稿，无凭据时保留清晰的 `待凭据验收` 且不阻塞其他工作；快手、小红书、微信视频号无可达入口并明确暂不实现；
+- SA-01～SA-07 的自愈式自动化仍为后续规划，没有用事件字段或普通审计冒充 skill 编译、回放、修复和版本路由已实现；
 - UI、任务、错误和导出中没有两个上游项目名，法务声明除外；
 - 普通用户无需理解行业术语就能选对制作方式；
 - macOS 和 Windows 正式包完成全新安装、卸载、资源清理和干净机纵向验收；
@@ -611,6 +791,9 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 - Playwright 浏览器与版本匹配：https://playwright.dev/docs/browsers
 - Playwright executablePath 风险提示：https://playwright.dev/docs/api/class-browsertype
+- Browser Use 官方仓库：https://github.com/browser-use/browser-use
+- Browser Use 浏览器参数：https://docs.browser-use.com/customize/browser/all-parameters
+- Browser Use 自定义模型：https://docs.browser-use.com/customize/llm/all-parameters
 - Tauri 资源打包：https://v2.tauri.app/develop/resources/
 - Tauri Node sidecar：https://v2.tauri.app/learn/sidecar-nodejs/
 - Tauri Capability：https://v2.tauri.app/security/capabilities/
@@ -630,5 +813,12 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 - 官网 12 套风格：https://www.hyperframes.dev/design
 - 官网 URL 转视频：https://www.hyperframes.dev/website
 - 官网公开 100 项 Catalog：https://www.hyperframes.dev/
+- v0.7.68 可安装 registry（109 blocks + 25 components + 8 examples）：https://github.com/heygen-com/hyperframes/blob/v0.7.68/registry/registry.json
 - Website to Video 官方指南：https://hyperframes.heygen.com/guides/website-to-video
 - Catalog 官方说明：https://hyperframes.heygen.com/catalog/blocks/data-chart
+- 百炼 DeepSeek 模型：https://help.aliyun.com/zh/model-studio/deepseek-api
+- 百炼 GLM 模型：https://help.aliyun.com/zh/model-studio/glm
+- 百炼千问文本模型：https://help.aliyun.com/zh/model-studio/text-generation-model
+- 百炼视觉理解模型：https://help.aliyun.com/zh/model-studio/vision/
+- 阿里 IMS 云剪辑：https://help.aliyun.com/zh/ims/user-guide/cloud-clip
+- 阿里 IMS Timeline 配置：https://help.aliyun.com/zh/ims/developer-reference/timeline-configuration-description

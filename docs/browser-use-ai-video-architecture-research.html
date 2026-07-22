@@ -125,9 +125,9 @@
   <header class="hero shell">
     <div class="eyebrow">Architecture Research · Decision Document</div>
     <h1>数字员工浏览器自动化与 AI 视频生产技术方案</h1>
-    <p class="lede">面向 automation-tool 的可落地方案：用 Browser Use 增强网页理解，但保留现有的授权、幂等与结果确认；用“分镜 + 参考资产 + 分段生成 + 云剪辑”构建一句话到视频，再通过官方接口优先、浏览器兜底完成分发和互动。</p>
+    <p class="lede">面向 automation-tool 的可落地方案：App 内置一套完整 Chromium，供 Playwright、Browser Use 和品牌动效渲染共同使用；用两种视频制作方式与独立云剪辑模块构建一句话到成片，首期通过 B站 API 和抖音 Browser Use 完成发布。</p>
     <div class="meta">
-      <span class="tag">调研日期：2026-07-22</span>
+      <span class="tag">调研日期：2026-07-23</span>
       <span class="tag">分支：research/browser-use-video-architecture</span>
       <span class="tag">结论级别：可开始技术验证，生产需过硬门禁</span>
       <span class="tag">适用：Tauri + Python Control Plane + Local Executor</span>
@@ -139,12 +139,14 @@
       <a href="#conclusion">结论</a>
       <a href="#current">现状</a>
       <a href="#browser-use">Browser Use</a>
+      <a href="#browser-runtime">共用浏览器</a>
       <a href="#browser-architecture">浏览器架构</a>
       <a href="#video">视频方案</a>
       <a href="#moneyprinter">智能素材成片</a>
       <a href="#motion-video">品牌动效成片</a>
       <a href="#editing">云剪辑</a>
       <a href="#publishing">发布与互动</a>
+      <a href="#self-healing">自愈规划</a>
       <a href="#roadmap">路线图</a>
       <a href="#risks">风险</a>
       <a href="#sources">资料</a>
@@ -188,14 +190,14 @@
           <thead><tr><th>决策项</th><th>建议</th><th>原因</th></tr></thead>
           <tbody>
             <tr><td>全面替换 Playwright</td><td class="no">不建议</td><td>当前代码的价值不只在选择器，还包括授权、限制、幂等账本、单次副作用与不确定结果处理。</td></tr>
-            <tr><td>引入 Browser Use</td><td class="yes">建议，受限引入</td><td>承担读操作、页面探索、语义候选定位和新版页面恢复，不拥有最终成功判定。</td></tr>
+            <tr><td>引入 Browser Use</td><td class="yes">首期受限接入</td><td>先用于抖音作品发布，复用内置 Chromium；不开放任意网站通用入口，也不接 OpenAI Computer Use。</td></tr>
             <tr><td>运营浏览器来源</td><td class="yes">改为 App 内置</td><td>随安装包提供与 Playwright 严格匹配的完整 Chromium，运行时离线，不依赖用户安装 Chrome/Edge；仍使用 App 私有 Profile 和可见窗口。</td></tr>
             <tr><td>Browser Use Cloud / stealth / CAPTCHA 绕过</td><td class="no">禁止</td><td>与项目“可见浏览器、人工接管、不得绕过风控”的既有边界冲突。</td></tr>
-            <tr><td>跨平台内容发布</td><td class="maybe">逐平台选路</td><td>B站走服务端 API；快手走 API + 前台确认；抖音走 SDK/H5 手动投稿；小红书、视频号暂无通用服务端投稿 API。</td></tr>
+            <tr><td>首期内容发布</td><td class="yes">只做 B站 + 抖音</td><td>B站走当前正式 API；抖音走 Browser Use + 可见内置 Chromium；快手、小红书、视频号列入后续但暂不实现。</td></tr>
             <tr><td>一句话直接生成整段长视频</td><td class="no">仅用于快速预览</td><td>人物、产品和叙事连续性不可控，也难以局部重做与控制成本。</td></tr>
             <tr><td>智能素材成片</td><td class="yes">作为低成本素材成片方式</td><td>适合口播知识类、资讯类，以及用城市、办公、生活等补充画面配合旁白的内容；不承担数字人、品牌人物一致性或真实文生视频。</td></tr>
             <tr><td>品牌动效成片</td><td class="yes">作为品牌与信息动效方式</td><td>适合网址转产品视频、图表、标题、产品演示和品牌动效；已有说话人物可作为输入素材，但底层渲染器本身不生成人物。</td></tr>
-            <tr><td>阿里 IMS/ICE 云剪辑</td><td class="yes">建议作为首个云剪辑 Provider</td><td>Timeline API、异步任务、字幕/音频/转场能力完整；同时保留本地 FFmpeg Provider。</td></tr>
+            <tr><td>视频剪辑</td><td class="yes">独立模块，首期阿里云</td><td>用供应商无关 Timeline 与 VideoEditingProvider 隔离；未来接腾讯云时只增加 Adapter，不改上层业务。</td></tr>
           </tbody>
         </table>
       </div>
@@ -208,11 +210,11 @@
 
       <div class="two">
         <article class="card">
-          <h3>应当替换/增强</h3>
+          <h3>后续单独替换/增强</h3>
           <ul>
-            <li><code>search_page.py</code>、<code>comment_page.py</code>、<code>direct_message_page.py</code> 中的固定页面感知。</li>
-            <li>把“元素在哪里、页面现在是什么状态”从硬编码选择器升级为多策略感知。</li>
-            <li>用真实站点快照与多版 DOM 回放，代替只依赖 <code>data-e2e</code> 测试锚点的信心。</li>
+            <li>本期不改 <code>search_page.py</code>、<code>comment_page.py</code>、<code>direct_message_page.py</code> 的固定流程，只把它们原样迁移到内置 Chromium。</li>
+            <li>先让 Browser Use 在新建的抖音作品发布流程中跑通并真实验收。</li>
+            <li>发布链路稳定后，另立任务把搜索、评论和私信的页面感知升级为多策略感知。</li>
           </ul>
         </article>
         <article class="card">
@@ -277,8 +279,54 @@
       </div>
     </section>
 
+    <section id="browser-runtime">
+      <div class="eyebrow">04 · Shared Chromium and Bailian</div>
+      <h2>Browser Use 可以复用内置 Chromium，也能通过百炼驱动</h2>
+      <p>本报告中的 Browser Use 是 <code>browser-use/browser-use</code> 开源 Python Agent 框架。锁定调研版本 0.13.6 直接通过 CDP 控制 Chrome/Chromium，可传 <code>executable_path</code> 启动 App 内置二进制，也可在取得页面独占租约后通过随机 loopback <code>cdp_url</code> 接管已有运营进程。它不要求再打包自己的浏览器，也不需要接入 OpenAI Computer Use。</p>
+
+      <div class="callout verdict">
+        <strong>结论：三个用途可以共用同一个 Chromium 二进制。</strong>
+        Browser Use 没有强制绑定专用 Chromium major；项目只打包与 Playwright 锁定版本匹配的一套完整 Chromium。共用的是二进制，不是让 RPA、Agent 和渲染器并发抢同一个进程、Profile 或页面。
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>使用方</th><th>浏览器进程与 Profile</th><th>控制方式</th><th>隔离要求</th></tr></thead>
+          <tbody>
+            <tr><td>现有运营 RPA</td><td>可见进程 + 持久 App 运营 Profile</td><td>同步 Playwright 页面对象</td><td>扫码、验证码和人工接管可见</td></tr>
+            <tr><td>Browser Use 独立验证</td><td>独立进程 + 每任务临时 Profile</td><td><code>BrowserSession(executable_path=...)</code> 直接 CDP</td><td>固定 viewport/DPI、禁扩展与本地文件、关闭默认发现/下载/云服务</td></tr>
+            <tr><td>Browser Use 抖音发布</td><td>复用运营进程/Profile 的登录态</td><td>取得 <code>BrowserSurfaceLease</code> 后经随机 loopback CDP 接管</td><td>原 Playwright 暂停发动作；不能并发控制同一页面</td></tr>
+            <tr><td>品牌动效渲染</td><td>独立无头进程 + RenderJob 临时目录</td><td>上游通过 <code>chromePath</code> 使用同一二进制</td><td>不能访问运营 Profile、Cookie 或页面</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>百炼统一模型网关</h3>
+      <p>Browser Use 的 <code>ChatOpenAI(base_url=...)</code> 可以指向百炼 OpenAI-compatible 地址。App 用统一 <code>BailianModelGateway</code> 管理密钥、模型目录、能力和版本快照，Browser Use 与两个视频 Worker 都不能各自保存另一套密钥。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>模型</th><th>官方当前能力</th><th>首期用途</th></tr></thead>
+          <tbody>
+            <tr><td><code>qwen3.7-max-2026-06-08</code></td><td>多模态</td><td>抖音 Browser Use 视觉模式默认候选；实施时若有更新的稳定多模态 Max，重新验证后锁新版本。</td></tr>
+            <tr><td><code>qwen3.7-max</code></td><td>滚动别名当前等同文本快照 <code>2026-05-20</code></td><td>文案、脚本和结构化页面任务；不能因名字相同就假设可看截图。</td></tr>
+            <tr><td><code>deepseek-v4-pro</code></td><td>文本</td><td>文案、推理；仅在 DOM-only Browser Use 真实验收后才可选择。</td></tr>
+            <tr><td><code>glm-5.2</code></td><td>文本、Function Calling</td><td>文案、工具编排；仅在 DOM-only Browser Use 真实验收后才可选择。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>首期产品边界</h3>
+      <ul>
+        <li>锁定 Browser Use、模型和 Chromium 的兼容组合，禁用其默认浏览器发现、运行时下载、Cloud、stealth 和验证码绕过。</li>
+        <li>不提供“输入一句话操作任意网站”的通用菜单；capability registry 首期只允许抖音作品发布调用。</li>
+        <li>搜索、评论、私信已经有固定 Playwright 第一版，本期只原样迁移到内置 Chromium。等抖音发布真实跑稳，再另立第二阶段改造。</li>
+        <li>网页、截图和屏幕文字都视为不可信；域名/路径/动作白名单、敏感数据确认、ActionGate、本地 ledger 和独立 verifier 不交给模型。</li>
+        <li>发布按钮属于外部副作用临界点：展示账号、视频摘要和文案，用户确认后最多点击一次；断网或超时无法确认时进入 <code>outcome_uncertain</code>，不盲目重试。</li>
+      </ul>
+    </section>
+
     <section id="browser-architecture">
-      <div class="eyebrow">04 · Controlled browser architecture</div>
+      <div class="eyebrow">05 · Controlled browser architecture</div>
       <h2>推荐架构：AI 提案，确定性执行，独立验收</h2>
 
       <div class="arch" aria-label="浏览器架构分层图">
@@ -458,7 +506,7 @@
       <p>规划因此改为优先只打包 Playwright 严格匹配的完整 Chromium：RPA 用可见持久进程，视频用独立无头临时进程。不能让 RPA 使用上游无头壳，因为它没有可供扫码、验证码和人工接管的正常窗口。</p>
       <div class="callout blue">
         <strong>共用验证必须成为最前置门禁。</strong>
-        在开发浏览器打包、视频页面和渲染适配器之前，先在 macOS/Windows 用同一 Chromium 验证 RPA 启动、12 套风格、公开 100 项动效冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏和并发隔离。通过后 Manifest 只允许这一套浏览器，后续禁止上游下载或发现第二套；失败则先调整共同版本重跑，再单独决策，不静默双打包。
+        在开发浏览器打包、视频页面和渲染适配器之前，先在 macOS/Windows 用同一 Chromium 验证 RPA、Browser Use、12 套风格和全部 134 项可安装动效零件，覆盖字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏和并发隔离。通过后 Manifest 只允许这一套浏览器，后续禁止上游下载或发现第二套；失败则先调整共同版本重跑，再单独决策，不静默双打包。
       </div>
 
       <div class="callout verdict">
@@ -522,8 +570,8 @@
       </div>
       <p>官网当前是 12 套；仓库里的 <code>code-editorial</code> 没有出现在公开设计画廊，首期不混入用户选择。每套都要展示真实预览、适用场景、明暗和信息密度，推荐 2～3 套但允许展开全部 12 套。每个 RenderJob 冻结风格 ID、上游版本、源摘要、品牌 token 摘要和最终 frame.md，保证当前锁定版本内的任务可以重现；首发规划不增加跨版本项目迁移逻辑。</p>
 
-      <h3>Catalog 的“100”是动效零件，不是 100 套视频风格</h3>
-      <p>官网公开 Catalog 当前正好是 100 项：76 个可独立使用的完整画面块和 24 个局部组件。官网的 Showcase、Captions、VFX、Transitions、Social、Data、Effects 和 Overlays 是重叠标签，不能相加当总数。</p>
+      <h3>内置全部 134 个动效零件，不把它们误称为 134 套风格</h3>
+      <p>官网公开 Catalog 当前展示 100 项（76 个完整画面块、24 个局部组件），但锁定的 v0.7.68 registry 实际有 134 个可安装零件：109 个完整画面块和 25 个局部组件；另有 8 个 example，不计入可安装零件。产品全部内置 134 个，官网 100 项只标记为“有官方在线预览”的子集。官网的 Showcase、Captions、VFX、Transitions、Social、Data、Effects 和 Overlays 是重叠标签，不能相加当总数。</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>主分类</th><th>数量</th><th>用途</th></tr></thead>
@@ -541,7 +589,9 @@
           </tbody>
         </table>
       </div>
-      <p>技术上可通过官方 <code>hyperframes add</code> 安装，但不能原样无审计打包。固定的 v0.7.68 registry 已有 134 个可安装零件，比公开页多 34 个；首期只把官网可预览的 100 个作为用户基线。多个零件仍引用 jsDelivr、Google Fonts、gstatic 或 Cloudflare CDN；3D/WebGPU 要做双平台和低配置验证；示例里的头像、音效、Apple/macOS/iOS、TikTok、Instagram、X 和 Spotify 等需要替换或单独确认权利。</p>
+      <p>源码静态审计显示，可安装源码约 31 MB，并含 158 个本地非 HTML 资产；134 项中 127 项仍有运行时远程引用，125 项引用 jsDelivr、54 项引用 Google Fonts、4 项引用 Cloudflare CDN、3 项引用 gstatic/Draco（这些集合有重叠）。因此不能在安装时执行在线 <code>add</code>，也不能假设用户有 VPN。构建期从只读 submodule 生成 App 自有 <code>OfflineMotionCatalog</code>：本地固定 GSAP、Three.js、D3、TopoJSON、Draco、地图数据与开放字体，逐项记录原 URL、版本、许可证和摘要，正式包静态扫描必须为零运行时远程 URL。</p>
+
+      <p>示例资产按类型替换：头像、壁纸、插画和纹理可生成原创中性素材；地图必须来自可再分发的地理数据；3D GLB、音效、字体、品牌 UI/图标需使用自研或明确许可资源，不能把生图当作万能替代。所有覆盖层由 App 构建产物维护，不修改 submodule。</p>
 
       <div class="two">
         <article class="card">
@@ -549,13 +599,13 @@
           <ul>
             <li>视频类型：品牌短片、产品演示、发布预告、功能介绍。</li>
             <li>整体风格：12 套，决定整条视频的视觉语言。</li>
-            <li>高级动效库：100 个零件，按转场、字幕、图表、身份条等中文分类。</li>
+            <li>高级动效库：134 个零件，按转场、字幕、图表、身份条等中文分类。</li>
           </ul>
         </article>
         <article class="card">
           <h3>默认自动，允许高级覆盖</h3>
           <ul>
-            <li>AI 根据分镜自动选择零件，普通用户不需要浏览 100 个技术名。</li>
+            <li>AI 根据分镜自动选择零件，普通用户不需要逐个理解 134 个技术名。</li>
             <li>高级用户可以逐镜头覆盖，并看到预览、性能等级、适用场景和权利提示。</li>
             <li>远程依赖全部冻结为本地文件，未知资源和缺少摘要的零件不得渲染。</li>
           </ul>
@@ -568,8 +618,8 @@
     </section>
 
     <section id="editing">
-      <div class="eyebrow">08 · Alibaba cloud editing</div>
-      <h2>阿里云剪辑：用 IMS/ICE Timeline API，不把 WebSDK 放进 MVP</h2>
+      <div class="eyebrow">08 · Independent video editing</div>
+      <h2>视频剪辑独立成模块：首期只接阿里 IMS/ICE</h2>
       <p>阿里智能媒体服务的云剪辑支持多视频、音频、图片裁剪拼接，以及字幕、贴纸、滤镜、特效、转场、TTS/ASR 和高级模板。后端可提交 <code>SubmitMediaProducingJob</code>，由异步任务输出成片。这与仓库现有 provider-neutral <code>Timeline</code> 规划吻合。</p>
 
       <div class="arch" aria-label="云剪辑数据流">
@@ -600,7 +650,7 @@
       </div>
 
       <h3>Provider 设计</h3>
-      <p>内部只定义 <code>VideoRenderProvider.submit(timeline)</code>、<code>get(job_id)</code>、<code>cancel(job_id)</code> 和 <code>fetch_artifact(job_id)</code>。首期实现 <code>AliyunImsProvider</code> 与 <code>LocalFfmpegProvider</code>：云端用于批量、模板和弹性；FFmpeg 用于离线、隐私数据、小修复和供应商故障降级。</p>
+      <p>视频剪辑有独立左侧入口、<code>EditingProject</code>、供应商无关 <code>Timeline</code>、<code>EditingJob</code>、<code>Artifact</code> 和 <code>VideoEditingProvider</code>。契约定义 <code>capabilities / validate / submit / get / cancel / fetch_artifacts</code>，首期唯一用户可选实现是 <code>AliyunImsEditingProvider</code>。未来接腾讯云时只增加 Adapter 与 Timeline/状态映射，不修改页面和领域层；用假的第二 Provider 先跑一致性测试。FFmpeg 仍是本地媒体基础设施，不包装成第二个首期剪辑供应商。</p>
 
       <h3>当前成本量级（仅用于预算，最终以控制台为准）</h3>
       <div class="table-wrap">
@@ -618,42 +668,42 @@
 
     <section id="publishing">
       <div class="eyebrow">09 · Publishing, comments and messaging</div>
-      <h2>内容发布最新矩阵：只有 B 站可直接按“无人值守服务端投稿”设计</h2>
-      <p>本节按 2026-07-22 能直接打开的官方页面重新核验，不采用搜索引擎缓存或民间逆向接口。这里的“有接口”还要区分三种产品形态：服务端可提交、官方 SDK/H5 只负责唤起发布器、完全没有普通内容投稿 API。</p>
+      <h2>首期只实现 B站 API + 抖音 Browser Use</h2>
+      <p>平台能力按 2026-07-23 可直接打开的官方页面复核，不采用搜索缓存或民间逆向接口。技术调查与首期排期是两回事：快手、小红书和微信视频号保留能力记录，但本期不写 Adapter、不放入口。</p>
 
       <div class="table-wrap">
         <table>
-          <thead><tr><th>平台</th><th>现行官方能力</th><th>能否静默自动发布</th><th>automation-tool 建议</th></tr></thead>
+          <thead><tr><th>平台</th><th>现行能力结论</th><th>首期状态</th><th>automation-tool 路径</th></tr></thead>
           <tbody>
             <tr>
               <td><strong>B站</strong><br><span class="yes">服务端 API</span></td>
               <td>现行文档包含上传预处理、分片上传/合片、封面上传和“视频稿件提交”；<code>ARC_BASE</code> 需申请并由 UP 主授权，提交成功返回 <code>resource_id</code>，之后进入审核。</td>
-              <td class="yes">可以</td>
-              <td>第一优先实现 <code>BilibiliPublishAdapter</code>；以 upload_token 和 resource_id 对账，提交后查询稿件状态。</td>
+              <td class="yes">实现</td>
+              <td><code>BilibiliPublishAdapter</code>；upload_token/resource_id 对账并查询状态。无凭据也完成代码与测试，真实联调单独待验收。</td>
+            </tr>
+            <tr>
+              <td><strong>抖音</strong><br><span class="yes">可见浏览器</span></td>
+              <td>旧服务端创建视频链接已 404；当前公开规范明确 SDK/H5 投稿和用户手动发布，不能继续按旧 API 设计。</td>
+              <td class="yes">实现</td>
+              <td>Browser Use + App 内置可见 Chromium，停在发布临界点确认后最多点击一次，并独立核对作品结果。</td>
             </tr>
             <tr>
               <td><strong>快手</strong><br><span class="maybe">API + 用户确认</span></td>
-              <td>当前页面仍提供 <code>start_upload</code>、上传和 <code>/openapi/photo/publish</code>，scope 为 <code>user_video_publish</code>。但 2026-03-09 规范要求实时或预设发布都由用户在第三方应用前台操作并勾选确认。</td>
-              <td class="no">不允许静默</td>
-              <td>实现 <code>KuaishouPublishAdapter</code>，但必须保留“发布到哪个账号”的前台确认页；确认后才调用一次 API。</td>
-            </tr>
-            <tr>
-              <td><strong>抖音</strong><br><span class="maybe">SDK/H5 投稿</span></td>
-              <td>2026-07-14 最新规范只明确 SDK 投稿和 H5 投稿：拉起抖音 App 或展示二维码，内容进入编辑/发布页，由用户手动操作。旧服务端创建视频链接现已 404。</td>
-              <td class="no">不允许静默</td>
-              <td>桌面端优先做 H5 投稿 handoff；营销内容还可能不符合投稿准入。浏览器自动化只能作为另一路径，仍需最终人工预览。</td>
+              <td>现行页面仍有上传/发布 API，但规范要求用户在第三方应用前台操作并确认。</td>
+              <td class="no">暂不实现</td>
+              <td>只保留 capability 记录；后续立项时重新复核 API 与 Browser Use 方案。</td>
             </tr>
             <tr>
               <td><strong>小红书</strong><br><span class="no">暂停接入</span></td>
               <td>分享开放平台提供 iOS/Android/HarmonyOS/JS SDK，作用是把素材带入小红书 App 发布器；官网当前多处显示“暂停接入”，且官方 FAQ 说明标题与文案自动填充受限。未找到通用服务端笔记发布 API。</td>
-              <td class="no">不可以</td>
-              <td>不基于分享 SDK 排期；继续使用可见浏览器/人工确认的发布 adapter，并保留未来官方重新开放后的替换位。</td>
+              <td class="no">暂不实现</td>
+              <td>只保留未来 Browser Use/官方能力替换位，不建用户入口。</td>
             </tr>
             <tr>
               <td><strong>微信视频号</strong><br><span class="no">无普通投稿 API</span></td>
               <td>官方 API 目录及 2025-11-14 变更日志覆盖基础凭证、直播、电商橱窗、留资、罗盘和本地生活；没有创建普通视频号动态/视频稿件的接口。</td>
-              <td class="no">不可以</td>
-              <td>使用视频号助手网页的确定性上传流程 + Browser Use 语义兜底 + 人工确认；不能把微信小店/直播 API 误当作作品发布 API。</td>
+              <td class="no">暂不实现</td>
+              <td>只保留未来 Browser Use 适配位；不能把微信小店/直播 API 误当作品发布 API。</td>
             </tr>
           </tbody>
         </table>
@@ -664,21 +714,13 @@
         原“上传视频 / 创建视频”页面仍可能出现在搜索缓存中，但实际打开“创建视频”路径已跳转官方 404；当前 OpenAPI 总表也不再把它列为通用内容能力。除非某个已审核应用在控制台能力实验室中真实获得了新的“代替用户发布”权限和配套现行文档，否则产品设计不得假设 <code>video.create.bind</code> 可用。
       </div>
 
-      <h3>发布 adapter 的实际优先级</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>优先级</th><th>实现</th><th>适用平台</th><th>完成证据</th></tr></thead>
-          <tbody>
-            <tr><td>P1</td><td>服务端 <code>OfficialApiAdapter</code></td><td>B站；快手在前台确认之后</td><td>平台稿件 ID + 审核/公开状态查询</td></tr>
-            <tr><td>P2</td><td><code>OfficialHandoffAdapter</code></td><td>抖音 H5/SDK；小红书仅在恢复接入后</td><td>官方回调/share_id；没有终态时不得声称已发布</td></tr>
-            <tr><td>P3</td><td>确定性浏览器 adapter</td><td>小红书、微信视频号及官方能力缺口</td><td>作品 URL/ID、审核状态或稳定页面回执</td></tr>
-            <tr><td>P4</td><td>Browser Use 语义兜底</td><td>所有页面改版恢复</td><td>只提供候选与证据，最终动作/验收仍由确定性层完成</td></tr>
-          </tbody>
-        </table>
+      <div class="callout verdict">
+        <strong>B站缺少凭据时不阻塞执行。</strong>
+        先按正式文档写完接口契约、Adapter、Mock Server、fixture、上传/创建/状态查询、幂等、限流、超时和错误矩阵，标记“代码与确定性测试完成 / 真实平台待凭据验收”，然后继续抖音和后续任务。用户提供密钥后只补真实账号纵向验收；Mock 不能冒充真实发布成功。
       </div>
 
       <h3>搜索、评论与私信不要套用旧发布接口结论</h3>
-      <p>本轮只确认内容投稿。抖音当前通用能力目录仍有部分搜索能力，但已不能据旧文档假设通用评论回复或私信发送 API 可申请；这些能力需要逐项以控制台实际 scope 为准。没有现行权限时，继续使用现有浏览器状态机：AI 定位，ActionGate 授权，确定性单次发送，独立验收，缺少回执则进入 <code>outcome_uncertain</code>。</p>
+      <p>本轮只新增内容投稿。现有抖音搜索、评论和私信第一版继续使用固定 Playwright 页面对象，只迁移到内置 Chromium，不在本期改成 Browser Use。等抖音发布路径真实跑稳后，再单独立项改造；现有 ActionGate、单次发送、独立验收和 <code>outcome_uncertain</code> 语义保持不变。</p>
 
       <h3>发布状态机</h3>
       <div class="flow" aria-label="发布状态机">
@@ -689,37 +731,49 @@
         <div class="node"><b>Final</b><small>Published / Rejected / OutcomeUncertain，不盲目重发。</small></div>
       </div>
 
-      <h3>数字员工回复策略</h3>
-      <p>入站评论/私信先经过 webhook/API 或浏览器只读采集，再由 AI 输出结构化 <code>ReplySuggestion</code>（意图、情绪、风险、建议文本、引用事实、置信度）。审核器过滤隐私、承诺、价格、医疗/法律等高风险表达；首期由人确认。只有低风险 FAQ、明确知识库命中、处于工作时间/频率上限内的回复，才逐步灰度自动发送。</p>
+    </section>
+
+    <section id="self-healing">
+      <div class="eyebrow">10 · Deferred self-healing automation</div>
+      <h2>成功流程沉淀为可版本化 JSON，但本期不实现</h2>
+      <p>未来不是让 AI 修改 Playwright 代码，而是把一次成功的 Browser Use 轨迹清洗成受限、声明式 <code>AutomationSkill</code>。下次先按页面特征选择最匹配版本做确定性回放；某一步前置/后置条件不匹配时，只有在尚未派发外部副作用的安全检查点才能切回 Browser Use，完成剩余步骤并生成新的候选版本。</p>
+      <div class="flow" aria-label="自愈流程">
+        <div class="node"><b>首次成功</b><small>收集动作、页面事实和终态证据。</small></div>
+        <div class="node"><b>生成 v1</b><small>去秘密、去偶然坐标，Schema 校验与签名。</small></div>
+        <div class="node"><b>优先回放</b><small>按语义锚点与前后条件执行，减少模型调用。</small></div>
+        <div class="node"><b>失败接管</b><small>安全点切回 Browser Use，收集页面差异。</small></div>
+        <div class="node"><b>生成 v2</b><small>保留 v1，按 A/B 页面特征路由多个版本。</small></div>
+      </div>
+      <p>JSON 至少记录 skill/version/parent、域名路径、页面指纹、语言/viewport、语义目标、受限动作、前置/后置条件、风险、副作用边界、检查点和成功证据；禁止任意 JS、Shell、Cookie、token、用户正文和原始截图。v1 永不被 v2 覆盖或删除，路由综合页面指纹、历史成功率和最近命中。若动作已经 dispatch 而结果未知，只能进入 <code>outcome_uncertain</code> 并对账，不能继续或重发。首期只预留稳定事件字段，不实现编译、回放、自动修复、版本路由和管理 UI。</p>
     </section>
 
     <section id="roadmap">
-      <div class="eyebrow">10 · Delivery plan</div>
+      <div class="eyebrow">11 · Delivery plan</div>
       <h2>建议的落地路线与验收门槛</h2>
       <div class="timeline">
         <div class="milestone">
           <b>P0 · 依赖、安全与共用浏览器前置验证（3–5 天）</b>
-          <span>锁定 Browser Use、Playwright 与完整 Chromium；最先在 macOS/Windows 验证同一浏览器二进制能分别以可见 RPA 进程和隔离无头渲染进程运行，覆盖 12 套风格、100 项动效与关键媒体/GPU 矩阵。同时验证 Python 3.12、PyInstaller/Tauri sidecar、CDP loopback、独立 Profile、遥测关闭和工具裁剪。任一硬门禁失败就不进入后续集成。</span>
+          <span>锁定 Browser Use、Playwright 与完整 Chromium；最先在 macOS/Windows 验证同一浏览器二进制分别支持可见 RPA、Browser Use 直接 CDP 和隔离无头渲染，覆盖 12 套风格、134 项动效与关键媒体/GPU 矩阵。同时验证 sidecar、随机 loopback CDP、独立 Profile、默认下载/云服务关闭和工具裁剪。任一硬门禁失败就不进入后续集成。</span>
         </div>
         <div class="milestone">
-          <b>P1 · 通用网页只读 Agent（约 1 周）</b>
-          <span>实现 BrowserTaskSpec、域名能力策略、结构化观察与审计；只允许 L0/L1。用多站点和恶意 prompt-injection 页面测试，不接账号副作用。</span>
+          <b>P1 · Browser Use 受限底座与百炼（约 1 周）</b>
+          <span>实现 BrowserTaskSpec、最小 Tools、域名/路径/动作策略、结构化观察、审计和 BailianModelGateway；视觉默认使用经验证的最新稳定多模态 Qwen Max，不开放任意网站通用入口。</span>
         </div>
         <div class="milestone">
-          <b>P2 · 抖音语义页面适配（1–2 周）</b>
-          <span>先把 Browser Use 放在现有搜索/评论/私信状态机的“候选定位”位置。构造 30+ 个 DOM/文案/遮罩变体；真实账号只做观察，再做一次人工批准的低风险回复。</span>
+          <b>P2 · 抖音作品发布（1–2 周）</b>
+          <span>Browser Use 使用运营 Profile，在独占租约下完成选片、填写和提交前准备；发布临界点确认后最多点击一次并独立验收。搜索、评论和私信固定 Playwright 第一版本期不改。</span>
         </div>
         <div class="milestone">
           <b>P3 · 30 秒视频闭环技术验证（2–3 周）</b>
-          <span>先跑通“智能素材成片”和“品牌动效成片”两条路线，共用 ContentBrief、分镜、Timeline 与 Artifact；验证一句话成片、网址转产品视频、12 套整体风格和 100 个动效零件，并记录质量、耗时和真实成本。真人生成不在本期任务内。</span>
+          <span>跑通“智能素材成片”和“品牌动效成片”两条路线，共用 ContentBrief、分镜、Timeline 与 Artifact；验证一句话成片、网址转产品视频、12 套整体风格、134 个离线动效零件，并记录质量、耗时和真实成本。真人生成不在本期任务内。</span>
         </div>
         <div class="milestone">
-          <b>P4 · 分平台发布能力接入（约 2–3 周）</b>
-          <span>先实现 B站服务端投稿，再实现快手“前台确认后 API 发布”和抖音 H5 投稿 handoff；小红书、微信视频号保留可见浏览器 adapter。所有路径统一进入现有 ActionGate 与 ledger，并在账号接入时记录官方能力、scope、授权时间与复核日期。</span>
+          <b>P4 · 独立剪辑与双平台发布（约 2–3 周）</b>
+          <span>独立视频剪辑模块首期只接阿里 IMS/ICE；内容发布只做 B站正式 API 和抖音 Browser Use。B站无凭据时完成实现、Mock/契约与失败测试后继续，真实联调保留待验收；快手、小红书和视频号只列后续。</span>
         </div>
         <div class="milestone">
-          <b>P5 · 灰度数字员工</b>
-          <span>从草稿建议 → 人工批准 → 低风险白名单自动化，逐级开放。按账号、域名、动作设置 kill switch、额度与回滚。</span>
+          <b>P5 · 正式包联合验收</b>
+          <span>完成 macOS/Windows 全新安装、唯一 Chromium、断网 134 项、资源清理、抖音真实发布和 B站分层验收。自愈 AutomationSkill 与搜索/评论/私信 Browser Use 改造都留到后续专项。</span>
         </div>
       </div>
 
@@ -731,8 +785,8 @@
             <tr><td>安全</td><td>越权域名/路径/工具 100% 拒绝；prompt injection 不得触发文件、密钥、跨域和提交动作；CDP 不暴露到 loopback 之外。</td></tr>
             <tr><td>副作用</td><td>每个授权最多一次 dispatch；断网/超时/进程退出后不得重复评论、私信或发布；无法确认即 outcome_uncertain。</td></tr>
             <tr><td>页面韧性</td><td>30+ 个结构/文案/遮罩变体中，读任务成功率 ≥95%；副作用任务宁可拒绝，也不得点错目标。</td></tr>
-            <tr><td>视频</td><td>3 类 30 秒样片均可局部重做、自动成片；人物/产品/字幕/技术规格通过预设 QA；成本和延迟可追溯。</td></tr>
-            <tr><td>分发</td><td>B站 API 能取回 resource_id/审核状态；快手与抖音保留规范要求的用户确认；小红书/视频号浏览器路径有独立终态证据；验证码可暂停并恢复。</td></tr>
+            <tr><td>视频</td><td>两种制作方式均可局部重做、自动成片；12 套风格和 134 项零件断网可用；成本和延迟可追溯。</td></tr>
+            <tr><td>分发</td><td>抖音 Browser Use 可暂停处理验证码并取得独立终态证据；B站有凭据时取回 resource_id/审核状态，无凭据时完整确定性证据与“待凭据验收”不阻塞后续。</td></tr>
             <tr><td>交付</td><td>macOS/Windows 正式包全新安装、版本锁定、审计导出、kill switch 和资源清理全部验证。</td></tr>
           </tbody>
         </table>
@@ -740,7 +794,7 @@
     </section>
 
     <section id="risks">
-      <div class="eyebrow">11 · Risk register</div>
+      <div class="eyebrow">12 · Risk register</div>
       <h2>主要风险与止损点</h2>
       <div class="table-wrap">
         <table>
@@ -754,7 +808,8 @@
             <tr><td>人物/版权/虚假内容</td><td>中 / 极高</td><td>reference 权利证明、肖像/声音同意、内容审核、AIGC 标识与发布声明、人工终审。</td></tr>
             <tr><td>库存素材同质化/权利不清</td><td>高 / 高</td><td>逐素材许可快照和来源台账；语义与重复度检测；品牌、人物、商标进入人工审核；stock_montage 不用于高要求品牌内容。</td></tr>
             <tr><td>生成成本失控</td><td>高 / 中</td><td>任务前预算冻结、候选上限、720P 草稿/1080P 定稿、局部重做、task_id 对账、按效果统计成本。</td></tr>
-            <tr><td>供应商锁定/故障</td><td>中 / 高</td><td>内部 Timeline/Artifact/Job 契约；AliyunImsProvider + LocalFfmpegProvider；生成 Provider 可替换。</td></tr>
+            <tr><td>动效运行时依赖外网</td><td>高 / 高</td><td>134 项生成离线目录；所有 CDN/字体/Draco/地图依赖带版本、许可和摘要，正式包静态扫描零远程 URL。</td></tr>
+            <tr><td>供应商锁定/故障</td><td>中 / 高</td><td>独立 VideoEditingProvider 与供应商无关 Timeline；首期只接阿里，假的第二 Provider 证明未来腾讯 Adapter 不改上层。</td></tr>
           </tbody>
         </table>
       </div>
@@ -766,9 +821,9 @@
     </section>
 
     <section id="sources">
-      <div class="eyebrow">12 · Primary sources</div>
+      <div class="eyebrow">13 · Primary sources</div>
       <h2>主要资料与核对范围</h2>
-      <p>以下均为官方仓库、官方文档或监管机构来源；易变化的版本、模型、价格与平台权限按 2026-07-22 记录，实施时应在控制台再次确认。</p>
+      <p>以下均为官方仓库、官方文档或监管机构来源；易变化的版本、模型、价格与平台权限按 2026-07-23 记录，实施时应在控制台再次确认。</p>
       <ol class="sources">
         <li><a href="https://github.com/browser-use/browser-use">Browser Use 官方仓库与 releases</a></li>
         <li><a href="https://docs.browser-use.com/open-source/customize/browser/all-parameters">Browser Use：Browser 参数、CDP、profile 与域名限制</a></li>
@@ -789,12 +844,13 @@
         <li><a href="https://github.com/heygen-com/hyperframes">Hyperframes 官方仓库</a>；<a href="https://github.com/heygen-com/hyperframes/releases/tag/v0.7.68">v0.7.68 正式版</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/LICENSE">Apache-2.0 License</a></li>
         <li><a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/engine/src/services/browserManager.ts">浏览器启动、BeginFrame 探测与截图回退源码</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/producer/README.md">macOS/Windows 默认截图模式说明</a></li>
         <li><a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/README.md">AI Agent 与手工 CLI 两种入口</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/docs/packages/studio.mdx">Studio 预览/时间线/属性/代码编辑能力</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/docs/guides/pipeline.mdx">7 步制作 Pipeline</a></li>
-        <li><a href="https://www.hyperframes.dev/design">官网 12 套 frame.md 整体风格</a>；<a href="https://www.hyperframes.dev/">官网公开 100 项 Catalog 与 Examples</a>；<a href="https://www.hyperframes.dev/website">官网 URL → Video 页面</a></li>
+        <li><a href="https://www.hyperframes.dev/design">官网 12 套 frame.md 整体风格</a>；<a href="https://www.hyperframes.dev/">官网公开 100 项 Catalog 与 Examples</a>；<a href="https://www.hyperframes.dev/website">官网 URL → Video 页面</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/registry/registry.json">v0.7.68 全量 registry（134 个可安装零件）</a></li>
         <li><a href="https://hyperframes.heygen.com/guides/website-to-video">Website to Video 官方工作流</a>；<a href="https://hyperframes.heygen.com/catalog/blocks/data-chart">Catalog 官方说明与安装入口</a></li>
         <li><a href="https://www.pexels.com/license/">Pexels License</a>；<a href="https://pixabay.com/service/license-summary/">Pixabay Content License</a>；<a href="https://coverr.co/license">Coverr License</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/use-video-generation">阿里云百炼：视频生成模型选型</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/text-to-video-api-reference">Wan 2.7 文生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide">图生视频指南</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/wan-video-to-video-api-reference">Wan 2.7 参考生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-s2v-api">Wan S2V 数字人 API</a></li>
+        <li><a href="https://help.aliyun.com/zh/model-studio/deepseek-api">百炼 DeepSeek 模型</a>；<a href="https://help.aliyun.com/zh/model-studio/glm">百炼 GLM 模型</a>；<a href="https://help.aliyun.com/zh/model-studio/text-generation-model">百炼千问文本模型</a>；<a href="https://help.aliyun.com/zh/model-studio/vision/">百炼视觉理解模型</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/model-pricing">阿里云百炼模型价格</a></li>
         <li><a href="https://help.aliyun.com/zh/ims/user-guide/cloud-clip">阿里 IMS：云剪辑</a>；<a href="https://help.aliyun.com/zh/ims/developer-reference/timeline-configuration-description">Timeline 配置</a></li>
         <li><a href="https://help.aliyun.com/zh/ims/developer-reference/api-ice-2020-11-09-submitmediaproducingjob/">IMS：SubmitMediaProducingJob</a>；<a href="https://help.aliyun.com/zh/ims/user-guide/callback-events-overview">回调与 MNS</a></li>
