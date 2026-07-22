@@ -308,7 +308,8 @@ backend/
 │       │   ├── bootstrap/         # 配置、注册、设备凭据和 Session 依赖装配
 │       │   ├── api/               # REST、设备认证、SSE/WebSocket 和错误映射
 │       │   ├── application/       # 注册、凭据、任务、工作台指标、配置、内容和工作流用例
-│       │   ├── domain/            # 稳定 ID、Task 执行状态、版本事件、快照与 Command 契约
+│       │   ├── domain/            # 稳定 ID、Task/视频领域状态、版本事件、快照与 Command 契约
+│       │   │   └── video_creation.py # VF-01 两种制作方式共用的不可变领域对象和硬边界
 │       │   └── infrastructure/
 │       │       ├── database/      # PostgreSQL 注册认证、任务、动作 evidence/连续失败、目标结果与工作台指标投影
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
@@ -492,6 +493,13 @@ P9-09 的 `contracts/quality/mvp-final-acceptance.v1.json` 不改写上述规格
 U9-01 的 `contracts/security/account-threat-model-v1.json` 是客户 Demo 账号边界的机器可读权威源：它冻结运维创建、账号状态、登录标识、密码/恢复、opaque Session、Installation 不可变归属、合取授权、吊销和最小审计，并逐项登记账号枚举、凭据填充、暴力破解、数据库泄露、恢复/refresh 重放、跨账号绑定及秘密泄露等 12 类威胁。`frontend/tests/account-threat-model.test.mjs` 同时锁定契约、产品规划、后端架构和唯一 roadmap，后续 U9-02～U9-06 只能实现这些不变量，不能暗中引入匿名注册、配对审批、浏览器 Cookie、组织/租户/RBAC 或第二套设备归属。
 
 U9-02 在既有 Control Plane 分层内新增 `domain/accounts.py`、`application/customer_accounts.py`、`infrastructure/security/passwords.py` 和 `infrastructure/database/customer_account_repository.py`，没有建立第二个认证服务。`schema.py` 与 Alembic `20260722_0028_customer_accounts.py` 共同拥有 `users/user_password_credentials/account_audit_events`，审计不可变 trigger 也只由该迁移创建/回滚。领域/安全单元测试覆盖 canonical ID、固定 Argon2id/Pepper、输入与错误脱敏；`tests/integration/test_customer_account_lifecycle.py` 在真实 PostgreSQL 验证空库迁移/降级、最小列与约束、弱 hash/非规范身份旁路拒绝、并发创建/停用单赢家、恢复和审计不可修改。U9-03 将复用这些内部端口增加 API/Session，不得把 password hash 暴露到 FastAPI、React 或 Executor。
+
+VF-01 的 `control_plane/domain/video_creation.py` 不建立第二个 Artifact 存储，也不
+引入任何制作供应商 DTO。它定义 `ContentBriefId/StoryboardId/TimelineId/RenderJobId`
+强类型 ID，并让 `ContentBrief`、`Storyboard`、`Timeline`、`RenderJob` 与领域
+`Artifact` 只通过这些 ID 和既有 `ArtifactId` 关联。所有对象 frozen/slots、长度和
+数量有硬上限、时间为 UTC、Timeline 同轨不重叠且 RenderJob 终态事实自洽；
+VF-02/VF-03 才分别接生命周期与私有工作区。
 
 U9-03 沿同一纵向切片新增 `application/account_sessions.py`、`api/account_sessions.py`、`bootstrap/account_sessions.py` 和唯一 `infrastructure/database/account_session_repository.py`；`schema.py`/Alembic `20260722_0029_account_sessions.py` 共同拥有产品 Session family/token、keyed 登录限流和运维恢复票据四张表。`tests/contract/test_account_session_api.py` 冻结五个公开 operation、三种专用 Bearer scheme 和统一脱敏错误；`tests/integration/test_account_session_lifecycle.py` 用真实 PostgreSQL 验证临时锁、来源限流、摘要持久化、refresh 单次轮换/重放整族吊销、注销、改密、恢复与迁移回滚；配置/工厂/数据库异常由两个单元测试文件覆盖。OpenAPI 与生成 TypeScript DTO 同步更新，但 U9-03 没有新增 React/Rust 存储或设备归属；这些分别留给 U9-04/U9-05。
 

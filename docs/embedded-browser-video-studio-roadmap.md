@@ -551,11 +551,11 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 71 |
+| ⬜ 未开始 | 70 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
 | 🔍 待验收 | 1 |
-| ✅ 已完成 | 6 |
+| ✅ 已完成 | 7 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -618,7 +618,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| VF-01 | 视频领域契约细化 | 复用 CT-01/CT-06 的 ContentBrief、Storyboard、Timeline、RenderJob、Artifact；制作方式专属字段留在 Adapter，不污染领域层 | AV-04 | ⬜ 未开始 |
+| VF-01 | 视频领域契约细化 | 复用 CT-01/CT-06 的 ContentBrief、Storyboard、Timeline、RenderJob、Artifact；制作方式专属字段留在 Adapter，不污染领域层 | AV-04 | ✅ 已完成 |
 | VF-02 | LocalVideoOrchestrator 生命周期 | Tauri 管理 Python/Node Worker 的启动、随机端口、会话令牌、健康、取消、崩溃恢复、版本握手和退出 | VF-01 | ⬜ 未开始 |
 | VF-03 | RenderJob 私有工作区与 Artifact 导入 | 每任务隔离、路径 containment、摘要、配额、断点、原子导入、保留/删除和磁盘满失败矩阵 | VF-01 | ⬜ 未开始 |
 | VF-04 | 统一 FFmpeg/ffprobe 供应链 | 锁版本、摘要、许可证、编解码器、macOS/Windows 打包；验证两种制作方式兼容后才共享一套二进制 | VF-02 | ⬜ 未开始 |

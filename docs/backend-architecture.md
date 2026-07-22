@@ -904,6 +904,15 @@ H8-09 的首个生产消费者是页面漂移固定证据：正式 `task.discove
 
 P2 内容素材和成片需要云端共享时再启用对象存储，继续使用同一 Artifact 领域接口。
 
+VF-01 在 Control Plane 领域层建立唯一 `video_creation.py`。两种首期制作方式只用
+内部 `material_montage_v1`、`motion_composition_v1` 路由，共用不可变
+`ContentBrief → Storyboard → Timeline → RenderJob → Artifact` 对象和强类型 ID。
+Timeline 只表达画面、音频、字幕、片段与通用转场；Artifact 复用既有
+`ArtifactId`，只保存角色、受限媒体类型、大小、SHA-256 和来源谱系，不保存路径。
+模型名、供应商参数、密钥、Base URL、音色 ID、上游任务 ID 和任意扩展字典都不在
+领域对象中，必须留在后续 Adapter 私有边界。当前契约不持久化、不启动 Worker、
+不创建文件，也不改变 H8-09 本机 Artifact Store。
+
 ## 18. 错误模型
 
 稳定类别：

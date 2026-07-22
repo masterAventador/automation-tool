@@ -14,7 +14,7 @@ def test_pyinstaller_and_playwright_are_locked_in_their_runtime_scopes() -> None
 
     assert any(dependency.startswith("pyinstaller") for dependency in development_dependencies)
     assert "pyinstaller" not in project["project"]["dependencies"]
-    assert "playwright" in project["project"]["dependencies"]
+    assert "playwright==1.61.0" in project["project"]["dependencies"]
     assert "playwright" not in development_dependencies
     assert (
         project["project"]["scripts"]["automation-tool-build-executor-manifest"]
