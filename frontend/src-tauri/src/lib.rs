@@ -22,6 +22,7 @@ mod managed_process_tree;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
+pub mod video_job_workspace;
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use account_session_vault::{
@@ -2943,6 +2944,10 @@ pub fn run() {
             app.manage(local_video_orchestrator::LocalVideoOrchestrator::new(
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
+            )?);
+            app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
+                &app_data_directory,
+                video_job_workspace::production_video_workspace_policy(),
             )?);
             app.manage(browser_profiles::BrowserProfileStore::initialize(
                 &app_data_directory,

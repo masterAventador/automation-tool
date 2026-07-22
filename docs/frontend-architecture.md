@@ -355,6 +355,23 @@ TCP `/health` 上复验，不把端口、令牌、可执行路径或原始错误
 管道，避免渲染子进程继承句柄后卡死。VF-02 只提供内部生命周期，不注册用户 Command；
 后续 IM/BM Adapter 才提供受限业务调用，VF-06 才增加正常用户入口。
 
+### 6.4 VF-03 RenderJob 私有工作区
+
+Tauri 正式组合根持有唯一 `VideoJobWorkspaceStore`，存储根固定在 App 私有数据目录下，
+每个 UUIDv4 RenderJob 分配独立 `outputs/checkpoints/work` 目录和稳定目录 identity。只有
+受信 Worker Adapter 能取得重新校验后的输出目录；React、Tauri Command、Control Plane、
+日志、错误和 Artifact DTO 均不包含绝对路径。
+
+Worker 输出导入时先拒绝越界名称、symlink/reparse、identity 替换、单文件/单任务配额和
+剩余空间不足，再以固定大小缓冲区流式复制及计算 SHA-256。payload 与无路径 manifest
+先写入私有临时目录并 fsync，最后以一次目录 rename 原子发布；启动时只清理符合本协议
+命名和结构的中断临时目录。成片读取使用带剩余字节上限的流式 Reader，不把最高 32 GiB
+Artifact 整体载入内存。
+
+checkpoint 使用同目录临时文件、fsync 和原子替换，可在 App 重启后按 Job/名称恢复；
+`Keep` 写入保留截止时间，清理只删除已到期且整棵目录复验无链接的工作区，`Delete` 明确
+删除工作区。已经原子导入的 Artifact 独立存续，只能按稳定 Artifact ID 显式删除。
+
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
