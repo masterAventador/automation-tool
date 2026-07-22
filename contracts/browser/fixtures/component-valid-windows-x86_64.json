@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "component": "embedded-chromium",
+  "target": {"id": "windows-x86_64", "os": "windows", "arch": "x86_64"},
+  "playwright_python": "1.61.0",
+  "chromium": {
+    "name": "chromium",
+    "title": "Chrome for Testing",
+    "browser_version": "149.0.7827.55",
+    "revision": "1228",
+    "install_by_default": true
+  }
+}

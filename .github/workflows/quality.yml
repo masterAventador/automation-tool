@@ -50,6 +50,7 @@ jobs:
           cache-dependency-glob: backend/uv.lock
       - run: uv sync --locked --dev
       - run: uv lock --check
+      - run: uv run python ../scripts/check_embedded_browser_compatibility.py --self-test
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy

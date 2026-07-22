@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "policy": "fail_closed",
+  "verified_at": "2026-07-23",
+  "production_runtime": {
+    "playwright_python": "1.61.0",
+    "driver_browsers_json_sha256": "ee39bc924bc3d1bd895626c2910f1292d109bbfeeb5abd113acb45e1951cc942",
+    "chromium": {
+      "name": "chromium",
+      "title": "Chrome for Testing",
+      "browser_version": "149.0.7827.55",
+      "revision": "1228",
+      "install_by_default": true
+    }
+  },
+  "test_harness": {
+    "playwright_node": "1.61.1",
+    "production_browser_authority": false
+  },
+  "supported_targets": [
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "arch": "arm64"
+    },
+    {
+      "id": "windows-x86_64",
+      "os": "windows",
+      "arch": "x86_64"
+    }
+  ],
+  "sources": {
+    "python_release": "https://pypi.org/project/playwright/1.61.0/",
+    "node_release": "https://www.npmjs.com/package/@playwright/test/v/1.61.1",
+    "chromium_metadata": "playwright/driver/package/browsers.json"
+  }
+}

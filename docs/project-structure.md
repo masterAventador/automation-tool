@@ -28,6 +28,9 @@ automation-tool/
 ├── frontend/                      # 桌面客户端 UI 与 Tauri 原生壳
 ├── backend/                       # Python 可部署业务后端和本地执行器
 ├── contracts/                     # 跨 Rust/TypeScript/Python 的生成协议
+│   ├── browser/
+│   │   ├── embedded-chromium-compatibility.v1.json # 生产 Playwright、Chromium 完整版本/修订和双平台兼容契约
+│   │   └── fixtures/              # 双平台有效组件清单与版本/修订/平台错误样例
 │   ├── openapi/                   # FastAPI OpenAPI 快照
 │   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
@@ -85,6 +88,8 @@ automation-tool/
 │   ├── check_user_facing_branding.py # UI 上游名称和未解释术语静态门禁
 │   ├── run_av_04_acceptance.py   # 87 行任务、汇总、独立证据和旧 Roadmap 隔离验收
 │   ├── check_embedded_browser_video_roadmap.py # 专项轻量台账与每任务证据 CI 门禁
+│   ├── run_eb_01_acceptance.py   # Playwright/Chromium 完整版本与双平台兼容验收
+│   ├── check_embedded_browser_compatibility.py # 构建候选版本、修订、平台和架构 fail-closed 门禁
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
