@@ -58,6 +58,26 @@ jobs:
       - run: uv run automation-tool-export-executor-schema --output ../contracts/protocol/executor-v1.schema.json --check
       - run: uv run pytest --cov=automation_tool --cov-report=term-missing
 
+  browser-use-contract:
+    name: Browser Use API contract / Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: 3.12.13
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.28
+          enable-cache: true
+          cache-dependency-glob: tools/browser-use-contract/uv.lock
+      - run: uv sync --project tools/browser-use-contract --locked
+      - run: uv lock --project tools/browser-use-contract --check
+      - run: >-
+          uv run --project tools/browser-use-contract --locked python
+          scripts/check_browser_use_api_contract.py --self-test
+
   frontend:
     name: Frontend / Node 26
     runs-on: ubuntu-latest
