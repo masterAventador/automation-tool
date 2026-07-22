@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "workerId": "material_montage_v1",
+  "entrypoint": "automation-tool-material-video-worker",
+  "upstream": {
+    "tag": "v1.3.2",
+    "commit": "b1588e1fdc6c5e54358f66ca2ff323e1dddf1364",
+    "pyprojectSha256": "813dcd24b1dbd900a0d406ca22489f75ae24937b71acd4d1aac3d8542241240b",
+    "lockSha256": "4145b3ff1384e05a339f0aac9c9afd9ad43e6d77405d19ea6b4dd8af8922c9f9"
+  },
+  "python": {
+    "implementation": "CPython",
+    "version": "3.11.15",
+    "requires": ">=3.11,<3.12"
+  },
+  "build": {
+    "tool": "PyInstaller",
+    "version": "6.21.0",
+    "mode": "onedir",
+    "sharesEnvironmentWithRpaExecutor": false,
+    "writesIntoUpstreamCheckout": false,
+    "maximumFiles": 20000,
+    "maximumBytes": 2147483648,
+    "maximumProbeStartupSeconds": 30
+  },
+  "dependencies": {
+    "expectedInstalledDistributionCount": 112,
+    "required": {
+      "moviepy": "2.2.1",
+      "streamlit": "1.59.1",
+      "streamlit-tour": "1.1.0",
+      "edge-tts": "7.2.7",
+      "fastapi": "0.136.3",
+      "uvicorn": "0.32.1",
+      "openai": "2.24.0",
+      "faster-whisper": "1.1.0",
+      "dashscope": "1.20.14",
+      "azure-cognitiveservices-speech": "1.41.1",
+      "python-multipart": "0.0.27",
+      "pydub": "0.25.1",
+      "litellm": "1.86.2",
+      "google-genai": "2.11.0"
+    }
+  },
+  "probe": {
+    "protocolVersion": 1,
+    "status": "ready",
+    "networkRequired": false,
+    "requiredCapabilities": [
+      "video_composition",
+      "speech_synthesis",
+      "subtitle_transcription",
+      "web_ui"
+    ]
+  },
+  "licensePolicy": {
+    "inventoryRequired": true,
+    "unknownLicenseAllowed": false,
+    "packageLicenseFilesRecorded": true,
+    "releaseRequiresHumanLegalReview": true
+  }
+}
