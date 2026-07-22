@@ -8,12 +8,16 @@ import pytest
 from automation_tool.control_plane.application.customer_accounts import (
     AccountAuditActor,
     AccountAuditContext,
+    AccountRecord,
     CustomerAccountRepository,
     CustomerAccountService,
+    EmergencyRevocationRecord,
 )
 from automation_tool.control_plane.domain import (
     AccountAuditActorKind,
+    AccountStatus,
     InvalidAccountModel,
+    LoginName,
     PasswordHash,
     UserId,
 )
@@ -41,6 +45,9 @@ class UnusedRepository:
         raise AssertionError("repository must not be called")
 
     async def transition(self, **_values: object) -> None:
+        raise AssertionError("repository must not be called")
+
+    async def emergency_revoke(self, **_values: object) -> None:
         raise AssertionError("repository must not be called")
 
 
@@ -150,3 +157,45 @@ async def test_service_rejects_invalid_id_request_clock_and_revision_before_pers
                 actor=valid_actor(),
                 request_id="request-1",
             )
+        with pytest.raises(InvalidAccountModel):
+            await service.emergency_revoke(
+                user_id=cast(UserId, user_id),
+                expected_revision=revision,
+                actor=valid_actor(),
+                request_id="request-1",
+            )
+
+
+def account_record(*, status: AccountStatus = AccountStatus.DISABLED) -> AccountRecord:
+    return AccountRecord(
+        user_id=UserId.new(),
+        login_name=LoginName.parse("emergency.ops"),
+        status=status,
+        credential_version=2,
+        revision=2,
+        created_at=NOW,
+        updated_at=NOW,
+        locked_at=None,
+        lock_expires_at=None,
+        disabled_at=NOW if status is AccountStatus.DISABLED else None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("account", "count"),
+    (
+        (object(), 0),
+        (account_record(status=AccountStatus.ACTIVE), 0),
+        (account_record(), True),
+        (account_record(), -1),
+    ),
+)
+def test_emergency_record_requires_disabled_account_and_nonnegative_exact_count(
+    account: object,
+    count: object,
+) -> None:
+    with pytest.raises(InvalidAccountModel):
+        EmergencyRevocationRecord(
+            account=cast(AccountRecord, account),
+            revoked_device_count=cast(int, count),
+        )

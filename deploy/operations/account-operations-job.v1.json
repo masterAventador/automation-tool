@@ -1,0 +1,42 @@
+{
+  "version": "customer-demo-account-operations-job.v1",
+  "entrypoint": "automation-tool-account-operations",
+  "commands": [
+    "create",
+    "disable",
+    "restore",
+    "reset",
+    "emergency-revoke"
+  ],
+  "publicNetworkAccess": false,
+  "networkAccess": [
+    "postgresql"
+  ],
+  "databaseRole": "automation_tool_operations",
+  "secretDelivery": "fixed_read_only_files",
+  "requiredSecretFiles": [
+    "database-url",
+    "account-password-pepper",
+    "account-operations-capability-digest"
+  ],
+  "passwordAndCapabilityInput": "bounded_json_stdin",
+  "forbiddenSecretChannels": [
+    "argv",
+    "environment",
+    "logs",
+    "http"
+  ],
+  "recoveryTokenOutput": "single_use_stdout_no_logging",
+  "runAs": "65532:65532",
+  "readOnlyRootFilesystem": true,
+  "linuxCapabilities": [],
+  "maximumParallelJobs": 1,
+  "requestIdRequired": true,
+  "expectedRevisionRequired": [
+    "disable",
+    "restore",
+    "emergency-revoke"
+  ],
+  "auditActor": "operations",
+  "automaticRetry": false
+}

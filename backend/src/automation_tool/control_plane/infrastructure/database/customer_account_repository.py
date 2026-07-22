@@ -18,6 +18,7 @@ from automation_tool.control_plane.application.customer_accounts import (
     AccountRecord,
     AccountRevisionConflict,
     AccountTransitionRejected,
+    EmergencyRevocationRecord,
 )
 from automation_tool.control_plane.domain import (
     AccountAuditEventType,
@@ -30,6 +31,9 @@ from automation_tool.control_plane.infrastructure.database.schema import (
     account_audit_events,
     account_session_families,
     account_session_tokens,
+    device_credentials,
+    device_sessions,
+    installations,
     user_password_credentials,
     users,
 )
@@ -293,6 +297,154 @@ class SqlAlchemyCustomerAccountRepository:
                         )
                     )
                 return _account_record(updated_row)
+        except SQLAlchemyError:
+            raise AccountPersistenceUnavailable from None
+
+    async def emergency_revoke(
+        self,
+        *,
+        user_id: UserId,
+        expected_revision: int,
+        audit: AccountAuditContext,
+    ) -> EmergencyRevocationRecord:
+        try:
+            async with self._database.session() as session:
+                current_row = (
+                    (
+                        await session.execute(
+                            select(users).where(users.c.id == user_id.uuid).with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if current_row is None:
+                    raise AccountNotFound
+                current = _account_record(current_row)
+                if current.revision != expected_revision:
+                    raise AccountRevisionConflict
+                if current.status not in {AccountStatus.ACTIVE, AccountStatus.LOCKED}:
+                    raise AccountTransitionRejected
+                updated_row = (
+                    (
+                        await session.execute(
+                            update(users)
+                            .where(
+                                users.c.id == user_id.uuid,
+                                users.c.revision == expected_revision,
+                            )
+                            .values(
+                                status=AccountStatus.DISABLED.value,
+                                credential_version=current.credential_version + 1,
+                                revision=current.revision + 1,
+                                updated_at=audit.occurred_at,
+                                locked_at=None,
+                                lock_expires_at=None,
+                                disabled_at=audit.occurred_at,
+                            )
+                            .returning(users)
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                device_ids = tuple(
+                    (
+                        await session.execute(
+                            select(installations.c.id)
+                            .where(
+                                installations.c.owner_user_id == user_id.uuid,
+                                installations.c.status == "active",
+                            )
+                            .order_by(installations.c.id)
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                await session.execute(
+                    update(account_session_families)
+                    .where(
+                        account_session_families.c.user_id == user_id.uuid,
+                        account_session_families.c.revoked_at.is_(None),
+                    )
+                    .values(
+                        revoked_at=audit.occurred_at,
+                        revocation_reason="account_disabled",
+                    )
+                )
+                await session.execute(
+                    update(account_session_tokens)
+                    .where(
+                        account_session_tokens.c.user_id == user_id.uuid,
+                        account_session_tokens.c.revoked_at.is_(None),
+                    )
+                    .values(revoked_at=audit.occurred_at)
+                )
+                if device_ids:
+                    await session.execute(
+                        update(installations)
+                        .where(
+                            installations.c.id.in_(device_ids),
+                            installations.c.status == "active",
+                        )
+                        .values(
+                            status="revoked",
+                            revision=installations.c.revision + 1,
+                            updated_at=audit.occurred_at,
+                            revoked_at=audit.occurred_at,
+                        )
+                    )
+                    await session.execute(
+                        update(device_credentials)
+                        .where(
+                            device_credentials.c.installation_id.in_(device_ids),
+                            device_credentials.c.status == "active",
+                        )
+                        .values(
+                            status="revoked",
+                            updated_at=audit.occurred_at,
+                            revoked_at=audit.occurred_at,
+                        )
+                    )
+                    await session.execute(
+                        update(device_sessions)
+                        .where(
+                            device_sessions.c.installation_id.in_(device_ids),
+                            device_sessions.c.revoked_at.is_(None),
+                        )
+                        .values(revoked_at=audit.occurred_at)
+                    )
+                for _device_id in device_ids:
+                    await session.execute(
+                        insert(account_audit_events).values(
+                            **_audit_values(
+                                event_type=AccountAuditEventType.DEVICE_REVOKED,
+                                user_id=user_id,
+                                reason_code="operations_emergency_revoked",
+                                audit=audit,
+                            )
+                        )
+                    )
+                for event_type in (
+                    AccountAuditEventType.ACCOUNT_DISABLED,
+                    AccountAuditEventType.SESSION_ALL_REVOKED,
+                ):
+                    await session.execute(
+                        insert(account_audit_events).values(
+                            **_audit_values(
+                                event_type=event_type,
+                                user_id=user_id,
+                                reason_code="operations_emergency_revoked",
+                                audit=audit,
+                            )
+                        )
+                    )
+                return EmergencyRevocationRecord(
+                    account=_account_record(updated_row),
+                    revoked_device_count=len(device_ids),
+                )
         except SQLAlchemyError:
             raise AccountPersistenceUnavailable from None
 
