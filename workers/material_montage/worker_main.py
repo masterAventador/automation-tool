@@ -8,9 +8,21 @@ import importlib.metadata
 import json
 import re
 import sys
-from typing import Final
+import threading
+from typing import Final, TextIO
 
-PROTOCOL_VERSION: Final = 1
+from gateway import (
+    MAX_BOOTSTRAP_BYTES,
+    PROTOCOL_VERSION,
+    WORKER_VERSION,
+    GatewayRejected,
+    create_gateway,
+    event_proof,
+    parse_bootstrap,
+    parse_cancel_command,
+)
+
+RUNTIME_PROBE_PROTOCOL_VERSION: Final = 1
 SAFE_MODULE_NAME: Final = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 RUNTIME_MODULES: Final[dict[str, str | None]] = {
     "moviepy": "moviepy",
@@ -38,7 +50,7 @@ def runtime_probe() -> dict[str, object]:
             importlib.import_module(module)
         versions[distribution] = importlib.metadata.version(distribution)
     return {
-        "protocolVersion": PROTOCOL_VERSION,
+        "protocolVersion": RUNTIME_PROBE_PROTOCOL_VERSION,
         "status": "ready",
         "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "dependencies": versions,
@@ -62,7 +74,55 @@ def dependency_probe(name: str) -> dict[str, object]:
     return {"dependency": name, "status": "ready"}
 
 
-def main(arguments: list[str] | None = None) -> int:
+def _gateway_process(stream: TextIO) -> int:
+    line = stream.readline(MAX_BOOTSTRAP_BYTES + 1)
+    if not line:
+        print("Material video worker command is required", file=sys.stderr)
+        return 64
+    try:
+        bootstrap = parse_bootstrap(line.encode())
+        server = create_gateway(bootstrap)
+    except Exception:
+        print("Material video worker bootstrap is rejected", file=sys.stderr)
+        return 65
+    port = int(server.server_address[1])
+    thread = threading.Thread(target=server.serve_forever, name="material-video-gateway")
+    thread.start()
+    ready = {
+        "authenticationProof": event_proof(bootstrap, "worker.ready", str(port)),
+        "event": "worker.ready",
+        "port": port,
+        "protocolVersion": PROTOCOL_VERSION,
+        "workerKind": "python",
+        "workerVersion": WORKER_VERSION,
+    }
+    print(json.dumps(ready, sort_keys=True, separators=(",", ":")), flush=True)
+    try:
+        for command_line in stream:
+            try:
+                job_id = parse_cancel_command(bootstrap, command_line.encode())
+            except (GatewayRejected, UnicodeEncodeError):
+                continue
+            cancelled = {
+                "authenticationProof": event_proof(bootstrap, "worker.cancelled", job_id),
+                "event": "worker.cancelled",
+                "jobId": job_id,
+                "protocolVersion": PROTOCOL_VERSION,
+                "workerKind": "python",
+                "workerVersion": WORKER_VERSION,
+            }
+            print(json.dumps(cancelled, sort_keys=True, separators=(",", ":")), flush=True)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=REQUEST_SHUTDOWN_TIMEOUT_SECONDS)
+    return 0
+
+
+REQUEST_SHUTDOWN_TIMEOUT_SECONDS: Final = 5
+
+
+def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None) -> int:
     values = sys.argv[1:] if arguments is None else arguments
     if len(values) == 2 and values[0] == "--probe-dependency":
         try:
@@ -85,6 +145,8 @@ def main(arguments: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     if values != ["--probe"]:
+        if not values:
+            return _gateway_process(sys.stdin if bootstrap_stream is None else bootstrap_stream)
         print("Material video worker command is required", file=sys.stderr)
         return 64
     try:

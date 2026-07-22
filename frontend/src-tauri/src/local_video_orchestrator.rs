@@ -129,6 +129,7 @@ impl VideoWorkerRestartPolicy {
 pub struct VideoWorkerLaunch {
     kind: VideoWorkerKind,
     executable_path: PathBuf,
+    asset_root: PathBuf,
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
 }
@@ -137,10 +138,12 @@ impl VideoWorkerLaunch {
     pub fn new(
         kind: VideoWorkerKind,
         executable_path: PathBuf,
+        asset_root: PathBuf,
         expected_version: String,
         restart_policy: VideoWorkerRestartPolicy,
     ) -> Result<Self, VideoWorkerError> {
         validate_executable_path(&executable_path)?;
+        validate_directory_path(&asset_root)?;
         if expected_version.is_empty()
             || expected_version.len() > MAX_VERSION_BYTES
             || Version::parse(&expected_version).is_err()
@@ -150,6 +153,7 @@ impl VideoWorkerLaunch {
         Ok(Self {
             kind,
             executable_path,
+            asset_root,
             expected_version,
             restart_policy,
         })
@@ -479,6 +483,7 @@ impl Drop for VideoWorkerSessionToken {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VideoWorkerBootstrapDocument<'a> {
+    asset_root: &'a str,
     bootstrap_version: &'static str,
     local_session_token: &'a str,
     protocol_version: &'static str,
@@ -555,7 +560,7 @@ fn spawn_worker(
         let stderr = child.stderr.take().ok_or_else(process_unavailable)?;
         let (events, stdout_thread) = spawn_stdout_reader(stdout);
         let stderr_thread = spawn_stderr_drain(stderr);
-        write_bootstrap(&token, launch.kind, &mut stdin)?;
+        write_bootstrap(&token, &launch, &mut stdin)?;
         let line = receive_line(&events, start_timeout)?;
         let event: VideoWorkerReadyEvent =
             serde_json::from_str(&line).map_err(|_| authentication_rejected())?;
@@ -598,15 +603,20 @@ fn spawn_worker(
 
 fn write_bootstrap(
     token: &VideoWorkerSessionToken,
-    kind: VideoWorkerKind,
+    launch: &VideoWorkerLaunch,
     stdin: &mut ChildStdin,
 ) -> Result<(), VideoWorkerError> {
     let encoded = token.encoded();
+    let asset_root = launch
+        .asset_root
+        .to_str()
+        .ok_or_else(configuration_invalid)?;
     let document = VideoWorkerBootstrapDocument {
+        asset_root,
         bootstrap_version: BOOTSTRAP_VERSION,
         local_session_token: &encoded,
         protocol_version: WORKER_PROTOCOL_VERSION,
-        worker_kind: kind.as_str(),
+        worker_kind: launch.kind.as_str(),
     };
     let mut bytes =
         Zeroizing::new(serde_json::to_vec(&document).map_err(|_| process_unavailable())?);
@@ -821,6 +831,32 @@ fn validate_executable_path(path: &Path) -> Result<(), VideoWorkerError> {
         if metadata.permissions().mode() & 0o111 == 0 {
             return Err(configuration_invalid());
         }
+    }
+    Ok(())
+}
+
+fn validate_directory_path(path: &Path) -> Result<(), VideoWorkerError> {
+    if !path.is_absolute() || path.as_os_str().len() > MAX_PATH_BYTES {
+        return Err(configuration_invalid());
+    }
+    for ancestor in path.ancestors() {
+        let metadata = fs::symlink_metadata(ancestor).map_err(|_| configuration_invalid())?;
+        #[cfg(windows)]
+        let windows_file_attributes = {
+            use std::os::windows::fs::MetadataExt;
+            Some(metadata.file_attributes())
+        };
+        #[cfg(not(windows))]
+        let windows_file_attributes = None;
+        if unsafe_path_component(metadata.file_type().is_symlink(), windows_file_attributes) {
+            return Err(configuration_invalid());
+        }
+    }
+    if !fs::metadata(path)
+        .map_err(|_| configuration_invalid())?
+        .is_dir()
+    {
+        return Err(configuration_invalid());
     }
     Ok(())
 }

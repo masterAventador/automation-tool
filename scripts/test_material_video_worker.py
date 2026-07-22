@@ -17,7 +17,7 @@ import worker_main  # noqa: E402
 
 class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
     def test_rejects_missing_or_unknown_commands_without_loading_runtime(self) -> None:
-        for arguments in ([], ["--unknown"], ["--probe", "extra"]):
+        for arguments in (["--unknown"], ["--probe", "extra"]):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -25,6 +25,15 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             self.assertEqual(result, 64)
             self.assertEqual(stdout.getvalue(), "")
             self.assertEqual(stderr.getvalue(), "Material video worker command is required\n")
+
+    def test_rejects_missing_bootstrap_without_starting_gateway(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = worker_main.main([], io.StringIO(""))
+        self.assertEqual(result, 64)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "Material video worker command is required\n")
 
     def test_dependency_probe_rejects_non_startup_dependency(self) -> None:
         with self.assertRaisesRegex(ValueError, "not part of the startup set"):

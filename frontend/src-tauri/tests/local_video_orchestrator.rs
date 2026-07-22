@@ -136,6 +136,7 @@ impl TemporaryWorker {
         VideoWorkerLaunch::new(
             kind,
             self.executable.clone(),
+            self.root.clone(),
             WORKER_VERSION.to_owned(),
             restart_policy,
         )
@@ -226,6 +227,7 @@ fn rejects_relative_symlink_duplicate_and_version_mismatch_launches() {
     let relative = VideoWorkerLaunch::new(
         VideoWorkerKind::Python,
         Path::new("video-worker").to_path_buf(),
+        fixture.root.clone(),
         WORKER_VERSION.to_owned(),
         VideoWorkerRestartPolicy::new(1, Duration::from_millis(10)).expect("restart policy"),
     )
@@ -233,17 +235,53 @@ fn rejects_relative_symlink_duplicate_and_version_mismatch_launches() {
     .expect("relative worker must be rejected");
     assert_eq!(relative.code(), VideoWorkerErrorCode::ConfigurationInvalid);
 
+    let relative_asset_root = VideoWorkerLaunch::new(
+        VideoWorkerKind::Python,
+        fixture.executable.clone(),
+        Path::new("assets").to_path_buf(),
+        WORKER_VERSION.to_owned(),
+        VideoWorkerRestartPolicy::new(1, Duration::from_millis(10)).expect("restart policy"),
+    )
+    .err()
+    .expect("relative asset root must be rejected");
+    assert_eq!(
+        relative_asset_root.code(),
+        VideoWorkerErrorCode::ConfigurationInvalid
+    );
+
     let symlink = fixture.root.join("worker-link");
     std::os::unix::fs::symlink(&fixture.executable, &symlink).expect("worker symlink");
     let linked = VideoWorkerLaunch::new(
         VideoWorkerKind::Python,
         symlink,
+        fixture.root.clone(),
         WORKER_VERSION.to_owned(),
         VideoWorkerRestartPolicy::new(1, Duration::from_millis(10)).expect("restart policy"),
     )
     .err()
     .expect("symlink worker must be rejected");
     assert_eq!(linked.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+
+    let asset_link = fixture.root.parent().expect("worker parent").join(format!(
+        "automation-tool-vf02-asset-link-{}-{}",
+        std::process::id(),
+        TEMPORARY_WORKER_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+    ));
+    std::os::unix::fs::symlink(&fixture.root, &asset_link).expect("asset root symlink");
+    let linked_asset = VideoWorkerLaunch::new(
+        VideoWorkerKind::Python,
+        fixture.executable.clone(),
+        asset_link.clone(),
+        WORKER_VERSION.to_owned(),
+        VideoWorkerRestartPolicy::new(1, Duration::from_millis(10)).expect("restart policy"),
+    )
+    .err()
+    .expect("linked asset root must be rejected");
+    assert_eq!(
+        linked_asset.code(),
+        VideoWorkerErrorCode::ConfigurationInvalid
+    );
+    fs::remove_file(asset_link).expect("remove asset root symlink");
 
     let ancestor_link = fixture.root.parent().expect("worker parent").join(format!(
         "automation-tool-vf02-parent-link-{}-{}",
@@ -254,6 +292,7 @@ fn rejects_relative_symlink_duplicate_and_version_mismatch_launches() {
     let replaced_ancestor = VideoWorkerLaunch::new(
         VideoWorkerKind::Python,
         ancestor_link.join("video-worker"),
+        fixture.root.clone(),
         WORKER_VERSION.to_owned(),
         VideoWorkerRestartPolicy::new(1, Duration::from_millis(10)).expect("restart policy"),
     )
@@ -277,6 +316,7 @@ fn rejects_relative_symlink_duplicate_and_version_mismatch_launches() {
     let mismatch = VideoWorkerLaunch::new(
         VideoWorkerKind::Node,
         fixture.executable.clone(),
+        fixture.root.clone(),
         "9.9.9".to_owned(),
         VideoWorkerRestartPolicy::new(1, Duration::from_millis(10)).expect("restart policy"),
     )
