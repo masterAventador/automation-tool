@@ -107,7 +107,10 @@ fn video_studio_acceptance_is_isolated_and_hidden() {
     );
     assert_eq!(capabilities[0], "main");
     assert_eq!(capabilities[1]["identifier"], "wdio-video-studio");
-    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+    assert_eq!(
+        capabilities[1]["windows"],
+        serde_json::json!(["main", "material-video-studio"])
+    );
 }
 
 #[test]

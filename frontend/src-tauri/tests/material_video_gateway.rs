@@ -72,7 +72,7 @@ fn frozen_worker_uses_the_authenticated_loopback_gateway_end_to_end() {
         eprintln!("real frozen worker is exercised by scripts/run_im_03_acceptance.py");
         return;
     };
-    let executable = PathBuf::from(executable);
+    let executable = fs::canonicalize(PathBuf::from(executable)).expect("canonical worker path");
     assert!(executable.is_absolute());
     assert!(executable.is_file());
     let assets = TemporaryAssetRoot::new();
@@ -170,4 +170,62 @@ fn app_script_settings_configure_the_real_frozen_worker_without_public_secrets()
     orchestrator
         .stop(VideoWorkerKind::Python)
         .expect("configured worker cleanup");
+}
+
+#[test]
+fn frozen_worker_starts_real_web_ui_only_inside_the_task_workspace() {
+    let Some(executable) = std::env::var_os("AUTOMATION_TOOL_IM05_WORKER") else {
+        eprintln!("real frozen WebUI is exercised by scripts/run_im_05_acceptance.py");
+        return;
+    };
+    let executable = fs::canonicalize(PathBuf::from(executable)).expect("canonical worker path");
+    assert!(executable.is_absolute());
+    assert!(executable.is_file());
+    let assets = TemporaryAssetRoot::new();
+    let launch = VideoWorkerLaunch::new(
+        VideoWorkerKind::Python,
+        executable,
+        assets.0.clone(),
+        "1.3.2".to_owned(),
+        VideoWorkerRestartPolicy::new(0, Duration::ZERO).expect("restart policy"),
+    )
+    .expect("secure launch configuration")
+    .with_web_ui();
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(45), Duration::from_secs(10))
+            .expect("orchestrator");
+
+    let running = orchestrator
+        .start(launch)
+        .expect("start frozen WebUI worker");
+    assert_eq!(running.state(), VideoWorkerState::Running);
+    assert!(running.web_ui_available());
+    orchestrator
+        .verify_web_ui(VideoWorkerKind::Python)
+        .expect("real WebUI HTML entry is available");
+    orchestrator
+        .health(VideoWorkerKind::Python)
+        .expect("gateway remains healthy beside WebUI");
+
+    let private_roots = fs::read_dir(assets.0.join(".automation-tool-webui"))
+        .expect("private WebUI parent")
+        .map(|entry| entry.expect("private root entry").path())
+        .collect::<Vec<_>>();
+    assert_eq!(private_roots.len(), 1);
+    let private_root = &private_roots[0];
+    assert!(private_root.join("config.toml").is_file());
+    assert!(private_root.join("webui/Main.py").is_file());
+    assert!(private_root.join("resource").is_dir());
+    assert!(private_root.join("storage/tasks").is_dir());
+
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("WebUI and gateway descendants stop together");
+    assert_eq!(
+        orchestrator
+            .status(VideoWorkerKind::Python)
+            .expect("stopped status")
+            .state(),
+        VideoWorkerState::Stopped
+    );
 }

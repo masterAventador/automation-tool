@@ -19,7 +19,7 @@
         {
           "identifier": "wdio-video-studio",
           "description": "Test-only WebdriverIO access for isolated video studio acceptance",
-          "windows": ["main"],
+          "windows": ["main", "material-video-studio"],
           "permissions": [
             "wdio:allow-execute",
             "wdio:allow-log-frontend",

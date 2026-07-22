@@ -9,6 +9,7 @@ import json
 import re
 import sys
 import threading
+from pathlib import Path
 from typing import Final, TextIO
 
 from gateway import (
@@ -22,6 +23,7 @@ from gateway import (
     parse_cancel_command,
 )
 from model_service_adapter import install_script_model
+from webui_runtime import WebUiRejected, serve_webui, start_webui
 
 RUNTIME_PROBE_PROTOCOL_VERSION: Final = 1
 SAFE_MODULE_NAME: Final = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -80,6 +82,7 @@ def _gateway_process(stream: TextIO) -> int:
     if not line:
         print("Material video worker command is required", file=sys.stderr)
         return 64
+    webui = None
     try:
         bootstrap = parse_bootstrap(line.encode())
         script_model_id = (
@@ -87,12 +90,21 @@ def _gateway_process(stream: TextIO) -> int:
             if bootstrap.script_model is not None
             else None
         )
+        webui = (
+            start_webui(bootstrap.asset_root, bootstrap.script_model)
+            if bootstrap.web_ui
+            else None
+        )
         server = create_gateway(bootstrap)
     except Exception:
+        if webui is not None:
+            webui.stop()
         print("Material video worker bootstrap is rejected", file=sys.stderr)
         return 65
     port = int(server.server_address[1])
-    thread = threading.Thread(target=server.serve_forever, name="material-video-gateway")
+    thread = threading.Thread(
+        target=server.serve_forever, name="material-video-gateway"
+    )
     thread.start()
     ready = {
         "authenticationProof": event_proof(bootstrap, "worker.ready", str(port)),
@@ -100,6 +112,17 @@ def _gateway_process(stream: TextIO) -> int:
         "port": port,
         "protocolVersion": PROTOCOL_VERSION,
         "scriptModelId": script_model_id,
+        "webUiAuthenticationProof": (
+            event_proof(
+                bootstrap,
+                "worker.web_ui_ready",
+                f"{webui.endpoint.port}:{webui.endpoint.path}",
+            )
+            if webui is not None
+            else None
+        ),
+        "webUiPath": webui.endpoint.path if webui is not None else None,
+        "webUiPort": webui.endpoint.port if webui is not None else None,
         "workerKind": "python",
         "workerVersion": WORKER_VERSION,
     }
@@ -111,26 +134,45 @@ def _gateway_process(stream: TextIO) -> int:
             except (GatewayRejected, UnicodeEncodeError):
                 continue
             cancelled = {
-                "authenticationProof": event_proof(bootstrap, "worker.cancelled", job_id),
+                "authenticationProof": event_proof(
+                    bootstrap, "worker.cancelled", job_id
+                ),
                 "event": "worker.cancelled",
                 "jobId": job_id,
                 "protocolVersion": PROTOCOL_VERSION,
                 "workerKind": "python",
                 "workerVersion": WORKER_VERSION,
             }
-            print(json.dumps(cancelled, sort_keys=True, separators=(",", ":")), flush=True)
+            print(
+                json.dumps(cancelled, sort_keys=True, separators=(",", ":")), flush=True
+            )
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=REQUEST_SHUTDOWN_TIMEOUT_SECONDS)
+        if webui is not None:
+            webui.stop()
     return 0
 
 
 REQUEST_SHUTDOWN_TIMEOUT_SECONDS: Final = 5
 
 
-def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None) -> int:
+def main(
+    arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None
+) -> int:
     values = sys.argv[1:] if arguments is None else arguments
+    if len(values) == 4 and values[0] == "--serve-webui":
+        try:
+            return serve_webui(
+                int(values[1]),
+                values[2],
+                Path(values[3]),
+                sys.stdin if bootstrap_stream is None else bootstrap_stream,
+            )
+        except (ValueError, OSError, WebUiRejected):
+            print("Material video WebUI is unavailable", file=sys.stderr)
+            return 70
     if len(values) == 2 and values[0] == "--probe-dependency":
         try:
             payload = dependency_probe(values[1])
@@ -140,7 +182,11 @@ def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = N
                 missing = "unknown"
             print(
                 json.dumps(
-                    {"dependency": values[1], "missingModule": missing, "status": "unavailable"},
+                    {
+                        "dependency": values[1],
+                        "missingModule": missing,
+                        "status": "unavailable",
+                    },
                     sort_keys=True,
                     separators=(",", ":"),
                 )
@@ -149,11 +195,17 @@ def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = N
         except Exception:
             print("Material video worker dependency is unavailable", file=sys.stderr)
             return 70
-        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        print(
+            json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        )
         return 0
     if values != ["--probe"]:
         if not values:
-            return _gateway_process(sys.stdin if bootstrap_stream is None else bootstrap_stream)
+            return _gateway_process(
+                sys.stdin if bootstrap_stream is None else bootstrap_stream
+            )
         print("Material video worker command is required", file=sys.stderr)
         return 64
     try:
@@ -161,7 +213,9 @@ def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = N
     except Exception:
         print("Material video worker startup is unavailable", file=sys.stderr)
         return 70
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
     return 0
 
 

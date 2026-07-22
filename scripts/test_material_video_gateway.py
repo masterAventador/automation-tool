@@ -36,6 +36,7 @@ def bootstrap_line(asset_root: Path, **changes: object) -> bytes:
     value: dict[str, object] = {
         "assetRoot": str(asset_root),
         "bootstrapVersion": "1",
+        "enableWebUi": False,
         "localSessionToken": TOKEN,
         "protocolVersion": "1.0",
         "scriptModel": None,
@@ -71,7 +72,11 @@ def request(
     connection.request(method, path, body=body, headers=headers or {})
     response = connection.getresponse()
     payload = response.read()
-    result = response.status, {key.lower(): value for key, value in response.getheaders()}, payload
+    result = (
+        response.status,
+        {key.lower(): value for key, value in response.getheaders()},
+        payload,
+    )
     connection.close()
     return result
 
@@ -90,6 +95,7 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                 {"localSessionToken": "short"},
                 {"workerKind": "node"},
                 {"protocolVersion": "2.0"},
+                {"enableWebUi": "true"},
                 {"assetRoot": "relative"},
                 {"extra": True},
             ):
@@ -104,14 +110,21 @@ class MaterialVideoGatewayTest(unittest.TestCase):
 
     def test_cancel_command_requires_exact_authenticated_document(self) -> None:
         with tempfile.TemporaryDirectory(prefix="im03-command-") as directory:
-            bootstrap = GatewayBootstrap(TOKEN, bytes.fromhex(TOKEN), Path(directory).resolve())
+            bootstrap = GatewayBootstrap(
+                TOKEN, bytes.fromhex(TOKEN), Path(directory).resolve()
+            )
             job_id = "123e4567-e89b-42d3-a456-426614174321"
             message = b"automation-tool.video-worker-command.v1\0" + b"\0".join(
                 value.encode() for value in ["worker.cancel", "python", "1.0", job_id]
             )
-            proof = "atvwc1." + base64.urlsafe_b64encode(
-                hmac.digest(bytes.fromhex(TOKEN), message, hashlib.sha256)
-            ).rstrip(b"=").decode()
+            proof = (
+                "atvwc1."
+                + base64.urlsafe_b64encode(
+                    hmac.digest(bytes.fromhex(TOKEN), message, hashlib.sha256)
+                )
+                .rstrip(b"=")
+                .decode()
+            )
             value = {
                 "authenticationProof": proof,
                 "command": "worker.cancel",
@@ -133,51 +146,51 @@ class MaterialVideoGatewayTest(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix="im03-http-") as directory,
             running_gateway(Path(directory)) as port,
         ):
-                status, headers, body = request(port, "GET", "/health")
-                self.assertEqual(status, 401)
-                self.assertEqual(json.loads(body), {"code": "authentication_required"})
-                self.assertNotIn("access-control-allow-origin", headers)
+            status, headers, body = request(port, "GET", "/health")
+            self.assertEqual(status, 401)
+            self.assertEqual(json.loads(body), {"code": "authentication_required"})
+            self.assertNotIn("access-control-allow-origin", headers)
 
-                status, headers, body = request(
-                    port,
-                    "GET",
-                    "/health",
-                    headers=authorized_headers(Origin=ORIGIN),
-                )
-                self.assertEqual(status, 200)
-                self.assertEqual(headers["access-control-allow-origin"], ORIGIN)
-                health = json.loads(body)
-                self.assertEqual(health["event"], "worker.health")
-                self.assertEqual(health["port"], port)
-                self.assertNotIn(TOKEN, body.decode())
+            status, headers, body = request(
+                port,
+                "GET",
+                "/health",
+                headers=authorized_headers(Origin=ORIGIN),
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["access-control-allow-origin"], ORIGIN)
+            health = json.loads(body)
+            self.assertEqual(health["event"], "worker.health")
+            self.assertEqual(health["port"], port)
+            self.assertNotIn(TOKEN, body.decode())
 
-                status, _, body = request(
-                    port,
-                    "GET",
-                    "/health?debug=1",
-                    headers=authorized_headers(),
-                )
-                self.assertEqual(status, 400)
-                self.assertEqual(json.loads(body), {"code": "request_rejected"})
+            status, _, body = request(
+                port,
+                "GET",
+                "/health?debug=1",
+                headers=authorized_headers(),
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(json.loads(body), {"code": "request_rejected"})
 
-                status, _, body = request(
-                    port,
-                    "GET",
-                    "/api/v1/unknown",
-                    headers=authorized_headers(),
-                )
-                self.assertEqual(status, 404)
-                self.assertEqual(json.loads(body), {"code": "route_unavailable"})
+            status, _, body = request(
+                port,
+                "GET",
+                "/api/v1/unknown",
+                headers=authorized_headers(),
+            )
+            self.assertEqual(status, 404)
+            self.assertEqual(json.loads(body), {"code": "route_unavailable"})
 
-                status, _, body = request(
-                    port,
-                    "GET",
-                    "/api/v1/capabilities",
-                    headers=authorized_headers(Origin="https://evil.example"),
-                )
-                self.assertEqual(status, 400)
-                self.assertNotIn(str(Path(directory)), body.decode())
-                self.assertNotIn(TOKEN, body.decode())
+            status, _, body = request(
+                port,
+                "GET",
+                "/api/v1/capabilities",
+                headers=authorized_headers(Origin="https://evil.example"),
+            )
+            self.assertEqual(status, 400)
+            self.assertNotIn(str(Path(directory)), body.decode())
+            self.assertNotIn(TOKEN, body.decode())
 
     def test_preflight_and_asset_containment(self) -> None:
         with tempfile.TemporaryDirectory(prefix="im03-assets-") as directory:
@@ -217,7 +230,8 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                     )
                     self.assertEqual(status, 200)
                     self.assertEqual(
-                        json.loads(body), {"sizeBytes": len(b"safe-video"), "status": "available"}
+                        json.loads(body),
+                        {"sizeBytes": len(b"safe-video"), "status": "available"},
                     )
 
                     for relative in (
@@ -232,7 +246,9 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                             "POST",
                             "/api/v1/assets/inspect",
                             body=payload,
-                            headers=authorized_headers(**{"Content-Type": "application/json"}),
+                            headers=authorized_headers(
+                                **{"Content-Type": "application/json"}
+                            ),
                         )
                         self.assertEqual(status, 400)
                         self.assertEqual(json.loads(body), {"code": "request_rejected"})
@@ -245,7 +261,10 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                         "/api/v1/assets/inspect",
                         body=oversized,
                         headers=authorized_headers(
-                            **{"Content-Type": "application/json", "Content-Length": "65537"}
+                            **{
+                                "Content-Type": "application/json",
+                                "Content-Length": "65537",
+                            }
                         ),
                     )
                     self.assertEqual(status, 400)
@@ -253,7 +272,9 @@ class MaterialVideoGatewayTest(unittest.TestCase):
             finally:
                 outside.unlink(missing_ok=True)
 
-    @unittest.skipIf(os.name == "nt", "Windows symlink creation requires optional privilege")
+    @unittest.skipIf(
+        os.name == "nt", "Windows symlink creation requires optional privilege"
+    )
     def test_asset_symlink_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="im03-symlink-") as directory:
             root = Path(directory).resolve()
@@ -268,7 +289,9 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                         "POST",
                         "/api/v1/assets/inspect",
                         body=payload,
-                        headers=authorized_headers(**{"Content-Type": "application/json"}),
+                        headers=authorized_headers(
+                            **{"Content-Type": "application/json"}
+                        ),
                     )
                     self.assertEqual(status, 400)
             finally:

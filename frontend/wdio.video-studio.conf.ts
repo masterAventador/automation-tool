@@ -17,6 +17,7 @@ export const config: WebdriverIO.Config = {
   specs: [
     "./e2e-tauri/video-studio.spec.ts",
     "./e2e-tauri/video-creation-methods.spec.ts",
+    "./e2e-tauri/material-video-webui.spec.ts",
   ],
   maxInstances: 1,
   services: [

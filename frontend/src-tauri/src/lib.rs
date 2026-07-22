@@ -20,6 +20,7 @@ pub mod executor_platform;
 pub mod executor_protocol;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
+pub mod material_video_studio;
 pub mod model_service_settings;
 mod runtime_compatibility;
 pub mod secure_store;
@@ -258,6 +259,19 @@ async fn test_model_service_connection(
     model_service_settings::ModelServiceCommandError,
 > {
     settings.test_connection(purpose).await.map_err(Into::into)
+}
+
+#[tauri::command]
+async fn open_material_video_studio(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    material_video_studio::MaterialVideoStudioSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::open(&app, &orchestrator, &settings, &workspaces)
 }
 
 #[tauri::command]
@@ -3112,6 +3126,7 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
+        open_material_video_studio,
         get_update_policy_record_for_acceptance,
         get_app_update_state,
         check_app_update_now,
@@ -3162,6 +3177,7 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
+        open_material_video_studio,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3243,6 +3259,7 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
+        open_material_video_studio,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3260,6 +3277,11 @@ pub fn run() {
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {
                 let _ = platform.shutdown_for_app_exit();
+            }
+            if let Some(orchestrator) =
+                app_handle.try_state::<local_video_orchestrator::LocalVideoOrchestrator>()
+            {
+                let _ = orchestrator.stop_all();
             }
         }
     });

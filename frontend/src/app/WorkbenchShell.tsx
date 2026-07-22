@@ -42,6 +42,7 @@ import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { VideoStudio } from "../features/video-studio/VideoStudio";
+import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
@@ -226,6 +227,12 @@ const shellModelServiceGateway: ModelServiceGateway = {
   },
 };
 
+const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
+  async open() {
+    throw new Error("Material video studio is unavailable");
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
@@ -238,6 +245,7 @@ interface WorkbenchShellProps {
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
   readonly modelServiceGateway?: ModelServiceGateway | undefined;
+  readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
 }
 
 export function WorkbenchShell({
@@ -252,6 +260,7 @@ export function WorkbenchShell({
   platformSessionGateway = shellPlatformSessionGateway,
   appUpdateGateway = shellAppUpdateGateway,
   modelServiceGateway = shellModelServiceGateway,
+  materialVideoStudioGateway = shellMaterialVideoStudioGateway,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -375,7 +384,7 @@ export function WorkbenchShell({
                 />
               </div>
             ) : showingVideoStudio ? (
-              <VideoStudio />
+              <VideoStudio gateway={materialVideoStudioGateway} />
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />

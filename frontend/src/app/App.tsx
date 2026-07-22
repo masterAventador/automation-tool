@@ -21,6 +21,7 @@ import { AccountSessionGate } from "../features/account-session/AccountSessionGa
 import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
+import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 
 interface AppProps {
   startupCheck: StartupCheck;
@@ -37,6 +38,7 @@ interface AppProps {
   appUpdateGateway?: AppUpdateGateway;
   accountSessionGateway?: AccountSessionGateway;
   modelServiceGateway?: ModelServiceGateway;
+  materialVideoStudioGateway?: MaterialVideoStudioGateway;
 }
 
 export function App({
@@ -54,6 +56,7 @@ export function App({
   appUpdateGateway,
   accountSessionGateway,
   modelServiceGateway,
+  materialVideoStudioGateway,
 }: AppProps) {
   const workbench = (
     <WorkbenchShell
@@ -68,6 +71,7 @@ export function App({
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
+      materialVideoStudioGateway={materialVideoStudioGateway}
     />
   );
   const desktopApplication = (

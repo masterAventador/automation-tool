@@ -2,6 +2,11 @@ import { useState } from "react";
 
 import { Alert, Button, Card, Empty, Input, Space, Tabs, Tag, Typography } from "antd";
 
+import {
+  MaterialVideoStudioGatewayError,
+  type MaterialVideoStudioGateway,
+} from "./material-video-studio-gateway";
+
 type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
 
 interface VideoCreationMethodOption {
@@ -133,8 +138,21 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
   );
 }
 
-function NewVideoPage() {
+const OPEN_ERRORS = {
+  configuration_required: "请先到“设置与诊断”配置并测试文案模型服务。",
+  process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
+  storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
+  view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
+  protocol_mismatch: "视频制作服务版本不匹配，请更新 App 后重试。",
+  operation_unavailable: "视频制作暂时不可用，请稍后重试。",
+} as const;
+
+function NewVideoPage({ gateway }: { readonly gateway: MaterialVideoStudioGateway }) {
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
+    null,
+  );
   const selectedName = VIDEO_CREATION_METHODS.find(
     (method) => method.id === selectedMethod,
   )?.name;
@@ -196,14 +214,39 @@ function NewVideoPage() {
             );
           })}
         </div>
-        <Alert
-          type="info"
-          showIcon
-          title="现在可以比较并选择制作方式；一句话创建会在相应制作流程接入后开放。"
-        />
+        {openMessage === null ? (
+          <Alert
+            type="info"
+            showIcon
+            title="选择“智能素材成片”后可打开完整制作界面；“品牌动效成片”将在对应流程接入后开放。"
+          />
+        ) : (
+          <Alert type={openMessage.type} showIcon title={openMessage.text} />
+        )}
         <div>
-          <Button type="primary" disabled>
-            创建视频草稿
+          <Button
+            type="primary"
+            loading={opening}
+            disabled={selectedMethod !== "material_montage_v1" || opening}
+            onClick={() => {
+              setOpening(true);
+              setOpenMessage(null);
+              void gateway
+                .open()
+                .then(() => {
+                  setOpenMessage({ type: "success", text: "完整制作界面已打开。" });
+                })
+                .catch((error: unknown) => {
+                  const code =
+                    error instanceof MaterialVideoStudioGatewayError
+                      ? error.code
+                      : "operation_unavailable";
+                  setOpenMessage({ type: "error", text: OPEN_ERRORS[code] });
+                })
+                .finally(() => setOpening(false));
+            }}
+          >
+            打开完整制作界面
           </Button>
         </div>
       </Space>
@@ -211,13 +254,13 @@ function NewVideoPage() {
   );
 }
 
-export function VideoStudio() {
+export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudioGateway }) {
   return (
     <section className="video-studio" aria-label="视频制作工作区">
       <Tabs
         defaultActiveKey="new"
         items={[
-          { key: "new", label: "新建视频", children: <NewVideoPage /> },
+          { key: "new", label: "新建视频", children: <NewVideoPage gateway={gateway} /> },
           { key: "script", label: "脚本与分镜", children: <EmptyVideoPage page="script" /> },
           { key: "settings", label: "制作设置", children: <EmptyVideoPage page="settings" /> },
           { key: "preview", label: "预览", children: <EmptyVideoPage page="preview" /> },

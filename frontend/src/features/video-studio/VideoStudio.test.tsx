@@ -1,13 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { MaterialVideoStudioGateway } from "./material-video-studio-gateway";
 import { VideoStudio } from "./VideoStudio";
+
+function gateway(): MaterialVideoStudioGateway {
+  return {
+    open: vi.fn().mockResolvedValue({
+      state: "opened",
+      modelId: "qwen3.7-max-2026-06-08",
+    }),
+  };
+}
 
 describe("video studio shell", () => {
   it("exposes every planned page without inventing jobs or artifacts", async () => {
     const user = userEvent.setup();
-    render(<VideoStudio />);
+    render(<VideoStudio gateway={gateway()} />);
 
     expect(screen.getByRole("tab", { name: "新建视频" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "脚本与分镜" })).toBeVisible();
@@ -15,9 +25,12 @@ describe("video studio shell", () => {
     expect(screen.getByRole("tab", { name: "预览" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "制作任务" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "成片" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "创建视频草稿" })).toBeDisabled();
-    expect(screen.getByText("现在可以比较并选择制作方式；一句话创建会在相应制作流程接入后开放。"))
-      .toBeVisible();
+    expect(screen.getByRole("button", { name: "打开完整制作界面" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "选择“智能素材成片”后可打开完整制作界面；“品牌动效成片”将在对应流程接入后开放。",
+      ),
+    ).toBeVisible();
 
     await user.click(screen.getByRole("tab", { name: "制作任务" }));
     expect(screen.getByText("还没有真实制作任务"))
@@ -30,14 +43,15 @@ describe("video studio shell", () => {
   });
 
   it("uses only product-facing Chinese names", () => {
-    render(<VideoStudio />);
+    render(<VideoStudio gateway={gateway()} />);
 
     expect(document.body).not.toHaveTextContent(/moneyprinter|hyperframes|b-roll/iu);
   });
 
   it("helps ordinary users compare and select exactly two creation methods", async () => {
     const user = userEvent.setup();
-    render(<VideoStudio />);
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
 
     const materialMethod = screen.getByRole("button", { name: /选择智能素材成片/u });
     const motionMethod = screen.getByRole("button", { name: /选择品牌动效成片/u });
@@ -63,11 +77,17 @@ describe("video studio shell", () => {
     expect(materialMethod).toHaveAttribute("aria-pressed", "true");
     expect(motionMethod).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText("已选择：智能素材成片")).toBeVisible();
+    const openButton = screen.getByRole("button", { name: "打开完整制作界面" });
+    expect(openButton).toBeEnabled();
+    await user.click(openButton);
+    expect(studioGateway.open).toHaveBeenCalledOnce();
+    expect(await screen.findByText("完整制作界面已打开。")).toBeVisible();
 
     await user.click(motionMethod);
     expect(materialMethod).toHaveAttribute("aria-pressed", "false");
     expect(motionMethod).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("已选择：品牌动效成片")).toBeVisible();
+    expect(openButton).toBeDisabled();
 
     expect(document.body).not.toHaveTextContent(/真人生成|网址转视频/iu);
   });

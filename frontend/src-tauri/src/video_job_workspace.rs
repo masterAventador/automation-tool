@@ -317,6 +317,10 @@ impl VideoJobWorkspaceStore {
         result
     }
 
+    pub fn create_new(&self) -> Result<VideoJobWorkspace, VideoWorkspaceError> {
+        self.create(generate_uuid_v4()?)
+    }
+
     pub fn open(&self, job_id: Uuid) -> Result<VideoJobWorkspace, VideoWorkspaceError> {
         self.revalidate_roots()?;
         if !valid_uuid_v4(job_id) {
@@ -346,6 +350,14 @@ impl VideoJobWorkspaceStore {
     ) -> Result<PathBuf, VideoWorkspaceError> {
         self.revalidate_workspace(workspace)?;
         Ok(workspace.directory.join(OUTPUTS_DIRECTORY))
+    }
+
+    pub fn worker_asset_directory(
+        &self,
+        workspace: &VideoJobWorkspace,
+    ) -> Result<PathBuf, VideoWorkspaceError> {
+        self.revalidate_workspace(workspace)?;
+        Ok(workspace.directory.join(WORK_DIRECTORY))
     }
 
     pub fn save_checkpoint(

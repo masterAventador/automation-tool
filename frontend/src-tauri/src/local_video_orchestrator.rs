@@ -134,6 +134,7 @@ pub struct VideoWorkerLaunch {
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
     script_model: Option<VideoWorkerScriptModelConfiguration>,
+    web_ui: bool,
 }
 
 #[derive(Clone)]
@@ -198,12 +199,48 @@ impl VideoWorkerLaunch {
             expected_version,
             restart_policy,
             script_model: None,
+            web_ui: false,
         })
     }
 
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
         self.script_model = Some(configuration);
         self
+    }
+
+    pub fn with_web_ui(mut self) -> Self {
+        self.web_ui = true;
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct VideoWorkerWebUiEndpoint {
+    port: u16,
+    path: String,
+}
+
+impl fmt::Debug for VideoWorkerWebUiEndpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VideoWorkerWebUiEndpoint(<redacted>)")
+    }
+}
+
+impl VideoWorkerWebUiEndpoint {
+    pub(crate) fn url(&self) -> Result<url::Url, VideoWorkerError> {
+        url::Url::parse(&format!(
+            "http://{LOOPBACK_HOST}:{}/{}/",
+            self.port, self.path
+        ))
+        .map_err(|_| process_unavailable())
+    }
+
+    pub(crate) const fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub(crate) fn path(&self) -> &str {
+        &self.path
     }
 }
 
@@ -218,6 +255,7 @@ pub struct VideoWorkerStatus {
     process_id: Option<u32>,
     restart_count: u8,
     script_model_id: Option<String>,
+    web_ui_available: bool,
 }
 
 impl VideoWorkerStatus {
@@ -231,6 +269,7 @@ impl VideoWorkerStatus {
             process_id: None,
             restart_count,
             script_model_id: None,
+            web_ui_available: false,
         }
     }
 
@@ -241,6 +280,7 @@ impl VideoWorkerStatus {
         process_id: u32,
         restart_count: u8,
         script_model_id: Option<String>,
+        web_ui_available: bool,
     ) -> Self {
         Self {
             kind,
@@ -251,6 +291,7 @@ impl VideoWorkerStatus {
             process_id: Some(process_id),
             restart_count,
             script_model_id,
+            web_ui_available,
         }
     }
 
@@ -280,6 +321,10 @@ impl VideoWorkerStatus {
 
     pub fn script_model_id(&self) -> Option<&str> {
         self.script_model_id.as_deref()
+    }
+
+    pub const fn web_ui_available(&self) -> bool {
+        self.web_ui_available
     }
 }
 
@@ -408,6 +453,38 @@ impl LocalVideoOrchestrator {
         Ok(())
     }
 
+    pub fn web_ui_endpoint(
+        &self,
+        kind: VideoWorkerKind,
+    ) -> Result<VideoWorkerWebUiEndpoint, VideoWorkerError> {
+        let mut workers = self.lock_workers()?;
+        let running = workers.get_mut(&kind).ok_or_else(not_running)?;
+        if running
+            .child
+            .try_wait()
+            .map_err(|_| process_unavailable())?
+            .is_some()
+        {
+            return Err(process_unavailable());
+        }
+        running.web_ui.clone().ok_or_else(not_running)
+    }
+
+    pub fn verify_web_ui(&self, kind: VideoWorkerKind) -> Result<(), VideoWorkerError> {
+        let mut workers = self.lock_workers()?;
+        let running = workers.get_mut(&kind).ok_or_else(not_running)?;
+        if running
+            .child
+            .try_wait()
+            .map_err(|_| process_unavailable())?
+            .is_some()
+        {
+            return Err(process_unavailable());
+        }
+        let endpoint = running.web_ui.as_ref().ok_or_else(not_running)?;
+        verify_web_ui_document(endpoint, self.request_timeout)
+    }
+
     pub fn stop(&self, kind: VideoWorkerKind) -> Result<(), VideoWorkerError> {
         let mut workers = self.lock_workers()?;
         let mut running = workers.remove(&kind).ok_or_else(not_running)?;
@@ -451,6 +528,7 @@ struct RunningVideoWorker {
     stderr_thread: Option<JoinHandle<()>>,
     launch: VideoWorkerLaunch,
     status: VideoWorkerStatus,
+    web_ui: Option<VideoWorkerWebUiEndpoint>,
 }
 
 struct VideoWorkerSessionToken {
@@ -540,6 +618,7 @@ impl Drop for VideoWorkerSessionToken {
 struct VideoWorkerBootstrapDocument<'a> {
     asset_root: &'a str,
     bootstrap_version: &'static str,
+    enable_web_ui: bool,
     local_session_token: &'a str,
     protocol_version: &'static str,
     script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
@@ -573,6 +652,9 @@ struct VideoWorkerReadyEvent {
     event: String,
     protocol_version: String,
     script_model_id: Option<String>,
+    web_ui_authentication_proof: Option<String>,
+    web_ui_path: Option<String>,
+    web_ui_port: Option<u16>,
     worker_kind: String,
     worker_version: String,
     port: u16,
@@ -631,7 +713,7 @@ fn spawn_worker(
         let line = receive_line(&events, start_timeout)?;
         let event: VideoWorkerReadyEvent =
             serde_json::from_str(&line).map_err(|_| authentication_rejected())?;
-        validate_ready_event(&token, &launch, &event)?;
+        let web_ui = validate_ready_event(&token, &launch, &event)?;
         let status = VideoWorkerStatus::running(
             launch.kind,
             event.worker_version,
@@ -639,10 +721,11 @@ fn spawn_worker(
             child.id(),
             restart_count,
             event.script_model_id,
+            web_ui.is_some(),
         );
-        Ok((stdin, events, stdout_thread, stderr_thread, status))
+        Ok((stdin, events, stdout_thread, stderr_thread, status, web_ui))
     })();
-    let (stdin, events, stdout_thread, stderr_thread, status) = match setup {
+    let (stdin, events, stdout_thread, stderr_thread, status, web_ui) = match setup {
         Ok(value) => value,
         Err(error) => {
             let _ = process_tree.terminate();
@@ -661,6 +744,7 @@ fn spawn_worker(
         stderr_thread: Some(stderr_thread),
         launch,
         status,
+        web_ui,
     };
     if let Err(error) = verify_health(&running, start_timeout) {
         force_stop(&mut running);
@@ -682,6 +766,7 @@ fn write_bootstrap(
     let document = VideoWorkerBootstrapDocument {
         asset_root,
         bootstrap_version: BOOTSTRAP_VERSION,
+        enable_web_ui: launch.web_ui,
         local_session_token: &encoded,
         protocol_version: WORKER_PROTOCOL_VERSION,
         script_model: launch.script_model.as_ref().map(|configuration| {
@@ -711,7 +796,7 @@ fn validate_ready_event(
     token: &VideoWorkerSessionToken,
     launch: &VideoWorkerLaunch,
     event: &VideoWorkerReadyEvent,
-) -> Result<(), VideoWorkerError> {
+) -> Result<Option<VideoWorkerWebUiEndpoint>, VideoWorkerError> {
     let port = event.port.to_string();
     if event.event != "worker.ready"
         || event.protocol_version != WORKER_PROTOCOL_VERSION
@@ -734,7 +819,33 @@ fn validate_ready_event(
     if event.worker_version != launch.expected_version {
         return Err(VideoWorkerError::new(VideoWorkerErrorCode::VersionMismatch));
     }
-    Ok(())
+    match (
+        launch.web_ui,
+        event.web_ui_port,
+        event.web_ui_path.as_deref(),
+        event.web_ui_authentication_proof.as_deref(),
+    ) {
+        (false, None, None, None) => Ok(None),
+        (true, Some(web_ui_port), Some(web_ui_path), Some(proof))
+            if valid_web_ui_path(web_ui_path) =>
+        {
+            let detail = format!("{web_ui_port}:{web_ui_path}");
+            if !token.verify_event_proof(
+                "worker.web_ui_ready",
+                launch.kind,
+                &event.worker_version,
+                &detail,
+                proof,
+            ) {
+                return Err(authentication_rejected());
+            }
+            Ok(Some(VideoWorkerWebUiEndpoint {
+                port: web_ui_port,
+                path: web_ui_path.to_owned(),
+            }))
+        }
+        _ => Err(authentication_rejected()),
+    }
 }
 
 fn verify_health(running: &RunningVideoWorker, timeout: Duration) -> Result<(), VideoWorkerError> {
@@ -793,6 +904,56 @@ fn verify_health(running: &RunningVideoWorker, timeout: Duration) -> Result<(), 
             &detail,
             &event.authentication_proof,
         )
+    {
+        return Err(authentication_rejected());
+    }
+    Ok(())
+}
+
+fn verify_web_ui_document(
+    endpoint: &VideoWorkerWebUiEndpoint,
+    timeout: Duration,
+) -> Result<(), VideoWorkerError> {
+    let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), endpoint.port);
+    let mut stream = TcpStream::connect_timeout(&address, timeout).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::TimedOut {
+            timed_out()
+        } else {
+            process_unavailable()
+        }
+    })?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .map_err(|_| process_unavailable())?;
+    let request = format!(
+        "GET /{}/ HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{}\r\nAccept: text/html\r\nConnection: close\r\n\r\n",
+        endpoint.path, endpoint.port
+    );
+    stream
+        .write_all(request.as_bytes())
+        .and_then(|()| stream.flush())
+        .map_err(|_| process_unavailable())?;
+    let mut response = Vec::new();
+    stream
+        .take(MAX_HTTP_RESPONSE_BYTES)
+        .read_to_end(&mut response)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                timed_out()
+            } else {
+                process_unavailable()
+            }
+        })?;
+    let response = std::str::from_utf8(&response).map_err(|_| authentication_rejected())?;
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(authentication_rejected)?;
+    if !headers.starts_with("HTTP/1.1 200 ")
+        || !headers
+            .to_ascii_lowercase()
+            .contains("content-type: text/html")
+        || !body.contains("<title>Streamlit</title>")
     {
         return Err(authentication_rejected());
     }
@@ -947,6 +1108,16 @@ fn valid_model_api_key(value: &str) -> bool {
     (20..=256).contains(&value.len())
         && value.starts_with("sk-")
         && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn valid_web_ui_path(value: &str) -> bool {
+    let Some(capability) = value.strip_prefix("studio-") else {
+        return false;
+    };
+    capability.len() == 43
+        && capability
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }

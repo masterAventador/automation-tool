@@ -14,6 +14,8 @@ sys.path.insert(0, str(upstream_root))
 moviepy_datas, moviepy_binaries, moviepy_hiddenimports = collect_all("moviepy")
 imageio_datas, imageio_binaries, imageio_hiddenimports = collect_all("imageio")
 ffmpeg_datas, ffmpeg_binaries, ffmpeg_hiddenimports = collect_all("imageio_ffmpeg")
+streamlit_datas, streamlit_binaries, streamlit_hiddenimports = collect_all("streamlit")
+tour_datas, tour_binaries, tour_hiddenimports = collect_all("streamlit_tour")
 
 runtime_distributions = [
     "moviepy",
@@ -50,9 +52,17 @@ hiddenimports = [
     *moviepy_hiddenimports,
     *imageio_hiddenimports,
     *ffmpeg_hiddenimports,
+    *streamlit_hiddenimports,
+    *tour_hiddenimports,
     *collect_submodules("app"),
 ]
-datas = [*moviepy_datas, *imageio_datas, *ffmpeg_datas]
+datas = [
+    *moviepy_datas,
+    *imageio_datas,
+    *ffmpeg_datas,
+    *streamlit_datas,
+    *tour_datas,
+]
 for distribution in runtime_distributions:
     datas += copy_metadata(distribution)
 datas += [
@@ -61,11 +71,21 @@ datas += [
     (str(upstream_root / "config.example.toml"), "upstream"),
     (str(upstream_root / "LICENSE"), "upstream"),
 ]
+for source in (upstream_root / "app").rglob("*"):
+    if source.is_file() and "__pycache__" not in source.parts and source.suffix != ".pyc":
+        destination = Path("upstream/app") / source.relative_to(upstream_root / "app").parent
+        datas.append((str(source), str(destination)))
 
 analysis = Analysis(
     [str(worker_root / "worker_main.py")],
     pathex=[str(worker_root), str(upstream_root)],
-    binaries=[*moviepy_binaries, *imageio_binaries, *ffmpeg_binaries],
+    binaries=[
+        *moviepy_binaries,
+        *imageio_binaries,
+        *ffmpeg_binaries,
+        *streamlit_binaries,
+        *tour_binaries,
+    ],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

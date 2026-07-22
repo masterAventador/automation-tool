@@ -46,7 +46,7 @@ describe("VF-07 production App creation method acceptance", () => {
     await expect(materialMethod).toHaveAttribute("aria-pressed", "false");
     await expect(motionMethod).toHaveAttribute("aria-pressed", "true");
     await expect(studio).toHaveText(expect.stringContaining("已选择：品牌动效成片"));
-    await expect(await studio.$("button=创建视频草稿")).not.toBeEnabled();
+    await expect(await studio.$("button=打开完整制作界面")).not.toBeEnabled();
 
     const body = await browser.$("body").getText();
     assert.doesNotMatch(body, /moneyprinter|hyperframes|b-roll/i);

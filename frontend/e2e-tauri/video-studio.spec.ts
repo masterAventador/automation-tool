@@ -12,9 +12,9 @@ describe("VF-06 production App video studio acceptance", () => {
     await expect(await browser.$("h2")).toHaveText("视频制作");
     const studio = await browser.$("section[aria-label='视频制作工作区']");
     await expect(studio).toBeDisplayed();
-    await expect(await studio.$("button=创建视频草稿")).not.toBeEnabled();
+    await expect(await studio.$("button=打开完整制作界面")).not.toBeEnabled();
     await expect(studio).toHaveText(
-      expect.stringContaining("一句话创建会在相应制作流程接入后开放。"),
+      expect.stringContaining("选择“智能素材成片”后可打开完整制作界面"),
     );
 
     const pages = [
