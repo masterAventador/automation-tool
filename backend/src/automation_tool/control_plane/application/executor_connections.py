@@ -26,6 +26,7 @@ from automation_tool.control_plane.domain import (
     InvalidResourceId,
 )
 from automation_tool.protocol import (
+    CURRENT_EXECUTOR_RUNTIME_VERSION,
     EXECUTOR_PROTOCOL_VERSION,
     EXECUTOR_WEBSOCKET_SUBPROTOCOL,
     ExecutorLifecycleEnvelope,
@@ -144,6 +145,8 @@ class ExecutorConnectionService:
             ):
                 raise ValueError
             payload = _ExecutorHelloPayload.model_validate(message.payload)
+            if payload.executor_version != CURRENT_EXECUTOR_RUNTIME_VERSION:
+                raise ValueError
             return BoundExecutorConnection(
                 connection_id=ExecutorConnectionId.new(),
                 installation_id=authorized.installation_id,

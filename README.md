@@ -43,7 +43,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - 产品、架构、MVP 和任务级开发台账已完成；
 - 仓库规则已从旧 `agent-platform` 项目筛选并改写；
 - Backend 已建立 uv/Python 3.12、src layout、Pytest、Ruff 和 Mypy 基线；
-- Control Plane 已具备独立应用工厂、lifespan、请求关联 ID、不泄密错误信封，以及 Health/Version 和协议兼容响应；
+- Control Plane 已具备独立应用工厂、lifespan、请求关联 ID、不泄密错误信封，以及 Health/Version 和 App/Executor/协议兼容响应；Desktop 启动与 Executor Hello 会对错误版本 fail closed；
 - PostgreSQL 18.4 开发库与测试库使用独立容器、凭据和存储，Compose 凭据缺失时 fail closed；
 - SQLAlchemy 使用 asyncpg、事务作用域 session 和连接预检；Alembic 已验证真实空库升级与回滚；数据库不可用时 Health 返回脱敏、可重试的 503；
 - Installation 已具备 PostgreSQL 表、32 字节设备公钥、active/revoked 状态、revision CAS、吊销时间、UUIDv4/唯一性/时间一致性约束和可回滚迁移；

@@ -10,9 +10,15 @@ from automation_tool.control_plane.api.errors import AppError
 from automation_tool.control_plane.domain import DatabaseLifecycle, DependencyUnavailable
 from automation_tool.protocol.version import (
     API_VERSION,
+    CURRENT_DESKTOP_APP_VERSION,
     CURRENT_EXECUTOR_PROTOCOL,
+    CURRENT_EXECUTOR_RUNTIME_VERSION,
+    MAXIMUM_COMPATIBLE_DESKTOP_APP_VERSION,
     MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL,
+    MAXIMUM_COMPATIBLE_EXECUTOR_RUNTIME_VERSION,
+    MINIMUM_COMPATIBLE_DESKTOP_APP_VERSION,
     MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL,
+    MINIMUM_COMPATIBLE_EXECUTOR_RUNTIME_VERSION,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["system"])
@@ -30,7 +36,7 @@ class HealthResponse(ApiResponse):
     version: str
 
 
-class ExecutorProtocolCompatibility(ApiResponse):
+class VersionCompatibility(ApiResponse):
     current: str
     minimum_compatible: str = Field(alias="minimumCompatible")
     maximum_compatible: str = Field(alias="maximumCompatible")
@@ -40,7 +46,9 @@ class VersionResponse(ApiResponse):
     service: Literal["control-plane"] = "control-plane"
     version: str
     api_version: str = Field(alias="apiVersion")
-    executor_protocol: ExecutorProtocolCompatibility = Field(alias="executorProtocol")
+    desktop_app: VersionCompatibility = Field(alias="desktopApp")
+    executor_runtime: VersionCompatibility = Field(alias="executorRuntime")
+    executor_protocol: VersionCompatibility = Field(alias="executorProtocol")
 
 
 def _disable_caching(response: Response) -> None:
@@ -70,7 +78,17 @@ async def version(response: Response) -> VersionResponse:
     return VersionResponse(
         version=__version__,
         apiVersion=API_VERSION,
-        executorProtocol=ExecutorProtocolCompatibility(
+        desktopApp=VersionCompatibility(
+            current=CURRENT_DESKTOP_APP_VERSION,
+            minimumCompatible=MINIMUM_COMPATIBLE_DESKTOP_APP_VERSION,
+            maximumCompatible=MAXIMUM_COMPATIBLE_DESKTOP_APP_VERSION,
+        ),
+        executorRuntime=VersionCompatibility(
+            current=CURRENT_EXECUTOR_RUNTIME_VERSION,
+            minimumCompatible=MINIMUM_COMPATIBLE_EXECUTOR_RUNTIME_VERSION,
+            maximumCompatible=MAXIMUM_COMPATIBLE_EXECUTOR_RUNTIME_VERSION,
+        ),
+        executorProtocol=VersionCompatibility(
             current=CURRENT_EXECUTOR_PROTOCOL,
             minimumCompatible=MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL,
             maximumCompatible=MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL,

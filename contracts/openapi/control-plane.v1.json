@@ -112,30 +112,6 @@
         "title": "DouyinSearchExposureAction",
         "type": "string"
       },
-      "ExecutorProtocolCompatibility": {
-        "additionalProperties": false,
-        "properties": {
-          "current": {
-            "title": "Current",
-            "type": "string"
-          },
-          "maximumCompatible": {
-            "title": "Maximumcompatible",
-            "type": "string"
-          },
-          "minimumCompatible": {
-            "title": "Minimumcompatible",
-            "type": "string"
-          }
-        },
-        "required": [
-          "current",
-          "minimumCompatible",
-          "maximumCompatible"
-        ],
-        "title": "ExecutorProtocolCompatibility",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1140,6 +1116,30 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VersionCompatibility": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "string"
+          },
+          "maximumCompatible": {
+            "title": "Maximumcompatible",
+            "type": "string"
+          },
+          "minimumCompatible": {
+            "title": "Minimumcompatible",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "minimumCompatible",
+          "maximumCompatible"
+        ],
+        "title": "VersionCompatibility",
+        "type": "object"
+      },
       "VersionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1147,8 +1147,14 @@
             "title": "Apiversion",
             "type": "string"
           },
+          "desktopApp": {
+            "$ref": "#/components/schemas/VersionCompatibility"
+          },
           "executorProtocol": {
-            "$ref": "#/components/schemas/ExecutorProtocolCompatibility"
+            "$ref": "#/components/schemas/VersionCompatibility"
+          },
+          "executorRuntime": {
+            "$ref": "#/components/schemas/VersionCompatibility"
           },
           "service": {
             "const": "control-plane",
@@ -1164,6 +1170,8 @@
         "required": [
           "version",
           "apiVersion",
+          "desktopApp",
+          "executorRuntime",
           "executorProtocol"
         ],
         "title": "VersionResponse",

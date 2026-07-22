@@ -31,6 +31,7 @@ use crate::executor_manager::{
     ExecutorRestartPolicy,
 };
 use crate::executor_package::ExecutorPackageVerifier;
+use crate::runtime_compatibility::EXECUTOR_RUNTIME_VERSION_REQUIREMENT;
 use crate::secure_store::{AppDataSecretStore, SecretStore};
 use crate::startup_environment::ExecutorStartupState;
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,6 @@ const BROWSER_DIAGNOSTIC_SETTINGS_VERSION: &str = "1";
 const EXECUTOR_START_TIMEOUT_SECONDS: u64 = 30;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 const HEARTBEAT_INTERVAL_SECONDS: u8 = 15;
-const ALLOWED_EXECUTOR_VERSION: &str = "=0.1.0";
 
 // This public key corresponds only to the checked-in development fixture signer. Release builds
 // fail closed unless the real release verification key is supplied by the packaging pipeline.
@@ -298,11 +298,12 @@ impl ExecutorPlatformService {
         #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
         let identity = LocalExecutorIdentity::load_or_create(app_data_directory)?;
         ensure_private_directory(paths.state_directory())?;
-        let verifier =
-            ExecutorPackageVerifier::new(executor_verifying_key()?, ALLOWED_EXECUTOR_VERSION, None)
-                .map_err(|_| {
-                    ExecutorPlatformError::new(ExecutorPlatformErrorCode::ConfigurationInvalid)
-                })?;
+        let verifier = ExecutorPackageVerifier::new(
+            executor_verifying_key()?,
+            EXECUTOR_RUNTIME_VERSION_REQUIREMENT,
+            None,
+        )
+        .map_err(|_| ExecutorPlatformError::new(ExecutorPlatformErrorCode::ConfigurationInvalid))?;
         let restart_policy =
             ExecutorRestartPolicy::new(2, Duration::from_secs(1), Duration::from_secs(1))
                 .map_err(map_manager_error)?;

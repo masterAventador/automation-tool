@@ -279,6 +279,8 @@ AUTOMATION_TOOL_ACTION_CONSECUTIVE_FAILURE_THRESHOLD=3
 - `GET http://127.0.0.1:8765/api/v1/tasks/{task_id}`
 - `WS ws://127.0.0.1:8765/api/v1/executors/connect`
 
+P9-08 的 `/api/v1/version` 同时发布 Desktop App、Executor runtime 与 Executor protocol 的 current/minimum/maximum。当前 `0.1.0` release 只接受 App `0.1.0`、Control Plane `0.1.0`、API `v1`、Executor `0.1.0` 和 protocol `1.0`；Desktop 会在 Health 后严格核对该矩阵，Executor WebSocket Hello 也独立拒绝旧版、新版与预发布 runtime。机器可读权威快照为 `contracts/protocol/runtime-compatibility-v1.json`，升级任一组件必须同步更新并通过 Python、Rust 与 Node 漂移门禁。
+
 迁移回滚验证（只对明确的测试数据库执行）：
 
 ```bash

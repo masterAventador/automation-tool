@@ -17,6 +17,10 @@ use crate::device_credentials::{
     DeviceCredentialErrorCode, DeviceCredentialVault, StoredDeviceCredential,
 };
 use crate::device_identity::ProductionDeviceIdentity;
+use crate::runtime_compatibility::{
+    CONTROL_PLANE_API_VERSION, CONTROL_PLANE_VERSION, DESKTOP_APP_VERSION,
+    EXECUTOR_PROTOCOL_VERSION, EXECUTOR_RUNTIME_VERSION,
+};
 use crate::secure_store::SecretStore;
 
 const DEFAULT_LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
@@ -39,6 +43,7 @@ const MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS: usize = 64;
 #[derive(Clone, Copy)]
 enum ControlPlaneOperation {
     GetSystemHealth,
+    GetSystemVersion,
     GetCurrentInstallationAccess,
     GetWorkbenchStatus,
     GetWorkbenchMetrics,
@@ -68,6 +73,7 @@ impl ControlPlaneOperation {
     fn method(self) -> &'static str {
         match self {
             Self::GetSystemHealth
+            | Self::GetSystemVersion
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
             | Self::GetWorkbenchMetrics
@@ -97,6 +103,7 @@ impl ControlPlaneOperation {
     fn path(self) -> &'static str {
         match self {
             Self::GetSystemHealth => "/api/v1/health",
+            Self::GetSystemVersion => "/api/v1/version",
             Self::GetCurrentInstallationAccess => "/api/v1/installations/current",
             Self::GetWorkbenchStatus => "/api/v1/workbench/status",
             Self::GetWorkbenchMetrics => "/api/v1/workbench/metrics",
@@ -134,6 +141,7 @@ impl ControlPlaneOperation {
     fn success_status(self) -> u16 {
         match self {
             Self::GetSystemHealth
+            | Self::GetSystemVersion
             | Self::GetCurrentInstallationAccess
             | Self::GetWorkbenchStatus
             | Self::GetWorkbenchMetrics
@@ -260,6 +268,25 @@ struct HealthResponse {
     service: String,
     status: String,
     version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VersionCompatibilityResponse {
+    current: String,
+    minimum_compatible: String,
+    maximum_compatible: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SystemVersionResponse {
+    service: String,
+    version: String,
+    api_version: String,
+    desktop_app: VersionCompatibilityResponse,
+    executor_runtime: VersionCompatibilityResponse,
+    executor_protocol: VersionCompatibilityResponse,
 }
 
 #[derive(Deserialize)]
@@ -416,7 +443,7 @@ impl ControlPlaneClient {
     }
 
     pub async fn check_health(&self) -> Result<ControlPlaneHealth, ControlPlaneError> {
-        let body = self
+        let health_body = self
             .execute(
                 ControlPlaneOperation::GetSystemHealth,
                 None,
@@ -425,7 +452,18 @@ impl ControlPlaneClient {
                 None,
             )
             .await?;
-        parse_health_response(&body)
+        let health = parse_health_response(&health_body)?;
+        let version_body = self
+            .execute(
+                ControlPlaneOperation::GetSystemVersion,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_system_version_response(&version_body, &health.service_version)?;
+        Ok(health)
     }
 
     pub async fn check_installation_access_if_registered<S>(
@@ -1678,6 +1716,44 @@ fn parse_health_response(body: &[u8]) -> Result<ControlPlaneHealth, ControlPlane
         status: "available",
         service_version: response.version,
     })
+}
+
+fn parse_system_version_response(
+    body: &[u8],
+    health_version: &str,
+) -> Result<(), ControlPlaneError> {
+    let response: SystemVersionResponse =
+        serde_json::from_slice(body).map_err(|_| protocol_invalid())?;
+    if response.service != "control-plane"
+        || response.version != health_version
+        || response.version != CONTROL_PLANE_VERSION
+        || response.api_version != CONTROL_PLANE_API_VERSION
+        || !exact_version_compatibility(&response.desktop_app, DESKTOP_APP_VERSION)
+        || !exact_version_compatibility(&response.executor_runtime, EXECUTOR_RUNTIME_VERSION)
+        || !exact_protocol_compatibility(&response.executor_protocol, EXECUTOR_PROTOCOL_VERSION)
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn exact_version_compatibility(
+    compatibility: &VersionCompatibilityResponse,
+    expected: &str,
+) -> bool {
+    compatibility.current == expected
+        && compatibility.minimum_compatible == expected
+        && compatibility.maximum_compatible == expected
+        && semver::Version::parse(expected).is_ok()
+}
+
+fn exact_protocol_compatibility(
+    compatibility: &VersionCompatibilityResponse,
+    expected: &str,
+) -> bool {
+    compatibility.current == expected
+        && compatibility.minimum_compatible == expected
+        && compatibility.maximum_compatible == expected
 }
 
 fn parse_installation_access(body: &[u8]) -> Result<String, ControlPlaneError> {
@@ -3232,11 +3308,12 @@ mod tests {
         new_request_id, parse_created_task, parse_device_session, parse_douyin_platform_session,
         parse_douyin_platform_session_logout_prepare, parse_health_response,
         parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, parse_sse_frame, parse_task_control,
-        parse_task_discovery, parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
-        parse_task_target_results, parse_workbench_metrics, parse_workbench_status, request_path,
-        require_idempotency_key, require_list_cursor, require_preview_cursor, required_credential,
-        sse_frame_end, transport_error, validate_preview_command, validate_response_metadata,
+        parse_revoked_credential, parse_rotated_credential, parse_sse_frame,
+        parse_system_version_response, parse_task_control, parse_task_discovery, parse_task_list,
+        parse_task_snapshot_body, parse_task_target_preview, parse_task_target_results,
+        parse_workbench_metrics, parse_workbench_status, request_path, require_idempotency_key,
+        require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
+        transport_error, validate_preview_command, validate_response_metadata,
         validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
         ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
@@ -3309,6 +3386,12 @@ mod tests {
                 ControlPlaneOperation::GetSystemHealth,
                 "GET",
                 "/api/v1/health",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetSystemVersion,
+                "GET",
+                "/api/v1/version",
                 200,
             ),
             (
@@ -3757,6 +3840,36 @@ mod tests {
         ] {
             assert!(parse_health_response(invalid).is_err());
         }
+    }
+
+    #[test]
+    fn system_version_response_enforces_the_complete_runtime_matrix() {
+        let valid = r#"{
+            "service":"control-plane",
+            "version":"0.1.0",
+            "apiVersion":"v1",
+            "desktopApp":{"current":"0.1.0","minimumCompatible":"0.1.0","maximumCompatible":"0.1.0"},
+            "executorRuntime":{"current":"0.1.0","minimumCompatible":"0.1.0","maximumCompatible":"0.1.0"},
+            "executorProtocol":{"current":"1.0","minimumCompatible":"1.0","maximumCompatible":"1.0"}
+        }"#;
+        parse_system_version_response(valid.as_bytes(), "0.1.0")
+            .expect("compatible release matrix");
+
+        for incompatible in [
+            valid.replace("\"version\":\"0.1.0\"", "\"version\":\"0.0.9\""),
+            valid.replace("\"apiVersion\":\"v1\"", "\"apiVersion\":\"v2\""),
+            valid.replace(
+                "\"minimumCompatible\":\"0.1.0\"",
+                "\"minimumCompatible\":\"0.1.1\"",
+            ),
+            valid.replace(
+                "\"executorProtocol\":{\"current\":\"1.0\"",
+                "\"executorProtocol\":{\"current\":\"2.0\"",
+            ),
+        ] {
+            assert!(parse_system_version_response(incompatible.as_bytes(), "0.1.0").is_err());
+        }
+        assert!(parse_system_version_response(valid.as_bytes(), "0.1.1").is_err());
     }
 
     #[test]
@@ -4889,6 +5002,7 @@ mod tests {
         }
         for operation in [
             ControlPlaneOperation::GetSystemHealth,
+            ControlPlaneOperation::GetSystemVersion,
             ControlPlaneOperation::GetCurrentInstallationAccess,
             ControlPlaneOperation::GetWorkbenchStatus,
             ControlPlaneOperation::GetWorkbenchMetrics,

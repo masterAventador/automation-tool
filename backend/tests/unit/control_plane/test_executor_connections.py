@@ -294,6 +294,27 @@ async def test_hello_rejects_impersonation_wrong_type_and_invalid_runtime_metada
                 "platform": "linux",
             }
         ),
+        lifecycle_message(
+            payload={
+                "architecture": "arm64",
+                "executor_version": "0.0.9",
+                "platform": "macos",
+            }
+        ),
+        lifecycle_message(
+            payload={
+                "architecture": "arm64",
+                "executor_version": "0.1.1",
+                "platform": "macos",
+            }
+        ),
+        lifecycle_message(
+            payload={
+                "architecture": "arm64",
+                "executor_version": "0.1.0-rc.1",
+                "platform": "macos",
+            }
+        ),
     )
 
     for source in invalid_messages:

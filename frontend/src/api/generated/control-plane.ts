@@ -462,15 +462,6 @@ export interface components {
          * @enum {string}
          */
         DouyinSearchExposureAction: "browse" | "comment" | "direct_message";
-        /** ExecutorProtocolCompatibility */
-        ExecutorProtocolCompatibility: {
-            /** Current */
-            current: string;
-            /** Maximumcompatible */
-            maximumCompatible: string;
-            /** Minimumcompatible */
-            minimumCompatible: string;
-        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -845,11 +836,22 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VersionCompatibility */
+        VersionCompatibility: {
+            /** Current */
+            current: string;
+            /** Maximumcompatible */
+            maximumCompatible: string;
+            /** Minimumcompatible */
+            minimumCompatible: string;
+        };
         /** VersionResponse */
         VersionResponse: {
             /** Apiversion */
             apiVersion: string;
-            executorProtocol: components["schemas"]["ExecutorProtocolCompatibility"];
+            desktopApp: components["schemas"]["VersionCompatibility"];
+            executorProtocol: components["schemas"]["VersionCompatibility"];
+            executorRuntime: components["schemas"]["VersionCompatibility"];
             /**
              * Service
              * @default control-plane

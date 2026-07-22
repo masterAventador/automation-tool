@@ -1,0 +1,34 @@
+{
+  "version": "runtime.compatibility.v1",
+  "release": "0.1.0",
+  "desktopApp": {
+    "version": "0.1.0",
+    "controlPlane": "=0.1.0",
+    "controlPlaneApi": "v1",
+    "executorRuntime": "=0.1.0",
+    "executorProtocol": "1.0"
+  },
+  "controlPlane": {
+    "version": "0.1.0",
+    "desktopApp": {
+      "minimum": "0.1.0",
+      "maximum": "0.1.0"
+    },
+    "executorRuntime": {
+      "minimum": "0.1.0",
+      "maximum": "0.1.0"
+    },
+    "executorProtocol": {
+      "minimum": "1.0",
+      "maximum": "1.0"
+    }
+  },
+  "failurePolicy": [
+    "malformed_version_rejected",
+    "older_version_rejected",
+    "newer_version_rejected",
+    "prerelease_version_rejected",
+    "api_mismatch_rejected",
+    "protocol_mismatch_rejected"
+  ]
+}

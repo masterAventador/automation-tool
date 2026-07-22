@@ -16,6 +16,7 @@ pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
+mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
 

@@ -783,6 +783,16 @@ GET  /api/v1/version
 GET  /api/v1/capabilities
 ```
 
+P9-08 把当前 pre-1.0 release 的三端兼容关系冻结为可执行单值矩阵：
+
+| 调用方 | 被调用方 | 允许版本 |
+| --- | --- | --- |
+| Desktop App `0.1.0` | Control Plane / HTTP API | Control Plane `0.1.0`，API `v1` |
+| Desktop App `0.1.0` | bundled Local Executor | runtime `0.1.0`，protocol `1.0` |
+| Control Plane `0.1.0` | Executor WebSocket Hello | runtime `0.1.0`，protocol `1.0` |
+
+权威机器可读快照是 `contracts/protocol/runtime-compatibility-v1.json`。`/api/v1/version` 以 strict response 同时返回 `desktopApp`、`executorRuntime` 和 `executorProtocol` 的 current/minimum/maximum；当前 minimum 与 maximum 都等于 current，不隐含跨 patch/minor 兼容。App 的生产启动探针必须在 Health 后读取该端点，并核对 Health/Version 服务版本一致、App 自身版本、Control Plane、API、Executor runtime 与 protocol 全部命中矩阵；任何 malformed、旧版、新版、预发布、未知字段或范围漂移均 fail closed，且先于 Installation 访问请求。Desktop 的签名 Executor package verifier 继续拒绝非 `=0.1.0` 与版本回滚，Control Plane 的已认证 Hello 也独立拒绝非 `0.1.0` runtime；因此客户端声明、包签名和服务端握手任一层都不能单独放宽兼容性。
+
 ### 安装实例
 
 ```text

@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 安装包与发布准备（P9-02/P9-04 Windows 工程链、P9-03 macOS 候选与 P9-05 完整包审计已就绪，待原生/正式证书验收）
+> 当前阶段：Wave 9 安装包与发布准备（P9-08 三端版本兼容矩阵已完成，下一步 P9-09 汇总本地 MVP 最终验收；双平台正式签名/设备事实独立待补）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21 与 P9-01 已完成；P9-02 Windows Executor 隔离构建器、PE/依赖审计和原生验收入口已就绪，保持 `🔍 待 Windows 实机验收`。P9-03 的只读 Executor Resources、production-mode ad-hoc App/DMG 和最小 Capability/CSP 已通过，Developer ID/notarization 保持 `🔍 待验收`；P9-04 的 production-mode NSIS/currentUser 候选配置、只读 Executor Resources 与隔离安装/卸载 runner 已就绪，保持 `🔍 待 Windows 实机/Authenticode 验收`。P9-05 统一完整包 auditor 已在真实 macOS App/DMG 通过并接入 Windows 安装根，保持 `🔍 待 Windows 实机验收`。H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据待补；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01 与 P9-08 已完成；P9-02/P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。P9-08 已冻结 App/Control Plane/Executor `0.1.0`、API `v1`、Executor protocol `1.0` 的可执行矩阵，并从 App 启动和 Executor Hello 双边拒绝错误版本。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -370,7 +370,7 @@
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | 🔍 待验收 |
 | P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
 | P9-07 | Windows 干净安装 | 无 Python 前置；同上；DPI/杀进程/卸载行为 | P9-04,P9-05 | 🔍 待设备验收 |
-| P9-08 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-06,P9-07 | ⬜ 未开始 |
+| P9-08 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-06,P9-07 | ✅ 已完成 |
 | P9-09 | 本地 MVP 最终验收 | 产品规划 14 条 MVP 验收全部通过并记录证据 | P9-08 | ⬜ 未开始 |
 
 ### 14.1 客户 Demo 前置：账号体系与设备归属
@@ -2901,6 +2901,19 @@
 - 待设备与产品事实：当前机器是 macOS，不能观察 Windows Authenticode、CIM、DPI、Job、HKCU/HKLM、NSIS 或回收站；现有 P9-04 普通包还是 `NotSigned`。授权 Windows 设备还需安装 Chrome/Edge、设置至少 125% 缩放、提供正式 Authenticode 包与授权抖音账号；与 P9-06 相同，production 本地 Control Plane/首次设备注册链未交付前打开即用会正确失败。条件具备后执行 `pnpm --dir frontend test:p9-07-windows-clean-install --installer <绝对 EXE> --evidence <绝对 JSON>`，审阅输出后才改为 `✅ 已完成`
 - 后续：不等待实机，下一独立任务进入 P9-08 App/Executor/Control Plane 版本兼容与降级矩阵；版本错误必须从真实解析/启动边界 fail closed，不用文档表格或设备待验收状态代替可执行契约
 
+### P9-08 版本兼容/降级
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：Control Plane 版本契约首跑缺少 Desktop App/Executor runtime 范围，Executor Hello 会接受 canonical 但不兼容的 `0.0.9`、`0.1.1` 和 `0.1.0-rc.1`；Rust 首跑不存在三端版本响应解析器；机器可读矩阵首跑准确失败于 `runtime-compatibility-v1.json` 不存在
+- 可执行矩阵：`contracts/protocol/runtime-compatibility-v1.json` 冻结当前 release 为 Desktop App `0.1.0`、Control Plane `0.1.0`、API `v1`、Executor runtime `0.1.0`、Executor protocol `1.0`。当前 pre-1.0 发布不猜测跨 patch/minor 兼容，所有范围均为精确单值；升级任一组件必须先显式更新并复验整张矩阵
+- App 启动边界：生产 Rust 客户端的 Health 成功不再等于可用；同一启动探针必须继续请求 no-store `/api/v1/version`，严格解析无未知字段响应，并核对 Health/Version 的 Control Plane 版本一致、App 自身版本在声明范围、API/Executor runtime/Executor protocol 精确匹配。旧版、新版、预发布、API/协议漂移或响应扩展统一返回不可重试的安全协议错误，不进入 Installation 访问探针
+- Executor 双边拒绝：Desktop 的唯一 release 组合根从共享 Rust matrix 取得 `=0.1.0` 包要求，保留 E4-05 已有签名、canonical SemVer、安装版本回滚拒绝；Control Plane 的认证 WebSocket Hello 现在还要求 `executor_version == 0.1.0`，因此即使持有有效设备 Session，旧版、新版、预发布或 build 变体也不能建立连接。消息 envelope 继续精确要求 protocol `1.0`
+- 发布契约：`GET /api/v1/version` 现在同时发布 `desktopApp`、`executorRuntime`、`executorProtocol` 三个 current/minimum/maximum 封闭对象；Python 的 endpoint 与 Hello 共享版本常量，Rust 的启动协商与包验证共享另一组 release 常量，Node 漂移门禁把两端常量、Cargo/Python package version 和机器可读矩阵锁在同一 `0.1.0` release
+- 自动化 GREEN：Backend 全量 `2166 passed / 5 explicit skipped in 224.10s`，14,503 条语句/3,422 个分支 100%；Frontend 160 项 Node 契约、33 个 Vitest 文件/241 项测试、ESLint、严格 TypeScript、OpenAPI 导出/DTO 漂移、生产构建与边界扫描全绿。Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套全量，Rustfmt 与全目标全特性 Clippy 全绿；默认套件为 194 passed / 4 explicit ignored。339 个 Python 文件 Ruff format/check、严格 Mypy、`git diff --check` 均通过
+- 设备边界：本任务只改变版本解析、启动探针、签名包选择和 WebSocket Hello；全量门禁使用隔离 TestClient/PostgreSQL、无头浏览器和测试 Executor 并已清理，没有启动可见 App/外部浏览器、接触默认 Profile 或真实账号，也不需要 macOS/Windows 可见设备事实。P9-06/P9-07 的正式签名安装验收继续独立待补，不阻塞此纯协议任务完成
+- 后续：全量门禁通过并独立提交后进入 P9-09；最终 MVP 验收必须如实汇总已自动化通过、待正式双平台设备、待授权真实账号和首次注册链四类事实，不能把 P9-08 的协议 GREEN 冒充完整本地 MVP 通过
+
 ## 21. 当前下一步
 
 严格按顺序：
@@ -2910,6 +2923,7 @@
 3. `P9-05`（🔍 待验收）：统一完整包 auditor 已在真实 macOS App/DMG 通过并接入 P9-04 Windows 安装根；稍后在 Windows 执行 `pnpm --dir frontend test:p9-05-package-audit` 补最终统计；
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
 5. `P9-07`（🔍 待设备验收）：正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor/私有浏览器、主 PID 强停恢复、正式卸载和最小 ACL 证据 runner 已就绪；等待 Windows/签名包/授权账号/本地服务注册链补事实；
-6. `P9-08`（⬜ 未开始）：下一步建立 App/Executor/Control Plane 可执行兼容矩阵和降级拒绝，先从现有三端版本解析与握手边界审计，再按 TDD 补齐缺口；不等待 P9-06/P9-07 设备事实；
-7. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
-8. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
+7. `P9-09`（⬜ 未开始）：P9-08 提交后按产品规划 14 条 MVP 验收逐项汇总真实证据与外部待验收边界；
+8. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+9. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。

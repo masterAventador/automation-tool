@@ -33,6 +33,16 @@ def test_version_contract_declares_api_and_executor_protocol_compatibility() -> 
         "service": "control-plane",
         "version": __version__,
         "apiVersion": API_VERSION,
+        "desktopApp": {
+            "current": "0.1.0",
+            "minimumCompatible": "0.1.0",
+            "maximumCompatible": "0.1.0",
+        },
+        "executorRuntime": {
+            "current": "0.1.0",
+            "minimumCompatible": "0.1.0",
+            "maximumCompatible": "0.1.0",
+        },
         "executorProtocol": {
             "current": CURRENT_EXECUTOR_PROTOCOL,
             "minimumCompatible": MINIMUM_COMPATIBLE_EXECUTOR_PROTOCOL,
