@@ -60,7 +60,7 @@
       "id": "MVP-ADR-10",
       "decision": "例行自动化测试全局无头，正式扫码、人工接管和平台动作保持可见",
       "disposition": "conforms",
-      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "正式产品扫码/人工接管浏览器仍保持可见"}]
+      "evidence": [{"path": "docs/development/B5-12.md", "anchor": "正式产品扫码/人工接管浏览器仍保持可见"}]
     }
   ],
   "acceptanceCriteria": [
@@ -93,7 +93,7 @@
       "id": "MVP-AC-04",
       "criterion": "用户扫码一次后，App 能检测登录并在下一次启动复用平台登录态",
       "disposition": "pending_real_platform",
-      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "### B5-15 登录复用验收"}]
+      "evidence": [{"path": "docs/development/B5-15.md", "anchor": "# B5-15 登录复用验收"}]
     },
     {
       "id": "MVP-AC-05",
@@ -102,7 +102,7 @@
       "evidence": [
         {"path": "frontend/src/features/task-create/TaskCreate.tsx", "anchor": "setCreatedTaskId(task.taskId)"},
         {"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "开始目标发现"},
-        {"path": "docs/development-roadmap.md", "anchor": "### D6-16 真实目标发现验收（当前待补）"}
+        {"path": "docs/development/D6-16.md", "anchor": "# D6-16 真实目标发现验收（当前待补）"}
       ]
     },
     {
@@ -139,7 +139,7 @@
       "id": "MVP-AC-10",
       "criterion": "App、Control Plane 或 Local Executor 崩溃重启后，不重复已经确认完成的副作用，并能恢复任务快照",
       "disposition": "automated_complete",
-      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "### H8-04 App 崩溃恢复"}]
+      "evidence": [{"path": "docs/development/H8-04.md", "anchor": "# H8-04 App 崩溃恢复"}]
     },
     {
       "id": "MVP-AC-11",
@@ -210,7 +210,7 @@
       "state": "resolved",
       "requirementRefs": ["MVP-AC-06", "MVP-AC-07", "MVP-AC-11"],
       "summary": "正式 Executor 对 task.offer 仍生成固定 success batch，没有调用已完成的 browse/comment/direct-message 与副作用账本实现",
-      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "正式 `ExecutorCommandProcessor` 对 `task.offer` 仍调用 `_success_batch`"}],
+      "evidence": [{"path": "docs/development/H8-16.md", "anchor": "正式 `ExecutorCommandProcessor` 对 `task.offer` 仍调用 `_success_batch`"}],
       "resolutionEvidence": [
         {"path": "backend/src/automation_tool/executor/command_processor.py", "anchor": "if isinstance(command, TaskActionCommandEnvelope):"},
         {"path": "backend/src/automation_tool/executor/action_operation.py", "anchor": "class ProductionDouyinActionOperation"},
@@ -223,7 +223,7 @@
       "state": "resolved",
       "requirementRefs": ["MVP-AC-02"],
       "summary": "启动 Gate 只组合 Control Plane Transport，Executor、受信浏览器与 App 私有数据目录需用户进入设置后分别查看",
-      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "当前生产组合仍只有 Control Plane transport"}],
+      "evidence": [{"path": "docs/development/H8-16E.md", "anchor": "当前生产组合仍只有 Control Plane transport"}],
       "resolutionEvidence": [
         {"path": "frontend/src/app/startup.ts", "anchor": "export function createDesktopStartupCheck("},
         {"path": "frontend/src/platform/tauri/startup-environment-gateway.ts", "anchor": "check_local_startup_environment"},

@@ -13,6 +13,7 @@ use time::{Duration as TimeDuration, OffsetDateTime, UtcOffset};
 use uuid::Variant;
 use zeroize::Zeroizing;
 
+use crate::account_session_vault::AccountSessionSecrets;
 use crate::device_credentials::{
     DeviceCredentialErrorCode, DeviceCredentialVault, StoredDeviceCredential,
 };
@@ -67,6 +68,11 @@ enum ControlPlaneOperation {
     ResumeTask,
     CancelTask,
     EmergencyStopTask,
+    LoginAccountSession,
+    RefreshAccountSession,
+    LogoutAccountSession,
+    ChangeAccountPassword,
+    RecoverAccountPassword,
 }
 
 impl ControlPlaneOperation {
@@ -95,8 +101,13 @@ impl ControlPlaneOperation {
             | Self::PauseTask
             | Self::ResumeTask
             | Self::CancelTask
-            | Self::EmergencyStopTask => "POST",
+            | Self::EmergencyStopTask
+            | Self::LoginAccountSession
+            | Self::RefreshAccountSession
+            | Self::ChangeAccountPassword
+            | Self::RecoverAccountPassword => "POST",
             Self::ReplaceTaskTargetExclusions => "PUT",
+            Self::LogoutAccountSession => "DELETE",
         }
     }
 
@@ -135,6 +146,11 @@ impl ControlPlaneOperation {
             Self::ResumeTask => "/api/v1/tasks/{task_id}/resume",
             Self::CancelTask => "/api/v1/tasks/{task_id}/cancel",
             Self::EmergencyStopTask => "/api/v1/tasks/{task_id}/emergency-stop",
+            Self::LoginAccountSession => "/api/v1/account-sessions",
+            Self::RefreshAccountSession => "/api/v1/account-sessions/refresh",
+            Self::LogoutAccountSession => "/api/v1/account-sessions/current",
+            Self::ChangeAccountPassword => "/api/v1/account-password/changes",
+            Self::RecoverAccountPassword => "/api/v1/account-password/recovery",
         }
     }
 
@@ -158,13 +174,18 @@ impl ControlPlaneOperation {
             | Self::CompleteInstallationRegistration
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
-            | Self::CreateTask => 201,
+            | Self::CreateTask
+            | Self::LoginAccountSession
+            | Self::RefreshAccountSession => 201,
             Self::StartTaskDiscovery
             | Self::ConfirmTaskTargetPreview
             | Self::PauseTask
             | Self::ResumeTask
             | Self::CancelTask
             | Self::EmergencyStopTask => 202,
+            Self::LogoutAccountSession
+            | Self::ChangeAccountPassword
+            | Self::RecoverAccountPassword => 204,
         }
     }
 
@@ -189,6 +210,11 @@ impl ControlPlaneOperation {
                 | Self::RotateDeviceCredential
                 | Self::RevokeDeviceCredential
                 | Self::ExchangeDeviceSession
+                | Self::LoginAccountSession
+                | Self::RefreshAccountSession
+                | Self::LogoutAccountSession
+                | Self::ChangeAccountPassword
+                | Self::RecoverAccountPassword
         )
     }
 }
@@ -224,6 +250,9 @@ pub enum ControlPlaneErrorCode {
     IdentityUnavailable,
     StorageUnavailable,
     OutcomeUncertain,
+    AuthenticationInvalid,
+    RecoveryInvalid,
+    AccountSessionInvalid,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -294,6 +323,24 @@ struct SystemVersionResponse {
 struct InstallationAccessResponse {
     installation_id: String,
     status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountProjectionResponse {
+    user_id: String,
+    login_name: String,
+    status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountSessionResponse {
+    access_token: String,
+    refresh_token: String,
+    access_expires_at: String,
+    refresh_expires_at: String,
+    account: AccountProjectionResponse,
 }
 
 #[derive(Serialize)]
@@ -489,6 +536,104 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_installation_access(&body).map(|_| ())
+    }
+
+    pub async fn login_account_session(
+        &self,
+        login_name: &str,
+        password: &str,
+    ) -> Result<AccountSessionSecrets, ControlPlaneError> {
+        require_login_input(login_name, password)?;
+        let body = serde_json::json!({ "loginName": login_name, "password": password });
+        let response = self
+            .execute(
+                ControlPlaneOperation::LoginAccountSession,
+                None,
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        parse_account_session(&response)
+    }
+
+    pub async fn refresh_account_session(
+        &self,
+        refresh_token: &str,
+    ) -> Result<AccountSessionSecrets, ControlPlaneError> {
+        require_opaque_bearer(refresh_token, "atrs1")?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::RefreshAccountSession,
+                Some(refresh_token),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_account_session(&response)
+    }
+
+    pub async fn logout_account_session(
+        &self,
+        refresh_token: &str,
+    ) -> Result<(), ControlPlaneError> {
+        require_opaque_bearer(refresh_token, "atrs1")?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::LogoutAccountSession,
+                Some(refresh_token),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        require_empty_response(&response)
+    }
+
+    pub async fn change_account_password(
+        &self,
+        access_token: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), ControlPlaneError> {
+        require_opaque_bearer(access_token, "atas1")?;
+        require_password(current_password)?;
+        require_password(new_password)?;
+        let body = serde_json::json!({
+            "currentPassword": current_password,
+            "newPassword": new_password,
+        });
+        let response = self
+            .execute(
+                ControlPlaneOperation::ChangeAccountPassword,
+                Some(access_token),
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        require_empty_response(&response)
+    }
+
+    pub async fn recover_account_password(
+        &self,
+        recovery_token: &str,
+        new_password: &str,
+    ) -> Result<(), ControlPlaneError> {
+        require_opaque_bearer(recovery_token, "atrp1")?;
+        require_password(new_password)?;
+        let body = serde_json::json!({ "newPassword": new_password });
+        let response = self
+            .execute(
+                ControlPlaneOperation::RecoverAccountPassword,
+                Some(recovery_token),
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        require_empty_response(&response)
     }
 
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -1242,6 +1387,7 @@ impl ControlPlaneClient {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
             "PUT" => self.client.put(url),
+            "DELETE" => self.client.delete(url),
             _ => {
                 return Err(ControlPlaneError::new(
                     ControlPlaneErrorCode::ProtocolInvalid,
@@ -1475,9 +1621,14 @@ fn validate_response_metadata(
         .cache_control
         .as_deref()
         .is_some_and(|value| value.split(',').any(|part| part.trim() == "no-store"));
+    let content_type_matches = if metadata.status == 204 {
+        metadata.content_type.is_none()
+    } else {
+        content_type_is_json
+    };
     if !operation.accepts_status(metadata.status)
         || metadata.request_id.as_deref() != Some(expected_request_id)
-        || !content_type_is_json
+        || !content_type_matches
         || !cache_control_is_private
     {
         let code = if operation.accepts_status(metadata.status) {
@@ -1489,6 +1640,23 @@ fn validate_response_metadata(
             && cache_control_is_private
         {
             ControlPlaneErrorCode::InstallationBusy
+        } else if metadata.status == 401
+            && matches!(operation, ControlPlaneOperation::LoginAccountSession)
+        {
+            ControlPlaneErrorCode::AuthenticationInvalid
+        } else if metadata.status == 401
+            && matches!(operation, ControlPlaneOperation::RecoverAccountPassword)
+        {
+            ControlPlaneErrorCode::RecoveryInvalid
+        } else if metadata.status == 401
+            && matches!(
+                operation,
+                ControlPlaneOperation::RefreshAccountSession
+                    | ControlPlaneOperation::LogoutAccountSession
+                    | ControlPlaneOperation::ChangeAccountPassword
+            )
+        {
+            ControlPlaneErrorCode::AccountSessionInvalid
         } else if metadata.status == 401
             && matches!(
                 operation,
@@ -1716,6 +1884,48 @@ fn parse_health_response(body: &[u8]) -> Result<ControlPlaneHealth, ControlPlane
         status: "available",
         service_version: response.version,
     })
+}
+
+fn parse_account_session(body: &[u8]) -> Result<AccountSessionSecrets, ControlPlaneError> {
+    let response: AccountSessionResponse = parse_exact_json(body)?;
+    AccountSessionSecrets::new(
+        response.access_token,
+        response.refresh_token,
+        response.access_expires_at,
+        response.refresh_expires_at,
+        response.account.user_id,
+        response.account.login_name,
+        response.account.status,
+    )
+    .map_err(|_| protocol_invalid())
+}
+
+fn require_login_input(login_name: &str, password: &str) -> Result<(), ControlPlaneError> {
+    let valid_login_name = (3..=64).contains(&login_name.len())
+        && login_name.as_bytes()[0].is_ascii_alphabetic()
+        && login_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    if !valid_login_name {
+        return Err(protocol_invalid());
+    }
+    require_password(password)
+}
+
+fn require_password(password: &str) -> Result<(), ControlPlaneError> {
+    let length = password.chars().count();
+    if !(12..=128).contains(&length) || password.chars().any(|value| value == '\0') {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn require_empty_response(body: &[u8]) -> Result<(), ControlPlaneError> {
+    if body.is_empty() {
+        Ok(())
+    } else {
+        Err(protocol_invalid())
+    }
 }
 
 fn parse_system_version_response(
@@ -3305,15 +3515,15 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        new_request_id, parse_created_task, parse_device_session, parse_douyin_platform_session,
-        parse_douyin_platform_session_logout_prepare, parse_health_response,
-        parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, parse_sse_frame,
-        parse_system_version_response, parse_task_control, parse_task_discovery, parse_task_list,
-        parse_task_snapshot_body, parse_task_target_preview, parse_task_target_results,
-        parse_workbench_metrics, parse_workbench_status, request_path, require_idempotency_key,
-        require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
-        transport_error, validate_preview_command, validate_response_metadata,
+        new_request_id, parse_account_session, parse_created_task, parse_device_session,
+        parse_douyin_platform_session, parse_douyin_platform_session_logout_prepare,
+        parse_health_response, parse_installation_access, parse_installation_registration,
+        parse_registration_challenge, parse_revoked_credential, parse_rotated_credential,
+        parse_sse_frame, parse_system_version_response, parse_task_control, parse_task_discovery,
+        parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
+        parse_task_target_results, parse_workbench_metrics, parse_workbench_status, request_path,
+        require_idempotency_key, require_list_cursor, require_preview_cursor, required_credential,
+        sse_frame_end, transport_error, validate_preview_command, validate_response_metadata,
         validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
         ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
@@ -3507,6 +3717,36 @@ mod tests {
                 "POST",
                 "/api/v1/tasks/{task_id}/emergency-stop",
                 202,
+            ),
+            (
+                ControlPlaneOperation::LoginAccountSession,
+                "POST",
+                "/api/v1/account-sessions",
+                201,
+            ),
+            (
+                ControlPlaneOperation::RefreshAccountSession,
+                "POST",
+                "/api/v1/account-sessions/refresh",
+                201,
+            ),
+            (
+                ControlPlaneOperation::LogoutAccountSession,
+                "DELETE",
+                "/api/v1/account-sessions/current",
+                204,
+            ),
+            (
+                ControlPlaneOperation::ChangeAccountPassword,
+                "POST",
+                "/api/v1/account-password/changes",
+                204,
+            ),
+            (
+                ControlPlaneOperation::RecoverAccountPassword,
+                "POST",
+                "/api/v1/account-password/recovery",
+                204,
             ),
         ];
 
@@ -3784,7 +4024,7 @@ mod tests {
             "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
             &ResponseMetadata {
                 status: 503,
-                ..valid
+                ..valid.clone()
             },
         )
         .expect_err("503 access dependency failure");
@@ -3807,6 +4047,45 @@ mod tests {
             ControlPlaneErrorCode::InstallationBusy
         );
         assert!(!installation_busy.retryable());
+
+        for (operation, expected_code) in [
+            (
+                ControlPlaneOperation::LoginAccountSession,
+                ControlPlaneErrorCode::AuthenticationInvalid,
+            ),
+            (
+                ControlPlaneOperation::RecoverAccountPassword,
+                ControlPlaneErrorCode::RecoveryInvalid,
+            ),
+            (
+                ControlPlaneOperation::RefreshAccountSession,
+                ControlPlaneErrorCode::AccountSessionInvalid,
+            ),
+        ] {
+            let account_error = validate_response_metadata(
+                operation,
+                "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+                &ResponseMetadata {
+                    status: 401,
+                    ..valid.clone()
+                },
+            )
+            .expect_err("account 401 classification");
+            assert_eq!(account_error.code(), expected_code);
+            assert!(!account_error.retryable());
+        }
+
+        validate_response_metadata(
+            ControlPlaneOperation::LogoutAccountSession,
+            "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+            &ResponseMetadata {
+                status: 204,
+                request_id: Some("f831a58a-a54c-4bd9-8f3e-0383c4df609d".to_owned()),
+                content_type: None,
+                cache_control: Some("no-store".to_owned()),
+            },
+        )
+        .expect("secret-free empty account response metadata");
 
         for status in [200, 201] {
             validate_response_metadata(
@@ -3839,6 +4118,51 @@ mod tests {
             b"private-invalid-json".as_slice(),
         ] {
             assert!(parse_health_response(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn account_session_response_is_exact_canonical_and_keeps_bearers_native() {
+        let access_token = opaque_bearer("atas1");
+        let refresh_token = opaque_bearer("atrs1");
+        let valid = serde_json::json!({
+            "accessToken": access_token,
+            "refreshToken": refresh_token,
+            "accessExpiresAt": "2026-07-23T10:10:00Z",
+            "refreshExpiresAt": "2026-08-22T10:00:00Z",
+            "account": {
+                "userId": IDENTIFIER,
+                "loginName": "demo.operator",
+                "status": "active"
+            }
+        });
+        let body = serde_json::to_vec(&valid).expect("account fixture JSON");
+        let parsed = parse_account_session(&body).expect("canonical account Session");
+        assert_eq!(parsed.access_token(), valid["accessToken"]);
+        assert_eq!(parsed.refresh_token(), valid["refreshToken"]);
+        assert_eq!(parsed.account().login_name(), "demo.operator");
+
+        for invalid in [
+            {
+                let mut value = valid.clone();
+                value["accessToken"] = serde_json::json!("atas1.private");
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["account"]["loginName"] = serde_json::json!("Demo.Operator");
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["account"]["extra"] = serde_json::json!(true);
+                value
+            },
+        ] {
+            assert!(parse_account_session(
+                &serde_json::to_vec(&invalid).expect("invalid account fixture JSON")
+            )
+            .is_err());
         }
     }
 
@@ -4995,6 +5319,11 @@ mod tests {
             ControlPlaneOperation::RotateDeviceCredential,
             ControlPlaneOperation::RevokeDeviceCredential,
             ControlPlaneOperation::ExchangeDeviceSession,
+            ControlPlaneOperation::LoginAccountSession,
+            ControlPlaneOperation::RefreshAccountSession,
+            ControlPlaneOperation::LogoutAccountSession,
+            ControlPlaneOperation::ChangeAccountPassword,
+            ControlPlaneOperation::RecoverAccountPassword,
         ] {
             let error = transport_error(operation);
             assert_eq!(error.code(), ControlPlaneErrorCode::OutcomeUncertain);

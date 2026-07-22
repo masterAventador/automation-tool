@@ -20,6 +20,8 @@ pnpm tauri:dev
 
 `pnpm dev` 只绑定 `127.0.0.1:1420`。`pnpm tauri:dev` 会显式合并仅开发用的 `tauri.dev.conf.json`，启动这个本机服务和真实桌面窗口。正式 `tauri.conf.json` 不含开发 URL/devCSP，交付必须由 Tauri 打包，不能把 `dist/` 发布为用户入口。
 
+U9-04 的 `customer-demo` Vite Profile 在组合根最外层启用 `AccountSessionGate`。账号状态未确认、未登录或离线时不会挂载 `StartupGate`、诊断工具或工作台；登录、运维恢复票据、改密和注销只经过 `TauriAccountSessionGateway` 的五个固定 Command。Rust 将 access/refresh 保存为 `product-account-session-v1` 私有 secret，并在启动时用 refresh 轮换；React 只接收严格 Zod 校验的安全账号投影，不接收 bearer、过期时间或存储路径。默认 P9 Profile 不启用该门禁。
+
 当前 `src-tauri/capabilities/main.json` 不暴露任何 IPC 权限；后续每项原生能力必须随对应任务单独增加最小权限。`src-tauri/app-icon.svg` 是工程占位图标，不代表最终品牌设计。
 
 H8-18 已锁定 Rust `tauri-plugin-updater 2.10.1` 作为 macOS/Windows 更新检查与安装原语；H8-20/H8-21 已在 Rust 注册插件并只开放 `get_app_update_state`、`check_app_update_now`、`decide_app_update` 三个脱敏产品 Command。`src-tauri/src/app_updates.rs` 验证官方 dynamic feed 的 `raw_json` 与通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的状态闭集投影安全版本、策略和 Artifact 元数据；React 不安装 updater JavaScript binding，`main` Capability 也不授予 updater 权限，所以不能取得下载 URL/签名、安装路径或调用插件原生命令。

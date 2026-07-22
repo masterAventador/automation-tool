@@ -59,8 +59,8 @@
       "result": "pending_real_platform",
       "evidence": [
         {
-          "path": "docs/development-roadmap.md",
-          "anchor": "### B5-15 登录复用验收"
+          "path": "docs/development/B5-15.md",
+          "anchor": "# B5-15 登录复用验收"
         },
         {
           "path": "scripts/run_p9_06_acceptance.py",
@@ -79,8 +79,8 @@
       "result": "pending_real_platform",
       "evidence": [
         {
-          "path": "docs/development-roadmap.md",
-          "anchor": "### D6-16 真实目标发现验收（当前待补）"
+          "path": "docs/development/D6-16.md",
+          "anchor": "# D6-16 真实目标发现验收（当前待补）"
         },
         {
           "path": "frontend/src/features/task-runs/TaskRunDetails.tsx",
@@ -151,8 +151,8 @@
       "result": "verified_automated",
       "evidence": [
         {
-          "path": "docs/development-roadmap.md",
-          "anchor": "### H8-04 App 崩溃恢复"
+          "path": "docs/development/H8-04.md",
+          "anchor": "# H8-04 App 崩溃恢复"
         }
       ],
       "blockingTasks": []

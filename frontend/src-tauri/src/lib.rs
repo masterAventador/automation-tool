@@ -1,3 +1,4 @@
+pub mod account_session_vault;
 pub mod app_update_cache;
 pub mod app_update_coordinator;
 pub mod app_update_installation;
@@ -20,6 +21,11 @@ mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
 
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+use account_session_vault::{
+    initialize_production_account_session_vault, AccountSessionSnapshot, AccountSessionVaultError,
+    AccountSessionVaultErrorCode, ProductionAccountSessionVault,
+};
 use device_credentials::initialize_production_device_credential_vault;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_credentials::ProductionDeviceCredentialVault;
@@ -30,6 +36,8 @@ use device_identity::initialize_production_identity;
 #[cfg(feature = "control-plane-e2e")]
 use device_identity::ProductionDeviceIdentity;
 use tauri::Manager;
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+use zeroize::Zeroizing;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -284,6 +292,9 @@ fn map_executor_connection_error(
         | control_plane::ControlPlaneErrorCode::OutcomeUncertain => "transport_unavailable",
         control_plane::ControlPlaneErrorCode::IdentityUnavailable
         | control_plane::ControlPlaneErrorCode::StorageUnavailable => "storage_unavailable",
+        control_plane::ControlPlaneErrorCode::AuthenticationInvalid
+        | control_plane::ControlPlaneErrorCode::RecoveryInvalid
+        | control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "operation_unavailable",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
         | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
     };
@@ -675,12 +686,153 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
             "installation_access_denied"
         }
         control_plane::ControlPlaneErrorCode::InstallationBusy => "installation_busy",
+        control_plane::ControlPlaneErrorCode::AuthenticationInvalid => "authentication_invalid",
+        control_plane::ControlPlaneErrorCode::RecoveryInvalid => "recovery_invalid",
+        control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "session_invalid",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
         | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
     };
     ControlPlaneCommandError {
         code,
         retryable: error.retryable(),
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_account_session_vault_error(error: AccountSessionVaultError) -> ControlPlaneCommandError {
+    let code = match error.code() {
+        AccountSessionVaultErrorCode::StorageUnavailable => "storage_unavailable",
+        AccountSessionVaultErrorCode::InvalidSession
+        | AccountSessionVaultErrorCode::CorruptStoredSession => "session_invalid",
+    };
+    ControlPlaneCommandError {
+        code,
+        retryable: false,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn clear_account_session(
+    vault: &ProductionAccountSessionVault,
+) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
+    vault.delete().map_err(map_account_session_vault_error)?;
+    Ok(AccountSessionSnapshot::unauthenticated())
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn restore_product_account_session(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
+    let stored = match vault.load() {
+        Ok(stored) => stored,
+        Err(error) if error.code() == AccountSessionVaultErrorCode::CorruptStoredSession => {
+            return clear_account_session(&vault);
+        }
+        Err(error) => return Err(map_account_session_vault_error(error)),
+    };
+    let Some(stored) = stored else {
+        return Ok(AccountSessionSnapshot::unauthenticated());
+    };
+    match client.refresh_account_session(stored.refresh_token()).await {
+        Ok(rotated) => {
+            vault
+                .replace(&rotated)
+                .map_err(map_account_session_vault_error)?;
+            Ok(AccountSessionSnapshot::authenticated(&rotated))
+        }
+        Err(error)
+            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
+        {
+            clear_account_session(&vault)
+        }
+        Err(error) => Err(map_control_plane_error(error)),
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn login_product_account(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+    login_name: String,
+    password: String,
+) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
+    let password = Zeroizing::new(password);
+    let session = client
+        .login_account_session(&login_name, password.as_str())
+        .await
+        .map_err(map_control_plane_error)?;
+    if let Err(error) = vault.replace(&session) {
+        let _ = client.logout_account_session(session.refresh_token()).await;
+        return Err(map_account_session_vault_error(error));
+    }
+    Ok(AccountSessionSnapshot::authenticated(&session))
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn recover_product_account_password(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+    recovery_token: String,
+    new_password: String,
+) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
+    let recovery_token = Zeroizing::new(recovery_token);
+    let new_password = Zeroizing::new(new_password);
+    client
+        .recover_account_password(recovery_token.as_str(), new_password.as_str())
+        .await
+        .map_err(map_control_plane_error)?;
+    clear_account_session(&vault)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn change_product_account_password(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+    current_password: String,
+    new_password: String,
+) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
+    let session = vault
+        .load()
+        .map_err(map_account_session_vault_error)?
+        .ok_or(ControlPlaneCommandError {
+            code: "session_invalid",
+            retryable: false,
+        })?;
+    let current_password = Zeroizing::new(current_password);
+    let new_password = Zeroizing::new(new_password);
+    client
+        .change_account_password(
+            session.access_token(),
+            current_password.as_str(),
+            new_password.as_str(),
+        )
+        .await
+        .map_err(map_control_plane_error)?;
+    clear_account_session(&vault)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn logout_product_account(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
+    let Some(session) = vault.load().map_err(map_account_session_vault_error)? else {
+        return Ok(AccountSessionSnapshot::unauthenticated());
+    };
+    match client.logout_account_session(session.refresh_token()).await {
+        Ok(()) => clear_account_session(&vault),
+        Err(error)
+            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
+        {
+            clear_account_session(&vault)
+        }
+        Err(error) => Err(map_control_plane_error(error)),
     }
 }
 
@@ -2755,9 +2907,12 @@ pub fn run() {
                 let device_identity = initialize_production_identity(&app_data_directory)?;
                 let device_credential_vault =
                     initialize_production_device_credential_vault(&app_data_directory)?;
+                let account_session_vault =
+                    initialize_production_account_session_vault(&app_data_directory)?;
                 debug_assert_eq!(device_identity.public_key().len(), 32);
                 app.manage(device_identity);
                 app.manage(device_credential_vault);
+                app.manage(account_session_vault);
             }
             Ok(())
         });
@@ -2789,6 +2944,11 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         check_local_startup_environment,
+        restore_product_account_session,
+        login_product_account,
+        recover_product_account_password,
+        change_product_account_password,
+        logout_product_account,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,
@@ -2826,6 +2986,11 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         check_local_startup_environment,
+        restore_product_account_session,
+        login_product_account,
+        recover_product_account_password,
+        change_product_account_password,
+        logout_product_account,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,
