@@ -1,0 +1,23 @@
+{
+  "version": "customer-demo-protocol-regression.v1",
+  "profiles": ["local", "demo"],
+  "openapi": "contracts/openapi/control-plane.v1.json",
+  "generatedDto": "frontend/src/api/generated/control-plane.ts",
+  "nativeTransport": "frontend/src-tauri/src/control_plane.rs",
+  "controlPlaneFixtures": [
+    "contracts/fixtures/control-plane-v1/health.json",
+    "contracts/fixtures/control-plane-v1/version.json"
+  ],
+  "executorSchema": "contracts/protocol/executor-v1.schema.json",
+  "executorFixtures": "contracts/fixtures/executor-v1",
+  "allowedBuildDifferences": ["compiledDeploymentProfile"],
+  "businessCodeDifferences": [],
+  "requiredReplays": [
+    "backend_openapi_and_control_plane_fixtures",
+    "generated_typescript_drift_check",
+    "python_executor_fixtures",
+    "typescript_executor_fixtures",
+    "rust_executor_fixtures",
+    "rust_control_plane_allowlist_and_parsers"
+  ]
+}

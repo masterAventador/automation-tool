@@ -3762,7 +3762,7 @@ fn protocol_invalid() -> ControlPlaneError {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::collections::HashSet;
+    use std::collections::{BTreeSet, HashSet};
     use std::error::Error;
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -3969,6 +3969,30 @@ mod tests {
                 200,
             ),
             (
+                ControlPlaneOperation::GetTaskTargetPreview,
+                "GET",
+                "/api/v1/tasks/{task_id}/target-preview",
+                200,
+            ),
+            (
+                ControlPlaneOperation::ReplaceTaskTargetExclusions,
+                "PUT",
+                "/api/v1/tasks/{task_id}/target-preview/exclusions",
+                200,
+            ),
+            (
+                ControlPlaneOperation::ConfirmTaskTargetPreview,
+                "POST",
+                "/api/v1/tasks/{task_id}/target-preview/confirmations",
+                202,
+            ),
+            (
+                ControlPlaneOperation::GetTaskTargetResults,
+                "GET",
+                "/api/v1/tasks/{task_id}/target-results",
+                200,
+            ),
+            (
                 ControlPlaneOperation::StreamTaskEvents,
                 "GET",
                 "/api/v1/tasks/{task_id}/events",
@@ -4035,6 +4059,157 @@ mod tests {
             assert_eq!(operation.path(), path);
             assert_eq!(operation.success_status(), success_status);
         }
+    }
+
+    #[test]
+    fn app_operation_allowlist_matches_the_complete_openapi_snapshot() {
+        let operations = [
+            (ControlPlaneOperation::GetSystemHealth, "getSystemHealth"),
+            (ControlPlaneOperation::GetSystemVersion, "getSystemVersion"),
+            (
+                ControlPlaneOperation::GetCurrentInstallationAccess,
+                "getCurrentInstallationAccess",
+            ),
+            (
+                ControlPlaneOperation::GetWorkbenchStatus,
+                "getWorkbenchStatus",
+            ),
+            (
+                ControlPlaneOperation::GetWorkbenchMetrics,
+                "getWorkbenchMetrics",
+            ),
+            (
+                ControlPlaneOperation::GetDouyinPlatformSession,
+                "getDouyinPlatformSession",
+            ),
+            (
+                ControlPlaneOperation::PrepareDouyinPlatformSessionLogout,
+                "prepareDouyinPlatformSessionLogout",
+            ),
+            (
+                ControlPlaneOperation::IssueInstallationRegistrationChallenge,
+                "issueInstallationRegistrationChallenge",
+            ),
+            (
+                ControlPlaneOperation::CompleteInstallationRegistration,
+                "completeInstallationRegistration",
+            ),
+            (
+                ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
+                "issueAccountInstallationBindingChallenge",
+            ),
+            (
+                ControlPlaneOperation::CompleteAccountInstallationBinding,
+                "completeAccountInstallationBinding",
+            ),
+            (
+                ControlPlaneOperation::ListAccountInstallations,
+                "listAccountInstallations",
+            ),
+            (
+                ControlPlaneOperation::RevokeAccountInstallation,
+                "revokeAccountInstallation",
+            ),
+            (
+                ControlPlaneOperation::RotateDeviceCredential,
+                "rotateDeviceCredential",
+            ),
+            (
+                ControlPlaneOperation::RevokeDeviceCredential,
+                "revokeDeviceCredential",
+            ),
+            (
+                ControlPlaneOperation::ExchangeDeviceSession,
+                "exchangeDeviceSession",
+            ),
+            (ControlPlaneOperation::CreateTask, "createTask"),
+            (
+                ControlPlaneOperation::StartTaskDiscovery,
+                "startTaskDiscovery",
+            ),
+            (ControlPlaneOperation::ListTasks, "listTasks"),
+            (ControlPlaneOperation::GetTask, "getTask"),
+            (
+                ControlPlaneOperation::GetTaskTargetPreview,
+                "getTaskTargetPreview",
+            ),
+            (
+                ControlPlaneOperation::ReplaceTaskTargetExclusions,
+                "replaceTaskTargetExclusions",
+            ),
+            (
+                ControlPlaneOperation::ConfirmTaskTargetPreview,
+                "confirmTaskTargetPreview",
+            ),
+            (
+                ControlPlaneOperation::GetTaskTargetResults,
+                "getTaskTargetResults",
+            ),
+            (ControlPlaneOperation::StreamTaskEvents, "streamTaskEvents"),
+            (ControlPlaneOperation::PauseTask, "pauseTask"),
+            (ControlPlaneOperation::ResumeTask, "resumeTask"),
+            (ControlPlaneOperation::CancelTask, "cancelTask"),
+            (
+                ControlPlaneOperation::EmergencyStopTask,
+                "emergencyStopTask",
+            ),
+            (
+                ControlPlaneOperation::LoginAccountSession,
+                "loginAccountSession",
+            ),
+            (
+                ControlPlaneOperation::RefreshAccountSession,
+                "refreshAccountSession",
+            ),
+            (
+                ControlPlaneOperation::LogoutAccountSession,
+                "logoutAccountSession",
+            ),
+            (
+                ControlPlaneOperation::ChangeAccountPassword,
+                "changeAccountPassword",
+            ),
+            (
+                ControlPlaneOperation::RecoverAccountPassword,
+                "recoverAccountPassword",
+            ),
+        ];
+        let app_operations = operations
+            .iter()
+            .map(|(operation, operation_id)| {
+                (
+                    operation.path().to_owned(),
+                    operation.method().to_ascii_lowercase(),
+                    (*operation_id).to_owned(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(app_operations.len(), operations.len());
+
+        let openapi: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/openapi/control-plane.v1.json"
+        ))
+        .expect("committed OpenAPI snapshot");
+        let mut openapi_operations = BTreeSet::new();
+        for (path, item) in openapi["paths"]
+            .as_object()
+            .expect("OpenAPI path inventory")
+        {
+            for method in ["get", "post", "put", "delete"] {
+                let Some(operation) = item.get(method) else {
+                    continue;
+                };
+                openapi_operations.insert((
+                    path.to_owned(),
+                    method.to_owned(),
+                    operation["operationId"]
+                        .as_str()
+                        .expect("OpenAPI operationId")
+                        .to_owned(),
+                ));
+            }
+        }
+        assert_eq!(app_operations, openapi_operations);
     }
 
     #[test]
@@ -4410,10 +4585,10 @@ mod tests {
 
     #[test]
     fn health_response_is_exact_and_rejects_unknown_or_malformed_fields() {
-        let health = parse_health_response(
-            br#"{"service":"control-plane","status":"ok","version":"0.1.0"}"#,
-        )
-        .expect("valid health");
+        let health = parse_health_response(include_bytes!(
+            "../../../contracts/fixtures/control-plane-v1/health.json"
+        ))
+        .expect("shared valid health fixture");
         assert_eq!(health.service_version(), "0.1.0");
 
         for invalid in [
@@ -4569,30 +4744,26 @@ mod tests {
 
     #[test]
     fn system_version_response_enforces_the_complete_runtime_matrix() {
-        let valid = r#"{
-            "service":"control-plane",
-            "version":"0.1.0",
-            "apiVersion":"v1",
-            "desktopApp":{"current":"0.1.0","minimumCompatible":"0.1.0","maximumCompatible":"0.1.0"},
-            "executorRuntime":{"current":"0.1.0","minimumCompatible":"0.1.0","maximumCompatible":"0.1.0"},
-            "executorProtocol":{"current":"1.0","minimumCompatible":"1.0","maximumCompatible":"1.0"}
-        }"#;
+        let valid = include_str!("../../../contracts/fixtures/control-plane-v1/version.json");
         parse_system_version_response(valid.as_bytes(), "0.1.0")
-            .expect("compatible release matrix");
+            .expect("shared compatible release matrix fixture");
 
-        for incompatible in [
-            valid.replace("\"version\":\"0.1.0\"", "\"version\":\"0.0.9\""),
-            valid.replace("\"apiVersion\":\"v1\"", "\"apiVersion\":\"v2\""),
-            valid.replace(
-                "\"minimumCompatible\":\"0.1.0\"",
-                "\"minimumCompatible\":\"0.1.1\"",
-            ),
-            valid.replace(
-                "\"executorProtocol\":{\"current\":\"1.0\"",
-                "\"executorProtocol\":{\"current\":\"2.0\"",
-            ),
+        let fixture: serde_json::Value = serde_json::from_str(valid).expect("version fixture JSON");
+        for (pointer, replacement) in [
+            ("/version", serde_json::json!("0.0.9")),
+            ("/apiVersion", serde_json::json!("v2")),
+            ("/desktopApp/minimumCompatible", serde_json::json!("0.1.1")),
+            ("/executorProtocol/current", serde_json::json!("2.0")),
         ] {
-            assert!(parse_system_version_response(incompatible.as_bytes(), "0.1.0").is_err());
+            let mut incompatible = fixture.clone();
+            *incompatible
+                .pointer_mut(pointer)
+                .expect("version fixture pointer") = replacement;
+            assert!(parse_system_version_response(
+                &serde_json::to_vec(&incompatible).expect("invalid fixture JSON"),
+                "0.1.0"
+            )
+            .is_err());
         }
         assert!(parse_system_version_response(valid.as_bytes(), "0.1.1").is_err());
     }
