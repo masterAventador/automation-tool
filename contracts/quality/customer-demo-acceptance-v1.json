@@ -1,0 +1,109 @@
+{
+  "version": "customer-demo-acceptance.v1",
+  "profiles": ["isolated_full", "device_package"],
+  "journey": [
+    {
+      "id": "install",
+      "evidence": [
+        {
+          "path": "frontend/scripts/audit-release-bundle.mjs",
+          "anchor": "export async function auditReleaseBundle("
+        },
+        {
+          "path": "scripts/run_p9_07_acceptance.py",
+          "anchor": "--interactive-device-acceptance"
+        }
+      ]
+    },
+    {
+      "id": "account_login",
+      "evidence": [
+        {
+          "path": "frontend/e2e-tauri/account-management.spec.ts",
+          "anchor": "login_product_account"
+        }
+      ]
+    },
+    {
+      "id": "automatic_device_binding",
+      "evidence": [
+        {
+          "path": "scripts/run_u9_06_acceptance.py",
+          "anchor": "verify_final_state"
+        }
+      ]
+    },
+    {
+      "id": "workbench",
+      "evidence": [
+        {
+          "path": "frontend/e2e-tauri/mvp-user-journey.spec.ts",
+          "anchor": "RPA 运营工作台"
+        }
+      ]
+    },
+    {
+      "id": "platform_scan",
+      "evidence": [
+        {
+          "path": "backend/tests/integration/test_douyin_qr_login_browser.py",
+          "anchor": "test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow"
+        }
+      ]
+    },
+    {
+      "id": "target_preview",
+      "evidence": [
+        {
+          "path": "frontend/e2e-tauri/mvp-user-journey.spec.ts",
+          "anchor": "已发现 2 个目标"
+        }
+      ]
+    },
+    {
+      "id": "controlled_action",
+      "evidence": [
+        {
+          "path": "scripts/run_h8_16f_acceptance.py",
+          "anchor": "Action command was not acknowledged exactly once"
+        }
+      ]
+    },
+    {
+      "id": "structured_results",
+      "evidence": [
+        {
+          "path": "frontend/e2e-tauri/mvp-user-journey.spec.ts",
+          "anchor": "目标主页已确认可见"
+        }
+      ]
+    },
+    {
+      "id": "manual_handoff",
+      "evidence": [
+        {
+          "path": "backend/tests/integration/test_task_discovery_lifecycle.py",
+          "anchor": "handoff_required"
+        },
+        {
+          "path": "frontend/tests/douyin-handoff-boundary.test.mjs",
+          "anchor": "without solving it"
+        }
+      ]
+    }
+  ],
+  "safety": {
+    "externalPlatformWrites": 0,
+    "automaticChallengeBypass": false,
+    "realCustomerCredentials": false,
+    "isolatedBrowserHeadless": true,
+    "controlledAction": "browse"
+  },
+  "devicePackageHandoff": {
+    "macOS": "scripts/run_p9_06_acceptance.py",
+    "Windows": "scripts/run_p9_07_acceptance.py",
+    "requiresInteractiveConsole": true,
+    "requiresAuthorizedTestAccount": true,
+    "automatedRunMayNotClaimDeviceAcceptance": true
+  }
+}
