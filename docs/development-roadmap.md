@@ -2872,6 +2872,20 @@
 - 待验收边界：Windows auditor 已接在 P9-04 安装根，但当前未观察真实 NSIS 解包内容、reparse 行为或卸载前全树统计。稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-05-package-audit`，同一命令将经 P9-04 完成安装扫描与清理；取得输出后 P9-05 才能标记 `✅ 已完成`
 - 后续：不等待 Windows，下一独立工程任务进入 P9-06 macOS 干净安装验收入口；任何需要真实平台扫码/账号/用户交互的步骤只做显式 runner 和 fail-closed 前置，不自动产生外部副作用
 
+### P9-06 macOS 干净安装
+
+- 状态：🔍 待授权 macOS 设备验收（显式 runner 与离线门禁已完成）
+- 日期：2026-07-22
+- 推进边界：按用户授权先完成所有不依赖正式证书、真实账号和专用设备的工程工作；本任务的完成定义本身要求可见 App/外部浏览器、扫码与真实任务，因此自动 CI、隐藏 App 或当前 ad-hoc 候选都不能冒充最终结果。本轮没有启动 App、浏览器、服务或平台账号
+- RED：先把唯一台账置为 `🧪 RED`，新增 4 项 P9-06 契约，锁定唯一显式命令、macOS/TTY/非 root 边界、Developer ID/notarization/Gatekeeper、DMG 只读挂载、fresh 用户级安装、无 Python 启动环境、Executor/Chrome/Edge/私有 Profile 进程树、两次启动恢复、最小证据和无自动 CI；首跑 0/4，全部准确失败于 `run_p9_06_acceptance.py` 不存在
+- 正式制品门禁：`scripts/run_p9_06_acceptance.py` 不从源码重建包，也不接受 P9-03 普通 ad-hoc 结果；只消费操作者显式传入的绝对 DMG，依次执行 `hdiutil verify`、只读/no-browse 挂载、production identifier/入口核对、Developer ID 非 ad-hoc codesign、`spctl --assess`、stapled notarization 验证和 P9-05 完整包审计。DMG 只允许一个普通 `.app`，源/安装全树逐文件大小与 SHA-256 必须一致
+- 干净安装与无 Python：入口必须由非 root 真实 TTY 显式传 `--interactive-device-acceptance`，并拒绝复用专属用户级安装名或 production AppData。App 启动环境只保留必要用户变量，`PATH=/usr/bin:/bin:/usr/sbin:/sbin`，移除 `PYTHONHOME/PYTHONPATH/VIRTUAL_ENV` 与所有 `AUTOMATION_TOOL_*`；扫码窗口保持打开时，从 OS 进程树要求至少一个 Resources Local Executor、精确一个 Chrome 或 Edge、`app_data_dir/browser-profiles` 参数和零 Python 后代，不读取 Cookie、页面正文、默认 Profile 或命令行到证据
+- 显式用户旅程：操作者只能在自有/授权测试账号上逐字确认启动四项诊断、等待平台登录、外部浏览器、扫码成功、真实目标预览/排除、无写入副作用 browse、结构化结果；正常退出后第二次启动再确认平台 Session、任务快照/结果恢复和零重复动作。任何 checkpoint 文本不精确、App/Executor/浏览器未退出、进程树事实不符或第二次启动失败都会固定拒绝，不把人工点击包装成自动化结论
+- 证据与清理：成功证据是 schema `p9-06.macos-clean-install.v1` 的独占 `0600` JSON，只含完成时间、OS/架构、DMG SHA-256、版本/签名结论、浏览器枚举、零 Python 计数和 checkpoint 布尔值，不含 PID、命令行、安装/AppData 路径、账号、Cookie、页面内容或任务 ID。成功、失败和中断都只处理本轮从空状态创建的专属 App/进程树/AppData；退出后的 App 与 AppData 移入用户废纸篓而非不可恢复删除，证据文件保留
+- 自动化 GREEN：P9-06 聚焦 4/4；Frontend 全部 154 项 Node 契约、33 个 Vitest 文件/241 项测试、ESLint、严格 TypeScript、OpenAPI、生产构建与边界扫描全绿。runner 的 Ruff format/check、严格 Mypy、Python 编译/帮助入口、uv lock、`actionlint` 与 `git diff --check` 全绿；没有修改 Rust/React/Python 产品实现，也没有执行可见验收命令
+- 待设备与产品事实：当前 P9-03 普通候选是 ad-hoc，不能通过本 runner 的 Developer ID/notarization/Gatekeeper 前置；本机 Chrome 仍有 B5-02 FinderInfo 深签名问题且 Edge 未安装，也没有授权抖音测试账号。更重要的是 production App 当前固定本机 Control Plane，fresh App 没有可交付的首次设备注册链；在本地服务/注册条件真正具备前，“打开即用/创建任务”会正确失败，不能靠操作者勾选绕过。取得正式 DMG、授权账号和完整服务条件后执行 `pnpm --dir frontend test:p9-06-macos-clean-install --dmg <绝对 DMG> --evidence <绝对 JSON>`，审阅证据后才改为 `✅ 已完成`
+- 后续：不等待上述外部条件，下一独立任务按顺序进入 P9-07 Windows 干净安装；复用同一正式制品、零 Python、私有 Profile、任务/恢复和最小证据原则，另补 Windows DPI、Job Object/强杀及 NSIS 卸载事实
+
 ## 21. 当前下一步
 
 严格按顺序：
@@ -2879,6 +2893,7 @@
 1. `P9-02`（🔍 待验收）：Windows Executor 构建器、PE/依赖审计、Manifest/冻结入口/UIAutomation/Job Object 原生 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor` 补最终事实；
 2. `P9-04`（🔍 待验收）：production-mode NSIS/currentUser 配置、只读 Executor Resources、非提权隔离安装/卸载/注册表/普通签名 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-04-windows-package`，正式发布再补 Authenticode；
 3. `P9-05`（🔍 待验收）：统一完整包 auditor 已在真实 macOS App/DMG 通过并接入 P9-04 Windows 安装根；稍后在 Windows 执行 `pnpm --dir frontend test:p9-05-package-audit` 补最终统计；
-4. `P9-06`（🔍 待设备验收）：下一步先把 macOS 干净安装、无 Python 前置、打开即用、浏览器/扫码/任务/恢复的显式验收入口工程化；真实平台账号和用户交互仍只在授权设备执行；P9-07 Windows 同理随后推进，P9-08 在兼容前置具备后继续；
-5. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
-6. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
+5. `P9-07`（🔍 待设备验收）：下一步按同一边界工程化 Windows 干净安装验收，增加 DPI、Job Object/杀进程和 NSIS 卸载恢复事实；完成工程链后继续 P9-08 兼容矩阵，不等待 Windows 实机；
+6. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+7. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。

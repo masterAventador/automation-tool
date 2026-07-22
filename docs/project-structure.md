@@ -516,6 +516,8 @@ P9-04 的 `tauri.windows-candidate.conf.json` 与 `scripts/run_p9_04_acceptance.
 
 P9-05 的 `frontend/scripts/audit-release-bundle.mjs` 是完整正式包树的唯一内容审计器，`scripts/run_p9_05_acceptance.py` 只按当前 OS 分派 P9-03/P9-04，不另建第三种包。auditor 固定双平台 Executor Resources 位置，流式扫描所有普通文件并拒绝链接、特殊文件、测试/调试/开发信任材料、私钥及运行期日志/Profile/Cookie/SQLite/诊断/素材；P9-03 同时用于 build App 和 DMG 挂载副本，P9-04 用于安装后根。真实 macOS 已通过，Windows 入口已就绪待实机。
 
+P9-06 的 `scripts/run_p9_06_acceptance.py` 是人工可见 macOS 干净安装的唯一设备入口，`frontend/tests/p9-06-macos-clean-install.test.mjs` 只锁定其安全边界而不启动 App。runner 不构建包，只接受 Developer ID/notarization/Gatekeeper 均通过的 DMG；它在 fresh production AppData 和专属用户级 App 上运行正式二进制，移除 Python/开发环境后从 OS 进程树核对 Resources Executor、Chrome/Edge 私有 Profile、退出清理和二次启动恢复。操作者 checkpoint 只生成无账号/路径/页面内容的 `0600` 证据；安装与 AppData 移到废纸篓。工作流只把 runner 变化列为触发路径，没有自动执行可见 App、浏览器、扫码或平台任务。
+
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
 T3-14 复用同一 `task_controls.py`、HTTP router、Outbox repository 和事件收敛仓储：cancel/emergency-stop 首次请求在命令事务内把 Task/Attempt 投影到 CANCELLING，终态再由匹配最新 ACK/correlation 的 Executor 事件决定，完成竞态仍服从领域状态机。桌面侧仍只扩展同一个 `control_plane.rs` 固定 operation；T3-14 专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_14_acceptance.py` 顺序验证取消和紧停，不建立第二网络桥或第二状态源。
