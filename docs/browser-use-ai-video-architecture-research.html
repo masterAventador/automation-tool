@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>数字员工浏览器自动化与 AI 视频生产技术方案</title>
+  <style>
+    :root {
+      --ink: #172126;
+      --muted: #5b6b73;
+      --paper: #fbfaf6;
+      --panel: #ffffff;
+      --line: #dce3e2;
+      --accent: #0c7c72;
+      --accent-soft: #e9f6f3;
+      --warn: #ad5c00;
+      --warn-soft: #fff4df;
+      --danger: #a93b3b;
+      --danger-soft: #fff0ef;
+      --blue: #2f5f8f;
+      --blue-soft: #edf4fb;
+      --shadow: 0 18px 45px rgba(23, 33, 38, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0, rgba(12,124,114,.08), transparent 28rem),
+        linear-gradient(180deg, #f6f4ed 0, var(--paper) 24rem);
+      font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: #075b54; }
+    code {
+      padding: .12em .36em;
+      border-radius: .35em;
+      background: #eef2f1;
+      font: .92em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .shell { width: min(1180px, calc(100% - 36px)); margin: 0 auto; }
+    .hero { padding: 64px 0 34px; }
+    .eyebrow {
+      color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 { max-width: 980px; margin: 12px 0 18px; font-size: clamp(34px, 5vw, 64px); line-height: 1.08; letter-spacing: -.04em; }
+    .lede { max-width: 880px; margin: 0; color: var(--muted); font-size: 19px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+    .tag { padding: 6px 11px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.7); color: var(--muted); font-size: 13px; }
+    nav {
+      position: sticky; top: 0; z-index: 10; border-block: 1px solid var(--line);
+      background: rgba(251,250,246,.92); backdrop-filter: blur(12px);
+    }
+    nav .shell { display: flex; gap: 18px; overflow-x: auto; padding-block: 11px; white-space: nowrap; }
+    nav a { color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main { padding: 24px 0 80px; }
+    section { scroll-margin-top: 64px; margin: 24px 0; padding: 30px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.82); box-shadow: var(--shadow); }
+    section > :first-child { margin-top: 0; }
+    h2 { margin: 0 0 16px; font-size: 28px; line-height: 1.22; letter-spacing: -.02em; }
+    h3 { margin: 28px 0 10px; font-size: 19px; line-height: 1.35; }
+    p { margin: 10px 0; }
+    ul, ol { padding-left: 22px; }
+    li + li { margin-top: 6px; }
+    .summary-grid, .two, .three { display: grid; gap: 16px; }
+    .summary-grid { grid-template-columns: repeat(3, 1fr); }
+    .two { grid-template-columns: repeat(2, 1fr); }
+    .three { grid-template-columns: repeat(3, 1fr); }
+    .card { padding: 19px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }
+    .card h3 { margin-top: 0; }
+    .number { display: block; margin-bottom: 8px; color: var(--accent); font-size: 30px; font-weight: 850; }
+    .callout { margin: 18px 0; padding: 17px 19px; border-left: 4px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
+    .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+    .callout.danger { border-color: var(--danger); background: var(--danger-soft); }
+    .callout.blue { border-color: var(--blue); background: var(--blue-soft); }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .verdict { font-size: 17px; }
+    .table-wrap { overflow-x: auto; margin: 16px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 11px 12px; border: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { background: #f0f4f2; font-weight: 800; }
+    tr:nth-child(even) td { background: rgba(247,249,248,.7); }
+    .yes { color: #077164; font-weight: 800; }
+    .no { color: var(--danger); font-weight: 800; }
+    .maybe { color: var(--warn); font-weight: 800; }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 10px; margin: 18px 0; }
+    .flow .node { position: relative; min-height: 106px; padding: 14px; border: 1px solid #b9d8d3; border-radius: 11px; background: var(--accent-soft); }
+    .flow .node:not(:last-child)::after { content: "→"; position: absolute; right: -18px; top: 36px; z-index: 2; color: var(--accent); font-size: 22px; font-weight: 800; }
+    .flow b { display: block; margin-bottom: 5px; }
+    .flow small { color: var(--muted); line-height: 1.45; }
+    .arch { display: grid; gap: 10px; margin: 18px 0; }
+    .layer { padding: 16px 18px; border: 1px solid var(--line); border-radius: 11px; background: #f7f9f8; }
+    .layer b { display: inline-block; min-width: 150px; color: var(--accent); }
+    .layer.guard { border-color: #efc47d; background: var(--warn-soft); }
+    .timeline { position: relative; margin: 20px 0 8px 7px; padding-left: 28px; border-left: 2px solid #a7cbc6; }
+    .milestone { position: relative; padding: 0 0 24px 6px; }
+    .milestone:last-child { padding-bottom: 0; }
+    .milestone::before { content: ""; position: absolute; left: -36px; top: 7px; width: 13px; height: 13px; border: 3px solid var(--paper); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px #8cbdb7; }
+    .milestone b { display: block; font-size: 16px; }
+    .muted { color: var(--muted); }
+    .sources li { overflow-wrap: anywhere; }
+    .footer { padding: 0 0 50px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 900px) {
+      .summary-grid, .three, .two { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow .node:not(:last-child)::after { content: "↓"; left: 50%; right: auto; top: auto; bottom: -24px; }
+      section { padding: 22px; }
+    }
+    @media print {
+      body { background: white; font-size: 11px; }
+      nav { display: none; }
+      .shell { width: 100%; }
+      .hero { padding-top: 18px; }
+      section { break-inside: avoid; box-shadow: none; margin: 10px 0; padding: 18px; }
+      a { color: inherit; }
+      .flow { grid-template-columns: repeat(5, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <div class="eyebrow">Architecture Research · Decision Document</div>
+    <h1>数字员工浏览器自动化与 AI 视频生产技术方案</h1>
+    <p class="lede">面向 automation-tool 的可落地方案：用 Browser Use 增强网页理解，但保留现有的授权、幂等与结果确认；用“分镜 + 参考资产 + 分段生成 + 云剪辑”构建一句话到视频，再通过官方接口优先、浏览器兜底完成分发和互动。</p>
+    <div class="meta">
+      <span class="tag">调研日期：2026-07-22</span>
+      <span class="tag">分支：research/browser-use-video-architecture</span>
+      <span class="tag">结论级别：PoC 可开始，生产需过硬门禁</span>
+      <span class="tag">适用：Tauri + Python Control Plane + Local Executor</span>
+    </div>
+  </header>
+
+  <nav aria-label="文档导航">
+    <div class="shell">
+      <a href="#conclusion">结论</a>
+      <a href="#current">现状</a>
+      <a href="#browser-use">Browser Use</a>
+      <a href="#browser-architecture">浏览器架构</a>
+      <a href="#video">视频方案</a>
+      <a href="#editing">云剪辑</a>
+      <a href="#publishing">发布与互动</a>
+      <a href="#roadmap">路线图</a>
+      <a href="#risks">风险</a>
+      <a href="#sources">资料</a>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="conclusion">
+      <div class="eyebrow">01 · Executive decision</div>
+      <h2>结论先行</h2>
+      <div class="summary-grid">
+        <article class="card">
+          <span class="number">可行</span>
+          <h3>Browser Use 值得做 PoC</h3>
+          <p>它适合解决页面改版、弱结构页面和任意网站的语义理解问题，但不适合直接取代现有执行状态机。</p>
+        </article>
+        <article class="card">
+          <span class="number">混合</span>
+          <h3>不是“全 AI 点网页”</h3>
+          <p>生产优先级应是：官方 API，其次确定性适配器，最后才是受限的 Browser Use 语义兜底。</p>
+        </article>
+        <article class="card">
+          <span class="number">分镜</span>
+          <h3>视频不要一把梭</h3>
+          <p>一句话先变成脚本和镜头计划；人物/产品镜头用参考图或首尾帧，最后在 Timeline 中合成。</p>
+        </article>
+      </div>
+
+      <div class="callout verdict">
+        <strong>建议立项，但先做两个相互独立的 PoC。</strong>
+        浏览器 PoC 只验证“语义定位能否在页面变化下稳定工作，且不破坏安全边界”；视频 PoC 只验证“30 秒竖屏成片的一致性、成本和云剪辑闭环”。两者通过后，再接入自动发布与私信/评论。
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>决策项</th><th>建议</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>全面替换 Playwright</td><td class="no">不建议</td><td>当前代码的价值不只在选择器，还包括授权、限制、幂等账本、单次副作用与不确定结果处理。</td></tr>
+            <tr><td>引入 Browser Use</td><td class="yes">建议，受限引入</td><td>承担读操作、页面探索、语义候选定位和新版页面恢复，不拥有最终成功判定。</td></tr>
+            <tr><td>Browser Use Cloud / stealth / CAPTCHA 绕过</td><td class="no">禁止</td><td>与项目“可见浏览器、人工接管、不得绕过风控”的既有边界冲突。</td></tr>
+            <tr><td>抖音发布/评论/私信</td><td class="yes">官方 API 优先</td><td>开放平台已有发布、评论、搜索和部分 IM 能力；账号/应用无权限时才走浏览器补位。</td></tr>
+            <tr><td>一句话直接生成整段长视频</td><td class="no">仅用于快速预览</td><td>人物、产品和叙事连续性不可控，也难以局部重做与控制成本。</td></tr>
+            <tr><td>阿里 IMS/ICE 云剪辑</td><td class="yes">建议作为首个云剪辑 Provider</td><td>Timeline API、异步任务、字幕/音频/转场能力完整；同时保留本地 FFmpeg Provider。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="current">
+      <div class="eyebrow">02 · Repository audit</div>
+      <h2>项目现状：脆弱的是“页面感知层”，不是整个执行骨架</h2>
+      <p>当前抖音能力确实大量依赖固定 URL、中文文案、ARIA 和 <code>data-e2e</code> 选择器。例如搜索、评论和私信页面分别维护了一组写死的候选选择器；真实平台换文案、换 DOM 或插入登录/风控层后就会失效。</p>
+
+      <div class="two">
+        <article class="card">
+          <h3>应当替换/增强</h3>
+          <ul>
+            <li><code>search_page.py</code>、<code>comment_page.py</code>、<code>direct_message_page.py</code> 中的固定页面感知。</li>
+            <li>把“元素在哪里、页面现在是什么状态”从硬编码选择器升级为多策略感知。</li>
+            <li>用真实站点快照与多版 DOM 回放，代替只依赖 <code>data-e2e</code> 测试锚点的信心。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>必须保留</h3>
+          <ul>
+            <li><code>ActionGate</code>：签名授权、账号/平台/动作限制和本地限额。</li>
+            <li>本地 SQLite side-effect ledger：prepare → dispatch → verified / uncertain。</li>
+            <li>单次点击/发送、最终状态独立确认、结果不确定时绝不自动重放。</li>
+            <li>应用独立浏览器 profile、可见 Chrome/Edge、验证码人工接管。</li>
+          </ul>
+        </article>
+      </div>
+
+      <p>相关实现入口包括 <code>backend/src/automation_tool/executor/browser_runtime.py</code>、<code>backend/src/automation_tool/executor/rpa/douyin/</code> 以及 action operation/ledger 代码。现有路线图也已预留供应商无关的 <code>Material</code>、<code>Timeline</code>、<code>RenderJob</code>、<code>PublishJob</code>、<code>Artifact</code>，以及阿里云剪辑与本地 FFmpeg 的选型任务。新方案应沿用这些边界，而不是再造一套平行系统。</p>
+
+      <div class="callout warn">
+        <strong>当前测试结论要克制。</strong>
+        仓库里的官方域名本地回放能够证明状态机与防重复机制，但不能证明真实抖音页面可用。现有真实会话已遇到 verifycenter/CAPTCHA，搜索、评论和私信仍需要真实账号与人工风控窗口验收。
+      </div>
+    </section>
+
+    <section id="browser-use">
+      <div class="eyebrow">03 · Browser Use feasibility</div>
+      <h2>Browser Use 能带来什么，以及不能让它做什么</h2>
+      <p><a href="https://github.com/browser-use/browser-use">Browser Use</a> 是 MIT 许可的 Python 浏览器 Agent 框架，支持本地运行、自选 LLM、自定义工具、结构化输出和浏览器会话参数。调研时最新 release 为 0.13.6（2026-07-17），0.13 系列还在引入 Rust-backed beta Agent，说明项目迭代很快：必须精确锁版本并做升级回归，不能追 latest。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>能力</th><th>对本项目的价值</th><th>生产约束</th></tr></thead>
+          <tbody>
+            <tr><td>语义理解 DOM + 视觉</td><td>可按“搜索框”“发送按钮”“当前是否登录”等意图找元素，降低 CSS/文案变更影响。</td><td>视觉会把截图发给模型；敏感页默认关闭，必要时只发裁剪区域。</td></tr>
+            <tr><td>自定义 Tools</td><td>可以只暴露“观察、候选定位、读文本”等少量动作。</td><td>默认工具包含导航、输入、上传、JS、文件读写等广泛能力，必须删减。</td></tr>
+            <tr><td><code>allowed_domains</code> / <code>prohibited_domains</code></td><td>可把执行限定在批准的网站。</td><td>域名限制只是第一道门，还需路径、动作、账号和目标对象校验。</td></tr>
+            <tr><td>结构化输出</td><td>可让 Agent 返回 <code>ActionProposal</code>、候选元素和证据，不直接返回“任务成功”。</td><td>最终状态必须由独立 verifier 检查平台回执、URL、实体 ID 或稳定页面证据。</td></tr>
+            <tr><td>CDP 会话</td><td>可接本机 Chrome/Edge 的独立 profile。</td><td>当前版本底层是直接 CDP 而非 Playwright；调试端口只能监听 loopback、随机端口、短生命周期，若做不到则 PoC 失败。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout danger">
+        <strong>网页内容是不可信输入。</strong>
+        恶意页面可以把“忽略系统指令、上传文件、泄露密钥”写进 DOM 诱导 Agent。模型不得获得 Cookie、平台 token、任意文件路径、shell、任意 JS、任意上传和跨域导航能力；敏感数据按域名分组注入，并关闭匿名遥测、脱敏历史与截图。
+      </div>
+
+      <h3>推荐的能力等级</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>等级</th><th>允许</th><th>审批</th><th>示例</th></tr></thead>
+          <tbody>
+            <tr><td>L0 观察</td><td>截图、读 DOM、提取可见文本、识别页面状态</td><td>首次授权域名</td><td>判断是否登录、列出搜索结果</td></tr>
+            <tr><td>L1 无副作用导航</td><td>同域打开页面、滚动、切换标签、搜索</td><td>策略自动批准</td><td>打开某个公开视频详情</td></tr>
+            <tr><td>L2 可逆输入</td><td>填表但不提交、选择文件但不上传</td><td>动作前展示预览</td><td>填写评论草稿</td></tr>
+            <tr><td>L3 外部副作用</td><td>提交评论、发送私信、上传和发布</td><td>授权 + 本地账本 + 首期人工确认</td><td>点击一次“发表评论”</td></tr>
+            <tr><td>L4 高风险</td><td>支付、删除、账号安全、风控绕过</td><td>默认禁用</td><td>不在当前产品范围</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="browser-architecture">
+      <div class="eyebrow">04 · Controlled browser architecture</div>
+      <h2>推荐架构：AI 提案，确定性执行，独立验收</h2>
+
+      <div class="arch" aria-label="浏览器架构分层图">
+        <div class="layer"><b>Control Plane</b>TaskIntent、账号/域名/动作策略、额度、审批、任务状态机、审计。</div>
+        <div class="layer guard"><b>Authorization Envelope</b>冻结目标、操作、内容哈希、有效期、最大步骤、最大一次副作用。</div>
+        <div class="layer"><b>Local Executor</b>独立 profile 锁、ActionGate、本地 side-effect ledger、凭据与进程生命周期。</div>
+        <div class="layer"><b>BrowserAutomationPort</b>OfficialApiAdapter / DeterministicPlaywrightAdapter / SemanticBrowserUseAdapter。</div>
+        <div class="layer guard"><b>Independent Verifier</b>平台回执、实体 ID、最终 URL/状态证据；失败则 fixed failure，不明确则 outcome_uncertain。</div>
+      </div>
+
+      <div class="flow" aria-label="有副作用网页动作流程">
+        <div class="node"><b>1. 观察</b><small>AI 识别页面状态、候选元素与风险，不做提交。</small></div>
+        <div class="node"><b>2. 提案</b><small>输出结构化候选、依据、置信度和预计副作用。</small></div>
+        <div class="node"><b>3. 门禁</b><small>校验 origin、账号、目标、内容哈希、授权与本地限额。</small></div>
+        <div class="node"><b>4. 单次执行</b><small>确定性工具只点击/调用一次，并写入 dispatch。</small></div>
+        <div class="node"><b>5. 验收</b><small>独立证据确认；超时不自动重试，进入不确定态。</small></div>
+      </div>
+
+      <h3>建议新增的内部契约</h3>
+      <div class="two">
+        <article class="card">
+          <h3><code>BrowserTaskSpec</code></h3>
+          <p class="muted">task_id、account_id、allowed_domains/routes、operation、risk_level、content_hash、max_steps、max_duration、vision_policy、approval_id、policy_version。</p>
+        </article>
+        <article class="card">
+          <h3><code>ActionProposal</code></h3>
+          <p class="muted">page_state、candidate_element、semantic_role、evidence、confidence、expected_side_effect、target_fingerprint；它不是执行结果。</p>
+        </article>
+        <article class="card">
+          <h3><code>ActionReceipt</code></h3>
+          <p class="muted">prepared_at、dispatched_at、adapter、exact_action、request/entity ID、evidence_hash、verification_state。</p>
+        </article>
+        <article class="card">
+          <h3><code>WebCapabilityPolicy</code></h3>
+          <p class="muted">按站点声明可用能力；“任何网页”意味着可扩展的 capability registry，不意味着任意权限。</p>
+        </article>
+      </div>
+
+      <h3>与现有同步 Playwright 的集成方式</h3>
+      <p>现有 <code>BrowserRuntime</code> 是同步 Playwright，Browser Use 主流程偏异步且直接使用 CDP。不要在同一线程、同一 profile 上让两个框架同时持有页面对象。PoC 应采用独立的 bounded worker/async loop，并由 profile 单实例锁保证串行；真正执行副作用时，选择一个 adapter 完成从 prepare 到 verify 的完整临界区。</p>
+
+      <div class="callout blue">
+        <strong>CDP 是 Browser Use PoC 的硬门禁。</strong>
+        只允许 <code>127.0.0.1</code>、随机临时端口、进程归属校验、任务结束立即关闭；严禁固定 9222、监听局域网、连接用户日常默认 profile。若当前 Browser Use 版本无法满足，就保持 Playwright 主引擎，只抽取其语义定位能力或暂缓集成。
+      </div>
+    </section>
+
+    <section id="video">
+      <div class="eyebrow">05 · One sentence to video</div>
+      <h2>最稳的文生视频方案：一句话不是 prompt，而是生产 Brief</h2>
+      <p>万相 2.7 已支持 2–15 秒、720P/1080P、9:16、有声与多镜头叙事；图生视频支持首帧、首尾帧和视频续写；参考生视频支持多张人物/场景参考。能力已经足够，但“30 秒人物稳定、产品准确、字幕清楚的营销视频”仍应拆镜头生产，而不是交给一次长 prompt。</p>
+
+      <div class="flow" aria-label="AI 视频生产流水线">
+        <div class="node"><b>1. ContentBrief</b><small>目标、受众、平台、时长、风格、卖点、CTA、版权。</small></div>
+        <div class="node"><b>2. Script &amp; Shots</b><small>旁白、4–8 个镜头、时长、景别、运动、字幕与转场。</small></div>
+        <div class="node"><b>3. References</b><small>人物/品牌 Bible，关键帧、首尾帧、产品图与声音。</small></div>
+        <div class="node"><b>4. Generate</b><small>逐镜头选 T2V / I2V / R2V / 数字人，失败只重做局部。</small></div>
+        <div class="node"><b>5. Edit &amp; QA</b><small>Timeline 合成、字幕/BGM/封面、机器质检、人工审批。</small></div>
+      </div>
+
+      <h3>镜头模型路由</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>内容类型</th><th>首选方式</th><th>为什么</th><th>注意</th></tr></thead>
+          <tbody>
+            <tr><td>无固定人物的氛围/B-roll</td><td>Wan T2V</td><td>起步快，适合场景与情绪探索。</td><td>用于预览或短镜头，不依赖它生成准确文字。</td></tr>
+            <tr><td>产品/品牌/固定人物</td><td>参考生视频 R2V</td><td>可提供人物、场景、产品多参考，连续性更好。</td><td>保存 reference 版本与授权来源；产品外观仍需 QA。</td></tr>
+            <tr><td>构图必须可控</td><td>首帧 I2V</td><td>先生成/审核关键图，再赋予镜头运动。</td><td>竖屏关键帧直接按 9:16 设计，字幕留安全区。</td></tr>
+            <tr><td>明确起点和终点</td><td>首尾帧 I2V</td><td>适合产品变换、转场与精确落版。</td><td>首尾差异过大时容易产生形变。</td></tr>
+            <tr><td>固定数字员工口播 ≤20 秒</td><td>Wan S2V：人物图 + TTS 音频</td><td>口型、表情和身体动作专用，强于通用 T2V。</td><td>长文拆段，统一音色与人物 reference。</td></tr>
+            <tr><td>长时间简单头像口播</td><td>LivePortrait</td><td>可覆盖更长音频，成本/稳定性通常更合适。</td><td>表现力较弱，适合说明类而非强剧情。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>建议的数据对象</h3>
+      <p><code>ContentBrief</code> → <code>ScriptPlan</code> → <code>ShotPlan[]</code> → <code>CharacterBible/BrandBible</code> → <code>GenerationJob[]</code> → <code>Timeline</code> → <code>RenderJob</code> → <code>Artifact</code> → <code>PublishJob</code>。每个生成产物保存 provider、model/version、prompt、negative prompt、seed、reference hashes、task_id、费用、内容合规结果和 lineage。</p>
+
+      <div class="callout warn">
+        <strong>生成结果链接只有约 24 小时，必须立即归档。</strong>
+        API 返回 <code>task_id</code> 后先持久化，再轮询任务；成功后马上下载到受控对象存储并校验 hash/媒体信息。网络中断时按 task_id 对账，不能盲目重新提交昂贵任务。
+      </div>
+
+      <h3>视频 QA 门禁</h3>
+      <div class="three">
+        <article class="card"><h3>技术质量</h3><p>9:16、H.264/AAC、帧率、时长、响度、黑帧/冻帧/静音、字幕安全区、文件完整性。</p></article>
+        <article class="card"><h3>内容质量</h3><p>人物相似度、产品形态、镜头与脚本一致、字幕/口播一致、转场和节奏、封面可读性。</p></article>
+        <article class="card"><h3>合规质量</h3><p>素材版权/肖像/声音授权、敏感内容、平台禁限词、AIGC 显式与隐式标识、发布声明。</p></article>
+      </div>
+
+      <p>中国《人工智能生成合成内容标识办法》已于 2025-09-01 施行，要求对视频等生成合成内容添加显式标识和文件元数据中的隐式标识，发布者也需主动声明。流水线应自己负责标准化标识与 metadata，不应只依赖模型的 <code>watermark</code> 参数。抖音开放平台同时提示品牌 Logo/水印可能影响分发甚至触发处理，因此应区分“合规 AIGC 标识”和“无必要的供应商/品牌水印”。</p>
+    </section>
+
+    <section id="editing">
+      <div class="eyebrow">06 · Alibaba cloud editing</div>
+      <h2>阿里云剪辑：用 IMS/ICE Timeline API，不把 WebSDK 放进 MVP</h2>
+      <p>阿里智能媒体服务的云剪辑支持多视频、音频、图片裁剪拼接，以及字幕、贴纸、滤镜、特效、转场、TTS/ASR 和高级模板。后端可提交 <code>SubmitMediaProducingJob</code>，由异步任务输出成片。这与仓库现有 provider-neutral <code>Timeline</code> 规划吻合。</p>
+
+      <div class="arch" aria-label="云剪辑数据流">
+        <div class="layer"><b>Controlled Storage</b>生成片段先归档；阿里 Provider 将所需素材 staging 到同地域 OSS/IMS 媒资。</div>
+        <div class="layer"><b>Timeline Compiler</b>把内部 Timeline 编译为 VideoTracks / AudioTracks / SubtitleTracks / EffectTracks。</div>
+        <div class="layer"><b>IMS/ICE Job</b>提交异步剪辑任务，持久化 JobId、请求哈希、费用估算与输出规格。</div>
+        <div class="layer"><b>MNS + Reconcile</b>MNS 回调推进状态，同时周期性 Get job 对账，避免只依赖回调。</div>
+        <div class="layer"><b>Artifact Store</b>下载/登记最终成片、封面、字幕、metadata 和 lineage，之后才能进入发布审批。</div>
+      </div>
+
+      <div class="two">
+        <article class="card">
+          <h3>为什么适合</h3>
+          <ul>
+            <li>服务端异步，不要求桌面端长期占用 CPU/GPU。</li>
+            <li>Timeline 和模板适合批量改字幕、片头尾、Logo、BGM 和多比例输出。</li>
+            <li>成功成片按时长计费，失败任务不计费；1080P 云剪辑价格相对生成模型很低。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>必须处理的约束</h3>
+          <ul>
+            <li>输入只接受 IMS 媒资或 OSS，不接受任意外部/CDN URL；需要同地域 staging。</li>
+            <li>HTTP 回调重试次数有限，推荐 MNS，并保留主动查询的 reconciliation job。</li>
+            <li>WebSDK 许可证成本和产品复杂度高；MVP 只做 API/模板，不做在线视频编辑器。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>Provider 设计</h3>
+      <p>内部只定义 <code>VideoRenderProvider.submit(timeline)</code>、<code>get(job_id)</code>、<code>cancel(job_id)</code> 和 <code>fetch_artifact(job_id)</code>。首期实现 <code>AliyunImsProvider</code> 与 <code>LocalFfmpegProvider</code>：云端用于批量、模板和弹性；FFmpeg 用于离线、隐私数据、小修复和供应商故障降级。</p>
+
+      <h3>当前成本量级（仅用于预算，最终以控制台为准）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>项目</th><th>2026-07-22 公开价示例</th><th>30 秒 720P 单候选示例</th></tr></thead>
+          <tbody>
+            <tr><td>Wan 2.7 T2V / I2V，中国内地</td><td>约 ¥0.60/成功输出秒</td><td>约 ¥18；若每镜头生成 3 个候选，约 ¥54</td></tr>
+            <tr><td>Wan S2V 数字人 720P</td><td>约 ¥0.90/成功输出秒</td><td>约 ¥27，通常需按 ≤20 秒拆段</td></tr>
+            <tr><td>IMS 云剪辑 1080P 及以下</td><td>约 ¥0.06/成功输出分钟</td><td>按分钟向上取整，剪辑费远低于生成费</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">不含脚本 LLM、关键帧图片、TTS、OSS、审核、重生成、流量与税费。真正的成本杠杆是“候选数、生成秒数、分辨率、局部重做率”，因此必须在任务创建前做预算冻结与超额审批。</p>
+    </section>
+
+    <section id="publishing">
+      <div class="eyebrow">07 · Publishing, comments and messaging</div>
+      <h2>自动发布与互动：官方接口优先，浏览器只补缺口</h2>
+      <p>抖音开放平台提供视频/图片发布、分片上传、评论列表与回复、关键词视频搜索，以及特定资质下的 IM 能力。是否可用取决于应用类型、账号绑定、能力申请和 OAuth scope，因此账号接入时应先运行 capability probe，形成每个账号的能力矩阵。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>业务</th><th>首选</th><th>Browser Use 兜底</th><th>完成证据</th></tr></thead>
+          <tbody>
+            <tr><td>发布作品</td><td>开放平台 upload/chunk + create + 审核状态查询</td><td>选择文件、填写文案后人工预览，单次提交</td><td>item/video ID + 平台审核/发布状态</td></tr>
+            <tr><td>搜索内容</td><td>获批关键词搜索 API</td><td>L0/L1 语义浏览和结果抽取</td><td>结构化结果 + URL + 抓取时间</td></tr>
+            <tr><td>回复评论</td><td><code>video.comment</code> 相关 API</td><td>AI 定位评论，确定性 adapter 单次回复</td><td>comment/reply ID 或稳定最终回执</td></tr>
+            <tr><td>私信</td><td>符合资质的 IM webhook/OpenAPI</td><td>批准会话内、批准次数和模板下发送</td><td>message ID/回执；缺失则 uncertain</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>发布状态机</h3>
+      <div class="flow" aria-label="发布状态机">
+        <div class="node"><b>Draft</b><small>Brief、脚本、素材和目标平台已冻结。</small></div>
+        <div class="node"><b>Generated</b><small>成片归档并通过技术/内容/合规 QA。</small></div>
+        <div class="node"><b>Approved</b><small>首期必须人工预览；保留审批人和内容哈希。</small></div>
+        <div class="node"><b>Publishing</b><small>prepare → 一次 API/浏览器提交 → 回执查询。</small></div>
+        <div class="node"><b>Final</b><small>Published / Rejected / OutcomeUncertain，不盲目重发。</small></div>
+      </div>
+
+      <h3>数字员工回复策略</h3>
+      <p>入站评论/私信先经过 webhook/API 或浏览器只读采集，再由 AI 输出结构化 <code>ReplySuggestion</code>（意图、情绪、风险、建议文本、引用事实、置信度）。审核器过滤隐私、承诺、价格、医疗/法律等高风险表达；首期由人确认。只有低风险 FAQ、明确知识库命中、处于工作时间/频率上限内的回复，才逐步灰度自动发送。</p>
+    </section>
+
+    <section id="roadmap">
+      <div class="eyebrow">08 · Delivery plan</div>
+      <h2>建议的落地路线与验收门槛</h2>
+      <div class="timeline">
+        <div class="milestone">
+          <b>P0 · 依赖与安全 spike（2–3 天）</b>
+          <span>锁定 Browser Use 版本；验证 Python 3.12、PyInstaller/Tauri sidecar、Windows/macOS；验证 CDP loopback 隔离、独立 profile、遥测关闭、工具裁剪。任一硬门禁失败就不进入生产集成。</span>
+        </div>
+        <div class="milestone">
+          <b>P1 · 通用网页只读 Agent（约 1 周）</b>
+          <span>实现 BrowserTaskSpec、域名能力策略、结构化观察与审计；只允许 L0/L1。用多站点和恶意 prompt-injection 页面测试，不接账号副作用。</span>
+        </div>
+        <div class="milestone">
+          <b>P2 · 抖音语义页面适配（1–2 周）</b>
+          <span>先把 Browser Use 放在现有搜索/评论/私信状态机的“候选定位”位置。构造 30+ 个 DOM/文案/遮罩变体；真实账号只做观察，再做一次人工批准的低风险回复。</span>
+        </div>
+        <div class="milestone">
+          <b>P3 · 30 秒视频闭环 PoC（2–3 周）</b>
+          <span>实现 ContentBrief/ShotPlan/Timeline；Wan T2V + I2V/R2V + TTS/S2V 路由；IMS 与 FFmpeg 两个 Provider；产出 3 类样片并记录质量、耗时和真实成本。</span>
+        </div>
+        <div class="milestone">
+          <b>P4 · 官方发布与互动接入（约 2 周）</b>
+          <span>实现抖音 capability probe、OAuth/scopes、上传/创建/审核查询、评论/IM 可用能力；统一进入现有 ActionGate 与 ledger。浏览器仅承担未开放能力。</span>
+        </div>
+        <div class="milestone">
+          <b>P5 · 灰度数字员工</b>
+          <span>从草稿建议 → 人工批准 → 低风险白名单自动化，逐级开放。按账号、域名、动作设置 kill switch、额度与回滚。</span>
+        </div>
+      </div>
+
+      <h3>PoC 通过标准</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th>必须达到</th></tr></thead>
+          <tbody>
+            <tr><td>安全</td><td>越权域名/路径/工具 100% 拒绝；prompt injection 不得触发文件、密钥、跨域和提交动作；CDP 不暴露到 loopback 之外。</td></tr>
+            <tr><td>副作用</td><td>每个授权最多一次 dispatch；断网/超时/进程退出后不得重复评论、私信或发布；无法确认即 outcome_uncertain。</td></tr>
+            <tr><td>页面韧性</td><td>30+ 个结构/文案/遮罩变体中，读任务成功率 ≥95%；副作用任务宁可拒绝，也不得点错目标。</td></tr>
+            <tr><td>视频</td><td>3 类 30 秒样片均可局部重做、自动成片；人物/产品/字幕/技术规格通过预设 QA；成本和延迟可追溯。</td></tr>
+            <tr><td>分发</td><td>官方 API 路径能取回实体 ID/审核状态；浏览器路径有独立终态证据；验证码可暂停并恢复。</td></tr>
+            <tr><td>交付</td><td>macOS/Windows 正式包、离线迁移、版本锁定、审计导出、kill switch 全部验证。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="risks">
+      <div class="eyebrow">09 · Risk register</div>
+      <h2>主要风险与止损点</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>风险</th><th>概率/影响</th><th>控制与止损</th></tr></thead>
+          <tbody>
+            <tr><td>页面 prompt injection</td><td>高 / 高</td><td>网页视为不可信；自定义最小工具集、域名/路径 allowlist、敏感页关视觉、模型无 secret/文件/shell 权限。</td></tr>
+            <tr><td>AI 点错/谎报成功</td><td>中 / 极高</td><td>AI 只提案；确定性单次执行；独立 verifier；低置信度拒绝；首期人工确认。</td></tr>
+            <tr><td>重复发布/评论/私信</td><td>中 / 极高</td><td>沿用 ledger、内容哈希与幂等键；dispatch 后异常一律不自动重试，先 reconcile。</td></tr>
+            <tr><td>平台风控/封号</td><td>高 / 高</td><td>官方 API 优先、可见浏览器、真实速率、人工验证码、账号级限额；不 stealth、不绕验证码。</td></tr>
+            <tr><td>CDP 远程控制面暴露</td><td>中 / 极高</td><td>随机 loopback 端口、短生命周期、独立 profile、进程归属检查；不能满足即否决 Browser Use 生产接入。</td></tr>
+            <tr><td>人物/版权/虚假内容</td><td>中 / 极高</td><td>reference 权利证明、肖像/声音同意、内容审核、AIGC 标识与发布声明、人工终审。</td></tr>
+            <tr><td>生成成本失控</td><td>高 / 中</td><td>任务前预算冻结、候选上限、720P 草稿/1080P 定稿、局部重做、task_id 对账、按效果统计成本。</td></tr>
+            <tr><td>供应商锁定/故障</td><td>中 / 高</td><td>内部 Timeline/Artifact/Job 契约；AliyunImsProvider + LocalFfmpegProvider；生成 Provider 可替换。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <strong>最终产品定义建议</strong>
+        “可操作任何网页”应对外表述为“在用户授权的站点和能力范围内，可扩展地完成网页任务”。这既符合真实技术边界，也为每个站点建立可审计、可灰度、可停用的 capability，避免把数字员工变成一个持有全部权限的通用浏览器机器人。
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="eyebrow">10 · Primary sources</div>
+      <h2>主要资料与核对范围</h2>
+      <p>以下均为官方仓库、官方文档或监管机构来源；易变化的版本、模型、价格与平台权限按 2026-07-22 记录，实施时应在控制台再次确认。</p>
+      <ol class="sources">
+        <li><a href="https://github.com/browser-use/browser-use">Browser Use 官方仓库与 releases</a></li>
+        <li><a href="https://docs.browser-use.com/open-source/customize/browser/all-parameters">Browser Use：Browser 参数、CDP、profile 与域名限制</a></li>
+        <li><a href="https://docs.browser-use.com/open-source/customize/agent/all-parameters">Browser Use：Agent 步骤、失败、视觉与超时参数</a></li>
+        <li><a href="https://docs.browser-use.com/open-source/customize/tools/add">Browser Use：自定义 Tools</a>；<a href="https://docs.browser-use.com/open-source/customize/tools/remove">移除默认 Tools</a></li>
+        <li><a href="https://docs.browser-use.com/open-source/customize/browser/authentication">Browser Use：认证与敏感数据隔离</a></li>
+        <li><a href="https://open.douyin.com/platform/resource/docs/ability/content-management/douyin-publish-solution/">抖音开放平台：内容发布解决方案</a></li>
+        <li><a href="https://open.douyin.com/platform/resource/docs/openapi/video-management/douyin/create/upload/">抖音开放平台：视频上传</a>；<a href="https://developer.open-douyin.com/docs/resource/zh-CN/dop/develop/openapi/video-management/douyin/create-video/video-create">创建视频</a></li>
+        <li><a href="https://open.douyin.com/platform/resource/docs/ability/interaction-management/video-comment-management-solution">抖音开放平台：评论管理</a>；<a href="https://open.douyin.com/platform/resource/docs/ability/search-management/video/">关键词视频搜索</a></li>
+        <li><a href="https://developer.open-douyin.com/docs/resource/zh-CN/mini-app/develop/tutorial/open-capabilities/management/im-messaging-access">抖音开放平台：IM 消息接入</a></li>
+        <li><a href="https://help.aliyun.com/zh/model-studio/use-video-generation">阿里云百炼：视频生成模型选型</a></li>
+        <li><a href="https://help.aliyun.com/zh/model-studio/text-to-video-api-reference">Wan 2.7 文生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide">图生视频指南</a></li>
+        <li><a href="https://help.aliyun.com/zh/model-studio/wan-video-to-video-api-reference">Wan 2.7 参考生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-s2v-api">Wan S2V 数字人 API</a></li>
+        <li><a href="https://help.aliyun.com/zh/model-studio/model-pricing">阿里云百炼模型价格</a></li>
+        <li><a href="https://help.aliyun.com/zh/ims/user-guide/cloud-clip">阿里 IMS：云剪辑</a>；<a href="https://help.aliyun.com/zh/ims/developer-reference/timeline-configuration-description">Timeline 配置</a></li>
+        <li><a href="https://help.aliyun.com/zh/ims/developer-reference/api-ice-2020-11-09-submitmediaproducingjob/">IMS：SubmitMediaProducingJob</a>；<a href="https://help.aliyun.com/zh/ims/user-guide/callback-events-overview">回调与 MNS</a></li>
+        <li><a href="https://help.aliyun.com/zh/ims/video-clip">IMS 视频剪辑计费</a></li>
+        <li><a href="https://www.cac.gov.cn/2025-03/14/c_1743654684782215.htm">国家网信办：人工智能生成合成内容标识办法</a></li>
+        <li><a href="https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=F32EA2A561F1886CD8D606513512D547&amp;refer=outter">国家标准 GB 45438-2025</a></li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <p>本报告是技术决策输入，不构成平台权限、法务或价格承诺。建议以 P0/P1 的可验证结果决定是否进入生产集成。</p>
+  </footer>
+</body>
+</html>
