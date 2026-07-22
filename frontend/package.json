@@ -72,6 +72,7 @@
     "test:c10-05-secrets": "../backend/.venv/bin/python ../scripts/run_c10_05_acceptance.py",
     "test:c10-06-operations": "../backend/.venv/bin/python ../scripts/run_c10_06_acceptance.py",
     "test:c10-07-profile": "../backend/.venv/bin/python ../scripts/run_c10_07_acceptance.py",
+    "test:c10-08-deployment": "../backend/.venv/bin/python ../scripts/run_c10_08_acceptance.py",
     "test:browser-settings-tauri": "python3 ../scripts/run_b5_04_acceptance.py",
     "test:executor-lifecycle-tauri": "pnpm build:tauri:executor-lifecycle-test && wdio run wdio.executor-lifecycle.conf.ts",
     "test:installation-revocation-tauri": "pnpm build:tauri:installation-revocation-test && wdio run wdio.installation-revocation.conf.ts",

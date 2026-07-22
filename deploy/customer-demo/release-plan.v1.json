@@ -1,0 +1,28 @@
+{
+  "version": "customer-demo-release-plan.v1",
+  "composeFile": "deploy/customer-demo/compose.v1.json",
+  "phases": [
+    "preflight",
+    "verified_backup",
+    "migration",
+    "single_control_plane",
+    "https_ingress",
+    "health_and_version"
+  ],
+  "deploymentConcurrency": 1,
+  "maximumControlPlaneReplicas": 1,
+  "automaticScaling": false,
+  "automaticFailover": false,
+  "databaseDowngrade": "forbidden",
+  "applicationRollback": "explicit_previous_digest_only_when_schema_compatible",
+  "requiredImageIdentity": [
+    "immutable_digest",
+    "org.opencontainers.image.version",
+    "org.opencontainers.image.revision"
+  ],
+  "secretDelivery": "external_read_only_volume",
+  "forbiddenSecretChannels": ["environment", "argv", "compose", "image", "logs"],
+  "healthChecks": ["/api/v1/health", "/api/v1/version"],
+  "cloudExecutionRequiresNamedTarget": true,
+  "rehearsalMayUseLocalImageId": true
+}

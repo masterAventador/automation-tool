@@ -1,0 +1,153 @@
+{
+  "name": "automation-tool-customer-demo",
+  "services": {
+    "migration": {
+      "profiles": ["migration"],
+      "image": "${CONTROL_PLANE_IMAGE:?CONTROL_PLANE_IMAGE is required}",
+      "user": "65532:65532",
+      "read_only": true,
+      "tmpfs": ["/tmp:rw,noexec,nosuid,size=16m"],
+      "security_opt": ["no-new-privileges=true"],
+      "cap_drop": ["ALL"],
+      "entrypoint": ["alembic"],
+      "command": ["-c", "/app/alembic.ini", "upgrade", "head"],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "migration_secrets",
+          "target": "/run/secrets",
+          "read_only": true
+        }
+      ],
+      "networks": ["database"],
+      "restart": "no",
+      "deploy": {
+        "restart_policy": {"condition": "none"},
+        "resources": {
+          "limits": {"cpus": "0.50", "memory": "512M"}
+        }
+      }
+    },
+    "control-plane": {
+      "image": "${CONTROL_PLANE_IMAGE:?CONTROL_PLANE_IMAGE is required}",
+      "user": "65532:65532",
+      "read_only": true,
+      "tmpfs": ["/tmp:rw,noexec,nosuid,size=16m"],
+      "security_opt": ["no-new-privileges=true"],
+      "cap_drop": ["ALL"],
+      "init": true,
+      "stop_grace_period": "30s",
+      "environment": {
+        "AUTOMATION_TOOL_WORKERS": "1",
+        "AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER_VERSION": "${ACCOUNT_PASSWORD_PEPPER_VERSION:?ACCOUNT_PASSWORD_PEPPER_VERSION is required}",
+        "AUTOMATION_TOOL_ACCOUNT_OPERATIONS_ACTOR_ID": "${ACCOUNT_OPERATIONS_ACTOR_ID:?ACCOUNT_OPERATIONS_ACTOR_ID is required}",
+        "AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID": "${DEMO_ENVIRONMENT_ID:?DEMO_ENVIRONMENT_ID is required}",
+        "AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY": "${DEMO_BOOTSTRAP_PUBLIC_KEY:?DEMO_BOOTSTRAP_PUBLIC_KEY is required}",
+        "AUTOMATION_TOOL_ACTION_MINIMUM_INTERVAL_SECONDS": "${ACTION_MINIMUM_INTERVAL_SECONDS:?ACTION_MINIMUM_INTERVAL_SECONDS is required}",
+        "AUTOMATION_TOOL_ACTION_TASK_LIMIT": "${ACTION_TASK_LIMIT:?ACTION_TASK_LIMIT is required}",
+        "AUTOMATION_TOOL_ACTION_DAILY_LIMIT": "${ACTION_DAILY_LIMIT:?ACTION_DAILY_LIMIT is required}",
+        "AUTOMATION_TOOL_ACTION_CONSECUTIVE_FAILURE_THRESHOLD": "${ACTION_CONSECUTIVE_FAILURE_THRESHOLD:?ACTION_CONSECUTIVE_FAILURE_THRESHOLD is required}"
+      },
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "runtime_secrets",
+          "target": "/run/secrets",
+          "read_only": true
+        }
+      ],
+      "networks": ["application", "database"],
+      "expose": ["8000"],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2); assert response.status == 200; response.close()"
+        ],
+        "interval": "30s",
+        "timeout": "3s",
+        "start_period": "10s",
+        "retries": 3
+      },
+      "restart": "unless-stopped",
+      "deploy": {
+        "mode": "replicated",
+        "replicas": 1,
+        "update_config": {"parallelism": 1, "order": "stop-first"},
+        "rollback_config": {"parallelism": 1, "order": "stop-first"},
+        "resources": {
+          "limits": {"cpus": "1.0", "memory": "1024M"}
+        }
+      }
+    },
+    "ingress": {
+      "image": "${INGRESS_IMAGE:?INGRESS_IMAGE is required}",
+      "user": "101:101",
+      "read_only": true,
+      "tmpfs": ["/tmp:rw,noexec,nosuid,size=32m"],
+      "security_opt": ["no-new-privileges=true"],
+      "cap_drop": ["ALL"],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "tls_secrets",
+          "target": "/run/secrets",
+          "read_only": true
+        }
+      ],
+      "networks": ["application"],
+      "ports": [
+        {
+          "name": "http",
+          "target": 8080,
+          "published": "${DEMO_HTTP_PORT:?DEMO_HTTP_PORT is required}",
+          "host_ip": "${DEMO_BIND_ADDRESS:?DEMO_BIND_ADDRESS is required}",
+          "protocol": "tcp",
+          "mode": "host"
+        },
+        {
+          "name": "https",
+          "target": 8443,
+          "published": "${DEMO_HTTPS_PORT:?DEMO_HTTPS_PORT is required}",
+          "host_ip": "${DEMO_BIND_ADDRESS:?DEMO_BIND_ADDRESS is required}",
+          "protocol": "tcp",
+          "mode": "host"
+        }
+      ],
+      "restart": "unless-stopped",
+      "deploy": {
+        "mode": "replicated",
+        "replicas": 1,
+        "update_config": {"parallelism": 1, "order": "stop-first"},
+        "resources": {
+          "limits": {"cpus": "0.25", "memory": "128M"}
+        }
+      }
+    }
+  },
+  "networks": {
+    "application": {
+      "external": true,
+      "name": "${APPLICATION_NETWORK:?APPLICATION_NETWORK is required}"
+    },
+    "database": {
+      "external": true,
+      "name": "${DATABASE_NETWORK:?DATABASE_NETWORK is required}"
+    }
+  },
+  "volumes": {
+    "runtime_secrets": {
+      "external": true,
+      "name": "${RUNTIME_SECRETS_VOLUME:?RUNTIME_SECRETS_VOLUME is required}"
+    },
+    "migration_secrets": {
+      "external": true,
+      "name": "${MIGRATION_SECRETS_VOLUME:?MIGRATION_SECRETS_VOLUME is required}"
+    },
+    "tls_secrets": {
+      "external": true,
+      "name": "${TLS_SECRETS_VOLUME:?TLS_SECRETS_VOLUME is required}"
+    }
+  }
+}
