@@ -19,6 +19,7 @@ pub mod executor_platform;
 pub mod executor_protocol;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
+pub mod model_service_settings;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
@@ -203,6 +204,59 @@ fn select_browser(
     settings
         .select_browser(browser)
         .map_err(map_browser_settings_error)
+}
+
+#[tauri::command]
+fn get_model_service_settings(
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.snapshot().map_err(Into::into)
+}
+
+#[tauri::command]
+fn configure_model_service(
+    request: model_service_settings::ConfigureModelServiceRequest,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.configure(&request).map_err(Into::into)
+}
+
+#[tauri::command]
+fn reuse_script_model_service_for_video(
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.reuse_script_for_video().map_err(Into::into)
+}
+
+#[tauri::command]
+fn clear_model_service(
+    purpose: model_service_settings::ModelServicePurpose,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.clear(purpose).map_err(Into::into)
+}
+
+#[tauri::command]
+async fn test_model_service_connection(
+    purpose: model_service_settings::ModelServicePurpose,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelConnectionSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.test_connection(purpose).await.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -2939,6 +2993,11 @@ pub fn run() {
             app.manage(browser_settings::BrowserSettingsService::initialize(
                 &app_data_directory,
             )?);
+            app.manage(
+                model_service_settings::initialize_production_model_service_settings(
+                    &app_data_directory,
+                )?,
+            );
             app.manage(startup_environment::StartupEnvironmentService::initialize(
                 &app_data_directory,
             )?);
@@ -3014,6 +3073,11 @@ pub fn run() {
         set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser,
+        get_model_service_settings,
+        configure_model_service,
+        reuse_script_model_service_for_video,
+        clear_model_service,
+        test_model_service_connection,
         get_update_policy_record_for_acceptance,
         get_app_update_state,
         check_app_update_now,
@@ -3059,6 +3123,11 @@ pub fn run() {
         set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser,
+        get_model_service_settings,
+        configure_model_service,
+        reuse_script_model_service_for_video,
+        clear_model_service,
+        test_model_service_connection,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3135,6 +3204,11 @@ pub fn run() {
         exit_app_for_acceptance,
         get_browser_settings,
         select_browser,
+        get_model_service_settings,
+        configure_model_service,
+        reuse_script_model_service_for_video,
+        clear_model_service,
+        test_model_service_connection,
         get_app_update_state,
         check_app_update_now,
         decide_app_update

@@ -152,6 +152,28 @@ body {
   margin: 0 auto;
 }
 
+.model-service-settings-stack,
+.model-service-fields,
+.model-service-fields label,
+.model-service-fields .ant-select,
+.model-service-fields .ant-input-password {
+  width: 100%;
+}
+
+.model-service-purpose .ant-typography {
+  margin-bottom: 0;
+}
+
+.model-service-fields label {
+  display: grid;
+  gap: 8px;
+}
+
+.model-service-loading {
+  min-height: 120px;
+  align-items: center;
+}
+
 .overview-grid {
   margin-top: 24px;
 }

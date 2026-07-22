@@ -16,6 +16,7 @@ import { TauriPlatformSessionGateway } from "./platform/tauri/platform-session-g
 import { TauriStartupEnvironmentGateway } from "./platform/tauri/startup-environment-gateway";
 import { TauriAppUpdateGateway } from "./platform/tauri/app-update-gateway";
 import { TauriAccountSessionGateway } from "./platform/tauri/account-session-gateway";
+import { TauriModelServiceGateway } from "./platform/tauri/model-service-gateway";
 import "./styles/global.css";
 
 const root = document.getElementById("root");
@@ -38,6 +39,7 @@ const workbenchGateway = new TauriWorkbenchGateway();
 const platformAdapter = new TauriPlatformAdapter();
 const platformSessionGateway = new TauriPlatformSessionGateway();
 const appUpdateGateway = new TauriAppUpdateGateway();
+const modelServiceGateway = new TauriModelServiceGateway();
 const accountSessionGateway =
   import.meta.env.MODE === "customer-demo" ? new TauriAccountSessionGateway() : undefined;
 
@@ -55,6 +57,7 @@ createRoot(root).render(
       platformAdapter={platformAdapter}
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
+      modelServiceGateway={modelServiceGateway}
       {...(accountSessionGateway === undefined ? {} : { accountSessionGateway })}
     />
   </StrictMode>,

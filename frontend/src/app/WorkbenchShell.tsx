@@ -39,6 +39,8 @@ import { BrowserSettings } from "../features/settings/BrowserSettings";
 import type { PlatformAdapter } from "../platform/types";
 import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
+import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
+import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
@@ -193,6 +195,35 @@ const shellAppUpdateGateway: AppUpdateGateway = {
   },
 };
 
+const shellModelServiceGateway: ModelServiceGateway = {
+  async getSettings() {
+    return {
+      provider: "bailian",
+      providerLabel: "阿里百炼",
+      catalogVerifiedAt: "2026-07-23",
+      script: { purpose: "script", configured: false, modelId: "qwen3.7-max-2026-06-08" },
+      videoCreative: {
+        purpose: "video_creative",
+        configured: false,
+        modelId: "qwen3.7-max-2026-06-08",
+      },
+      sameCredential: false,
+    };
+  },
+  async configure() {
+    throw new Error("Model service configuration is unavailable");
+  },
+  async reuseScriptForVideo() {
+    throw new Error("Model service configuration is unavailable");
+  },
+  async clear() {
+    throw new Error("Model service configuration is unavailable");
+  },
+  async testConnection() {
+    throw new Error("Model service connection test is unavailable");
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
@@ -204,6 +235,7 @@ interface WorkbenchShellProps {
   readonly platformAdapter?: PlatformAdapter | undefined;
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
+  readonly modelServiceGateway?: ModelServiceGateway | undefined;
 }
 
 export function WorkbenchShell({
@@ -217,6 +249,7 @@ export function WorkbenchShell({
   platformAdapter = shellPlatformAdapter,
   platformSessionGateway = shellPlatformSessionGateway,
   appUpdateGateway = shellAppUpdateGateway,
+  modelServiceGateway = shellModelServiceGateway,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -297,7 +330,7 @@ export function WorkbenchShell({
                     : showingPlatform
                       ? "查看抖音登录健康，并在系统运营浏览器中完成人工处理。"
                     : showingDiagnostics
-                      ? "选择受信运营浏览器，并管理本地执行器、诊断与 App 更新。"
+                      ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
@@ -333,6 +366,7 @@ export function WorkbenchShell({
               </div>
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
+                <ModelServiceSettings gateway={modelServiceGateway} />
                 <BrowserSettings platform={platformAdapter} />
                 <Diagnostics platform={platformAdapter} />
               </Space>

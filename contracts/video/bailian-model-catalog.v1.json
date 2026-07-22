@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "provider": "bailian",
+  "provider_label": "阿里百炼",
+  "api_mode": "openai_compatible",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "verified_at": "2026-07-23",
+  "sources": [
+    "https://help.aliyun.com/zh/model-studio/deepseek-api",
+    "https://help.aliyun.com/zh/model-studio/glm",
+    "https://help.aliyun.com/zh/model-studio/text-generation-model",
+    "https://help.aliyun.com/zh/model-studio/vision/"
+  ],
+  "purposes": [
+    {
+      "id": "script",
+      "label": "文案模型服务",
+      "description": "用于文案、脚本和分镜，不会获得浏览器、发布平台或视频文件权限。",
+      "default_model_id": "qwen3.7-max-2026-06-08",
+      "allowed_model_ids": [
+        "deepseek-v4-pro",
+        "glm-5.2",
+        "qwen3.7-max-2026-06-08"
+      ]
+    },
+    {
+      "id": "video_creative",
+      "label": "视频创作模型服务",
+      "description": "用于生成和修正视频画面代码，可读取明确提交的预览图，但不会获得运营浏览器或发布平台权限。",
+      "default_model_id": "qwen3.7-max-2026-06-08",
+      "allowed_model_ids": ["qwen3.7-max-2026-06-08"]
+    }
+  ],
+  "models": [
+    {
+      "id": "deepseek-v4-pro",
+      "label": "DeepSeek V4 Pro（最新稳定版）",
+      "stability": "stable_alias",
+      "text": true,
+      "image_input": false,
+      "recommended_for": "复杂文案与推理"
+    },
+    {
+      "id": "glm-5.2",
+      "label": "GLM 5.2（最新稳定版）",
+      "stability": "stable_alias",
+      "text": true,
+      "image_input": false,
+      "recommended_for": "中文脚本与结构化输出"
+    },
+    {
+      "id": "qwen3.7-max-2026-06-08",
+      "label": "通义千问 3.7 Max（2026-06-08 多模态稳定版）",
+      "stability": "dated_snapshot",
+      "text": true,
+      "image_input": true,
+      "recommended_for": "脚本、分镜和视频预览修正"
+    }
+  ],
+  "connection_test": {
+    "path": "/chat/completions",
+    "timeout_seconds": 15,
+    "max_output_tokens": 1,
+    "sends_user_content": false
+  }
+}
