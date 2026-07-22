@@ -18,6 +18,16 @@ export interface BrowserDiagnosticSettingsSnapshot {
   readonly captureSuccessfulRuns: boolean;
 }
 
+export interface LocalStartupEnvironmentSnapshot {
+  readonly appData: "ready" | "unavailable";
+  readonly executor: "ready" | "configuration_required" | "unavailable";
+  readonly trustedBrowser: "ready" | "selection_required" | "unavailable";
+}
+
+export interface StartupEnvironmentGateway {
+  checkLocalEnvironment(): Promise<LocalStartupEnvironmentSnapshot>;
+}
+
 export interface DiagnosticExportReceipt {
   readonly fileName: string;
   readonly entryCount: number;

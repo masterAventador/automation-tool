@@ -38,6 +38,30 @@ impl Drop for TemporaryAppData {
 }
 
 #[test]
+fn startup_storage_probe_revalidates_the_existing_app_data_layout() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+
+    store
+        .revalidate_storage()
+        .expect("private AppData layout remains valid");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&app_data.path, fs::Permissions::from_mode(0o755))
+            .expect("broaden AppData permissions");
+        assert_eq!(
+            store
+                .revalidate_storage()
+                .expect_err("broadened AppData must fail")
+                .code(),
+            BrowserProfileErrorCode::UnsafeDirectory
+        );
+    }
+}
+
+#[test]
 fn creates_and_reopens_only_the_fixed_douyin_uuid_profile() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");

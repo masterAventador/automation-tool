@@ -68,13 +68,17 @@
       "id": "MVP-AC-01",
       "criterion": "全新安装后打开 App，不出现产品注册或登录页面",
       "disposition": "automated_complete",
-      "evidence": [{"path": "frontend/src/app/StartupGate.tsx", "anchor": "type StartupState = \"checking\" | \"ready\" | \"unavailable\" | \"revoked\""}]
+      "evidence": [{"path": "frontend/src/app/StartupGate.tsx", "anchor": "type StartupState = { status: \"checking\" } | StartupCheckResult"}]
     },
     {
       "id": "MVP-AC-02",
       "criterion": "App 自动完成 Control Plane 连通性、Local Executor、浏览器和数据目录诊断",
-      "disposition": "remediation_required",
-      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "createTransportStartupCheck(new TauriControlPlaneTransport())"}]
+      "disposition": "automated_complete",
+      "evidence": [
+        {"path": "frontend/src/main.tsx", "anchor": "const startupCheck = createDesktopStartupCheck("},
+        {"path": "frontend/src-tauri/src/lib.rs", "anchor": "fn check_local_startup_environment("},
+        {"path": "frontend/e2e-tauri/startup-environment.spec.ts", "anchor": "repairs the trusted browser selection and reaches the workbench"}
+      ]
     },
     {
       "id": "MVP-AC-03",
@@ -207,10 +211,16 @@
     },
     {
       "remediationTask": "H8-16E",
-      "state": "open",
+      "state": "resolved",
       "requirementRefs": ["MVP-AC-02"],
       "summary": "启动 Gate 只组合 Control Plane Transport，Executor、受信浏览器与 App 私有数据目录需用户进入设置后分别查看",
-      "evidence": [{"path": "frontend/src/main.tsx", "anchor": "const startupCheck = createTransportStartupCheck"}]
+      "evidence": [{"path": "docs/development-roadmap.md", "anchor": "当前生产组合仍只有 Control Plane transport"}],
+      "resolutionEvidence": [
+        {"path": "frontend/src/app/startup.ts", "anchor": "export function createDesktopStartupCheck("},
+        {"path": "frontend/src/platform/tauri/startup-environment-gateway.ts", "anchor": "check_local_startup_environment"},
+        {"path": "frontend/src-tauri/src/startup_environment.rs", "anchor": "pub struct StartupEnvironmentSnapshot"},
+        {"path": "frontend/e2e-tauri/startup-environment.spec.ts", "anchor": "check_local_startup_environment"}
+      ]
     },
     {
       "remediationTask": "H8-16F",

@@ -291,7 +291,7 @@ impl PlatformProfileStore {
         self.revalidate_layout()
     }
 
-    fn revalidate_layout(&self) -> Result<(), BrowserProfileError> {
+    pub(super) fn revalidate_layout(&self) -> Result<(), BrowserProfileError> {
         if directory_identity(&self.app_data.file)? != self.app_data.identity
             || directory_identity(&self.profile_root.file)? != self.profile_root.identity
             || directory_identity(&self.platform.file)? != self.platform.identity

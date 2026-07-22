@@ -201,7 +201,7 @@ function protocolMismatch(): PlatformAdapterError {
   return new PlatformAdapterError("protocol_mismatch", false);
 }
 
-function safeNativeError(value: unknown): PlatformAdapterError {
+export function safeNativeError(value: unknown): PlatformAdapterError {
   if (value instanceof PlatformAdapterError) {
     return value;
   }

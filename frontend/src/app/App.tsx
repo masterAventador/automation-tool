@@ -1,4 +1,4 @@
-import { App as AntDesignApp, ConfigProvider } from "antd";
+import { App as AntDesignApp, ConfigProvider, Space } from "antd";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 
 import { desktopQueryClient } from "./query-client";
@@ -14,6 +14,8 @@ import type { PlatformSessionGateway } from "../features/platform-sessions/platf
 import { StartupGate } from "./StartupGate";
 import { desktopShellStartupCheck, type StartupCheck } from "./startup";
 import { WorkbenchShell } from "./WorkbenchShell";
+import { BrowserSettings } from "../features/settings/BrowserSettings";
+import { Diagnostics } from "../features/diagnostics/Diagnostics";
 
 interface AppProps {
   startupCheck?: StartupCheck;
@@ -55,7 +57,17 @@ export function App({
         }}
       >
         <AntDesignApp>
-          <StartupGate startupCheck={startupCheck}>
+          <StartupGate
+            startupCheck={startupCheck}
+            repairTools={
+              platformAdapter === undefined ? undefined : (
+                <Space orientation="vertical" size="large" className="settings-stack">
+                  <BrowserSettings platform={platformAdapter} />
+                  <Diagnostics platform={platformAdapter} />
+                </Space>
+              )
+            }
+          >
             <WorkbenchShell
               taskSource={taskSource}
               gateway={workbenchGateway}

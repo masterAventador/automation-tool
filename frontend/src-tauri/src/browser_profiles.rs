@@ -151,6 +151,10 @@ impl BrowserProfileStore {
         Ok(profile)
     }
 
+    pub fn revalidate_storage(&self) -> Result<(), BrowserProfileError> {
+        self.platform.revalidate_layout()
+    }
+
     pub fn create_douyin_profile(&self) -> Result<BrowserProfile, BrowserProfileError> {
         for _ in 0..PROFILE_ID_GENERATION_ATTEMPTS {
             let profile_id = generate_profile_id()?;

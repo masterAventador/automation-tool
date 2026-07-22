@@ -39,8 +39,9 @@ test("the production network bridge exposes only fixed Control Plane operations"
   assert.doesNotMatch(bridgeSource, /pub\s+(?:async\s+)?fn\s+\w+\([^)]*(?:url|uri|path)\s*:/i);
   assert.match(transportSource, /invoke.*check_control_plane_health/s);
   assert.doesNotMatch(transportSource, /fetch\(|axios|baseUrl|https?:\/\//i);
-  assert.match(productionMain, /createTransportStartupCheck/);
+  assert.match(productionMain, /createDesktopStartupCheck/);
   assert.match(productionMain, /TauriControlPlaneTransport/);
+  assert.match(productionMain, /TauriStartupEnvironmentGateway/);
 });
 
 test("device credentials remain native while the bridge injects them", async () => {

@@ -448,6 +448,14 @@ impl ExecutorManager {
         Ok(status)
     }
 
+    pub fn validate_installed_package(&self) -> Result<(), ExecutorManagerError> {
+        self.core
+            .verifier
+            .verify_current(&self.core.package_root)
+            .map(|_| ())
+            .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::PackageRejected))
+    }
+
     pub fn execute_platform_command(
         &self,
         command: LocalPlatformCommand,

@@ -432,7 +432,7 @@ impl PlatformProfileStore {
         self.revalidate_layout()
     }
 
-    fn revalidate_layout(&self) -> Result<(), BrowserProfileError> {
+    pub(super) fn revalidate_layout(&self) -> Result<(), BrowserProfileError> {
         for directory in [&self.app_data, &self.profile_root, &self.platform] {
             if directory_identity(&directory.file)? != directory.identity
                 || final_path(&directory.file)? != normalized_path_key(&directory.path)

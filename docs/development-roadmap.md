@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16D Executor 真实动作编排已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16E 启动环境诊断闭环已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16D 已完成；下一项 H8-16E，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16E 已完成；下一项 H8-16F，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -350,7 +350,7 @@
 | H8-16B | Installation 单活任务 | 同一 Installation 只能有一个未终结 RPA Attempt，数据库并发单赢家且 UI 明确提示 | H8-16A | ✅ 已完成 |
 | H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ✅ 已完成 |
 | H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ✅ 已完成 |
-| H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ⬜ 未开始 |
+| H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ✅ 已完成 |
 | H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | ⬜ 未开始 |
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ⬜ 未开始 |
 | H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ⬜ 未开始 |
@@ -2669,13 +2669,26 @@
 - 规格、隔离与清理：`mvp-spec-review.v1.json` 的 H8-16D finding 已 resolved，但 MVP-AC-06/07 仍保留 `remediation_required`，因为本任务的无头隔离页不能冒充 H8-16F 可见浏览器整条 App 用户旅程或 A7-16/A7-17 真实账号最终状态。测试 Profile、SQLite、WebSocket server/thread、Playwright driver 和 Chrome 均在 finally/Runtime close 回收；结束后本项目无浏览器、监听端口或容器残留，没有读取默认 Profile、真实账号或系统钥匙串
 - 后续：进入 `H8-16E`，把 Control Plane、Executor、受信浏览器和 App 私有数据目录合并进启动 Gate，并把“动作信任配置缺失”作为同一安全诊断而不是运行到命令时才失败
 
+### H8-16E 启动环境诊断闭环
+
+- 状态：✅ 已完成
+- 日期：2026-07-21
+- 提交：本记录、启动聚合、Rust 本机探针、受限修复入口、隐藏 App 验收和规格 finding 收敛属于单一 `feat: 完成启动环境诊断闭环` 提交；完成后立即推送 `main`
+- RED：先从正式 `StartupCheck` 原入口新增四项组合用例，要求 Control Plane、Local Executor、受信浏览器和 App 私有数据目录全部被检查；同时固定 Installation 吊销、动作信任配置缺失、浏览器未选择/不可用、本机聚合失败和 AppData 不可用的脱敏诊断顺序。首跑 4/4 准确失败于 `createDesktopStartupCheck is not a function`，证明当前生产组合仍只有 Control Plane transport，没有用旧设置页或 Mock 冒充启动诊断
+- 聚合与边界：生产 `main.tsx` 只组合 `TauriControlPlaneTransport` 与新的 `TauriStartupEnvironmentGateway`，`Promise.allSettled` 并行取得云端和本机结果后按固定顺序输出封闭诊断。TypeScript 只接受 exact `{appData,executor,trustedBrowser}`；聚合 Command 异常保守映射三项本机不可用，Installation 吊销仍与普通网络失败分离，任何未知字段、状态或底层异常均 fail closed
+- Rust 只读探针：`StartupEnvironmentService` 每次复验 AppData 绝对目录、链接和 Unix `0700`；`BrowserProfileStore.revalidate_storage()` 复用既有 Unix identity/权限与 Windows reparse/DACL 防线；浏览器设置每次重新执行受信发现并区分未选择与无可用安装；`ExecutorPlatformService.startup_environment_state()` 先验证编译期动作公钥/本机硬限制，再只读复验 signed Executor package 和 Manager 状态，不启动进程。Tauri DTO 只有封闭枚举，不序列化路径、版本、摘要、PID、Token、正文或原始错误
+- 页面修复：`StartupGate` 在业务工作台挂载前并列展示全部安全原因，保留“重新检查”，只有存在本机问题且已注入正式 `PlatformAdapter` 时才允许展开既有浏览器设置和 Executor 诊断组件；Control Plane 单独不可用或 Installation 吊销不会出现无关本机按钮。AppData 首次初始化继续复用既有私有目录创建器，随后才建立只读启动服务，避免把正常首启误判为存储损坏
+- 原调用方验收：`backend/.venv/bin/python scripts/run_h8_16e_acceptance.py` 构建真实签名 PyInstaller Executor，安装到唯一 `com.aventador.automationtool.h816eacceptance` AppData，并在 OS 动态 loopback 端口启动真实 Control Plane。唯一 `visible=false` App 从正式启动页只看到浏览器未选择，真实点击“打开本地修复工具”→选择受信 Chrome/Edge→“保存浏览器选择”→“重新检查”，随后进入“RPA 运营工作台”；正式 `check_local_startup_environment` 返回三项 `ready`，`get_executor_status` 仍为 stopped，WebdriverIO 报告 `1 passing` 并以 0 正常退出，证明测试没有代写选择、绕过 App IPC、用断连异常冒充成功或启动 Executor/运营浏览器
+- 失败与门禁：4 项组合用例覆盖全 ready、吊销+多本机失败、网络+聚合失败和不可信本机 DTO；Gateway exact parser、19 项 App/启动组件测试、Rust AppData/包/动作配置/Profile 复验和 Node 生产边界契约均通过。隐藏真实 App 1/1 通过。Backend 全量 `2052 passed/5 explicit skipped in 230.53s`，13819 条语句/3176 个分支覆盖率 100%，354 个 Python 文件格式、Ruff、严格 Mypy 327 个源码文件、uv lock、OpenAPI 与 Executor Schema 全绿；Frontend 120 项 Node 契约、223 项 Vitest、5 项全局无头 Playwright、冻结安装、peer dependency、Lint、严格 TypeScript、API 漂移和 production boundary 全绿；Rust 默认 `162 passed/4 ignored`、`desktop-e2e` `158 passed/4 ignored`、`control-plane-e2e` `163 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿。`desktop-e2e` 首轮既有紧停恢复用例一次时序失败，精确用例及完整套件原断言重跑通过，没有降低断言或修改无关生产代码
+- 资源与规格：专用 Tauri 配置全局固定 `visible=false`，WebDriver 使用动态已检查端口；runner 成功/失败都回收 App、签名 Executor、驱动、Control Plane、隔离 AppData 和端口并恢复 production Vite 资产。没有访问真实账号、默认浏览器 Profile、系统钥匙串或其他项目资源；`MVP-AC-02` 已改为 `automated_complete`，H8-16E finding 已 resolved，但不冒充 H8-16F 的整条可见运营旅程或 A7-16/A7-17 真实副作用证据
+- 后续：进入 `H8-16F`，校准可选过滤/黑名单、截图直览、结果导出和存储控制的当前/后置范围，并从隐藏真实 App 跑通完整 MVP 用户旅程
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-16E`：把 Control Plane、Executor、受信浏览器和 App 私有数据目录合并进启动环境诊断；
-2. `H8-16F`：校准可选过滤/黑名单、截图直览、结果导出和存储控制范围，并跑通隐藏 App 整条用户旅程；
-3. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
-4. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-5. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；
-6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `H8-16F`：校准可选过滤/黑名单、截图直览、结果导出和存储控制范围，并跑通隐藏 App 整条用户旅程；
+2. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
+3. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
+4. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；
+5. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

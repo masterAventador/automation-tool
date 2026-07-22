@@ -12,6 +12,7 @@ pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
 pub mod secure_store;
+pub mod startup_environment;
 
 use device_credentials::initialize_production_device_credential_vault;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -100,6 +101,37 @@ fn select_browser(
     settings
         .select_browser(browser)
         .map_err(map_browser_settings_error)
+}
+
+#[tauri::command]
+fn check_local_startup_environment(
+    startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
+    profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
+    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> startup_environment::StartupEnvironmentSnapshot {
+    let app_data = if startup.app_data_state() == startup_environment::AppDataStartupState::Ready
+        && profiles.revalidate_storage().is_ok()
+    {
+        startup_environment::AppDataStartupState::Ready
+    } else {
+        startup_environment::AppDataStartupState::Unavailable
+    };
+    let trusted_browser = match settings.snapshot() {
+        Ok(snapshot) if snapshot.available_browsers().is_empty() => {
+            startup_environment::TrustedBrowserStartupState::Unavailable
+        }
+        Ok(snapshot) if snapshot.selected_browser().is_none() => {
+            startup_environment::TrustedBrowserStartupState::SelectionRequired
+        }
+        Ok(_) => startup_environment::TrustedBrowserStartupState::Ready,
+        Err(_) => startup_environment::TrustedBrowserStartupState::Unavailable,
+    };
+    startup_environment::StartupEnvironmentSnapshot::new(
+        app_data,
+        platform.startup_environment_state(),
+        trusted_browser,
+    )
 }
 
 fn map_executor_platform_error(
@@ -2520,6 +2552,9 @@ pub fn run() {
         app.manage(browser_settings::BrowserSettingsService::initialize(
             &app_data_directory,
         )?);
+        app.manage(startup_environment::StartupEnvironmentService::initialize(
+            &app_data_directory,
+        )?);
         app.manage(browser_profiles::BrowserProfileStore::initialize(
             &app_data_directory,
         )?);
@@ -2558,6 +2593,7 @@ pub fn run() {
     #[cfg(all(not(feature = "control-plane-e2e"), feature = "desktop-e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
+        check_local_startup_environment,
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
@@ -2571,6 +2607,7 @@ pub fn run() {
     #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
+        check_local_startup_environment,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,
@@ -2604,6 +2641,7 @@ pub fn run() {
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
+        check_local_startup_environment,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,

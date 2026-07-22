@@ -21,7 +21,9 @@ use crate::browser_profiles::{
 };
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::control_plane::ExecutorConnectionMaterial;
-use crate::executor_bootstrap::{LocalPlatformCommand, LocalPlatformCommandResult};
+use crate::executor_bootstrap::{
+    ExecutorActionRuntimeInput, LocalPlatformCommand, LocalPlatformCommandResult,
+};
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::executor_manager::ExecutorLaunchConfiguration;
 use crate::executor_manager::{
@@ -30,6 +32,7 @@ use crate::executor_manager::{
 };
 use crate::executor_package::ExecutorPackageVerifier;
 use crate::secure_store::{AppDataSecretStore, SecretStore};
+use crate::startup_environment::ExecutorStartupState;
 use serde::{Deserialize, Serialize};
 
 const EXECUTOR_DIRECTORY: &str = "local-executor";
@@ -326,6 +329,19 @@ impl ExecutorPlatformService {
 
     pub fn status(&self) -> Result<ExecutorManagerStatus, ExecutorPlatformError> {
         self.manager.status().map_err(map_manager_error)
+    }
+
+    pub fn startup_environment_state(&self) -> ExecutorStartupState {
+        match ExecutorActionRuntimeInput::from_compile_time_configuration() {
+            Ok(Some(_)) => {}
+            Ok(None) => return ExecutorStartupState::ConfigurationRequired,
+            Err(_) => return ExecutorStartupState::Unavailable,
+        }
+        if self.manager.status().is_err() || self.manager.validate_installed_package().is_err() {
+            ExecutorStartupState::Unavailable
+        } else {
+            ExecutorStartupState::Ready
+        }
     }
 
     pub fn diagnostics(&self) -> Result<Vec<String>, ExecutorPlatformError> {
@@ -729,6 +745,7 @@ const fn storage_unavailable() -> ExecutorPlatformError {
 #[cfg(all(test, any(not(feature = "desktop-e2e"), feature = "control-plane-e2e")))]
 mod tests {
     use super::{ExecutorPlatformErrorCode, ExecutorPlatformService};
+    use crate::startup_environment::ExecutorStartupState;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -836,5 +853,20 @@ mod tests {
             .err()
             .expect("reject malformed settings");
         assert_eq!(error.code(), ExecutorPlatformErrorCode::StorageUnavailable);
+    }
+
+    #[test]
+    fn startup_diagnostic_reports_missing_action_trust_without_starting_executor() {
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+
+        assert_eq!(
+            service.startup_environment_state(),
+            ExecutorStartupState::ConfigurationRequired
+        );
+        assert_eq!(
+            service.status().expect("manager status").state(),
+            crate::executor_manager::ExecutorManagerState::Stopped
+        );
     }
 }

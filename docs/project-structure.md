@@ -67,6 +67,7 @@ automation-tool/
 │   ├── run_t3_19_acceptance.py   # 隐藏 Tauri 创建/控制/成功→整页刷新恢复验收
 │   ├── run_t3_20_acceptance.py   # 隐藏 Tauri→Control Plane 同库重启→Executor 恢复验收
 │   ├── run_h8_01_acceptance.py   # 隐藏 Tauri→真实 Executor 安全暂停/恢复验收
+│   ├── run_h8_16e_acceptance.py  # 隐藏 Tauri 启动诊断→浏览器选择→ready 验收
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
@@ -115,6 +116,7 @@ frontend/
 │   ├── platform/
 │   │   ├── tauri/
 │   │   │   ├── control-plane-transport.ts # 正式启动检查 Tauri invoke 适配器
+│   │   │   ├── startup-environment-gateway.ts # AppData/Executor/浏览器封闭启动快照适配器
 │   │   │   ├── task-creation-gateway.ts   # 固定抖音任务定义创建 Command
 │   │   │   ├── task-projection-source.ts  # 固定 Task 快照/列表/Channel source
 │   │   │   ├── task-run-control-gateway.ts # 固定暂停/恢复/取消/紧停 Command
@@ -153,6 +155,7 @@ frontend/
 │   │   ├── executor_package.rs    # signed onedir 验签、完整目录复算与防降级
 │   │   ├── executor_platform.rs   # app_data 固定路径、稳定 Executor ID 与 Manager 组合根
 │   │   ├── executor_protocol.rs   # Executor v1 Rust 正式解析与安全失败边界
+│   │   ├── startup_environment.rs # 无路径 AppData/Executor/浏览器启动诊断 DTO 与复验
 │   │   ├── secure_store.rs        # app_data_dir 私有文件与原子替换
 │   │   ├── lib.rs
 │   │   └── main.rs

@@ -72,7 +72,9 @@ Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
 
 当前 P9 本地 MVP 没有认证路由守卫，启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页。U9-04 将为客户 Demo 增加独立登录/恢复路由和业务路由守卫，未登录时不挂载工作台。
 
-App 启动边界已实现 ready、checking、unavailable、revoked 四态和安全重试；ready 后进入正式工作台页面。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 已组合正式 `TauriControlPlaneTransport`、`TauriTaskProjectionSource` 与 `TauriWorkbenchGateway`。真实 WebView 只 invoke 固定 Rust Command，Rust 先检查 Control Plane Health；若 App 私有目录已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针。未注册 App 仍直接进入工作台；精确 401 才进入“当前安装实例已失效”，网络/服务/协议故障仍进入普通不可用诊断。禁止让 WebView 直接请求 Control Plane。
+App 启动边界已实现 checking、ready、blocked 及兼容 unavailable/revoked 状态和安全重试；ready 后才挂载正式工作台。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 组合 `TauriControlPlaneTransport` 与 `TauriStartupEnvironmentGateway`，并行检查 Control Plane、Local Executor、受信浏览器和 App 私有数据目录。Control Plane Health 若发现已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针；精确 401 单独映射吊销，网络/服务/协议故障映射普通不可用。
+
+本机诊断只经固定 `check_local_startup_environment` Command 返回 exact `{appData,executor,trustedBrowser}` 封闭枚举。Rust 复用既有 AppData 私有权限、BrowserProfile identity/DACL、浏览器受信发现、编译期动作信任配置和 signed Executor verifier；它不会启动 Executor 或浏览器，也不会序列化路径、版本、摘要、PID、凭据、页面内容或底层异常。本机问题可在 Gate 内展开既有浏览器设置与 Executor 诊断工具并重新检查；只有 Control Plane 不可用或 Installation 吊销时不展示无关本机修复入口。真实 WebView 只能 invoke 固定 Rust Command，禁止直接请求 Control Plane。
 
 U9-04/U9-05 将在客户 Demo Profile 中把启动组合根扩展为“产品账号会话 + 账号所属 Installation”双门禁：未登录展示登录/恢复状态，登录成功后 Rust 自动完成账号授权下的设备证明和归属绑定，不生成配对码、不轮询设备审批，也不要求后台逐设备批准。账号或设备任一失效都退出业务工作台并显示各自可操作的固定诊断；该段是后续规划，当前实现仍以上一段 P9 四态为准。
 

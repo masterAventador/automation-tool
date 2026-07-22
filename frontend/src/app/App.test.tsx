@@ -71,6 +71,54 @@ describe("desktop startup", () => {
     expect(document.body).not.toHaveTextContent(/账号登录|注册账号|私钥|凭据/);
   });
 
+  it("shows every local startup failure and opens only the existing safe repair tools", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({
+        status: "blocked" as const,
+        diagnostics: [
+          "executor_configuration_required" as const,
+          "trusted_browser_selection_required" as const,
+          "app_data_unavailable" as const,
+        ],
+      }),
+    };
+    const platformAdapter: PlatformAdapter = {
+      getBrowserSettings: vi.fn().mockResolvedValue({
+        availableBrowsers: ["google_chrome"],
+        selectedBrowser: null,
+      }),
+      selectBrowser: vi.fn(),
+      getExecutorStatus: vi.fn().mockResolvedValue({
+        state: "stopped",
+        version: null,
+        buildId: null,
+        restartCount: 0,
+      }),
+      restartExecutor: vi.fn(),
+      getExecutorDiagnostics: vi.fn().mockResolvedValue([]),
+      exportDiagnostics: vi.fn(),
+      emergencyStopExecutor: vi.fn(),
+      getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
+      setCaptureSuccessfulDiagnostics: vi.fn(),
+    };
+    const user = userEvent.setup();
+
+    render(<App startupCheck={startupCheck} platformAdapter={platformAdapter} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "桌面运行环境需要处理" }),
+    ).toBeVisible();
+    expect(screen.getByText("本地执行器动作配置缺失")).toBeVisible();
+    expect(screen.getByText("尚未选择受信运营浏览器")).toBeVisible();
+    expect(screen.getByText("App 私有数据目录不可用")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/\/Users\/|token=|私钥内容/iu);
+
+    await user.click(screen.getByRole("button", { name: "打开本地修复工具" }));
+
+    expect(await screen.findByText("尚未选择运营浏览器")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "本地执行器已停止" })).toBeVisible();
+  });
+
   it("opens settings and diagnostics through the injected PlatformAdapter", async () => {
     const startupCheck: StartupCheck = {
       check: vi.fn().mockResolvedValue({ status: "ready" as const }),

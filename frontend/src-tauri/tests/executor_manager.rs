@@ -405,6 +405,29 @@ fn launch(state_directory: PathBuf) -> ExecutorLaunchConfiguration {
 }
 
 #[test]
+fn startup_package_diagnostic_verifies_without_starting_a_process() {
+    let package = TemporaryPackage::new(HEALTHY_FIXTURE);
+    let manager = manager(&package);
+
+    manager
+        .validate_installed_package()
+        .expect("valid installed package");
+    assert_eq!(
+        manager.status().expect("stopped status").state(),
+        ExecutorManagerState::Stopped
+    );
+
+    fs::write(package.root.join("automation-tool-executor"), b"tampered").expect("tamper package");
+    assert_eq!(
+        manager
+            .validate_installed_package()
+            .expect_err("tampered package must fail")
+            .code(),
+        ExecutorManagerErrorCode::PackageRejected
+    );
+}
+
+#[test]
 fn verified_process_starts_reports_status_and_stops_with_authenticated_events() {
     let package = TemporaryPackage::new(HEALTHY_FIXTURE);
     let manager = manager(&package);
