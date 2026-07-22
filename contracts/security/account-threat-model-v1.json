@@ -1,0 +1,203 @@
+{
+  "version": "account.threat-model.v1",
+  "release": "customer-demo-v1",
+  "provisioning": {
+    "mode": "authenticated_operations_only",
+    "entrypoint": "separate_operations_capability",
+    "publicSignup": false,
+    "userSuppliedRole": false
+  },
+  "account": {
+    "lifecycle": ["active", "locked", "disabled"],
+    "loginIdentifier": {
+      "kind": "login_name",
+      "canonicalPattern": "^[a-z][a-z0-9._-]{2,63}$",
+      "caseSensitive": false,
+      "mutable": false
+    },
+    "credentials": {
+      "kind": "password",
+      "minimumCharacters": 12,
+      "maximumCharacters": 128,
+      "passwordHash": "argon2id",
+      "pepperRequired": true,
+      "credentialVersioned": true,
+      "plaintextPersistence": false
+    },
+    "recovery": {
+      "mode": "operations_issued_one_time_token",
+      "publicRequestEndpoint": false,
+      "tokenEntropyBits": 256,
+      "maximumLifetimeSeconds": 900,
+      "serverStorage": "digest_only",
+      "singleUse": true,
+      "successfulReset": "increment_credential_version_and_revoke_all_sessions"
+    }
+  },
+  "sessions": {
+    "tokenKinds": ["access", "refresh"],
+    "tokenFormat": "opaque_256_bit_secret",
+    "transport": "authorization_header_only",
+    "serverStorage": "digest_only",
+    "accessLifetimeSeconds": 600,
+    "refreshAbsoluteLifetimeSeconds": 2592000,
+    "refreshRotation": "single_use_family",
+    "refreshReuseResponse": "revoke_family",
+    "accountStateCheckedOnEveryUse": true,
+    "credentialVersionBound": true,
+    "reactSecretExposure": false,
+    "webCookieAuthentication": false
+  },
+  "deviceOwnership": {
+    "userToInstallation": "one_to_many",
+    "installationToUser": "exactly_one_immutable_owner",
+    "binding": "account_session_plus_device_key_proof",
+    "crossAccountRebinding": "rejected",
+    "anonymousDeviceRequest": false,
+    "pairingCode": false,
+    "approvalPolling": false,
+    "platformProfileRemainsLocal": true
+  },
+  "authorization": {
+    "businessRequestRequires": [
+      "active_account_session",
+      "active_owned_installation",
+      "required_capability"
+    ],
+    "accountIdentityFromRequestBody": false,
+    "installationIdentityFromRequestBody": false,
+    "frontendVisibilityIsAuthorization": false
+  },
+  "revocation": {
+    "logout": ["revoke_current_refresh_family", "clear_native_product_secrets"],
+    "passwordChange": ["increment_credential_version", "revoke_all_account_sessions"],
+    "passwordReset": ["increment_credential_version", "revoke_all_account_sessions"],
+    "accountDisable": [
+      "reject_login_and_refresh",
+      "revoke_all_account_sessions",
+      "reject_device_session_exchange"
+    ],
+    "deviceRevoke": [
+      "revoke_device_credentials_and_sessions",
+      "preserve_other_owned_devices"
+    ],
+    "platformProfileDeletionOnProductLogout": false
+  },
+  "audit": {
+    "events": [
+      "account.created",
+      "account.locked",
+      "account.unlocked",
+      "account.disabled",
+      "account.enabled",
+      "login.succeeded",
+      "login.failed",
+      "credential.changed",
+      "recovery.issued",
+      "recovery.consumed",
+      "session.refreshed",
+      "session.logged_out",
+      "session.reuse_detected",
+      "session.all_revoked",
+      "device.bound",
+      "device.revoked"
+    ],
+    "requiredFields": [
+      "event_id",
+      "event_type",
+      "occurred_at",
+      "actor_kind",
+      "actor_id",
+      "subject_user_id",
+      "outcome",
+      "reason_code",
+      "request_id"
+    ],
+    "sourceMetadata": "keyed_fingerprint_only",
+    "appendOnly": true,
+    "forbiddenFields": [
+      "password",
+      "token",
+      "credential",
+      "raw_login_identifier",
+      "raw_ip_address",
+      "raw_user_agent",
+      "platform_cookie"
+    ]
+  },
+  "invariants": [
+    "no_public_or_anonymous_account_creation",
+    "login_and_recovery_errors_do_not_enumerate_accounts",
+    "passwords_and_tokens_never_enter_logs_or_plaintext_storage",
+    "all_product_tokens_are_opaque_and_digest_only_at_rest",
+    "password_change_requires_current_password_or_one_time_recovery_authority",
+    "password_change_reset_and_disable_revoke_existing_account_sessions",
+    "business_authorization_is_account_and_owned_installation_conjunctive",
+    "an_installation_owner_is_immutable_after_first_binding",
+    "product_logout_does_not_read_or_delete_platform_cookies_or_profiles",
+    "react_and_tauri_ipc_never_receive_product_session_secrets",
+    "disabled_accounts_cannot_login_refresh_exchange_device_sessions_or_use_business_apis",
+    "operations_capability_is_separate_from_end_user_authentication",
+    "organization_tenant_rbac_subscription_and_billing_are_absent"
+  ],
+  "threats": [
+    {
+      "id": "account_enumeration",
+      "controls": ["uniform_login_recovery_errors", "bounded_response_shape_and_timing"]
+    },
+    {
+      "id": "credential_stuffing",
+      "controls": ["per_identifier_and_source_rate_limits", "automatic_temporary_lock"]
+    },
+    {
+      "id": "brute_force",
+      "controls": ["minimum_password_length", "bounded_failed_attempt_window"]
+    },
+    {
+      "id": "password_database_theft",
+      "controls": ["argon2id_unique_salt", "deployment_pepper_outside_database"]
+    },
+    {
+      "id": "recovery_token_theft_or_replay",
+      "controls": ["operations_verified_issuance", "short_lived_single_use_digest"]
+    },
+    {
+      "id": "access_token_theft",
+      "controls": ["ten_minute_lifetime", "server_authoritative_revocation_check"]
+    },
+    {
+      "id": "refresh_token_replay",
+      "controls": ["single_use_rotation", "family_reuse_detection_and_revocation"]
+    },
+    {
+      "id": "cross_account_device_binding",
+      "controls": ["account_session_plus_device_key_proof", "immutable_installation_owner"]
+    },
+    {
+      "id": "disabled_account_continued_access",
+      "controls": ["account_state_checked_on_every_use", "disable_revokes_all_sessions"]
+    },
+    {
+      "id": "secret_leakage_to_webview_or_logs",
+      "controls": ["rust_native_secret_storage", "fixed_redacted_errors_and_audit_schema"]
+    },
+    {
+      "id": "platform_session_confusion",
+      "controls": ["product_and_platform_sessions_are_separate", "product_logout_preserves_local_profile"]
+    },
+    {
+      "id": "operations_endpoint_abuse",
+      "controls": ["separate_operations_capability", "append_only_operations_audit"]
+    }
+  ],
+  "excluded": [
+    "anonymous_signup",
+    "organization",
+    "tenant",
+    "rbac",
+    "subscription",
+    "billing",
+    "social_login",
+    "account_deletion"
+  ]
+}

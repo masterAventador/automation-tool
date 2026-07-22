@@ -467,6 +467,14 @@ U9-05 在有效账号 Session 下复用现有两步设备密钥证明：Control 
 
 客户 Demo 不创建匿名设备申请端点，不生成配对码或 poll secret，也不提供后台逐设备审批队列。Demo 账号由认证运维入口创建/恢复，用户登录后客户端自动完成设备绑定；既有 bootstrap 仅保留在受控测试和明确迁移边界，不能用于客户业务 API。
 
+U9-01 的权威机器契约为 `contracts/security/account-threat-model-v1.json`。首版账号只使用不可变、大小写不敏感的 canonical `login_name`，不为 Demo 强制收集邮箱或手机号；账号只能由与终端用户认证分离的运维 capability 创建，状态封闭为 `active/locked/disabled`，不提供匿名注册、账号硬删除或用户自报角色。密码使用 Argon2id、每条唯一 salt 和数据库外 Pepper，明文密码不持久化；用户正常修改必须证明当前密码，遗忘恢复只能由运维完成产品外身份核验后签发 15 分钟、256-bit、digest-only、单次消费的 reset token，不开放可枚举账号的公开“找回申请”端点。
+
+产品 Session 固定为 opaque access/refresh 两类：access 最长 10 分钟，refresh 绝对最长 30 天且每次旋转单次使用；服务端只保存摘要并在每次使用时复验账号状态、凭据版本和 Session 状态，refresh 重放吊销整个 family。密码修改、密码重置和账号停用递增凭据版本并吊销全部产品 Session；账号停用还阻止登录、refresh、设备 Session 换票与业务访问。App 只经 Authorization header 发送产品能力，不使用浏览器 Cookie；Rust 私有存储持有 secret，React/Tauri IPC 只接收安全账号投影。
+
+一个账号可拥有多个 Installation，但一个 Installation 首次绑定后只能有一个不可变 owner。绑定必须同时具备有效账号 Session 和既有设备私钥持有证明；跨账号重绑、匿名申请、配对码和审批轮询全部拒绝。业务请求的授权是 `active account session + active owned installation + required capability` 三者合取，客户端请求体中的 user/installation 声明和页面按钮可见性都不是授权。产品注销、账号停用或设备吊销不读取、上传或静默删除本机平台 Cookie/Profile；产品身份与抖音等平台 Session 始终是两套独立生命周期。
+
+账号、登录、恢复、Session 与设备关键变化写入 append-only 最小审计；记录事件/行为方/目标 User/结果/reason/request ID 和经独立 key 处理的来源指纹，不保存密码、token、credential、原始登录名、IP、User-Agent 或平台 Cookie。组织、租户、RBAC、套餐、计费、社交登录和账号删除均排除在 customer-demo-v1 之外，后续不得在 U9-02/U9-03 中悄然扩张。
+
 ### 9.3 请求授权
 
 - P9 本地 App 业务请求继续作用域固定到 installation；

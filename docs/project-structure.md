@@ -462,6 +462,8 @@ H8-16 的 `contracts/quality/mvp-spec-review.v1.json` 把产品规划 14 条 MVP
 
 P9-09 的 `contracts/quality/mvp-final-acceptance.v1.json` 不改写上述规格复审，而是在 Wave 9 末尾重新按“最终事实”审计同一 14 条原文。报告只允许 `verified_automated/pending_real_platform/pending_device_package` 三种逐项结果，并以 `blockingTasks` 绑定唯一 roadmap；当前整体固定为 `pending_external_acceptance`。`frontend/tests/mvp-final-acceptance.test.mjs` 校验 14 条顺序、原文、7/4/3 汇总、证据锚点和 blocker 状态，且把“全新安装后无产品登录 UI”重新归入 P9-06/P9-07 设备包事实；这样代码里确实没有登录页也不能让 fresh install 验收提前变绿。客户 Demo 的 U9-01～U9-06 作为独立前置保留，不能混入本地 MVP 结果。
 
+U9-01 的 `contracts/security/account-threat-model-v1.json` 是客户 Demo 账号边界的机器可读权威源：它冻结运维创建、账号状态、登录标识、密码/恢复、opaque Session、Installation 不可变归属、合取授权、吊销和最小审计，并逐项登记账号枚举、凭据填充、暴力破解、数据库泄露、恢复/refresh 重放、跨账号绑定及秘密泄露等 12 类威胁。`frontend/tests/account-threat-model.test.mjs` 同时锁定契约、产品规划、后端架构和唯一 roadmap，后续 U9-02～U9-06 只能实现这些不变量，不能暗中引入匿名注册、配对审批、浏览器 Cookie、组织/租户/RBAC 或第二套设备归属。
+
 H8-16A 在既有 `features/task-runs/` 内新增 `task-discovery.ts` 严格领域边界，在 `platform/tauri/task-discovery-gateway.ts` 增加唯一固定 Command Adapter，并由 `main.tsx → App → WorkbenchShell → TaskRunDetails` 注入；业务组件不导入 Tauri、不接触 HTTP、Session、Candidate 私密字段或浏览器路径。D6-10 的 feature-gated 验收 Command 现在只注册 Installation 并创建 draft Task，`e2e-tauri/task-discovery.spec.ts` 必须从隐藏 App 的正式页面点击“开始目标发现”，再由 `scripts/run_d6_10_acceptance.py` 的真实 PostgreSQL/Uvicorn/LocalExecutorProcess 核对收敛事实；正式包不包含测试准备命令。
 
 H8-16B 只扩展既有发现纵向切片：Alembic `20260721_0025` 与 `schema.py` 拥有 Installation 级非终态 Attempt 部分唯一索引，`task_discovery_repository.py` 在既有 Installation 行锁内执行同键重放与竞争检查，API/Rust/TypeScript 沿固定发现调用链传递封闭忙碌码。D6-10 验收准备 Command 只多创建一个竞争草稿 Task；独立同步 Command 只在隐藏 App 已观察忙碌提示后写测试信号，不启动发现、Executor 或平台动作，且受 `control-plane-e2e` feature 隔离。
