@@ -66,6 +66,8 @@ automation-tool/
 │   ├── development/               # 每个任务一个 `<任务ID>.md` 独立 RED/GREEN 与验收证据文件
 │   └── adr/
 │       └── 0001-embedded-chromium-runtime.md # 内置统一 Chromium 运行时决策
+├── deploy/
+│   └── postgresql/                # C10-03 固定角色、最小权限与安全运维顺序
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
 │   ├── run_i2_09_acceptance.py   # 隐藏 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
 │   ├── run_i2_13_acceptance.py   # 后台 Uvicorn→WebSocket→PostgreSQL 隔离验收
@@ -103,7 +105,9 @@ automation-tool/
 │   ├── run_b5_12_acceptance.py   # 无头浏览器→Executor WebSocket→平台投影验收
 │   ├── run_b5_13_acceptance.py   # 隐藏 App→signed Executor→无头浏览器→平台页面验收
 │   ├── run_b5_15_acceptance.py   # 四轮隐藏 App/Executor/浏览器复用与接管验收
-│   └── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
+│   ├── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
+│   ├── run_c10_02_acceptance.py  # 锁定非 root Control Plane 真实容器验收
+│   └── run_c10_03_acceptance.py  # 私网迁移、只读备份与隔离恢复验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── vendor/                         # 只读 Git submodule；禁止直接修改
@@ -393,6 +397,7 @@ backend/
 ├── uv.lock
 ├── automation-tool-executor.spec  # Local Executor 的 PyInstaller 配置
 ├── Dockerfile                     # Control Plane 部署镜像
+├── .dockerignore                  # 排除测试、虚拟环境、缓存与 Executor 构建资产
 └── README.md
 ```
 
