@@ -6,9 +6,11 @@ from .action_execution_orchestration_repository import (
 from .action_risk_authorization_repository import (
     SqlAlchemyActionRiskAuthorizationRepository,
 )
+from .customer_account_repository import SqlAlchemyCustomerAccountRepository
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
+    account_audit_events,
     action_failure_circuits,
     action_risk_authorizations,
     action_risk_results,
@@ -28,6 +30,8 @@ from .schema import (
     task_target_exclusions,
     task_targets,
     tasks,
+    user_password_credentials,
+    users,
 )
 from .session import Database
 from .task_command_repository import SqlAlchemyTaskCommandRepository
@@ -41,6 +45,7 @@ __all__ = [
     "Database",
     "SqlAlchemyActionExecutionOrchestrationRepository",
     "SqlAlchemyActionRiskAuthorizationRepository",
+    "SqlAlchemyCustomerAccountRepository",
     "SqlAlchemyInstallationRevocationRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
@@ -49,6 +54,7 @@ __all__ = [
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",
     "SqlAlchemyTaskTargetResultRepository",
+    "account_audit_events",
     "action_failure_circuits",
     "action_risk_authorizations",
     "action_risk_results",
@@ -68,4 +74,6 @@ __all__ = [
     "task_target_exclusions",
     "task_targets",
     "tasks",
+    "user_password_credentials",
+    "users",
 ]

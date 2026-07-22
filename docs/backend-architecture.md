@@ -475,6 +475,10 @@ U9-01 的权威机器契约为 `contracts/security/account-threat-model-v1.json`
 
 账号、登录、恢复、Session 与设备关键变化写入 append-only 最小审计；记录事件/行为方/目标 User/结果/reason/request ID 和经独立 key 处理的来源指纹，不保存密码、token、credential、原始登录名、IP、User-Agent 或平台 Cookie。组织、租户、RBAC、套餐、计费、社交登录和账号删除均排除在 customer-demo-v1 之外，后续不得在 U9-02/U9-03 中悄然扩张。
 
+U9-02 由 `control_plane.domain.accounts`、`application.customer_accounts`、`infrastructure/security/passwords.py` 和唯一 `SqlAlchemyCustomerAccountRepository` 实现数据边界。`UserId` 继续使用不可与其他资源混用的 canonical UUIDv4；`LoginName` 只接受 3～64 位 ASCII 字母开头及字母/数字/点/下划线/连字符，进入领域即转为小写，数据库再以同一正则和唯一约束拒绝旁路。密码在进入仓储前先以数据库外 32 字节版本化 Pepper 做域隔离 HMAC-SHA-256 预哈希，再固定使用 RFC 9106 Argon2id 第二推荐参数 `m=65536 KiB/t=3/p=4`、16 字节随机 salt 与 32 字节 tag；PostgreSQL 只保存 PHC 和 Pepper 版本，不保存明文、Pepper 或可逆材料。
+
+Alembic `20260722_0028` 新增 `users`、`user_password_credentials`、`account_audit_events` 三张最小表。User 只含 login/status/credential version/revision/状态时间，密码表只含当前 hash/version，审计只含封闭事件、actor/subject、结果、reason、request ID 与可选 32 字节 keyed 来源指纹；三表没有邮箱、手机号、角色、组织、租户、任意 metadata、原始 IP 或 User-Agent。账号创建在单事务写 User/密码/审计并由 canonical unique 约束处理大小写并发；状态变化先 `FOR UPDATE` 锁 User、复验 expected revision，再原子写状态和审计，停用额外递增 credential version。审计 trigger 在数据库层拒绝 UPDATE、DELETE 和 TRUNCATE；失败映射不反射 SQL/登录名/密码。U9-02 不开放 HTTP 或 Session，不把未认证 repository 变成客户入口。
+
 ### 9.3 请求授权
 
 - P9 本地 App 业务请求继续作用域固定到 installation；

@@ -14,6 +14,7 @@ from automation_tool.control_plane.domain import (
     ResourceId,
     TargetId,
     TaskId,
+    UserId,
 )
 
 CANONICAL_UUID = "123e4567-e89b-42d3-a456-426614174000"
@@ -26,6 +27,7 @@ RESOURCE_ID_TYPES: tuple[type[ResourceId], ...] = (
     ExecutionAttemptId,
     ActionId,
     ArtifactId,
+    UserId,
 )
 RESOURCE_NAMES: dict[type[ResourceId], str] = {
     InstallationId: "installation",
@@ -35,6 +37,7 @@ RESOURCE_NAMES: dict[type[ResourceId], str] = {
     ExecutionAttemptId: "execution attempt",
     ActionId: "action",
     ArtifactId: "artifact",
+    UserId: "user",
 }
 
 

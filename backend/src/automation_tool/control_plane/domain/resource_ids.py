@@ -70,6 +70,14 @@ class InstallationId(ResourceId):
 
 
 @final
+class UserId(ResourceId):
+    """A stable customer account identifier."""
+
+    __slots__ = ()
+    _resource = "user"
+
+
+@final
 class ExecutorId(ResourceId):
     """A stable Local Executor identifier."""
 
@@ -136,4 +144,5 @@ __all__ = [
     "ResourceId",
     "TargetId",
     "TaskId",
+    "UserId",
 ]

@@ -34,6 +34,9 @@ from automation_tool.control_plane.domain import (
     MAX_TASK_INTERVAL_SECONDS,
     MAX_TASK_TARGET_LIMIT,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
+    AccountAuditActorKind,
+    AccountAuditEventType,
+    AccountStatus,
     ActionOutcome,
     ActionRiskPlatform,
     ActionStatus,
@@ -60,6 +63,158 @@ from automation_tool.protocol import (
 )
 
 metadata = MetaData()
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("login_name", String(length=64), nullable=False),
+    Column(
+        "status",
+        String(length=16),
+        nullable=False,
+        server_default=text(f"'{AccountStatus.ACTIVE.value}'"),
+    ),
+    Column("credential_version", BigInteger(), nullable=False, server_default=text("1")),
+    Column("revision", BigInteger(), nullable=False, server_default=text("1")),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column("locked_at", DateTime(timezone=True), nullable=True),
+    Column("disabled_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_users_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "login_name ~ '^[a-z][a-z0-9._-]{2,63}$'",
+        name="ck_users_login_name",
+    ),
+    CheckConstraint(
+        "status in (" + ", ".join(f"'{status.value}'" for status in AccountStatus) + ")",
+        name="ck_users_status",
+    ),
+    CheckConstraint(
+        "credential_version > 0 and revision > 0",
+        name="ck_users_versions_positive",
+    ),
+    CheckConstraint(
+        "(status = 'active' and locked_at is null and disabled_at is null) or "
+        "(status = 'locked' and locked_at is not null and disabled_at is null) or "
+        "(status = 'disabled' and locked_at is null and disabled_at is not null)",
+        name="ck_users_lifecycle_state",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at "
+        "and (locked_at is null or locked_at between created_at and updated_at) "
+        "and (disabled_at is null or disabled_at between created_at and updated_at)",
+        name="ck_users_timestamp_order",
+    ),
+    PrimaryKeyConstraint("id", name="pk_users"),
+    UniqueConstraint("login_name", name="uq_users_login_name"),
+    UniqueConstraint("id", "credential_version", name="uq_users_id_credential_version"),
+)
+
+user_password_credentials = Table(
+    "user_password_credentials",
+    metadata,
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("version", BigInteger(), nullable=False),
+    Column("password_hash", String(length=255), nullable=False),
+    Column("pepper_version", BigInteger(), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "version > 0",
+        name="ck_user_password_credentials_version_positive",
+    ),
+    CheckConstraint(
+        r"password_hash ~ '^\$argon2id\$v=19\$m=65536,t=3,p=4"
+        r"\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$'",
+        name="ck_user_password_credentials_hash",
+    ),
+    CheckConstraint(
+        "pepper_version > 0",
+        name="ck_user_password_credentials_pepper_version_positive",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at",
+        name="ck_user_password_credentials_timestamp_order",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["users.id"],
+        name="fk_user_password_credentials_user",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("user_id", name="pk_user_password_credentials"),
+)
+
+account_audit_events = Table(
+    "account_audit_events",
+    metadata,
+    Column("event_id", UUID(as_uuid=True), nullable=False),
+    Column("event_type", String(length=32), nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
+    Column("actor_kind", String(length=16), nullable=False),
+    Column("actor_id", UUID(as_uuid=True), nullable=False),
+    Column("subject_user_id", UUID(as_uuid=True), nullable=True),
+    Column("outcome", String(length=16), nullable=False),
+    Column("reason_code", String(length=64), nullable=False),
+    Column("request_id", String(length=128), nullable=False),
+    Column("source_fingerprint", LargeBinary(length=32), nullable=True),
+    CheckConstraint(
+        "substring(event_id::text from 15 for 1) = '4' "
+        "and substring(event_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_account_audit_events_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "substring(actor_id::text from 15 for 1) = '4' "
+        "and substring(actor_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_account_audit_events_actor_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "event_type in (" + ", ".join(f"'{event.value}'" for event in AccountAuditEventType) + ")",
+        name="ck_account_audit_events_type",
+    ),
+    CheckConstraint(
+        "actor_kind in (" + ", ".join(f"'{kind.value}'" for kind in AccountAuditActorKind) + ")",
+        name="ck_account_audit_events_actor_kind",
+    ),
+    CheckConstraint(
+        "outcome in ('succeeded', 'rejected')",
+        name="ck_account_audit_events_outcome",
+    ),
+    CheckConstraint(
+        "reason_code ~ '^[a-z][a-z0-9._-]{0,63}$'",
+        name="ck_account_audit_events_reason_code",
+    ),
+    CheckConstraint(
+        "request_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'",
+        name="ck_account_audit_events_request_id",
+    ),
+    CheckConstraint(
+        "source_fingerprint is null or octet_length(source_fingerprint) = 32",
+        name="ck_account_audit_events_source_fingerprint",
+    ),
+    ForeignKeyConstraint(
+        ["subject_user_id"],
+        ["users.id"],
+        name="fk_account_audit_events_subject_user",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("event_id", name="pk_account_audit_events"),
+)
 
 installations = Table(
     "installations",
@@ -1731,6 +1886,7 @@ Index(
 )
 
 __all__ = [
+    "account_audit_events",
     "action_risk_authorizations",
     "device_credentials",
     "device_sessions",
@@ -1746,4 +1902,6 @@ __all__ = [
     "task_events",
     "task_targets",
     "tasks",
+    "user_password_credentials",
+    "users",
 ]

@@ -1,5 +1,15 @@
 """Control Plane domain contracts and errors."""
 
+from automation_tool.control_plane.domain.accounts import (
+    MAX_PASSWORD_CHARACTERS,
+    MIN_PASSWORD_CHARACTERS,
+    AccountAuditActorKind,
+    AccountAuditEventType,
+    AccountStatus,
+    InvalidAccountModel,
+    LoginName,
+    PasswordHash,
+)
 from automation_tool.control_plane.domain.action_risk_policy import (
     ACTION_RISK_POLICY_VERSION,
     MAX_ACTION_RISK_LIMIT,
@@ -49,6 +59,7 @@ from automation_tool.control_plane.domain.resource_ids import (
     ResourceId,
     TargetId,
     TaskId,
+    UserId,
 )
 from automation_tool.control_plane.domain.task_commands import (
     TERMINAL_TASK_COMMAND_STATUSES,
@@ -89,14 +100,19 @@ __all__ = [
     "MAX_ACTION_RISK_LIMIT",
     "MAX_DEMO_BOOTSTRAP_LIFETIME",
     "MAX_MESSAGE_TEMPLATE_CHARACTERS",
+    "MAX_PASSWORD_CHARACTERS",
     "MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS",
     "MAX_SEARCH_KEYWORD_CHARACTERS",
     "MAX_TASK_EVENT_SEQUENCE",
     "MAX_TASK_INTERVAL_SECONDS",
     "MAX_TASK_TARGET_LIMIT",
+    "MIN_PASSWORD_CHARACTERS",
     "TERMINAL_ACTION_STATUSES",
     "TERMINAL_EXECUTION_ATTEMPT_STATUSES",
     "TERMINAL_TASK_COMMAND_STATUSES",
+    "AccountAuditActorKind",
+    "AccountAuditEventType",
+    "AccountStatus",
     "ActionId",
     "ActionOutcome",
     "ActionRiskPlatform",
@@ -123,6 +139,7 @@ __all__ = [
     "ExecutorId",
     "InstallationId",
     "InstallationStatus",
+    "InvalidAccountModel",
     "InvalidActionRiskPolicy",
     "InvalidDemoBootstrap",
     "InvalidDemoEnvironmentId",
@@ -131,6 +148,8 @@ __all__ = [
     "InvalidTaskDefinition",
     "InvalidTaskEventModel",
     "InvalidTaskTransition",
+    "LoginName",
+    "PasswordHash",
     "ResourceId",
     "SafeTaskEventMessage",
     "TargetId",
@@ -143,5 +162,6 @@ __all__ = [
     "TaskSnapshotProjection",
     "TaskStateMachine",
     "TaskStatus",
+    "UserId",
     "evaluate_douyin_candidates",
 ]

@@ -11,10 +11,14 @@ from automation_tool.control_plane.infrastructure.security.bootstrap_tokens impo
     Ed25519BootstrapTokenVerifier,
     VerifiedBootstrapCredential,
 )
+from automation_tool.control_plane.infrastructure.security.passwords import (
+    Argon2idPasswordHasher,
+)
 
 __all__ = [
     "ActionAuthorizationIssuanceClock",
     "ActionAuthorizationIssuanceRejected",
+    "Argon2idPasswordHasher",
     "BootstrapCredentialRejected",
     "Ed25519ActionAuthorizationIssuer",
     "Ed25519BootstrapTokenVerifier",

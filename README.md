@@ -57,6 +57,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - App 打开后直接进入真实 RPA 运营工作台，展示当前/最近任务、运行状态，以及按当前 Installation 从 PostgreSQL 权威事实汇总的任务/动作成功、失败、接管和结果不确定指标；Control Plane 不可用与 Installation 已吊销分别显示脱敏诊断和重试状态，页面不存在产品登录或注册入口；
 - 上述无登录入口仅是当前 P9 本地 MVP 状态；任何客户 Demo 交付前必须完成 U9 产品账号、登录/恢复、Session 和账号设备归属，未登录不进入工作台，登录后设备自动绑定账号；
 - U9-01 已用 `contracts/security/account-threat-model-v1.json` 冻结客户 Demo 首版账号边界：账号只由独立认证运维能力创建，使用不可变 canonical login name、Argon2id + 部署 Pepper、短期 opaque access/旋转 refresh、运维签发单次恢复票据，以及账号 Session + 设备密钥证明的不可变 Installation 归属；匿名注册、组织/租户/RBAC、套餐/计费和账号硬删除继续排除；
+- U9-02 已建立 `UserId`、canonical `LoginName`、`active/locked/disabled` 领域状态，以及 `users`、`user_password_credentials`、`account_audit_events` 三张强约束 PostgreSQL 表；密码以数据库外 256-bit Pepper 做域隔离预哈希后使用固定 RFC 9106 Argon2id 参数与随机 salt，账号创建/停用/恢复采用行锁和 revision 单赢家，审计表在数据库层拒绝 UPDATE/DELETE/TRUNCATE；本阶段未开放登录或运维 HTTP API；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已接入正式 Tauri IPC/Rust 网络桥：生产入口由真实 App 发起 Health 请求；Rust 侧以固定 origin、封闭 operation allowlist、禁止重定向/代理、请求与响应大小/时间上限和关联 ID 调用 Control Plane，不暴露任意 URL 代理；
 - Installation 注册、长期凭据轮换/吊销、两类短期 Session，以及 Task 幂等创建、分页列表、详情、事件 SSE、暂停/恢复和取消/紧停，已通过测试版真实隐藏 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；

@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01 客户 Demo 账号范围与威胁模型已冻结，下一独立工程任务进入 U9-02 账号领域与 PostgreSQL
+> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-02 已完成，下一独立工程任务进入 U9-03 登录与 Session API
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01 与 P9-08 已完成；P9-02/P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。P9-08 已冻结 App/Control Plane/Executor `0.1.0`、API `v1`、Executor protocol `1.0` 的可执行矩阵，并从 App 启动和 Executor Hello 双边拒绝错误版本。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-08 与 U9-01～U9-02 已完成；P9-02/P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。U9-02 已建立客户账号 canonical User/Argon2id 凭据/append-only 审计和 PostgreSQL 原子状态边界，登录与 Session 由下一任务接入。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -380,7 +380,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | U9-01 | 账号范围与威胁模型 | 固定首版账号生命周期、登录标识、凭据恢复、Session、设备归属、停用/吊销和审计；Demo 账号由认证运维入口创建，不开放匿名自注册；组织、租户、RBAC、套餐和计费继续排除 | P9-09 | ✅ 已完成 |
-| U9-02 | 账号领域与 PostgreSQL | User、登录凭据、账号状态、审计与迁移；规范唯一标识、强密码哈希、并发创建/停用/恢复和数据最小化 fail closed | U9-01,F1-05 | ⬜ 未开始 |
+| U9-02 | 账号领域与 PostgreSQL | User、登录凭据、账号状态、审计与迁移；规范唯一标识、强密码哈希、并发创建/停用/恢复和数据最小化 fail closed | U9-01,F1-05 | ✅ 已完成 |
 | U9-03 | 登录与 Session API | 登录、刷新、注销、密码修改/重置；短期访问能力、旋转 refresh、重放检测、限流/锁定、统一脱敏错误和全 Session 吊销 | U9-02,F1-10 | ⬜ 未开始 |
 | U9-04 | Tauri 登录与账号状态 UI | 未登录只显示登录/恢复状态，不挂载业务工作台；Token 与 refresh secret 仅由 Rust 私有存储持有，React 只接收安全账号投影；覆盖加载、失败、锁定、离线、注销和重启恢复 | U9-03,F1-08,I2-09 | ⬜ 未开始 |
 | U9-05 | 登录账号自动绑定设备 | 登录成功后复用 I2 设备密钥证明，把 Installation 原子绑定当前账号并签发/轮换设备凭据；不使用配对码、设备轮询或后台逐设备审批，跨账号、重放、并发绑定和已吊销设备 fail closed | U9-03,U9-04,I2-14 | ⬜ 未开始 |
@@ -2943,6 +2943,20 @@
 - 自动化 GREEN：聚焦 3/3，Frontend 全部 165 项 Node 契约、ESLint 与 OpenAPI DTO 漂移检查全绿；`git diff --check` 通过。本任务只新增机器契约、Node 漂移门禁与权威文档，不修改 Python、Rust、React 运行时代码，不启动 App、浏览器、Control Plane、数据库、Executor 或平台账号
 - 后续：下一独立工程任务进入 U9-02，按本契约建立 User、登录凭据、账号状态、审计和 PostgreSQL 迁移；登录/refresh API、Tauri 登录 UI 与设备自动归属仍分别保留在 U9-03～U9-06，不在数据层任务中提前复制
 
+### U9-02 账号领域与 PostgreSQL
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：先把唯一台账置为 `🧪 RED`，新增账号领域、密码哈希和真实 PostgreSQL 生命周期三组测试；首跑在收集阶段 3 个模块全部失败，分别缺少账号领域导出、`infrastructure.security.passwords` 和 `application.customer_accounts`，没有借用既有 Installation/设备 Session 冒充产品账号
+- 领域边界：新增不可与 Installation/Task 等 ID 混用的 canonical UUIDv4 `UserId`；`LoginName` 只接受 3～64 位 ASCII 封闭字符并立即小写，错误与 repr 不回显标识。账号状态精确为 `active/locked/disabled`，审计词汇精确绑定 U9-01 的 16 类事件；没有邮箱、手机号、角色、组织、租户或可变账号标识
+- 密码边界：新增锁定 `argon2-cffi 25.1.0` 大版本范围的实现；先以数据库外 32 字节版本化 Pepper 做域隔离 HMAC-SHA-256 预哈希，再显式使用 RFC 9106 Argon2id 第二推荐参数 `m=65536 KiB/t=3/p=4`、16 字节随机 salt 与 32 字节 tag。PHC、Pepper 版本和密码版本之外无持久材料；错误、对象 repr、日志和仓储接口不接收或返回明文/Pepper
+- PostgreSQL：Alembic `20260722_0028` 与 `schema.py` 同步新增 `users`、`user_password_credentials`、`account_audit_events`。数据库复验 UUIDv4、canonical login、三态/时间、正版本、精确 Argon2id PHC、封闭审计字段与 32 字节来源指纹；真实空库 upgrade/check、降级到 `20260721_0027`、重新升级均通过，全部既有迁移测试的唯一 head 已同步
+- 原子并发：账号创建在同一事务写 User、当前密码 hash 和 `account.created`，canonical unique 约束保证大小写并发只有一个赢家和一条审计。停用/恢复先锁 User、复验 expected revision，再原子更新状态与审计；并发旧 revision 只有一个成功。停用递增 credential version，恢复不倒退版本；非规范 login、弱 Argon2 参数和状态/时间矛盾即使绕过领域直写数据库也会失败
+- 审计与最小化：审计只保存 event/occurred、稳定 actor/subject、封闭 outcome/reason、request ID 和可选 keyed source fingerprint；无登录名、密码、Token、原始 IP/User-Agent、metadata 或平台 Cookie。PostgreSQL 的行级与语句级 trigger 拒绝 UPDATE、DELETE 和 TRUNCATE，失败信息固定；密码表与 User 也使用 RESTRICT 外键，不提供账号硬删除路径
+- 自动化 GREEN：新增任务聚焦 53/53，四个新增生产模块语句/分支 100%；Backend 全量 `2232 passed / 5 explicit skipped in 232.16s`，14,774 条语句/3,462 个分支 100%。348 个 Python 文件 Ruff format/check 与严格 Mypy、uv lock、Alembic check、`git diff --check` 全绿
+- 执行边界：全量测试使用隔离 PostgreSQL、TestClient、无头系统浏览器和既有测试 Executor 并自动回收；没有启动可见 App/外部浏览器、部署云端、接触真实账号或执行平台动作。本任务没有注册账号/运维 HTTP 路由，没有创建 access/refresh/recovery token，也没有改 React/Rust/Installation 归属；这些边界继续由 U9-03～U9-06 独立 TDD
+- 后续：下一独立工程任务进入 U9-03 登录与 Session API，复用本任务的认证读取端口和 credential version，增加登录/refresh/logout/密码修改/运维恢复、重放检测、锁定/限流与全 Session 吊销，不复制 User/密码表或降低审计约束
+
 ## 21. 当前下一步
 
 严格按顺序：
@@ -2955,6 +2969,7 @@
 6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
 7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 7 条自动化确认、4 条待授权真实平台、3 条待正式双平台设备/包，未达到 14/14 前不得改绿；
 8. `U9-01`（✅ 已完成）：客户 Demo 账号生命周期、登录/恢复、opaque Session、不可变设备归属、停用/吊销、审计及 12 类威胁已冻结为可执行契约；
-9. `U9-02`（⬜ 下一任务）：按 U9-01 不变量建立 User、登录凭据、账号状态、审计与 PostgreSQL 迁移，覆盖并发创建/停用/恢复和数据最小化；
-10. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
-11. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
+10. `U9-03`（⬜ 下一任务）：复用 U9-02 数据边界实现登录、刷新、注销、密码修改/运维恢复、短期 access/旋转 refresh、重放检测、锁定/限流和全 Session 吊销；
+11. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+12. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
