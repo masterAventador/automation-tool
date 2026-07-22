@@ -554,6 +554,8 @@ H8-22 的 UI 边界位于 `features/app-updates/AppUpdateCenter.tsx` 与 `platfo
 
 P9-03 不新增 IPC、Capability 或运行时安装器。debug 仍从 AppData 的 `local-executor/package` 使用开发/验收包；release setup 则由 Tauri `resource_dir()` 固定派生 `.app/Contents/Resources/local-executor/package`，再与 AppData 下的 `local-executor/state` 组成同一个 `ExecutorPlatformService`。两棵目录必须是无 `.`/`..` 的绝对非重叠路径，实际启动前仍由 E4-05 对 Resources 内 Manifest、签名、平台/架构和完整目录做 fail-closed 复验。独立候选配置只选择 `app/dmg`、不锁死发布 identity，并继承生产 `withGlobalTauri=false`、单一 `main` capability、空权限表和 CSP；普通包 runner 才在临时生成配置中强制 ad-hoc。正式 Developer ID Application、公证与 Gatekeeper 分发不由普通候选冒充。
 
+P9-04 沿同一个 release Resources 组合根构建 Windows NSIS，不新增第二个 Executor 路径或安装服务。正式候选覆盖只声明 `targets=["nsis"]` 和 `installMode="currentUser"`，不覆盖 product/identifier/main binary、App、plugin、Capability、CSP、Updater passive 模式或 Windows 签名字段。原生 runner 从 P9-02 候选生成一次性 Manifest，以无测试 Feature release 执行 E4-15 审计；为避免破坏用户可能已有的正式安装，安装阶段才生成唯一隔离 identity，并在非提权进程中核对普通 `NotSigned` installer/App/uninstaller、主二进制版本/哈希、HKCU-only 卸载记录、LocalAppData 根、Resources 清单/Manifest/PE 以及专属卸载零残留。Windows 实机运行与正式 Authenticode 是独立待验收事实。
+
 正式构建通过 `AUTOMATION_TOOL_UPDATE_ENDPOINT` 与 `AUTOMATION_TOOL_UPDATE_PUBLIC_KEY` 注入公开发布配置；`build.rs` 在 release Profile 强制 endpoint 为包含一次 `target/arch/current_version` 占位符的 HTTPS URL，并对规范 Base64 包裹的 Minisign 公钥做实际解析。缺失、非 HTTPS、带凭据/fragment、占位符异常或坏公钥均在打包前失败。debug 仅在显式本机环境变量存在时启用更新，证书忽略开关只编译进 `desktop-e2e`；正式 App 不接受运行时端点覆盖。发布私钥始终只属于受控签名环境。
 
 ## 15. 禁止事项

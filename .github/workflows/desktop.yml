@@ -20,6 +20,7 @@ on:
       - backend/tests/unit/executor/test_pyinstaller_bundle_contract.py
       - scripts/run_p9_01_acceptance.py
       - scripts/run_p9_02_acceptance.py
+      - scripts/run_p9_04_acceptance.py
       - contracts/fixtures/executor-package-v1/**
       - contracts/protocol/executor-package-manifest-v1.schema.json
       - contracts/**
@@ -42,6 +43,7 @@ on:
       - backend/tests/unit/executor/test_pyinstaller_bundle_contract.py
       - scripts/run_p9_01_acceptance.py
       - scripts/run_p9_02_acceptance.py
+      - scripts/run_p9_04_acceptance.py
       - contracts/fixtures/executor-package-v1/**
       - contracts/protocol/executor-package-manifest-v1.schema.json
       - contracts/**
@@ -62,7 +64,7 @@ jobs:
   executor-bundle:
     name: ${{ matrix.runner }} / Executor onedir smoke
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +107,9 @@ jobs:
       - name: Build and audit the Windows Executor candidate
         if: runner.os == 'Windows'
         run: uv run python ../scripts/run_p9_02_acceptance.py
+      - name: Build and audit the Windows Tauri candidate
+        if: runner.os == 'Windows'
+        run: uv run python ../scripts/run_p9_04_acceptance.py
 
   desktop:
     name: ${{ matrix.runner }} / build and smoke
