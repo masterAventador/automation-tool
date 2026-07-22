@@ -8,13 +8,18 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from automation_tool.control_plane.application.action_execution_orchestration import (
     ActionExecutionLimits,
     ActionExecutionOrchestrationService,
     SystemActionExecutionOrchestrationClock,
+)
+from automation_tool.control_plane.bootstrap.runtime_secrets import (
+    RuntimeSecretError,
+    RuntimeSecretName,
+    runtime_secret,
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
@@ -36,7 +41,6 @@ class ActionExecutionConfigurationError(RuntimeError):
 class _ActionExecutionSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTOMATION_TOOL_", extra="ignore")
 
-    action_authorization_private_key: SecretStr | None = None
     action_minimum_interval_seconds: int | None = None
     action_task_limit: int | None = None
     action_daily_limit: int | None = None
@@ -52,8 +56,7 @@ class ActionExecutionRuntime:
         return "ActionExecutionRuntime(<redacted>)"
 
 
-def _private_key(value: SecretStr) -> bytes:
-    source = value.get_secret_value()
+def _private_key(source: str) -> bytes:
     if _BASE64URL_PATTERN.fullmatch(source) is None:
         raise ActionExecutionConfigurationError
     try:
@@ -73,10 +76,11 @@ def action_execution_runtime_from_environment(
 
     try:
         settings = _ActionExecutionSettings()
-    except ValidationError:
+        private_key = runtime_secret(RuntimeSecretName.ACTION_AUTHORIZATION_PRIVATE_KEY)
+    except (RuntimeSecretError, ValidationError):
         raise ActionExecutionConfigurationError from None
     values = (
-        settings.action_authorization_private_key,
+        private_key,
         settings.action_minimum_interval_seconds,
         settings.action_task_limit,
         settings.action_daily_limit,
@@ -97,7 +101,7 @@ def action_execution_runtime_from_environment(
         )
         clock = SystemActionExecutionOrchestrationClock()
         issuer = Ed25519ActionAuthorizationIssuer(
-            private_key=_private_key(settings.action_authorization_private_key),  # type: ignore[arg-type]
+            private_key=_private_key(private_key or ""),
             clock=clock,
             authorization_lifetime=ACTION_AUTHORIZATION_MAX_LIFETIME,
         )

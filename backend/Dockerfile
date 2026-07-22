@@ -30,6 +30,7 @@ RUN groupadd --gid 65532 automation-tool
 RUN useradd --uid 65532 --gid 65532 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin automation-tool
 
 ENV PATH="/app/.venv/bin:${PATH}" \
+    AUTOMATION_TOOL_RUNTIME_SECRET_MODE=files \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app

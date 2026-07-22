@@ -70,6 +70,8 @@
     "test:u9-06-tauri": "../backend/.venv/bin/python ../scripts/run_u9_06_acceptance.py",
     "test:c10-02-container": "../backend/.venv/bin/python ../scripts/run_c10_02_acceptance.py",
     "test:c10-03-postgresql": "../backend/.venv/bin/python ../scripts/run_c10_03_acceptance.py",
+    "test:c10-04-https": "../backend/.venv/bin/python ../scripts/run_c10_04_acceptance.py",
+    "test:c10-05-secrets": "../backend/.venv/bin/python ../scripts/run_c10_05_acceptance.py",
     "test:browser-settings-tauri": "python3 ../scripts/run_b5_04_acceptance.py",
     "test:executor-lifecycle-tauri": "pnpm build:tauri:executor-lifecycle-test && wdio run wdio.executor-lifecycle.conf.ts",
     "test:installation-revocation-tauri": "pnpm build:tauri:installation-revocation-test && wdio run wdio.installation-revocation.conf.ts",

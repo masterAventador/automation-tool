@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+from runtime_secret_volume import writer_command, writer_payload
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 POSTGRES_IMAGE = "postgres:18.4-bookworm"
@@ -25,10 +27,16 @@ class AcceptanceFailure(RuntimeError):
     """Fixed failure without reflecting a credential or container log."""
 
 
-def run(arguments: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run(
+    arguments: Sequence[str],
+    *,
+    input_text: str | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         list(arguments),
         cwd=REPOSITORY_ROOT,
+        input=input_text,
         check=False,
         capture_output=True,
         text=True,
@@ -49,7 +57,11 @@ def write_private_environment(path: Path, values: Mapping[str, str]) -> None:
 
 def inspect(kind: str, identity: str) -> dict[str, Any]:
     payload = json.loads(run(["docker", kind, "inspect", identity]).stdout)
-    if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 1
+        or not isinstance(payload[0], dict)
+    ):
         raise AcceptanceFailure("C10-02 Docker inspection is invalid")
     return cast(dict[str, Any], payload[0])
 
@@ -78,16 +90,20 @@ def main() -> None:
     network_name = f"automation-tool-c10-02-{suffix}"
     postgres_name = f"automation-tool-c10-02-postgres-{suffix}"
     control_plane_name = f"automation-tool-c10-02-control-plane-{suffix}"
+    secret_volume = f"automation-tool-c10-02-secrets-{suffix}"
     image = f"automation-tool-control-plane:c10-02-{suffix}"
     password = secrets.token_urlsafe(24)
-    project = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = tomllib.loads(
+        (BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
     app_version = cast(str, project["project"]["version"])
     revision = run(["git", "rev-parse", "HEAD"]).stdout.strip()
 
-    with tempfile.TemporaryDirectory(prefix=f"automation-tool-c10-02-{suffix}-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix=f"automation-tool-c10-02-{suffix}-"
+    ) as temporary:
         temporary_root = Path(temporary)
         postgres_environment = temporary_root / "postgres.env"
-        control_plane_environment = temporary_root / "control-plane.env"
         write_private_environment(
             postgres_environment,
             {
@@ -96,14 +112,7 @@ def main() -> None:
                 "POSTGRES_DB": "c10_demo",
             },
         )
-        write_private_environment(
-            control_plane_environment,
-            {
-                "AUTOMATION_TOOL_DATABASE_URL": (
-                    f"postgresql+asyncpg://c10_app:{password}@postgres:5432/c10_demo"
-                )
-            },
-        )
+        database_url = f"postgresql+asyncpg://c10_app:{password}@postgres:5432/c10_demo"
 
         try:
             run(
@@ -123,7 +132,10 @@ def main() -> None:
             )
             image_inspection = inspect("image", image)
             image_config = image_inspection.get("Config")
-            if not isinstance(image_config, dict) or image_config.get("User") != "65532:65532":
+            if (
+                not isinstance(image_config, dict)
+                or image_config.get("User") != "65532:65532"
+            ):
                 raise AcceptanceFailure("C10-02 image user is invalid")
             labels = image_config.get("Labels")
             if not isinstance(labels, dict) or labels != {
@@ -140,6 +152,11 @@ def main() -> None:
                 raise AcceptanceFailure("C10-02 image healthcheck is absent")
 
             run(["docker", "network", "create", network_name])
+            run(["docker", "volume", "create", secret_volume])
+            run(
+                writer_command(image=image, volume=secret_volume),
+                input_text=writer_payload({"database-url": database_url}),
+            )
             run(
                 [
                     "docker",
@@ -175,8 +192,8 @@ def main() -> None:
                     control_plane_name,
                     "--network",
                     network_name,
-                    "--env-file",
-                    str(control_plane_environment),
+                    "--mount",
+                    f"type=volume,source={secret_volume},target=/run/secrets,readonly",
                     "--read-only",
                     "--tmpfs",
                     "/tmp:rw,noexec,nosuid,size=16m",
@@ -190,7 +207,10 @@ def main() -> None:
             wait_for_healthy(control_plane_name, timeout_seconds=60)
             container = inspect("container", control_plane_name)
             host_config = container.get("HostConfig")
-            if not isinstance(host_config, dict) or host_config.get("ReadonlyRootfs") is not True:
+            if (
+                not isinstance(host_config, dict)
+                or host_config.get("ReadonlyRootfs") is not True
+            ):
                 raise AcceptanceFailure("C10-02 root filesystem is writable")
             if host_config.get("PortBindings") not in ({}, None):
                 raise AcceptanceFailure("C10-02 published an unexpected host port")
@@ -226,10 +246,16 @@ def main() -> None:
                     "AssertionError",
                 )
                 category = next(
-                    (candidate for candidate in categories if candidate in probe.stderr),
+                    (
+                        candidate
+                        for candidate in categories
+                        if candidate in probe.stderr
+                    ),
                     "unknown",
                 )
-                raise AcceptanceFailure(f"C10-02 container runtime probe failed: {category}")
+                raise AcceptanceFailure(
+                    f"C10-02 container runtime probe failed: {category}"
+                )
             projection = json.loads(probe.stdout)
             if projection["health"] != {
                 "service": "control-plane",
@@ -270,7 +296,9 @@ def main() -> None:
                 raise AcceptanceFailure("C10-02 graceful stop exceeded its deadline")
             logs = run(["docker", "logs", control_plane_name]).stdout
             if password in logs or "postgresql+asyncpg://" in logs:
-                raise AcceptanceFailure("C10-02 container logs exposed a database secret")
+                raise AcceptanceFailure(
+                    "C10-02 container logs exposed a database secret"
+                )
 
             print(
                 "[C10-02] locked non-root image, real health/version, read-only rootfs, "
@@ -280,6 +308,7 @@ def main() -> None:
             remove_container(control_plane_name)
             remove_container(postgres_name)
             run(["docker", "network", "rm", network_name], check=False)
+            run(["docker", "volume", "rm", "--force", secret_volume], check=False)
             run(["docker", "image", "rm", "--force", image], check=False)
 
 

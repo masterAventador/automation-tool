@@ -14,6 +14,11 @@ from automation_tool.control_plane.application.account_sessions import (
     AccountSessionFactory,
     AccountSessionService,
 )
+from automation_tool.control_plane.bootstrap.runtime_secrets import (
+    RuntimeSecretError,
+    RuntimeSecretName,
+    runtime_secret,
+)
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     SqlAlchemyAccountSessionRepository,
@@ -36,9 +41,7 @@ class AccountSessionConfigurationError(RuntimeError):
 class _AccountSessionSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTOMATION_TOOL_", extra="ignore")
 
-    account_password_pepper: str | None = None
     account_password_pepper_version: int | None = None
-    account_fingerprint_key: str | None = None
 
 
 class _SystemClock:
@@ -66,12 +69,14 @@ def account_session_service_from_environment(
 
     try:
         settings = _AccountSessionSettings()
-    except ValidationError:
+        password_pepper = runtime_secret(RuntimeSecretName.ACCOUNT_PASSWORD_PEPPER)
+        fingerprint_source = runtime_secret(RuntimeSecretName.ACCOUNT_FINGERPRINT_KEY)
+    except (RuntimeSecretError, ValidationError):
         raise AccountSessionConfigurationError from None
     configured = (
-        settings.account_password_pepper,
+        password_pepper,
         settings.account_password_pepper_version,
-        settings.account_fingerprint_key,
+        fingerprint_source,
     )
     if all(value is None for value in configured):
         return None
@@ -82,10 +87,10 @@ def account_session_service_from_environment(
         raise AccountSessionConfigurationError
     try:
         hasher = Argon2idPasswordHasher(
-            pepper=_secret(settings.account_password_pepper or ""),
+            pepper=_secret(password_pepper or ""),
             pepper_version=version,
         )
-        fingerprint_key = _secret(settings.account_fingerprint_key or "")
+        fingerprint_key = _secret(fingerprint_source or "")
     except (AccountSessionConfigurationError, RuntimeError):
         raise AccountSessionConfigurationError from None
     return AccountSessionService(
@@ -104,17 +109,21 @@ def account_password_hasher_from_environment() -> Argon2idPasswordHasher:
 
     try:
         settings = _AccountSessionSettings()
-    except ValidationError:
+        password_pepper = runtime_secret(
+            RuntimeSecretName.ACCOUNT_PASSWORD_PEPPER,
+            required=True,
+        )
+    except (RuntimeSecretError, ValidationError):
         raise AccountSessionConfigurationError from None
     if (
-        settings.account_password_pepper is None
+        password_pepper is None
         or type(settings.account_password_pepper_version) is not int
         or settings.account_password_pepper_version <= 0
     ):
         raise AccountSessionConfigurationError
     try:
         return Argon2idPasswordHasher(
-            pepper=_secret(settings.account_password_pepper),
+            pepper=_secret(password_pepper),
             pepper_version=settings.account_password_pepper_version,
         )
     except (AccountSessionConfigurationError, RuntimeError):
