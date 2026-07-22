@@ -119,9 +119,7 @@ def test_discriminated_union_selects_lifecycle_platform_command_and_event_varian
 
 
 def test_task_offer_carries_one_exact_global_event_sequence_baseline() -> None:
-    parsed = validate(
-        task_message(payload={"task_event_sequence_baseline": 4})
-    ).root
+    parsed = validate(task_message(payload={"task_event_sequence_baseline": 4})).root
 
     assert isinstance(parsed, TaskCommandEnvelope)
     assert parsed.payload == {"task_event_sequence_baseline": 4}

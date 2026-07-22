@@ -559,10 +559,7 @@ class TaskCommandEnvelope(_TaskEnvelopeBase):
             if set(self.payload) != {"task_event_sequence_baseline"}:
                 raise ValueError("task offer payload is not exact")
             baseline = self.payload["task_event_sequence_baseline"]
-            if (
-                type(baseline) is not int
-                or not 0 <= baseline < MAX_EXECUTOR_SEQUENCE
-            ):
+            if type(baseline) is not int or not 0 <= baseline < MAX_EXECUTOR_SEQUENCE:
                 raise ValueError("task offer event sequence baseline is invalid")
         elif self.payload:
             raise ValueError("task control payload must be empty")

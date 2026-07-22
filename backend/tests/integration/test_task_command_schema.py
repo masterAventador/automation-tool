@@ -155,9 +155,7 @@ def command_values(
         "execution_attempt_id": attempt_id.uuid,
         "sequence": sequence,
         "command_type": command_type.value,
-        "task_event_sequence_baseline": (
-            0 if command_type is TaskCommandType.TASK_OFFER else None
-        ),
+        "task_event_sequence_baseline": (0 if command_type is TaskCommandType.TASK_OFFER else None),
         "status": TaskCommandStatus.PENDING.value,
         "idempotency_key": f"task:command:{sequence}",
         "revision": 1,

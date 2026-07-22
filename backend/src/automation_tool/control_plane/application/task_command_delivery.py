@@ -523,10 +523,7 @@ def _command_wire(
             payload = command.discovery_payload.model_dump(mode="json")
         elif command.command_type is TaskCommandType.TASK_OFFER:
             baseline = command.task_event_sequence_baseline
-            if (
-                type(baseline) is not int
-                or not 0 <= baseline < MAX_TASK_EVENT_SEQUENCE
-            ):
+            if type(baseline) is not int or not 0 <= baseline < MAX_TASK_EVENT_SEQUENCE:
                 raise ValueError
             payload = {"task_event_sequence_baseline": baseline}
         else:

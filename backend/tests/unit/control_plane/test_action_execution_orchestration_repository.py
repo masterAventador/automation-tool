@@ -20,6 +20,7 @@ from automation_tool.control_plane.application.action_risk_authorizations import
     ActionRiskAuthorizationUnavailable,
 )
 from automation_tool.control_plane.domain import (
+    MAX_TASK_EVENT_SEQUENCE,
     DouyinSearchExposureAction,
     ExecutionAttemptId,
     ExecutorId,
@@ -81,6 +82,48 @@ async def test_repository_rejects_invalid_database_and_advance_request() -> None
         repository = repository_module.SqlAlchemyActionExecutionOrchestrationRepository(database)
         with pytest.raises(ActionExecutionOrchestrationRejected):
             await repository.advance(object())  # type: ignore[arg-type]
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_finalization_rejects_invalid_selection_and_exhausted_watermark() -> None:
+    class TerminalRows:
+        def mappings(self) -> TerminalRows:
+            return self
+
+        def all(self) -> list[dict[str, str]]:
+            return [{"status": "verified", "outcome": "succeeded"}]
+
+    class TerminalSession:
+        @staticmethod
+        async def execute(_statement: object) -> TerminalRows:
+            return TerminalRows()
+
+    database = database_without_connection()
+    try:
+        repository = repository_module.SqlAlchemyActionExecutionOrchestrationRepository(database)
+        request = pending()
+        with pytest.raises(ActionExecutionOrchestrationRejected):
+            await repository._finalize_completed_task_locked(
+                object(),  # type: ignore[arg-type]
+                request,
+                task_row={},
+                active_attempt={},
+                selected_target_count=0,
+            )
+        with pytest.raises(ActionExecutionOrchestrationRejected):
+            await repository._finalize_completed_task_locked(
+                TerminalSession(),  # type: ignore[arg-type]
+                request,
+                task_row={
+                    "id": uuid4(),
+                    "revision": 1,
+                    "last_event_sequence": MAX_TASK_EVENT_SEQUENCE,
+                },
+                active_attempt={"id": uuid4(), "revision": 1},
+                selected_target_count=1,
+            )
     finally:
         await database.close()
 

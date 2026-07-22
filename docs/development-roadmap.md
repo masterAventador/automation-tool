@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16E 启动环境诊断闭环已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16F MVP 规格差异收口已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -32,7 +32,7 @@
 
 ## 3. 当前进度快照
 
-快照日期：2026-07-21。
+快照日期：2026-07-22。
 
 | 范围 | 当前结果 |
 | --- | --- |
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16E 已完成；下一项 H8-16F，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16F 已完成；下一项 H8-17，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -351,7 +351,7 @@
 | H8-16C | 服务端动作执行编排 | 确认后按目标逐个授权并投递 typed 执行命令，保留确认、频控、幂等和结果收敛 | H8-16B | ✅ 已完成 |
 | H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ✅ 已完成 |
 | H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ✅ 已完成 |
-| H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | 🧪 RED |
+| H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | ✅ 已完成 |
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ⬜ 未开始 |
 | H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ⬜ 未开始 |
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ⬜ 未开始 |
@@ -2683,11 +2683,27 @@
 - 资源与规格：专用 Tauri 配置全局固定 `visible=false`，WebDriver 使用动态已检查端口；runner 成功/失败都回收 App、签名 Executor、驱动、Control Plane、隔离 AppData 和端口并恢复 production Vite 资产。没有访问真实账号、默认浏览器 Profile、系统钥匙串或其他项目资源；`MVP-AC-02` 已改为 `automated_complete`，H8-16E finding 已 resolved，但不冒充 H8-16F 的整条可见运营旅程或 A7-16/A7-17 真实副作用证据
 - 后续：进入 `H8-16F`，校准可选过滤/黑名单、截图直览、结果导出和存储控制的当前/后置范围，并从隐藏真实 App 跑通完整 MVP 用户旅程
 
+### H8-16F MVP 规格差异收口
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED 与复审缺口：整条 App 旅程首轮暴露五类真实缺口：Executor 在跨 Attempt 时把 Task 事件序号重置为零；全部目标动作结算后 Task/Attempt 没有统一收敛终态；`AUTHORIZED` Action 的正式 `step.started` 被状态机拒绝；目标结果查询没有随事件水位刷新；App 正常退出后验收 Executor 仍可能残留。测试先分别固定这些失败边界，再实现最小修复，没有用 Mock、直接内部业务 Command 或测试专用结果代替正式入口
+- 规格校准：当前 MVP 只承诺关键词、动作类型、固定模板、单任务上限、间隔和逐目标排除；可配置过滤条件、用户黑名单、任务结果导出、截图直接查看、存储占用统计与可配置清理策略明确后置。固定去重/安全黑名单、结构化逐目标结果和固定留存策略仍保留，不把尚未实现的配置能力写成当前功能
+- 全局事件序号：`task.offer` 在 Python/TypeScript/Rust 和公共 Schema 中新增 exact `task_event_sequence_baseline`，Control Plane 从 PostgreSQL 锁定 Task 水位写入 Outbox，Executor SQLite checkpoint 必须与其精确匹配并从 `baseline + 1` 继续；Alembic `20260721_0027` 持久化该基线。缺失、布尔值、越界、跨 Task/Attempt 不一致与整数上限全部 fail closed，Fake Executor 也遵守同一协议，避免测试掩盖生产序号回退
+- 服务端终态：动作编排在所有已确认目标都进入终态后，于同一 PostgreSQL 事务写入 Task/Attempt 结果与事件；全成功映射 success，混合成功/失败映射 partial，全部失败映射 fail，不确定副作用映射 uncertain。`AUTHORIZED/PREPARED/DISPATCHED` 的正式恢复路径均可接收与自身事实一致的 `step.started`，并继续保持逐目标授权、限流和幂等约束
+- 桌面结果闭环：生产 `WorkbenchShell` 完成 Task 到登录页的正式交接、平台健康同步与 Executor 自动启动；`TaskRunDetails` 的结果查询键同时跟随结果相关事件和权威 Task snapshot 的 `lastEventSequence`。这样即使事件流短暂落后，终态快照也会触发重新读取结构化逐目标结果，不再停留在旧的 pending 视图
+- 原调用方验收：`backend/.venv/bin/python scripts/run_h8_16f_acceptance.py` 构建并验证签名 PyInstaller Executor，在已检查的动态 loopback 端口启动真实 Uvicorn/PostgreSQL，由唯一 `visible=false` Tauri App 经生产 Rust bridge 完成创建任务→登录处理→发现两个目标→排除一个→最终确认→受控 browse→查看结构化结果→从 App 请求退出。受控外部页面全部使用 Playwright 全局无头浏览器；业务链没有直接调用 Tauri 内部业务 Command，唯一验收专用 Command 只用于从原调用方触发 App 退出与资源回收
+- 失败矩阵与清理：协议错序、基线缺失/损坏、跨 Attempt 续号、零候选/水位耗尽、动作部分失败/全部失败/不确定、事件流落后和 App 主动退出均有自动化证据。runner 在成功和失败路径都关闭 App、WebDriver、签名 Executor、Playwright、Uvicorn、专属 PostgreSQL Compose project、动态端口与隔离 AppData；例行 App 始终隐藏，例行浏览器始终无头，且全局契约扫描所有 Tauri E2E 配置，新增可见窗口会直接失败
+- 门禁：Backend 全量 `2071 passed/5 explicit skipped in 233.16s`，13909 条语句/3222 个分支覆盖率 100%；Ruff、格式化、严格 Mypy、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend Node 契约、231 项 Vitest、5 项全局无头 Playwright、Lint、严格 TypeScript、API 漂移、production boundary 与 Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套测试、Rustfmt、三套全目标 Clippy `-D warnings` 均通过；台账状态写入后再次执行最终 Node 契约与隐藏 App 纵向验收
+- 真实边界：本任务只在隔离官方-origin 测试页执行无副作用 browse，证明桌面 App、Control Plane、签名 Executor、外部浏览器和 PostgreSQL 的完整组合链；没有把隔离页冒充真实抖音搜索、评论或私信。`D6-16`、`A7-16`、`A7-17` 与 `B5-15` 继续保持 `🔍 待真实账号`，没有用户明确授权的目标时跳过且不阻塞后续离线任务
+- 提交：外部检查点 `b69f463` 已保存协议、实现、验收和规格主体并推送 `main`；本任务随后以独立补正提交收录防御性覆盖率分支、全量门禁结果和最终台账，不改写或强推已有历史
+- 后续：进入 `H8-17`，复审 fail-open、竞态、资源泄漏、假绿测试和平台差异；H8-17 完成前不启动后续自动更新实现
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-16F`：校准可选过滤/黑名单、截图直览、结果导出和存储控制范围，并跑通隐藏 App 整条用户旅程；
+1. `H8-17`：复审 fail-open、竞态、资源泄漏、假绿测试和平台差异，逐项给出可复现证据并只修复本任务范围内缺口；
 2. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
 3. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
 4. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；

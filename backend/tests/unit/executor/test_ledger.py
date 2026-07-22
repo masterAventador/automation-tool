@@ -68,7 +68,9 @@ def command(
             "payload": (
                 {"task_event_sequence_baseline": 0}
                 if payload is None and message_type == "task.offer"
-                else {} if payload is None else payload
+                else {}
+                if payload is None
+                else payload
             ),
             "task_id": task_id,
             "execution_attempt_id": attempt_id,
@@ -399,6 +401,12 @@ def test_commands_are_durable_idempotent_and_attempt_sequences_are_contiguous(
         opened.receive_command(wrong_installation)
     with pytest.raises(ExecutorLedgerRejected):
         opened.receive_command(cast(TaskCommandEnvelope, object()))
+
+    invalid_baseline = command(1).model_copy(
+        update={"payload": {"task_event_sequence_baseline": "invalid"}}
+    )
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger(tmp_path / "invalid-baseline").receive_command(invalid_baseline)
 
     assert second_identity.sequence == 2
     assert opened.get_checkpoint(ATTEMPT_ID).last_command_sequence == 2  # type: ignore[union-attr]

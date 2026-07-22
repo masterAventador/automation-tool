@@ -450,9 +450,7 @@ class SqlAlchemyActionExecutionOrchestrationRepository:
                 .returning(tasks.c.id)
             )
             updated_task.scalar_one()
-            return ActionExecutionAdvanceResult(
-                kind=ActionExecutionAdvanceKind.TASK_FINALIZED
-            )
+            return ActionExecutionAdvanceResult(kind=ActionExecutionAdvanceKind.TASK_FINALIZED)
         except (KeyError, TypeError, ValueError):
             raise ActionExecutionOrchestrationRejected from None
 

@@ -18,8 +18,10 @@ from automation_tool.executor.fake import (
 )
 from automation_tool.protocol import (
     ExecutorLifecycleEnvelope,
+    TaskCommandEnvelope,
     TaskCommandResultEnvelope,
     TaskEventEnvelope,
+    parse_executor_message,
 )
 
 NOW = datetime(2026, 7, 18, 10, 0, tzinfo=UTC)
@@ -92,11 +94,7 @@ def command(
         "correlation_id": correlation_id,
         "idempotency_key": idempotency_key or f"task:fake:{message_type}:{sequence}",
         "sequence": sequence,
-        "payload": (
-            {"task_event_sequence_baseline": 0}
-            if message_type == "task.offer"
-            else {}
-        ),
+        "payload": ({"task_event_sequence_baseline": 0} if message_type == "task.offer" else {}),
         "task_id": task_id,
         "execution_attempt_id": attempt_id,
     }
@@ -313,6 +311,37 @@ def test_command_replay_returns_identical_messages_without_duplicate_events() ->
                 correlation_id="423e4567-e89b-42d3-a456-426614174003",
             )
         )
+
+
+def test_internal_offer_baseline_corruption_and_cross_attempt_regression_fail_closed() -> None:
+    valid = cast(
+        TaskCommandEnvelope,
+        parse_executor_message(command("task.offer", sequence=1)),
+    )
+    corrupted = valid.model_copy(update={"payload": {"task_event_sequence_baseline": "invalid"}})
+    with pytest.raises(FakeExecutorRejected):
+        engine(FakeExecutorScenario.HOLD)._apply(corrupted)
+
+    active = engine(FakeExecutorScenario.HOLD)
+    active._apply(valid)
+    next_attempt = cast(
+        TaskCommandEnvelope,
+        parse_executor_message(
+            command(
+                "task.offer",
+                sequence=1,
+                attempt_id="123e4567-e89b-42d3-a456-426614174099",
+            )
+        ),
+    ).model_copy(update={"payload": {"task_event_sequence_baseline": 1}})
+    with pytest.raises(FakeExecutorRejected):
+        active._apply(next_attempt)
+    continued = next_attempt.model_copy(update={"payload": {"task_event_sequence_baseline": 2}})
+    assert [message.message_type for message in active._apply(continued)] == [
+        "task.accept",
+        "task.started",
+        "step.started",
+    ]
 
 
 def test_message_generation_failure_rolls_back_state_and_event_sequence() -> None:

@@ -18,6 +18,7 @@ from automation_tool.control_plane.application.task_target_previews import (
     TASK_TARGET_CONFIRMATION_INTENT_VERSION,
 )
 from automation_tool.control_plane.domain import (
+    MAX_TASK_EVENT_SEQUENCE,
     ExecutionAttemptId,
     ExecutionAttemptStatus,
     InstallationId,
@@ -623,6 +624,41 @@ async def test_repository_validation_response_mapping_and_stale_operations_fail_
                     installation_id=InstallationId.new(),
                     message_id=UUID("623e4567-e89b-42d3-a456-426614174001"),
                 )
+            )
+
+        with pytest.raises(TaskCommandDeliveryRejected):
+            await repository.enqueue(
+                replace(
+                    offer,
+                    task_id=TaskId.new(),
+                    message_id=UUID("623e4567-e89b-42d3-a456-426614174011"),
+                    correlation_id=UUID("623e4567-e89b-42d3-a456-426614174012"),
+                    idempotency_key="task:offer:missing-task",
+                )
+            )
+        async with database.session() as session:
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == task_id.uuid)
+                .values(
+                    revision=MAX_TASK_EVENT_SEQUENCE,
+                    last_event_sequence=MAX_TASK_EVENT_SEQUENCE,
+                )
+            )
+        with pytest.raises(TaskCommandDeliveryRejected):
+            await repository.enqueue(
+                replace(
+                    offer,
+                    message_id=UUID("623e4567-e89b-42d3-a456-426614174013"),
+                    correlation_id=UUID("623e4567-e89b-42d3-a456-426614174014"),
+                    idempotency_key="task:offer:exhausted-event-sequence",
+                )
+            )
+        async with database.session() as session:
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == task_id.uuid)
+                .values(revision=2, last_event_sequence=0)
             )
 
         await repository.enqueue(offer)

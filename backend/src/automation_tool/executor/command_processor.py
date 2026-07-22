@@ -225,10 +225,7 @@ class ExecutorCommandProcessor:
             last_event_sequence = len(batch) - 1
         else:
             baseline = command.payload["task_event_sequence_baseline"]
-            if (
-                type(baseline) is not int
-                or checkpoint.last_event_sequence != baseline
-            ):
+            if type(baseline) is not int or checkpoint.last_event_sequence != baseline:
                 raise ValueError
             batch = self._started_batch(command, baseline=baseline)
             last_event_sequence = baseline + 1

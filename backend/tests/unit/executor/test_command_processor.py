@@ -11,6 +11,7 @@ from uuid import UUID
 
 import pytest
 
+from automation_tool.executor import command_processor as command_processor_module
 from automation_tool.executor.command_processor import (
     ExecutorCommandExpired,
     ExecutorCommandProcessor,
@@ -20,10 +21,16 @@ from automation_tool.executor.command_processor import (
 from automation_tool.executor.ledger import (
     AttemptCheckpoint,
     AttemptCheckpointState,
+    CommandReceipt,
     ExecutorLedger,
     ExecutorLedgerRejected,
 )
-from automation_tool.protocol import TaskCommandResultEnvelope, TaskEventEnvelope
+from automation_tool.protocol import (
+    TaskCommandEnvelope,
+    TaskCommandResultEnvelope,
+    TaskEventEnvelope,
+    parse_executor_message,
+)
 
 NOW = datetime(2026, 7, 19, 14, 0, tzinfo=UTC)
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
@@ -77,7 +84,9 @@ def command(
             "payload": (
                 {"task_event_sequence_baseline": 0}
                 if payload is None and message_type == "task.offer"
-                else {} if payload is None else payload
+                else {}
+                if payload is None
+                else payload
             ),
             "task_id": TASK_ID,
             "execution_attempt_id": ATTEMPT_ID,
@@ -145,9 +154,7 @@ def test_offer_continues_the_task_global_event_sequence_across_attempts(
 ) -> None:
     active = processor(tmp_path / "state")
 
-    batch = active.handle(
-        command(payload={"task_event_sequence_baseline": 4})
-    )
+    batch = active.handle(command(payload={"task_event_sequence_baseline": 4}))
 
     assert [message.message_type for message in batch] == [
         "task.accept",
@@ -157,6 +164,50 @@ def test_offer_continues_the_task_global_event_sequence_across_attempts(
     checkpoint = active.ledger.get_checkpoint(ATTEMPT_ID)
     assert checkpoint is not None
     assert checkpoint.last_event_sequence == 5
+
+
+def test_offer_rejects_invalid_or_mismatched_internal_event_baselines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    valid = cast(TaskCommandEnvelope, parse_executor_message(command()))
+    invalid_commands = (
+        valid.model_copy(update={"payload": {"task_event_sequence_baseline": "invalid"}}),
+        cast(
+            TaskCommandEnvelope,
+            parse_executor_message(command(payload={"task_event_sequence_baseline": 4})),
+        ),
+    )
+    receipt = CommandReceipt(
+        message_id=str(valid.message_id),
+        idempotency_key=valid.idempotency_key,
+        task_id=TASK_ID,
+        attempt_id=ATTEMPT_ID,
+        sequence=1,
+        message_type="task.offer",
+        replayed=False,
+    )
+    checkpoint = AttemptCheckpoint(
+        task_id=TASK_ID,
+        attempt_id=ATTEMPT_ID,
+        last_command_sequence=1,
+        last_event_sequence=0,
+        state=AttemptCheckpointState.RECEIVED,
+        revision=1,
+    )
+    for index, invalid in enumerate(invalid_commands):
+        active = processor(tmp_path / f"invalid-baseline-{index}")
+        with monkeypatch.context() as scoped:
+            scoped.setattr(
+                command_processor_module,
+                "parse_executor_message",
+                lambda _source, value=invalid: value,
+            )
+            scoped.setattr(active.ledger, "receive_command", lambda _command: receipt)
+            scoped.setattr(active.ledger, "outbox_for_command", lambda _message_id: ())
+            scoped.setattr(active.ledger, "get_checkpoint", lambda _attempt_id: checkpoint)
+            with pytest.raises(ExecutorCommandRejected):
+                active.handle("ignored")
 
 
 def test_recovery_requeues_only_the_same_persisted_outbox_messages(tmp_path: Path) -> None:

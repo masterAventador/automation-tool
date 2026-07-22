@@ -84,9 +84,7 @@ def command(
             "idempotency_key": f"executor:h802:{message_type}:{sequence}:{message_id}",
             "sequence": sequence,
             "payload": (
-                {"task_event_sequence_baseline": 0}
-                if message_type == "task.offer"
-                else {}
+                {"task_event_sequence_baseline": 0} if message_type == "task.offer" else {}
             ),
             "task_id": str(TASK_ID),
             "execution_attempt_id": str(ATTEMPT_ID),

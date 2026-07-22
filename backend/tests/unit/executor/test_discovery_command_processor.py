@@ -7,12 +7,21 @@ from itertools import count
 from pathlib import Path
 from uuid import UUID
 
-from automation_tool.executor.command_processor import ExecutorCommandProcessor
+import pytest
+
+from automation_tool.executor.command_processor import (
+    ExecutorCommandProcessor,
+    ExecutorCommandRejected,
+)
 from automation_tool.executor.discovery_operation import (
     DouyinDiscoveryExecutionResult,
     DouyinDiscoveryOperationState,
 )
-from automation_tool.executor.ledger import AttemptCheckpointState, ExecutorLedger
+from automation_tool.executor.ledger import (
+    AttemptCheckpoint,
+    AttemptCheckpointState,
+    ExecutorLedger,
+)
 from automation_tool.protocol import (
     DouyinCandidate,
     DouyinCandidateSource,
@@ -200,8 +209,6 @@ def test_discover_rejects_missing_operation_or_mismatched_result_revision(
         clock=Clock(),
         id_source=Ids(),
     )
-    from automation_tool.executor.command_processor import ExecutorCommandRejected
-
     try:
         without_operation.handle(command())
     except ExecutorCommandRejected:
@@ -222,3 +229,25 @@ def test_discover_rejects_missing_operation_or_mismatched_result_revision(
         pass
     else:  # pragma: no cover - contract assertion
         raise AssertionError("mismatched revision unexpectedly crossed the wire")
+
+
+def test_discover_rejects_a_nonzero_internal_event_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = processor(tmp_path / "nonzero-checkpoint", Discovery(completed(1)))
+    monkeypatch.setattr(
+        active.ledger,
+        "get_checkpoint",
+        lambda _attempt_id: AttemptCheckpoint(
+            task_id=TASK_ID,
+            attempt_id=ATTEMPT_ID,
+            last_command_sequence=1,
+            last_event_sequence=1,
+            state=AttemptCheckpointState.RECEIVED,
+            revision=1,
+        ),
+    )
+
+    with pytest.raises(ExecutorCommandRejected):
+        active.handle(command())

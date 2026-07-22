@@ -802,6 +802,16 @@ async def test_acknowledgement_failure_expiry_and_wire_validation_are_closed() -
             sent_at=NOW,
         )
 
+    with pytest.raises(TaskCommandDeliveryRejected):
+        delivery_module._command_wire(
+            replace(
+                TaskCommandRecord.from_pending(pending_command()),
+                task_event_sequence_baseline=None,
+            ),
+            executor_id=EXECUTOR_ID,
+            sent_at=NOW,
+        )
+
     discovery_payload = DouyinDiscoveryCommandPayload.model_validate(
         {
             "discovery_version": "douyin.discovery.v1",
