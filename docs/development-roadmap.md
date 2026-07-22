@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-17 代码质量复审已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-18 通用更新底座选型与契约已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-17 已完成；下一项 H8-18，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-18 已完成；下一项 H8-19，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -353,7 +353,7 @@
 | H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ✅ 已完成 |
 | H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | ✅ 已完成 |
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ✅ 已完成 |
-| H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ⬜ 未开始 |
+| H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ✅ 已完成 |
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ⬜ 未开始 |
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ⬜ 未开始 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ⬜ 未开始 |
@@ -2713,14 +2713,28 @@
 - 真实边界：本任务验证的是代码安全边界、测试可信度和本地资源生命周期，没有访问默认浏览器 Profile、真实账号、系统钥匙串或制造平台副作用；Windows 配置已进入编译/契约门禁，涉及真实 Windows 安装与升级的最终证据仍由对应双平台任务独立完成
 - 后续：进入 `H8-18`，先评估现成更新 SDK 并冻结通用、与业务无关的更新契约；没有完成选型前不直接编写安装器状态机
 
+### H8-18 通用更新底座选型与契约
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：前置 H8-17 已完成后先把唯一台账置为 `🧪 RED`，新增 Rust 行为契约并由 `lib.rs` 接入测试编译；首跑准确失败于 `parse_update_release`、状态、决策、策略和错误闭集均不存在的 7 组 unresolved imports，没有先安装 SDK、补空实现或用文档评估冒充可执行契约
+- SDK 选型：依据官方 Tauri updater 文档、官方 crate API 与当日 crates.io/npm registry，选择 `tauri-plugin-updater 2.10.1` 并在 Cargo 清单/锁文件精确固定。官方底座原生支持 macOS/Windows，更新签名不可关闭，可分离 `download`/`install`，dynamic response 的 `raw_json` 可安全承载额外发布策略；因此复用其平台安装器、Minisign、下载和安装原语，自研通用协调层处理启动/周期/手动检查、可选/强制策略、缓存和 UI，不复制第三方安装实现
+- 最小权限：只引入 Rust crate，没有安装 `@tauri-apps/plugin-updater` JavaScript binding，没有在 `main` Capability 授予 updater Command，也没有注册联网/下载/安装入口。React 只定义 `AppUpdateGateway` 及脱敏 DTO；下载 URL、Minisign signature、官方 `Update` 对象和本机路径不会穿过 WebView 边界
+- Feed 与发布契约：官方 dynamic feed 无更新返回 204；200 JSON 固定规范 SemVer、HTTPS URL、签名、可选安全 notes/RFC3339 时间，并以 `update_contract` v1 携带受限 channel、`optional/forced`、`darwin/windows`、`aarch64/x86_64`、小写 SHA-256 与 `1..1 GiB` 大小。Rust 拒绝未知字段、插件/响应版本不一致、URL userinfo/fragment、非 HTTPS、非法策略/平台/架构/摘要/大小和不安全文本，并把 Artifact 与当前编译目标再次绑定；官方默认仅升级比较保持不被覆盖
+- 平台与签名：第一期冻结 macOS aarch64/x86_64 updater archive 和 Windows x86_64/aarch64 NSIS per-user 链，Windows 采用官方推荐 passive 无交互安装模式，不并行维护 MSI。Tauri Minisign、macOS Developer ID/notarization 与 Windows Authenticode 是三条独立门禁；发布私钥只允许进入受控构建环境，不进入服务、数据库、AppData、仓库或系统钥匙串
+- 状态契约：App 状态闭集为 `idle/checking/up_to_date/available/downloading/ready/installing/failed`，检查来源为 `startup/periodic/manual`，决策为 `install_now/defer/skip_version`，错误按 configuration/check/download/storage/install 阶段和固定代码投影。Rust 序列化与 TypeScript/Zod 严格解析保持 camelCase/蛇形值一致，下载进度不能超过已知总量，未知字段、私有 updater 字段、业务策略和 Bidi 文本全部 fail closed
+- GREEN 与门禁：H8-18 Rust 4 项行为测试和 TypeScript 2 项运行时契约先转绿；完整 Frontend 为 128 项 Node 契约、233 项 Vitest、5 项全局无头 Playwright、Lint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿。Rust 默认 `166 passed/4 ignored`、`desktop-e2e` `162 passed/4 ignored`、`control-plane-e2e` `167 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿；`cargo tree --locked -i tauri-plugin-updater` 证明唯一选中版本为 2.10.1
+- 真实边界与失败矩阵：本任务只交付 SDK 依赖可编译、协议解析、WebView 状态和架构决策，不声称已经联网检查、下载、缓存、安装、提示或升级；这些原调用方证据分别属于 H8-19～H8-22。测试没有启动 Tauri App、更新服务或安装器；唯一 Playwright UI Harness 全局无头，结束后 1420 无监听、无项目 App/浏览器/WDIO/临时目录残留
+- 文档与提交：同一任务同步产品规划 ADR-P005、前后端架构、工程结构、根/Frontend README 和唯一台账；实现、锁文件、测试与文档形成独立可回滚提交，不生成或提交任何真实签名公私钥
+- 后续：进入 `H8-19`，只在本任务闭集上实现可选/强制更新策略机和 App 私有持久状态；未完成策略不提前启动真实下载或安装
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-18`：评估现成更新 SDK，冻结通用版本、平台、签名、发布策略和状态契约；
-2. `H8-19`：实现可选/强制更新策略机，以及立即安装、暂缓和跳过版本的持久语义；
-3. `H8-20`：统一 App 启动、有界轮询和用户主动检查入口，完成后台下载、验签、恢复与新包覆盖旧缓存；
-4. `H8-21`：实现立即安装前安全退出、暂缓重复提示和强更下次启动静默安装协调；
-5. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
-6. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
-7. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `H8-19`：实现可选/强制更新策略机，以及立即安装、暂缓和跳过版本的持久语义；
+2. `H8-20`：统一 App 启动、有界轮询和用户主动检查入口，完成后台下载、验签、恢复与新包覆盖旧缓存；
+3. `H8-21`：实现立即安装前安全退出、暂缓重复提示和强更下次启动静默安装协调；
+4. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
+5. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
+6. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

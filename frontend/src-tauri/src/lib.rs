@@ -1,3 +1,4 @@
+pub mod app_updates;
 pub mod browser_discovery;
 pub mod browser_profiles;
 pub mod browser_settings;

@@ -22,6 +22,8 @@ pnpm tauri:dev
 
 当前 `src-tauri/capabilities/main.json` 不暴露任何 IPC 权限；后续每项原生能力必须随对应任务单独增加最小权限。`src-tauri/app-icon.svg` 是工程占位图标，不代表最终品牌设计。
 
+H8-18 已锁定 Rust `tauri-plugin-updater 2.10.1` 作为 macOS/Windows 安装原语，但尚未注册联网检查、下载或安装 Command。`src-tauri/src/app_updates.rs` 只验证官方 dynamic feed 的 `raw_json` 与通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的状态闭集投影安全版本、策略和 Artifact 元数据；React 不安装 updater JavaScript binding，`main` Capability 也不授予 updater 权限。策略持久化、后台下载、安装协调和真实签名包验收分别由 H8-19～H8-22 继续完成。
+
 设备身份和长期设备凭据只由 Rust 管理。正式 App 首启使用系统 CSPRNG 生成 Ed25519 私钥，并保存到 Tauri `app_data_dir` 下的固定 App 私有文件；长期 `atdc1` 凭据使用同一存储边界。目录在 Unix 为 `0700`、文件为 `0600`，写入使用同目录临时文件、落盘同步和原子替换；Windows 使用当前用户 AppData 继承的私有 ACL。React、Tauri Command、普通配置文件和 `localStorage` 均没有密钥或长期凭据读写面，也不调用 macOS Keychain 或 Windows Credential Manager，因此不会产生系统钥匙串授权提示。已存在的 32 字节私钥只复用不轮换，凭据可替换和删除；符号链接、非法权限、内容损坏、存储拒绝或随机源失败均 fail closed。`desktop-e2e` 构建只使用不落盘的临时身份，App 私有存储由 Rust 行为测试和正式 Tauri 启动验收覆盖。
 
 正式 `TauriControlPlaneTransport` 只调用注册过的 `check_control_plane_health` Command；Task 服务端状态由 `TauriTaskProjectionSource` 通过固定 `get_task_snapshot`、`list_task_snapshots` 和 `stream_task_projection_events` 消费。工作台以固定 `get_workbench_status` 与 `emergency_stop_workbench_task` 读取运行状态并提交紧停；新建页只通过 `TauriTaskCreationGateway` 调用 `create_douyin_search_exposure_task`，发送经 Zod 和 Rust 双重校验的封闭任务定义。运行详情通过 `TauriTaskRunControlGateway` 的四个固定 Command 提交暂停、恢复、取消与紧停，并以权威快照和持久事件展示状态、进度、时间线及已有 Action 结果。请求由 Rust `reqwest` 客户端从固定 local origin 发出，禁止 React 传入任意 URL、Header 或 bearer。Task 快照严格校验 `status/revision/lastEventSequence`、UTC 时间、降序稳定性和 opaque cursor；SSE 通过 Rust Tauri Channel 推送。TanStack Query 维护权威快照和创建/控制后失效，不建立 WebView EventSource 或第二事实源。请求禁止系统代理和重定向；设备签名及凭据注入只在 Rust 内完成。

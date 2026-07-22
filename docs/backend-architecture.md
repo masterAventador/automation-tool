@@ -814,6 +814,14 @@ GET  /api/v1/diagnostics
 
 当前机器契约实现平台状态查询和 logout prepare；prepare 只持久化 current Installation 的阻断门闩并返回 blocked revision，不负责也不能接收 Profile/Cookie/本机路径。登录处理、重新检查以及 prepare 之后的停止、删除、退出上报固定走本机 Tauri→Executor 链路。
 
+### 桌面更新分发
+
+H8-18 将桌面更新冻结为独立于运营业务的 Tauri dynamic update feed；H8-20 才实现部署入口，规划路径为 `GET /desktop-updates/v1/{channel}/{target}/{arch}/{current_version}`。该入口在产品登录、Installation 和业务 Session 之前也必须可用，所以不复用业务 Bearer；它只接受受限 channel、`darwin/windows`、`aarch64/x86_64` 和规范 SemVer，按发布配置返回 204 或官方 updater 200 JSON，并通过 HTTPS、限流和 CDN/对象存储保护，不读取 Task、平台账号、浏览器 Profile 或用户数据。
+
+200 响应的官方字段为 `version/url/signature/notes/pub_date`，额外 `update_contract` v1 只携带 `optional/forced`、目标平台、架构、SHA-256 和大小。发布私钥只在签名构建环境生成更新包，绝不进入服务进程、数据库、App 私有目录或仓库；客户端只内置公开验签公钥。Tauri updater 的 Minisign 是更新包内容信任根，macOS notarization/Developer ID 与 Windows Authenticode 仍是独立且必须同时通过的操作系统发布门禁。
+
+这个 feed 不属于 `control-plane.v1.json` 的业务 REST 客户端，也不生成给 React 的 HTTP DTO；Rust 官方 updater 是唯一网络调用方，`app_updates.rs` 只向 WebView 投影不含 URL、签名和本机路径的封闭状态。后续若把 feed 拆到独立域名或服务，只改受控发布配置，不改变 App 状态机和业务 API。
+
 ### Executor
 
 ```text
