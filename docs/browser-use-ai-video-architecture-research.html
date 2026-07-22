@@ -474,6 +474,25 @@
         <div class="node"><b>5. 验收与渲染</b><small>lint、截图预览、用户确认、逐帧渲染、成片入库。</small></div>
       </div>
 
+      <h3>没有 AI 时能渲染，但没人替用户从一句话写出 H5</h3>
+      <p>上游有完整的无 AI 手工流程：<code>init</code> 从空白/示例建立工程，人工编辑 <code>index.html</code> 和 Composition，Studio 提供实时预览、时间线移动与裁切、属性检查、代码编辑和逐帧定位，再通过 <code>lint / check / snapshot / render</code> 输出 MP4。整个渲染阶段不要求 LLM。</p>
+      <p>它的 7 步 Pipeline（抓取、设计、策略、脚本分镜、配音校时、构建、验收）和 19 个 skills 是写给外部 AI 编码助手或人工团队的制作规范，不是库内置了一个会自动创作的模型。skills 更接近路由、操作手册、领域规则和配套脚本说明，并非调用一次就能返回成片的 API。Studio 也不是剪映式“输入一句话就生成”，它主要负责已有 Composition 的预览和编辑。</p>
+      <div class="two">
+        <article class="card">
+          <h3>AI 负责创作与决策</h3>
+          <p>理解 Brief、选择 workflow、生成 DESIGN/脚本/分镜、挑选风格和动效零件、编写可按时间定位的 HTML/CSS/JavaScript，并调用 lint/check/snapshot 查看结果后局部修正。</p>
+        </article>
+        <article class="card">
+          <h3>程序负责执行与成片</h3>
+          <p>受限工具完成网页抓取、配音、转写和检查；Composition 冻结后，Chromium 按时间点逐帧取图，FFmpeg 编码、混音并输出 Artifact，不再调用模型。</p>
+        </article>
+      </div>
+      <p>AI 不是给每一帧单独写代码。它只写一套可 seek 的时间轴和动画规则；渲染器随后计算第 0 秒、第 1/30 秒、第 2/30 秒等状态并取图。因此自动创作阶段需要 AI，最终逐帧渲染阶段不需要 AI 持续在线。</p>
+      <div class="callout warn">
+        <strong>automation-tool 的“一句话自动制作”必须自带受限 AI 创作代理。</strong>
+        App 配置“视频创作模型”，使用 submodule 中锁定并审计过的 workflow/skill/reference，把 Brief 或网站抓取结果转成 DESIGN、SCRIPT、STORYBOARD 和 H5 Composition。Agent 只能调用 App 提供的抓取、配音、转写、检查、截图和渲染等封闭工具；模型只能产出封闭 Artifact 和 RenderJob 私有目录里的代码，不获得 Shell、任意文件、运营 Profile、密钥或任意网络工具。未配置模型时，只开放固定模板的文字/颜色/Logo/图片/视频替换与 Studio 手工精修，不能显示成一句话生成可用。
+      </div>
+
       <h3>网址转视频不是“录屏”，而是抓取品牌后重新编排</h3>
       <p>官网的 URL → Video 会抓取页面各滚动位置的截图、计算后的配色、字体文件、图片、SVG、Lottie、页面视频、可见文字、区块、按钮和动画，再由 Agent 生成品牌说明、脚本、分镜、旁白和 HTML 镜头。它可以做品牌短片、产品演示、发布预告或功能介绍，并支持 16:9 / 9:16、旁白、字幕、音乐、音效、声音和核心信息设置。</p>
       <div class="callout warn">
@@ -769,6 +788,7 @@
         <li><a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/LICENSE">MoneyPrinterTurbo MIT License</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/pyproject.toml">v1.3.2 运行时依赖</a></li>
         <li><a href="https://github.com/heygen-com/hyperframes">Hyperframes 官方仓库</a>；<a href="https://github.com/heygen-com/hyperframes/releases/tag/v0.7.68">v0.7.68 正式版</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/LICENSE">Apache-2.0 License</a></li>
         <li><a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/engine/src/services/browserManager.ts">浏览器启动、BeginFrame 探测与截图回退源码</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/producer/README.md">macOS/Windows 默认截图模式说明</a></li>
+        <li><a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/README.md">AI Agent 与手工 CLI 两种入口</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/docs/packages/studio.mdx">Studio 预览/时间线/属性/代码编辑能力</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/docs/guides/pipeline.mdx">7 步制作 Pipeline</a></li>
         <li><a href="https://www.hyperframes.dev/design">官网 12 套 frame.md 整体风格</a>；<a href="https://www.hyperframes.dev/">官网公开 100 项 Catalog 与 Examples</a>；<a href="https://www.hyperframes.dev/website">官网 URL → Video 页面</a></li>
         <li><a href="https://hyperframes.heygen.com/guides/website-to-video">Website to Video 官方工作流</a>；<a href="https://hyperframes.heygen.com/catalog/blocks/data-chart">Catalog 官方说明与安装入口</a></li>
         <li><a href="https://www.pexels.com/license/">Pexels License</a>；<a href="https://pixabay.com/service/license-summary/">Pixabay Content License</a>；<a href="https://coverr.co/license">Coverr License</a></li>

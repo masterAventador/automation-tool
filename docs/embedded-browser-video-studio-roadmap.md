@@ -243,7 +243,49 @@ App 应把这一能力直接放在“视频制作设置 → 文案模型服务�
 
 上游当前稳定版本核对为 v0.7.68，Apache-2.0，要求 Node 22 以上。建议同样以固定 submodule 集成，因为官网风格资源不全部包含在发布的命令行 npm 包中，而且需要离线、可复现和版本锁定。
 
-### 6.2 官网当前公开的 12 套风格
+### 6.2 AI 创作层与无 AI 手工流程
+
+渲染器本身不依赖 AI。已经有合法 HTML/CSS/JavaScript Composition 时，上游默认手工流程可以完整运行：
+
+    init 从空白或示例建立工程并导入素材
+        → 人工编辑 index.html / compositions/*.html
+        → Studio 实时预览、时间线移动/裁切、属性检查和代码编辑
+        → lint / check / snapshot
+        → render 输出 MP4
+
+这条流程的问题不是不能渲染，而是“谁来写 H5 代码”。Studio 是预览和编辑器，不会仅凭一句话自动写出脚本、分镜和动画 Composition。
+
+上游提供的 7 步 Pipeline 和 skills 是给外部 AI 编码代理或人工团队使用的制作规范：Capture → Design → Strategy → Storyboard/Script → Voice/Timing → Build → Validate。它们不等于库内置了 LLM，也不会在用户没有配置模型时自动创作。skills 本质上是路由、操作手册、领域规则和配套脚本说明，不是“调用一下就生成视频”的远程 API。
+
+对“一句话自动成片”而言，AI 必须贯穿创作与验收决策，但不进入逐帧渲染循环：
+
+    AI 创作与决策
+    理解 Brief / 选择 workflow
+        → 生成 DESIGN、SCRIPT、STORYBOARD
+        → 选择风格和 Catalog 零件
+        → 编写可按时间 seek 的 HTML/CSS/JavaScript Composition
+        → 调用 lint/check/snapshot 并查看结果
+        → 局部修正，达到门禁后提交 RenderJob
+
+    确定性程序执行
+    capture / TTS / transcribe / lint / snapshot / render
+        → Chromium 按时间点逐帧取图
+        → FFmpeg 编码、混音和封装
+        → Artifact 入库
+
+AI 不为每一帧分别写一份代码。它写的是一套时间轴和动画规则，渲染器随后把第 0 秒、第 1/30 秒、第 2/30 秒等时间点确定性求值并取图。RenderJob 一旦冻结输入，最终逐帧取图与 MP4 合成不需要模型在线。
+
+automation-tool 必须增加自己的受限 `MotionAuthoringAgent`：
+
+- 默认“AI 自动制作”使用 App 已配置的创作模型，把一句话或网站抓取结果转成 DESIGN、SCRIPT、STORYBOARD 和 Composition；
+- 固定使用 submodule 中经过审计的 workflow/skill/reference 版本，运行时不联网安装或更新 skills；Agent 读取这些规则后只能调用 App 暴露的封闭工具，不直接执行 skill 里的任意命令；
+- 模型只返回封闭的结构化 Artifact 和待写入 RenderJob 私有目录的 Composition 内容；capture、TTS、转写、lint、snapshot 和 render 由类型化工具执行，模型不获得 Shell、任意文件、浏览器 Profile、密钥或任意网络工具；
+- 模型未配置时，“一句话自动制作”和“网址自动成片”明确不可用，不调用隐藏默认服务；用户仍可从固定模板开始，替换声明过的文字、颜色、Logo、图片和视频，并在 Studio 中手工精修和渲染；
+- 设置页使用普通用户能理解的“视频创作模型”名称，并说明哪些脚本、网页文字和品牌资料会发送给外部模型；渲染仍可完全在本机完成。
+
+因此 Studio 是生成后的预览与精修界面，AI 创作代理才是一句话到 H5 的作者，两者不能互相冒充。
+
+### 6.3 官网当前公开的 12 套风格
 
 2026-07-22 实际检查 https://www.hyperframes.dev/design ：页面存在 12 个风格预览 iframe，公开画廊为以下 12 套。仓库还存在一套没有出现在当前官网公开画廊的 code-editorial 模板，首期不混入产品清单；若以后官网正式增加，再走版本升级任务。
 
@@ -262,7 +304,7 @@ App 应把这一能力直接放在“视频制作设置 → 文案模型服务�
 | daisy-days | 雏菊晴日 | 花园粉彩、深色描边、硬阴影、圆润字体 | 亲子、教育、手作、温暖生活、女性向内容 |
 | editorial-forest | 森林刊物 | 绿色、粉色、奶油三色，衬线刊物感 | 自然、可持续、人文、慢生活、品质品牌 |
 
-### 6.3 App 风格选择体验
+### 6.4 App 风格选择体验
 
 - 首页先根据内容、行业、品牌色和信息密度推荐 2～3 套，用户仍可展开查看全部 12 套；
 - 每套卡片展示中文名、真实预览、适合内容、明暗、信息密度和可读性标签；
@@ -273,7 +315,7 @@ App 应把这一能力直接放在“视频制作设置 → 文案模型服务�
 - 当前固定版本内若风格缺失或摘要变化必须 fail closed；每个 RenderJob 使用冻结副本保证本次任务可以重现，不承诺首发前不存在的跨版本项目迁移；
 - UI 只显示中文风格名；上游英文标识只保留在适配器映射、内部清单和技术诊断中。
 
-### 6.4 网址转视频到底是什么
+### 6.5 网址转视频到底是什么
 
 官网的 URL → Video 不是录制一遍网页，也不是把网址直接交给视频模型。开源工作流是：
 
@@ -299,7 +341,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 上游已经对素材下载的部分 URL 和重定向做了私网拒绝，但主页面导航仍直接调用 page.goto。App 不能把这一点当作完整的 SSRF 防护，必须在外围网关和浏览器请求拦截中补齐。
 
-### 6.5 Catalog 的 100 个不是 100 套风格
+### 6.6 Catalog 的 100 个不是 100 套风格
 
 2026-07-22 实查官网 Catalog 页，页面明确展示 100 个可复用项。公开 catalog-index.json 中是 76 个完整画面块和 24 个局部组件。
 
@@ -331,7 +373,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 产品交互不让普通用户从 100 个技术名中盲选。默认由 AI 根据分镜和平台自动挑选；高级设置按“转场、字幕、身份条、图表地图、社交展示、3D 效果”等中文分组开放全部 100 个，并为每项提供预览、性能等级、适用场景和权利提示。
 
-### 6.6 官网说话人像示例的真实边界
+### 6.7 官网说话人像示例的真实边界
 
 官网的 avatar-explainer 预览中可以直接看到 avatar-scene12-bg-video.mp4 和 avatar-scene3-bg-video.mp4；页面把人物视频作为静音画面轨，再把对应 mp4 音轨单独放进 audio 元素。另一个财务复盘示例也加载了现成的人物讲话视频。
 
@@ -339,7 +381,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 
 本期允许把用户已经拥有且明确授权的视频作为普通输入素材，但不提供数字人创建、真人克隆或口型生成入口。这些仍是未来第三种方案的范围。
 
-### 6.7 渲染安全边界
+### 6.8 渲染安全边界
 
 模型生成的 HTML/JavaScript 可能包含恶意导航、远程脚本、文件访问或死循环。渲染 Worker 必须：
 
@@ -440,7 +482,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | VF-02 | LocalVideoOrchestrator 生命周期 | Tauri 管理 Python/Node Worker 的启动、随机端口、会话令牌、健康、取消、崩溃恢复、版本握手和退出 | VF-01 |
 | VF-03 | RenderJob 私有工作区与 Artifact 导入 | 每任务隔离、路径 containment、摘要、配额、断点、原子导入、保留/删除和磁盘满失败矩阵 | VF-01 |
 | VF-04 | 统一 FFmpeg/ffprobe 供应链 | 锁版本、摘要、许可证、编解码器、macOS/Windows 打包；验证两种制作方式兼容后才共享一套二进制 | VF-02 |
-| VF-05 | 模型与服务密钥设置 | Rust 管理秘密；React 只见“已配置”；按制作方式提供连接测试、超时、额度和错误脱敏 | VF-02 |
+| VF-05 | 模型与服务密钥设置 | Rust 管理秘密；React 只见“已配置”；区分“文案模型”和“视频创作模型”，可复用同一服务配置但权限/用途分别说明，并提供连接测试、超时、额度和错误脱敏 | VF-02 |
 | VF-06 | 左侧“视频制作”入口与页面骨架 | 接入现有 WorkbenchShell，完成新建、脚本/分镜、设置、预览、任务和成片页面；无假数据冒充运行结果 | VF-01 |
 | VF-07 | 两种制作方式选择器 | 两张中文卡片清楚展示适用/不适用、示例、耗时、资源、网络和隐私；未来方案不展示 | VF-05,VF-06 |
 
@@ -465,15 +507,15 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 | BM-02 | 隔离 Node 22 Worker | Tauri sidecar 打包命令行/SDK 适配器，验证版本握手、无全局 Node 前置、取消、退出和错误脱敏 | BM-01,VF-02 |
 | BM-03 | 共用 Chromium 渲染适配 | 只接收 Rust 已验证的单一完整 Chromium 路径，以独立无头进程和 RenderJob 临时目录启动；显式设置实际 Chromium major，禁用上游下载、系统浏览器发现和缓存 fallback | BM-02,EB-02 |
 | BM-04 | HTML 渲染安全沙箱 | 私有目录、默认断网、本地资源、导航/下载/file URL 拦截、CPU/内存/帧数/大小/时长限制和 prompt injection 测试 | BM-02,BM-03,VF-03 |
-| BM-05 | 一句话到动效视频编排 | Brief→脚本→分镜→HTML/动画→lint→预览→渲染→QA；任何阶段失败可局部重做且不覆盖已批准版本 | BM-04,VF-01 |
+| BM-05 | AI 一句话到动效视频编排 | 受限 MotionAuthoringAgent 读取锁定 workflow，以封闭工具把 Brief→DESIGN/脚本/分镜→可 seek 的 HTML/动画→lint/check/snapshot→局部修正→提交 RenderJob；逐帧 Chromium/FFmpeg 不调用模型，Agent 无 Shell/任意文件/Profile/密钥权限，未配置模型时自动制作明确不可用 | BM-04,VF-01,VF-05 |
 | BM-06 | 12 套风格目录与中文选择器 | 全部 12 套有预览、中文名、适用场景、标签和键盘可访问性；少一套、重复或混入未公开模板都失败 | BM-01,VF-07 |
-| BM-07 | 风格推荐、品牌微调与冻结 | 推荐 2～3 套但可看全量；品牌色/字体/Logo 覆盖、实际内容预览、frame.md 校验、版本/摘要冻结和旧项目重现 | BM-05,BM-06 |
-| BM-08 | App 原生编辑、预览与 Artifact 导入 | 不暴露上游 Studio 品牌；App 内编辑脚本/分镜/风格、播放预览、看进度、取消和管理成片 | BM-05,BM-07,VF-06 |
+| BM-07 | 风格推荐、品牌微调与冻结 | 推荐 2～3 套但可看全量；品牌色/字体/Logo 覆盖、实际内容预览、frame.md 校验、版本/摘要冻结和当前 RenderJob 重现 | BM-05,BM-06 |
+| BM-08 | App 原生编辑、Studio 精修与 Artifact 导入 | 不暴露上游 Studio 品牌；App 内编辑脚本/分镜/风格、播放预览、看进度、取消和管理成片；无模型时允许从固定模板替换声明变量/素材并手工精修，但不伪装成一句话生成 | BM-05,BM-07,VF-06 |
 | BM-09 | 公共网站抓取与安全网关 | 只允许获授权的公开 http/https URL；协议、DNS/IP、每跳重定向、请求拦截、私网/元数据拒绝、大小/时长/跨域限制和网页指令注入测试 | BM-04 |
 | BM-10 | 网址转产品视频工作流 | 抓取→品牌说明→脚本/分镜→风格→旁白/字幕/音乐→HTML→预览→渲染；支持横竖屏和品牌短片、产品演示、发布预告、功能介绍 | BM-05,BM-07,BM-09 |
 | BM-11 | 公开 100 项 Catalog 固定与权利审计 | 固定 76 个画面块、24 个局部组件的清单/摘要/中文分类；逐项审计远程依赖、字体、素材、作者、商标、GPU 要求和替换策略 | BM-01,AV-02 |
 | BM-12 | 100 项动效库自动选用与高级界面 | AI 可按分镜自动选，用户可按中文分类查看全部 100 项预览并覆盖；每项显示性能、适用、权利和离线状态；不把它们叫作整体风格 | BM-08,BM-10,BM-11 |
-| BM-13 | 确定性与正式包验收 | 同输入/版本/字体/资源生成稳定结果；一句话、网址转视频、12 套整体风格和公开 100 项逐项冒烟；并发、崩溃、休眠、磁盘和双平台包验证 | BM-08..BM-12,VF-04 |
+| BM-13 | 确定性与正式包验收 | 同输入/版本/字体/资源生成稳定结果；一句话、网址转视频、无模型手工模板边界、12 套整体风格和公开 100 项逐项冒烟；并发、崩溃、休眠、磁盘和双平台包验证 | BM-08..BM-12,VF-04 |
 
 ### 9.6 组合质量（5 项）
 
@@ -541,6 +583,7 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 - 磁盘满、CPU/内存不足、取消、紧停、App 退出、休眠和重启恢复；
 - 两个 Worker 与运营 RPA 并发导致资源争抢；
 - 上游 WebUI/Studio 出现真实项目名、外链或原始错误；
+- 视频创作模型未配置却显示可自动生成、模型获得 Shell/任意文件/运营 Profile/秘密或用户资料发送范围未说明；
 - 当前锁定版本内风格缺失、摘要变化或同一 RenderJob 无法重现；
 - 网站 URL 指向私网、云元数据、登录页、跳转换域、DNS 重绑定或超大页面；
 - 网页文字诱导模型执行工具、泄漏密钥或偏离用户视频目标；
@@ -581,6 +624,9 @@ automation-tool 不调用或逆向官网私有生成接口。App 使用固定 su
 - Hyperframes v0.7.68：https://github.com/heygen-com/hyperframes/releases/tag/v0.7.68
 - 浏览器启动与 BeginFrame/截图分支：https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/engine/src/services/browserManager.ts
 - macOS/Windows 默认截图模式说明：https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/producer/README.md
+- 手工 CLI 与 AI 两种入口：https://github.com/heygen-com/hyperframes/blob/v0.7.68/README.md
+- Studio 编辑能力：https://github.com/heygen-com/hyperframes/blob/v0.7.68/docs/packages/studio.mdx
+- 7 步制作 Pipeline：https://github.com/heygen-com/hyperframes/blob/v0.7.68/docs/guides/pipeline.mdx
 - 官网 12 套风格：https://www.hyperframes.dev/design
 - 官网 URL 转视频：https://www.hyperframes.dev/website
 - 官网公开 100 项 Catalog：https://www.hyperframes.dev/
