@@ -86,6 +86,10 @@ impl CachedUpdateRecord {
         self.size_bytes
     }
 
+    pub fn matches_release(&self, release: &UpdateRelease) -> bool {
+        self.matches(release)
+    }
+
     fn from_release(release: &UpdateRelease) -> Self {
         Self {
             version: release.version.as_str().to_owned(),
@@ -204,6 +208,39 @@ impl AppUpdateCache {
             return Err(storage_error());
         }
         Ok(Some(record))
+    }
+
+    pub fn read_verified_package(
+        &self,
+        release: &UpdateRelease,
+        source: &DownloadSource,
+    ) -> Result<Vec<u8>, UpdateDownloadError> {
+        let record = self.cached()?.ok_or_else(storage_error)?;
+        if !record.matches(release) {
+            return Err(manifest_error());
+        }
+        let metadata = safe_file_metadata(&self.package_path)?.ok_or_else(storage_error)?;
+        ensure_private_file_permissions(&metadata)?;
+        let expected_size = usize::try_from(record.size_bytes).map_err(|_| storage_error())?;
+        let mut package = Vec::with_capacity(expected_size);
+        File::open(&self.package_path)
+            .and_then(|mut file| file.read_to_end(&mut package))
+            .map_err(|_| storage_error())?;
+        if package.len() != expected_size || digest_bytes(&package) != record.sha256 {
+            return Err(storage_error());
+        }
+        let signature_text = STANDARD
+            .decode(&source.signature)
+            .map_err(|_| signature_error())?;
+        if signature_text.is_empty() || signature_text.len() > MAX_SIGNATURE_BYTES {
+            return Err(signature_error());
+        }
+        let signature_text = std::str::from_utf8(&signature_text).map_err(|_| signature_error())?;
+        let signature = Signature::decode(signature_text).map_err(|_| signature_error())?;
+        self.public_key
+            .verify(&package, &signature, false)
+            .map_err(|_| signature_error())?;
+        Ok(package)
     }
 
     pub async fn download<F>(

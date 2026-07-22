@@ -110,6 +110,17 @@ pub enum UpdateDecision {
     SkipVersion,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdatePolicyAction {
+    Prompt,
+    Deferred,
+    Skipped,
+    Suppressed,
+    InstallRequested,
+    Forced,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateErrorStage {
@@ -151,8 +162,12 @@ pub enum UpdateState {
     },
     Ready {
         release: UpdateRelease,
+        action: UpdatePolicyAction,
     },
     Installing {
+        release: UpdateRelease,
+    },
+    InstallationLaunched {
         release: UpdateRelease,
     },
     Failed {
@@ -337,7 +352,8 @@ mod tests {
 
     use super::{
         current_update_platform, parse_update_release, UpdateArchitecture, UpdateCheckTrigger,
-        UpdateDecision, UpdateErrorCode, UpdateErrorStage, UpdatePolicy, UpdateState, UpdateTarget,
+        UpdateDecision, UpdateErrorCode, UpdateErrorStage, UpdatePolicy, UpdatePolicyAction,
+        UpdateState, UpdateTarget,
     };
 
     fn release_json(policy: &str) -> serde_json::Value {
@@ -433,8 +449,12 @@ mod tests {
             },
             UpdateState::Ready {
                 release: release.clone(),
+                action: UpdatePolicyAction::Prompt,
             },
-            UpdateState::Installing { release },
+            UpdateState::Installing {
+                release: release.clone(),
+            },
+            UpdateState::InstallationLaunched { release },
             UpdateState::Failed {
                 stage: UpdateErrorStage::Download,
                 code: UpdateErrorCode::TransportUnavailable,
@@ -450,6 +470,7 @@ mod tests {
             "downloading",
             "ready",
             "installing",
+            "installation_launched",
             "failed",
             "startup",
             "manual",

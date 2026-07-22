@@ -144,6 +144,7 @@ frontend/
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
 │   │   ├── app_update_cache.rs    # Range 恢复、SHA-256/Minisign 流式验证与唯一私有候选缓存
 │   │   ├── app_update_coordinator.rs # 启动/周期/手动统一检查、并发门和 official updater 适配
+│   │   ├── app_update_installation.rs # 缓存重验、运行环境安全退出与官方安装/重启交接
 │   │   ├── app_update_policy.rs   # 可选/强制更新决策、单调版本与 App 私有持久状态
 │   │   ├── app_updates.rs         # 官方 updater raw JSON 校验与通用状态/决策契约
 │   │   ├── browser_discovery.rs  # macOS/Windows 标准浏览器原生发现、签名与路径 identity
@@ -249,11 +250,13 @@ B5-04 的 `browser_settings.rs` 是选择边界而不是第二套发现逻辑。
 
 B5-05 的 `browser_profiles.rs` 是后续浏览器运行时唯一 Profile 组合根。Tauri setup 从自身 AppData 管理唯一 Store；它当前只允许本机生成/打开 canonical UUIDv4 抖音 Profile，未注册 WebView Command。Unix 用父目录 fd 相对创建/打开并保持 dev+inode，Windows 用父 HANDLE 相对 `NtCreateFile` 并保持 volume/file index；每层私有权限、symlink/reparse、最终路径和重开 identity 均 fail closed。B5-06/B5-07 必须继续使用该对象，不能重新从字符串路径构造 Profile。
 
-H8-18 的 `src-tauri/src/app_updates.rs` 是 updater 原生响应进入产品状态前的唯一契约边界。官方 `tauri-plugin-updater` 持有网络 URL、签名和安装对象；该模块只从其 `raw_json` 验证通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的闭集投影版本、channel、可选/强制策略、平台、架构、摘要、大小和安全发布说明。React 不导入 updater binding，Capability 不开放 updater Command；H8-19～H8-21 必须继续在这个 Rust 边界内实现策略、私有缓存和安装协调，不能在业务 Feature 复制状态机。
+H8-18 的 `src-tauri/src/app_updates.rs` 是 updater 原生响应进入产品状态前的唯一契约边界。官方 `tauri-plugin-updater` 持有网络 URL、签名和安装对象；该模块只从其 `raw_json` 验证通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的闭集投影版本、channel、可选/强制策略、平台、架构、摘要、大小和安全发布说明。React 不导入 updater binding，Capability 不开放 updater Command；H8-19～H8-22 继续在这个 Rust 边界内实现策略、私有缓存、安装协调和 UI，不能在业务 Feature 复制状态机。
 
 H8-19 的 `src-tauri/src/app_update_policy.rs` 是唯一更新决策机。正式 Tauri setup 管理单实例，它以包版本建立不会下降的 floor，并在 `app-updates/update-policy-v1` 原子保存最高已见 release identity、可选决策和 revision；持久文件没有 URL、签名、notes、路径或业务数据。每次提示只接受一个决策，新观察才允许再次决策；强更、回退、同版本换包和存储失败全部拒绝。后续 scheduler、下载缓存、安装协调和 UI 只消费它的 action，不得自行解释 `defer/skip/forced`。
 
-H8-20 的 `app_update_coordinator.rs` 是更新调度的唯一组合根：official updater 检查适配、启动/周期/手动触发、重叠检查合并、策略观察和公开状态都在此串行；生产 endpoint/公钥来自构建期验证配置，React 不能传 URL。`app_update_cache.rs` 只持有 Rust 内部 `DownloadSource`，固定管理 `app-updates/cache-v1` 的 partial/package/两份小清单；它不把 URL、签名或路径写盘，只有 Range 恢复后的完整大小、SHA-256 和 Minisign 都通过才原子替换旧 package。H8-21 安装协调必须消费这个唯一已验证 package，不能另建下载器或绕开缓存清单。
+H8-20 的 `app_update_coordinator.rs` 是更新调度的唯一组合根：official updater 检查适配、启动/周期/手动触发、重叠检查合并、策略观察和公开状态都在此串行；生产 endpoint/公钥来自构建期验证配置，React 不能传 URL。`app_update_cache.rs` 只持有 Rust 内部 `DownloadSource`，固定管理 `app-updates/cache-v1` 的 partial/package/两份小清单；它不把 URL、签名或路径写盘，只有 Range 恢复后的完整大小、SHA-256 和 Minisign 都通过才原子替换旧 package。
+
+H8-21 的 `app_update_installation.rs` 是唯一安装交接边界。协调层把当前 official `Update` 作为不序列化的 installer 保留；立即安装或 startup 自动安装时先让 cache 以 release identity 和当前签名重验完整 bytes，再隐藏窗口、停止 Executor/释放 Profile，最后调用官方 `Update::install`。预检失败不触碰运行环境，停止或安装失败恢复窗口；Windows 由官方安装器退出接管，macOS 安装成功后 Tauri restart。`decide_app_update` 只接收封闭决策枚举，不接收版本、URL、签名、bytes 或路径；安装探针同时要求 debug、`desktop-e2e` 且排除 `control-plane-e2e`，release/生产和其他验收特性不编译该类型，仅为 H8-21 隐藏 App 验证交接顺序，H8-22 必须以真实签名包替代该平台底层探针。H8-21 配置另用 `frontend/dist-h821`，不复用 production `dist`；runner 前后精确清理它，避免 release 与验收构建资产相互覆盖。
 
 规则：
 
@@ -733,7 +736,7 @@ ActorContext + tenant/RBAC/Entitlement + Core Approval/Audit/Artifact
 | 打开文件后的稳定 identity 检查 | 提取迁移 | `E4-05` | 覆盖验证后替换、目录成员替换和入口被调包；macOS/Windows 分别验证 |
 | 凭据、Cookie、URL 和私有路径脱敏规则 | 提取迁移 | `E4-10` | 与 Python Executor 使用同一脱敏 fixtures，避免两端结论漂移 |
 | `CrashRecoveryPolicy` | 移位迁移 | `E4-08` | 归入 Executor 监管模块，不留在包验证模块 |
-| HTTPS 下载、redirect allowlist、在线安装 | 延后 | MVP 之后单独立项 | MVP 的 Executor 随 App 安装包交付；没有明确更新威胁模型前不做在线 Sidecar 更新器 |
+| Executor Sidecar 自行 HTTPS 下载、redirect allowlist、在线安装 | 删除 | — | Executor 仍随 App 安装包交付；通用 App 更新已由 H8-18～H8-22 的受控 feed、官方 updater、签名缓存和原生安装边界负责，Sidecar 不建立第二套更新器 |
 | `reqwest::blocking` 下载器和远程 URL 输入 | 删除 | — | Tauri 不接受 React/Control Plane 下发的任意下载 URL |
 | 单文件名 `social-operations-sidecar` | 删除 | — | 改为平台相关 PyInstaller `onedir` manifest，不沿用旧产品命名 |
 | 自定义 `x.y.z` 字符串比较 | 按新契约重写 | `E4-05` | 用受维护的语义版本库或严格内部版本类型，并覆盖预发布/非法版本 |

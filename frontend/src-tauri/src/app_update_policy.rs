@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+pub use crate::app_updates::UpdatePolicyAction;
 use crate::app_updates::{
     UpdateArchitecture, UpdateDecision, UpdatePolicy, UpdateRelease, UpdateTarget,
     MAX_UPDATE_ARTIFACT_BYTES,
@@ -16,17 +17,6 @@ use crate::secure_store::{AppDataSecretStore, SecretStore};
 const UPDATE_POLICY_SCHEMA_VERSION: u8 = 1;
 const UPDATE_POLICY_DIRECTORY: &str = "app-updates";
 const UPDATE_POLICY_FILE: &str = "update-policy-v1";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdatePolicyAction {
-    Prompt,
-    Deferred,
-    Skipped,
-    Suppressed,
-    InstallRequested,
-    Forced,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UpdatePolicyErrorCode {

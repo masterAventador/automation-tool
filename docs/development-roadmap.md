@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-20 后台检查与下载已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-21 安装与重启协调已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-20 已完成；下一项 H8-21，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-21 已完成；下一项 H8-22，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -356,7 +356,7 @@
 | H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ✅ 已完成 |
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ✅ 已完成 |
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
-| H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ⬜ 未开始 |
+| H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ✅ 已完成 |
 | H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | ⬜ 未开始 |
 
 ## 14. Wave 9：双平台安装包与本地候选版
@@ -2761,11 +2761,27 @@
 - 真实边界：本任务完成了 feed、检查、下载、验签、恢复和唯一缓存，没有声称已调用安装器、退出/重启 App、弹出选择 UI、实现强更下次启动安装或完成真实签名包跨版本升级；这些严格属于 H8-21/H8-22
 - 后续：进入 `H8-21`，让立即安装先安全退出主 App，暂缓/跳过继续消费 H8-19 策略，强更在已验证包存在的下次启动静默进入官方安装；不得重新下载、重新解释策略或从 WebView 传安装路径
 
+### H8-21 安装与重启协调
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：先把唯一台账置为 `🧪 RED`，新增安装交接集成测试后执行 `cargo test --test app_update_installation --no-run`；编译唯一失败于正式库没有 `app_update_installation` 模块，证明测试先于实现且未以空模块或 acceptance-only Command 冒充产品能力
+- 唯一决策入口：新增正式 `decide_app_update`，只接受 `install_now/defer/skip_version` 封闭枚举；它和 startup/periodic/manual 检查共用同一原子操作门，只有当前 `ready/prompt` 可接受一次决策。`defer` 本次收敛为 deferred，下一次任一检查重新成为 prompt；`skip_version` 让 identity 不变的版本持续 suppressed，新版本仍由 H8-19 单调策略清除旧决策；WebView 不传版本、URL、signature、bytes 或路径
+- 安装交接：新增 `AppUpdateInstallationCoordinator`。它在触碰运行环境前从唯一私有缓存读取与 release identity 精确匹配的 package，并以当前 official response 的签名重新验证长度、SHA-256 和 Minisign；随后隐藏可见窗口、调用既有 `ExecutorPlatformService.shutdown_for_app_exit()` 停止完整 Executor 树并释放浏览器 Profile，最后才把内存 bytes 交给锁定的官方 `Update::install`。预检失败不停止 App；停止或安装失败恢复已隐藏窗口，错误只投影固定 code
+- 平台语义：Windows official updater 在安全退出回调后启动 NSIS/MSI 并直接退出进程；macOS official updater 必须由仍存活的进程替换 `.app`，成功后调用 Tauri restart。因此通用层统一保证“UI 隐藏 + Executor/Profile 已退出后进入安装”，不伪造一个与官方 SDK 冲突的跨平台进程模型，也没有复制 macOS/Windows 安装器
+- 强更与恢复：startup 只有在检查得到 `forced` 或已持久化 `install_requested`，并且启动前已经存在 exact verified cache 时才自动安装；同一次启动刚完成的强更下载保持 ready，下一次启动再安装。缓存缺失/损坏、签名变化、运行环境停止失败、安装器失败和重叠安装全部 fail closed；安装失败保留持久意图，后续启动可从同一原路径重试
+- 测试隔离：正式 production/release 构建只包含 official installer；无副作用安装探针以 `debug_assertions + desktop-e2e + 非 control-plane-e2e` 三重条件隔离，release 和其他验收特性中连探针类型和绕过分支都不编译。React 仍无 JavaScript updater binding，`main` Capability 仍无 updater 权限，发布签名私钥仍不在仓库、App、AppData 或系统钥匙串
+- 隐藏 App 原入口：`pnpm test:h8-21-app` 使用独立 `com.aventador.automationtool.h821acceptance`、`visible:false`、动态 HTTPS/WDIO 端口、临时证书和正式 `create_app(database=None, desktop_update_catalog=...)` feed。第一轮 App 从 0.2.0 optional 完成暂缓→手动再提示→跳过→同版本 suppressed→发现 0.3.0 恢复 prompt→立即安装交接；清理 AppData 后第二轮 forced 首启只下载 0.2.0，第三轮复用同一 AppData 在 startup 自动安装。服务端 Artifact 账本精确为 optional 两次、forced 一次，强更重开没有重复下载
+- 构建资源隔离：收紧探针 cfg 后曾把 H8-21 debug App 与 E4-15 release 审计并行启动；两者当时共用 `frontend/dist`，release 的 production assets 覆盖验收 assets，使首轮 App 启动门准确显示“桌面运行环境需要处理”而非假绿。定位后停止并行，顺序重跑原验收通过；随后把 H8-21 改为专属 `dist-h821`/`frontendDist` 并由 runner 前后精确删除，消除同项目构建产物冲突，不把简单复跑当最终修复
+- 门禁：Frontend `136` 项 Node 契约、`233` 项 Vitest、`5` 项全局无头 Playwright、ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿。Rust 默认 `191 passed/4 ignored`、`desktop-e2e` `187 passed/4 ignored`、`control-plane-e2e` `192 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿；E4-15 release 门禁验证缺失/非法信任根拒绝，合法公开配置的临时生产二进制构建、依赖树审计和精确资源删除通过。Backend 本任务无源码/Schema/OpenAPI 改动，H8-20 feed 47 项与隐藏 App 生产调用路径继续通过
+- 资源与文档：三轮 App 验收结束后删除专属 AppData、临时 TLS、WDIO 目录并关闭 Update/Uvicorn/WebDriver/App 进程和端口；未启动系统浏览器、未触碰真实账号、用户默认 Profile、其他项目 Compose 或系统钥匙串。同一任务同步根/Frontend README、产品规划、前端架构、项目结构和唯一台账，没有新增重复计划
+- 真实边界：本任务证明真实 App 决策、缓存重验、安全退出、官方安装调用和重启协调；无副作用探针只替代会实际覆盖机器上 App 的最后平台安装副作用。macOS/Windows 真实签名包从旧版本升级到新版本、安装失败恢复和 UI 点击证据严格属于 H8-22，未在本任务冒充完成
+- 后续：进入 `H8-22`，实现通用更新设置/提示 UI，并在 macOS 与 Windows 用真实签名包从 App 原入口验证升级、暂缓、跳过、旧包覆盖和强更；不得把 desktop-e2e 探针带入发布包
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-21`：实现立即安装前安全退出、暂缓重复提示和强更下次启动静默安装协调；
-2. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
-3. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
-4. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
+2. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
+3. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

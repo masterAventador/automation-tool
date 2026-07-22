@@ -1,5 +1,6 @@
 pub mod app_update_cache;
 pub mod app_update_coordinator;
+pub mod app_update_installation;
 pub mod app_update_policy;
 pub mod app_updates;
 pub mod browser_discovery;
@@ -69,6 +70,12 @@ struct UpdatePolicyAcceptanceError {
     code: &'static str,
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppUpdateDecisionCommandError {
+    code: &'static str,
+}
+
 #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
 #[tauri::command]
 fn get_update_policy_record_for_acceptance(
@@ -113,6 +120,31 @@ async fn check_app_update_now(
     Ok(coordinator
         .check(app_updates::UpdateCheckTrigger::Manual)
         .await)
+}
+
+#[tauri::command]
+fn decide_app_update(
+    coordinator: tauri::State<
+        '_,
+        Option<std::sync::Arc<app_update_coordinator::AppUpdateCoordinator>>,
+    >,
+    decision: app_updates::UpdateDecision,
+) -> Result<app_updates::UpdateState, AppUpdateDecisionCommandError> {
+    let Some(coordinator) = coordinator.as_ref() else {
+        return Err(AppUpdateDecisionCommandError {
+            code: "configuration_unavailable",
+        });
+    };
+    coordinator.decide(decision).map_err(|error| {
+        use app_update_coordinator::UpdateCoordinationErrorCode;
+
+        AppUpdateDecisionCommandError {
+            code: match error.code() {
+                UpdateCoordinationErrorCode::OperationInProgress => "operation_in_progress",
+                UpdateCoordinationErrorCode::DecisionUnavailable => "decision_unavailable",
+            },
+        }
+    })
 }
 
 fn map_diagnostic_export_error(
@@ -2651,6 +2683,19 @@ pub fn run() {
                             configuration.endpoint().clone(),
                             configuration.public_key().to_owned(),
                             configuration.accept_invalid_tls(),
+                            configuration.install_probe(),
+                        ),
+                    );
+                    let lifecycle = std::sync::Arc::new(
+                        app_update_installation::TauriUpdateInstallLifecycle::new(
+                            app.handle().clone(),
+                            configuration.install_probe(),
+                        ),
+                    );
+                    let installation = std::sync::Arc::new(
+                        app_update_installation::AppUpdateInstallationCoordinator::new(
+                            cache.clone(),
+                            lifecycle,
                         ),
                     );
                     let coordinator =
@@ -2658,6 +2703,7 @@ pub fn run() {
                             backend,
                             update_policy,
                             cache,
+                            installation,
                             configuration.download_client()?,
                         )?);
                     coordinator.start_background();
@@ -2722,7 +2768,8 @@ pub fn run() {
         select_browser,
         get_update_policy_record_for_acceptance,
         get_app_update_state,
-        check_app_update_now
+        check_app_update_now,
+        decide_app_update
     ]);
     #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -2758,7 +2805,8 @@ pub fn run() {
         get_browser_settings,
         select_browser,
         get_app_update_state,
-        check_app_update_now
+        check_app_update_now,
+        decide_app_update
     ]);
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -2826,7 +2874,8 @@ pub fn run() {
         get_browser_settings,
         select_browser,
         get_app_update_state,
-        check_app_update_now
+        check_app_update_now,
+        decide_app_update
     ]);
 
     let app = builder

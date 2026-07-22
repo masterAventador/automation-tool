@@ -7,10 +7,14 @@ use std::time::Duration;
 use tauri_plugin_updater::UpdaterExt as _;
 
 use crate::app_update_cache::{AppUpdateCache, DownloadSource, UpdateDownloadErrorCode};
+use crate::app_update_installation::{
+    AppUpdateInstallationCoordinator, OfficialUpdatePackageInstaller, UpdateInstallErrorCode,
+    UpdatePackageInstaller,
+};
 use crate::app_update_policy::{UpdatePolicyErrorCode, UpdatePolicyService};
 use crate::app_updates::{
-    parse_official_update, UpdateCheckTrigger, UpdateErrorCode, UpdateErrorStage, UpdateRelease,
-    UpdateState,
+    parse_official_update, UpdateCheckTrigger, UpdateDecision, UpdateErrorCode, UpdateErrorStage,
+    UpdatePolicyAction, UpdateRelease, UpdateState,
 };
 
 pub const MIN_UPDATE_POLL_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -49,17 +53,63 @@ impl std::fmt::Display for UpdateCheckError {
 
 impl std::error::Error for UpdateCheckError {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CheckedUpdate {
     release: UpdateRelease,
     source: DownloadSource,
+    installer: Arc<dyn UpdatePackageInstaller>,
 }
 
 impl CheckedUpdate {
-    pub fn new(release: UpdateRelease, source: DownloadSource) -> Self {
-        Self { release, source }
+    pub fn new(
+        release: UpdateRelease,
+        source: DownloadSource,
+        installer: Arc<dyn UpdatePackageInstaller>,
+    ) -> Self {
+        Self {
+            release,
+            source,
+            installer,
+        }
     }
 }
+
+impl std::fmt::Debug for CheckedUpdate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("CheckedUpdate(<redacted>)")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UpdateCoordinationErrorCode {
+    OperationInProgress,
+    DecisionUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UpdateCoordinationError(UpdateCoordinationErrorCode);
+
+impl UpdateCoordinationError {
+    pub fn code(self) -> UpdateCoordinationErrorCode {
+        self.0
+    }
+
+    fn operation_in_progress() -> Self {
+        Self(UpdateCoordinationErrorCode::OperationInProgress)
+    }
+
+    fn decision_unavailable() -> Self {
+        Self(UpdateCoordinationErrorCode::DecisionUnavailable)
+    }
+}
+
+impl std::fmt::Display for UpdateCoordinationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("update decision unavailable")
+    }
+}
+
+impl std::error::Error for UpdateCoordinationError {}
 
 pub trait UpdateCheckBackend: Send + Sync {
     fn check(
@@ -71,8 +121,10 @@ pub struct AppUpdateCoordinator {
     backend: Arc<dyn UpdateCheckBackend>,
     policy: Arc<UpdatePolicyService>,
     cache: Arc<AppUpdateCache>,
+    installation: Arc<AppUpdateInstallationCoordinator>,
     download_client: reqwest::Client,
     state: Mutex<UpdateState>,
+    pending_update: Mutex<Option<CheckedUpdate>>,
     check_in_progress: AtomicBool,
 }
 
@@ -87,6 +139,7 @@ impl AppUpdateCoordinator {
         backend: Arc<B>,
         policy: Arc<UpdatePolicyService>,
         cache: Arc<AppUpdateCache>,
+        installation: Arc<AppUpdateInstallationCoordinator>,
         download_client: reqwest::Client,
     ) -> Result<Self, UpdateCheckError>
     where
@@ -96,8 +149,10 @@ impl AppUpdateCoordinator {
             backend,
             policy,
             cache,
+            installation,
             download_client,
             state: Mutex::new(UpdateState::Idle),
+            pending_update: Mutex::new(None),
             check_in_progress: AtomicBool::new(false),
         })
     }
@@ -143,31 +198,74 @@ impl AppUpdateCoordinator {
             }
         };
         let Some(checked) = checked else {
+            if let Ok(mut pending) = self.pending_update.lock() {
+                *pending = None;
+            }
             return self.set_state(UpdateState::UpToDate { trigger });
         };
 
         self.set_state(UpdateState::Available {
             release: checked.release.clone(),
         });
-        if let Err(error) = self.policy.observe_release(checked.release.clone()) {
-            let (stage, code, retryable) = match error.code() {
-                UpdatePolicyErrorCode::StorageUnavailable => (
+        let evaluation = match self.policy.observe_release(checked.release.clone()) {
+            Ok(evaluation) => evaluation,
+            Err(error) => {
+                let (stage, code, retryable) = match error.code() {
+                    UpdatePolicyErrorCode::StorageUnavailable => (
+                        UpdateErrorStage::Storage,
+                        UpdateErrorCode::StorageUnavailable,
+                        false,
+                    ),
+                    UpdatePolicyErrorCode::ConfigurationInvalid => (
+                        UpdateErrorStage::Configuration,
+                        UpdateErrorCode::ConfigurationInvalid,
+                        false,
+                    ),
+                    _ => (
+                        UpdateErrorStage::Check,
+                        UpdateErrorCode::ManifestRejected,
+                        false,
+                    ),
+                };
+                return self.fail(stage, code, retryable);
+            }
+        };
+        let action = evaluation.action();
+        let cached_before = match self.cache.cached() {
+            Ok(cached) => cached
+                .as_ref()
+                .is_some_and(|cached| cached.matches_release(&checked.release)),
+            Err(_) => {
+                return self.fail(
                     UpdateErrorStage::Storage,
                     UpdateErrorCode::StorageUnavailable,
                     false,
-                ),
-                UpdatePolicyErrorCode::ConfigurationInvalid => (
-                    UpdateErrorStage::Configuration,
-                    UpdateErrorCode::ConfigurationInvalid,
-                    false,
-                ),
-                _ => (
-                    UpdateErrorStage::Check,
-                    UpdateErrorCode::ManifestRejected,
-                    false,
-                ),
-            };
-            return self.fail(stage, code, retryable);
+                );
+            }
+        };
+        if let Ok(mut pending) = self.pending_update.lock() {
+            *pending = Some(checked.clone());
+        } else {
+            return self.fail(
+                UpdateErrorStage::Storage,
+                UpdateErrorCode::StorageUnavailable,
+                false,
+            );
+        }
+        if trigger == UpdateCheckTrigger::Startup
+            && cached_before
+            && matches!(
+                action,
+                UpdatePolicyAction::Forced | UpdatePolicyAction::InstallRequested
+            )
+        {
+            return self.install_checked(&checked);
+        }
+        if action == UpdatePolicyAction::Suppressed {
+            return self.set_state(UpdateState::Ready {
+                release: checked.release,
+                action,
+            });
         }
 
         let release_for_progress = checked.release.clone();
@@ -189,6 +287,7 @@ impl AppUpdateCoordinator {
         match result {
             Ok(_) => self.set_state(UpdateState::Ready {
                 release: checked.release,
+                action,
             }),
             Err(error) => {
                 let (stage, code, retryable) = match error.code() {
@@ -215,6 +314,78 @@ impl AppUpdateCoordinator {
                 };
                 self.fail(stage, code, retryable)
             }
+        }
+    }
+
+    pub fn decide(&self, decision: UpdateDecision) -> Result<UpdateState, UpdateCoordinationError> {
+        if self
+            .check_in_progress
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(UpdateCoordinationError::operation_in_progress());
+        }
+        let _guard = CheckGuard(&self.check_in_progress);
+        let current = self
+            .state()
+            .map_err(|_| UpdateCoordinationError::decision_unavailable())?;
+        if !matches!(
+            current,
+            UpdateState::Ready {
+                action: UpdatePolicyAction::Prompt,
+                ..
+            }
+        ) {
+            return Err(UpdateCoordinationError::decision_unavailable());
+        }
+        let checked = self
+            .pending_update
+            .lock()
+            .map_err(|_| UpdateCoordinationError::decision_unavailable())?
+            .clone()
+            .ok_or_else(UpdateCoordinationError::decision_unavailable)?;
+        let evaluation = self
+            .policy
+            .decide(decision)
+            .map_err(|_| UpdateCoordinationError::decision_unavailable())?;
+        if evaluation.release() != &checked.release {
+            return Err(UpdateCoordinationError::decision_unavailable());
+        }
+        if evaluation.action() == UpdatePolicyAction::InstallRequested {
+            return Ok(self.install_checked(&checked));
+        }
+        Ok(self.set_state(UpdateState::Ready {
+            release: checked.release,
+            action: evaluation.action(),
+        }))
+    }
+
+    fn install_checked(&self, checked: &CheckedUpdate) -> UpdateState {
+        self.set_state(UpdateState::Installing {
+            release: checked.release.clone(),
+        });
+        match self.installation.install(
+            &checked.release,
+            &checked.source,
+            Arc::clone(&checked.installer),
+        ) {
+            Ok(()) => self.set_state(UpdateState::InstallationLaunched {
+                release: checked.release.clone(),
+            }),
+            Err(error) => self.fail(
+                UpdateErrorStage::Install,
+                match error.code() {
+                    UpdateInstallErrorCode::PackageUnavailable => {
+                        UpdateErrorCode::StorageUnavailable
+                    }
+                    UpdateInstallErrorCode::RuntimeShutdownFailed
+                    | UpdateInstallErrorCode::InstallerFailed
+                    | UpdateInstallErrorCode::InstallationInProgress => {
+                        UpdateErrorCode::InstallationFailed
+                    }
+                },
+                false,
+            ),
         }
     }
 
@@ -268,6 +439,12 @@ pub struct OfficialUpdateCheckBackend {
     endpoint: reqwest::Url,
     public_key: String,
     accept_invalid_tls: bool,
+    #[cfg(all(
+        debug_assertions,
+        feature = "desktop-e2e",
+        not(feature = "control-plane-e2e")
+    ))]
+    install_probe: bool,
 }
 
 impl OfficialUpdateCheckBackend {
@@ -276,12 +453,25 @@ impl OfficialUpdateCheckBackend {
         endpoint: reqwest::Url,
         public_key: String,
         accept_invalid_tls: bool,
+        install_probe: bool,
     ) -> Self {
+        #[cfg(not(all(
+            debug_assertions,
+            feature = "desktop-e2e",
+            not(feature = "control-plane-e2e")
+        )))]
+        let _ = install_probe;
         Self {
             app,
             endpoint,
             public_key,
             accept_invalid_tls,
+            #[cfg(all(
+                debug_assertions,
+                feature = "desktop-e2e",
+                not(feature = "control-plane-e2e")
+            ))]
+            install_probe,
         }
     }
 }
@@ -316,10 +506,54 @@ impl UpdateCheckBackend for OfficialUpdateCheckBackend {
             };
             let release = parse_official_update(&update)
                 .map_err(|_| UpdateCheckError::configuration_invalid())?;
-            let source = DownloadSource::new(update.download_url, update.signature)
+            let source = DownloadSource::new(update.download_url.clone(), update.signature.clone())
                 .map_err(|_| UpdateCheckError::configuration_invalid())?;
-            Ok(Some(CheckedUpdate::new(release, source)))
+            #[cfg(all(
+                debug_assertions,
+                feature = "desktop-e2e",
+                not(feature = "control-plane-e2e")
+            ))]
+            let installer: Arc<dyn UpdatePackageInstaller> = if self.install_probe {
+                Arc::new(UpdateInstallProbe)
+            } else {
+                Arc::new(OfficialUpdatePackageInstaller::new(update))
+            };
+            #[cfg(not(all(
+                debug_assertions,
+                feature = "desktop-e2e",
+                not(feature = "control-plane-e2e")
+            )))]
+            let installer: Arc<dyn UpdatePackageInstaller> =
+                Arc::new(OfficialUpdatePackageInstaller::new(update));
+            Ok(Some(CheckedUpdate::new(release, source, installer)))
         })
+    }
+}
+
+#[derive(Debug)]
+#[cfg(all(
+    debug_assertions,
+    feature = "desktop-e2e",
+    not(feature = "control-plane-e2e")
+))]
+struct UpdateInstallProbe;
+
+#[cfg(all(
+    debug_assertions,
+    feature = "desktop-e2e",
+    not(feature = "control-plane-e2e")
+))]
+impl UpdatePackageInstaller for UpdateInstallProbe {
+    fn install(
+        &self,
+        bytes: Vec<u8>,
+    ) -> Result<(), crate::app_update_installation::UpdateInstallError> {
+        if bytes.is_empty() {
+            return Err(crate::app_update_installation::UpdateInstallError::new(
+                UpdateInstallErrorCode::InstallerFailed,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -328,6 +562,12 @@ pub struct UpdateRuntimeConfiguration {
     endpoint: reqwest::Url,
     public_key: String,
     accept_invalid_tls: bool,
+    #[cfg(all(
+        debug_assertions,
+        feature = "desktop-e2e",
+        not(feature = "control-plane-e2e")
+    ))]
+    install_probe: bool,
 }
 
 impl UpdateRuntimeConfiguration {
@@ -366,15 +606,36 @@ impl UpdateRuntimeConfiguration {
         {
             return Err(UpdateCheckError::configuration_invalid());
         }
-        #[cfg(all(debug_assertions, feature = "desktop-e2e"))]
+        #[cfg(all(
+            debug_assertions,
+            feature = "desktop-e2e",
+            not(feature = "control-plane-e2e")
+        ))]
         let accept_invalid_tls =
             std::env::var("AUTOMATION_TOOL_UPDATE_ACCEPT_INVALID_TLS").as_deref() == Ok("1");
-        #[cfg(not(all(debug_assertions, feature = "desktop-e2e")))]
+        #[cfg(not(all(
+            debug_assertions,
+            feature = "desktop-e2e",
+            not(feature = "control-plane-e2e")
+        )))]
         let accept_invalid_tls = false;
+        #[cfg(all(
+            debug_assertions,
+            feature = "desktop-e2e",
+            not(feature = "control-plane-e2e")
+        ))]
+        let install_probe =
+            std::env::var("AUTOMATION_TOOL_UPDATE_INSTALL_PROBE").as_deref() == Ok("1");
         Ok(Some(Self {
             endpoint,
             public_key,
             accept_invalid_tls,
+            #[cfg(all(
+                debug_assertions,
+                feature = "desktop-e2e",
+                not(feature = "control-plane-e2e")
+            ))]
+            install_probe,
         }))
     }
 
@@ -388,6 +649,25 @@ impl UpdateRuntimeConfiguration {
 
     pub fn accept_invalid_tls(&self) -> bool {
         self.accept_invalid_tls
+    }
+
+    pub fn install_probe(&self) -> bool {
+        #[cfg(all(
+            debug_assertions,
+            feature = "desktop-e2e",
+            not(feature = "control-plane-e2e")
+        ))]
+        {
+            self.install_probe
+        }
+        #[cfg(not(all(
+            debug_assertions,
+            feature = "desktop-e2e",
+            not(feature = "control-plane-e2e")
+        )))]
+        {
+            false
+        }
     }
 
     pub fn download_client(&self) -> Result<reqwest::Client, UpdateCheckError> {
