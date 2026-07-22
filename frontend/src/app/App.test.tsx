@@ -20,6 +20,8 @@ describe("desktop startup", () => {
       recoverPassword: vi.fn(),
       changePassword: vi.fn(),
       logout: vi.fn(),
+      listDevices: vi.fn().mockResolvedValue([]),
+      revokeDevice: vi.fn(),
     };
 
     render(

@@ -14,8 +14,11 @@ from sqlalchemy.exc import IntegrityError
 
 from automation_tool.control_plane.application.account_installation_bindings import (
     AccountInstallationBindingService,
+    BindingChallengeExpired,
     BindingChallengeUsed,
+    BindingProofRejected,
     CrossAccountBindingRejected,
+    IssuedAccountBindingChallenge,
     RevokedInstallationBindingRejected,
 )
 from automation_tool.control_plane.application.account_sessions import (
@@ -32,6 +35,7 @@ from automation_tool.control_plane.application.device_sessions import (
     DeviceSessionRejected,
     DeviceSessionService,
 )
+from automation_tool.control_plane.application.registration import RegisteredInstallation
 from automation_tool.control_plane.domain import UserId
 from automation_tool.control_plane.infrastructure.database import (
     Database,
@@ -138,7 +142,7 @@ async def bind(
     service: AccountInstallationBindingService,
     key: Ed25519PrivateKey,
     request_id: str,
-):
+) -> RegisteredInstallation:
     challenge = await service.issue_challenge(
         access_token="atas1.private",
         device_public_key=key.public_key().public_bytes_raw(),
@@ -373,7 +377,7 @@ async def test_pending_challenge_has_one_concurrent_winner_and_disabled_account_
         assert sum(not isinstance(item, Exception) for item in results) == 1
         assert sum(isinstance(item, BindingChallengeUsed) for item in results) == 1
 
-        winner = next(item for item in results if not isinstance(item, Exception))
+        winner = next(item for item in results if isinstance(item, IssuedAccountBindingChallenge))
         async with database.session() as session:
             await session.execute(
                 update(users)
@@ -406,6 +410,96 @@ async def test_pending_challenge_has_one_concurrent_winner_and_disabled_account_
 
 
 @pytest.mark.asyncio
+async def test_binding_rejects_missing_tampered_expired_and_invalid_proofs_and_claims_legacy_device(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    user_id = await seed_user(database, f"failure-matrix-{uuid4().hex}")
+    clock = MutableClock()
+    service = binding_service(database, user_id, clock)
+    repository = SqlAlchemyAccountInstallationBindingRepository(database)
+    credential_factory = DeviceCredentialFactory(
+        secret_source=secrets.token_bytes,
+        id_source=uuid4,
+    )
+    try:
+        with pytest.raises(BindingProofRejected):
+            await repository.complete_challenge(
+                challenge_id=uuid4(),
+                user_id=user_id,
+                signing_payload=b"missing",
+                signature=b"s" * 64,
+                completed_at=clock.current,
+                pending_credential=credential_factory.create(),
+                request_id="missing-proof",
+            )
+
+        tampered_key = Ed25519PrivateKey.generate()
+        tampered = await service.issue_challenge(
+            access_token="atas1.private",
+            device_public_key=tampered_key.public_key().public_bytes_raw(),
+        )
+        with pytest.raises(BindingProofRejected):
+            await service.complete_binding(
+                access_token="atas1.private",
+                challenge_id=tampered.challenge_id,
+                signing_payload=tampered.signing_payload + b"x",
+                signature=tampered_key.sign(tampered.signing_payload),
+                request_id="tampered-proof",
+            )
+
+        expired_key = Ed25519PrivateKey.generate()
+        expired = await service.issue_challenge(
+            access_token="atas1.private",
+            device_public_key=expired_key.public_key().public_bytes_raw(),
+        )
+        clock.current += timedelta(minutes=5)
+        with pytest.raises(BindingChallengeExpired):
+            await service.complete_binding(
+                access_token="atas1.private",
+                challenge_id=expired.challenge_id,
+                signing_payload=expired.signing_payload,
+                signature=expired_key.sign(expired.signing_payload),
+                request_id="expired-proof",
+            )
+
+        clock.current += timedelta(seconds=1)
+        invalid_signature_key = Ed25519PrivateKey.generate()
+        invalid_signature = await service.issue_challenge(
+            access_token="atas1.private",
+            device_public_key=invalid_signature_key.public_key().public_bytes_raw(),
+        )
+        with pytest.raises(BindingProofRejected):
+            await service.complete_binding(
+                access_token="atas1.private",
+                challenge_id=invalid_signature.challenge_id,
+                signing_payload=invalid_signature.signing_payload,
+                signature=b"s" * 64,
+                request_id="invalid-signature",
+            )
+
+        legacy_key = Ed25519PrivateKey.generate()
+        legacy_installation_id = uuid4()
+        async with database.session() as session:
+            await session.execute(
+                insert(installations).values(
+                    id=legacy_installation_id,
+                    device_public_key=legacy_key.public_key().public_bytes_raw(),
+                    created_at=clock.current,
+                    updated_at=clock.current,
+                )
+            )
+        claimed = await bind(service, legacy_key, "claim-legacy-device")
+        assert claimed.installation_id == legacy_installation_id
+        assert claimed.revision == 2
+    finally:
+        await cleanup_users(database, (user_id,))
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_account_disable_invalidates_owned_device_exchange_and_live_session(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
@@ -431,6 +525,11 @@ async def test_account_disable_invalidates_owned_device_exchange_and_live_sessio
             device_credential=bound.device_credential.credential,
             capability=DeviceSessionCapability.APP_CONTROL_PLANE,
         )
+        authenticated = await sessions.authenticate(
+            session_token=issued.session_token,
+            required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+        )
+        assert authenticated.installation_id == bound.installation_id
         clock.current += timedelta(seconds=1)
         async with database.session() as session:
             await session.execute(

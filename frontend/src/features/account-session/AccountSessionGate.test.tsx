@@ -18,6 +18,13 @@ const authenticated: AccountSessionSnapshot = {
     status: "active",
   },
 };
+const device = {
+  installationId: "223e4567-e89b-42d3-a456-426614174000",
+  status: "active" as const,
+  revision: 1,
+  createdAt: "2026-07-23T02:15:00Z",
+  updatedAt: "2026-07-23T02:15:00Z",
+};
 
 function gateway(overrides: Partial<AccountSessionGateway> = {}): AccountSessionGateway {
   return {
@@ -26,6 +33,8 @@ function gateway(overrides: Partial<AccountSessionGateway> = {}): AccountSession
     recoverPassword: vi.fn().mockResolvedValue(unauthenticated),
     changePassword: vi.fn().mockResolvedValue(unauthenticated),
     logout: vi.fn().mockResolvedValue(unauthenticated),
+    listDevices: vi.fn().mockResolvedValue([device]),
+    revokeDevice: vi.fn().mockResolvedValue({ ...device, status: "revoked", revision: 2 }),
     ...overrides,
   };
 }
@@ -169,5 +178,26 @@ describe("customer Demo product account gate", () => {
     expect(await screen.findByText("密码已修改，请重新登录")).toBeVisible();
     expect(screen.queryByText("改密前工作台")).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/Correct-Horse-12|Changed-Password-12/u);
+  });
+
+  it("lists and revokes only the authenticated account device projection", async () => {
+    const accountGateway = gateway({ restoreSession: vi.fn().mockResolvedValue(authenticated) });
+    const user = userEvent.setup();
+    render(<AccountSessionGate gateway={accountGateway}>设备前工作台</AccountSessionGate>);
+
+    await screen.findByText("设备前工作台");
+    await user.click(screen.getByRole("button", { name: "设备管理" }));
+    expect(await screen.findByText(device.installationId)).toBeVisible();
+    expect(screen.getByText("有效")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "吊销设备" }));
+    await user.click(screen.getByRole("button", { name: "确认吊销" }));
+
+    await waitFor(() =>
+      expect(accountGateway.revokeDevice).toHaveBeenCalledWith({
+        installationId: device.installationId,
+        expectedRevision: 1,
+      }),
+    );
+    expect(await screen.findByText("已吊销")).toBeVisible();
   });
 });

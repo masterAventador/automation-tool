@@ -2,12 +2,14 @@ import asyncio
 import base64
 
 import pytest
+from pydantic import ValidationError
 
 from automation_tool.control_plane import create_app
 from automation_tool.control_plane.application.account_sessions import AccountSessionService
 from automation_tool.control_plane.bootstrap.account_sessions import (
     AccountSessionConfigurationError,
     _SystemClock,
+    account_password_hasher_from_environment,
     account_session_service_from_environment,
 )
 from automation_tool.control_plane.infrastructure.database import Database
@@ -51,6 +53,10 @@ def test_exact_secret_set_builds_account_session_service(
     service = account_session_service_from_environment(database_without_connection())
 
     assert isinstance(service, AccountSessionService)
+    assert account_password_hasher_from_environment().verify(
+        "account timing defense password",
+        account_password_hasher_from_environment().hash("account timing defense password"),
+    )
 
 
 @pytest.mark.parametrize(
@@ -96,6 +102,45 @@ def test_partial_or_invalid_account_configuration_fails_closed(
 
 def test_account_clock_is_timezone_aware() -> None:
     assert _SystemClock().now().utcoffset() is not None
+
+
+@pytest.mark.parametrize(
+    ("pepper", "version"),
+    (
+        (None, None),
+        (base64url(b"p" * 32), "0"),
+        ("invalid+secret", "1"),
+    ),
+)
+def test_operations_password_hasher_configuration_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    pepper: str | None,
+    version: str | None,
+) -> None:
+    clear_account_environment(monkeypatch)
+    if pepper is not None:
+        monkeypatch.setenv("AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER", pepper)
+    if version is not None:
+        monkeypatch.setenv("AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER_VERSION", version)
+
+    with pytest.raises(AccountSessionConfigurationError):
+        account_password_hasher_from_environment()
+
+
+def test_operations_password_hasher_normalizes_settings_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from automation_tool.control_plane.bootstrap import account_sessions
+
+    validation = ValidationError.from_exception_data("AccountSessionSettings", [])
+    monkeypatch.setattr(
+        account_sessions,
+        "_AccountSessionSettings",
+        lambda: (_ for _ in ()).throw(validation),
+    )
+
+    with pytest.raises(AccountSessionConfigurationError):
+        account_password_hasher_from_environment()
 
 
 def test_default_app_factory_wires_account_sessions_from_deployment_secrets(

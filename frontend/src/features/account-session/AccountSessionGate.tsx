@@ -1,8 +1,22 @@
-import { Alert, Button, Card, Form, Input, Result, Space, Spin, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Form,
+  Input,
+  List,
+  Popconfirm,
+  Result,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from "antd";
 import { useEffect, useState, type ReactNode } from "react";
 
 import {
   AccountSessionGatewayError,
+  type AccountDevice,
   type AccountSessionGateway,
   type AccountSessionSnapshot,
 } from "./account-session-gateway";
@@ -40,6 +54,9 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
   const [state, setState] = useState<GateState>({ kind: "checking" });
   const [mode, setMode] = useState<"login" | "recovery">("login");
   const [changingPassword, setChangingPassword] = useState(false);
+  const [managingDevices, setManagingDevices] = useState(false);
+  const [devices, setDevices] = useState<readonly AccountDevice[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [restoreAttempt, setRestoreAttempt] = useState(0);
@@ -100,6 +117,21 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
   }
 
   if (state.kind === "authenticated") {
+    const loadDevices = () => {
+      setDevicesLoading(true);
+      setErrorMessage(undefined);
+      void gateway
+        .listDevices()
+        .then(setDevices)
+        .catch((error: unknown) => {
+          if (error instanceof AccountSessionGatewayError && error.code === "session_invalid") {
+            setState({ kind: "unauthenticated", notice: "产品账号会话已失效，请重新登录" });
+            return;
+          }
+          setErrorMessage(authenticationMessage(error));
+        })
+        .finally(() => setDevicesLoading(false));
+    };
     return (
       <div className="account-session-layout">
         <div className="account-session-bar" aria-label="产品账号状态">
@@ -108,10 +140,22 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
             disabled={submitting}
             onClick={() => {
               setErrorMessage(undefined);
+              setManagingDevices(false);
               setChangingPassword((current) => !current);
             }}
           >
             修改密码
+          </Button>
+          <Button
+            disabled={submitting}
+            onClick={() => {
+              const opening = !managingDevices;
+              setManagingDevices(opening);
+              setChangingPassword(false);
+              if (opening) loadDevices();
+            }}
+          >
+            设备管理
           </Button>
           <Button
             danger
@@ -134,7 +178,70 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
         {errorMessage === undefined ? null : (
           <Alert type="error" showIcon message={errorMessage} />
         )}
-        {changingPassword ? (
+        {managingDevices ? (
+          <Card title="我的设备" className="account-login-card">
+            <List
+              loading={devicesLoading}
+              locale={{ emptyText: "暂无已绑定设备" }}
+              dataSource={[...devices]}
+              renderItem={(device) => (
+                <List.Item
+                  actions={
+                    device.status === "active"
+                      ? [
+                          <Popconfirm
+                            key="revoke"
+                            title="确认吊销这台设备？"
+                            description="吊销后该设备凭据与在线会话会立即失效，且不能重新绑定。"
+                            okText="确认吊销"
+                            cancelText="取消"
+                            onConfirm={() => {
+                              setDevicesLoading(true);
+                              setErrorMessage(undefined);
+                              return gateway
+                                .revokeDevice({
+                                  installationId: device.installationId,
+                                  expectedRevision: device.revision,
+                                })
+                                .then((revoked) =>
+                                  setDevices((current) =>
+                                    current.map((item) =>
+                                      item.installationId === revoked.installationId
+                                        ? revoked
+                                        : item,
+                                    ),
+                                  ),
+                                )
+                                .catch((error: unknown) =>
+                                  setErrorMessage(authenticationMessage(error)),
+                                )
+                                .finally(() => setDevicesLoading(false));
+                            }}
+                          >
+                            <Button danger size="small">
+                              吊销设备
+                            </Button>
+                          </Popconfirm>,
+                        ]
+                      : []
+                  }
+                >
+                  <List.Item.Meta
+                    title={
+                      <Space wrap>
+                        <Typography.Text code>{device.installationId}</Typography.Text>
+                        <Tag color={device.status === "active" ? "green" : "default"}>
+                          {device.status === "active" ? "有效" : "已吊销"}
+                        </Tag>
+                      </Space>
+                    }
+                    description={`版本 ${device.revision} · 绑定于 ${new Date(device.createdAt).toLocaleString()}`}
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+        ) : changingPassword ? (
           <Card className="account-login-card">
             <Form
               layout="vertical"

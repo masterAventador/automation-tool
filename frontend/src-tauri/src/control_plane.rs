@@ -54,6 +54,8 @@ enum ControlPlaneOperation {
     CompleteInstallationRegistration,
     IssueAccountInstallationBindingChallenge,
     CompleteAccountInstallationBinding,
+    ListAccountInstallations,
+    RevokeAccountInstallation,
     RotateDeviceCredential,
     RevokeDeviceCredential,
     ExchangeDeviceSession,
@@ -86,6 +88,7 @@ impl ControlPlaneOperation {
             | Self::GetWorkbenchStatus
             | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
+            | Self::ListAccountInstallations
             | Self::GetTaskTargetPreview
             | Self::ListTasks
             | Self::GetTask
@@ -111,7 +114,7 @@ impl ControlPlaneOperation {
             | Self::ChangeAccountPassword
             | Self::RecoverAccountPassword => "POST",
             Self::ReplaceTaskTargetExclusions => "PUT",
-            Self::LogoutAccountSession => "DELETE",
+            Self::LogoutAccountSession | Self::RevokeAccountInstallation => "DELETE",
         }
     }
 
@@ -134,6 +137,8 @@ impl ControlPlaneOperation {
                 "/api/v1/account-installations/binding-challenges"
             }
             Self::CompleteAccountInstallationBinding => "/api/v1/account-installations/bindings",
+            Self::ListAccountInstallations => "/api/v1/account-installations",
+            Self::RevokeAccountInstallation => "/api/v1/account-installations/{installation_id}",
             Self::RotateDeviceCredential => "/api/v1/device-credentials/rotations",
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
@@ -173,6 +178,8 @@ impl ControlPlaneOperation {
             | Self::GetTaskTargetPreview
             | Self::ReplaceTaskTargetExclusions
             | Self::PrepareDouyinPlatformSessionLogout
+            | Self::ListAccountInstallations
+            | Self::RevokeAccountInstallation
             | Self::RevokeDeviceCredential
             | Self::ListTasks
             | Self::GetTask
@@ -219,6 +226,7 @@ impl ControlPlaneOperation {
             Self::CompleteInstallationRegistration
                 | Self::IssueAccountInstallationBindingChallenge
                 | Self::CompleteAccountInstallationBinding
+                | Self::RevokeAccountInstallation
                 | Self::RotateDeviceCredential
                 | Self::RevokeDeviceCredential
                 | Self::ExchangeDeviceSession
@@ -249,6 +257,10 @@ enum ControlPlaneRequestTarget<'a> {
         limit: u16,
     },
     PreviewCommand(&'a str),
+    AccountDevice {
+        installation_id: &'a str,
+        expected_revision: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -353,6 +365,22 @@ struct AccountSessionResponse {
     access_expires_at: String,
     refresh_expires_at: String,
     account: AccountProjectionResponse,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountDevice {
+    installation_id: String,
+    status: String,
+    revision: u32,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountDeviceListResponse {
+    devices: Vec<AccountDevice>,
 }
 
 #[derive(Serialize)]
@@ -644,6 +672,45 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_account_session(&response)
+    }
+
+    pub async fn list_account_installations(
+        &self,
+        access_token: &str,
+    ) -> Result<Vec<AccountDevice>, ControlPlaneError> {
+        require_opaque_bearer(access_token, "atas1")?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::ListAccountInstallations,
+                Some(access_token),
+                None,
+                None,
+                None,
+            )
+            .await?;
+        parse_account_device_list(&response)
+    }
+
+    pub async fn revoke_account_installation(
+        &self,
+        access_token: &str,
+        installation_id: &str,
+        expected_revision: u32,
+    ) -> Result<AccountDevice, ControlPlaneError> {
+        require_opaque_bearer(access_token, "atas1")?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::RevokeAccountInstallation,
+                Some(access_token),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::AccountDevice {
+                    installation_id,
+                    expected_revision,
+                }),
+            )
+            .await?;
+        parse_account_device(&response)
     }
 
     pub async fn logout_account_session(
@@ -1524,6 +1591,18 @@ fn request_path(
 ) -> Result<String, ControlPlaneError> {
     match (operation, target) {
         (
+            ControlPlaneOperation::RevokeAccountInstallation,
+            Some(ControlPlaneRequestTarget::AccountDevice {
+                installation_id,
+                expected_revision,
+            }),
+        ) if expected_revision > 0 => {
+            require_canonical_uuid_v4(installation_id)?;
+            Ok(format!(
+                "/api/v1/account-installations/{installation_id}?expectedRevision={expected_revision}"
+            ))
+        }
+        (
             ControlPlaneOperation::ListTasks,
             Some(ControlPlaneRequestTarget::List { cursor, limit }),
         ) if (1..=100).contains(&limit) => {
@@ -1622,7 +1701,8 @@ fn request_path(
             | ControlPlaneOperation::StartTaskDiscovery
             | ControlPlaneOperation::ResumeTask
             | ControlPlaneOperation::CancelTask
-            | ControlPlaneOperation::EmergencyStopTask,
+            | ControlPlaneOperation::EmergencyStopTask
+            | ControlPlaneOperation::RevokeAccountInstallation,
             _,
         )
         | (_, Some(_)) => Err(protocol_invalid()),
@@ -1728,6 +1808,8 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::ChangeAccountPassword
                     | ControlPlaneOperation::IssueAccountInstallationBindingChallenge
                     | ControlPlaneOperation::CompleteAccountInstallationBinding
+                    | ControlPlaneOperation::ListAccountInstallations
+                    | ControlPlaneOperation::RevokeAccountInstallation
             )
         {
             ControlPlaneErrorCode::AccountSessionInvalid
@@ -1972,6 +2054,36 @@ fn parse_account_session(body: &[u8]) -> Result<AccountSessionSecrets, ControlPl
         response.account.status,
     )
     .map_err(|_| protocol_invalid())
+}
+
+fn validate_account_device(device: &AccountDevice) -> Result<(), ControlPlaneError> {
+    require_canonical_uuid_v4(&device.installation_id)?;
+    if !matches!(device.status.as_str(), "active" | "revoked") || device.revision == 0 {
+        return Err(protocol_invalid());
+    }
+    let created_at = require_bounded_timestamp(&device.created_at)?;
+    let updated_at = require_bounded_timestamp(&device.updated_at)?;
+    if updated_at < created_at {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn parse_account_device_list(body: &[u8]) -> Result<Vec<AccountDevice>, ControlPlaneError> {
+    let response: AccountDeviceListResponse = parse_exact_json(body)?;
+    if response.devices.len() > 1000 {
+        return Err(protocol_invalid());
+    }
+    for device in &response.devices {
+        validate_account_device(device)?;
+    }
+    Ok(response.devices)
+}
+
+fn parse_account_device(body: &[u8]) -> Result<AccountDevice, ControlPlaneError> {
+    let device: AccountDevice = parse_exact_json(body)?;
+    validate_account_device(&device)?;
+    Ok(device)
 }
 
 fn require_login_input(login_name: &str, password: &str) -> Result<(), ControlPlaneError> {
@@ -3619,15 +3731,16 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        new_request_id, parse_account_session, parse_created_task, parse_device_session,
-        parse_douyin_platform_session, parse_douyin_platform_session_logout_prepare,
-        parse_health_response, parse_installation_access, parse_installation_registration,
-        parse_registration_challenge, parse_revoked_credential, parse_rotated_credential,
-        parse_sse_frame, parse_system_version_response, parse_task_control, parse_task_discovery,
-        parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
-        parse_task_target_results, parse_workbench_metrics, parse_workbench_status, request_path,
-        require_idempotency_key, require_list_cursor, require_preview_cursor, required_credential,
-        sse_frame_end, transport_error, validate_preview_command, validate_response_metadata,
+        new_request_id, parse_account_device, parse_account_device_list, parse_account_session,
+        parse_created_task, parse_device_session, parse_douyin_platform_session,
+        parse_douyin_platform_session_logout_prepare, parse_health_response,
+        parse_installation_access, parse_installation_registration, parse_registration_challenge,
+        parse_revoked_credential, parse_rotated_credential, parse_sse_frame,
+        parse_system_version_response, parse_task_control, parse_task_discovery, parse_task_list,
+        parse_task_snapshot_body, parse_task_target_preview, parse_task_target_results,
+        parse_workbench_metrics, parse_workbench_status, request_path, require_idempotency_key,
+        require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
+        transport_error, validate_preview_command, validate_response_metadata,
         validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
         ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
@@ -3761,6 +3874,18 @@ mod tests {
                 "POST",
                 "/api/v1/account-installations/bindings",
                 201,
+            ),
+            (
+                ControlPlaneOperation::ListAccountInstallations,
+                "GET",
+                "/api/v1/account-installations",
+                200,
+            ),
+            (
+                ControlPlaneOperation::RevokeAccountInstallation,
+                "DELETE",
+                "/api/v1/account-installations/{installation_id}",
+                200,
             ),
             (
                 ControlPlaneOperation::RotateDeviceCredential,
@@ -4319,6 +4444,62 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn account_device_projection_is_exact_bounded_and_secret_free() {
+        let device = serde_json::json!({
+            "installationId": IDENTIFIER,
+            "status": "active",
+            "revision": 1,
+            "createdAt": "2026-07-23T02:15:00Z",
+            "updatedAt": "2026-07-23T02:20:00Z"
+        });
+        let list = serde_json::json!({"devices": [device.clone()]});
+        let parsed =
+            parse_account_device_list(&serde_json::to_vec(&list).expect("account devices JSON"))
+                .expect("valid account devices");
+        assert_eq!(parsed.len(), 1);
+        assert!(
+            parse_account_device(&serde_json::to_vec(&device).expect("account device JSON"))
+                .is_ok()
+        );
+
+        for invalid in [
+            {
+                let mut value = device.clone();
+                value["revision"] = serde_json::json!(0);
+                value
+            },
+            {
+                let mut value = device.clone();
+                value["updatedAt"] = serde_json::json!("2026-07-23T02:14:59Z");
+                value
+            },
+            {
+                let mut value = device.clone();
+                value["deviceCredential"] = serde_json::json!("atdc1.private");
+                value
+            },
+        ] {
+            assert!(parse_account_device(
+                &serde_json::to_vec(&invalid).expect("invalid account device JSON")
+            )
+            .is_err());
+        }
+
+        let revoke_path = request_path(
+            ControlPlaneOperation::RevokeAccountInstallation,
+            Some(ControlPlaneRequestTarget::AccountDevice {
+                installation_id: IDENTIFIER,
+                expected_revision: 1,
+            }),
+        )
+        .expect("validated account device path");
+        assert_eq!(
+            revoke_path,
+            format!("/api/v1/account-installations/{IDENTIFIER}?expectedRevision=1")
+        );
     }
 
     #[test]

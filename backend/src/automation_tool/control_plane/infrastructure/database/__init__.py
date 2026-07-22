@@ -1,5 +1,6 @@
 """Async PostgreSQL infrastructure."""
 
+from .account_device_repository import SqlAlchemyAccountDeviceRepository
 from .account_installation_binding_repository import (
     SqlAlchemyAccountInstallationBindingRepository,
 )
@@ -52,6 +53,7 @@ from .task_target_result_repository import SqlAlchemyTaskTargetResultRepository
 
 __all__ = [
     "Database",
+    "SqlAlchemyAccountDeviceRepository",
     "SqlAlchemyAccountInstallationBindingRepository",
     "SqlAlchemyAccountSessionRepository",
     "SqlAlchemyActionExecutionOrchestrationRepository",
