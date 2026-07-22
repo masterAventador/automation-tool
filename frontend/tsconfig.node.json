@@ -19,7 +19,8 @@
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
-    "wdio.conf.ts",
+    "wdio*.conf.ts",
+    "wdio-runtime-artifacts.ts",
     "e2e/**/*.ts",
     "e2e-tauri/**/*.ts",
     "eslint.config.js"

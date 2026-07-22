@@ -12,13 +12,13 @@ import type { TaskDiscoveryGateway } from "../features/task-runs/task-discovery"
 import type { PlatformAdapter } from "../platform/types";
 import type { PlatformSessionGateway } from "../features/platform-sessions/platform-session-gateway";
 import { StartupGate } from "./StartupGate";
-import { desktopShellStartupCheck, type StartupCheck } from "./startup";
+import type { StartupCheck } from "./startup";
 import { WorkbenchShell } from "./WorkbenchShell";
 import { BrowserSettings } from "../features/settings/BrowserSettings";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
 
 interface AppProps {
-  startupCheck?: StartupCheck;
+  startupCheck: StartupCheck;
   queryClient?: QueryClient;
   taskSource?: TaskProjectionSource;
   workbenchGateway?: WorkbenchGateway;
@@ -32,7 +32,7 @@ interface AppProps {
 }
 
 export function App({
-  startupCheck = desktopShellStartupCheck,
+  startupCheck,
   queryClient = desktopQueryClient,
   taskSource,
   workbenchGateway,

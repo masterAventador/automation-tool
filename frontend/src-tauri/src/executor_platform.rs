@@ -454,9 +454,13 @@ impl ExecutorPlatformService {
         }))
     }
 
-    pub fn shutdown_for_app_exit(&self) {
-        let _ = self.manager.stop();
-        let _ = self.release_platform_profile();
+    pub fn shutdown_for_app_exit(&self) -> Result<(), ExecutorPlatformError> {
+        let stop = self.manager.stop().map_err(map_manager_error);
+        let release = self.release_platform_profile();
+        match (stop, release) {
+            (Ok(_), Ok(())) => Ok(()),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
     }
 
     pub fn execute_platform_command(

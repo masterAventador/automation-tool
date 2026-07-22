@@ -21,7 +21,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     executor_entrypoint,
-    graceful_app_exit_observed,
     install_executor_package,
     require_port_available,
     start_control_plane,
@@ -105,7 +104,9 @@ def isolated_environment(
     *, control_plane_port: int, database_port: int
 ) -> tuple[dict[str, str], str]:
     environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("AUTOMATION_TOOL_")
     }
     database_password = secrets.token_hex(24)
     database_url = (
@@ -140,7 +141,9 @@ async def verify_database_state(database_url: str) -> None:
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
-            installation_count = await connection.scalar(text("select count(*) from installations"))
+            installation_count = await connection.scalar(
+                text("select count(*) from installations")
+            )
             rows = (
                 await connection.execute(
                     text(
@@ -163,7 +166,9 @@ async def verify_database_state(database_url: str) -> None:
     if installation_count != 1:
         raise RuntimeError("B5-13 acceptance did not create exactly one Installation")
     if len(rows) != 1:
-        raise RuntimeError("B5-13 acceptance did not persist one platform health projection")
+        raise RuntimeError(
+            "B5-13 acceptance did not persist one platform health projection"
+        )
     platform, state, revision, timestamp_ordered = rows[0]
     if (
         platform != "douyin"
@@ -193,7 +198,10 @@ def verify_logout_local_state(private_app_data: Path) -> None:
 def matching_project_processes(
     private_app_data: Path, package_entrypoint: Path
 ) -> list[int]:
-    markers = (os.fspath(private_app_data.resolve()), os.fspath(package_entrypoint.resolve()))
+    markers = (
+        os.fspath(private_app_data.resolve()),
+        os.fspath(package_entrypoint.resolve()),
+    )
     if sys.platform == "win32":
         completed = subprocess.run(
             [
@@ -249,7 +257,9 @@ def require_no_residual_project_processes(
     raise RuntimeError("B5-13 left an App, Executor, or browser process running")
 
 
-def terminate_project_processes(private_app_data: Path, package_entrypoint: Path) -> None:
+def terminate_project_processes(
+    private_app_data: Path, package_entrypoint: Path
+) -> None:
     for process_id in matching_project_processes(private_app_data, package_entrypoint):
         if sys.platform == "win32":
             subprocess.run(
@@ -298,7 +308,9 @@ def main() -> None:
         workspace = Path(temporary)
         try:
             print("[B5-13] Building the real signed PyInstaller Executor")
-            package_source = build_signed_executor(workspace, build_id=EXECUTOR_BUILD_ID)
+            package_source = build_signed_executor(
+                workspace, build_id=EXECUTOR_BUILD_ID
+            )
             package_root = install_executor_package(package_source, private_app_data)
             package_entrypoint = executor_entrypoint(package_root)
 
@@ -317,10 +329,16 @@ def main() -> None:
                 cwd=BACKEND_ROOT,
                 env=environment,
             )
-            print(f"[B5-13] Starting Control Plane on isolated port {control_plane_port}")
-            server = start_control_plane(port=control_plane_port, environment=environment)
+            print(
+                f"[B5-13] Starting Control Plane on isolated port {control_plane_port}"
+            )
+            server = start_control_plane(
+                port=control_plane_port, environment=environment
+            )
 
-            print("[B5-13] Running the real Tauri App with visible=false and headless browser")
+            print(
+                "[B5-13] Running the real Tauri App with visible=false and headless browser"
+            )
             app_process = subprocess.Popen(
                 ["pnpm", "test:platform-session-tauri"],
                 cwd=FRONTEND_ROOT,
@@ -331,12 +349,12 @@ def main() -> None:
             try:
                 app_output_bytes, _ = app_process.communicate(timeout=480)
             except subprocess.TimeoutExpired as error:
-                raise RuntimeError("B5-13 hidden App acceptance did not finish") from error
+                raise RuntimeError(
+                    "B5-13 hidden App acceptance did not finish"
+                ) from error
             app_output = app_output_bytes.decode("utf-8", errors="replace")
             print(app_output, end="")
-            if app_process.returncode != 0 and not graceful_app_exit_observed(
-                app_process.returncode, app_output
-            ):
+            if app_process.returncode != 0:
                 raise RuntimeError("B5-13 hidden App production-path acceptance failed")
             app_process = None
 
@@ -344,7 +362,9 @@ def main() -> None:
             verify_logout_local_state(private_app_data)
             asyncio.run(verify_database_state(database_url))
             require_no_residual_project_processes(private_app_data, package_entrypoint)
-            print("[B5-13/B5-14] Hidden-App platform status and safe logout acceptance passed")
+            print(
+                "[B5-13/B5-14] Hidden-App platform status and safe logout acceptance passed"
+            )
         finally:
             if app_process is not None:
                 terminate_process(app_process)

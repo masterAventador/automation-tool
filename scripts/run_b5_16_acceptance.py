@@ -28,7 +28,6 @@ from run_b5_13_acceptance import (
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     executor_entrypoint,
-    graceful_app_exit_observed,
     install_executor_package,
     require_port_available,
     start_control_plane,
@@ -437,9 +436,7 @@ def main() -> None:
                 raise RuntimeError("B5-16 hidden App did not finish") from error
             output = output_bytes.decode("utf-8", errors="replace")
             print(sanitized_output(output, private_app_data), end="")
-            if app_process.returncode != 0 and not graceful_app_exit_observed(
-                app_process.returncode, output
-            ):
+            if app_process.returncode != 0:
                 raise RuntimeError("B5-16 hidden App production-path acceptance failed")
             app_process = None
 

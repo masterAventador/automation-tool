@@ -2102,11 +2102,18 @@ fn inject_executor_hang_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
-fn exit_app_for_acceptance(app: tauri::AppHandle) {
+fn exit_app_for_acceptance(
+    app: tauri::AppHandle,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+) -> Result<(), ExecutorPlatformCommandError> {
+    platform
+        .shutdown_for_app_exit()
+        .map_err(map_executor_platform_error)?;
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        std::thread::sleep(std::time::Duration::from_secs(2));
         app.exit(0);
     });
+    Ok(())
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -2731,7 +2738,7 @@ pub fn run() {
             if let Some(platform) =
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {
-                platform.shutdown_for_app_exit();
+                let _ = platform.shutdown_for_app_exit();
             }
         }
     });

@@ -157,6 +157,5 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
     assert.doesNotMatch(finalText, /产品登录|注册账号|账号登录/);
 
     await browser.tauri.execute(({ core }) => core.invoke("exit_app_for_acceptance"));
-    await browser.pause(12_000);
   });
 });

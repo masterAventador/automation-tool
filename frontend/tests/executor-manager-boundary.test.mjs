@@ -292,7 +292,7 @@ test("E4-14 drives the signed Executor lifecycle through one isolated hidden App
   assert.match(orchestrator, /automation-tool-e414-/);
   assert.match(orchestrator, /require_port_available/);
   assert.match(orchestrator, /assert_no_executor_process/);
-  assert.match(orchestrator, /graceful_app_exit_observed/);
+  assert.doesNotMatch(orchestrator, /graceful_app_exit_observed/);
   assert.match(orchestrator, /executor-ledger\.sqlite3/);
   assert.match(controlPlane, /AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN/);
   assert.match(spec, /exit_app_for_acceptance/);

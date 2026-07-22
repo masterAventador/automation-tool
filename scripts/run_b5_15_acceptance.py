@@ -27,7 +27,6 @@ from run_b5_13_acceptance import (
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     executor_entrypoint,
-    graceful_app_exit_observed,
     install_executor_package,
     require_port_available,
     start_control_plane,
@@ -43,7 +42,9 @@ from run_t3_06_acceptance import FRONTEND_ROOT, base64url
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.platform-session-reuse-e2e.conf.json"
+TAURI_CONFIG = (
+    FRONTEND_ROOT / "src-tauri" / "tauri.platform-session-reuse-e2e.conf.json"
+)
 EXECUTOR_SPEC = BACKEND_ROOT / "tests/fixtures/automation-tool-executor-b515.spec"
 APP_IDENTIFIER = "com.aventador.automationtool.b515acceptance"
 ENVIRONMENT_ID = "b515-acceptance"
@@ -123,7 +124,9 @@ def isolated_environment(
     page_state_path: Path,
 ) -> tuple[dict[str, str], str]:
     environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("AUTOMATION_TOOL_")
     }
     database_password = secrets.token_hex(24)
     database_url = (
@@ -147,7 +150,9 @@ def isolated_environment(
             "AUTOMATION_TOOL_B515_BOOTSTRAP_TOKEN": bootstrap_token,
             "AUTOMATION_TOOL_B515_ENVIRONMENT_ID": ENVIRONMENT_ID,
             "AUTOMATION_TOOL_B515_PAGE_STATE": os.fspath(page_state_path),
-            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": (f"http://127.0.0.1:{control_plane_port}"),
+            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": (
+                f"http://127.0.0.1:{control_plane_port}"
+            ),
         }
     )
     return environment, database_url
@@ -199,7 +204,9 @@ async def verify_database_state(database_url: str) -> None:
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
-            installation_count = await connection.scalar(text("select count(*) from installations"))
+            installation_count = await connection.scalar(
+                text("select count(*) from installations")
+            )
             rows = (
                 await connection.execute(
                     text(
@@ -245,7 +252,7 @@ def run_hidden_app_phase(
         raise RuntimeError("B5-15 hidden App phase did not finish") from error
     output = output_bytes.decode("utf-8", errors="replace")
     print(output, end="")
-    if process.returncode != 0 and not graceful_app_exit_observed(process.returncode, output):
+    if process.returncode != 0:
         raise RuntimeError("B5-15 hidden App production-path phase failed")
 
 
@@ -294,8 +301,12 @@ def main() -> None:
                 cwd=BACKEND_ROOT,
                 env=environment,
             )
-            print(f"[B5-15] Starting Control Plane on isolated port {control_plane_port}")
-            server = start_control_plane(port=control_plane_port, environment=environment)
+            print(
+                f"[B5-15] Starting Control Plane on isolated port {control_plane_port}"
+            )
+            server = start_control_plane(
+                port=control_plane_port, environment=environment
+            )
 
             print("[B5-15] Building one hidden Tauri App for four restart phases")
             subprocess.run(
@@ -317,16 +328,22 @@ def main() -> None:
                 )
                 if package_entrypoint is None:
                     raise RuntimeError("B5-15 Executor entrypoint is unavailable")
-                require_no_residual_project_processes(private_app_data, package_entrypoint)
+                require_no_residual_project_processes(
+                    private_app_data, package_entrypoint
+                )
                 current_identity = profile_identity(private_app_data)
                 if observed_identity is None:
                     observed_identity = current_identity
                 elif current_identity != observed_identity:
-                    raise RuntimeError("B5-15 did not retain one stable Profile across restarts")
+                    raise RuntimeError(
+                        "B5-15 did not retain one stable Profile across restarts"
+                    )
 
             verify_local_session_state(private_app_data)
             asyncio.run(verify_database_state(database_url))
-            print("[B5-15] Hidden-App Profile reuse and fail-closed handoff acceptance passed")
+            print(
+                "[B5-15] Hidden-App Profile reuse and fail-closed handoff acceptance passed"
+            )
         finally:
             if package_entrypoint is not None:
                 terminate_project_processes(private_app_data, package_entrypoint)

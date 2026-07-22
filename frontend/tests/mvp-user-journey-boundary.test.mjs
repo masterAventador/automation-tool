@@ -84,7 +84,7 @@ test("H8-16F keeps one hidden original-caller MVP journey with controlled browse
   assert.match(runner, /unused_loopback_port/u);
   assert.match(runner, /require_port_closed/u);
   assert.match(runner, /shutil\.rmtree/u);
-  assert.match(runner, /graceful_app_exit_observed/u);
+  assert.doesNotMatch(runner, /graceful_app_exit_observed/u);
 
   assert.match(executorFixture, /ProductionDouyinActionOperation/u);
   assert.match(executorFixture, /DouyinBrowseExecution/u);

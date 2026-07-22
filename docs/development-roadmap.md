@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-16F MVP 规格差异收口已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-17 代码质量复审已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-16F 已完成；下一项 H8-17，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-17 已完成；下一项 H8-18，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -352,7 +352,7 @@
 | H8-16D | Executor 真实动作编排 | 正式 Processor 消费授权命令并调用 browse/comment/direct-message 生产实现，不再返回固定成功批次 | H8-16C | ✅ 已完成 |
 | H8-16E | 启动环境诊断闭环 | App 启动统一检查 Control Plane、Executor、受信浏览器和 App 私有数据目录并给出安全修复入口 | H8-16D | ✅ 已完成 |
 | H8-16F | MVP 规格差异收口 | 校准页面承诺/后置范围，并由隐藏 App 跑通创建→登录/发现→预览→确认→受控动作→结果 | H8-16E | ✅ 已完成 |
-| H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ⬜ 未开始 |
+| H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ✅ 已完成 |
 | H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ⬜ 未开始 |
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ⬜ 未开始 |
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ⬜ 未开始 |
@@ -2699,12 +2699,28 @@
 - 提交：外部检查点 `b69f463` 已保存协议、实现、验收和规格主体并推送 `main`；本任务随后以独立补正提交收录防御性覆盖率分支、全量门禁结果和最终台账，不改写或强推已有历史
 - 后续：进入 `H8-17`，复审 fail-open、竞态、资源泄漏、假绿测试和平台差异；H8-17 完成前不启动后续自动更新实现
 
+### H8-17 代码质量复审
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：新增 H8-17 可执行审查后，聚焦门禁准确得到 12/17：`App` 仍允许省略启动检查并默认直接 ready；五条隐藏 App 验收在主动退出后故意等待驱动断连，再由外层把特定 WDIO 失败码转换为成功；全部 31 个 WDIO 配置没有统一的临时日志生命周期，且 `tsconfig.node.json` 只类型检查默认配置。没有先改实现或用静态结论冒充缺口
+- Fail-closed 启动：`App` 的 `startupCheck` 改为必传，移除组件内部 `desktopShellStartupCheck` 默认值和生产依赖；正式 `main.tsx` 继续显式组合 Control Plane 与本机环境检查，测试入口也必须显式声明自己的检查器。这样任何新入口漏接安全启动 Gate 都在 TypeScript 编译期失败，不能静默进入工作台
+- 假绿与退出竞态：E4-14、B5-13、B5-15、B5-16、H8-16F runner 现在一律要求 WDIO 零退出码，删除 `graceful_app_exit_observed` 例外；五条 E2E 不再用 12 秒 `browser.pause` 等待连接报错。真实复验首轮得到 WDIO `1 passing`，同时暴露 Session 结束先于 App 延迟退出、Executor 残留的竞态；验收退出 Command 随后改为在返回成功前同步调用与真实 App 退出相同的 `shutdown_for_app_exit`，Executor 与 Profile 任一清理失败都会回传失败，资源断言再以 30 秒有界轮询覆盖最长优雅停机窗口，不靠固定睡眠碰运气
+- WDIO 资源治理：所有 31 个配置统一注入 `wdioRuntimeArtifacts`，每次运行使用 OS 临时目录下唯一 `automation-tool-wdio-*` 路径。配置加载时启动无 shell、隐藏、脱离父进程的短寿命 Node 守护进程，通过父 PID 存活探测在 WDIO 正常退出、失败或被强停后清理目录；没有依赖在 Tauri service 下不可靠的 `onComplete`。真实隐藏 Tauri smoke 后未新增临时目录，仓库旧有 212 个 WDIO 日志和四个复审过程目录已移动到可恢复的 `/Users/aventador/.Trash/automation-tool-h8-17-generated-logs-20260722-1231`
+- 跨平台与门禁：`tsconfig.node.json` 由单个 `wdio.conf.ts` 改为覆盖全部 `wdio*.conf.ts` 和共享生命周期模块，Windows 专用配置不再绕过 TypeScript。清理子进程使用 `process.execPath` 参数数组、`windowsHide=true` 和 OS `tmpdir()`，不调用 shell、不依赖 POSIX 路径；全局隐藏 App/无头浏览器门禁继续扫描所有验收配置
+- 原调用方验收：H8-16F 隐藏真实 App 再次从创建任务走到结构化结果，WDIO 明确报告 `1 passing`、进程退出码 0，随后验证签名 Executor、App、WebDriver、无头浏览器、Uvicorn、专属 PostgreSQL、动态端口和 AppData 全部回收。通用隐藏 Tauri smoke 同样 `1 passing`，并实证守护清理没有在临时目录或仓库重新留下日志
+- 完整门禁：Backend `2071 passed/5 explicit skipped in 233.11s`，13909 条语句/3222 个分支覆盖率 100%，356 个 Python 文件格式/Ruff、严格 Mypy 328 个源码文件、uv lock、OpenAPI、Executor Schema 及变更验收脚本的格式/Ruff/编译全绿。Frontend 126 项 Node 契约、231 项 Vitest、5 项全局无头 Playwright、Lint、严格 TypeScript、API 漂移和 production boundary 全绿；Rust 默认 `162 passed/4 ignored`、`desktop-e2e` `158 passed/4 ignored`、`control-plane-e2e` `163 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿
+- 真实边界：本任务验证的是代码安全边界、测试可信度和本地资源生命周期，没有访问默认浏览器 Profile、真实账号、系统钥匙串或制造平台副作用；Windows 配置已进入编译/契约门禁，涉及真实 Windows 安装与升级的最终证据仍由对应双平台任务独立完成
+- 后续：进入 `H8-18`，先评估现成更新 SDK 并冻结通用、与业务无关的更新契约；没有完成选型前不直接编写安装器状态机
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-17`：复审 fail-open、竞态、资源泄漏、假绿测试和平台差异，逐项给出可复现证据并只修复本任务范围内缺口；
-2. `A7-16/A7-17`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上完成真实评论与私信最终状态验收；没有目标时跳过，不制造外部副作用；
-3. `A7-18`（依赖阻塞）：待 A7-16/A7-17 真实证据完成后执行风险护栏对抗测试，不把离线 Fake 证据冒充通过；
-4. `D6-16`/`B5-15` 真实账号补验：账号不可用时继续保持 `🔍`，不阻塞后续任务；
-5. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `H8-18`：评估现成更新 SDK，冻结通用版本、平台、签名、发布策略和状态契约；
+2. `H8-19`：实现可选/强制更新策略机，以及立即安装、暂缓和跳过版本的持久语义；
+3. `H8-20`：统一 App 启动、有界轮询和用户主动检查入口，完成后台下载、验签、恢复与新包覆盖旧缓存；
+4. `H8-21`：实现立即安装前安全退出、暂缓重复提示和强更下次启动静默安装协调；
+5. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
+6. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
+7. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

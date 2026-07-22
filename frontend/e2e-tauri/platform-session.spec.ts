@@ -98,6 +98,5 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
     assert.equal(blocked, true, "real App Task API must observe the persistent logout gate");
 
     await browser.tauri.execute(({ core }) => core.invoke("exit_app_for_acceptance"));
-    await browser.pause(12_000);
   });
 });

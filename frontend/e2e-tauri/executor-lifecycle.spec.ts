@@ -123,6 +123,5 @@ describe("E4-14 hidden App Executor lifecycle acceptance", () => {
     assert.doesNotMatch(bodyText, PRIVATE_DIAGNOSTIC_VALUES);
 
     await browser.tauri.execute(({ core }) => core.invoke("exit_app_for_acceptance"));
-    await browser.pause(12_000);
   });
 });

@@ -28,7 +28,6 @@ from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     assert_no_executor_process,
     executor_entrypoint,
-    graceful_app_exit_observed,
     install_executor_package,
     pnpm_executable,
     start_control_plane,
@@ -449,10 +448,7 @@ def main() -> None:
                 ) from error
             output = output_bytes.decode("utf-8", errors="replace")
             print(output, end="")
-            if app_process.returncode != 0 and not graceful_app_exit_observed(
-                app_process.returncode,
-                output,
-            ):
+            if app_process.returncode != 0:
                 raise RuntimeError("H8-16F hidden App original-caller journey failed")
             app_process = None
 

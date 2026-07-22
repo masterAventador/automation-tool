@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 
 import type { TauriCapabilities } from "@wdio/tauri-service";
+import { wdioRuntimeArtifacts } from "./wdio-runtime-artifacts";
 
 const binaryName =
   process.platform === "win32"
@@ -13,6 +14,7 @@ const capabilities: TauriCapabilities = {
 };
 
 export const config: WebdriverIO.Config = {
+  ...wdioRuntimeArtifacts,
   runner: "local",
   specs: ["./e2e-tauri/task-event-stream.spec.ts"],
   maxInstances: 1,
