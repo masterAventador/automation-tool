@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>shared chromium probe</title>
+    <style>
+      @font-face {
+        font-family: ProbeFont;
+        src: url("/sample.woff2") format("woff2");
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #172033;
+        color: white;
+        font-family: ProbeFont, serif;
+      }
+
+      #lottie {
+        width: 120px;
+        height: 120px;
+      }
+    </style>
+    <script src="/lottie.min.js"></script>
+  </head>
+  <body>
+    <h1 id="font">Shared Chromium</h1>
+    <img
+      id="image"
+      alt="probe"
+      src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23ff5c35'/%3E%3C/svg%3E"
+    />
+    <video id="video" src="/sample.webm" muted preload="auto"></video>
+    <audio id="audio" src="/sample.ogg" preload="auto"></audio>
+    <div id="lottie"></div>
+    <canvas id="canvas" width="64" height="64"></canvas>
+    <canvas id="webgl" width="64" height="64"></canvas>
+    <script>
+      window.probeReady = (async () => {
+        await document.fonts.load("24px ProbeFont");
+        await image.decode();
+
+        const context2d = canvas.getContext("2d");
+        context2d.fillStyle = "#00ff00";
+        context2d.fillRect(0, 0, 64, 64);
+        const canvas2d = context2d.getImageData(2, 2, 1, 1).data[1] === 255;
+
+        const gl = webgl.getContext("webgl2") || webgl.getContext("webgl");
+        let webglOk = false;
+        if (gl) {
+          gl.clearColor(0, 0, 1, 1);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          webglOk = gl.getParameter(gl.VERSION).length > 0;
+        }
+
+        const animation = lottie.loadAnimation({
+          container: document.getElementById("lottie"),
+          renderer: "svg",
+          loop: false,
+          autoplay: false,
+          animationData: {
+            v: "5.7.0",
+            fr: 30,
+            ip: 0,
+            op: 30,
+            w: 120,
+            h: 120,
+            layers: [
+              {
+                ddd: 0,
+                ind: 1,
+                ty: 4,
+                nm: "square",
+                sr: 1,
+                ks: {
+                  o: { a: 0, k: 100 },
+                  r: { a: 0, k: 0 },
+                  p: { a: 0, k: [60, 60, 0] },
+                  a: { a: 0, k: [0, 0, 0] },
+                  s: { a: 0, k: [100, 100, 100] },
+                },
+                shapes: [
+                  { ty: "rc", p: { a: 0, k: [0, 0] }, s: { a: 0, k: [80, 80] } },
+                  { ty: "fl", c: { a: 0, k: [1, 0.35, 0.2, 1] }, o: { a: 0, k: 100 } },
+                ],
+                ip: 0,
+                op: 30,
+                st: 0,
+                bm: 0,
+              },
+            ],
+          },
+        });
+        animation.goToAndStop(10, true);
+
+        const waitForMetadata = (element) =>
+          new Promise((resolve) => {
+            if (element.readyState >= 1) resolve();
+            else element.addEventListener("loadedmetadata", resolve, { once: true });
+          });
+        await Promise.all([waitForMetadata(video), waitForMetadata(audio)]);
+
+        let webgpu = false;
+        if (navigator.gpu) {
+          try {
+            webgpu = Boolean(await navigator.gpu.requestAdapter());
+          } catch {
+            webgpu = false;
+          }
+        }
+
+        return {
+          font: document.fonts.check("24px ProbeFont"),
+          image: image.complete && image.naturalWidth === 64,
+          video: video.readyState >= 1,
+          audio: audio.readyState >= 1,
+          lottie: Boolean(document.querySelector("#lottie svg")),
+          canvas_2d: canvas2d,
+          webgl: webglOk,
+          webgpu,
+        };
+      })();
+    </script>
+  </body>
+</html>

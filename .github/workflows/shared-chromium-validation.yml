@@ -1,0 +1,107 @@
+name: Shared Chromium validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-chromium-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: ${{ matrix.platform-id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform-id: macos-arm64
+          - runner: windows-2025
+            platform-id: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.6.0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: 3.12.13
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.8.4
+          enable-cache: true
+          cache-dependency-glob: tools/shared-browser-validation/uv.lock
+
+      - name: Install locked validation dependencies
+        shell: bash
+        run: |
+          uv sync --project tools/shared-browser-validation --locked
+          pnpm --dir tools/shared-browser-validation install --frozen-lockfile
+
+      - name: Ensure FFmpeg is available on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ffmpeg -version
+
+      - name: Ensure FFmpeg is available on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress
+          }
+          ffmpeg -version
+
+      - name: Install the one full Chromium distribution
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/eb-02-playwright
+        run: >-
+          uv run --project tools/shared-browser-validation --locked
+          playwright install --no-shell chromium
+
+      - name: Reject a second browser binary
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/eb-02-playwright
+        run: |
+          if find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name 'headless_shell' -o -name 'chrome-headless-shell' -o -name 'chrome-headless-shell.exe' \) | grep -q .; then
+            echo 'A forbidden second browser binary was downloaded.' >&2
+            exit 1
+          fi
+
+      - name: Run real shared-browser probes
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/eb-02-playwright
+          EB02_ARTIFACTS: ${{ runner.temp }}/eb-02-artifacts
+        run: >-
+          uv run --project tools/shared-browser-validation --locked python
+          scripts/validate_shared_chromium.py
+          --browser-root "$PLAYWRIGHT_BROWSERS_PATH"
+          --platform-id "${{ matrix.platform-id }}"
+          --artifacts-dir "$EB02_ARTIFACTS"
+
+      - name: Upload deterministic evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: eb-02-${{ matrix.platform-id }}
+          path: ${{ runner.temp }}/eb-02-artifacts
+          if-no-files-found: error
+          retention-days: 14

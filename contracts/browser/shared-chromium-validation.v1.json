@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "status": "collecting",
+  "chromium": {
+    "browser_version": "149.0.7827.55",
+    "revision": "1228"
+  },
+  "browser_use_version": "0.13.6",
+  "render_engine_version": "0.7.68",
+  "capture_policy": {
+    "macos": "screenshot",
+    "windows": "screenshot",
+    "requires_second_browser_binary": false
+  },
+  "style_count": 12,
+  "styles": [
+    "Biennale Yellow",
+    "BlockFrame",
+    "Blue Professional",
+    "Bold Poster",
+    "Broadside",
+    "Capsule",
+    "Cartesian",
+    "Cobalt Grid",
+    "Coral",
+    "Creative Mode",
+    "Daisy Days",
+    "Editorial Forest"
+  ],
+  "catalog": {
+    "blocks": 109,
+    "components": 25,
+    "installable_items": 134,
+    "examples_excluded": 8
+  },
+  "required_probes": [
+    "headed_playwright",
+    "browser_use_executable_path",
+    "browser_use_random_cdp",
+    "headless_render_process",
+    "catalog_single_frame",
+    "style_single_frame",
+    "font",
+    "image",
+    "video",
+    "audio",
+    "lottie",
+    "canvas_2d",
+    "webgl",
+    "webgpu",
+    "transparent_png",
+    "landscape",
+    "portrait",
+    "concurrent_processes",
+    "isolated_profiles",
+    "exclusive_control_lease",
+    "single_browser_distribution"
+  ],
+  "platform_results": {
+    "macos-arm64": {
+      "status": "pending",
+      "evidence_sha256": null
+    },
+    "windows-x86_64": {
+      "status": "pending",
+      "evidence_sha256": null
+    }
+  }
+}
