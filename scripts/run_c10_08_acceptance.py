@@ -13,7 +13,8 @@ import sys
 import tempfile
 import time
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -64,22 +65,45 @@ class AcceptanceFailure(RuntimeError):
     """Fixed failure without reflecting a generated credential or path."""
 
 
+@dataclass(frozen=True)
+class DeploymentRecoveryContext:
+    """Non-secret handles for an in-lifecycle deployment recovery probe."""
+
+    project: str
+    compose_environment: Mapping[str, str]
+    application_network: str
+    control_container: str
+    ingress_container: str
+    health_address: str
+    https_port: int
+    demo_host: str
+    ca_file: Path
+
+
+RecoveryProbe = Callable[[DeploymentRecoveryContext], Mapping[str, object]]
+
+
 def run(
     arguments: Sequence[str],
     *,
     input_text: str | None = None,
     environment: Mapping[str, str] | None = None,
     check: bool = True,
+    timeout_seconds: float = 300,
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        list(arguments),
-        cwd=REPOSITORY_ROOT,
-        env=None if environment is None else dict(environment),
-        input=input_text,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            list(arguments),
+            cwd=REPOSITORY_ROOT,
+            env=None if environment is None else dict(environment),
+            input=input_text,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        raise AcceptanceFailure("C10-08 command timed out") from None
     if check and result.returncode != 0:
         raise AcceptanceFailure("C10-08 command failed")
     return result
@@ -154,6 +178,7 @@ def write_volume(
             VOLUME_WRITER,
         ],
         input_text=json.dumps(payload, separators=(",", ":")),
+        timeout_seconds=60,
     )
 
 
@@ -285,7 +310,7 @@ def remove_container(name: str) -> None:
     run(["docker", "container", "rm", "--force", name], check=False)
 
 
-def main() -> None:
+def main(recovery_probe: RecoveryProbe | None = None) -> None:
     suffix = uuid4().hex[:12]
     project = f"c10-08-{suffix}"
     application_network = f"automation-tool-c10-08-app-{suffix}"
@@ -567,6 +592,37 @@ def main() -> None:
                 "PortBindings"
             ) not in ({}, None):
                 raise AcceptanceFailure("C10-08 Control Plane published a host port")
+            ingress_container = run(
+                [
+                    "docker",
+                    "compose",
+                    "--file",
+                    str(COMPOSE_FILE),
+                    "--project-name",
+                    project,
+                    "ps",
+                    "--quiet",
+                    "ingress",
+                ],
+                environment=environment,
+            ).stdout.strip()
+            recovery_result: Mapping[str, object] | None = None
+            if recovery_probe is not None:
+                recovery_result = recovery_probe(
+                    DeploymentRecoveryContext(
+                        project=project,
+                        compose_environment=environment,
+                        application_network=application_network,
+                        control_container=control_container,
+                        ingress_container=ingress_container,
+                        health_address="127.0.0.1",
+                        https_port=cast(int, projection["hostPorts"]["https"]),
+                        demo_host=DEMO_HOST,
+                        ca_file=ca_file,
+                    )
+                )
+                if not isinstance(recovery_result, Mapping):
+                    raise AcceptanceFailure("C10-08 recovery probe is invalid")
             revision_result = run(
                 [
                     "docker",
@@ -600,18 +656,16 @@ def main() -> None:
                 raise AcceptanceFailure(
                     "C10-08 service log contains a generated secret"
                 )
-            print(
-                json.dumps(
-                    {
-                        "alembicRevision": revision_result,
-                        "healthStatus": projection["healthStatus"],
-                        "hostPorts": projection["hostPorts"],
-                        "replicas": projection["replicas"],
-                        "versionStatus": projection["versionStatus"],
-                    },
-                    sort_keys=True,
-                )
-            )
+            summary: dict[str, object] = {
+                "alembicRevision": revision_result,
+                "healthStatus": projection["healthStatus"],
+                "hostPorts": projection["hostPorts"],
+                "replicas": projection["replicas"],
+                "versionStatus": projection["versionStatus"],
+            }
+            if recovery_result is not None:
+                summary["recovery"] = dict(recovery_result)
+            print(json.dumps(summary, sort_keys=True))
     finally:
         fallback_environment = os.environ.copy()
         if "values" in locals():

@@ -1,0 +1,16 @@
+{
+  "version": "customer-demo-recovery-plan.v1",
+  "controlPlaneRestarts": 1,
+  "applicationNetworkFlaps": 2,
+  "maximumControlPlaneReplicas": 1,
+  "maximumIngressReplicas": 1,
+  "automaticScaling": false,
+  "databaseRestart": false,
+  "databaseDowngrade": false,
+  "eventResumeHeader": "Last-Event-ID",
+  "protocolRecovery": [
+    "executor_reconnect",
+    "durable_outbox_replay",
+    "last_event_id_continuation"
+  ]
+}
