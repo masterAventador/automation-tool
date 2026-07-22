@@ -23,6 +23,7 @@ on:
       - scripts/run_p9_04_acceptance.py
       - scripts/run_p9_05_acceptance.py
       - scripts/run_p9_06_acceptance.py
+      - scripts/run_p9_07_acceptance.py
       - contracts/fixtures/executor-package-v1/**
       - contracts/protocol/executor-package-manifest-v1.schema.json
       - contracts/**
@@ -48,6 +49,7 @@ on:
       - scripts/run_p9_04_acceptance.py
       - scripts/run_p9_05_acceptance.py
       - scripts/run_p9_06_acceptance.py
+      - scripts/run_p9_07_acceptance.py
       - contracts/fixtures/executor-package-v1/**
       - contracts/protocol/executor-package-manifest-v1.schema.json
       - contracts/**

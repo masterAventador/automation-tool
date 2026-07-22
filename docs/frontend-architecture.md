@@ -560,6 +560,8 @@ P9-05 在 E4-15 既有主二进制、生产配置、Vite assets 和无测试 Fea
 
 P9-06 不给正式 App 增加测试 Feature、IPC 或运行时配置口。显式设备 runner 消费已经完成 Developer ID 签名、公证 staple 和 Gatekeeper 认可的唯一 DMG，复用 P9-05 完整包审计后复制到不存在的用户级验收 App；生产 identifier/AppData 保持不变，因此任何既有 AppData 都在启动前拒绝。目标 App 环境只保留必要用户变量和系统 `PATH`，移除 Python/虚拟环境/`AUTOMATION_TOOL_*`；外部扫码窗口打开时，OS 进程树必须证明正式 Executor、一个 Chrome/Edge、`app_data_dir/browser-profiles` 和零 Python 后代。人工 checkpoint 只允许授权账号的无写入 browse 旅程，重启后必须观察登录态/任务快照复用和零重复动作；证据是 path-free 的 `0600` JSON，安装和 AppData 可从废纸篓恢复。该入口显式可见且不进入 CI；签名包、真实账号以及本地 Control Plane/首次设备注册链未具备时保持 fail closed。
 
+P9-07 同样不增加测试 Feature/IPC，直接消费发布方给出的 NSIS。PowerShell 只作 OS 证明：`Get-AuthenticodeSignature` 配合在线 `X509Chain`、Code Signing EKU、时间戳和 thumbprint 锁定 installer/App/uninstaller；注册表只允许 HKCU 的固定 DisplayName/InstallLocation/UninstallString，HKLM 任一命中即拒绝。App 在无 Python/开发变量的系统环境启动后，Win32 `GetProcessDpiAwareness/GetDpiForWindow` 要求 per-monitor 与至少 125% 实际 DPI，CIM 进程树要求一个 `IsProcessInJob=true` 的 Executor、一个 Chrome/Edge 和私有 Profile。强停只针对主 App PID，不递归杀树；Executor/浏览器仍存活即证明 Job 清理失败。三次启动分别覆盖真实旅程、普通恢复和强停恢复；卸载必须删程序/HKCU 而保留 AppData，随后由 runner 复验 current-user ACL 并移到回收站。最小证据关闭 ACL 继承且只授权当前用户；入口显式可见，不在 CI 自动运行。
+
 正式构建通过 `AUTOMATION_TOOL_UPDATE_ENDPOINT` 与 `AUTOMATION_TOOL_UPDATE_PUBLIC_KEY` 注入公开发布配置；`build.rs` 在 release Profile 强制 endpoint 为包含一次 `target/arch/current_version` 占位符的 HTTPS URL，并对规范 Base64 包裹的 Minisign 公钥做实际解析。缺失、非 HTTPS、带凭据/fragment、占位符异常或坏公钥均在打包前失败。debug 仅在显式本机环境变量存在时启用更新，证书忽略开关只编译进 `desktop-e2e`；正式 App 不接受运行时端点覆盖。发布私钥始终只属于受控签名环境。
 
 ## 15. 禁止事项

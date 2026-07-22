@@ -518,6 +518,8 @@ P9-05 的 `frontend/scripts/audit-release-bundle.mjs` 是完整正式包树的�
 
 P9-06 的 `scripts/run_p9_06_acceptance.py` 是人工可见 macOS 干净安装的唯一设备入口，`frontend/tests/p9-06-macos-clean-install.test.mjs` 只锁定其安全边界而不启动 App。runner 不构建包，只接受 Developer ID/notarization/Gatekeeper 均通过的 DMG；它在 fresh production AppData 和专属用户级 App 上运行正式二进制，移除 Python/开发环境后从 OS 进程树核对 Resources Executor、Chrome/Edge 私有 Profile、退出清理和二次启动恢复。操作者 checkpoint 只生成无账号/路径/页面内容的 `0600` 证据；安装与 AppData 移到废纸篓。工作流只把 runner 变化列为触发路径，没有自动执行可见 App、浏览器、扫码或平台任务。
 
+P9-07 的 `scripts/run_p9_07_acceptance.py` 和对应 Node 契约是 Windows 正式签名 NSIS 的显式设备入口。runner 不构建包，只验证同 signer 的 Authenticode installer/App/uninstaller、HKCU-only currentUser 安装、P9-05 全树、per-monitor 高 DPI、Job-owned Executor、Chrome/Edge 私有 Profile、零 Python、主进程强停后的整树退出、三次启动恢复，以及卸载删程序但保留 AppData 的边界。证据 ACL 只给当前 SID，AppData 经 ACL 复验后进入回收站；workflow 只把源码列为变更触发，不自动执行可见应用或平台交互。
+
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
 T3-14 复用同一 `task_controls.py`、HTTP router、Outbox repository 和事件收敛仓储：cancel/emergency-stop 首次请求在命令事务内把 Task/Attempt 投影到 CANCELLING，终态再由匹配最新 ACK/correlation 的 Executor 事件决定，完成竞态仍服从领域状态机。桌面侧仍只扩展同一个 `control_plane.rs` 固定 operation；T3-14 专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_14_acceptance.py` 顺序验证取消和紧停，不建立第二网络桥或第二状态源。

@@ -90,6 +90,7 @@
     "test:p9-04-windows-package": "uv run --project ../backend --locked python ../scripts/run_p9_04_acceptance.py",
     "test:p9-05-package-audit": "uv run --project ../backend --locked python ../scripts/run_p9_05_acceptance.py",
     "test:p9-06-macos-clean-install": "../backend/.venv/bin/python ../scripts/run_p9_06_acceptance.py --interactive-device-acceptance",
+    "test:p9-07-windows-clean-install": "uv run --project ../backend --locked python ../scripts/run_p9_07_acceptance.py --interactive-device-acceptance",
     "test:task-run-tauri": "pnpm build:tauri:task-run-test && wdio run wdio.task-run.conf.ts",
     "test:task-query-tauri": "pnpm build:tauri:task-query-test && wdio run wdio.task-query.conf.ts",
     "test:task-event-stream-tauri": "pnpm build:tauri:task-event-stream-test && wdio run wdio.task-event-stream.conf.ts",
