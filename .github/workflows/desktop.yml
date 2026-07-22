@@ -14,8 +14,10 @@ on:
       - backend/tests/integration/test_pyinstaller_bundle.py
       - backend/tests/fixtures/packaged_browser_probe.py
       - backend/tests/unit/executor/test_package_manifest.py
+      - backend/tests/unit/executor/test_macos_candidate.py
       - backend/tests/unit/executor/test_process_cli.py
       - backend/tests/unit/executor/test_pyinstaller_bundle_contract.py
+      - scripts/run_p9_01_acceptance.py
       - contracts/fixtures/executor-package-v1/**
       - contracts/protocol/executor-package-manifest-v1.schema.json
       - contracts/**
@@ -32,8 +34,10 @@ on:
       - backend/tests/integration/test_pyinstaller_bundle.py
       - backend/tests/fixtures/packaged_browser_probe.py
       - backend/tests/unit/executor/test_package_manifest.py
+      - backend/tests/unit/executor/test_macos_candidate.py
       - backend/tests/unit/executor/test_process_cli.py
       - backend/tests/unit/executor/test_pyinstaller_bundle_contract.py
+      - scripts/run_p9_01_acceptance.py
       - contracts/fixtures/executor-package-v1/**
       - contracts/protocol/executor-package-manifest-v1.schema.json
       - contracts/**
@@ -91,6 +95,9 @@ jobs:
           tests/integration/test_pyinstaller_bundle.py
           tests/integration/test_packaged_browser_probe.py
           -q
+      - name: Build and audit the macOS Executor candidate
+        if: runner.os == 'macOS'
+        run: uv run python ../scripts/run_p9_01_acceptance.py
 
   desktop:
     name: ${{ matrix.runner }} / build and smoke

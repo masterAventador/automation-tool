@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-21 已完成；H8-22 的通用更新 UI、隐藏 App 原入口自动化、macOS ad-hoc 实包升级和 Windows 隔离普通包验收器已经完成，Windows 实机结果及 macOS/Windows 正式发布签名证据仍为 `🔍 待验收`。桌面 MVP 闭环、恢复诊断、后台更新下载及安全安装协调均已收口，真实账号证据继续独立待补。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15、Wave 8 H8-01～H8-21 与 P9-01 macOS Executor 候选构建已完成；H8-22 的通用更新 UI、隐藏 App 原入口自动化、macOS ad-hoc 实包升级和 Windows 隔离普通包验收器已经完成，Windows 实机结果及 macOS/Windows 正式发布签名证据仍为 `🔍 待验收`。macOS Executor 候选已收口依赖、开发路径清理、原生架构和全 Mach-O ad-hoc 签名准备，但 Developer ID/notarization 仍归后续 Tauri 候选包阶段；真实账号证据继续独立待补。
 
 ## 第一阶段
 

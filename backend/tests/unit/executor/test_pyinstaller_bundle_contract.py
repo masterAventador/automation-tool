@@ -20,6 +20,10 @@ def test_pyinstaller_and_playwright_are_locked_in_their_runtime_scopes() -> None
         project["project"]["scripts"]["automation-tool-build-executor-manifest"]
         == "automation_tool.executor.package_manifest:main"
     )
+    assert (
+        project["project"]["scripts"]["automation-tool-build-macos-executor"]
+        == "automation_tool.executor.macos_candidate:main"
+    )
 
 
 def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() -> None:
@@ -33,6 +37,7 @@ def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() ->
     assert "console=True" in source
     assert 'collect_all("playwright")' in source
     assert '"automation_tool.executor.browser_runtime"' in source
+    assert "remove_direct_url_metadata" in source
 
 
 def test_every_executor_spec_materializes_safe_internal_pyinstaller_symlinks() -> None:
@@ -62,3 +67,4 @@ def test_desktop_ci_smokes_the_executor_bundle_on_both_supported_platforms() -> 
     assert "frontend/src-tauri -> target" in source
     assert "backend/automation-tool-executor.spec" in source
     assert "contracts/fixtures/executor-package-v1/**" in source
+    assert "run_p9_01_acceptance.py" in source

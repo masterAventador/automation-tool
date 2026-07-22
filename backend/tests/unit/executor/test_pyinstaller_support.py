@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -112,3 +113,59 @@ def test_materialization_rejects_a_directory_link_cycle(tmp_path: Path) -> None:
 
     with pytest.raises(PyInstallerPackageMaterializationRejected):
         materialize_internal_package_symlinks(package_root)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlinks require developer mode")
+def test_materialization_rejects_a_link_target_changed_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = tmp_path / "automation-tool-executor"
+    package_root.mkdir()
+    target = package_root / "runtime"
+    target.write_bytes(b"runtime")
+    link = package_root / "runtime-link"
+    link.symlink_to(target.name)
+    original_readlink = os.readlink
+    read_count = 0
+
+    def drifting_readlink(path: os.PathLike[str] | str) -> str:
+        nonlocal read_count
+        read_count += 1
+        if read_count == 2:
+            return "changed-after-preflight"
+        return original_readlink(path)
+
+    monkeypatch.setattr(os, "readlink", drifting_readlink)
+
+    with pytest.raises(PyInstallerPackageMaterializationRejected):
+        materialize_internal_package_symlinks(package_root)
+
+    assert link.is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows symlinks require developer mode")
+def test_materialization_rejects_a_link_created_after_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = tmp_path / "automation-tool-executor"
+    package_root.mkdir()
+    target = package_root / "runtime"
+    target.write_bytes(b"runtime")
+    late_link = package_root / "late-link"
+    original_rglob = Path.rglob
+    scan_count = 0
+
+    def racing_rglob(path: Path, pattern: str) -> Iterator[Path]:
+        nonlocal scan_count
+        if path == package_root:
+            scan_count += 1
+            if scan_count == 2:
+                late_link.symlink_to(target.name)
+        return original_rglob(path, pattern)
+
+    monkeypatch.setattr(Path, "rglob", racing_rglob)
+
+    with pytest.raises(PyInstallerPackageMaterializationRejected):
+        materialize_internal_package_symlinks(package_root)
+
+    assert late_link.is_symlink()

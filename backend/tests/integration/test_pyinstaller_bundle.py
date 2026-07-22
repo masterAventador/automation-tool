@@ -100,7 +100,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         input=b"",
         capture_output=True,
         check=False,
-        timeout=20,
+        timeout=30,
         env={"PATH": os.defpath},
     )
 

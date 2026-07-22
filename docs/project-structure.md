@@ -504,6 +504,8 @@ E4-14 的 `tauri.executor-lifecycle-e2e.conf.json`、`wdio.executor-lifecycle.co
 
 E4-15 的 `build.rs` 是 release 验证公钥的打包前 fail-closed 门；`tauri.dev.conf.json` 是唯一含 1420/devCSP 的开发覆盖，正式 `tauri.conf.json` 不再携带开发地址。`frontend/scripts/audit-production-package.mjs` 检查真实 release 二进制、生产资产、正式配置与 `cargo tree --no-default-features`，而根 `scripts/run_e4_15_acceptance.py` 负责缺失/畸形公钥失败证明、唯一临时 target 构建和精确清理。验收公开公钥不用于发布签名，临时制品不启动、不上传、不保留。
 
+P9-01 的 `executor/macos_candidate.py` 与 `scripts/run_p9_01_acceptance.py` 把既有 PyInstaller/Manifest 能力收敛成唯一 macOS 候选构建链。命令只向一个不存在的新目录输出，build/cache/dist 使用输出同级临时目录并在结束删除；候选必须包含生产 Playwright driver 和 base library、不含浏览器缓存、symlink、仓库/临时绝对路径，所有 Mach-O 与当前架构匹配并在 framework 别名规整后完成可复验的 ad-hoc 签名。验收用一次性测试 seed 证明离线 Manifest 签名准备后连同产物删除；没有 Developer ID、公证、上传或 Tauri 资源装配，后两者归 P9-03。
+
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 
 T3-14 复用同一 `task_controls.py`、HTTP router、Outbox repository 和事件收敛仓储：cancel/emergency-stop 首次请求在命令事务内把 Task/Attempt 投影到 CANCELLING，终态再由匹配最新 ACK/correlation 的 Executor 事件决定，完成竞态仍服从领域状态机。桌面侧仍只扩展同一个 `control_plane.rs` 固定 operation；T3-14 专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_14_acceptance.py` 顺序验证取消和紧停，不建立第二网络桥或第二状态源。

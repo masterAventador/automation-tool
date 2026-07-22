@@ -363,7 +363,7 @@
 
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ⬜ 未开始 |
+| P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ✅ 已完成 |
 | P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ⬜ 未开始 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | ⬜ 未开始 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | ⬜ 未开始 |
@@ -2802,10 +2802,26 @@
 - 解锁条件：Windows 实体机先用隔离普通包补齐同一可选/强制/覆盖/失败恢复矩阵；正式发布前再在受控环境提供 macOS Developer ID Application + notarization 和 Windows Authenticode，分别复验至少旧/新两个候选版本的签名、安装、更新和最终版本事实。两平台发布门禁全部满足后才能把 H8-22 改为 `✅ 已完成`
 - 提交：通用 UI/原入口自动化与 macOS ad-hoc 实包验收已在前序检查点提交；本检查点提交历史并行分支复核后筛选出的 camelCase/轮询互斥/HKCU 边界、Windows 普通包验收器、失败矩阵、资源隔离和权威文档，不整块合并重复实现，不生成、提交或索取长期发布私钥，也不把 macOS 静态门禁冒充 Windows 实机证据
 
+### P9-01 macOS Executor 构建
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- 推进边界：H8-22 仍等待 Windows 实机与正式双平台发布签名，但其剩余证据不改变已经冻结的 Executor spec、目录 Manifest 或 macOS 构建输入；按用户明确要求先推进可在本机独立完成的 P9-01，不把本任务反向冒充 H8-22 完成
+- RED：先把唯一台账置为 `🧪 RED`，新增 macOS 候选审计与构建失败矩阵；首跑在收集阶段准确失败于 `automation_tool.executor.macos_candidate` 不存在。随后真实侦察构建发现 196 MiB onedir 的 `_internal/automation_tool-0.1.0.dist-info/direct_url.json` 含本机仓库绝对路径；第一轮严格签名验收又准确拒绝 symlink 实体化后签名失效的三份 Python Mach-O，统一重签时再暴露 framework 根别名的格式歧义
+- 唯一构建入口：新增 `automation-tool-build-macos-executor`，只在 macOS 接受一个不存在的新输出目录；PyInstaller config/build/dist 全部位于输出同级唯一临时目录，禁止覆盖已有文件。正式 spec 过滤 editable install 的 `direct_url.json`，构建后和复制后各做一次完整审计，失败只返回固定文案且删除本次新建的部分输出
+- 依赖与路径审计：候选必须包含 `base_library.zip`、正式 Python Playwright 包及 driver/node，明确拒绝 `.local-browsers`、`ms-playwright`、Chromium/Firefox/WebKit/ffmpeg 浏览器缓存、symlink、特殊文件、超出 10,000 文件/8 GiB 和仓库/构建临时目录绝对路径；扫描按流式分块并保留边界 overlap，不靠文件名假定开发路径只出现在文本文件
+- 架构与签名准备：全部 thin/fat Mach-O 必须包含当前 `aarch64|x86_64` 架构，正式入口还必须可执行。`Python.framework/Python` 仅在与唯一版本化 Python 二进制逐字节相同时删除其实体化产生的冗余根别名，避免 `codesign` 的 app/framework 歧义；目录最终确定后对全部 Mach-O 统一 ad-hoc 重签并逐个 `codesign --verify --strict`。这只证明 P9-03 Developer ID/notarization 前的可签边界，不声称正式发布签名
+- 原调用方验收：`backend/.venv/bin/python scripts/run_p9_01_acceptance.py` 从唯一正式 spec 构建真实 onedir，最终为 364 个普通文件、143 个 Mach-O、198,723,081 bytes；候选从仅有系统 `PATH`、无项目 Python 的环境启动，空 bootstrap 精确返回退出码 2、空 stdout 和固定 stderr。随后只在即将删除的临时副本内用公开一次性 seed 生成并验证 E4-04 Manifest，核对 macOS/架构/入口/包大小一致。测试 seed 不进入保留产物、环境、argv、日志或仓库，也不代表发布私钥
+- 自动化与隔离：23 项候选/构建契约达到新增模块 179 条语句/68 个分支 100% 覆盖，覆盖依赖、开发路径、浏览器缓存、Mach-O 解析、架构、签名、symlink、framework 别名、资源上限、隔离目录和不覆盖；Desktop CI 的 macOS Executor job 运行同一真实候选验收，Windows job 不冒充 P9-01。真实候选、PyInstaller cache/build/dist、测试 Manifest/签名都由临时目录回收，不启动 App、浏览器、Control Plane 或 Docker，不上传/发布产物
+- 全量门禁修正：首次 Backend 全量在既有 H8-16D WebSocket 浏览器验收中收到 H8-16F 已规定的 Hello 后立即 heartbeat，旧测试却把它当成 offer 业务帧；现只在验收 reader 跳过生命周期 heartbeat，后续 `task.accept/task.started` 与三条 action 消息仍严格按序。覆盖率全量高负载下，真实冻结入口一次超过旧测试 20 秒冷启动等待；仅把该测试等待与 P9-01 原验收对齐到 30 秒，退出码、空 stdout 和固定 stderr 均未放宽，产品逻辑无改动
+- 最终门禁：Backend 正式工作目录全量 `2153 passed / 5 explicit skipped in 305.36s`，14,346 条语句/3,370 个分支 100%；其中 macOS 候选模块 179/68 与 PyInstaller symlink 规整 53/20 均为 100%。338 个 Python 文件 Ruff format/check、严格 Mypy、uv lock/sync、OpenAPI/Executor Schema 快照、Frontend 142 项 Node 契约、`actionlint 1.7.12` 和 `git diff --check` 全绿；本任务没有改动 Rust/React 产品源码，不重复声明前序 Rust/UI 全量结果
+- 后续：Windows 实体机先补 H8-22 普通包验收，再进入 P9-02 Windows Executor 构建；P9-03 可在本机继续接入本候选与 Tauri 普通安装包，但 Developer ID、公证和面向普通用户无警告分发仍须正式证书
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `H8-22`（🔍 待验收）：通用 UI、原入口自动化、macOS ad-hoc 实包矩阵和 Windows 隔离普通包验收器已完成；今晚在 Windows 实体机执行 `pnpm --dir frontend test:h8-22-windows-package` 取得普通包同矩阵事实，Developer ID/notarization 与 Authenticode 正式发布门禁按用户决定后置；
-2. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
-3. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+2. `P9-02`（⬜ 未开始）：在 Windows 实体机完成 H8-22 后，从同一正式 spec 收口 Windows Executor 候选、Playwright/UIA 依赖和 Job Object；macOS 不冒充 PE、UIA 或 Job Object 证据；
+3. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
+4. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

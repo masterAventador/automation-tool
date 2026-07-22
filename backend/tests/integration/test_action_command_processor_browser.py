@@ -392,6 +392,18 @@ def test_local_executor_websocket_drives_production_comment_through_a_headless_b
     stop = threading.Event()
     captured: queue.Queue[object] = queue.Queue()
 
+    def receive_business_messages(connection: ServerConnection, count: int) -> tuple[object, ...]:
+        messages: list[object] = []
+        while len(messages) < count:
+            message = parse_executor_message(connection.recv(timeout=5))
+            if (
+                isinstance(message, ExecutorLifecycleEnvelope)
+                and message.message_type == "executor.heartbeat"
+            ):
+                continue
+            messages.append(message)
+        return tuple(messages)
+
     def handler(connection: ServerConnection) -> None:
         try:
             assert connection.subprotocol == EXECUTOR_WEBSOCKET_SUBPROTOCOL
@@ -401,13 +413,9 @@ def test_local_executor_websocket_drives_production_comment_through_a_headless_b
             assert isinstance(hello, ExecutorLifecycleEnvelope)
             assert hello.message_type == "executor.hello"
             connection.send(offer())
-            offer_batch = tuple(
-                parse_executor_message(connection.recv(timeout=5)) for _ in range(2)
-            )
+            offer_batch = receive_business_messages(connection, 2)
             connection.send(action_command(action, action_id))
-            action_batch = tuple(
-                parse_executor_message(connection.recv(timeout=5)) for _ in range(3)
-            )
+            action_batch = receive_business_messages(connection, 3)
             captured.put((offer_batch, action_batch))
         except Exception as error:
             captured.put(error)
