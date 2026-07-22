@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "sourceId": "moneyprinterturbo",
+  "displayPurpose": "智能素材成片只读上游源码",
+  "sourcePath": "vendor/moneyprinterturbo",
+  "origin": "https://github.com/harry0703/MoneyPrinterTurbo.git",
+  "tag": "v1.3.2",
+  "commit": "b1588e1fdc6c5e54358f66ca2ff323e1dddf1364",
+  "tree": "d7181addf4504e7f56afcdd1b82f4238716d4a98",
+  "archive": {
+    "format": "tar",
+    "prefix": "moneyprinterturbo/",
+    "sha256": "2cc9f0b65af922788a28a6c9810f12ebc9350987288d1db008c06591bd97528b",
+    "trackedFileCount": 155,
+    "requiredPaths": [
+      "LICENSE",
+      "pyproject.toml",
+      "uv.lock",
+      "main.py",
+      "app/asgi.py",
+      "webui/Main.py"
+    ]
+  },
+  "policy": {
+    "recursiveInitializationRequired": true,
+    "networkRequiredToBuild": false,
+    "sourceCheckoutReadOnly": true,
+    "allowPatches": false,
+    "allowDirtyTree": false,
+    "allowRuntimeSourceUpdate": false
+  }
+}
