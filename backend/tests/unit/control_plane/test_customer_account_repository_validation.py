@@ -111,6 +111,11 @@ async def test_repository_normalizes_database_failures_without_private_details()
             target_status=AccountStatus.DISABLED,
             audit=audit(),
         ),
+        repository.emergency_revoke(
+            user_id=user_id,
+            expected_revision=1,
+            audit=audit(),
+        ),
     )
     for operation in operations:
         with pytest.raises(AccountPersistenceUnavailable) as captured:

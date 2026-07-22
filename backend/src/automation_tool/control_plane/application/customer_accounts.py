@@ -109,6 +109,21 @@ class AccountAuthenticationRecord:
     password_hash: PasswordHash
 
 
+@dataclass(frozen=True, slots=True)
+class EmergencyRevocationRecord:
+    account: AccountRecord
+    revoked_device_count: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.account, AccountRecord)
+            or self.account.status is not AccountStatus.DISABLED
+            or type(self.revoked_device_count) is not int
+            or self.revoked_device_count < 0
+        ):
+            raise InvalidAccountModel
+
+
 class CustomerAccountRepository(Protocol):
     async def create(
         self,
@@ -127,6 +142,14 @@ class CustomerAccountRepository(Protocol):
         target_status: AccountStatus,
         audit: AccountAuditContext,
     ) -> AccountRecord: ...
+
+    async def emergency_revoke(
+        self,
+        *,
+        user_id: UserId,
+        expected_revision: int,
+        audit: AccountAuditContext,
+    ) -> EmergencyRevocationRecord: ...
 
 
 class AccountPasswordHasher(Protocol):
@@ -209,6 +232,26 @@ class CustomerAccountService:
             request_id=request_id,
         )
 
+    async def emergency_revoke(
+        self,
+        *,
+        user_id: UserId,
+        expected_revision: object,
+        actor: AccountAuditActor,
+        request_id: object,
+    ) -> EmergencyRevocationRecord:
+        if (
+            not isinstance(user_id, UserId)
+            or type(expected_revision) is not int
+            or expected_revision <= 0
+        ):
+            raise InvalidAccountModel
+        return await self._repository.emergency_revoke(
+            user_id=user_id,
+            expected_revision=expected_revision,
+            audit=self._audit(actor=actor, request_id=request_id),
+        )
+
     async def _transition(
         self,
         *,
@@ -245,4 +288,5 @@ __all__ = [
     "AccountTransitionRejected",
     "CustomerAccountRepository",
     "CustomerAccountService",
+    "EmergencyRevocationRecord",
 ]

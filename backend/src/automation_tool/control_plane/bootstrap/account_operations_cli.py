@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     create = commands.add_parser("create")
     create.add_argument("--login-name", required=True)
     create.add_argument("--request-id", required=True)
-    for command in ("disable", "restore"):
+    for command in ("disable", "restore", "emergency-revoke"):
         transition = commands.add_parser(command)
         transition.add_argument("--user-id", required=True)
         transition.add_argument("--expected-revision", required=True, type=int)
@@ -191,6 +191,19 @@ async def _execute(
                 "userId": str(changed.user_id),
                 "status": changed.status.value,
                 "revision": changed.revision,
+            }
+        if command == "emergency-revoke":
+            revoked = await accounts.emergency_revoke(
+                user_id=UserId.parse(arguments.user_id),
+                expected_revision=arguments.expected_revision,
+                actor=actor,
+                request_id=arguments.request_id,
+            )
+            return {
+                "userId": str(revoked.account.user_id),
+                "status": revoked.account.status.value,
+                "revision": revoked.account.revision,
+                "revokedDeviceCount": revoked.revoked_device_count,
             }
         sessions = account_session_service_from_environment(database)
         if sessions is None:
