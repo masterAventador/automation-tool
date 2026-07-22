@@ -15,6 +15,8 @@ from pathlib import Path, PurePosixPath
 from typing import Final
 from urllib.parse import urlsplit
 
+from model_service_adapter import ScriptModelConfiguration, parse_script_model
+
 HOST: Final = "127.0.0.1"
 WORKER_VERSION: Final = "1.3.2"
 PROTOCOL_VERSION: Final = "1.0"
@@ -49,6 +51,7 @@ class GatewayBootstrap:
     token_text: str
     token_bytes: bytes
     asset_root: Path
+    script_model: ScriptModelConfiguration | None = None
 
 
 def _fixed_json(code: str) -> bytes:
@@ -104,6 +107,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         "bootstrapVersion",
         "localSessionToken",
         "protocolVersion",
+        "scriptModel",
         "workerKind",
     }:
         raise GatewayRejected("invalid bootstrap")
@@ -120,6 +124,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         token_text=token,
         token_bytes=bytes.fromhex(token),
         asset_root=validate_asset_root(value.get("assetRoot")),
+        script_model=parse_script_model(value.get("scriptModel")),
     )
 
 

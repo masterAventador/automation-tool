@@ -7,13 +7,17 @@ on:
       - ".github/workflows/material-video-worker.yml"
       - "contracts/quality/material-video-worker-package.v1.json"
       - "contracts/security/material-video-gateway.v1.json"
+      - "contracts/video/material-video-script-model-adapter.v1.json"
       - "frontend/src-tauri/src/local_video_orchestrator.rs"
+      - "frontend/src-tauri/src/model_service_settings.rs"
       - "frontend/src-tauri/tests/material_video_gateway.rs"
+      - "frontend/src-tauri/tests/model_service_settings.rs"
       - "workers/material_montage/**"
       - "scripts/build_material_video_worker_candidate.py"
       - "scripts/test_material_video_worker.py"
       - "scripts/run_im_02_acceptance.py"
       - "scripts/run_im_03_acceptance.py"
+      - "scripts/run_im_04_acceptance.py"
       - "vendor/moneyprinterturbo"
 
 permissions:
@@ -44,4 +48,4 @@ jobs:
         with:
           workspaces: frontend/src-tauri -> target
       - run: uv python install 3.11.15
-      - run: python scripts/run_im_03_acceptance.py
+      - run: python scripts/run_im_04_acceptance.py

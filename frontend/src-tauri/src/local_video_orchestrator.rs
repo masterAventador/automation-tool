@@ -35,6 +35,7 @@ const EVENT_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.video-worker-event.
 const COMMAND_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.video-worker-command.v1\0";
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+const BAILIAN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
 pub const DEFAULT_VIDEO_WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -132,6 +133,46 @@ pub struct VideoWorkerLaunch {
     asset_root: PathBuf,
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
+    script_model: Option<VideoWorkerScriptModelConfiguration>,
+}
+
+#[derive(Clone)]
+pub struct VideoWorkerScriptModelConfiguration {
+    model_id: String,
+    api_key: Zeroizing<String>,
+}
+
+impl fmt::Debug for VideoWorkerScriptModelConfiguration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VideoWorkerScriptModelConfiguration")
+            .field("source_provider", &"bailian")
+            .field("upstream_provider", &"openai")
+            .field("model_id", &self.model_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VideoWorkerScriptModelConfiguration {
+    pub(crate) fn bailian(
+        model_id: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Result<Self, VideoWorkerError> {
+        let model_id = model_id.into();
+        let api_key = Zeroizing::new(api_key.into());
+        if !matches!(
+            model_id.as_str(),
+            "deepseek-v4-pro" | "glm-5.2" | "qwen3.7-max-2026-06-08"
+        ) || !valid_model_api_key(&api_key)
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self { model_id, api_key })
+    }
+
+    pub fn model_id(&self) -> &str {
+        &self.model_id
+    }
 }
 
 impl VideoWorkerLaunch {
@@ -156,7 +197,13 @@ impl VideoWorkerLaunch {
             asset_root,
             expected_version,
             restart_policy,
+            script_model: None,
         })
+    }
+
+    pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
+        self.script_model = Some(configuration);
+        self
     }
 }
 
@@ -170,6 +217,7 @@ pub struct VideoWorkerStatus {
     port: Option<u16>,
     process_id: Option<u32>,
     restart_count: u8,
+    script_model_id: Option<String>,
 }
 
 impl VideoWorkerStatus {
@@ -182,6 +230,7 @@ impl VideoWorkerStatus {
             port: None,
             process_id: None,
             restart_count,
+            script_model_id: None,
         }
     }
 
@@ -191,6 +240,7 @@ impl VideoWorkerStatus {
         port: u16,
         process_id: u32,
         restart_count: u8,
+        script_model_id: Option<String>,
     ) -> Self {
         Self {
             kind,
@@ -200,6 +250,7 @@ impl VideoWorkerStatus {
             port: Some(port),
             process_id: Some(process_id),
             restart_count,
+            script_model_id,
         }
     }
 
@@ -225,6 +276,10 @@ impl VideoWorkerStatus {
 
     pub const fn restart_count(&self) -> u8 {
         self.restart_count
+    }
+
+    pub fn script_model_id(&self) -> Option<&str> {
+        self.script_model_id.as_deref()
     }
 }
 
@@ -487,7 +542,18 @@ struct VideoWorkerBootstrapDocument<'a> {
     bootstrap_version: &'static str,
     local_session_token: &'a str,
     protocol_version: &'static str,
+    script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
     worker_kind: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoWorkerScriptModelBootstrap<'a> {
+    api_key: &'a str,
+    base_url: &'static str,
+    model_id: &'a str,
+    source_provider: &'static str,
+    upstream_provider: &'static str,
 }
 
 #[derive(Serialize)]
@@ -506,6 +572,7 @@ struct VideoWorkerReadyEvent {
     authentication_proof: String,
     event: String,
     protocol_version: String,
+    script_model_id: Option<String>,
     worker_kind: String,
     worker_version: String,
     port: u16,
@@ -571,6 +638,7 @@ fn spawn_worker(
             event.port,
             child.id(),
             restart_count,
+            event.script_model_id,
         );
         Ok((stdin, events, stdout_thread, stderr_thread, status))
     })();
@@ -616,6 +684,15 @@ fn write_bootstrap(
         bootstrap_version: BOOTSTRAP_VERSION,
         local_session_token: &encoded,
         protocol_version: WORKER_PROTOCOL_VERSION,
+        script_model: launch.script_model.as_ref().map(|configuration| {
+            VideoWorkerScriptModelBootstrap {
+                api_key: &configuration.api_key,
+                base_url: BAILIAN_BASE_URL,
+                model_id: &configuration.model_id,
+                source_provider: "bailian",
+                upstream_provider: "openai",
+            }
+        }),
         worker_kind: launch.kind.as_str(),
     };
     let mut bytes =
@@ -639,6 +716,11 @@ fn validate_ready_event(
     if event.event != "worker.ready"
         || event.protocol_version != WORKER_PROTOCOL_VERSION
         || event.worker_kind != launch.kind.as_str()
+        || event.script_model_id.as_deref()
+            != launch
+                .script_model
+                .as_ref()
+                .map(VideoWorkerScriptModelConfiguration::model_id)
         || !token.verify_event_proof(
             "worker.ready",
             launch.kind,
@@ -859,6 +941,14 @@ fn validate_directory_path(path: &Path) -> Result<(), VideoWorkerError> {
         return Err(configuration_invalid());
     }
     Ok(())
+}
+
+fn valid_model_api_key(value: &str) -> bool {
+    (20..=256).contains(&value.len())
+        && value.starts_with("sk-")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 const fn unsafe_path_component(is_symlink: bool, windows_file_attributes: Option<u32>) -> bool {

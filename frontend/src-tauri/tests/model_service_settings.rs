@@ -139,6 +139,9 @@ fn snapshots_and_debug_never_expose_credentials() {
     assert_eq!(credential.model_id(), BailianModelId::DeepseekV4Pro);
     assert_eq!(credential.api_key(), FIRST_KEY);
     assert!(!format!("{credential:?}").contains(FIRST_KEY));
+    let material_video = settings.material_video_script_model().unwrap();
+    assert_eq!(material_video.model_id(), "deepseek-v4-pro");
+    assert!(!format!("{material_video:?}").contains(FIRST_KEY));
     assert!(!format!("{settings:?}").contains(FIRST_KEY));
 }
 

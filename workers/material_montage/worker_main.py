@@ -21,6 +21,7 @@ from gateway import (
     parse_bootstrap,
     parse_cancel_command,
 )
+from model_service_adapter import install_script_model
 
 RUNTIME_PROBE_PROTOCOL_VERSION: Final = 1
 SAFE_MODULE_NAME: Final = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -81,6 +82,11 @@ def _gateway_process(stream: TextIO) -> int:
         return 64
     try:
         bootstrap = parse_bootstrap(line.encode())
+        script_model_id = (
+            install_script_model(bootstrap.script_model)
+            if bootstrap.script_model is not None
+            else None
+        )
         server = create_gateway(bootstrap)
     except Exception:
         print("Material video worker bootstrap is rejected", file=sys.stderr)
@@ -93,6 +99,7 @@ def _gateway_process(stream: TextIO) -> int:
         "event": "worker.ready",
         "port": port,
         "protocolVersion": PROTOCOL_VERSION,
+        "scriptModelId": script_model_id,
         "workerKind": "python",
         "workerVersion": WORKER_VERSION,
     }

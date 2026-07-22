@@ -38,6 +38,7 @@ def bootstrap_line(asset_root: Path, **changes: object) -> bytes:
         "bootstrapVersion": "1",
         "localSessionToken": TOKEN,
         "protocolVersion": "1.0",
+        "scriptModel": None,
         "workerKind": "python",
     }
     value.update(changes)

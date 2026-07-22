@@ -1,5 +1,6 @@
 //! Native-only model credentials, capability selection and connection testing.
 
+use crate::local_video_orchestrator::VideoWorkerScriptModelConfiguration;
 use crate::secure_store::{AppDataSecretStore, SecretStore, SecureStoreError};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -314,6 +315,17 @@ where
             model_id: credential.model_id,
             api_key: Zeroizing::new(credential.api_key.clone()),
         })
+    }
+
+    pub fn material_video_script_model(
+        &self,
+    ) -> Result<VideoWorkerScriptModelConfiguration, ModelServiceError> {
+        let credential = self.credential_for_worker(ModelServicePurpose::Script)?;
+        VideoWorkerScriptModelConfiguration::bailian(
+            credential.model_id().as_str(),
+            credential.api_key().to_owned(),
+        )
+        .map_err(|_| ModelServiceError::new(ModelServiceErrorCode::ConfigurationInvalid, false))
     }
 
     pub async fn test_connection(
