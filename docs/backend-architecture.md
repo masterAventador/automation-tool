@@ -173,7 +173,7 @@ infrastructure
 - OpenTelemetry 和结构化日志；
 - 不能反向定义业务语义。
 
-当前数据库基线固定为 SQLAlchemy asyncio + asyncpg。进程只持有一个 engine，应用用事务作用域 session；正常退出由 FastAPI lifespan 释放连接池。数据库 URL 只从 `AUTOMATION_TOOL_DATABASE_URL` 读取并要求 `postgresql+asyncpg://`，缺失或非法时启动 fail closed，错误不得回显凭据。Alembic 使用同一受校验配置，迁移文件和 `alembic.ini` 不保存连接信息。
+当前数据库基线固定为 SQLAlchemy asyncio + asyncpg。进程只持有一个 engine，应用用事务作用域 session；正常退出由 FastAPI lifespan 释放连接池。生产容器的数据库 URL 只从 `/run/secrets/database-url` 固定文件读取并要求 `postgresql+asyncpg://`，缺失或非法时启动 fail closed，错误不得回显凭据；本地开发的非容器入口才保留显式 environment mode。Alembic 使用同一受校验配置，迁移文件和 `alembic.ini` 不保存连接信息。
 
 ## 7. Executor 分层
 
@@ -481,7 +481,9 @@ Alembic `20260722_0028` 新增 `users`、`user_password_credentials`、`account_
 
 U9-03 复用同一 User/credential/audit 事实，没有复制认证中心。Alembic `20260722_0029` 只增加 `lock_expires_at` 和四张 Session 表：family 保存账号/credential version/30 天绝对期限与封闭吊销原因，token 只保存 access/refresh 类型、32 字节 digest、期限和单次 refresh 轮换链，登录限流只保存 identifier/source 两类 keyed HMAC 指纹与窗口计数，恢复票据只保存 15 分钟单次 digest。数据库复验 UUIDv4、时间上限、family 复合绑定、轮换状态、计数上限和恢复票据版本；明文密码、token、原始 login/IP/User-Agent 均不进入仓储参数、表或审计。
 
-公开账号 HTTP 面固定为登录、refresh、注销、当前密码修改和票据消费恢复五个 operation，不提供匿名注册、恢复申请或运维票据签发端点。登录在同一事务锁定 keyed identifier/source 窗口和 User：15 分钟内标识 5 次失败进入 15 分钟临时锁，来源 20 次失败阻止跨标识填充；未知账号、错密码、锁定、停用和限流共享固定 401。`atas1` access 最长 10 分钟，`atrs1` refresh 绝对最长 30 天且每次消费生成新 access/refresh，旧 refresh 重放即吊销整个 family。每次 access/refresh 都复验 User active、credential version、family/token 状态和半开期限；注销吊销当前 family，改密与 `atrp1` 运维恢复递增 credential version 并吊销账号全部 family。部署只有在 32 字节 Password Pepper、正版本和独立 32 字节指纹密钥三项完整时启用，部分配置 fail closed；U9-04 才负责把这些 secret 放进 Rust 私有存储并建立未登录 UI 门禁。
+公开账号 HTTP 面固定为登录、refresh、注销、当前密码修改和票据消费恢复五个 operation，不提供匿名注册、恢复申请或运维票据签发端点。登录在同一事务锁定 keyed identifier/source 窗口和 User：15 分钟内标识 5 次失败进入 15 分钟临时锁，来源 20 次失败阻止跨标识填充；未知账号、错密码、锁定、停用和限流共享固定 401。`atas1` access 最长 10 分钟，`atrs1` refresh 绝对最长 30 天且每次消费生成新 access/refresh，旧 refresh 重放即吊销整个 family。每次 access/refresh 都复验 User active、credential version、family/token 状态和半开期限；注销吊销当前 family，改密与 `atrp1` 运维恢复递增 credential version 并吊销账号全部 family。部署只有在固定只读文件交付的 32 字节 Password Pepper、正版本和独立 32 字节指纹密钥三项完整时启用，部分配置 fail closed；U9-04 负责 App 侧产品 Session 的 Rust 私有存储和未登录 UI 门禁。
+
+C10-05 的服务端 Secret inventory 固定为数据库 URL、密码 Pepper、账号指纹 key、运维 capability digest 和动作授权 Ed25519 私钥。生产镜像默认 file-only，装载器只打开 `/run/secrets` 下不可配置的文件名，并用 `O_NOFOLLOW`、`fstat`、owner/mode、8192 bytes 和单行 UTF-8 约束 fail closed；同名 Secret 环境变量在生产模式下一律拒绝。账号 Session 与设备 credential 都使用 opaque CSPRNG 值并只保存 digest，不额外引入 Session 签名 Secret 或设备 credential 签发私钥；设备 Ed25519 私钥仍只属于 App。
 
 ### 9.3 请求授权
 

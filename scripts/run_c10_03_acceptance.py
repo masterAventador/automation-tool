@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+from runtime_secret_volume import writer_command, writer_payload
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 ROLES_SQL = REPOSITORY_ROOT / "deploy/postgresql/roles.sql"
@@ -81,12 +83,18 @@ def write_environment(path: Path, values: Mapping[str, str]) -> None:
     for name, value in values.items():
         if "\n" in name or "\n" in value:
             raise AcceptanceFailure("C10-03 environment value is invalid")
-    write_private_text(path, "".join(f"{name}={value}\n" for name, value in values.items()))
+    write_private_text(
+        path, "".join(f"{name}={value}\n" for name, value in values.items())
+    )
 
 
 def inspect_container(name: str) -> dict[str, Any]:
     payload = json.loads(run(["docker", "container", "inspect", name]).stdout)
-    if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 1
+        or not isinstance(payload[0], dict)
+    ):
         raise AcceptanceFailure("C10-03 container inspection is invalid")
     return cast(dict[str, Any], payload[0])
 
@@ -150,19 +158,42 @@ def provision_database(name: str, passwords: Mapping[str, str]) -> None:
         if SAFE_PASSWORD.fullmatch(password) is None:
             raise AcceptanceFailure("C10-03 generated password is invalid")
     run(
-        ["docker", "exec", "--interactive", name, "psql", "-U", "postgres", "-d", "postgres"],
+        [
+            "docker",
+            "exec",
+            "--interactive",
+            name,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+        ],
         input_text=ROLES_SQL.read_text(encoding="utf-8"),
     )
     bootstrap_sql = "\n".join(
         [
-            *(f"ALTER ROLE {role} PASSWORD '{passwords[role]}';" for role in ROLE_NAMES),
+            *(
+                f"ALTER ROLE {role} PASSWORD '{passwords[role]}';"
+                for role in ROLE_NAMES
+            ),
             f"CREATE DATABASE {DATABASE_NAME} OWNER automation_tool_migrator;",
             f"REVOKE ALL ON DATABASE {DATABASE_NAME} FROM PUBLIC;",
             f"GRANT CONNECT ON DATABASE {DATABASE_NAME} TO {', '.join(ROLE_NAMES)};",
         ]
     )
     run(
-        ["docker", "exec", "--interactive", name, "psql", "-U", "postgres", "-d", "postgres"],
+        [
+            "docker",
+            "exec",
+            "--interactive",
+            name,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+        ],
         input_text=bootstrap_sql,
     )
 
@@ -233,9 +264,12 @@ def main() -> None:
     primary = f"automation-tool-c10-03-primary-{suffix}"
     restore = f"automation-tool-c10-03-restore-{suffix}"
     image = f"automation-tool-control-plane:c10-03-{suffix}"
+    secret_volume = f"automation-tool-c10-03-secrets-{suffix}"
     passwords = {role: secrets.token_urlsafe(32) for role in ROLE_NAMES}
     postgres_password = secrets.token_urlsafe(32)
-    project = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = tomllib.loads(
+        (BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
     app_version = cast(str, project["project"]["version"])
     revision = run(["git", "rev-parse", "HEAD"]).stdout.strip()
 
@@ -247,7 +281,6 @@ def main() -> None:
     ) as temporary:
         root = Path(temporary)
         postgres_environment = root / "postgres.env"
-        migration_environment = root / "migration.env"
         password_file = root / "pgpass"
         backup_file = root / "backup.dump"
         write_environment(
@@ -259,19 +292,16 @@ def main() -> None:
                 "POSTGRES_INITDB_ARGS": "--auth-host=scram-sha-256 --data-checksums",
             },
         )
-        write_environment(
-            migration_environment,
-            {
-                "AUTOMATION_TOOL_DATABASE_URL": (
-                    "postgresql+asyncpg://automation_tool_migrator:"
-                    f"{passwords['automation_tool_migrator']}@primary:5432/{DATABASE_NAME}"
-                )
-            },
+        migration_database_url = (
+            "postgresql+asyncpg://automation_tool_migrator:"
+            f"{passwords['automation_tool_migrator']}@primary:5432/{DATABASE_NAME}"
         )
         password_lines = []
         for host in ("primary", "restore"):
             for role in ROLE_NAMES:
-                password_lines.append(f"{host}:5432:{DATABASE_NAME}:{role}:{passwords[role]}\n")
+                password_lines.append(
+                    f"{host}:5432:{DATABASE_NAME}:{role}:{passwords[role]}\n"
+                )
         write_private_text(password_file, "".join(password_lines))
 
         try:
@@ -290,6 +320,11 @@ def main() -> None:
                     str(BACKEND_ROOT),
                 ]
             )
+            run(["docker", "volume", "create", secret_volume])
+            run(
+                writer_command(image=image, volume=secret_volume),
+                input_text=writer_payload({"database-url": migration_database_url}),
+            )
             run(["docker", "network", "create", network])
             start_postgresql(
                 name=primary,
@@ -306,8 +341,8 @@ def main() -> None:
                     "--rm",
                     "--network",
                     network,
-                    "--env-file",
-                    str(migration_environment),
+                    "--mount",
+                    f"type=volume,source={secret_volume},target=/run/secrets,readonly",
                     "--entrypoint",
                     "alembic",
                     image,
@@ -482,6 +517,7 @@ def main() -> None:
             remove_container(restore)
             remove_container(primary)
             run(["docker", "network", "rm", network], check=False)
+            run(["docker", "volume", "rm", "--force", secret_volume], check=False)
             run(["docker", "image", "rm", "--force", image], check=False)
 
 

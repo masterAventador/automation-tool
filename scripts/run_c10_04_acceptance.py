@@ -22,6 +22,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from runtime_secret_volume import writer_command, writer_payload
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 INGRESS_ROOT = REPOSITORY_ROOT / "deploy" / "ingress"
@@ -159,11 +161,13 @@ class AcceptanceFailure(RuntimeError):
 def run(
     arguments: Sequence[str],
     *,
+    input_text: str | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         list(arguments),
         cwd=REPOSITORY_ROOT,
+        input=input_text,
         check=False,
         capture_output=True,
         text=True,
@@ -289,6 +293,9 @@ def main() -> None:
     control_plane = f"automation-tool-c10-04-control-plane-{suffix}"
     ingress = f"automation-tool-c10-04-ingress-{suffix}"
     secret_volume = f"automation-tool-c10-04-secrets-{suffix}"
+    control_plane_secret_volume = (
+        f"automation-tool-c10-04-control-plane-secrets-{suffix}"
+    )
     control_plane_image = f"automation-tool-control-plane:c10-04-{suffix}"
     ingress_image = f"automation-tool-ingress:c10-04-{suffix}"
     invalid_image = f"automation-tool-ingress:c10-04-invalid-{suffix}"
@@ -307,7 +314,6 @@ def main() -> None:
     ) as temporary:
         root = Path(temporary)
         postgres_environment = root / "postgres.env"
-        control_plane_environment = root / "control-plane.env"
         probe_path = root / "probe.py"
         ca_path, _certificate_path, _key_path = generate_certificate(root)
         write_environment(
@@ -320,10 +326,6 @@ def main() -> None:
         )
         database_url = (
             f"postgresql+asyncpg://c10_app:{database_password}@postgres:5432/c10_demo"
-        )
-        write_environment(
-            control_plane_environment,
-            {"AUTOMATION_TOOL_DATABASE_URL": database_url},
         )
         write_private_text(probe_path, PROBE_SOURCE, mode=0o444)
 
@@ -389,6 +391,14 @@ def main() -> None:
 
             run(["docker", "network", "create", network])
             run(["docker", "volume", "create", secret_volume])
+            run(["docker", "volume", "create", control_plane_secret_volume])
+            run(
+                writer_command(
+                    image=control_plane_image,
+                    volume=control_plane_secret_volume,
+                ),
+                input_text=writer_payload({"database-url": database_url}),
+            )
             run(
                 [
                     "docker",
@@ -454,8 +464,11 @@ def main() -> None:
                     "--rm",
                     "--network",
                     network,
-                    "--env-file",
-                    str(control_plane_environment),
+                    "--mount",
+                    (
+                        f"type=volume,source={control_plane_secret_volume},"
+                        "target=/run/secrets,readonly"
+                    ),
                     "--entrypoint",
                     "alembic",
                     control_plane_image,
@@ -476,8 +489,11 @@ def main() -> None:
                     network,
                     "--network-alias",
                     "control-plane",
-                    "--env-file",
-                    str(control_plane_environment),
+                    "--mount",
+                    (
+                        f"type=volume,source={control_plane_secret_volume},"
+                        "target=/run/secrets,readonly"
+                    ),
                     "--read-only",
                     "--tmpfs",
                     "/tmp:rw,noexec,nosuid,size=16m",
@@ -586,6 +602,10 @@ def main() -> None:
             remove_container(postgres)
             run(["docker", "network", "rm", network], check=False)
             run(["docker", "volume", "rm", "--force", secret_volume], check=False)
+            run(
+                ["docker", "volume", "rm", "--force", control_plane_secret_volume],
+                check=False,
+            )
             run(["docker", "image", "rm", "--force", invalid_image], check=False)
             run(["docker", "image", "rm", "--force", ingress_image], check=False)
             run(["docker", "image", "rm", "--force", control_plane_image], check=False)

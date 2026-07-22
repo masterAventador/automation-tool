@@ -28,6 +28,11 @@ from automation_tool.control_plane.bootstrap.account_sessions import (
     account_session_service_from_environment,
 )
 from automation_tool.control_plane.bootstrap.database import database_from_environment
+from automation_tool.control_plane.bootstrap.runtime_secrets import (
+    RuntimeSecretError,
+    RuntimeSecretName,
+    runtime_secret,
+)
 from automation_tool.control_plane.domain import AccountAuditActorKind, UserId
 from automation_tool.control_plane.infrastructure.database import (
     SqlAlchemyCustomerAccountRepository,
@@ -47,7 +52,6 @@ class AccountOperationsAuthenticationRejected(PermissionError):
 class _Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTOMATION_TOOL_", extra="ignore")
 
-    account_operations_capability_digest: str | None = None
     account_operations_actor_id: str | None = None
 
 
@@ -95,12 +99,16 @@ def operations_identity_from_environment() -> OperationsIdentity:
     try:
         settings = _Settings()
         actor_id = UUID(settings.account_operations_actor_id or "")
-    except (ValidationError, ValueError):
+        capability_digest = runtime_secret(
+            RuntimeSecretName.ACCOUNT_OPERATIONS_CAPABILITY_DIGEST,
+            required=True,
+        )
+    except (RuntimeSecretError, ValidationError, ValueError):
         raise AccountOperationsAuthenticationRejected from None
     if actor_id.version != 4 or str(actor_id) != settings.account_operations_actor_id:
         raise AccountOperationsAuthenticationRejected
     return OperationsIdentity(
-        capability_digest=_decode_digest(settings.account_operations_capability_digest),
+        capability_digest=_decode_digest(capability_digest),
         actor_id=actor_id,
     )
 

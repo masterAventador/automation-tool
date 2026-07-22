@@ -41,10 +41,10 @@ Tauri App / Local Executor
 
 ## Secret 与配置边界
 
-- DB URL、账号密码 Pepper、账号 fingerprint key、运维 capability digest、动作授权私钥和 TLS 私钥只能来自部署 Secret Store 或 root-only 运行时文件。
+- DB URL、账号密码 Pepper、账号 fingerprint key、运维 capability digest、动作授权私钥和 TLS 私钥只能来自部署 Secret Store 投影的 runtime UID `0400` 或 root/runtime-group `0440` 固定运行时文件。
 - Secret 不进入 Git、镜像层、Compose/部署清单、进程参数、日志或桌面 WebView；运行时错误继续固定脱敏。
 - 非秘密配置（环境 ID、公钥、资源上限、域名 allowlist、版本标签）也必须由部署清单单点定义，不能在镜像和运行命令维护两份漂移值。
-- Secret 轮换采用受控重启；账号 Session、设备与动作授权的具体轮换/吊销顺序由 C10-05、C10-06 和 C10-13 固化。
+- Secret 轮换采用受控重启；C10-05 已冻结文件装载与基础轮换依赖，账号/设备吊销操作由 C10-06、最终顺序和应急手册由 C10-13 固化。
 
 ## 备份、恢复与故障处理
 
