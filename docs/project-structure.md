@@ -31,6 +31,8 @@ automation-tool/
 │   ├── browser/
 │   │   ├── embedded-chromium-compatibility.v1.json # 生产 Playwright、Chromium 完整版本/修订和双平台兼容契约
 │   │   └── fixtures/              # 双平台有效组件清单与版本/修订/平台错误样例
+│   ├── video/
+│   │   └── ffmpeg-toolchain.v1.json # FFmpeg/x264 版本、源码摘要、能力与双平台构建契约
 │   ├── deployment/
 │   │   └── customer-demo-deployment.v1.json # C10-01 单实例 Demo 部署机器契约
 │   ├── openapi/                   # FastAPI OpenAPI 快照
@@ -57,6 +59,7 @@ automation-tool/
 │   ├── backend-architecture.md
 │   ├── third-party-source-governance.md
 │   ├── embedded-browser-video-security-and-branding.md
+│   ├── video-media-toolchain-supply-chain.md # 单一 FFmpeg/ffprobe 构建、许可、能力和运行时边界
 │   ├── customer-demo-deployment-design.md # C10-01 拓扑、资源、恢复与发布设计
 │   ├── development-roadmap.md
 │   ├── embedded-browser-video-studio-roadmap.md # 专项任务、依赖与状态轻量台账

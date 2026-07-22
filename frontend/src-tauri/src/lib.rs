@@ -23,6 +23,7 @@ mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
 pub mod video_job_workspace;
+pub mod video_media_toolchain;
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use account_session_vault::{

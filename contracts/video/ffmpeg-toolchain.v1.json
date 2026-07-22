@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "policy": "fail_closed",
+  "verified_at": "2026-07-23",
+  "ffmpeg": {
+    "version": "8.1.2",
+    "source_url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+    "source_sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+    "license": "GPL-3.0-or-later",
+    "why_gpl": "两种制作方式共同依赖 libx264，发行物不得误标为 LGPL",
+    "forbidden_configure_flags": ["--enable-nonfree"]
+  },
+  "x264": {
+    "revision": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+    "source_url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+    "source_sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+    "license": "GPL-2.0-or-later"
+  },
+  "required_capabilities": {
+    "programs": ["ffmpeg", "ffprobe"],
+    "encoders": ["libx264", "aac", "png"],
+    "decoders": ["h264", "aac", "png"],
+    "demuxers": ["concat", "image2", "image2pipe", "mov"],
+    "muxers": ["mp4", "mov", "image2"],
+    "filters": ["amix", "aresample", "concat", "overlay", "scale"],
+    "protocols": ["file", "pipe"]
+  },
+  "worker_environment": {
+    "智能素材成片": {
+      "IMAGEIO_FFMPEG_EXE": "ffmpeg"
+    },
+    "品牌动效成片": {
+      "HYPERFRAMES_FFMPEG_PATH": "ffmpeg",
+      "HYPERFRAMES_FFPROBE_PATH": "ffprobe"
+    }
+  },
+  "targets": [
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "arch": "arm64",
+      "build_runner": "macos-15"
+    },
+    {
+      "id": "windows-x86_64",
+      "os": "windows",
+      "arch": "x86_64",
+      "build_runner": "windows-2025"
+    }
+  ],
+  "package_layout": {
+    "root": "media-toolchain",
+    "manifest": "manifest.json",
+    "notice": "NOTICE.txt",
+    "license": "COPYING.GPLv3",
+    "build_info": "BUILD-INFO.txt",
+    "source_archive": "source/ffmpeg-8.1.2.tar.xz",
+    "x264_source_archive": "source/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+    "binaries": {
+      "macos": ["bin/ffmpeg", "bin/ffprobe"],
+      "windows": ["bin/ffmpeg.exe", "bin/ffprobe.exe"]
+    }
+  },
+  "release_requirements": {
+    "bundle_source_archive": true,
+    "bundle_license_and_build_info": true,
+    "allow_system_path_fallback": false,
+    "allow_runtime_download": false,
+    "one_verified_pair_for_both_video_providers": true
+  }
+}

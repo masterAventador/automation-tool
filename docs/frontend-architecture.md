@@ -372,6 +372,16 @@ checkpoint 使用同目录临时文件、fsync 和原子替换，可在 App 重�
 `Keep` 写入保留截止时间，清理只删除已到期且整棵目录复验无链接的工作区，`Delete` 明确
 删除工作区。已经原子导入的 Artifact 独立存续，只能按稳定 Artifact ID 显式删除。
 
+### 6.5 VF-04 统一视频媒体工具
+
+Tauri 侧 `VideoMediaToolchain` 只解析 `resource_dir/media-toolchain` 的锁定发行物，逐文件
+校验摘要、目标、版本、许可、路径和可执行权限；系统 PATH、用户选择路径和运行时下载都
+不是生产来源。同一个已验证 FFmpeg/ffprobe 对通过环境变量分别交给 Python 与 Node Worker；
+路径不序列化、不写普通日志，也没有 WebView command。
+
+FFmpeg 8.1.2 与 x264 锁定源码、双平台原生构建、能力矩阵、GPL 对应源码和真实编码烟测
+详见 `video-media-toolchain-supply-chain.md`。
+
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
