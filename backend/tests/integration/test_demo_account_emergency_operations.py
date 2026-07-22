@@ -10,6 +10,7 @@ import pytest
 from conftest import AlembicRunner
 from sqlalchemy import insert, select
 
+from automation_tool.control_plane.application.account_sessions import AccountSessionRejected
 from automation_tool.control_plane.bootstrap.account_operations_cli import main
 from automation_tool.control_plane.bootstrap.account_sessions import (
     account_session_service_from_environment,
@@ -120,11 +121,17 @@ async def test_emergency_revoke_is_atomic_scoped_audited_and_single_winner(
     sessions = account_session_service_from_environment(database)
     assert sessions is not None
     try:
-        await sessions.login(
+        target_session = await sessions.login(
             login_name=target_login,
             password=password,
             source_address="127.0.0.1",
             request_id="emergency-login",
+        )
+        foreign_session = await sessions.login(
+            login_name=foreign_login,
+            password=password,
+            source_address="127.0.0.2",
+            request_id="foreign-login",
         )
         target_devices = {
             await seed_device(database, target_id, ordinal=1),
@@ -189,6 +196,13 @@ async def test_emergency_revoke_is_atomic_scoped_audited_and_single_winner(
                 ],
                 {"capability": CAPABILITY},
             )
+
+        with pytest.raises(AccountSessionRejected):
+            await sessions.authenticate(access_token=target_session.access_token)
+        authenticated_foreign = await sessions.authenticate(
+            access_token=foreign_session.access_token
+        )
+        assert authenticated_foreign.user_id.uuid == foreign_id
 
         async with database.session() as session:
             target_user = (
