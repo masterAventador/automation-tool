@@ -1,0 +1,10 @@
+[submodule "vendor/moneyprinterturbo"]
+	path = vendor/moneyprinterturbo
+	url = https://github.com/harry0703/MoneyPrinterTurbo.git
+	update = checkout
+	ignore = none
+[submodule "vendor/hyperframes"]
+	path = vendor/hyperframes
+	url = https://github.com/heygen-com/hyperframes.git
+	update = checkout
+	ignore = none

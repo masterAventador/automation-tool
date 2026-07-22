@@ -39,6 +39,8 @@ P9 以前的第一期是本地单设备 MVP：
 
 专项 Roadmap 例外：`docs/embedded-browser-video-studio-roadmap.md` 是其中 87 个内置浏览器、Browser Use、视频制作、视频剪辑和首期发布任务的唯一状态台账，只保留任务、依赖和当前状态；这些任务不得向 `docs/development-roadmap.md` 双写状态，也不得把完成记录不断追加到专项 Roadmap。每个专项任务必须单独使用 `docs/development/<任务ID>.md` 记录日期、提交、RED、GREEN、失败矩阵、正常用户路径验收或不适用原因、真实边界、清理和文档证据，并与代码及状态变更在同一提交完成。专项以外的任务仍遵守上一段规则。
 
+专项连续执行时，每个任务提交、推送并合并最新 `main` 后，都必须读取 `Asia/Shanghai` 当前时间。时间早于 09:00 才能自动激活下一任务；到达或超过 09:00 时，必须在 `docs/development/` 新增带停止时间、最后完成任务和停止原因的标记文档，以独立 `chore` 提交推送后停止，不得继续激活任务。
+
 - 开始任何小任务前，先检查前置依赖，并把对应行更新为 `🧪 RED` 或 `🚧 实现中`；
 - 同一时间最多一个小任务处于 `🧪 RED` 或 `🚧 实现中`；
 - 每个小任务完成后，必须立即把状态更新为 `✅ 已完成`，并在完成记录中写入日期、提交、RED、GREEN、真实边界、失败矩阵、清理和文档证据；
@@ -148,6 +150,7 @@ App 管理的独立运营 Profile
 - 内容渲染通过 `VideoRenderProvider` 隔离云端或本地实现；
 - AI 模型通过供应商无关 Adapter 接入；第一期 RPA 闭环不得依赖 AI 调用才能运行；
 - 禁止修改 Playwright、Tauri、FastAPI、LangGraph、模型 SDK 等第三方源码，禁止 Monkey Patch、私有 Fork 或复制内部实现；
+- `vendor/moneyprinterturbo` 与 `vendor/hyperframes` 只允许按 `contracts/quality/third-party-sources.v1.json` 的正式 tag/完整 commit 作为只读 Submodule 存在；禁止在 Submodule 内修改、跟随 branch/latest、运行时更新或绕过 `scripts/check_third_party_sources.py`。升级必须使用独立任务并同步 Gitlink、许可证摘要、资产权利清单和 SBOM；
 - 遇到上游问题依次使用公开扩展点、外围适配、锁定可用版本和提交上游 Issue/PR。
 
 ## 7. 安全与隐私

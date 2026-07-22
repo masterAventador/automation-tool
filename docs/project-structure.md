@@ -33,7 +33,9 @@ automation-tool/
 │   ├── events/                    # 任务事件 JSON Schema
 │   ├── quality/
 │   │   ├── mvp-failure-matrix.v1.json # H8-15 可执行失败矩阵与测试证据登记
-│   │   └── mvp-spec-review.v1.json # H8-16 MVP 决策、验收状态与修复任务登记
+│   │   ├── mvp-spec-review.v1.json # H8-16 MVP 决策、验收状态与修复任务登记
+│   │   ├── third-party-sources.v1.json # 两个只读上游的 tag/commit/许可证锁
+│   │   └── asset-rights-policy.v1.json # 字体/素材/音乐/编解码器等默认拒绝策略
 │   └── fixtures/
 │       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
@@ -45,6 +47,7 @@ automation-tool/
 │   ├── project-structure.md
 │   ├── frontend-architecture.md
 │   ├── backend-architecture.md
+│   ├── third-party-source-governance.md
 │   ├── development-roadmap.md
 │   ├── embedded-browser-video-studio-roadmap.md # 专项任务、依赖与状态轻量台账
 │   ├── development/                # 每个专项任务一个 `<任务ID>.md` 独立完成证据文件
@@ -72,6 +75,8 @@ automation-tool/
 │   ├── run_h8_01_acceptance.py   # 隐藏 Tauri→真实 Executor 安全暂停/恢复验收
 │   ├── run_h8_16e_acceptance.py  # 隐藏 Tauri 启动诊断→浏览器选择→ready 验收
 │   ├── run_av_01_acceptance.py   # 内置 Chromium 架构基线确定性检查
+│   ├── run_av_02_acceptance.py   # 两个 submodule、权利策略与 SBOM 验收
+│   ├── check_third_party_sources.py # 上游 Gitlink/许可证/工作树/SBOM 防漂移门禁
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
@@ -82,6 +87,11 @@ automation-tool/
 │   └── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
+├── vendor/                         # 只读 Git submodule；禁止直接修改
+│   ├── moneyprinterturbo/          # v1.3.2 / b1588e1
+│   └── hyperframes/                # v0.7.68 / 71d84ff
+├── third_party/
+│   └── source-submodules.cdx.json  # 源码级 CycloneDX 1.6 基线
 ├── .local/                        # 开发运行数据，必须忽略
 ├── AGENTS.md
 ├── CLAUDE.md
