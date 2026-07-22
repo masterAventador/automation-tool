@@ -12,7 +12,7 @@
 
 1. 产品 UI：任务创建、目标预览、运行详情、结果、设置和诊断；
 2. 网络控制面：连接开发机本地或 Demo 云端 FastAPI；
-3. 本机原生能力：监管 Local Executor、打开外部浏览器、文件、通知、窗口和紧急停止。
+3. 本机原生能力：监管 Local Executor、验证并打开 App 内置运营浏览器、文件、通知、窗口和紧急停止。
 
 不建设面向用户的 Web 产品。Vite 浏览器模式只是测试专用 UI Harness。
 
@@ -51,6 +51,7 @@ React 页面与 Feature
 
 Tauri/Rust ──HTTPS/SSE──> Python Control Plane
 Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
+Tauri/Rust ──只读 Resources──> 已验证的内置 Chromium
 ```
 
 业务页面不感知当前 Control Plane 在本机还是云端，也不直接感知 Rust、Sidecar 或操作系统。
@@ -121,7 +122,7 @@ features/
 ├── task-runs/              # 快照、目标预览、事件、控制和结果
 ├── platform-sessions/      # 抖音服务端健康、本机处理与后续安全注销
 ├── diagnostics/            # 后端、Executor、浏览器和权限诊断
-└── settings/               # 本地保留、浏览器选择和诊断导出
+└── settings/               # 本地保留、内置浏览器组件状态和诊断导出
 ```
 
 规则：
@@ -321,7 +322,16 @@ E4-15 把测试隔离从源码约束扩展到实际 release 字节。`build.rs` 
 
 真实 release 审计最初发现 `tauri.conf.json` 的 `devUrl`/devCSP 即使 release 不使用仍会进入二进制，因此现已拆到只由 `pnpm tauri:dev` 显式合并的 `tauri.dev.conf.json`。自动化配置继续只用于各自 `--config` 测试构建；正式配置保持唯一可见主窗口、`withGlobalTauri=false`、唯一 `main` Capability 与生产 CSP。E4-15 临时 release target 每次唯一且结束删除，不启动 App、不绑定端口。
 
-B5-01 已冻结外部浏览器会话的迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
+### 6.1 AV-01 内置浏览器前端基线
+
+ADR-0001 已替代外部 Chrome/Edge 生产方案。Tauri/Rust 后续只从安装包 Resources 验证并启动与 Playwright 锁定版本匹配的 Chromium；React、普通设置、Control Plane 和任务参数都不能提供浏览器种类或可执行路径。
+
+- 启动门禁与诊断 UI 只展示 `浏览器组件正常`、`浏览器组件损坏`、`浏览器组件版本不兼容` 三类封闭结果及安全修复动作，不显示本机浏览器列表、安装路径、文件选择器或运行时下载按钮。
+- 首次使用直接创建全新 App 私有运营 Profile，不提供旧 Profile、旧浏览器选择或 Cookie 迁移入口。可见运营窗口继续支持扫码、验证码/风控暂停和人工接管。
+- 正常用户路径验收必须从正式 App 页面启动可见窗口并核对真实浏览器/平台结果；UI Harness、Mock Gateway、直接 invoke 和测试专用页面不能替代。
+- 现有 B5 浏览器发现、选择与系统浏览器验收段落保留为已实现历史和迁移输入；EB 系列完成前它们仍描述当前代码，不再定义目标生产架构，也不得成为 fallback。
+
+B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
 
@@ -513,7 +523,7 @@ Playwright 使用受控窄 Adapter 驱动真实 React 页面交互；T3-19 的�
 - local/demo Profile 连接；
 - Rust 网络桥和事件；
 - Local Executor 真实子进程；
-- 外部 Chrome/Edge 启动与人工接管；
+- 内置 Chromium 启动、可见窗口与人工接管；
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 

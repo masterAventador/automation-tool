@@ -46,7 +46,10 @@ automation-tool/
 │   ├── frontend-architecture.md
 │   ├── backend-architecture.md
 │   ├── development-roadmap.md
-│   └── adr/                       # 后续重要架构决策
+│   ├── embedded-browser-video-studio-roadmap.md # 专项任务、依赖与状态轻量台账
+│   ├── development/                # 每个专项任务一个 `<任务ID>.md` 独立完成证据文件
+│   └── adr/
+│       └── 0001-embedded-chromium-runtime.md # 内置统一 Chromium 运行时决策
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
 │   ├── run_i2_09_acceptance.py   # 隐藏 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
 │   ├── run_i2_13_acceptance.py   # 后台 Uvicorn→WebSocket→PostgreSQL 隔离验收
@@ -68,6 +71,7 @@ automation-tool/
 │   ├── run_t3_20_acceptance.py   # 隐藏 Tauri→Control Plane 同库重启→Executor 恢复验收
 │   ├── run_h8_01_acceptance.py   # 隐藏 Tauri→真实 Executor 安全暂停/恢复验收
 │   ├── run_h8_16e_acceptance.py  # 隐藏 Tauri 启动诊断→浏览器选择→ready 验收
+│   ├── run_av_01_acceptance.py   # 内置 Chromium 架构基线确定性检查
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
@@ -596,7 +600,7 @@ Tauri App ──HTTP/SSE──> 本机 Control Plane（FastAPI 热更新）
     │                         └── PostgreSQL（本机 Docker）
     │
     └──监管 Local Executor ──受认证通道──> Control Plane
-         └── 系统 Chrome/Edge + App 独立运营 Profile
+         └── 已验证的内置 Chromium + App 独立运营 Profile
 ```
 
 客户 Demo：
@@ -607,11 +611,12 @@ Tauri App ──HTTPS/SSE──> 云端 Control Plane（同一 Python 包）
     │                         └── 云端 PostgreSQL
     │
     └──监管 Local Executor ──出站设备认证通道──> Control Plane
+         └── 已验证的内置 Chromium + App 独立运营 Profile
 ```
 
 App 使用受控 Profile 配置 `baseUrl`，开发和 Demo 只切换端点、凭据与基础设施，不修改业务源码。
 
-Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接和 PyInstaller `onedir` Local Executor。它不包含：
+Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接、PyInstaller `onedir` Local Executor，以及与 Playwright 锁定版本严格匹配的内置 Chromium 发行物和浏览器 Manifest 与逐文件摘要。它不包含：
 
 - Control Plane 或 PostgreSQL；
 - Web 前端服务器或公开网页；
@@ -619,6 +624,16 @@ Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接和 PyInstal
 - 用户默认 Chrome Profile；
 - 测试 WebDriver、测试 Adapter 或真实平台凭据；
 - 第一阶段未启用的 AI 中台。
+
+### 6.1 AV-01 内置浏览器目标结构
+
+ADR-0001 从 AV-01 起替代“发现并选择系统 Chrome/Edge”的生产基线。现有 `browser_discovery.rs`、`browser_settings.rs` 及 B5 验收说明是尚待 EB 系列迁移的历史实现，不代表允许长期保留生产 fallback。
+
+- Tauri Resources 是内置 Chromium 发行物的唯一来源；后续由 EB-03～EB-06 固定双平台目录、浏览器 Manifest 与逐文件摘要，并由 Rust 在启动前验证来源、版本、修订、平台、架构、完整文件集和路径身份。
+- 不接受用户提供的浏览器可执行路径；路径也不得来自 React、Control Plane、任务 payload、普通环境变量或 App 设置，用户不能选择系统浏览器。只有 Rust 验证后的绝对路径可以通过受认证 Executor 启动协议传入本机执行器。
+- Local Executor、Playwright、Browser Use 和品牌动效渲染共用同一已验证的内置 Chromium 发行物，但默认使用相互隔离的进程、Context、Profile 和控制通道。运营页面控制权只能通过独占租约串行交接。
+- App 从未发布，直接创建全新运营 Profile；不兼容或迁移开发期 Profile、浏览器选择文件、用户默认浏览器 Profile 或 Cookie。
+- 正式用户验收必须从可见 App 页面打开运营浏览器并核对真实进程与平台最终状态；测试探针、Mock、直接 Command 和无头集成测试只作为分层证据。
 
 ## 7. 本地运行数据
 
@@ -646,6 +661,7 @@ app-data/
 
 - 目录和文件权限按当前用户最小化；
 - 浏览器 Profile 不进入普通备份、日志或导出；
+- 首发不迁移开发期或系统浏览器 Profile；卸载与注销只处理 App 自己创建且已复验身份的目录；
 - Artifact、日志和诊断数据都有数量、大小和时间上限；H8-12 由唯一 Local Artifact Store 在初始化和写入前执行到期清理、最小磁盘余量治理与精确引用保护；
 - 数据迁移必须有 schema version、备份或可回滚策略；
 - 测试使用临时目录，不能读写真实 App 数据。
