@@ -17,29 +17,7 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 const WINDOW_LABEL: &str = "material-video-studio";
 const WORKER_VERSION: &str = "1.3.2";
-const INIT_SCRIPT: &str = r#"
-(() => {
-  const hideInternalSettings = () => {
-    const styleId = "automation-tool-material-video-guard";
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement("style");
-      style.id = styleId;
-      style.textContent = `
-        .mpt-brand, .st-key-open_settings_dialog_button,
-        [data-testid="stToolbar"], [data-testid="stMainMenu"] { display: none !important; }
-      `;
-      (document.head || document.documentElement).appendChild(style);
-    }
-  };
-  hideInternalSettings();
-  document.addEventListener("DOMContentLoaded", hideInternalSettings, { once: true });
-  new MutationObserver(hideInternalSettings).observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
-  window.open = () => null;
-})();
-"#;
+const INIT_SCRIPT: &str = include_str!("material_video_studio_init.js");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -246,5 +224,28 @@ const fn view_unavailable() -> MaterialVideoStudioError {
     MaterialVideoStudioError {
         code: MaterialVideoStudioErrorCode::ViewUnavailable,
         retryable: true,
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::INIT_SCRIPT;
+
+    #[test]
+    fn initialization_script_is_fail_closed_and_keeps_material_settings() {
+        for required in [
+            "data-automation-tool-studio-state",
+            "制作界面暂时不可用",
+            "制作服务设置",
+            "素材\\s*API",
+            "removeExternalNavigation",
+            "60_000",
+        ] {
+            assert!(
+                INIT_SCRIPT.contains(required),
+                "missing theme guard: {required}"
+            );
+        }
+        assert!(!INIT_SCRIPT.contains(".st-key-open_settings_dialog_button,\n"));
     }
 }

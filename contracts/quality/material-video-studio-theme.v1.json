@@ -1,0 +1,27 @@
+{
+  "version": "material-video-studio-theme.v1",
+  "productTitle": "智能素材成片",
+  "settingsTitle": "制作服务设置",
+  "locale": "zh-CN",
+  "desktopMinimumWidth": 960,
+  "theme": {
+    "primary": "#1677ff",
+    "page": "#f5f7fb",
+    "surface": "#ffffff",
+    "text": "#172033",
+    "muted": "#667085",
+    "border": "#e4e8f0",
+    "radius": 12,
+    "contentMaximumWidth": 1280
+  },
+  "settingsPolicy": {
+    "appOwnsModelService": true,
+    "embeddedModelSettingsVisible": false,
+    "materialApiSettingsVisible": true,
+    "cacheSettingsVisible": true,
+    "interfaceSettingsVisible": true
+  },
+  "externalNavigationAllowed": false,
+  "structureChangePolicy": "fail_closed",
+  "structureReadyTimeoutMilliseconds": 60000
+}
