@@ -31,6 +31,8 @@ automation-tool/
 │   ├── browser/
 │   │   ├── embedded-chromium-compatibility.v1.json # 生产 Playwright、Chromium 完整版本/修订和双平台兼容契约
 │   │   └── fixtures/              # 双平台有效组件清单与版本/修订/平台错误样例
+│   ├── deployment/
+│   │   └── customer-demo-deployment.v1.json # C10-01 单实例 Demo 部署机器契约
 │   ├── openapi/                   # FastAPI OpenAPI 快照
 │   ├── protocol/                  # Executor wire 与 signed package Manifest JSON Schema
 │   ├── events/                    # 任务事件 JSON Schema
@@ -55,9 +57,10 @@ automation-tool/
 │   ├── backend-architecture.md
 │   ├── third-party-source-governance.md
 │   ├── embedded-browser-video-security-and-branding.md
+│   ├── customer-demo-deployment-design.md # C10-01 拓扑、资源、恢复与发布设计
 │   ├── development-roadmap.md
 │   ├── embedded-browser-video-studio-roadmap.md # 专项任务、依赖与状态轻量台账
-│   ├── development/                # 每个专项任务一个 `<任务ID>.md` 独立完成证据文件
+│   ├── development/               # 每个任务一个 `<任务ID>.md` 独立 RED/GREEN 与验收证据文件
 │   └── adr/
 │       └── 0001-embedded-chromium-runtime.md # 内置统一 Chromium 运行时决策
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本

@@ -1,0 +1,158 @@
+{
+  "version": "customer-demo-deployment.v1",
+  "scope": "customer-demo-v1",
+  "availability": {
+    "mode": "single_instance_no_automatic_failover",
+    "acceptedFailureDomain": "one_customer_demo_environment",
+    "plannedDowntimeAllowed": true,
+    "automaticFailover": false
+  },
+  "ingress": {
+    "kind": "dedicated_https_reverse_proxy",
+    "publicTcpPorts": [
+      443
+    ],
+    "httpRedirectPort": 80,
+    "tlsMinimumVersion": "1.2",
+    "controlPlaneDirectlyPublic": false,
+    "requestBodyLimitMiB": 1,
+    "upstreamTimeoutSeconds": 60,
+    "websocketIdleTimeoutSeconds": 90
+  },
+  "controlPlane": {
+    "replicas": 1,
+    "autoScaling": false,
+    "workers": 1,
+    "listenAddress": "0.0.0.0:8000",
+    "publiclyReachable": false,
+    "healthPath": "/api/v1/health",
+    "versionPath": "/api/v1/version",
+    "startupRunsMigrations": false
+  },
+  "desktopApp": {
+    "baseUrlPattern": "https://api.<customer-domain>",
+    "allowedOrigins": [
+      "https://api.<customer-domain>"
+    ],
+    "directDatabaseAccess": false,
+    "fallbackWebProduct": false
+  },
+  "postgresql": {
+    "majorVersion": 18,
+    "primaryCount": 1,
+    "publiclyReachable": false,
+    "tlsRequired": true,
+    "applicationRoleSuperuser": false,
+    "migrationsRunByApplicationStartup": false,
+    "schemaMigrationMode": "one_shot_release_job",
+    "networkAccessFrom": [
+      "control_plane",
+      "migration_job",
+      "backup_restore_job"
+    ]
+  },
+  "network": {
+    "publicServices": [
+      "https_ingress"
+    ],
+    "privateServices": [
+      "control_plane",
+      "postgresql"
+    ],
+    "postgresqlPublicPort": false,
+    "administrationAccess": "provider_console_or_restricted_operator_tunnel"
+  },
+  "secrets": {
+    "source": "deployment_secret_store_or_root_readable_runtime_files",
+    "required": [
+      "database_url",
+      "account_password_pepper",
+      "account_fingerprint_key",
+      "account_operations_capability_digest",
+      "action_authorization_private_key",
+      "tls_private_key"
+    ],
+    "forbiddenLocations": [
+      "git",
+      "container_image",
+      "compose_manifest",
+      "process_arguments",
+      "logs",
+      "desktop_webview"
+    ],
+    "rotationRequiresControlledRestart": true
+  },
+  "resources": {
+    "httpsIngress": {
+      "cpuLimit": "0.25",
+      "memoryLimitMiB": 128
+    },
+    "controlPlane": {
+      "cpuLimit": "1",
+      "memoryLimitMiB": 1024,
+      "workers": 1,
+      "gracefulShutdownSeconds": 30
+    },
+    "postgresql": {
+      "cpuLimit": "1",
+      "memoryLimitMiB": 2048,
+      "storageGiB": 20,
+      "maxConnections": 50
+    }
+  },
+  "capacity": {
+    "concurrentDesktopApps": 5,
+    "concurrentRunningTasks": 1,
+    "automaticHorizontalScale": false,
+    "saturationResponse": "reject_new_work_and_preserve_existing_task_state"
+  },
+  "recovery": {
+    "rpoHours": 24,
+    "rtoHours": 4,
+    "backupSchedule": "daily",
+    "backupRetentionDays": 7,
+    "backupEncryptionRequired": true,
+    "restoreTarget": "new_isolated_postgresql_instance",
+    "restoreDrillRequiredBeforeDemo": true,
+    "automaticPromotion": false
+  },
+  "observability": {
+    "healthProbeIntervalSeconds": 30,
+    "healthProbeFailureThreshold": 3,
+    "alerts": [
+      "health_unavailable",
+      "postgresql_unavailable",
+      "disk_above_80_percent",
+      "backup_failed",
+      "certificate_expiry_within_14_days"
+    ],
+    "sensitivePayloadLogging": false
+  },
+  "rollout": {
+    "order": [
+      "backup",
+      "migration",
+      "control_plane",
+      "health_check",
+      "desktop_compatibility_check"
+    ],
+    "deploymentConcurrency": 1,
+    "automaticDatabaseRollback": false,
+    "applicationRollbackRequiresSchemaCompatibility": true,
+    "failedHealthCheckResponse": "stop_rollout_and_restore_previous_application_image"
+  },
+  "implementationOwnership": {
+    "C10-02": "control_plane_container",
+    "C10-03": "postgresql_migration_backup_restore_and_network",
+    "C10-04": "https_domain_reverse_proxy_and_edge_limits",
+    "C10-05": "runtime_secret_delivery_and_rotation",
+    "C10-06": "demo_account_operations",
+    "C10-07": "desktop_demo_profile",
+    "C10-08": "deployment_execution",
+    "C10-09": "cloud_protocol_regression",
+    "C10-10": "network_and_restart_recovery",
+    "C10-11": "account_and_device_revocation_demo",
+    "C10-12": "customer_demo_acceptance",
+    "C10-13": "operations_and_rollback_runbook"
+  }
+}
