@@ -308,6 +308,12 @@ async def test_repository_rejects_a_session_removed_during_authentication() -> N
             ),
             result(
                 {
+                    "owner_user_id": None,
+                    "status": "active",
+                }
+            ),
+            result(
+                {
                     "id": CREDENTIAL_ID,
                     "installation_id": INSTALLATION_ID,
                     "version": 3,

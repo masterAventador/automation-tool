@@ -128,6 +128,106 @@
         "title": "ActionResultEvidence",
         "type": "string"
       },
+      "BindingChallengeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "devicePublicKey": {
+            "maxLength": 43,
+            "minLength": 43,
+            "title": "Devicepublickey",
+            "type": "string"
+          }
+        },
+        "required": [
+          "devicePublicKey"
+        ],
+        "title": "BindingChallengeRequest",
+        "type": "object"
+      },
+      "BindingChallengeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "format": "uuid",
+            "title": "Challengeid",
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "signingPayload": {
+            "title": "Signingpayload",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challengeId",
+          "signingPayload",
+          "expiresAt"
+        ],
+        "title": "BindingChallengeResponse",
+        "type": "object"
+      },
+      "BindingCompletionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "format": "uuid",
+            "title": "Challengeid",
+            "type": "string"
+          },
+          "signature": {
+            "maxLength": 86,
+            "minLength": 86,
+            "title": "Signature",
+            "type": "string"
+          },
+          "signingPayload": {
+            "maxLength": 2731,
+            "minLength": 1,
+            "title": "Signingpayload",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challengeId",
+          "signingPayload",
+          "signature"
+        ],
+        "title": "BindingCompletionRequest",
+        "type": "object"
+      },
+      "BindingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deviceCredential": {
+            "$ref": "#/components/schemas/IssuedCredentialResponse"
+          },
+          "installationId": {
+            "format": "uuid",
+            "title": "Installationid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installationId",
+          "status",
+          "revision",
+          "deviceCredential"
+        ],
+        "title": "BindingResponse",
+        "type": "object"
+      },
       "DeviceSessionCapability": {
         "enum": [
           "app.control-plane",
@@ -327,6 +427,30 @@
           "deviceCredential"
         ],
         "title": "InstallationRegistrationResponse",
+        "type": "object"
+      },
+      "IssuedCredentialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "title": "Credential",
+            "type": "string"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential",
+          "version",
+          "scope"
+        ],
+        "title": "IssuedCredentialResponse",
         "type": "object"
       },
       "IssuedDeviceCredentialResponse": {
@@ -1490,6 +1614,98 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/account-installations/binding-challenges": {
+      "post": {
+        "operationId": "issueAccountInstallationBindingChallenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindingChallengeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AccountAccessToken": []
+          }
+        ],
+        "summary": "Issue Binding Challenge",
+        "tags": [
+          "account-installations"
+        ]
+      }
+    },
+    "/api/v1/account-installations/bindings": {
+      "post": {
+        "operationId": "completeAccountInstallationBinding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindingCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AccountAccessToken": []
+          }
+        ],
+        "summary": "Complete Binding",
+        "tags": [
+          "account-installations"
+        ]
+      }
+    },
     "/api/v1/account-password/changes": {
       "post": {
         "operationId": "changeAccountPassword",

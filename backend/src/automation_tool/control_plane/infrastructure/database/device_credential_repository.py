@@ -15,11 +15,12 @@ from automation_tool.control_plane.application.device_credentials import (
     PendingDeviceCredential,
     RevokedDeviceCredential,
 )
-from automation_tool.control_plane.domain import InstallationStatus
+from automation_tool.control_plane.domain import AccountStatus, InstallationStatus
 from automation_tool.control_plane.infrastructure.database.schema import (
     device_credentials,
     device_sessions,
     installations,
+    users,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
 
@@ -35,13 +36,26 @@ async def lock_authenticated_device_credential(
     )
     if installation_id is None:
         raise DeviceCredentialRejected
-    installation_status = await session.scalar(
-        select(installations.c.status)
-        .where(installations.c.id == installation_id)
-        .with_for_update()
+    installation = (
+        (
+            await session.execute(
+                select(installations.c.status, installations.c.owner_user_id)
+                .where(installations.c.id == installation_id)
+                .with_for_update()
+            )
+        )
+        .mappings()
+        .one_or_none()
     )
-    if installation_status != InstallationStatus.ACTIVE.value:
+    if installation is None or installation["status"] != InstallationStatus.ACTIVE.value:
         raise DeviceCredentialRejected
+    owner_user_id = installation["owner_user_id"]
+    if owner_user_id is not None:
+        owner_status = await session.scalar(
+            select(users.c.status).where(users.c.id == owner_user_id).with_for_update()
+        )
+        if owner_status != AccountStatus.ACTIVE.value:
+            raise DeviceCredentialRejected
     credential = (
         (
             await session.execute(

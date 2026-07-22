@@ -52,6 +52,8 @@ enum ControlPlaneOperation {
     PrepareDouyinPlatformSessionLogout,
     IssueInstallationRegistrationChallenge,
     CompleteInstallationRegistration,
+    IssueAccountInstallationBindingChallenge,
+    CompleteAccountInstallationBinding,
     RotateDeviceCredential,
     RevokeDeviceCredential,
     ExchangeDeviceSession,
@@ -91,6 +93,8 @@ impl ControlPlaneOperation {
             | Self::StreamTaskEvents => "GET",
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
+            | Self::IssueAccountInstallationBindingChallenge
+            | Self::CompleteAccountInstallationBinding
             | Self::RotateDeviceCredential
             | Self::RevokeDeviceCredential
             | Self::ExchangeDeviceSession
@@ -126,6 +130,10 @@ impl ControlPlaneOperation {
                 "/api/v1/installations/registration-challenges"
             }
             Self::CompleteInstallationRegistration => "/api/v1/installations",
+            Self::IssueAccountInstallationBindingChallenge => {
+                "/api/v1/account-installations/binding-challenges"
+            }
+            Self::CompleteAccountInstallationBinding => "/api/v1/account-installations/bindings",
             Self::RotateDeviceCredential => "/api/v1/device-credentials/rotations",
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
@@ -172,6 +180,8 @@ impl ControlPlaneOperation {
             | Self::StreamTaskEvents => 200,
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
+            | Self::IssueAccountInstallationBindingChallenge
+            | Self::CompleteAccountInstallationBinding
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
             | Self::CreateTask
@@ -207,6 +217,8 @@ impl ControlPlaneOperation {
         matches!(
             self,
             Self::CompleteInstallationRegistration
+                | Self::IssueAccountInstallationBindingChallenge
+                | Self::CompleteAccountInstallationBinding
                 | Self::RotateDeviceCredential
                 | Self::RevokeDeviceCredential
                 | Self::ExchangeDeviceSession
@@ -555,6 +567,66 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_account_session(&response)
+    }
+
+    pub async fn bind_account_installation<S>(
+        &self,
+        access_token: &str,
+        identity: &ProductionDeviceIdentity,
+        vault: &DeviceCredentialVault<S>,
+    ) -> Result<InstallationRegistration, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_opaque_bearer(access_token, "atas1")?;
+        let challenge_request = serde_json::to_value(AccountBindingChallengeRequest {
+            device_public_key: URL_SAFE_NO_PAD.encode(identity.public_key()),
+        })
+        .map_err(|_| protocol_invalid())?;
+        let challenge_body = self
+            .execute(
+                ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
+                Some(access_token),
+                Some(&challenge_request),
+                None,
+                None,
+            )
+            .await?;
+        let challenge = parse_registration_challenge(&challenge_body)?;
+        let signing_payload = decode_canonical_base64url(&challenge.signing_payload, 1, 2048)?;
+        let signature = identity.sign(&signing_payload).map_err(|_| {
+            ControlPlaneError::new(ControlPlaneErrorCode::IdentityUnavailable, false)
+        })?;
+        let completion_request = serde_json::to_value(AccountInstallationBindingRequest {
+            challenge_id: challenge.challenge_id,
+            signing_payload: challenge.signing_payload,
+            signature: URL_SAFE_NO_PAD.encode(signature),
+        })
+        .map_err(|_| protocol_invalid())?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::CompleteAccountInstallationBinding,
+                Some(access_token),
+                Some(&completion_request),
+                None,
+                None,
+            )
+            .await?;
+        let bound = parse_account_installation_binding(&response)?;
+        let credential = Zeroizing::new(bound.device_credential.credential);
+        vault
+            .replace(&credential)
+            .map_err(|error| match error.code() {
+                DeviceCredentialErrorCode::InvalidCredential => protocol_invalid(),
+                DeviceCredentialErrorCode::SecureStoreUnavailable
+                | DeviceCredentialErrorCode::CorruptStoredCredential => {
+                    ControlPlaneError::new(ControlPlaneErrorCode::OutcomeUncertain, false)
+                }
+            })?;
+        Ok(InstallationRegistration {
+            installation_id: bound.installation_id,
+            credential_version: bound.device_credential.version,
+        })
     }
 
     pub async fn refresh_account_session(
@@ -1654,6 +1726,8 @@ fn validate_response_metadata(
                 ControlPlaneOperation::RefreshAccountSession
                     | ControlPlaneOperation::LogoutAccountSession
                     | ControlPlaneOperation::ChangeAccountPassword
+                    | ControlPlaneOperation::IssueAccountInstallationBindingChallenge
+                    | ControlPlaneOperation::CompleteAccountInstallationBinding
             )
         {
             ControlPlaneErrorCode::AccountSessionInvalid
@@ -3237,6 +3311,12 @@ struct RegistrationChallengeRequest<'a> {
     device_public_key: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountBindingChallengeRequest {
+    device_public_key: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RegistrationChallengeResponse {
@@ -3250,6 +3330,14 @@ struct RegistrationChallengeResponse {
 struct InstallationRegistrationRequest<'a> {
     challenge_id: String,
     environment_id: &'a str,
+    signing_payload: String,
+    signature: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountInstallationBindingRequest {
+    challenge_id: String,
     signing_payload: String,
     signature: String,
 }
@@ -3384,6 +3472,22 @@ fn parse_installation_registration(
     if response.status != "active"
         || response.revision != 1
         || response.device_credential.version != 1
+        || response.device_credential.scope != "device.session.exchange"
+    {
+        return Err(protocol_invalid());
+    }
+    require_opaque_bearer(&response.device_credential.credential, "atdc1")?;
+    Ok(response)
+}
+
+fn parse_account_installation_binding(
+    body: &[u8],
+) -> Result<InstallationRegistrationResponse, ControlPlaneError> {
+    let response: InstallationRegistrationResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(&response.installation_id)?;
+    if response.status != "active"
+        || response.revision == 0
+        || response.device_credential.version == 0
         || response.device_credential.scope != "device.session.exchange"
     {
         return Err(protocol_invalid());
@@ -3644,6 +3748,18 @@ mod tests {
                 ControlPlaneOperation::CompleteInstallationRegistration,
                 "POST",
                 "/api/v1/installations",
+                201,
+            ),
+            (
+                ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
+                "POST",
+                "/api/v1/account-installations/binding-challenges",
+                201,
+            ),
+            (
+                ControlPlaneOperation::CompleteAccountInstallationBinding,
+                "POST",
+                "/api/v1/account-installations/bindings",
                 201,
             ),
             (
@@ -4161,6 +4277,45 @@ mod tests {
         ] {
             assert!(parse_account_session(
                 &serde_json::to_vec(&invalid).expect("invalid account fixture JSON")
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn account_installation_binding_response_allows_rotation_but_rejects_secrets_in_shape() {
+        let credential = opaque_bearer("atdc1");
+        let valid = serde_json::json!({
+            "installationId": IDENTIFIER,
+            "status": "active",
+            "revision": 2,
+            "deviceCredential": {
+                "credential": credential,
+                "version": 3,
+                "scope": "device.session.exchange"
+            }
+        });
+        let parsed = super::parse_account_installation_binding(
+            &serde_json::to_vec(&valid).expect("binding JSON"),
+        )
+        .expect("valid account Installation binding");
+        assert_eq!(parsed.installation_id, IDENTIFIER);
+        assert_eq!(parsed.device_credential.version, 3);
+
+        for invalid in [
+            {
+                let mut value = valid.clone();
+                value["deviceCredential"]["version"] = serde_json::json!(0);
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["ownerUserId"] = serde_json::json!(IDENTIFIER);
+                value
+            },
+        ] {
+            assert!(super::parse_account_installation_binding(
+                &serde_json::to_vec(&invalid).expect("invalid binding JSON")
             )
             .is_err());
         }
@@ -5316,6 +5471,8 @@ mod tests {
     fn transport_failure_marks_only_stateful_or_issuing_operations_uncertain() {
         for operation in [
             ControlPlaneOperation::CompleteInstallationRegistration,
+            ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
+            ControlPlaneOperation::CompleteAccountInstallationBinding,
             ControlPlaneOperation::RotateDeviceCredential,
             ControlPlaneOperation::RevokeDeviceCredential,
             ControlPlaneOperation::ExchangeDeviceSession,

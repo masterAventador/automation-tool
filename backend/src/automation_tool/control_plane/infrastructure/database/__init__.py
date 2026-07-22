@@ -1,5 +1,8 @@
 """Async PostgreSQL infrastructure."""
 
+from .account_installation_binding_repository import (
+    SqlAlchemyAccountInstallationBindingRepository,
+)
 from .account_session_repository import SqlAlchemyAccountSessionRepository
 from .action_execution_orchestration_repository import (
     SqlAlchemyActionExecutionOrchestrationRepository,
@@ -12,6 +15,7 @@ from .installation_revocation_repository import SqlAlchemyInstallationRevocation
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
     account_audit_events,
+    account_installation_binding_challenges,
     account_login_rate_limits,
     account_recovery_tokens,
     account_session_families,
@@ -48,6 +52,7 @@ from .task_target_result_repository import SqlAlchemyTaskTargetResultRepository
 
 __all__ = [
     "Database",
+    "SqlAlchemyAccountInstallationBindingRepository",
     "SqlAlchemyAccountSessionRepository",
     "SqlAlchemyActionExecutionOrchestrationRepository",
     "SqlAlchemyActionRiskAuthorizationRepository",
@@ -61,6 +66,7 @@ __all__ = [
     "SqlAlchemyTaskTargetRepository",
     "SqlAlchemyTaskTargetResultRepository",
     "account_audit_events",
+    "account_installation_binding_challenges",
     "account_login_rate_limits",
     "account_recovery_tokens",
     "account_session_families",

@@ -419,6 +419,7 @@ installations = Table(
     metadata,
     Column("id", UUID(as_uuid=True), nullable=False),
     Column("device_public_key", LargeBinary(length=32), nullable=False),
+    Column("owner_user_id", UUID(as_uuid=True), nullable=True),
     Column(
         "status",
         String(length=16),
@@ -463,11 +464,19 @@ installations = Table(
         name="ck_installations_timestamp_order",
     ),
     PrimaryKeyConstraint("id", name="pk_installations"),
+    ForeignKeyConstraint(
+        ["owner_user_id"],
+        ["users.id"],
+        name="fk_installations_owner_user",
+        ondelete="RESTRICT",
+    ),
     UniqueConstraint(
         "device_public_key",
         name="uq_installations_device_public_key",
     ),
 )
+
+Index("ix_installations_owner_user", installations.c.owner_user_id)
 
 platform_session_health = Table(
     "platform_session_health",
@@ -589,6 +598,74 @@ installation_registration_challenges = Table(
         ondelete="RESTRICT",
     ),
     PrimaryKeyConstraint("id", name="pk_registration_challenges"),
+)
+
+account_installation_binding_challenges = Table(
+    "account_installation_binding_challenges",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("device_public_key", LargeBinary(length=32), nullable=False),
+    Column("proof_hash", LargeBinary(length=32), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("consumed_at", DateTime(timezone=True), nullable=True),
+    Column("installation_id", UUID(as_uuid=True), nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_account_binding_challenges_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "octet_length(device_public_key) = 32",
+        name="ck_account_binding_challenges_device_key_length",
+    ),
+    CheckConstraint(
+        "octet_length(proof_hash) = 32",
+        name="ck_account_binding_challenges_proof_hash_length",
+    ),
+    CheckConstraint(
+        "expires_at > created_at and expires_at <= created_at + interval '5 minutes'",
+        name="ck_account_binding_challenges_expiry",
+    ),
+    CheckConstraint(
+        "(consumed_at is null and installation_id is null) or "
+        "(consumed_at is not null and installation_id is not null "
+        "and consumed_at >= created_at and consumed_at < expires_at)",
+        name="ck_account_binding_challenges_consumption_state",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["users.id"],
+        name="fk_account_binding_challenges_user",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_account_binding_challenges_installation",
+        ondelete="CASCADE",
+    ),
+    PrimaryKeyConstraint("id", name="pk_account_binding_challenges"),
+)
+
+Index(
+    "ix_account_binding_challenges_user_expiry",
+    account_installation_binding_challenges.c.user_id,
+    account_installation_binding_challenges.c.expires_at,
+)
+
+Index(
+    "uq_account_binding_challenges_pending_device",
+    account_installation_binding_challenges.c.user_id,
+    account_installation_binding_challenges.c.device_public_key,
+    unique=True,
+    postgresql_where=account_installation_binding_challenges.c.consumed_at.is_(None),
 )
 
 device_credentials = Table(
@@ -2085,6 +2162,7 @@ Index(
 
 __all__ = [
     "account_audit_events",
+    "account_installation_binding_challenges",
     "account_login_rate_limits",
     "account_recovery_tokens",
     "account_session_families",
