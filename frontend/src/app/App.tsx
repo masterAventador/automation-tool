@@ -16,6 +16,7 @@ import type { StartupCheck } from "./startup";
 import { WorkbenchShell } from "./WorkbenchShell";
 import { BrowserSettings } from "../features/settings/BrowserSettings";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
+import type { AppUpdateGateway } from "../features/app-updates/contracts";
 
 interface AppProps {
   startupCheck: StartupCheck;
@@ -29,6 +30,7 @@ interface AppProps {
   taskTargetResultSource?: TaskTargetResultSource;
   platformAdapter?: PlatformAdapter;
   platformSessionGateway?: PlatformSessionGateway;
+  appUpdateGateway?: AppUpdateGateway;
 }
 
 export function App({
@@ -43,6 +45,7 @@ export function App({
   taskTargetResultSource,
   platformAdapter,
   platformSessionGateway,
+  appUpdateGateway,
 }: AppProps) {
   return (
     <QueryClientProvider client={queryClient}>
@@ -78,6 +81,7 @@ export function App({
               taskTargetResultSource={taskTargetResultSource}
               platformAdapter={platformAdapter}
               platformSessionGateway={platformSessionGateway}
+              appUpdateGateway={appUpdateGateway}
             />
           </StartupGate>
         </AntDesignApp>

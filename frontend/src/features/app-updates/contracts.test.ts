@@ -28,8 +28,9 @@ describe("generic desktop update contract", () => {
       { state: "up_to_date", trigger: "manual" },
       { state: "available", release },
       { state: "downloading", release, downloadedBytes: 512, totalBytes: 1024 },
-      { state: "ready", release },
+      { state: "ready", release, action: "prompt" },
       { state: "installing", release },
+      { state: "installation_launched", release },
       {
         state: "failed",
         stage: "download",
@@ -70,6 +71,19 @@ describe("generic desktop update contract", () => {
         state: "available",
         release: { ...release, notes: "unsafe\u202evalue" },
       }),
+    ).toThrow();
+    expect(() =>
+      parseAppUpdateState({ state: "ready", release, action: "private_action" }),
+    ).toThrow();
+    expect(() =>
+      parseAppUpdateState({
+        state: "ready",
+        release: { ...release, policy: "forced" },
+        action: "prompt",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseAppUpdateState({ state: "ready", release, action: "forced" }),
     ).toThrow();
   });
 });

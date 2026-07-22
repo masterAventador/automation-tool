@@ -123,6 +123,7 @@ frontend/
 │   │   │   ├── task-run-control-gateway.ts # 固定暂停/恢复/取消/紧停 Command
 │   │   │   ├── platform-adapter.ts         # 固定 Executor 状态/重启/诊断/本机紧停 Command
 │   │   │   ├── platform-session-gateway.ts # 固定抖音状态查询/打开处理/重新检查 Command
+│   │   │   ├── app-update-gateway.ts       # 固定更新状态/检查/决策 Command
 │   │   │   └── workbench-gateway.ts       # 固定运行状态、只读指标与全局紧停 gateway
 │   │   ├── types.ts               # PlatformAdapter 公共接口
 │   │   └── test-harness.ts        # 仅测试构建可用
@@ -257,6 +258,8 @@ H8-19 的 `src-tauri/src/app_update_policy.rs` 是唯一更新决策机。正式
 H8-20 的 `app_update_coordinator.rs` 是更新调度的唯一组合根：official updater 检查适配、启动/周期/手动触发、重叠检查合并、策略观察和公开状态都在此串行；生产 endpoint/公钥来自构建期验证配置，React 不能传 URL。`app_update_cache.rs` 只持有 Rust 内部 `DownloadSource`，固定管理 `app-updates/cache-v1` 的 partial/package/两份小清单；它不把 URL、签名或路径写盘，只有 Range 恢复后的完整大小、SHA-256 和 Minisign 都通过才原子替换旧 package。
 
 H8-21 的 `app_update_installation.rs` 是唯一安装交接边界。协调层把当前 official `Update` 作为不序列化的 installer 保留；立即安装或 startup 自动安装时先让 cache 以 release identity 和当前签名重验完整 bytes，再隐藏窗口、停止 Executor/释放 Profile，最后调用官方 `Update::install`。预检失败不触碰运行环境，停止或安装失败恢复窗口；Windows 由官方安装器退出接管，macOS 安装成功后 Tauri restart。`decide_app_update` 只接收封闭决策枚举，不接收版本、URL、签名、bytes 或路径；安装探针同时要求 debug、`desktop-e2e` 且排除 `control-plane-e2e`，release/生产和其他验收特性不编译该类型，仅为 H8-21 隐藏 App 验证交接顺序，H8-22 必须以真实签名包替代该平台底层探针。H8-21 配置另用 `frontend/dist-h821`，不复用 production `dist`；runner 前后精确清理它，避免 release 与验收构建资产相互覆盖。
+
+H8-22 的 `features/app-updates/AppUpdateCenter.tsx` 只解释公开状态为设置卡片、进度和可选/强制提示；`platform/tauri/app-update-gateway.ts` 是唯一原生适配器，只调用 `get_app_update_state`、`check_app_update_now`、`decide_app_update`。生产 `main.tsx` 显式注入该 gateway，业务组件没有 updater JavaScript binding、任意 invoke、URL、签名、包 bytes 或路径。`e2e-tauri/update-ui.spec.ts` 与 `scripts/run_h8_22_acceptance.py` 复用 H8-21 的隔离更新源和三轮真实 App，但从页面按钮而非直接 Command 完成暂缓、跳过、新版本覆盖提示、立即安装和强更下次启动；debug 安装探针仍由 release 审计排除，双平台正式签名替换保留为独立真实验收。
 
 规则：
 

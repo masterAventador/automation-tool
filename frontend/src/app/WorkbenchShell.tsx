@@ -37,6 +37,8 @@ import {
 } from "../features/platform-sessions/platform-session-gateway";
 import { BrowserSettings } from "../features/settings/BrowserSettings";
 import type { PlatformAdapter } from "../platform/types";
+import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
+import type { AppUpdateGateway } from "../features/app-updates/contracts";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
@@ -174,6 +176,23 @@ const shellPlatformSessionGateway: PlatformSessionGateway = {
   },
 };
 
+const shellAppUpdateGateway: AppUpdateGateway = {
+  async getState() {
+    return {
+      state: "failed",
+      stage: "configuration",
+      code: "configuration_invalid",
+      retryable: false,
+    };
+  },
+  async checkNow() {
+    return this.getState();
+  },
+  async decide() {
+    return this.getState();
+  },
+};
+
 interface WorkbenchShellProps {
   readonly taskSource?: TaskProjectionSource | undefined;
   readonly gateway?: WorkbenchGateway | undefined;
@@ -184,6 +203,7 @@ interface WorkbenchShellProps {
   readonly taskTargetResultSource?: TaskTargetResultSource | undefined;
   readonly platformAdapter?: PlatformAdapter | undefined;
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
+  readonly appUpdateGateway?: AppUpdateGateway | undefined;
 }
 
 export function WorkbenchShell({
@@ -196,6 +216,7 @@ export function WorkbenchShell({
   taskTargetResultSource = shellTaskTargetResultSource,
   platformAdapter = shellPlatformAdapter,
   platformSessionGateway = shellPlatformSessionGateway,
+  appUpdateGateway = shellAppUpdateGateway,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -276,7 +297,7 @@ export function WorkbenchShell({
                     : showingPlatform
                       ? "查看抖音登录健康，并在系统运营浏览器中完成人工处理。"
                     : showingDiagnostics
-                      ? "选择受信运营浏览器，并管理 App 自己的本地执行器。"
+                      ? "选择受信运营浏览器，并管理本地执行器、诊断与 App 更新。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
@@ -294,6 +315,8 @@ export function WorkbenchShell({
                     : "工作台已就绪"}
               </Tag>
             </Flex>
+
+            <AppUpdateCenter gateway={appUpdateGateway} showSettings={showingDiagnostics} />
 
             {creatingTask ? (
               <TaskCreate

@@ -22,13 +22,15 @@ pnpm tauri:dev
 
 当前 `src-tauri/capabilities/main.json` 不暴露任何 IPC 权限；后续每项原生能力必须随对应任务单独增加最小权限。`src-tauri/app-icon.svg` 是工程占位图标，不代表最终品牌设计。
 
-H8-18 已锁定 Rust `tauri-plugin-updater 2.10.1` 作为 macOS/Windows 更新检查与安装原语；H8-20/H8-21 已在 Rust 注册插件并只开放 `get_app_update_state`、`check_app_update_now`、`decide_app_update` 三个脱敏产品 Command。`src-tauri/src/app_updates.rs` 验证官方 dynamic feed 的 `raw_json` 与通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的状态闭集投影安全版本、策略和 Artifact 元数据；React 不安装 updater JavaScript binding，`main` Capability 也不授予 updater 权限，所以不能取得下载 URL/签名、安装路径或调用插件原生命令。真实签名包跨版本验收仍由 H8-22 完成。
+H8-18 已锁定 Rust `tauri-plugin-updater 2.10.1` 作为 macOS/Windows 更新检查与安装原语；H8-20/H8-21 已在 Rust 注册插件并只开放 `get_app_update_state`、`check_app_update_now`、`decide_app_update` 三个脱敏产品 Command。`src-tauri/src/app_updates.rs` 验证官方 dynamic feed 的 `raw_json` 与通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的状态闭集投影安全版本、策略和 Artifact 元数据；React 不安装 updater JavaScript binding，`main` Capability 也不授予 updater 权限，所以不能取得下载 URL/签名、安装路径或调用插件原生命令。
 
 H8-19 的 `UpdatePolicyService` 已由正式 Tauri setup 使用当前包版本和固定 stable channel 初始化。它只在 App 私有 `app-updates/update-policy-v1` 保存 schema、版本下限、最高已见发布的不可变 identity、可选更新决策和单调 revision，不保存 URL、签名、发布说明或路径；Unix 目录/文件为 `0700/0600`，写入失败时磁盘与内存均不推进。可选更新暂缓后由下一次启动/轮询重新提示，跳过只压制同版本，立即安装意图跨重启保留；强制更新不接受用户选择。同版本换策略/摘要/平台、回退、重复旧按钮和损坏状态全部 fail closed。
 
 H8-20 的 `AppUpdateCoordinator` 让启动、每 6 小时周期检查和用户手动检查共用同一个并发门与状态转换；重叠触发只执行一次官方 updater 检查。`AppUpdateCache` 从 Rust 私有的官方响应取得 URL/Minisign 签名，以 HTTP Range/强 ETag 断点续传，在固定 `app-updates/cache-v1` 中流式复算 SHA-256 与 Minisign，双重通过后才原子替换唯一 `candidate.package`。失败断点可续传，摘要/签名错误不会覆盖旧包，清单不保存 URL、签名或路径。release 构建必须提供经 `build.rs` 验证的 HTTPS endpoint 模板和公开 Minisign 公钥；签名私钥不进入 App。`pnpm test:h8-20-app` 使用隐藏 App、真实 FastAPI feed 和临时 HTTPS 完成中断→手动恢复→精确缓存命中验收。
 
 H8-21 的 `AppUpdateInstallationCoordinator` 只接受协调层持有的 official `Update` 和与 release identity 精确匹配的缓存。读取完整包后再次验证长度、SHA-256 与当前 feed 的 Minisign 签名，成功才隐藏所有可见窗口并调用 `ExecutorPlatformService.shutdown_for_app_exit()`；缓存、停止运行环境或官方安装器任一步失败都返回固定脱敏错误，已隐藏窗口会恢复。Windows 的官方安装原语接管退出和安装，macOS 原位替换成功后调用 Tauri restart；WebView 不能传 package、路径、URL 或签名。`pnpm test:h8-21-app` 以 `visible:false` 的独立 App、专属 `dist-h821` 构建资产和三次启动，验证暂缓再提示、同版本跳过、下一版本恢复提示、立即安装交接，以及强更首次下载后在下次启动无重复下载地安装；finally 删除资产、AppData、服务和端口，不与 production `dist` 或其他验收构建互相覆盖。
+
+H8-22 的 `AppUpdateCenter` 常驻消费同一个 `AppUpdateGateway`：更新提示可以覆盖工作台任意页面，“设置与诊断”同时提供 stable 通道状态、进度和主动检查入口。可选发布展示“立即安装/稍后提醒/跳过此版本”，强制发布使用不可关闭提示且不渲染可选决策；策略与 action 不一致、未知字段和原生异常均 fail closed 为固定文案。`main.tsx` 只注入 `TauriAppUpdateGateway`，该适配器只调用上述三个产品 Command。`pnpm test:h8-22-app` 在三次隐藏真实 App 启动中从可见页面控件完成暂缓、跳过、同版本压制、新版本恢复、立即安装和强更下次启动交接；desktop-e2e 安装探针仍不进入发布包，也不替代 macOS/Windows 真实发布签名包验收。当前本机无有效 macOS 发布签名身份且无 Windows 实体环境，双平台覆盖与安装失败恢复保持待验收。
 
 设备身份和长期设备凭据只由 Rust 管理。正式 App 首启使用系统 CSPRNG 生成 Ed25519 私钥，并保存到 Tauri `app_data_dir` 下的固定 App 私有文件；长期 `atdc1` 凭据使用同一存储边界。目录在 Unix 为 `0700`、文件为 `0600`，写入使用同目录临时文件、落盘同步和原子替换；Windows 使用当前用户 AppData 继承的私有 ACL。React、Tauri Command、普通配置文件和 `localStorage` 均没有密钥或长期凭据读写面，也不调用 macOS Keychain 或 Windows Credential Manager，因此不会产生系统钥匙串授权提示。已存在的 32 字节私钥只复用不轮换，凭据可替换和删除；符号链接、非法权限、内容损坏、存储拒绝或随机源失败均 fail closed。`desktop-e2e` 构建只使用不落盘的临时身份，App 私有存储由 Rust 行为测试和正式 Tauri 启动验收覆盖。
 

@@ -44,6 +44,14 @@ export const appUpdateReleaseSchema = z
   .strict();
 
 const checkTriggerSchema = z.enum(["startup", "periodic", "manual"]);
+const updatePolicyActionSchema = z.enum([
+  "prompt",
+  "deferred",
+  "skipped",
+  "suppressed",
+  "install_requested",
+  "forced",
+]);
 const failedUpdateSchema = z
   .object({
     state: z.literal("failed"),
@@ -72,14 +80,30 @@ const downloadingUpdateSchema = z
     ({ downloadedBytes, totalBytes }) => totalBytes === null || downloadedBytes <= totalBytes,
   );
 
+const readyUpdateSchema = z
+  .object({
+    state: z.literal("ready"),
+    release: appUpdateReleaseSchema,
+    action: updatePolicyActionSchema,
+  })
+  .strict()
+  .refine(
+    ({ release, action }) =>
+      release.policy === "forced" ? action === "forced" : action !== "forced",
+    { path: ["action"] },
+  );
+
 export const appUpdateStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("idle") }).strict(),
   z.object({ state: z.literal("checking"), trigger: checkTriggerSchema }).strict(),
   z.object({ state: z.literal("up_to_date"), trigger: checkTriggerSchema }).strict(),
   z.object({ state: z.literal("available"), release: appUpdateReleaseSchema }).strict(),
   downloadingUpdateSchema,
-  z.object({ state: z.literal("ready"), release: appUpdateReleaseSchema }).strict(),
+  readyUpdateSchema,
   z.object({ state: z.literal("installing"), release: appUpdateReleaseSchema }).strict(),
+  z
+    .object({ state: z.literal("installation_launched"), release: appUpdateReleaseSchema })
+    .strict(),
   failedUpdateSchema,
 ]);
 
@@ -93,6 +117,23 @@ export interface AppUpdateGateway {
   getState(): Promise<AppUpdateState>;
   checkNow(): Promise<AppUpdateState>;
   decide(decision: AppUpdateDecision): Promise<AppUpdateState>;
+}
+
+export type AppUpdateGatewayErrorCode =
+  | "configuration_unavailable"
+  | "decision_unavailable"
+  | "operation_in_progress"
+  | "operation_unavailable"
+  | "protocol_mismatch";
+
+export class AppUpdateGatewayError extends Error {
+  readonly code: AppUpdateGatewayErrorCode;
+
+  constructor(code: AppUpdateGatewayErrorCode) {
+    super("App 更新操作暂时不可用");
+    this.name = "AppUpdateGatewayError";
+    this.code = code;
+  }
 }
 
 export function parseAppUpdateState(value: unknown): AppUpdateState {

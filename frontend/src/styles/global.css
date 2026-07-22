@@ -201,6 +201,17 @@ body {
   margin-top: 20px;
 }
 
+.app-update-card {
+  margin-top: 20px;
+  border-color: #e7ebf2;
+  box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
+}
+
+.app-update-settings,
+.app-update-prompt {
+  width: 100%;
+}
+
 .browser-settings-card {
   border-color: #e7ebf2;
   box-shadow: 0 8px 24px rgb(34 55 89 / 4%);

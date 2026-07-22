@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-21 已完成；下一项 H8-22，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-21 已完成；H8-22 更新 UI 与原入口自动化已完成，双平台真实发布签名包证据为 `🔍 待验收`；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -357,7 +357,7 @@
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ✅ 已完成 |
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ✅ 已完成 |
-| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | ⬜ 未开始 |
+| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | 🔍 待验收 |
 
 ## 14. Wave 9：双平台安装包与本地候选版
 
@@ -2780,10 +2780,23 @@
 - 真实边界：本任务证明真实 App 决策、缓存重验、安全退出、官方安装调用和重启协调；无副作用探针只替代会实际覆盖机器上 App 的最后平台安装副作用。macOS/Windows 真实签名包从旧版本升级到新版本、安装失败恢复和 UI 点击证据严格属于 H8-22，未在本任务冒充完成
 - 后续：进入 `H8-22`，实现通用更新设置/提示 UI，并在 macOS 与 Windows 用真实签名包从 App 原入口验证升级、暂缓、跳过、旧包覆盖和强更；不得把 desktop-e2e 探针带入发布包
 
+### H8-22 更新 UI 与双平台验收
+
+- 状态：🔍 待验收
+- 日期：2026-07-22
+- RED：先把唯一台账置为 `🧪 RED`；新增严格状态契约、Tauri gateway、React 更新中心和隐藏 App UI 契约。首跑准确失败于 `AppUpdateCenter.tsx`/`app-update-gateway.ts`/专用 UI E2E 配置不存在，`ready.action` 与 `installation_launched` 未进入 TypeScript 状态闭集。策略复审另以先红后绿用例证明强制 release 配可选 action、可选 release 配 `forced` 必须 fail closed
+- 产品 UI：`AppUpdateCenter` 常驻工作台读取状态，所以可选/强制提示不要求用户先进入设置页；“设置与诊断”增加 stable 通道卡片、目标版本/平台/架构、下载进度和“检查更新”。可选提示只有“立即安装/稍后提醒/跳过此版本”；强制提示不可关闭、不可按 Escape 或遮罩退出，也不渲染可选决策，明确要求重新启动 App 后自动安装。原生失败统一映射固定安全文案，不显示 URL、签名、包内容、路径或底层错误
+- 固定边界：正式 `main.tsx` 唯一构造 `TauriAppUpdateGateway` 并经 `App → WorkbenchShell` 注入；适配器只调用 `get_app_update_state`、`check_app_update_now`、`decide_app_update`，严格解析 exact-field 状态以及 release policy/action 一致性。React 仍未安装 updater JavaScript binding，`main` Capability 仍未授予 updater 权限，用户决策不携带版本、URL、signature、bytes 或路径
+- 隐藏 App 原入口：`pnpm test:h8-22-app` 复用 H8-21 的隔离 production FastAPI feed、临时 HTTPS、唯一 AppData 与 official updater 协调层，但把三轮 WDIO 改为从真实页面控件操作。第一轮从可选提示点击暂缓，再从设置页主动检查、跳过 0.2.0、验证同版本 suppressed、发现 0.3.0 后点击立即安装；第二轮显示不可跳过的 0.2.0 强更；第三轮复用 AppData，在 startup 无重复下载地进入安装交接。三轮均为 `1 passing`，runner 最终删除专属 `dist-h821`、AppData、临时服务、端口和 WDIO 资源
+- 自动化门禁：Frontend 140 项 Node 契约、240 项 Vitest、5 项全局无头 Playwright、ESLint 与严格 TypeScript 全绿；H8-22 聚焦 gateway/契约/App 接线/组件共 15 项通过，Python runner Ruff format/check 通过。本任务没有修改 Rust、Backend Schema/OpenAPI 或生产 updater 实现，H8-21 的真实 Rust/Feed/安装协调原路径由上述三轮继续消费
+- 待验收边界：当前机器是 macOS arm64，`security find-identity -v -p codesigning` 返回 `0 valid identities found`，没有 Developer ID Application/notarization 发布身份；当前也没有 Windows 实体构建/安装环境与 Authenticode 发布证书。因此尚不能生成并从旧 App 安装真实发布签名 macOS/Windows 包，也不能真实验证旧包覆盖、平台安装失败后的窗口/运行环境恢复和强更完成后版本切换。desktop-e2e 无副作用安装探针只证明产品协调与 UI 原入口，未被写成正式签名证据，台账保持 `🔍 待验收`
+- 解锁条件：在受控发布环境提供 macOS Developer ID Application + notarization 凭据和 Windows Authenticode 证书/实体机，各自构建至少旧/新两个正式候选版本；从旧 App 原入口逐平台记录可选暂缓、跳过、同版本压制、新版本覆盖、立即安装、安装失败恢复、强更重启和最终版本/签名事实，通过后才能把 H8-22 改为 `✅ 已完成`
+- 提交：通用 UI、严格 adapter/协议、三轮原入口自动化、资源隔离与权威文档形成单一可回滚提交；不生成、提交或索取发布私钥
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
+1. `H8-22`（🔍 待验收）：通用更新 UI 与原入口自动化已完成；获得受控发布签名身份和 Windows 实体环境后，补 macOS/Windows 真实签名包升级、覆盖、失败恢复与强更证据；
 2. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
 3. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

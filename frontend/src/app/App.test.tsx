@@ -6,6 +6,7 @@ import { App } from "./App";
 import type { StartupCheck } from "./startup";
 import type { PlatformAdapter } from "../platform/types";
 import type { PlatformSessionGateway } from "../features/platform-sessions/platform-session-gateway";
+import type { AppUpdateGateway } from "../features/app-updates/contracts";
 
 describe("desktop startup", () => {
   it("opens the RPA workbench without any product login route", async () => {
@@ -142,16 +143,30 @@ describe("desktop startup", () => {
       getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
       setCaptureSuccessfulDiagnostics: vi.fn(),
     };
+    const appUpdateGateway: AppUpdateGateway = {
+      getState: vi.fn().mockResolvedValue({ state: "up_to_date", trigger: "manual" }),
+      checkNow: vi.fn().mockResolvedValue({ state: "up_to_date", trigger: "manual" }),
+      decide: vi.fn(),
+    };
     const user = userEvent.setup();
 
-    render(<App startupCheck={startupCheck} platformAdapter={platformAdapter} />);
+    render(
+      <App
+        startupCheck={startupCheck}
+        platformAdapter={platformAdapter}
+        appUpdateGateway={appUpdateGateway}
+      />,
+    );
 
     await screen.findByRole("heading", { name: "RPA 运营工作台" });
     await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
     expect(await screen.findByRole("heading", { name: "设置与诊断" })).toBeVisible();
     expect(await screen.findByText("本地执行器运行中")).toBeVisible();
     expect(screen.getByText("safe app diagnostic")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "App 更新" })).toBeVisible();
+    expect(screen.getByText("当前已是最新版本")).toBeVisible();
     expect(platformAdapter.getExecutorStatus).toHaveBeenCalledTimes(1);
+    expect(appUpdateGateway.getState).toHaveBeenCalledTimes(1);
   });
 
   it("opens the enabled platform status page through the injected real gateway boundary", async () => {
