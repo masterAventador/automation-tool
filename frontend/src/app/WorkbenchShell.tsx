@@ -41,11 +41,13 @@ import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
+import { VideoStudio } from "../features/video-studio/VideoStudio";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
   { key: "task-create", label: "新建任务" },
   { key: "task-runs", label: "任务记录" },
+  { key: "video-studio", label: "视频制作" },
   { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
 ];
@@ -258,6 +260,7 @@ export function WorkbenchShell({
   const showingTaskRun = activePage === "task-runs";
   const showingDiagnostics = activePage === "diagnostics";
   const showingPlatform = activePage === "platform";
+  const showingVideoStudio = activePage === "video-studio";
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -291,6 +294,7 @@ export function WorkbenchShell({
                 key === "workbench" ||
                 key === "task-create" ||
                 key === "task-runs" ||
+                key === "video-studio" ||
                 key === "diagnostics" ||
                 key === "platform"
               ) {
@@ -318,6 +322,8 @@ export function WorkbenchShell({
                     ? "新建运营任务"
                     : showingPlatform
                       ? "平台状态"
+                    : showingVideoStudio
+                      ? "视频制作"
                     : showingDiagnostics
                       ? "设置与诊断"
                     : showingTaskRun
@@ -329,6 +335,8 @@ export function WorkbenchShell({
                     ? "配置一个可预览、可确认的抖音搜索曝光任务。"
                     : showingPlatform
                       ? "查看抖音登录健康，并在系统运营浏览器中完成人工处理。"
+                    : showingVideoStudio
+                      ? "从需求、脚本与分镜到预览、任务和成片，按真实制作状态逐步推进。"
                     : showingDiagnostics
                       ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
                     : showingTaskRun
@@ -341,6 +349,8 @@ export function WorkbenchShell({
                   ? "任务模板已就绪"
                   : showingPlatform
                     ? "登录边界"
+                  : showingVideoStudio
+                    ? "视频工作区"
                   : showingDiagnostics
                     ? "本地边界"
                   : showingTaskRun
@@ -364,6 +374,8 @@ export function WorkbenchShell({
                   onAutoOpenConsumed={() => setAutoOpenPlatformLogin(false)}
                 />
               </div>
+            ) : showingVideoStudio ? (
+              <VideoStudio />
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />

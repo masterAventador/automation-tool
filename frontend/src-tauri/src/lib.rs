@@ -260,6 +260,7 @@ async fn test_model_service_connection(
 }
 
 #[tauri::command]
+#[cfg(not(feature = "video-studio-e2e"))]
 fn check_local_startup_environment(
     startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
@@ -287,6 +288,16 @@ fn check_local_startup_environment(
         app_data,
         platform.startup_environment_state(),
         trusted_browser,
+    )
+}
+
+#[tauri::command]
+#[cfg(feature = "video-studio-e2e")]
+fn check_local_startup_environment() -> startup_environment::StartupEnvironmentSnapshot {
+    startup_environment::StartupEnvironmentSnapshot::new(
+        startup_environment::AppDataStartupState::Ready,
+        startup_environment::ExecutorStartupState::Ready,
+        startup_environment::TrustedBrowserStartupState::Ready,
     )
 }
 
@@ -709,11 +720,28 @@ async fn restart_executor(
 }
 
 #[tauri::command]
-#[cfg(feature = "desktop-e2e")]
+#[cfg(all(feature = "desktop-e2e", not(feature = "video-studio-e2e")))]
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
     client.check_health().await.map_err(map_control_plane_error)
+}
+
+#[cfg(feature = "video-studio-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoStudioAcceptanceHealth {
+    status: &'static str,
+    service_version: &'static str,
+}
+
+#[tauri::command]
+#[cfg(feature = "video-studio-e2e")]
+async fn check_control_plane_health() -> VideoStudioAcceptanceHealth {
+    VideoStudioAcceptanceHealth {
+        status: "available",
+        service_version: "video-studio-acceptance",
+    }
 }
 
 #[tauri::command]
