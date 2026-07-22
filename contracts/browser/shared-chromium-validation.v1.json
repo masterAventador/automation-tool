@@ -58,8 +58,8 @@
   ],
   "platform_results": {
     "macos-arm64": {
-      "status": "pending",
-      "evidence_sha256": null
+      "status": "passed",
+      "evidence_sha256": "0457ff56f36483dded5c68c69c70c6aeb49fca8b999e0c804d257e2675bb680d"
     },
     "windows-x86_64": {
       "status": "pending",
