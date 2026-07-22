@@ -33,7 +33,7 @@ use device_credentials::ProductionDeviceCredentialVault;
 use device_identity::initialize_ephemeral_identity;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_identity::initialize_production_identity;
-#[cfg(feature = "control-plane-e2e")]
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_identity::ProductionDeviceIdentity;
 use tauri::Manager;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -756,6 +756,8 @@ async fn restore_product_account_session(
 async fn login_product_account(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionAccountSessionVault>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    device_credential_vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     login_name: String,
     password: String,
 ) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
@@ -764,6 +766,13 @@ async fn login_product_account(
         .login_account_session(&login_name, password.as_str())
         .await
         .map_err(map_control_plane_error)?;
+    if let Err(error) = client
+        .bind_account_installation(session.access_token(), &identity, &device_credential_vault)
+        .await
+    {
+        let _ = client.logout_account_session(session.refresh_token()).await;
+        return Err(map_control_plane_error(error));
+    }
     if let Err(error) = vault.replace(&session) {
         let _ = client.logout_account_session(session.refresh_token()).await;
         return Err(map_account_session_vault_error(error));

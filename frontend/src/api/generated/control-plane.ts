@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/v1/account-installations/binding-challenges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue Binding Challenge */
+        post: operations["issueAccountInstallationBindingChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account-installations/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Binding */
+        post: operations["completeAccountInstallationBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account-password/changes": {
         parameters: {
             query?: never;
@@ -549,6 +583,51 @@ export interface components {
          * @enum {string}
          */
         ActionResultEvidence: "awaiting_execution" | "action_pending" | "action_in_progress" | "profile_visible" | "comment_confirmed" | "message_confirmed" | "executor_reported_success" | "user_excluded" | "duplicate_in_task" | "duplicate_in_history" | "blacklisted" | "action_cancelled" | "admission_rejected" | "local_safety_limit" | "login_required" | "dialog_blocked" | "messaging_not_allowed" | "follow_required" | "timed_out" | "page_version_unknown" | "conflicting_anchors" | "page_unavailable" | "verification_unavailable" | "executor_reported_failure" | "dispatch_timed_out" | "dispatch_unavailable" | "final_state_unconfirmed" | "recovery_unconfirmed";
+        /** BindingChallengeRequest */
+        BindingChallengeRequest: {
+            /** Devicepublickey */
+            devicePublicKey: string;
+        };
+        /** BindingChallengeResponse */
+        BindingChallengeResponse: {
+            /**
+             * Challengeid
+             * Format: uuid
+             */
+            challengeId: string;
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /** Signingpayload */
+            signingPayload: string;
+        };
+        /** BindingCompletionRequest */
+        BindingCompletionRequest: {
+            /**
+             * Challengeid
+             * Format: uuid
+             */
+            challengeId: string;
+            /** Signature */
+            signature: string;
+            /** Signingpayload */
+            signingPayload: string;
+        };
+        /** BindingResponse */
+        BindingResponse: {
+            deviceCredential: components["schemas"]["IssuedCredentialResponse"];
+            /**
+             * Installationid
+             * Format: uuid
+             */
+            installationId: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+        };
         /**
          * DeviceSessionCapability
          * @enum {string}
@@ -647,6 +726,15 @@ export interface components {
             revision: number;
             /** Status */
             status: string;
+        };
+        /** IssuedCredentialResponse */
+        IssuedCredentialResponse: {
+            /** Credential */
+            credential: string;
+            /** Scope */
+            scope: string;
+            /** Version */
+            version: number;
         };
         /** IssuedDeviceCredentialResponse */
         IssuedDeviceCredentialResponse: {
@@ -1067,6 +1155,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    issueAccountInstallationBindingChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindingChallengeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingChallengeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    completeAccountInstallationBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindingCompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     changeAccountPassword: {
         parameters: {
             query?: never;

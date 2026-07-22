@@ -47,3 +47,28 @@ test("U9-04 keeps account bearer secrets in one Rust vault behind fixed Commands
   assert.doesNotMatch(webview, /accessToken|refreshToken|localStorage|sessionStorage/u);
   assert.doesNotMatch(native, /system.*keychain|keyring|credential manager/iu);
 });
+
+test("U9-05 binds the native device before publishing an authenticated snapshot", async () => {
+  const [controlPlane, native] = await Promise.all([
+    read("src-tauri/src/control_plane.rs"),
+    read("src-tauri/src/lib.rs"),
+  ]);
+
+  for (const operation of [
+    "IssueAccountInstallationBindingChallenge",
+    "CompleteAccountInstallationBinding",
+  ]) {
+    assert.match(controlPlane, new RegExp(`\\b${operation}\\b`, "u"));
+  }
+  assert.match(controlPlane, /account\.installation\.bind|bind_account_installation/u);
+  assert.doesNotMatch(controlPlane, /pairing.?code|approval.?poll/iu);
+
+  const loginStart = native.indexOf("async fn login_product_account");
+  const loginEnd = native.indexOf("async fn recover_product_account_password", loginStart);
+  const login = native.slice(loginStart, loginEnd);
+  assert.ok(loginStart >= 0 && loginEnd > loginStart);
+  assert.ok(login.indexOf("bind_account_installation") < login.indexOf("vault.replace(&session)"));
+  assert.match(login, /ProductionDeviceIdentity/u);
+  assert.match(login, /ProductionDeviceCredentialVault/u);
+  assert.doesNotMatch(login, /pairing|poll|approval/iu);
+});
