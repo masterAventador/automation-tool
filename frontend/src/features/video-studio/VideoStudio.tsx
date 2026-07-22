@@ -1,4 +1,97 @@
-import { Alert, Button, Card, Empty, Input, Space, Tabs, Typography } from "antd";
+import { useState } from "react";
+
+import { Alert, Button, Card, Empty, Input, Space, Tabs, Tag, Typography } from "antd";
+
+type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
+
+interface VideoCreationMethodOption {
+  readonly id: VideoCreationMethodId;
+  readonly name: string;
+  readonly shortDescription: string;
+  readonly details: ReadonlyArray<{
+    readonly label: string;
+    readonly value: string;
+  }>;
+}
+
+const VIDEO_CREATION_METHODS: readonly VideoCreationMethodOption[] = [
+  {
+    id: "material_montage_v1",
+    name: "智能素材成片",
+    shortDescription: "让旁白、字幕和素材画面配合起来，快速制作信息类短视频。",
+    details: [
+      {
+        label: "最适合",
+        value: "知识讲解、观点、榜单、教程，以及旁白配城市、办公、做饭等补充画面的内容。",
+      },
+      {
+        label: "不适合",
+        value: "固定真人连续出镜、电影感剧情、精确产品动作，或同一人物跨镜头保持一致。",
+      },
+      {
+        label: "举个例子",
+        value: "输入一段护肤知识，生成旁白和字幕，并配上洗脸、护肤品与生活场景画面。",
+      },
+      {
+        label: "外部服务",
+        value: "通常需要文案模型、配音服务和素材网站；具体使用哪些服务会在提交前列明。",
+      },
+      {
+        label: "本机处理",
+        value: "素材整理、字幕排版和视频合成主要在本机完成。",
+      },
+      {
+        label: "预计耗时",
+        value: "30–60 秒视频通常约 5–20 分钟，实际取决于素材和配音服务。",
+      },
+      { label: "设备占用", value: "合成时会持续占用较多处理器和内存。" },
+      { label: "临时磁盘", value: "建议预留 2–6 GB，任务提交前会按设置重新估算。" },
+      { label: "网络消耗", value: "中到高，通常需要请求文案、配音并下载素材。" },
+      {
+        label: "数据与隐私",
+        value: "输入内容及发送给外部服务的文案、配音文本或素材检索词会离开本机。",
+      },
+    ],
+  },
+  {
+    id: "motion_composition_v1",
+    name: "品牌动效成片",
+    shortDescription: "用品牌配色、文字、图表和界面动画制作结构清晰的宣传视频。",
+    details: [
+      {
+        label: "最适合",
+        value: "品牌宣传、产品发布、数据图表、产品界面演示、标题动画和代码讲解。",
+      },
+      {
+        label: "不适合",
+        value: "只凭一句话生成逼真人物、自然运动，或真实世界中的复杂镜头。",
+      },
+      {
+        label: "举个例子",
+        value: "输入一次产品更新，按品牌颜色生成标题、功能界面、数据和转场动画。",
+      },
+      {
+        label: "外部服务",
+        value: "一句话自动制作通常需要视频创作模型；固定模板手工调整时可以不调用模型。",
+      },
+      {
+        label: "本机处理",
+        value: "画面排版、逐帧渲染和视频合成主要在本机完成。",
+      },
+      {
+        label: "预计耗时",
+        value: "30–60 秒视频通常约 3–15 分钟，复杂动画会更久。",
+      },
+      { label: "设备占用", value: "渲染时会持续占用较多处理器、内存，部分效果还会使用显卡。" },
+      { label: "临时磁盘", value: "建议预留 1–4 GB，任务提交前会按设置重新估算。" },
+      { label: "网络消耗", value: "低到中；使用模型时需要联网，本机渲染不会上传整条视频。" },
+      {
+        label: "数据与隐私",
+        value: "使用模型时，需求和选中的品牌文字可能离开本机；本机素材不会被自动上传。",
+      },
+    ],
+  },
+] as const;
 
 const EMPTY_PAGES = {
   script: {
@@ -41,6 +134,11 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
 }
 
 function NewVideoPage() {
+  const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
+  const selectedName = VIDEO_CREATION_METHODS.find(
+    (method) => method.id === selectedMethod,
+  )?.name;
+
   return (
     <Card className="video-studio-panel" title="从一句话开始">
       <Space orientation="vertical" size="middle" className="video-studio-new-form">
@@ -53,10 +151,55 @@ function NewVideoPage() {
           rows={5}
           placeholder="例如：用 30 秒介绍新品的三个亮点"
         />
+        <div className="video-method-heading">
+          <div>
+            <Typography.Title level={4}>选择制作方式</Typography.Title>
+            <Typography.Text type="secondary">
+              以下耗时和空间是 30–60 秒视频的参考范围，提交任务前会结合设备与设置重新估算。
+            </Typography.Text>
+          </div>
+          {selectedName ? <Tag color="blue">已选择：{selectedName}</Tag> : <Tag>尚未选择</Tag>}
+        </div>
+        <div className="video-method-grid" aria-label="视频制作方式">
+          {VIDEO_CREATION_METHODS.map((method) => {
+            const selected = method.id === selectedMethod;
+            return (
+              <article
+                key={method.id}
+                className={`video-method-card${selected ? " video-method-card-selected" : ""}`}
+              >
+                <div className="video-method-card-header">
+                  <Typography.Title level={3}>{method.name}</Typography.Title>
+                  <Tag color={selected ? "blue" : "default"}>{selected ? "已选择" : "可选择"}</Tag>
+                </div>
+                <Typography.Paragraph className="video-method-summary">
+                  {method.shortDescription}
+                </Typography.Paragraph>
+                <dl className="video-method-details">
+                  {method.details.map((detail) => (
+                    <div key={detail.label}>
+                      <dt>{detail.label}</dt>
+                      <dd>{detail.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <Button
+                  type={selected ? "primary" : "default"}
+                  aria-label={`选择${method.name}`}
+                  aria-pressed={selected}
+                  className="video-method-select"
+                  onClick={() => setSelectedMethod(method.id)}
+                >
+                  {selected ? `已选择${method.name}` : `选择${method.name}`}
+                </Button>
+              </article>
+            );
+          })}
+        </div>
         <Alert
           type="info"
           showIcon
-          title="制作方式接入后开放创建，不会生成演示任务。"
+          title="现在可以比较并选择制作方式；一句话创建会在相应制作流程接入后开放。"
         />
         <div>
           <Button type="primary" disabled>

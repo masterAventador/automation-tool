@@ -14,7 +14,10 @@ const capabilities: TauriCapabilities = {
 export const config: WebdriverIO.Config = {
   ...wdioRuntimeArtifacts,
   runner: "local",
-  specs: ["./e2e-tauri/video-studio.spec.ts"],
+  specs: [
+    "./e2e-tauri/video-studio.spec.ts",
+    "./e2e-tauri/video-creation-methods.spec.ts",
+  ],
   maxInstances: 1,
   services: [
     [
