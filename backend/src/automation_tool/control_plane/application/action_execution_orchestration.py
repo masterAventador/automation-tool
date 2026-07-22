@@ -33,6 +33,7 @@ class ActionExecutionAdvanceKind(StrEnum):
     IDLE = "idle"
     TASK_OFFERED = "task_offered"
     ACTION_ENQUEUED = "action_enqueued"
+    TASK_FINALIZED = "task_finalized"
     RATE_LIMITED = "rate_limited"
 
 

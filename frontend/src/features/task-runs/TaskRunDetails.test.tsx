@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -256,6 +256,7 @@ function renderDetails(
   taskTargetResultSource = targetResultSource(),
   taskDiscoveryGateway = discoveryGateway(),
   onOpenPlatformSession = () => undefined,
+  onPlatformLoginRequired = () => undefined,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -275,6 +276,7 @@ function renderDetails(
           taskTargetResultSource={taskTargetResultSource}
           onBack={() => undefined}
           onOpenPlatformSession={onOpenPlatformSession}
+          onPlatformLoginRequired={onPlatformLoginRequired}
         />
       </QueryClientProvider>,
     ),
@@ -311,6 +313,7 @@ describe("Task run details", () => {
       .mockRejectedValueOnce(new TaskDiscoveryGatewayError("discovery_rejected", false))
       .mockResolvedValueOnce(discoveryReceipt());
     const onOpenPlatformSession = vi.fn();
+    const onPlatformLoginRequired = vi.fn();
     const user = userEvent.setup();
     renderDetails(
       idleSource(snapshot({ status: "awaiting_human", revision: 4 })),
@@ -319,6 +322,7 @@ describe("Task run details", () => {
       targetResultSource(),
       { startDiscovery },
       onOpenPlatformSession,
+      onPlatformLoginRequired,
     );
 
     await user.click(await screen.findByRole("button", { name: "开始目标发现" }));
@@ -327,6 +331,7 @@ describe("Task run details", () => {
         "当前平台登录或任务状态尚未满足目标发现条件，请先处理平台状态后重试",
       ),
     ).toBeVisible();
+    expect(onPlatformLoginRequired).toHaveBeenCalledOnce();
     await user.click(screen.getAllByRole("button", { name: "打开平台状态" })[0]!);
     expect(onOpenPlatformSession).toHaveBeenCalledOnce();
 
@@ -334,6 +339,95 @@ describe("Task run details", () => {
     await user.click(screen.getByRole("button", { name: "开始目标发现" }));
     await waitFor(() => expect(startDiscovery).toHaveBeenCalledTimes(2));
     expect(startDiscovery.mock.calls[1]?.[1]).toBe(firstKey);
+  });
+
+  it("requests one automatic login launch only when discovery enters the waiting state", async () => {
+    let emitEvent: ((event: TaskEvent) => void) | null = null;
+    const taskSource: TaskProjectionSource = {
+      getTask: vi.fn(async () =>
+        snapshot({
+          status: "discovering_targets",
+          revision: 2,
+          lastEventSequence: 1,
+        }),
+      ),
+      listTasks: vi.fn(async () => ({ items: [], nextCursor: null })),
+      streamTaskEvents: vi.fn(
+        async (_taskId, _afterSequence, onEvent, options = {}) => {
+          emitEvent = onEvent;
+          return new Promise<{ lastSequence: number; terminal: boolean }>((resolve) => {
+            options.signal?.addEventListener(
+              "abort",
+              () => resolve({ lastSequence: 2, terminal: false }),
+              { once: true },
+            );
+          });
+        },
+      ),
+    };
+    const onPlatformLoginRequired = vi.fn();
+    renderDetails(
+      taskSource,
+      gateway(),
+      targetSource(),
+      targetResultSource(),
+      discoveryGateway(),
+      () => undefined,
+      onPlatformLoginRequired,
+    );
+
+    expect((await screen.findAllByText("发现目标中")).length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(emitEvent).not.toBeNull());
+    expect(onPlatformLoginRequired).not.toHaveBeenCalled();
+    await act(async () => {
+      emitEvent?.({
+        taskId: TASK_ID,
+        sequence: 1,
+        eventVersion: "1.0",
+        eventType: "task.discovery_started",
+        taskRevision: 2,
+        taskStatus: "discovering_targets",
+        executionAttemptId: ATTEMPT_ID,
+        actionId: null,
+        progressPercent: null,
+        occurredAt: "2026-07-18T15:32:00Z",
+        recordedAt: "2026-07-18T15:32:00Z",
+        message: "Target discovery started",
+      });
+      emitEvent?.({
+        taskId: TASK_ID,
+        sequence: 2,
+        eventVersion: "1.0",
+        eventType: "task.awaiting_platform_login",
+        taskRevision: 3,
+        taskStatus: "awaiting_platform_login",
+        executionAttemptId: ATTEMPT_ID,
+        actionId: null,
+        progressPercent: null,
+        occurredAt: "2026-07-18T15:33:00Z",
+        recordedAt: "2026-07-18T15:33:00Z",
+        message: "Platform login is required",
+      });
+    });
+
+    await waitFor(() => expect(onPlatformLoginRequired).toHaveBeenCalledOnce());
+    expect(screen.getAllByText("等待平台登录").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not relaunch login when an existing waiting task is opened after App restart", async () => {
+    const onPlatformLoginRequired = vi.fn();
+    renderDetails(
+      idleSource(snapshot({ status: "awaiting_platform_login", revision: 3 })),
+      gateway(),
+      targetSource(),
+      targetResultSource(),
+      discoveryGateway(),
+      () => undefined,
+      onPlatformLoginRequired,
+    );
+
+    expect((await screen.findAllByText("等待平台登录")).length).toBeGreaterThanOrEqual(1);
+    expect(onPlatformLoginRequired).not.toHaveBeenCalled();
   });
 
   it("shows an explicit device single-task message for an Installation conflict", async () => {
@@ -407,6 +501,7 @@ describe("Task run details", () => {
           taskTargetResultSource={targetResultSource()}
           onBack={() => undefined}
           onOpenPlatformSession={() => undefined}
+          onPlatformLoginRequired={() => undefined}
         />
       </QueryClientProvider>
     );
@@ -436,6 +531,178 @@ describe("Task run details", () => {
     expect(screen.getByText("结果不确定")).toBeVisible();
     expect(screen.getByText("已发送，但平台最终状态无法确认", { exact: false })).toBeVisible();
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
+  });
+
+  it("refetches an early empty target result after terminal events reach the page", async () => {
+    const terminalEvents: readonly TaskEvent[] = [
+      {
+        ...EVENTS[1]!,
+        sequence: 1,
+        eventType: "step.completed",
+        taskRevision: 2,
+        progressPercent: null,
+      },
+      {
+        ...EVENTS[0]!,
+        sequence: 2,
+        eventType: "task.completed",
+        taskRevision: 3,
+        taskStatus: "succeeded",
+        actionId: null,
+      },
+    ];
+    const taskSource: TaskProjectionSource = {
+      getTask: vi.fn(async () =>
+        snapshot({ status: "running", revision: 1, lastEventSequence: 0 }),
+      ),
+      listTasks: vi.fn(async () => ({ items: [], nextCursor: null })),
+      streamTaskEvents: vi.fn(async (_taskId, afterSequence, onEvent) => {
+        expect(afterSequence).toBe(0);
+        terminalEvents.forEach(onEvent);
+        return { lastSequence: 2, terminal: true };
+      }),
+    };
+    const completeResults = targetResults();
+    const getResults = vi
+      .fn<TaskTargetResultSource["getResults"]>()
+      .mockResolvedValueOnce({
+        taskId: TASK_ID,
+        taskStatus: "running",
+        taskRevision: 1,
+        lastEventSequence: 0,
+        items: [],
+      })
+      .mockResolvedValue({
+        ...completeResults,
+        taskStatus: "succeeded",
+        taskRevision: 3,
+        lastEventSequence: 2,
+      });
+
+    renderDetails(
+      taskSource,
+      gateway(),
+      targetSource(),
+      { getResults },
+    );
+
+    expect(await screen.findByText("任务已进入终态，控制按钮已关闭")).toBeVisible();
+    await waitFor(() => expect(getResults).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("评论成功目标")).toBeVisible();
+    expect(screen.getByText("用户排除目标")).toBeVisible();
+  });
+
+  it("does not lose the terminal result refresh while the initial result request is pending", async () => {
+    const terminalEvents: readonly TaskEvent[] = [
+      {
+        ...EVENTS[1]!,
+        sequence: 1,
+        eventType: "step.completed",
+        taskRevision: 2,
+        progressPercent: null,
+      },
+      {
+        ...EVENTS[0]!,
+        sequence: 2,
+        eventType: "task.completed",
+        taskRevision: 3,
+        taskStatus: "succeeded",
+        actionId: null,
+      },
+    ];
+    let releaseInitialResult: (() => void) | undefined;
+    let publishTerminalEvents: (() => void) | undefined;
+    const initialResult = new Promise<TaskTargetResultSnapshot>((resolve) => {
+      releaseInitialResult = () =>
+        resolve({
+          taskId: TASK_ID,
+          taskStatus: "running",
+          taskRevision: 1,
+          lastEventSequence: 0,
+          items: [],
+        });
+    });
+    const terminalStream = new Promise<{ lastSequence: number; terminal: boolean }>(
+      (resolve) => {
+        publishTerminalEvents = () => resolve({ lastSequence: 2, terminal: true });
+      },
+    );
+    const taskSource: TaskProjectionSource = {
+      getTask: vi.fn(async () =>
+        snapshot({ status: "running", revision: 1, lastEventSequence: 0 }),
+      ),
+      listTasks: vi.fn(async () => ({ items: [], nextCursor: null })),
+      streamTaskEvents: vi.fn(async (_taskId, afterSequence, onEvent) => {
+        expect(afterSequence).toBe(0);
+        const summary = await terminalStream;
+        terminalEvents.forEach(onEvent);
+        return summary;
+      }),
+    };
+    const completeResults = targetResults();
+    const getResults = vi
+      .fn<TaskTargetResultSource["getResults"]>()
+      .mockImplementationOnce(async () => initialResult)
+      .mockResolvedValue({
+        ...completeResults,
+        taskStatus: "succeeded",
+        taskRevision: 3,
+        lastEventSequence: 2,
+      });
+
+    renderDetails(taskSource, gateway(), targetSource(), { getResults });
+
+    await waitFor(() => expect(getResults).toHaveBeenCalledTimes(1));
+    publishTerminalEvents?.();
+    expect(await screen.findByText("任务已进入终态，控制按钮已关闭")).toBeVisible();
+    releaseInitialResult?.();
+
+    await waitFor(() => expect(getResults).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("评论成功目标")).toBeVisible();
+    expect(screen.getByText("用户排除目标")).toBeVisible();
+  });
+
+  it("refreshes results from the authoritative Task watermark when the event stream lags", async () => {
+    const taskSource = source();
+    vi.mocked(taskSource.getTask)
+      .mockResolvedValueOnce(
+        snapshot({ status: "running", revision: 1, lastEventSequence: 0 }),
+      )
+      .mockResolvedValue(
+        snapshot({ status: "succeeded", revision: 9, lastEventSequence: 8 }),
+      );
+    const completeResults = targetResults();
+    const getResults = vi
+      .fn<TaskTargetResultSource["getResults"]>()
+      .mockResolvedValueOnce({
+        taskId: TASK_ID,
+        taskStatus: "running",
+        taskRevision: 1,
+        lastEventSequence: 0,
+        items: [],
+      })
+      .mockResolvedValue({
+        ...completeResults,
+        taskStatus: "succeeded",
+        taskRevision: 9,
+        lastEventSequence: 8,
+      });
+    const rendered = renderDetails(
+      taskSource,
+      gateway(),
+      targetSource(),
+      { getResults },
+    );
+
+    await waitFor(() => expect(getResults).toHaveBeenCalledTimes(1));
+    await rendered.queryClient.refetchQueries({
+      queryKey: taskProjectionKeys.detail(TASK_ID),
+    });
+
+    expect(await screen.findByText("任务已进入终态，控制按钮已关闭")).toBeVisible();
+    await waitFor(() => expect(getResults).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("评论成功目标")).toBeVisible();
+    expect(screen.getByText("用户排除目标")).toBeVisible();
   });
 
   it("submits pause from its real page control without claiming it is already paused", async () => {

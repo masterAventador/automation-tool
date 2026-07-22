@@ -270,6 +270,15 @@ class FakeExecutorEngine:
         if command.message_type == "task.offer":
             if state is not _AttemptState.NEW:
                 raise FakeExecutorRejected
+            task_id = str(command.task_id)
+            baseline = command.payload["task_event_sequence_baseline"]
+            if type(baseline) is not int:
+                raise FakeExecutorRejected
+            known_baseline = self._last_event_sequence.get(task_id)
+            if known_baseline is None:
+                self._last_event_sequence[task_id] = baseline
+            elif known_baseline != baseline:
+                raise FakeExecutorRejected
             if self._scenario is FakeExecutorScenario.REJECT:
                 self._attempt_states[attempt_id] = _AttemptState.TERMINAL
                 return (self._result(command, "task.reject"),)

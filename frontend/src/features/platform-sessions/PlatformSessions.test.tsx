@@ -6,31 +6,55 @@ import type { PlatformSessionGateway } from "./platform-session-gateway";
 import { PlatformSessions } from "./PlatformSessions";
 
 function gateway(): PlatformSessionGateway {
+  let state: "healthy" | "missing" = "missing";
   return {
-    getDouyinSession: vi.fn().mockResolvedValue({
-      platform: "douyin",
-      state: "missing",
+    getDouyinSession: vi.fn(async () => ({
+      platform: "douyin" as const,
+      state,
       observedAt: "2026-07-19T14:30:00Z",
-    }),
+    })),
     openDouyinLogin: vi.fn().mockResolvedValue({
       platform: "douyin",
       state: "awaiting_scan",
       flowVersion: "douyin.qr-login.v2",
     }),
-    recheckDouyinLogin: vi.fn().mockResolvedValue({
-      platform: "douyin",
-      state: "healthy",
-      flowVersion: "douyin.qr-login.v2",
+    recheckDouyinLogin: vi.fn(async () => {
+      state = "healthy";
+      return {
+        platform: "douyin" as const,
+        state: "healthy" as const,
+        flowVersion: "douyin.qr-login.v2" as const,
+      };
     }),
-    logoutDouyinSession: vi.fn().mockResolvedValue({
-      platform: "douyin",
-      state: "missing",
-      observedAt: "2026-07-19T14:31:00Z",
+    logoutDouyinSession: vi.fn(async () => {
+      state = "missing";
+      return {
+        platform: "douyin" as const,
+        state: "missing" as const,
+        observedAt: "2026-07-19T14:31:00Z",
+      };
     }),
   };
 }
 
 describe("platform status page", () => {
+  it("uses the existing login action once for an automatic task handoff", async () => {
+    const source = gateway();
+    const onAutoOpenConsumed = vi.fn();
+
+    render(
+      <PlatformSessions
+        gateway={source}
+        autoOpenLogin
+        onAutoOpenConsumed={onAutoOpenConsumed}
+      />,
+    );
+
+    expect(await screen.findByText("请在打开的运营浏览器中扫码登录。")).toBeVisible();
+    expect(source.openDouyinLogin).toHaveBeenCalledOnce();
+    expect(onAutoOpenConsumed).toHaveBeenCalledOnce();
+  });
+
   it("shows server health and drives the original local handling entry", async () => {
     const source = gateway();
     const user = userEvent.setup();
@@ -43,8 +67,9 @@ describe("platform status page", () => {
 
     await user.click(screen.getByRole("button", { name: "我已处理，重新检查" }));
     expect(source.recheckDouyinLogin).toHaveBeenCalledOnce();
-    expect(await screen.findByText("登录正常")).toBeVisible();
-    expect(screen.getByText("需要登录")).toBeVisible();
+    expect((await screen.findAllByText("登录正常")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("需要登录")).not.toBeInTheDocument();
+    expect(source.getDouyinSession).toHaveBeenCalledTimes(3);
   });
 
   it("requires confirmation and renders only the authoritative safe logout result", async () => {

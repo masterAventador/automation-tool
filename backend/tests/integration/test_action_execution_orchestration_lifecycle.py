@@ -41,6 +41,7 @@ from automation_tool.control_plane.domain import (
     TaskCommandResponseType,
     TaskCommandStatus,
     TaskCommandType,
+    TaskEventType,
     TaskId,
     TaskStatus,
 )
@@ -100,11 +101,18 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(installations))
 
 
-async def seed_confirmed_task(database: Database) -> tuple[InstallationId, TaskId]:
+async def seed_confirmed_task(
+    database: Database,
+    *,
+    target_count: int = 2,
+    selected_target_count: int | None = None,
+) -> tuple[InstallationId, TaskId]:
     installation_id = InstallationId.new()
     task_id = TaskId.new()
-    target_ids = tuple(uuid4() for _ in range(2))
+    target_ids = tuple(uuid4() for _ in range(target_count))
     message_template = "您好 {{target_display_name}}"
+    selected_count = target_count if selected_target_count is None else selected_target_count
+    selected_target_ids = target_ids[:selected_count]
     intent = TaskTargetConfirmationIntent(
         installation_id=installation_id,
         task_id=task_id,
@@ -112,7 +120,7 @@ async def seed_confirmed_task(database: Database) -> tuple[InstallationId, TaskI
         confirmation_revision=1,
         action=DouyinSearchExposureAction.COMMENT,
         message_template=message_template,
-        selected_target_ids=tuple(TargetId.parse(value) for value in target_ids),
+        selected_target_ids=tuple(TargetId.parse(value) for value in selected_target_ids),
     )
     async with database.session() as session:
         await session.execute(
@@ -187,6 +195,16 @@ async def seed_confirmed_task(database: Database) -> tuple[InstallationId, TaskI
                     created_at=NOW,
                 )
             )
+            if target_id not in selected_target_ids:
+                await session.execute(
+                    insert(task_target_exclusions).values(
+                        target_id=target_id,
+                        task_id=task_id.uuid,
+                        installation_id=installation_id.uuid,
+                        page_revision=1,
+                        excluded_at=NOW,
+                    )
+                )
         await session.execute(
             insert(task_target_confirmations).values(
                 task_id=task_id.uuid,
@@ -241,6 +259,10 @@ async def test_confirmed_task_is_offered_then_authorized_one_target_at_a_time(
     try:
         await reset_data(database)
         installation_id, task_id = await seed_confirmed_task(database)
+        async with database.session() as session:
+            await session.execute(
+                update(tasks).where(tasks.c.id == task_id.uuid).values(last_event_sequence=4)
+            )
         repository = SqlAlchemyActionExecutionOrchestrationRepository(database)
 
         offered = await repository.advance(pending(installation_id, NOW))
@@ -263,6 +285,7 @@ async def test_confirmed_task_is_offered_then_authorized_one_target_at_a_time(
             assert attempt_id is not None
             assert offer["target_confirmation_message_id"] is not None
             assert offer["action_id"] is None
+            assert offer["task_event_sequence_baseline"] == 4
             await session.execute(
                 update(execution_attempts)
                 .where(execution_attempts.c.id == attempt_id)
@@ -451,6 +474,211 @@ async def test_confirmed_task_is_offered_then_authorized_one_target_at_a_time(
                 pending(installation_id, NOW + timedelta(minutes=12)),
                 action_id=second_action_id,
             )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.parametrize(
+    ("action_outcomes", "expected_task", "expected_attempt", "expected_event"),
+    (
+        (
+            (ActionOutcome.SUCCEEDED, ActionOutcome.SUCCEEDED),
+            TaskStatus.SUCCEEDED,
+            ExecutionAttemptStatus.SUCCEEDED,
+            TaskEventType.TASK_COMPLETED,
+        ),
+        (
+            (ActionOutcome.SUCCEEDED, ActionOutcome.FAILED),
+            TaskStatus.PARTIALLY_SUCCEEDED,
+            ExecutionAttemptStatus.PARTIALLY_SUCCEEDED,
+            TaskEventType.TASK_PARTIALLY_COMPLETED,
+        ),
+        (
+            (ActionOutcome.FAILED, ActionOutcome.FAILED),
+            TaskStatus.FAILED,
+            ExecutionAttemptStatus.FAILED,
+            TaskEventType.TASK_FAILED,
+        ),
+        (
+            (ActionOutcome.SUCCEEDED, ActionOutcome.OUTCOME_UNCERTAIN),
+            TaskStatus.OUTCOME_UNCERTAIN,
+            ExecutionAttemptStatus.OUTCOME_UNCERTAIN,
+            TaskEventType.TASK_OUTCOME_UNCERTAIN,
+        ),
+    ),
+    ids=("all-succeeded", "partially-succeeded", "all-failed", "outcome-uncertain"),
+)
+@pytest.mark.asyncio
+async def test_last_terminal_target_atomically_finalizes_the_task_and_attempt(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+    action_outcomes: tuple[ActionOutcome, ActionOutcome],
+    expected_task: TaskStatus,
+    expected_attempt: ExecutionAttemptStatus,
+    expected_event: TaskEventType,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        installation_id, task_id = await seed_confirmed_task(database)
+        repository = SqlAlchemyActionExecutionOrchestrationRepository(database)
+
+        offered = await repository.advance(pending(installation_id, NOW))
+        assert offered.kind is ActionExecutionAdvanceKind.TASK_OFFERED
+        async with database.session() as session:
+            attempt_id = await session.scalar(
+                select(execution_attempts.c.id).where(execution_attempts.c.task_id == task_id.uuid)
+            )
+            assert attempt_id is not None
+            await session.execute(
+                update(execution_attempts)
+                .where(execution_attempts.c.id == attempt_id)
+                .values(
+                    status=ExecutionAttemptStatus.RUNNING.value,
+                    revision=2,
+                    started_at=NOW + timedelta(seconds=1),
+                    updated_at=NOW + timedelta(seconds=1),
+                )
+            )
+            await session.execute(
+                update(tasks)
+                .where(tasks.c.id == task_id.uuid)
+                .values(
+                    status=TaskStatus.RUNNING.value,
+                    updated_at=NOW + timedelta(seconds=1),
+                )
+            )
+            await session.execute(
+                update(task_commands)
+                .where(
+                    task_commands.c.execution_attempt_id == attempt_id,
+                    task_commands.c.command_type == TaskCommandType.TASK_OFFER.value,
+                )
+                .values(
+                    status=TaskCommandStatus.ACKNOWLEDGED.value,
+                    revision=3,
+                    delivery_attempts=1,
+                    next_delivery_at=None,
+                    delivered_at=NOW + timedelta(milliseconds=500),
+                    acknowledged_at=NOW + timedelta(milliseconds=600),
+                    response_message_id=uuid4(),
+                    response_type=TaskCommandResponseType.TASK_ACCEPT.value,
+                    updated_at=NOW + timedelta(milliseconds=600),
+                )
+            )
+
+        first_enqueued = await repository.advance(
+            pending(installation_id, NOW + timedelta(seconds=2))
+        )
+        assert first_enqueued.kind is ActionExecutionAdvanceKind.ACTION_ENQUEUED
+        async with database.session() as session:
+            first_action_id = await session.scalar(
+                select(task_actions.c.id)
+                .where(task_actions.c.task_id == task_id.uuid)
+                .order_by(task_actions.c.ordinal)
+            )
+            assert first_action_id is not None
+            first_outcome = action_outcomes[0]
+            await session.execute(
+                update(task_actions)
+                .where(task_actions.c.id == first_action_id)
+                .values(
+                    status=(
+                        ActionStatus.OUTCOME_UNCERTAIN.value
+                        if first_outcome is ActionOutcome.OUTCOME_UNCERTAIN
+                        else ActionStatus.VERIFIED.value
+                    ),
+                    outcome=first_outcome.value,
+                    evidence_code=(
+                        ActionResultEvidence.PROFILE_VISIBLE.value
+                        if first_outcome is ActionOutcome.SUCCEEDED
+                        else ActionResultEvidence.FINAL_STATE_UNCONFIRMED.value
+                        if first_outcome is ActionOutcome.OUTCOME_UNCERTAIN
+                        else ActionResultEvidence.LOGIN_REQUIRED.value
+                    ),
+                    revision=2,
+                    updated_at=NOW + timedelta(seconds=3),
+                    finished_at=NOW + timedelta(seconds=3),
+                )
+            )
+
+        second_enqueued = await repository.advance(
+            pending(installation_id, NOW + timedelta(seconds=4))
+        )
+        assert second_enqueued.kind is ActionExecutionAdvanceKind.ACTION_ENQUEUED
+        async with database.session() as session:
+            second_action_id = await session.scalar(
+                select(task_actions.c.id)
+                .where(
+                    task_actions.c.task_id == task_id.uuid,
+                    task_actions.c.id != first_action_id,
+                )
+                .order_by(task_actions.c.ordinal)
+            )
+            assert second_action_id is not None
+            second_outcome = action_outcomes[1]
+            await session.execute(
+                update(task_actions)
+                .where(task_actions.c.id == second_action_id)
+                .values(
+                    status=(
+                        ActionStatus.OUTCOME_UNCERTAIN.value
+                        if second_outcome is ActionOutcome.OUTCOME_UNCERTAIN
+                        else ActionStatus.VERIFIED.value
+                    ),
+                    outcome=second_outcome.value,
+                    evidence_code=(
+                        ActionResultEvidence.PROFILE_VISIBLE.value
+                        if second_outcome is ActionOutcome.SUCCEEDED
+                        else ActionResultEvidence.FINAL_STATE_UNCONFIRMED.value
+                        if second_outcome is ActionOutcome.OUTCOME_UNCERTAIN
+                        else ActionResultEvidence.LOGIN_REQUIRED.value
+                    ),
+                    revision=2,
+                    updated_at=NOW + timedelta(seconds=5),
+                    finished_at=NOW + timedelta(seconds=5),
+                )
+            )
+
+        finalized = await repository.advance(pending(installation_id, NOW + timedelta(seconds=6)))
+
+        assert finalized.kind is ActionExecutionAdvanceKind.TASK_FINALIZED
+        async with database.session() as session:
+            task = (
+                (await session.execute(select(tasks).where(tasks.c.id == task_id.uuid)))
+                .mappings()
+                .one()
+            )
+            attempt = (
+                (
+                    await session.execute(
+                        select(execution_attempts).where(execution_attempts.c.id == attempt_id)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            terminal_event = (
+                (
+                    await session.execute(
+                        select(task_events).where(
+                            task_events.c.task_id == task_id.uuid,
+                            task_events.c.sequence == 1,
+                        )
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert task["status"] == expected_task.value
+        assert task["last_event_sequence"] == 1
+        assert attempt["status"] == expected_attempt.value
+        assert attempt["finished_at"] == NOW + timedelta(seconds=6)
+        assert terminal_event["event_type"] == expected_event.value
+        assert terminal_event["task_status"] == expected_task.value
+        assert terminal_event["execution_attempt_id"] == attempt_id
     finally:
         await reset_data(database)
         await database.close()

@@ -86,7 +86,11 @@ def command(
             "correlation_id": correlation_id,
             "idempotency_key": f"executor:h801:{message_type}:{sequence}",
             "sequence": sequence,
-            "payload": {},
+            "payload": (
+                {"task_event_sequence_baseline": 0}
+                if message_type == "task.offer"
+                else {}
+            ),
             "task_id": str(TASK_ID),
             "execution_attempt_id": str(ATTEMPT_ID),
         }

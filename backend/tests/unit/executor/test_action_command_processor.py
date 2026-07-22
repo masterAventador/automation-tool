@@ -77,7 +77,7 @@ def offer() -> str:
             "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
             "idempotency_key": f"task:offer:{ATTEMPT_ID}",
             "sequence": 1,
-            "payload": {},
+            "payload": {"task_event_sequence_baseline": 0},
             "task_id": TASK_ID,
             "execution_attempt_id": ATTEMPT_ID,
         },

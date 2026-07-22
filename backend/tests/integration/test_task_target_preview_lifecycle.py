@@ -22,6 +22,7 @@ from automation_tool.control_plane.application.task_target_previews import (
 )
 from automation_tool.control_plane.domain import (
     DouyinSearchExposureAction,
+    ExecutionAttemptStatus,
     InstallationId,
     TargetId,
     TaskEventType,
@@ -31,6 +32,7 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     douyin_search_exposure_definitions,
+    execution_attempts,
     installations,
     task_events,
     task_target_confirmations,
@@ -81,6 +83,8 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(task_targets))
         await session.execute(delete(task_events))
         await session.execute(delete(douyin_search_exposure_definitions))
+        await session.execute(update(tasks).values(current_attempt_id=None))
+        await session.execute(delete(execution_attempts))
         await session.execute(delete(tasks))
         await session.execute(delete(installations))
 
@@ -92,6 +96,7 @@ async def seed_preview(
 ) -> tuple[InstallationId, TaskId, tuple[TargetId, ...]]:
     scoped_installation = installation_id or InstallationId.new()
     task_id = TaskId.new()
+    discovery_attempt_id = uuid4()
     async with database.session() as session:
         if installation_id is None:
             await session.execute(
@@ -125,6 +130,25 @@ async def seed_preview(
                 minimum_interval_seconds=30,
                 maximum_interval_seconds=90,
             )
+        )
+        await session.execute(
+            insert(execution_attempts).values(
+                id=discovery_attempt_id,
+                task_id=task_id.uuid,
+                installation_id=scoped_installation.uuid,
+                attempt_number=1,
+                status=ExecutionAttemptStatus.SUCCEEDED.value,
+                revision=3,
+                created_at=BASE,
+                updated_at=BASE,
+                started_at=BASE,
+                finished_at=BASE,
+            )
+        )
+        await session.execute(
+            update(tasks)
+            .where(tasks.c.id == task_id.uuid)
+            .values(current_attempt_id=discovery_attempt_id)
         )
     records = await SqlAlchemyTaskTargetRepository(database).evaluate_and_replace(
         task_id=task_id,
@@ -263,6 +287,11 @@ async def test_preview_paginates_excludes_confirms_and_replays_atomically(
         assert confirmed.snapshot.task.status is TaskStatus.QUEUED
         assert confirmed.snapshot.task.revision == 6
         assert confirmed.snapshot.confirmed_at == clock.value
+        async with database.session() as session:
+            current_attempt_id = await session.scalar(
+                select(tasks.c.current_attempt_id).where(tasks.c.id == task_id.uuid)
+            )
+        assert current_attempt_id is None
 
         replayed_confirmation = await service.confirm(
             installation_id=installation_id,
@@ -295,6 +324,56 @@ async def test_preview_paginates_excludes_confirms_and_replays_atomically(
             TaskEventType.TASK_TARGET_SELECTION_UPDATED.value,
             TaskEventType.TASK_TARGETS_CONFIRMED.value,
         ]
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_never_detaches_a_nonterminal_discovery_attempt(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    service = TaskTargetPreviewService(
+        repository=SqlAlchemyTaskTargetPreviewRepository(database),
+        clock=MutableClock(BASE + timedelta(seconds=1)),
+    )
+    try:
+        await reset_data(database)
+        installation_id, task_id, _ = await seed_preview(database)
+        async with database.session() as session:
+            await session.execute(
+                update(execution_attempts).values(
+                    status=ExecutionAttemptStatus.RUNNING.value,
+                    finished_at=None,
+                )
+            )
+
+        with pytest.raises(TaskTargetPreviewConflict):
+            await service.confirm(
+                installation_id=installation_id,
+                task_id=task_id,
+                page_revision=7,
+                expected_task_revision=4,
+                idempotency_key="task:preview:confirm-active-attempt",
+            )
+
+        async with database.session() as session:
+            task_row = (
+                await session.execute(
+                    select(tasks.c.status, tasks.c.current_attempt_id).where(
+                        tasks.c.id == task_id.uuid
+                    )
+                )
+            ).one()
+            confirmation_count = await session.scalar(
+                select(func.count()).select_from(task_target_confirmations)
+            )
+        assert task_row[0] == TaskStatus.AWAITING_CONFIRMATION.value
+        assert task_row[1] is not None
+        assert confirmation_count == 0
     finally:
         await reset_data(database)
         await database.close()

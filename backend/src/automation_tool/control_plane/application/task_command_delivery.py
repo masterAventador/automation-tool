@@ -193,6 +193,7 @@ class TaskCommandRecord:
     action_id: ActionId | None = None
     discovery_payload: DouyinDiscoveryCommandPayload | None = None
     action_context: ActionCommandContext | None = None
+    task_event_sequence_baseline: int | None = None
 
     @classmethod
     def from_pending(cls, command: PendingTaskCommand) -> TaskCommandRecord:
@@ -221,6 +222,9 @@ class TaskCommandRecord:
             deadline_at=command.deadline_at,
             created_at=command.created_at,
             updated_at=command.created_at,
+            task_event_sequence_baseline=(
+                0 if command.command_type is TaskCommandType.TASK_OFFER else None
+            ),
         )
 
 
@@ -517,6 +521,14 @@ def _command_wire(
             ).model_dump(mode="json")
         elif command.discovery_payload is not None:
             payload = command.discovery_payload.model_dump(mode="json")
+        elif command.command_type is TaskCommandType.TASK_OFFER:
+            baseline = command.task_event_sequence_baseline
+            if (
+                type(baseline) is not int
+                or not 0 <= baseline < MAX_TASK_EVENT_SEQUENCE
+            ):
+                raise ValueError
+            payload = {"task_event_sequence_baseline": baseline}
         else:
             payload = {}
         source = {

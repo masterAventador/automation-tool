@@ -188,7 +188,12 @@ def _validate_action(
         return current_status, current_outcome
     if target_status is ActionStatus.DISPATCHED:
         if (
-            current_status not in {ActionStatus.PREPARED, ActionStatus.DISPATCHED}
+            current_status
+            not in {
+                ActionStatus.AUTHORIZED,
+                ActionStatus.PREPARED,
+                ActionStatus.DISPATCHED,
+            }
             or current_outcome is not ActionOutcome.PENDING
         ):
             raise TaskEventConvergenceRejected

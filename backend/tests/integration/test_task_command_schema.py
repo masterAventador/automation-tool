@@ -33,7 +33,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0008"
-HEAD_REVISION = "20260721_0026"
+HEAD_REVISION = "20260721_0027"
 NOW = datetime(2026, 7, 18, 5, 30, tzinfo=UTC)
 DEADLINE = NOW + timedelta(minutes=5)
 EXPECTED_COLUMNS = {
@@ -46,6 +46,7 @@ EXPECTED_COLUMNS = {
     "command_type",
     "target_confirmation_message_id",
     "action_id",
+    "task_event_sequence_baseline",
     "status",
     "idempotency_key",
     "revision",
@@ -74,6 +75,7 @@ EXPECTED_CONSTRAINTS = {
     "ck_task_commands_target_confirmation_uuid_v4",
     "ck_task_commands_action_uuid_v4",
     "ck_task_commands_action_scope",
+    "ck_task_commands_offer_event_baseline_scope",
     "ck_task_commands_target_confirmation_scope",
     "ck_task_commands_sequence_range",
     "ck_task_commands_type",
@@ -153,6 +155,9 @@ def command_values(
         "execution_attempt_id": attempt_id.uuid,
         "sequence": sequence,
         "command_type": command_type.value,
+        "task_event_sequence_baseline": (
+            0 if command_type is TaskCommandType.TASK_OFFER else None
+        ),
         "status": TaskCommandStatus.PENDING.value,
         "idempotency_key": f"task:command:{sequence}",
         "revision": 1,
@@ -278,6 +283,7 @@ async def test_command_defaults_and_valid_delivery_ack_reject_expiry_states_are_
                             execution_attempt_id=attempt_id.uuid,
                             sequence=1,
                             command_type=TaskCommandType.TASK_OFFER.value,
+                            task_event_sequence_baseline=0,
                             idempotency_key="task:offer:attempt:1",
                             deadline_at=DEADLINE,
                             created_at=NOW,

@@ -203,7 +203,7 @@ def offer() -> TaskCommandEnvelope:
             "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
             "idempotency_key": "executor-real:offer:1",
             "sequence": 1,
-            "payload": {},
+            "payload": {"task_event_sequence_baseline": 0},
             "task_id": "123e4567-e89b-42d3-a456-426614174005",
             "execution_attempt_id": "123e4567-e89b-42d3-a456-426614174006",
         }

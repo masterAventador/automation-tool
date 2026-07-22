@@ -178,7 +178,9 @@ def seed_local_checkpoint(
             "correlation_id": str(original.correlation_id),
             "idempotency_key": original.idempotency_key,
             "sequence": original.sequence,
-            "payload": {},
+            "payload": {
+                "task_event_sequence_baseline": original.task_event_sequence_baseline
+            },
             "task_id": str(original.task_id),
             "execution_attempt_id": str(original.execution_attempt_id),
         }

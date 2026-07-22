@@ -327,7 +327,7 @@ async def test_pending_offer_is_claimed_sent_and_only_marked_delivered() -> None
     assert wire["message_id"] == str(MESSAGE_ID)
     assert wire["correlation_id"] == str(CORRELATION_ID)
     assert wire["executor_id"] == str(EXECUTOR_ID)
-    assert wire["payload"] == {}
+    assert wire["payload"] == {"task_event_sequence_baseline": 0}
 
 
 @pytest.mark.asyncio

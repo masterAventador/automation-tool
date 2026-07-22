@@ -55,7 +55,18 @@ def task_message(**changes: object) -> dict[str, object]:
         task_id=TASK_ID,
         execution_attempt_id=ATTEMPT_ID,
         idempotency_key="task:offer:attempt:1",
-        payload={"task_kind": "douyin.search_leads"},
+        payload={"task_event_sequence_baseline": 0},
+    )
+    message.update(changes)
+    return message
+
+
+def task_event_message(**changes: object) -> dict[str, object]:
+    message = task_message(
+        message_type="step.progress",
+        idempotency_key="task:event:sequence:2",
+        sequence=2,
+        payload={"step_code": "discover_targets", "progress_percent": 25},
     )
     message.update(changes)
     return message
@@ -105,6 +116,41 @@ def test_discriminated_union_selects_lifecycle_platform_command_and_event_varian
         ExecutorMessage.model_validate_json(ExecutorMessage(root=event).model_dump_json()).root
         == event
     )
+
+
+def test_task_offer_carries_one_exact_global_event_sequence_baseline() -> None:
+    parsed = validate(
+        task_message(payload={"task_event_sequence_baseline": 4})
+    ).root
+
+    assert isinstance(parsed, TaskCommandEnvelope)
+    assert parsed.payload == {"task_event_sequence_baseline": 4}
+    for payload in (
+        {},
+        {"task_event_sequence_baseline": -1},
+        {"task_event_sequence_baseline": 2**53},
+        {"task_event_sequence_baseline": 4, "unexpected": True},
+    ):
+        with pytest.raises(ValidationError):
+            validate(task_message(payload=payload))
+
+
+@pytest.mark.parametrize(
+    "message_type",
+    ("task.pause", "task.resume", "task.cancel", "task.emergency_stop"),
+)
+def test_task_controls_keep_an_exact_empty_payload(message_type: str) -> None:
+    parsed = validate(task_message(message_type=message_type, payload={})).root
+
+    assert isinstance(parsed, TaskCommandEnvelope)
+    assert parsed.payload == {}
+    with pytest.raises(ValidationError):
+        validate(
+            task_message(
+                message_type=message_type,
+                payload={"task_event_sequence_baseline": 4},
+            )
+        )
 
 
 def test_platform_session_health_is_executor_scoped_and_rejects_sensitive_payloads() -> None:
@@ -283,32 +329,34 @@ def test_payload_rejects_credentials_private_paths_inline_data_and_resource_abus
     payload: dict[str, Any],
 ) -> None:
     with pytest.raises(ValidationError):
-        validate(task_message(payload=payload))
+        validate(task_event_message(payload=payload))
 
 
 def test_payload_size_and_collection_counts_are_bounded() -> None:
     with pytest.raises(ValidationError):
-        validate(task_message(payload={f"field_{index}": "x" * 4000 for index in range(5)}))
+        validate(task_event_message(payload={f"field_{index}": "x" * 4000 for index in range(5)}))
     with pytest.raises(ValidationError):
-        validate(task_message(payload={f"field_{index}": index for index in range(65)}))
+        validate(task_event_message(payload={f"field_{index}": index for index in range(65)}))
     with pytest.raises(ValidationError):
-        validate(task_message(payload={"items": list(range(65))}))
+        validate(task_event_message(payload={"items": list(range(65))}))
     too_deep: dict[str, object] = {"value": 1}
     for _ in range(9):
         too_deep = {"nested": too_deep}
     with pytest.raises(ValidationError):
-        validate(task_message(payload=too_deep))
+        validate(task_event_message(payload=too_deep))
 
 
 def test_payload_accepts_bounded_arrays_finite_floats_and_safe_nulls() -> None:
-    parsed = validate(task_message(payload={"items": [1, 0.5, True, None, "safe diagnostic"]})).root
+    parsed = validate(
+        task_event_message(payload={"items": [1, 0.5, True, None, "safe diagnostic"]})
+    ).root
 
     assert parsed.payload == {"items": [1, 0.5, True, None, "safe diagnostic"]}
 
 
 def test_payload_rejects_text_that_cannot_be_encoded_as_utf8() -> None:
     with pytest.raises(ValidationError, match="payload must be bounded safe JSON"):
-        validate(task_message(payload={"message": "\ud800"}))
+        validate(task_event_message(payload={"message": "\ud800"}))
 
 
 def test_parser_accepts_only_bounded_json_objects_and_returns_fixed_errors() -> None:
@@ -323,7 +371,7 @@ def test_parser_accepts_only_bounded_json_objects_and_returns_fixed_errors() -> 
     valid_json = json.dumps(lifecycle_message())
     duplicate_key_json = f'{valid_json[:-1]}, "sequence": 2}}'
     invalid_inputs: tuple[str | bytes, ...] = (
-        json.dumps(task_message(payload={"cookie": private_value})),
+        json.dumps(task_event_message(payload={"cookie": private_value})),
         duplicate_key_json,
         "[]",
         "not-json",

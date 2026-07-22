@@ -199,6 +199,7 @@ export function WorkbenchShell({
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [autoOpenPlatformLogin, setAutoOpenPlatformLogin] = useState(false);
   const creatingTask = activePage === "task-create";
   const showingTaskRun = activePage === "task-runs";
   const showingDiagnostics = activePage === "diagnostics";
@@ -207,6 +208,11 @@ export function WorkbenchShell({
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
     setActivePage("task-runs");
+  };
+
+  const openPlatformPage = (openLogin: boolean) => {
+    setAutoOpenPlatformLogin(openLogin);
+    setActivePage("platform");
   };
 
   return (
@@ -296,7 +302,11 @@ export function WorkbenchShell({
               />
             ) : showingPlatform ? (
               <div className="platform-session-content">
-                <PlatformSessions gateway={platformSessionGateway} />
+                <PlatformSessions
+                  gateway={platformSessionGateway}
+                  autoOpenLogin={autoOpenPlatformLogin}
+                  onAutoOpenConsumed={() => setAutoOpenPlatformLogin(false)}
+                />
               </div>
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
@@ -312,7 +322,8 @@ export function WorkbenchShell({
                 taskTargetPreviewSource={taskTargetPreviewSource}
                 taskTargetResultSource={taskTargetResultSource}
                 onBack={() => setActivePage("workbench")}
-                onOpenPlatformSession={() => setActivePage("platform")}
+                onOpenPlatformSession={() => openPlatformPage(false)}
+                onPlatformLoginRequired={() => openPlatformPage(true)}
               />
             ) : showingTaskRun ? (
               <div className="task-run-empty">

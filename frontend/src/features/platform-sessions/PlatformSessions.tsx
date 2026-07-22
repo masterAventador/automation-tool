@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Flex, Popconfirm, Space, Spin, Tag, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type {
   PlatformSessionAction,
@@ -33,11 +33,34 @@ const ACTION_MESSAGES: Record<PlatformSessionAction["state"], string> = {
   healthy: "登录正常",
 };
 
-interface PlatformSessionsProps {
-  readonly gateway: PlatformSessionGateway;
+const HEALTH_PUBLICATION_ATTEMPTS = 100;
+const HEALTH_PUBLICATION_INTERVAL_MILLISECONDS = 50;
+
+async function readPublishedSnapshot(
+  gateway: PlatformSessionGateway,
+  action: PlatformSessionAction,
+): Promise<PlatformSessionSnapshot> {
+  for (let attempt = 0; attempt < HEALTH_PUBLICATION_ATTEMPTS; attempt += 1) {
+    const latest = await gateway.getDouyinSession();
+    if (action.state !== "healthy" || latest.state === "healthy") return latest;
+    await new Promise((resolve) =>
+      globalThis.setTimeout(resolve, HEALTH_PUBLICATION_INTERVAL_MILLISECONDS),
+    );
+  }
+  throw new Error("authoritative platform health publication timed out");
 }
 
-export function PlatformSessions({ gateway }: PlatformSessionsProps) {
+interface PlatformSessionsProps {
+  readonly gateway: PlatformSessionGateway;
+  readonly autoOpenLogin?: boolean;
+  readonly onAutoOpenConsumed?: () => void;
+}
+
+export function PlatformSessions({
+  gateway,
+  autoOpenLogin = false,
+  onAutoOpenConsumed,
+}: PlatformSessionsProps) {
   const [snapshot, setSnapshot] = useState<PlatformSessionSnapshot | null>(null);
   const [action, setAction] = useState<PlatformSessionAction | null>(null);
   const [failure, setFailure] = useState(false);
@@ -61,19 +84,27 @@ export function PlatformSessions({ gateway }: PlatformSessionsProps) {
     };
   }, [gateway]);
 
-  const run = async (kind: "open" | "recheck") => {
+  const run = useCallback(async (kind: "open" | "recheck") => {
     setPending(kind);
     setFailure(false);
     try {
       const result =
         kind === "open" ? await gateway.openDouyinLogin() : await gateway.recheckDouyinLogin();
+      const latest = await readPublishedSnapshot(gateway, result);
+      setSnapshot(latest);
       setAction(result);
     } catch {
       setFailure(true);
     } finally {
       setPending(null);
     }
-  };
+  }, [gateway]);
+
+  useEffect(() => {
+    if (!autoOpenLogin) return;
+    onAutoOpenConsumed?.();
+    void Promise.resolve().then(() => run("open"));
+  }, [autoOpenLogin, onAutoOpenConsumed, run]);
 
   const logout = async () => {
     setPending("logout");

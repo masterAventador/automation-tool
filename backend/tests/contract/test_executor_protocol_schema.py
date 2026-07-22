@@ -59,7 +59,9 @@ EXPECTED_INVALID_FIXTURES = {
     "private-path.json",
     "sensitive-assignment.json",
     "sensitive-cookie-field.json",
+    "task-control-with-event-baseline.json",
     "task-missing-attempt.json",
+    "task-offer-missing-event-baseline.json",
     "unknown-envelope-field.json",
     "unknown-message-type.json",
     "unsafe-sequence.json",
@@ -75,6 +77,8 @@ SEMANTIC_ONLY_INVALID_FIXTURES = {
     "private-path.json",
     "sensitive-assignment.json",
     "sensitive-cookie-field.json",
+    "task-control-with-event-baseline.json",
+    "task-offer-missing-event-baseline.json",
 }
 
 
@@ -151,11 +155,11 @@ def test_fixture_inventory_is_exact_documented_and_nontrivial() -> None:
     assert fixture_names(VALID_FIXTURE_ROOT) == EXPECTED_VALID_FIXTURES
     assert fixture_names(INVALID_FIXTURE_ROOT) == EXPECTED_INVALID_FIXTURES
     assert len(EXPECTED_VALID_FIXTURES) == 12
-    assert len(EXPECTED_INVALID_FIXTURES) == 27
-    assert len(SEMANTIC_ONLY_INVALID_FIXTURES) == 10
+    assert len(EXPECTED_INVALID_FIXTURES) == 29
+    assert len(SEMANTIC_ONLY_INVALID_FIXTURES) == 12
     for fixture_name in sorted(SEMANTIC_ONLY_INVALID_FIXTURES):
         assert f"`{fixture_name}`" in document
-    assert "10 个语义层无效样例" in document
+    assert "12 个语义层无效样例" in document
     assert "其余 17 个结构层无效样例" in document
 
 

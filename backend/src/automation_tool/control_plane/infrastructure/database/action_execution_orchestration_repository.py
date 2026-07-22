@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import cast
@@ -23,9 +24,11 @@ from automation_tool.control_plane.application.action_risk_authorizations import
     ActionRiskAuthorizationUnavailable,
 )
 from automation_tool.control_plane.domain import (
+    MAX_TASK_EVENT_SEQUENCE,
     TERMINAL_ACTION_STATUSES,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionId,
+    ActionOutcome,
     ActionRiskPlatform,
     ActionRiskPolicy,
     ActionRiskScope,
@@ -38,7 +41,10 @@ from automation_tool.control_plane.domain import (
     TargetId,
     TaskCommandStatus,
     TaskCommandType,
+    TaskEventType,
+    TaskEventVersion,
     TaskId,
+    TaskStateMachine,
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
@@ -50,6 +56,7 @@ from automation_tool.control_plane.infrastructure.database.schema import (
     platform_session_health,
     task_actions,
     task_commands,
+    task_events,
     task_target_confirmations,
     task_target_exclusions,
     task_targets,
@@ -260,7 +267,10 @@ class SqlAlchemyActionExecutionOrchestrationRepository:
             confirmation = (
                 (
                     await session.execute(
-                        select(task_target_confirmations.c.page_revision).where(
+                        select(
+                            task_target_confirmations.c.page_revision,
+                            task_target_confirmations.c.selected_target_count,
+                        ).where(
                             task_target_confirmations.c.task_id == task_row["id"],
                             task_target_confirmations.c.installation_id
                             == pending.installation_id.uuid,
@@ -302,13 +312,149 @@ class SqlAlchemyActionExecutionOrchestrationRepository:
                 .limit(1)
             )
             if target_id is None:
-                return ActionExecutionAdvanceResult(kind=ActionExecutionAdvanceKind.IDLE)
+                return await self._finalize_completed_task_locked(
+                    session,
+                    pending,
+                    task_row=task_row,
+                    active_attempt=active_attempt,
+                    selected_target_count=cast(
+                        int,
+                        confirmation["selected_target_count"],
+                    ),
+                )
             return _NextAuthorization(
                 task_id=TaskId.parse(task_row["id"]),
                 attempt_id=ExecutionAttemptId.parse(active_attempt["id"]),
                 target_id=TargetId.parse(target_id),
                 action=DouyinSearchExposureAction(cast(str, definition["action"])),
             )
+
+    async def _finalize_completed_task_locked(
+        self,
+        session: AsyncSession,
+        pending: PendingActionExecutionAdvance,
+        *,
+        task_row: object,
+        active_attempt: object,
+        selected_target_count: int,
+    ) -> ActionExecutionAdvanceResult:
+        try:
+            task = cast(dict[str, object], task_row)
+            attempt = cast(dict[str, object], active_attempt)
+            if selected_target_count <= 0:
+                raise ValueError
+            action_rows = (
+                (
+                    await session.execute(
+                        select(task_actions.c.status, task_actions.c.outcome)
+                        .where(
+                            task_actions.c.execution_attempt_id == attempt["id"],
+                            task_actions.c.task_id == task["id"],
+                            task_actions.c.installation_id == pending.installation_id.uuid,
+                        )
+                        .order_by(task_actions.c.ordinal, task_actions.c.id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            if len(action_rows) != selected_target_count or any(
+                ActionStatus(cast(str, row["status"])) not in TERMINAL_ACTION_STATUSES
+                for row in action_rows
+            ):
+                return ActionExecutionAdvanceResult(kind=ActionExecutionAdvanceKind.IDLE)
+            outcomes = tuple(ActionOutcome(cast(str, row["outcome"])) for row in action_rows)
+            succeeded = sum(outcome is ActionOutcome.SUCCEEDED for outcome in outcomes)
+            if ActionOutcome.OUTCOME_UNCERTAIN in outcomes:
+                task_status = TaskStatus.OUTCOME_UNCERTAIN
+                attempt_status = ExecutionAttemptStatus.OUTCOME_UNCERTAIN
+                event_type = TaskEventType.TASK_OUTCOME_UNCERTAIN
+            elif succeeded == len(outcomes):
+                task_status = TaskStatus.SUCCEEDED
+                attempt_status = ExecutionAttemptStatus.SUCCEEDED
+                event_type = TaskEventType.TASK_COMPLETED
+            elif succeeded > 0:
+                task_status = TaskStatus.PARTIALLY_SUCCEEDED
+                attempt_status = ExecutionAttemptStatus.PARTIALLY_SUCCEEDED
+                event_type = TaskEventType.TASK_PARTIALLY_COMPLETED
+            else:
+                task_status = TaskStatus.FAILED
+                attempt_status = ExecutionAttemptStatus.FAILED
+                event_type = TaskEventType.TASK_FAILED
+            TaskStateMachine.transition(TaskStatus.RUNNING, task_status)
+            last_event_sequence = cast(int, task["last_event_sequence"])
+            if not 0 <= last_event_sequence < MAX_TASK_EVENT_SEQUENCE:
+                raise ValueError
+            next_sequence = last_event_sequence + 1
+            next_revision = cast(int, task["revision"]) + 1
+            source_idempotency_key = f"task:action-finalize:{attempt['id']}"
+            fingerprint = hashlib.sha256(
+                (
+                    "task-action-finalize-v1:"
+                    f"{pending.installation_id}:{task['id']}:{attempt['id']}:"
+                    f"{next_sequence}:{task_status.value}"
+                ).encode("ascii")
+            ).digest()
+            await session.execute(
+                insert(task_events).values(
+                    task_id=task["id"],
+                    installation_id=pending.installation_id.uuid,
+                    sequence=next_sequence,
+                    event_version=TaskEventVersion.V1.value,
+                    event_type=event_type.value,
+                    task_revision=next_revision,
+                    task_status=task_status.value,
+                    execution_attempt_id=attempt["id"],
+                    action_id=None,
+                    source_message_id=None,
+                    source_idempotency_key=source_idempotency_key,
+                    source_fingerprint=fingerprint,
+                    progress_percent=None,
+                    occurred_at=pending.requested_at,
+                    recorded_at=pending.requested_at,
+                    safe_message=None,
+                )
+            )
+            updated_attempt = await session.execute(
+                update(execution_attempts)
+                .where(
+                    execution_attempts.c.id == attempt["id"],
+                    execution_attempts.c.revision == attempt["revision"],
+                    execution_attempts.c.status == ExecutionAttemptStatus.RUNNING.value,
+                )
+                .values(
+                    status=attempt_status.value,
+                    revision=cast(int, attempt["revision"]) + 1,
+                    finished_at=pending.requested_at,
+                    updated_at=pending.requested_at,
+                )
+                .returning(execution_attempts.c.id)
+            )
+            updated_attempt.scalar_one()
+            updated_task = await session.execute(
+                update(tasks)
+                .where(
+                    tasks.c.id == task["id"],
+                    tasks.c.installation_id == pending.installation_id.uuid,
+                    tasks.c.current_attempt_id == attempt["id"],
+                    tasks.c.revision == task["revision"],
+                    tasks.c.last_event_sequence == last_event_sequence,
+                    tasks.c.status == TaskStatus.RUNNING.value,
+                )
+                .values(
+                    status=task_status.value,
+                    revision=next_revision,
+                    last_event_sequence=next_sequence,
+                    updated_at=pending.requested_at,
+                )
+                .returning(tasks.c.id)
+            )
+            updated_task.scalar_one()
+            return ActionExecutionAdvanceResult(
+                kind=ActionExecutionAdvanceKind.TASK_FINALIZED
+            )
+        except (KeyError, TypeError, ValueError):
+            raise ActionExecutionOrchestrationRejected from None
 
     async def _offer_next_confirmed_locked(
         self,
@@ -388,6 +534,7 @@ class SqlAlchemyActionExecutionOrchestrationRepository:
                 command_type=TaskCommandType.TASK_OFFER.value,
                 target_confirmation_message_id=task_row["source_message_id"],
                 action_id=None,
+                task_event_sequence_baseline=task_row["last_event_sequence"],
                 status=TaskCommandStatus.PENDING.value,
                 idempotency_key=f"task:offer:{pending.execution_attempt_id}",
                 revision=1,

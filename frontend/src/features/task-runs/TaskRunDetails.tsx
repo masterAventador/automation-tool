@@ -26,7 +26,6 @@ import {
 } from "../../api/control-plane/task-projections";
 import type { TaskTargetPreviewSource } from "../../api/control-plane/task-target-previews";
 import {
-  taskTargetResultKeys,
   taskTargetResultQueryOptions,
   type TaskTargetResultEvidence,
   type TaskTargetResultSource,
@@ -44,6 +43,14 @@ import type {
 } from "./task-run-controls";
 
 const MAX_RETAINED_TIMELINE_EVENTS = 200;
+const TARGET_RESULT_REFRESH_EVENTS = new Set<TaskEvent["eventType"]>([
+  "step.completed",
+  "step.failed",
+  "task.completed",
+  "task.partially_completed",
+  "task.failed",
+  "task.outcome_uncertain",
+]);
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   draft: "草稿",
@@ -136,6 +143,7 @@ interface TaskRunDetailsProps {
   readonly discoveryGateway: TaskDiscoveryGateway;
   readonly onBack: () => void;
   readonly onOpenPlatformSession: () => void;
+  readonly onPlatformLoginRequired: () => void;
 }
 
 interface ControlRequest {
@@ -251,12 +259,10 @@ export function TaskRunDetails({
   discoveryGateway,
   onBack,
   onOpenPlatformSession,
+  onPlatformLoginRequired,
 }: TaskRunDetailsProps) {
   const queryClient = useQueryClient();
   const taskQuery = useQuery(taskSnapshotQueryOptions(taskSource, taskId));
-  const targetResultQuery = useQuery(
-    taskTargetResultQueryOptions(taskTargetResultSource, taskId),
-  );
   const [events, setEvents] = useState<readonly TaskEvent[]>([]);
   const [streamError, setStreamError] = useState(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
@@ -270,6 +276,30 @@ export function TaskRunDetails({
   const commandAbort = useRef<AbortController | null>(null);
   const discoveryKey = useRef<{ revision: number; key: string } | null>(null);
   const discoveryAbort = useRef<AbortController | null>(null);
+  const previousProjectedStatus = useRef<TaskStatus | null>(null);
+
+  const targetResultEventSequence = useMemo(
+    () =>
+      events.reduce(
+        (latest, event) =>
+          TARGET_RESULT_REFRESH_EVENTS.has(event.eventType)
+            ? Math.max(latest, event.sequence)
+            : latest,
+        0,
+      ),
+    [events],
+  );
+  const targetResultRefreshSequence = Math.max(
+    targetResultEventSequence,
+    taskQuery.data?.lastEventSequence ?? 0,
+  );
+  const targetResultQuery = useQuery(
+    taskTargetResultQueryOptions(
+      taskTargetResultSource,
+      taskId,
+      targetResultRefreshSequence,
+    ),
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -303,15 +333,6 @@ export function TaskRunDetails({
             setEvents((current) =>
               [...current, event].slice(-MAX_RETAINED_TIMELINE_EVENTS),
             );
-            if (
-              event.eventType === "step.completed" ||
-              event.eventType === "step.failed" ||
-              event.eventType === "task.outcome_uncertain"
-            ) {
-              void queryClient.invalidateQueries({
-                queryKey: taskTargetResultKeys.detail(taskId),
-              });
-            }
           },
           { signal: controller.signal },
         );
@@ -334,7 +355,7 @@ export function TaskRunDetails({
         if (!controller.signal.aborted) setStreamError(true);
       });
     return () => controller.abort();
-  }, [queryClient, streamGeneration, taskId, taskSource]);
+  }, [streamGeneration, taskId, taskSource]);
 
   useEffect(
     () => () => {
@@ -348,6 +369,19 @@ export function TaskRunDetails({
     () => (taskQuery.data === undefined ? null : projectSnapshot(taskQuery.data, events)),
     [events, taskQuery.data],
   );
+
+  useEffect(() => {
+    const status = projectedSnapshot?.status ?? null;
+    const previous = previousProjectedStatus.current;
+    previousProjectedStatus.current = status;
+    if (
+      previous !== null &&
+      previous !== "awaiting_platform_login" &&
+      status === "awaiting_platform_login"
+    ) {
+      onPlatformLoginRequired();
+    }
+  }, [onPlatformLoginRequired, projectedSnapshot?.status]);
 
   const controls = useMutation({
     mutationFn: async (request: ControlRequest) => {
@@ -411,6 +445,7 @@ export function TaskRunDetails({
     },
     onError: (error) => {
       const errorCode = error instanceof TaskDiscoveryGatewayError ? error.code : null;
+      if (errorCode === "discovery_rejected") onPlatformLoginRequired();
       setDiscoveryNotice(
         errorCode === "installation_busy"
           ? "当前设备已有任务正在运行，请先完成或终止该任务后再试"

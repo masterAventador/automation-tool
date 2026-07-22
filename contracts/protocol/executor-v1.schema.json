@@ -1407,7 +1407,8 @@
     "deadline_at must be later than sent_at",
     "payload encoded size and recursive depth must stay within x-wire-limits",
     "payload strings and field names must not carry credentials or private local data",
-    "payload numbers must be finite JSON numbers"
+    "payload numbers must be finite JSON numbers",
+    "task.offer must carry one exact event sequence baseline and task controls must be empty"
   ],
   "x-wire-limits": {
     "maxCollectionItems": 64,

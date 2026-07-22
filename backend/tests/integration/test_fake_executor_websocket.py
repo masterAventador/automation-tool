@@ -54,6 +54,7 @@ class DeterministicIds:
 
 
 def command(message_type: str, *, sequence: int) -> str:
+    payload = {"task_event_sequence_baseline": 0} if message_type == "task.offer" else {}
     return json.dumps(
         {
             "protocol_version": "1.0",
@@ -66,7 +67,7 @@ def command(message_type: str, *, sequence: int) -> str:
             "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
             "idempotency_key": f"task:fake:{message_type}:{sequence}",
             "sequence": sequence,
-            "payload": {},
+            "payload": payload,
             "task_id": TASK_ID,
             "execution_attempt_id": ATTEMPT_ID,
         },

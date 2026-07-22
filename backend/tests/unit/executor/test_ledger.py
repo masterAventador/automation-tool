@@ -65,7 +65,11 @@ def command(
             "correlation_id": _uuid(900),
             "idempotency_key": idempotency_key or f"executor-ledger:test:{sequence}",
             "sequence": sequence,
-            "payload": payload or {},
+            "payload": (
+                {"task_event_sequence_baseline": 0}
+                if payload is None and message_type == "task.offer"
+                else {} if payload is None else payload
+            ),
             "task_id": task_id,
             "execution_attempt_id": attempt_id,
         }
@@ -350,10 +354,20 @@ def test_commands_are_durable_idempotent_and_attempt_sequences_are_contiguous(
     assert opened.receive_command(same_intent_new_message).replayed is True
     with pytest.raises(ExecutorLedgerRejected):
         opened.receive_command(
-            command(1, message_id=str(first.message_id), payload={"changed": True})
+            command(
+                1,
+                message_id=str(first.message_id),
+                payload={"task_event_sequence_baseline": 1},
+            )
         )
     with pytest.raises(ExecutorLedgerRejected):
-        opened.receive_command(command(1, message_id=_uuid(89), payload={"changed": True}))
+        opened.receive_command(
+            command(
+                1,
+                message_id=_uuid(89),
+                payload={"task_event_sequence_baseline": 1},
+            )
+        )
     with pytest.raises(ExecutorLedgerRejected):
         opened.receive_command(command(3))
     with pytest.raises(ExecutorLedgerRejected):

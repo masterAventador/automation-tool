@@ -20,7 +20,7 @@ const VALID_FIXTURES: [&str; 12] = [
     "task-discovery-completed.json",
     "task-offer.json",
 ];
-const INVALID_FIXTURES: [&str; 27] = [
+const INVALID_FIXTURES: [&str; 29] = [
     "deadline-before-send.json",
     "deadline-before-send-microsecond.json",
     "deadline-equals-send.json",
@@ -44,7 +44,9 @@ const INVALID_FIXTURES: [&str; 27] = [
     "private-path.json",
     "sensitive-assignment.json",
     "sensitive-cookie-field.json",
+    "task-control-with-event-baseline.json",
     "task-missing-attempt.json",
+    "task-offer-missing-event-baseline.json",
     "unknown-envelope-field.json",
     "unknown-message-type.json",
     "unsafe-sequence.json",

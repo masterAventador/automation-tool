@@ -38,6 +38,14 @@ test("discovery acceptance uses the production bridge from one hidden App", asyn
   assert.match(spec, /core\.invoke\("signal_task_discovery_busy_for_acceptance"\)/u);
   assert.match(rustClient, /pub async fn start_task_discovery/u);
   assert.match(rustEntry, /async fn start_task_discovery\(/u);
+  const startDiscovery = rustEntry.match(/async fn start_task_discovery\([\s\S]*?\n\}\n/u);
+  assert.ok(startDiscovery);
+  assert.match(startDiscovery[0], /ensure_executor_running/u);
+  assert.ok(
+    startDiscovery[0].indexOf("ensure_executor_running") <
+      startDiscovery[0].indexOf(".start_task_discovery"),
+    "the signed Executor must be running before the discovery command is accepted",
+  );
   const preparation = rustEntry.match(
     /async fn prepare_task_discovery_for_acceptance[\s\S]*?\n\}\n/u,
   );

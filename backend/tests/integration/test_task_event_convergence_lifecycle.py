@@ -791,37 +791,38 @@ async def test_illegal_task_attempt_and_action_states_are_rejected_before_append
                     )
                 )
 
-        await reset_data(database)
-        installation_id, task_id, attempt_id, action_id = await seed_chain(
-            database,
-            task_status=TaskStatus.RUNNING,
-            attempt_status=ExecutionAttemptStatus.RUNNING,
-            action_status=ActionStatus.PREPARED,
-        )
-        transitioned = await service(database).receive(
-            event(
-                installation_id,
-                task_id,
-                attempt_id,
-                "step.started",
-                sequence=1,
-                payload={"action_id": str(action_id)},
+        for action_status in (ActionStatus.AUTHORIZED, ActionStatus.PREPARED):
+            await reset_data(database)
+            installation_id, task_id, attempt_id, action_id = await seed_chain(
+                database,
+                task_status=TaskStatus.RUNNING,
+                attempt_status=ExecutionAttemptStatus.RUNNING,
+                action_status=action_status,
             )
-        )
-        assert transitioned.snapshot.last_event_sequence == 1
-        async with database.session() as session:
-            action_row = (
-                (
-                    await session.execute(
-                        select(task_actions.c.status, task_actions.c.revision).where(
-                            task_actions.c.id == action_id.uuid
+            transitioned = await service(database).receive(
+                event(
+                    installation_id,
+                    task_id,
+                    attempt_id,
+                    "step.started",
+                    sequence=1,
+                    payload={"action_id": str(action_id)},
+                )
+            )
+            assert transitioned.snapshot.last_event_sequence == 1
+            async with database.session() as session:
+                action_row = (
+                    (
+                        await session.execute(
+                            select(task_actions.c.status, task_actions.c.revision).where(
+                                task_actions.c.id == action_id.uuid
+                            )
                         )
                     )
+                    .mappings()
+                    .one()
                 )
-                .mappings()
-                .one()
-            )
-        assert action_row == {"status": ActionStatus.DISPATCHED.value, "revision": 4}
+            assert action_row == {"status": ActionStatus.DISPATCHED.value, "revision": 4}
     finally:
         await reset_data(database)
         await database.close()

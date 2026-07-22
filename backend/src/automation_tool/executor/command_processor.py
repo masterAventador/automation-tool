@@ -203,12 +203,11 @@ class ExecutorCommandProcessor:
                 if fact.message_type == "task.outcome_uncertain"
                 else AttemptCheckpointState.RUNNING
             )
-        elif (
-            checkpoint.state is not AttemptCheckpointState.RECEIVED
-            or checkpoint.last_event_sequence != 0
-        ):
+        elif checkpoint.state is not AttemptCheckpointState.RECEIVED:
             raise ValueError
         elif isinstance(command, TaskDiscoveryCommandEnvelope):
+            if checkpoint.last_event_sequence != 0:
+                raise ValueError
             discovery_operation = self._discovery_operation
             if discovery_operation is None:
                 raise ValueError
@@ -225,8 +224,14 @@ class ExecutorCommandProcessor:
             batch = self._discovery_batch(command, outcome)
             last_event_sequence = len(batch) - 1
         else:
-            batch = self._started_batch(command)
-            last_event_sequence = 1
+            baseline = command.payload["task_event_sequence_baseline"]
+            if (
+                type(baseline) is not int
+                or checkpoint.last_event_sequence != baseline
+            ):
+                raise ValueError
+            batch = self._started_batch(command, baseline=baseline)
+            last_event_sequence = baseline + 1
             checkpoint_state = AttemptCheckpointState.RUNNING
         try:
             entries = self._ledger.commit_outcome(
@@ -315,10 +320,16 @@ class ExecutorCommandProcessor:
     def _started_batch(
         self,
         command: TaskCommandEnvelope,
+        *,
+        baseline: int,
     ) -> tuple[ExecutorOutboundMessage, ...]:
         return (
             self._result(command),
-            self._event(command, message_type="task.started", sequence=1),
+            self._event(
+                command,
+                message_type="task.started",
+                sequence=baseline + 1,
+            ),
         )
 
     def _action_batch(

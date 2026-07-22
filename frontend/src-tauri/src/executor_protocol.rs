@@ -280,6 +280,9 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
                 return Err(());
             }
             match kind {
+                ExecutorEnvelopeKind::TaskCommand => {
+                    validate_task_command(&raw.payload.0, &raw.message_type)?;
+                }
                 ExecutorEnvelopeKind::TaskActionCommand => {
                     validate_action_command(&raw.payload.0, &raw.idempotency_key)?;
                 }
@@ -299,6 +302,24 @@ fn parse_executor_message_inner(source: &str) -> Result<ExecutorEnvelope, ()> {
 
     validate_payload(&raw.payload.0)?;
     Ok(ExecutorEnvelope { raw, kind })
+}
+
+fn validate_task_command(payload: &Value, message_type: &str) -> Result<(), ()> {
+    let object = payload.as_object().ok_or(())?;
+    if message_type == "task.offer" {
+        if !has_exact_keys(object, &["task_event_sequence_baseline"])
+            || object
+                .get("task_event_sequence_baseline")
+                .and_then(Value::as_u64)
+                .filter(|value| *value < MAX_SEQUENCE)
+                .is_none()
+        {
+            return Err(());
+        }
+    } else if !object.is_empty() {
+        return Err(());
+    }
+    Ok(())
 }
 
 fn message_kind(message_type: &str) -> Option<ExecutorEnvelopeKind> {

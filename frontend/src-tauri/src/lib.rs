@@ -356,14 +356,11 @@ async fn restart_executor(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-async fn execute_douyin_login_command(
-    command: executor_bootstrap::LocalPlatformCommand,
+async fn ensure_executor_running(
     client: &control_plane::ControlPlaneClient,
     vault: &ProductionDeviceCredentialVault,
     platform: &executor_platform::ExecutorPlatformService,
-    settings: &browser_settings::BrowserSettingsService,
-    profiles: &browser_profiles::BrowserProfileStore,
-) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
+) -> Result<(), ExecutorPlatformCommandError> {
     let status = platform.status().map_err(map_executor_platform_error)?;
     match status.state() {
         executor_manager::ExecutorManagerState::Stopped => {
@@ -379,15 +376,26 @@ async fn execute_douyin_login_command(
                     retryable: true,
                 })?
                 .map_err(map_executor_platform_error)?;
+            Ok(())
         }
-        executor_manager::ExecutorManagerState::Restarting => {
-            return Err(ExecutorPlatformCommandError {
-                code: "process_unavailable",
-                retryable: true,
-            });
-        }
-        executor_manager::ExecutorManagerState::Running => {}
+        executor_manager::ExecutorManagerState::Restarting => Err(ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        }),
+        executor_manager::ExecutorManagerState::Running => Ok(()),
     }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+async fn execute_douyin_login_command(
+    command: executor_bootstrap::LocalPlatformCommand,
+    client: &control_plane::ControlPlaneClient,
+    vault: &ProductionDeviceCredentialVault,
+    platform: &executor_platform::ExecutorPlatformService,
+    settings: &browser_settings::BrowserSettingsService,
+    profiles: &browser_profiles::BrowserProfileStore,
+) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
+    ensure_executor_running(client, vault, platform).await?;
     let executable_path = settings
         .selected_executable_path()
         .map_err(map_browser_settings_error)
@@ -726,7 +734,14 @@ async fn start_task_discovery(
     idempotency_key: String,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<control_plane::TaskDiscoveryCommand, ControlPlaneCommandError> {
+    ensure_executor_running(&client, &vault, &platform)
+        .await
+        .map_err(|error| ControlPlaneCommandError {
+            code: error.code,
+            retryable: error.retryable,
+        })?;
     client
         .start_task_discovery(&vault, &task_id, &idempotency_key)
         .await

@@ -83,8 +83,11 @@
     {
       "id": "MVP-AC-03",
       "criterion": "未登录抖音时，任务进入“等待平台登录”，并拉起可见的外部浏览器",
-      "disposition": "remediation_required",
-      "evidence": [{"path": "frontend/src-tauri/src/lib.rs", "anchor": "async fn start_task_discovery("}]
+      "disposition": "automated_complete",
+      "evidence": [
+        {"path": "frontend/src-tauri/src/lib.rs", "anchor": "async fn start_task_discovery("},
+        {"path": "frontend/e2e-tauri/mvp-user-journey.spec.ts", "anchor": "waiting-platform-login did not automatically open the handling path"}
+      ]
     },
     {
       "id": "MVP-AC-04",
@@ -105,14 +108,20 @@
     {
       "id": "MVP-AC-06",
       "criterion": "用户确认后能在可见浏览器中完成受控动作",
-      "disposition": "remediation_required",
-      "evidence": [{"path": "backend/src/automation_tool/executor/action_operation.py", "anchor": "class ProductionDouyinActionOperation"}]
+      "disposition": "pending_real_platform",
+      "evidence": [
+        {"path": "backend/src/automation_tool/executor/action_operation.py", "anchor": "class ProductionDouyinActionOperation"},
+        {"path": "frontend/e2e-tauri/mvp-user-journey.spec.ts", "anchor": "controlled Action result did not reach the App"}
+      ]
     },
     {
       "id": "MVP-AC-07",
       "criterion": "每个目标都有结构化结果，成功必须由页面最终状态或平台可核对结果证明",
-      "disposition": "remediation_required",
-      "evidence": [{"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "证据摘要：{EVIDENCE_LABELS[result.evidence]}"}]
+      "disposition": "pending_real_platform",
+      "evidence": [
+        {"path": "frontend/src/features/task-runs/TaskRunDetails.tsx", "anchor": "证据摘要：{EVIDENCE_LABELS[result.evidence]}"},
+        {"path": "frontend/e2e-tauri/mvp-user-journey.spec.ts", "anchor": "目标主页已确认可见"}
+      ]
     },
     {
       "id": "MVP-AC-08",
@@ -224,10 +233,15 @@
     },
     {
       "remediationTask": "H8-16F",
-      "state": "open",
+      "state": "resolved",
       "requirementRefs": ["MVP-AC-01", "MVP-AC-03", "MVP-AC-05", "MVP-AC-06", "MVP-AC-07"],
       "summary": "产品页仍把可选过滤/用户黑名单、截图直览、结果导出和存储控制写成当前 MVP，而实现只具备目标排除、固定保留、结构化结果与诊断包导出；需明确实现或后置并完成整条隐藏 App 验收",
-      "evidence": [{"path": "docs/product-plan.md", "anchor": "#### F. 本地设置与诊断"}]
+      "evidence": [{"path": "docs/product-plan.md", "anchor": "#### F. 本地设置与诊断"}],
+      "resolutionEvidence": [
+        {"path": "docs/product-plan.md", "anchor": "可配置的目标过滤器和用户维护黑名单不属于当前 MVP"},
+        {"path": "frontend/e2e-tauri/mvp-user-journey.spec.ts", "anchor": "H8-16F hidden App original-caller MVP journey"},
+        {"path": "frontend/package.json", "anchor": "test:h8-16f-tauri"}
+      ]
     }
   ]
 }

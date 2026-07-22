@@ -47,6 +47,7 @@ def executor_schema() -> dict[str, Any]:
         "payload encoded size and recursive depth must stay within x-wire-limits",
         "payload strings and field names must not carry credentials or private local data",
         "payload numbers must be finite JSON numbers",
+        "task.offer must carry one exact event sequence baseline and task controls must be empty",
     ]
     definitions = schema["$defs"]
     for model_name in (

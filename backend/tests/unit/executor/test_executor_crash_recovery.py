@@ -85,7 +85,7 @@ def offer() -> TaskCommandEnvelope:
             "correlation_id": resource_id(101),
             "idempotency_key": "executor:h805:offer:1",
             "sequence": 1,
-            "payload": {},
+            "payload": {"task_event_sequence_baseline": 0},
             "task_id": str(TASK_ID),
             "execution_attempt_id": str(ATTEMPT_ID),
         }

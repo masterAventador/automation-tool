@@ -24,6 +24,7 @@ from automation_tool.control_plane.application.task_controls import (
     TaskControlNotFound,
 )
 from automation_tool.control_plane.domain import (
+    MAX_TASK_EVENT_SEQUENCE,
     ActionId,
     ExecutionAttemptId,
     ExecutionAttemptStatus,
@@ -84,6 +85,10 @@ def _record(row: RowMapping) -> TaskCommandRecord:
                 row["target_confirmation_message_id"],
             ),
             action_id=(None if row["action_id"] is None else ActionId.parse(row["action_id"])),
+            task_event_sequence_baseline=cast(
+                int | None,
+                row["task_event_sequence_baseline"],
+            ),
             status=TaskCommandStatus(cast(str, row["status"])),
             idempotency_key=cast(str, row["idempotency_key"]),
             revision=cast(int, row["revision"]),
@@ -261,6 +266,21 @@ class SqlAlchemyTaskCommandRepository:
                     if confirmation_row is None
                     else cast(UUID, confirmation_row["source_message_id"])
                 )
+                task_event_sequence_baseline = None
+                if command.command_type is TaskCommandType.TASK_OFFER:
+                    task_event_sequence_baseline = await session.scalar(
+                        select(tasks.c.last_event_sequence)
+                        .where(
+                            tasks.c.id == command.task_id.uuid,
+                            tasks.c.installation_id == command.installation_id.uuid,
+                        )
+                        .with_for_update()
+                    )
+                    if (
+                        type(task_event_sequence_baseline) is not int
+                        or not 0 <= task_event_sequence_baseline < MAX_TASK_EVENT_SEQUENCE
+                    ):
+                        raise TaskCommandDeliveryRejected
                 existing_row = (
                     (
                         await session.execute(
@@ -313,6 +333,7 @@ class SqlAlchemyTaskCommandRepository:
                                 sequence=command.sequence,
                                 command_type=command.command_type.value,
                                 target_confirmation_message_id=confirmation_message_id,
+                                task_event_sequence_baseline=task_event_sequence_baseline,
                                 status=TaskCommandStatus.PENDING.value,
                                 idempotency_key=command.idempotency_key,
                                 revision=1,

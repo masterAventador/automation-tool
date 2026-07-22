@@ -1109,16 +1109,25 @@ class ExecutorLedger:
                         "action.execute",
                     }:
                         raise ValueError
+                    initial_event_sequence = (
+                        command.payload["task_event_sequence_baseline"]
+                        if isinstance(command, TaskCommandEnvelope)
+                        and command.message_type == "task.offer"
+                        else 0
+                    )
+                    if type(initial_event_sequence) is not int:
+                        raise ValueError
                     connection.execute(
                         """
                         INSERT INTO executor_attempt_checkpoints (
                             attempt_id, task_id, last_command_sequence,
                             last_event_sequence, state, revision
-                        ) VALUES (?, ?, 1, 0, ?, 1)
+                        ) VALUES (?, ?, 1, ?, ?, 1)
                         """,
                         (
                             str(command.execution_attempt_id),
                             str(command.task_id),
+                            initial_event_sequence,
                             AttemptCheckpointState.RECEIVED.value,
                         ),
                     )

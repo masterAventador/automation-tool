@@ -60,6 +60,7 @@ def command(
     deadline_at: datetime = NOW + timedelta(minutes=5),
     message_type: str = "task.offer",
     installation_id: str = INSTALLATION_ID,
+    payload: dict[str, object] | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -73,7 +74,11 @@ def command(
             "correlation_id": "323e4567-e89b-42d3-a456-426614174002",
             "idempotency_key": idempotency_key,
             "sequence": 1,
-            "payload": {},
+            "payload": (
+                {"task_event_sequence_baseline": 0}
+                if payload is None and message_type == "task.offer"
+                else {} if payload is None else payload
+            ),
             "task_id": TASK_ID,
             "execution_attempt_id": ATTEMPT_ID,
         },
@@ -133,6 +138,25 @@ def test_offer_is_atomically_checkpointed_without_fabricating_action_success(
         sent_at=NOW + timedelta(seconds=1),
     )
     assert reopened.handle(retry_with_new_wire_identity) == batch
+
+
+def test_offer_continues_the_task_global_event_sequence_across_attempts(
+    tmp_path: Path,
+) -> None:
+    active = processor(tmp_path / "state")
+
+    batch = active.handle(
+        command(payload={"task_event_sequence_baseline": 4})
+    )
+
+    assert [message.message_type for message in batch] == [
+        "task.accept",
+        "task.started",
+    ]
+    assert [message.sequence for message in batch] == [1, 5]
+    checkpoint = active.ledger.get_checkpoint(ATTEMPT_ID)
+    assert checkpoint is not None
+    assert checkpoint.last_event_sequence == 5
 
 
 def test_recovery_requeues_only_the_same_persisted_outbox_messages(tmp_path: Path) -> None:

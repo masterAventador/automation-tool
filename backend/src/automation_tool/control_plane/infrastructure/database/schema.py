@@ -1461,6 +1461,7 @@ task_commands = Table(
     Column("command_type", String(length=32), nullable=False),
     Column("target_confirmation_message_id", UUID(as_uuid=True), nullable=True),
     Column("action_id", UUID(as_uuid=True), nullable=True),
+    Column("task_event_sequence_baseline", BigInteger(), nullable=True),
     Column(
         "status",
         String(length=16),
@@ -1606,6 +1607,12 @@ task_commands = Table(
         "and target_confirmation_message_id is not null) or "
         "(command_type <> 'action.execute' and action_id is null)",
         name="ck_task_commands_action_scope",
+    ),
+    CheckConstraint(
+        f"(command_type = 'task.offer' and task_event_sequence_baseline between 0 and "
+        f"{MAX_TASK_EVENT_SEQUENCE - 1}) or "
+        "(command_type <> 'task.offer' and task_event_sequence_baseline is null)",
+        name="ck_task_commands_offer_event_baseline_scope",
     ),
     ForeignKeyConstraint(
         ["execution_attempt_id", "task_id", "installation_id"],

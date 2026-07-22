@@ -209,14 +209,17 @@ export function parseTaskTargetResultSnapshot(value: unknown): TaskTargetResultS
 export const taskTargetResultKeys = {
   all: ["task-target-results"] as const,
   detail: (taskId: string) => [...taskTargetResultKeys.all, taskId] as const,
+  eventSnapshot: (taskId: string, eventSequence: number) =>
+    [...taskTargetResultKeys.detail(taskId), eventSequence] as const,
 };
 
 export function taskTargetResultQueryOptions(
   source: TaskTargetResultSource,
   taskId: string,
+  eventSequence = 0,
 ) {
   return queryOptions({
-    queryKey: taskTargetResultKeys.detail(taskId),
+    queryKey: taskTargetResultKeys.eventSnapshot(taskId, eventSequence),
     queryFn: ({ signal }) => source.getResults(taskId, { signal }),
     retry: false,
     staleTime: 0,

@@ -21,6 +21,7 @@ from automation_tool.control_plane.application.task_target_previews import (
     TaskTargetPreviewSnapshot,
 )
 from automation_tool.control_plane.domain import (
+    TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     DouyinCandidateDisposition,
     DouyinSearchExposureAction,
     InstallationId,
@@ -34,6 +35,7 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
     douyin_search_exposure_definitions,
+    execution_attempts,
     installations,
     task_events,
     task_target_confirmations,
@@ -297,6 +299,7 @@ class SqlAlchemyTaskTargetPreviewRepository:
                 event_type=TaskEventType.TASK_TARGETS_CONFIRMED,
                 target_status=TaskStatus.QUEUED,
                 occurred_at=pending.requested_at,
+                clear_current_attempt=True,
             )
             return TaskTargetPreviewMutationResult(
                 snapshot=await _read_snapshot(
@@ -722,10 +725,21 @@ async def _append_preview_event(
     event_type: TaskEventType,
     target_status: TaskStatus,
     occurred_at: datetime,
+    clear_current_attempt: bool = False,
 ) -> RowMapping:
     current_status = TaskStatus(cast(str, task_row["status"]))
     if target_status is not current_status:
         TaskStateMachine.transition(current_status, target_status)
+    if clear_current_attempt and task_row["current_attempt_id"] is not None:
+        attempt_status = await session.scalar(
+            select(execution_attempts.c.status).where(
+                execution_attempts.c.id == task_row["current_attempt_id"],
+                execution_attempts.c.task_id == task_row["id"],
+                execution_attempts.c.installation_id == task_row["installation_id"],
+            )
+        )
+        if attempt_status not in {status.value for status in TERMINAL_EXECUTION_ATTEMPT_STATUSES}:
+            raise TaskTargetPreviewConflict
     next_revision = cast(int, task_row["revision"]) + 1
     next_sequence = cast(int, task_row["last_event_sequence"]) + 1
     await session.execute(
@@ -748,28 +762,24 @@ async def _append_preview_event(
             safe_message=None,
         )
     )
-    return (
-        (
-            await session.execute(
-                update(tasks)
-                .where(
-                    tasks.c.id == task_row["id"],
-                    tasks.c.installation_id == task_row["installation_id"],
-                    tasks.c.revision == task_row["revision"],
-                    tasks.c.last_event_sequence == task_row["last_event_sequence"],
-                )
-                .values(
-                    status=target_status.value,
-                    revision=next_revision,
-                    last_event_sequence=next_sequence,
-                    updated_at=occurred_at,
-                )
-                .returning(*tasks.c)
-            )
+    statement = (
+        update(tasks)
+        .where(
+            tasks.c.id == task_row["id"],
+            tasks.c.installation_id == task_row["installation_id"],
+            tasks.c.revision == task_row["revision"],
+            tasks.c.last_event_sequence == task_row["last_event_sequence"],
         )
-        .mappings()
-        .one()
+        .values(
+            status=target_status.value,
+            revision=next_revision,
+            last_event_sequence=next_sequence,
+            updated_at=occurred_at,
+        )
     )
+    if clear_current_attempt:
+        statement = statement.values(current_attempt_id=None)
+    return (await session.execute(statement.returning(*tasks.c))).mappings().one()
 
 
 __all__ = ["SqlAlchemyTaskTargetPreviewRepository"]

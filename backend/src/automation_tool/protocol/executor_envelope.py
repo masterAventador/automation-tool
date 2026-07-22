@@ -553,6 +553,21 @@ class TaskCommandEnvelope(_TaskEnvelopeBase):
         "task.emergency_stop",
     ]
 
+    @model_validator(mode="after")
+    def require_exact_command_payload(self) -> TaskCommandEnvelope:
+        if self.message_type == "task.offer":
+            if set(self.payload) != {"task_event_sequence_baseline"}:
+                raise ValueError("task offer payload is not exact")
+            baseline = self.payload["task_event_sequence_baseline"]
+            if (
+                type(baseline) is not int
+                or not 0 <= baseline < MAX_EXECUTOR_SEQUENCE
+            ):
+                raise ValueError("task offer event sequence baseline is invalid")
+        elif self.payload:
+            raise ValueError("task control payload must be empty")
+        return self
+
 
 class TaskDiscoveryCommandEnvelope(_TaskEnvelopeBase):
     """One typed, read-only Douyin target discovery command."""

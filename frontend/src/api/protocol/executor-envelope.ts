@@ -213,6 +213,23 @@ const taskCommandEnvelope = commonEnvelope.extend({
     "task.cancel",
     "task.emergency_stop",
   ]),
+}).superRefine((message, context) => {
+  const keys = Object.keys(message.payload);
+  if (message.message_type === "task.offer") {
+    const baseline = message.payload.task_event_sequence_baseline;
+    if (
+      keys.length !== 1 ||
+      keys[0] !== "task_event_sequence_baseline" ||
+      typeof baseline !== "number" ||
+      !Number.isSafeInteger(baseline) ||
+      baseline < 0 ||
+      baseline >= Number.MAX_SAFE_INTEGER
+    ) {
+      context.addIssue({ code: "custom", message: "Invalid Task offer payload" });
+    }
+  } else if (keys.length !== 0) {
+    context.addIssue({ code: "custom", message: "Invalid Task control payload" });
+  }
 });
 const discoverySequence = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const discoverySafeText = (maximum: number) =>
