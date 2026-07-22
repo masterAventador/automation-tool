@@ -141,6 +141,7 @@
       <a href="#browser-use">Browser Use</a>
       <a href="#browser-architecture">浏览器架构</a>
       <a href="#video">视频方案</a>
+      <a href="#moneyprinter">MoneyPrinterTurbo</a>
       <a href="#editing">云剪辑</a>
       <a href="#publishing">发布与互动</a>
       <a href="#roadmap">路线图</a>
@@ -190,6 +191,7 @@
             <tr><td>Browser Use Cloud / stealth / CAPTCHA 绕过</td><td class="no">禁止</td><td>与项目“可见浏览器、人工接管、不得绕过风控”的既有边界冲突。</td></tr>
             <tr><td>跨平台内容发布</td><td class="maybe">逐平台选路</td><td>B站走服务端 API；快手走 API + 前台确认；抖音走 SDK/H5 手动投稿；小红书、视频号暂无通用服务端投稿 API。</td></tr>
             <tr><td>一句话直接生成整段长视频</td><td class="no">仅用于快速预览</td><td>人物、产品和叙事连续性不可控，也难以局部重做与控制成本。</td></tr>
+            <tr><td>MoneyPrinterTurbo</td><td class="yes">作为低成本混剪 Provider</td><td>适合口播知识类、资讯类和无固定人物 B-roll；不承担数字人、品牌人物一致性或真实文生视频。</td></tr>
             <tr><td>阿里 IMS/ICE 云剪辑</td><td class="yes">建议作为首个云剪辑 Provider</td><td>Timeline API、异步任务、字幕/音频/转场能力完整；同时保留本地 FFmpeg Provider。</td></tr>
           </tbody>
         </table>
@@ -362,8 +364,71 @@
       <p>中国《人工智能生成合成内容标识办法》已于 2025-09-01 施行，要求对视频等生成合成内容添加显式标识和文件元数据中的隐式标识，发布者也需主动声明。流水线应自己负责标准化标识与 metadata，不应只依赖模型的 <code>watermark</code> 参数。抖音 2026-07 最新投稿规范同时禁止用水印导流，并限制明显营销内容的投稿准入，因此应区分“合规 AIGC 标识”和“无必要的供应商/导流水印”。</p>
     </section>
 
+    <section id="moneyprinter">
+      <div class="eyebrow">06 · Stock montage baseline</div>
+      <h2>MoneyPrinterTurbo：能用，但它是“自动素材混剪”，不是视频生成模型</h2>
+      <p>截至 2026-07-22，最新正式版是 <code>v1.3.2</code>（2026-07-12），采用 MIT License，要求 Python 3.11 及以上；仓库 <code>main</code> 仍在快速开发。它最有价值的不是某个模型，而是把写稿、搜素材、配音、字幕、混剪和输出串成了一条能直接运行的流水线。</p>
+
+      <div class="callout verdict">
+        <strong>判断：建议接入为 <code>StockMontageProvider</code>，不建议把它当成最终文生视频内核。</strong>
+        用户说一句话后，它确实能快速产出一条“旁白 + 公共素材 + 字幕 + BGM”的成片，适合低成本验证选题或生产无固定人物的知识类短视频；需要固定数字员工、准确产品外观、连续剧情或品牌级画面时，仍应走分镜后的 I2V / R2V / S2V 路线。
+      </div>
+
+      <h3>它的实际原理</h3>
+      <div class="flow" aria-label="MoneyPrinterTurbo 源码流水线">
+        <div class="node"><b>1. 写文案</b><small>LLM 根据主题生成一段旁白脚本，也允许直接输入自定义文案。</small></div>
+        <div class="node"><b>2. 生成搜索词</b><small>LLM 从脚本提炼 5 个英文素材词；顺序匹配模式使用 8 个按叙事先后排列的词。</small></div>
+        <div class="node"><b>3. 找素材</b><small>调用 Pexels、Pixabay 或 Coverr 搜索并下载库存视频，也可使用本地素材。</small></div>
+        <div class="node"><b>4. 声音与字幕</b><small>TTS 生成旁白；用 TTS 时间戳或 faster-whisper 生成、校正 SRT。</small></div>
+        <div class="node"><b>5. 混剪输出</b><small>MoviePy/FFmpeg 切段、缩放、补黑边、转场、循环铺满，再叠字幕、旁白与 BGM。</small></div>
+      </div>
+
+      <p>这里的“AI 选镜头”要准确理解：正式版并不会先生成逐镜头脚本，再把每句旁白和某段素材做视觉语义对齐。默认路径是生成少量英文关键词，把搜索结果合并或打乱后按固定片段时长拼接；开启 <code>match_materials_to_script</code> 后，只是让关键词按文案顺序生成，并按关键词组轮询下载、顺序拼接。可选 TwelveLabs Marengo 也只是把搜索词按主题相关性重排；仓库虽然提供 Pegasus 的 <code>analyze_clip</code> helper，但正式生成主流程没有调用它逐条验收素材。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>目标内容</th><th>适合度</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>知识口播、观点、鸡汤、资讯摘要</td><td class="yes">适合</td><td>画面主要承担 B-roll 氛围，不要求固定人物和严格情节，生成速度快、边际成本低。</td></tr>
+            <tr><td>热点快报、批量账号矩阵</td><td class="maybe">有条件适合</td><td>需要事实核验、时效素材、自有模板和人工抽检；同质化库存素材可能影响平台原创度与账号质量。</td></tr>
+            <tr><td>固定数字员工出镜</td><td class="no">不适合</td><td>没有人物 reference、口型驱动和跨镜头一致性，应走人物图 + TTS + S2V/数字人 Provider。</td></tr>
+            <tr><td>产品广告、品牌故事、连续剧情</td><td class="no">不适合做主引擎</td><td>搜索素材无法保证产品外观、品牌元素、镜头调度和叙事连续性。</td></tr>
+            <tr><td>生成视频的低成本预览/失败降级</td><td class="yes">非常适合</td><td>昂贵的生成模型不可用或预算不足时，仍可快速交付一个可审核的草稿版本。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>对 automation-tool 的接法</h3>
+      <div class="two">
+        <article class="card">
+          <h3>PoC：隔离运行原项目</h3>
+          <ul>
+            <li>锁定 <code>v1.3.2</code> 或明确 commit，以独立 Python worker/Docker 服务运行，不把 Streamlit UI 打进 Tauri。</li>
+            <li>只调用 CLI/API 生成 MP4，采集脚本、搜索词、素材、音频、字幕和成片路径，快速测质量、耗时与资源占用。</li>
+            <li>发布功能保持关闭；它走第三方 Upload-Post，当前覆盖 TikTok、Instagram、YouTube Shorts，不能替代国内平台 adapter。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>生产：吸收流水线，不复制控制面</h3>
+          <ul>
+            <li>内部仍使用 <code>ContentBrief → ScriptPlan → Material[] → Timeline → RenderJob</code>，把库存素材检索定义为一种镜头来源。</li>
+            <li>将选词、素材检索和本地混剪封装为 <code>StockMontageProvider</code>；渲染继续复用 <code>LocalFfmpegProvider</code> / <code>AliyunImsProvider</code>。</li>
+            <li>补齐逐句时间轴、素材语义评分、重复素材检测、版权台账、媒体下载限额、QA 与局部重做，不沿用它的粗粒度任务模型。</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="callout warn">
+        <strong>MIT 只覆盖 MoneyPrinterTurbo 源码，不覆盖下载到的素材、字体、音乐、人物肖像和商标。</strong>
+        每个素材必须记录 provider、原始 ID/URL、下载时间、许可版本和授权限制。Pexels 禁止暗示人物或品牌为产品背书；Pixabay 对可识别商标、人物和其他第三方权利另有约束；Coverr 当前许可页还区分免费下载归因及其他权利，商业投放前不能只靠“免费素材”四个字放行。
+      </div>
+
+      <h3>最终建议：保留两条视频生产路线</h3>
+      <p><code>stock_montage</code> 路线使用 MoneyPrinterTurbo 思路，服务低成本、高速度、弱人物一致性的内容；<code>generative_story</code> 路线使用 ShotPlan + T2V/I2V/R2V/S2V，服务品牌、产品和数字员工。两条路线共享脚本、Timeline、QA、Artifact 和 PublishJob，因此用户仍然只需要说一句话，由策略层根据内容类型、预算、时限与质量等级自动选路，也可以混合使用“库存 B-roll + 生成式关键镜头 + 数字人口播”。</p>
+    </section>
+
     <section id="editing">
-      <div class="eyebrow">06 · Alibaba cloud editing</div>
+      <div class="eyebrow">07 · Alibaba cloud editing</div>
       <h2>阿里云剪辑：用 IMS/ICE Timeline API，不把 WebSDK 放进 MVP</h2>
       <p>阿里智能媒体服务的云剪辑支持多视频、音频、图片裁剪拼接，以及字幕、贴纸、滤镜、特效、转场、TTS/ASR 和高级模板。后端可提交 <code>SubmitMediaProducingJob</code>，由异步任务输出成片。这与仓库现有 provider-neutral <code>Timeline</code> 规划吻合。</p>
 
@@ -412,7 +477,7 @@
     </section>
 
     <section id="publishing">
-      <div class="eyebrow">07 · Publishing, comments and messaging</div>
+      <div class="eyebrow">08 · Publishing, comments and messaging</div>
       <h2>内容发布最新矩阵：只有 B 站可直接按“无人值守服务端投稿”设计</h2>
       <p>本节按 2026-07-22 能直接打开的官方页面重新核验，不采用搜索引擎缓存或民间逆向接口。这里的“有接口”还要区分三种产品形态：服务端可提交、官方 SDK/H5 只负责唤起发布器、完全没有普通内容投稿 API。</p>
 
@@ -489,7 +554,7 @@
     </section>
 
     <section id="roadmap">
-      <div class="eyebrow">08 · Delivery plan</div>
+      <div class="eyebrow">09 · Delivery plan</div>
       <h2>建议的落地路线与验收门槛</h2>
       <div class="timeline">
         <div class="milestone">
@@ -506,7 +571,7 @@
         </div>
         <div class="milestone">
           <b>P3 · 30 秒视频闭环 PoC（2–3 周）</b>
-          <span>实现 ContentBrief/ShotPlan/Timeline；Wan T2V + I2V/R2V + TTS/S2V 路由；IMS 与 FFmpeg 两个 Provider；产出 3 类样片并记录质量、耗时和真实成本。</span>
+          <span>先用 MoneyPrinterTurbo v1.3.2 跑通低成本 stock_montage 基线，再实现 ContentBrief/ShotPlan/Timeline 与 Wan T2V + I2V/R2V + TTS/S2V 路由；IMS 与 FFmpeg 两个渲染 Provider；产出 3 类样片并记录质量、耗时和真实成本。</span>
         </div>
         <div class="milestone">
           <b>P4 · 分平台发布能力接入（约 2–3 周）</b>
@@ -535,7 +600,7 @@
     </section>
 
     <section id="risks">
-      <div class="eyebrow">09 · Risk register</div>
+      <div class="eyebrow">10 · Risk register</div>
       <h2>主要风险与止损点</h2>
       <div class="table-wrap">
         <table>
@@ -547,6 +612,7 @@
             <tr><td>平台风控/封号</td><td>高 / 高</td><td>只使用平台当前正式开放并已获批的 API/SDK；其余使用可见浏览器、真实速率、人工确认/验证码和账号级限额；不 stealth、不绕验证码。</td></tr>
             <tr><td>CDP 远程控制面暴露</td><td>中 / 极高</td><td>随机 loopback 端口、短生命周期、独立 profile、进程归属检查；不能满足即否决 Browser Use 生产接入。</td></tr>
             <tr><td>人物/版权/虚假内容</td><td>中 / 极高</td><td>reference 权利证明、肖像/声音同意、内容审核、AIGC 标识与发布声明、人工终审。</td></tr>
+            <tr><td>库存素材同质化/权利不清</td><td>高 / 高</td><td>逐素材许可快照和来源台账；语义与重复度检测；品牌、人物、商标进入人工审核；stock_montage 不用于高要求品牌内容。</td></tr>
             <tr><td>生成成本失控</td><td>高 / 中</td><td>任务前预算冻结、候选上限、720P 草稿/1080P 定稿、局部重做、task_id 对账、按效果统计成本。</td></tr>
             <tr><td>供应商锁定/故障</td><td>中 / 高</td><td>内部 Timeline/Artifact/Job 契约；AliyunImsProvider + LocalFfmpegProvider；生成 Provider 可替换。</td></tr>
           </tbody>
@@ -560,7 +626,7 @@
     </section>
 
     <section id="sources">
-      <div class="eyebrow">10 · Primary sources</div>
+      <div class="eyebrow">11 · Primary sources</div>
       <h2>主要资料与核对范围</h2>
       <p>以下均为官方仓库、官方文档或监管机构来源；易变化的版本、模型、价格与平台权限按 2026-07-22 记录，实施时应在控制台再次确认。</p>
       <ol class="sources">
@@ -577,6 +643,10 @@
         <li><a href="https://agora.xiaohongshu.com/index">小红书分享开放平台</a>（当前显示“暂停接入”）；<a href="https://agora.xiaohongshu.com/doc/qa">分享 SDK FAQ</a></li>
         <li><a href="https://developers.weixin.qq.com/doc/channels/api/">微信视频号：现行 API 接口目录</a>；<a href="https://developers.weixin.qq.com/doc/channels/ChangeLog.html">接口变更日志</a>（最近记录 2025-11-14）</li>
         <li><a href="https://openhome.bilibili.com/doc">哔哩哔哩开放平台：视频稿件管理</a>；<a href="https://openhome.bilibili.com/agreement/developer-service">开发者服务协议</a>（2025-06-04 生效）</li>
+        <li><a href="https://github.com/harry0703/MoneyPrinterTurbo">MoneyPrinterTurbo 官方仓库与 README</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/releases/tag/v1.3.2">v1.3.2 最新正式版</a>（2026-07-12）</li>
+        <li><a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/app/services/task.py">MoneyPrinterTurbo v1.3.2 任务流水线</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/app/services/material.py">素材检索与下载</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/app/services/video.py">MoviePy/FFmpeg 合成</a></li>
+        <li><a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/LICENSE">MoneyPrinterTurbo MIT License</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/pyproject.toml">v1.3.2 运行时依赖</a></li>
+        <li><a href="https://www.pexels.com/license/">Pexels License</a>；<a href="https://pixabay.com/service/license-summary/">Pixabay Content License</a>；<a href="https://coverr.co/license">Coverr License</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/use-video-generation">阿里云百炼：视频生成模型选型</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/text-to-video-api-reference">Wan 2.7 文生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide">图生视频指南</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/wan-video-to-video-api-reference">Wan 2.7 参考生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-s2v-api">Wan S2V 数字人 API</a></li>
