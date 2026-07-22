@@ -94,6 +94,28 @@ describe("generic App update UI", () => {
     expect(source.checkNow).toHaveBeenCalledOnce();
   });
 
+  it("does not overlap state polling with a user update operation", async () => {
+    const source = gateway({ state: "idle" });
+    let finishCheck: ((state: AppUpdateState) => void) | undefined;
+    vi.mocked(source.checkNow).mockImplementationOnce(
+      () =>
+        new Promise<AppUpdateState>((resolve) => {
+          finishCheck = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    renderCenter(source, true);
+
+    const check = await screen.findByRole("button", { name: "检查更新" });
+    await waitFor(() => expect(source.getState).toHaveBeenCalledOnce());
+    await user.click(check);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 1_100));
+
+    expect(source.getState).toHaveBeenCalledOnce();
+    finishCheck?.({ state: "up_to_date", trigger: "manual" });
+    expect(await screen.findByText("当前已是最新版本")).toBeVisible();
+  });
+
   it("maps native failures to fixed public copy without reflecting details", async () => {
     const source = gateway({ state: "idle" });
     vi.mocked(source.checkNow).mockRejectedValueOnce(

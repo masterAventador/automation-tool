@@ -102,11 +102,12 @@ export function AppUpdateCenter({ gateway, showSettings }: AppUpdateCenterProps)
   const [failure, setFailure] = useState(false);
   const [busy, setBusy] = useState(false);
   const readInFlight = useRef(false);
+  const operationInFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
     const read = async () => {
-      if (readInFlight.current) return;
+      if (readInFlight.current || operationInFlight.current) return;
       readInFlight.current = true;
       try {
         const next = await gateway.getState();
@@ -129,29 +130,25 @@ export function AppUpdateCenter({ gateway, showSettings }: AppUpdateCenterProps)
     };
   }, [gateway]);
 
-  const checkNow = async () => {
+  const runOperation = async (operation: () => Promise<AppUpdateState>) => {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setBusy(true);
     setFailure(false);
     try {
-      setState(await gateway.checkNow());
+      setState(await operation());
     } catch {
       setFailure(true);
     } finally {
+      operationInFlight.current = false;
       setBusy(false);
     }
   };
 
-  const decide = async (decision: AppUpdateDecision) => {
-    setBusy(true);
-    setFailure(false);
-    try {
-      setState(await gateway.decide(decision));
-    } catch {
-      setFailure(true);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const checkNow = () => runOperation(() => gateway.checkNow());
+
+  const decide = (decision: AppUpdateDecision) =>
+    runOperation(() => gateway.decide(decision));
 
   const release = releaseFrom(state);
   const optionalPrompt = state?.state === "ready" && state.action === "prompt";

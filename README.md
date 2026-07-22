@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-21 已完成；H8-22 的通用更新 UI、隐藏 App 原入口自动化和 macOS ad-hoc 实包升级已经完成，Windows 实包及 macOS/Windows 正式发布签名证据仍为 `🔍 待验收`。桌面 MVP 闭环、恢复诊断、后台更新下载及安全安装协调均已收口，真实账号证据继续独立待补。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15 与 Wave 8 H8-01～H8-21 已完成；H8-22 的通用更新 UI、隐藏 App 原入口自动化、macOS ad-hoc 实包升级和 Windows 隔离普通包验收器已经完成，Windows 实机结果及 macOS/Windows 正式发布签名证据仍为 `🔍 待验收`。桌面 MVP 闭环、恢复诊断、后台更新下载及安全安装协调均已收口，真实账号证据继续独立待补。
 
 ## 第一阶段
 
@@ -131,7 +131,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - H8-19 已把通用可选/强制更新策略装入真实 Tauri 启动路径：App 版本、stable channel、最高见过版本、不可变 Artifact identity 和最后一次可选决策以规范 JSON 原子保存在 App 私有 `app-updates/update-policy-v1`。暂缓会在下一次检查重新提示，跳过只压制当前版本，立即安装意图跨重启保留；强更不接受用户决策，版本回退、同版本换包、并发观察、过期按钮和失败写入均 fail closed；
 - H8-20 已部署独立、无业务认证和无数据库依赖的 `GET /desktop-updates/v1/{channel}/{target}/{arch}/{current_version}` 更新 feed，并在正式 Tauri setup 注册 Rust-only 官方 updater。启动、6 小时有界周期和手动检查共用唯一协调入口；安装包在 App 私有缓存以 Range/ETag 续传并流式通过 SHA-256 + Minisign 后原子替换，失败不覆盖旧包且清单不保存 URL/签名/路径。隐藏 App 已经由真实 FastAPI/临时 HTTPS 从中断下载恢复到唯一候选；release 缺少合法 HTTPS endpoint 或公开验签公钥会在构建期失败；
 - H8-21 已把 `install_now/defer/skip_version` 接入同一个 Rust 协调入口。立即安装会先从私有缓存重验 identity、SHA-256 和 Minisign，再隐藏窗口、停止 Executor 并释放浏览器 Profile，最后只调用官方 updater 安装原语；Windows 由官方安装器退出并接管，macOS 安装成功后由 App 重启。暂缓在下一次启动/轮询/手动检查重新提示，跳过只压制当前版本；强更首次启动只下载，复用同一 AppData 的下一次启动自动安装且不重复下载。隐藏 App 已从正式 Command 和生产 FastAPI feed 验证这些转换；真实签名安装包跨版本升级归 H8-22；
-- H8-22 已在“设置与诊断”加入通用 App 更新卡片，并在任意工作台页面挂载可选/强制更新提示。React 只经三个固定 Tauri Command 读取脱敏状态、主动检查和提交封闭决策；可选更新支持立即安装、稍后提醒和跳过当前版本，强更提示不可关闭且没有暂缓/跳过入口。除三轮隐藏 App 页面自动化外，macOS arm64 已用独立 ad-hoc 0.1.0 DMG、0.2.0/0.3.0 更新包和损坏 0.4.0 包，在不启用安装探针的正式 Rust/官方 updater 路径完成暂缓、跳过、同版本压制、真实 `.app` 覆盖、强更重启及失败恢复；安装后版本/二进制哈希与旧包不变边界均已核对。Windows 普通包实体机验证和 Developer ID/notarization、Authenticode 正式发布门禁仍保持 `🔍 待验收`；
+- H8-22 已在“设置与诊断”加入通用 App 更新卡片，并在任意工作台页面挂载可选/强制更新提示。React 只经三个固定 Tauri Command 读取脱敏状态、主动检查和提交封闭决策；Rust 下载进度字段固定为 camelCase，用户操作期间暂停后台轮询。可选更新支持立即安装、稍后提醒和跳过当前版本，强更提示不可关闭且没有暂缓/跳过入口。除三轮隐藏 App 页面自动化外，macOS arm64 已用独立 ad-hoc 0.1.0 DMG、0.2.0/0.3.0 更新包和损坏 0.4.0 包，在不启用安装探针的正式 Rust/官方 updater 路径完成暂缓、跳过、同版本压制、真实 `.app` 覆盖、强更重启及失败恢复；安装后版本/二进制哈希与旧包不变边界均已核对。Windows 已准备 `currentUser` 普通未签名 NSIS 的隔离验收器，覆盖同一可选/强制/失败矩阵、安装后二进制版本/哈希、HKCU 安装记录和卸载清理；它只能在 Windows x86_64 执行，实体机结果和 Developer ID/notarization、Authenticode 正式发布门禁仍保持 `🔍 待验收`；
 - H8-08 在同一 `LocalExecutorProcess` 中用 5 秒有界单调调度间隙识别整机休眠/锁屏后的陈旧连接：先复位 H8-07 网络闸门，再复用原有有界重连，稳定心跳后才报告恢复；正常长页面任务完成时重置观测基线，不冒充休眠。合法但已过 UTC deadline 的命令以独立固定结果忽略且不落账，其他坏协议继续 fail closed。浏览器窗口失效和重新建立只写固定无参数诊断，Rust 仍执行二次脱敏与 200 行/64 KiB 滚动限制。独立隐藏 App 已真实暂停/恢复签名 Executor，同一 PID、`restartCount=0`，并从正式 IPC 读到休眠与传输恢复诊断；另用无头系统浏览器和隔离 Profile 验证窗口丢失/恢复，全程不锁屏整机、不触碰默认 Profile；
 - H8-09 新增唯一 `LocalArtifactStore`：可信生产者用固定 Policy 声明受控目录、扩展名、媒体类型、单文件和数量上限，存储返回 UUIDv4、SHA-256、媒体类型、大小与相对路径，不返回绝对路径。写入采用独占创建、稳定重读和目录/文件身份复验，POSIX 固定 `0700/0600`，Windows 复用私有 ACL 校验；页面漂移证据已删除重复文件边界并复用该 Store。正式 `task.discover` 无头浏览器链路已经按 Artifact ID 完成解析、枚举和读取；本任务没有新增 App/API、上传、截图/Trace 或清理策略；
 - H8-10 在同一 Store 上新增失败截图与结构化 Trace：失败发现自动采集，成功发现默认关闭且只能由用户在“设置与诊断”页显式开启；设置保存在 App 私有 `local-executor/browser-diagnostic-settings-v1`，经固定 Tauri Command 和严格 bootstrap 布尔值进入 signed Executor，不用系统钥匙串。截图只保留当前 viewport，经注入样式隐藏文字、表单、图片、媒体、iframe 与背景资源，并剥离 PNG 附加元数据；Trace 不是 Playwright 原始归档，只含固定平台/操作/阶段/触发/版本/时间/Artifact ID。两类各最多 8 个，截图最多 1 MiB、Trace 最多 4 KiB、截图调用最多 5 秒；无头真实 Processor 与隐藏 App 原入口均已通过；

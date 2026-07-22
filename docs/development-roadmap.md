@@ -2782,7 +2782,7 @@
 
 ### H8-22 更新 UI 与双平台验收
 
-- 状态：🔍 待验收（macOS ad-hoc 实包已通过；Windows 与正式发布签名待补）
+- 状态：🔍 待验收（macOS ad-hoc 实包已通过；Windows 普通包验收器已就绪，实机与正式发布签名待补）
 - 日期：2026-07-22
 - RED：先把唯一台账置为 `🧪 RED`；新增严格状态契约、Tauri gateway、React 更新中心和隐藏 App UI 契约。首跑准确失败于 `AppUpdateCenter.tsx`/`app-update-gateway.ts`/专用 UI E2E 配置不存在，`ready.action` 与 `installation_launched` 未进入 TypeScript 状态闭集。策略复审另以先红后绿用例证明强制 release 配可选 action、可选 release 配 `forced` 必须 fail closed
 - 产品 UI：`AppUpdateCenter` 常驻工作台读取状态，所以可选/强制提示不要求用户先进入设置页；“设置与诊断”增加 stable 通道卡片、目标版本/平台/架构、下载进度和“检查更新”。可选提示只有“立即安装/稍后提醒/跳过此版本”；强制提示不可关闭、不可按 Escape 或遮罩退出，也不渲染可选决策，明确要求重新启动 App 后自动安装。原生失败统一映射固定安全文案，不显示 URL、签名、包内容、路径或底层错误
@@ -2791,17 +2791,21 @@
 - macOS ad-hoc 实包：`pnpm test:h8-22-macos-package` 在 `/private/tmp` 创建独立安装根和临时 Minisign 密钥，使用专用 identifier、隐藏窗口、`createUpdaterArtifacts=true` 与 `signingIdentity="-"` 构建 0.1.0 App/DMG、0.2.0/0.3.0 更新归档及签名正确但格式故意损坏的 0.4.0 包。旧 0.1.0 从真实 DMG 挂载复制，所有 App 都通过 `codesign --verify --deep --strict`、`Signature=adhoc`、`TeamIdentifier=not set`，并明确拒绝把 Developer ID/Apple Distribution 冒充为本轮证据
 - macOS 原路径证据：验收使用 production FastAPI feed、临时 HTTPS、正式 Rust coordinator/cache/policy/installer 和页面按钮，环境中明确移除 `AUTOMATION_TOOL_UPDATE_INSTALL_PROBE`。可选链路完成 0.2.0 暂缓→手动再提示→跳过→同版本 suppressed→0.3.0 提示→真实替换；安装重启使 WDIO 预期断连时，外层只有在安装后二进制 SHA-256 精确等于 0.3.0 后才放行，并重新启动更新后 App 验证 `CFBundleShortVersionString=0.3.0` 与 `up_to_date`
 - macOS 强更与失败恢复：独立旧 App 首次启动显示不可跳过的 0.2.0 强更，Escape 不关闭；下一次直接启动原 `.app` 后自动安装、重启并达到 0.2.0，安装后二进制与构建候选 SHA-256 一致，再启动为 `up_to_date`。另一独立旧 App 下载并验签 0.4.0 损坏归档，官方安装器返回 `failed/install/installation_failed`，窗口恢复并显示安全文案，旧 App 的版本和二进制 SHA-256 均未改变
-- 自动化门禁：Frontend 141 项 Node 契约、240 项 Vitest、5 项全局无头 Playwright、ESLint 与严格 TypeScript 全绿；H8-22 聚焦 gateway/契约/App 接线/组件共 15 项通过，macOS 实包 runner 的 Ruff format/check、Python 编译和静态契约通过。本任务没有修改生产 Rust、Backend Schema/OpenAPI 或 updater 实现，H8-21 的真实 Rust/Feed/安装协调原路径由实包继续消费
+- Windows runner RED/GREEN：先新增 `h8-22-windows-package-acceptance.test.mjs`，首跑准确失败于专用 Tauri/WDIO/页面规格与 Python runner 不存在；实现后再以缺少 updater 临时安装器退出等待的契约二次置红，补齐后恢复全绿。专用配置固定唯一 product/identifier/main binary、`currentUser` NSIS、`createUpdaterArtifacts=true`、隐藏窗口和独立 `dist-h822-windows`，不写入正式签名证书配置
+- Windows 普通包原路径：`pnpm test:h8-22-windows-package` 只允许 Windows x86_64，构建普通未 Authenticode 签名的 0.1.0/0.2.0/0.3.0 NSIS 与 Minisign updater artifacts，并生成签名正确但格式损坏的 0.4.0 `.exe`。runner 先用 0.1.0 `/S` 安装，再从页面覆盖可选暂缓/手动检查/跳过/同版本压制/0.3.0 安装、0.2.0 强更重启和 0.4.0 失败恢复；Windows updater 启动 NSIS 后旧 App 退出造成的 WDIO 断连，只能由外层在安装后二进制 SHA-256/PE 版本精确命中并等待 updater 安装器退出后放行，随后重启已安装 App 验证 `up_to_date`
+- Windows 隔离与清理：安装根固定为唯一 `%LOCALAPPDATA%\Automation Tool H822 Windows Acceptance`，AppData 固定为唯一 `%APPDATA%\com.aventador.automationtool.h822windowsacceptance`，可执行文件固定为 `automation-tool-h822-windows-acceptance.exe`；每个场景先通过专属 `uninstall.exe /S` 卸载再重装 0.1.0。除文件版本/哈希/`NotSigned` 与专属 `uninstall.exe` 外，runner 还从 HKCU 64/32 位卸载视图精确核对 `DisplayName`、`DisplayVersion`、`InstallLocation` 和 `UninstallString`，卸载完成必须同时删除安装根与注册表事实。临时 Minisign 私钥只进入构建/签名子进程，运行前移除私钥与安装探针；finally 停止精确 App/WDIO/feed、调用专属卸载器并删除构建资产、AppData、临时密钥和端口。该矩阵只证明普通包，不等同于 Authenticode 发布证据
+- 历史并行分支复核与融合：逐文件复核 `origin/h8-22-updater-windows-ci` 的替代 UI、共用 macOS/Windows runner 和 CI。其 workflow dispatch `29904145762` 的 Windows/macOS 共 6 个 Job 都在 checkout 前以 `steps: []` 结束，Windows updater Job 没有运行任何代码，因此分支标题和 runner 实现不构成 Windows GREEN。主线保留更严格的强更不可关闭 Modal、policy/action 一致性、macOS DMG/codesign/损坏包恢复，以及 Windows `NotSigned`/哈希/PE/失败包/重启事实；只以新增 RED 用例吸收该分支有效的 Rust `downloadedBytes/totalBytes` camelCase、用户操作期间暂停轮询、HKCU 安装记录核对和 H8-22 构建目录忽略，不合并重复组件、较弱的共用 runner 或未执行成功的自动 CI
+- 自动化门禁：Frontend 142 项 Node 契约、241 项 Vitest、5 项全局无头 Playwright、ESLint、严格 TypeScript、OpenAPI 与 production boundary 全绿；H8-22 聚焦 gateway/契约/App 接线/组件增加用户操作与轮询互斥回归，macOS/Windows 实包 runner 的 Ruff format/check、Python 编译和静态契约通过。Rust 默认 `191 passed/4 ignored`、`desktop-e2e` `187 passed/4 ignored`、`control-plane-e2e` `192 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿。生产 Rust 只增加 `UpdateState` enum 字段 camelCase 序列化约束及回归，没有修改 Backend Schema/OpenAPI 或 updater 安装实现；H8-21 的真实 Rust/Feed/安装协调原路径由实包继续消费
 - 失败修正：首次实包构建暴露临时公钥与 Tauri bundler 公钥格式、签名私钥环境变量以及 updater `.sig` 重复编码问题，均收敛到 runner 的官方格式；首次安装路径位于 `/var/folders`，Tauri 正确拒绝其中 `/var → /private/var` 符号链接，验收改用无链接的 `/private/tmp`。页面手动检查返回时按钮仍短暂 disabled，WDIO 改为等按钮可用后点击；这些修正均保留失败状态/安装后事实硬断言，没有放宽产品门禁
-- 清理：临时 Minisign 私钥只进入构建/签名进程，启动任何验收 App 前从运行环境移除；成功、失败和中断路径均停止精确临时 App/WebDriver/Uvicorn，卸载 DMG，关闭动态端口，删除专属 AppData、`dist-h822-mac`、唯一 bundle 输出、临时安装根和临时密钥；未写 `/Applications`、未触碰日常 App、浏览器 Profile、系统钥匙串或其他项目资源
-- 待验收边界：当前 macOS arm64 没有 Developer ID Application/notarization 身份，本轮只能证明普通 ad-hoc 包的官方安装器、覆盖、重启和恢复语义，不能证明 Gatekeeper 面向普通用户分发时无警告，也不能冒充正式签名/公证通过。Windows 实包需按用户安排在 Windows 实体机补测，Authenticode 证书同样后置；台账因此保持 `🔍 待验收`
+- 清理：临时 Minisign 私钥只进入构建/签名进程，启动任何验收 App 前从运行环境移除；成功、失败和中断路径均停止精确临时 App/WebDriver/Uvicorn，卸载 DMG 或调用专属 NSIS 卸载器，关闭动态端口，删除专属 AppData、`dist-h822-mac`、`dist-h822-windows`、唯一 bundle 输出、临时安装根和临时密钥；未写 `/Applications`、未触碰日常 App、浏览器 Profile、系统钥匙串或其他项目资源
+- 待验收边界：当前 macOS arm64 没有 Developer ID Application/notarization 身份，本轮只能证明普通 ad-hoc 包的官方安装器、覆盖、重启和恢复语义，不能证明 Gatekeeper 面向普通用户分发时无警告，也不能冒充正式签名/公证通过。这台 Mac 只能执行 Windows runner 的静态契约、TypeScript、Ruff 和 Python 编译门禁，不能生成或运行 NSIS/PE/注册表事实；Windows 实包需按用户安排在 Windows 实体机执行 `pnpm --dir frontend test:h8-22-windows-package`，Authenticode 证书同样后置，实际输出和清理事实未取得前不得声称 Windows 通过。台账因此保持 `🔍 待验收`
 - 解锁条件：Windows 实体机先用隔离普通包补齐同一可选/强制/覆盖/失败恢复矩阵；正式发布前再在受控环境提供 macOS Developer ID Application + notarization 和 Windows Authenticode，分别复验至少旧/新两个候选版本的签名、安装、更新和最终版本事实。两平台发布门禁全部满足后才能把 H8-22 改为 `✅ 已完成`
-- 提交：通用 UI/原入口自动化已在上一检查点提交；本检查点只提交 macOS ad-hoc 实包构建与验收器、失败矩阵、资源隔离和权威文档，不生成、提交或索取长期发布私钥
+- 提交：通用 UI/原入口自动化与 macOS ad-hoc 实包验收已在前序检查点提交；本检查点提交历史并行分支复核后筛选出的 camelCase/轮询互斥/HKCU 边界、Windows 普通包验收器、失败矩阵、资源隔离和权威文档，不整块合并重复实现，不生成、提交或索取长期发布私钥，也不把 macOS 静态门禁冒充 Windows 实机证据
 
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-22`（🔍 待验收）：通用 UI、原入口自动化和 macOS ad-hoc 实包升级/覆盖/失败恢复/强更已完成；今晚在 Windows 实体机补普通包同矩阵，Developer ID/notarization 与 Authenticode 正式发布门禁按用户决定后置；
+1. `H8-22`（🔍 待验收）：通用 UI、原入口自动化、macOS ad-hoc 实包矩阵和 Windows 隔离普通包验收器已完成；今晚在 Windows 实体机执行 `pnpm --dir frontend test:h8-22-windows-package` 取得普通包同矩阵事实，Developer ID/notarization 与 Authenticode 正式发布门禁按用户决定后置；
 2. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
 3. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
