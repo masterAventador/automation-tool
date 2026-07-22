@@ -6,7 +6,7 @@
 RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```
 
-当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15、Wave 8 H8-01～H8-21 与 P9-01 macOS Executor 候选构建已完成；P9-03 已把该 Executor 作为只读 Tauri Resources 装入真实 production-mode `.app/.dmg`，完成 ad-hoc 签名、Manifest、资源完整性及最小 Capability/CSP 审计，正式 Developer ID/notarization 仍为 `🔍 待验收`。H8-22 的通用更新 UI、隐藏 App 原入口自动化、macOS ad-hoc 实包升级和 Windows 隔离普通包验收器已经完成，Windows 实机结果及 macOS/Windows 正式发布签名证据同样待补；真实账号证据继续独立待补。
+当前处于第一期 MVP 实施阶段。Wave 1～Wave 6 的工程主线、Wave 7 A7-01～A7-15、Wave 8 H8-01～H8-21 与 P9-01 macOS Executor 候选构建已完成；P9-02 的 Windows Executor 隔离构建器、PE/依赖审计及原生验收入口已经就绪，保留 `🔍 待 Windows 实机验收`。P9-03 已把 macOS Executor 作为只读 Tauri Resources 装入真实 production-mode `.app/.dmg`，完成 ad-hoc 签名、Manifest、资源完整性及最小 Capability/CSP 审计，正式 Developer ID/notarization 仍为 `🔍 待验收`。H8-22 的通用更新 UI、隐藏 App 原入口自动化、macOS ad-hoc 实包升级和 Windows 隔离普通包验收器已经完成，Windows 实机结果及 macOS/Windows 正式发布签名证据同样待补；真实账号证据继续独立待补。
 
 ## 第一阶段
 
@@ -139,6 +139,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - Executor `onedir` 已有 v1 签名 Manifest：离线构建工具清点入口和每个普通文件的相对路径、大小与 SHA-256，以确定性目录摘要绑定版本、构建 ID、macOS/Windows 和 aarch64/x86_64，再对 canonical Manifest 原始字节生成独立 `atems1` Ed25519 签名。签发私钥只从 stdin 读取且不落盘；非规范路径、symlink、非普通文件、文件替换竞态、超限或错误入口均拒绝；
 - Rust 原生包验证器已用可信 Ed25519 公钥先验签，再 exact-field 解析 canonical Manifest，绑定当前 OS/架构，以 `semver` 允许范围和已安装版本拒绝越界/降级，并两次枚举整目录、稳定打开逐文件复算大小/SHA-256/目录摘要；错误 signer、弱公钥、目录增删篡改、symlink、非普通文件和竞态均 fail closed。该能力没有 React/Tauri Command 或在线下载面；macOS arm64 与 Windows x86_64 原生 runner 均已实测，Hosted Windows CI 的 Billing 限制只保留为持续集成覆盖缺口；
 - E4-15 已把 `127.0.0.1:1420` 与 devCSP 从正式 Tauri 配置拆到仅 `pnpm tauri:dev` 合并的覆盖文件；release 缺失、畸形或弱 Executor 验证公钥会在打包前 fail closed。实际 macOS arm64 与 Windows x86_64 release 二进制及无默认特性 Cargo 依赖树已经扫描，不含 WebDriver/WDIO、验收 Command、测试 origin/Sidecar、开发验证公钥或调试端口；验收只使用临时公开公钥和唯一临时 target，不启动 App；
+- P9-02 的 `automation-tool-build-windows-executor` 复用唯一正式 PyInstaller spec，只向不存在的新目录输出；复制前后均拒绝错误架构 PE、symlink/reparse point、特殊文件、开发绝对路径、浏览器缓存和缺失的 base library/Playwright driver。`pnpm --dir frontend test:p9-02-windows-executor` 将在原生 Windows 构建候选，以一次性 Ed25519 seed 验证正式 Manifest 和冻结入口安全失败，再只读探测系统 UIAutomationClient 并复用 E4-09 的 Job Object 后代树清理验收；macOS 只完成失败矩阵与静态契约，不冒充 PE/UIA/Job Object 的实机结果；
 - P9-03 的 release 组合根从 `.app/Contents/Resources/local-executor/package` 使用已签名 Executor，AppData 只保留身份、SQLite 状态、Profile 与凭据；debug 仍使用原 AppData 包路径，避免改变现有开发/验收入口。候选配置不锁死发布 identity；`pnpm --dir frontend test:p9-03-macos-package` 只在一次性生成的验收覆盖中强制 ad-hoc，用临时签名材料构建真实 App/DMG，逐文件比较 301 个 Executor 资源、复验 Manifest、Mach-O、App 签名、DMG 校验/只读挂载与生产制品边界后全部删除，不启动 App、浏览器或服务。该普通候选只证明可签/可装配边界，不代替 Developer ID Application、公证或 Gatekeeper 无警告分发；
 - Demo Bootstrap 已建立最多 7 天、精确环境绑定、只允许 installation 注册的 fail-closed 能力模型，不能作为业务 API 凭据；该能力只保留用于本地验收、隔离测试和明确迁移，不作为客户安装、配对或审批机制；
 - React 工作台已通过 TanStack Query、严格公开 Task DTO、快照权威事件投影和 Rust SSE → Tauri Channel 展示当前/最近任务、运行状态与基础指标；“新建任务”提供受约束的抖音搜索曝光表单。运行详情展示权威状态、进度、事件时间线与目标级待执行/进行中/成功/跳过/失败/不确定证据，并通过四个固定 Rust operation 提交暂停、恢复、取消与紧停，最终仍以 Executor/PostgreSQL 事实收敛；

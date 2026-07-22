@@ -316,6 +316,8 @@ backend/
 │       │   ├── page_drift_artifact.py # 复用通用 Store 的页面漂移固定 Schema/Policy
 │       │   ├── platform_commands.py # 认证本机平台命令、扫码 flow 与健康队列
 │       │   ├── package_manifest.py # onedir 完整清单、目录摘要和离线 Ed25519 签发工具
+│       │   ├── macos_candidate.py # P9-01 隔离 PyInstaller、Mach-O/依赖/路径与 ad-hoc 签名准备审计
+│       │   ├── windows_candidate.py # P9-02 隔离 PyInstaller、PE/依赖/路径与 reparse point 审计
 │       │   ├── runtime.py         # Hello/Heartbeat、固定健康投影和有界停止
 │       │   ├── transport.py       # Fake/正式 Executor 共用的受认证 WebSocket 传输
 │       │   ├── fake.py            # 无 I/O 场景引擎；复用正式 parser/envelope/幂等规则
@@ -505,6 +507,8 @@ E4-14 的 `tauri.executor-lifecycle-e2e.conf.json`、`wdio.executor-lifecycle.co
 E4-15 的 `build.rs` 是 release 验证公钥的打包前 fail-closed 门；`tauri.dev.conf.json` 是唯一含 1420/devCSP 的开发覆盖，正式 `tauri.conf.json` 不再携带开发地址。`frontend/scripts/audit-production-package.mjs` 检查真实 release 二进制、生产资产、正式配置与 `cargo tree --no-default-features`，而根 `scripts/run_e4_15_acceptance.py` 负责缺失/畸形公钥失败证明、唯一临时 target 构建和精确清理。验收公开公钥不用于发布签名，临时制品不启动、不上传、不保留。
 
 P9-01 的 `executor/macos_candidate.py` 与 `scripts/run_p9_01_acceptance.py` 把既有 PyInstaller/Manifest 能力收敛成唯一 macOS 候选构建链。命令只向一个不存在的新目录输出，build/cache/dist 使用输出同级临时目录并在结束删除；候选必须包含生产 Playwright driver 和 base library、不含浏览器缓存、symlink、仓库/临时绝对路径，所有 Mach-O 与当前架构匹配并在 framework 别名规整后完成可复验的 ad-hoc 签名。验收用一次性测试 seed 证明离线 Manifest 签名准备后连同产物删除；没有 Developer ID、公证、上传或 Tauri 资源装配，后两者归 P9-03。
+
+P9-02 的 `executor/windows_candidate.py` 与 `scripts/run_p9_02_acceptance.py` 沿同一正式 spec 建立唯一 Windows 候选构建链。命令只向不存在的新目录输出，复制前后都审计当前架构 PE、Playwright driver/base library、开发路径、浏览器缓存、symlink/reparse point、特殊文件和资源上限；原生 runner 再验证一次性 Manifest、冻结入口固定安全失败、只读 UIAutomationClient 能力及 E4-09 Job Object 后代树清理。该入口不启动 App 或浏览器、不安装驱动、不上传产物；Windows 实机运行前保持 `🔍 待验收`。
 
 P9-03 的 `tauri.macos-candidate.conf.json` 与 `scripts/run_p9_03_acceptance.py` 在不增加 Capability/CSP/测试 Feature 的前提下，把 P9-01 输出映射到 App 的 `Resources/local-executor/package`。候选配置不锁死发布 identity；runner 只在临时覆盖中强制 ad-hoc，并用一次性 Ed25519 seed 签发正式格式 Manifest，构建 production-mode `.app/.dmg`，逐文件比较源/Resources/DMG 中的 SHA-256 与大小，复验 Manifest、Mach-O、App codesign、DMG 校验/只读挂载及 E4-15 生产二进制边界；所有输出只在 `/private/tmp` 存活且不启动 App、浏览器或服务。Developer ID Application、公证和 Gatekeeper 无警告分发仍是外部证书门禁。
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 
 import pytest
@@ -325,8 +326,8 @@ def test_builder_uses_an_isolated_staging_root_and_keeps_the_audited_candidate(
         lambda bundle: signed.append(bundle),
     )
     monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
-    monkeypatch.setattr(macos_candidate.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(macos_candidate.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
 
     result = build_macos_executor_candidate(
         backend_root=backend_root,
@@ -353,8 +354,8 @@ def test_builder_never_overwrites_an_existing_output(
     _write(backend_root / "automation-tool-executor.spec", b"fixture spec")
     output = tmp_path / "artifacts/automation-tool-executor"
     _write(output / "keep.txt", b"user-owned")
-    monkeypatch.setattr(macos_candidate.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(macos_candidate.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
 
     with pytest.raises(MacOSExecutorCandidateRejected):
         build_macos_executor_candidate(
@@ -372,7 +373,7 @@ def test_builder_rejects_other_platforms_and_a_missing_spec(
     backend_root = tmp_path / "source/backend"
     backend_root.mkdir(parents=True)
     output = tmp_path / "artifacts/automation-tool-executor"
-    monkeypatch.setattr(macos_candidate.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     with pytest.raises(MacOSExecutorCandidateRejected):
         build_macos_executor_candidate(
             backend_root=backend_root,
@@ -380,8 +381,8 @@ def test_builder_rejects_other_platforms_and_a_missing_spec(
             python_executable=Path("/isolated/python"),
         )
 
-    monkeypatch.setattr(macos_candidate.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(macos_candidate.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
     with pytest.raises(MacOSExecutorCandidateRejected):
         build_macos_executor_candidate(
             backend_root=backend_root,
@@ -412,8 +413,8 @@ def test_builder_removes_its_new_output_when_the_final_audit_fails(
     monkeypatch.setattr(macos_candidate, "_run_pyinstaller", fake_pyinstaller)
     monkeypatch.setattr(macos_candidate, "_apply_adhoc_code_signatures", lambda bundle: None)
     monkeypatch.setattr(macos_candidate, "audit_macos_executor_candidate", fail_final_audit)
-    monkeypatch.setattr(macos_candidate.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(macos_candidate.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
 
     with pytest.raises(MacOSExecutorCandidateRejected):
         build_macos_executor_candidate(

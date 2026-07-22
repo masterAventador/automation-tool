@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 安装包与发布准备（P9-03 普通 macOS 候选已通过，待正式证书验收）
+> 当前阶段：Wave 9 安装包与发布准备（P9-02 Windows 工程链与 P9-03 普通 macOS 候选已就绪，待原生/正式证书验收）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21 与 P9-01 已完成；P9-03 的只读 Executor Resources、production-mode ad-hoc App/DMG 和最小 Capability/CSP 已通过，Developer ID/notarization 保持 `🔍 待验收`。H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据待补；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21 与 P9-01 已完成；P9-02 Windows Executor 隔离构建器、PE/依赖审计和原生验收入口已就绪，保持 `🔍 待 Windows 实机验收`。P9-03 的只读 Executor Resources、production-mode ad-hoc App/DMG 和最小 Capability/CSP 已通过，Developer ID/notarization 保持 `🔍 待验收`。H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据待补；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -364,7 +364,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ✅ 已完成 |
-| P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ⬜ 未开始 |
+| P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | 🔍 待验收 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | 🔍 待验收 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | ⬜ 未开始 |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ⬜ 未开始 |
@@ -2817,6 +2817,20 @@
 - 最终门禁：Backend 正式工作目录全量 `2153 passed / 5 explicit skipped in 305.36s`，14,346 条语句/3,370 个分支 100%；其中 macOS 候选模块 179/68 与 PyInstaller symlink 规整 53/20 均为 100%。338 个 Python 文件 Ruff format/check、严格 Mypy、uv lock/sync、OpenAPI/Executor Schema 快照、Frontend 142 项 Node 契约、`actionlint 1.7.12` 和 `git diff --check` 全绿；本任务没有改动 Rust/React 产品源码，不重复声明前序 Rust/UI 全量结果
 - 后续：Windows 实体机先补 H8-22 普通包验收，再进入 P9-02 Windows Executor 构建；P9-03 可在本机继续接入本候选与 Tauri 普通安装包，但 Developer ID、公证和面向普通用户无警告分发仍须正式证书
 
+### P9-02 Windows Executor 构建
+
+- 状态：🔍 待 Windows 实机验收（工程实现与跨平台自动化已通过）
+- 日期：2026-07-22
+- 推进边界：按用户明确要求先完成 Windows 工程实现，实体机只补最终原生事实；H8-22 的 Windows 普通包验收尚未执行，因此本任务在 Windows runner 真正通过前不得标记 `✅ 已完成`
+- RED：新增 Windows 候选失败矩阵与工程契约，要求独立 PE/架构/依赖/开发路径审计、隔离 PyInstaller builder、正式 CLI、一次性 Manifest、只读 UIAutomation 系统探针、既有 Job Object 原生验收复用及 Windows CI 接线。实现前 `windows_candidate` 与 P9-02 runner 均不存在
+- 唯一构建入口：新增 `automation-tool-build-windows-executor`，只允许 Windows 在不存在的新输出目录构建；正式 spec 的 config/build/dist 全部位于输出同级唯一临时目录，已有目标绝不覆盖。复制前后各执行一次完整审计，最终审计失败只删除本次新建输出并返回固定拒绝，不保留半成品
+- PE、依赖与路径审计：严格解析每个 `.exe/.dll/.pyd` 的 PE machine，只接受与当前 `x86_64|aarch64` 一致的原生文件；必须存在正式入口、base library、Playwright Python 包与 driver/node。全目录拒绝 symlink/reparse point、特殊文件、浏览器缓存、超过 10,000 文件/8 GiB 及仓库/临时绝对路径，路径标记使用带 overlap 的流式扫描，不假设只会出现在文本 metadata
+- 原生验收入口：`pnpm --dir frontend test:p9-02-windows-executor` 只允许原生 Windows。它构建候选，用一次性随机 Ed25519 seed 生成并离线验证正式 Manifest；随后从最小系统环境向冻结入口发送空 stdin，要求退出码 2、空 stdout 和固定 stderr，再只读加载系统 `UIAutomationClient`/根元素，最后复用 E4-09 已有 Rust Manager 对真实打包后代树的 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 验收。全过程不启动 App/浏览器、不给网页交互、不安装驱动、不上传或发布制品
+- CI 与失败边界：Desktop 双平台工作流已把新模块、测试和 runner 纳入触发路径，只在 Windows job 执行原生 runner；macOS job 不执行也不冒充 PE、UIAutomation 或 Job Object。候选、Manifest、签名 seed、PyInstaller build/cache/dist 与 Job probe 都位于临时目录，成功、失败和中断后由 runner 回收
+- 自动化门禁：P9-02 聚焦 13 项测试通过，新增模块 146 条语句/50 个分支 100%；Frontend 全部 144 项 Node 契约通过。Backend 全量 `2166 passed / 5 explicit skipped in 226.41s`，14,492 条语句/3,420 个分支 100%；340 个 Python 文件 Ruff format/check 与严格 Mypy、uv lock、`actionlint` 和 `git diff --check` 全绿。全量 Mypy 额外发现 P9-01 测试经模块 `__all__` 访问内部 `platform` 的显式导出错误，现改为直接注入标准库模块，产品实现和测试语义不变
+- 待验收边界：当前 macOS 不能生成或执行真实 Windows PE，也不能提供系统 UIAutomation/Job Object 运行事实；因此只把工程链标为就绪。稍后在 Windows 实体机执行上述唯一命令，记录候选文件/PE/字节统计和零残留后才改为 `✅ 已完成`
+- 后续：按用户授权不等待实机，下一独立任务直接推进 P9-04 Windows Tauri 普通候选安装包；它同样先完成工程实现与 fail-closed runner，再把 Authenticode、真实安装/卸载和系统权限事实保留给 Windows 验收
+
 ### P9-03 macOS Tauri 候选包
 
 - 状态：🔍 待验收（普通 ad-hoc 候选与自动化已通过；Developer ID Application/notarization 待正式证书）
@@ -2834,8 +2848,8 @@
 
 严格按顺序：
 
-1. `H8-22`（🔍 待验收）：通用 UI、原入口自动化、macOS ad-hoc 实包矩阵和 Windows 隔离普通包验收器已完成；今晚在 Windows 实体机执行 `pnpm --dir frontend test:h8-22-windows-package` 取得普通包同矩阵事实，Developer ID/notarization 与 Authenticode 正式发布门禁按用户决定后置；
-2. `P9-02`（⬜ 未开始）：在 Windows 实体机完成 H8-22 后，从同一正式 spec 收口 Windows Executor 候选、Playwright/UIA 依赖和 Job Object；macOS 不冒充 PE、UIA 或 Job Object 证据；
-3. `P9-03`（🔍 待验收）：普通 production-mode ad-hoc App/DMG、只读 Executor Resources 和最小 Capability/CSP 已通过；在受控发布环境提供 Developer ID Application/notarization 后补签名链、staple、Gatekeeper 与普通用户安装事实，不把普通包冒充正式发布；
-4. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
-5. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `P9-02`（🔍 待验收）：Windows Executor 构建器、PE/依赖审计、Manifest/冻结入口/UIAutomation/Job Object 原生 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor` 补最终事实；
+2. `P9-04`（⬜ 未开始）：按同一策略立即完成 Windows Tauri 普通候选配置、只读 Executor Resources、最小 Capability/CSP、普通用户安装/卸载与签名状态 runner；macOS 做静态/失败矩阵，Windows 实体机稍后补 NSIS/注册表/权限/Authenticode 事实；
+3. `P9-05/P9-08`：在可独立验证的工程前置满足后继续按序推进正式包内容审计与版本兼容/降级矩阵；P9-06/P9-07 的干净设备交互和 P9-09 最终 MVP 事实仍须对应平台/账号，不会以静态门禁冒充；
+4. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+5. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
