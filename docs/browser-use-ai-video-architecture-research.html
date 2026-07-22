@@ -129,7 +129,7 @@
     <div class="meta">
       <span class="tag">调研日期：2026-07-22</span>
       <span class="tag">分支：research/browser-use-video-architecture</span>
-      <span class="tag">结论级别：PoC 可开始，生产需过硬门禁</span>
+      <span class="tag">结论级别：可开始技术验证，生产需过硬门禁</span>
       <span class="tag">适用：Tauri + Python Control Plane + Local Executor</span>
     </div>
   </header>
@@ -141,7 +141,8 @@
       <a href="#browser-use">Browser Use</a>
       <a href="#browser-architecture">浏览器架构</a>
       <a href="#video">视频方案</a>
-      <a href="#moneyprinter">MoneyPrinterTurbo</a>
+      <a href="#moneyprinter">智能素材成片</a>
+      <a href="#motion-video">品牌动效成片</a>
       <a href="#editing">云剪辑</a>
       <a href="#publishing">发布与互动</a>
       <a href="#roadmap">路线图</a>
@@ -157,7 +158,7 @@
       <div class="summary-grid">
         <article class="card">
           <span class="number">可行</span>
-          <h3>Browser Use 值得做 PoC</h3>
+          <h3>Browser Use 值得做技术验证</h3>
           <p>它适合解决页面改版、弱结构页面和任意网站的语义理解问题，但不适合直接取代现有执行状态机。</p>
         </article>
         <article class="card">
@@ -173,8 +174,8 @@
       </div>
 
       <div class="callout verdict">
-        <strong>建议立项，但先做两个相互独立的 PoC。</strong>
-        浏览器 PoC 只验证“语义定位能否在页面变化下稳定工作，且不破坏安全边界”；视频 PoC 只验证“30 秒竖屏成片的一致性、成本和云剪辑闭环”。两者通过后，再接入自动发布与私信/评论。
+        <strong>建议立项，但先做两个相互独立的技术可行性验证。</strong>
+        浏览器部分只验证“语义定位能否在页面变化下稳定工作，且不破坏安全边界”；视频部分只验证“30 秒竖屏成片的一致性、成本和云剪辑闭环”。两者通过后，再接入自动发布与私信/评论。
       </div>
 
       <div class="callout danger">
@@ -188,10 +189,12 @@
           <tbody>
             <tr><td>全面替换 Playwright</td><td class="no">不建议</td><td>当前代码的价值不只在选择器，还包括授权、限制、幂等账本、单次副作用与不确定结果处理。</td></tr>
             <tr><td>引入 Browser Use</td><td class="yes">建议，受限引入</td><td>承担读操作、页面探索、语义候选定位和新版页面恢复，不拥有最终成功判定。</td></tr>
+            <tr><td>运营浏览器来源</td><td class="yes">改为 App 内置</td><td>随安装包提供与 Playwright 严格匹配的完整 Chromium，运行时离线，不依赖用户安装 Chrome/Edge；仍使用 App 私有 Profile 和可见窗口。</td></tr>
             <tr><td>Browser Use Cloud / stealth / CAPTCHA 绕过</td><td class="no">禁止</td><td>与项目“可见浏览器、人工接管、不得绕过风控”的既有边界冲突。</td></tr>
             <tr><td>跨平台内容发布</td><td class="maybe">逐平台选路</td><td>B站走服务端 API；快手走 API + 前台确认；抖音走 SDK/H5 手动投稿；小红书、视频号暂无通用服务端投稿 API。</td></tr>
             <tr><td>一句话直接生成整段长视频</td><td class="no">仅用于快速预览</td><td>人物、产品和叙事连续性不可控，也难以局部重做与控制成本。</td></tr>
-            <tr><td>MoneyPrinterTurbo</td><td class="yes">作为低成本混剪 Provider</td><td>适合口播知识类、资讯类和无固定人物 B-roll；不承担数字人、品牌人物一致性或真实文生视频。</td></tr>
+            <tr><td>智能素材成片</td><td class="yes">作为低成本素材成片方式</td><td>适合口播知识类、资讯类，以及用城市、办公、生活等补充画面配合旁白的内容；不承担数字人、品牌人物一致性或真实文生视频。</td></tr>
+            <tr><td>品牌动效成片</td><td class="yes">作为品牌与信息动效方式</td><td>适合网址转产品视频、图表、标题、产品演示和品牌动效；已有说话人物可作为输入素材，但底层渲染器本身不生成人物。</td></tr>
             <tr><td>阿里 IMS/ICE 云剪辑</td><td class="yes">建议作为首个云剪辑 Provider</td><td>Timeline API、异步任务、字幕/音频/转场能力完整；同时保留本地 FFmpeg Provider。</td></tr>
           </tbody>
         </table>
@@ -218,12 +221,17 @@
             <li><code>ActionGate</code>：签名授权、账号/平台/动作限制和本地限额。</li>
             <li>本地 SQLite side-effect ledger：prepare → dispatch → verified / uncertain。</li>
             <li>单次点击/发送、最终状态独立确认、结果不确定时绝不自动重放。</li>
-            <li>应用独立浏览器 profile、可见 Chrome/Edge、验证码人工接管。</li>
+            <li>应用独立浏览器 profile、可见运营浏览器窗口、验证码人工接管。</li>
           </ul>
         </article>
       </div>
 
       <p>相关实现入口包括 <code>backend/src/automation_tool/executor/browser_runtime.py</code>、<code>backend/src/automation_tool/executor/rpa/douyin/</code> 以及 action operation/ledger 代码。现有路线图也已预留供应商无关的 <code>Material</code>、<code>Timeline</code>、<code>RenderJob</code>、<code>PublishJob</code>、<code>Artifact</code>，以及阿里云剪辑与本地 FFmpeg 的选型任务。新方案应沿用这些边界，而不是再造一套平行系统。</p>
+
+      <div class="callout blue">
+        <strong>本报告已按新策略修订浏览器目标。</strong>
+        当前代码仍会发现并选择用户安装的 Chrome/Edge；实施时先用 ADR 更新项目基线，再把系统浏览器发现、选择设置和启动门禁替换为 App 内置 Chromium 发行物校验。Profile、原生锁、Playwright Page、页面对象和副作用安全链路继续复用。
+      </div>
 
       <div class="callout warn">
         <strong>当前测试结论要克制。</strong>
@@ -244,7 +252,7 @@
             <tr><td>自定义 Tools</td><td>可以只暴露“观察、候选定位、读文本”等少量动作。</td><td>默认工具包含导航、输入、上传、JS、文件读写等广泛能力，必须删减。</td></tr>
             <tr><td><code>allowed_domains</code> / <code>prohibited_domains</code></td><td>可把执行限定在批准的网站。</td><td>域名限制只是第一道门，还需路径、动作、账号和目标对象校验。</td></tr>
             <tr><td>结构化输出</td><td>可让 Agent 返回 <code>ActionProposal</code>、候选元素和证据，不直接返回“任务成功”。</td><td>最终状态必须由独立 verifier 检查平台回执、URL、实体 ID 或稳定页面证据。</td></tr>
-            <tr><td>CDP 会话</td><td>可接本机 Chrome/Edge 的独立 profile。</td><td>当前版本底层是直接 CDP 而非 Playwright；调试端口只能监听 loopback、随机端口、短生命周期，若做不到则 PoC 失败。</td></tr>
+            <tr><td>CDP 会话</td><td>可接 App 内置运营 Chromium 的独立 profile。</td><td>当前版本底层是直接 CDP 而非 Playwright；调试端口只能监听 loopback、随机端口、短生命周期，若做不到则技术验证失败。</td></tr>
           </tbody>
         </table>
       </div>
@@ -309,11 +317,21 @@
         </article>
       </div>
 
+      <h3>App 内置 Chromium 的供应链</h3>
+      <div class="arch" aria-label="内置浏览器供应链">
+        <div class="layer"><b>Build Pin</b>锁定 Playwright，并在构建阶段下载与其严格匹配的完整 Chromium；“最新”指本次发布时最新的兼容组合。</div>
+        <div class="layer"><b>Signed Manifest</b>记录 Playwright、Chromium 修订、平台、架构、每文件摘要、许可证与 SBOM。</div>
+        <div class="layer"><b>Tauri Resolver</b>只从 resource_dir 解析，拒绝 symlink/reparse、摘要错、平台错和目录替换；React 看不到绝对路径。</div>
+        <div class="layer"><b>Executor Runtime</b>把验证后的路径交给现有 <code>BrowserLaunchRequest</code>，继续使用 headed persistent context 和 App 私有 Profile。</div>
+        <div class="layer guard"><b>First Release Unit</b>App、Executor、Playwright 与浏览器在同一个首发安装包内锁定并联合验收；运行时不下载，不回退到用户浏览器。</div>
+      </div>
+      <p>App 尚未发布，因此不设计旧版兼容或 Profile 迁移。首发版本直接删除外部浏览器选择入口，在 App 私有数据根创建一套全新的内置浏览器 Profile；不读取、复制或导入系统 Chrome/Edge、开发环境或测试环境的 Cookie/Profile，用户首次使用时正常扫码登录。最终必须在没有 Chrome/Edge 的 macOS 与 Windows 全新环境完成正式包纵向验收。</p>
+
       <h3>与现有同步 Playwright 的集成方式</h3>
-      <p>现有 <code>BrowserRuntime</code> 是同步 Playwright，Browser Use 主流程偏异步且直接使用 CDP。不要在同一线程、同一 profile 上让两个框架同时持有页面对象。PoC 应采用独立的 bounded worker/async loop，并由 profile 单实例锁保证串行；真正执行副作用时，选择一个 adapter 完成从 prepare 到 verify 的完整临界区。</p>
+      <p>现有 <code>BrowserRuntime</code> 是同步 Playwright，Browser Use 主流程偏异步且直接使用 CDP。不要在同一线程、同一 profile 上让两个框架同时持有页面对象。技术验证应采用独立的 bounded worker/async loop，并由 profile 单实例锁保证串行；真正执行副作用时，选择一个 adapter 完成从 prepare 到 verify 的完整临界区。</p>
 
       <div class="callout blue">
-        <strong>CDP 是 Browser Use PoC 的硬门禁。</strong>
+        <strong>CDP 隔离是 Browser Use 技术验证的硬门禁。</strong>
         只允许 <code>127.0.0.1</code>、随机临时端口、进程归属校验、任务结束立即关闭；严禁固定 9222、监听局域网、连接用户日常默认 profile。若当前 Browser Use 版本无法满足，就保持 Playwright 主引擎，只抽取其语义定位能力或暂缓集成。
       </div>
     </section>
@@ -336,7 +354,7 @@
         <table>
           <thead><tr><th>内容类型</th><th>首选方式</th><th>为什么</th><th>注意</th></tr></thead>
           <tbody>
-            <tr><td>无固定人物的氛围/B-roll</td><td>Wan T2V</td><td>起步快，适合场景与情绪探索。</td><td>用于预览或短镜头，不依赖它生成准确文字。</td></tr>
+            <tr><td>无固定人物的场景与氛围画面</td><td>Wan T2V</td><td>起步快，适合场景与情绪探索。</td><td>用于预览或短镜头，不依赖它生成准确文字。</td></tr>
             <tr><td>产品/品牌/固定人物</td><td>参考生视频 R2V</td><td>可提供人物、场景、产品多参考，连续性更好。</td><td>保存 reference 版本与授权来源；产品外观仍需 QA。</td></tr>
             <tr><td>构图必须可控</td><td>首帧 I2V</td><td>先生成/审核关键图，再赋予镜头运动。</td><td>竖屏关键帧直接按 9:16 设计，字幕留安全区。</td></tr>
             <tr><td>明确起点和终点</td><td>首尾帧 I2V</td><td>适合产品变换、转场与精确落版。</td><td>首尾差异过大时容易产生形变。</td></tr>
@@ -366,7 +384,7 @@
 
     <section id="moneyprinter">
       <div class="eyebrow">06 · Stock montage baseline</div>
-      <h2>MoneyPrinterTurbo：能用，但它是“自动素材混剪”，不是视频生成模型</h2>
+      <h2>智能素材成片：能用，但它是“自动素材混剪”，不是视频生成模型</h2>
       <p>截至 2026-07-22，最新正式版是 <code>v1.3.2</code>（2026-07-12），采用 MIT License，要求 Python 3.11 及以上；仓库 <code>main</code> 仍在快速开发。它最有价值的不是某个模型，而是把写稿、搜素材、配音、字幕、混剪和输出串成了一条能直接运行的流水线。</p>
 
       <div class="callout verdict">
@@ -389,7 +407,7 @@
         <table>
           <thead><tr><th>目标内容</th><th>适合度</th><th>原因</th></tr></thead>
           <tbody>
-            <tr><td>知识口播、观点、鸡汤、资讯摘要</td><td class="yes">适合</td><td>画面主要承担 B-roll 氛围，不要求固定人物和严格情节，生成速度快、边际成本低。</td></tr>
+            <tr><td>知识口播、观点、鸡汤、资讯摘要</td><td class="yes">适合</td><td>画面主要用城市、办公、生活等补充素材配合旁白，不要求固定人物和严格情节，生成速度快、边际成本低。</td></tr>
             <tr><td>热点快报、批量账号矩阵</td><td class="maybe">有条件适合</td><td>需要事实核验、时效素材、自有模板和人工抽检；同质化库存素材可能影响平台原创度与账号质量。</td></tr>
             <tr><td>固定数字员工出镜</td><td class="no">不适合</td><td>没有人物 reference、口型驱动和跨镜头一致性，应走人物图 + TTS + S2V/数字人 Provider。</td></tr>
             <tr><td>产品广告、品牌故事、连续剧情</td><td class="no">不适合做主引擎</td><td>搜索素材无法保证产品外观、品牌元素、镜头调度和叙事连续性。</td></tr>
@@ -398,22 +416,27 @@
         </table>
       </div>
 
+      <h3>为什么有很多模型服务商，但主页面看不到选择</h3>
+      <p>v1.3.2 的 WebUI 确实支持 Moonshot、OpenAI、Gemini、DeepSeek、Qwen、Azure、火山、MiniMax、Ollama、OneAPI、LiteLLM、Groq 等文案模型服务。入口藏在页面顶部的设置按钮里，打开弹窗后的第一个 <code>LLM Settings</code> 页签才会出现服务商、API Key、Base URL 和模型字段；只有部分服务能动态列出模型，其余主要靠默认值或手工输入。没有打开设置弹窗、使用旧版本，或者只看主生成表单时，很容易误判成不能切换。</p>
+      <p>App 应把它改成清晰的“文案模型服务”设置，和“智能素材成片 / 品牌动效成片”这一级制作方式分开，避免两个“Provider”概念混在一起。</p>
+
       <h3>对 automation-tool 的接法</h3>
       <div class="two">
         <article class="card">
-          <h3>PoC：隔离运行原项目</h3>
+          <h3>源码与运行时隔离</h3>
           <ul>
-            <li>锁定 <code>v1.3.2</code> 或明确 commit，以独立 Python worker/Docker 服务运行，不把 Streamlit UI 打进 Tauri。</li>
-            <li>只调用 CLI/API 生成 MP4，采集脚本、搜索词、素材、音频、字幕和成片路径，快速测质量、耗时与资源占用。</li>
-            <li>发布功能保持关闭；它走第三方 Upload-Post，当前覆盖 TikTok、Instagram、YouTube Shorts，不能替代国内平台 adapter。</li>
+            <li>以 Git submodule 固定 <code>v1.3.2 / b1588e1</code>，不修改上游源代码，不跟随 main 自动升级。</li>
+            <li>使用独立 Python Worker，不和 RPA Executor 共用 Python 环境；Tauri 负责启动、版本握手、健康、取消和退出。</li>
+            <li>发布功能保持关闭；其第三方发布能力不能替代国内平台 adapter。</li>
           </ul>
         </article>
         <article class="card">
-          <h3>生产：吸收流水线，不复制控制面</h3>
+          <h3>首版 WebUI 与长期边界</h3>
           <ul>
-            <li>内部仍使用 <code>ContentBrief → ScriptPlan → Material[] → Timeline → RenderJob</code>，把库存素材检索定义为一种镜头来源。</li>
-            <li>将选词、素材检索和本地混剪封装为 <code>StockMontageProvider</code>；渲染继续复用 <code>LocalFfmpegProvider</code> / <code>AliyunImsProvider</code>。</li>
-            <li>补齐逐句时间轴、素材语义评分、重复素材检测、版权台账、媒体下载限额、QA 与局部重做，不沿用它的粗粒度任务模型。</li>
+            <li>首版用专用子 WebView 展示完整 Streamlit 功能，通过 App 自有主题配置和初始化脚本统一外层视觉，不改 submodule。</li>
+            <li>只监听随机 loopback，经过会话令牌、来源/路径白名单和文件范围检查的 App 网关；不能把上游 FastAPI 直接暴露到局域网。</li>
+            <li>标题、DOM、可访问性树、错误、日志、外链和任务记录都不能出现上游项目名；页面结构不兼容时 fail closed。</li>
+            <li>任务仍统一进入 <code>ContentBrief → Material[] → Timeline → RenderJob → Artifact</code>，避免 WebUI 和 App 各有一套结果状态。</li>
           </ul>
         </article>
       </div>
@@ -424,11 +447,109 @@
       </div>
 
       <h3>最终建议：保留两条视频生产路线</h3>
-      <p><code>stock_montage</code> 路线使用 MoneyPrinterTurbo 思路，服务低成本、高速度、弱人物一致性的内容；<code>generative_story</code> 路线使用 ShotPlan + T2V/I2V/R2V/S2V，服务品牌、产品和数字员工。两条路线共享脚本、Timeline、QA、Artifact 和 PublishJob，因此用户仍然只需要说一句话，由策略层根据内容类型、预算、时限与质量等级自动选路，也可以混合使用“库存 B-roll + 生成式关键镜头 + 数字人口播”。</p>
+      <p>本期只实现两条路线：<code>material_montage_v1</code> 服务低成本、高速度的旁白素材视频；<code>motion_composition_v1</code> 服务品牌、产品、数据和网页动效。两条路线共享脚本、Timeline、QA、Artifact 和 PublishJob。真人、电影感镜头与真实世界场景生成只保留未来扩展位，本期不实现。</p>
+    </section>
+
+    <section id="motion-video">
+      <div class="eyebrow">07 · Brand motion video</div>
+      <h2>品牌动效成片：把 HTML、网页资产和动画确定性渲染成视频</h2>
+      <p>该方案的核心不是扩散模型，而是让 AI 编写普通 HTML/CSS 和可按时间定位的 GSAP、Web Animations、Lottie、Three.js 等动画，再用 App 内置完整 Chromium 的独立无头进程逐帧截图，最后交给 FFmpeg 编码。它非常适合产品发布、网站演示、数据图表、标题动画、代码讲解和品牌模板化视频。</p>
+      <p>上游默认下载 <code>chrome-headless-shell 152.0.7928.2</code>，但源码明确支持通过 <code>chromePath</code> / <code>HYPERFRAMES_BROWSER_PATH</code> 使用普通 Chrome。它并非在所有平台都只有一种取帧方式：macOS、Windows 即使用自带无头壳也默认通过 <code>Page.captureScreenshot</code> 逐帧取图；Linux 配合无头壳时优先使用 <code>HeadlessExperimental.beginFrame</code> 驱动合成器，方法不可用或强制截图时再回退。因此在本项目当前两个目标平台共用完整 Chromium 不会改变原本的取帧方式，仍需验证 Puppeteer/CDP、字体、GPU、视频解码、透明画面和结果稳定性。</p>
+      <p>规划因此改为优先只打包 Playwright 严格匹配的完整 Chromium：RPA 用可见持久进程，视频用独立无头临时进程。不能让 RPA 使用上游无头壳，因为它没有可供扫码、验证码和人工接管的正常窗口。</p>
+      <div class="callout blue">
+        <strong>共用验证必须成为最前置门禁。</strong>
+        在开发浏览器打包、视频页面和渲染适配器之前，先在 macOS/Windows 用同一 Chromium 验证 RPA 启动、12 套风格、公开 100 项动效冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏和并发隔离。通过后 Manifest 只允许这一套浏览器，后续禁止上游下载或发现第二套；失败则先调整共同版本重跑，再单独决策，不静默双打包。
+      </div>
+
+      <div class="callout verdict">
+        <strong>判断：适合作为本期第二种视频制作方式，但不要把官网示例中的人物误判为内置真人生成。</strong>
+        渲染器可以把现有的人物讲话视频、自拍视频或数字人视频放进全屏/小窗并叠加字幕、图表和转场；人物、声音和口型本身需要由其他服务预先生成，或由用户提供授权素材。
+      </div>
+
+      <div class="flow" aria-label="品牌动效成片流水线">
+        <div class="node"><b>1. 输入</b><small>一句话、品牌资料，或获授权的公开网站 URL。</small></div>
+        <div class="node"><b>2. 脚本与分镜</b><small>锁定一个核心信息，拆成逐镜头文案、布局和节奏。</small></div>
+        <div class="node"><b>3. 整体风格</b><small>从 12 套 frame.md 中选择，并映射品牌色、字体和 Logo。</small></div>
+        <div class="node"><b>4. 动效零件</b><small>按镜头调用转场、字幕、图表、身份条和 3D 效果。</small></div>
+        <div class="node"><b>5. 验收与渲染</b><small>lint、截图预览、用户确认、逐帧渲染、成片入库。</small></div>
+      </div>
+
+      <h3>网址转视频不是“录屏”，而是抓取品牌后重新编排</h3>
+      <p>官网的 URL → Video 会抓取页面各滚动位置的截图、计算后的配色、字体文件、图片、SVG、Lottie、页面视频、可见文字、区块、按钮和动画，再由 Agent 生成品牌说明、脚本、分镜、旁白和 HTML 镜头。它可以做品牌短片、产品演示、发布预告或功能介绍，并支持 16:9 / 9:16、旁白、字幕、音乐、音效、声音和核心信息设置。</p>
+      <div class="callout warn">
+        <strong>不能直接调用官网私有接口，也不能裸用上游 capture 处理任意网址。</strong>
+        App 应使用 submodule 中公开的 capture 与工作流，在自己的 Worker 内执行。上游素材下载已对部分私网地址和重定向做拒绝，但主页面导航仍直接调用 <code>page.goto(url)</code>；外围必须补协议、DNS/IP、每次跳转、请求拦截、私网/云元数据、DNS 重绑定和网页指令注入防护。首期只抓用户拥有或获准使用的公开网站，不抓登录后页面。
+      </div>
+
+      <h3>官网当前公开的 12 套整体风格</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>App 中文名</th><th>内部映射</th><th>视觉特点</th><th>适用内容</th></tr></thead>
+          <tbody>
+            <tr><td>艺展暖黄</td><td><code>biennale-yellow</code></td><td>暖纸色、黄色光晕、靛蓝文字</td><td>文化活动、人文与品牌故事</td></tr>
+            <tr><td>撞色方框</td><td><code>blockframe</code></td><td>粗黑边、硬阴影、糖果撞色</td><td>年轻品牌、活动和产品卖点</td></tr>
+            <tr><td>商务蓝</td><td><code>blue-professional</code></td><td>米白底、钴蓝主色、克制排版</td><td>企业、咨询、数据周报</td></tr>
+            <tr><td>醒目海报</td><td><code>bold-poster</code></td><td>倾斜大字、红色强调、杂志感</td><td>活动宣发、榜单和金句</td></tr>
+            <tr><td>宣言橙黑</td><td><code>broadside</code></td><td>工业报纸、黑色与火焰橙</td><td>观点、趋势和品牌宣言</td></tr>
+            <tr><td>糖果胶囊</td><td><code>capsule</code></td><td>胶囊组件、糖果色、衬线标题</td><td>生活方式、新品和功能清单</td></tr>
+            <tr><td>留白坐标</td><td><code>cartesian</code></td><td>大留白、暖纸色、细分隔线</td><td>方法论、步骤和专业知识</td></tr>
+            <tr><td>钴蓝网格</td><td><code>cobalt-grid</code></td><td>编辑式纸张、钴蓝网格</td><td>研究、数据和科技内容</td></tr>
+            <tr><td>珊瑚标题</td><td><code>coral</code></td><td>窄体大标题、珊瑚色、鲜明节奏</td><td>快消、教程和运动主题</td></tr>
+            <tr><td>创意硬朗</td><td><code>creative-mode</code></td><td>超粗标题、饱和点缀、等宽数据字</td><td>设计、潮流产品和幕后过程</td></tr>
+            <tr><td>雏菊晴日</td><td><code>daisy-days</code></td><td>花园粉彩、深色描边、圆润字体</td><td>亲子、教育、手作和温暖生活</td></tr>
+            <tr><td>森林刊物</td><td><code>editorial-forest</code></td><td>绿粉奶油三色、衬线刊物感</td><td>自然、可持续、人文和慢生活</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>官网当前是 12 套；仓库里的 <code>code-editorial</code> 没有出现在公开设计画廊，首期不混入用户选择。每套都要展示真实预览、适用场景、明暗和信息密度，推荐 2～3 套但允许展开全部 12 套。每个 RenderJob 冻结风格 ID、上游版本、源摘要、品牌 token 摘要和最终 frame.md，保证当前锁定版本内的任务可以重现；首发规划不增加跨版本项目迁移逻辑。</p>
+
+      <h3>Catalog 的“100”是动效零件，不是 100 套视频风格</h3>
+      <p>官网公开 Catalog 当前正好是 100 项：76 个可独立使用的完整画面块和 24 个局部组件。官网的 Showcase、Captions、VFX、Transitions、Social、Data、Effects 和 Overlays 是重叠标签，不能相加当总数。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>主分类</th><th>数量</th><th>用途</th></tr></thead>
+          <tbody>
+            <tr><td>转场</td><td>30</td><td>缩放、模糊、翻页、闪光、故障、粒子和 shader 变化</td></tr>
+            <tr><td>字幕</td><td>15</td><td>逐词高亮、霓虹、渐变、弹跳、打字和关键词强调</td></tr>
+            <tr><td>画面内复杂效果</td><td>12</td><td>液态背景、玻璃效果、3D 设备和 WebGL/WebGPU</td></tr>
+            <tr><td>人名与身份条</td><td>11</td><td>采访、播客和新闻的姓名、职位与重点信息</td></tr>
+            <tr><td>数据与地图</td><td>7</td><td>图表、地图、气泡、连接线和区域数据</td></tr>
+            <tr><td>社交平台展示</td><td>7</td><td>关注卡、帖子卡、播放卡和通知卡</td></tr>
+            <tr><td>产品与案例展示</td><td>6</td><td>App、产品、路线、统计和 3D UI</td></tr>
+            <tr><td>文字效果</td><td>3</td><td>纹理文字、闪光和自动反色</td></tr>
+            <tr><td>流程图</td><td>2</td><td>步骤、判断和关系说明</td></tr>
+            <tr><td>其他单项</td><td>7</td><td>Logo 片尾、新闻条、暗角等</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>技术上可通过官方 <code>hyperframes add</code> 安装，但不能原样无审计打包。固定的 v0.7.68 registry 已有 134 个可安装零件，比公开页多 34 个；首期只把官网可预览的 100 个作为用户基线。多个零件仍引用 jsDelivr、Google Fonts、gstatic 或 Cloudflare CDN；3D/WebGPU 要做双平台和低配置验证；示例里的头像、音效、Apple/macOS/iOS、TikTok、Instagram、X 和 Spotify 等需要替换或单独确认权利。</p>
+
+      <div class="two">
+        <article class="card">
+          <h3>普通用户看到的三层选择</h3>
+          <ul>
+            <li>视频类型：品牌短片、产品演示、发布预告、功能介绍。</li>
+            <li>整体风格：12 套，决定整条视频的视觉语言。</li>
+            <li>高级动效库：100 个零件，按转场、字幕、图表、身份条等中文分类。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>默认自动，允许高级覆盖</h3>
+          <ul>
+            <li>AI 根据分镜自动选择零件，普通用户不需要浏览 100 个技术名。</li>
+            <li>高级用户可以逐镜头覆盖，并看到预览、性能等级、适用场景和权利提示。</li>
+            <li>远程依赖全部冻结为本地文件，未知资源和缺少摘要的零件不得渲染。</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3>官网人像示例为什么会说话</h3>
+      <p>实查 <code>avatar-explainer</code> 预览，页面加载了 <code>avatar-scene12-bg-video.mp4</code> 和 <code>avatar-scene3-bg-video.mp4</code>，并把人物画面与对应音轨作为普通媒体元素组合；财务复盘示例也加载了现成的人物讲话视频。这说明它能“剪和包装已有说话人物素材”，不说明它能本地生成人物或口型。素材可能来自 HeyGen 数字人服务，也可能由作者上传，公开页面无法进一步确认。</p>
+      <p>本期只允许用户把已有授权的人物视频当作输入素材，不提供数字人创建、真人克隆或口型生成入口；相关能力留到未来第三种方案。</p>
     </section>
 
     <section id="editing">
-      <div class="eyebrow">07 · Alibaba cloud editing</div>
+      <div class="eyebrow">08 · Alibaba cloud editing</div>
       <h2>阿里云剪辑：用 IMS/ICE Timeline API，不把 WebSDK 放进 MVP</h2>
       <p>阿里智能媒体服务的云剪辑支持多视频、音频、图片裁剪拼接，以及字幕、贴纸、滤镜、特效、转场、TTS/ASR 和高级模板。后端可提交 <code>SubmitMediaProducingJob</code>，由异步任务输出成片。这与仓库现有 provider-neutral <code>Timeline</code> 规划吻合。</p>
 
@@ -477,7 +598,7 @@
     </section>
 
     <section id="publishing">
-      <div class="eyebrow">08 · Publishing, comments and messaging</div>
+      <div class="eyebrow">09 · Publishing, comments and messaging</div>
       <h2>内容发布最新矩阵：只有 B 站可直接按“无人值守服务端投稿”设计</h2>
       <p>本节按 2026-07-22 能直接打开的官方页面重新核验，不采用搜索引擎缓存或民间逆向接口。这里的“有接口”还要区分三种产品形态：服务端可提交、官方 SDK/H5 只负责唤起发布器、完全没有普通内容投稿 API。</p>
 
@@ -554,12 +675,12 @@
     </section>
 
     <section id="roadmap">
-      <div class="eyebrow">09 · Delivery plan</div>
+      <div class="eyebrow">10 · Delivery plan</div>
       <h2>建议的落地路线与验收门槛</h2>
       <div class="timeline">
         <div class="milestone">
-          <b>P0 · 依赖与安全 spike（2–3 天）</b>
-          <span>锁定 Browser Use 版本；验证 Python 3.12、PyInstaller/Tauri sidecar、Windows/macOS；验证 CDP loopback 隔离、独立 profile、遥测关闭、工具裁剪。任一硬门禁失败就不进入生产集成。</span>
+          <b>P0 · 依赖、安全与共用浏览器前置验证（3–5 天）</b>
+          <span>锁定 Browser Use、Playwright 与完整 Chromium；最先在 macOS/Windows 验证同一浏览器二进制能分别以可见 RPA 进程和隔离无头渲染进程运行，覆盖 12 套风格、100 项动效与关键媒体/GPU 矩阵。同时验证 Python 3.12、PyInstaller/Tauri sidecar、CDP loopback、独立 Profile、遥测关闭和工具裁剪。任一硬门禁失败就不进入后续集成。</span>
         </div>
         <div class="milestone">
           <b>P1 · 通用网页只读 Agent（约 1 周）</b>
@@ -570,8 +691,8 @@
           <span>先把 Browser Use 放在现有搜索/评论/私信状态机的“候选定位”位置。构造 30+ 个 DOM/文案/遮罩变体；真实账号只做观察，再做一次人工批准的低风险回复。</span>
         </div>
         <div class="milestone">
-          <b>P3 · 30 秒视频闭环 PoC（2–3 周）</b>
-          <span>先用 MoneyPrinterTurbo v1.3.2 跑通低成本 stock_montage 基线，再实现 ContentBrief/ShotPlan/Timeline 与 Wan T2V + I2V/R2V + TTS/S2V 路由；IMS 与 FFmpeg 两个渲染 Provider；产出 3 类样片并记录质量、耗时和真实成本。</span>
+          <b>P3 · 30 秒视频闭环技术验证（2–3 周）</b>
+          <span>先跑通“智能素材成片”和“品牌动效成片”两条路线，共用 ContentBrief、分镜、Timeline 与 Artifact；验证一句话成片、网址转产品视频、12 套整体风格和 100 个动效零件，并记录质量、耗时和真实成本。真人生成不在本期任务内。</span>
         </div>
         <div class="milestone">
           <b>P4 · 分平台发布能力接入（约 2–3 周）</b>
@@ -583,7 +704,7 @@
         </div>
       </div>
 
-      <h3>PoC 通过标准</h3>
+      <h3>技术验证通过标准</h3>
       <div class="table-wrap">
         <table>
           <thead><tr><th>维度</th><th>必须达到</th></tr></thead>
@@ -593,14 +714,14 @@
             <tr><td>页面韧性</td><td>30+ 个结构/文案/遮罩变体中，读任务成功率 ≥95%；副作用任务宁可拒绝，也不得点错目标。</td></tr>
             <tr><td>视频</td><td>3 类 30 秒样片均可局部重做、自动成片；人物/产品/字幕/技术规格通过预设 QA；成本和延迟可追溯。</td></tr>
             <tr><td>分发</td><td>B站 API 能取回 resource_id/审核状态；快手与抖音保留规范要求的用户确认；小红书/视频号浏览器路径有独立终态证据；验证码可暂停并恢复。</td></tr>
-            <tr><td>交付</td><td>macOS/Windows 正式包、离线迁移、版本锁定、审计导出、kill switch 全部验证。</td></tr>
+            <tr><td>交付</td><td>macOS/Windows 正式包全新安装、版本锁定、审计导出、kill switch 和资源清理全部验证。</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
     <section id="risks">
-      <div class="eyebrow">10 · Risk register</div>
+      <div class="eyebrow">11 · Risk register</div>
       <h2>主要风险与止损点</h2>
       <div class="table-wrap">
         <table>
@@ -626,7 +747,7 @@
     </section>
 
     <section id="sources">
-      <div class="eyebrow">11 · Primary sources</div>
+      <div class="eyebrow">12 · Primary sources</div>
       <h2>主要资料与核对范围</h2>
       <p>以下均为官方仓库、官方文档或监管机构来源；易变化的版本、模型、价格与平台权限按 2026-07-22 记录，实施时应在控制台再次确认。</p>
       <ol class="sources">
@@ -646,6 +767,10 @@
         <li><a href="https://github.com/harry0703/MoneyPrinterTurbo">MoneyPrinterTurbo 官方仓库与 README</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/releases/tag/v1.3.2">v1.3.2 最新正式版</a>（2026-07-12）</li>
         <li><a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/app/services/task.py">MoneyPrinterTurbo v1.3.2 任务流水线</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/app/services/material.py">素材检索与下载</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/app/services/video.py">MoviePy/FFmpeg 合成</a></li>
         <li><a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/LICENSE">MoneyPrinterTurbo MIT License</a>；<a href="https://github.com/harry0703/MoneyPrinterTurbo/blob/v1.3.2/pyproject.toml">v1.3.2 运行时依赖</a></li>
+        <li><a href="https://github.com/heygen-com/hyperframes">Hyperframes 官方仓库</a>；<a href="https://github.com/heygen-com/hyperframes/releases/tag/v0.7.68">v0.7.68 正式版</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/LICENSE">Apache-2.0 License</a></li>
+        <li><a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/engine/src/services/browserManager.ts">浏览器启动、BeginFrame 探测与截图回退源码</a>；<a href="https://github.com/heygen-com/hyperframes/blob/v0.7.68/packages/producer/README.md">macOS/Windows 默认截图模式说明</a></li>
+        <li><a href="https://www.hyperframes.dev/design">官网 12 套 frame.md 整体风格</a>；<a href="https://www.hyperframes.dev/">官网公开 100 项 Catalog 与 Examples</a>；<a href="https://www.hyperframes.dev/website">官网 URL → Video 页面</a></li>
+        <li><a href="https://hyperframes.heygen.com/guides/website-to-video">Website to Video 官方工作流</a>；<a href="https://hyperframes.heygen.com/catalog/blocks/data-chart">Catalog 官方说明与安装入口</a></li>
         <li><a href="https://www.pexels.com/license/">Pexels License</a>；<a href="https://pixabay.com/service/license-summary/">Pixabay Content License</a>；<a href="https://coverr.co/license">Coverr License</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/use-video-generation">阿里云百炼：视频生成模型选型</a></li>
         <li><a href="https://help.aliyun.com/zh/model-studio/text-to-video-api-reference">Wan 2.7 文生视频 API</a>；<a href="https://help.aliyun.com/zh/model-studio/wan-image-to-video-guide">图生视频指南</a></li>
