@@ -8,6 +8,7 @@ pub mod browser_discovery;
 pub mod browser_profiles;
 pub mod browser_settings;
 pub mod control_plane;
+pub mod deployment_profile;
 pub mod device_credentials;
 pub mod device_identity;
 mod diagnostic_export;
@@ -2877,13 +2878,18 @@ async fn run_control_plane_acceptance(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let deployment_profile =
+        deployment_profile::DeploymentProfile::load().expect("deployment profile rejected");
     let update_configuration = app_update_coordinator::UpdateRuntimeConfiguration::load()
         .expect("desktop update configuration rejected");
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
-            app.manage(control_plane::ControlPlaneClient::local()?);
-            let app_data_directory = app.path().app_data_dir()?;
+            app.manage(control_plane::ControlPlaneClient::for_deployment_profile(
+                &deployment_profile,
+            )?);
+            let app_data_root = app.path().app_data_dir()?;
+            let app_data_directory = deployment_profile.prepare_data_directory(&app_data_root)?;
             let update_policy =
                 std::sync::Arc::new(app_update_policy::UpdatePolicyService::initialize(
                     &app_data_directory,

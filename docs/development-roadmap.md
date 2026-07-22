@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发的任务定义、依赖、状态与当前下一步台账；详细执行证据按任务拆分到 [`docs/development/`](./development/)
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-06、C10-01～C10-06 已完成，下一工程任务为 C10-07 App Demo Profile
+> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-06、C10-01～C10-07 已完成，下一工程任务为 C10-08 云端部署
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 > 当前开发终点：完成 Wave 10 全部任务后停止；第 16 节“RPA 运营增强路线图”及之后任务本轮不启动
 
@@ -405,7 +405,7 @@
 | C10-04 | HTTPS/域名 | TLS、反代、请求大小/超时/限流和安全头 | C10-02 | ✅ 已完成 |
 | C10-05 | Secret 管理 | DB、账号 Session 签发、密码 Pepper 与设备签发密钥；不进入镜像、Git 或日志 | C10-02,C10-03,U9-03 | ✅ 已完成 |
 | C10-06 | Demo 账号初始化与运维 | 通过 U9 认证运维入口创建、停用和重置 Demo 账号，固定最小权限、审计和应急全 Session/设备吊销 | U9-06,C10-05 | ✅ 已完成 |
-| C10-07 | App Demo Profile | 签名 baseUrl/允许域名；local/demo 账号 Session、设备凭据和数据隔离 | F1-09,C10-04,C10-06 | ⬜ 未开始 |
+| C10-07 | App Demo Profile | 签名 baseUrl/允许域名；local/demo 账号 Session、设备凭据和数据隔离 | F1-09,C10-04,C10-06 | ✅ 已完成 |
 | C10-08 | 云端部署 | 执行迁移、启动单实例、健康检查；不自动扩容多副本 | C10-03..C10-07 | ⬜ 未开始 |
 | C10-09 | 云端协议回归 | 同一 OpenAPI/fixtures，App 只切 baseUrl，无业务代码变化 | C10-08 | ⬜ 未开始 |
 | C10-10 | 网络/重启恢复 | 服务器重启、网络抖动、Executor 重连和事件续传 | C10-09,H8-07 | ⬜ 未开始 |
@@ -566,6 +566,6 @@
 9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
 10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；
 11. `U9-04`（✅ 已完成）：customer-demo 外层账号门禁、Rust 私有账号 Session vault、登录/恢复/改密/注销、离线 fail-closed、重启 refresh 和隐藏真实 Tauri 未登录边界已完成；React 不接收 bearer secret；
-12. `C10-06`（✅ 已完成）：Demo 账号运维最小权限、创建/停用/恢复/重置和应急全 Session/所属设备原子吊销已完成；下一工程任务为 `C10-07`；
+12. `C10-07`（✅ 已完成）：签名 Demo origin/allowlist 原生信任边界、HTTPS/WSS Transport 与 local/demo 全私有数据 namespace 隔离已完成；下一工程任务为 `C10-08`；
 13. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
 14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。

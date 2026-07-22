@@ -14,6 +14,7 @@ use uuid::Variant;
 use zeroize::Zeroizing;
 
 use crate::account_session_vault::AccountSessionSecrets;
+use crate::deployment_profile::{DeploymentProfile, DeploymentProfileKind};
 use crate::device_credentials::{
     DeviceCredentialErrorCode, DeviceCredentialVault, StoredDeviceCredential,
 };
@@ -508,9 +509,47 @@ fn validated_loopback_origin(source: &str) -> Result<(String, String), ControlPl
     ))
 }
 
+fn validated_demo_origin(
+    source: &str,
+    allowed_hosts: &[String],
+) -> Result<(String, String), ControlPlaneError> {
+    let parsed = reqwest::Url::parse(source).map_err(|_| protocol_invalid())?;
+    let host = parsed.host_str().ok_or_else(protocol_invalid)?;
+    let canonical = format!("https://{host}");
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || source != canonical
+        || !allowed_hosts.iter().any(|allowed| allowed == host)
+    {
+        return Err(protocol_invalid());
+    }
+    Ok((canonical, format!("wss://{host}/api/v1/executors/connect")))
+}
+
 impl ControlPlaneClient {
     pub fn local() -> Result<Self, ControlPlaneError> {
         let configured = validated_loopback_origin(configured_local_control_plane_origin())?;
+        Self::from_validated_origins(configured)
+    }
+
+    pub fn for_deployment_profile(profile: &DeploymentProfile) -> Result<Self, ControlPlaneError> {
+        let configured = match profile.kind() {
+            DeploymentProfileKind::Local => {
+                validated_loopback_origin(configured_local_control_plane_origin())?
+            }
+            DeploymentProfileKind::Demo => {
+                validated_demo_origin(profile.base_url(), profile.allowed_hosts())?
+            }
+        };
+        Self::from_validated_origins(configured)
+    }
+
+    fn from_validated_origins(configured: (String, String)) -> Result<Self, ControlPlaneError> {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(10))
@@ -3741,8 +3780,8 @@ mod tests {
         parse_workbench_metrics, parse_workbench_status, request_path, require_idempotency_key,
         require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
         transport_error, validate_preview_command, validate_response_metadata,
-        validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
-        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        validated_demo_origin, validated_loopback_origin, ControlPlaneErrorCode,
+        ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
@@ -4016,6 +4055,32 @@ mod tests {
             "http://127.0.0.1:43123?private=value",
         ] {
             assert!(validated_loopback_origin(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn signed_demo_origin_accepts_only_an_exact_allowlisted_https_origin() {
+        let allowed = vec!["api.automation-tool.test".to_owned()];
+        assert_eq!(
+            validated_demo_origin("https://api.automation-tool.test", &allowed)
+                .expect("canonical Demo origin"),
+            (
+                "https://api.automation-tool.test".to_owned(),
+                "wss://api.automation-tool.test/api/v1/executors/connect".to_owned(),
+            )
+        );
+        for invalid in [
+            "http://api.automation-tool.test",
+            "https://api.automation-tool.test.evil.test",
+            "https://operator@api.automation-tool.test",
+            "https://api.automation-tool.test:443",
+            "https://api.automation-tool.test/api",
+            "https://api.automation-tool.test?private=value",
+        ] {
+            assert!(
+                validated_demo_origin(invalid, &allowed).is_err(),
+                "{invalid}"
+            );
         }
     }
 
