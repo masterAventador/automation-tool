@@ -542,6 +542,10 @@ H8-18～H8-22 的自动更新采用“官方安装底座 + 自有通用策略层
 
 App 可见状态闭集为 `idle/checking/up_to_date/available/downloading/ready/installing/failed`，检查来源闭集为 `startup/periodic/manual`，用户决策闭集为 `install_now/defer/skip_version`。H8-19 起由 Rust 通用协调层实现状态转换和持久策略，H8-20 再统一启动、有界周期与“检查更新”入口并把已验签字节原子写入 App 私有缓存；H8-21 负责安全退出和安装。缓存始终只保留当前候选，新版本原子替换旧包；强更在下载完成后的下次 App 启动直接进入安装，可选更新继续走同一提示流程。该层只依赖版本、平台、签名、发布策略和安装状态，不引用抖音、任务、客户或其他业务概念，以便跨项目复用。
 
+H8-19 已实现 `UpdatePolicyService`，并在正式 Tauri setup 中以当前 `package_info().version`、固定 stable channel 和当前 AppData 初始化唯一实例。私有 `app-updates/update-policy-v1` 使用规范 JSON schema v1，只保存配置 channel、不会下降的已安装版本下限、最高已观察发布的 `version/channel/policy/target/arch/sha256/sizeBytes` identity、最后一次可选决策和单调 revision；不保存 URL、Minisign signature、notes、本机路径或任何业务数据。存储复用 App 私有原子替换，Unix 固定 `0700/0600`，损坏、未来 schema、symlink、宽权限或写入失败均不推进内存状态。
+
+策略转换固定如下：新的更高版本清除旧暂缓/跳过；`defer` 仅关闭本次提示，下一次启动、周期或手动检查重新观察同一发布时再次提示；`skip_version` 只压制 identity 不变的当前版本；`install_now` 作为待安装意图跨重启保留，直到实际 App 版本达到候选才清除。强制发布不接受任何用户决策；低于版本下限/最高已见版本的发布、同版本换策略/摘要/目标、一次提示上的第二次点击，以及被压制或已请求安装状态下的过期决策均拒绝。H8-20/H8-21 只能消费该策略结果，不能在 scheduler、React 或安装器中复制另一套判断。
+
 ## 15. 禁止事项
 
 - 禁止建设、部署或对外交付 Web 版；

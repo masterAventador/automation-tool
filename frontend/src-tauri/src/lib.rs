@@ -1,3 +1,4 @@
+pub mod app_update_policy;
 pub mod app_updates;
 pub mod browser_discovery;
 pub mod browser_profiles;
@@ -57,6 +58,23 @@ struct BrowserSettingsCommandError {
 struct DiagnosticExportCommandError {
     code: &'static str,
     retryable: bool,
+}
+
+#[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatePolicyAcceptanceError {
+    code: &'static str,
+}
+
+#[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
+#[tauri::command]
+fn get_update_policy_record_for_acceptance(
+    policy: tauri::State<'_, app_update_policy::UpdatePolicyService>,
+) -> Result<app_update_policy::UpdatePolicyRecord, UpdatePolicyAcceptanceError> {
+    policy.record().map_err(|_| UpdatePolicyAcceptanceError {
+        code: "storage_unavailable",
+    })
 }
 
 fn map_diagnostic_export_error(
@@ -2572,6 +2590,11 @@ pub fn run() {
     let builder = tauri::Builder::default().setup(|app| {
         app.manage(control_plane::ControlPlaneClient::local()?);
         let app_data_directory = app.path().app_data_dir()?;
+        app.manage(app_update_policy::UpdatePolicyService::initialize(
+            &app_data_directory,
+            &app.package_info().version.to_string(),
+            app_updates::DEFAULT_UPDATE_CHANNEL,
+        )?);
         app.manage(browser_settings::BrowserSettingsService::initialize(
             &app_data_directory,
         )?);
@@ -2625,7 +2648,8 @@ pub fn run() {
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,
         get_browser_settings,
-        select_browser
+        select_browser,
+        get_update_policy_record_for_acceptance
     ]);
     #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
     let builder = builder.invoke_handler(tauri::generate_handler![

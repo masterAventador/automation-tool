@@ -142,6 +142,7 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
+│   │   ├── app_update_policy.rs   # 可选/强制更新决策、单调版本与 App 私有持久状态
 │   │   ├── app_updates.rs         # 官方 updater raw JSON 校验与通用状态/决策契约
 │   │   ├── browser_discovery.rs  # macOS/Windows 标准浏览器原生发现、签名与路径 identity
 │   │   ├── browser_profiles.rs   # 固定抖音 UUIDv4 Profile、稳定 identity 与跨平台组合根
@@ -247,6 +248,8 @@ B5-04 的 `browser_settings.rs` 是选择边界而不是第二套发现逻辑。
 B5-05 的 `browser_profiles.rs` 是后续浏览器运行时唯一 Profile 组合根。Tauri setup 从自身 AppData 管理唯一 Store；它当前只允许本机生成/打开 canonical UUIDv4 抖音 Profile，未注册 WebView Command。Unix 用父目录 fd 相对创建/打开并保持 dev+inode，Windows 用父 HANDLE 相对 `NtCreateFile` 并保持 volume/file index；每层私有权限、symlink/reparse、最终路径和重开 identity 均 fail closed。B5-06/B5-07 必须继续使用该对象，不能重新从字符串路径构造 Profile。
 
 H8-18 的 `src-tauri/src/app_updates.rs` 是 updater 原生响应进入产品状态前的唯一契约边界。官方 `tauri-plugin-updater` 持有网络 URL、签名和安装对象；该模块只从其 `raw_json` 验证通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的闭集投影版本、channel、可选/强制策略、平台、架构、摘要、大小和安全发布说明。React 不导入 updater binding，Capability 不开放 updater Command；H8-19～H8-21 必须继续在这个 Rust 边界内实现策略、私有缓存和安装协调，不能在业务 Feature 复制状态机。
+
+H8-19 的 `src-tauri/src/app_update_policy.rs` 是唯一更新决策机。正式 Tauri setup 管理单实例，它以包版本建立不会下降的 floor，并在 `app-updates/update-policy-v1` 原子保存最高已见 release identity、可选决策和 revision；持久文件没有 URL、签名、notes、路径或业务数据。每次提示只接受一个决策，新观察才允许再次决策；强更、回退、同版本换包和存储失败全部拒绝。后续 scheduler、下载缓存、安装协调和 UI 只消费它的 action，不得自行解释 `defer/skip/forced`。
 
 规则：
 
