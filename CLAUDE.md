@@ -151,6 +151,8 @@ App 管理的独立运营 Profile
 - AI 模型通过供应商无关 Adapter 接入；第一期 RPA 闭环不得依赖 AI 调用才能运行；
 - 禁止修改 Playwright、Tauri、FastAPI、LangGraph、模型 SDK 等第三方源码，禁止 Monkey Patch、私有 Fork 或复制内部实现；
 - `vendor/moneyprinterturbo` 与 `vendor/hyperframes` 只允许按 `contracts/quality/third-party-sources.v1.json` 的正式 tag/完整 commit 作为只读 Submodule 存在；禁止在 Submodule 内修改、跟随 branch/latest、运行时更新或绕过 `scripts/check_third_party_sources.py`。升级必须使用独立任务并同步 Gitlink、许可证摘要、资产权利清单和 SBOM；
+- 用户界面中的两种视频制作方式只允许显示“智能素材成片”和“品牌动效成片”；两个上游项目名只能出现在代码、内部诊断、SBOM 和独立第三方软件声明页，禁止进入菜单、卡片、按钮、帮助、错误、日志、任务、无障碍名称、文件名或导出。用户文案使用 `contracts/quality/user-facing-terminology.v1.json` 的通俗映射，禁止出现未解释的 `B-roll`、`PoC` 等术语，并运行 `scripts/check_user_facing_branding.py`；
+- 内置浏览器、Browser Use、视频制作和剪辑必须遵守 `contracts/security/embedded-browser-video-threat-model.v1.json`：随机 loopback Worker、生成 HTML、素材下载、密钥、路径和名称泄漏六类边界均默认拒绝并做失败矩阵；
 - 遇到上游问题依次使用公开扩展点、外围适配、锁定可用版本和提交上游 Issue/PR。
 
 ## 7. 安全与隐私

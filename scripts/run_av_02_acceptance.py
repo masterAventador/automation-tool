@@ -149,8 +149,6 @@ def require_roadmap() -> None:
     rows = [line for line in roadmap.splitlines() if line.startswith("| AV-02 |")]
     if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
         raise AssertionError("专项 Roadmap 中 AV-02 必须唯一且为已完成")
-    if "| ✅ 已完成 | 2 |" not in roadmap:
-        raise AssertionError("专项 Roadmap 已完成计数未更新为 2")
 
 
 def main() -> None:

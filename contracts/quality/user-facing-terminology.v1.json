@@ -1,0 +1,100 @@
+{
+  "version": "user-facing-terminology.v1",
+  "locale": "zh-CN",
+  "videoCreationMethods": [
+    {
+      "id": "material_montage_v1",
+      "displayName": "智能素材成片",
+      "suitableFor": "知识讲解、观点、榜单、教程和旁白配字幕，并自动匹配城市、办公、做饭等补充画面",
+      "notSuitableFor": "固定真人连续出镜、电影感剧情、精确产品动作或同一人物跨镜头保持一致",
+      "example": "输入一段护肤知识，自动生成旁白、字幕，并配上洗脸、护肤品和生活场景画面"
+    },
+    {
+      "id": "motion_composition_v1",
+      "displayName": "品牌动效成片",
+      "suitableFor": "品牌宣传、产品发布、数据图表、产品界面演示、标题动画和代码讲解",
+      "notSuitableFor": "只凭一句话生成逼真人物、自然运动或真实世界复杂镜头",
+      "example": "输入一次产品更新，按品牌颜色生成标题、功能界面、数据和转场动画"
+    }
+  ],
+  "plainLanguageMappings": {
+    "B-roll": "补充画面",
+    "PoC": "前期验证",
+    "Provider": "制作方式",
+    "Worker": "本机视频服务",
+    "Artifact": "素材或成片",
+    "LLM": "文案模型或视频创作模型",
+    "Timeline": "剪辑时间线",
+    "RenderJob": "视频生成任务",
+    "Browser Use": "智能网页操作",
+    "Chromium": "浏览器组件",
+    "SBOM": "第三方软件清单"
+  },
+  "forbiddenUserFacingTerms": [
+    "MoneyPrinterTurbo",
+    "Money Printer Turbo",
+    "Money-Printer-Turbo",
+    "Hyperframes",
+    "Hyper Frames",
+    "Hyper-Frames",
+    "B-roll",
+    "B roll",
+    "broll",
+    "PoC",
+    "proof of concept"
+  ],
+  "forbiddenSurfaces": [
+    "menu",
+    "route_title",
+    "creation_method_card",
+    "button",
+    "form_label",
+    "help_text",
+    "loading_text",
+    "error",
+    "notification",
+    "accessibility_name",
+    "task_name",
+    "log",
+    "artifact_filename",
+    "export"
+  ],
+  "allowedLegalDisclosurePaths": [
+    "frontend/src/features/legal/third-party-software/**"
+  ],
+  "staticScan": {
+    "roots": [
+      "frontend/index.html",
+      "frontend/src",
+      "frontend/src-tauri/tauri.conf.json"
+    ],
+    "excludedGlobs": [
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/__tests__/**",
+      "**/test/**",
+      "**/test-harness/**",
+      "frontend/src/api/**",
+      "frontend/src/platform/**",
+      "frontend/src/schemas/**",
+      "frontend/src/stores/**"
+    ],
+    "textExtensions": [
+      ".css",
+      ".html",
+      ".json",
+      ".md",
+      ".scss",
+      ".ts",
+      ".tsx"
+    ],
+    "maximumFileBytes": 1048576
+  },
+  "rules": [
+    "internal_provider_ids_never_become_display_names",
+    "raw_worker_submodule_or_provider_errors_never_reach_users",
+    "technical_terms_use_plain_language_mapping_or_immediate_explanation",
+    "upstream_names_only_appear_on_separate_required_legal_page",
+    "safe_task_export_and_artifact_names_use_product_terms_only"
+  ]
+}

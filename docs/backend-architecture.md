@@ -931,6 +931,10 @@ internal
 
 ## 19. 安全与隐私
 
+AV-03 为后续浏览器与视频链路增加 `contracts/security/embedded-browser-video-threat-model.v1.json`：本地视频 Worker 只绑定随机 loopback 端口并由 Tauri 持有进程树和单会话能力；生成 HTML 在无 Node、默认断网、任务目录受限的独立渲染进程执行；素材下载逐跳防 SSRF、限大小/类型并遵守默认拒绝的权利清单；密钥、绝对路径、运营 Profile 和上游原始错误不得进入模型、WebView、任务、事件、日志或导出。
+
+后端领域和公开协议只使用 `material_montage_v1`、`motion_composition_v1` 等内部 ID。上游名称可以存在于 `vendor/`、Provider Adapter、源码锁和 SBOM，但不能成为公开 Task 名、错误消息、Artifact 文件名或日志字段；原始失败先映射到固定产品错误。任何用户功能最终仍须由正式 App 正常用户路径和真实最终状态验收，直接 Worker/CLI、Mock 或单元测试不能替代。
+
 - local Control Plane 只绑定 loopback；
 - Demo Control Plane 强制 HTTPS、产品账号认证、账号所属 Installation 认证和请求限流；
 - 既有 bootstrap 只允许受控测试/迁移注册，保持最小化、短期且不能调用业务 API；

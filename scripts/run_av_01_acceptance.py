@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 ADR_PATH = REPOSITORY_ROOT / "docs" / "adr" / "0001-embedded-chromium-runtime.md"
 AV_01_EVIDENCE = (
@@ -109,7 +108,6 @@ def main() -> None:
         "docs/embedded-browser-video-studio-roadmap.md",
         (
             "| AV-01 |",
-            "| ✅ 已完成 | 1 |",
             "docs/development/<任务ID>.md",
         ),
     )

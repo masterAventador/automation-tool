@@ -38,6 +38,7 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - [任务级开发路线图与进度台账](docs/development-roadmap.md)
 - [内置浏览器与视频制作专项 Roadmap](docs/embedded-browser-video-studio-roadmap.md)
 - [第三方源码与许可证治理](docs/third-party-source-governance.md)
+- [内置浏览器与视频安全、术语和用户品牌](docs/embedded-browser-video-security-and-branding.md)
 - [项目协作规则](CLAUDE.md)
 
 克隆仓库后必须初始化锁定的只读上游源码：

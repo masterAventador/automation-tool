@@ -35,7 +35,10 @@ automation-tool/
 │   │   ├── mvp-failure-matrix.v1.json # H8-15 可执行失败矩阵与测试证据登记
 │   │   ├── mvp-spec-review.v1.json # H8-16 MVP 决策、验收状态与修复任务登记
 │   │   ├── third-party-sources.v1.json # 两个只读上游的 tag/commit/许可证锁
-│   │   └── asset-rights-policy.v1.json # 字体/素材/音乐/编解码器等默认拒绝策略
+│   │   ├── asset-rights-policy.v1.json # 字体/素材/音乐/编解码器等默认拒绝策略
+│   │   └── user-facing-terminology.v1.json # 两种中文制作方式、通俗映射与 UI 禁止词
+│   ├── security/
+│   │   └── embedded-browser-video-threat-model.v1.json # Worker/HTML/下载/密钥/路径/品牌威胁模型
 │   └── fixtures/
 │       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
@@ -48,6 +51,7 @@ automation-tool/
 │   ├── frontend-architecture.md
 │   ├── backend-architecture.md
 │   ├── third-party-source-governance.md
+│   ├── embedded-browser-video-security-and-branding.md
 │   ├── development-roadmap.md
 │   ├── embedded-browser-video-studio-roadmap.md # 专项任务、依赖与状态轻量台账
 │   ├── development/                # 每个专项任务一个 `<任务ID>.md` 独立完成证据文件
@@ -77,6 +81,8 @@ automation-tool/
 │   ├── run_av_01_acceptance.py   # 内置 Chromium 架构基线确定性检查
 │   ├── run_av_02_acceptance.py   # 两个 submodule、权利策略与 SBOM 验收
 │   ├── check_third_party_sources.py # 上游 Gitlink/许可证/工作树/SBOM 防漂移门禁
+│   ├── run_av_03_acceptance.py   # 威胁模型、中文术语和用户品牌契约验收
+│   ├── check_user_facing_branding.py # UI 上游名称和未解释术语静态门禁
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
