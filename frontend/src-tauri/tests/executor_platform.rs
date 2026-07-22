@@ -92,6 +92,39 @@ fn app_data_owns_stable_executor_identity_and_fixed_private_paths() {
 }
 
 #[test]
+fn bundled_executor_package_is_separate_from_app_private_state() {
+    let app_data = TemporaryAppData::new();
+    let bundled_package = app_data
+        .path
+        .with_extension("app-resources")
+        .join("package");
+
+    let paths =
+        ExecutorPlatformPaths::from_app_data_and_package_root(&app_data.path, &bundled_package)
+            .expect("separate bundled Executor package root");
+
+    assert_eq!(paths.package_root(), bundled_package);
+    assert_eq!(
+        paths.state_directory(),
+        app_data.path.join("local-executor/state")
+    );
+    assert!(ExecutorPlatformPaths::from_app_data_and_package_root(
+        &app_data.path,
+        &PathBuf::from("relative/package"),
+    )
+    .is_err());
+    assert!(ExecutorPlatformPaths::from_app_data_and_package_root(
+        &app_data.path,
+        &app_data.path.join("local-executor/state"),
+    )
+    .is_err());
+    assert!(
+        ExecutorPlatformPaths::from_app_data_and_package_root(&app_data.path, &app_data.path,)
+            .is_err()
+    );
+}
+
+#[test]
 fn rejects_relative_app_data_and_corrupt_persisted_identity() {
     assert!(ExecutorPlatformPaths::from_app_data(&PathBuf::from("relative")).is_err());
 

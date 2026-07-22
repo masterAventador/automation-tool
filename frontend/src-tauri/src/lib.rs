@@ -2721,9 +2721,22 @@ pub fn run() {
             app.manage(browser_profiles::BrowserProfileStore::initialize(
                 &app_data_directory,
             )?);
-            app.manage(executor_platform::ExecutorPlatformService::initialize(
-                &app_data_directory,
-            )?);
+            #[cfg(debug_assertions)]
+            let executor_platform =
+                executor_platform::ExecutorPlatformService::initialize(&app_data_directory)?;
+            #[cfg(not(debug_assertions))]
+            let executor_platform = {
+                let package_root = app
+                    .path()
+                    .resource_dir()?
+                    .join("local-executor")
+                    .join("package");
+                executor_platform::ExecutorPlatformService::initialize_with_package_root(
+                    &app_data_directory,
+                    &package_root,
+                )?
+            };
+            app.manage(executor_platform);
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
                 &app_data_directory,
             )?);

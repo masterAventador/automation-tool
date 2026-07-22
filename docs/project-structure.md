@@ -498,13 +498,15 @@ E4-11 的 `executor/ledger.py` 是正式 Local Executor 唯一本机 SQLite 入�
 
 E4-12 的 `executor/command_processor.py` 是正式任务帧进入本机账本的唯一应用层；它不导入 FakeExecutor，也不直接访问 Control Plane 仓储。`task.offer` 现在只原子提交 `task.accept/task.started` 并保持 running，绝不再生成固定平台成功；H8-16D 的后续 `action.execute` 必须经过生产 Operation 才能提交 `action.accept/step.started/封闭结果`。`runtime.py` 在 Hello 后恢复并逐条发送 outbox，成功发送后才标 delivered；精确重放不再次访问浏览器或副作用入口。既有 E4-12 验收继续证明进程/账本重放边界，H8-16D 浏览器集成测试证明真实动作入口。该账本没有 Tauri Command/React API；E4-13 只装配生命周期 Adapter，E4-14 已完成隐藏 App 验收。
 
-E4-13 的 `src-tauri/src/executor_platform.rs` 是唯一 App 组合根：包、SQLite 状态和稳定 Executor UUID 都从 Tauri `app_data_dir/local-executor` 固定派生，不接受 WebView 路径；重启所需 Installation 和短期 `executor.connect` Session 只由 Rust Control Plane client 换取。`src/platform/tauri/platform-adapter.ts` 只 invoke 四个无参数生命周期 Command，并对状态和诊断 DTO fail closed；`features/diagnostics` 只消费该接口。账本、Session、PID、路径、包信任参数和原始 stderr 都不进入 React。
+E4-13 的 `src-tauri/src/executor_platform.rs` 是唯一 App 组合根：SQLite 状态和稳定 Executor UUID 从 Tauri `app_data_dir/local-executor` 固定派生，debug 包根也保留在该目录；P9-03 的 release 包根改由 Tauri `resource_dir()/local-executor/package` 固定装配，不接受 WebView 路径。重启所需 Installation 和短期 `executor.connect` Session 只由 Rust Control Plane client 换取。`src/platform/tauri/platform-adapter.ts` 只 invoke 四个无参数生命周期 Command，并对状态和诊断 DTO fail closed；`features/diagnostics` 只消费该接口。账本、Session、PID、路径、包信任参数和原始 stderr 都不进入 React。
 
 E4-14 的 `tauri.executor-lifecycle-e2e.conf.json`、`wdio.executor-lifecycle.conf.ts`、对应 spec 与 `scripts/run_e4_14_acceptance.py` 只服务于 `control-plane-e2e` 隐藏 App 验收。它们从真实诊断页驱动正式 PlatformAdapter，使用专属动态端口、Compose project、AppData 和 signed PyInstaller 包，实际注入 OS crash/hang 后验证 supervisor、进程树和私有 SQLite；测试 origin、故障与退出 Command 不进入默认构建。生产 `lib.rs` 的 event loop 在 `ExitRequested/Exit` 显式停止唯一 Executor，避免依赖测试驱动或析构时机回收。
 
 E4-15 的 `build.rs` 是 release 验证公钥的打包前 fail-closed 门；`tauri.dev.conf.json` 是唯一含 1420/devCSP 的开发覆盖，正式 `tauri.conf.json` 不再携带开发地址。`frontend/scripts/audit-production-package.mjs` 检查真实 release 二进制、生产资产、正式配置与 `cargo tree --no-default-features`，而根 `scripts/run_e4_15_acceptance.py` 负责缺失/畸形公钥失败证明、唯一临时 target 构建和精确清理。验收公开公钥不用于发布签名，临时制品不启动、不上传、不保留。
 
 P9-01 的 `executor/macos_candidate.py` 与 `scripts/run_p9_01_acceptance.py` 把既有 PyInstaller/Manifest 能力收敛成唯一 macOS 候选构建链。命令只向一个不存在的新目录输出，build/cache/dist 使用输出同级临时目录并在结束删除；候选必须包含生产 Playwright driver 和 base library、不含浏览器缓存、symlink、仓库/临时绝对路径，所有 Mach-O 与当前架构匹配并在 framework 别名规整后完成可复验的 ad-hoc 签名。验收用一次性测试 seed 证明离线 Manifest 签名准备后连同产物删除；没有 Developer ID、公证、上传或 Tauri 资源装配，后两者归 P9-03。
+
+P9-03 的 `tauri.macos-candidate.conf.json` 与 `scripts/run_p9_03_acceptance.py` 在不增加 Capability/CSP/测试 Feature 的前提下，把 P9-01 输出映射到 App 的 `Resources/local-executor/package`。候选配置不锁死发布 identity；runner 只在临时覆盖中强制 ad-hoc，并用一次性 Ed25519 seed 签发正式格式 Manifest，构建 production-mode `.app/.dmg`，逐文件比较源/Resources/DMG 中的 SHA-256 与大小，复验 Manifest、Mach-O、App codesign、DMG 校验/只读挂载及 E4-15 生产二进制边界；所有输出只在 `/private/tmp` 存活且不启动 App、浏览器或服务。Developer ID Application、公证和 Gatekeeper 无警告分发仍是外部证书门禁。
 
 T3-13 的 `application/task_controls.py` 定义 pause/resume 用例、公开结果和稳定错误；`api/task_controls.py` 只做 Installation-scoped HTTP 映射；既有 `SqlAlchemyTaskCommandRepository` 在同一 Outbox 内原子分配控制 sequence，既有事件仓储再校验最新 ACK/correlation 后收敛状态，没有新增控制表或第二状态机。桌面侧继续扩展同一个 `control_plane.rs` 固定 operation allowlist，专用 `visible=false` 配置、WDIO spec 与 `scripts/run_t3_13_acceptance.py` 只承担真实产品入口验收。
 

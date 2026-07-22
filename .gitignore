@@ -26,6 +26,7 @@ Desktop.ini
 *.db-wal
 
 # Frontend / Tauri
+/.pnpm-store/
 frontend/node_modules/
 frontend/dist/
 frontend/dist-h821/

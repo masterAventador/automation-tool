@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-21 安装与重启协调已完成）
+> 当前阶段：Wave 9 安装包与发布准备（P9-03 普通 macOS 候选已通过，待正式证书验收）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-21 已完成；H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据为 `🔍 待验收`；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21 与 P9-01 已完成；P9-03 的只读 Executor Resources、production-mode ad-hoc App/DMG 和最小 Capability/CSP 已通过，Developer ID/notarization 保持 `🔍 待验收`。H8-22 更新 UI、原入口自动化和 macOS ad-hoc 实包升级证据已完成，Windows 实包与 macOS/Windows 正式发布签名证据待补；D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -365,7 +365,7 @@
 | --- | --- | --- | --- | --- |
 | P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ✅ 已完成 |
 | P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ⬜ 未开始 |
-| P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | ⬜ 未开始 |
+| P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | 🔍 待验收 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | ⬜ 未开始 |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ⬜ 未开始 |
 | P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
@@ -2817,11 +2817,25 @@
 - 最终门禁：Backend 正式工作目录全量 `2153 passed / 5 explicit skipped in 305.36s`，14,346 条语句/3,370 个分支 100%；其中 macOS 候选模块 179/68 与 PyInstaller symlink 规整 53/20 均为 100%。338 个 Python 文件 Ruff format/check、严格 Mypy、uv lock/sync、OpenAPI/Executor Schema 快照、Frontend 142 项 Node 契约、`actionlint 1.7.12` 和 `git diff --check` 全绿；本任务没有改动 Rust/React 产品源码，不重复声明前序 Rust/UI 全量结果
 - 后续：Windows 实体机先补 H8-22 普通包验收，再进入 P9-02 Windows Executor 构建；P9-03 可在本机继续接入本候选与 Tauri 普通安装包，但 Developer ID、公证和面向普通用户无警告分发仍须正式证书
 
+### P9-03 macOS Tauri 候选包
+
+- 状态：🔍 待验收（普通 ad-hoc 候选与自动化已通过；Developer ID Application/notarization 待正式证书）
+- 日期：2026-07-22
+- 推进边界：H8-22/P9-02 仍等待 Windows 实体机；P9-03 只依赖已完成的 P9-01，因此先在当前 macOS 收口普通候选包、只读 Executor 资源装配和生产 Capability/CSP。Developer ID Application、公证与面向普通用户的 Gatekeeper 事实没有证书时不得冒充完成
+- RED：新增 Rust 路径分离测试与 P9-03 Node 工程契约；目标要求 release App 从只读 bundle Resources 使用已签 Manifest 的 P9-01 Executor，AppData 只保存 state/Profile/凭据，并要求独立 macOS 候选配置、正式 release 构建脚本和普通 App/DMG 审计入口。实现前相关方法、配置和 runner 均不存在
+- 组合根：`ExecutorPlatformPaths` 支持受信 package root 与 AppData state root 分离，并拒绝相对、含 `.`/`..` 或彼此重叠的路径。debug 保留 `app_data_dir/local-executor/package`；release 只能由 Tauri `resource_dir()/local-executor/package` 装配，WebView/IPC 没有路径、Manifest 或公钥输入面。状态、Executor UUID、浏览器 Profile 和凭据仍只在 AppData
+- 最小生产配置：`tauri.macos-candidate.conf.json` 只选择 `app/dmg`，不锁死发布 signing identity，也不覆盖 App、plugin、Capability、CSP 或测试 Feature；因此继承正式 `withGlobalTauri=false`、唯一 `main` capability、空权限列表和无 dev origin 的生产 CSP。普通包 runner 只在一次性生成配置中明确写入 `signingIdentity: "-"`，正式 E4-15 二进制审计仍在同一 runner 内执行
+- 真实普通包验收：`backend/.venv/bin/python scripts/run_p9_03_acceptance.py` 从 P9-01 唯一 spec 在 `/private/tmp` 构建隔离 Executor，以一次性随机 Ed25519 seed 生成正式格式 Manifest，再构建 release `.app/.dmg`。本机 arm64 实际通过 App ad-hoc `codesign --deep --strict`、DMG checksum/只读挂载、源包/App Resources/DMG 内逐文件大小与 SHA-256 一致、Manifest 离线验签、全包 Mach-O/路径复审和 production binary audit；最终资源为 301 个文件、184,628,305 bytes，P9-01 原 payload 为 184,581,810 bytes
+- 隔离与副作用：runner 从运行环境剔除既有 `AUTOMATION_TOOL_*`、`APPLE_*`、`TAURI_SIGNING_*` 与 Cargo target，只注入一次性公开验证配置；候选、Cargo target、Manifest、seed、App、DMG 和挂载点均随临时目录删除。全过程不启动 App、浏览器、Control Plane、Docker 或真实账号，不写 `/Applications`、不上传、不发布、不调用安装更新探针
+- 最终门禁：Frontend 143 项 Node 契约、33 个 Vitest 文件/241 项测试、ESLint、TypeScript、OpenAPI 快照和生产边界全绿；Rust 默认、`desktop-e2e`、`control-plane-e2e` 三套全量、全目标全特性 Clippy 与 Rustfmt 全绿，既有需外层 PyInstaller orchestrator 的 ignored 项未伪造。Backend 候选/Manifest 46 项回归通过，P9-03 runner 的 Ruff check/format 与严格 Mypy 全绿；真实候选 runner 和 `git diff --check` 通过。本任务未改 Backend 产品源码，不重复消耗无关 PostgreSQL/浏览器/真实账号全量
+- 待验收边界：当前 App 明确为 `Signature=adhoc` 且 `TeamIdentifier=not set`，runner 反向拒绝 Developer ID/Apple Distribution 冒名结果；Tauri 日志明确跳过 notarization。必须在受控发布环境提供 Developer ID Application 身份和 Apple notarization 凭据，复验签名链、staple、Gatekeeper 与普通用户安装后，P9-03 才能标记 `✅ 已完成`
+
 ## 21. 当前下一步
 
 严格按顺序：
 
 1. `H8-22`（🔍 待验收）：通用 UI、原入口自动化、macOS ad-hoc 实包矩阵和 Windows 隔离普通包验收器已完成；今晚在 Windows 实体机执行 `pnpm --dir frontend test:h8-22-windows-package` 取得普通包同矩阵事实，Developer ID/notarization 与 Authenticode 正式发布门禁按用户决定后置；
 2. `P9-02`（⬜ 未开始）：在 Windows 实体机完成 H8-22 后，从同一正式 spec 收口 Windows Executor 候选、Playwright/UIA 依赖和 Job Object；macOS 不冒充 PE、UIA 或 Job Object 证据；
-3. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
-4. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+3. `P9-03`（🔍 待验收）：普通 production-mode ad-hoc App/DMG、只读 Executor Resources 和最小 Capability/CSP 已通过；在受控发布环境提供 Developer ID Application/notarization 后补签名链、staple、Gatekeeper 与普通用户安装事实，不把普通包冒充正式发布；
+4. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
+5. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

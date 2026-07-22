@@ -100,9 +100,30 @@ impl ExecutorPlatformPaths {
     pub fn from_app_data(app_data_directory: &Path) -> Result<Self, ExecutorPlatformError> {
         require_absolute_private_root(app_data_directory)?;
         let executor_root = app_data_directory.join(EXECUTOR_DIRECTORY);
+        Self::from_app_data_and_package_root(
+            app_data_directory,
+            &executor_root.join(EXECUTOR_PACKAGE_DIRECTORY),
+        )
+    }
+
+    pub fn from_app_data_and_package_root(
+        app_data_directory: &Path,
+        package_root: &Path,
+    ) -> Result<Self, ExecutorPlatformError> {
+        require_absolute_private_root(app_data_directory)?;
+        require_absolute_private_root(package_root)?;
+        let state_directory = app_data_directory
+            .join(EXECUTOR_DIRECTORY)
+            .join(EXECUTOR_STATE_DIRECTORY);
+        if package_root == state_directory
+            || package_root.starts_with(&state_directory)
+            || state_directory.starts_with(package_root)
+        {
+            return Err(configuration_invalid());
+        }
         Ok(Self {
-            package_root: executor_root.join(EXECUTOR_PACKAGE_DIRECTORY),
-            state_directory: executor_root.join(EXECUTOR_STATE_DIRECTORY),
+            package_root: package_root.to_path_buf(),
+            state_directory,
         })
     }
 
@@ -256,6 +277,24 @@ pub struct ExecutorPlatformService {
 impl ExecutorPlatformService {
     pub fn initialize(app_data_directory: &Path) -> Result<Self, ExecutorPlatformError> {
         let paths = ExecutorPlatformPaths::from_app_data(app_data_directory)?;
+        Self::initialize_with_paths(app_data_directory, paths)
+    }
+
+    pub fn initialize_with_package_root(
+        app_data_directory: &Path,
+        package_root: &Path,
+    ) -> Result<Self, ExecutorPlatformError> {
+        let paths = ExecutorPlatformPaths::from_app_data_and_package_root(
+            app_data_directory,
+            package_root,
+        )?;
+        Self::initialize_with_paths(app_data_directory, paths)
+    }
+
+    fn initialize_with_paths(
+        app_data_directory: &Path,
+        paths: ExecutorPlatformPaths,
+    ) -> Result<Self, ExecutorPlatformError> {
         #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
         let identity = LocalExecutorIdentity::load_or_create(app_data_directory)?;
         ensure_private_directory(paths.state_directory())?;
