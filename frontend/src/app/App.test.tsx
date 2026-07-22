@@ -7,8 +7,30 @@ import type { StartupCheck } from "./startup";
 import type { PlatformAdapter } from "../platform/types";
 import type { PlatformSessionGateway } from "../features/platform-sessions/platform-session-gateway";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
+import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 
 describe("desktop startup", () => {
+  it("keeps customer Demo startup and workbench unmounted until product login", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({ status: "ready" as const }),
+    };
+    const accountSessionGateway: AccountSessionGateway = {
+      restoreSession: vi.fn().mockResolvedValue({ state: "unauthenticated", account: null }),
+      login: vi.fn(),
+      recoverPassword: vi.fn(),
+      changePassword: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    render(
+      <App startupCheck={startupCheck} accountSessionGateway={accountSessionGateway} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "登录自动化运营工具" })).toBeVisible();
+    expect(startupCheck.check).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "RPA 运营工作台" })).not.toBeInTheDocument();
+  });
+
   it("opens the RPA workbench without any product login route", async () => {
     const startupCheck: StartupCheck = {
       check: vi.fn().mockResolvedValue({ status: "ready" as const }),

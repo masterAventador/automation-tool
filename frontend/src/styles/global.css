@@ -42,6 +42,32 @@ body {
   width: min(680px, 100%);
 }
 
+.account-login-card {
+  width: min(480px, 100%);
+  border-color: #e2e8f2;
+  box-shadow: 0 20px 60px rgb(24 34 48 / 10%);
+}
+
+.account-session-layout {
+  min-height: 100vh;
+}
+
+.account-session-bar {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e7ebf2;
+}
+
+.account-session-layout > .account-login-card,
+.account-session-layout > .ant-alert {
+  margin: 16px 24px;
+}
+
 .diagnostic-card {
   max-width: 520px;
   margin: 0 auto;

@@ -17,6 +17,8 @@ import { WorkbenchShell } from "./WorkbenchShell";
 import { BrowserSettings } from "../features/settings/BrowserSettings";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
+import { AccountSessionGate } from "../features/account-session/AccountSessionGate";
+import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 
 interface AppProps {
   startupCheck: StartupCheck;
@@ -31,6 +33,7 @@ interface AppProps {
   platformAdapter?: PlatformAdapter;
   platformSessionGateway?: PlatformSessionGateway;
   appUpdateGateway?: AppUpdateGateway;
+  accountSessionGateway?: AccountSessionGateway;
 }
 
 export function App({
@@ -46,7 +49,37 @@ export function App({
   platformAdapter,
   platformSessionGateway,
   appUpdateGateway,
+  accountSessionGateway,
 }: AppProps) {
+  const workbench = (
+    <WorkbenchShell
+      taskSource={taskSource}
+      gateway={workbenchGateway}
+      taskCreationGateway={taskCreationGateway}
+      taskRunControlGateway={taskRunControlGateway}
+      taskDiscoveryGateway={taskDiscoveryGateway}
+      taskTargetPreviewSource={taskTargetPreviewSource}
+      taskTargetResultSource={taskTargetResultSource}
+      platformAdapter={platformAdapter}
+      platformSessionGateway={platformSessionGateway}
+      appUpdateGateway={appUpdateGateway}
+    />
+  );
+  const desktopApplication = (
+    <StartupGate
+      startupCheck={startupCheck}
+      repairTools={
+        platformAdapter === undefined ? undefined : (
+          <Space orientation="vertical" size="large" className="settings-stack">
+            <BrowserSettings platform={platformAdapter} />
+            <Diagnostics platform={platformAdapter} />
+          </Space>
+        )
+      }
+    >
+      {workbench}
+    </StartupGate>
+  );
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider
@@ -60,30 +93,13 @@ export function App({
         }}
       >
         <AntDesignApp>
-          <StartupGate
-            startupCheck={startupCheck}
-            repairTools={
-              platformAdapter === undefined ? undefined : (
-                <Space orientation="vertical" size="large" className="settings-stack">
-                  <BrowserSettings platform={platformAdapter} />
-                  <Diagnostics platform={platformAdapter} />
-                </Space>
-              )
-            }
-          >
-            <WorkbenchShell
-              taskSource={taskSource}
-              gateway={workbenchGateway}
-              taskCreationGateway={taskCreationGateway}
-              taskRunControlGateway={taskRunControlGateway}
-              taskDiscoveryGateway={taskDiscoveryGateway}
-              taskTargetPreviewSource={taskTargetPreviewSource}
-              taskTargetResultSource={taskTargetResultSource}
-              platformAdapter={platformAdapter}
-              platformSessionGateway={platformSessionGateway}
-              appUpdateGateway={appUpdateGateway}
-            />
-          </StartupGate>
+          {accountSessionGateway === undefined ? (
+            desktopApplication
+          ) : (
+            <AccountSessionGate gateway={accountSessionGateway}>
+              {desktopApplication}
+            </AccountSessionGate>
+          )}
         </AntDesignApp>
       </ConfigProvider>
     </QueryClientProvider>

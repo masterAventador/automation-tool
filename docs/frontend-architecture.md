@@ -77,7 +77,7 @@ App 启动边界已实现 checking、ready、blocked 及兼容 unavailable/revok
 
 本机诊断只经固定 `check_local_startup_environment` Command 返回 exact `{appData,executor,trustedBrowser}` 封闭枚举。Rust 复用既有 AppData 私有权限、BrowserProfile identity/DACL、浏览器受信发现、编译期动作信任配置和 signed Executor verifier；它不会启动 Executor 或浏览器，也不会序列化路径、版本、摘要、PID、凭据、页面内容或底层异常。本机问题可在 Gate 内展开既有浏览器设置与 Executor 诊断工具并重新检查；只有 Control Plane 不可用或 Installation 吊销时不展示无关本机修复入口。真实 WebView 只能 invoke 固定 Rust Command，禁止直接请求 Control Plane。
 
-U9-04/U9-05 将在客户 Demo Profile 中把启动组合根扩展为“产品账号会话 + 账号所属 Installation”双门禁：未登录展示登录/恢复状态，登录成功后 Rust 自动完成账号授权下的设备证明和归属绑定，不生成配对码、不轮询设备审批，也不要求后台逐设备批准。账号或设备任一失效都退出业务工作台并显示各自可操作的固定诊断；该段是后续规划，当前实现仍以上一段 P9 四态为准。
+U9-04 已在客户 Demo Profile 中把产品账号会话门禁放到启动组合根最外层：账号状态未确认、未登录或离线时不挂载 P9 启动检查、诊断工具或业务工作台；登录、恢复、改密、注销和重启 refresh 都经固定 Rust Command，React 只得到安全账号投影。U9-05 再在登录成功后增加账号所属 Installation 门禁，复用设备密钥证明完成自动归属绑定，不生成配对码、不轮询设备审批，也不要求后台逐设备批准。P9 本地 Profile 继续保持上一段四态和无产品登录入口。
 
 T3-06 已在同一正式 Rust Control Plane client 中加入封闭的创建 Task operation；T3-17 已以 `create_douyin_search_exposure_task` 固定 Command 接入窄任务表单。React 只能提交 `douyin.search_exposure.v1` 的明确字段，Zod 先校验，Rust 再校验安全文本、动作/消息关系、数量、间隔和强制确认，然后自行从 App 私有 vault 换取 `app.control-plane` Session 并注入受限幂等键。WebView 不接触 bearer、Header 或任意 URL。完成证据来自 `visible=false` 真实 Tauri App 点击表单并核对 PostgreSQL 最终定义，而不是浏览器 Harness 或直接 HTTP。
 
@@ -252,6 +252,8 @@ P9 本地 MVP 保留当前无产品登录的 Installation 认证；任何客户 
 - 产品账号只授权 automation-tool 服务，不读取、上传或同步运营浏览器 Profile、平台 Cookie、微信数据和原始本机证据。
 
 首个 Demo 账号由认证运维入口创建和重置，不开放匿名自注册。组织、租户、RBAC、套餐、计费与跨设备业务数据同步仍在本阶段之外，不能复制旧项目账号服务提前引入。
+
+U9-04 的正式实现由 `features/account-session/`、`platform/tauri/account-session-gateway.ts`、Rust `account_session_vault.rs` 和 `lib.rs` 五个固定 Command 组成。账号 vault 复用 App 私有 secret store，使用单个 `product-account-session-v1` 记录、严格 token/UUID/login/UTC 校验、原子替换和幂等删除；损坏记录删除后回到未登录。refresh、注销、改密或恢复的网络结果不确定不会被自动当成成功，工作台保持 fail closed。账号设备归属仍由 U9-05 实现，U9-04 不伪造 Installation 已绑定。
 
 ## 6. Local Executor 桥接
 

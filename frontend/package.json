@@ -10,6 +10,7 @@
   },
   "scripts": {
     "audit:production-package": "node scripts/audit-production-package.mjs",
+    "build:customer-demo-assets": "tsc -b && vite build --mode customer-demo",
     "build:control-plane-e2e-assets": "tsc -b && vite build --mode control-plane-e2e",
     "build:browser-settings-e2e-assets": "tsc -b && vite build --mode browser-settings-e2e",
     "build:desktop-e2e-assets": "tsc -b && vite build --mode desktop-e2e",
@@ -17,6 +18,7 @@
     "build:desktop-e2e-h822-mac-assets": "tsc -b && vite build --mode desktop-e2e --outDir dist-h822-mac",
     "build:desktop-e2e-h822-windows-assets": "tsc -b && vite build --mode desktop-e2e --outDir dist-h822-windows",
     "build:tauri:control-plane-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.control-plane-e2e.conf.json",
+    "build:tauri:account-session-test": "tauri build --debug --no-bundle --features desktop-test-driver --config src-tauri/tauri.account-session-e2e.conf.json",
     "build:tauri:browser-settings-test": "tauri build --debug --no-bundle --features desktop-e2e --config src-tauri/tauri.browser-settings-e2e.conf.json",
     "build:tauri:diagnostic-export-test": "tauri build --debug --no-bundle --features desktop-e2e --config src-tauri/tauri.diagnostic-export-e2e.conf.json",
     "build:tauri:executor-lifecycle-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.executor-lifecycle-e2e.conf.json",
@@ -60,6 +62,7 @@
     "test": "pnpm test:contracts && pnpm test:unit",
     "test:contracts": "node --test tests/*.test.mjs",
     "test:control-plane-tauri": "pnpm build:tauri:control-plane-test && wdio run wdio.control-plane.conf.ts",
+    "test:account-session-tauri": "pnpm build:tauri:account-session-test && wdio run wdio.account-session.conf.ts",
     "test:browser-settings-tauri": "python3 ../scripts/run_b5_04_acceptance.py",
     "test:executor-lifecycle-tauri": "pnpm build:tauri:executor-lifecycle-test && wdio run wdio.executor-lifecycle.conf.ts",
     "test:installation-revocation-tauri": "pnpm build:tauri:installation-revocation-test && wdio run wdio.installation-revocation.conf.ts",

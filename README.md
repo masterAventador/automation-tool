@@ -70,6 +70,7 @@ python3 scripts/check_third_party_sources.py
 - 上述无登录入口仅是当前 P9 本地 MVP 状态；任何客户 Demo 交付前必须完成 U9 产品账号、登录/恢复、Session 和账号设备归属，未登录不进入工作台，登录后设备自动绑定账号；
 - U9-01 已用 `contracts/security/account-threat-model-v1.json` 冻结客户 Demo 首版账号边界：账号只由独立认证运维能力创建，使用不可变 canonical login name、Argon2id + 部署 Pepper、短期 opaque access/旋转 refresh、运维签发单次恢复票据，以及账号 Session + 设备密钥证明的不可变 Installation 归属；匿名注册、组织/租户/RBAC、套餐/计费和账号硬删除继续排除；
 - U9-02/U9-03 已建立客户账号领域、Argon2id + Pepper 凭据、append-only 审计，以及独立产品登录/Session 边界；Control Plane 只保存 `atas1` access、`atrs1` refresh 和 `atrp1` 恢复票据摘要，access 最长 10 分钟、refresh 绝对最长 30 天且单次旋转，重放会吊销整个 family。登录按 keyed 标识/来源指纹限流，连续失败临时锁定 15 分钟；改密和运维恢复递增凭据版本并吊销全部账号 Session，不开放匿名注册或公开找回申请；
+- U9-04 已为 `customer-demo` Profile 增加产品账号外层门禁：未登录时不挂载启动检查、诊断或业务工作台；登录、恢复、改密、注销和重启 refresh 只调用五个固定 Tauri Command。`atas1`/`atrs1` 作为一个版本化 secret 记录保存在 Rust 管理的 App 私有 vault，React 只收到 canonical user ID、登录名和 active 状态；P9 本地 Profile 继续保持无产品登录入口；
 - BaseUrl Profile 使用 Zod fail closed：local 固定为 `127.0.0.1:8765`，demo 强制 HTTPS 且主机必须精确命中构建允许列表；
 - ControlPlaneTransport 已接入正式 Tauri IPC/Rust 网络桥：生产入口由真实 App 发起 Health 请求；Rust 侧以固定 origin、封闭 operation allowlist、禁止重定向/代理、请求与响应大小/时间上限和关联 ID 调用 Control Plane，不暴露任意 URL 代理；
 - Installation 注册、长期凭据轮换/吊销、两类短期 Session，以及 Task 幂等创建、分页列表、详情、事件 SSE、暂停/恢复和取消/紧停，已通过测试版真实隐藏 Tauri App → 正式 Rust 桥 → 真实 FastAPI/PostgreSQL 纵向验收；设备私钥、Bootstrap、长期凭据和短期票据全程留在 Rust，React/IPC 响应只得到公开结果；
