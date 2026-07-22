@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const canonicalUuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const canonicalLoginName = /^[a-z][a-z0-9._-]{2,63}$/;
+const utcTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
 const accountProjectionSchema = z
   .object({
@@ -17,6 +18,25 @@ const accountSessionSnapshotSchema = z.discriminatedUnion("state", [
 ]);
 
 export type AccountSessionSnapshot = z.infer<typeof accountSessionSnapshotSchema>;
+
+const accountDeviceSchema = z
+  .object({
+    installationId: z.string().regex(canonicalUuidV4),
+    status: z.enum(["active", "revoked"]),
+    revision: z.number().int().positive(),
+    createdAt: z.string().regex(utcTimestamp),
+    updatedAt: z.string().regex(utcTimestamp),
+  })
+  .strict();
+
+const accountDeviceListSchema = z.object({ devices: z.array(accountDeviceSchema) }).strict();
+
+export type AccountDevice = z.infer<typeof accountDeviceSchema>;
+
+export interface AccountDeviceRevocationInput {
+  readonly installationId: string;
+  readonly expectedRevision: number;
+}
 
 export interface AccountLoginInput {
   readonly loginName: string;
@@ -39,6 +59,8 @@ export interface AccountSessionGateway {
   recoverPassword(input: AccountRecoveryInput): Promise<AccountSessionSnapshot>;
   changePassword(input: AccountPasswordChangeInput): Promise<AccountSessionSnapshot>;
   logout(): Promise<AccountSessionSnapshot>;
+  listDevices(): Promise<readonly AccountDevice[]>;
+  revokeDevice(input: AccountDeviceRevocationInput): Promise<AccountDevice>;
 }
 
 export type AccountSessionGatewayErrorCode =
@@ -65,6 +87,18 @@ export class AccountSessionGatewayError extends Error {
 
 export function parseAccountSessionSnapshot(value: unknown): AccountSessionSnapshot {
   const parsed = accountSessionSnapshotSchema.safeParse(value);
+  if (!parsed.success) throw new AccountSessionGatewayError("protocol_mismatch", false);
+  return parsed.data;
+}
+
+export function parseAccountDevices(value: unknown): readonly AccountDevice[] {
+  const parsed = accountDeviceListSchema.safeParse(value);
+  if (!parsed.success) throw new AccountSessionGatewayError("protocol_mismatch", false);
+  return parsed.data.devices;
+}
+
+export function parseAccountDevice(value: unknown): AccountDevice {
+  const parsed = accountDeviceSchema.safeParse(value);
   if (!parsed.success) throw new AccountSessionGatewayError("protocol_mismatch", false);
   return parsed.data;
 }

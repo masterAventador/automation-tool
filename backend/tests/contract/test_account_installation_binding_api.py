@@ -1,18 +1,30 @@
 import base64
+import binascii
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import cast
 from uuid import UUID
 
+import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from automation_tool.control_plane import create_app
+from automation_tool.control_plane.api import account_installation_bindings as binding_api
 from automation_tool.control_plane.application.account_installation_bindings import (
     AccountInstallationBindingService,
+    AccountInstallationBindingUnavailable,
     BindingChallengeExpired,
     BindingChallengeUsed,
     BindingProofRejected,
     CrossAccountBindingRejected,
+    InvalidBindingRequest,
     IssuedAccountBindingChallenge,
     RevokedInstallationBindingRejected,
+)
+from automation_tool.control_plane.application.account_sessions import (
+    AccountSessionRejected,
+    AccountSessionUnavailable,
 )
 from automation_tool.control_plane.application.device_credentials import (
     IssuedDeviceCredential,
@@ -180,3 +192,70 @@ def test_noncanonical_or_extra_identity_fields_are_rejected() -> None:
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "validation"
         assert "private-user" not in response.text
+
+
+def test_binding_api_private_validation_and_translation_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(InvalidBindingRequest):
+        binding_api._decode("invalid+")
+    with pytest.raises(InvalidBindingRequest):
+        binding_api._decode(base64url(b"short"), exact_length=32)
+
+    canonical_key = base64url(b"d" * 32)
+    monkeypatch.setattr(
+        base64,
+        "urlsafe_b64decode",
+        lambda _value: (_ for _ in ()).throw(binascii.Error()),
+    )
+    with pytest.raises(InvalidBindingRequest):
+        binding_api._decode(canonical_key)
+
+    with pytest.raises(AccountInstallationBindingUnavailable):
+        binding_api._request_id(cast(Request, SimpleNamespace(state=SimpleNamespace())))
+
+    cases = (
+        (AccountSessionRejected(), 401, "account_session_invalid"),
+        (AccountSessionUnavailable(), 503, "account_installation_binding_unavailable"),
+        (InvalidBindingRequest(), 422, "validation"),
+        (
+            AccountInstallationBindingUnavailable(),
+            503,
+            "account_installation_binding_unavailable",
+        ),
+    )
+    for error, expected_status, expected_code in cases:
+        translated = binding_api._translate(error)
+        assert translated.status_code == expected_status
+        assert translated.code == expected_code
+    with pytest.raises(RuntimeError, match="unknown"):
+        binding_api._translate(RuntimeError("unknown"))
+
+
+def test_binding_completion_translates_service_failures() -> None:
+    service = FakeBindingService()
+    service.error = AccountSessionRejected()
+    response = client(service).post(
+        "/api/v1/account-installations/bindings",
+        headers={"authorization": f"Bearer {ACCESS_TOKEN}", "x-request-id": "bind-request"},
+        json={
+            "challengeId": str(CHALLENGE_ID),
+            "signingPayload": base64url(b"canonical-binding-payload"),
+            "signature": base64url(b"s" * 64),
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "account_session_invalid"
+
+
+def test_binding_completion_requires_uuid_v4() -> None:
+    response = client(FakeBindingService()).post(
+        "/api/v1/account-installations/bindings",
+        headers={"authorization": f"Bearer {ACCESS_TOKEN}", "x-request-id": "bind-request"},
+        json={
+            "challengeId": "123e4567-e89b-12d3-a456-426614174000",
+            "signingPayload": base64url(b"canonical-binding-payload"),
+            "signature": base64url(b"s" * 64),
+        },
+    )
+    assert response.status_code == 422

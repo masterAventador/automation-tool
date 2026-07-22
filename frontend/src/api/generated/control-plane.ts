@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/account-installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Account Installations */
+        get: operations["listAccountInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account-installations/binding-challenges": {
         parameters: {
             query?: never;
@@ -33,6 +50,23 @@ export interface paths {
         /** Complete Binding */
         post: operations["completeAccountInstallationBinding"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account-installations/{installation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Account Installation */
+        delete: operations["revokeAccountInstallation"];
         options?: never;
         head?: never;
         patch?: never;
@@ -536,6 +570,30 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountDeviceListResponse */
+        AccountDeviceListResponse: {
+            /** Devices */
+            devices: components["schemas"]["AccountDeviceResponse"][];
+        };
+        /** AccountDeviceResponse */
+        AccountDeviceResponse: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Installationid */
+            installationId: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
         /** AccountLoginRequest */
         AccountLoginRequest: {
             /** Loginname */
@@ -1155,6 +1213,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAccountInstallations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeviceListResponse"];
+                };
+            };
+        };
+    };
     issueAccountInstallationBindingChallenge: {
         parameters: {
             query?: never;
@@ -1208,6 +1286,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BindingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revokeAccountInstallation: {
+        parameters: {
+            query: {
+                expectedRevision: number;
+            };
+            header?: never;
+            path: {
+                installation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeviceResponse"];
                 };
             };
             /** @description Validation Error */

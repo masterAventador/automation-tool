@@ -846,6 +846,64 @@ async fn logout_product_account(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_product_account_devices(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+) -> Result<Vec<control_plane::AccountDevice>, ControlPlaneCommandError> {
+    let session = vault
+        .load()
+        .map_err(map_account_session_vault_error)?
+        .ok_or(ControlPlaneCommandError {
+            code: "session_invalid",
+            retryable: false,
+        })?;
+    match client
+        .list_account_installations(session.access_token())
+        .await
+    {
+        Ok(devices) => Ok(devices),
+        Err(error)
+            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
+        {
+            vault.delete().map_err(map_account_session_vault_error)?;
+            Err(map_control_plane_error(error))
+        }
+        Err(error) => Err(map_control_plane_error(error)),
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn revoke_product_account_device(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionAccountSessionVault>,
+    installation_id: String,
+    expected_revision: u32,
+) -> Result<control_plane::AccountDevice, ControlPlaneCommandError> {
+    let session = vault
+        .load()
+        .map_err(map_account_session_vault_error)?
+        .ok_or(ControlPlaneCommandError {
+            code: "session_invalid",
+            retryable: false,
+        })?;
+    match client
+        .revoke_account_installation(session.access_token(), &installation_id, expected_revision)
+        .await
+    {
+        Ok(device) => Ok(device),
+        Err(error)
+            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
+        {
+            vault.delete().map_err(map_account_session_vault_error)?;
+            Err(map_control_plane_error(error))
+        }
+        Err(error) => Err(map_control_plane_error(error)),
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn map_task_emergency_stop_platform_error(
     error: executor_platform::ExecutorPlatformError,
 ) -> ControlPlaneCommandError {
@@ -2958,6 +3016,8 @@ pub fn run() {
         recover_product_account_password,
         change_product_account_password,
         logout_product_account,
+        list_product_account_devices,
+        revoke_product_account_device,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,
@@ -3000,6 +3060,8 @@ pub fn run() {
         recover_product_account_password,
         change_product_account_password,
         logout_product_account,
+        list_product_account_devices,
+        revoke_product_account_device,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,

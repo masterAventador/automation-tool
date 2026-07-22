@@ -72,3 +72,47 @@ test("U9-05 binds the native device before publishing an authenticated snapshot"
   assert.match(login, /ProductionDeviceCredentialVault/u);
   assert.doesNotMatch(login, /pairing|poll|approval/iu);
 });
+
+test("U9-06 keeps owned-device management behind the Rust account Session", async () => {
+  const [controlPlane, native, adapter] = await Promise.all([
+    read("src-tauri/src/control_plane.rs"),
+    read("src-tauri/src/lib.rs"),
+    read("src/platform/tauri/account-session-gateway.ts"),
+  ]);
+
+  for (const operation of ["ListAccountInstallations", "RevokeAccountInstallation"]) {
+    assert.match(controlPlane, new RegExp(`\\b${operation}\\b`, "u"));
+  }
+  assert.match(native, /list_product_account_devices/u);
+  assert.match(native, /revoke_product_account_device/u);
+  assert.match(adapter, /parseAccountDevices|parseAccountDevice/u);
+  assert.doesNotMatch(adapter, /accessToken|refreshToken|deviceCredential|devicePublicKey/u);
+  assert.doesNotMatch(native, /user_id:\s*String|account_id:\s*String/u);
+});
+
+test("U9-06 owns one isolated hidden longitudinal Tauri acceptance", async () => {
+  const [configurationSource, packageSource, orchestrator, specification] = await Promise.all([
+    read("src-tauri/tauri.account-management-e2e.conf.json"),
+    read("package.json"),
+    read("../scripts/run_u9_06_acceptance.py"),
+    read("e2e-tauri/account-management.spec.ts"),
+  ]);
+  const configuration = JSON.parse(configurationSource);
+  assert.equal(configuration.identifier, "com.aventador.automationtool.u906acceptance");
+  assert.equal(configuration.app.windows.length, 1);
+  assert.equal(configuration.app.windows[0].visible, false);
+  assert.match(packageSource, /test:u9-06-tauri/u);
+  for (const phase of [
+    "login",
+    "restart",
+    "offline",
+    "session-invalid",
+    "disabled",
+    "device-revoke",
+  ]) {
+    assert.match(orchestrator, new RegExp(`"${phase}"`, "u"));
+    assert.match(specification, new RegExp(`"${phase}"`, "u"));
+  }
+  assert.match(orchestrator, /verify_final_state|account_operation/u);
+  assert.doesNotMatch(orchestrator, /--password|--capability/u);
+});

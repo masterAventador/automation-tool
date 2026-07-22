@@ -13,7 +13,7 @@ import {
 describe("Tauri product account Session gateway", () => {
   beforeEach(() => invoke.mockReset());
 
-  it("uses only the five fixed account operations and never receives bearer secrets", async () => {
+  it("uses fixed account operations and never receives bearer secrets", async () => {
     const unauthenticated = { state: "unauthenticated", account: null };
     const authenticated = {
       state: "authenticated",
@@ -28,7 +28,25 @@ describe("Tauri product account Session gateway", () => {
       .mockResolvedValueOnce(authenticated)
       .mockResolvedValueOnce(unauthenticated)
       .mockResolvedValueOnce(unauthenticated)
-      .mockResolvedValueOnce(unauthenticated);
+      .mockResolvedValueOnce(unauthenticated)
+      .mockResolvedValueOnce({
+        devices: [
+          {
+            installationId: "223e4567-e89b-42d3-a456-426614174000",
+            status: "active",
+            revision: 1,
+            createdAt: "2026-07-23T02:15:00Z",
+            updatedAt: "2026-07-23T02:15:00Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        installationId: "223e4567-e89b-42d3-a456-426614174000",
+        status: "revoked",
+        revision: 2,
+        createdAt: "2026-07-23T02:15:00Z",
+        updatedAt: "2026-07-23T02:20:00Z",
+      });
     const gateway = new TauriAccountSessionGateway();
 
     await gateway.restoreSession();
@@ -42,6 +60,11 @@ describe("Tauri product account Session gateway", () => {
       newPassword: "Changed-Password-12",
     });
     await gateway.logout();
+    await gateway.listDevices();
+    await gateway.revokeDevice({
+      installationId: "223e4567-e89b-42d3-a456-426614174000",
+      expectedRevision: 1,
+    });
 
     expect(invoke.mock.calls).toEqual([
       ["restore_product_account_session", {}],
@@ -58,6 +81,14 @@ describe("Tauri product account Session gateway", () => {
         { currentPassword: "Correct-Horse-12", newPassword: "Changed-Password-12" },
       ],
       ["logout_product_account", {}],
+      ["list_product_account_devices", {}],
+      [
+        "revoke_product_account_device",
+        {
+          installationId: "223e4567-e89b-42d3-a456-426614174000",
+          expectedRevision: 1,
+        },
+      ],
     ]);
   });
 

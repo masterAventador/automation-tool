@@ -99,7 +99,30 @@ def account_session_service_from_environment(
     )
 
 
+def account_password_hasher_from_environment() -> Argon2idPasswordHasher:
+    """Load the same deployment password authority for the operations CLI."""
+
+    try:
+        settings = _AccountSessionSettings()
+    except ValidationError:
+        raise AccountSessionConfigurationError from None
+    if (
+        settings.account_password_pepper is None
+        or type(settings.account_password_pepper_version) is not int
+        or settings.account_password_pepper_version <= 0
+    ):
+        raise AccountSessionConfigurationError
+    try:
+        return Argon2idPasswordHasher(
+            pepper=_secret(settings.account_password_pepper),
+            pepper_version=settings.account_password_pepper_version,
+        )
+    except (AccountSessionConfigurationError, RuntimeError):
+        raise AccountSessionConfigurationError from None
+
+
 __all__ = [
     "AccountSessionConfigurationError",
+    "account_password_hasher_from_environment",
     "account_session_service_from_environment",
 ]

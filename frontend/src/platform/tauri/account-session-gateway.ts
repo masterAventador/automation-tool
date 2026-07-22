@@ -3,7 +3,11 @@ import { z } from "zod";
 
 import {
   AccountSessionGatewayError,
+  parseAccountDevice,
+  parseAccountDevices,
   parseAccountSessionSnapshot,
+  type AccountDevice,
+  type AccountDeviceRevocationInput,
   type AccountLoginInput,
   type AccountPasswordChangeInput,
   type AccountRecoveryInput,
@@ -38,7 +42,7 @@ export function mapAccountSessionNativeError(error: unknown): AccountSessionGate
   return new AccountSessionGatewayError("transport_unavailable", true);
 }
 
-async function safeInvoke(command: string, args: Record<string, string>): Promise<unknown> {
+async function safeInvoke(command: string, args: Record<string, string | number>): Promise<unknown> {
   try {
     return await invoke<unknown>(command, args);
   } catch (error) {
@@ -80,5 +84,18 @@ export class TauriAccountSessionGateway implements AccountSessionGateway {
 
   async logout(): Promise<AccountSessionSnapshot> {
     return parseAccountSessionSnapshot(await safeInvoke("logout_product_account", {}));
+  }
+
+  async listDevices(): Promise<readonly AccountDevice[]> {
+    return parseAccountDevices(await safeInvoke("list_product_account_devices", {}));
+  }
+
+  async revokeDevice(input: AccountDeviceRevocationInput): Promise<AccountDevice> {
+    return parseAccountDevice(
+      await safeInvoke("revoke_product_account_device", {
+        installationId: input.installationId,
+        expectedRevision: input.expectedRevision,
+      }),
+    );
   }
 }

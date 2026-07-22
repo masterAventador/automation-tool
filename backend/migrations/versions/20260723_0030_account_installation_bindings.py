@@ -29,9 +29,7 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
-    op.create_index(
-        "ix_installations_owner_user", "installations", ["owner_user_id"], unique=False
-    )
+    op.create_index("ix_installations_owner_user", "installations", ["owner_user_id"], unique=False)
     op.execute(
         """
         CREATE FUNCTION prevent_installation_owner_reassignment()
@@ -82,8 +80,7 @@ def upgrade() -> None:
             name="ck_account_binding_challenges_proof_hash_length",
         ),
         sa.CheckConstraint(
-            "expires_at > created_at and "
-            "expires_at <= created_at + interval '5 minutes'",
+            "expires_at > created_at and expires_at <= created_at + interval '5 minutes'",
             name="ck_account_binding_challenges_expiry",
         ),
         sa.CheckConstraint(
@@ -93,12 +90,16 @@ def upgrade() -> None:
             name="ck_account_binding_challenges_consumption_state",
         ),
         sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"],
-            name="fk_account_binding_challenges_user", ondelete="RESTRICT",
+            ["user_id"],
+            ["users.id"],
+            name="fk_account_binding_challenges_user",
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["installation_id"], ["installations.id"],
-            name="fk_account_binding_challenges_installation", ondelete="CASCADE",
+            ["installation_id"],
+            ["installations.id"],
+            name="fk_account_binding_challenges_installation",
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_account_binding_challenges"),
     )

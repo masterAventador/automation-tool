@@ -1,6 +1,59 @@
 {
   "components": {
     "schemas": {
+      "AccountDeviceListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDeviceResponse"
+            },
+            "title": "Devices",
+            "type": "array"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "title": "AccountDeviceListResponse",
+        "type": "object"
+      },
+      "AccountDeviceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "installationId": {
+            "title": "Installationid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installationId",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "AccountDeviceResponse",
+        "type": "object"
+      },
       "AccountLoginRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1614,6 +1667,32 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/account-installations": {
+      "get": {
+        "operationId": "listAccountInstallations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeviceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AccountAccessToken": []
+          }
+        ],
+        "summary": "List Account Installations",
+        "tags": [
+          "account-devices"
+        ]
+      }
+    },
     "/api/v1/account-installations/binding-challenges": {
       "post": {
         "operationId": "issueAccountInstallationBindingChallenge",
@@ -1703,6 +1782,63 @@
         "summary": "Complete Binding",
         "tags": [
           "account-installations"
+        ]
+      }
+    },
+    "/api/v1/account-installations/{installation_id}": {
+      "delete": {
+        "operationId": "revokeAccountInstallation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expectedRevision",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Expectedrevision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AccountAccessToken": []
+          }
+        ],
+        "summary": "Revoke Account Installation",
+        "tags": [
+          "account-devices"
         ]
       }
     },
