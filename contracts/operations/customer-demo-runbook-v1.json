@@ -1,0 +1,56 @@
+{
+  "version": "customer-demo-operations-runbook.v1",
+  "procedures": [
+    "preflight",
+    "backup",
+    "migration_and_deploy",
+    "health_verification",
+    "account_and_device_revocation",
+    "isolated_restore",
+    "application_rollback",
+    "emergency_stop",
+    "recovery_and_closeout"
+  ],
+  "invariants": {
+    "namedCloudTargetRequired": true,
+    "deploymentConcurrency": 1,
+    "maximumControlPlaneReplicas": 1,
+    "maximumIngressReplicas": 1,
+    "databaseDowngrade": "forbidden",
+    "restoreDestination": "new_isolated_database",
+    "rollbackImage": "explicit_previous_digest",
+    "rollbackRequiresSchemaCompatibility": true,
+    "emergencyStopPreservesDatabase": true,
+    "automaticScaling": false,
+    "automaticFailover": false
+  },
+  "secretInputs": ["read_only_secret_file", "stdin"],
+  "healthChecks": ["/api/v1/health", "/api/v1/version"],
+  "revocation": {
+    "account": "authenticated_operations_emergency_revoke",
+    "singleDevice": "authenticated_account_device_management",
+    "anonymousBusinessWrites": 0
+  },
+  "rollbackDecision": {
+    "schemaCompatible": "deploy_explicit_previous_application_digest",
+    "schemaIncompatible": "forward_fix_or_cut_over_to_isolated_predeployment_restore",
+    "healthUnknown": "keep_ingress_and_control_plane_stopped"
+  },
+  "requiredDrills": [
+    {
+      "id": "C10-03",
+      "path": "scripts/run_c10_03_acceptance.py",
+      "anchor": "isolated PostgreSQL restore verified"
+    },
+    {
+      "id": "C10-10",
+      "path": "scripts/run_c10_10_acceptance.py",
+      "anchor": "deployment.main(recovery_probe=recovery_probe)"
+    },
+    {
+      "id": "C10-11",
+      "path": "scripts/run_c10_11_acceptance.py",
+      "anchor": "test_emergency_revoke_is_atomic_scoped_audited_and_single_winner"
+    }
+  ]
+}
