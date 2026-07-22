@@ -63,7 +63,7 @@ async def test_failure_circuit_migration_has_exact_tables_and_downgrades_cleanly
                     )
                 )
             )
-        assert revision == "20260722_0028"
+        assert revision == "20260722_0029"
         assert result_columns == {
             "action_id",
             "installation_id",

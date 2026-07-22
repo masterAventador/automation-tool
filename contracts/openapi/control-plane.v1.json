@@ -1,6 +1,99 @@
 {
   "components": {
     "schemas": {
+      "AccountLoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "loginName": {
+            "maxLength": 64,
+            "minLength": 3,
+            "title": "Loginname",
+            "type": "string"
+          },
+          "password": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 12,
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "loginName",
+          "password"
+        ],
+        "title": "AccountLoginRequest",
+        "type": "object"
+      },
+      "AccountProjectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "loginName": {
+            "title": "Loginname",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccountStatus"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "loginName",
+          "status"
+        ],
+        "title": "AccountProjectionResponse",
+        "type": "object"
+      },
+      "AccountSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accessExpiresAt": {
+            "format": "date-time",
+            "title": "Accessexpiresat",
+            "type": "string"
+          },
+          "accessToken": {
+            "title": "Accesstoken",
+            "type": "string"
+          },
+          "account": {
+            "$ref": "#/components/schemas/AccountProjectionResponse"
+          },
+          "refreshExpiresAt": {
+            "format": "date-time",
+            "title": "Refreshexpiresat",
+            "type": "string"
+          },
+          "refreshToken": {
+            "title": "Refreshtoken",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "accessExpiresAt",
+          "refreshExpiresAt",
+          "account"
+        ],
+        "title": "AccountSessionResponse",
+        "type": "object"
+      },
+      "AccountStatus": {
+        "description": "Persisted customer account lifecycle.",
+        "enum": [
+          "active",
+          "locked",
+          "disabled"
+        ],
+        "title": "AccountStatus",
+        "type": "string"
+      },
       "ActionResultEvidence": {
         "enum": [
           "awaiting_execution",
@@ -258,6 +351,51 @@
           "scope"
         ],
         "title": "IssuedDeviceCredentialResponse",
+        "type": "object"
+      },
+      "PasswordChangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "currentPassword": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 12,
+            "title": "Currentpassword",
+            "type": "string",
+            "writeOnly": true
+          },
+          "newPassword": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 12,
+            "title": "Newpassword",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PasswordRecoveryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "newPassword": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 12,
+            "title": "Newpassword",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "newPassword"
+        ],
+        "title": "PasswordRecoveryRequest",
         "type": "object"
       },
       "PlatformSessionLogoutPrepareResponse": {
@@ -1320,6 +1458,18 @@
       }
     },
     "securitySchemes": {
+      "AccountAccessToken": {
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "AccountRecoveryToken": {
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "AccountRefreshToken": {
+        "scheme": "bearer",
+        "type": "http"
+      },
       "AppSession": {
         "scheme": "bearer",
         "type": "http"
@@ -1340,6 +1490,170 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/account-password/changes": {
+      "post": {
+        "operationId": "changeAccountPassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AccountAccessToken": []
+          }
+        ],
+        "summary": "Change Account Password",
+        "tags": [
+          "account-sessions"
+        ]
+      }
+    },
+    "/api/v1/account-password/recovery": {
+      "post": {
+        "operationId": "recoverAccountPassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRecoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AccountRecoveryToken": []
+          }
+        ],
+        "summary": "Recover Account Password",
+        "tags": [
+          "account-sessions"
+        ]
+      }
+    },
+    "/api/v1/account-sessions": {
+      "post": {
+        "operationId": "loginAccountSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login Account Session",
+        "tags": [
+          "account-sessions"
+        ]
+      }
+    },
+    "/api/v1/account-sessions/current": {
+      "delete": {
+        "operationId": "logoutAccountSession",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AccountRefreshToken": []
+          }
+        ],
+        "summary": "Logout Account Session",
+        "tags": [
+          "account-sessions"
+        ]
+      }
+    },
+    "/api/v1/account-sessions/refresh": {
+      "post": {
+        "operationId": "refreshAccountSession",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "AccountRefreshToken": []
+          }
+        ],
+        "summary": "Refresh Account Session",
+        "tags": [
+          "account-sessions"
+        ]
+      }
+    },
     "/api/v1/device-credentials/revocations": {
       "post": {
         "operationId": "revokeDeviceCredential",

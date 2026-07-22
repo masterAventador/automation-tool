@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-02 已完成，下一独立工程任务进入 U9-03 登录与 Session API
+> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-03 已完成，下一工程任务为 U9-04 Tauri 登录与账号状态 UI
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-08 与 U9-01～U9-02 已完成；P9-02/P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。U9-02 已建立客户账号 canonical User/Argon2id 凭据/append-only 审计和 PostgreSQL 原子状态边界，登录与 Session 由下一任务接入。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-08 与 U9-01～U9-03 已完成；P9-02/P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。U9-03 已建立客户账号登录/刷新/注销/改密/恢复 API、digest-only opaque Session、单次 refresh 重放吊销、登录限流与临时锁；Tauri 私有 secret 存储和登录 UI 由 U9-04 接入。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -381,7 +381,7 @@
 | --- | --- | --- | --- | --- |
 | U9-01 | 账号范围与威胁模型 | 固定首版账号生命周期、登录标识、凭据恢复、Session、设备归属、停用/吊销和审计；Demo 账号由认证运维入口创建，不开放匿名自注册；组织、租户、RBAC、套餐和计费继续排除 | P9-09 | ✅ 已完成 |
 | U9-02 | 账号领域与 PostgreSQL | User、登录凭据、账号状态、审计与迁移；规范唯一标识、强密码哈希、并发创建/停用/恢复和数据最小化 fail closed | U9-01,F1-05 | ✅ 已完成 |
-| U9-03 | 登录与 Session API | 登录、刷新、注销、密码修改/重置；短期访问能力、旋转 refresh、重放检测、限流/锁定、统一脱敏错误和全 Session 吊销 | U9-02,F1-10 | ⬜ 未开始 |
+| U9-03 | 登录与 Session API | 登录、刷新、注销、密码修改/重置；短期访问能力、旋转 refresh、重放检测、限流/锁定、统一脱敏错误和全 Session 吊销 | U9-02,F1-10 | ✅ 已完成 |
 | U9-04 | Tauri 登录与账号状态 UI | 未登录只显示登录/恢复状态，不挂载业务工作台；Token 与 refresh secret 仅由 Rust 私有存储持有，React 只接收安全账号投影；覆盖加载、失败、锁定、离线、注销和重启恢复 | U9-03,F1-08,I2-09 | ⬜ 未开始 |
 | U9-05 | 登录账号自动绑定设备 | 登录成功后复用 I2 设备密钥证明，把 Installation 原子绑定当前账号并签发/轮换设备凭据；不使用配对码、设备轮询或后台逐设备审批，跨账号、重放、并发绑定和已吊销设备 fail closed | U9-03,U9-04,I2-14 | ⬜ 未开始 |
 | U9-06 | 账号与设备管理验收 | 认证运维创建/停用/重置 Demo 账号，用户可修改密码、注销并查看/吊销自己的设备；真实 Tauri App 完成登录、自动绑定、重启、断网、Session 失效、账号停用和设备吊销纵向验收 | U9-02..U9-05 | ⬜ 未开始 |
@@ -2957,6 +2957,20 @@
 - 执行边界：全量测试使用隔离 PostgreSQL、TestClient、无头系统浏览器和既有测试 Executor 并自动回收；没有启动可见 App/外部浏览器、部署云端、接触真实账号或执行平台动作。本任务没有注册账号/运维 HTTP 路由，没有创建 access/refresh/recovery token，也没有改 React/Rust/Installation 归属；这些边界继续由 U9-03～U9-06 独立 TDD
 - 后续：下一独立工程任务进入 U9-03 登录与 Session API，复用本任务的认证读取端口和 credential version，增加登录/refresh/logout/密码修改/运维恢复、重放检测、锁定/限流与全 Session 吊销，不复制 User/密码表或降低审计约束
 
+### U9-03 登录与 Session API
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：先把唯一台账置为 `🧪 RED`，新增 HTTP 契约与真实 PostgreSQL 生命周期测试；首轮分别在收集阶段准确失败于 `application.account_sessions`、四张 Session 表导出和 `account_session_repository` 不存在。实现 API 骨架后契约 6/6 先绿，数据库用例继续保持 RED，未用设备 `atds1` Session 或平台 Cookie 冒充产品身份
+- HTTP 边界：公开面只有 `POST /account-sessions` 登录、`POST /account-sessions/refresh`、`DELETE /account-sessions/current`、`POST /account-password/changes` 与 `POST /account-password/recovery` 五个 operation；access/refresh/recovery 使用三种独立 Bearer scheme。不存在匿名注册、公开 recovery-request 或运维签发 HTTP 路由；未知账号、错密码、锁定、停用与限流共享固定脱敏 401，秘密响应统一 `no-store`
+- Token 与恢复：`atas1` access 最长 10 分钟，`atrs1` refresh family 绝对最长 30 天，`atrp1` 运维恢复票据最长 15 分钟；三者均含 256-bit CSPRNG secret 且 PostgreSQL 只保存 32 字节 digest。refresh 单次消费并轮换新 access/refresh，旧 refresh 重放原子吊销整个 family；注销只吊销当前 family，改密和恢复递增 credential version 并吊销账号全部 family，恢复票据单次消费且旧凭据版本固定拒绝
+- 登录防护：canonical identifier 与来源分别用独立域的 keyed HMAC-SHA-256 指纹持久化，不保存原始 login/IP/User-Agent；15 分钟窗口内标识 5 次失败进入 15 分钟临时锁，来源 20 次失败阻止跨标识 credential stuffing。锁到期由下次登录事务自动恢复 active 并审计；真实/未知账号都执行 Argon2id verify 路径，失败计数、锁定、审计与 Session 签发保持单事务
+- PostgreSQL：Alembic `20260722_0029` 增加 `users.lock_expires_at`、`account_session_families`、`account_session_tokens`、`account_login_rate_limits`、`account_recovery_tokens`；约束复验 UUIDv4、credential version、10 分钟/30 天/15 分钟期限、family 复合绑定、refresh 轮换状态、digest 长度、封闭吊销原因和计数上限。真实 upgrade/check、降级到 `20260722_0028`、重新升级通过，全部既有迁移测试唯一 head 同步
+- 部署与机器契约：账号 API 只有在 32 字节 Password Pepper、正 Pepper 版本和独立 32 字节指纹密钥三项完整且 canonical base64url 时启用，缺项/畸形启动 fail closed 且不回显值。FastAPI OpenAPI 3.1 快照与 `openapi-typescript` DTO 同提交更新；DTO 生成不等于 WebView 获得 token，React/Rust 登录与私有存储仍由 U9-04 独立实现
+- 自动化 GREEN：新增任务聚焦 41/41，`api/application/bootstrap/repository` 四个 U9-03 新模块语句/分支 100%；Backend 全量 `2273 passed / 5 explicit skipped in 241.10s`，15,325 条语句/3,554 个分支 100%。386 个 Python 文件 Ruff format/check、356 个源的严格 Mypy、uv lock、真实 Alembic upgrade/downgrade、Frontend Node 契约/OpenAPI DTO 与文档门禁全部通过
+- 执行边界：全量测试只使用隔离 PostgreSQL、TestClient、无头系统浏览器和既有测试 Executor 并自动回收；没有启动可见 App/外部浏览器、部署云端、接触真实账号、签发真实恢复票据或执行平台动作。产品账号 Session 与既有设备 `atds1`、Executor Session、抖音 Cookie/Profile 完全分离
+- 后续：下一独立工程任务进入 U9-04，把五个固定 operation 接到 Rust 私有账号 Session vault 和未登录路由门禁；React 只接收安全账号投影，不接收 access/refresh/recovery secret。Installation 自动归属仍由 U9-05 处理，不在登录 UI 中伪造绑定成功
+
 ## 21. 当前下一步
 
 严格按顺序：
@@ -2970,6 +2984,7 @@
 7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 7 条自动化确认、4 条待授权真实平台、3 条待正式双平台设备/包，未达到 14/14 前不得改绿；
 8. `U9-01`（✅ 已完成）：客户 Demo 账号生命周期、登录/恢复、opaque Session、不可变设备归属、停用/吊销、审计及 12 类威胁已冻结为可执行契约；
 9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
-10. `U9-03`（⬜ 下一任务）：复用 U9-02 数据边界实现登录、刷新、注销、密码修改/运维恢复、短期 access/旋转 refresh、重放检测、锁定/限流和全 Session 吊销；
-11. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
-12. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；
+11. `U9-04`（⬜ 未开始）：下一步接入 Tauri/Rust 私有账号 Session vault、未登录路由门禁、登录/恢复/注销状态 UI 与重启恢复；React 不接收 bearer secret；
+12. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+13. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。

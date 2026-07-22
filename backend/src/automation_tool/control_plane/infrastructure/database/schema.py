@@ -90,6 +90,7 @@ users = Table(
         server_default=text("CURRENT_TIMESTAMP"),
     ),
     Column("locked_at", DateTime(timezone=True), nullable=True),
+    Column("lock_expires_at", DateTime(timezone=True), nullable=True),
     Column("disabled_at", DateTime(timezone=True), nullable=True),
     CheckConstraint(
         "substring(id::text from 15 for 1) = '4' "
@@ -109,14 +110,18 @@ users = Table(
         name="ck_users_versions_positive",
     ),
     CheckConstraint(
-        "(status = 'active' and locked_at is null and disabled_at is null) or "
-        "(status = 'locked' and locked_at is not null and disabled_at is null) or "
-        "(status = 'disabled' and locked_at is null and disabled_at is not null)",
+        "(status = 'active' and locked_at is null and lock_expires_at is null "
+        "and disabled_at is null) or "
+        "(status = 'locked' and locked_at is not null and lock_expires_at > locked_at "
+        "and disabled_at is null) or "
+        "(status = 'disabled' and locked_at is null and lock_expires_at is null "
+        "and disabled_at is not null)",
         name="ck_users_lifecycle_state",
     ),
     CheckConstraint(
         "updated_at >= created_at "
         "and (locked_at is null or locked_at between created_at and updated_at) "
+        "and (lock_expires_at is null or lock_expires_at > locked_at) "
         "and (disabled_at is null or disabled_at between created_at and updated_at)",
         name="ck_users_timestamp_order",
     ),
@@ -214,6 +219,199 @@ account_audit_events = Table(
         ondelete="RESTRICT",
     ),
     PrimaryKeyConstraint("event_id", name="pk_account_audit_events"),
+)
+
+account_session_families = Table(
+    "account_session_families",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("credential_version", BigInteger(), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("absolute_expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("revocation_reason", String(length=32), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_account_session_families_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "credential_version > 0",
+        name="ck_account_session_families_credential_version_positive",
+    ),
+    CheckConstraint(
+        "absolute_expires_at > created_at "
+        "and absolute_expires_at <= created_at + interval '30 days' "
+        "and (revoked_at is null or revoked_at >= created_at)",
+        name="ck_account_session_families_time_order",
+    ),
+    CheckConstraint(
+        "(revoked_at is null and revocation_reason is null) or "
+        "(revoked_at is not null and revocation_reason in "
+        "('logout', 'refresh_reuse', 'credential_changed', 'recovery', 'account_disabled'))",
+        name="ck_account_session_families_revocation_state",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["users.id"],
+        name="fk_account_session_families_user",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_account_session_families"),
+    UniqueConstraint(
+        "id",
+        "user_id",
+        "credential_version",
+        name="uq_account_session_families_binding",
+    ),
+)
+
+account_session_tokens = Table(
+    "account_session_tokens",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("family_id", UUID(as_uuid=True), nullable=False),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("credential_version", BigInteger(), nullable=False),
+    Column("kind", String(length=16), nullable=False),
+    Column("secret_digest", LargeBinary(length=32), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("consumed_at", DateTime(timezone=True), nullable=True),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("replaced_by_id", UUID(as_uuid=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_account_session_tokens_id_uuid_v4",
+    ),
+    CheckConstraint(
+        "credential_version > 0",
+        name="ck_account_session_tokens_credential_version_positive",
+    ),
+    CheckConstraint(
+        "kind in ('access', 'refresh')",
+        name="ck_account_session_tokens_kind",
+    ),
+    CheckConstraint(
+        "octet_length(secret_digest) = 32",
+        name="ck_account_session_tokens_secret_digest_length",
+    ),
+    CheckConstraint(
+        "expires_at > created_at and "
+        "((kind = 'access' and expires_at <= created_at + interval '10 minutes') or "
+        "(kind = 'refresh' and expires_at <= created_at + interval '30 days')) "
+        "and (consumed_at is null or consumed_at between created_at and expires_at) "
+        "and (revoked_at is null or revoked_at >= created_at)",
+        name="ck_account_session_tokens_time_order",
+    ),
+    CheckConstraint(
+        "(kind = 'access' and consumed_at is null and replaced_by_id is null) or "
+        "(kind = 'refresh' and ((consumed_at is null and replaced_by_id is null) or "
+        "(consumed_at is not null and replaced_by_id is not null and replaced_by_id <> id)))",
+        name="ck_account_session_tokens_rotation_state",
+    ),
+    ForeignKeyConstraint(
+        ["family_id", "user_id", "credential_version"],
+        [
+            "account_session_families.id",
+            "account_session_families.user_id",
+            "account_session_families.credential_version",
+        ],
+        name="fk_account_session_tokens_family_binding",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["replaced_by_id"],
+        ["account_session_tokens.id"],
+        name="fk_account_session_tokens_replaced_by",
+        ondelete="RESTRICT",
+        deferrable=True,
+        initially="DEFERRED",
+    ),
+    PrimaryKeyConstraint("id", name="pk_account_session_tokens"),
+    UniqueConstraint("secret_digest", name="uq_account_session_tokens_secret_digest"),
+)
+
+Index(
+    "ix_account_session_tokens_family_kind",
+    account_session_tokens.c.family_id,
+    account_session_tokens.c.kind,
+    account_session_tokens.c.created_at,
+)
+
+account_login_rate_limits = Table(
+    "account_login_rate_limits",
+    metadata,
+    Column("scope_kind", String(length=16), nullable=False),
+    Column("scope_fingerprint", LargeBinary(length=32), nullable=False),
+    Column("window_started_at", DateTime(timezone=True), nullable=False),
+    Column("failure_count", BigInteger(), nullable=False),
+    Column("blocked_until", DateTime(timezone=True), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "scope_kind in ('identifier', 'source')",
+        name="ck_account_login_rate_limits_scope_kind",
+    ),
+    CheckConstraint(
+        "octet_length(scope_fingerprint) = 32",
+        name="ck_account_login_rate_limits_fingerprint_length",
+    ),
+    CheckConstraint(
+        "failure_count >= 0 and failure_count <= 20",
+        name="ck_account_login_rate_limits_failure_count",
+    ),
+    CheckConstraint(
+        "updated_at >= window_started_at and (blocked_until is null or blocked_until > updated_at)",
+        name="ck_account_login_rate_limits_time_order",
+    ),
+    PrimaryKeyConstraint(
+        "scope_kind",
+        "scope_fingerprint",
+        name="pk_account_login_rate_limits",
+    ),
+)
+
+account_recovery_tokens = Table(
+    "account_recovery_tokens",
+    metadata,
+    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("credential_version", BigInteger(), nullable=False),
+    Column("secret_digest", LargeBinary(length=32), nullable=False),
+    Column("issued_by_actor_id", UUID(as_uuid=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("consumed_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "substring(id::text from 15 for 1) = '4' "
+        "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b') "
+        "and substring(issued_by_actor_id::text from 15 for 1) = '4' "
+        "and substring(issued_by_actor_id::text from 20 for 1) in ('8', '9', 'a', 'b')",
+        name="ck_account_recovery_tokens_ids_uuid_v4",
+    ),
+    CheckConstraint(
+        "credential_version > 0",
+        name="ck_account_recovery_tokens_credential_version_positive",
+    ),
+    CheckConstraint(
+        "octet_length(secret_digest) = 32",
+        name="ck_account_recovery_tokens_secret_digest_length",
+    ),
+    CheckConstraint(
+        "expires_at > created_at and expires_at <= created_at + interval '15 minutes' "
+        "and (consumed_at is null or consumed_at between created_at and expires_at)",
+        name="ck_account_recovery_tokens_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["user_id"],
+        ["users.id"],
+        name="fk_account_recovery_tokens_user",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("id", name="pk_account_recovery_tokens"),
+    UniqueConstraint("secret_digest", name="uq_account_recovery_tokens_secret_digest"),
 )
 
 installations = Table(
@@ -1887,6 +2085,10 @@ Index(
 
 __all__ = [
     "account_audit_events",
+    "account_login_rate_limits",
+    "account_recovery_tokens",
+    "account_session_families",
+    "account_session_tokens",
     "action_risk_authorizations",
     "device_credentials",
     "device_sessions",

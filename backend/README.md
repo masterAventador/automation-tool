@@ -2,7 +2,7 @@
 
 同一个 Python 包包含可独立部署的 Control Plane 和始终运行在用户电脑上的 Local Executor；两者只能通过 `automation_tool.protocol` 的稳定协议协作，不能互相导入内部实现。
 
-当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、不可混用的稳定资源 ID、客户账号领域/密码凭据/append-only 审计、Installation 持久化表、受控 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。未终结 Attempt 以 Installation 为数据库单活键；正式 App 的竞争启动会得到固定 `423 installation_task_active`，不泄漏活动 Task 身份。确认后的 Task 由服务端建立 Attempt/offer，运行后按确认目标逐个授权并投递签名 `action.execute`；正式 Executor 已在本机复验授权和硬限制，并调用 browse/comment/direct-message 生产实现返回页面证据，不再用固定 success batch 冒充平台完成。
+当前已建立包与质量基线、Control Plane 应用工厂、lifespan、统一错误处理、Health/Version API、SQLAlchemy asyncpg/Alembic 数据库基线、不可混用的稳定资源 ID、客户账号领域/密码凭据/append-only 审计及 opaque 产品 Session API、Installation 持久化表、受控 Installation 注册 API、版本化设备凭据生命周期、短期设备 Session 交换、Executor v1 Envelope、受认证 Executor WebSocket、单活连接 Registry、工作台运行状态、持久命令投递/重连/ACK、Task 事件原子收敛与 SSE 续拉、无副作用 FakeExecutor、正式 Local Executor 进程、纯领域任务状态机、Task/Attempt/Action/Event/Command 持久化模型，以及 Task 幂等创建、隔离查询、暂停/恢复和取消/紧停 API。未终结 Attempt 以 Installation 为数据库单活键；正式 App 的竞争启动会得到固定 `423 installation_task_active`，不泄漏活动 Task 身份。确认后的 Task 由服务端建立 Attempt/offer，运行后按确认目标逐个授权并投递签名 `action.execute`；正式 Executor 已在本机复验授权和硬限制，并调用 browse/comment/direct-message 生产实现返回页面证据，不再用固定 success batch 冒充平台完成。
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
@@ -12,7 +12,9 @@
 
 U9-02 的 `control_plane.domain.accounts` 只定义 canonical、大小写不敏感的 ASCII `LoginName`、`active/locked/disabled` 三态、16 类审计事件和不回显输入的固定错误；`infrastructure/security/passwords.py` 先用数据库外 32 字节版本化 Pepper 对密码做 HMAC-SHA-256 域隔离预哈希，再使用 Argon2id `m=65536 KiB/t=3/p=4`、16 字节随机 salt 和 32 字节 tag。参数不依赖库默认值，数据库只接受该 U9-02 PHC 形状；明文密码和 Pepper 不进入仓储、日志或数据库。
 
-迁移 `20260722_0028` 新增最小 `users`、`user_password_credentials` 和 `account_audit_events`。User 只保存 UUIDv4、canonical login、状态、credential/revision 与状态时间，不含邮箱、手机号、角色、组织或租户；密码表只保存当前 Argon2id PHC、Pepper 版本和密码版本。`SqlAlchemyCustomerAccountRepository` 在一个事务写入 User/密码/创建审计，大小写并发创建由 canonical unique 约束保持单赢家；停用/恢复先锁 User 并复验 expected revision，停用递增 credential version，旧 revision 并发请求失败。审计只保存稳定 actor/subject、封闭事件/结果/reason、request ID 和可选 32 字节 keyed 来源指纹，数据库 trigger 拒绝 UPDATE、DELETE 与 TRUNCATE。本任务不注册账号 HTTP 路由；登录、refresh、找回和运维认证入口由 U9-03 实现。
+迁移 `20260722_0028` 新增最小 `users`、`user_password_credentials` 和 `account_audit_events`。User 只保存 UUIDv4、canonical login、状态、credential/revision 与状态时间，不含邮箱、手机号、角色、组织或租户；密码表只保存当前 Argon2id PHC、Pepper 版本和密码版本。`SqlAlchemyCustomerAccountRepository` 在一个事务写入 User/密码/创建审计，大小写并发创建由 canonical unique 约束保持单赢家；停用/恢复先锁 User 并复验 expected revision，停用递增 credential version，旧 revision 并发请求失败。审计只保存稳定 actor/subject、封闭事件/结果/reason、request ID 和可选 32 字节 keyed 来源指纹，数据库 trigger 拒绝 UPDATE、DELETE 与 TRUNCATE。
+
+U9-03 的迁移 `20260722_0029` 增加 15 分钟临时锁到期时间，以及 `account_session_families/account_session_tokens/account_login_rate_limits/account_recovery_tokens` 四张最小表。`POST /api/v1/account-sessions` 对 canonical identifier 与来源分别保存独立 keyed HMAC 指纹，15 分钟窗口内 5 次标识失败锁账号、20 次来源失败阻止 credential stuffing；未知账号、错密码、锁定、停用和限流只返回同一错误。`atas1` access 最长 10 分钟，`atrs1` refresh family 绝对最长 30 天并单次旋转，旧 refresh 重放即原子吊销整族。注销吊销当前 family；正常改密要求当前密码，运维恢复只由内部服务签发 15 分钟 `atrp1` 单次票据；二者均递增 credential version 并吊销全部产品 Session。数据库和审计只保存 token digest/keyed 来源指纹，不保存密码、token、原始 login/IP/User-Agent；不存在公开恢复申请端点。
 
 `control_plane.domain.task_state_machine` 定义 16 个 `TaskStatus`、5 个无出边终态和唯一显式转换矩阵。取消必须先进入 `cancelling`；取消/完成竞态从 `cancelling` 按真实事实收敛；`outcome_uncertain` 只可从已执行、人工接管或取消中的状态进入。所有 256 个状态对均由单元测试分类，字符串输入、自循环、终态复活和未列出的跳转固定拒绝，后续应用服务不得另建状态分支。
 
@@ -266,10 +268,23 @@ AUTOMATION_TOOL_ACTION_DAILY_LIMIT=100
 AUTOMATION_TOOL_ACTION_CONSECUTIVE_FAILURE_THRESHOLD=3
 ```
 
+客户账号 Session API 默认关闭；启用时必须同时设置两个彼此独立的 canonical 32 字节 base64url secret 和正 Pepper 版本，任何缺项或非法值都会启动失败且不回显输入：
+
+```bash
+AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER=<32-byte-secret-base64url>
+AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER_VERSION=1
+AUTOMATION_TOOL_ACCOUNT_FINGERPRINT_KEY=<different-32-byte-secret-base64url>
+```
+
 服务只绑定 `127.0.0.1:8765`。启动时配置缺失会 fail closed；数据库断开时 Health 返回可重试的结构化 `503 dependency_unavailable`。当前端点为：
 
 - `GET http://127.0.0.1:8765/api/v1/health`
 - `GET http://127.0.0.1:8765/api/v1/version`
+- `POST http://127.0.0.1:8765/api/v1/account-sessions`
+- `POST http://127.0.0.1:8765/api/v1/account-sessions/refresh`
+- `DELETE http://127.0.0.1:8765/api/v1/account-sessions/current`
+- `POST http://127.0.0.1:8765/api/v1/account-password/changes`
+- `POST http://127.0.0.1:8765/api/v1/account-password/recovery`
 - `POST http://127.0.0.1:8765/api/v1/installations/registration-challenges`
 - `POST http://127.0.0.1:8765/api/v1/installations`
 - `GET http://127.0.0.1:8765/api/v1/installations/current`

@@ -157,7 +157,7 @@ features/
 
 Executor v1 的 TypeScript 正式入口是 `src/api/protocol/executor-envelope.ts` 的 `parseExecutorMessage`；Rust 正式入口是 `src-tauri/src/executor_protocol.rs` 的 `parse_executor_message`。两者不从 UI、IPC 或网络输入推断类型，而是与 Python 权威模型共同回放 `contracts/fixtures/executor-v1` 的原始 UTF-8 wire：判别类型、任务作用域、UUIDv4、UTC 微秒 deadline、安全整数、重复 key、资源上限和 payload 隐私规则均 fail closed，失败只返回固定错误。B5-12 新增 Executor-scoped `platform.session_health`，payload 只能包含平台、封闭状态、正 revision 和 UTC 观察时间，不能携带 task scope 或任意附加页面/Profile 字段。B5-13 只在 React 侧消费 Control Plane 已验证的 `{platform,state,observedAt}` 公开投影；打开处理/重新检查结果是独立本机 flow 事实，页面不得用它伪造服务端状态或观察时间。I2-13 已在 Control Plane 网络入口复用 Python 正式 parser，E4-02 已让独立 Local Executor 发送 Hello/Heartbeat，E4-12/B5-13 已沿同一 WebSocket 接入持久命令回放与平台投影。
 
-当前 FastAPI OpenAPI 3.1 快照固定在 `contracts/openapi/control-plane.v1.json`，系统 operationId 为 `getSystemHealth`、`getSystemVersion`。`frontend/scripts/openapi.mjs` 使用锁定的 `openapi-typescript` 从快照机械生成 `src/api/generated/control-plane.ts`，`--check` 在系统临时目录重新生成并逐字比较；生成文件禁止手改。
+当前 FastAPI OpenAPI 3.1 快照固定在 `contracts/openapi/control-plane.v1.json`，系统 operationId 为 `getSystemHealth`、`getSystemVersion`；U9-03 已加入产品账号登录、refresh、注销、改密和恢复五个固定 operation 及三种用途隔离 Bearer scheme。`frontend/scripts/openapi.mjs` 使用锁定的 `openapi-typescript` 从快照机械生成 `src/api/generated/control-plane.ts`，`--check` 在系统临时目录重新生成并逐字比较；生成文件禁止手改。生成账号 DTO 只表示机器契约已就绪，U9-04 完成 Rust 私有 secret 存储与登录路由前，React 不得直接调用这些 HTTP operation。
 
 业务组件只处理统一 `AppError`，不直接判断 Axios、Rust 或 FastAPI 的原始异常。
 

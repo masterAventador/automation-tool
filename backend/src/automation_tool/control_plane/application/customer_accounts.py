@@ -99,6 +99,7 @@ class AccountRecord:
     created_at: datetime
     updated_at: datetime
     locked_at: datetime | None
+    lock_expires_at: datetime | None
     disabled_at: datetime | None
 
 

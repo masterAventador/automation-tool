@@ -1,6 +1,6 @@
 """Atomic PostgreSQL persistence for operations-managed customer accounts."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 from uuid import uuid4
 
@@ -28,6 +28,8 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
     account_audit_events,
+    account_session_families,
+    account_session_tokens,
     user_password_credentials,
     users,
 )
@@ -45,6 +47,7 @@ def _account_record(row: RowMapping) -> AccountRecord:
             created_at=cast(datetime, row["created_at"]),
             updated_at=cast(datetime, row["updated_at"]),
             locked_at=cast(datetime | None, row["locked_at"]),
+            lock_expires_at=cast(datetime | None, row["lock_expires_at"]),
             disabled_at=cast(datetime | None, row["disabled_at"]),
         )
     except (KeyError, TypeError, ValueError):
@@ -126,6 +129,7 @@ class SqlAlchemyCustomerAccountRepository:
             "created_at": audit.occurred_at,
             "updated_at": audit.occurred_at,
             "locked_at": None,
+            "lock_expires_at": None,
             "disabled_at": None,
         }
         try:
@@ -227,6 +231,11 @@ class SqlAlchemyCustomerAccountRepository:
                     "locked_at": (
                         audit.occurred_at if target_status is AccountStatus.LOCKED else None
                     ),
+                    "lock_expires_at": (
+                        audit.occurred_at + timedelta(minutes=15)
+                        if target_status is AccountStatus.LOCKED
+                        else None
+                    ),
                     "disabled_at": (
                         audit.occurred_at if target_status is AccountStatus.DISABLED else None
                     ),
@@ -253,6 +262,36 @@ class SqlAlchemyCustomerAccountRepository:
                         )
                     )
                 )
+                if target_status is AccountStatus.DISABLED:
+                    await session.execute(
+                        update(account_session_families)
+                        .where(
+                            account_session_families.c.user_id == user_id.uuid,
+                            account_session_families.c.revoked_at.is_(None),
+                        )
+                        .values(
+                            revoked_at=audit.occurred_at,
+                            revocation_reason="account_disabled",
+                        )
+                    )
+                    await session.execute(
+                        update(account_session_tokens)
+                        .where(
+                            account_session_tokens.c.user_id == user_id.uuid,
+                            account_session_tokens.c.revoked_at.is_(None),
+                        )
+                        .values(revoked_at=audit.occurred_at)
+                    )
+                    await session.execute(
+                        insert(account_audit_events).values(
+                            **_audit_values(
+                                event_type=AccountAuditEventType.SESSION_ALL_REVOKED,
+                                user_id=user_id,
+                                reason_code="account_disabled",
+                                audit=audit,
+                            )
+                        )
+                    )
                 return _account_record(updated_row)
         except SQLAlchemyError:
             raise AccountPersistenceUnavailable from None

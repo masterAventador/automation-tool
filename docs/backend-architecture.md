@@ -479,6 +479,10 @@ U9-02 由 `control_plane.domain.accounts`、`application.customer_accounts`、`i
 
 Alembic `20260722_0028` 新增 `users`、`user_password_credentials`、`account_audit_events` 三张最小表。User 只含 login/status/credential version/revision/状态时间，密码表只含当前 hash/version，审计只含封闭事件、actor/subject、结果、reason、request ID 与可选 32 字节 keyed 来源指纹；三表没有邮箱、手机号、角色、组织、租户、任意 metadata、原始 IP 或 User-Agent。账号创建在单事务写 User/密码/审计并由 canonical unique 约束处理大小写并发；状态变化先 `FOR UPDATE` 锁 User、复验 expected revision，再原子写状态和审计，停用额外递增 credential version。审计 trigger 在数据库层拒绝 UPDATE、DELETE 和 TRUNCATE；失败映射不反射 SQL/登录名/密码。U9-02 不开放 HTTP 或 Session，不把未认证 repository 变成客户入口。
 
+U9-03 复用同一 User/credential/audit 事实，没有复制认证中心。Alembic `20260722_0029` 只增加 `lock_expires_at` 和四张 Session 表：family 保存账号/credential version/30 天绝对期限与封闭吊销原因，token 只保存 access/refresh 类型、32 字节 digest、期限和单次 refresh 轮换链，登录限流只保存 identifier/source 两类 keyed HMAC 指纹与窗口计数，恢复票据只保存 15 分钟单次 digest。数据库复验 UUIDv4、时间上限、family 复合绑定、轮换状态、计数上限和恢复票据版本；明文密码、token、原始 login/IP/User-Agent 均不进入仓储参数、表或审计。
+
+公开账号 HTTP 面固定为登录、refresh、注销、当前密码修改和票据消费恢复五个 operation，不提供匿名注册、恢复申请或运维票据签发端点。登录在同一事务锁定 keyed identifier/source 窗口和 User：15 分钟内标识 5 次失败进入 15 分钟临时锁，来源 20 次失败阻止跨标识填充；未知账号、错密码、锁定、停用和限流共享固定 401。`atas1` access 最长 10 分钟，`atrs1` refresh 绝对最长 30 天且每次消费生成新 access/refresh，旧 refresh 重放即吊销整个 family。每次 access/refresh 都复验 User active、credential version、family/token 状态和半开期限；注销吊销当前 family，改密与 `atrp1` 运维恢复递增 credential version 并吊销账号全部 family。部署只有在 32 字节 Password Pepper、正版本和独立 32 字节指纹密钥三项完整时启用，部分配置 fail closed；U9-04 才负责把这些 secret 放进 Rust 私有存储并建立未登录 UI 门禁。
+
 ### 9.3 请求授权
 
 - P9 本地 App 业务请求继续作用域固定到 installation；

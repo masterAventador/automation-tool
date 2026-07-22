@@ -36,7 +36,7 @@ from automation_tool.control_plane.infrastructure.security.passwords import (
     Argon2idPasswordHasher,
 )
 
-HEAD_REVISION = "20260722_0028"
+HEAD_REVISION = "20260722_0029"
 PREVIOUS_REVISION = "20260721_0027"
 NOW = datetime(2026, 7, 22, 10, 0, tzinfo=UTC)
 PASSWORD = "correct horse battery staple"
@@ -122,6 +122,7 @@ async def test_customer_account_migration_is_minimal_constrained_and_reversible(
                 "created_at",
                 "updated_at",
                 "locked_at",
+                "lock_expires_at",
                 "disabled_at",
             },
             "user_password_credentials": {
@@ -445,7 +446,14 @@ async def test_disable_is_single_winner_restore_is_explicit_and_audit_is_append_
                     .order_by(account_audit_events.c.occurred_at, account_audit_events.c.event_id)
                 )
             )
-        assert events == ["account.created", "account.disabled", "account.enabled"]
+        assert Counter(events) == Counter(
+            {
+                "account.created": 1,
+                "account.disabled": 1,
+                "session.all_revoked": 1,
+                "account.enabled": 1,
+            }
+        )
 
         with pytest.raises(DBAPIError):
             async with database.session() as session:
@@ -465,7 +473,7 @@ async def test_disable_is_single_winner_restore_is_explicit_and_audit_is_append_
                     .select_from(account_audit_events)
                     .where(account_audit_events.c.subject_user_id == created.user_id.uuid)
                 )
-                == 3
+                == 4
             )
     finally:
         await database.close()
