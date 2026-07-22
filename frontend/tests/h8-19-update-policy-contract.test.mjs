@@ -13,7 +13,7 @@ test("H8-19 initializes one generic policy service from the real Tauri startup p
 
   assert.match(
     nativeEntry,
-    /app\.manage\(app_update_policy::UpdatePolicyService::initialize\([\s\S]*app_data_directory[\s\S]*package_info\(\)\.version[\s\S]*DEFAULT_UPDATE_CHANNEL/u,
+    /let update_policy\s*=\s*std::sync::Arc::new\([\s\S]*app_update_policy::UpdatePolicyService::initialize\([\s\S]*app_data_directory[\s\S]*package_info\(\)\.version[\s\S]*DEFAULT_UPDATE_CHANNEL[\s\S]*app\.manage\(std::sync::Arc::clone\(&update_policy\)\)/u,
   );
   assert.match(policy, /UPDATE_POLICY_DIRECTORY:\s*&str\s*=\s*"app-updates"/u);
   assert.match(policy, /UPDATE_POLICY_FILE:\s*&str\s*=\s*"update-policy-v1"/u);

@@ -7,6 +7,7 @@ from math import isfinite
 from fastapi import FastAPI
 
 from automation_tool import __version__
+from automation_tool.control_plane.api.desktop_updates import router as desktop_update_router
 from automation_tool.control_plane.api.device_credentials import (
     router as device_credential_router,
 )
@@ -42,6 +43,7 @@ from automation_tool.control_plane.api.workbench import router as workbench_rout
 from automation_tool.control_plane.application.action_execution_orchestration import (
     ActionExecutionOrchestrationService,
 )
+from automation_tool.control_plane.application.desktop_updates import DesktopUpdateCatalog
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
 from automation_tool.control_plane.application.executor_connection_registry import (
@@ -79,6 +81,9 @@ from automation_tool.control_plane.bootstrap.action_execution import (
     action_execution_runtime_from_environment,
 )
 from automation_tool.control_plane.bootstrap.database import database_from_environment
+from automation_tool.control_plane.bootstrap.desktop_updates import (
+    desktop_update_catalog_from_environment,
+)
 from automation_tool.control_plane.bootstrap.device_credentials import (
     device_credential_service as build_device_credential_service,
 )
@@ -187,6 +192,7 @@ def create_app(
     task_event_convergence_service: TaskEventConvergenceService | None = None,
     task_event_stream_service: TaskEventStreamService | None = None,
     workbench_metrics_service: WorkbenchMetricsService | None = None,
+    desktop_update_catalog: DesktopUpdateCatalog | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
     task_event_stream_poll_interval_seconds: float = 0.25,
@@ -219,6 +225,13 @@ def create_app(
     resolved_task_event_convergence_service = task_event_convergence_service
     resolved_task_event_stream_service = task_event_stream_service
     resolved_workbench_metrics_service = workbench_metrics_service
+    resolved_desktop_update_catalog = desktop_update_catalog
+    if resolved_desktop_update_catalog is None:
+        resolved_desktop_update_catalog = (
+            desktop_update_catalog_from_environment()
+            if isinstance(database, _FromEnvironment)
+            else DesktopUpdateCatalog.empty()
+        )
     if (
         resolved_registration_service is None
         and isinstance(database, _FromEnvironment)
@@ -321,6 +334,7 @@ def create_app(
     app.state.task_event_convergence_service = resolved_task_event_convergence_service
     app.state.task_event_stream_service = resolved_task_event_stream_service
     app.state.workbench_metrics_service = resolved_workbench_metrics_service
+    app.state.desktop_update_catalog = resolved_desktop_update_catalog
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     app.state.task_event_stream_poll_interval_seconds = stream_poll_interval_seconds
@@ -328,6 +342,7 @@ def create_app(
     app.state.task_event_stream_max_connection_seconds = stream_max_connection_seconds
     install_request_context(app)
     register_error_handlers(app)
+    app.include_router(desktop_update_router)
     app.include_router(system_router)
     app.include_router(registration_router)
     app.include_router(device_credential_router)

@@ -142,6 +142,8 @@ frontend/
 │   │   ├── executor/              # Local Executor 握手、监管和事件桥
 │   │   ├── security/              # Capability、路径和令牌边界
 │   │   ├── platform/              # 文件、通知、窗口和系统能力
+│   │   ├── app_update_cache.rs    # Range 恢复、SHA-256/Minisign 流式验证与唯一私有候选缓存
+│   │   ├── app_update_coordinator.rs # 启动/周期/手动统一检查、并发门和 official updater 适配
 │   │   ├── app_update_policy.rs   # 可选/强制更新决策、单调版本与 App 私有持久状态
 │   │   ├── app_updates.rs         # 官方 updater raw JSON 校验与通用状态/决策契约
 │   │   ├── browser_discovery.rs  # macOS/Windows 标准浏览器原生发现、签名与路径 identity
@@ -250,6 +252,8 @@ B5-05 的 `browser_profiles.rs` 是后续浏览器运行时唯一 Profile 组合
 H8-18 的 `src-tauri/src/app_updates.rs` 是 updater 原生响应进入产品状态前的唯一契约边界。官方 `tauri-plugin-updater` 持有网络 URL、签名和安装对象；该模块只从其 `raw_json` 验证通用 `update_contract` v1，并向 `features/app-updates/contracts.ts` 对应的闭集投影版本、channel、可选/强制策略、平台、架构、摘要、大小和安全发布说明。React 不导入 updater binding，Capability 不开放 updater Command；H8-19～H8-21 必须继续在这个 Rust 边界内实现策略、私有缓存和安装协调，不能在业务 Feature 复制状态机。
 
 H8-19 的 `src-tauri/src/app_update_policy.rs` 是唯一更新决策机。正式 Tauri setup 管理单实例，它以包版本建立不会下降的 floor，并在 `app-updates/update-policy-v1` 原子保存最高已见 release identity、可选决策和 revision；持久文件没有 URL、签名、notes、路径或业务数据。每次提示只接受一个决策，新观察才允许再次决策；强更、回退、同版本换包和存储失败全部拒绝。后续 scheduler、下载缓存、安装协调和 UI 只消费它的 action，不得自行解释 `defer/skip/forced`。
+
+H8-20 的 `app_update_coordinator.rs` 是更新调度的唯一组合根：official updater 检查适配、启动/周期/手动触发、重叠检查合并、策略观察和公开状态都在此串行；生产 endpoint/公钥来自构建期验证配置，React 不能传 URL。`app_update_cache.rs` 只持有 Rust 内部 `DownloadSource`，固定管理 `app-updates/cache-v1` 的 partial/package/两份小清单；它不把 URL、签名或路径写盘，只有 Range 恢复后的完整大小、SHA-256 和 Minisign 都通过才原子替换旧 package。H8-21 安装协调必须消费这个唯一已验证 package，不能另建下载器或绕开缓存清单。
 
 规则：
 

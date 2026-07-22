@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-19 通用更新策略机已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-20 后台检查与下载已完成）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-19 已完成；下一项 H8-20，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-20 已完成；下一项 H8-21，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -355,7 +355,7 @@
 | H8-17 | 代码质量复审 | 安全 fail-open、竞态、资源泄漏、假绿测试和平台差异 | H8-16F | ✅ 已完成 |
 | H8-18 | 通用更新底座选型与契约 | 评估现成 SDK；冻结与业务无关的版本、平台、签名、发布策略和状态契约 | H8-17 | ✅ 已完成 |
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ✅ 已完成 |
-| H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ⬜ 未开始 |
+| H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ⬜ 未开始 |
 | H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | ⬜ 未开始 |
 
@@ -2744,12 +2744,28 @@
 - 文档与提交：同一任务同步根/Frontend README、前端架构、工程结构和唯一台账；实现、测试与文档形成独立可回滚提交
 - 后续：进入 `H8-20`，让启动、有界周期和用户主动入口复用同一检查调度，并完成官方 updater 下载、验签、恢复和单候选缓存原子覆盖；不在 React 或 scheduler 复制 H8-19 策略
 
+### H8-20 后台检查与下载
+
+- 状态：✅ 已完成
+- 日期：2026-07-22
+- RED：先把唯一台账置为 `🧪 RED`；Rust 缓存测试首跑只失败于 `app_update_cache` 模块不存在，修正测试脚手架的摘要格式和所有权后再次证明唯一失败仍为生产模块缺失。随后新增协调层测试，首跑只失败于 `app_update_coordinator` 不存在；Backend 先由 unit/contract 测试定义 feed、Catalog、SemVer、部署文件和安全错误闭集，再实现生产入口。没有先建空模块、放宽网络断言或用内存 mock 冒充下载
+- 服务端 feed：新增不进业务 OpenAPI 的 `GET /desktop-updates/v1/{channel}/{target}/{arch}/{current_version}`，无产品登录、Installation Bearer 或数据库依赖；只读 Catalog 从绝对、非 symlink、普通且不超过 64 KiB 的部署 JSON 加载，按 channel/`darwin|windows`/`aarch64|x86_64`/规范 SemVer 返回最高官方 dynamic response 或 204。未知字段、非 HTTPS、URL 凭据/fragment、坏签名/摘要/时间/文本/大小、重复 identity，以及 build metadata 不同但 SemVer 优先级相同的候选全部在配置阶段拒绝
+- SDK 边界：正式 Tauri 注册锁定的 Rust `tauri-plugin-updater 2.10.1`，official updater 负责平台识别、endpoint 占位符、版本比较、feed 解析和后续安装；React 没有 JavaScript updater binding，`main` Capability 没有 updater 权限。官方 `Update::download` 会把完整包缓冲到内存且不支持 Range，因此 H8-20 只对下载缓存复用同一依赖树的 `reqwest 0.13.4` 与官方底层同款 `minisign-verify 0.2.5` 流式原语，不复制 macOS/Windows 安装器
+- 统一协调：`AppUpdateCoordinator` 把 startup、固定 6 小时 periodic 和用户 `check_app_update_now` 放入同一个原子并发门；15 分钟～24 小时边界防止忙轮询，重叠触发读取当前状态而不重复发网。正式状态只投影版本/channel/policy/target/arch/SHA-256/大小和固定错误，不返回 URL、signature、官方 Update 或路径；`get_app_update_state` 与手动 Command 在生产、desktop-e2e、control-plane-e2e 三种 handler 中共用同一受管实例
+- 可恢复缓存：固定 `app-updates/cache-v1` 只管理 `candidate.partial`、`candidate.package`、完整/断点两份小清单。首次中断保留实际字节和强 ETag；重试发送精确 Range/If-Range 并校验 status、Content-Length、Content-Range、ETag 和 1 GiB 总上限。完整文件以 64 KiB 块同时复算 SHA-256、Minisign，双重通过后才原子替换唯一旧包；摘要/签名/传输失败均不会覆盖已验证旧包，精确 cache hit 不发 Artifact 请求。清单不保存 URL、签名、notes、绝对路径或业务数据，Unix 目录/文件固定 `0700/0600`，symlink、宽权限、损坏和路径反射全部 fail closed
+- 发布配置：release 构建强制同时提供 `AUTOMATION_TOOL_UPDATE_ENDPOINT` 和 `AUTOMATION_TOOL_UPDATE_PUBLIC_KEY`；`build.rs` 验证 HTTPS、无 userinfo/fragment、三个占位符各一次、规范 Base64 和实际 Minisign 公钥解析。正式二进制使用编译期值且不接受运行时覆盖；debug 只有显式本机环境变量才启用，忽略临时 TLS 证书只在 `desktop-e2e` 编译。发布私钥未生成、未进入仓库、服务、AppData、系统钥匙串或二进制
+- 隐藏 App 原入口：`pnpm test:h8-20-app` 用专属 `com.aventador.automationtool.h820acceptance`、`visible:false`、动态 HTTPS/WDIO 端口和临时自签证书启动真实 Tauri。服务端由正式 `create_app(database=None, desktop_update_catalog=...)` 提供生产 feed；Artifact 第一次声明 4 字节后只发 `te` 并断开，App startup 收敛为 retryable download failure；随后从 App 内调用正式手动 Command，服务端实收 `Range: bytes=2-`/`If-Range: "artifact-v1"`，App 进入 ready。再次手动检查只命中缓存；外层核对 package 精确为签名 payload、目录只剩两个私有文件、清单无私有 transport 数据，结束关闭 App、WDIO、Uvicorn、端口和 AppData
+- 失败矩阵：隐藏 App 首跑在 WebDriver 前以 101 退出，真实 stderr 定位为 updater 插件配置为 `null`；正式配置加入无 endpoint/空公钥的惰性插件配置，运行时仍只从受控 Rust 配置覆盖后原路径通过。完整 `control-plane-e2e` 又复现既有 `executor_platform` 稳定 ID 波动；根因为三条并行测试的临时目录只用 PID+低分辨率系统时间而可能碰撞，不是生产持久化。测试目录加入原子序号后原失败用例 `20/20`、完整套件和三套 Clippy 通过，不再以复跑冒充修复
+- 门禁：Backend 更新 feed 47 项达到 `203 statements/60 branches/100%`，完整 Backend `2118 passed, 5 skipped`，uv lock、333 个 Python 文件格式、Ruff 与严格 Mypy 157 个源码文件全绿。Frontend `134` 项 Node 契约、`233` 项 Vitest、`5` 项全局无头 Playwright、ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿。Rust 默认 `183 passed/4 ignored`、`desktop-e2e` `179 passed/4 ignored`、`control-plane-e2e` `184 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿；真实 E4-15 release 门禁验证缺失/坏 Executor 根、缺失/HTTP 更新配置均拒绝，合法公开更新配置的临时二进制构建和审计通过
+- 资源与文档：全量后无 `automation-tool-pytest-*`/H8-20 容器、网络、Volume、App、WDIO、Uvicorn、1420 或验收 AppData 残留；未触碰用户默认浏览器 Profile、其他项目 Compose、真实账号或系统钥匙串。同一任务同步根/Frontend README、产品规划、前后端架构、项目结构和唯一台账，没有新增重复计划
+- 真实边界：本任务完成了 feed、检查、下载、验签、恢复和唯一缓存，没有声称已调用安装器、退出/重启 App、弹出选择 UI、实现强更下次启动安装或完成真实签名包跨版本升级；这些严格属于 H8-21/H8-22
+- 后续：进入 `H8-21`，让立即安装先安全退出主 App，暂缓/跳过继续消费 H8-19 策略，强更在已验证包存在的下次启动静默进入官方安装；不得重新下载、重新解释策略或从 WebView 传安装路径
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-20`：统一 App 启动、有界轮询和用户主动检查入口，完成后台下载、验签、恢复与新包覆盖旧缓存；
-2. `H8-21`：实现立即安装前安全退出、暂缓重复提示和强更下次启动静默安装协调；
-3. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
-4. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
-5. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。
+1. `H8-21`：实现立即安装前安全退出、暂缓重复提示和强更下次启动静默安装协调；
+2. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
+3. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
+4. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

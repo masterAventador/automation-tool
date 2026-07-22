@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
@@ -11,6 +12,7 @@ use automation_tool_desktop_lib::executor_platform::{
 
 const TASK_ID: &str = "123e4567-e89b-42d3-a456-426614174005";
 const EMERGENCY_STOP_KEY: &str = "task:emergency-stop:h8-03";
+static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 struct TemporaryAppData {
     path: PathBuf,
@@ -20,12 +22,13 @@ impl TemporaryAppData {
     fn new() -> Self {
         Self {
             path: std::env::temp_dir().join(format!(
-                "automation-tool-e4-13-{}-{}",
+                "automation-tool-e4-13-{}-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("system time")
                     .as_nanos(),
+                NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
             )),
         }
     }

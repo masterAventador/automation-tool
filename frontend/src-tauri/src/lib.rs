@@ -1,3 +1,5 @@
+pub mod app_update_cache;
+pub mod app_update_coordinator;
 pub mod app_update_policy;
 pub mod app_updates;
 pub mod browser_discovery;
@@ -70,11 +72,47 @@ struct UpdatePolicyAcceptanceError {
 #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
 #[tauri::command]
 fn get_update_policy_record_for_acceptance(
-    policy: tauri::State<'_, app_update_policy::UpdatePolicyService>,
+    policy: tauri::State<'_, std::sync::Arc<app_update_policy::UpdatePolicyService>>,
 ) -> Result<app_update_policy::UpdatePolicyRecord, UpdatePolicyAcceptanceError> {
     policy.record().map_err(|_| UpdatePolicyAcceptanceError {
         code: "storage_unavailable",
     })
+}
+
+#[tauri::command]
+fn get_app_update_state(
+    coordinator: tauri::State<
+        '_,
+        Option<std::sync::Arc<app_update_coordinator::AppUpdateCoordinator>>,
+    >,
+) -> app_updates::UpdateState {
+    coordinator
+        .as_ref()
+        .and_then(|coordinator| coordinator.state().ok())
+        .unwrap_or(app_updates::UpdateState::Failed {
+            stage: app_updates::UpdateErrorStage::Configuration,
+            code: app_updates::UpdateErrorCode::ConfigurationInvalid,
+            retryable: false,
+        })
+}
+
+#[tauri::command]
+async fn check_app_update_now(
+    coordinator: tauri::State<
+        '_,
+        Option<std::sync::Arc<app_update_coordinator::AppUpdateCoordinator>>,
+    >,
+) -> Result<app_updates::UpdateState, ()> {
+    let Some(coordinator) = coordinator.as_ref().cloned() else {
+        return Ok(app_updates::UpdateState::Failed {
+            stage: app_updates::UpdateErrorStage::Configuration,
+            code: app_updates::UpdateErrorCode::ConfigurationInvalid,
+            retryable: false,
+        });
+    };
+    Ok(coordinator
+        .check(app_updates::UpdateCheckTrigger::Manual)
+        .await)
 }
 
 fn map_diagnostic_export_error(
@@ -2587,49 +2625,82 @@ async fn run_control_plane_acceptance(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().setup(|app| {
-        app.manage(control_plane::ControlPlaneClient::local()?);
-        let app_data_directory = app.path().app_data_dir()?;
-        app.manage(app_update_policy::UpdatePolicyService::initialize(
-            &app_data_directory,
-            &app.package_info().version.to_string(),
-            app_updates::DEFAULT_UPDATE_CHANNEL,
-        )?);
-        app.manage(browser_settings::BrowserSettingsService::initialize(
-            &app_data_directory,
-        )?);
-        app.manage(startup_environment::StartupEnvironmentService::initialize(
-            &app_data_directory,
-        )?);
-        app.manage(browser_profiles::BrowserProfileStore::initialize(
-            &app_data_directory,
-        )?);
-        app.manage(executor_platform::ExecutorPlatformService::initialize(
-            &app_data_directory,
-        )?);
-        app.manage(diagnostic_export::DiagnosticExportService::initialize(
-            &app_data_directory,
-        )?);
-        #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
-        {
-            let _production_identity_boundary = device_identity::initialize_production_identity;
-            let _production_credential_boundary = initialize_production_device_credential_vault;
-            let device_identity = initialize_ephemeral_identity()?;
-            debug_assert_eq!(device_identity.as_bytes().len(), 32);
-            app.manage(device_identity);
-        }
+    let update_configuration = app_update_coordinator::UpdateRuntimeConfiguration::load()
+        .expect("desktop update configuration rejected");
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(move |app| {
+            app.manage(control_plane::ControlPlaneClient::local()?);
+            let app_data_directory = app.path().app_data_dir()?;
+            let update_policy =
+                std::sync::Arc::new(app_update_policy::UpdatePolicyService::initialize(
+                    &app_data_directory,
+                    &app.package_info().version.to_string(),
+                    app_updates::DEFAULT_UPDATE_CHANNEL,
+                )?);
+            app.manage(std::sync::Arc::clone(&update_policy));
+            let update_coordinator = match update_configuration.as_ref() {
+                Some(configuration) => {
+                    let cache = std::sync::Arc::new(app_update_cache::AppUpdateCache::initialize(
+                        &app_data_directory,
+                        configuration.public_key(),
+                    )?);
+                    let backend = std::sync::Arc::new(
+                        app_update_coordinator::OfficialUpdateCheckBackend::new(
+                            app.handle().clone(),
+                            configuration.endpoint().clone(),
+                            configuration.public_key().to_owned(),
+                            configuration.accept_invalid_tls(),
+                        ),
+                    );
+                    let coordinator =
+                        std::sync::Arc::new(app_update_coordinator::AppUpdateCoordinator::new(
+                            backend,
+                            update_policy,
+                            cache,
+                            configuration.download_client()?,
+                        )?);
+                    coordinator.start_background();
+                    Some(coordinator)
+                }
+                None => None,
+            };
+            app.manage(update_coordinator);
+            app.manage(browser_settings::BrowserSettingsService::initialize(
+                &app_data_directory,
+            )?);
+            app.manage(startup_environment::StartupEnvironmentService::initialize(
+                &app_data_directory,
+            )?);
+            app.manage(browser_profiles::BrowserProfileStore::initialize(
+                &app_data_directory,
+            )?);
+            app.manage(executor_platform::ExecutorPlatformService::initialize(
+                &app_data_directory,
+            )?);
+            app.manage(diagnostic_export::DiagnosticExportService::initialize(
+                &app_data_directory,
+            )?);
+            #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
+            {
+                let _production_identity_boundary = device_identity::initialize_production_identity;
+                let _production_credential_boundary = initialize_production_device_credential_vault;
+                let device_identity = initialize_ephemeral_identity()?;
+                debug_assert_eq!(device_identity.as_bytes().len(), 32);
+                app.manage(device_identity);
+            }
 
-        #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-        {
-            let device_identity = initialize_production_identity(&app_data_directory)?;
-            let device_credential_vault =
-                initialize_production_device_credential_vault(&app_data_directory)?;
-            debug_assert_eq!(device_identity.public_key().len(), 32);
-            app.manage(device_identity);
-            app.manage(device_credential_vault);
-        }
-        Ok(())
-    });
+            #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+            {
+                let device_identity = initialize_production_identity(&app_data_directory)?;
+                let device_credential_vault =
+                    initialize_production_device_credential_vault(&app_data_directory)?;
+                debug_assert_eq!(device_identity.public_key().len(), 32);
+                app.manage(device_identity);
+                app.manage(device_credential_vault);
+            }
+            Ok(())
+        });
 
     #[cfg(feature = "desktop-test-driver")]
     let builder = builder
@@ -2649,7 +2720,9 @@ pub fn run() {
         set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser,
-        get_update_policy_record_for_acceptance
+        get_update_policy_record_for_acceptance,
+        get_app_update_state,
+        check_app_update_now
     ]);
     #[cfg(all(not(feature = "control-plane-e2e"), not(feature = "desktop-e2e")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -2683,7 +2756,9 @@ pub fn run() {
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,
         get_browser_settings,
-        select_browser
+        select_browser,
+        get_app_update_state,
+        check_app_update_now
     ]);
     #[cfg(feature = "control-plane-e2e")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -2749,7 +2824,9 @@ pub fn run() {
         inject_hostile_executor_diagnostics_for_acceptance,
         exit_app_for_acceptance,
         get_browser_settings,
-        select_browser
+        select_browser,
+        get_app_update_state,
+        check_app_update_now
     ]);
 
     let app = builder

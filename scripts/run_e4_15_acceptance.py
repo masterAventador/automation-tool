@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import subprocess
@@ -16,6 +17,8 @@ CARGO_MANIFEST = FRONTEND_ROOT / "src-tauri" / "Cargo.toml"
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.conf.json"
 PRODUCTION_ASSETS = FRONTEND_ROOT / "dist"
 VERIFYING_KEY_ENVIRONMENT = "AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY"
+UPDATE_ENDPOINT_ENVIRONMENT = "AUTOMATION_TOOL_UPDATE_ENDPOINT"
+UPDATE_PUBLIC_KEY_ENVIRONMENT = "AUTOMATION_TOOL_UPDATE_PUBLIC_KEY"
 
 # Public key derived from an acceptance-only seed. The seed is not stored or used to sign a
 # distributable package, and this temporary artifact is deleted after the audit.
@@ -23,6 +26,18 @@ ACCEPTANCE_VERIFYING_KEY = "GX9rI-FshTLGq8g4-s1ep4m-DHaykgM0A5v6iz02jWE"
 WEAK_VERIFYING_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 REQUIRED_KEY_ERROR = "release Executor verification key is required"
 INVALID_KEY_ERROR = "release Executor verification key is invalid"
+REQUIRED_UPDATE_ERROR = "release update configuration is required"
+INVALID_UPDATE_ERROR = "release update configuration is invalid"
+ACCEPTANCE_UPDATE_ENDPOINT = (
+    "https://updates.acceptance.invalid/desktop-updates/v1/stable/"
+    "{{target}}/{{arch}}/{{current_version}}"
+)
+ACCEPTANCE_UPDATE_PUBLIC_KEY = base64.b64encode(
+    (
+        "untrusted comment: minisign public key E7620F1842B4E81F\n"
+        "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
+    ).encode()
+).decode()
 
 
 def isolated_environment(target_directory: Path) -> dict[str, str]:
@@ -104,9 +119,24 @@ def main() -> int:
         weak_environment[VERIFYING_KEY_ENVIRONMENT] = WEAK_VERIFYING_KEY
         expect_release_key_failure(weak_environment, INVALID_KEY_ERROR)
 
+        print("[E4-15] Verifying that a release build requires an update trust root")
+        missing_update_environment = dict(environment)
+        missing_update_environment[VERIFYING_KEY_ENVIRONMENT] = ACCEPTANCE_VERIFYING_KEY
+        expect_release_key_failure(missing_update_environment, REQUIRED_UPDATE_ERROR)
+
+        print("[E4-15] Verifying that an invalid release update origin fails closed")
+        invalid_update_environment = dict(missing_update_environment)
+        invalid_update_environment[UPDATE_ENDPOINT_ENVIRONMENT] = (
+            "http://updates.acceptance.invalid/{{target}}/{{arch}}/{{current_version}}"
+        )
+        invalid_update_environment[UPDATE_PUBLIC_KEY_ENVIRONMENT] = ACCEPTANCE_UPDATE_PUBLIC_KEY
+        expect_release_key_failure(invalid_update_environment, INVALID_UPDATE_ERROR)
+
         print("[E4-15] Building one ephemeral production-mode Tauri binary")
         release_environment = dict(environment)
         release_environment[VERIFYING_KEY_ENVIRONMENT] = ACCEPTANCE_VERIFYING_KEY
+        release_environment[UPDATE_ENDPOINT_ENVIRONMENT] = ACCEPTANCE_UPDATE_ENDPOINT
+        release_environment[UPDATE_PUBLIC_KEY_ENVIRONMENT] = ACCEPTANCE_UPDATE_PUBLIC_KEY
         run_checked(
             [pnpm_executable(), "tauri", "build", "--no-bundle"],
             environment=release_environment,

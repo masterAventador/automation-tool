@@ -534,17 +534,19 @@ I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临�
 - Local Executor 随目标平台安装包构建、签名和版本锁定；
 - App、Executor 和 Control Plane 建立明确兼容矩阵与最小支持版本。
 
-H8-18～H8-22 的自动更新采用“官方安装底座 + 自有通用策略层”。H8-18 已锁定官方 Rust `tauri-plugin-updater 2.10.1`，由它完成 macOS/Windows 平台包选择、Minisign 验证、下载和安装原语；当前 Tauri 2.11/Rust 1.96 满足其版本要求。只引入 Rust crate，不引入 `@tauri-apps/plugin-updater` JavaScript binding，也不向 `main` Capability 授予 `updater:default`，因此 React 只能消费 `AppUpdateGateway` 的脱敏状态，不能直接检查任意端点、取得下载 URL/签名或触发安装。
+H8-18～H8-22 的自动更新采用“官方安装底座 + 自有通用策略层”。H8-18 已锁定官方 Rust `tauri-plugin-updater 2.10.1`，由它完成 macOS/Windows 平台识别、feed 检查和安装原语；H8-20 因官方 `Update::download` 会一次性缓冲且不支持 Range，通用缓存层改用同版本依赖树中的 `reqwest` 和官方底层同款 `minisign-verify 0.2.5` 做可恢复流式下载与验签，不复制平台安装器。当前 Tauri 2.11/Rust 1.96 满足其版本要求。只引入 Rust crate，不引入 `@tauri-apps/plugin-updater` JavaScript binding，也不向 `main` Capability 授予 `updater:default`，因此 React 只能消费 `AppUpdateGateway` 的脱敏状态，不能直接检查任意端点、取得下载 URL/签名或触发安装。
 
 更新 feed 固定使用官方 dynamic server 格式：无更新返回 204；有更新返回规范 SemVer、HTTPS `url`、Minisign `signature`、可选 notes/RFC3339 `pub_date`，并在官方 `Update.raw_json` 的 `update_contract` 扩展中携带版本 1、受限 channel、`optional/forced` policy，以及 `darwin/windows`、`aarch64/x86_64`、SHA-256 和 1 GiB 内字节数。Rust 在把任何数据投影给 UI 前再次拒绝未知字段、响应/插件版本不一致、非 HTTPS、非法平台、非法摘要和不安全文本；URL 与签名永不进入 React 状态。官方默认版本比较保持启用，不允许服务端借更新通道静默降级。
 
 第一期发布目标固定为 macOS `aarch64/x86_64` 的签名、notarized App updater archive，以及 Windows `x86_64/aarch64` 的 Authenticode-signed NSIS per-user installer；不同时维护 MSI 更新链。Windows 安装器采用官方推荐的 `passive` 无交互模式以保留可靠进度和必要的系统安装能力。“强制/静默更新”在产品契约中表示用户不能暂缓或跳过、下次启动直接进入安装，不表示关闭安装器安全提示、绕过系统权限或使用不可靠的 `quiet` 提权。
 
-App 可见状态闭集为 `idle/checking/up_to_date/available/downloading/ready/installing/failed`，检查来源闭集为 `startup/periodic/manual`，用户决策闭集为 `install_now/defer/skip_version`。H8-19 起由 Rust 通用协调层实现状态转换和持久策略，H8-20 再统一启动、有界周期与“检查更新”入口并把已验签字节原子写入 App 私有缓存；H8-21 负责安全退出和安装。缓存始终只保留当前候选，新版本原子替换旧包；强更在下载完成后的下次 App 启动直接进入安装，可选更新继续走同一提示流程。该层只依赖版本、平台、签名、发布策略和安装状态，不引用抖音、任务、客户或其他业务概念，以便跨项目复用。
+App 可见状态闭集为 `idle/checking/up_to_date/available/downloading/ready/installing/failed`，检查来源闭集为 `startup/periodic/manual`，用户决策闭集为 `install_now/defer/skip_version`。H8-20 已由 Rust `AppUpdateCoordinator` 统一启动、固定 6 小时周期与“检查更新”入口；15 分钟～24 小时常量边界防止错误配置成忙轮询，原子并发门把重叠触发合并为一个官方检查。`AppUpdateCache` 只从 Rust 内的 official `Update` 构造下载源，使用 Range/If-Range、强 ETag、精确 Content-Length/Range 和 20 秒请求上限恢复失败下载；流式 SHA-256 与 Minisign 都通过后才把私有 `candidate.partial` 原子替换为唯一 `candidate.package`。H8-21 负责安全退出和安装。缓存始终只保留当前候选，新版本原子替换旧包；强更在下载完成后的下次 App 启动直接进入安装，可选更新继续走同一提示流程。该层只依赖版本、平台、签名、发布策略和安装状态，不引用抖音、任务、客户或其他业务概念，以便跨项目复用。
 
 H8-19 已实现 `UpdatePolicyService`，并在正式 Tauri setup 中以当前 `package_info().version`、固定 stable channel 和当前 AppData 初始化唯一实例。私有 `app-updates/update-policy-v1` 使用规范 JSON schema v1，只保存配置 channel、不会下降的已安装版本下限、最高已观察发布的 `version/channel/policy/target/arch/sha256/sizeBytes` identity、最后一次可选决策和单调 revision；不保存 URL、Minisign signature、notes、本机路径或任何业务数据。存储复用 App 私有原子替换，Unix 固定 `0700/0600`，损坏、未来 schema、symlink、宽权限或写入失败均不推进内存状态。
 
 策略转换固定如下：新的更高版本清除旧暂缓/跳过；`defer` 仅关闭本次提示，下一次启动、周期或手动检查重新观察同一发布时再次提示；`skip_version` 只压制 identity 不变的当前版本；`install_now` 作为待安装意图跨重启保留，直到实际 App 版本达到候选才清除。强制发布不接受任何用户决策；低于版本下限/最高已见版本的发布、同版本换策略/摘要/目标、一次提示上的第二次点击，以及被压制或已请求安装状态下的过期决策均拒绝。H8-20/H8-21 只能消费该策略结果，不能在 scheduler、React 或安装器中复制另一套判断。
+
+正式构建通过 `AUTOMATION_TOOL_UPDATE_ENDPOINT` 与 `AUTOMATION_TOOL_UPDATE_PUBLIC_KEY` 注入公开发布配置；`build.rs` 在 release Profile 强制 endpoint 为包含一次 `target/arch/current_version` 占位符的 HTTPS URL，并对规范 Base64 包裹的 Minisign 公钥做实际解析。缺失、非 HTTPS、带凭据/fragment、占位符异常或坏公钥均在打包前失败。debug 仅在显式本机环境变量存在时启用更新，证书忽略开关只编译进 `desktop-e2e`；正式 App 不接受运行时端点覆盖。发布私钥始终只属于受控签名环境。
 
 ## 15. 禁止事项
 
