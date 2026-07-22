@@ -206,6 +206,32 @@ body {
   box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
 }
 
+.app-update-settings-card {
+  border-color: #e7ebf2;
+  box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
+}
+
+.app-update-settings-stack {
+  width: 100%;
+}
+
+.app-update-settings-loading {
+  min-height: 72px;
+}
+
+.app-update-banner {
+  position: fixed;
+  z-index: 1100;
+  right: 24px;
+  bottom: 24px;
+  width: min(440px, calc(100vw - 48px));
+  box-shadow: 0 14px 36px rgb(34 55 89 / 18%);
+}
+
+.app-update-notes {
+  white-space: pre-wrap;
+}
+
 .platform-session-content {
   margin-top: 20px;
 }

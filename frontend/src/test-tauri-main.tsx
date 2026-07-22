@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App";
 import { desktopShellStartupCheck } from "./app/startup";
+import { TauriAppUpdateGateway } from "./platform/tauri/app-update-gateway";
 import "./styles/global.css";
 
 const root = document.getElementById("root");
@@ -14,6 +15,9 @@ if (root === null) {
 
 createRoot(root).render(
   <StrictMode>
-    <App startupCheck={desktopShellStartupCheck} />
+    <App
+      startupCheck={desktopShellStartupCheck}
+      appUpdateGateway={new TauriAppUpdateGateway()}
+    />
   </StrictMode>,
 );

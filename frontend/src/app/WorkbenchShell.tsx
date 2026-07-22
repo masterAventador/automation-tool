@@ -37,6 +37,7 @@ import {
 } from "../features/platform-sessions/platform-session-gateway";
 import { BrowserSettings } from "../features/settings/BrowserSettings";
 import type { PlatformAdapter } from "../platform/types";
+import { AppUpdateSettings } from "../features/app-updates/AppUpdates";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
@@ -312,6 +313,7 @@ export function WorkbenchShell({
               <Space orientation="vertical" size="large" className="settings-stack">
                 <BrowserSettings platform={platformAdapter} />
                 <Diagnostics platform={platformAdapter} />
+                <AppUpdateSettings />
               </Space>
             ) : showingTaskRun && selectedTaskId !== null ? (
               <TaskRunDetails

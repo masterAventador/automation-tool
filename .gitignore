@@ -29,6 +29,9 @@ Desktop.ini
 frontend/node_modules/
 frontend/dist/
 frontend/dist-h821/
+frontend/dist-h822-ui/
+frontend/dist-h822-real/
+frontend/src-tauri/target-h822-real/
 frontend/.vite/
 frontend/coverage/
 frontend/playwright-report/

@@ -548,7 +548,11 @@ H8-19 已实现 `UpdatePolicyService`，并在正式 Tauri setup 中以当前 `p
 
 策略转换固定如下：新的更高版本清除旧暂缓/跳过；`defer` 仅关闭本次提示，下一次启动、周期或手动检查重新观察同一发布时再次提示；`skip_version` 只压制 identity 不变的当前版本；`install_now` 作为待安装意图跨重启保留，直到实际 App 版本达到候选才清除。强制发布不接受任何用户决策；低于版本下限/最高已见版本的发布、同版本换策略/摘要/目标、一次提示上的第二次点击，以及被压制或已请求安装状态下的过期决策均拒绝。H8-20/H8-21 只能消费该策略结果，不能在 scheduler、React 或安装器中复制另一套判断。
 
-H8-21 的安装交接位于 Rust `AppUpdateInstallationCoordinator`。`install_now` 只在当前状态为 `ready/prompt` 时接受；强更或先前已持久化的 `install_requested` 只有在 startup 检查发现 identity 精确匹配的既有缓存时自动安装，因此同一次启动刚下载的强更不会提前执行。安装前从私有 package 重新读取并校验长度、SHA-256 和当前 official response 的 Minisign；随后隐藏窗口、通过 `shutdown_for_app_exit` 停止完整 Executor 树并释放 Profile，最后把内存 bytes 交给 official `Update::install`。Windows 官方路径启动安装器后退出进程；macOS 官方路径替换 App 后由 Tauri restart。预检失败不会停止运行环境；停止或安装失败会恢复窗口并投影固定 `failed/install`，不会暴露包内容、内部错误或路径。H8-22 才用真实发布签名包验证平台安装器对现有 App 的跨版本替换。
+H8-21 的安装交接位于 Rust `AppUpdateInstallationCoordinator`。`install_now` 只在当前状态为 `ready/prompt` 时接受；强更或先前已持久化的 `install_requested` 只有在 startup 检查发现 identity 精确匹配的既有缓存时自动安装，因此同一次启动刚下载的强更不会提前执行。安装前从私有 package 重新读取并校验长度、SHA-256 和当前 official response 的 Minisign；随后隐藏窗口、通过 `shutdown_for_app_exit` 停止完整 Executor 树并释放 Profile，最后把内存 bytes 交给 official `Update::install`。Windows 官方路径启动安装器后退出进程；macOS 官方路径替换 App 后由 Tauri restart。预检失败不会停止运行环境；停止或安装失败会恢复窗口并投影固定 `failed/install`，不会暴露包内容、内部错误或路径。
+
+H8-22 的 React `AppUpdates` 位于正式 App 组合根，不属于运营业务 Feature。它每秒读取一次本机协调状态以刷新下载/安装投影，但不会自行请求服务端或复制 6 小时调度；设置页主动检查和可选更新三个按钮分别只调用 gateway 的 `checkNow`/`decide`，重叠操作由 UI promise 与 Rust 原子门共同合并。`prompt` 才展示立即安装、暂不安装、跳过版本；`forced` 只展示不可跳过状态；`suppressed`、进度、安装中和固定错误均从 Rust 闭集渲染。Gateway 对任意 Tauri/解析异常只返回 `transport_unavailable` 或 `protocol_mismatch`，不反射底层错误。
+
+H8-22 双层验收都使用 `visible:false` 和专属资产目录。UI 层通过生产 FastAPI feed 验证设置入口、主动检查、跳过、同版本抑制、新版本覆盖、立即安装提示及强更无按钮；平台层临时生成不入仓库/AppData/钥匙串的 Minisign 密钥，构建 0.1.0/0.2.0/0.3.0 官方 updater artifact，并从 App 原按钮实际安装。macOS archive 已完成跨版本替换和强更重开；同一 runner 包含 Windows current-user NSIS 安装、注册表版本核对与卸载清理，等待 GitHub Windows runner GREEN。测试专属 target、dist、AppData、安装记录、进程和端口在 finally 精确清除。
 
 正式构建通过 `AUTOMATION_TOOL_UPDATE_ENDPOINT` 与 `AUTOMATION_TOOL_UPDATE_PUBLIC_KEY` 注入公开发布配置；`build.rs` 在 release Profile 强制 endpoint 为包含一次 `target/arch/current_version` 占位符的 HTTPS URL，并对规范 Base64 包裹的 Minisign 公钥做实际解析。缺失、非 HTTPS、带凭据/fragment、占位符异常或坏公钥均在打包前失败。debug 仅在显式本机环境变量存在时启用更新，证书忽略开关只编译进 `desktop-e2e`；正式 App 不接受运行时端点覆盖。发布私钥始终只属于受控签名环境。
 

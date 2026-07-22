@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发唯一执行台账
 > 建立日期：2026-07-18
-> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-21 安装与重启协调已完成）
+> 当前阶段：Wave 8 恢复、诊断与 MVP 质量收口（H8-22 待 Windows 真实签名包验收）
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 
 ## 1. 如何使用本路线图
@@ -44,7 +44,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15 与 H8-01～H8-21 已完成；下一项 H8-22，D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
+| 产品代码 | H8-22 通用更新 UI 与 macOS 真实签名包升级已通过，Windows current-user NSIS 同路径验收待 CI；因此 Wave 8 仍停在 H8-22，不提前标绿。D6-16、A7-16、A7-17 与 B5-15 的真实账号证据保持独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -357,7 +357,7 @@
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ✅ 已完成 |
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ✅ 已完成 |
-| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | ⬜ 未开始 |
+| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | 🔍 待 Windows 验收 |
 
 ## 14. Wave 9：双平台安装包与本地候选版
 
@@ -2780,10 +2780,23 @@
 - 真实边界：本任务证明真实 App 决策、缓存重验、安全退出、官方安装调用和重启协调；无副作用探针只替代会实际覆盖机器上 App 的最后平台安装副作用。macOS/Windows 真实签名包从旧版本升级到新版本、安装失败恢复和 UI 点击证据严格属于 H8-22，未在本任务冒充完成
 - 后续：进入 `H8-22`，实现通用更新设置/提示 UI，并在 macOS 与 Windows 用真实签名包从 App 原入口验证升级、暂缓、跳过、旧包覆盖和强更；不得把 desktop-e2e 探针带入发布包
 
+### H8-22 更新 UI 与双平台验收
+
+- 状态：🔍 待 Windows 验收
+- 日期：2026-07-22
+- RED：先将唯一台账置为 `🧪 RED`；新增 `AppUpdates`/Tauri gateway 测试后，目标套件因组件、适配器和更新状态的 Rust camelCase 字段尚不存在而失败。真实包验收首轮又由 Tauri updater 在含 `/var` symlink 的临时 App 路径准确拒绝为 `configuration_invalid/build/io`，证明测试确实进入官方 updater builder，没有用 H8-21 安装探针冒充平台安装
+- UI 与固定边界：正式 `App` 组合根统一挂载业务无关的 `AppUpdates`；设置页新增“软件更新”卡片和用户主动“检查更新”，启动/周期产生的本机状态同样驱动下载进度、安装中和提示。可选 `prompt` 只提供立即安装、暂不安装、跳过此版本；`forced` 无可选按钮。`TauriAppUpdateGateway` 只调用 `get_app_update_state`、`check_app_update_now`、`decide_app_update`，解析/传输失败固定脱敏，React 仍无 updater binding、URL、签名、包或路径
+- 隐藏 UI 原入口：`pnpm test:h8-22-ui-app` 使用正式生产 FastAPI feed、动态 HTTPS/WDIO 端口、`visible:false`、专属 `com.aventador.automationtool.h822uiacceptance` 与 `dist-h822-ui`。optional 从 0.2.0 提示→暂缓→设置手动检查→跳过→同版本抑制→0.3.0 新包覆盖→立即安装投影；forced 只显示不可跳过状态。两轮均由产品按钮和固定 Tauri Command 发起，最终连续 `1 passing`
+- macOS 真实包 GREEN：`pnpm test:h8-22-real-update` 在规范化 `/private/var/...` 临时目录生成仅进程环境持有的 Minisign 私钥，依次构建 0.2.0、0.3.0 和旧版 0.1.0 官方 `.app.tar.gz + .sig`，用正式 `create_app` feed 返回真实 bytes/signature。隐藏 0.1.0 App 从原设置/提示按钮完成跳过 0.2.0、同版本抑制、0.3.0 覆盖缓存并实际替换 App；清理 AppData 后又证明 forced 0.2.0 首次只下载、下一次启动自动安装且不重复下载。WebDriver 因官方安装关闭旧 App 的 `ECONNREFUSED` 只在安装后版本、缓存和 Artifact 账本精确命中时视为预期，最终命令 GREEN
+- 平台与资源：macOS 临时 App 路径先 `resolve()`，保留 Tauri 对 symlink 启动路径的安全拒绝；安装后自动拉起的新 App 按精确 executable path 终止，再强制验证专属 WebDriver 端口释放。私钥/公钥/配置只在临时目录，私钥仅通过子进程环境传入，不写仓库、AppData、日志或系统钥匙串。每次结束删除 `target-h822-real`、`dist-h822-real`、`dist-h822-ui`、专属 AppData、TLS、包、App、进程和端口，未触碰默认浏览器 Profile、真实账号、其他项目服务或 Docker 资源
+- Windows 门禁：同一 runner 已实现 current-user NSIS 真包构建、静默安装旧版、正式 App/生产 feed 更新、HKCU 安装记录与 DisplayVersion 核对、精确进程结束和卸载清理；`.github/workflows/desktop.yml` 新增 `macos-latest/windows-latest` 独立 real signed updater job。候选提交 `9a478c8` 的 workflow dispatch `29904145762` 已实际创建 Windows updater job，但 6 个矩阵 job 均在 checkout 前以 `steps: []` 结束；GitHub Check annotation 明确为近期付款失败或 spending limit 不足，证明是账户 Billing 阻止 runner 启动而非代码/Windows 测试失败。尚未取得 Windows GREEN，因此本任务严格保持 `🔍 待 Windows 验收`，P9-01/P9-02 依赖仍未开放
+- 已通过门禁：Frontend 140 项 Node 契约、241 项 Vitest、5 项全局无头 Playwright、ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary；Rust 默认 `191 passed/4 ignored`、`desktop-e2e` `187 passed/4 ignored`、`control-plane-e2e` `192 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings`。最终隐藏 UI 和 macOS 真实签名包均在同步远端 Node 26/WDIO 兼容修复后重跑 GREEN
+- 后续：把本任务分支推送后触发 GitHub Windows runner；只有 Windows 同一真实包命令 GREEN 并再次核对资源清理，才把 H8-22 改为 `✅ 已完成`、开放 P9-01/P9-02 并形成最终可回滚提交
+
 ## 21. 当前下一步
 
 严格按顺序：
 
-1. `H8-22`：完成通用更新 UI 及 macOS/Windows 真实签名包原入口验收；
+1. `H8-22`：取得 Windows current-user NSIS 真实签名包原入口 GREEN 后完成本任务；
 2. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用，也不阻塞上述离线任务；
 3. `B5-02` 本机环境补验：在用户可输入管理员密码时，仅清除 Chrome Framework 上破坏深度签名的 `com.apple.FinderInfo` 后重跑真实发现/设置测试；另在安装 Microsoft Edge 的 macOS 设备上验证真实签名、Bundle ID 和 Team ID。

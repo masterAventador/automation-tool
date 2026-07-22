@@ -28,8 +28,9 @@ describe("generic desktop update contract", () => {
       { state: "up_to_date", trigger: "manual" },
       { state: "available", release },
       { state: "downloading", release, downloadedBytes: 512, totalBytes: 1024 },
-      { state: "ready", release },
+      { state: "ready", release, action: "prompt" },
       { state: "installing", release },
+      { state: "installation_launched", release },
       {
         state: "failed",
         stage: "download",
@@ -41,6 +42,18 @@ describe("generic desktop update contract", () => {
     }
     for (const decision of ["install_now", "defer", "skip_version"]) {
       expect(appUpdateDecisionSchema.parse(decision)).toBe(decision);
+    }
+    for (const action of [
+      "prompt",
+      "deferred",
+      "skipped",
+      "suppressed",
+      "install_requested",
+      "forced",
+    ]) {
+      expect(
+        appUpdateStateSchema.parse({ state: "ready", release, action }),
+      ).toEqual({ state: "ready", release, action });
     }
   });
 

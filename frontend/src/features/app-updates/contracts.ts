@@ -44,6 +44,14 @@ export const appUpdateReleaseSchema = z
   .strict();
 
 const checkTriggerSchema = z.enum(["startup", "periodic", "manual"]);
+const updatePolicyActionSchema = z.enum([
+  "prompt",
+  "deferred",
+  "skipped",
+  "suppressed",
+  "install_requested",
+  "forced",
+]);
 const failedUpdateSchema = z
   .object({
     state: z.literal("failed"),
@@ -78,8 +86,17 @@ export const appUpdateStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("up_to_date"), trigger: checkTriggerSchema }).strict(),
   z.object({ state: z.literal("available"), release: appUpdateReleaseSchema }).strict(),
   downloadingUpdateSchema,
-  z.object({ state: z.literal("ready"), release: appUpdateReleaseSchema }).strict(),
+  z
+    .object({
+      state: z.literal("ready"),
+      release: appUpdateReleaseSchema,
+      action: updatePolicyActionSchema,
+    })
+    .strict(),
   z.object({ state: z.literal("installing"), release: appUpdateReleaseSchema }).strict(),
+  z
+    .object({ state: z.literal("installation_launched"), release: appUpdateReleaseSchema })
+    .strict(),
   failedUpdateSchema,
 ]);
 
@@ -93,6 +110,20 @@ export interface AppUpdateGateway {
   getState(): Promise<AppUpdateState>;
   checkNow(): Promise<AppUpdateState>;
   decide(decision: AppUpdateDecision): Promise<AppUpdateState>;
+}
+
+export type AppUpdateGatewayErrorCode = "protocol_mismatch" | "transport_unavailable";
+
+export class AppUpdateGatewayError extends Error {
+  readonly code: AppUpdateGatewayErrorCode;
+  readonly retryable: boolean;
+
+  constructor(code: AppUpdateGatewayErrorCode, retryable: boolean) {
+    super("App update operation is unavailable");
+    this.name = "AppUpdateGatewayError";
+    this.code = code;
+    this.retryable = retryable;
+  }
 }
 
 export function parseAppUpdateState(value: unknown): AppUpdateState {

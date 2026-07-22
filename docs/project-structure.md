@@ -258,6 +258,8 @@ H8-20 的 `app_update_coordinator.rs` 是更新调度的唯一组合根：offici
 
 H8-21 的 `app_update_installation.rs` 是唯一安装交接边界。协调层把当前 official `Update` 作为不序列化的 installer 保留；立即安装或 startup 自动安装时先让 cache 以 release identity 和当前签名重验完整 bytes，再隐藏窗口、停止 Executor/释放 Profile，最后调用官方 `Update::install`。预检失败不触碰运行环境，停止或安装失败恢复窗口；Windows 由官方安装器退出接管，macOS 安装成功后 Tauri restart。`decide_app_update` 只接收封闭决策枚举，不接收版本、URL、签名、bytes 或路径；安装探针同时要求 debug、`desktop-e2e` 且排除 `control-plane-e2e`，release/生产和其他验收特性不编译该类型，仅为 H8-21 隐藏 App 验证交接顺序，H8-22 必须以真实签名包替代该平台底层探针。H8-21 配置另用 `frontend/dist-h821`，不复用 production `dist`；runner 前后精确清理它，避免 release 与验收构建资产相互覆盖。
 
+H8-22 的 `features/app-updates/AppUpdates.tsx` 是更新 UI 的唯一组合组件，`platform/tauri/app-update-gateway.ts` 是它进入三个固定 Rust Command 的唯一适配器；设置页只接收组件注入的卡片，不直接依赖 Tauri。`tauri.update-ui-e2e.conf.json`/`dist-h822-ui` 负责隐藏 UI 原入口，`tauri.real-update-e2e.conf.json`/`dist-h822-real`/`target-h822-real` 负责官方真实签名包；两者均使用专属 identifier、全局隐藏窗口和 finally 清理，不复用 production `dist`、常规 Cargo target、用户 Profile 或系统钥匙串。真实包 runner 同时实现 macOS App archive 与 Windows current-user NSIS，Windows GREEN 未取得前台账保持待验收。
+
 规则：
 
 - `features/` 之间通过稳定 ID、公开组件或任务事件协作，不深层导入内部文件；

@@ -143,7 +143,11 @@ pub enum UpdateErrorCode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(
+    tag = "state",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum UpdateState {
     Idle,
     Checking {
@@ -462,6 +466,9 @@ mod tests {
             },
         ];
         let serialized = serde_json::to_string(&states).expect("state contract must serialize");
+        assert!(serialized.contains("downloadedBytes"));
+        assert!(serialized.contains("totalBytes"));
+        assert!(!serialized.contains("downloaded_bytes"));
         for expected in [
             "idle",
             "checking",
