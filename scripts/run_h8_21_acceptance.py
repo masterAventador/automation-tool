@@ -72,7 +72,9 @@ def build_update_app(
     artifact_ledger: list[str],
 ) -> Any:
     sys.path.insert(0, str(BACKEND_ROOT / "src"))
-    from automation_tool.control_plane.application.desktop_updates import DesktopUpdateCatalog
+    from automation_tool.control_plane.application.desktop_updates import (
+        DesktopUpdateCatalog,
+    )
     from automation_tool.control_plane.bootstrap.app import create_app
 
     target, arch = current_update_platform()
@@ -160,7 +162,9 @@ def isolated_environment(update_port: int, webdriver_port: int) -> dict[str, str
     return environment
 
 
-def run_hidden_app(environment: dict[str, str], scenario: str, webdriver_port: int) -> None:
+def run_hidden_app(
+    environment: dict[str, str], scenario: str, webdriver_port: int
+) -> None:
     require_port_closed(webdriver_port)
     run_environment = {**environment, "H821_SCENARIO": scenario}
     subprocess.run(
@@ -183,7 +187,10 @@ def verify_cache(private_app_data: Path, expected_version: str) -> None:
     manifest = json.loads(raw_manifest)
     if manifest.get("version") != expected_version:
         raise RuntimeError("H8-21 cached version does not match the accepted release")
-    if any(token in raw_manifest.lower() for token in (b"url", b"signature", b"http", b"path")):
+    if any(
+        token in raw_manifest.lower()
+        for token in (b"url", b"signature", b"http", b"path")
+    ):
         raise RuntimeError("H8-21 persisted updater transport or install paths")
     if os.name == "posix":
         if stat.S_IMODE(cache_directory.stat().st_mode) != 0o700:
@@ -239,7 +246,9 @@ def run() -> None:
             run_hidden_app(environment, "optional", webdriver_port)
             verify_cache(private_app_data, "0.3.0")
             if artifact_ledger != ["0.2.0", "0.3.0"]:
-                raise RuntimeError("H8-21 optional decisions did not replace the cached version")
+                raise RuntimeError(
+                    "H8-21 optional decisions did not replace the cached version"
+                )
 
             shutil.rmtree(private_app_data)
             artifact_ledger.clear()
@@ -247,10 +256,14 @@ def run() -> None:
             run_hidden_app(environment, "forced-first", webdriver_port)
             verify_cache(private_app_data, "0.2.0")
             if artifact_ledger != ["0.2.0"]:
-                raise RuntimeError("H8-21 forced first launch did not download exactly once")
+                raise RuntimeError(
+                    "H8-21 forced first launch did not download exactly once"
+                )
             run_hidden_app(environment, "forced-reopen", webdriver_port)
             if artifact_ledger != ["0.2.0"]:
-                raise RuntimeError("H8-21 forced reopen downloaded the verified package again")
+                raise RuntimeError(
+                    "H8-21 forced reopen downloaded the verified package again"
+                )
             verify_cache(private_app_data, "0.2.0")
         finally:
             if server is not None:
@@ -266,8 +279,12 @@ def run() -> None:
             require_port_closed(update_port)
             require_port_closed(webdriver_port)
     if [entry["scenario"] for entry in feed_ledger].count("optional") != 4:
-        raise RuntimeError("H8-21 optional App did not use the expected four production checks")
-    print("Hidden App update decision and next-start forced installation acceptance passed")
+        raise RuntimeError(
+            "H8-21 optional App did not use the expected four production checks"
+        )
+    print(
+        "Hidden App update decision and next-start forced installation acceptance passed"
+    )
 
 
 if __name__ == "__main__":

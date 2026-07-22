@@ -3,6 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { withoutExplicitContentLength } from "./wdio-request-compatibility";
+
 const outputDir = mkdtempSync(join(tmpdir(), "automation-tool-wdio-"));
 const cleanupScript = [
   'const { rmSync } = require("node:fs");',
@@ -31,4 +33,5 @@ cleanup.unref();
 
 export const wdioRuntimeArtifacts = {
   outputDir,
-} satisfies Pick<WebdriverIO.Config, "outputDir">;
+  transformRequest: withoutExplicitContentLength,
+} satisfies Pick<WebdriverIO.Config, "outputDir" | "transformRequest">;

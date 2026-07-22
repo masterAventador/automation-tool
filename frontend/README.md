@@ -63,7 +63,7 @@ E4-11 扩展同一个 `executor_bootstrap.rs`/`executor_manager.rs`，由 Rust �
 
 E4-13 的 `src-tauri/src/executor_platform.rs` 从 Tauri `app_data_dir` 固定派生 `local-executor/package`、`state` 和 `executor-id-v1`。Executor UUIDv4 在 App 私有 `0700/0600` 边界原子持久且重启复用；React 不能提交路径、URL、身份或 Session。正式 `TauriPlatformAdapter` 只有状态、重启、脱敏诊断和本机进程树紧停四个无参数 invoke；“设置与诊断”页面严格校验公开 DTO，并明确本机硬停止不等于业务 Task 已停止。Rust 重启链自行换取当前 Installation 与独立短期 `executor.connect` Session，秘密仍只在清零内存/stdin 中。
 
-E4-14 已用唯一 `visible=false` 真实 App 从诊断页完成启动、状态刷新、本机紧停和再次启动。链路经过正式 TypeScript Adapter、Tauri IPC、Rust Control Plane client、真实 PostgreSQL/Uvicorn 与 signed PyInstaller Executor；实际 `SIGKILL` 验证 supervisor 恢复，实际挂起验证超时后的完整进程树回收，App 正常退出则由生产 `RunEvent::ExitRequested/Exit` 路径显式停止 Executor。测试专用动态 loopback origin 与故障注入只在 `control-plane-e2e` 构建存在；App 私有 UUID/SQLite 和 `0700/0600` 权限均已核对，凭据不入 SQLite，也不调用系统钥匙串。
+E4-14 已用唯一 `visible=false` 真实 App 从诊断页完成启动、状态刷新、本机紧停和再次启动。链路经过正式 TypeScript Adapter、Tauri IPC、Rust Control Plane client、真实 PostgreSQL/Uvicorn 与 signed PyInstaller Executor；Executor 在连接闸门建立后立即发出首条健康心跳，持续入站帧不能饿死后续 heartbeat。实际 `SIGKILL` 验证 supervisor 恢复，实际挂起验证超时后的完整进程树回收，App 正常退出则由生产 `RunEvent::ExitRequested/Exit` 路径显式停止 Executor。测试专用动态 loopback origin 与故障注入只在 `control-plane-e2e` 构建存在；App 私有 UUID/SQLite 和 `0700/0600` 权限均已核对，凭据不入 SQLite，也不调用系统钥匙串。
 
 ```bash
 backend/.venv/bin/python scripts/run_e4_14_acceptance.py

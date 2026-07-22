@@ -35,6 +35,19 @@ def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() ->
     assert '"automation_tool.executor.browser_runtime"' in source
 
 
+def test_every_executor_spec_materializes_safe_internal_pyinstaller_symlinks() -> None:
+    spec_paths = (
+        SPEC_PATH,
+        BACKEND_ROOT / "tests/fixtures/automation-tool-executor-b515.spec",
+        BACKEND_ROOT / "tests/fixtures/automation-tool-executor-h816f.spec",
+    )
+
+    for spec_path in spec_paths:
+        source = spec_path.read_text(encoding="utf-8")
+        assert "materialize_internal_package_symlinks" in source
+        assert "materialize_internal_package_symlinks(Path(bundle.name))" in source
+
+
 def test_desktop_ci_smokes_the_executor_bundle_on_both_supported_platforms() -> None:
     source = (REPOSITORY_ROOT / ".github/workflows/desktop.yml").read_text(encoding="utf-8")
 

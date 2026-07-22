@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { PlatformSessionGateway } from "./platform-session-gateway";
@@ -48,6 +49,25 @@ describe("platform status page", () => {
         autoOpenLogin
         onAutoOpenConsumed={onAutoOpenConsumed}
       />,
+    );
+
+    expect(await screen.findByText("请在打开的运营浏览器中扫码登录。")).toBeVisible();
+    expect(source.openDouyinLogin).toHaveBeenCalledOnce();
+    expect(onAutoOpenConsumed).toHaveBeenCalledOnce();
+  });
+
+  it("does not duplicate the automatic login action in React StrictMode", async () => {
+    const source = gateway();
+    const onAutoOpenConsumed = vi.fn();
+
+    render(
+      <StrictMode>
+        <PlatformSessions
+          gateway={source}
+          autoOpenLogin
+          onAutoOpenConsumed={onAutoOpenConsumed}
+        />
+      </StrictMode>,
     );
 
     expect(await screen.findByText("请在打开的运营浏览器中扫码登录。")).toBeVisible();

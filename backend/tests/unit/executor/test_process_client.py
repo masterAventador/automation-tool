@@ -305,6 +305,113 @@ def test_process_sends_formal_hello_and_heartbeat_then_stops_cleanly(
     assert not thread.is_alive()
 
 
+def test_continuous_inbound_messages_cannot_starve_the_initial_health_heartbeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = threading.Event()
+    sent_messages: list[ExecutorEnvelope] = []
+
+    class ContinuousInboundSocket:
+        def __init__(self) -> None:
+            self.received = 0
+
+        def __enter__(self) -> ContinuousInboundSocket:
+            return self
+
+        def __exit__(self, *_values: object) -> None:
+            return None
+
+        def send(self, source: str) -> None:
+            message = parse_executor_message(source)
+            sent_messages.append(message)
+            if message.message_type == "executor.heartbeat":
+                stop.set()
+
+        def recv(self, *, timeout: float) -> str:
+            assert timeout > 0
+            self.received += 1
+            if self.received >= 20:
+                stop.set()
+            return expired_offer().model_dump_json()
+
+    elapsed = count()
+    monkeypatch.setattr(
+        executor_runtime,
+        "connect_executor_websocket",
+        lambda **_values: ContinuousInboundSocket(),
+    )
+    process, output = process_for(
+        9,
+        tmp_path / "continuous-inbound-health-state",
+        monotonic_source=lambda: next(elapsed) * 0.2,
+    )
+
+    process.run(stop)
+
+    assert [message.message_type for message in sent_messages] == [
+        "executor.hello",
+        "executor.heartbeat",
+    ]
+    assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+        "executor.healthy",
+        "executor.stopped",
+    ]
+
+
+def test_initial_health_heartbeat_does_not_wait_for_the_steady_state_interval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = threading.Event()
+    sent_messages: list[ExecutorEnvelope] = []
+
+    class StartupSocket:
+        def __init__(self) -> None:
+            self.receive_count = 0
+
+        def __enter__(self) -> StartupSocket:
+            return self
+
+        def __exit__(self, *_values: object) -> None:
+            return None
+
+        def send(self, source: str) -> None:
+            message = parse_executor_message(source)
+            sent_messages.append(message)
+            if message.message_type == "executor.heartbeat":
+                stop.set()
+
+        def recv(self, *, timeout: float) -> str:
+            assert timeout > 0
+            self.receive_count += 1
+            if self.receive_count >= 2:
+                stop.set()
+            raise TimeoutError
+
+    monkeypatch.setattr(
+        executor_runtime,
+        "connect_executor_websocket",
+        lambda **_values: StartupSocket(),
+    )
+    process, output = process_for(
+        9,
+        tmp_path / "initial-health-heartbeat-state",
+        monotonic_source=lambda: 0.0,
+    )
+
+    process.run(stop)
+
+    assert [message.message_type for message in sent_messages] == [
+        "executor.hello",
+        "executor.heartbeat",
+    ]
+    assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+        "executor.healthy",
+        "executor.stopped",
+    ]
+
+
 def test_process_drains_local_platform_health_queue_over_the_formal_socket(
     tmp_path: Path,
 ) -> None:
@@ -315,7 +422,10 @@ def test_process_drains_local_platform_health_queue_over_the_formal_socket(
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             observed.put(parse_executor_message(connection.recv(timeout=2)))
             stop.set()
         except Exception as error:
@@ -382,7 +492,10 @@ def test_process_rejects_invalid_post_hello_application_frame(
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             connection.send(server_message)
             observed.put(True)
         except Exception as error:
@@ -398,7 +511,9 @@ def test_process_rejects_invalid_post_hello_application_frame(
             process.run(threading.Event())
         assert captured.value.__cause__ is None
         assert captured.value.__context__ is None
-        assert output.getvalue() == ""
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.healthy"
+        ]
         assert observed.get(timeout=2) is True
     finally:
         server.shutdown()
@@ -415,7 +530,10 @@ def test_process_consumes_a_formal_offer_and_sends_the_durable_outcome_batch(
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             connection.send(offered.model_dump_json())
             batch = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
             observed.put(batch)
@@ -436,7 +554,8 @@ def test_process_consumes_a_formal_offer_and_sends_the_durable_outcome_batch(
             "task.started",
         ]
         assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
-            "executor.stopped"
+            "executor.healthy",
+            "executor.stopped",
         ]
     finally:
         server.shutdown()
@@ -478,7 +597,10 @@ def test_process_consumes_pause_and_resume_over_the_formal_socket(
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             connection.send(pause.model_dump_json())
             paused = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
             connection.send(resume.model_dump_json())
@@ -508,7 +630,8 @@ def test_process_consumes_pause_and_resume_over_the_formal_socket(
         assert checkpoint.state is AttemptCheckpointState.RUNNING
         assert checkpoint.last_event_sequence == 4
         assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
-            "executor.stopped"
+            "executor.healthy",
+            "executor.stopped",
         ]
     finally:
         server.shutdown()
@@ -544,7 +667,10 @@ def test_process_consumes_cancel_and_confirms_the_safe_terminal_checkpoint(
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             connection.send(cancel.model_dump_json())
             terminal = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
             observed.put(terminal)
@@ -568,7 +694,8 @@ def test_process_consumes_cancel_and_confirms_the_safe_terminal_checkpoint(
         assert checkpoint.last_command_sequence == 2
         assert checkpoint.last_event_sequence == 3
         assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
-            "executor.stopped"
+            "executor.healthy",
+            "executor.stopped",
         ]
     finally:
         server.shutdown()
@@ -579,7 +706,7 @@ def test_process_consumes_cancel_and_confirms_the_safe_terminal_checkpoint(
 @pytest.mark.parametrize(
     ("local_emergency_stop", "expected_lifecycle"),
     (
-        (False, ["executor.stopped"]),
+        (False, ["executor.healthy", "executor.stopped"]),
         (True, ["executor.healthy", "executor.stopped"]),
     ),
 )
@@ -612,7 +739,10 @@ def test_process_reports_emergency_stop_uncertain_and_exits_without_network_stop
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             connection.send(emergency_stop.model_dump_json())
             terminal = tuple(parse_executor_message(connection.recv(timeout=2)) for _ in range(2))
             observed.put(terminal)
@@ -729,7 +859,10 @@ def test_process_collapses_outbox_delivery_failure(
 
     def handler(connection: ServerConnection) -> None:
         try:
-            parse_executor_message(connection.recv(timeout=2))
+            hello = parse_executor_message(connection.recv(timeout=2))
+            heartbeat = parse_executor_message(connection.recv(timeout=2))
+            assert hello.message_type == "executor.hello"
+            assert heartbeat.message_type == "executor.heartbeat"
             connection.send(offer().model_dump_json())
             observed.put(parse_executor_message(connection.recv(timeout=2)))
         except Exception as error:
@@ -745,7 +878,9 @@ def test_process_collapses_outbox_delivery_failure(
         with pytest.raises(ExecutorProcessRejected) as captured:
             process.run(threading.Event())
         assert captured.value.__context__ is None
-        assert output.getvalue() == ""
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
+            "executor.healthy"
+        ]
         message = cast(ExecutorEnvelope, observed.get(timeout=2))
         assert message.message_type == "task.accept"
     finally:
@@ -938,7 +1073,7 @@ def test_explicit_falsy_clock_is_not_silently_replaced_by_the_system_clock(
     "mode",
     ("already-stopped", "stop-during-timeout", "close-after-stop", "frame-after-stop"),
 )
-def test_stop_races_are_graceful_without_claiming_health(
+def test_stop_races_are_graceful_and_only_preexisting_stop_skips_health(
     mode: str,
     tmp_path: Path,
 ) -> None:
@@ -951,6 +1086,9 @@ def test_stop_races_are_graceful_without_claiming_health(
         try:
             hello = parse_executor_message(connection.recv(timeout=2))
             observed.put(hello)
+            if mode != "already-stopped":
+                heartbeat = parse_executor_message(connection.recv(timeout=2))
+                assert heartbeat.message_type == "executor.heartbeat"
             if mode == "stop-during-timeout":
                 threading.Timer(0.05, stop.set).start()
             elif mode != "already-stopped":
@@ -974,9 +1112,12 @@ def test_stop_races_are_graceful_without_claiming_health(
         if isinstance(hello, Exception):
             raise hello
         assert isinstance(hello, ExecutorLifecycleEnvelope)
-        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == [
-            "executor.stopped"
-        ]
+        expected = (
+            ["executor.stopped"]
+            if mode == "already-stopped"
+            else ["executor.healthy", "executor.stopped"]
+        )
+        assert [json.loads(line)["event"] for line in output.getvalue().splitlines()] == expected
     finally:
         server.shutdown()
         thread.join(timeout=2)
@@ -1005,9 +1146,9 @@ def test_control_plane_restart_reconnects_and_replays_exact_durable_outbox(
                 connection.close(code=1012, reason="control plane restart")
                 return
             recovered = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
+            recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
             connection.send(offered.model_dump_json())
             duplicate = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
-            recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
             observed.put((hello, recovered, duplicate, recovered_heartbeat))
             stop.set()
         except Exception as error:
@@ -1162,8 +1303,9 @@ def test_suspension_gap_closes_the_stale_transport_and_ignores_expired_command(
                 connection.send(stale.model_dump_json())
                 observed.put((hello, heartbeat))
                 return
-            connection.send(stale.model_dump_json())
             recovered_heartbeat = parse_executor_message(connection.recv(timeout=3))
+            connection.send(stale.model_dump_json())
+            time.sleep(0.05)
             observed.put((hello, recovered_heartbeat))
             stop.set()
         except Exception as error:
@@ -1199,8 +1341,8 @@ def test_suspension_gap_closes_the_stale_transport_and_ignores_expired_command(
         )
         assert diagnostics.getvalue().splitlines() == [
             "executor.recovery system_suspension_detected",
-            "executor.recovery command_deadline_expired",
             "executor.recovery transport_recovered",
+            "executor.recovery command_deadline_expired",
         ]
         assert process._command_processor.ledger.transport_connected() is False
     finally:
@@ -1302,6 +1444,8 @@ def test_long_command_processing_does_not_impersonate_system_suspension(
     def handler(connection: ServerConnection) -> None:
         try:
             hello = parse_executor_message(connection.recv(timeout=3))
+            initial_heartbeat = parse_executor_message(connection.recv(timeout=3))
+            assert initial_heartbeat.message_type == "executor.heartbeat"
             connection.send(offer().model_dump_json())
             batch = tuple(parse_executor_message(connection.recv(timeout=3)) for _ in range(2))
             heartbeat = parse_executor_message(connection.recv(timeout=3))
@@ -1439,6 +1583,8 @@ def test_gap_observed_after_socket_timeout_reconnects_before_heartbeat(
             connection_number = next(connections)
             hello = parse_executor_message(connection.recv(timeout=3))
             if connection_number == 1:
+                initial_heartbeat = parse_executor_message(connection.recv(timeout=3))
+                assert initial_heartbeat.message_type == "executor.heartbeat"
                 with suppress(Exception):
                     connection.recv(timeout=3)
                 observed.put(hello)

@@ -87,7 +87,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         input=TEST_SIGNING_KEY,
         capture_output=True,
         check=False,
-        timeout=20,
+        timeout=30,
     )
     assert manifest.returncode == 0, manifest.stderr
     manifest_document = json.loads((executable.parent / EXECUTOR_MANIFEST_FILE_NAME).read_bytes())

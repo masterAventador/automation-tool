@@ -2697,6 +2697,7 @@
 - 门禁：Backend 全量 `2071 passed/5 explicit skipped in 233.16s`，13909 条语句/3222 个分支覆盖率 100%；Ruff、格式化、严格 Mypy、uv lock、OpenAPI 与 Executor Schema 全绿。Frontend Node 契约、231 项 Vitest、5 项全局无头 Playwright、Lint、严格 TypeScript、API 漂移、production boundary 与 Rust 默认/`desktop-e2e`/`control-plane-e2e` 三套测试、Rustfmt、三套全目标 Clippy `-D warnings` 均通过；台账状态写入后再次执行最终 Node 契约与隐藏 App 纵向验收
 - 真实边界：本任务只在隔离官方-origin 测试页执行无副作用 browse，证明桌面 App、Control Plane、签名 Executor、外部浏览器和 PostgreSQL 的完整组合链；没有把隔离页冒充真实抖音搜索、评论或私信。`D6-16`、`A7-16`、`A7-17` 与 `B5-15` 继续保持 `🔍 待真实账号`，没有用户明确授权的目标时跳过且不阻塞后续离线任务
 - 提交：外部检查点 `b69f463` 已保存协议、实现、验收和规格主体并推送 `main`；本任务随后以独立补正提交收录防御性覆盖率分支、全量门禁结果和最终台账，不改写或强推已有历史
+- 本机迁移补正：在 Node 26/macOS 新环境复验时，真实隐藏 App 暴露 WDIO 跨 Undici dispatcher 的显式 `Content-Length` 不兼容、React StrictMode 自动登录重复消费、Executor 首个/持续 heartbeat 可被等待或入站帧推迟，以及 PyInstaller framework 包内 symlink 无法进入只接受普通文件的签名清单。现分别以请求边界移除显式长度、单次消费 ref、连接闸门后立即心跳并逐帧检查 deadline、构建期安全实体化闭环；失败输出只增加白名单计数和无路径/凭据的账本事实。最新 H8-20 基线上隐藏 App 再验收为 `1 passing`（37.3 秒），全链路与隔离资源清理通过
 - 后续：进入 `H8-17`，复审 fail-open、竞态、资源泄漏、假绿测试和平台差异；H8-17 完成前不启动后续自动更新实现
 
 ### H8-17 代码质量复审
@@ -2772,6 +2773,7 @@
 - 强更与恢复：startup 只有在检查得到 `forced` 或已持久化 `install_requested`，并且启动前已经存在 exact verified cache 时才自动安装；同一次启动刚完成的强更下载保持 ready，下一次启动再安装。缓存缺失/损坏、签名变化、运行环境停止失败、安装器失败和重叠安装全部 fail closed；安装失败保留持久意图，后续启动可从同一原路径重试
 - 测试隔离：正式 production/release 构建只包含 official installer；无副作用安装探针以 `debug_assertions + desktop-e2e + 非 control-plane-e2e` 三重条件隔离，release 和其他验收特性中连探针类型和绕过分支都不编译。React 仍无 JavaScript updater binding，`main` Capability 仍无 updater 权限，发布签名私钥仍不在仓库、App、AppData 或系统钥匙串
 - 隐藏 App 原入口：`pnpm test:h8-21-app` 使用独立 `com.aventador.automationtool.h821acceptance`、`visible:false`、动态 HTTPS/WDIO 端口、临时证书和正式 `create_app(database=None, desktop_update_catalog=...)` feed。第一轮 App 从 0.2.0 optional 完成暂缓→手动再提示→跳过→同版本 suppressed→发现 0.3.0 恢复 prompt→立即安装交接；清理 AppData 后第二轮 forced 首启只下载 0.2.0，第三轮复用同一 AppData 在 startup 自动安装。服务端 Artifact 账本精确为 optional 两次、forced 一次，强更重开没有重复下载
+- 本机迁移补正：Node 26 首轮 H8-21 在创建 WebDriver Session 时准确失败为 `UND_ERR_INVALID_ARG`，证明 H8-16F 的请求兼容若只挂单条配置仍会让新验收回归。现将 `withoutExplicitContentLength` 提升到所有 WDIO 配置共用的 `wdioRuntimeArtifacts`，严格 TypeScript 和 7 项聚焦契约通过；同一 H8-21 三轮隐藏 App 随后连续 `1 passing`，暂缓、跳过、立即安装与强更下一次启动交接全部通过。新 runner 同时按锁定 Ruff 版本完成机械格式化
 - 构建资源隔离：收紧探针 cfg 后曾把 H8-21 debug App 与 E4-15 release 审计并行启动；两者当时共用 `frontend/dist`，release 的 production assets 覆盖验收 assets，使首轮 App 启动门准确显示“桌面运行环境需要处理”而非假绿。定位后停止并行，顺序重跑原验收通过；随后把 H8-21 改为专属 `dist-h821`/`frontendDist` 并由 runner 前后精确删除，消除同项目构建产物冲突，不把简单复跑当最终修复
 - 门禁：Frontend `136` 项 Node 契约、`233` 项 Vitest、`5` 项全局无头 Playwright、ESLint、严格 TypeScript、OpenAPI 漂移和 production boundary 全绿。Rust 默认 `191 passed/4 ignored`、`desktop-e2e` `187 passed/4 ignored`、`control-plane-e2e` `192 passed/6 ignored`，Rustfmt 与三套全目标 Clippy `-D warnings` 全绿；E4-15 release 门禁验证缺失/非法信任根拒绝，合法公开配置的临时生产二进制构建、依赖树审计和精确资源删除通过。Backend 本任务无源码/Schema/OpenAPI 改动，H8-20 feed 47 项与隐藏 App 生产调用路径继续通过
 - 资源与文档：三轮 App 验收结束后删除专属 AppData、临时 TLS、WDIO 目录并关闭 Update/Uvicorn/WebDriver/App 进程和端口；未启动系统浏览器、未触碰真实账号、用户默认 Profile、其他项目 Compose 或系统钥匙串。同一任务同步根/Frontend README、产品规划、前端架构、项目结构和唯一台账，没有新增重复计划

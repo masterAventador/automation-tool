@@ -53,6 +53,15 @@ ENVIRONMENT_ID = "h816f-acceptance"
 EXECUTOR_BUILD_ID = "h8-16f-mvp-user-journey"
 EXECUTOR_LEDGER_FILE = "executor-ledger.sqlite3"
 DEVICE_CREDENTIAL_FILE = "device-credential-v1"
+PUBLIC_OBSERVATION_EVENTS = frozenset(
+    {
+        "login_browser_started",
+        "discovery_login_required",
+        "discovery_completed",
+        "action_browser_started",
+        "browse_page_closed",
+    }
+)
 
 
 def app_data_directory() -> Path:
@@ -176,6 +185,56 @@ def isolated_environment(
         }
     )
     return environment, database_url
+
+
+def public_observation_counts(path: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not path.is_file():
+        return counts
+    try:
+        documents = (
+            json.loads(line) for line in path.read_text(encoding="ascii").splitlines()
+        )
+        for document in documents:
+            event = document.get("event")
+            if event in PUBLIC_OBSERVATION_EVENTS:
+                counts[event] = counts.get(event, 0) + 1
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return {}
+    return counts
+
+
+def public_executor_facts(private_app_data: Path) -> dict[str, object]:
+    ledger = private_app_data / "local-executor" / "state" / EXECUTOR_LEDGER_FILE
+    facts: dict[str, object] = {"ledgerPresent": ledger.is_file()}
+    if not ledger.is_file():
+        return facts
+    try:
+        with closing(
+            sqlite3.connect(f"file:{ledger}?mode=ro", uri=True, timeout=1)
+        ) as connection:
+            facts.update(
+                {
+                    "commands": connection.execute(
+                        "SELECT count(*) FROM executor_commands"
+                    ).fetchone()[0],
+                    "attempts": connection.execute(
+                        "SELECT count(*) FROM executor_attempt_checkpoints"
+                    ).fetchone()[0],
+                    "platformStates": [
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT state FROM executor_platform_sessions ORDER BY platform"
+                        ).fetchall()
+                    ],
+                    "schemaVersion": connection.execute(
+                        "PRAGMA user_version"
+                    ).fetchone()[0],
+                }
+            )
+    except (OSError, sqlite3.Error, TypeError):
+        facts["readable"] = False
+    return facts
 
 
 def verify_observations(path: Path) -> None:
@@ -449,6 +508,24 @@ def main() -> None:
             output = output_bytes.decode("utf-8", errors="replace")
             print(output, end="")
             if app_process.returncode != 0:
+                print(
+                    "[H8-16F] Public controlled-browser observation counts: "
+                    + json.dumps(
+                        public_observation_counts(observations),
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
+                print(
+                    "[H8-16F] Public Local Executor facts: "
+                    + json.dumps(
+                        public_executor_facts(private_app_data),
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
                 raise RuntimeError("H8-16F hidden App original-caller journey failed")
             app_process = None
 

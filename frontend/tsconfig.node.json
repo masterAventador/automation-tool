@@ -21,6 +21,7 @@
     "playwright.config.ts",
     "wdio*.conf.ts",
     "wdio-runtime-artifacts.ts",
+    "wdio-request-compatibility.ts",
     "e2e/**/*.ts",
     "e2e-tauri/**/*.ts",
     "eslint.config.js"

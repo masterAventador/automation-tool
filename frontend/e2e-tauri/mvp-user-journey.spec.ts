@@ -51,16 +51,42 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
     await expect(await browser.$("h3=任务运行详情")).toExist();
 
     await browser.$("button=开始目标发现").click();
-    await browser.waitUntil(
-      async () => {
-        const text = await body.getText();
-        return text.includes("平台状态") && text.includes("登录正常");
-      },
-      {
-        timeout: 180_000,
-        timeoutMsg: "waiting-platform-login did not automatically open the handling path",
-      },
-    );
+    try {
+      await browser.waitUntil(
+        async () => {
+          const text = await body.getText();
+          return text.includes("平台状态") && text.includes("登录正常");
+        },
+        {
+          timeout: 180_000,
+          timeoutMsg: "waiting-platform-login did not automatically open the handling path",
+        },
+      );
+    } catch {
+      const text = await body.getText();
+      const executorStatus = await browser.tauri.execute(({ core }) =>
+        core.invoke("get_executor_status"),
+      );
+      const executorDiagnostics = await browser.tauri.execute(({ core }) =>
+        core.invoke("get_executor_diagnostics"),
+      );
+      const openLoginButton = await browser.$("button=打开登录处理");
+      const openLoginButtonExists = await openLoginButton.isExisting();
+      throw new Error(
+        `waiting-platform-login handoff facts: ${JSON.stringify({
+          discoverySubmitted: text.includes("目标发现命令已提交"),
+          discovering: text.includes("发现目标中"),
+          awaitingLogin: text.includes("等待平台登录"),
+          platformPage: text.includes("平台状态"),
+          loginHealthy: text.includes("登录正常"),
+          platformFailure: text.includes("暂时无法读取抖音登录状态"),
+          loginOpenPending: openLoginButtonExists && !(await openLoginButton.isEnabled()),
+          loginActionRendered: text.includes("请在打开的运营浏览器中扫码登录"),
+          executorStatus,
+          executorDiagnostics,
+        })}`,
+      );
+    }
     await expect(await browser.$("h2")).toHaveText("平台状态");
 
     await browser.$("li=任务记录").click();

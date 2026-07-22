@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Flex, Popconfirm, Space, Spin, Tag, Typography } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   PlatformSessionAction,
@@ -65,6 +65,7 @@ export function PlatformSessions({
   const [action, setAction] = useState<PlatformSessionAction | null>(null);
   const [failure, setFailure] = useState(false);
   const [pending, setPending] = useState<"open" | "recheck" | "logout" | null>(null);
+  const autoOpenConsumed = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -101,7 +102,12 @@ export function PlatformSessions({
   }, [gateway]);
 
   useEffect(() => {
-    if (!autoOpenLogin) return;
+    if (!autoOpenLogin) {
+      autoOpenConsumed.current = false;
+      return;
+    }
+    if (autoOpenConsumed.current) return;
+    autoOpenConsumed.current = true;
     onAutoOpenConsumed?.();
     void Promise.resolve().then(() => run("open"));
   }, [autoOpenLogin, onAutoOpenConsumed, run]);

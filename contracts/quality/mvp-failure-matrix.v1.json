@@ -49,7 +49,7 @@
         {"name": "token 错误", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "invalid_package_configuration_and_health_proof_fail_closed_without_leaks"}},
         {"name": "协议漂移", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_protocol_fixtures.rs", "anchor": "rust_formal_parser_rejects_every_shared_invalid_fixture_with_one_safe_error"}},
         {"name": "stdout 破损", "disposition": "automated", "evidence": {"path": "frontend/src-tauri/tests/executor_manager.rs", "anchor": "invalid_package_configuration_and_health_proof_fail_closed_without_leaks"}},
-        {"name": "stop/invoke 竞争", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_process_client.py", "anchor": "test_stop_races_are_graceful_without_claiming_health"}}
+        {"name": "stop/invoke 竞争", "disposition": "automated", "evidence": {"path": "backend/tests/unit/executor/test_process_client.py", "anchor": "test_stop_races_are_graceful_and_only_preexisting_stop_skips_health"}}
       ]
     },
     {

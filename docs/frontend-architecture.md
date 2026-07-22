@@ -301,7 +301,7 @@ E4-12 没有给 WebView 增加通用命令通道：Rust Manager 仍只监管正�
 
 E4-13 新增唯一 `executor_platform.rs` 组合根。Tauri setup 只从 `app.path().app_data_dir()` 派生 `local-executor/package`、`local-executor/state` 和 `executor-id-v1`；稳定 Executor UUIDv4 使用既有 App 私有原子存储，Unix 目录/文件为 `0700/0600`。重启时 Rust 依次换取 `app.control-plane` Session、校验当前 Installation，再换取独立 `executor.connect` Session 并启动 Manager；React 只能调用四个无参数 Command，不能传 URL、Session、路径、包根或身份。`emergency_stop_executor` 是本机完整进程树硬停止，与 T3-16/T3-18 的业务 Task 协作式紧停严格分离。E4-14 已从唯一 `visible=false` App 的诊断页面完成 WebView→IPC→Control Plane→signed Executor→退出清理的 macOS 生产同路径验收。
 
-E4-14 专用配置只在 `control-plane-e2e` 编译中允许 runner 注入规范动态 loopback origin，并只在该特性注册真实 OS crash/hang 与正常退出验收 Command；默认和 `desktop-e2e` 构建没有这些入口。真实链路发现首个健康心跳为 15 秒而原启动预算为 10 秒，现将 App 组合根启动预算固定为 30 秒。生产 Tauri event loop 在 `RunEvent::ExitRequested` 或 `RunEvent::Exit` 上显式调用唯一 Platform service 停止 Executor，Manager Drop 仍是兜底，不能依赖测试驱动杀进程触发析构。验收核对 App 私有稳定 UUID、SQLite identity/版本迁移、Unix 权限和凭据不入库；所有服务、进程、端口与数据均按本次专属标识清理。
+E4-14 专用配置只在 `control-plane-e2e` 编译中允许 runner 注入规范动态 loopback origin，并只在该特性注册真实 OS crash/hang 与正常退出验收 Command；默认和 `desktop-e2e` 构建没有这些入口。App 组合根保留 30 秒有界启动预算；Executor 在 Hello、持久 outbox/控制队列和连接闸门完成后立即发送首条健康心跳，持续入站帧也不能推迟该证明。生产 Tauri event loop 在 `RunEvent::ExitRequested` 或 `RunEvent::Exit` 上显式调用唯一 Platform service 停止 Executor，Manager Drop 仍是兜底，不能依赖测试驱动杀进程触发析构。验收核对 App 私有稳定 UUID、SQLite identity/版本迁移、Unix 权限和凭据不入库；所有服务、进程、端口与数据均按本次专属标识清理。
 
 B5-13 在同一组合根增加平台状态纵向链路。`get_douyin_platform_session` 由 Rust 自行换 `app.control-plane` Session 并调用固定 `/api/v1/platform-sessions/douyin`；`open_douyin_login`/`recheck_douyin_login` 在 Executor 停止时先按 E4-13 原路径自动启动，再从 `BrowserSettingsService` 重新发现受信浏览器、从 `BrowserProfileStore.current_douyin_profile()` 取得稳定 App 私有 Profile 并持有 owned lease。Manager 在现有 stdin/stdout 上发送/验签动作，不创建第二 Executor 或第二浏览器 Manager；生产 headed，只有 B5-13 专用 `visible=false`、唯一标识的 `control-plane-e2e` 构建硬编码 headless。真实验收从页面点击出发并在 App 正常退出后确认 signed Executor、Chrome、Profile 锁和隔离服务全部清理。
 
@@ -522,6 +522,8 @@ Playwright 使用受控窄 Adapter 驱动真实 React 页面交互；T3-19 的�
 I2-04 起，`desktop-e2e` 特性在真实 App 进程内生成不持久化的临时 Ed25519 身份，避免通用桌面冒烟污染开发机或 CI 的正式 App 数据。I2-08 另以正式、非 `desktop-e2e` Tauri 入口解析隔离测试标识的 `app_data_dir`，验证私钥文件首次创建、重启复用、权限和无长期凭据初始状态；Rust 测试再覆盖凭据写入、替换、删除及故障矩阵。临时身份不能替代正式 App 私有存储验收。
 
 `pnpm test:layers` 固定按 Vitest/契约、Playwright UI Harness、Rust、WebdriverIO 真实桌面四层执行。通用桌面冒烟证明真实 App、WKWebView、测试 IPC 插件和窗口查询可用；I2-09 验证认证纵向链路，T3-19 验证完整任务交互，T3-20 的 `scripts/run_t3_20_acceptance.py` 再让同一隐藏 App 保持运行，真实停止 Control Plane、整页刷新显示不可用、以同一 PostgreSQL 重启服务并点击“重新检查”，最终从工作台/详情读取 Executor 重连后的取消终态。E4-14 的 `scripts/run_e4_14_acceptance.py` 则从隐藏 App 诊断页驱动正式 signed Executor 启停、崩溃恢复、挂起超时和 App 退出清理。这些证据仍不证明外部运营浏览器或真实平台 RPA，相关最终状态由 Wave 5～7 各自验收。
+
+所有 WDIO 配置统一展开 `wdioRuntimeArtifacts`：除每次运行唯一且随父进程回收的临时输出目录外，Node 26 下还统一移除跨 Undici dispatcher 不兼容的显式 `Content-Length`，交给实际发送方按 body 重新计算。该兼容层本身不改写 body、URL、认证或响应，并进入严格 TypeScript 与 Node 契约；新增验收配置无需再复制请求 workaround。
 
 ## 14. 构建和配置
 

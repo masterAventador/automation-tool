@@ -474,10 +474,30 @@ class LocalExecutorProcess:
                         self._command_processor.ledger.set_transport_connected(False)
                         self._reporter.stopped()
                         return
-                    sequence = 1
+                    if stop.is_set():
+                        break
                     heartbeat_interval = float(self._bootstrap.heartbeat_interval_seconds)
                     last_monotonic = self._monotonic_now()
                     heartbeat_deadline = last_monotonic + heartbeat_interval
+                    sequence = 2
+                    websocket.send(
+                        serialize_executor_message(
+                            self._lifecycle(
+                                message_type="executor.heartbeat",
+                                sequence=sequence,
+                            )
+                        )
+                    )
+                    if not healthy:
+                        self._reporter.healthy()
+                        healthy = True
+                    if recovering_transport:
+                        recovering_transport = False
+                        reconnect_attempts = 0
+                        if recovering_from_suspension:
+                            if self._diagnostics is not None:
+                                self._diagnostics.transport_recovered()
+                            recovering_from_suspension = False
                     while not stop.is_set():
                         current_monotonic = self._monotonic_now()
                         if self._suspension_detected(last_monotonic, current_monotonic):
@@ -492,37 +512,7 @@ class LocalExecutorProcess:
                         try:
                             source = websocket.recv(timeout=receive_timeout)
                         except TimeoutError:
-                            if stop.is_set():
-                                break
-                            current_monotonic = self._monotonic_now()
-                            if self._suspension_detected(last_monotonic, current_monotonic):
-                                self._report_suspension()
-                                recovering_from_suspension = True
-                                raise _ExecutorNetworkDisconnected from None
-                            last_monotonic = current_monotonic
-                            if current_monotonic < heartbeat_deadline:
-                                continue
-                            sequence += 1
-                            websocket.send(
-                                serialize_executor_message(
-                                    self._lifecycle(
-                                        message_type="executor.heartbeat",
-                                        sequence=sequence,
-                                    )
-                                )
-                            )
-                            if not healthy:
-                                self._reporter.healthy()
-                                healthy = True
-                            if recovering_transport:
-                                recovering_transport = False
-                                reconnect_attempts = 0
-                                if recovering_from_suspension:
-                                    if self._diagnostics is not None:
-                                        self._diagnostics.transport_recovered()
-                                    recovering_from_suspension = False
-                            heartbeat_deadline = current_monotonic + heartbeat_interval
-                            continue
+                            source = None
                         except Exception:
                             if stop.is_set():
                                 break
@@ -535,6 +525,19 @@ class LocalExecutorProcess:
                             recovering_from_suspension = True
                             raise _ExecutorNetworkDisconnected
                         last_monotonic = current_monotonic
+                        if current_monotonic >= heartbeat_deadline:
+                            sequence += 1
+                            websocket.send(
+                                serialize_executor_message(
+                                    self._lifecycle(
+                                        message_type="executor.heartbeat",
+                                        sequence=sequence,
+                                    )
+                                )
+                            )
+                            heartbeat_deadline = current_monotonic + heartbeat_interval
+                        if source is None:
+                            continue
                         try:
                             outcome = self._command_processor.handle(source)
                         except ExecutorCommandExpired:
@@ -568,12 +571,6 @@ class LocalExecutorProcess:
             failed = True
         if failed:
             raise ExecutorProcessRejected from None
-        if (
-            self._bootstrap.local_emergency_stop
-            and self._command_processor.emergency_stop_received()
-            and not healthy
-        ):
-            self._reporter.healthy()
         self._reporter.stopped()
 
 

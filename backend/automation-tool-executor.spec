@@ -1,10 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 backend_root = Path(SPECPATH)
 source_root = backend_root / "src"
+sys.path.insert(0, str(source_root))
+from automation_tool.executor.pyinstaller_support import materialize_internal_package_symlinks
+
 playwright_datas, playwright_binaries, playwright_hiddenimports = collect_all("playwright")
 playwright_hiddenimports.append("automation_tool.executor.browser_runtime")
 
@@ -50,3 +54,4 @@ bundle = COLLECT(
     upx_exclude=[],
     name="automation-tool-executor",
 )
+materialize_internal_package_symlinks(Path(bundle.name))
