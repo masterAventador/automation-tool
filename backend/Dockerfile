@@ -34,6 +34,8 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY --from=builder --chown=65532:65532 /app/.venv /app/.venv
+COPY --chown=65532:65532 alembic.ini /app/alembic.ini
+COPY --chown=65532:65532 migrations /app/migrations
 
 USER 65532:65532
 EXPOSE 8000

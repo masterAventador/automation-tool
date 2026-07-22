@@ -51,6 +51,8 @@ automation-tool/
 │   ├── development-roadmap.md
 │   ├── development/               # 每个任务独立的 RED/GREEN 与验收证据
 │   └── adr/                       # 后续重要架构决策
+├── deploy/
+│   └── postgresql/                # C10-03 固定角色、最小权限与安全运维顺序
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
 │   ├── run_i2_09_acceptance.py   # 隐藏 Tauri→Rust→FastAPI/PostgreSQL 隔离验收
 │   ├── run_i2_13_acceptance.py   # 后台 Uvicorn→WebSocket→PostgreSQL 隔离验收
@@ -80,7 +82,8 @@ automation-tool/
 │   ├── run_b5_13_acceptance.py   # 隐藏 App→signed Executor→无头浏览器→平台页面验收
 │   ├── run_b5_15_acceptance.py   # 四轮隐藏 App/Executor/浏览器复用与接管验收
 │   ├── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
-│   └── run_c10_02_acceptance.py  # 锁定非 root Control Plane 真实容器验收
+│   ├── run_c10_02_acceptance.py  # 锁定非 root Control Plane 真实容器验收
+│   └── run_c10_03_acceptance.py  # 私网迁移、只读备份与隔离恢复验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略

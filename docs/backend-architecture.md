@@ -959,6 +959,8 @@ C10-01 的权威机器契约为 `contracts/deployment/customer-demo-deployment.v
 
 C10-02 的 `backend/Dockerfile` 是唯一 Control Plane 镜像入口：Python base 与 uv 构建器都用 digest 锁定，多阶段构建只从 `uv.lock` 安装生产依赖；运行阶段固定 UID/GID 65532、一个 Uvicorn worker、内部 `8000`、`/api/v1/health`、SIGTERM 与 30 秒优雅停止。镜像不携带测试依赖、下载浏览器、Secret 或数据库迁移副作用，并已在只读 rootfs、全部 capability 移除和无宿主端口条件下通过真实容器验收。C10-03/C10-04 分别提供数据库和反代，不能修改镜像重新开放公网端口或多 worker。
 
+C10-03 的 PostgreSQL 权限事实只存在于 `deploy/postgresql/roles.sql` 与 `privileges.sql`：migrator 拥有 schema/DDL，app 仅有 DML/序列/必要函数执行，backup 仅有 SELECT；三个 LOGIN role 都禁止 superuser、建库、建角色、replication 与 bypass RLS，Secret 由部署系统单独设置。Control Plane 镜像携带只读 Alembic 资产供显式一次性迁移作业使用，但正式入口永不自动迁移。真实双实例门禁已验证私网无端口映射、migrator 全链 upgrade、app/backup 拒绝矩阵、PostgreSQL 18 custom dump 和全新隔离实例恢复；云实例、防火墙与加密备份存储仍必须在 C10-08 产生外部事实。
+
 - Control Plane 构建 Docker 镜像；
 - 执行同一 Alembic 迁移；
 - 使用云端 PostgreSQL；
