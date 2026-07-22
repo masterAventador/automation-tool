@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发的任务定义、依赖、状态与当前下一步台账；详细执行证据按任务拆分到 [`docs/development/`](./development/)
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-06、C10-01 已完成，下一工程任务为 C10-02 Control Plane Docker
+> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-06、C10-01～C10-02 已完成，下一工程任务为 C10-03 云 PostgreSQL
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 > 当前开发终点：完成 Wave 10 全部任务后停止；第 16 节“RPA 运营增强路线图”及之后任务本轮不启动
 
@@ -400,7 +400,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | C10-01 | Demo 部署设计 | 单实例 Control Plane、PostgreSQL、HTTPS、域名、备份和资源上限 | U9-06 | ✅ 已完成 |
-| C10-02 | Control Plane Docker | 锁定镜像、非 root、健康检查、优雅停止和版本标签 | F1-14,C10-01 | ⬜ 未开始 |
+| C10-02 | Control Plane Docker | 锁定镜像、非 root、健康检查、优雅停止和版本标签 | F1-14,C10-01 | ✅ 已完成 |
 | C10-03 | 云 PostgreSQL | 最小权限、迁移、备份、恢复演练和网络隔离 | C10-01 | ⬜ 未开始 |
 | C10-04 | HTTPS/域名 | TLS、反代、请求大小/超时/限流和安全头 | C10-02 | ⬜ 未开始 |
 | C10-05 | Secret 管理 | DB、账号 Session 签发、密码 Pepper 与设备签发密钥；不进入镜像、Git 或日志 | C10-02,C10-03,U9-03 | ⬜ 未开始 |
@@ -566,6 +566,6 @@
 9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
 10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；
 11. `U9-04`（✅ 已完成）：customer-demo 外层账号门禁、Rust 私有账号 Session vault、登录/恢复/改密/注销、离线 fail-closed、重启 refresh 和隐藏真实 Tauri 未登录边界已完成；React 不接收 bearer secret；
-12. `C10-01`（✅ 已完成）：单实例 Demo 拓扑、网络/Secret 边界、资源容量、RPO/RTO、备份恢复和串行发布/回滚顺序已冻结为机器契约；下一工程任务为 `C10-02`；
+12. `C10-02`（✅ 已完成）：digest 锁定的多阶段 Control Plane 镜像、非 root/只读运行、真实健康/版本探测、OCI 身份与 30 秒优雅停止已完成；下一工程任务为 `C10-03`；
 13. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
 14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。

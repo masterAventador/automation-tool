@@ -957,6 +957,8 @@ Local Executor: uv 源码模式或测试构建
 
 C10-01 的权威机器契约为 `contracts/deployment/customer-demo-deployment.v1.json`，配套说明为 `docs/customer-demo-deployment-design.md`。当前拓扑固定为唯一公网 HTTPS 反代、一个 Control Plane worker 和一个私网 PostgreSQL primary；不声明 HA、自动扩容或自动数据库回滚。资源、容量、RPO/RTO、备份保留、健康检查和发布顺序只能由后续 C10 任务按该契约落地，设计文档本身不构成部署授权或环境验收。
 
+C10-02 的 `backend/Dockerfile` 是唯一 Control Plane 镜像入口：Python base 与 uv 构建器都用 digest 锁定，多阶段构建只从 `uv.lock` 安装生产依赖；运行阶段固定 UID/GID 65532、一个 Uvicorn worker、内部 `8000`、`/api/v1/health`、SIGTERM 与 30 秒优雅停止。镜像不携带测试依赖、下载浏览器、Secret 或数据库迁移副作用，并已在只读 rootfs、全部 capability 移除和无宿主端口条件下通过真实容器验收。C10-03/C10-04 分别提供数据库和反代，不能修改镜像重新开放公网端口或多 worker。
+
 - Control Plane 构建 Docker 镜像；
 - 执行同一 Alembic 迁移；
 - 使用云端 PostgreSQL；

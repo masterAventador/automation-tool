@@ -79,7 +79,8 @@ automation-tool/
 │   ├── run_b5_12_acceptance.py   # 无头浏览器→Executor WebSocket→平台投影验收
 │   ├── run_b5_13_acceptance.py   # 隐藏 App→signed Executor→无头浏览器→平台页面验收
 │   ├── run_b5_15_acceptance.py   # 四轮隐藏 App/Executor/浏览器复用与接管验收
-│   └── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
+│   ├── run_b5_16_acceptance.py   # 活跃 Chrome 进程树/lsof 默认 Profile 隔离审计
+│   └── run_c10_02_acceptance.py  # 锁定非 root Control Plane 真实容器验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
 ├── .local/                        # 开发运行数据，必须忽略
@@ -363,6 +364,7 @@ backend/
 ├── uv.lock
 ├── automation-tool-executor.spec  # Local Executor 的 PyInstaller 配置
 ├── Dockerfile                     # Control Plane 部署镜像
+├── .dockerignore                  # 排除测试、虚拟环境、缓存与 Executor 构建资产
 └── README.md
 ```
 

@@ -298,6 +298,14 @@ AUTOMATION_TOOL_ACCOUNT_FINGERPRINT_KEY=<different-32-byte-secret-base64url>
 - `GET http://127.0.0.1:8765/api/v1/tasks/{task_id}`
 - `WS ws://127.0.0.1:8765/api/v1/executors/connect`
 
+客户 Demo 容器不使用上述本机 CLI。`backend/Dockerfile` 通过 digest 锁定 Python/uv、多阶段 `uv sync --locked --no-dev --no-editable` 构建 `automation-tool-control-plane-container`，运行时固定非 root UID/GID 65532、一个 worker、内部端口 8000、`/api/v1/health` 和 30 秒 SIGTERM 优雅停止。镜像必须由 C10 部署流程提供 OCI `APP_VERSION`/`VCS_REF` 和运行时 Secret，不能发布 Control Plane 宿主端口或在镜像内执行 Alembic。真实只读容器门禁在仓库根目录执行：
+
+```bash
+uv run --project backend python scripts/run_c10_02_acceptance.py
+```
+
+该门禁创建唯一名称的临时 PostgreSQL、网络和镜像，核对健康、版本、OCI 标签、无测试/浏览器资产、日志脱敏与优雅停止后精确清理；它不部署云环境。
+
 P9-08 的 `/api/v1/version` 同时发布 Desktop App、Executor runtime 与 Executor protocol 的 current/minimum/maximum。当前 `0.1.0` release 只接受 App `0.1.0`、Control Plane `0.1.0`、API `v1`、Executor `0.1.0` 和 protocol `1.0`；Desktop 会在 Health 后严格核对该矩阵，Executor WebSocket Hello 也独立拒绝旧版、新版与预发布 runtime。机器可读权威快照为 `contracts/protocol/runtime-compatibility-v1.json`，升级任一组件必须同步更新并通过 Python、Rust 与 Node 漂移门禁。
 
 迁移回滚验证（只对明确的测试数据库执行）：
