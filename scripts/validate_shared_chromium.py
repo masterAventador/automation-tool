@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ctypes
 import hashlib
 import json
 import os
@@ -14,7 +15,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
+from ctypes import wintypes
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,7 +31,9 @@ from playwright.async_api import BrowserContext, Playwright, async_playwright
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = REPOSITORY_ROOT / "contracts/browser/shared-chromium-validation.v1.json"
-COMPATIBILITY_PATH = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-compatibility.v1.json"
+COMPATIBILITY_PATH = (
+    REPOSITORY_ROOT / "contracts/browser/embedded-chromium-compatibility.v1.json"
+)
 TOOL_ROOT = REPOSITORY_ROOT / "tools/shared-browser-validation"
 CATALOG_SCRIPT = REPOSITORY_ROOT / "scripts/render_shared_chromium_catalog.mjs"
 EXPECTED_PROBES = {
@@ -54,6 +59,30 @@ EXPECTED_PROBES = {
     "exclusive_control_lease",
     "single_browser_distribution",
 }
+_VS_FIXED_FILE_INFO_SIGNATURE = 0xFEEF04BD
+_PROXY_ENVIRONMENT_NAMES = {
+    "all_proxy",
+    "http_proxy",
+    "https_proxy",
+}
+
+
+class WindowsFixedFileInfo(ctypes.Structure):
+    _fields_ = [
+        ("dwSignature", wintypes.DWORD),
+        ("dwStrucVersion", wintypes.DWORD),
+        ("dwFileVersionMS", wintypes.DWORD),
+        ("dwFileVersionLS", wintypes.DWORD),
+        ("dwProductVersionMS", wintypes.DWORD),
+        ("dwProductVersionLS", wintypes.DWORD),
+        ("dwFileFlagsMask", wintypes.DWORD),
+        ("dwFileFlags", wintypes.DWORD),
+        ("dwFileOS", wintypes.DWORD),
+        ("dwFileType", wintypes.DWORD),
+        ("dwFileSubtype", wintypes.DWORD),
+        ("dwFileDateMS", wintypes.DWORD),
+        ("dwFileDateLS", wintypes.DWORD),
+    ]
 
 
 class ValidationError(RuntimeError):
@@ -89,7 +118,10 @@ def validate_contract() -> dict[str, Any]:
         "browser_version": runtime["chromium"]["browser_version"],
         "revision": runtime["chromium"]["revision"],
     }
-    if contract.get("schema_version") != 1 or contract.get("chromium") != expected_chromium:
+    if (
+        contract.get("schema_version") != 1
+        or contract.get("chromium") != expected_chromium
+    ):
         fail("shared validation Chromium differs from EB-01")
     if contract.get("browser_use_version") != "0.13.6":
         fail("Browser Use validation version drifted")
@@ -118,9 +150,13 @@ def validate_contract() -> dict[str, Any]:
         fail("catalog total differs from the pinned submodule")
 
     manager_source = (
-        REPOSITORY_ROOT / "vendor/hyperframes/packages/engine/src/services/browserManager.ts"
+        REPOSITORY_ROOT
+        / "vendor/hyperframes/packages/engine/src/services/browserManager.ts"
     ).read_text(encoding="utf-8")
-    if 'process.platform === "linux"' not in manager_source or '"screenshot"' not in manager_source:
+    if (
+        'process.platform === "linux"' not in manager_source
+        or '"screenshot"' not in manager_source
+    ):
         fail("render engine no longer clearly limits BeginFrame selection to Linux")
     return contract
 
@@ -152,7 +188,71 @@ def discover_browser(browser_root: Path) -> Path:
     return candidates[0].resolve()
 
 
+def read_windows_pe_product_version(browser_path: Path) -> str:
+    version_api = ctypes.WinDLL("version", use_last_error=True)
+    version_api.GetFileVersionInfoSizeW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    version_api.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+    version_api.GetFileVersionInfoW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+    ]
+    version_api.GetFileVersionInfoW.restype = wintypes.BOOL
+    version_api.VerQueryValueW.argtypes = [
+        wintypes.LPCVOID,
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.UINT),
+    ]
+    version_api.VerQueryValueW.restype = wintypes.BOOL
+
+    ignored_handle = wintypes.DWORD()
+    size = version_api.GetFileVersionInfoSizeW(
+        str(browser_path), ctypes.byref(ignored_handle)
+    )
+    if size == 0:
+        fail(
+            "could not read Windows Chromium PE version metadata "
+            f"(winerror={ctypes.get_last_error()})"
+        )
+    buffer = ctypes.create_string_buffer(size)
+    if not version_api.GetFileVersionInfoW(str(browser_path), 0, size, buffer):
+        fail(
+            "could not load Windows Chromium PE version metadata "
+            f"(winerror={ctypes.get_last_error()})"
+        )
+    fixed_pointer = wintypes.LPVOID()
+    fixed_size = wintypes.UINT()
+    if not version_api.VerQueryValueW(
+        buffer, "\\", ctypes.byref(fixed_pointer), ctypes.byref(fixed_size)
+    ):
+        fail(
+            "could not query Windows Chromium PE product version "
+            f"(winerror={ctypes.get_last_error()})"
+        )
+    if fixed_size.value < ctypes.sizeof(WindowsFixedFileInfo):
+        fail("Windows Chromium PE version metadata is truncated")
+    fixed = ctypes.cast(fixed_pointer, ctypes.POINTER(WindowsFixedFileInfo)).contents
+    if fixed.dwSignature != _VS_FIXED_FILE_INFO_SIGNATURE:
+        fail("Windows Chromium PE version metadata has an invalid signature")
+    return ".".join(
+        str(component)
+        for component in (
+            fixed.dwProductVersionMS >> 16,
+            fixed.dwProductVersionMS & 0xFFFF,
+            fixed.dwProductVersionLS >> 16,
+            fixed.dwProductVersionLS & 0xFFFF,
+        )
+    )
+
+
 def read_browser_version(browser_path: Path) -> str:
+    if platform.system() == "Windows":
+        return read_windows_pe_product_version(browser_path)
     completed = subprocess.run(
         [str(browser_path), "--version"],
         check=True,
@@ -193,7 +293,9 @@ class FixtureServer(AbstractContextManager["FixtureServer"]):
 
 
 def copy_fixture_assets(root: Path) -> None:
-    source_assets = REPOSITORY_ROOT / "vendor/hyperframes/.agents/skills/changelog-video/assets"
+    source_assets = (
+        REPOSITORY_ROOT / "vendor/hyperframes/.agents/skills/changelog-video/assets"
+    )
     shutil.copy2(
         source_assets / "fonts/ABCSolarDisplay-Bold.woff2",
         root / "sample.woff2",
@@ -264,15 +366,44 @@ def chromium_args() -> list[str]:
     ]
 
 
+@contextmanager
+def without_proxy_environment() -> Iterator[None]:
+    previous = {
+        name: value
+        for name, value in os.environ.items()
+        if name.casefold() in _PROXY_ENVIRONMENT_NAMES
+    }
+    for name in previous:
+        del os.environ[name]
+    try:
+        yield
+    finally:
+        for name in list(os.environ):
+            if name.casefold() in _PROXY_ENVIRONMENT_NAMES:
+                del os.environ[name]
+        os.environ.update(previous)
+
+
 async def check_page_capabilities(
     context: BrowserContext, url: str, artifacts: Path
 ) -> dict[str, bool]:
     page = context.pages[0] if context.pages else await context.new_page()
     await page.goto(url, wait_until="domcontentloaded")
-    capabilities = await asyncio.wait_for(page.evaluate("window.probeReady"), timeout=60)
+    capabilities = await asyncio.wait_for(
+        page.evaluate("window.probeReady"), timeout=60
+    )
     if not isinstance(capabilities, dict):
         fail("browser capability fixture returned no result")
-    for name in ("font", "image", "video", "audio", "lottie", "canvas_2d", "webgl", "webgpu"):
+    for name in (
+        "font",
+        "image",
+        "video",
+        "audio",
+        "lottie",
+        "canvas_2d",
+        "webgl",
+        "webgpu",
+    ):
         if capabilities.get(name) is not True:
             fail(f"browser capability failed: {name}={capabilities.get(name)!r}")
 
@@ -282,7 +413,10 @@ async def check_page_capabilities(
     await page.set_viewport_size({"width": 720, "height": 1280})
     portrait = artifacts / "portrait.png"
     await page.screenshot(path=str(portrait))
-    if Image.open(landscape).size != (1280, 720) or Image.open(portrait).size != (720, 1280):
+    if Image.open(landscape).size != (1280, 720) or Image.open(portrait).size != (
+        720,
+        1280,
+    ):
         fail("landscape or portrait screenshot dimensions are wrong")
 
     transparent_page = await context.new_page()
@@ -331,21 +465,24 @@ async def run_playwright_probe(
         raise
 
 
-async def close_playwright_context(context: BrowserContext, playwright: Playwright) -> None:
+async def close_playwright_context(
+    context: BrowserContext, playwright: Playwright
+) -> None:
     await context.close()
     await playwright.stop()
 
 
 def browser_use_session(**kwargs: object) -> BrowserSession:
-    return BrowserSession(
-        is_local=True,
-        keep_alive=False,
-        enable_default_extensions=False,
-        captcha_solver=False,
-        highlight_elements=False,
-        args=chromium_args(),
-        **kwargs,
-    )
+    with without_proxy_environment():
+        return BrowserSession(
+            is_local=True,
+            keep_alive=False,
+            enable_default_extensions=False,
+            captcha_solver=False,
+            highlight_elements=False,
+            args=chromium_args(),
+            **kwargs,
+        )
 
 
 async def run_browser_use_executable_probe(
@@ -361,7 +498,9 @@ async def run_browser_use_executable_probe(
         await session.navigate_to(url)
         title = await session.get_current_page_title()
         current_url = await session.get_current_page_url()
-        screenshot = await session.take_screenshot(path=str(artifacts / "browser-use.png"))
+        screenshot = await session.take_screenshot(
+            path=str(artifacts / "browser-use.png")
+        )
         if current_url != url or not screenshot:
             fail(
                 "Browser Use executable_path did not reach the fixture: "
@@ -378,7 +517,9 @@ async def run_browser_use_executable_probe(
         raise
 
 
-async def wait_for_devtools_port(profile: Path, process: subprocess.Popen[bytes]) -> int:
+async def wait_for_devtools_port(
+    profile: Path, process: subprocess.Popen[bytes]
+) -> int:
     active_port = profile / "DevToolsActivePort"
     for _ in range(300):
         if process.poll() is not None:
@@ -401,7 +542,9 @@ async def run_browser_use_cdp_probe(
         *chromium_args(),
         "about:blank",
     ]
-    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     session: BrowserSession | None = None
     try:
         port = await wait_for_devtools_port(profile, process)
@@ -410,7 +553,9 @@ async def run_browser_use_cdp_probe(
         await session.navigate_to(url)
         title = await session.get_current_page_title()
         current_url = await session.get_current_page_url()
-        screenshot = await session.take_screenshot(path=str(artifacts / "browser-use-cdp.png"))
+        screenshot = await session.take_screenshot(
+            path=str(artifacts / "browser-use-cdp.png")
+        )
         if current_url != url or not screenshot:
             fail("Browser Use random CDP mode did not reach the fixture")
         return {
@@ -485,20 +630,24 @@ async def concurrent_probe(
         artifacts,
         headed=True,
     )
-    browser_use_result, session = await run_browser_use_executable_probe(
-        browser_path,
-        root / "profile-browser-use",
-        url,
-        artifacts,
-    )
-    node_output = artifacts / "render-concurrent.json"
-    node_process = await run_node_probe(browser_path, node_output, limit=1)
+    session: BrowserSession | None = None
+    node_process: subprocess.Popen[bytes] | None = None
     try:
+        browser_use_result, session = await run_browser_use_executable_probe(
+            browser_path,
+            root / "profile-browser-use",
+            url,
+            artifacts,
+        )
+        node_output = artifacts / "render-concurrent.json"
+        node_process = await run_node_probe(browser_path, node_output, limit=1)
         await asyncio.sleep(1)
         markers = profile_markers(psutil.Process(os.getpid()))
         await wait_process(node_process, timeout=180)
         if len(markers) < 3:
-            fail(f"three concurrent isolated browser profiles were not observed: {markers}")
+            fail(
+                f"three concurrent isolated browser profiles were not observed: {markers}"
+            )
         return {
             "status": "passed",
             "playwright": playwright_result,
@@ -507,9 +656,10 @@ async def concurrent_probe(
             "profiles_distinct": len(markers) == len(set(markers)),
         }
     finally:
-        await session.stop()
+        if session is not None:
+            await session.stop()
         await close_playwright_context(context, playwright)
-        if node_process.poll() is None:
+        if node_process is not None and node_process.poll() is None:
             node_process.terminate()
             await asyncio.to_thread(node_process.wait)
 
@@ -527,20 +677,28 @@ def exclusive_lease_probe(root: Path) -> dict[str, Any]:
     lease.rmdir()
     if not rejected:
         fail("exclusive control lease admitted a second owner")
-    return {"status": "passed", "second_owner_rejected": True, "reacquire_after_release": True}
+    return {
+        "status": "passed",
+        "second_owner_rejected": True,
+        "reacquire_after_release": True,
+    }
 
 
 async def run_validation(args: argparse.Namespace) -> None:
     contract = validate_contract()
     browser_path = (
-        args.browser_path.resolve() if args.browser_path else discover_browser(args.browser_root)
+        args.browser_path.resolve()
+        if args.browser_path
+        else discover_browser(args.browser_root)
     )
     if not browser_path.is_file():
         fail(f"Chromium executable is missing: {browser_path}")
     expected_version = contract["chromium"]["browser_version"]
     actual_version = read_browser_version(browser_path)
     if actual_version != expected_version:
-        fail(f"Chromium version mismatch: expected {expected_version}, got {actual_version}")
+        fail(
+            f"Chromium version mismatch: expected {expected_version}, got {actual_version}"
+        )
 
     artifacts = args.artifacts_dir.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -550,7 +708,9 @@ async def run_validation(args: argparse.Namespace) -> None:
         fixture.mkdir()
         write_fixture(fixture)
         with FixtureServer(fixture) as server:
-            concurrency = await concurrent_probe(browser_path, root, server.url, artifacts)
+            concurrency = await concurrent_probe(
+                browser_path, root, server.url, artifacts
+            )
             cdp = await run_browser_use_cdp_probe(
                 browser_path,
                 root / "profile-browser-use-cdp",
@@ -583,7 +743,10 @@ async def run_validation(args: argparse.Namespace) -> None:
                 "headed_playwright": concurrency["playwright"],
                 "browser_use_executable_path": concurrency["browser_use"],
                 "browser_use_random_cdp": cdp,
-                "headless_render_process": {"status": "passed", "capture_mode": "screenshot"},
+                "headless_render_process": {
+                    "status": "passed",
+                    "capture_mode": "screenshot",
+                },
                 "catalog_single_frame": {"status": "passed", "count": 134},
                 "style_single_frame": {"status": "passed", "count": 12},
                 "concurrent_processes": concurrency,
@@ -600,7 +763,16 @@ async def run_validation(args: argparse.Namespace) -> None:
             "catalog_digest": sha256_file(full_render),
         }
         capabilities = concurrency["playwright"]["capabilities"]
-        for name in ("font", "image", "video", "audio", "lottie", "canvas_2d", "webgl", "webgpu"):
+        for name in (
+            "font",
+            "image",
+            "video",
+            "audio",
+            "lottie",
+            "canvas_2d",
+            "webgl",
+            "webgpu",
+        ):
             result["probes"][name] = {"status": "passed", "value": capabilities[name]}
         for name in ("transparent_png", "landscape", "portrait"):
             result["probes"][name] = {"status": "passed"}
@@ -608,7 +780,9 @@ async def run_validation(args: argparse.Namespace) -> None:
         if missing:
             fail(f"result omitted probes: {sorted(missing)}")
         output = artifacts / f"eb-02-{args.platform_id}.json"
-        output.write_text(f"{json.dumps(result, ensure_ascii=False, indent=2)}\n", encoding="utf-8")
+        output.write_text(
+            f"{json.dumps(result, ensure_ascii=False, indent=2)}\n", encoding="utf-8"
+        )
         print(f"EB-02 platform validation passed: {output}")
 
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "collecting",
+  "status": "passed",
   "chromium": {
     "browser_version": "149.0.7827.55",
     "revision": "1228"
@@ -62,8 +62,8 @@
       "evidence_sha256": "0457ff56f36483dded5c68c69c70c6aeb49fca8b999e0c804d257e2675bb680d"
     },
     "windows-x86_64": {
-      "status": "pending",
-      "evidence_sha256": null
+      "status": "passed",
+      "evidence_sha256": "3bab78042c135143377fc9791ed2ed54cd4aa859a294fa99628e37761cdbb161"
     }
   }
 }
