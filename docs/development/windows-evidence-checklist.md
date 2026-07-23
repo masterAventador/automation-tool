@@ -174,6 +174,17 @@ rename/delete replacement，以及持有后代锁文件句柄时目录不可 ren
 tombstone 同时存在稳定返回 `RecoveryRequired`，不会因 tombstone 的继承 DACL 提前
 改变错误语义。Clippy `-D warnings`、212 项前端契约与专项 Roadmap self-test 均通过。
 
+### 5.6 EB-10 删除生产浏览器选择链路（✅ 2026-07-24 已完成）
+
+Windows 11 x86_64 实体机会话重新运行正式启动环境 runner：独立签名测试 Executor、
+隐藏真实 Tauri App 与 WebdriverIO 1/1 通过（4.8 秒）。从 App 正常启动门禁进入
+“打开本地修复工具”，确认没有浏览器选择卡片、Google Chrome/Microsoft Edge 选项、
+保存选择或当前选择；正式 IPC 只报告内置浏览器组件缺失，并提示重装官方客户端。
+WebView2/Edge 仅作为测试驱动承载 App WebView，不是运营浏览器发现或 fallback。
+
+48 文件/307 项 React 测试、typecheck、lint、212 项契约、品牌扫描和专项 Roadmap
+self-test 全绿。Runner 清理签名 Executor、隔离 AppData、App 进程及两个临时端口。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
