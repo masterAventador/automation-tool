@@ -133,6 +133,15 @@ Manifest、308 files / 435,574,347 bytes、PE `0x8664`、Playwright 离线启动
 锁定归档完成 308 files / 435,574,347 bytes 的 Manifest 生成与逐文件摘要复验；故意篡改
 `chrome.exe` 后默认强锁校验拒绝，恢复后临时树清理。
 
+### 5.2 EB-06 Rust 内置发行物解析与验证（✅ 2026-07-24 已完成）
+
+`run_eb_06_acceptance.py` 已扩展为按宿主选择原生目标与 Rust 测试。在 Windows 11
+x86_64 使用 EB-04 锁定归档现场生成 308 files / 435,574,347 bytes 的发行物 Manifest，
+生产 Rust `EmbeddedBrowserDistribution::load_for_target` 在 4.63 秒内完成逐文件复验
+并解析真实 `chrome.exe`。确定性矩阵同时通过 AMD64 PE `0x8664`、macOS 契约错配拒绝
+和非提权 `mklink /J` 创建的真实 NTFS junction 根拒绝；验收结束恢复 fixture 并清理
+全部临时发行物。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读

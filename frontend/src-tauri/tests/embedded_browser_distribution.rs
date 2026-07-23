@@ -1,4 +1,5 @@
 //! EB-06: fail-closed resolution of the packaged embedded-browser distribution.
+#![cfg(target_os = "macos")]
 
 use automation_tool_desktop_lib::embedded_browser_distribution::{
     EmbeddedBrowserDistribution, EmbeddedBrowserError,

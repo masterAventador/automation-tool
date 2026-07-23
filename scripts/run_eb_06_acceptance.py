@@ -11,6 +11,7 @@ evidence checks close the run.
 
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import subprocess
@@ -31,10 +32,14 @@ from build_embedded_chromium_staging import (  # noqa: E402
 )
 
 STAGING_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVE = (
-    ROOT.parent.parent
-    / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
+DEFAULT_MACOS_ARM64_ARCHIVE = (
+    ROOT.parent.parent / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
 )
+DEFAULT_ARCHIVES = {
+    "macos-arm64": DEFAULT_MACOS_ARM64_ARCHIVE,
+    "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
+    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
+}
 MANIFEST_ARGS = ["--manifest-path", "frontend/src-tauri/Cargo.toml"]
 
 
@@ -50,14 +55,37 @@ def require_evidence() -> None:
             fail(f"EB-06 evidence is missing {marker}")
 
 
+def current_target_id() -> str:
+    system = platform.system()
+    machine = platform.machine().lower()
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
+    if system == "Darwin" and machine in {"x86_64", "amd64"}:
+        return "macos-x86_64"
+    if system == "Windows" and machine in {"x86_64", "amd64"}:
+        return "windows-x86_64"
+    fail(f"unsupported EB-06 host: {system}/{machine}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--archive", type=Path)
+    return parser.parse_args()
+
+
 def main() -> int:
-    if platform.system() != "Darwin" or platform.machine() != "arm64":
-        fail("EB-06 acceptance must run on macOS arm64")
-    if not DEFAULT_ARCHIVE.is_file():
-        fail(f"locked archive not downloaded yet: {DEFAULT_ARCHIVE}")
+    target_id = current_target_id()
+    archive = parse_args().archive or DEFAULT_ARCHIVES[target_id]
+    test_target = (
+        "embedded_browser_distribution_windows"
+        if target_id == "windows-x86_64"
+        else "embedded_browser_distribution"
+    )
+    if not archive.is_file():
+        fail(f"locked archive not downloaded yet: {archive}")
 
     deterministic = subprocess.run(
-        ["cargo", "test", *MANIFEST_ARGS, "--test", "embedded_browser_distribution", "--locked"],
+        ["cargo", "test", *MANIFEST_ARGS, "--test", test_target, "--locked"],
         cwd=ROOT,
         check=False,
     )
@@ -65,19 +93,19 @@ def main() -> int:
         fail("deterministic Rust distribution tests failed")
 
     contract = load_staging_contract(STAGING_CONTRACT)
-    digest = sha256_file(DEFAULT_ARCHIVE)
+    digest = sha256_file(archive)
     with tempfile.TemporaryDirectory(prefix="eb06-resources-") as directory:
         resources = Path(directory) / "resources"
         resources.mkdir()
         staging = resources / "embedded-browser"
         build_staging(
             contract=contract,
-            target_id="macos-arm64",
-            archive_path=DEFAULT_ARCHIVE,
+            target_id=target_id,
+            archive_path=archive,
             archive_sha256=digest,
             output=staging,
         )
-        build_distribution_manifest(staging=staging, target_id="macos-arm64")
+        build_distribution_manifest(staging=staging, target_id=target_id)
         environment = dict(os.environ)
         environment["EB06_REAL_RESOURCE_DIR"] = str(resources)
         real = subprocess.run(
@@ -86,7 +114,7 @@ def main() -> int:
                 "test",
                 *MANIFEST_ARGS,
                 "--test",
-                "embedded_browser_distribution",
+                test_target,
                 "--locked",
                 "--",
                 "--ignored",
@@ -100,7 +128,9 @@ def main() -> int:
             fail("real staged distribution failed to load through the Rust resolver")
 
     require_evidence()
-    print("EB-06 acceptance passed: Rust resolver verified the real staged distribution")
+    print(
+        f"EB-06 acceptance passed: Rust resolver verified the real staged {target_id} distribution"
+    )
     return 0
 
 
