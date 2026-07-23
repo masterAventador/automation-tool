@@ -96,19 +96,24 @@ Windows 实际为 0 tests，新增 Windows 原生测试并让 runner 强制要�
 `1 passed; 0 failed`。Clippy `-D warnings` 与 212 项前端契约通过；候选、归档、随机
 loopback 端口和进程均无残留，上游 submodule 零写入。
 
-### 4.1 BM-03 共用 Chromium 渲染适配（依赖 EB-04 的 Windows 暂存）
+### 4.1 BM-03 共用 Chromium 渲染适配（✅ 2026-07-24 已完成）
 
-EB-04 完成 Windows 暂存后执行：
+Windows 11 x86_64 实体机会话执行：
 
 ```bash
 python scripts/test_motion_video_render_adapter.py
 python scripts/run_bm_03_acceptance.py --archive <EB-04 锁定的 chrome-win64.zip>
 ```
 
-补证要点：Worker 对无头 Chromium 的 detached 进程组终止在 Windows 上的语义
-（`process.kill(-pid)` 不适用，需验证 Job Object/进程树清理路径）、可执行路径
-reparse point 校验，以及真实 `chrome.exe` 的 CDP 管道 getVersion/Browser.close
-干净退出。通过后更新 `docs/development/BM-03.md` 遗留项。
+正式 runner 从 EB-04 摘要锁定归档现场暂存 308 个文件，以官方 Node 22.23.1 x64
+候选启动生产 Worker，并从 Rust `LocalVideoOrchestrator` 经 CDP 管道验证真实
+Chrome for Testing 149.0.7827.55。首轮 RED 发现 Windows GUI 子系统的
+`chrome.exe --version` 会启动完整浏览器并挂起，且 `Browser.close` 已应答后根进程仍因
+继承管道保持存活；实现改为 Windows 直接以已认证的 CDP `Browser.getVersion` 验证实际
+major，收到 `Browser.close` 应答后使用绝对 `taskkill.exe /T /F` 定向清理本次自有树。
+10 项 Worker 矩阵、真实 major 错配拒绝、NTFS junction 祖先拒绝、超时父子 PID 清理及
+RenderJob/暂存路径零残留全部通过；Rust 两项原生门禁分别为
+`1 passed; 0 failed`。
 
 ### 4.2 BM-04 HTML 渲染安全沙箱（依赖 EB-04 的 Windows 暂存）
 
