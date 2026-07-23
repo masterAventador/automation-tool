@@ -37,7 +37,7 @@ uv run --project tools/shared-browser-validation --locked python \
 
 通过后：EB-02 → ✅；同时把 `$TEMP/eb-02-artifacts` 的关键输出摘录进 EB-02.md。
 
-### 2. IM 线冻结 Worker（IM-02/03 ✅；IM-04 待补）
+### 2. IM 线冻结 Worker（IM-02/03/04 ✅）
 
 ```bash
 uv python install 3.11.15
@@ -56,7 +56,12 @@ IM-03 已于 2026-07-24 用独立 Windows 候选完成生产 Rust 编排器的 r
 loopback、认证 health/cancel、模型秘密投影和 Job Object 清理。补证发现并修复统一 Rust
 bootstrap 新增 `renderBrowser: null` 后 Python 严格字段集未同步的问题；非空值仍拒绝。
 
-继续执行上面的 IM-04/IM-05 纵向命令，补齐 IM-04 的 Windows 原生链路。
+IM-04 已于 2026-07-24 连续两次通过 Windows 原生冻结模型适配验收：4,383 files /
+749,943,876 bytes、冷启动 2.808 秒；原生模型设置投影、公开状态脱敏、真实进程健康/停止和
+上游 `config.toml` 零写入全部通过。真实百炼三个锁定模型调用已由 2026-07-23 的独立凭据
+验收补齐。
+
+IM-05 的完整 WebUI 正式入口属于独立任务，不计作 IM-04 缺口。
 
 ### 3. VF-04 媒体工具链（✅ 2026-07-24 已完成）
 
