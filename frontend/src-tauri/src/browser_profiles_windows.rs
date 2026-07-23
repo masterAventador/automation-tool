@@ -153,6 +153,7 @@ pub(super) struct PlatformProfileLock {
     file: File,
     file_identity: FileIdentity,
     profile_directory: DirectoryHandle,
+    share_delete: bool,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -192,6 +193,7 @@ impl PlatformProfile {
             PROFILE_LOCK_FILE,
             FILE_CREATE,
             AclPolicy::Repair,
+            allow_abandoned_active_marker,
         ) {
             Ok(file) => file,
             Err(error) if error.code() == super::BrowserProfileErrorCode::ProfileNotFound => {
@@ -200,6 +202,7 @@ impl PlatformProfile {
                     PROFILE_LOCK_FILE,
                     FILE_OPEN,
                     AclPolicy::Require,
+                    allow_abandoned_active_marker,
                 )?
             }
             Err(error) => return Err(error),
@@ -228,6 +231,7 @@ impl PlatformProfile {
             PROFILE_LOCK_FILE,
             FILE_OPEN,
             AclPolicy::Require,
+            allow_abandoned_active_marker,
         )?;
         if lock_file_identity(&reopened)? != file_identity
             || directory_identity(&profile_directory.file)? != profile_directory.identity
@@ -244,6 +248,7 @@ impl PlatformProfile {
             PROFILE_LOCK_FILE,
             FILE_OPEN,
             AclPolicy::Require,
+            allow_abandoned_active_marker,
         )?;
         if lock_file_identity(&reopened)? != file_identity
             || directory_identity(&profile_directory.file)? != profile_directory.identity
@@ -254,6 +259,7 @@ impl PlatformProfile {
             file,
             file_identity,
             profile_directory,
+            share_delete: allow_abandoned_active_marker,
         })
     }
 }
@@ -268,6 +274,7 @@ impl PlatformProfileLock {
             PROFILE_LOCK_FILE,
             FILE_OPEN,
             AclPolicy::Require,
+            self.share_delete,
         )?;
         if lock_file_identity(&self.file)? != self.file_identity
             || lock_file_identity(&reopened)? != self.file_identity
@@ -389,15 +396,23 @@ impl PlatformProfileStore {
         self.revalidate_layout()?;
         require_safe_name(profile_id)?;
         let removal_id = format!(".removing-{profile_id}");
-        require_safe_name(&removal_id)?;
-        let original = open_optional_directory(&self.platform, profile_id)?;
-        let staged = open_optional_directory(&self.platform, &removal_id)?;
+        require_safe_relative_name(&removal_id)?;
+        let original =
+            open_optional_directory_with_acl(&self.platform, profile_id, AclPolicy::Ignore)?;
+        let staged =
+            open_optional_directory_with_acl(&self.platform, &removal_id, AclPolicy::Ignore)?;
         if original.is_some() && staged.is_some() {
             return Err(BrowserProfileError::recovery_required());
         }
         if let Some(directory) = original {
+            verify_private_acl(&directory.file)?;
             let profile = PlatformProfile { directory };
             let lock = profile.try_acquire_removal_lock()?;
+            // Windows will not rename a directory while a descendant lock-file
+            // handle is open. Dropping this lock without releasing it preserves
+            // the active marker as a durable fence: normal launchers fail closed,
+            // while a later removal attempt can resume the staged operation.
+            drop(lock);
             let staged_path = self.platform.path.join(&removal_id);
             fs::rename(&profile.directory.path, &staged_path)
                 .map_err(|_| BrowserProfileError::storage_unavailable())?;
@@ -410,10 +425,14 @@ impl PlatformProfileStore {
             if reopened.identity != profile.directory.identity {
                 return Err(BrowserProfileError::identity_changed());
             }
-            lock.release()?;
-            drop(reopened);
             drop(profile);
+            let staged_profile = PlatformProfile {
+                directory: reopened,
+            };
+            staged_profile.try_acquire_removal_lock()?.release()?;
+            drop(staged_profile);
         } else if let Some(directory) = staged {
+            verify_private_acl(&directory.file)?;
             let profile = PlatformProfile { directory };
             let lock = profile.try_acquire_removal_lock()?;
             lock.release()?;
@@ -503,7 +522,7 @@ fn open_relative_directory(
     disposition: u32,
     acl_policy: AclPolicy,
 ) -> Result<DirectoryHandle, BrowserProfileError> {
-    require_safe_name(name)?;
+    require_safe_relative_name(name)?;
     if directory_identity(&parent.file)? != parent.identity {
         return Err(BrowserProfileError::identity_changed());
     }
@@ -585,7 +604,15 @@ fn open_optional_directory(
     parent: &DirectoryHandle,
     name: &str,
 ) -> Result<Option<DirectoryHandle>, BrowserProfileError> {
-    match open_relative_directory(parent, name, FILE_OPEN, AclPolicy::Require) {
+    open_optional_directory_with_acl(parent, name, AclPolicy::Require)
+}
+
+fn open_optional_directory_with_acl(
+    parent: &DirectoryHandle,
+    name: &str,
+    acl_policy: AclPolicy,
+) -> Result<Option<DirectoryHandle>, BrowserProfileError> {
+    match open_relative_directory(parent, name, FILE_OPEN, acl_policy) {
         Ok(directory) => Ok(Some(directory)),
         Err(error) if error.code() == super::BrowserProfileErrorCode::ProfileNotFound => Ok(None),
         Err(error) => Err(error),
@@ -597,6 +624,7 @@ fn open_relative_lock_file(
     name: &str,
     disposition: u32,
     acl_policy: AclPolicy,
+    share_delete: bool,
 ) -> Result<File, BrowserProfileError> {
     if name != PROFILE_LOCK_FILE {
         return Err(BrowserProfileError::unsafe_directory());
@@ -632,6 +660,11 @@ fn open_relative_lock_file(
     };
     let mut io_status = IO_STATUS_BLOCK::default();
     let mut handle = INVALID_HANDLE_VALUE;
+    let share_access = if share_delete {
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+    } else {
+        FILE_SHARE_READ | FILE_SHARE_WRITE
+    };
     let status = unsafe {
         NtCreateFile(
             &mut handle,
@@ -640,7 +673,7 @@ fn open_relative_lock_file(
             &mut io_status,
             null(),
             FILE_ATTRIBUTE_NORMAL,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            share_access,
             disposition,
             FILE_NON_DIRECTORY_FILE
                 | FILE_OPEN_REPARSE_POINT
@@ -1006,4 +1039,12 @@ fn require_safe_name(value: &str) -> Result<(), BrowserProfileError> {
         return Err(BrowserProfileError::unsafe_directory());
     }
     Ok(())
+}
+
+fn require_safe_relative_name(value: &str) -> Result<(), BrowserProfileError> {
+    if let Some(profile_id) = value.strip_prefix(".removing-") {
+        require_safe_name(profile_id)
+    } else {
+        require_safe_name(value)
+    }
 }
