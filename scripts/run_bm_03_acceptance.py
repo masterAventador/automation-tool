@@ -20,17 +20,31 @@ import tempfile
 from pathlib import Path
 
 from build_embedded_chromium_staging import build_staging, load_staging_contract
+from build_motion_video_worker_candidate import build_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVE = ROOT / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-TARGET_ID = "macos-arm64"
+DEFAULT_ARCHIVES = {
+    "macos-arm64": (
+        ROOT.parent.parent
+        / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
+    ),
+    "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
+    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
+}
 RENDER_JOB_PREFIX = "automation-tool-renderjob-"
 
 
-def require_platform() -> None:
-    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
-        raise AssertionError("BM-03 acceptance currently runs on macOS arm64 only")
+def current_target_id() -> str:
+    system = platform.system()
+    machine = platform.machine().casefold()
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
+    if system == "Darwin" and machine in {"x86_64", "amd64"}:
+        return "macos-x86_64"
+    if system == "Windows" and machine in {"x86_64", "amd64"}:
+        return "windows-x86_64"
+    raise AssertionError(f"BM-03 unsupported native target: {system}/{machine}")
 
 
 def node_executable() -> str:
@@ -48,12 +62,16 @@ def run_worker_gates() -> None:
         subprocess.run([sys.executable, script], cwd=ROOT, check=True, timeout=300)
 
 
-def stage_real_chromium(archive: Path, run_root: Path) -> tuple[Path, int]:
+def stage_real_chromium(
+    archive: Path, run_root: Path, target_id: str
+) -> tuple[Path, int]:
     contract = load_staging_contract(CONTRACT)
-    target = contract.targets[TARGET_ID]
+    target = contract.targets[target_id]
+    if not target.buildable:
+        raise AssertionError("BM-03 native Chromium target is not buildable")
     result = build_staging(
         contract=contract,
-        target_id=TARGET_ID,
+        target_id=target_id,
         archive_path=archive,
         archive_sha256=target.archive_sha256,
         output=run_root / "staging",
@@ -64,19 +82,51 @@ def stage_real_chromium(archive: Path, run_root: Path) -> tuple[Path, int]:
     return executable, major
 
 
-def run_production_chain(executable: Path, major: int) -> None:
+def run_production_chain(
+    executable: Path, major: int, package_root: Path | None
+) -> None:
     environment = os.environ.copy()
     environment["BM03_RENDER_BROWSER"] = str(executable)
     environment["BM03_CHROMIUM_MAJOR"] = str(major)
-    environment["BM03_NODE"] = node_executable()
-    subprocess.run(
+    if os.name == "nt":
+        if package_root is None:
+            raise AssertionError("BM-03 Windows Node package is unavailable")
+        environment["BM03_PACKAGE_ROOT"] = str(package_root)
+        test_target = "local_video_orchestrator_windows"
+        reparse = subprocess.run(
+            [
+                "cargo",
+                "test",
+                "--manifest-path",
+                "frontend/src-tauri/Cargo.toml",
+                "--test",
+                test_target,
+                "render_browser_configuration_rejects_junction_ancestor",
+                "--",
+                "--exact",
+                "--nocapture",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+        print(reparse.stdout, end="")
+        print(reparse.stderr, end="", file=sys.stderr)
+        if reparse.returncode != 0 or "1 passed; 0 failed" not in reparse.stdout:
+            raise AssertionError("BM-03 Windows reparse gate did not execute")
+    else:
+        environment["BM03_NODE"] = node_executable()
+        test_target = "local_video_orchestrator"
+    completed = subprocess.run(
         [
             "cargo",
             "test",
             "--manifest-path",
             "frontend/src-tauri/Cargo.toml",
             "--test",
-            "local_video_orchestrator",
+            test_target,
             "real_worker_render_verify_launches_the_locked_chromium",
             "--",
             "--exact",
@@ -84,9 +134,15 @@ def run_production_chain(executable: Path, major: int) -> None:
         ],
         cwd=ROOT,
         env=environment,
-        check=True,
+        capture_output=True,
+        text=True,
+        check=False,
         timeout=600,
     )
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    if completed.returncode != 0 or "1 passed; 0 failed" not in completed.stdout:
+        raise AssertionError("BM-03 native Rust production-chain test did not execute")
 
 
 def require_real_major_rejection(executable: Path, major: int) -> None:
@@ -128,6 +184,11 @@ def require_real_major_rejection(executable: Path, major: int) -> None:
             "protocolVersion": "1.0",
             "workerKind": "node",
         }
+        environment = {"PATH": ""}
+        if os.name == "nt":
+            for name in ("SYSTEMROOT", "WINDIR"):
+                if name in os.environ:
+                    environment[name] = os.environ[name]
         process = subprocess.run(
             [node_executable(), str(ROOT / "workers/motion_composition/worker.mjs")],
             input=json.dumps(bootstrap) + "\n" + json.dumps(command) + "\n",
@@ -135,7 +196,7 @@ def require_real_major_rejection(executable: Path, major: int) -> None:
             text=True,
             timeout=120,
             check=False,
-            env={"PATH": ""},
+            env=environment,
         )
     if process.returncode != 0:
         raise AssertionError("BM-03 major-mismatch worker run must exit cleanly")
@@ -154,52 +215,93 @@ def require_no_residue(run_root: Path) -> None:
     ]
     if leftovers:
         raise AssertionError(f"render job directories leaked: {leftovers}")
-    survivors = subprocess.run(
-        ["pgrep", "-f", str(run_root)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if survivors.stdout.strip():
-        raise AssertionError("staged Chromium processes survived the acceptance")
+    if os.name == "nt":
+        powershell = (
+            Path(os.environ["SYSTEMROOT"])
+            / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        )
+        environment = os.environ.copy()
+        environment["BM03_RESIDUE_ROOT"] = str(run_root.resolve())
+        process_scan = subprocess.run(
+            [
+                str(powershell),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                (
+                    "$marker=[IO.Path]::GetFullPath($env:BM03_RESIDUE_ROOT);"
+                    "@(Get-Process | ForEach-Object { try {"
+                    "if ([IO.Path]::GetFullPath($_.Path).StartsWith("
+                    "$marker,[StringComparison]::OrdinalIgnoreCase)) {$_.Id}"
+                    "} catch {} }) -join ','"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=environment,
+            timeout=60,
+        )
+        survivors = process_scan.stdout.strip()
+        if survivors:
+            raise AssertionError(
+                f"staged Chromium processes survived the acceptance: {survivors}"
+            )
+    else:
+        survivors = subprocess.run(
+            ["pgrep", "-f", str(run_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if survivors.stdout.strip():
+            raise AssertionError("staged Chromium processes survived the acceptance")
 
 
 def require_evidence() -> None:
     text = (ROOT / "docs/development/BM-03.md").read_text(encoding="utf-8")
     for heading in (
-        "# BM-03 完成证据", "状态：🔍 待验收", "## RED", "## GREEN", "## 失败矩阵",
+        "# BM-03 完成证据", "状态：✅ 已完成", "## RED", "## GREEN", "## 失败矩阵",
         "## 正常用户路径验收", "## 真实边界", "## 清理", "## 文档变化", "## 遗留项",
     ):
         if heading not in text:
             raise AssertionError(f"BM-03 evidence is missing {heading}")
     roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     rows = [line for line in roadmap.splitlines() if line.startswith("| BM-03 |")]
-    if len(rows) != 1 or not rows[0].endswith("| 🔍 待验收 |"):
-        raise AssertionError("BM-03 roadmap status is not pending native validation")
+    if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
+        raise AssertionError("BM-03 roadmap status is not complete")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path, default=DEFAULT_ARCHIVE)
+    parser.add_argument("--archive", type=Path)
     parser.add_argument("--skip-evidence", action="store_true")
     arguments = parser.parse_args()
-    require_platform()
-    archive = arguments.archive.resolve(strict=True)
+    target_id = current_target_id()
+    archive = (arguments.archive or DEFAULT_ARCHIVES[target_id]).resolve(strict=True)
     run_root = (
         ROOT / ".local/embedded-browser-video-studio" / f"ebvs-bm03-{os.getpid()}"
     )
     run_root.mkdir(parents=True, exist_ok=False)
     try:
         run_worker_gates()
-        executable, major = stage_real_chromium(archive, run_root)
-        run_production_chain(executable, major)
-        require_real_major_rejection(executable, major)
+        executable, major = stage_real_chromium(archive, run_root, target_id)
+        with tempfile.TemporaryDirectory(prefix="bm03-node-package-") as node_directory:
+            package_root = None
+            if os.name == "nt":
+                package_root = Path(node_directory) / "motion-video-worker"
+                build_candidate(package_root)
+            run_production_chain(executable, major, package_root)
+            require_real_major_rejection(executable, major)
     finally:
         shutil.rmtree(run_root, ignore_errors=True)
     require_no_residue(run_root)
     if not arguments.skip_evidence:
         require_evidence()
-    print(f"BM-03 {platform.system()} shared-Chromium render adaptation acceptance passed")
+    print(
+        f"BM-03 {target_id} shared-Chromium render adaptation acceptance passed"
+    )
     return 0
 
 

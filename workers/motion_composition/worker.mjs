@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /** Isolated process boundary for the motion-composition runtime. */
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, sep } from "node:path";
+import { extname, isAbsolute, join, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
@@ -62,6 +62,22 @@ function canonicalJson(value) {
 }
 
 function killBrowserProcessGroup(child) {
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+    if (typeof systemRoot === "string" && systemRoot.length > 0) {
+      spawnSync(
+        join(systemRoot, "System32", "taskkill.exe"),
+        ["/PID", String(child.pid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+    }
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The direct child already exited.
+    }
+    return;
+  }
   try {
     process.kill(-child.pid, "SIGKILL");
   } catch {
@@ -87,8 +103,38 @@ async function executableFileMetadata(path) {
   } catch {
     return null;
   }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || !(metadata.mode & 0o111)) return null;
+  if (!metadata.isFile() || metadata.isSymbolicLink()) return null;
+  if (process.platform !== "win32") {
+    if (!(metadata.mode & 0o111)) return null;
+    return metadata;
+  }
+  if (extname(path).toLowerCase() !== ".exe") return null;
+  let handle;
+  try {
+    handle = await open(path, "r");
+    const signature = Buffer.alloc(2);
+    const { bytesRead } = await handle.read(signature, 0, signature.length, 0);
+    if (bytesRead !== 2 || !signature.equals(Buffer.from("MZ"))) return null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
   return metadata;
+}
+
+function renderProcessEnvironment(jobDirectory) {
+  const environment = { HOME: jobDirectory, TMPDIR: jobDirectory };
+  if (process.platform !== "win32") return environment;
+  environment.USERPROFILE = jobDirectory;
+  environment.TEMP = jobDirectory;
+  environment.TMP = jobDirectory;
+  for (const name of ["SystemRoot", "WINDIR"]) {
+    if (typeof process.env[name] === "string" && process.env[name].length > 0) {
+      environment[name] = process.env[name];
+    }
+  }
+  return environment;
 }
 
 async function validRenderBrowser(value) {
@@ -366,27 +412,47 @@ function runHeadlessProbe(executablePath, browserArguments, environment, timeout
     child.stdio[4].on("error", () => {});
     child.stdio[4].setEncoding("utf8");
     child.stdio[4].on("data", (chunk) => {
-      if (product !== null) return;
       buffer += chunk;
-      const separator = buffer.indexOf("\0");
-      if (separator < 0) {
-        if (buffer.length > MAX_PROTOCOL_RESPONSE_BYTES) {
+      for (;;) {
+        const separator = buffer.indexOf("\0");
+        if (separator < 0) {
+          if (buffer.length > MAX_PROTOCOL_RESPONSE_BYTES) {
+            killProcessGroup();
+            finish({ status: "protocol" });
+          }
+          return;
+        }
+        let response;
+        try {
+          response = JSON.parse(buffer.slice(0, separator));
+        } catch {
           killProcessGroup();
           finish({ status: "protocol" });
+          return;
+        }
+        buffer = buffer.slice(separator + 1);
+        if (product === null) {
+          if (response?.id !== 1) {
+            killProcessGroup();
+            finish({ status: "protocol" });
+            return;
+          }
+          const value = response?.result?.product;
+          product = typeof value === "string" ? value : "";
+          child.stdio[3].write(`${fixedJson({ id: 2, method: "Browser.close" })}\0`);
+          continue;
+        }
+        if (response?.id !== 2) continue;
+        // Windows Chrome acknowledges Browser.close but retains the root
+        // process while its inherited CDP pipe handles remain open. Kill the
+        // still-live owned tree only after that acknowledgement, then report
+        // the already authenticated Browser.getVersion result.
+        if (process.platform === "win32") {
+          killProcessGroup();
+          finish({ status: "exit", product });
         }
         return;
       }
-      let response;
-      try {
-        response = JSON.parse(buffer.slice(0, separator));
-      } catch {
-        killProcessGroup();
-        finish({ status: "protocol" });
-        return;
-      }
-      const value = response?.result?.product;
-      product = typeof value === "string" ? value : "";
-      child.stdio[3].write(`${fixedJson({ id: 2, method: "Browser.close" })}\0`);
     });
     child.on("close", (code) => {
       if (product === null || code !== 0) {
@@ -412,21 +478,29 @@ async function renderVerify(renderBrowser, jobId) {
     if ((await executableFileMetadata(renderBrowser.executablePath)) === null) {
       return { failed: "render_browser_unusable" };
     }
-    const environment = { HOME: jobDirectory, TMPDIR: jobDirectory };
+    const environment = renderProcessEnvironment(jobDirectory);
     const timeoutMs = renderBrowser.launchTimeoutSeconds * 1000;
-    const version = await runBrowserProcess(
-      renderBrowser.executablePath,
-      ["--version"],
-      environment,
-      timeoutMs,
-    );
-    if (version.status === "timeout") return { failed: "render_timeout" };
-    if (version.status !== "exit" || version.code !== 0) {
-      return { failed: "render_browser_unusable" };
+    // Chrome for Testing on Windows is a GUI-subsystem executable: `--version`
+    // may start the full browser and never produce stdout. The authenticated
+    // CDP Browser.getVersion response below is the authoritative live-binary
+    // check on that platform. POSIX keeps the additional standalone probe.
+    if (process.platform !== "win32") {
+      const version = await runBrowserProcess(
+        renderBrowser.executablePath,
+        ["--version"],
+        environment,
+        timeoutMs,
+      );
+      if (version.status === "timeout") return { failed: "render_timeout" };
+      if (version.status !== "exit" || version.code !== 0) {
+        return { failed: "render_browser_unusable" };
+      }
+      const major = Number(CHROMIUM_VERSION_PATTERN.exec(version.stdout)?.[1]);
+      if (!Number.isInteger(major)) return { failed: "render_browser_unusable" };
+      if (major !== renderBrowser.chromiumMajor) {
+        return { failed: "chromium_major_mismatch" };
+      }
     }
-    const major = Number(CHROMIUM_VERSION_PATTERN.exec(version.stdout)?.[1]);
-    if (!Number.isInteger(major)) return { failed: "render_browser_unusable" };
-    if (major !== renderBrowser.chromiumMajor) return { failed: "chromium_major_mismatch" };
     const probe = await runHeadlessProbe(
       renderBrowser.executablePath,
       [
@@ -458,7 +532,12 @@ async function renderVerify(renderBrowser, jobId) {
     }
     return { chromiumMajor: headlessMajor };
   } finally {
-    await rm(jobDirectory, { recursive: true, force: true });
+    await rm(jobDirectory, {
+      force: true,
+      maxRetries: process.platform === "win32" ? 20 : 0,
+      recursive: true,
+      retryDelay: 100,
+    });
   }
 }
 
@@ -815,27 +894,36 @@ async function renderSandbox(renderBrowser, jobId, spec) {
   const jobDirectory = await mkdtemp(join(tmpdir(), `${RENDER_JOB_PREFIX}${jobId}-`));
   let succeeded = false;
   try {
-    const environment = { HOME: jobDirectory, TMPDIR: jobDirectory };
-    const version = await runBrowserProcess(
-      renderBrowser.executablePath,
-      ["--version"],
-      environment,
-      renderBrowser.launchTimeoutSeconds * 1000,
-    );
-    if (version.status === "timeout") return { failed: "render_timeout" };
-    if (version.status !== "exit" || version.code !== 0) {
-      return { failed: "render_browser_unusable" };
+    const environment = renderProcessEnvironment(jobDirectory);
+    if (process.platform !== "win32") {
+      const version = await runBrowserProcess(
+        renderBrowser.executablePath,
+        ["--version"],
+        environment,
+        renderBrowser.launchTimeoutSeconds * 1000,
+      );
+      if (version.status === "timeout") return { failed: "render_timeout" };
+      if (version.status !== "exit" || version.code !== 0) {
+        return { failed: "render_browser_unusable" };
+      }
+      const major = Number(CHROMIUM_VERSION_PATTERN.exec(version.stdout)?.[1]);
+      if (!Number.isInteger(major)) return { failed: "render_browser_unusable" };
+      if (major !== renderBrowser.chromiumMajor) {
+        return { failed: "chromium_major_mismatch" };
+      }
     }
-    const major = Number(CHROMIUM_VERSION_PATTERN.exec(version.stdout)?.[1]);
-    if (!Number.isInteger(major)) return { failed: "render_browser_unusable" };
-    if (major !== renderBrowser.chromiumMajor) return { failed: "chromium_major_mismatch" };
     await mkdir(resolved.framesDirectory);
     const outcome = await runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environment);
     if (outcome.status !== "complete") return { failed: SANDBOX_FAILURES[outcome.status] };
     succeeded = true;
     return { sandboxed: { chromiumMajor: renderBrowser.chromiumMajor, ...outcome } };
   } finally {
-    await rm(jobDirectory, { recursive: true, force: true });
+    await rm(jobDirectory, {
+      force: true,
+      maxRetries: process.platform === "win32" ? 20 : 0,
+      recursive: true,
+      retryDelay: 100,
+    });
     if (!succeeded) await rm(resolved.framesDirectory, { recursive: true, force: true });
   }
 }

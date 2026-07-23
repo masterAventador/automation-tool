@@ -98,7 +98,7 @@ def render_browser_document(
 
 def poisoned_environment(decoy: Path) -> dict[str, str]:
     """A hostile environment: every legacy discovery channel points at a decoy."""
-    return {
+    environment = {
         "PATH": "",
         "HOME": str(decoy / "home"),
         "HYPERFRAMES_BROWSER_PATH": str(decoy / "decoy-browser"),
@@ -106,6 +106,11 @@ def poisoned_environment(decoy: Path) -> dict[str, str]:
         "PUPPETEER_CACHE_DIR": str(decoy / "puppeteer-cache"),
         "CHROME_PATH": str(decoy / "decoy-browser"),
     }
+    if os.name == "nt":
+        for name in ("SYSTEMROOT", "WINDIR"):
+            if name in os.environ:
+                environment[name] = os.environ[name]
+    return environment
 
 
 def write_decoy_browser(decoy: Path) -> Path:
@@ -176,6 +181,169 @@ sys.exit(0)
     executable.write_text(script)
     executable.chmod(0o755)
     return executable, record
+
+
+def write_windows_hanging_browser(
+    directory: Path, *, version_output: str = FAKE_VERSION_OUTPUT
+) -> tuple[Path, Path]:
+    if os.name != "nt":
+        raise AssertionError("Windows fake browser requested on another platform")
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        raise AssertionError("rustc is unavailable")
+    directory.mkdir(parents=True, exist_ok=True)
+    executable = directory / "fake-browser.exe"
+    record = directory / "fake-record.log"
+    source = directory / "fake-browser.rs"
+    source.write_text(
+        f"""
+use std::{{env, fs, process::Command, thread, time::Duration}};
+
+fn main() {{
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments.iter().any(|value| value == "--version") {{
+        println!({json.dumps(version_output)});
+        return;
+    }}
+    if arguments.iter().any(|value| value == "--child") {{
+        loop {{ thread::sleep(Duration::from_secs(1)); }}
+    }}
+    let child = Command::new(env::current_exe().unwrap())
+        .arg("--child")
+        .spawn()
+        .unwrap();
+    fs::write(
+        {json.dumps(str(record))},
+        format!("{{}} {{}}\\n", std::process::id(), child.id()),
+    ).unwrap();
+    loop {{ thread::sleep(Duration::from_secs(1)); }}
+}}
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [rustc, str(source), "-o", str(executable)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return executable, record
+
+
+def write_windows_cdp_browser(
+    directory: Path,
+    *,
+    product: str = f"Chrome/{LOCKED_MAJOR}.0.7827.55",
+    garbage_protocol: bool = False,
+) -> tuple[Path, Path]:
+    """Compile a PE fake that speaks CDP on inherited CRT descriptors 3/4."""
+    if os.name != "nt":
+        raise AssertionError("Windows CDP fake browser requested on another platform")
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        raise AssertionError("rustc is unavailable")
+    directory.mkdir(parents=True, exist_ok=True)
+    executable = directory / "fake-browser.exe"
+    record = directory / "fake-record.log"
+    source = directory / "fake-browser.rs"
+    response = (
+        b"not-a-cdp-response\0"
+        if garbage_protocol
+        else json.dumps({"id": 1, "result": {"product": product}}).encode() + b"\0"
+    )
+    close_response = json.dumps({"id": 2, "result": {}}).encode() + b"\0"
+    source.write_text(
+        f"""
+use std::{{env, ffi::c_void, fs, process, thread, time::Duration}};
+
+extern "C" {{
+    fn _read(fd: i32, buffer: *mut c_void, count: u32) -> i32;
+    fn _write(fd: i32, buffer: *const c_void, count: u32) -> i32;
+}}
+
+fn read_message() {{
+    let mut byte = [0_u8; 1];
+    loop {{
+        let count = unsafe {{ _read(3, byte.as_mut_ptr().cast(), 1) }};
+        if count != 1 {{
+            process::exit(2);
+        }}
+        if byte[0] == 0 {{
+            return;
+        }}
+    }}
+}}
+
+fn write_message(message: &[u8]) {{
+    let mut offset = 0;
+    while offset < message.len() {{
+        let count = unsafe {{
+            _write(
+                4,
+                message[offset..].as_ptr().cast(),
+                (message.len() - offset) as u32,
+            )
+        }};
+        if count <= 0 {{
+            process::exit(3);
+        }}
+        offset += count as usize;
+    }}
+}}
+
+fn main() {{
+    let mut invocation = format!("INVOCATION pid={{}}\\n", process::id());
+    for argument in env::args().skip(1) {{
+        invocation.push_str(&format!("ARG {{argument}}\\n"));
+    }}
+    for (name, value) in env::vars() {{
+        invocation.push_str(&format!("ENV {{name}}={{value}}\\n"));
+    }}
+    invocation.push_str("END\\n");
+    fs::write({json.dumps(str(record))}, invocation).unwrap();
+    read_message();
+    write_message(&{list(response)!r});
+    if {str(garbage_protocol).lower()} {{
+        loop {{ thread::sleep(Duration::from_secs(1)); }}
+    }}
+    read_message();
+    write_message(&{list(close_response)!r});
+    loop {{ thread::sleep(Duration::from_secs(1)); }}
+}}
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [rustc, str(source), "-o", str(executable)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return executable, record
+
+
+def windows_process_exists(process_id: int) -> bool:
+    if os.name != "nt":
+        raise AssertionError("Windows process query requested on another platform")
+    import ctypes
+
+    query_limited_information = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+        query_limited_information, False, process_id
+    )
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        return bool(
+            ctypes.windll.kernel32.GetExitCodeProcess(  # type: ignore[attr-defined]
+                handle, ctypes.byref(exit_code)
+            )
+        ) and exit_code.value == 259
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
 
 
 class WorkerSession:
@@ -262,18 +430,21 @@ def test_bootstrap_requires_render_browser_key(assets: Path, decoy: Path) -> Non
 
 
 def test_bootstrap_rejects_invalid_render_browser(assets: Path, decoy: Path) -> None:
-    executable, _ = write_fake_browser(assets / "valid")
-    link = assets / "browser-link"
-    link.symlink_to(executable)
+    if os.name == "nt":
+        executable = Path(sys.executable).resolve(strict=True)
+        link = None
+    else:
+        executable, _ = write_fake_browser(assets / "valid")
+        link = assets / "browser-link"
+        link.symlink_to(executable)
     missing = assets / "missing-browser"
-    plain = assets / "plain-file"
+    plain = assets / ("plain-file.exe" if os.name == "nt" else "plain-file")
     plain.write_text("not executable")
     secret_relative = "secret-relative/browser"
     invalid_documents: list[object] = [
         render_browser_document(Path(secret_relative)),
         render_browser_document(missing),
         render_browser_document(plain),
-        render_browser_document(link),
         render_browser_document(executable, major=99),
         render_browser_document(executable, major=1000),
         render_browser_document(executable, major="149"),
@@ -283,6 +454,8 @@ def test_bootstrap_rejects_invalid_render_browser(assets: Path, decoy: Path) -> 
         {"executablePath": str(executable)},
         str(executable),
     ]
+    if link is not None:
+        invalid_documents.append(render_browser_document(link))
     for document in invalid_documents:
         stderr = run_rejected_bootstrap(
             bootstrap_document(str(assets), document), poisoned_environment(decoy)
@@ -309,9 +482,15 @@ def test_null_render_browser_refuses_render_without_discovery(assets: Path, deco
 
 
 def test_render_rejects_chromium_major_mismatch(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(
-        assets / "mismatch", version_output="Google Chrome for Testing 150.0.1.1"
-    )
+    if os.name == "nt":
+        executable, record = write_windows_cdp_browser(
+            assets / "mismatch",
+            product="Chrome/150.0.1.1",
+        )
+    else:
+        executable, record = write_fake_browser(
+            assets / "mismatch", version_output="Google Chrome for Testing 150.0.1.1"
+        )
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
         poisoned_environment(decoy),
@@ -323,15 +502,23 @@ def test_render_rejects_chromium_major_mismatch(assets: Path, decoy: Path) -> No
     assert event["reasonCode"] == "chromium_major_mismatch", event
     code, _ = session.finish()
     assert code == 0
-    invocations = read_invocations(record)
-    assert len(invocations) == 1, "mismatched browser must not be launched headless"
-    assert invocations[0]["arguments"] == ["--version"]
+    if os.name == "nt":
+        invocations = read_invocations(record)
+        assert len(invocations) == 1, invocations
+        assert "--remote-debugging-pipe" in invocations[0]["arguments"]
+    else:
+        invocations = read_invocations(record)
+        assert len(invocations) == 1, "mismatched browser must not be launched headless"
+        assert invocations[0]["arguments"] == ["--version"]
     assert not render_job_directories(JOB_ID), "render job directory must be removed"
 
 
 def test_render_verified_headless_job_isolation_and_cleanup(assets: Path, decoy: Path) -> None:
     decoy_record = write_decoy_browser(decoy)
-    executable, record = write_fake_browser(assets / "healthy")
+    if os.name == "nt":
+        executable, record = write_windows_cdp_browser(assets / "healthy")
+    else:
+        executable, record = write_fake_browser(assets / "healthy")
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
         poisoned_environment(decoy),
@@ -350,9 +537,11 @@ def test_render_verified_headless_job_isolation_and_cleanup(assets: Path, decoy:
     assert code == 0
 
     invocations = read_invocations(record)
-    assert len(invocations) == 2, invocations
-    assert invocations[0]["arguments"] == ["--version"]
-    headless = invocations[1]
+    expected_invocations = 1 if os.name == "nt" else 2
+    assert len(invocations) == expected_invocations, invocations
+    if os.name != "nt":
+        assert invocations[0]["arguments"] == ["--version"]
+    headless = invocations[-1]
     arguments = headless["arguments"]
     assert "--headless" in arguments, arguments
     assert "--remote-debugging-pipe" in arguments, arguments
@@ -379,7 +568,14 @@ def test_render_verified_headless_job_isolation_and_cleanup(assets: Path, decoy:
 
 
 def test_render_rejects_invalid_headless_protocol(assets: Path, decoy: Path) -> None:
-    executable, _ = write_fake_browser(assets / "badprotocol", garbage_protocol=True)
+    if os.name == "nt":
+        executable, _ = write_windows_cdp_browser(
+            assets / "badprotocol", garbage_protocol=True
+        )
+    else:
+        executable, _ = write_fake_browser(
+            assets / "badprotocol", garbage_protocol=True
+        )
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
         poisoned_environment(decoy),
@@ -396,7 +592,14 @@ def test_render_rejects_invalid_headless_protocol(assets: Path, decoy: Path) -> 
 
 def test_render_rejects_headless_major_drift(assets: Path, decoy: Path) -> None:
     """The version probe and the running headless browser must agree."""
-    executable, _ = write_fake_browser(assets / "drift", product="Chrome/150.0.1.1")
+    if os.name == "nt":
+        executable, _ = write_windows_cdp_browser(
+            assets / "drift", product="Chrome/150.0.1.1"
+        )
+    else:
+        executable, _ = write_fake_browser(
+            assets / "drift", product="Chrome/150.0.1.1"
+        )
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
         poisoned_environment(decoy),
@@ -412,7 +615,13 @@ def test_render_rejects_headless_major_drift(assets: Path, decoy: Path) -> None:
 
 
 def test_render_rejects_replaced_executable(assets: Path, decoy: Path) -> None:
-    executable, _ = write_fake_browser(assets / "replaced")
+    if os.name == "nt":
+        directory = assets / "replaced"
+        directory.mkdir()
+        executable = directory / "fake-browser.exe"
+        shutil.copyfile(sys.executable, executable)
+    else:
+        executable, _ = write_fake_browser(assets / "replaced")
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
         poisoned_environment(decoy),
@@ -429,7 +638,10 @@ def test_render_rejects_replaced_executable(assets: Path, decoy: Path) -> None:
 
 
 def test_render_timeout_kills_the_browser_process_group(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(assets / "hang", hang_seconds=30)
+    if os.name == "nt":
+        executable, record = write_windows_hanging_browser(assets / "hang")
+    else:
+        executable, record = write_fake_browser(assets / "hang", hang_seconds=30)
     session = WorkerSession(
         bootstrap_document(
             str(assets), render_browser_document(executable, timeout_seconds=1)
@@ -445,6 +657,19 @@ def test_render_timeout_kills_the_browser_process_group(assets: Path, decoy: Pat
     assert event["reasonCode"] == "render_timeout", event
     code, _ = session.finish()
     assert code == 0
+    if os.name == "nt":
+        parent, child = [
+            int(value) for value in record.read_text(encoding="utf-8").split()
+        ]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if not windows_process_exists(parent) and not windows_process_exists(child):
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("hanging render browser tree survived the timeout")
+        assert not render_job_directories(JOB_ID)
+        return
     hanging = read_invocations(record)[-1]["pid"]
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -460,7 +685,14 @@ def test_render_timeout_kills_the_browser_process_group(assets: Path, decoy: Pat
 
 
 def test_forged_render_command_is_ignored(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(assets / "forged")
+    if os.name == "nt":
+        directory = assets / "forged"
+        directory.mkdir()
+        executable = directory / "fake-browser.exe"
+        shutil.copyfile(sys.executable, executable)
+        record = None
+    else:
+        executable, record = write_fake_browser(assets / "forged")
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
         poisoned_environment(decoy),
@@ -474,22 +706,37 @@ def test_forged_render_command_is_ignored(assets: Path, decoy: Path) -> None:
     assert event["event"] == "worker.cancelled", event
     code, _ = session.finish()
     assert code == 0
-    assert not read_invocations(record), "forged render command must never touch the browser"
+    if record is not None:
+        assert not read_invocations(record), "forged render command must never touch the browser"
 
 
 def main() -> int:
-    tests = [
-        test_bootstrap_requires_render_browser_key,
-        test_bootstrap_rejects_invalid_render_browser,
-        test_null_render_browser_refuses_render_without_discovery,
-        test_render_rejects_chromium_major_mismatch,
-        test_render_verified_headless_job_isolation_and_cleanup,
-        test_render_rejects_invalid_headless_protocol,
-        test_render_rejects_headless_major_drift,
-        test_render_rejects_replaced_executable,
-        test_render_timeout_kills_the_browser_process_group,
-        test_forged_render_command_is_ignored,
-    ]
+    if os.name == "nt":
+        tests = [
+            test_bootstrap_requires_render_browser_key,
+            test_bootstrap_rejects_invalid_render_browser,
+            test_null_render_browser_refuses_render_without_discovery,
+            test_render_rejects_chromium_major_mismatch,
+            test_render_verified_headless_job_isolation_and_cleanup,
+            test_render_rejects_invalid_headless_protocol,
+            test_render_rejects_headless_major_drift,
+            test_render_rejects_replaced_executable,
+            test_render_timeout_kills_the_browser_process_group,
+            test_forged_render_command_is_ignored,
+        ]
+    else:
+        tests = [
+            test_bootstrap_requires_render_browser_key,
+            test_bootstrap_rejects_invalid_render_browser,
+            test_null_render_browser_refuses_render_without_discovery,
+            test_render_rejects_chromium_major_mismatch,
+            test_render_verified_headless_job_isolation_and_cleanup,
+            test_render_rejects_invalid_headless_protocol,
+            test_render_rejects_headless_major_drift,
+            test_render_rejects_replaced_executable,
+            test_render_timeout_kills_the_browser_process_group,
+            test_forged_render_command_is_ignored,
+        ]
     for test in tests:
         with tempfile.TemporaryDirectory(prefix="automation-tool-bm03-") as directory:
             base = Path(directory).resolve(strict=True)
