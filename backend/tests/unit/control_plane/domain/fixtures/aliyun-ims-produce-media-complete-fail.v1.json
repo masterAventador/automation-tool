@@ -1,0 +1,12 @@
+{
+  "EventType": "ProduceMediaComplete",
+  "UserId": 1000000000000000,
+  "EventTime": "2026-07-23T00:31:00Z",
+  "MessageBody": {
+    "Status": "Fail",
+    "ErrorCode": "InternalError",
+    "ErrorMessage": "The request processing has failed",
+    "ProjectId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "JobId": "46c446e2420348e0950e4d7876acc6fb"
+  }
+}

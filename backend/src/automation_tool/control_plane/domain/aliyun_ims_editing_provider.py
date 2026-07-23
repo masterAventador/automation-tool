@@ -323,6 +323,14 @@ class AliyunEditingIntentStore(Protocol):
         """Persist or replace the intent for its editing job."""
         ...
 
+    async def load_all(self) -> tuple[AliyunEditingIntent, ...]:
+        """Return every persisted intent for restart recovery scans."""
+        ...
+
+    async def load_by_vendor_job_id(self, vendor_job_id: str) -> AliyunEditingIntent | None:
+        """Return the intent holding one acknowledged vendor JobId, if any."""
+        ...
+
 
 @final
 class InMemoryAliyunEditingIntentStore:
@@ -342,6 +350,17 @@ class InMemoryAliyunEditingIntentStore:
         if not isinstance(intent, AliyunEditingIntent):
             _reject()
         self._intents[intent.editing_job_id] = intent
+
+    async def load_all(self) -> tuple[AliyunEditingIntent, ...]:
+        return tuple(self._intents.values())
+
+    async def load_by_vendor_job_id(self, vendor_job_id: str) -> AliyunEditingIntent | None:
+        if type(vendor_job_id) is not str or not vendor_job_id:
+            _reject()
+        for intent in self._intents.values():
+            if intent.vendor_job_id == vendor_job_id:
+                return intent
+        return None
 
 
 class AliyunImsSubmitTransport(Protocol):
@@ -872,6 +891,10 @@ class AliyunImsEditingProvider:
     ) -> None:
         """VE-06 reconciliation entry point: confirmed terminal failure."""
         await self._transition_intent(editing_job_id, EditingJobStatus.FAILED, (), failure_code)
+
+    async def record_outcome_uncertain(self, editing_job_id: EditingJobId) -> None:
+        """VE-06 reconciliation entry point: the outcome cannot be confirmed."""
+        await self._transition_intent(editing_job_id, EditingJobStatus.OUTCOME_UNCERTAIN, (), None)
 
     async def _transition_intent(
         self,

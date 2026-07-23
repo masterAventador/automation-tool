@@ -1,0 +1,12 @@
+{
+  "EventType": "ProduceMediaComplete",
+  "UserId": 1000000000000000,
+  "EventTime": "2026-07-23T00:30:00Z",
+  "MessageBody": {
+    "Status": "Success",
+    "MediaURL": "https://automation-tool-video-staging.oss-cn-beijing.aliyuncs.com/editing-output/v1/00000000-0000-4000-8000-0000000000cc.mp4",
+    "MediaId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ProjectId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "JobId": "46c446e2420348e0950e4d7876acc6fb"
+  }
+}

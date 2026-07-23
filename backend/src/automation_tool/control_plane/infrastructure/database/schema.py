@@ -17,7 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 
 from automation_tool.control_plane.application.task_target_previews import (
     TASK_TARGET_CONFIRMATION_INTENT_VERSION,
@@ -2284,6 +2284,80 @@ bilibili_upload_parts = Table(
     ),
 )
 
+
+aliyun_editing_intents = Table(
+    "aliyun_editing_intents",
+    metadata,
+    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
+    Column("request_hash", String(length=64), nullable=False),
+    Column("state", String(length=16), nullable=False),
+    Column("vendor_job_id", String(length=128), nullable=True),
+    Column("status", String(length=20), nullable=False),
+    Column("failure_code", String(length=32), nullable=True),
+    Column("output_artifact_ids", ARRAY(UUID(as_uuid=True)), nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
+    ),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
+    ),
+    CheckConstraint(
+        "state in ('prepared', 'dispatched', 'uncertain')",
+        name="ck_aliyun_editing_intents_state",
+    ),
+    CheckConstraint(
+        "status in ('queued', 'running', 'paused', 'cancelling', 'succeeded', "
+        "'failed', 'cancelled', 'outcome_uncertain')",
+        name="ck_aliyun_editing_intents_status",
+    ),
+    CheckConstraint(
+        "request_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_aliyun_editing_intents_request_hash",
+    ),
+    CheckConstraint(
+        "vendor_job_id is null or vendor_job_id ~ '^[A-Za-z0-9-]{8,128}$'",
+        name="ck_aliyun_editing_intents_vendor_job_id",
+    ),
+    CheckConstraint(
+        "state <> 'prepared' or (vendor_job_id is null and status = 'queued'"
+        " and failure_code is null and cardinality(output_artifact_ids) = 0)",
+        name="ck_aliyun_editing_intents_prepared_shape",
+    ),
+    CheckConstraint(
+        "state <> 'uncertain' or (vendor_job_id is null"
+        " and status = 'outcome_uncertain' and failure_code is null"
+        " and cardinality(output_artifact_ids) = 0)",
+        name="ck_aliyun_editing_intents_uncertain_shape",
+    ),
+    CheckConstraint(
+        "state <> 'dispatched' or vendor_job_id is not null",
+        name="ck_aliyun_editing_intents_dispatched_shape",
+    ),
+    CheckConstraint(
+        "status <> 'succeeded' or (cardinality(output_artifact_ids) > 0"
+        " and failure_code is null)",
+        name="ck_aliyun_editing_intents_succeeded_facts",
+    ),
+    CheckConstraint(
+        "status = 'succeeded' or status = 'failed'"
+        " or (cardinality(output_artifact_ids) = 0 and failure_code is null)",
+        name="ck_aliyun_editing_intents_non_terminal_facts",
+    ),
+    CheckConstraint(
+        "status <> 'failed' or (cardinality(output_artifact_ids) = 0"
+        " and failure_code is not null)",
+        name="ck_aliyun_editing_intents_failed_facts",
+    ),
+    PrimaryKeyConstraint("editing_job_id", name="pk_aliyun_editing_intents"),
+)
+
+Index(
+    "ux_aliyun_editing_intents_vendor_job_id",
+    aliyun_editing_intents.c.vendor_job_id,
+    unique=True,
+    postgresql_where=text("vendor_job_id is not null"),
+)
+
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2292,6 +2366,7 @@ __all__ = [
     "account_session_families",
     "account_session_tokens",
     "action_risk_authorizations",
+    "aliyun_editing_intents",
     "bilibili_publish_attempts",
     "bilibili_upload_parts",
     "device_credentials",
