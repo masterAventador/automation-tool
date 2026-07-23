@@ -1,0 +1,2615 @@
+{
+  "schemaVersion": 1,
+  "id": "offline-motion-dependencies",
+  "source": {
+    "id": "hyperframes",
+    "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+    "tag": "v0.7.68"
+  },
+  "verifiedAt": "2026-07-23",
+  "keptFontSubsets": [
+    "latin",
+    "latin-ext"
+  ],
+  "embeddedDocumentationUrlDomains": [
+    "d3js.org",
+    "docs.unrealengine.com",
+    "en.wikipedia.org",
+    "github.com",
+    "gsap.com"
+  ],
+  "layout": {
+    "downloadRoot": ".local/offline-motion-deps/downloads",
+    "catalogRoot": ".local/offline-motion-deps/catalog",
+    "dependencyRoot": "offline-deps",
+    "itemRoot": "items"
+  },
+  "packages": [
+    {
+      "package": "gsap",
+      "version": "3.14.2",
+      "license": "GSAP Standard License (Webflow)",
+      "licenseUrl": "https://gsap.com/standard-license",
+      "verification": "verified_package_json_and_license_page_2026-07-23",
+      "redistributable": true,
+      "notes": "Current Webflow standard license grants use/reproduce/display/implement for any website, web application or digital interface at no charge, commercial included; prohibited uses are limited to building Webflow-competing no-code visual animation builders and removing proprietary notices. The renderer ships gsap.min.js unmodified with its copyright banner.",
+      "evidence": {
+        "packageJsonLicense": "Standard 'no charge' license: https://gsap.com/standard-license.",
+        "licenseFiles": []
+      }
+    },
+    {
+      "package": "three",
+      "version": "0.147.0",
+      "license": "MIT",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "",
+      "evidence": {
+        "packageJsonLicense": "MIT",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "fbf3943930dacbf56aabb8dc5d816440bd16aa6f4cc78ddbdf12106ee1807832"
+          }
+        ]
+      }
+    },
+    {
+      "package": "three.js",
+      "version": "r128 (npm 0.128.0)",
+      "license": "MIT",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/three@0.128.0/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "cdnjs r128 build corresponds to npm three@0.128.0.",
+      "evidence": {
+        "packageJsonLicense": "MIT",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "7dddf7c5b8fd10ee654db8857d75d104b5557889aa5a91fc4ca545ea7c07062f"
+          }
+        ]
+      }
+    },
+    {
+      "package": "d3",
+      "version": "7.9.0",
+      "license": "ISC",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/d3@7.9.0/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "Upstream floating specifier d3@7 locked to the resolved release.",
+      "evidence": {
+        "packageJsonLicense": "ISC",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "3e6849627f74ff73c257a3ae1efb574015d94fc1035c05ec3c15805165efcbc4"
+          }
+        ]
+      }
+    },
+    {
+      "package": "topojson-client",
+      "version": "3.1.0",
+      "license": "ISC",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "",
+      "evidence": {
+        "packageJsonLicense": "ISC",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "4c4d15b635e04e691825a76db7d33f7f2033b55669a7430011694f31e6c65999"
+          }
+        ]
+      }
+    },
+    {
+      "package": "us-atlas",
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "US map TopoJSON derived from US Census Bureau cartographic boundary files.",
+      "evidence": {
+        "packageJsonLicense": "ISC",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "8048290dfdb6e83fbed17e8985c8cfc4ce9da9b842642f3d3e497280790cfa31"
+          }
+        ]
+      }
+    },
+    {
+      "package": "world-atlas",
+      "version": "2.0.2",
+      "license": "ISC",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "World map TopoJSON derived from Natural Earth public-domain data.",
+      "evidence": {
+        "packageJsonLicense": "ISC",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "8048290dfdb6e83fbed17e8985c8cfc4ce9da9b842642f3d3e497280790cfa31"
+          }
+        ]
+      }
+    },
+    {
+      "package": "es-atlas",
+      "version": "0.6.0",
+      "license": "MIT",
+      "licenseUrl": "https://cdn.jsdelivr.net/npm/es-atlas@0.6.0/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "BM-11 registered this package as unverified; the npm LICENSE file is MIT (map data derived from Spanish IGN CC-BY-style sources, attribution kept in the third-party notices page).",
+      "evidence": {
+        "packageJsonLicense": "MIT",
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "6565750cedfd15784bc83d974db4c38dc592d68c1f4352a6f934ff9fb3d623c9"
+          }
+        ]
+      }
+    },
+    {
+      "package": "draco-decoder",
+      "version": "1.5.6",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://cdn.jsdelivr.net/gh/google/draco@1.5.6/LICENSE",
+      "verification": "verified_license_file_2026-07-23",
+      "redistributable": true,
+      "notes": "Decoder trio fetched from the gstatic versioned distribution.",
+      "evidence": {
+        "packageJsonLicense": null,
+        "licenseFiles": [
+          {
+            "file": "/LICENSE",
+            "sha256": "d3709b0fb4b8a94bbb1d02b8a2e484f258b0d9c5c5a01f940391f3fe662cd1a4"
+          }
+        ]
+      }
+    }
+  ],
+  "fontFamilies": [
+    {
+      "family": "Anton",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/anton",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "ee67e6ee22790b7929f1a3769ca2801d565c64b5a9096942c1adf5596de9c9e4",
+      "redistributable": true
+    },
+    {
+      "family": "Bebas Neue",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/bebasneue",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "72082f6cb4d04be2ecf7cc7d9e1e7d73787f0af8a5a278a47cade70c16b78341",
+      "redistributable": true
+    },
+    {
+      "family": "Big Shoulders Display",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/bigshouldersdisplay",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "338f9c050f19daeda1d597243faf79f3a3d437c338af58cb7047617d0ce08771",
+      "redistributable": true
+    },
+    {
+      "family": "DM Sans",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/dmsans",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "9af36190332437f5ecd09974de43c1f7c77a310a996cdd8ceb25628b458840e1",
+      "redistributable": true
+    },
+    {
+      "family": "Figtree",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/figtree",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "140d37233e7f3ce7313798befa9600893bcceaf41a55fa0fa5ad52f7f657a268",
+      "redistributable": true
+    },
+    {
+      "family": "Gabarito",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/gabarito",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "21506cc7106bbfd4aa1c40371f33f9f4296182a8e4bb46658e99af24feb4bfca",
+      "redistributable": true
+    },
+    {
+      "family": "Instrument Serif",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/instrumentserif",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "129ed7618959716959f2941fdd5b49e0ad6e6c1d78726761786a00253d865521",
+      "redistributable": true
+    },
+    {
+      "family": "Inter",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/inter",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
+      "redistributable": true
+    },
+    {
+      "family": "JetBrains Mono",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/jetbrainsmono",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d",
+      "redistributable": true
+    },
+    {
+      "family": "Lato",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/lato",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "74ba064d03f1f1c4a952da936c3eb71866c34404916734de3cae73b34357e59e",
+      "redistributable": true
+    },
+    {
+      "family": "Libre Baskerville",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/librebaskerville",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "3624eddd4c8f8a908130a417ae7cd089c9da69899c4e0ca1a5217d0a6fae16fd",
+      "redistributable": true
+    },
+    {
+      "family": "Libre Franklin",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/librefranklin",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "2710268527181a27b8e938617551bae29e714e6525247be6679bf897a9942a60",
+      "redistributable": true
+    },
+    {
+      "family": "Montserrat",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/montserrat",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "8b7141c03fa4f8d44e6345d5d4931709290f0f67875e452e95ac1fd3a027802e",
+      "redistributable": true
+    },
+    {
+      "family": "Outfit",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/outfit",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "c676351bf8576b9aba743cd5eaa8c0e7ee0d51f805d720447b4df4ddb6a2e416",
+      "redistributable": true
+    },
+    {
+      "family": "Playfair Display",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/playfairdisplay",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "566be814f8e96e93dfa16101331557eb6b5467e9e03f627c0910fe93ca12300e",
+      "redistributable": true
+    },
+    {
+      "family": "Poppins",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/poppins",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "6be04893d770899a015649c7aa3b582f871b272f8747a92b78b17c3e5c8b2573",
+      "redistributable": true
+    },
+    {
+      "family": "Space Grotesk",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/spacegrotesk",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72",
+      "redistributable": true
+    },
+    {
+      "family": "Space Mono",
+      "license": "OFL-1.1",
+      "repositoryPath": "ofl/spacemono",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseFileSha256": "8e4ee42b2553e1e01504e61cb0d46d148cd8c9e5eacaa3622a7df2d4f2955b9f",
+      "redistributable": true
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "data",
+      "package": "es-atlas",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/es-atlas@0.6.0/es/autonomous_regions.json"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/es-atlas@0.6.0/es/autonomous_regions.json",
+      "localPath": "offline-deps/data/es-atlas-0.6.0/es/autonomous_regions.json",
+      "sha256": "c99ec36ed214619ab680de4dca8c5aefe36753f20cfe3efe10051d4d1e10b6dc",
+      "bytes": 37420
+    },
+    {
+      "kind": "data",
+      "package": "us-atlas",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/states-10m.json",
+      "localPath": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+      "sha256": "d76b391ccfa8bff601d51e3e3da5d43a89fa46cd5caca72ce731b383be5596d0",
+      "bytes": 114554
+    },
+    {
+      "kind": "data",
+      "package": "world-atlas",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json",
+      "localPath": "offline-deps/data/world-atlas-2.0.2/countries-110m.json",
+      "sha256": "2516c915867c7baf18ddec727aec46c315541a07cfb3d79a6559b05d5e94eee8",
+      "bytes": 107761
+    },
+    {
+      "kind": "draco",
+      "package": "draco-decoder",
+      "originalUrls": [],
+      "downloadUrl": "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.js",
+      "localPath": "offline-deps/draco/1.5.6/draco_decoder.js",
+      "sha256": "30e4d486fa020737af10e3c56197693e5b904bdc05b8bfa5d7b06751dec6da04",
+      "bytes": 719410
+    },
+    {
+      "kind": "draco",
+      "package": "draco-decoder",
+      "originalUrls": [],
+      "downloadUrl": "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm",
+      "localPath": "offline-deps/draco/1.5.6/draco_decoder.wasm",
+      "sha256": "c55a594e8ffd18426d36b27fea9618af3df5e173640a3e56d46f09d76f0574f2",
+      "bytes": 285747
+    },
+    {
+      "kind": "draco",
+      "package": "draco-decoder",
+      "originalUrls": [],
+      "downloadUrl": "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
+      "localPath": "offline-deps/draco/1.5.6/draco_wasm_wrapper.js",
+      "sha256": "e8049906ef3f8f75d3456c22a3f31bfdfe5b5b5bd09ccdec613b9e9a49d554d8",
+      "bytes": 58763
+    },
+    {
+      "kind": "font",
+      "family": "Anton",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/anton/v27/1Ptgg87LROyAm3K9-C8CSKlvPfE.woff2",
+      "localPath": "offline-deps/fonts/woff2/anton/1Ptgg87LROyAm3K9-C8CSKlvPfE.woff2",
+      "sha256": "ae1a8ac1c2899a66eed47a851201bb78a56664bf8da6d34a9ee226582d15ac19",
+      "bytes": 21296
+    },
+    {
+      "kind": "font",
+      "family": "Anton",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/anton/v27/1Ptgg87LROyAm3Kz-C8CSKlv.woff2",
+      "localPath": "offline-deps/fonts/woff2/anton/1Ptgg87LROyAm3Kz-C8CSKlv.woff2",
+      "sha256": "23aab0b2692a0c89eb7997d3c7cf5bda41276d6cd4ab6cc0edc3edfcece32b09",
+      "bytes": 12004
+    },
+    {
+      "kind": "font",
+      "family": "Bebas Neue",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/bebasneue/v16/JTUSjIg69CK48gW7PXoo9WdhyyTh89ZNpQ.woff2",
+      "localPath": "offline-deps/fonts/woff2/bebas-neue/JTUSjIg69CK48gW7PXoo9WdhyyTh89ZNpQ.woff2",
+      "sha256": "a724a4b6a8844a50c489b60294d308818f43a244213b0d687d2ba72cf6cee746",
+      "bytes": 5664
+    },
+    {
+      "kind": "font",
+      "family": "Bebas Neue",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/bebasneue/v16/JTUSjIg69CK48gW7PXoo9WlhyyTh89Y.woff2",
+      "localPath": "offline-deps/fonts/woff2/bebas-neue/JTUSjIg69CK48gW7PXoo9WlhyyTh89Y.woff2",
+      "sha256": "441b026df205d28954f61b6989c7bbd228c0adff42f746a266c6a5d89134bc34",
+      "bytes": 8596
+    },
+    {
+      "kind": "font",
+      "family": "Big Shoulders Display",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/bigshouldersdisplay/v24/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1cwtDuDJAM23AZ.woff2",
+      "localPath": "offline-deps/fonts/woff2/big-shoulders-display/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1cwtDuDJAM23AZ.woff2",
+      "sha256": "8a2768ca71f8db60855e512408d497853be30eddb011d9845d25e62944457972",
+      "bytes": 29464
+    },
+    {
+      "kind": "font",
+      "family": "Big Shoulders Display",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/bigshouldersdisplay/v24/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1czNDuDJAM2w.woff2",
+      "localPath": "offline-deps/fonts/woff2/big-shoulders-display/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1czNDuDJAM2w.woff2",
+      "sha256": "203dd8ba4ae61b19cd2e00c66708f0d0f6d8484cdfdb1d7e8be37260d36a99b1",
+      "bytes": 35520
+    },
+    {
+      "kind": "font",
+      "family": "DM Sans",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2",
+      "localPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2",
+      "sha256": "468d56b6b25b05b70190b6c233d773f6f1770e8579827ce022a57f03fa8002fb",
+      "bytes": 36980
+    },
+    {
+      "kind": "font",
+      "family": "DM Sans",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2",
+      "localPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2",
+      "sha256": "219b02c7d8884817d3d6ad4c8771f2c000ce4c5669a67ef4e2e5617ffa25c4cc",
+      "bytes": 18192
+    },
+    {
+      "kind": "font",
+      "family": "Figtree",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/figtree/v9/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_fWR25XyEA25WTzZO_OSg.woff2",
+      "localPath": "offline-deps/fonts/woff2/figtree/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_fWR25XyEA25WTzZO_OSg.woff2",
+      "sha256": "96fb89fbbd2ae1dc1ffba34d8cd127d6f5445149eb6128c439315f1fb95bb6b5",
+      "bytes": 6100
+    },
+    {
+      "kind": "font",
+      "family": "Figtree",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/figtree/v9/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_fWR25ZyEA25WTzZO8.woff2",
+      "localPath": "offline-deps/fonts/woff2/figtree/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_fWR25ZyEA25WTzZO8.woff2",
+      "sha256": "9e37d5eb9c12a9394a5ba72a0044c00db7f21553c75c01f307a69a1b072d60c7",
+      "bytes": 11104
+    },
+    {
+      "kind": "font",
+      "family": "Gabarito",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/gabarito/v9/QGYwz_0dZAGKJJ4t3FFkc3Q8AkNP9Pj2SsWEEQgsiaPVIzHL.woff2",
+      "localPath": "offline-deps/fonts/woff2/gabarito/QGYwz_0dZAGKJJ4t3FFkc3Q8AkNP9Pj2SsWEEQgsiaPVIzHL.woff2",
+      "sha256": "0797a6961bda1588e6c1c27a73376ab405fabc784fdfb2b6b5a0e65677c35a03",
+      "bytes": 17780
+    },
+    {
+      "kind": "font",
+      "family": "Gabarito",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/gabarito/v9/QGYwz_0dZAGKJJ4t3FFkc3Q8AkNP9Pj2SsWEHwgsiaPVIzHLeME.woff2",
+      "localPath": "offline-deps/fonts/woff2/gabarito/QGYwz_0dZAGKJJ4t3FFkc3Q8AkNP9Pj2SsWEHwgsiaPVIzHLeME.woff2",
+      "sha256": "892f450d3ba849d042be51c5b20c90c2fb2d4515958530adee1dfe596c2aa552",
+      "bytes": 7220
+    },
+    {
+      "kind": "font",
+      "family": "Instrument Serif",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/instrumentserif/v5/jizBRFtNs2ka5fXjeivQ4LroWlx-6zUTjnTLgNs.woff2",
+      "localPath": "offline-deps/fonts/woff2/instrument-serif/jizBRFtNs2ka5fXjeivQ4LroWlx-6zUTjnTLgNs.woff2",
+      "sha256": "60c06664b5a95c7de6cc3e00d1f9034d78bd1e40b564016b241674449a067d4d",
+      "bytes": 15040
+    },
+    {
+      "kind": "font",
+      "family": "Instrument Serif",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/instrumentserif/v5/jizBRFtNs2ka5fXjeivQ4LroWlx-6zsTjnTLgNuZ5w.woff2",
+      "localPath": "offline-deps/fonts/woff2/instrument-serif/jizBRFtNs2ka5fXjeivQ4LroWlx-6zsTjnTLgNuZ5w.woff2",
+      "sha256": "a8c4bd7cd7073180e740d2d83a616b5cb0845579b73207eeafeae8532e70c901",
+      "bytes": 7828
+    },
+    {
+      "kind": "font",
+      "family": "Instrument Serif",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/instrumentserif/v5/jizHRFtNs2ka5fXjeivQ4LroWlx-6zAjgn7Motmp5r61.woff2",
+      "localPath": "offline-deps/fonts/woff2/instrument-serif/jizHRFtNs2ka5fXjeivQ4LroWlx-6zAjgn7Motmp5r61.woff2",
+      "sha256": "a04fc7ed18a8037149ce0bfda58076709d8e0840e136ed00abbdc196b7992443",
+      "bytes": 8444
+    },
+    {
+      "kind": "font",
+      "family": "Instrument Serif",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/instrumentserif/v5/jizHRFtNs2ka5fXjeivQ4LroWlx-6zAjjH7Motmp5g.woff2",
+      "localPath": "offline-deps/fonts/woff2/instrument-serif/jizHRFtNs2ka5fXjeivQ4LroWlx-6zAjjH7Motmp5g.woff2",
+      "sha256": "6ee678c33f388dd7ba59700ebea635deb98821baafd817b09891f7927177f702",
+      "bytes": 15684
+    },
+    {
+      "kind": "font",
+      "family": "Inter",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2",
+      "localPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2",
+      "sha256": "c940764593d0fe5d596be327ca7558855e018039fb78509aa21921fd3644c3e4",
+      "bytes": 48432
+    },
+    {
+      "kind": "font",
+      "family": "Inter",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2",
+      "localPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2",
+      "sha256": "a28eb6d3ccb534ae0c94ca999371df024aab60b08c3c8a5720ee9e32fa0faaa2",
+      "bytes": 85272
+    },
+    {
+      "kind": "font",
+      "family": "Inter",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiJ-Ek-_EeA.woff2",
+      "localPath": "offline-deps/fonts/woff2/inter/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiJ-Ek-_EeA.woff2",
+      "sha256": "48a0c2503a9c8ec4153302693fff56b3281aba5ce5afd7cf2bd51a03b098cd22",
+      "bytes": 23804
+    },
+    {
+      "kind": "font",
+      "family": "Inter",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZFhiJ-Ek-_EeAmM.woff2",
+      "localPath": "offline-deps/fonts/woff2/inter/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZFhiJ-Ek-_EeAmM.woff2",
+      "sha256": "3c05d9f2f8b544316e1950a84635b50729963d1c6332d9200c9171bd67252c1f",
+      "bytes": 35056
+    },
+    {
+      "kind": "font",
+      "family": "JetBrains Mono",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwgknk-6nFg.woff2",
+      "localPath": "offline-deps/fonts/woff2/jetbrains-mono/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwgknk-6nFg.woff2",
+      "sha256": "9c38cb2d0d2d93c1ee6e21fa78db76f13ea7e15e15cc64214c7ca89b6aaa35c4",
+      "bytes": 11596
+    },
+    {
+      "kind": "font",
+      "family": "JetBrains Mono",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwgknk-4.woff2",
+      "localPath": "offline-deps/fonts/woff2/jetbrains-mono/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwgknk-4.woff2",
+      "sha256": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4",
+      "bytes": 31340
+    },
+    {
+      "kind": "font",
+      "family": "Lato",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/lato/v25/S6u9w4BMUTPHh6UVSwaPGQ3q5d0N7w.woff2",
+      "localPath": "offline-deps/fonts/woff2/lato/S6u9w4BMUTPHh6UVSwaPGQ3q5d0N7w.woff2",
+      "sha256": "78e850d569834892d3f4bdfd2084c7a7c0dc64ae4226f3231af30dae706400e2",
+      "bytes": 3028
+    },
+    {
+      "kind": "font",
+      "family": "Lato",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/lato/v25/S6u9w4BMUTPHh6UVSwiPGQ3q5d0.woff2",
+      "localPath": "offline-deps/fonts/woff2/lato/S6u9w4BMUTPHh6UVSwiPGQ3q5d0.woff2",
+      "sha256": "7a7ce1a34f3e9944fe88fc61abbc93b6db383afa2b90815fd7ccea456fbce4e5",
+      "bytes": 14168
+    },
+    {
+      "kind": "font",
+      "family": "Lato",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/lato/v25/S6uyw4BMUTPHjx4wXiWtFCc.woff2",
+      "localPath": "offline-deps/fonts/woff2/lato/S6uyw4BMUTPHjx4wXiWtFCc.woff2",
+      "sha256": "d4ae5188a65370ecfe28f42293bbee8297cfd5712c6aadfdb270d48f2bcd88b0",
+      "bytes": 13980
+    },
+    {
+      "kind": "font",
+      "family": "Lato",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/lato/v25/S6uyw4BMUTPHjxAwXiWtFCfQ7A.woff2",
+      "localPath": "offline-deps/fonts/woff2/lato/S6uyw4BMUTPHjxAwXiWtFCfQ7A.woff2",
+      "sha256": "b85c84c655bcbba3bd628b2c1fea0fbdb5b158a9022281a2f910e82fd6da5098",
+      "bytes": 2988
+    },
+    {
+      "kind": "font",
+      "family": "Libre Baskerville",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/librebaskerville/v24/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNXaxMaC82U-ro.woff2",
+      "localPath": "offline-deps/fonts/woff2/libre-baskerville/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNXaxMaC82U-ro.woff2",
+      "sha256": "1b43b44b580f524de254ecb11fb2230bacb2a4a45533687473e8770b1737f25e",
+      "bytes": 35460
+    },
+    {
+      "kind": "font",
+      "family": "Libre Baskerville",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/librebaskerville/v24/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNZaxMaC82U.woff2",
+      "localPath": "offline-deps/fonts/woff2/libre-baskerville/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNZaxMaC82U.woff2",
+      "sha256": "b62b98ef69e6e55b28b9bcac84513eb1bdd1d312a344b1c76e979219923224a5",
+      "bytes": 33852
+    },
+    {
+      "kind": "font",
+      "family": "Libre Franklin",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/librefranklin/v20/jizDREVItHgc8qDIbSTKq4XkRiUR2zcZiVbJsNo.woff2",
+      "localPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUR2zcZiVbJsNo.woff2",
+      "sha256": "96176420d1e4d66b81149e47347c5d8c76c5be3d74671e0c87a661da69ea33ed",
+      "bytes": 25592
+    },
+    {
+      "kind": "font",
+      "family": "Libre Franklin",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/librefranklin/v20/jizDREVItHgc8qDIbSTKq4XkRiUf2zcZiVbJ.woff2",
+      "localPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUf2zcZiVbJ.woff2",
+      "sha256": "d21d1545591ddfa2ce9c208879298e9086b1a8dba7c81d50b686c70a259e91e8",
+      "bytes": 29336
+    },
+    {
+      "kind": "font",
+      "family": "Montserrat",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvC73w3aXp-p7K4KLjztg.woff2",
+      "localPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvC73w3aXp-p7K4KLjztg.woff2",
+      "sha256": "e1e1abe788eb56961f58295970db85050896d1de33ea9bd77d8aef021565824b",
+      "bytes": 30104
+    },
+    {
+      "kind": "font",
+      "family": "Montserrat",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvC73w5aXp-p7K4KLg.woff2",
+      "localPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvC73w5aXp-p7K4KLg.woff2",
+      "sha256": "0a53da911b5f2ffacd4bcc71e05f97f965fcf3564cea98f332cc4d95ce64d99e",
+      "bytes": 15704
+    },
+    {
+      "kind": "font",
+      "family": "Montserrat",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvr73w3aXp-p7K4KLjztg.woff2",
+      "localPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvr73w3aXp-p7K4KLjztg.woff2",
+      "sha256": "6b9882f636a05ce57e3551223c5a67c30512dbca1abe134f9b7d8b0a8680d844",
+      "bytes": 31376
+    },
+    {
+      "kind": "font",
+      "family": "Montserrat",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvr73w5aXp-p7K4KLg.woff2",
+      "localPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvr73w5aXp-p7K4KLg.woff2",
+      "sha256": "c57401a633ee4e7c292dbb634295076cd84b6dd95f498145876d03f24c971592",
+      "bytes": 16692
+    },
+    {
+      "kind": "font",
+      "family": "Montserrat",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/montserrat/v31/JTUSjIg1_i6t8kCHKm459WdhyyTh89ZNpQ.woff2",
+      "localPath": "offline-deps/fonts/woff2/montserrat/JTUSjIg1_i6t8kCHKm459WdhyyTh89ZNpQ.woff2",
+      "sha256": "920711de9ae96c18970fa4faca73cd302b93ac5ed57ebeb6bfec2ddeff930082",
+      "bytes": 68224
+    },
+    {
+      "kind": "font",
+      "family": "Montserrat",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/montserrat/v31/JTUSjIg1_i6t8kCHKm459WlhyyTh89Y.woff2",
+      "localPath": "offline-deps/fonts/woff2/montserrat/JTUSjIg1_i6t8kCHKm459WlhyyTh89Y.woff2",
+      "sha256": "6438d7b8ea9c7c3992d5e2fd2afdb1ff948570a3ef0bedae76247b51632960ba",
+      "bytes": 35508
+    },
+    {
+      "kind": "font",
+      "family": "Outfit",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/outfit/v15/QGYyz_MVcBeNP4NjuGObqx1XmO1I4ZmyO4a0EwItq6fNIg.woff2",
+      "localPath": "offline-deps/fonts/woff2/outfit/QGYyz_MVcBeNP4NjuGObqx1XmO1I4ZmyO4a0EwItq6fNIg.woff2",
+      "sha256": "1fabb71155c2577eacbc64fca742819df5d76398c3bd9b6c1c73cc8b6dbb603e",
+      "bytes": 13496
+    },
+    {
+      "kind": "font",
+      "family": "Outfit",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/outfit/v15/QGYyz_MVcBeNP4NjuGObqx1XmO1I4ZmyO4i0EwItq6fNIhnL.woff2",
+      "localPath": "offline-deps/fonts/woff2/outfit/QGYyz_MVcBeNP4NjuGObqx1XmO1I4ZmyO4i0EwItq6fNIhnL.woff2",
+      "sha256": "bb8063b68a5e98f42311798fe85ada6b2a8f0dbbeb23e865c9bd6fdeb7d5f8cf",
+      "bytes": 6480
+    },
+    {
+      "kind": "font",
+      "family": "Playfair Display",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_iiUXtHA-X-uE0qEEw.woff2",
+      "localPath": "offline-deps/fonts/woff2/playfair-display/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_iiUXtHA-X-uE0qEEw.woff2",
+      "sha256": "dd0d16ee5b7356f18e746f2eabedc2c4621e5a1412e6ac94e7da6367133e5bdb",
+      "bytes": 23156
+    },
+    {
+      "kind": "font",
+      "family": "Playfair Display",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_iiUXt_A-X-uE0qEE5Do.woff2",
+      "localPath": "offline-deps/fonts/woff2/playfair-display/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_iiUXt_A-X-uE0qEE5Do.woff2",
+      "sha256": "dcfda202eb68ab96d70a3a59f7e7c21787704a377adad21a7ded5885df62c144",
+      "bytes": 14116
+    },
+    {
+      "kind": "font",
+      "family": "Playfair Display",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKfFunDXbtPK-F2qC0s.woff2",
+      "localPath": "offline-deps/fonts/woff2/playfair-display/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKfFunDXbtPK-F2qC0s.woff2",
+      "sha256": "9d293c073e0f3b3e2e7954e531506ab6499bd273a6ae0bf7de1fa10468112ed9",
+      "bytes": 23284
+    },
+    {
+      "kind": "font",
+      "family": "Playfair Display",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKfFunDZbtPK-F2qC0usEw.woff2",
+      "localPath": "offline-deps/fonts/woff2/playfair-display/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKfFunDZbtPK-F2qC0usEw.woff2",
+      "sha256": "9dac311ecb308b432f3b3e537c2722e64d342ee65264cd5b6ad67f0bef7a8bb2",
+      "bytes": 13008
+    },
+    {
+      "kind": "font",
+      "family": "Poppins",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/poppins/v24/pxiByp8kv8JHgFVrLCz7Z1JlFd2JQEl8qw.woff2",
+      "localPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLCz7Z1JlFd2JQEl8qw.woff2",
+      "sha256": "2477683a4b1200680780a759cc1b93b816410362dc5f4c74ebfeafa212bcb74d",
+      "bytes": 5448
+    },
+    {
+      "kind": "font",
+      "family": "Poppins",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/poppins/v24/pxiByp8kv8JHgFVrLCz7Z1xlFd2JQEk.woff2",
+      "localPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLCz7Z1xlFd2JQEk.woff2",
+      "sha256": "197a3cbd7290c242c5c765268cdd69a9a39867fdc80cd13071f243a81c56fb76",
+      "bytes": 7848
+    },
+    {
+      "kind": "font",
+      "family": "Poppins",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/poppins/v24/pxiByp8kv8JHgFVrLDD4Z1JlFd2JQEl8qw.woff2",
+      "localPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLDD4Z1JlFd2JQEl8qw.woff2",
+      "sha256": "db859b9cbc7a91707aeb8829f8e9df1d21b6354dac9481b89c4186bb23c842df",
+      "bytes": 5484
+    },
+    {
+      "kind": "font",
+      "family": "Poppins",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/poppins/v24/pxiByp8kv8JHgFVrLDD4Z1xlFd2JQEk.woff2",
+      "localPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLDD4Z1xlFd2JQEk.woff2",
+      "sha256": "4ef5511d8e7b39ae3f98ffed14d6071d7914e0c145fee5a79bb43aa962ff0fc4",
+      "bytes": 7816
+    },
+    {
+      "kind": "font",
+      "family": "Space Grotesk",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVnskPMBBSSJLm2E.woff2",
+      "localPath": "offline-deps/fonts/woff2/space-grotesk/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVnskPMBBSSJLm2E.woff2",
+      "sha256": "2492847386187b8d1ee093e465f49c6e085a9f6442aba227f565f8893cefcc4d",
+      "bytes": 12848
+    },
+    {
+      "kind": "font",
+      "family": "Space Grotesk",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVnsqPMBBSSJLm2FXTQ.woff2",
+      "localPath": "offline-deps/fonts/woff2/space-grotesk/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVnsqPMBBSSJLm2FXTQ.woff2",
+      "sha256": "fc18f2146077b009f799ac6db32472918f2b8e5e1607221281f58a8fdaa591e7",
+      "bytes": 12068
+    },
+    {
+      "kind": "font",
+      "family": "Space Mono",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/spacemono/v17/i7dMIFZifjKcF5UAWdDRaPpZUFWaHi6WZ3Q.woff2",
+      "localPath": "offline-deps/fonts/woff2/space-mono/i7dMIFZifjKcF5UAWdDRaPpZUFWaHi6WZ3Q.woff2",
+      "sha256": "af7cf6d2b897ec453acdcdacde4e9bcc8410718af5914de865b453e09f10eebc",
+      "bytes": 9552
+    },
+    {
+      "kind": "font",
+      "family": "Space Mono",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/spacemono/v17/i7dMIFZifjKcF5UAWdDRaPpZUFuaHi6WZ3S_Yg.woff2",
+      "localPath": "offline-deps/fonts/woff2/space-mono/i7dMIFZifjKcF5UAWdDRaPpZUFuaHi6WZ3S_Yg.woff2",
+      "sha256": "512458b32bf452ac0e4b33fd6277bf4f07821acefb59db2d1498aa107679a1a6",
+      "bytes": 9732
+    },
+    {
+      "kind": "font",
+      "family": "Space Mono",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/spacemono/v17/i7dPIFZifjKcF5UAWdDRYE98RXi4EwSsbg.woff2",
+      "localPath": "offline-deps/fonts/woff2/space-mono/i7dPIFZifjKcF5UAWdDRYE98RXi4EwSsbg.woff2",
+      "sha256": "b4f90459adf4851575a46d9a492c17ee34c97fe40d56979521de67d1ee77d75a",
+      "bytes": 9752
+    },
+    {
+      "kind": "font",
+      "family": "Space Mono",
+      "originalUrls": [],
+      "downloadUrl": "https://fonts.gstatic.com/s/spacemono/v17/i7dPIFZifjKcF5UAWdDRYEF8RXi4EwQ.woff2",
+      "localPath": "offline-deps/fonts/woff2/space-mono/i7dPIFZifjKcF5UAWdDRYEF8RXi4EwQ.woff2",
+      "sha256": "e0c8e616bda27642f4c3cebaecff6525d901e73afc8a227cbbb0f2af4810f300",
+      "bytes": 9464
+    },
+    {
+      "kind": "script",
+      "package": "d3",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js",
+      "localPath": "offline-deps/js/d3-7.9.0/d3.min.js",
+      "sha256": "f2094bbf6141b359722c4fe454eb6c4b0f0e42cc10cc7af921fc158fceb86539",
+      "bytes": 279706
+    },
+    {
+      "kind": "script",
+      "package": "gsap",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+      "localPath": "offline-deps/js/gsap-3.14.2/gsap.min.js",
+      "sha256": "c174bfce53a729418d57a8ad8625e7247c793a22fef8e2851e3cfa3de9cd8280",
+      "bytes": 72779
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+      "localPath": "offline-deps/js/three-0.147.0/build/three.min.js",
+      "sha256": "f34446bf875b5fb0dcd93819ffe1d9e182d46634ee855f5d904c6c4ac7cdbc95",
+      "bytes": 607784
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/loaders/DRACOLoader.js",
+      "sha256": "d508e5d3af5a4ec2e6572c112fcc24874dab5a065bd218ed3e089ee43478aed5",
+      "bytes": 12721
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/loaders/GLTFLoader.js",
+      "sha256": "b2edda923572c73e6b30b139756d182c87e2c34d022845c6e067a9a0a9544e01",
+      "bytes": 103311
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/EffectComposer.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/EffectComposer.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/postprocessing/EffectComposer.js",
+      "sha256": "6c8bf2f6b06778fdadf7cfd09ef4c17d881428d1cdee953e3348b3f54df4bc75",
+      "bytes": 6241
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/RenderPass.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/RenderPass.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/postprocessing/RenderPass.js",
+      "sha256": "3c1a07df004b36c1fac6af2a443953ef589f88fb024dd0f01d5f9f6252dfc371",
+      "bytes": 1741
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/postprocessing/ShaderPass.js",
+      "sha256": "f0d8d767e089c99ad04f6714cd4fac29363d6b0207543cd4335922ea143856a6",
+      "bytes": 1485
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/postprocessing/UnrealBloomPass.js",
+      "sha256": "1a5b8476addc578c179200bed5a0da54bb176c1b41ef89d2174ff76b0a4410e7",
+      "bytes": 12675
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/CopyShader.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/CopyShader.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/shaders/CopyShader.js",
+      "sha256": "249592106188290488cb9419fc6231b701983cdc23c25c7805536cf06800ff48",
+      "bytes": 597
+    },
+    {
+      "kind": "script",
+      "package": "three",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js",
+      "localPath": "offline-deps/js/three-0.147.0/examples/js/shaders/LuminosityHighPassShader.js",
+      "sha256": "3c8552bb514a01009c07eb17e576f14db43cff64ce8cfab01667ab8db2e85afe",
+      "bytes": 1218
+    },
+    {
+      "kind": "script",
+      "package": "three.js",
+      "originalUrls": [
+        "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+      ],
+      "downloadUrl": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js",
+      "localPath": "offline-deps/js/three.js-r128/three.min.js",
+      "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2",
+      "bytes": 603445
+    },
+    {
+      "kind": "script",
+      "package": "topojson-client",
+      "originalUrls": [
+        "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"
+      ],
+      "downloadUrl": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+      "localPath": "offline-deps/js/topojson-client-3.1.0/topojson-client.min.js",
+      "sha256": "25cd02ae486cc5063e0215a4e4cfb15de83700c87ac48bac4d57dc6aaf3ebb89",
+      "bytes": 7169
+    }
+  ],
+  "stylesheets": [
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Anton&display=swap",
+      "localPath": "offline-deps/fonts/css/family-anton-display-swap.css",
+      "faces": [
+        {
+          "family": "Anton",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/anton/1Ptgg87LROyAm3K9-C8CSKlvPfE.woff2"
+        },
+        {
+          "family": "Anton",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/anton/1Ptgg87LROyAm3Kz-C8CSKlv.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800;900&display=block",
+      "localPath": "offline-deps/fonts/css/family-big-shoulders-display-wght-800-900-display-block.css",
+      "faces": [
+        {
+          "family": "Big Shoulders Display",
+          "style": "normal",
+          "weight": "800",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/big-shoulders-display/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1cwtDuDJAM23AZ.woff2"
+        },
+        {
+          "family": "Big Shoulders Display",
+          "style": "normal",
+          "weight": "800",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/big-shoulders-display/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1czNDuDJAM2w.woff2"
+        },
+        {
+          "family": "Big Shoulders Display",
+          "style": "normal",
+          "weight": "900",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/big-shoulders-display/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1cwtDuDJAM23AZ.woff2"
+        },
+        {
+          "family": "Big Shoulders Display",
+          "style": "normal",
+          "weight": "900",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/big-shoulders-display/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1czNDuDJAM2w.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap",
+      "localPath": "offline-deps/fonts/css/family-dm-sans-wght-400-500-700-display-swap.css",
+      "faces": [
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=block",
+      "localPath": "offline-deps/fonts/css/family-dm-sans-wght-400-700-display-block.css",
+      "faces": [
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu6-K6z9mXgjU0.woff2"
+        },
+        {
+          "family": "DM Sans",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/dm-sans/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K6z9mXg.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Figtree:wght@900&display=block",
+      "localPath": "offline-deps/fonts/css/family-figtree-wght-900-display-block.css",
+      "faces": [
+        {
+          "family": "Figtree",
+          "style": "normal",
+          "weight": "900",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/figtree/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_fWR25XyEA25WTzZO_OSg.woff2"
+        },
+        {
+          "family": "Figtree",
+          "style": "normal",
+          "weight": "900",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/figtree/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_fWR25ZyEA25WTzZO8.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Gabarito:wght@900&display=swap",
+      "localPath": "offline-deps/fonts/css/family-gabarito-wght-900-display-swap.css",
+      "faces": [
+        {
+          "family": "Gabarito",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/gabarito/QGYwz_0dZAGKJJ4t3FFkc3Q8AkNP9Pj2SsWEHwgsiaPVIzHLeME.woff2"
+        },
+        {
+          "family": "Gabarito",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/gabarito/QGYwz_0dZAGKJJ4t3FFkc3Q8AkNP9Pj2SsWEEQgsiaPVIzHL.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
+      "localPath": "offline-deps/fonts/css/family-instrument-serif-ital-0-1-display-swap.css",
+      "faces": [
+        {
+          "family": "Instrument Serif",
+          "style": "italic",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/instrument-serif/jizHRFtNs2ka5fXjeivQ4LroWlx-6zAjgn7Motmp5r61.woff2"
+        },
+        {
+          "family": "Instrument Serif",
+          "style": "italic",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/instrument-serif/jizHRFtNs2ka5fXjeivQ4LroWlx-6zAjjH7Motmp5g.woff2"
+        },
+        {
+          "family": "Instrument Serif",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/instrument-serif/jizBRFtNs2ka5fXjeivQ4LroWlx-6zsTjnTLgNuZ5w.woff2"
+        },
+        {
+          "family": "Instrument Serif",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/instrument-serif/jizBRFtNs2ka5fXjeivQ4LroWlx-6zUTjnTLgNs.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-300-400-500-600-display-swap.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "300",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "300",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-300-400-500-600-700-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "300",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "300",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-300-400-500-600-700-800-900-display-swap.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "300",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "300",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400&family=Playfair+Display:ital,wght@0,800;1,800&display=swap",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-family-playfair-display-ital-wght-0-800-1-800-display-swap.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZFhiJ-Ek-_EeAmM.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiJ-Ek-_EeA.woff2"
+        },
+        {
+          "family": "Playfair Display",
+          "style": "italic",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/playfair-display/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_iiUXt_A-X-uE0qEE5Do.woff2"
+        },
+        {
+          "family": "Playfair Display",
+          "style": "italic",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/playfair-display/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_iiUXtHA-X-uE0qEEw.woff2"
+        },
+        {
+          "family": "Playfair Display",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/playfair-display/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKfFunDZbtPK-F2qC0usEw.woff2"
+        },
+        {
+          "family": "Playfair Display",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/playfair-display/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKfFunDXbtPK-F2qC0s.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-500-600-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-500-600-700-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-500-600-700-800-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-500-600-700-800-display-swap.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-500-600-700-800-900-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "500",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "800",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "900",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "900",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-600-700-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=block",
+      "localPath": "offline-deps/fonts/css/family-inter-wght-400-700-display-block.css",
+      "faces": [
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2"
+        },
+        {
+          "family": "Inter",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/inter/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Libre+Franklin:wght@300;400;600&display=block",
+      "localPath": "offline-deps/fonts/css/family-libre-baskerville-wght-400-700-family-libre-franklin-wght-300-400-600-dis.css",
+      "faces": [
+        {
+          "family": "Libre Baskerville",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/libre-baskerville/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNXaxMaC82U-ro.woff2"
+        },
+        {
+          "family": "Libre Baskerville",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/libre-baskerville/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNZaxMaC82U.woff2"
+        },
+        {
+          "family": "Libre Baskerville",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/libre-baskerville/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNXaxMaC82U-ro.woff2"
+        },
+        {
+          "family": "Libre Baskerville",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/libre-baskerville/kmKnZrc3Hgbbcjq75U4uslyuy4kn0qNZaxMaC82U.woff2"
+        },
+        {
+          "family": "Libre Franklin",
+          "style": "normal",
+          "weight": "300",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUR2zcZiVbJsNo.woff2"
+        },
+        {
+          "family": "Libre Franklin",
+          "style": "normal",
+          "weight": "300",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUf2zcZiVbJ.woff2"
+        },
+        {
+          "family": "Libre Franklin",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUR2zcZiVbJsNo.woff2"
+        },
+        {
+          "family": "Libre Franklin",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUf2zcZiVbJ.woff2"
+        },
+        {
+          "family": "Libre Franklin",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUR2zcZiVbJsNo.woff2"
+        },
+        {
+          "family": "Libre Franklin",
+          "style": "normal",
+          "weight": "600",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/libre-franklin/jizDREVItHgc8qDIbSTKq4XkRiUf2zcZiVbJ.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Montserrat:wght@300;700&display=swap",
+      "localPath": "offline-deps/fonts/css/family-montserrat-wght-300-700-display-swap.css",
+      "faces": [
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "300",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUSjIg1_i6t8kCHKm459WdhyyTh89ZNpQ.woff2"
+        },
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "300",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUSjIg1_i6t8kCHKm459WlhyyTh89Y.woff2"
+        },
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUSjIg1_i6t8kCHKm459WdhyyTh89ZNpQ.woff2"
+        },
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUSjIg1_i6t8kCHKm459WlhyyTh89Y.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap",
+      "localPath": "offline-deps/fonts/css/family-montserrat-wght-800-display-swap.css",
+      "faces": [
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvr73w3aXp-p7K4KLjztg.woff2"
+        },
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvr73w5aXp-p7K4KLg.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Montserrat:wght@900&display=swap",
+      "localPath": "offline-deps/fonts/css/family-montserrat-wght-900-display-swap.css",
+      "faces": [
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvC73w3aXp-p7K4KLjztg.woff2"
+        },
+        {
+          "family": "Montserrat",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/montserrat/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCvC73w5aXp-p7K4KLg.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Outfit:wght@900&display=swap",
+      "localPath": "offline-deps/fonts/css/family-outfit-wght-900-display-swap.css",
+      "faces": [
+        {
+          "family": "Outfit",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/outfit/QGYyz_MVcBeNP4NjuGObqx1XmO1I4ZmyO4i0EwItq6fNIhnL.woff2"
+        },
+        {
+          "family": "Outfit",
+          "style": "normal",
+          "weight": "900",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/outfit/QGYyz_MVcBeNP4NjuGObqx1XmO1I4ZmyO4a0EwItq6fNIg.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap",
+      "localPath": "offline-deps/fonts/css/family-poppins-wght-700-display-swap.css",
+      "faces": [
+        {
+          "family": "Poppins",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLCz7Z1JlFd2JQEl8qw.woff2"
+        },
+        {
+          "family": "Poppins",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLCz7Z1xlFd2JQEk.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Poppins:wght@800&display=swap",
+      "localPath": "offline-deps/fonts/css/family-poppins-wght-800-display-swap.css",
+      "faces": [
+        {
+          "family": "Poppins",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLDD4Z1JlFd2JQEl8qw.woff2"
+        },
+        {
+          "family": "Poppins",
+          "style": "normal",
+          "weight": "800",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/poppins/pxiByp8kv8JHgFVrLDD4Z1xlFd2JQEk.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&display=swap",
+      "localPath": "offline-deps/fonts/css/family-space-grotesk-wght-700-display-swap.css",
+      "faces": [
+        {
+          "family": "Space Grotesk",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/space-grotesk/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVnsqPMBBSSJLm2FXTQ.woff2"
+        },
+        {
+          "family": "Space Grotesk",
+          "style": "normal",
+          "weight": "700",
+          "display": "swap",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/space-grotesk/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVnskPMBBSSJLm2E.woff2"
+        }
+      ]
+    },
+    {
+      "originalUrl": "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block",
+      "localPath": "offline-deps/fonts/css/family-space-mono-wght-400-700-family-bebas-neue-family-jetbrains-mono-wght-400-.css",
+      "faces": [
+        {
+          "family": "Bebas Neue",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/bebas-neue/JTUSjIg69CK48gW7PXoo9WdhyyTh89ZNpQ.woff2"
+        },
+        {
+          "family": "Bebas Neue",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/bebas-neue/JTUSjIg69CK48gW7PXoo9WlhyyTh89Y.woff2"
+        },
+        {
+          "family": "JetBrains Mono",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/jetbrains-mono/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwgknk-6nFg.woff2"
+        },
+        {
+          "family": "JetBrains Mono",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/jetbrains-mono/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwgknk-4.woff2"
+        },
+        {
+          "family": "JetBrains Mono",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/jetbrains-mono/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwgknk-6nFg.woff2"
+        },
+        {
+          "family": "JetBrains Mono",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/jetbrains-mono/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwgknk-4.woff2"
+        },
+        {
+          "family": "Lato",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/lato/S6uyw4BMUTPHjxAwXiWtFCfQ7A.woff2"
+        },
+        {
+          "family": "Lato",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/lato/S6uyw4BMUTPHjx4wXiWtFCc.woff2"
+        },
+        {
+          "family": "Lato",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/lato/S6u9w4BMUTPHh6UVSwaPGQ3q5d0N7w.woff2"
+        },
+        {
+          "family": "Lato",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/lato/S6u9w4BMUTPHh6UVSwiPGQ3q5d0.woff2"
+        },
+        {
+          "family": "Space Mono",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/space-mono/i7dPIFZifjKcF5UAWdDRYE98RXi4EwSsbg.woff2"
+        },
+        {
+          "family": "Space Mono",
+          "style": "normal",
+          "weight": "400",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/space-mono/i7dPIFZifjKcF5UAWdDRYEF8RXi4EwQ.woff2"
+        },
+        {
+          "family": "Space Mono",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin-ext",
+          "unicodeRange": "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF",
+          "artifactPath": "offline-deps/fonts/woff2/space-mono/i7dMIFZifjKcF5UAWdDRaPpZUFuaHi6WZ3S_Yg.woff2"
+        },
+        {
+          "family": "Space Mono",
+          "style": "normal",
+          "weight": "700",
+          "display": "block",
+          "subset": "latin",
+          "unicodeRange": "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+          "artifactPath": "offline-deps/fonts/woff2/space-mono/i7dMIFZifjKcF5UAWdDRaPpZUFWaHi6WZ3Q.woff2"
+        }
+      ]
+    }
+  ],
+  "rewrites": {
+    "removeLinkDomains": [
+      "fonts.googleapis.com",
+      "fonts.gstatic.com"
+    ],
+    "prefixReplacements": [
+      {
+        "from": "https://www.gstatic.com/draco/versioned/decoders/1.5.6/",
+        "toLocalPath": "offline-deps/draco/1.5.6/"
+      }
+    ],
+    "textReplacements": [
+      {
+        "item": "code-snippet-apple-terminal-red-sands",
+        "from": "https://api.example.com/status",
+        "to": "api.example.com/status",
+        "reason": "terminal 演示中的占位显示文本，不发生网络请求；去掉协议前缀以满足零远程 URL 静态扫描"
+      }
+    ]
+  },
+  "generated": {
+    "fileCount": 384,
+    "aggregateSha256": "128ea48c66685b2bbf8f0e8b0afaa9f27440cbeb85154b115d86ff4190336068"
+  }
+}
