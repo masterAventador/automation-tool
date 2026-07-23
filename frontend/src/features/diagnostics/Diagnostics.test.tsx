@@ -7,11 +7,6 @@ import { Diagnostics } from "./Diagnostics";
 
 function platformAdapter(): PlatformAdapter {
   return {
-    getBrowserSettings: vi.fn().mockResolvedValue({
-      availableBrowsers: [],
-      selectedBrowser: null,
-    }),
-    selectBrowser: vi.fn(),
     getExecutorStatus: vi.fn().mockResolvedValue({
       state: "stopped",
       version: null,

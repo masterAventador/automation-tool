@@ -14,7 +14,6 @@ import type { PlatformSessionGateway } from "../features/platform-sessions/platf
 import { StartupGate } from "./StartupGate";
 import type { StartupCheck } from "./startup";
 import { WorkbenchShell } from "./WorkbenchShell";
-import { BrowserSettings } from "../features/settings/BrowserSettings";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { AccountSessionGate } from "../features/account-session/AccountSessionGate";
@@ -95,7 +94,6 @@ export function App({
             {videoEditingServiceGateway === undefined ? null : (
               <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
             )}
-            <BrowserSettings platform={platformAdapter} />
             <Diagnostics platform={platformAdapter} />
           </Space>
         )
