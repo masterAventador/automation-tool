@@ -12,6 +12,7 @@ pub mod deployment_profile;
 pub mod device_credentials;
 pub mod device_identity;
 mod diagnostic_export;
+pub mod embedded_browser_distribution;
 pub mod executor_bootstrap;
 mod executor_diagnostics;
 pub mod executor_manager;
