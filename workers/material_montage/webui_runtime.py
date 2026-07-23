@@ -82,7 +82,9 @@ def _reserve_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _child_command(port: int, path: str, runtime_root: Path, output_root: Path) -> list[str]:
+def _child_command(
+    port: int, path: str, runtime_root: Path, output_root: Path
+) -> list[str]:
     values = ["--serve-webui", str(port), path, str(runtime_root), str(output_root)]
     if getattr(sys, "frozen", False):
         return [sys.executable, *values]
@@ -99,6 +101,17 @@ def _script_model_document(configuration: ScriptModelConfiguration | None) -> ob
         "sourceProvider": configuration.source_provider,
         "upstreamProvider": configuration.upstream_provider,
     }
+
+
+def _native_path_for_upstream(path: Path) -> Path:
+    if os.name != "nt":
+        return path
+    value = str(path)
+    if value.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + value[8:])
+    if value.startswith("\\\\?\\"):
+        return Path(value[4:])
+    return path
 
 
 def start_webui(
@@ -196,8 +209,8 @@ def serve_webui(
 ) -> int:
     if not 1 <= port <= 65535 or not path.startswith("studio-") or len(path) != 50:
         raise WebUiRejected("invalid WebUI endpoint")
-    runtime_root = runtime_root.resolve(strict=True)
-    output_root = output_root.resolve(strict=True)
+    runtime_root = _native_path_for_upstream(runtime_root.resolve(strict=True))
+    output_root = _native_path_for_upstream(output_root.resolve(strict=True))
     if output_root != runtime_root.parents[2] / "outputs":
         raise WebUiRejected("invalid output root")
     line = stream.readline(16 * 1024 + 1)

@@ -22,13 +22,16 @@ from job_observation_bridge import (  # noqa: E402
     JobCancelled,
     ObservedTaskState,
 )
+from webui_runtime import _native_path_for_upstream  # noqa: E402
 
 
 class MemoryStateFixture:
     def __init__(self) -> None:
         self.tasks: dict[str, dict[str, object]] = {}
 
-    def update_task(self, task_id: str, state: int, progress: int, **kwargs: object) -> None:
+    def update_task(
+        self, task_id: str, state: int, progress: int, **kwargs: object
+    ) -> None:
         self.tasks[task_id] = {"state": state, "progress": progress, **kwargs}
 
     def get_task(self, task_id: str) -> object:
@@ -42,7 +45,24 @@ class MemoryStateFixture:
 
 
 class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
-    def test_job_observations_are_bounded_path_free_and_copy_only_final_video(self) -> None:
+    @unittest.skipUnless(sys.platform == "win32", "Windows extended-path boundary")
+    def test_webui_normalizes_canonical_windows_paths_before_upstream_use(self) -> None:
+        self.assertEqual(
+            str(_native_path_for_upstream(Path(r"\\?\C:\workspace\job"))),
+            r"C:\workspace\job",
+        )
+        self.assertEqual(
+            str(
+                _native_path_for_upstream(
+                    Path(r"\\?\UNC\server.example\share\workspace")
+                )
+            ),
+            r"\\server.example\share\workspace",
+        )
+
+    def test_job_observations_are_bounded_path_free_and_copy_only_final_video(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory(prefix="im07-observation-") as directory:
             render_job_id = str(uuid4())
             job_root = Path(directory) / render_job_id
@@ -68,7 +88,9 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             succeeded = json.loads((runtime_root / OBSERVATION_FILE).read_text())
             self.assertEqual(succeeded["status"], "succeeded")
             self.assertEqual(succeeded["outputFile"], "material-result.mp4")
-            self.assertEqual((output_root / "material-result.mp4").read_bytes(), b"verified-video")
+            self.assertEqual(
+                (output_root / "material-result.mp4").read_bytes(), b"verified-video"
+            )
             with self.assertRaises(PermissionError):
                 bridge.delete_task(task_id)
 
@@ -104,7 +126,9 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                 result = worker_main.main(arguments)
             self.assertEqual(result, 64)
             self.assertEqual(stdout.getvalue(), "")
-            self.assertEqual(stderr.getvalue(), "Material video worker command is required\n")
+            self.assertEqual(
+                stderr.getvalue(), "Material video worker command is required\n"
+            )
 
     def test_rejects_missing_bootstrap_without_starting_gateway(self) -> None:
         stdout = io.StringIO()
@@ -113,7 +137,9 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             result = worker_main.main([], io.StringIO(""))
         self.assertEqual(result, 64)
         self.assertEqual(stdout.getvalue(), "")
-        self.assertEqual(stderr.getvalue(), "Material video worker command is required\n")
+        self.assertEqual(
+            stderr.getvalue(), "Material video worker command is required\n"
+        )
 
     def test_dependency_probe_rejects_non_startup_dependency(self) -> None:
         with self.assertRaisesRegex(ValueError, "not part of the startup set"):

@@ -1177,6 +1177,17 @@ fn spawn_worker(
                 command.env(name, value);
             }
         }
+        #[cfg(windows)]
+        for name in [
+            "HOME",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "TEMP",
+            "TMP",
+        ] {
+            command.env(name, &launch.asset_root);
+        }
     }
     command
         .args(&launch.arguments)

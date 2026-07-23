@@ -12,7 +12,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from build_material_video_worker_candidate import ENTRYPOINT, build_candidate
+from build_material_video_worker_candidate import (
+    ENTRYPOINT,
+    MaterialVideoWorkerAudit,
+    build_candidate,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -20,6 +24,14 @@ UPSTREAM = ROOT / "vendor/moneyprinterturbo"
 TAURI_CONFIG = FRONTEND / "src-tauri/tauri.video-studio-e2e.conf.json"
 CONTRACT = ROOT / "contracts/security/material-video-webui.v1.json"
 APP_IDENTIFIER = "com.aventador.automationtool.vf06acceptance"
+
+
+def pnpm_executable() -> str:
+    command = "pnpm.cmd" if os.name == "nt" else "pnpm"
+    resolved = shutil.which(command)
+    if resolved is None:
+        raise RuntimeError(f"IM-05 required command is unavailable: {command}")
+    return resolved
 
 
 def run(command: list[str], *, environment: dict[str, str] | None = None) -> None:
@@ -125,7 +137,7 @@ def require_normal_app_entry(candidate: Path) -> None:
     environment["AUTOMATION_TOOL_IM05_WORKER"] = str(executable)
     try:
         subprocess.run(
-            ["pnpm", "build:tauri:video-studio-test"],
+            [pnpm_executable(), "build:tauri:video-studio-test"],
             cwd=FRONTEND,
             env=environment,
             check=True,
@@ -133,7 +145,7 @@ def require_normal_app_entry(candidate: Path) -> None:
         require_port_closed(port)
         subprocess.run(
             [
-                "pnpm",
+                pnpm_executable(),
                 "exec",
                 "wdio",
                 "run",
@@ -148,7 +160,7 @@ def require_normal_app_entry(candidate: Path) -> None:
         require_port_closed(port)
     finally:
         subprocess.run(
-            ["pnpm", "build"],
+            [pnpm_executable(), "build"],
             cwd=FRONTEND,
             env=environment,
             check=False,
@@ -197,7 +209,7 @@ def main() -> int:
     run([sys.executable, "scripts/test_material_video_worker.py"])
     run(
         [
-            "pnpm",
+            pnpm_executable(),
             "--dir",
             "frontend",
             "exec",
@@ -209,7 +221,7 @@ def main() -> int:
     )
     with tempfile.TemporaryDirectory(prefix="im05-acceptance-") as directory:
         candidate = Path(directory) / "material-video-worker"
-        build_candidate(candidate)
+        audit: MaterialVideoWorkerAudit = build_candidate(candidate)
         require_real_frozen_webui(candidate)
         require_normal_app_entry(candidate)
     upstream_after = subprocess.run(
@@ -222,7 +234,11 @@ def main() -> int:
     if upstream_after != upstream_before:
         raise AssertionError("IM-05 acceptance modified the upstream submodule")
     require_evidence()
-    print("IM-05 real frozen WebUI and normal App-entry acceptance passed")
+    print(
+        "IM-05 real frozen WebUI and normal App-entry acceptance passed: "
+        f"{audit.file_count} files, {audit.package_bytes} bytes, "
+        f"startup {audit.startup_seconds:.3f}s"
+    )
     return 0
 
 
