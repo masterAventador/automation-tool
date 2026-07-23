@@ -13,7 +13,7 @@ test("IM-05 gives Windows WebUI dependencies only a task-private home", async ()
     "utf8",
   );
   const isolatedEnvironment = orchestrator.match(
-    /if launch\.isolated_environment \{([\s\S]*?)\n    \}/u,
+    /if launch\.isolated_environment \{([\s\S]*?)\n {4}\}/u,
   )?.[1];
   assert.ok(isolatedEnvironment, "missing isolated Worker environment");
 
