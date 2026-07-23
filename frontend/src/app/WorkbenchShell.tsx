@@ -43,12 +43,18 @@ import { ModelServiceSettings } from "../features/settings/ModelServiceSettings"
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { VideoStudio } from "../features/video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
+import { VideoEditingWorkbench } from "../features/video-editing/VideoEditingWorkbench";
+import {
+  VideoEditingGatewayError,
+  type VideoEditingGateway,
+} from "../features/video-editing/video-editing-gateway";
 
 const navigationItems = [
   { key: "workbench", label: "工作台" },
   { key: "task-create", label: "新建任务" },
   { key: "task-runs", label: "任务记录" },
   { key: "video-studio", label: "视频制作" },
+  { key: "video-editing", label: "视频剪辑" },
   { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
 ];
@@ -227,6 +233,27 @@ const shellModelServiceGateway: ModelServiceGateway = {
   },
 };
 
+const shellVideoEditingGateway: VideoEditingGateway = {
+  async listProjects() {
+    return [];
+  },
+  async createProject() {
+    throw new VideoEditingGatewayError("draft_storage_unavailable", true);
+  },
+  async getTimeline() {
+    return null;
+  },
+  async saveTimeline() {
+    throw new VideoEditingGatewayError("draft_storage_unavailable", true);
+  },
+  async listEditingJobs() {
+    return [];
+  },
+  async submitEditingJob() {
+    throw new VideoEditingGatewayError("editing_service_unavailable", false);
+  },
+};
+
 const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async open() {
     throw new Error("Material video studio is unavailable");
@@ -255,6 +282,7 @@ interface WorkbenchShellProps {
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
   readonly modelServiceGateway?: ModelServiceGateway | undefined;
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
+  readonly videoEditingGateway?: VideoEditingGateway | undefined;
 }
 
 export function WorkbenchShell({
@@ -270,6 +298,7 @@ export function WorkbenchShell({
   appUpdateGateway = shellAppUpdateGateway,
   modelServiceGateway = shellModelServiceGateway,
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
+  videoEditingGateway = shellVideoEditingGateway,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -279,6 +308,7 @@ export function WorkbenchShell({
   const showingDiagnostics = activePage === "diagnostics";
   const showingPlatform = activePage === "platform";
   const showingVideoStudio = activePage === "video-studio";
+  const showingVideoEditing = activePage === "video-editing";
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -313,6 +343,7 @@ export function WorkbenchShell({
                 key === "task-create" ||
                 key === "task-runs" ||
                 key === "video-studio" ||
+                key === "video-editing" ||
                 key === "diagnostics" ||
                 key === "platform"
               ) {
@@ -342,6 +373,8 @@ export function WorkbenchShell({
                       ? "平台状态"
                     : showingVideoStudio
                       ? "视频制作"
+                    : showingVideoEditing
+                      ? "视频剪辑"
                     : showingDiagnostics
                       ? "设置与诊断"
                     : showingTaskRun
@@ -355,6 +388,8 @@ export function WorkbenchShell({
                       ? "查看抖音登录健康，并在系统运营浏览器中完成人工处理。"
                     : showingVideoStudio
                       ? "从需求、脚本与分镜到预览、任务和成片，按真实制作状态逐步推进。"
+                    : showingVideoEditing
+                      ? "把制作或导入的素材整理成时间轴，独立于视频制作管理剪辑项目与任务。"
                     : showingDiagnostics
                       ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
                     : showingTaskRun
@@ -369,6 +404,8 @@ export function WorkbenchShell({
                     ? "登录边界"
                   : showingVideoStudio
                     ? "视频工作区"
+                  : showingVideoEditing
+                    ? "剪辑工作区"
                   : showingDiagnostics
                     ? "本地边界"
                   : showingTaskRun
@@ -394,6 +431,8 @@ export function WorkbenchShell({
               </div>
             ) : showingVideoStudio ? (
               <VideoStudio gateway={materialVideoStudioGateway} />
+            ) : showingVideoEditing ? (
+              <VideoEditingWorkbench gateway={videoEditingGateway} />
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />
