@@ -118,6 +118,7 @@ async def takeover_probe(url: str) -> dict:
                 f"--user-data-dir={profile}",
                 "--no-first-run",
                 "--no-default-browser-check",
+                "--use-mock-keychain",
                 "about:blank",
             ],
             stdout=subprocess.DEVNULL,
