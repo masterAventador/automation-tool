@@ -2160,6 +2160,130 @@ Index(
     device_sessions.c.expires_at,
 )
 
+bilibili_publish_attempts = Table(
+    "bilibili_publish_attempts",
+    metadata,
+    Column("publish_job_id", UUID(as_uuid=True), nullable=False),
+    Column("phase", String(length=20), nullable=False),
+    Column("request_digest", String(length=64), nullable=False),
+    Column("material_file_name", String(length=255), nullable=False),
+    Column("material_size_bytes", BigInteger(), nullable=False),
+    Column("material_duration_seconds", BigInteger(), nullable=False),
+    Column("material_sha256", String(length=64), nullable=False),
+    Column("title", String(length=80), nullable=False),
+    Column("tid", BigInteger(), nullable=False),
+    Column("tag", String(length=200), nullable=False),
+    Column("copyright", BigInteger(), nullable=False),
+    Column("description", String(length=250), nullable=True),
+    Column("source", String(length=200), nullable=True),
+    Column("no_reprint", BigInteger(), nullable=False),
+    Column("upload_type", String(length=1), nullable=False),
+    Column("part_size_bytes", BigInteger(), nullable=False),
+    Column("part_count", BigInteger(), nullable=False),
+    Column("has_cover", Boolean(), nullable=False),
+    Column("upload_token", String(length=512), nullable=True),
+    Column("cover_url", String(length=1024), nullable=True),
+    Column("video_uploaded_at", DateTime(timezone=True), nullable=True),
+    Column("dispatched_at", DateTime(timezone=True), nullable=True),
+    Column("settled_at", DateTime(timezone=True), nullable=True),
+    Column("resource_id", String(length=16), nullable=True),
+    Column("failure_code", String(length=32), nullable=True),
+    Column("platform_error_code", BigInteger(), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "phase in ('prepared', 'video_uploaded', 'dispatched', "
+        "'submitted', 'failed', 'outcome_uncertain')",
+        name="ck_bilibili_publish_attempts_phase",
+    ),
+    CheckConstraint(
+        "char_length(request_digest) = 64 and char_length(material_sha256) = 64",
+        name="ck_bilibili_publish_attempts_digests",
+    ),
+    CheckConstraint(
+        "material_size_bytes > 0 and material_duration_seconds > 0",
+        name="ck_bilibili_publish_attempts_material_bounds",
+    ),
+    CheckConstraint(
+        "copyright in (1, 2) and no_reprint in (0, 1) and tid > 0",
+        name="ck_bilibili_publish_attempts_submission_fields",
+    ),
+    CheckConstraint(
+        "(upload_type = '0' and part_size_bytes = 0 and part_count = 0)"
+        " or (upload_type = '1' and part_size_bytes > 0 and part_count > 0)",
+        name="ck_bilibili_publish_attempts_upload_plan",
+    ),
+    CheckConstraint(
+        "phase <> 'prepared' or (video_uploaded_at is null"
+        " and dispatched_at is null and settled_at is null)",
+        name="ck_bilibili_publish_attempts_prepared_shape",
+    ),
+    CheckConstraint(
+        "phase <> 'video_uploaded' or (video_uploaded_at is not null"
+        " and upload_token is not null and dispatched_at is null and settled_at is null)",
+        name="ck_bilibili_publish_attempts_uploaded_shape",
+    ),
+    CheckConstraint(
+        "phase <> 'dispatched' or (video_uploaded_at is not null"
+        " and dispatched_at is not null and settled_at is null)",
+        name="ck_bilibili_publish_attempts_dispatched_shape",
+    ),
+    CheckConstraint(
+        "phase not in ('submitted', 'failed', 'outcome_uncertain')"
+        " or (video_uploaded_at is not null and dispatched_at is not null"
+        " and settled_at is not null)",
+        name="ck_bilibili_publish_attempts_settled_shape",
+    ),
+    CheckConstraint(
+        "(resource_id is not null) = (phase = 'submitted')",
+        name="ck_bilibili_publish_attempts_resource_id_shape",
+    ),
+    CheckConstraint(
+        "((failure_code is not null) = (phase = 'failed'))"
+        " and ((platform_error_code is not null) = (phase = 'failed'))",
+        name="ck_bilibili_publish_attempts_failure_shape",
+    ),
+    CheckConstraint(
+        "failure_code is null or failure_code in "
+        "('invalid_input', 'dependency_unavailable', 'platform_error')",
+        name="ck_bilibili_publish_attempts_failure_code",
+    ),
+    CheckConstraint(
+        "cover_url is null or has_cover",
+        name="ck_bilibili_publish_attempts_cover_shape",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at",
+        name="ck_bilibili_publish_attempts_time_order",
+    ),
+    PrimaryKeyConstraint("publish_job_id", name="pk_bilibili_publish_attempts"),
+)
+
+bilibili_upload_parts = Table(
+    "bilibili_upload_parts",
+    metadata,
+    Column("publish_job_id", UUID(as_uuid=True), nullable=False),
+    Column("part_number", BigInteger(), nullable=False),
+    Column("size_bytes", BigInteger(), nullable=False),
+    Column("completed_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "part_number between 1 and 512",
+        name="ck_bilibili_upload_parts_part_number",
+    ),
+    CheckConstraint("size_bytes > 0", name="ck_bilibili_upload_parts_size"),
+    ForeignKeyConstraint(
+        ["publish_job_id"],
+        ["bilibili_publish_attempts.publish_job_id"],
+        name="fk_bilibili_upload_parts_publish_job_id",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint(
+        "publish_job_id",
+        "part_number",
+        name="pk_bilibili_upload_parts",
+    ),
+)
+
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2168,6 +2292,8 @@ __all__ = [
     "account_session_families",
     "account_session_tokens",
     "action_risk_authorizations",
+    "bilibili_publish_attempts",
+    "bilibili_upload_parts",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",

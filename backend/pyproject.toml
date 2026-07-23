@@ -10,6 +10,7 @@ dependencies = [
     "asyncpg",
     "cryptography",
     "fastapi",
+    "httpx2",
     "playwright==1.61.0",
     "pydantic",
     "pydantic-settings",

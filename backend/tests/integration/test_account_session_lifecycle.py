@@ -39,7 +39,7 @@ from automation_tool.control_plane.infrastructure.security.passwords import (
     Argon2idPasswordHasher,
 )
 
-HEAD_REVISION = "20260723_0030"
+HEAD_REVISION = "20260723_0031"
 PREVIOUS_REVISION = "20260722_0028"
 NOW = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
 PASSWORD = "correct horse battery staple"

@@ -11,6 +11,7 @@ from .action_execution_orchestration_repository import (
 from .action_risk_authorization_repository import (
     SqlAlchemyActionRiskAuthorizationRepository,
 )
+from .bilibili_publish_repository import SqlAlchemyBilibiliArchivePublishStore
 from .customer_account_repository import SqlAlchemyCustomerAccountRepository
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
@@ -24,6 +25,8 @@ from .schema import (
     action_failure_circuits,
     action_risk_authorizations,
     action_risk_results,
+    bilibili_publish_attempts,
+    bilibili_upload_parts,
     device_credentials,
     device_sessions,
     douyin_search_exposure_definitions,
@@ -58,6 +61,7 @@ __all__ = [
     "SqlAlchemyAccountSessionRepository",
     "SqlAlchemyActionExecutionOrchestrationRepository",
     "SqlAlchemyActionRiskAuthorizationRepository",
+    "SqlAlchemyBilibiliArchivePublishStore",
     "SqlAlchemyCustomerAccountRepository",
     "SqlAlchemyInstallationRevocationRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
@@ -76,6 +80,8 @@ __all__ = [
     "action_failure_circuits",
     "action_risk_authorizations",
     "action_risk_results",
+    "bilibili_publish_attempts",
+    "bilibili_upload_parts",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",

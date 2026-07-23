@@ -14,7 +14,7 @@ from automation_tool.control_plane.application.task_event_stream import TaskEven
 from automation_tool.control_plane.domain import DependencyUnavailable
 from automation_tool.control_plane.infrastructure.database import Database
 
-HEAD_REVISION = "20260723_0030"
+HEAD_REVISION = "20260723_0031"
 
 
 @pytest.mark.asyncio
