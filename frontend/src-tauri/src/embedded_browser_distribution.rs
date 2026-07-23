@@ -41,6 +41,7 @@ const FORBIDDEN_NAME_SUBSTRINGS: [&str; 4] = [
 pub enum EmbeddedBrowserError {
     Io(io::Error),
     Invalid(&'static str),
+    VersionIncompatible,
 }
 
 impl fmt::Display for EmbeddedBrowserError {
@@ -52,6 +53,9 @@ impl fmt::Display for EmbeddedBrowserError {
                     formatter,
                     "invalid embedded browser distribution: {message}"
                 )
+            }
+            Self::VersionIncompatible => {
+                formatter.write_str("embedded browser distribution version is incompatible")
             }
         }
     }
@@ -181,9 +185,7 @@ impl EmbeddedBrowserDistribution {
             || runtime.browser_use != EXPECTED_BROWSER_USE
             || runtime.render_engine != EXPECTED_RENDER_ENGINE
         {
-            return Err(EmbeddedBrowserError::Invalid(
-                "runtime versions drifted from the locked baseline",
-            ));
+            return Err(EmbeddedBrowserError::VersionIncompatible);
         }
         if manifest.entries.is_empty() || manifest.entries.len() > MAX_ENTRY_COUNT {
             return Err(EmbeddedBrowserError::Invalid(

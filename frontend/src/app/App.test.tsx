@@ -102,7 +102,7 @@ describe("desktop startup", () => {
         status: "blocked" as const,
         diagnostics: [
           "executor_configuration_required" as const,
-          "trusted_browser_selection_required" as const,
+          "browser_component_damaged" as const,
           "app_data_unavailable" as const,
         ],
       }),
@@ -134,7 +134,7 @@ describe("desktop startup", () => {
       await screen.findByRole("heading", { name: "桌面运行环境需要处理" }),
     ).toBeVisible();
     expect(screen.getByText("本地执行器动作配置缺失")).toBeVisible();
-    expect(screen.getByText("尚未选择受信运营浏览器")).toBeVisible();
+    expect(screen.getByText("浏览器组件损坏")).toBeVisible();
     expect(screen.getByText("App 私有数据目录不可用")).toBeVisible();
     expect(document.body).not.toHaveTextContent(/\/Users\/|token=|私钥内容/iu);
 

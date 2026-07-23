@@ -26,10 +26,11 @@ pub enum ExecutorStartupState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TrustedBrowserStartupState {
+pub enum EmbeddedBrowserStartupState {
     Ready,
-    SelectionRequired,
-    Unavailable,
+    ComponentMissing,
+    ComponentDamaged,
+    VersionIncompatible,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -37,19 +38,19 @@ pub enum TrustedBrowserStartupState {
 pub struct StartupEnvironmentSnapshot {
     app_data: AppDataStartupState,
     executor: ExecutorStartupState,
-    trusted_browser: TrustedBrowserStartupState,
+    embedded_browser: EmbeddedBrowserStartupState,
 }
 
 impl StartupEnvironmentSnapshot {
     pub const fn new(
         app_data: AppDataStartupState,
         executor: ExecutorStartupState,
-        trusted_browser: TrustedBrowserStartupState,
+        embedded_browser: EmbeddedBrowserStartupState,
     ) -> Self {
         Self {
             app_data,
             executor,
-            trusted_browser,
+            embedded_browser,
         }
     }
 }

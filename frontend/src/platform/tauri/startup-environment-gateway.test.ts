@@ -15,7 +15,7 @@ describe("Tauri startup environment gateway", () => {
     invoke.mockResolvedValueOnce({
       appData: "ready",
       executor: "configuration_required",
-      trustedBrowser: "selection_required",
+      embeddedBrowser: "version_incompatible",
     });
 
     const result = await new TauriStartupEnvironmentGateway().checkLocalEnvironment();
@@ -23,7 +23,7 @@ describe("Tauri startup environment gateway", () => {
     expect(result).toEqual({
       appData: "ready",
       executor: "configuration_required",
-      trustedBrowser: "selection_required",
+      embeddedBrowser: "version_incompatible",
     });
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke).toHaveBeenCalledWith("check_local_startup_environment");
@@ -32,10 +32,10 @@ describe("Tauri startup environment gateway", () => {
   it.each([
     null,
     {},
-    { appData: "ready", executor: "ready", trustedBrowser: "ready", path: "/private" },
-    { appData: "private", executor: "ready", trustedBrowser: "ready" },
-    { appData: "ready", executor: "running", trustedBrowser: "ready" },
-    { appData: "ready", executor: "ready", trustedBrowser: "chrome" },
+    { appData: "ready", executor: "ready", embeddedBrowser: "ready", path: "/private" },
+    { appData: "private", executor: "ready", embeddedBrowser: "ready" },
+    { appData: "ready", executor: "running", embeddedBrowser: "ready" },
+    { appData: "ready", executor: "ready", embeddedBrowser: "chrome" },
   ])("rejects malformed or expanded native snapshots", async (snapshot) => {
     invoke.mockResolvedValueOnce(snapshot);
 
