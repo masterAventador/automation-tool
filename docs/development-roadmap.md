@@ -570,3 +570,4 @@
 13. `H8-22/P9-03`（🔍 待正式签名）：2026-07-24 H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机会话完成 0.1→0.3 可选更新、0.1→0.2 强更重启、0.4 损坏包失败恢复、HKCU 64/32 位注册表、整文件哈希、完整未签名事实和卸载零残留矩阵；仅 Developer ID/notarization 与 Authenticode 在受控签名环境补验，不阻塞上述工程任务；
 14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
 15. `EB-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机以 Chrome for Testing 149.0.7827.55 / revision 1228 完成同一浏览器的 headed Playwright、Browser Use `executable_path`/随机 CDP、独立渲染和三 Profile 并发隔离；134 个目录项、12 套风格及媒体/GPU/透明/横竖屏矩阵全绿，Windows 证据摘要已写入专项契约，下一 Windows 专项任务为 `EB-04`。
+16. `EB-04`（✅ 已完成）：2026-07-24 从预登记官方地址下载 192,511,857-byte Windows x86_64 Chromium 归档，真实 SHA-256 `ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab` 已写回契约并翻转 `buildable=true`；双暂存 Manifest 字节一致、PE machine `0x8664`、Playwright 离线启动 149.0.7827.55 和按绝对路径零进程残留门禁通过。

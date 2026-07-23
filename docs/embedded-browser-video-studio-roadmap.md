@@ -551,11 +551,11 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 23 |
+| ⬜ 未开始 | 22 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
 | 🔍 待验收 | 18 |
-| ✅ 已完成 | 37 |
+| ✅ 已完成 | 38 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -587,7 +587,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | EB-01 | Playwright 与 Chromium 兼容矩阵 | 锁定 Playwright、完整 Chromium 版本/修订、macOS arm64 和 Windows x86_64；安装包内版本不匹配时 fail closed | AV-04 | ✅ 已完成 |
 | EB-02 | 三方共用 Chromium 前置验证门禁 | 在 macOS/Windows 用 EB-01 同一完整 Chromium 分别启动可见 RPA、Browser Use `executable_path`/随机 CDP 两种模式和独立无头渲染进程；渲染 12 套风格、全部 134 项单帧冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏，并验证三方并发、进程/Profile 隔离、控制权租约和无第二套浏览器下载；通过后 ADR 固定为一套，失败则先调整共同版本重跑并暂停后续任务 | AV-02,EB-01 | ✅ 已完成 |
 | EB-03 | macOS 浏览器构建暂存 | 构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动 | EB-02 | ✅ 已完成 |
-| EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 | ⬜ 未开始 |
+| EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 | ✅ 已完成 |
 | EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 | 🔍 待验收 |
 | EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | 🔍 待验收 |
 | EB-07 | Executor 启动协议迁移 | 复用 BrowserLaunchRequest 和现有线程归属；由 Rust 传已验证内置路径，移除运行时发现 fallback | EB-06 | 🔍 待验收 |

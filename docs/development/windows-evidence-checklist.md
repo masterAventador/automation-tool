@@ -94,13 +94,14 @@ python scripts/run_bm_04_acceptance.py --archive <EB-04 锁定的 chrome-win64.z
 reparse point 越界校验；真实恶意 HTML 的 navigation/download/popup/dialog 拦截与
 工作区外机密不可读。通过后更新 `docs/development/BM-04.md` 遗留项。
 
-### 5. EB-04 Windows 浏览器构建暂存（新任务，可交给 Windows 机器上的会话执行）
+### 5. EB-04 Windows 浏览器构建暂存（✅ 2026-07-24 已完成）
 
-EB-03 已在 `contracts/browser/embedded-chromium-staging.v1.json` 预登记
-`windows-x86_64` 目标（官方下载地址 `.../cft/149.0.7827.55/win64/chrome-win64.zip`，
-`buildable=false` 待翻转）。流程与 EB-03 对称：下载归档→锁 SHA-256 进契约→
-`buildable=true`→复用 `scripts/build_embedded_chromium_staging.py` 与测试→
-新增 Windows 验收脚本（离线启动探针）→按台账激活/闭环。
+已从预登记官方地址下载 `chrome-win64.zip`（192,511,857 bytes），真实 SHA-256
+`ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab` 已写入
+`contracts/browser/embedded-chromium-staging.v1.json`，`windows-x86_64.buildable`
+已翻为 `true`。`run_eb_04_acceptance.py` 已在 Windows 11 x86_64 完成双暂存可复现
+Manifest、308 files / 435,574,347 bytes、PE `0x8664`、Playwright 离线启动
+149.0.7827.55 和进程零残留验收。
 
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 

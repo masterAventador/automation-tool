@@ -10,6 +10,7 @@ inputs.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -51,11 +52,21 @@ def _write_zip(path: Path, entries: dict[str, bytes | tuple[str, str]]) -> str:
 
 def _valid_entries() -> dict[str, bytes | tuple[str, str]]:
     app = "chrome-mac-arm64/Google Chrome for Testing.app/Contents"
-    return {
+    entries: dict[str, bytes | tuple[str, str]] = {
         f"{app}/MacOS/Google Chrome for Testing": b"binary",
         f"{app}/Info.plist": b"<plist/>",
         f"{app}/Frameworks/F.framework/Versions/A/F": b"framework",
-        f"{app}/Frameworks/F.framework/Versions/Current": ("symlink", "A"),
+    }
+    if os.name != "nt":
+        entries[f"{app}/Frameworks/F.framework/Versions/Current"] = ("symlink", "A")
+    return entries
+
+
+def _valid_windows_entries() -> dict[str, bytes | tuple[str, str]]:
+    return {
+        "chrome-win64/chrome.exe": b"MZ synthetic x86_64 chrome",
+        "chrome-win64/chrome.dll": b"synthetic library",
+        "chrome-win64/locales/en-US.pak": b"synthetic locale",
     }
 
 
@@ -78,7 +89,9 @@ class StagingBuilderTests(unittest.TestCase):
         self.assertEqual(self.target.root_entry, "chrome-mac-arm64")
         self.assertIn("cdn.playwright.dev", self.target.download_url)
         self.assertTrue(
-            self.target.executable.startswith("chrome-mac-arm64/Google Chrome for Testing.app/")
+            self.target.executable.startswith(
+                "chrome-mac-arm64/Google Chrome for Testing.app/"
+            )
         )
 
     def test_digest_mismatch_is_rejected(self) -> None:
@@ -92,6 +105,7 @@ class StagingBuilderTests(unittest.TestCase):
                 output=self.base / "out",
             )
 
+    @unittest.skipIf(os.name == "nt", "Windows cannot preserve macOS executable mode")
     def test_valid_archive_stages_and_manifest_is_reproducible(self) -> None:
         archive, digest = self._archive(_valid_entries())
         first = build_staging(
@@ -120,10 +134,11 @@ class StagingBuilderTests(unittest.TestCase):
             if entry["path"].endswith("MacOS/Google Chrome for Testing")
         )
         self.assertTrue(executable_entry["executable"])
-        symlink_entry = next(
-            entry for entry in manifest_a["entries"] if entry["type"] == "symlink"
-        )
-        self.assertEqual(symlink_entry["targetPath"], "A")
+        if os.name != "nt":
+            symlink_entry = next(
+                entry for entry in manifest_a["entries"] if entry["type"] == "symlink"
+            )
+            self.assertEqual(symlink_entry["targetPath"], "A")
         staged_executable = self.base / "out-a" / self.target.executable
         self.assertTrue(staged_executable.is_file())
 
@@ -208,15 +223,33 @@ class StagingBuilderTests(unittest.TestCase):
                 output=output,
             )
 
-    def test_windows_target_is_declared_but_not_buildable_yet(self) -> None:
-        archive, digest = self._archive(_valid_entries())
+    def test_windows_target_stages_without_symlinks(self) -> None:
+        archive, digest = self._archive(_valid_windows_entries())
+        target = self.contract.targets["windows-x86_64"]
+        result = build_staging(
+            contract=self.contract,
+            target_id="windows-x86_64",
+            archive_path=archive,
+            archive_sha256=digest,
+            output=self.base / "out-win",
+        )
+        manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+        self.assertTrue(target.buildable)
+        self.assertEqual(manifest["target"], "windows-x86_64")
+        self.assertEqual(manifest["executable"], "chrome-win64/chrome.exe")
+        self.assertTrue((result.output / target.executable).is_file())
+
+    def test_windows_target_rejects_symlinks(self) -> None:
+        entries = _valid_windows_entries()
+        entries["chrome-win64/link"] = ("symlink", "chrome.exe")
+        archive, digest = self._archive(entries)
         with self.assertRaises(StagingRejected):
             build_staging(
                 contract=self.contract,
                 target_id="windows-x86_64",
                 archive_path=archive,
                 archive_sha256=digest,
-                output=self.base / "out-win",
+                output=self.base / "out-win-link",
             )
 
     def test_safe_extract_rejects_duplicate_entries(self) -> None:

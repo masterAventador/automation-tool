@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EB-03: reproducible macOS staging of the locked embedded Chromium.
+"""EB-03/EB-04: reproducible staging of the locked embedded Chromium.
 
 The builder consumes one already-downloaded, digest-locked archive of the
 Playwright-locked Chrome for Testing build and produces a verifiable staging
@@ -141,7 +141,13 @@ def _validated_relative(name: str, root_entry: str) -> PurePosixPath:
     return path
 
 
-def safe_extract(archive_path: Path, destination: Path, *, root_entry: str) -> None:
+def safe_extract(
+    archive_path: Path,
+    destination: Path,
+    *,
+    root_entry: str,
+    allow_symlinks: bool = True,
+) -> None:
     """Extract with traversal, symlink, duplicate and root confinement checks."""
     destination.mkdir(parents=True, exist_ok=False)
     seen: set[str] = set()
@@ -161,6 +167,8 @@ def safe_extract(archive_path: Path, destination: Path, *, root_entry: str) -> N
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             if _entry_is_symlink(info):
+                if not allow_symlinks:
+                    _reject("symlink is not allowed for this staging target")
                 link_target = archive.read(info).decode("utf-8", errors="strict")
                 link_path = PurePosixPath(link_target)
                 if link_path.is_absolute():
@@ -234,7 +242,12 @@ def build_staging(
     if output.exists():
         _reject("output directory already exists")
 
-    safe_extract(archive_path, output, root_entry=target.root_entry)
+    safe_extract(
+        archive_path,
+        output,
+        root_entry=target.root_entry,
+        allow_symlinks=target_id.startswith("macos-"),
+    )
 
     roots = sorted(entry.name for entry in output.iterdir())
     if roots != [target.root_entry]:
