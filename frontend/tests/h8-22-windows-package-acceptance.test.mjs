@@ -39,13 +39,22 @@ test("H8-22 owns an isolated unsigned Windows NSIS package acceptance", async ()
   assert.equal(config.plugins.updater.windows.installMode, "passive");
 
   assert.match(runner, /sys\.platform != "win32"/u);
+  assert.match(runner, /require_non_elevated_process/u);
   assert.match(runner, /["']--bundles["'],\s*["']nsis["']/u);
   assert.match(runner, /signature\.read_text\(encoding="utf-8"\)\.strip\(\)/u);
   assert.doesNotMatch(runner, /b64encode\(signature\.read_bytes/u);
   assert.match(runner, /verify_unsigned_installer/u);
+  assert.match(runner, /\[Console\]::In\.ReadToEnd\(\)/u);
+  assert.match(runner, /hasSigner/u);
+  assert.match(runner, /hasTimestamp/u);
   assert.match(runner, /NotSigned/u);
   assert.match(runner, /LOCALAPPDATA/u);
   assert.match(runner, /HKEY_CURRENT_USER/u);
+  assert.match(runner, /parse_windows_registry_path/u);
+  assert.match(
+    runner,
+    /OpenKey\(\s*parent,\s*winreg\.EnumKey\(parent,\s*index\),\s*0,\s*winreg\.KEY_READ\s*\|\s*view/su,
+  );
   assert.match(runner, /DisplayName/u);
   assert.match(runner, /DisplayVersion/u);
   assert.match(runner, /InstallLocation/u);
@@ -59,6 +68,9 @@ test("H8-22 owns an isolated unsigned Windows NSIS package acceptance", async ()
   assert.match(runner, /installer-failure/u);
   assert.match(runner, /wait_for_binary_hash/u);
   assert.match(runner, /wait_for_update_installer_exit/u);
+  assert.match(runner, /BUNDLE_TYPE_VAR_UNK/u);
+  assert.match(runner, /BUNDLE_TYPE_VAR_NSS/u);
+  assert.match(runner, /expected_nsis_binary_sha256/u);
   assert.match(runner, /file_version/u);
   assert.match(runner, /runtime_environment\.pop\(name, None\)/u);
   assert.match(runner, /"AUTOMATION_TOOL_UPDATE_INSTALL_PROBE"/u);

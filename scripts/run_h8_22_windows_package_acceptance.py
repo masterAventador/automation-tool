@@ -32,6 +32,8 @@ APP_IDENTIFIER = "com.aventador.automationtool.h822windowsacceptance"
 PRODUCT_NAME = "Automation Tool H822 Windows Acceptance"
 MAIN_BINARY_NAME = "automation-tool-h822-windows-acceptance"
 KEY_PASSWORD = "h822-ephemeral-package-acceptance"
+_TAURI_UNKNOWN_BUNDLE_MARKER = b"BUNDLE_TYPE_VAR_UNK"
+_TAURI_NSIS_BUNDLE_MARKER = b"BUNDLE_TYPE_VAR_NSS"
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 from run_h8_20_acceptance import (  # noqa: E402
@@ -95,6 +97,20 @@ def normalized_windows_path(path: Path) -> str:
     return os.path.normcase(os.path.abspath(path))
 
 
+def parse_windows_registry_path(value: Any) -> Path:
+    literal = str(value).strip()
+    if literal.startswith('"') or literal.endswith('"'):
+        if not (literal.startswith('"') and literal.endswith('"')):
+            raise RuntimeError("H8-22 Windows registry path has unbalanced quoting")
+        literal = literal[1:-1]
+    if not literal or '"' in literal:
+        raise RuntimeError("H8-22 Windows registry path is invalid")
+    path = Path(literal)
+    if not path.is_absolute():
+        raise RuntimeError("H8-22 Windows registry path is not absolute")
+    return path
+
+
 def windows_registry_installation() -> WindowsRegistryInstallation | None:
     import winreg
 
@@ -114,31 +130,41 @@ def windows_registry_installation() -> WindowsRegistryInstallation | None:
         with parent:
             for index in range(winreg.QueryInfoKey(parent)[0]):
                 try:
-                    child = winreg.OpenKey(parent, winreg.EnumKey(parent, index))
+                    child = winreg.OpenKey(
+                        parent,
+                        winreg.EnumKey(parent, index),
+                        0,
+                        winreg.KEY_READ | view,
+                    )
                     with child:
-                        display_name = str(winreg.QueryValueEx(child, "DisplayName")[0])
+                        try:
+                            display_name = str(
+                                winreg.QueryValueEx(child, "DisplayName")[0]
+                            )
+                        except OSError:
+                            continue
                         if display_name != PRODUCT_NAME:
                             continue
-                        display_version = str(
-                            winreg.QueryValueEx(child, "DisplayVersion")[0]
-                        )
-                        uninstall_string = str(
-                            winreg.QueryValueEx(child, "UninstallString")[0]
-                        ).strip()
-                        quoted_uninstaller = f'"{expected_uninstaller}"'
-                        if uninstall_string.casefold() not in {
-                            str(expected_uninstaller).casefold(),
-                            quoted_uninstaller.casefold(),
-                        }:
+                        try:
+                            display_version = str(
+                                winreg.QueryValueEx(child, "DisplayVersion")[0]
+                            )
+                            uninstaller = parse_windows_registry_path(
+                                winreg.QueryValueEx(child, "UninstallString")[0]
+                            )
+                            install_location = parse_windows_registry_path(
+                                winreg.QueryValueEx(child, "InstallLocation")[0]
+                            )
+                        except OSError as error:
+                            raise RuntimeError(
+                                "H8-22 Windows uninstall registry record is incomplete"
+                            ) from error
+                        if normalized_windows_path(
+                            uninstaller
+                        ) != normalized_windows_path(expected_uninstaller):
                             raise RuntimeError(
                                 "H8-22 Windows uninstall registry path is unexpected"
                             )
-                        try:
-                            install_location = Path(
-                                str(winreg.QueryValueEx(child, "InstallLocation")[0])
-                            )
-                        except OSError:
-                            install_location = expected_uninstaller.parent
                         if normalized_windows_path(
                             install_location
                         ) != normalized_windows_path(expected_root):
@@ -148,7 +174,7 @@ def windows_registry_installation() -> WindowsRegistryInstallation | None:
                         return WindowsRegistryInstallation(
                             display_version=display_version,
                             install_location=install_location,
-                            uninstaller=expected_uninstaller,
+                            uninstaller=uninstaller,
                         )
                 except RuntimeError:
                     raise
@@ -211,45 +237,90 @@ def powershell_executable() -> str:
 
 
 def run_powershell(script: str, *arguments: str) -> str:
-    result = run_checked(
+    payload = json.dumps(
+        {"script": script, "arguments": list(arguments)},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    bootstrap = (
+        "$H822Payload=ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd());"
+        "$H822Arguments=@($H822Payload.arguments);"
+        "$H822Script=[ScriptBlock]::Create([string]$H822Payload.script);"
+        "& $H822Script @H822Arguments"
+    )
+    result = subprocess.run(
         [
             powershell_executable(),
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            script,
-            *arguments,
+            bootstrap,
         ],
-        capture=True,
+        cwd=FRONTEND_ROOT,
+        check=True,
+        text=True,
+        input=payload,
+        capture_output=True,
+        timeout=1800,
     )
     return result.stdout.strip()
 
 
-def authenticode_status(path: Path) -> str:
-    return run_powershell(
-        "& { param([string]$LiteralPath) "
-        "(Get-AuthenticodeSignature -LiteralPath $LiteralPath).Status.ToString() }",
+def require_non_elevated_process() -> None:
+    elevated = run_powershell(
+        "$identity=[Security.Principal.WindowsIdentity]::GetCurrent();"
+        "$principal=[Security.Principal.WindowsPrincipal]::new($identity);"
+        "$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"
+    )
+    if elevated.casefold() != "false":
+        raise RuntimeError("H8-22 acceptance must run as a non-elevated user")
+
+
+def authenticode_facts(path: Path) -> dict[str, Any]:
+    output = run_powershell(
+        "param([string]$LiteralPath);"
+        "$signature=Get-AuthenticodeSignature -LiteralPath $LiteralPath;"
+        "[PSCustomObject]@{"
+        "status=$signature.Status.ToString();"
+        "hasSigner=($null -ne $signature.SignerCertificate);"
+        "hasTimestamp=($null -ne $signature.TimeStamperCertificate)"
+        "} | ConvertTo-Json -Compress",
         str(path),
     )
+    facts: Any = json.loads(output)
+    if (
+        not isinstance(facts, dict)
+        or set(facts) != {"status", "hasSigner", "hasTimestamp"}
+        or not isinstance(facts["status"], str)
+        or not isinstance(facts["hasSigner"], bool)
+        or not isinstance(facts["hasTimestamp"], bool)
+    ):
+        raise RuntimeError("H8-22 Windows Authenticode facts are invalid")
+    return facts
 
 
-def verify_unsigned_installer(installer: Path) -> None:
-    if authenticode_status(installer) != "NotSigned":
+def require_unsigned(path: Path, label: str) -> None:
+    facts = authenticode_facts(path)
+    if facts["status"] != "NotSigned" or facts["hasSigner"] or facts["hasTimestamp"]:
         raise RuntimeError(
-            "H8-22 Windows installer is not the expected unsigned package"
+            f"H8-22 Windows {label} signing status is inconsistent "
+            f"({json.dumps(facts, sort_keys=True)})"
         )
 
 
+def verify_unsigned_installer(installer: Path) -> None:
+    require_unsigned(installer, "installer")
+
+
 def verify_unsigned_binary(binary: Path) -> None:
-    if authenticode_status(binary) != "NotSigned":
-        raise RuntimeError("H8-22 installed Windows binary is not unsigned")
+    require_unsigned(binary, "binary")
 
 
 def file_version(binary: Path) -> str:
     return run_powershell(
-        "& { param([string]$LiteralPath) "
-        "(Get-Item -LiteralPath $LiteralPath).VersionInfo.ProductVersion }",
+        "param([string]$LiteralPath);"
+        "(Get-Item -LiteralPath $LiteralPath).VersionInfo.ProductVersion",
         str(binary),
     )
 
@@ -390,6 +461,30 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def expected_nsis_binary_sha256(path: Path) -> str:
+    built_binary = path.read_bytes()
+    unknown_markers = built_binary.count(_TAURI_UNKNOWN_BUNDLE_MARKER)
+    nsis_markers = built_binary.count(_TAURI_NSIS_BUNDLE_MARKER)
+    if len(_TAURI_UNKNOWN_BUNDLE_MARKER) != len(_TAURI_NSIS_BUNDLE_MARKER) or (
+        unknown_markers,
+        nsis_markers,
+    ) not in {(1, 0), (0, 1), (1, 1), (0, 2)}:
+        raise RuntimeError(
+            "H8-22 built binary has an invalid Tauri bundle marker layout "
+            f"(unknown={unknown_markers}, nsis={nsis_markers})"
+        )
+    bundled_binary = (
+        built_binary.replace(
+            _TAURI_UNKNOWN_BUNDLE_MARKER,
+            _TAURI_NSIS_BUNDLE_MARKER,
+            1,
+        )
+        if unknown_markers == 1
+        else built_binary
+    )
+    return hashlib.sha256(bundled_binary).hexdigest()
+
+
 def wait_for_binary_hash(binary: Path, expected: str) -> None:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -406,14 +501,14 @@ def wait_for_binary_hash(binary: Path, expected: str) -> None:
 
 def matching_update_installer_pids() -> list[int]:
     output = run_powershell(
-        "& { param([string]$ProductName) "
+        "param([string]$ProductName);"
         "Get-CimInstance Win32_Process | Where-Object { "
         "$_.ExecutablePath -and $_.CommandLine -and "
         "$_.ExecutablePath.IndexOf($ProductName, "
         "[StringComparison]::OrdinalIgnoreCase) -ge 0 -and "
         "$_.CommandLine.IndexOf('/UPDATE', "
         "[StringComparison]::OrdinalIgnoreCase) -ge 0 } | "
-        "ForEach-Object { $_.ProcessId } }",
+        "ForEach-Object { $_.ProcessId }",
         PRODUCT_NAME,
     )
     return [int(line) for line in output.splitlines() if line.strip()]
@@ -593,12 +688,12 @@ def build_update_app(
 
 def matching_app_pids(binary: Path) -> list[int]:
     output = run_powershell(
-        "& { param([string]$TargetPath) "
+        "param([string]$TargetPath);"
         "$target = [IO.Path]::GetFullPath($TargetPath); "
         "Get-CimInstance Win32_Process | Where-Object { "
         "$_.ExecutablePath -and "
         "[IO.Path]::GetFullPath($_.ExecutablePath) -eq $target } | "
-        "ForEach-Object { $_.ProcessId } }",
+        "ForEach-Object { $_.ProcessId }",
         str(binary),
     )
     return [int(line) for line in output.splitlines() if line.strip()]
@@ -745,6 +840,7 @@ def reset_app_data(path: Path) -> None:
 
 def run() -> None:
     require_windows()
+    require_non_elevated_process()
     configuration = require_configuration()
     private_app_data = app_data_directory()
     uninstall_owned_application()
@@ -818,9 +914,9 @@ def run() -> None:
             server_thread.start()
             wait_for_port(update_port)
 
-            hash_01 = file_sha256(binary_01)
-            hash_02 = file_sha256(binary_02)
-            hash_03 = file_sha256(binary_03)
+            hash_01 = expected_nsis_binary_sha256(binary_01)
+            hash_02 = expected_nsis_binary_sha256(binary_02)
+            hash_03 = expected_nsis_binary_sha256(binary_03)
             install_initial_package(installer_01, "0.1.0", hash_01)
             run_packaged_app(runtime_environment, "optional-decisions", webdriver_port)
             verify_installed_app("0.1.0", hash_01)

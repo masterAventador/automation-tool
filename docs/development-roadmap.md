@@ -51,7 +51,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-05、P9-08 与 U9-01～U9-05 已完成；P9-04 Windows 普通候选已在 Windows 11 x86_64 完成生产构建、当前用户安装、HKCU-only 注册表、资源和卸载实机验收，仅正式 Authenticode 保持 `🔍`。P9-05 统一完整包审计已在 macOS App/DMG 与 Windows NSIS 安装根真实通过；P9-03 macOS 候选以及 P9-06/P9-07 双平台干净安装 runner 保持各自 `🔍` 设备/正式签名验收。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-05、P9-08 与 U9-01～U9-05 已完成；H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机完成可选更新、强更重启、覆盖、失败恢复、HKCU 注册表和清理矩阵，仅双平台正式发布签名保持 `🔍`。P9-04 Windows 普通候选已完成生产构建、当前用户安装、HKCU-only 注册表、资源和卸载实机验收，仅正式 Authenticode 保持 `🔍`。P9-05 统一完整包审计已在 macOS App/DMG 与 Windows NSIS 安装根真实通过；P9-03 macOS 候选以及 P9-06/P9-07 双平台干净安装 runner 保持各自 `🔍` 设备/正式签名验收。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -567,5 +567,5 @@
 10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；
 11. `U9-04`（✅ 已完成）：customer-demo 外层账号门禁、Rust 私有账号 Session vault、登录/恢复/改密/注销、离线 fail-closed、重启 refresh 和隐藏真实 Tauri 未登录边界已完成；React 不接收 bearer secret；
 12. `C10-07`（✅ 已完成）：签名 Demo origin/allowlist 原生信任边界、HTTPS/WSS Transport 与 local/demo 全私有数据 namespace 隔离已完成；下一工程任务为 `C10-08`；
-13. `H8-22/P9-03`（🔍 待验收）：Windows 普通包更新矩阵、Developer ID/notarization 与 Authenticode 在受控实机/签名环境补验，不阻塞上述工程任务；
+13. `H8-22/P9-03`（🔍 待正式签名）：2026-07-24 H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机会话完成 0.1→0.3 可选更新、0.1→0.2 强更重启、0.4 损坏包失败恢复、HKCU 64/32 位注册表、整文件哈希、完整未签名事实和卸载零残留矩阵；仅 Developer ID/notarization 与 Authenticode 在受控签名环境补验，不阻塞上述工程任务；
 14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
