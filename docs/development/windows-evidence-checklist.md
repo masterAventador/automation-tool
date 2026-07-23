@@ -1,9 +1,10 @@
 # Windows x86_64 补证清单（2026-07-23）
 
 > 背景：按用户决策，本项目不依赖 GitHub Actions；Windows 证据改为在用户的
-> Windows 电脑上本机执行补齐。本清单对应各任务证据文件登记的待补项，命令与
-> `.github/workflows/*.yml` 对应 Job 的步骤一致。执行完成后由 Windows 机器上的
-> 会话把结果写入对应 `docs/development/<任务ID>.md` 并提交（一个任务一个提交）。
+> Windows 电脑上本机执行补齐。本清单原对应各任务证据文件登记的 Windows 验收项，
+> 命令与 `.github/workflows/*.yml` 对应 Job 的步骤一致；登记项已于 2026-07-24
+> 全部完成，并由 Windows 机器上的会话把结果写入对应
+> `docs/development/<任务ID>.md` 后逐项提交。
 
 ## 一次性环境准备
 
