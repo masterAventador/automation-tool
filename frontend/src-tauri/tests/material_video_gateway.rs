@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 static DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-struct TemporaryAssetRoot(PathBuf);
+struct TemporaryAssetRoot(PathBuf, PathBuf);
 
 #[derive(Clone, Default)]
 struct MemoryStore(Arc<Mutex<Option<Vec<u8>>>>);
@@ -45,7 +45,7 @@ impl SecretStore for MemoryStore {
 
 impl TemporaryAssetRoot {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
+        let isolation = std::env::temp_dir().join(format!(
             "automation-tool-im03-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
@@ -54,15 +54,25 @@ impl TemporaryAssetRoot {
                 .as_nanos(),
             DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
+        // Mirror the production `VideoJobWorkspaceStore` layout consumed by the
+        // worker since IM-07: a UUID v4 workspace directory containing the
+        // `work` asset root and its sibling `outputs` directory. Uniqueness
+        // comes from the isolation directory, so a fixed UUID literal is fine.
+        let workspace = isolation.join("8c2f6f2e-4d2f-4c7a-9a3e-6f8b2c1d0e4a");
+        let path = workspace.join("work");
         fs::create_dir_all(path.join("inputs")).expect("asset root");
+        fs::create_dir_all(workspace.join("outputs")).expect("output root");
         fs::write(path.join("inputs/clip.mp4"), b"real-process-fixture").expect("asset fixture");
-        Self(fs::canonicalize(path).expect("canonical asset root"))
+        Self(
+            fs::canonicalize(path).expect("canonical asset root"),
+            isolation,
+        )
     }
 }
 
 impl Drop for TemporaryAssetRoot {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.1);
     }
 }
 

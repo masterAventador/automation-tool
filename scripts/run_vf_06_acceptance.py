@@ -11,11 +11,27 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 TAURI_CONFIG = FRONTEND / "src-tauri" / "tauri.video-studio-e2e.conf.json"
 APP_IDENTIFIER = "com.aventador.automationtool.vf06acceptance"
+
+# material-video-webui.spec.ts 属于 IM-05 验收范围: 它要求
+# AUTOMATION_TOOL_IM05_WORKER 指向真实冻结 Worker, 由
+# scripts/run_im_05_acceptance.py 构建并注入后单独覆盖;
+# VF-06 全量验收只运行不依赖冻结 Worker 的视频工作台 spec.
+SPECS = (
+    "./e2e-tauri/video-studio.spec.ts",
+    "./e2e-tauri/video-creation-methods.spec.ts",
+    "./e2e-tauri/motion-style-catalog.spec.ts",
+)
+
+
+def desktop_wdio_arguments() -> list[str]:
+    arguments = ["exec", "wdio", "run", "wdio.video-studio.conf.ts"]
+    for spec in SPECS:
+        arguments.extend(["--spec", spec])
+    return arguments
 
 
 def pnpm_executable() -> str:
@@ -78,7 +94,7 @@ def run_desktop_acceptance() -> None:
         )
         require_port_closed(port)
         subprocess.run(
-            [pnpm_executable(), "exec", "wdio", "run", "wdio.video-studio.conf.ts"],
+            [pnpm_executable(), *desktop_wdio_arguments()],
             cwd=FRONTEND,
             env=environment,
             check=True,

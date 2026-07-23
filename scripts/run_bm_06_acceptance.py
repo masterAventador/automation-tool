@@ -14,6 +14,7 @@ from run_vf_06_acceptance import (
     FRONTEND,
     TAURI_CONFIG,
     app_data_directory,
+    desktop_wdio_arguments,
     pnpm_executable,
     require_port_closed,
     unused_loopback_port,
@@ -21,13 +22,8 @@ from run_vf_06_acceptance import (
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# BM-06 只验收视频工作台页面链路；material-video-webui.spec 属于 IM-05，
-# 需要真实冻结 Worker 候选，由 scripts/run_im_05_acceptance.py 单独覆盖。
-SPECS = (
-    "./e2e-tauri/video-studio.spec.ts",
-    "./e2e-tauri/video-creation-methods.spec.ts",
-    "./e2e-tauri/motion-style-catalog.spec.ts",
-)
+# BM-06 与 VF-06 共用同一份视频工作台 spec 范围 (run_vf_06_acceptance.SPECS);
+# material-video-webui.spec 属于 IM-05, 由 scripts/run_im_05_acceptance.py 单独覆盖.
 
 
 def run_desktop_acceptance() -> None:
@@ -45,9 +41,6 @@ def run_desktop_acceptance() -> None:
     port = unused_loopback_port()
     environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
-    spec_arguments: list[str] = []
-    for spec in SPECS:
-        spec_arguments.extend(["--spec", spec])
     try:
         subprocess.run(
             [pnpm_executable(), "build:tauri:video-studio-test"],
@@ -57,14 +50,7 @@ def run_desktop_acceptance() -> None:
         )
         require_port_closed(port)
         subprocess.run(
-            [
-                pnpm_executable(),
-                "exec",
-                "wdio",
-                "run",
-                "wdio.video-studio.conf.ts",
-                *spec_arguments,
-            ],
+            [pnpm_executable(), *desktop_wdio_arguments()],
             cwd=FRONTEND,
             env=environment,
             check=True,
