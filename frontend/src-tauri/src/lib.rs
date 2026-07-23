@@ -12,6 +12,8 @@ pub mod deployment_profile;
 pub mod device_credentials;
 pub mod device_identity;
 mod diagnostic_export;
+pub mod embedded_browser_authority;
+pub mod embedded_browser_distribution;
 pub mod executor_bootstrap;
 mod executor_diagnostics;
 pub mod executor_manager;
@@ -657,16 +659,26 @@ async fn execute_douyin_login_command(
     client: &control_plane::ControlPlaneClient,
     vault: &ProductionDeviceCredentialVault,
     platform: &executor_platform::ExecutorPlatformService,
-    settings: &browser_settings::BrowserSettingsService,
+    authority: &embedded_browser_authority::EmbeddedBrowserAuthority,
     profiles: &browser_profiles::BrowserProfileStore,
 ) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
     ensure_executor_running(client, vault, platform).await?;
-    let executable_path = settings
-        .selected_executable_path()
-        .map_err(map_browser_settings_error)
+    // EB-07：运营浏览器唯一路径源是内置发行物 Authority，无系统浏览器发现 fallback。
+    let executable_path = authority
+        .resolve()
         .map_err(|error| ExecutorPlatformCommandError {
-            code: error.code,
-            retryable: error.retryable,
+            code: match error {
+                embedded_browser_authority::EmbeddedBrowserAuthorityError::ComponentMissing => {
+                    "browser_component_missing"
+                }
+                embedded_browser_authority::EmbeddedBrowserAuthorityError::ComponentInvalid => {
+                    "browser_component_invalid"
+                }
+                embedded_browser_authority::EmbeddedBrowserAuthorityError::Unavailable => {
+                    "storage_unavailable"
+                }
+            },
+            retryable: false,
         })?;
     let profile = profiles
         .current_douyin_profile()
@@ -697,7 +709,7 @@ async fn open_douyin_login(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
-    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
 ) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
     execute_douyin_login_command(
@@ -705,7 +717,7 @@ async fn open_douyin_login(
         &client,
         &vault,
         &platform,
-        &settings,
+        &authority,
         &profiles,
     )
     .await
@@ -717,7 +729,7 @@ async fn recheck_douyin_login(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
-    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
 ) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
     execute_douyin_login_command(
@@ -725,7 +737,7 @@ async fn recheck_douyin_login(
         &client,
         &vault,
         &platform,
-        &settings,
+        &authority,
         &profiles,
     )
     .await
@@ -3121,6 +3133,13 @@ pub fn run() {
             app.manage(browser_settings::BrowserSettingsService::initialize(
                 &app_data_directory,
             )?);
+            app.manage(embedded_browser_authority::EmbeddedBrowserAuthority::new(
+                app
+                    .path()
+                    .resource_dir()
+                    .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?,
+                embedded_browser_authority::release_target_id(),
+            ));
             app.manage(
                 model_service_settings::initialize_production_model_service_settings(
                     &app_data_directory,

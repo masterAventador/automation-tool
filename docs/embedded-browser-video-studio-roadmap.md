@@ -551,10 +551,10 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 34 |
+| ⬜ 未开始 | 31 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 11 |
+| 🔍 待验收 | 14 |
 | ✅ 已完成 | 33 |
 | ⏸ 后置 | 9 |
 
@@ -589,8 +589,8 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | EB-03 | macOS 浏览器构建暂存 | 构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动 | EB-02 | ✅ 已完成 |
 | EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 | ⬜ 未开始 |
 | EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 | 🔍 待验收 |
-| EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | ⬜ 未开始 |
-| EB-07 | Executor 启动协议迁移 | 复用 BrowserLaunchRequest 和现有线程归属；由 Rust 传已验证内置路径，移除运行时发现 fallback | EB-06 | ⬜ 未开始 |
+| EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | 🔍 待验收 |
+| EB-07 | Executor 启动协议迁移 | 复用 BrowserLaunchRequest 和现有线程归属；由 Rust 传已验证内置路径，移除运行时发现 fallback | EB-06 | 🔍 待验收 |
 | EB-08 | 启动健康状态迁移 | 用“浏览器组件正常/损坏/版本不兼容”替代“未安装/未选择 Chrome/Edge”，提供安全修复提示 | EB-06 | ⬜ 未开始 |
 | EB-09 | 全新内置 Profile 契约 | 新根目录、权限、稳定路径、排他锁、首次创建、登录后复用和安全删除测试；没有迁移或旧版分支 | EB-06 | ⬜ 未开始 |
 | EB-10 | 删除生产浏览器选择链路 | 先搜索所有引用，再移除设置项、启动门禁和生产消费者；系统浏览器发现代码不得继续存在可达的用户入口 | EB-08,EB-09 | ⬜ 未开始 |
@@ -645,7 +645,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | --- | --- | --- | --- | --- |
 | BM-01 | 上游源码与 12 套风格固定 | 固定 v0.7.68 和 submodule；只登记官网公开 12 套；英文标识到中文名称映射有契约测试 | AV-02 | ✅ 已完成 |
 | BM-02 | 隔离 Node 22 Worker | Tauri sidecar 打包命令行/SDK 适配器，验证版本握手、无全局 Node 前置、取消、退出和错误脱敏 | BM-01,VF-02 | 🔍 待验收 |
-| BM-03 | 共用 Chromium 渲染适配 | 只接收 Rust 已验证的单一完整 Chromium 路径，以独立无头进程和 RenderJob 临时目录启动；显式设置实际 Chromium major，禁用上游下载、系统浏览器发现和缓存 fallback | BM-02,EB-02 | ⬜ 未开始 |
+| BM-03 | 共用 Chromium 渲染适配 | 只接收 Rust 已验证的单一完整 Chromium 路径，以独立无头进程和 RenderJob 临时目录启动；显式设置实际 Chromium major，禁用上游下载、系统浏览器发现和缓存 fallback | BM-02,EB-02 | 🔍 待验收 |
 | BM-04 | HTML 渲染安全沙箱 | 私有目录、默认断网、本地资源、导航/下载/file URL 拦截、CPU/内存/帧数/大小/时长限制和 prompt injection 测试 | BM-02,BM-03,VF-03 | ⬜ 未开始 |
 | BM-05 | AI 一句话到动效视频编排 | 受限 MotionAuthoringAgent 读取锁定 workflow，以封闭工具把 Brief→DESIGN/脚本/分镜→可 seek 的 HTML/动画→lint/check/snapshot→局部修正→提交 RenderJob；逐帧 Chromium/FFmpeg 不调用模型，Agent 无 Shell/任意文件/Profile/密钥权限，未配置模型时自动制作明确不可用 | BM-04,VF-01,VF-05 | ⬜ 未开始 |
 | BM-06 | 12 套风格目录与中文选择器 | 全部 12 套有预览、中文名、适用场景、标签和键盘可访问性；少一套、重复或混入未公开模板都失败 | BM-01,VF-07 | ✅ 已完成 |
