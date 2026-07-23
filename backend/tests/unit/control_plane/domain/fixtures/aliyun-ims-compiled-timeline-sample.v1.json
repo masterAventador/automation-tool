@@ -1,0 +1,50 @@
+{
+  "VideoTracks": [
+    {
+      "VideoTrackClips": [
+        {
+          "Effects": [
+            {
+              "Duration": 0.5,
+              "SubType": "fade",
+              "Type": "Transition"
+            }
+          ],
+          "MediaURL": "https://automation-tool-video-staging.oss-cn-beijing.aliyuncs.com/editing-staging/v1/11e594f481958c10e3015d0bf0447a22f068a8a647f475df15ce2c7ab4b8f3f1.mp4",
+          "TimelineIn": 0.0,
+          "TimelineOut": 6.0
+        },
+        {
+          "Duration": 4.0,
+          "MediaURL": "https://automation-tool-video-staging.oss-cn-beijing.aliyuncs.com/editing-staging/v1/e79acd97ac88086665d85a762f43d533a45195b6bac5961a993e6ed362471439.png",
+          "TimelineIn": 6.0,
+          "TimelineOut": 10.0,
+          "Type": "Image"
+        }
+      ]
+    }
+  ],
+  "AudioTracks": [
+    {
+      "AudioTrackClips": [
+        {
+          "MediaURL": "https://automation-tool-video-staging.oss-cn-beijing.aliyuncs.com/editing-staging/v1/993224b4fe85990df64db926ca5c034675eb037399e2fcef041c8d7e31e54d3f.mp3",
+          "TimelineIn": 0.0,
+          "TimelineOut": 10.0
+        }
+      ]
+    }
+  ],
+  "SubtitleTracks": [
+    {
+      "SubtitleTrackClips": [
+        {
+          "Content": "你好世界",
+          "TimelineIn": 1.0,
+          "TimelineOut": 9.0,
+          "Type": "Text"
+        }
+      ]
+    }
+  ]
+}
