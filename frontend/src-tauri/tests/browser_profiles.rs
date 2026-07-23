@@ -76,7 +76,7 @@ fn creates_and_reopens_only_the_fixed_douyin_uuid_profile() {
         created.directory(),
         app_data
             .path
-            .join("browser-profiles")
+            .join("embedded-browser-profiles")
             .join("douyin")
             .join(created.profile_id())
     );
@@ -112,7 +112,7 @@ fn current_douyin_profile_is_created_once_and_reused_across_app_restarts() {
 
     assert_eq!(current.profile_id(), profile_id);
     assert_eq!(
-        fs::read_dir(app_data.path.join("browser-profiles/douyin"))
+        fs::read_dir(app_data.path.join("embedded-browser-profiles/douyin"))
             .expect("profile directory")
             .filter_map(Result::ok)
             .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
@@ -148,7 +148,7 @@ fn safe_removal_deletes_only_the_current_profile_and_clears_its_marker() {
     );
     assert!(!app_data
         .path
-        .join("browser-profiles/current-douyin-profile-v1")
+        .join("embedded-browser-profiles/current-douyin-profile-v1")
         .exists());
     let replacement = store.current_douyin_profile().expect("replacement current");
     assert_ne!(replacement.profile_id(), current_id);
@@ -175,7 +175,7 @@ fn safe_removal_resumes_one_staged_tombstone_after_a_crash() {
     assert!(!staged.exists());
     assert!(!app_data
         .path
-        .join("browser-profiles/current-douyin-profile-v1")
+        .join("embedded-browser-profiles/current-douyin-profile-v1")
         .exists());
 }
 
@@ -277,8 +277,8 @@ fn every_created_directory_is_private_and_symlink_components_are_rejected() {
     let profile = store.create_douyin_profile().expect("create profile");
     for directory in [
         app_data.path.clone(),
-        app_data.path.join("browser-profiles"),
-        app_data.path.join("browser-profiles/douyin"),
+        app_data.path.join("embedded-browser-profiles"),
+        app_data.path.join("embedded-browser-profiles/douyin"),
         profile.directory().to_path_buf(),
     ] {
         assert_eq!(
@@ -329,7 +329,9 @@ fn every_created_directory_is_private_and_symlink_components_are_rejected() {
     fs::create_dir(&outside).expect("outside directory");
     symlink(
         &outside,
-        child_symlink_app_data.path.join("browser-profiles"),
+        child_symlink_app_data
+            .path
+            .join("embedded-browser-profiles"),
     )
     .expect("symlink fixed child");
     assert_eq!(
@@ -338,8 +340,12 @@ fn every_created_directory_is_private_and_symlink_components_are_rejected() {
             .code(),
         BrowserProfileErrorCode::UnsafeDirectory
     );
-    fs::remove_file(child_symlink_app_data.path.join("browser-profiles"))
-        .expect("remove child symlink");
+    fs::remove_file(
+        child_symlink_app_data
+            .path
+            .join("embedded-browser-profiles"),
+    )
+    .expect("remove child symlink");
     fs::remove_dir(&outside).expect("remove outside fixture");
 }
 
@@ -377,18 +383,22 @@ fn windows_reparse_components_and_regular_file_children_fail_closed() {
     let fixed_child = TemporaryAppData::new();
     let outside = fixed_child.path.join("outside");
     fs::create_dir(&outside).expect("outside fixed child");
-    create_junction(&fixed_child.path.join("browser-profiles"), &outside);
+    create_junction(
+        &fixed_child.path.join("embedded-browser-profiles"),
+        &outside,
+    );
     assert_eq!(
         BrowserProfileStore::initialize(&fixed_child.path)
             .expect_err("junction fixed child must fail")
             .code(),
         BrowserProfileErrorCode::UnsafeDirectory
     );
-    fs::remove_dir(fixed_child.path.join("browser-profiles")).expect("remove fixed child junction");
+    fs::remove_dir(fixed_child.path.join("embedded-browser-profiles"))
+        .expect("remove fixed child junction");
 
     let regular_child = TemporaryAppData::new();
     fs::write(
-        regular_child.path.join("browser-profiles"),
+        regular_child.path.join("embedded-browser-profiles"),
         b"not a directory",
     )
     .expect("regular fixed child");
@@ -406,7 +416,7 @@ fn windows_reparse_components_and_regular_file_children_fail_closed() {
     fs::create_dir(&outside).expect("outside profile directory");
     let junction = profile_leaf
         .path
-        .join("browser-profiles/douyin")
+        .join("embedded-browser-profiles/douyin")
         .join(profile_id);
     create_junction(&junction, &outside);
     assert_eq!(
@@ -472,7 +482,7 @@ fn regular_files_leaf_symlinks_and_missing_profiles_fail_closed() {
 
     let invalid_root = TemporaryAppData::new();
     fs::write(
-        invalid_root.path.join("browser-profiles"),
+        invalid_root.path.join("embedded-browser-profiles"),
         b"not a directory",
     )
     .expect("regular fixed child");
@@ -499,7 +509,7 @@ fn regular_files_leaf_symlinks_and_missing_profiles_fail_closed() {
         &outside,
         app_data
             .path
-            .join("browser-profiles/douyin")
+            .join("embedded-browser-profiles/douyin")
             .join(profile_id),
     )
     .expect("profile leaf symlink");
@@ -513,7 +523,7 @@ fn regular_files_leaf_symlinks_and_missing_profiles_fail_closed() {
     fs::remove_file(
         app_data
             .path
-            .join("browser-profiles/douyin")
+            .join("embedded-browser-profiles/douyin")
             .join(profile_id),
     )
     .expect("remove profile symlink");
@@ -544,4 +554,46 @@ fn concurrent_profile_creation_is_atomic_and_never_reuses_an_identifier() {
     profile_ids.sort();
     profile_ids.dedup();
     assert_eq!(profile_ids.len(), 8);
+}
+
+/// EB-09：内置浏览器时代使用全新 Profile 根目录，绝不读取或迁移旧根。
+#[test]
+fn embedded_era_uses_a_fresh_root_and_never_reads_the_legacy_root() {
+    let app_data = TemporaryAppData::new();
+
+    // 预置一个"开发期旧根"，内含伪造的历史 Profile 与指针文件。
+    let legacy_root = app_data.path.join("browser-profiles");
+    fs::create_dir_all(legacy_root.join("douyin/legacy-profile")).expect("legacy tree");
+    fs::write(
+        legacy_root.join("current-douyin-profile-v1"),
+        b"legacy-profile",
+    )
+    .expect("legacy pointer");
+
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("initialize");
+    // 生产首启入口：current 不存在时创建全新 Profile。
+    let profile = store.current_douyin_profile().expect("fresh profile");
+
+    // 新 Profile 必须落在全新内置根目录，不落旧根。
+    assert!(profile
+        .directory()
+        .starts_with(app_data.path.join("embedded-browser-profiles/douyin")));
+    assert_ne!(profile.profile_id(), "legacy-profile");
+    // 登录后复用：第二次读取返回同一 Profile（稳定路径）。
+    let reused = store.current_douyin_profile().expect("reused profile");
+    assert_eq!(reused.profile_id(), profile.profile_id());
+    assert_eq!(reused.directory(), profile.directory());
+    // 旧根保持原样：既不被迁移也不被删除（开发清理规则另行处理）。
+    assert!(legacy_root.join("douyin/legacy-profile").is_dir());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let root_mode = fs::metadata(app_data.path.join("embedded-browser-profiles"))
+            .expect("root metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(root_mode, 0o700, "fresh root must be private");
+    }
 }
