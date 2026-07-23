@@ -20,6 +20,7 @@ telemetry and strips cloud credentials.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,9 +44,13 @@ FIXED_SESSION_KWARGS: Final = MappingProxyType(
 
 _FORBIDDEN_ENVIRONMENT_KEYS: Final = frozenset(
     {
-        "BROWSER_USE_CLOUD_API_KEY",
-        "BROWSER_USE_CLOUD_SYNC",
-        "ANONYMIZED_TELEMETRY",
+        "all_proxy",
+        "anonymized_telemetry",
+        "browser_use_cloud_api_key",
+        "browser_use_cloud_sync",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
     }
 )
 
@@ -56,6 +61,20 @@ class HarnessRejected(RuntimeError):
 
 def _reject(message: str) -> None:
     raise HarnessRejected(f"browser use harness rejected: {message}")
+
+
+def _is_native_executable(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if os.name != "nt":
+        return bool(path.stat().st_mode & 0o111)
+    if path.suffix.casefold() != ".exe":
+        return False
+    try:
+        with path.open("rb") as executable:
+            return executable.read(2) == b"MZ"
+    except OSError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -71,10 +90,7 @@ class IsolatedLaunchPlan:
             self.user_data_dir, Path
         ):
             _reject("paths must be Path values")
-        if (
-            not self.executable_path.is_file()
-            or not self.executable_path.stat().st_mode & 0o111
-        ):
+        if not _is_native_executable(self.executable_path):
             _reject("executable path is not a verified executable file")
         if self.user_data_dir.exists() and (
             not self.user_data_dir.is_dir() or any(self.user_data_dir.iterdir())
@@ -102,7 +118,7 @@ def harness_environment(base: dict[str, str]) -> dict[str, str]:
     environment = {
         key: value
         for key, value in base.items()
-        if key not in _FORBIDDEN_ENVIRONMENT_KEYS
+        if key.casefold() not in _FORBIDDEN_ENVIRONMENT_KEYS
     }
     environment["BROWSER_USE_CLOUD_SYNC"] = "false"
     environment["ANONYMIZED_TELEMETRY"] = "false"

@@ -185,6 +185,21 @@ WebView2/Edge 仅作为测试驱动承载 App WebView，不是运营浏览器发
 48 文件/307 项 React 测试、typecheck、lint、212 项契约、品牌扫描和专项 Roadmap
 self-test 全绿。Runner 清理签名 Executor、隔离 AppData、App 进程及两个临时端口。
 
+### 5.7 BU-02 单一 Chromium 双模式适配（✅ 2026-07-24 已完成）
+
+Windows 11 x86_64 实体机会话使用 EB-04 锁定归档现场暂存 308 文件 /
+435,574,347 bytes。同一发行物先由生产 Rust `EmbeddedBrowserAuthority` 完成 Manifest
+和逐文件摘要验证（4.60 秒），再由 Browser Use 0.13.6 完成两种真实模式：已验证
+`chrome.exe` + fresh Profile 独立启动，以及同一二进制随机 loopback CDP 接管；两次
+均命中本机随机端口 fixture，CDP 版本为 `Chrome/149.0.7827.55`。
+
+首轮 RED 修复 POSIX execute-bit 判据在 Windows 拒绝合法 PE 的问题，改为 Windows
+`.exe` + `MZ` 入口校验，完整 PE/AMD64/摘要继续由 Rust Authority 保证。第二轮 RED
+发现宿主 SOCKS 代理变量会让锁定环境因缺少可选 `socksio` 在启动前失败；harness 现在
+大小写无关地剥离 HTTP/HTTPS/ALL/NO_PROXY，同时继续关闭 Cloud、遥测并移除 Cloud
+凭据。Windows 外部 CDP 树按本次创建的 PID 定向清理；10 项 harness、Browser Use API
+self-test、ruff 与 212 项前端契约全部通过，无临时 Profile、端口或进程残留。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
