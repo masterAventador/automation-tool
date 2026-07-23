@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-catalog-release.v1",
+  "catalogVersion": "1.0.0",
+  "layout": {
+    "releaseRoot": ".local/motion-catalog-release",
+    "itemRoot": "items",
+    "dependencyRoot": "offline-deps"
+  },
+  "inputs": {
+    "offlineDependenciesLock": {
+      "path": "contracts/video/offline-motion-dependencies.v1.json",
+      "sha256": "f4eabb81e5f3b7e442e2ea7187275c8b9ea11189c3aad8dc95ae305c60631b86"
+    },
+    "motionCatalog": {
+      "path": "contracts/quality/motion-catalog.v1.json",
+      "sha256": "5f802746f53e93ac9bcb19cc6baf85ca9540fe7d783cff2045b6ff3e7b042349"
+    },
+    "motionCatalogRights": {
+      "path": "contracts/quality/motion-catalog-rights.v1.json",
+      "sha256": "983e1d3d3dfd6588c7c2f15c41c0f2d65f17a4aa2c076c6f2250e4c5f4c72f9b"
+    },
+    "motionAssetOverlay": {
+      "path": "contracts/quality/motion-asset-overlay.v1.json",
+      "sha256": "f2686293f9ea54f2e4441f0c93f2c716466958c5364e8b316e5472cc549a94bb"
+    }
+  },
+  "trademarkScan": {
+    "forms": {
+      "apple": [
+        "apple"
+      ],
+      "bild": [
+        "bild"
+      ],
+      "heygen": [
+        "heygen"
+      ],
+      "hyperframes": [
+        "hyperframes"
+      ],
+      "instagram": [
+        "instagram"
+      ],
+      "ios": [
+        "ios"
+      ],
+      "iphone": [
+        "iphone"
+      ],
+      "macbook": [
+        "macbook"
+      ],
+      "macos": [
+        "macos"
+      ],
+      "reddit": [
+        "reddit"
+      ],
+      "sf_pro": [
+        "sf pro",
+        "sf-pro",
+        "sfpro"
+      ],
+      "spotify": [
+        "spotify"
+      ],
+      "tiktok": [
+        "tiktok"
+      ],
+      "twitter": [
+        "twitter"
+      ],
+      "visual_studio": [
+        "visual studio"
+      ],
+      "vscode": [
+        "vscode",
+        "vs code"
+      ],
+      "youtube": [
+        "youtube"
+      ]
+    },
+    "technicalKeeplist": [
+      "-apple-system",
+      "Apple Color Emoji",
+      "__hyperframes"
+    ]
+  },
+  "generated": {
+    "fileCount": 310,
+    "aggregateSha256": "38160d1cc3c17821e6df57036583ac3b22c08dba6a3364396db888d59bd50a63"
+  }
+}
