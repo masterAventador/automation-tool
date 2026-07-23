@@ -11,6 +11,8 @@ use zeroize::Zeroizing;
 
 const FIRST_KEY: &str = "sk-vf05-first-private-key-1234567890";
 const SECOND_KEY: &str = "sk-vf05-second-private-key-0987654321";
+// 真实百炼工作空间 Key 的形状（含点号分段）；此处为合成值，不是真实凭据。
+const WORKSPACE_KEY: &str = "sk-ws-T.SYNTHETIC0.9Zz9.MEUCIQTestOnlyTestOnlyTestOnlyTestOnly-42";
 
 #[derive(Clone, Default)]
 struct MemoryStore {
@@ -173,6 +175,26 @@ fn purposes_are_separate_but_script_credential_can_be_explicitly_reused() {
     let public = serde_json::to_value(cleared).unwrap();
     assert_eq!(public["script"]["configured"], false);
     assert_eq!(public["videoCreative"]["configured"], true);
+}
+
+#[test]
+fn workspace_api_keys_with_dots_are_accepted_end_to_end() {
+    let script = MemoryStore::default();
+    let settings = service(
+        script,
+        MemoryStore::default(),
+        "https://dashscope.aliyuncs.com/compatible-mode/v1".to_owned(),
+    );
+    let snapshot = settings
+        .configure(&request("script", "glm-5.2", WORKSPACE_KEY))
+        .unwrap();
+    let public = serde_json::to_value(snapshot).unwrap();
+    assert_eq!(public["script"]["configured"], true);
+
+    let material_video = settings.material_video_script_model().unwrap();
+    assert_eq!(material_video.model_id(), "glm-5.2");
+    assert!(!format!("{material_video:?}").contains(WORKSPACE_KEY));
+    assert!(!format!("{settings:?}").contains(WORKSPACE_KEY));
 }
 
 #[test]

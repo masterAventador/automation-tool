@@ -458,11 +458,12 @@ fn purpose_snapshot(
 }
 
 fn is_valid_api_key(value: &str) -> bool {
+    // Real Bailian workspace keys carry dot-separated segments (sk-ws-X.....).
     (20..=MAX_API_KEY_LENGTH).contains(&value.len())
         && value.starts_with("sk-")
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 fn is_valid_base_url(value: &str) -> bool {

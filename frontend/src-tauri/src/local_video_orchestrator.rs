@@ -1172,11 +1172,12 @@ fn validate_directory_path(path: &Path) -> Result<(), VideoWorkerError> {
 }
 
 fn valid_model_api_key(value: &str) -> bool {
+    // Real Bailian workspace keys carry dot-separated segments (sk-ws-X.....).
     (20..=256).contains(&value.len())
         && value.starts_with("sk-")
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 fn valid_web_ui_path(value: &str) -> bool {
