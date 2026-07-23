@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""BU-02 acceptance: real dual-mode Browser Use control of the one Chromium.
+"""BU-02 acceptance: real dual-mode Browser Use control of one native Chromium.
 
-Runs on macOS arm64. The EB-03 digest-locked archive is staged with the
-production staging builder, then the production harness drives the staged
-binary in both closed modes against a local fixture page:
+The host-native digest-locked archive is staged with the production staging
+builder, then the production harness drives the staged binary in both closed
+modes against a local fixture page:
 
 1. isolated validation — `executable_path` + fresh temp profile;
 2. operations takeover — the same binary started externally with a random
@@ -18,7 +18,9 @@ ledger checks run first; no system browser is ever discovered.
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -28,6 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from build_embedded_browser_distribution import (  # noqa: E402
+    build_distribution_manifest,
+)
 from build_embedded_chromium_staging import (  # noqa: E402
     build_staging,
     load_staging_contract,
@@ -35,10 +40,16 @@ from build_embedded_chromium_staging import (  # noqa: E402
 )
 
 STAGING_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVE = (
+DEFAULT_MACOS_ARM64_ARCHIVE = (
     ROOT.parent.parent
     / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
 )
+DEFAULT_ARCHIVES = {
+    "macos-arm64": DEFAULT_MACOS_ARM64_ARCHIVE,
+    "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
+    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
+}
+MANIFEST_ARGS = ["--manifest-path", "frontend/src-tauri/Cargo.toml"]
 
 PROBE = r'''
 import asyncio
@@ -123,6 +134,10 @@ async def takeover_probe(url: str) -> dict:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            ),
+            start_new_session=os.name != "nt",
         )
         try:
             active = Path(profile) / "DevToolsActivePort"
@@ -150,7 +165,15 @@ async def takeover_probe(url: str) -> dict:
                 await session.stop()
             return {"title": title, "cdp_version": cdp_version, "random_port": port > 0}
         finally:
-            process.terminate()
+            if process.poll() is None and os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            elif process.poll() is None:
+                process.terminate()
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -192,11 +215,29 @@ def require_evidence() -> None:
             fail(f"BU-02 evidence is missing {marker}")
 
 
+def current_target_id() -> str:
+    system = platform.system()
+    machine = platform.machine().casefold()
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
+    if system == "Darwin" and machine in {"x86_64", "amd64"}:
+        return "macos-x86_64"
+    if system == "Windows" and machine in {"x86_64", "amd64"}:
+        return "windows-x86_64"
+    fail(f"unsupported BU-02 host: {system}/{machine}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--archive", type=Path)
+    return parser.parse_args()
+
+
 def main() -> int:
-    if platform.system() != "Darwin" or platform.machine() != "arm64":
-        fail("BU-02 acceptance must run on macOS arm64")
-    if not DEFAULT_ARCHIVE.is_file():
-        fail(f"locked archive not downloaded yet: {DEFAULT_ARCHIVE}")
+    target_id = current_target_id()
+    archive = (parse_args().archive or DEFAULT_ARCHIVES[target_id]).resolve()
+    if not archive.is_file():
+        fail(f"locked archive not downloaded yet: {archive}")
 
     deterministic = subprocess.run(
         [sys.executable, "scripts/test_browser_use_harness.py"], cwd=ROOT, check=False
@@ -205,26 +246,53 @@ def main() -> int:
         fail("deterministic harness tests failed")
 
     contract = load_staging_contract(STAGING_CONTRACT)
-    target = contract.targets["macos-arm64"]
-    digest = sha256_file(DEFAULT_ARCHIVE)
-    if digest != target.archive_sha256:
+    target = contract.targets[target_id]
+    digest = sha256_file(archive)
+    if not target.buildable or digest != target.archive_sha256:
         fail("archive digest does not match the staging contract lock")
 
     with tempfile.TemporaryDirectory(prefix="bu02-staging-") as directory:
-        staging = Path(directory) / "staging"
+        resources = Path(directory) / "resources"
+        resources.mkdir()
+        staging = resources / "embedded-browser"
         build_staging(
             contract=contract,
-            target_id="macos-arm64",
-            archive_path=DEFAULT_ARCHIVE,
+            target_id=target_id,
+            archive_path=archive,
             archive_sha256=digest,
             output=staging,
         )
+        build_distribution_manifest(staging=staging, target_id=target_id)
+        authority_target = (
+            "embedded_browser_authority_windows"
+            if target_id == "windows-x86_64"
+            else "embedded_browser_authority"
+        )
+        authority_environment = dict(os.environ)
+        authority_environment["EB07_REAL_RESOURCE_DIR"] = str(resources)
+        authority = subprocess.run(
+            [
+                "cargo",
+                "test",
+                *MANIFEST_ARGS,
+                "--test",
+                authority_target,
+                "--locked",
+                "--",
+                "--ignored",
+                "real_distribution_resolves_through_the_authority",
+            ],
+            cwd=ROOT,
+            env=authority_environment,
+            check=False,
+            timeout=300,
+        )
+        if authority.returncode != 0:
+            fail("Rust Authority rejected the distribution used by Browser Use")
         executable = staging / Path(*target.executable.split("/"))
         harness_dir = ROOT / "tools/browser-use-contract"
         sys.path.insert(0, str(harness_dir))
         from browser_use_harness import harness_environment
-
-        import os
 
         probe_environment = harness_environment(dict(os.environ))
         probe_environment.update(
@@ -261,7 +329,7 @@ def main() -> int:
     require_evidence()
     print(
         "BU-02 dual-mode acceptance passed: isolated executable_path + "
-        f"random loopback CDP takeover on {contract.browser_version}"
+        f"random loopback CDP takeover on {contract.browser_version} ({target_id})"
     )
     return 0
 

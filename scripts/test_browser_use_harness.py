@@ -44,9 +44,10 @@ class LaunchPlanTests(unittest.TestCase):
         self._directory = tempfile.TemporaryDirectory(prefix="bu02-test-")
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
-        self.executable = self.base / "chromium"
-        self.executable.write_bytes(b"#!/bin/sh\n")
-        self.executable.chmod(0o755)
+        self.executable = self.base / ("chromium.exe" if os.name == "nt" else "chromium")
+        self.executable.write_bytes(b"MZ" if os.name == "nt" else b"#!/bin/sh\n")
+        if os.name != "nt":
+            self.executable.chmod(0o755)
 
     def test_isolated_plan_requires_verified_executable(self) -> None:
         plan = IsolatedLaunchPlan(
@@ -62,8 +63,10 @@ class LaunchPlanTests(unittest.TestCase):
                 )
 
     def test_isolated_plan_rejects_non_executable_file(self) -> None:
-        plain = self.base / "plain"
+        plain = self.base / ("plain.exe" if os.name == "nt" else "plain")
         plain.write_bytes(b"data")
+        if os.name != "nt":
+            plain.chmod(0o600)
         with self.assertRaises(HarnessRejected):
             IsolatedLaunchPlan(executable_path=plain, user_data_dir=self.base / "p")
 
@@ -97,9 +100,10 @@ class SessionFactoryTests(unittest.TestCase):
         self._directory = tempfile.TemporaryDirectory(prefix="bu02-test-")
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
-        self.executable = self.base / "chromium"
-        self.executable.write_bytes(b"#!/bin/sh\n")
-        self.executable.chmod(0o755)
+        self.executable = self.base / ("chromium.exe" if os.name == "nt" else "chromium")
+        self.executable.write_bytes(b"MZ" if os.name == "nt" else b"#!/bin/sh\n")
+        if os.name != "nt":
+            self.executable.chmod(0o755)
 
     def test_isolated_session_uses_only_the_verified_path(self) -> None:
         plan = IsolatedLaunchPlan(
@@ -146,8 +150,15 @@ class HarnessEnvironmentTests(unittest.TestCase):
     def test_environment_strips_cloud_credentials(self) -> None:
         polluted = dict(os.environ)
         polluted["BROWSER_USE_CLOUD_API_KEY"] = "secret"
+        polluted["all_proxy"] = "socks://127.0.0.1:1080"
+        polluted["HTTP_PROXY"] = "http://127.0.0.1:8080"
+        polluted["https_proxy"] = "http://127.0.0.1:8080"
+        polluted["NO_PROXY"] = "127.0.0.1"
         environment = harness_environment(polluted)
         self.assertNotIn("BROWSER_USE_CLOUD_API_KEY", environment)
+        self.assertFalse(
+            any(key.casefold().endswith("proxy") for key in environment)
+        )
 
 
 if __name__ == "__main__":
