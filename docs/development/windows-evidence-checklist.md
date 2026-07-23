@@ -50,13 +50,20 @@ python scripts/run_im_05_acceptance.py
 通过后：IM-02、IM-03 的「Windows 原生候选」缺口闭合；IM-04 剩余缺口只剩完整
 WebUI 正式入口（IM-05 承接）。
 
-### 3. VF-04 媒体工具链（FFmpeg/ffprobe 供应链）
+### 3. VF-04 媒体工具链（✅ 2026-07-24 已完成）
 
-```bash
-scripts/build_video_media_toolchain.sh windows-x86_64 frontend/src-tauri/resources/media-toolchain
-python scripts/check_video_media_toolchain.py \
-  --candidate frontend/src-tauri/resources/media-toolchain --target windows-x86_64
-```
+已在 Windows 11 x86_64 的原生 MSYS2 MINGW64 环境从锁定源码构建 FFmpeg 8.1.2 和
+x264 `b35605ace3ddf7c1a5d67a2eb553f034aef41d55`。两个程序均为 PE `0x8664`，普通
+PowerShell 可直接启动且只导入系统 DLL；`ffmpeg.exe` SHA-256 为
+`35824b9ec97389446ac4a1f64a0088ff632d9c7e2dd3ec13f40978c3c31cfc95`，
+`ffprobe.exe` SHA-256 为
+`7b83be67453c09e7129a4d9806afa1e4713ab1f8b6e454ad2c5466e7628b0494`。
+
+`check_video_media_toolchain.py --candidate ... --target windows-x86_64` 已通过完整能力
+矩阵、两条真实 H.264 MP4 编码和 ffprobe 对账；self-test 与
+`run_vf_04_acceptance.py`（含 5 项 Rust fail-closed 测试）也全部通过。原生工具前缀、
+`.exe` make 目标、相对输出目录、缺失动态运行时和非管理员 symlink 夹具问题均已修复并
+建立回归约束。
 
 ### 4. BM-02 动效 Node Worker
 

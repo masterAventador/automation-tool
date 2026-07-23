@@ -22,6 +22,7 @@ case "$TARGET_ID" in
     EXE_SUFFIX=""
     X264_HOST_ARGS=()
     FFMPEG_ARCH_ARGS=(--arch=arm64)
+    FFMPEG_STATIC_LINK_FLAGS=()
     ;;
   windows-x86_64)
     [[ "${MSYSTEM:-}" == "MINGW64" ]] || {
@@ -29,8 +30,13 @@ case "$TARGET_ID" in
       exit 1
     }
     EXE_SUFFIX=".exe"
-    X264_HOST_ARGS=(--host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32-)
-    FFMPEG_ARCH_ARGS=(--arch=x86_64 --target-os=mingw32 --cross-prefix=x86_64-w64-mingw32-)
+    # This is a native MINGW64 build. Current MSYS2 exposes gcc/binutils
+    # without the x86_64-w64-mingw32-* prefix; declaring a cross prefix makes
+    # x264 call a non-existent x86_64-w64-mingw32-strings and fail its endian
+    # probe before compilation.
+    X264_HOST_ARGS=()
+    FFMPEG_ARCH_ARGS=(--arch=x86_64 --target-os=mingw32)
+    FFMPEG_STATIC_LINK_FLAGS=(-static -static-libgcc)
     ;;
   *)
     echo "unsupported target: $TARGET_ID" >&2
@@ -43,6 +49,7 @@ trap 'rm -rf -- "$BUILD_ROOT"' EXIT
 SOURCE_DIR="$BUILD_ROOT/source"
 PREFIX_DIR="$BUILD_ROOT/prefix"
 mkdir -p "$SOURCE_DIR" "$PREFIX_DIR" "$OUTPUT_DIR/bin" "$OUTPUT_DIR/source"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
 
 FFMPEG_ARCHIVE="$SOURCE_DIR/ffmpeg-${FFMPEG_VERSION}.tar.xz"
 X264_ARCHIVE="$SOURCE_DIR/x264-${X264_REVISION}.tar.gz"
@@ -97,7 +104,7 @@ pushd "$SOURCE_DIR/ffmpeg-${FFMPEG_VERSION}" >/dev/null
   --prefix="$PREFIX_DIR" \
   --pkg-config-flags=--static \
   --extra-cflags="-I$PREFIX_DIR/include" \
-  --extra-ldflags="-L$PREFIX_DIR/lib" \
+  --extra-ldflags="-L$PREFIX_DIR/lib ${FFMPEG_STATIC_LINK_FLAGS[*]}" \
   --enable-gpl \
   --enable-libx264 \
   --disable-autodetect \
@@ -108,7 +115,8 @@ pushd "$SOURCE_DIR/ffmpeg-${FFMPEG_VERSION}" >/dev/null
   --disable-network \
   --enable-small \
   "${FFMPEG_ARCH_ARGS[@]}"
-make -j"${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.logicalcpu 2>/dev/null || echo 2)}" ffmpeg ffprobe
+make -j"${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.logicalcpu 2>/dev/null || echo 2)}" \
+  "ffmpeg${EXE_SUFFIX}" "ffprobe${EXE_SUFFIX}"
 cp "ffmpeg${EXE_SUFFIX}" "$OUTPUT_DIR/bin/ffmpeg${EXE_SUFFIX}"
 cp "ffprobe${EXE_SUFFIX}" "$OUTPUT_DIR/bin/ffprobe${EXE_SUFFIX}"
 cp COPYING.GPLv3 "$OUTPUT_DIR/COPYING.GPLv3"

@@ -1,5 +1,6 @@
 //! Cross-platform ownership and forced cleanup for one spawned process tree.
 
+#[cfg(unix)]
 use std::io;
 use std::process::{Child, Command};
 

@@ -7,6 +7,8 @@ import argparse
 import copy
 import hashlib
 import json
+import os
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,6 +22,56 @@ SHA256_LENGTH = 64
 
 class ContractError(ValueError):
     pass
+
+
+def is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def create_test_directory_link(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return
+    except OSError as error:
+        if os.name != "nt" or getattr(error, "winerror", None) != 1314:
+            raise
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not link.is_dir():
+        raise ContractError("could not create the Windows junction rejection fixture")
+
+
+def plain_files_under(root: Path) -> set[Path]:
+    files: set[Path] = set()
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError as error:
+            raise ContractError("candidate directory cannot be enumerated") from error
+        for entry in entries:
+            path = Path(entry.path)
+            if is_link_or_reparse(path):
+                raise ContractError("candidate contains a link or reparse point")
+            if entry.is_dir(follow_symlinks=False):
+                pending.append(path)
+            elif entry.is_file(follow_symlinks=False):
+                files.add(path)
+            else:
+                raise ContractError("candidate contains a special file")
+    return files
 
 
 def exact_keys(value: dict[str, Any], expected: set[str], where: str) -> None:
@@ -326,7 +378,7 @@ def compatibility_smoke(ffmpeg: Path, ffprobe: Path) -> None:
 
 
 def validate_candidate(root: Path, target_id: str, document: dict[str, Any]) -> None:
-    if root.is_symlink() or not root.is_dir():
+    if is_link_or_reparse(root) or not root.is_dir():
         raise ContractError("candidate root must be a real directory")
     target = next(
         (item for item in document["targets"] if item["id"] == target_id), None
@@ -346,7 +398,7 @@ def validate_candidate(root: Path, target_id: str, document: dict[str, Any]) -> 
         root / "source" / "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
         manifest_path,
     ):
-        if path.is_symlink() or not path.is_file():
+        if is_link_or_reparse(path) or not path.is_file():
             raise ContractError(
                 f"candidate file missing or linked: {path.relative_to(root)}"
             )
@@ -380,10 +432,11 @@ def validate_candidate(root: Path, target_id: str, document: dict[str, Any]) -> 
         "GPL-3.0-or-later",
     ):
         raise ContractError("runtime manifest identity mismatch")
+    candidate_files = plain_files_under(root)
     expected_paths = {
         path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path != manifest_path and not path.is_symlink()
+        for path in candidate_files
+        if path != manifest_path
     }
     manifest_paths: set[str] = set()
     for entry in manifest["files"]:
@@ -396,7 +449,7 @@ def validate_candidate(root: Path, target_id: str, document: dict[str, Any]) -> 
         ):
             raise ContractError("runtime manifest path is unsafe or duplicated")
         path = root / relative
-        if path.is_symlink() or not path.is_file():
+        if is_link_or_reparse(path) or not path.is_file():
             raise ContractError("runtime manifest file is missing or linked")
         if path.stat().st_size != entry["size"] or sha256_file(path) != entry["sha256"]:
             raise ContractError("runtime manifest file identity mismatch")
@@ -474,13 +527,16 @@ def self_test(document: dict[str, Any]) -> None:
         prefix="automation-tool-vf04-selftest-"
     ) as directory:
         linked = Path(directory) / "linked"
-        linked.symlink_to(Path(directory), target_is_directory=True)
+        create_test_directory_link(linked, Path(directory))
         try:
             validate_candidate(linked, "macos-arm64", document)
-        except ContractError:
-            pass
+        except ContractError as error:
+            if str(error) != "candidate root must be a real directory":
+                raise
         else:
             raise ContractError("self-test accepted a linked candidate root")
+        finally:
+            linked.rmdir()
 
 
 def parse_args() -> argparse.Namespace:
@@ -500,7 +556,7 @@ def main() -> int:
     if bool(args.candidate) != bool(args.target):
         raise SystemExit("--candidate and --target must be provided together")
     if args.candidate:
-        validate_candidate(args.candidate.resolve(), args.target, document)
+        validate_candidate(args.candidate.absolute(), args.target, document)
     print("video media toolchain contract is valid")
     return 0
 

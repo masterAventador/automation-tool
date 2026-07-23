@@ -366,12 +366,12 @@ fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-fn assert_executable(path: &Path, target_id: &str) -> Result<(), VideoMediaToolchainError> {
+fn assert_executable(_path: &Path, target_id: &str) -> Result<(), VideoMediaToolchainError> {
     if target_id == "macos-arm64" {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if fs::metadata(path)?.permissions().mode() & 0o111 == 0 {
+            if fs::metadata(_path)?.permissions().mode() & 0o111 == 0 {
                 return Err(VideoMediaToolchainError::Invalid(
                     "media binary is not executable",
                 ));
