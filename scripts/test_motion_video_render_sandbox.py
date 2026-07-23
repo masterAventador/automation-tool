@@ -22,6 +22,8 @@ import hashlib
 import hmac
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -45,8 +47,10 @@ from test_motion_video_render_adapter import (
     read_invocations,
     render_browser_document,
     render_job_directories,
+    windows_process_exists,
     write_decoy_browser,
     write_fake_browser,
+    write_windows_cdp_browser,
 )
 
 
@@ -106,6 +110,142 @@ def make_workspace(base: Path) -> Path:
     return workspace
 
 
+def create_directory_link(link: Path, target: Path) -> None:
+    if os.name != "nt":
+        link.symlink_to(target, target_is_directory=True)
+        return
+    completed = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise AssertionError("failed to create Windows directory junction")
+
+
+def write_boundary_fake(directory: Path) -> tuple[Path, Path]:
+    if os.name == "nt":
+        return write_windows_sandbox_fake(directory, "hang")
+    return write_fake_browser(directory)
+
+
+def write_windows_sandbox_fake(directory: Path, mode: str) -> tuple[Path, Path]:
+    """Compile a PE browser that hangs or crosses a Windows resource budget."""
+    if os.name != "nt":
+        raise AssertionError("Windows sandbox fake requested on another platform")
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        raise AssertionError("rustc is unavailable")
+    if mode not in {"hang", "burn-cpu", "allocate-memory"}:
+        raise AssertionError("unknown Windows sandbox fake mode")
+    directory.mkdir(parents=True, exist_ok=True)
+    executable = directory / "fake-browser.exe"
+    record = directory / "fake-record.log"
+    source = directory / "fake-browser.rs"
+    response = json.dumps(
+        {"id": 1, "result": {"product": f"Chrome/{LOCKED_MAJOR}.0.7827.55"}}
+    ).encode() + b"\0"
+    source.write_text(
+        f"""
+use std::{{
+    env, ffi::c_void, fs, process::{{self, Command}}, thread, time::Duration
+}};
+
+extern "C" {{
+    fn _read(fd: i32, buffer: *mut c_void, count: u32) -> i32;
+    fn _write(fd: i32, buffer: *const c_void, count: u32) -> i32;
+}}
+
+fn read_message() {{
+    let mut byte = [0_u8; 1];
+    loop {{
+        let count = unsafe {{ _read(3, byte.as_mut_ptr().cast(), 1) }};
+        if count != 1 {{
+            process::exit(2);
+        }}
+        if byte[0] == 0 {{
+            return;
+        }}
+    }}
+}}
+
+fn write_message(message: &[u8]) {{
+    let mut offset = 0;
+    while offset < message.len() {{
+        let count = unsafe {{
+            _write(
+                4,
+                message[offset..].as_ptr().cast(),
+                (message.len() - offset) as u32,
+            )
+        }};
+        if count <= 0 {{
+            process::exit(3);
+        }}
+        offset += count as usize;
+    }}
+}}
+
+fn main() {{
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments.iter().any(|value| value == "--helper-child") {{
+        loop {{ thread::sleep(Duration::from_secs(1)); }}
+    }}
+    let mode = {json.dumps(mode)};
+    let child = if mode == "hang" {{
+        Some(
+            Command::new(env::current_exe().unwrap())
+                .arg("--helper-child")
+                .spawn()
+                .unwrap(),
+        )
+    }} else {{
+        None
+    }};
+    let mut invocation = format!("INVOCATION pid={{}}\\n", process::id());
+    for argument in arguments {{
+        invocation.push_str(&format!("ARG {{argument}}\\n"));
+    }}
+    for (name, value) in env::vars() {{
+        invocation.push_str(&format!("ENV {{name}}={{value}}\\n"));
+    }}
+    if let Some(child) = child.as_ref() {{
+        invocation.push_str(&format!("CHILD {{}}\\n", child.id()));
+    }}
+    invocation.push_str("END\\n");
+    fs::write({json.dumps(str(record))}, invocation).unwrap();
+    if mode == "hang" {{
+        loop {{ thread::sleep(Duration::from_secs(1)); }}
+    }}
+    read_message();
+    write_message(&{list(response)!r});
+    if mode == "burn-cpu" {{
+        loop {{ std::hint::spin_loop(); }}
+    }}
+    let mut allocation = vec![0_u8; 384 * 1024 * 1024];
+    for index in (0..allocation.len()).step_by(4096) {{
+        allocation[index] = 1;
+    }}
+    loop {{
+        std::hint::black_box(&allocation);
+        thread::sleep(Duration::from_secs(1));
+    }}
+}}
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [rustc, str(source), "-o", str(executable)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return executable, record
+
+
 def write_sandbox_fake(directory: Path, mode: str) -> tuple[Path, Path]:
     """A recording fake browser for resource-budget and hang scenarios.
 
@@ -113,6 +253,8 @@ def write_sandbox_fake(directory: Path, mode: str) -> tuple[Path, Path]:
     answer (``hang``), or answers ``Browser.getVersion`` and then burns CPU
     (``burn-cpu``) or holds a large allocation (``allocate-memory``).
     """
+    if os.name == "nt":
+        return write_windows_sandbox_fake(directory, mode)
     directory.mkdir(parents=True, exist_ok=True)
     record = directory / "fake-record.log"
     product = json.dumps({"id": 1, "result": {"product": f"Chrome/{LOCKED_MAJOR}.0.7827.55"}})
@@ -179,6 +321,11 @@ def assert_workspace_untouched(workspace: Path) -> None:
 def wait_for_process_exit(pid: int) -> None:
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
+        if os.name == "nt":
+            if not windows_process_exists(pid):
+                return
+            time.sleep(0.05)
+            continue
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
@@ -188,8 +335,15 @@ def wait_for_process_exit(pid: int) -> None:
     raise AssertionError("sandbox browser process survived the kill path")
 
 
+def windows_recorded_child(record: Path) -> int:
+    for line in record.read_text(encoding="utf-8").splitlines():
+        if line.startswith("CHILD "):
+            return int(line.removeprefix("CHILD "))
+    raise AssertionError("Windows sandbox fake did not record its child")
+
+
 def test_sandbox_rejects_invalid_spec(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(assets / "valid")
+    executable, record = write_boundary_fake(assets / "valid")
     workspace = make_workspace(assets)
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
@@ -237,7 +391,7 @@ def test_sandbox_rejects_invalid_spec(assets: Path, decoy: Path) -> None:
 
 
 def test_sandbox_rejects_workspace_violations(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(assets / "valid")
+    executable, record = write_boundary_fake(assets / "valid")
     outside = assets / "outside-secret.css"
     outside.write_text("secret{}")
 
@@ -262,7 +416,7 @@ def test_sandbox_rejects_workspace_violations(assets: Path, decoy: Path) -> None
 
     def symlinked_workspace(workspace: Path) -> dict[str, object]:
         link = workspace.parent / "workspace-link"
-        link.symlink_to(workspace)
+        create_directory_link(link, workspace)
         return sandbox_spec(link)
 
     def missing_entry(workspace: Path) -> dict[str, object]:
@@ -270,6 +424,12 @@ def test_sandbox_rejects_workspace_violations(assets: Path, decoy: Path) -> None
         return sandbox_spec(workspace)
 
     def symlinked_entry(workspace: Path) -> dict[str, object]:
+        if os.name == "nt":
+            outside_directory = workspace.parent / "outside-entry"
+            outside_directory.mkdir()
+            (outside_directory / "entry.html").write_text("secret")
+            create_directory_link(workspace / "entry-link", outside_directory)
+            return sandbox_spec(workspace, entryHtml="entry-link/entry.html")
         (workspace / "entry.html").unlink()
         (workspace / "entry.html").symlink_to(outside)
         return sandbox_spec(workspace)
@@ -278,6 +438,12 @@ def test_sandbox_rejects_workspace_violations(assets: Path, decoy: Path) -> None
         return sandbox_spec(workspace, allowedAssets=["assets/missing.css"])
 
     def escaping_asset(workspace: Path) -> dict[str, object]:
+        if os.name == "nt":
+            outside_directory = workspace.parent / "outside-asset"
+            outside_directory.mkdir()
+            (outside_directory / "escape.css").write_text("secret{}")
+            create_directory_link(workspace / "asset-link", outside_directory)
+            return sandbox_spec(workspace, allowedAssets=["asset-link/escape.css"])
         (workspace / "assets/escape.css").symlink_to(outside)
         return sandbox_spec(workspace, allowedAssets=["assets/escape.css"])
 
@@ -316,7 +482,7 @@ def test_sandbox_null_render_browser_refuses_without_discovery(assets: Path, dec
 
 
 def test_sandbox_forged_or_tampered_command_is_ignored(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(assets / "forged")
+    executable, record = write_boundary_fake(assets / "forged")
     workspace = make_workspace(assets)
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
@@ -349,9 +515,14 @@ def test_sandbox_forged_or_tampered_command_is_ignored(assets: Path, decoy: Path
 
 
 def test_sandbox_rejects_chromium_major_mismatch(assets: Path, decoy: Path) -> None:
-    executable, record = write_fake_browser(
-        assets / "mismatch", version_output="Google Chrome for Testing 150.0.1.1"
-    )
+    if os.name == "nt":
+        executable, record = write_windows_cdp_browser(
+            assets / "mismatch", product="Chrome/150.0.1.1"
+        )
+    else:
+        executable, record = write_fake_browser(
+            assets / "mismatch", version_output="Google Chrome for Testing 150.0.1.1"
+        )
     workspace = make_workspace(assets)
     session = WorkerSession(
         bootstrap_document(str(assets), render_browser_document(executable)),
@@ -364,8 +535,12 @@ def test_sandbox_rejects_chromium_major_mismatch(assets: Path, decoy: Path) -> N
     code, _ = session.finish()
     assert code == 0
     invocations = read_invocations(record)
-    assert len(invocations) == 1, "mismatched browser must not be launched headless"
-    assert invocations[0]["arguments"] == ["--version"]
+    expected_invocations = 1
+    assert len(invocations) == expected_invocations
+    if os.name == "nt":
+        assert "--remote-debugging-pipe" in invocations[0]["arguments"]
+    else:
+        assert invocations[0]["arguments"] == ["--version"]
     assert not render_job_directories(JOB_ID)
     assert_workspace_untouched(workspace)
 
@@ -388,9 +563,11 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
     code, _ = session.finish()
     assert code == 0
     invocations = read_invocations(record)
-    assert len(invocations) == 2, invocations
-    assert invocations[0]["arguments"] == ["--version"]
-    headless = invocations[1]
+    expected_invocations = 1 if os.name == "nt" else 2
+    assert len(invocations) == expected_invocations, invocations
+    if os.name != "nt":
+        assert invocations[0]["arguments"] == ["--version"]
+    headless = invocations[-1]
     arguments = headless["arguments"]
     for required in (
         "--headless",
@@ -417,6 +594,8 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
         assert name not in environment, f"{name} leaked into the sandbox browser"
     assert RENDER_JOB_PREFIX + JOB_ID in environment.get("HOME", ""), environment.get("HOME")
     wait_for_process_exit(headless["pid"])
+    if os.name == "nt":
+        wait_for_process_exit(windows_recorded_child(record))
     assert not render_job_directories(JOB_ID)
     assert_workspace_untouched(workspace)
 

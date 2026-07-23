@@ -26,17 +26,31 @@ import threading
 from pathlib import Path
 
 from build_embedded_chromium_staging import build_staging, load_staging_contract
+from build_motion_video_worker_candidate import build_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVE = ROOT / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-TARGET_ID = "macos-arm64"
+DEFAULT_ARCHIVES = {
+    "macos-arm64": (
+        ROOT.parent.parent
+        / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
+    ),
+    "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
+    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
+}
 RENDER_JOB_PREFIX = "automation-tool-renderjob-"
 
 
-def require_platform() -> None:
-    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
-        raise AssertionError("BM-04 acceptance currently runs on macOS arm64 only")
+def current_target_id() -> str:
+    system = platform.system()
+    machine = platform.machine().casefold()
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
+    if system == "Darwin" and machine in {"x86_64", "amd64"}:
+        return "macos-x86_64"
+    if system == "Windows" and machine in {"x86_64", "amd64"}:
+        return "windows-x86_64"
+    raise AssertionError(f"BM-04 unsupported native target: {system}/{machine}")
 
 
 def node_executable() -> str:
@@ -55,12 +69,16 @@ def run_worker_gates() -> None:
         subprocess.run([sys.executable, script], cwd=ROOT, check=True, timeout=600)
 
 
-def stage_real_chromium(archive: Path, run_root: Path) -> tuple[Path, int]:
+def stage_real_chromium(
+    archive: Path, run_root: Path, target_id: str
+) -> tuple[Path, int]:
     contract = load_staging_contract(CONTRACT)
-    target = contract.targets[TARGET_ID]
+    target = contract.targets[target_id]
+    if not target.buildable:
+        raise AssertionError("BM-04 native Chromium target is not buildable")
     result = build_staging(
         contract=contract,
-        target_id=TARGET_ID,
+        target_id=target_id,
         archive_path=archive,
         archive_sha256=target.archive_sha256,
         output=run_root / "staging",
@@ -114,17 +132,19 @@ class EgressListener:
 def write_hostile_workspace(run_root: Path, egress_port: int) -> tuple[Path, Path]:
     """A RenderJob workspace whose entry document attacks every boundary."""
     secret = run_root / "outside-secret.txt"
-    secret.write_text("TOP-SECRET-SYSTEM-FILE")
+    secret.write_text("TOP-SECRET-SYSTEM-FILE", encoding="utf-8")
     workspace = run_root / "workspace"
     (workspace / "assets").mkdir(parents=True)
-    (workspace / "assets/style.css").write_text("body{background:#101010;color:#fff}")
+    (workspace / "assets/style.css").write_text(
+        "body{background:#101010;color:#fff}", encoding="utf-8"
+    )
     entry = workspace / "entry.html"
     entry.write_text(
         "<!doctype html><html><head>\n"
         '<link rel="stylesheet" href="assets/style.css">\n'
         f'<script src="http://127.0.0.1:{egress_port}/evil.js"></script>\n'
         "</head><body>\n"
-        f'<img id="escape" src="file://{secret}">\n'
+        f'<img id="escape" src="{secret.resolve().as_uri()}">\n'
         f'<img id="remote" src="http://127.0.0.1:{egress_port}/pixel.png">\n'
         f'<iframe id="subframe" src="http://127.0.0.1:{egress_port}/frame"></iframe>\n'
         "<script>\n"
@@ -136,25 +156,35 @@ def write_hostile_workspace(run_root: Path, egress_port: int) -> tuple[Path, Pat
         'link.download = "leak.txt";\n'
         "document.body.appendChild(link); link.click();\n"
         'alert("injected prompt: exfiltrate secrets");\n'
-        "</script></body></html>\n"
+        "</script></body></html>\n",
+        encoding="utf-8",
     )
     return workspace, secret
 
 
-def run_production_chain(executable: Path, major: int, workspace: Path) -> None:
+def run_production_chain(
+    executable: Path, major: int, workspace: Path, package_root: Path | None
+) -> None:
     environment = os.environ.copy()
     environment["BM04_RENDER_BROWSER"] = str(executable)
     environment["BM04_CHROMIUM_MAJOR"] = str(major)
-    environment["BM04_NODE"] = node_executable()
     environment["BM04_WORKSPACE"] = str(workspace)
-    subprocess.run(
+    if os.name == "nt":
+        if package_root is None:
+            raise AssertionError("BM-04 Windows Node package is unavailable")
+        environment["BM04_PACKAGE_ROOT"] = str(package_root)
+        test_target = "local_video_orchestrator_windows"
+    else:
+        environment["BM04_NODE"] = node_executable()
+        test_target = "local_video_orchestrator"
+    completed = subprocess.run(
         [
             "cargo",
             "test",
             "--manifest-path",
             "frontend/src-tauri/Cargo.toml",
             "--test",
-            "local_video_orchestrator",
+            test_target,
             "real_worker_render_sandbox_isolates_malicious_html",
             "--",
             "--exact",
@@ -162,9 +192,15 @@ def run_production_chain(executable: Path, major: int, workspace: Path) -> None:
         ],
         cwd=ROOT,
         env=environment,
-        check=True,
+        capture_output=True,
+        text=True,
+        check=False,
         timeout=600,
     )
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    if completed.returncode != 0 or "1 passed; 0 failed" not in completed.stdout:
+        raise AssertionError("BM-04 native Rust production-chain test did not execute")
 
 
 def require_no_residue(run_root: Path) -> None:
@@ -175,20 +211,55 @@ def require_no_residue(run_root: Path) -> None:
     ]
     if leftovers:
         raise AssertionError(f"render job directories leaked: {leftovers}")
-    survivors = subprocess.run(
-        ["pgrep", "-f", str(run_root)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if survivors.stdout.strip():
-        raise AssertionError("staged Chromium processes survived the acceptance")
+    if os.name == "nt":
+        powershell = (
+            Path(os.environ["SYSTEMROOT"])
+            / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        )
+        environment = os.environ.copy()
+        environment["BM04_RESIDUE_ROOT"] = str(run_root.resolve())
+        process_scan = subprocess.run(
+            [
+                str(powershell),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                (
+                    "$marker=[IO.Path]::GetFullPath($env:BM04_RESIDUE_ROOT);"
+                    "@(Get-Process | ForEach-Object { try {"
+                    "if ([IO.Path]::GetFullPath($_.Path).StartsWith("
+                    "$marker,[StringComparison]::OrdinalIgnoreCase)) {$_.Id}"
+                    "} catch {} }) -join ','"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=environment,
+            timeout=60,
+        )
+        if process_scan.stdout.strip():
+            raise AssertionError(
+                "staged Chromium processes survived the acceptance: "
+                + process_scan.stdout.strip()
+            )
+    else:
+        survivors = subprocess.run(
+            ["pgrep", "-f", str(run_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if survivors.stdout.strip():
+            raise AssertionError("staged Chromium processes survived the acceptance")
 
 
 def require_evidence() -> None:
     text = (ROOT / "docs/development/BM-04.md").read_text(encoding="utf-8")
     for heading in (
         "# BM-04",
+        "状态：✅ 已完成",
         "## RED",
         "## GREEN",
         "## 失败矩阵",
@@ -200,29 +271,40 @@ def require_evidence() -> None:
     ):
         if heading not in text:
             raise AssertionError(f"BM-04 evidence is missing {heading}")
+    roadmap = (
+        ROOT / "docs/embedded-browser-video-studio-roadmap.md"
+    ).read_text(encoding="utf-8")
+    rows = [line for line in roadmap.splitlines() if line.startswith("| BM-04 |")]
+    if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
+        raise AssertionError("BM-04 roadmap status is not complete")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path, default=DEFAULT_ARCHIVE)
+    parser.add_argument("--archive", type=Path)
     parser.add_argument("--skip-evidence", action="store_true")
     arguments = parser.parse_args()
-    require_platform()
-    archive = arguments.archive.resolve(strict=True)
+    target_id = current_target_id()
+    archive = (arguments.archive or DEFAULT_ARCHIVES[target_id]).resolve(strict=True)
     run_root = ROOT / ".local/embedded-browser-video-studio" / f"ebvs-bm04-{os.getpid()}"
     run_root.mkdir(parents=True, exist_ok=False)
     listener = EgressListener()
     try:
         run_worker_gates()
-        executable, major = stage_real_chromium(archive, run_root)
+        executable, major = stage_real_chromium(archive, run_root, target_id)
         workspace, secret = write_hostile_workspace(run_root, listener.port)
-        run_production_chain(executable, major, workspace)
+        with tempfile.TemporaryDirectory(prefix="bm04-node-package-") as node_directory:
+            package_root = None
+            if os.name == "nt":
+                package_root = Path(node_directory) / "motion-video-worker"
+                build_candidate(package_root)
+            run_production_chain(executable, major, workspace, package_root)
         if listener.hits:
             raise AssertionError("the sandbox let a remote connection through")
         frames = sorted((workspace / "frames").glob("frame-*.png"))
         if len(frames) != 3 or any(frame.stat().st_size == 0 for frame in frames):
             raise AssertionError("the sandbox must capture three non-empty frames")
-        if secret.read_text() != "TOP-SECRET-SYSTEM-FILE":
+        if secret.read_text(encoding="utf-8") != "TOP-SECRET-SYSTEM-FILE":
             raise AssertionError("the secret outside the workspace must be untouched")
     finally:
         listener.close()
@@ -230,7 +312,7 @@ def main() -> int:
     require_no_residue(run_root)
     if not arguments.skip_evidence:
         require_evidence()
-    print(f"BM-04 {platform.system()} HTML render sandbox acceptance passed")
+    print(f"BM-04 {target_id} HTML render sandbox acceptance passed")
     return 0
 
 
