@@ -1,0 +1,21 @@
+{
+  "version": "motion-style-presets.v1",
+  "upstreamVersion": "v0.7.68",
+  "upstreamCommit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+  "publicPresetCount": 12,
+  "internalPresetsNotExposed": ["code-editorial"],
+  "presets": [
+    {"id": "biennale-yellow", "displayName": "展览黄", "summary": "纸张质感、深蓝文字和黄色光晕，适合文化与品牌叙事。"},
+    {"id": "blockframe", "displayName": "粗线积木", "summary": "粗黑边、硬阴影和糖果色，适合醒目活泼的宣传。"},
+    {"id": "blue-professional", "displayName": "专业蓝", "summary": "克制留白与钴蓝重点，适合商业汇报和数据内容。"},
+    {"id": "bold-poster", "displayName": "醒目海报", "summary": "复古杂志字体与红色重点，适合有力量的观点表达。"},
+    {"id": "broadside", "displayName": "宣言大字报", "summary": "黑橙双色和超大标题，适合口号、发布和强节奏内容。"},
+    {"id": "capsule", "displayName": "糖果胶囊", "summary": "圆润胶囊容器和柔和糖果色，适合亲切轻松的内容。"},
+    {"id": "cartesian", "displayName": "留白画册", "summary": "细线网格与大量留白，适合安静、精致的编辑风格。"},
+    {"id": "cobalt-grid", "displayName": "钴蓝网格", "summary": "米色纸张与钴蓝网格，适合结构清楚的知识和产品内容。"},
+    {"id": "coral", "displayName": "珊瑚杂志", "summary": "珊瑚红、黑和暖白硬切构图，适合大胆的杂志式宣传。"},
+    {"id": "creative-mode", "displayName": "创意拼贴", "summary": "硬边框、几何色块和拼贴感，适合年轻、有冲击力的内容。"},
+    {"id": "daisy-days", "displayName": "雏菊乐园", "summary": "花朵、贴纸和明亮柔色，适合温暖可爱的轻内容。"},
+    {"id": "editorial-forest", "displayName": "森林刊物", "summary": "森林绿、粉色与衬线标题，适合自然、生活和编辑叙事。"}
+  ]
+}
