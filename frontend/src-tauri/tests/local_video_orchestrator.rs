@@ -168,6 +168,38 @@ fn process_exists(process_id: u32) -> bool {
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
+#[test]
+fn bundled_node_candidate_uses_packaged_runtime_and_protocol() {
+    let Some(package_root) = std::env::var_os("BM02_PACKAGE_ROOT").map(PathBuf::from) else {
+        return;
+    };
+    let asset_root = package_root.join("acceptance-assets");
+    fs::create_dir(&asset_root).expect("asset root");
+    let launch = VideoWorkerLaunch::bundled_node(
+        &package_root,
+        asset_root,
+        VideoWorkerRestartPolicy::new(0, Duration::ZERO).expect("restart policy"),
+    )
+    .expect("bundled Node launch");
+    let orchestrator = orchestrator();
+    let status = orchestrator
+        .start(launch)
+        .expect("start bundled Node Worker");
+    assert_eq!(status.state(), VideoWorkerState::Running);
+    assert_eq!(status.worker_version(), Some("0.7.68"));
+    assert_eq!(status.host(), Some("127.0.0.1"));
+    orchestrator.health(VideoWorkerKind::Node).expect("health");
+    orchestrator
+        .cancel(
+            VideoWorkerKind::Node,
+            Uuid::parse_str("92cb8938-b8ad-4a32-8c32-f359beb20919").expect("UUID v4"),
+        )
+        .expect("authenticated cancellation");
+    let process_id = status.process_id().expect("process id");
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+    wait_until_stopped(process_id);
+}
+
 fn crashing_worker(counter: &Path, crash_limit: &str) -> String {
     let counter_json = serde_json::to_string(&counter.to_string_lossy()).expect("counter path");
     HEALTHY_WORKER

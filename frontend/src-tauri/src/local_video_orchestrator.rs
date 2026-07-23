@@ -7,6 +7,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -36,6 +37,7 @@ const COMMAND_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.video-worker-comm
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const BAILIAN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+pub const MOTION_VIDEO_WORKER_VERSION: &str = "0.7.68";
 
 pub const DEFAULT_VIDEO_WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -130,6 +132,8 @@ impl VideoWorkerRestartPolicy {
 pub struct VideoWorkerLaunch {
     kind: VideoWorkerKind,
     executable_path: PathBuf,
+    arguments: Vec<OsString>,
+    isolated_environment: bool,
     asset_root: PathBuf,
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
@@ -195,12 +199,39 @@ impl VideoWorkerLaunch {
         Ok(Self {
             kind,
             executable_path,
+            arguments: Vec::new(),
+            isolated_environment: false,
             asset_root,
             expected_version,
             restart_policy,
             script_model: None,
             web_ui: false,
         })
+    }
+
+    pub fn bundled_node(
+        package_root: &Path,
+        asset_root: PathBuf,
+        restart_policy: VideoWorkerRestartPolicy,
+    ) -> Result<Self, VideoWorkerError> {
+        validate_directory_path(package_root)?;
+        #[cfg(windows)]
+        let executable_path = package_root.join("runtime/node.exe");
+        #[cfg(not(windows))]
+        let executable_path = package_root.join("runtime/node");
+        let entrypoint = package_root.join("app/worker.mjs");
+        validate_executable_path(&executable_path)?;
+        validate_regular_file_path(&entrypoint)?;
+        let mut launch = Self::new(
+            VideoWorkerKind::Node,
+            executable_path,
+            asset_root,
+            MOTION_VIDEO_WORKER_VERSION.to_owned(),
+            restart_policy,
+        )?;
+        launch.arguments.push(entrypoint.into_os_string());
+        launch.isolated_environment = true;
+        Ok(launch)
     }
 
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
@@ -689,7 +720,17 @@ fn spawn_worker(
 ) -> Result<RunningVideoWorker, VideoWorkerError> {
     let token = VideoWorkerSessionToken::generate()?;
     let mut command = Command::new(&launch.executable_path);
+    if launch.isolated_environment {
+        command.env_clear();
+        #[cfg(windows)]
+        for name in ["SystemRoot", "WINDIR"] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+    }
     command
+        .args(&launch.arguments)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1074,6 +1115,32 @@ fn validate_executable_path(path: &Path) -> Result<(), VideoWorkerError> {
         if metadata.permissions().mode() & 0o111 == 0 {
             return Err(configuration_invalid());
         }
+    }
+    Ok(())
+}
+
+fn validate_regular_file_path(path: &Path) -> Result<(), VideoWorkerError> {
+    if !path.is_absolute() || path.as_os_str().len() > MAX_PATH_BYTES {
+        return Err(configuration_invalid());
+    }
+    for ancestor in path.ancestors() {
+        let metadata = fs::symlink_metadata(ancestor).map_err(|_| configuration_invalid())?;
+        #[cfg(windows)]
+        let windows_file_attributes = {
+            use std::os::windows::fs::MetadataExt;
+            Some(metadata.file_attributes())
+        };
+        #[cfg(not(windows))]
+        let windows_file_attributes = None;
+        if unsafe_path_component(metadata.file_type().is_symlink(), windows_file_attributes) {
+            return Err(configuration_invalid());
+        }
+    }
+    if !fs::metadata(path)
+        .map_err(|_| configuration_invalid())?
+        .is_file()
+    {
+        return Err(configuration_invalid());
     }
     Ok(())
 }
