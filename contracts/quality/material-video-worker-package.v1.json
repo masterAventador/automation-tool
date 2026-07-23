@@ -24,7 +24,20 @@
     "maximumProbeStartupSeconds": 30
   },
   "dependencies": {
-    "expectedInstalledDistributionCount": 112,
+    "expectedInstalledDistributionCountByTarget": {
+      "macos-arm64": 112,
+      "macos-x86_64": 112,
+      "windows-x86_64": 115
+    },
+    "platformRequired": {
+      "macos-arm64": {},
+      "macos-x86_64": {},
+      "windows-x86_64": {
+        "colorama": "0.4.6",
+        "watchdog": "6.0.0",
+        "win32_setctime": "1.2.0"
+      }
+    },
     "required": {
       "moviepy": "2.2.1",
       "streamlit": "1.59.1",

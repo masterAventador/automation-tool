@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -47,6 +51,80 @@ def load_contract() -> dict[str, object]:
     if not isinstance(value, dict) or value.get("schemaVersion") != 1:
         reject("打包契约版本无效")
     return value
+
+
+def current_target_id() -> str:
+    machine = platform.machine().lower()
+    if sys.platform == "darwin":
+        if machine in {"arm64", "aarch64"}:
+            return "macos-arm64"
+        if machine in {"x86_64", "amd64"}:
+            return "macos-x86_64"
+    if sys.platform == "win32" and machine in {"x86_64", "amd64"}:
+        return "windows-x86_64"
+    reject(f"不支持的构建平台：{sys.platform}/{machine}")
+
+
+def expected_dependency_count(contract: dict[str, object]) -> int:
+    dependencies = contract.get("dependencies")
+    if not isinstance(dependencies, dict):
+        reject("依赖契约缺失")
+    counts = dependencies.get("expectedInstalledDistributionCountByTarget")
+    if not isinstance(counts, dict):
+        reject("平台依赖数量契约缺失")
+    value = counts.get(current_target_id())
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        reject("当前平台依赖数量契约无效")
+    return value
+
+
+def required_dependencies(contract: dict[str, object]) -> dict[str, str]:
+    dependencies = contract.get("dependencies")
+    if not isinstance(dependencies, dict):
+        reject("依赖契约缺失")
+    common = dependencies.get("required")
+    by_target = dependencies.get("platformRequired")
+    platform_required = (
+        by_target.get(current_target_id()) if isinstance(by_target, dict) else None
+    )
+    if not isinstance(common, dict) or not isinstance(platform_required, dict):
+        reject("平台依赖版本契约缺失")
+    combined = {str(name).lower(): str(version) for name, version in common.items()}
+    for name, version in platform_required.items():
+        normalized = str(name).lower()
+        if normalized in combined:
+            reject("平台依赖与公共依赖重复")
+        combined[normalized] = str(version)
+    return combined
+
+
+@contextmanager
+def temporary_build_directory() -> Iterator[Path]:
+    path = Path(tempfile.mkdtemp(prefix="material-video-worker-build-"))
+    body_failed = False
+    try:
+        yield path
+    except BaseException:
+        body_failed = True
+        raise
+    finally:
+        cleanup_error: OSError | None = None
+        for attempt in range(10):
+            try:
+                shutil.rmtree(path)
+            except FileNotFoundError:
+                cleanup_error = None
+                break
+            except OSError as error:
+                cleanup_error = error
+                time.sleep(0.1 * (attempt + 1))
+            else:
+                cleanup_error = None
+                break
+        if cleanup_error is not None and not body_failed:
+            raise MaterialVideoWorkerPackageError(
+                f"智能素材成片本机服务包被拒绝：临时构建目录清理失败：{cleanup_error}"
+            )
 
 
 def run(
@@ -93,8 +171,7 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
     upstream_before = run(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=UPSTREAM
     ).stdout
-    with tempfile.TemporaryDirectory(prefix="material-video-worker-build-") as directory:
-        temporary = Path(directory)
+    with temporary_build_directory() as temporary:
         runtime = temporary / "runtime"
         environment = dict(os.environ)
         environment["UV_PROJECT_ENVIRONMENT"] = str(runtime)
@@ -136,19 +213,15 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
         dependencies = contract.get("dependencies")
         if not isinstance(dependencies, dict):
             reject("依赖契约缺失")
-        if inventory.get("distributionCount") != dependencies.get(
-            "expectedInstalledDistributionCount"
-        ):
+        if inventory.get("distributionCount") != expected_dependency_count(contract):
             reject("锁定环境的依赖数量漂移")
         installed = {
             str(item["name"]).lower(): str(item["version"])
             for item in inventory.get("distributions", [])
             if isinstance(item, dict) and "name" in item and "version" in item
         }
-        required = dependencies.get("required")
-        if not isinstance(required, dict) or any(
-            installed.get(str(name).lower()) != version for name, version in required.items()
-        ):
+        required = required_dependencies(contract)
+        if any(installed.get(name) != version for name, version in required.items()):
             reject("关键视频、配音或字幕依赖漂移")
 
         build = contract.get("build")
@@ -207,7 +280,9 @@ def audit_candidate(
     build = contract.get("build")
     dependencies = contract.get("dependencies")
     probe_contract = contract.get("probe")
-    if not all(isinstance(value, dict) for value in (build, dependencies, probe_contract)):
+    if not all(
+        isinstance(value, dict) for value in (build, dependencies, probe_contract)
+    ):
         reject("候选审计契约缺失")
     assert isinstance(build, dict)
     assert isinstance(dependencies, dict)
@@ -230,19 +305,26 @@ def audit_candidate(
             reject("候选包含特殊文件")
         files += 1
         package_bytes += metadata.st_size
-    if files > build.get("maximumFiles", 0) or package_bytes > build.get("maximumBytes", 0):
+    if files > build.get("maximumFiles", 0) or package_bytes > build.get(
+        "maximumBytes", 0
+    ):
         reject("候选文件数或包体超过上限")
     executable = candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)
     if not executable.is_file() or not os.access(executable, os.X_OK):
         reject("候选缺少独立可执行入口")
-    if any(path.name.startswith("automation-tool-executor") for path in candidate.rglob("*")):
+    if any(
+        path.name.startswith("automation-tool-executor")
+        for path in candidate.rglob("*")
+    ):
         reject("候选错误混入 RPA Executor")
-    inventory_path = candidate / "_internal/licenses/material-video-worker-dependencies.json"
+    inventory_path = (
+        candidate / "_internal/licenses/material-video-worker-dependencies.json"
+    )
     if not inventory_path.is_file():
         reject("候选缺少依赖许可证清单")
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
     dependency_count = inventory.get("distributionCount")
-    if dependency_count != dependencies.get("expectedInstalledDistributionCount"):
+    if dependency_count != expected_dependency_count(contract):
         reject("候选许可证清单数量漂移")
 
     started = time.perf_counter()

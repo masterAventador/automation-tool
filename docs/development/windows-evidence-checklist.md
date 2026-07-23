@@ -37,7 +37,7 @@ uv run --project tools/shared-browser-validation --locked python \
 
 通过后：EB-02 → ✅；同时把 `$TEMP/eb-02-artifacts` 的关键输出摘录进 EB-02.md。
 
-### 2. IM 线冻结 Worker（IM-02/03/04 的 Windows 原生候选）
+### 2. IM 线冻结 Worker（IM-02 ✅；IM-03/04 待补）
 
 ```bash
 uv python install 3.11.15
@@ -47,8 +47,12 @@ python scripts/run_im_04_acceptance.py
 python scripts/run_im_05_acceptance.py
 ```
 
-通过后：IM-02、IM-03 的「Windows 原生候选」缺口闭合；IM-04 剩余缺口只剩完整
-WebUI 正式入口（IM-05 承接）。
+IM-02 已于 2026-07-24 在 Windows 11 x86_64 完成两次原生冻结：4,383 files /
+749,943,842 bytes、CPython 3.11.15、115 个锁定分发包、冷启动 2.782 秒；真实
+`automation-tool-material-video-worker.exe` 启动、无参数拒绝、许可证清单、上游零写入和
+清理均通过。首轮发现并修复了 macOS/Windows 依赖计数差异与 Windows 临时目录重试清理。
+
+继续执行上面的 IM-04/IM-05 纵向命令，补齐 IM-03 与 IM-04 的 Windows 原生链路。
 
 ### 3. VF-04 媒体工具链（✅ 2026-07-24 已完成）
 
