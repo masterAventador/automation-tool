@@ -16,7 +16,9 @@ mod browser_profiles_platform;
 
 use browser_profiles_platform::{PlatformProfile, PlatformProfileLock, PlatformProfileStore};
 
-const PROFILE_ROOT_DIRECTORY: &str = "browser-profiles";
+// EB-09：内置浏览器时代的全新 Profile 根。开发期旧根 `browser-profiles`
+// 不迁移、不读取、不回退（App 未发布，无旧版用户数据）。
+const PROFILE_ROOT_DIRECTORY: &str = "embedded-browser-profiles";
 const DOUYIN_DIRECTORY: &str = "douyin";
 const PROFILE_ID_GENERATION_ATTEMPTS: usize = 32;
 const CURRENT_DOUYIN_PROFILE_FILE: &str = "current-douyin-profile-v1";
