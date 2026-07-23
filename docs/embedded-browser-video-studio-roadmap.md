@@ -714,6 +714,11 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
         ↓
     阶段 B0：EB-01～EB-02，最先验证一套完整 Chromium 同时满足 RPA、Browser Use 与渲染
         ↓ 只有 EB-02 通过才继续
+        ↓ 2026-07-23 用户决策（Windows 证据后补）：本项目不依赖 GitHub Actions；
+          EB-02 的 macOS arm64 真实证据已通过即视为门禁对依赖任务放行，
+          后续任务先推进 macOS 链路；EB-02 本身与各任务的 Windows x86_64
+          验收项拆为独立待补证据（待用户提供 Windows 环境后补），不再阻塞
+          依赖任务激活；EB-04 等 Windows 专属任务继续等待 Windows 环境。
     阶段 B：EB-03～EB-10，完成单一浏览器供应链、启动和全新 Profile
         ↓
     阶段 C：BU-01～BU-06 与 EB-11～EB-16
