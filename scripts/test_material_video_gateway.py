@@ -39,6 +39,7 @@ def bootstrap_line(asset_root: Path, **changes: object) -> bytes:
         "enableWebUi": False,
         "localSessionToken": TOKEN,
         "protocolVersion": "1.0",
+        "renderBrowser": None,
         "scriptModel": None,
         "workerKind": "python",
     }
@@ -96,6 +97,7 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                 {"workerKind": "node"},
                 {"protocolVersion": "2.0"},
                 {"enableWebUi": "true"},
+                {"renderBrowser": {}},
                 {"assetRoot": "relative"},
                 {"extra": True},
             ):

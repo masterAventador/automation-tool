@@ -109,6 +109,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         "enableWebUi",
         "localSessionToken",
         "protocolVersion",
+        "renderBrowser",
         "scriptModel",
         "workerKind",
     }:
@@ -118,6 +119,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         value.get("bootstrapVersion") != BOOTSTRAP_VERSION
         or value.get("protocolVersion") != PROTOCOL_VERSION
         or value.get("workerKind") != "python"
+        or value.get("renderBrowser") is not None
         or not isinstance(value.get("enableWebUi"), bool)
         or not isinstance(token, str)
         or TOKEN_PATTERN.fullmatch(token) is None

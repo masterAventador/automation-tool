@@ -11,7 +11,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from build_material_video_worker_candidate import ENTRYPOINT, build_candidate
+from build_material_video_worker_candidate import (
+    ENTRYPOINT,
+    MaterialVideoWorkerAudit,
+    build_candidate,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/security/material-video-gateway.v1.json"
@@ -40,7 +44,7 @@ def require_contract() -> None:
         raise AssertionError("IM-03 route allowlist drifted")
 
 
-def require_frozen_process() -> None:
+def require_frozen_process() -> MaterialVideoWorkerAudit:
     with tempfile.TemporaryDirectory(prefix="im03-acceptance-") as directory:
         candidate = Path(directory) / "material-video-worker"
         audit = build_candidate(candidate)
@@ -65,13 +69,14 @@ def require_frozen_process() -> None:
         )
         if audit.file_count < 100 or audit.package_bytes < 100 * 1024 * 1024:
             raise AssertionError("IM-03 did not exercise the real frozen candidate")
+        return audit
 
 
 def require_evidence() -> None:
     text = (ROOT / "docs/development/IM-03.md").read_text(encoding="utf-8")
     for marker in (
         "# IM-03 完成证据",
-        "状态：🔍 待验收",
+        "状态：✅ 已完成",
         "## RED",
         "## GREEN",
         "## 失败矩阵",
@@ -85,8 +90,8 @@ def require_evidence() -> None:
         encoding="utf-8"
     )
     rows = [line for line in roadmap.splitlines() if line.startswith("| IM-03 |")]
-    if len(rows) != 1 or not rows[0].endswith("| 🔍 待验收 |"):
-        raise AssertionError("IM-03 roadmap status is not pending native validation")
+    if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
+        raise AssertionError("IM-03 roadmap status is not completed")
 
 
 def main() -> int:
@@ -106,9 +111,13 @@ def main() -> int:
             "--test-threads=1",
         ]
     )
-    require_frozen_process()
+    audit = require_frozen_process()
     require_evidence()
-    print(f"IM-03 {platform.system()} secure frozen gateway acceptance passed")
+    print(
+        f"IM-03 {platform.system()} secure frozen gateway acceptance passed: "
+        f"{audit.file_count} files, {audit.package_bytes} bytes, "
+        f"startup {audit.startup_seconds:.3f}s"
+    )
     return 0
 
 
