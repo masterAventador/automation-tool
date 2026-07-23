@@ -257,6 +257,8 @@ def chromium_args() -> list[str]:
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-background-networking",
+        # 项目规则「不调用系统钥匙串」：阻止 macOS 上弹出钥匙串授权弹窗。
+        "--use-mock-keychain",
         "--enable-unsafe-webgpu",
         "--enable-features=Vulkan",
     ]
