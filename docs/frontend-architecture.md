@@ -336,6 +336,7 @@ ADR-0001 已替代外部 Chrome/Edge 生产方案。Tauri/Rust 后续只从安�
 ### 6.2 AV-03 用户品牌与不可信视频内容
 
 - 视频制作页面只显示“智能素材成片”和“品牌动效成片”，消费稳定内部 ID；上游项目名、CLI、原始错误和进程信息不能进入 React DTO、标题、菜单、按钮、加载、错误、无障碍文本、任务或导出。
+- 按 ADR-0002，“视频剪辑”是独立左侧菜单入口和独立模块，不并入“视频制作”页面；剪辑页面只消费供应商无关的内部 DTO，阿里云等供应商名称、任务 ID 和原始错误不进入 React。剪辑入口与页面由 VE-03 交付，交付前不得添加空壳菜单。
 - `contracts/quality/user-facing-terminology.v1.json` 是中文展示与通俗术语契约，`scripts/check_user_facing_branding.py` 扫描正式 UI 源码和 Tauri 标题。独立第三方软件声明页是唯一名称白名单，但不是功能入口。
 - React 不渲染生成 HTML，也不能直连本机视频 Worker；只通过固定 Gateway 查看脱敏状态、预览和 Artifact。HTML 预览由隔离渲染面生成像素或受控媒体结果。
 - 外部模型调用前页面必须说明会离开本机的数据范围；任何密钥、绝对路径、运营 Profile、Cookie、原始 Worker 错误和上游名称都不能进入 WebView。

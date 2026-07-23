@@ -551,11 +551,11 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 53 |
+| ⬜ 未开始 | 52 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
 | 🔍 待验收 | 9 |
-| ✅ 已完成 | 16 |
+| ✅ 已完成 | 17 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -664,7 +664,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| VE-01 | 独立剪辑领域与模块 ADR | 定义 EditingProject/Timeline/EditingJob/Artifact、与 VideoCreationProvider/PublishJob 的边界；“视频剪辑”是独立菜单和状态机 | AV-04,VF-01 | ⬜ 未开始 |
+| VE-01 | 独立剪辑领域与模块 ADR | 定义 EditingProject/Timeline/EditingJob/Artifact、与 VideoCreationProvider/PublishJob 的边界；“视频剪辑”是独立菜单和状态机 | AV-04,VF-01 | ✅ 已完成 |
 | VE-02 | VideoEditingProvider 契约与注册表 | `capabilities/validate/submit/get/cancel/fetch_artifacts`、统一错误/状态/幂等键；供应商 DTO 不进入领域层 | VE-01 | ⬜ 未开始 |
 | VE-03 | 剪辑工作台与 Timeline 编辑 | 独立左侧入口；轨道、片段、字幕、音频、转场、预览、保存、提交和任务详情只消费内部 DTO | VE-01,VF-06 | ⬜ 未开始 |
 | VE-04 | 阿里 IMS/ICE 凭据与媒资暂存 | 地域/账号/权限检查，OSS/IMS 同地域 staging、摘要、去重、生命周期、费用预估和密钥脱敏 | VE-02,VF-05 | ⬜ 未开始 |
