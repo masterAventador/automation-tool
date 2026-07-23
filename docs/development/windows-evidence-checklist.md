@@ -142,6 +142,15 @@ x86_64 使用 EB-04 锁定归档现场生成 308 files / 435,574,347 bytes 的�
 和非提权 `mklink /J` 创建的真实 NTFS junction 根拒绝；验收结束恢复 fixture 并清理
 全部临时发行物。
 
+### 5.3 EB-07 Executor 启动协议迁移（✅ 2026-07-24 已完成）
+
+Windows 11 x86_64 使用 EB-04 锁定归档完成 308 files / 435,574,347 bytes 的真实
+Authority 全量解析与缓存复解析（4.53 秒），同一 `chrome.exe` 经生产 Python
+`BrowserLaunchRequest.revalidate()` 接受且 repr 不泄露路径。验收真实复现并修复
+“首次缓存后发行物根被换成 NTFS junction 仍返回旧路径”的缺口；现在缓存命中前复查
+resource/发行物/可执行路径 reparse 边界，异常强制全量验证并固定拒绝。Windows
+原生确定性矩阵 8 passed / 1 ignored，临时 junction 与发行物均已清理。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
