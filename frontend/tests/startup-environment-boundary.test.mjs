@@ -42,7 +42,7 @@ test("H8-16E composes every startup component through one path-free native aggre
   assert.doesNotMatch(nativeStartup, /#\[tauri::command\]/u);
 });
 
-test("H8-16E keeps one hidden real-App repair-to-ready acceptance", async () => {
+test("H8-16E keeps one hidden real-App embedded-browser failure acceptance", async () => {
   const [packageJson, tauriConfig, wdioConfig, spec, orchestrator] = await Promise.all([
     readFile(new URL("package.json", frontendRoot), "utf8"),
     readFile(
@@ -61,11 +61,14 @@ test("H8-16E keeps one hidden real-App repair-to-ready acceptance", async () => 
   assert.match(tauriConfig, /build:control-plane-e2e-assets/u);
   assert.match(wdioConfig, /startup-environment\.spec\.ts/u);
   assert.match(spec, /桌面运行环境需要处理/u);
+  assert.match(spec, /浏览器组件缺失/u);
+  assert.match(spec, /请重新安装官方客户端/u);
+  assert.match(spec, /embeddedBrowser/u);
+  assert.match(spec, /component_missing/u);
   assert.match(spec, /打开本地修复工具/u);
-  assert.match(spec, /保存浏览器选择/u);
   assert.match(spec, /重新检查/u);
-  assert.match(spec, /RPA 运营工作台/u);
   assert.match(spec, /check_local_startup_environment/u);
+  assert.doesNotMatch(spec, /trustedBrowser|button=保存浏览器选择|RPA 运营工作台/u);
   assert.match(orchestrator, /build_signed_executor/u);
   assert.match(orchestrator, /unused loopback|start_control_plane/iu);
   assert.match(orchestrator, /AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY/u);

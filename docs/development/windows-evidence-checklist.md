@@ -151,6 +151,15 @@ Authority 全量解析与缓存复解析（4.53 秒），同一 `chrome.exe` 经
 resource/发行物/可执行路径 reparse 边界，异常强制全量验证并固定拒绝。Windows
 原生确定性矩阵 8 passed / 1 ignored，临时 junction 与发行物均已清理。
 
+### 5.4 EB-08 启动健康状态迁移（✅ 2026-07-24 已完成）
+
+Windows 11 x86_64 通过隔离隐藏 Tauri App 的正常启动入口验证真实组件缺失态：
+正式 IPC 返回 `appData=ready / executor=ready / embeddedBrowser=component_missing`，
+页面显示“浏览器组件缺失”和“请重新安装官方客户端；无需也不要单独安装其他浏览器”。
+首次 RED 证明旧 WDIO 仍尝试选择系统 Chrome/Edge；修正后打开修复工具只显示执行器
+诊断、没有浏览器选择入口，重新检查仍保持工作台封锁。WebdriverIO 1 passing（4.7 秒）；
+runner 已清理本次签名 Executor、AppData、App 进程并确认两个隔离端口关闭。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
