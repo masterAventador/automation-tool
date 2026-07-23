@@ -1,0 +1,33 @@
+{
+  "contract": "publishing-capabilities",
+  "version": 1,
+  "policy": {
+    "unknownPlatformsAllowed": false,
+    "unknownMechanismsAllowed": false,
+    "deferredPlatformEntryPointsAllowed": false,
+    "mechanismOverridesAllowed": false
+  },
+  "mechanisms": ["official_api", "browser_use", "deferred"],
+  "platforms": {
+    "bilibili": {
+      "mechanism": "official_api",
+      "enabled": true
+    },
+    "douyin": {
+      "mechanism": "browser_use",
+      "enabled": true
+    },
+    "kuaishou": {
+      "mechanism": "deferred",
+      "enabled": false
+    },
+    "xiaohongshu": {
+      "mechanism": "deferred",
+      "enabled": false
+    },
+    "wechat_channels": {
+      "mechanism": "deferred",
+      "enabled": false
+    }
+  }
+}
