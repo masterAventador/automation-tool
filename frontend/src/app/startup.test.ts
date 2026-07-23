@@ -27,7 +27,7 @@ describe("desktop startup environment", () => {
     const environment = localEnvironment({
       appData: "ready",
       executor: "ready",
-      trustedBrowser: "ready",
+      embeddedBrowser: "ready",
     });
 
     await expect(createDesktopStartupCheck(transport, environment).check()).resolves.toEqual({
@@ -45,7 +45,7 @@ describe("desktop startup environment", () => {
     const environment = localEnvironment({
       appData: "unavailable",
       executor: "configuration_required",
-      trustedBrowser: "selection_required",
+      embeddedBrowser: "component_damaged",
     });
 
     const result = await createDesktopStartupCheck(transport, environment).check();
@@ -55,7 +55,7 @@ describe("desktop startup environment", () => {
       diagnostics: [
         "control_plane_unavailable",
         "executor_configuration_required",
-        "trusted_browser_selection_required",
+        "browser_component_damaged",
         "app_data_unavailable",
       ],
     });
@@ -73,7 +73,7 @@ describe("desktop startup environment", () => {
     const environment = localEnvironment({
       appData: "ready",
       executor: "unavailable",
-      trustedBrowser: "unavailable",
+      embeddedBrowser: "component_missing",
     });
 
     await expect(createDesktopStartupCheck(transport, environment).check()).resolves.toEqual({
@@ -81,7 +81,7 @@ describe("desktop startup environment", () => {
       diagnostics: [
         "installation_revoked",
         "executor_unavailable",
-        "trusted_browser_unavailable",
+        "browser_component_missing",
       ],
     });
   });
@@ -100,7 +100,7 @@ describe("desktop startup environment", () => {
       status: "blocked",
       diagnostics: [
         "executor_unavailable",
-        "trusted_browser_unavailable",
+        "browser_component_missing",
         "app_data_unavailable",
       ],
     });

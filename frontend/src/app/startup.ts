@@ -26,8 +26,9 @@ export type StartupDiagnosticCode =
   | "control_plane_unavailable"
   | "executor_configuration_required"
   | "executor_unavailable"
-  | "trusted_browser_selection_required"
-  | "trusted_browser_unavailable"
+  | "browser_component_missing"
+  | "browser_component_damaged"
+  | "browser_component_version_incompatible"
   | "app_data_unavailable";
 
 export interface StartupCheck {
@@ -91,10 +92,12 @@ export function createDesktopStartupCheck(
         } else if (local.value.executor === "unavailable") {
           diagnostics.push("executor_unavailable");
         }
-        if (local.value.trustedBrowser === "selection_required") {
-          diagnostics.push("trusted_browser_selection_required");
-        } else if (local.value.trustedBrowser === "unavailable") {
-          diagnostics.push("trusted_browser_unavailable");
+        if (local.value.embeddedBrowser === "component_missing") {
+          diagnostics.push("browser_component_missing");
+        } else if (local.value.embeddedBrowser === "component_damaged") {
+          diagnostics.push("browser_component_damaged");
+        } else if (local.value.embeddedBrowser === "version_incompatible") {
+          diagnostics.push("browser_component_version_incompatible");
         }
         if (local.value.appData === "unavailable") {
           diagnostics.push("app_data_unavailable");
@@ -102,7 +105,7 @@ export function createDesktopStartupCheck(
       } else {
         diagnostics.push(
           "executor_unavailable",
-          "trusted_browser_unavailable",
+          "browser_component_missing",
           "app_data_unavailable",
         );
       }
@@ -123,14 +126,15 @@ function isLocalEnvironment(value: unknown): value is LocalStartupEnvironmentSna
   return (
     keys.length === 3 &&
     keys[0] === "appData" &&
-    keys[1] === "executor" &&
-    keys[2] === "trustedBrowser" &&
+    keys[1] === "embeddedBrowser" &&
+    keys[2] === "executor" &&
     (record.appData === "ready" || record.appData === "unavailable") &&
     (record.executor === "ready" ||
       record.executor === "configuration_required" ||
       record.executor === "unavailable") &&
-    (record.trustedBrowser === "ready" ||
-      record.trustedBrowser === "selection_required" ||
-      record.trustedBrowser === "unavailable")
+    (record.embeddedBrowser === "ready" ||
+      record.embeddedBrowser === "component_missing" ||
+      record.embeddedBrowser === "component_damaged" ||
+      record.embeddedBrowser === "version_incompatible")
   );
 }

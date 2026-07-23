@@ -1,6 +1,6 @@
 use automation_tool_desktop_lib::startup_environment::{
-    AppDataStartupState, ExecutorStartupState, StartupEnvironmentService,
-    StartupEnvironmentSnapshot, TrustedBrowserStartupState,
+    AppDataStartupState, EmbeddedBrowserStartupState, ExecutorStartupState,
+    StartupEnvironmentService, StartupEnvironmentSnapshot,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,7 +43,7 @@ fn snapshot_is_exact_path_free_and_component_typed() {
     let snapshot = StartupEnvironmentSnapshot::new(
         AppDataStartupState::Ready,
         ExecutorStartupState::ConfigurationRequired,
-        TrustedBrowserStartupState::SelectionRequired,
+        EmbeddedBrowserStartupState::VersionIncompatible,
     );
 
     assert_eq!(
@@ -51,7 +51,7 @@ fn snapshot_is_exact_path_free_and_component_typed() {
         serde_json::json!({
             "appData": "ready",
             "executor": "configuration_required",
-            "trustedBrowser": "selection_required",
+            "embeddedBrowser": "version_incompatible",
         })
     );
 }

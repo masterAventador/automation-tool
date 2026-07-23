@@ -22,6 +22,8 @@ pub enum EmbeddedBrowserAuthorityError {
     ComponentMissing,
     /// The packaged distribution exists but failed verification.
     ComponentInvalid,
+    /// The packaged distribution's locked versions do not match this build.
+    VersionIncompatible,
     /// The authority state is unavailable (poisoned lock).
     Unavailable,
 }
@@ -31,6 +33,7 @@ impl fmt::Display for EmbeddedBrowserAuthorityError {
         let message = match self {
             Self::ComponentMissing => "embedded browser component is missing",
             Self::ComponentInvalid => "embedded browser component failed verification",
+            Self::VersionIncompatible => "embedded browser component version is incompatible",
             Self::Unavailable => "embedded browser authority is unavailable",
         };
         formatter.write_str(message)
@@ -115,6 +118,9 @@ fn classify(error: EmbeddedBrowserError) -> EmbeddedBrowserAuthorityError {
     match error {
         EmbeddedBrowserError::Io(io_error) if io_error.kind() == io::ErrorKind::NotFound => {
             EmbeddedBrowserAuthorityError::ComponentMissing
+        }
+        EmbeddedBrowserError::VersionIncompatible => {
+            EmbeddedBrowserAuthorityError::VersionIncompatible
         }
         EmbeddedBrowserError::Io(_) | EmbeddedBrowserError::Invalid(_) => {
             EmbeddedBrowserAuthorityError::ComponentInvalid

@@ -21,7 +21,11 @@ export interface BrowserDiagnosticSettingsSnapshot {
 export interface LocalStartupEnvironmentSnapshot {
   readonly appData: "ready" | "unavailable";
   readonly executor: "ready" | "configuration_required" | "unavailable";
-  readonly trustedBrowser: "ready" | "selection_required" | "unavailable";
+  readonly embeddedBrowser:
+    | "ready"
+    | "component_missing"
+    | "component_damaged"
+    | "version_incompatible";
 }
 
 export interface StartupEnvironmentGateway {

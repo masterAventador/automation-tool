@@ -29,13 +29,17 @@ const DIAGNOSTICS: Record<
     title: "本地执行器不可用",
     description: "请使用下方本地修复工具检查执行器安装包和运行状态。",
   },
-  trusted_browser_selection_required: {
-    title: "尚未选择受信运营浏览器",
-    description: "请在本地修复工具中选择系统标准位置安装且签名可信的 Chrome 或 Edge。",
+  browser_component_missing: {
+    title: "浏览器组件缺失",
+    description: "当前安装不完整，请重新安装官方客户端；无需也不要单独安装其他浏览器。",
   },
-  trusted_browser_unavailable: {
-    title: "未发现可用的受信运营浏览器",
-    description: "请在系统标准位置安装 Google Chrome 或 Microsoft Edge 后重新检查。",
+  browser_component_damaged: {
+    title: "浏览器组件损坏",
+    description: "组件完整性校验未通过，请重新安装官方客户端；请勿手动修改安装目录内容。",
+  },
+  browser_component_version_incompatible: {
+    title: "浏览器组件版本不兼容",
+    description: "组件版本与当前客户端不匹配，请下载并重新安装同一版本的官方客户端。",
   },
   app_data_unavailable: {
     title: "App 私有数据目录不可用",
@@ -46,8 +50,9 @@ const DIAGNOSTICS: Record<
 const LOCAL_DIAGNOSTICS = new Set<StartupDiagnosticCode>([
   "executor_configuration_required",
   "executor_unavailable",
-  "trusted_browser_selection_required",
-  "trusted_browser_unavailable",
+  "browser_component_missing",
+  "browser_component_damaged",
+  "browser_component_version_incompatible",
   "app_data_unavailable",
 ]);
 
