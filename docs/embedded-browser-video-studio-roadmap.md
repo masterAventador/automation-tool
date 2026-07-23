@@ -551,11 +551,11 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 37 |
+| ⬜ 未开始 | 36 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
 | 🔍 待验收 | 10 |
-| ✅ 已完成 | 31 |
+| ✅ 已完成 | 32 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -608,7 +608,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | --- | --- | --- | --- | --- |
 | BU-01 | Browser Use 版本与 API 契约 | 锁 `browser-use==0.13.6`、Python/依赖、Agent/BrowserSession/Tools/history API 和序列化 fixture；实现前再次核对是否有更新稳定版并单独升级验证 | AV-04 | ✅ 已完成 |
 | BU-02 | 单一 Chromium 双模式适配 | Rust 只下发已验证 `executable_path`；独立模式用临时 Profile，抖音模式用随机 loopback `cdp_url` 接管运营进程；关闭系统浏览器发现、默认安装/下载、Cloud 和 fallback | BU-01,EB-02 | 🔍 待验收 |
-| BU-03 | 受限 Agent 与 Tools | 只保留观察、同域导航、点击、输入、选择、滚动和受控上传；结构化结果、allowed_domains/routes、步骤/时长/批量动作上限；移除任意 JS/文件/下载/跨域/Shell | BU-02 | ⬜ 未开始 |
+| BU-03 | 受限 Agent 与 Tools | 只保留观察、同域导航、点击、输入、选择、滚动和受控上传；结构化结果、allowed_domains/routes、步骤/时长/批量动作上限；移除任意 JS/文件/下载/跨域/Shell | BU-02 | ✅ 已完成 |
 | BU-04 | 页面动作所有权租约 | 建立 `BrowserSurfaceLease`；抖音发布时 Browser Use 经 CDP 独占运营浏览器动作权，暂停原 Playwright 执行器，超时/崩溃必定断开 CDP 并归还 | BU-02,EB-07 | ⬜ 未开始 |
 | BU-05 | 安全策略与确认门禁 | 页面内容不可信、敏感数据发送前确认、外部副作用临界点确认、ActionGate/ledger/Verifier 复用；模型历史、DOM 和截图脱敏且不持有 Cookie/token | BU-03,BU-04 | ⬜ 未开始 |
 | BU-06 | 百炼模型与受限能力接入 | `ChatOpenAI` 指向百炼兼容地址；锁最新稳定模型及能力快照，视觉默认 qwen3.7-max 最新多模态版本，DeepSeek/GLM 仅在 DOM-only 验收后可选；无通用 Browser Use 菜单 | BU-05,VF-05 | ⬜ 未开始 |
