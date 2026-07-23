@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TextIO
 
+from job_observation_bridge import install_job_observation_bridge
 from model_service_adapter import (
     ScriptModelConfiguration,
     generate_script,
@@ -81,8 +82,8 @@ def _reserve_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _child_command(port: int, path: str, runtime_root: Path) -> list[str]:
-    values = ["--serve-webui", str(port), path, str(runtime_root)]
+def _child_command(port: int, path: str, runtime_root: Path, output_root: Path) -> list[str]:
+    values = ["--serve-webui", str(port), path, str(runtime_root), str(output_root)]
     if getattr(sys, "frozen", False):
         return [sys.executable, *values]
     return [sys.executable, str(Path(__file__).with_name("worker_main.py")), *values]
@@ -111,9 +112,12 @@ def start_webui(
     path = f"studio-{capability}"
     runtime_root = runtime_parent / capability
     runtime_root.mkdir(mode=0o700)
+    output_root = asset_root.parent / "outputs"
+    if output_root.is_symlink() or not output_root.is_dir():
+        raise WebUiRejected("invalid output root")
     port = _reserve_port()
     process = subprocess.Popen(
-        _child_command(port, path, runtime_root),
+        _child_command(port, path, runtime_root, output_root),
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -187,10 +191,15 @@ def _prepare_private_project(runtime_root: Path) -> Path:
     return private_webui / "Main.py"
 
 
-def serve_webui(port: int, path: str, runtime_root: Path, stream: TextIO) -> int:
+def serve_webui(
+    port: int, path: str, runtime_root: Path, output_root: Path, stream: TextIO
+) -> int:
     if not 1 <= port <= 65535 or not path.startswith("studio-") or len(path) != 50:
         raise WebUiRejected("invalid WebUI endpoint")
     runtime_root = runtime_root.resolve(strict=True)
+    output_root = output_root.resolve(strict=True)
+    if output_root != runtime_root.parents[2] / "outputs":
+        raise WebUiRejected("invalid output root")
     line = stream.readline(16 * 1024 + 1)
     if not line or len(line.encode()) > 16 * 1024:
         raise WebUiRejected("invalid model bootstrap")
@@ -202,11 +211,13 @@ def serve_webui(port: int, path: str, runtime_root: Path, stream: TextIO) -> int
     if configuration is not None:
         install_script_model(configuration)
     from app.services import llm
+    from app.services import state as state_module
     from app.utils import utils
 
     llm._generate_response = generate_script
     utils.root_dir = lambda: str(runtime_root)
     main_path = _prepare_private_project(runtime_root)
+    install_job_observation_bridge(state_module, runtime_root, output_root)
     if not main_path.is_file():
         raise WebUiRejected("upstream WebUI unavailable")
     sys.argv = [

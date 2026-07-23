@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { Alert, Button, Card, Empty, Input, Space, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Input, Popconfirm, Progress, Space, Tabs, Tag, Typography } from "antd";
 
 import {
   MaterialVideoStudioGatewayError,
+  type MaterialRenderJobSnapshot,
   type MaterialVideoStudioGateway,
 } from "./material-video-studio-gateway";
 
@@ -143,11 +144,18 @@ const OPEN_ERRORS = {
   process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
   storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
   view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
+  job_unavailable: "制作任务状态暂时不可用，请稍后重试。",
   protocol_mismatch: "视频制作服务版本不匹配，请更新 App 后重试。",
   operation_unavailable: "视频制作暂时不可用，请稍后重试。",
 } as const;
 
-function NewVideoPage({ gateway }: { readonly gateway: MaterialVideoStudioGateway }) {
+function NewVideoPage({
+  gateway,
+  onOpened,
+}: {
+  readonly gateway: MaterialVideoStudioGateway;
+  readonly onOpened: () => void;
+}) {
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
   const [opening, setOpening] = useState(false);
   const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -234,6 +242,7 @@ function NewVideoPage({ gateway }: { readonly gateway: MaterialVideoStudioGatewa
               void gateway
                 .open()
                 .then(() => {
+                  onOpened();
                   setOpenMessage({ type: "success", text: "完整制作界面已打开。" });
                 })
                 .catch((error: unknown) => {
@@ -254,18 +263,116 @@ function NewVideoPage({ gateway }: { readonly gateway: MaterialVideoStudioGatewa
   );
 }
 
+const STATUS_COPY = {
+  running: { label: "制作中", color: "processing" },
+  succeeded: { label: "已完成", color: "success" },
+  failed: { label: "制作失败", color: "error" },
+  cancelled: { label: "已取消", color: "default" },
+} as const;
+
+function JobPage({
+  jobs,
+  busy,
+  onCancel,
+}: {
+  readonly jobs: readonly MaterialRenderJobSnapshot[];
+  readonly busy: boolean;
+  readonly onCancel: (id: string) => void;
+}) {
+  if (jobs.length === 0) return <EmptyVideoPage page="jobs" />;
+  return (
+    <Card className="video-studio-panel" title="本机制作任务">
+      {jobs.map((job) => (
+        <Space key={job.renderJobId} orientation="vertical" size="middle" className="video-job-card">
+          <Space>
+            <Typography.Text strong>{job.subject}</Typography.Text>
+            <Tag color={STATUS_COPY[job.status].color}>{STATUS_COPY[job.status].label}</Tag>
+          </Space>
+          <Progress
+            percent={job.progressPercent}
+            {...(job.status === "failed" ? { status: "exception" as const } : {})}
+          />
+          {job.status === "failed" ? <Alert type="error" showIcon title="本次制作未成功，可以返回完整制作界面调整后重试。" /> : null}
+          {job.status === "running" ? (
+            <Popconfirm
+              title="确定取消这个制作任务吗？"
+              okText="确定"
+              cancelText="返回"
+              onConfirm={() => onCancel(job.renderJobId)}
+            >
+              <Button danger disabled={busy}>取消任务</Button>
+            </Popconfirm>
+          ) : null}
+        </Space>
+      ))}
+    </Card>
+  );
+}
+
+function ArtifactPage({
+  jobs,
+  busy,
+  onDelete,
+}: {
+  readonly jobs: readonly MaterialRenderJobSnapshot[];
+  readonly busy: boolean;
+  readonly onDelete: (id: string) => void;
+}) {
+  const artifacts = jobs.filter((job) => job.artifactId !== null);
+  if (artifacts.length === 0) return <EmptyVideoPage page="artifacts" />;
+  return (
+    <Card className="video-studio-panel" title="已校验成片">
+      {artifacts.map((job) => (
+        <Space key={job.artifactId} orientation="vertical" size="small" className="video-job-card">
+          <Typography.Text strong>{job.subject}</Typography.Text>
+          <Typography.Text type="secondary">
+            MP4 视频 · {((job.artifactSizeBytes ?? 0) / 1024 / 1024).toFixed(1)} MB
+          </Typography.Text>
+          <Popconfirm
+            title="删除后无法恢复，确定删除吗？"
+            okText="确定"
+            cancelText="返回"
+            onConfirm={() => onDelete(job.artifactId!)}
+          >
+            <Button danger disabled={busy}>删除成片</Button>
+          </Popconfirm>
+        </Space>
+      ))}
+    </Card>
+  );
+}
+
 export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudioGateway }) {
+  const [jobs, setJobs] = useState<readonly MaterialRenderJobSnapshot[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [jobError, setJobError] = useState(false);
+  const refresh = useCallback(() => {
+    void gateway.jobs().then((value) => {
+      setJobs(value);
+      setJobError(false);
+    }).catch(() => setJobError(true));
+  }, [gateway]);
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+  const act = (operation: Promise<void>) => {
+    setBusy(true);
+    void operation.then(refresh).catch(() => setJobError(true)).finally(() => setBusy(false));
+  };
   return (
     <section className="video-studio" aria-label="视频制作工作区">
+      {jobError ? <Alert type="warning" showIcon title="暂时无法读取制作任务，请稍后重试。" /> : null}
       <Tabs
         defaultActiveKey="new"
         items={[
-          { key: "new", label: "新建视频", children: <NewVideoPage gateway={gateway} /> },
+          { key: "new", label: "新建视频", children: <NewVideoPage gateway={gateway} onOpened={refresh} /> },
           { key: "script", label: "脚本与分镜", children: <EmptyVideoPage page="script" /> },
           { key: "settings", label: "制作设置", children: <EmptyVideoPage page="settings" /> },
           { key: "preview", label: "预览", children: <EmptyVideoPage page="preview" /> },
-          { key: "jobs", label: "制作任务", children: <EmptyVideoPage page="jobs" /> },
-          { key: "artifacts", label: "成片", children: <EmptyVideoPage page="artifacts" /> },
+          { key: "jobs", label: "制作任务", children: <JobPage jobs={jobs} busy={busy} onCancel={(id) => act(gateway.cancel(id))} /> },
+          { key: "artifacts", label: "成片", children: <ArtifactPage jobs={jobs} busy={busy} onDelete={(id) => act(gateway.deleteArtifact(id))} /> },
         ]}
       />
     </section>

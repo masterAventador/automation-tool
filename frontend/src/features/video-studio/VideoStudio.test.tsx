@@ -11,6 +11,9 @@ function gateway(): MaterialVideoStudioGateway {
       state: "opened",
       modelId: "qwen3.7-max-2026-06-08",
     }),
+    jobs: vi.fn().mockResolvedValue([]),
+    cancel: vi.fn().mockResolvedValue(undefined),
+    deleteArtifact: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -90,5 +93,42 @@ describe("video studio shell", () => {
     expect(openButton).toBeDisabled();
 
     expect(document.body).not.toHaveTextContent(/真人生成|网址转视频/iu);
+  });
+
+  it("shows only reconciled jobs and artifacts without inventing file paths", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.jobs).mockResolvedValue([
+      {
+        renderJobId: "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+        revision: 3,
+        status: "running",
+        progressPercent: 42,
+        subject: "新品介绍",
+        artifactId: null,
+        artifactSizeBytes: null,
+        failureCode: null,
+      },
+      {
+        renderJobId: "01b70168-c90d-4ac7-938a-51eb4754f32a",
+        revision: 4,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "知识讲解",
+        artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+        artifactSizeBytes: 2 * 1024 * 1024,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "制作任务" }));
+    expect(await screen.findByText("新品介绍")).toBeVisible();
+    expect(screen.getByText("制作中")).toBeVisible();
+    expect(screen.getByRole("button", { name: "取消任务" })).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "成片" }));
+    expect(await screen.findByText("2.0 MB", { exact: false })).toBeVisible();
+    expect(screen.getByRole("button", { name: "删除成片" })).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/\/private\/|[A-Z]:\\/u);
   });
 });

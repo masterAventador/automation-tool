@@ -162,12 +162,13 @@ def main(
     arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None
 ) -> int:
     values = sys.argv[1:] if arguments is None else arguments
-    if len(values) == 4 and values[0] == "--serve-webui":
+    if len(values) == 5 and values[0] == "--serve-webui":
         try:
             return serve_webui(
                 int(values[1]),
                 values[2],
                 Path(values[3]),
+                Path(values[4]),
                 sys.stdin if bootstrap_stream is None else bootstrap_stream,
             )
         except (ValueError, OSError, WebUiRejected):

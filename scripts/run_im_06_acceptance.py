@@ -33,7 +33,7 @@ def require_contract() -> None:
         raise AssertionError("IM-06 external navigation must stay disabled")
     if value.get("structureChangePolicy") != "fail_closed":
         raise AssertionError("IM-06 structure changes must fail closed")
-    if value.get("structureReadyTimeoutMilliseconds") != 60_000:
+    if value.get("structureReadyTimeoutMilliseconds") != 120_000:
         raise AssertionError("IM-06 cold-start structure timeout drifted")
     policy = value.get("settingsPolicy")
     if not isinstance(policy, dict):

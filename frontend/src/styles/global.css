@@ -188,6 +188,14 @@ body {
   margin-block: 70px;
 }
 
+.video-job-card {
+  width: 100%;
+  max-width: 760px;
+  padding: 18px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+}
+
 .video-studio-new-form {
   width: 100%;
 }

@@ -275,6 +275,32 @@ async fn open_material_video_studio(
 }
 
 #[tauri::command]
+fn get_material_render_jobs(
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    Vec<material_video_studio::MaterialRenderJobSnapshot>,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::jobs(&workspaces)
+}
+
+#[tauri::command]
+fn cancel_material_render_job(
+    render_job_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::cancel(&workspaces, render_job_id)
+}
+
+#[tauri::command]
+fn delete_material_video_artifact(
+    artifact_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::delete_artifact(&workspaces, artifact_id)
+}
+
+#[tauri::command]
 #[cfg(not(feature = "video-studio-e2e"))]
 fn check_local_startup_environment(
     startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
@@ -3127,6 +3153,9 @@ pub fn run() {
         clear_model_service,
         test_model_service_connection,
         open_material_video_studio,
+        get_material_render_jobs,
+        cancel_material_render_job,
+        delete_material_video_artifact,
         get_update_policy_record_for_acceptance,
         get_app_update_state,
         check_app_update_now,
@@ -3178,6 +3207,9 @@ pub fn run() {
         clear_model_service,
         test_model_service_connection,
         open_material_video_studio,
+        get_material_render_jobs,
+        cancel_material_render_job,
+        delete_material_video_artifact,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3260,6 +3292,9 @@ pub fn run() {
         clear_model_service,
         test_model_service_connection,
         open_material_video_studio,
+        get_material_render_jobs,
+        cancel_material_render_job,
+        delete_material_video_artifact,
         get_app_update_state,
         check_app_update_now,
         decide_app_update

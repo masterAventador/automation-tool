@@ -344,6 +344,20 @@ impl VideoJobWorkspaceStore {
         Ok(workspace)
     }
 
+    pub fn list_workspaces(&self) -> Result<Vec<VideoJobWorkspace>, VideoWorkspaceError> {
+        self.revalidate_roots()?;
+        let mut workspaces = Vec::new();
+        for entry in fs::read_dir(&self.jobs_directory).map_err(|_| storage_unavailable())? {
+            let entry = entry.map_err(|_| storage_unavailable())?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(storage_unavailable)?;
+            let job_id = Uuid::parse_str(name).map_err(|_| storage_unavailable())?;
+            workspaces.push(self.open(job_id)?);
+        }
+        workspaces.sort_by_key(VideoJobWorkspace::job_id);
+        Ok(workspaces)
+    }
+
     pub fn worker_output_directory(
         &self,
         workspace: &VideoJobWorkspace,

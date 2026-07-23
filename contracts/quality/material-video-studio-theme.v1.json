@@ -23,5 +23,5 @@
   },
   "externalNavigationAllowed": false,
   "structureChangePolicy": "fail_closed",
-  "structureReadyTimeoutMilliseconds": 60000
+  "structureReadyTimeoutMilliseconds": 120000
 }

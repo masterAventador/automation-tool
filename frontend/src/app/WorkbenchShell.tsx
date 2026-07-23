@@ -231,6 +231,15 @@ const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async open() {
     throw new Error("Material video studio is unavailable");
   },
+  async jobs() {
+    return [];
+  },
+  async cancel() {
+    throw new Error("Material video studio is unavailable");
+  },
+  async deleteArtifact() {
+    throw new Error("Material video studio is unavailable");
+  },
 };
 
 interface WorkbenchShellProps {

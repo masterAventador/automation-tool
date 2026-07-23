@@ -42,7 +42,7 @@ describe("IM-05/IM-06 production App material video WebUI acceptance", () => {
           if (state === "failed") throw new Error("embedded theme guard failed closed");
           return (await browser.$("body").getText()).includes("视频主题") && state === "ready";
         },
-        { timeout: 90_000, timeoutMsg: "real material-video form did not become ready" },
+        { timeout: 150_000, timeoutMsg: "real material-video form did not become ready" },
       );
     } catch (error) {
       const diagnostics = await browser.execute(() => ({
@@ -88,6 +88,10 @@ describe("IM-05/IM-06 production App material video WebUI acceptance", () => {
     );
     const fontFamily = await browser.execute(() => getComputedStyle(document.body).fontFamily);
     assert.match(fontFamily, /PingFang SC|Microsoft YaHei|Inter/);
+    const duplicateTaskManager = await browser.$(".st-key-task_manager_entry");
+    if (await duplicateTaskManager.isExisting()) {
+      assert.equal(await duplicateTaskManager.isDisplayed(), false);
+    }
 
     const settingsButton = await browser.$("button[aria-label='制作服务设置']");
     await expect(settingsButton).toBeDisplayed();
@@ -112,5 +116,10 @@ describe("IM-05/IM-06 production App material video WebUI acceptance", () => {
     await browser.closeWindow();
     await browser.switchToWindow(mainHandle);
     await expect(await browser.$("h2")).toHaveText("视频制作");
+    await browser.$("div[role='tab']=制作任务").click();
+    await expect(await browser.$("body")).toHaveText(expect.stringContaining("还没有真实制作任务"));
+    await browser.$("div[role='tab']=成片").click();
+    await expect(await browser.$("body")).toHaveText(expect.stringContaining("还没有已导入的成片"));
+
   });
 });

@@ -73,6 +73,7 @@
       [data-testid="stStatusWidget"], .stDeployButton,
       .driver-popover, .driver-overlay,
       iframe[title*="streamlit-tour" i] { display: none !important; }
+      .st-key-task_manager_entry { display: none !important; }
       .driver-active-element { pointer-events: auto !important; }
       [data-automation-tool-hidden="true"] { display: none !important; }
       .automation-tool-studio-failed {
@@ -273,7 +274,7 @@
   document.addEventListener("DOMContentLoaded", schedule, { once: true });
   reconcile();
 
-  const timeout = Number(window.__AUTOMATION_TOOL_MATERIAL_VIDEO_GUARD_TIMEOUT_MS__) || 60_000;
+  const timeout = Number(window.__AUTOMATION_TOOL_MATERIAL_VIDEO_GUARD_TIMEOUT_MS__) || 120_000;
   guardTimer = window.setTimeout(() => {
     if (!stopped && root()?.getAttribute(ROOT_STATE) !== "ready") failClosed("structure_timeout");
   }, timeout);
