@@ -6,6 +6,7 @@ use automation_tool_desktop_lib::embedded_browser_distribution::{
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 const TARGET: &str = "windows-x86_64";
 const EXECUTABLE: &str = "chrome-win64/chrome.exe";
@@ -128,4 +129,39 @@ fn windows_target_rejects_a_macos_executable_contract() {
         EmbeddedBrowserDistribution::load_for_target(&fixture.resource_dir, TARGET),
         Err(EmbeddedBrowserError::Invalid(_))
     ));
+}
+
+#[test]
+fn windows_distribution_root_junction_is_rejected() {
+    let fixture = write_fixture(0x8664);
+    let root = fixture.resource_dir.join("embedded-browser");
+    let moved = fixture.resource_dir.join("embedded-browser-real");
+    fs::rename(&root, &moved).expect("move distribution root");
+    let result = Command::new("cmd.exe")
+        .args([
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            root.to_str().expect("root path"),
+            moved.to_str().expect("target path"),
+        ])
+        .output()
+        .expect("create junction");
+    assert!(result.status.success(), "mklink /J failed");
+    let load_result = EmbeddedBrowserDistribution::load_for_target(&fixture.resource_dir, TARGET);
+    fs::remove_dir(&root).expect("remove junction without following it");
+    fs::rename(&moved, &root).expect("restore distribution root");
+    assert!(matches!(load_result, Err(EmbeddedBrowserError::Invalid(_))));
+}
+
+#[test]
+#[ignore = "requires a real staged distribution; run via scripts/run_eb_06_acceptance.py"]
+fn real_staged_distribution_loads_end_to_end() {
+    let resource_dir = std::env::var("EB06_REAL_RESOURCE_DIR").expect("EB06_REAL_RESOURCE_DIR");
+    let distribution =
+        EmbeddedBrowserDistribution::load_for_target(PathBuf::from(resource_dir).as_path(), TARGET)
+            .expect("real staged Windows distribution must load");
+    assert_eq!(distribution.browser_version(), "149.0.7827.55");
+    assert!(distribution.executable_path().is_file());
 }
