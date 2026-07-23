@@ -160,6 +160,20 @@ Windows 11 x86_64 通过隔离隐藏 Tauri App 的正常启动入口验证真实
 诊断、没有浏览器选择入口，重新检查仍保持工作台封锁。WebdriverIO 1 passing（4.7 秒）；
 runner 已清理本次签名 Executor、AppData、App 进程并确认两个隔离端口关闭。
 
+### 5.5 EB-09 全新内置 Profile 契约（✅ 2026-07-24 已完成）
+
+Windows 11 x86_64 实体机会话已完成新 `embedded-browser-profiles` 根的 12 项生命周期
+测试和 8 项锁测试：真实 NTFS 私有 DACL、UUIDv4 稳定路径、首次创建/重开复用、
+junction/reparse/普通文件替换拒绝、并发创建、跨进程排他、持锁进程强杀恢复、活动
+lease 禁删、安全 tombstone 删除和 crash resume 全部通过。
+
+首轮 RED 发现 Windows 删除阶段名被通用安全名称校验误拒、普通锁句柄允许
+rename/delete replacement，以及持有后代锁文件句柄时目录不可 rename。生产实现现在
+仅接受精确 `.removing-<safe-id>` 内部名称，普通运行锁拒绝 delete sharing；删除流程
+关闭句柄前保留 durable active fence，rename 后通过恢复型删除锁清除。原目录与
+tombstone 同时存在稳定返回 `RecoveryRequired`，不会因 tombstone 的继承 DACL 提前
+改变错误语义。Clippy `-D warnings`、212 项前端契约与专项 Roadmap self-test 均通过。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
