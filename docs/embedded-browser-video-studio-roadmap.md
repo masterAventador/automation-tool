@@ -551,11 +551,11 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 36 |
+| ⬜ 未开始 | 33 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 11 |
-| ✅ 已完成 | 31 |
+| 🔍 待验收 | 13 |
+| ✅ 已完成 | 32 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -588,8 +588,8 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | EB-02 | 三方共用 Chromium 前置验证门禁 | 在 macOS/Windows 用 EB-01 同一完整 Chromium 分别启动可见 RPA、Browser Use `executable_path`/随机 CDP 两种模式和独立无头渲染进程；渲染 12 套风格、全部 134 项单帧冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏，并验证三方并发、进程/Profile 隔离、控制权租约和无第二套浏览器下载；通过后 ADR 固定为一套，失败则先调整共同版本重跑并暂停后续任务 | AV-02,EB-01 | 🔍 待验收 |
 | EB-03 | macOS 浏览器构建暂存 | 构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动 | EB-02 | ✅ 已完成 |
 | EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 | ⬜ 未开始 |
-| EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 | ⬜ 未开始 |
-| EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | ⬜ 未开始 |
+| EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 | 🔍 待验收 |
+| EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | 🔍 待验收 |
 | EB-07 | Executor 启动协议迁移 | 复用 BrowserLaunchRequest 和现有线程归属；由 Rust 传已验证内置路径，移除运行时发现 fallback | EB-06 | ⬜ 未开始 |
 | EB-08 | 启动健康状态迁移 | 用“浏览器组件正常/损坏/版本不兼容”替代“未安装/未选择 Chrome/Edge”，提供安全修复提示 | EB-06 | ⬜ 未开始 |
 | EB-09 | 全新内置 Profile 契约 | 新根目录、权限、稳定路径、排他锁、首次创建、登录后复用和安全删除测试；没有迁移或旧版分支 | EB-06 | ⬜ 未开始 |
@@ -608,7 +608,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | --- | --- | --- | --- | --- |
 | BU-01 | Browser Use 版本与 API 契约 | 锁 `browser-use==0.13.6`、Python/依赖、Agent/BrowserSession/Tools/history API 和序列化 fixture；实现前再次核对是否有更新稳定版并单独升级验证 | AV-04 | ✅ 已完成 |
 | BU-02 | 单一 Chromium 双模式适配 | Rust 只下发已验证 `executable_path`；独立模式用临时 Profile，抖音模式用随机 loopback `cdp_url` 接管运营进程；关闭系统浏览器发现、默认安装/下载、Cloud 和 fallback | BU-01,EB-02 | 🔍 待验收 |
-| BU-03 | 受限 Agent 与 Tools | 只保留观察、同域导航、点击、输入、选择、滚动和受控上传；结构化结果、allowed_domains/routes、步骤/时长/批量动作上限；移除任意 JS/文件/下载/跨域/Shell | BU-02 | ⬜ 未开始 |
+| BU-03 | 受限 Agent 与 Tools | 只保留观察、同域导航、点击、输入、选择、滚动和受控上传；结构化结果、allowed_domains/routes、步骤/时长/批量动作上限；移除任意 JS/文件/下载/跨域/Shell | BU-02 | ✅ 已完成 |
 | BU-04 | 页面动作所有权租约 | 建立 `BrowserSurfaceLease`；抖音发布时 Browser Use 经 CDP 独占运营浏览器动作权，暂停原 Playwright 执行器，超时/崩溃必定断开 CDP 并归还 | BU-02,EB-07 | ⬜ 未开始 |
 | BU-05 | 安全策略与确认门禁 | 页面内容不可信、敏感数据发送前确认、外部副作用临界点确认、ActionGate/ledger/Verifier 复用；模型历史、DOM 和截图脱敏且不持有 Cookie/token | BU-03,BU-04 | ⬜ 未开始 |
 | BU-06 | 百炼模型与受限能力接入 | `ChatOpenAI` 指向百炼兼容地址；锁最新稳定模型及能力快照，视觉默认 qwen3.7-max 最新多模态版本，DeepSeek/GLM 仅在 DOM-only 验收后可选；无通用 Browser Use 菜单 | BU-05,VF-05 | ⬜ 未开始 |
