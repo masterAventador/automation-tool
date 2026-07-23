@@ -10,7 +10,9 @@ PRODUCTION_BASE_URL: Final = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 ALLOWED_MODELS: Final = frozenset(
     {"deepseek-v4-pro", "glm-5.2", "qwen3.7-max-2026-06-08"}
 )
-API_KEY_PATTERN: Final = re.compile(r"^sk-[A-Za-z0-9_-]{17,253}$")
+# Real Bailian workspace keys are dot-separated segments (sk-ws-X.....);
+# the dot is part of the official key alphabet, not punctuation noise.
+API_KEY_PATTERN: Final = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}$")
 _installed: tuple[ScriptModelConfiguration, object] | None = None
 
 

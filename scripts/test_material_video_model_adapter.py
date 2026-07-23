@@ -124,5 +124,26 @@ class MaterialVideoModelAdapterTest(unittest.TestCase):
         self.assertNotIn(KEY, failure)
 
 
+WORKSPACE_KEY = "sk-ws-T.SYNTHETIC0.9Zz9.MEUCIQTestOnlyTestOnlyTestOnlyTestOnly-42"
+
+
+class WorkspaceKeyFormatTests(unittest.TestCase):
+    def test_accepts_real_workspace_key_shape_with_dots(self) -> None:
+        configuration = parse_script_model(document(apiKey=WORKSPACE_KEY))
+        assert configuration is not None
+        self.assertEqual(configuration.api_key, WORKSPACE_KEY)
+        self.assertNotIn(WORKSPACE_KEY, repr(configuration))
+
+    def test_still_rejects_other_punctuation_and_wrong_prefix(self) -> None:
+        for invalid in (
+            "sk-bad key with spaces padded to length",
+            "sk-bad/key/with/slashes/padded/to/len",
+            "ws-missing-sk-prefix-padded-to-length",
+            "sk-..",
+        ):
+            with self.assertRaises(ScriptModelRejected):
+                parse_script_model(document(apiKey=invalid))
+
+
 if __name__ == "__main__":
     unittest.main()
