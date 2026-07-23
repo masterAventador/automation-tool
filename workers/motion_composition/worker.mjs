@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, sep } from "node:path";
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const WORKER_VERSION = "0.7.68";
 const PROTOCOL_VERSION = "1.0";
@@ -554,8 +554,81 @@ function parseCpuSeconds(text) {
   return parts.reduce((total, value) => total * 60 + value, 0) + days * 86400;
 }
 
-/** Sum resident memory (KB) and cumulative CPU seconds over one process group. */
+/** Sum resident memory (KB) and cumulative CPU seconds over one Windows tree. */
+function sampleWindowsProcessTree(rootProcessId) {
+  return new Promise((resolve) => {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+    if (typeof systemRoot !== "string" || systemRoot.length === 0) {
+      resolve(null);
+      return;
+    }
+    const command = [
+      "$ErrorActionPreference='Stop';",
+      "Get-CimInstance -ClassName Win32_Process | ",
+      "Select-Object ProcessId,ParentProcessId,KernelModeTime,UserModeTime,WorkingSetSize | ",
+      "ConvertTo-Json -Compress",
+    ].join("");
+    execFile(
+      join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+      { maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          resolve(null);
+          return;
+        }
+        const processes = (Array.isArray(parsed) ? parsed : [parsed]).map((entry) => ({
+          cpuSeconds: (
+            Number(entry?.KernelModeTime ?? 0) + Number(entry?.UserModeTime ?? 0)
+          ) / 10_000_000,
+          parentProcessId: Number(entry?.ParentProcessId),
+          processId: Number(entry?.ProcessId),
+          workingSetBytes: Number(entry?.WorkingSetSize),
+        }));
+        const descendants = new Set([rootProcessId]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const entry of processes) {
+            if (
+              Number.isInteger(entry.processId)
+              && descendants.has(entry.parentProcessId)
+              && !descendants.has(entry.processId)
+            ) {
+              descendants.add(entry.processId);
+              changed = true;
+            }
+          }
+        }
+        let found = false;
+        let cpuSeconds = 0;
+        let rssKilobytes = 0;
+        for (const entry of processes) {
+          if (!descendants.has(entry.processId)) continue;
+          if (
+            !Number.isFinite(entry.cpuSeconds)
+            || !Number.isFinite(entry.workingSetBytes)
+          ) continue;
+          found = true;
+          cpuSeconds += entry.cpuSeconds;
+          rssKilobytes += entry.workingSetBytes / 1024;
+        }
+        resolve(found ? { cpuSeconds, rssKilobytes } : null);
+      },
+    );
+  });
+}
+
+/** Sum resident memory (KB) and cumulative CPU seconds over one owned tree. */
 function sampleProcessGroup(groupId) {
+  if (process.platform === "win32") return sampleWindowsProcessTree(groupId);
   return new Promise((resolve) => {
     execFile(
       "/bin/ps",
@@ -749,7 +822,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       if (parsed.protocol !== "file:") return false;
       let path;
       try {
-        path = decodeURIComponent(parsed.pathname);
+        path = fileURLToPath(parsed);
       } catch {
         return false;
       }
@@ -874,7 +947,14 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         framesCaptured = index;
       }
       closing = true;
-      pipe.send("Browser.close");
+      const closed = await pipe.send("Browser.close");
+      if (process.platform === "win32") {
+        if (!Number.isInteger(closed?.id) || closed?.error !== undefined) {
+          finish({ status: "protocol" });
+          return;
+        }
+        finish({ counters, framesCaptured, outputBytes, status: "complete" });
+      }
     })().catch(() => finish({ status: "protocol" }));
   });
 }

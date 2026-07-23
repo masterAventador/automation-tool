@@ -7,7 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
-    VideoWorkerRenderBrowserConfiguration, VideoWorkerRestartPolicy, VideoWorkerState,
+    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderSandboxRequest,
+    VideoWorkerRestartPolicy, VideoWorkerState,
 };
 use uuid::Uuid;
 use windows_sys::Win32::Foundation::CloseHandle;
@@ -146,6 +147,67 @@ fn real_worker_render_verify_launches_the_locked_chromium() {
         )
         .expect("real Chromium render verification");
     assert_eq!(verified_major, major);
+    let process_id = status.process_id().expect("process id");
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+    wait_until_stopped(process_id);
+}
+
+#[test]
+fn real_worker_render_sandbox_isolates_malicious_html() {
+    let (Some(package_root), Some(browser), Some(major), Some(workspace)) = (
+        std::env::var_os("BM04_PACKAGE_ROOT").map(PathBuf::from),
+        std::env::var_os("BM04_RENDER_BROWSER").map(PathBuf::from),
+        std::env::var("BM04_CHROMIUM_MAJOR")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok()),
+        std::env::var_os("BM04_WORKSPACE").map(PathBuf::from),
+    ) else {
+        return;
+    };
+    let asset_root = package_root.join("acceptance-sandbox-assets");
+    fs::create_dir(&asset_root).expect("asset root");
+    let launch = VideoWorkerLaunch::bundled_node(
+        &package_root,
+        asset_root,
+        VideoWorkerRestartPolicy::new(0, Duration::ZERO).expect("restart policy"),
+    )
+    .expect("bundled Node launch")
+    .with_render_browser(
+        VideoWorkerRenderBrowserConfiguration::new(browser, major, Duration::from_secs(30))
+            .expect("real render browser configuration"),
+    );
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(30), Duration::from_secs(15))
+            .expect("orchestrator");
+    let status = orchestrator.start(launch).expect("start real Node Worker");
+    orchestrator.health(VideoWorkerKind::Node).expect("health");
+    let request = VideoWorkerRenderSandboxRequest::new(
+        workspace.clone(),
+        "entry.html".to_owned(),
+        vec!["assets/style.css".to_owned()],
+        3,
+        60,
+        60,
+        2048,
+        50_000_000,
+    )
+    .expect("real sandbox request");
+    let summary = orchestrator
+        .render_sandbox(
+            VideoWorkerKind::Node,
+            Uuid::parse_str("6f9619ff-8b86-4d01-b42d-00cf4fc964ff").expect("job ID"),
+            &request,
+        )
+        .expect("real malicious HTML render sandbox");
+    assert_eq!(summary.chromium_major, major);
+    assert_eq!(summary.frames_captured, 3);
+    assert!(summary.output_bytes > 0);
+    assert!(summary.blocked_navigations >= 1);
+    assert!(summary.blocked_requests >= 1);
+    assert!(summary.blocked_downloads >= 1);
+    assert!(summary.blocked_popups >= 1);
+    assert!(summary.blocked_dialogs >= 1);
+    assert!(workspace.join("frames").is_dir());
     let process_id = status.process_id().expect("process id");
     orchestrator.stop(VideoWorkerKind::Node).expect("stop");
     wait_until_stopped(process_id);

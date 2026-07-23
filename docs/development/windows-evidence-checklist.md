@@ -115,21 +115,24 @@ major，收到 `Browser.close` 应答后使用绝对 `taskkill.exe /T /F` 定向
 RenderJob/暂存路径零残留全部通过；Rust 两项原生门禁分别为
 `1 passed; 0 failed`。
 
-### 4.2 BM-04 HTML 渲染安全沙箱（依赖 EB-04 的 Windows 暂存）
+### 4.2 BM-04 HTML 渲染安全沙箱（✅ 2026-07-24 已完成）
 
-EB-04 完成 Windows 暂存后执行：
+Windows 11 x86_64 实体机会话执行：
 
 ```bash
 python scripts/test_motion_video_render_sandbox.py
 python scripts/run_bm_04_acceptance.py --archive <EB-04 锁定的 chrome-win64.zip>
 ```
 
-补证要点：资源上限的进程组采样在 Windows 无 `/bin/ps`，需替换为 Job Object 内存/CPU
-统计或等价 API 并重验 CPU/内存超限强杀；detached 进程组终止改用 Windows Job Object；
-失效代理 `--proxy-server=127.0.0.1:9 --proxy-bypass-list=<-loopback>` 与子帧
-`Target.setAutoAttach` 递归拦截在 Windows 上重验诱饵端口 0 命中；入口/资产路径的
-reparse point 越界校验；真实恶意 HTML 的 navigation/download/popup/dialog 拦截与
-工作区外机密不可读。通过后更新 `docs/development/BM-04.md` 遗留项。
+正式 runner 从 EB-04 摘要锁定归档现场暂存 308 个文件，以官方 Node 22.23.1 x64
+候选启动生产 Worker。Windows 进程树资源采样改为绝对系统 PowerShell +
+`Win32_Process` CIM 的 `KernelModeTime`/`UserModeTime`/`WorkingSetSize`，按父 PID
+闭包累计；固定 PE 夹具实测 CPU 与内存越界都在墙钟前返回
+`render_resource_exceeded` 并清理整树。真实恶意 HTML 经 Rust→Node→Chromium 完成
+3 张非空 PNG，失效代理和递归 auto-attach 下诱饵端口 0 命中，工作区外机密未变，
+navigation/request/download/popup/dialog 五类计数均非零；Windows file URL 转换、
+NTFS junction 工作区/入口/资产越界、墙钟父子 PID 强杀及 RenderJob/暂存路径零残留
+全部通过。8 项 BM-04 Worker 矩阵、10 项 BM-03 回归和原生 Rust 纵向测试全绿。
 
 ### 5. EB-04 Windows 浏览器构建暂存（✅ 2026-07-24 已完成）
 
