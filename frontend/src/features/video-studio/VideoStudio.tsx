@@ -7,6 +7,7 @@ import {
   type MaterialRenderJobSnapshot,
   type MaterialVideoStudioGateway,
 } from "./material-video-studio-gateway";
+import { MotionStyleCatalog } from "./MotionStyleCatalog";
 
 type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
 
@@ -152,11 +153,14 @@ const OPEN_ERRORS = {
 function NewVideoPage({
   gateway,
   onOpened,
+  selectedMethod,
+  onSelectMethod,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
+  readonly selectedMethod: VideoCreationMethodId | null;
+  readonly onSelectMethod: (method: VideoCreationMethodId) => void;
 }) {
-  const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
   const [opening, setOpening] = useState(false);
   const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
     null,
@@ -214,7 +218,7 @@ function NewVideoPage({
                   aria-label={`选择${method.name}`}
                   aria-pressed={selected}
                   className="video-method-select"
-                  onClick={() => setSelectedMethod(method.id)}
+                  onClick={() => onSelectMethod(method.id)}
                 >
                   {selected ? `已选择${method.name}` : `选择${method.name}`}
                 </Button>
@@ -261,6 +265,22 @@ function NewVideoPage({
       </Space>
     </Card>
   );
+}
+
+function SettingsPage({ method }: { readonly method: VideoCreationMethodId | null }) {
+  if (method === null) {
+    return <EmptyVideoPage page="settings" />;
+  }
+  if (method === "material_montage_v1") {
+    return (
+      <Card className="video-studio-panel" title="智能素材成片设置">
+        <Typography.Text type="secondary">
+          智能素材成片的素材来源、配音和字幕设置在完整制作界面中调整。
+        </Typography.Text>
+      </Card>
+    );
+  }
+  return <MotionStyleCatalog />;
 }
 
 const STATUS_COPY = {
@@ -346,6 +366,7 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
   const [jobs, setJobs] = useState<readonly MaterialRenderJobSnapshot[]>([]);
   const [busy, setBusy] = useState(false);
   const [jobError, setJobError] = useState(false);
+  const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
   const refresh = useCallback(() => {
     void gateway.jobs().then((value) => {
       setJobs(value);
@@ -367,9 +388,20 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
       <Tabs
         defaultActiveKey="new"
         items={[
-          { key: "new", label: "新建视频", children: <NewVideoPage gateway={gateway} onOpened={refresh} /> },
+          {
+            key: "new",
+            label: "新建视频",
+            children: (
+              <NewVideoPage
+                gateway={gateway}
+                onOpened={refresh}
+                selectedMethod={selectedMethod}
+                onSelectMethod={setSelectedMethod}
+              />
+            ),
+          },
           { key: "script", label: "脚本与分镜", children: <EmptyVideoPage page="script" /> },
-          { key: "settings", label: "制作设置", children: <EmptyVideoPage page="settings" /> },
+          { key: "settings", label: "制作设置", children: <SettingsPage method={selectedMethod} /> },
           { key: "preview", label: "预览", children: <EmptyVideoPage page="preview" /> },
           { key: "jobs", label: "制作任务", children: <JobPage jobs={jobs} busy={busy} onCancel={(id) => act(gateway.cancel(id))} /> },
           { key: "artifacts", label: "成片", children: <ArtifactPage jobs={jobs} busy={busy} onDelete={(id) => act(gateway.deleteArtifact(id))} /> },

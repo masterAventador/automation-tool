@@ -287,6 +287,109 @@ body {
   margin-top: 20px;
 }
 
+.motion-style-intro {
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.motion-style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.motion-style-card {
+  min-width: 0;
+  padding: 16px;
+  cursor: pointer;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border);
+  border-radius: 12px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.motion-style-card:hover {
+  border-color: var(--ant-color-primary-border-hover);
+  box-shadow: 0 8px 24px rgb(17 24 39 / 8%);
+  transform: translateY(-1px);
+}
+
+.motion-style-card:focus-visible {
+  outline: 3px solid var(--ant-color-primary);
+  outline-offset: 2px;
+}
+
+.motion-style-card-selected {
+  background: var(--ant-color-primary-bg);
+  border-color: var(--ant-color-primary);
+  box-shadow: 0 0 0 1px var(--ant-color-primary);
+}
+
+.motion-style-preview {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  height: 96px;
+  padding: 14px 18px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 8px;
+}
+
+.motion-style-preview-title {
+  width: 62%;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.motion-style-preview-accent {
+  width: 38%;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.motion-style-preview-line {
+  width: 82%;
+  height: 6px;
+  border-radius: 3px;
+  opacity: 0.55;
+}
+
+.motion-style-preview-caption {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.motion-style-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.motion-style-card-header .ant-typography {
+  margin: 0;
+}
+
+.motion-style-summary {
+  margin: 8px 0 12px !important;
+  color: var(--ant-color-text-secondary);
+}
+
+.motion-style-meta {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.motion-style-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 0;
+}
+
 .overview-grid {
   margin-top: 24px;
 }

@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import contract from "../../../../contracts/video/motion-style-presets.v1.json";
 import type { MaterialVideoStudioGateway } from "./material-video-studio-gateway";
 import { VideoStudio } from "./VideoStudio";
 
@@ -93,6 +94,101 @@ describe("video studio shell", () => {
     expect(openButton).toBeDisabled();
 
     expect(document.body).not.toHaveTextContent(/真人生成|网址转视频/iu);
+  });
+
+  it("keeps the settings page gated until the brand motion method is selected", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    expect(screen.getByText("尚未选择制作方式")).toBeVisible();
+    expect(screen.queryByRole("radiogroup", { name: "选择整体画面风格" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "新建视频" }));
+    await user.click(screen.getByRole("button", { name: /选择智能素材成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    expect(
+      screen.getByText("智能素材成片的素材来源、配音和字幕设置在完整制作界面中调整。"),
+    ).toBeVisible();
+    expect(screen.queryByRole("radiogroup", { name: "选择整体画面风格" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "新建视频" }));
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    expect(screen.getByRole("radiogroup", { name: "选择整体画面风格" })).toBeVisible();
+  });
+
+  it("lists all twelve locked styles with Chinese-only cards", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+
+    const group = screen.getByRole("radiogroup", { name: "选择整体画面风格" });
+    const radios = within(group).getAllByRole("radio");
+    expect(radios).toHaveLength(12);
+    expect(radios.map((radio) => radio.getAttribute("aria-label"))).toEqual(
+      contract.presets.map((preset) => preset.displayName),
+    );
+    for (const radio of radios) {
+      expect(radio).toHaveAttribute("aria-checked", "false");
+      expect(within(radio).getByText("适用场景")).toBeVisible();
+      expect(within(radio).getByText("风格标签")).toBeVisible();
+      expect(within(radio).getByText("示意预览")).toBeVisible();
+    }
+    expect(screen.getByText("尚未选择风格")).toBeVisible();
+
+    expect(group).not.toHaveTextContent(
+      /biennale|blockframe|blue-professional|bold-poster|broadside|capsule|cartesian|cobalt-grid|coral|creative-mode|daisy-days|editorial-forest|code-editorial/iu,
+    );
+    expect(document.body).not.toHaveTextContent(/hyperframes|moneyprinter|b-roll/iu);
+  });
+
+  it("supports keyboard focus, arrow navigation and Enter/Space selection", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+
+    const group = screen.getByRole("radiogroup", { name: "选择整体画面风格" });
+    const radios = within(group).getAllByRole("radio");
+    const first = contract.presets[0]!;
+    const second = contract.presets[1]!;
+    const last = contract.presets[11]!;
+
+    radios[0]!.focus();
+    expect(radios[0]).toHaveFocus();
+
+    await user.keyboard("{ArrowRight}");
+    expect(radios[1]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(radios[1]).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(`已选择风格：${second.displayName}`)).toBeVisible();
+
+    await user.keyboard("{ArrowDown}");
+    expect(radios[2]).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(radios[1]).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(radios[0]).toHaveFocus();
+    await user.keyboard(" ");
+    expect(radios[0]).toHaveAttribute("aria-checked", "true");
+    expect(radios[1]).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(`已选择风格：${first.displayName}`)).toBeVisible();
+
+    await user.keyboard("{End}");
+    expect(radios[11]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByText(`已选择风格：${last.displayName}`)).toBeVisible();
+    await user.keyboard("{Home}");
+    expect(radios[0]).toHaveFocus();
+
+    const checked = radios.filter(
+      (radio) => radio.getAttribute("aria-checked") === "true",
+    );
+    expect(checked).toHaveLength(1);
   });
 
   it("shows only reconciled jobs and artifacts without inventing file paths", async () => {
