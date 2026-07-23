@@ -17,6 +17,7 @@ import { TauriStartupEnvironmentGateway } from "./platform/tauri/startup-environ
 import { TauriAppUpdateGateway } from "./platform/tauri/app-update-gateway";
 import { TauriAccountSessionGateway } from "./platform/tauri/account-session-gateway";
 import { TauriModelServiceGateway } from "./platform/tauri/model-service-gateway";
+import { TauriVideoEditingServiceGateway } from "./platform/tauri/video-editing-service-gateway";
 import { TauriMaterialVideoStudioGateway } from "./platform/tauri/material-video-studio-gateway";
 import { createLocalVideoEditingGateway } from "./features/video-editing/local-video-editing-gateway";
 import "./styles/global.css";
@@ -42,6 +43,7 @@ const platformAdapter = new TauriPlatformAdapter();
 const platformSessionGateway = new TauriPlatformSessionGateway();
 const appUpdateGateway = new TauriAppUpdateGateway();
 const modelServiceGateway = new TauriModelServiceGateway();
+const videoEditingServiceGateway = new TauriVideoEditingServiceGateway();
 const materialVideoStudioGateway = new TauriMaterialVideoStudioGateway();
 const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
 const accountSessionGateway =
@@ -62,6 +64,7 @@ createRoot(root).render(
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
+      videoEditingServiceGateway={videoEditingServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
       {...(accountSessionGateway === undefined ? {} : { accountSessionGateway })}

@@ -41,6 +41,8 @@ import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
+import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
+import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
 import { VideoStudio } from "../features/video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import { VideoEditingWorkbench } from "../features/video-editing/VideoEditingWorkbench";
@@ -254,6 +256,27 @@ const shellVideoEditingGateway: VideoEditingGateway = {
   },
 };
 
+const shellVideoEditingServiceGateway: VideoEditingServiceGateway = {
+  async getSettings() {
+    return {
+      provider: "aliyun_ims",
+      providerLabel: "阿里云视频剪辑服务",
+      catalogVerifiedAt: "2026-07-23",
+      configured: false,
+      region: null,
+    };
+  },
+  async configure() {
+    throw new Error("Video editing service configuration is unavailable");
+  },
+  async clear() {
+    throw new Error("Video editing service configuration is unavailable");
+  },
+  async testConnection() {
+    throw new Error("Video editing service connection test is unavailable");
+  },
+};
+
 const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async open() {
     throw new Error("Material video studio is unavailable");
@@ -281,6 +304,7 @@ interface WorkbenchShellProps {
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
   readonly modelServiceGateway?: ModelServiceGateway | undefined;
+  readonly videoEditingServiceGateway?: VideoEditingServiceGateway | undefined;
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
 }
@@ -297,6 +321,7 @@ export function WorkbenchShell({
   platformSessionGateway = shellPlatformSessionGateway,
   appUpdateGateway = shellAppUpdateGateway,
   modelServiceGateway = shellModelServiceGateway,
+  videoEditingServiceGateway = shellVideoEditingServiceGateway,
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
 }: WorkbenchShellProps) {
@@ -436,6 +461,7 @@ export function WorkbenchShell({
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />
+                <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
                 <BrowserSettings platform={platformAdapter} />
                 <Diagnostics platform={platformAdapter} />
               </Space>

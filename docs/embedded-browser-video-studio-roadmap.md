@@ -551,10 +551,10 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 46 |
+| ⬜ 未开始 | 45 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 9 |
+| 🔍 待验收 | 10 |
 | ✅ 已完成 | 23 |
 | ⏸ 后置 | 9 |
 
@@ -667,7 +667,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | VE-01 | 独立剪辑领域与模块 ADR | 定义 EditingProject/Timeline/EditingJob/Artifact、与 VideoCreationProvider/PublishJob 的边界；“视频剪辑”是独立菜单和状态机 | AV-04,VF-01 | ✅ 已完成 |
 | VE-02 | VideoEditingProvider 契约与注册表 | `capabilities/validate/submit/get/cancel/fetch_artifacts`、统一错误/状态/幂等键；供应商 DTO 不进入领域层 | VE-01 | ✅ 已完成 |
 | VE-03 | 剪辑工作台与 Timeline 编辑 | 独立左侧入口；轨道、片段、字幕、音频、转场、预览、保存、提交和任务详情只消费内部 DTO | VE-01,VF-06 | ✅ 已完成 |
-| VE-04 | 阿里 IMS/ICE 凭据与媒资暂存 | 地域/账号/权限检查，OSS/IMS 同地域 staging、摘要、去重、生命周期、费用预估和密钥脱敏 | VE-02,VF-05 | ⬜ 未开始 |
+| VE-04 | 阿里 IMS/ICE 凭据与媒资暂存 | 地域/账号/权限检查，OSS/IMS 同地域 staging、摘要、去重、生命周期、费用预估和密钥脱敏 | VE-02,VF-05 | 🔍 待验收 |
 | VE-05 | 阿里 Timeline 编译与任务提交 | 内部 Timeline 编译为阿里轨道/素材/特效，能力差异在提交前验证；一次提交并保存 JobId/请求哈希 | VE-03,VE-04 | ⬜ 未开始 |
 | VE-06 | 回调、轮询、取消与对账 | MNS/回调验签、主动查询、乱序/重复事件、超时、取消、未知结果和崩溃恢复统一推进 EditingJob | VE-05 | ⬜ 未开始 |
 | VE-07 | 成片导入、谱系、成本与清理 | 下载/登记视频、封面、字幕与 metadata；记录输入/Timeline/provider/version/费用，临时 OSS/IMS 资源按策略清理 | VE-06,VF-03 | ⬜ 未开始 |

@@ -21,6 +21,8 @@ import { AccountSessionGate } from "../features/account-session/AccountSessionGa
 import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
+import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
+import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import type { VideoEditingGateway } from "../features/video-editing/video-editing-gateway";
 
@@ -39,6 +41,7 @@ interface AppProps {
   appUpdateGateway?: AppUpdateGateway;
   accountSessionGateway?: AccountSessionGateway;
   modelServiceGateway?: ModelServiceGateway;
+  videoEditingServiceGateway?: VideoEditingServiceGateway;
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
   videoEditingGateway?: VideoEditingGateway;
 }
@@ -58,6 +61,7 @@ export function App({
   appUpdateGateway,
   accountSessionGateway,
   modelServiceGateway,
+  videoEditingServiceGateway,
   materialVideoStudioGateway,
   videoEditingGateway,
 }: AppProps) {
@@ -74,6 +78,7 @@ export function App({
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
+      videoEditingServiceGateway={videoEditingServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
     />
@@ -86,6 +91,9 @@ export function App({
           <Space orientation="vertical" size="large" className="settings-stack">
             {modelServiceGateway === undefined ? null : (
               <ModelServiceSettings gateway={modelServiceGateway} />
+            )}
+            {videoEditingServiceGateway === undefined ? null : (
+              <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
             )}
             <BrowserSettings platform={platformAdapter} />
             <Diagnostics platform={platformAdapter} />
