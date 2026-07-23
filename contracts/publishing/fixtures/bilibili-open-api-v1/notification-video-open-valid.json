@@ -1,0 +1,17 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "notification-video-open-valid",
+  "operation": "archive_notification",
+  "payload": {
+    "content": {
+      "client_id": "fixture-client-id",
+      "openid": "fixtureopenid00000000000000000001",
+      "resource_id": "BV1S9L90H082",
+      "state": 0,
+      "state_desc": "开放浏览"
+    },
+    "event": "video_open",
+    "timestamp": "2021-01-01 12:01:01"
+  }
+}

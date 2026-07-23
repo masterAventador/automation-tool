@@ -115,6 +115,16 @@
       "verified_at": "2026-07-23"
     },
     {
+      "name": "消息推送：概述（Webhooks 配置、verify_webhooks 校验、重试与 x-bilibili-signature 签名）",
+      "url": "https://open.bilibili.com/doc/4/b369a652-0e26-8ddb-74f0-20c74234fcd6",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "消息推送：投稿开放浏览消息（video_open）",
+      "url": "https://open.bilibili.com/doc/4/5f4b3ac2-a6b8-cc32-f13b-48e548f5a8ce",
+      "verified_at": "2026-07-23"
+    },
+    {
       "name": "沙盒环境（官方 MOCK 接口）",
       "url": "https://open.bilibili.com/doc/4/c5fcba1e-58eb-2f84-c86b-88028b0656c0",
       "verified_at": "2026-07-23"
@@ -237,7 +247,24 @@
       "0": "开放浏览",
       "-2": "已退回（来源：video_fail 消息推送示例）"
     },
-    "state_enum_note": "addit_info.state 完整取值官方未公开，除 0 与 -2 外的取值待凭据核验；解析层只锁定类型为整数"
+    "state_enum_note": "addit_info.state 完整取值官方未公开，除 0 与 -2 外的取值待凭据核验；解析层只锁定类型为整数",
+    "ptime_note": "未开放浏览的稿件 ptime 允许为 0（未发布）；真实平台取值待凭据核验。viewlist 文档明确 state≠0 时 video_info 为空"
+  },
+  "notifications": {
+    "transport": "https_post_webhook",
+    "configuration": "开放平台控制台：管理中心 -> 应用管理 -> 应用详情 -> Webhooks 模块配置回调地址",
+    "signature_header": "x-bilibili-signature",
+    "signature_algorithm": "SHA1(app_secret + request_body)",
+    "connection_timeout_seconds": 5,
+    "max_delivery_attempts": 3,
+    "duplicate_delivery_requires_dedup": true,
+    "verification_event": "verify_webhooks",
+    "archive_status_events": {
+      "video_open": 0,
+      "video_fail": -2
+    },
+    "timestamp_format": "yyyy-MM-dd HH:mm:ss（UTC+8）",
+    "note": "官方 Webhook 为出站推送到开发者公网回调地址；本产品本地部署无公网入站，轮询查询为第一实现，本节仅锁定契约与解析"
   },
   "rate_limits": {
     "numeric_quotas_published": false,
@@ -366,6 +393,9 @@
     "标题长度边界 79 或 80 的真实平台判定（文档与错误码文案不一致）",
     "沙盒 MOCK 接口的真实响应样例与正式环境的差异",
     "白名单开启后对本应用授权账号的实际影响",
-    "真实账号的授权页扫码、token 换取、上传、投稿与状态查询全链路"
+    "真实账号的授权页扫码、token 换取、上传、投稿与状态查询全链路",
+    "未开放浏览稿件在 view/viewlist 响应中 ptime 的真实取值（本契约按 0 处理）与审核中 state 的真实取值",
+    "Webhook 真实推送样例、x-bilibili-signature 签名核验与 video_open/video_fail 事件的 state 对应关系",
+    "viewlist 真实分页行为（page.ps 回显值与请求 ps 的关系、翻页一致性）"
   ]
 }

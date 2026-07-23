@@ -144,7 +144,6 @@ _TERMINAL_STATUSES: Final[frozenset[PublishJobStatus]] = frozenset(
         PublishJobStatus.REJECTED,
         PublishJobStatus.FAILED,
         PublishJobStatus.CANCELLED,
-        PublishJobStatus.OUTCOME_UNCERTAIN,
     }
 )
 
@@ -199,7 +198,15 @@ _TRANSITIONS: Final[Mapping[PublishJobStatus, frozenset[PublishJobStatus]]] = Ma
         PublishJobStatus.REJECTED: frozenset(),
         PublishJobStatus.FAILED: frozenset(),
         PublishJobStatus.CANCELLED: frozenset(),
-        PublishJobStatus.OUTCOME_UNCERTAIN: frozenset(),
+        # PB-04 reconciliation may resolve an ambiguous outcome against the
+        # platform's authoritative archive status; no other exit is legal.
+        PublishJobStatus.OUTCOME_UNCERTAIN: frozenset(
+            {
+                PublishJobStatus.PUBLISHED,
+                PublishJobStatus.REJECTED,
+                PublishJobStatus.FAILED,
+            }
+        ),
     }
 )
 

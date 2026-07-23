@@ -6,6 +6,8 @@ from automation_tool.control_plane.infrastructure.bilibili.material import (
 )
 from automation_tool.control_plane.infrastructure.bilibili.open_api_client import (
     BilibiliGatewayEndpoints,
+    BilibiliQueryGatewayEndpoints,
+    HttpxBilibiliArchiveQueryGateway,
     HttpxBilibiliOpenApiGateway,
 )
 from automation_tool.control_plane.infrastructure.bilibili.signing import (
@@ -16,8 +18,10 @@ from automation_tool.control_plane.infrastructure.bilibili.signing import (
 __all__ = [
     "BilibiliApiCredentials",
     "BilibiliGatewayEndpoints",
+    "BilibiliQueryGatewayEndpoints",
     "FilesystemBilibiliCoverSource",
     "FilesystemBilibiliPublishMaterial",
+    "HttpxBilibiliArchiveQueryGateway",
     "HttpxBilibiliOpenApiGateway",
     "build_signed_headers",
 ]

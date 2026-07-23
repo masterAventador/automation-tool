@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "notification-verify-webhooks-valid",
+  "operation": "webhook_verification",
+  "payload": {
+    "content": {
+      "data": 1371848576
+    },
+    "event": "verify_webhooks",
+    "timestamp": "2021-01-01 12:01:01"
+  }
+}

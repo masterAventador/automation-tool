@@ -2259,6 +2259,58 @@ bilibili_publish_attempts = Table(
     PrimaryKeyConstraint("publish_job_id", name="pk_bilibili_publish_attempts"),
 )
 
+bilibili_publish_reconciliations = Table(
+    "bilibili_publish_reconciliations",
+    metadata,
+    Column("publish_job_id", UUID(as_uuid=True), nullable=False),
+    Column("outcome", String(length=16), nullable=False),
+    Column("resource_id", String(length=16), nullable=True),
+    Column("archive_state", BigInteger(), nullable=True),
+    Column("failure_code", String(length=32), nullable=True),
+    Column("last_checked_at", DateTime(timezone=True), nullable=True),
+    Column("settled_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "outcome in ('pending', 'published', 'rejected', 'failed')",
+        name="ck_bilibili_publish_reconciliations_outcome",
+    ),
+    CheckConstraint(
+        "(settled_at is not null) = (outcome <> 'pending')",
+        name="ck_bilibili_publish_reconciliations_settled_shape",
+    ),
+    CheckConstraint(
+        "(failure_code is not null) = (outcome = 'failed')",
+        name="ck_bilibili_publish_reconciliations_failure_shape",
+    ),
+    CheckConstraint(
+        "failure_code is null or failure_code in "
+        "('invalid_input', 'dependency_unavailable', 'platform_error')",
+        name="ck_bilibili_publish_reconciliations_failure_code",
+    ),
+    CheckConstraint(
+        "outcome not in ('published', 'rejected')"
+        " or (resource_id is not null and archive_state is not null)",
+        name="ck_bilibili_publish_reconciliations_resolved_shape",
+    ),
+    CheckConstraint(
+        "updated_at >= created_at",
+        name="ck_bilibili_publish_reconciliations_time_order",
+    ),
+    ForeignKeyConstraint(
+        ["publish_job_id"],
+        ["bilibili_publish_attempts.publish_job_id"],
+        name="fk_bilibili_publish_reconciliations_publish_job_id",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint("publish_job_id", name="pk_bilibili_publish_reconciliations"),
+)
+
+Index(
+    "ix_bilibili_publish_reconciliations_resource_id",
+    bilibili_publish_reconciliations.c.resource_id,
+)
+
 bilibili_upload_parts = Table(
     "bilibili_upload_parts",
     metadata,
@@ -2368,6 +2420,7 @@ __all__ = [
     "action_risk_authorizations",
     "aliyun_editing_intents",
     "bilibili_publish_attempts",
+    "bilibili_publish_reconciliations",
     "bilibili_upload_parts",
     "device_credentials",
     "device_sessions",

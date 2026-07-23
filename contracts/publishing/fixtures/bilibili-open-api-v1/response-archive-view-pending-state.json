@@ -1,0 +1,30 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-archive-view-pending-state",
+  "operation": "archive_view",
+  "payload": {
+    "code": 0,
+    "data": {
+      "addit_info": {
+        "reject_reason": "",
+        "state": -30,
+        "state_desc": "审核中"
+      },
+      "copyright": 1,
+      "cover": "https://i1.hdslb.com/bfs/archive/fixture.jpg",
+      "ctime": 1729154751,
+      "desc": "",
+      "no_reprint": 1,
+      "ptime": 0,
+      "resource_id": "BV1Pending01",
+      "tag": "生活记录",
+      "tid": 229,
+      "title": "契约样例待审稿件",
+      "video_info": {}
+    },
+    "message": "0",
+    "request_id": "fixture-request-id-view-pending",
+    "ttl": 1
+  }
+}

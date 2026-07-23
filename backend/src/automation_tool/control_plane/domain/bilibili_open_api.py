@@ -7,6 +7,8 @@ client lives here; PB-03 consumes this contract for the real upload flow.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import unicodedata
@@ -24,6 +26,12 @@ BILIBILI_OPEN_API_CONTRACT_VERSION: Final = 1
 _RESOURCE_ID_PATTERN: Final = re.compile(r"^BV[0-9A-Za-z]{10}$")
 _FILE_NAME_PATTERN: Final = re.compile(r"^[^/\\]+\.[A-Za-z0-9]+$")
 _ENVELOPE_KEYS: Final = frozenset({"code", "message", "ttl", "data", "request_id"})
+_INTEGER_KEY_PATTERN: Final = re.compile(r"^(0|-?[1-9]\d*)$")
+_NOTIFICATION_KEYS: Final = frozenset({"event", "content", "timestamp"})
+_NOTIFICATION_CONTENT_KEYS: Final = frozenset(
+    {"openid", "client_id", "resource_id", "state", "state_desc"}
+)
+_NOTIFICATION_TIMESTAMP_PATTERN: Final = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -40,6 +48,7 @@ _TOP_LEVEL_KEYS: Final = frozenset(
         "query",
         "rate_limits",
         "sandbox",
+        "notifications",
         "error_categories",
         "error_codes",
         "pending_credential_verification",
@@ -141,6 +150,13 @@ class BilibiliOpenApiContract:
     tag_total_max_chars: int
     page_size_max: int
     archive_status_filters: frozenset[str]
+    archive_state_open: int
+    archive_state_rejected: int
+    notification_signature_header: str
+    notification_verification_event: str
+    notification_archive_events: Mapping[str, int]
+    notification_connection_timeout_seconds: int
+    notification_max_delivery_attempts: int
     error_categories: Mapping[int, BilibiliErrorCategory]
 
 
@@ -214,6 +230,31 @@ class ArchiveStatusSnapshot:
     published_at_epoch_seconds: int
 
 
+@final
+@dataclass(frozen=True, slots=True)
+class ArchiveListPage:
+    """One page of the user's archive list used by PB-04 reconciliation."""
+
+    items: tuple[ArchiveStatusSnapshot, ...]
+    page_number: int
+    page_size: int
+    total: int
+
+
+@final
+@dataclass(frozen=True, slots=True)
+class ArchiveStatusNotification:
+    """One official archive-status webhook push (video_open / video_fail)."""
+
+    event: str
+    openid: str
+    client_id: str
+    resource_id: str
+    state: int
+    state_desc: str
+    occurred_at_text: str
+
+
 def _require_mapping(value: object) -> Mapping[str, object]:
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         _reject_contract()
@@ -256,6 +297,43 @@ def _contract_str_items(section: Mapping[str, object], key: str) -> tuple[str, .
     ):
         _reject_contract()
     return tuple(value)
+
+
+def _parse_documented_states(query: Mapping[str, object]) -> tuple[int, int]:
+    """Return the locked (open, rejected) archive states from the query section."""
+    states = _require_mapping(query.get("documented_states"))
+    for raw_state, description in states.items():
+        if _INTEGER_KEY_PATTERN.fullmatch(raw_state) is None:
+            _reject_contract()
+        if not isinstance(description, str) or not description:
+            _reject_contract()
+    if "0" not in states or "-2" not in states:
+        _reject_contract()
+    return 0, -2
+
+
+def _parse_notifications(
+    document: Mapping[str, object],
+) -> tuple[str, str, Mapping[str, int], int, int]:
+    section = _section(document, "notifications")
+    events_value = _require_mapping(section.get("archive_status_events"))
+    events: dict[str, int] = {}
+    for event, state in events_value.items():
+        if not event or type(state) is not int:
+            _reject_contract()
+        events[event] = state
+    if not events:
+        _reject_contract()
+    verification_event = _contract_str(section, "verification_event")
+    if verification_event in events:
+        _reject_contract()
+    return (
+        _contract_str(section, "signature_header"),
+        verification_event,
+        MappingProxyType(events),
+        _contract_int(section, "connection_timeout_seconds"),
+        _contract_int(section, "max_delivery_attempts"),
+    )
 
 
 def _parse_error_categories(
@@ -326,6 +404,14 @@ def load_bilibili_open_api_contract(path: Path) -> BilibiliOpenApiContract:
     if max_parts * part_size < video_max:
         _reject_contract()
     status_filters = frozenset(_contract_str_items(query, "status_filters"))
+    archive_state_open, archive_state_rejected = _parse_documented_states(query)
+    (
+        notification_signature_header,
+        notification_verification_event,
+        notification_archive_events,
+        notification_connection_timeout_seconds,
+        notification_max_delivery_attempts,
+    ) = _parse_notifications(document)
     return BilibiliOpenApiContract(
         version=BILIBILI_OPEN_API_CONTRACT_VERSION,
         verified_at=verified_at,
@@ -361,6 +447,13 @@ def load_bilibili_open_api_contract(path: Path) -> BilibiliOpenApiContract:
         tag_total_max_chars=_contract_int(submission, "tag_total_max_chars"),
         page_size_max=_contract_int(query, "page_size_max"),
         archive_status_filters=status_filters,
+        archive_state_open=archive_state_open,
+        archive_state_rejected=archive_state_rejected,
+        notification_signature_header=notification_signature_header,
+        notification_verification_event=notification_verification_event,
+        notification_archive_events=notification_archive_events,
+        notification_connection_timeout_seconds=notification_connection_timeout_seconds,
+        notification_max_delivery_attempts=notification_max_delivery_attempts,
         error_categories=_parse_error_categories(document),
     )
 
@@ -552,15 +645,8 @@ _ARCHIVE_VIEW_KEYS: Final = frozenset(
 )
 
 
-def parse_archive_view(
-    contract: BilibiliOpenApiContract, payload: object
-) -> ArchiveStatusSnapshot | BilibiliPlatformRejection:
-    """Parse the single-archive detail response used for status reconciliation."""
-    data = _parse_envelope(contract, payload)
-    if isinstance(data, BilibiliPlatformRejection):
-        return data
-    if data is None:
-        _reject_message()
+def _parse_archive_snapshot(data: Mapping[str, object]) -> ArchiveStatusSnapshot:
+    """Parse one archive detail object shared by view and viewlist responses."""
     _data_exact_keys(data, _ARCHIVE_VIEW_KEYS)
     resource_id = _message_secret(data, "resource_id")
     if _RESOURCE_ID_PATTERN.fullmatch(resource_id) is None:
@@ -580,6 +666,9 @@ def parse_archive_view(
         or not isinstance(title, str)
     ):
         _reject_message()
+    published_at = data.get("ptime")
+    if type(published_at) is not int or published_at < 0:
+        _reject_message()
     return ArchiveStatusSnapshot(
         resource_id=resource_id,
         title=title,
@@ -587,8 +676,140 @@ def parse_archive_view(
         state_desc=state_desc,
         reject_reason=reject_reason,
         created_at_epoch_seconds=_message_epoch(data, "ctime"),
-        published_at_epoch_seconds=_message_epoch(data, "ptime"),
+        published_at_epoch_seconds=published_at,
     )
+
+
+def parse_archive_view(
+    contract: BilibiliOpenApiContract, payload: object
+) -> ArchiveStatusSnapshot | BilibiliPlatformRejection:
+    """Parse the single-archive detail response used for status reconciliation."""
+    data = _parse_envelope(contract, payload)
+    if isinstance(data, BilibiliPlatformRejection):
+        return data
+    if data is None:
+        _reject_message()
+    return _parse_archive_snapshot(data)
+
+
+def parse_archive_viewlist(
+    contract: BilibiliOpenApiContract, payload: object
+) -> ArchiveListPage | BilibiliPlatformRejection:
+    """Parse one page of the user archive list used for uncertainty reconciliation."""
+    data = _parse_envelope(contract, payload)
+    if isinstance(data, BilibiliPlatformRejection):
+        return data
+    if data is None:
+        _reject_message()
+    _data_exact_keys(data, frozenset({"list", "page"}))
+    page = _require_message_mapping(data.get("page"))
+    if set(page) != {"pn", "ps", "total"}:
+        _reject_message()
+    page_number = page.get("pn")
+    page_size = page.get("ps")
+    total = page.get("total")
+    if (
+        type(page_number) is not int
+        or page_number < 1
+        or type(page_size) is not int
+        or page_size < 1
+        or type(total) is not int
+        or total < 0
+    ):
+        _reject_message()
+    raw_items = data.get("list")
+    if not isinstance(raw_items, list):
+        _reject_message()
+    items = tuple(_parse_archive_snapshot(_require_message_mapping(item)) for item in raw_items)
+    return ArchiveListPage(
+        items=items,
+        page_number=page_number,
+        page_size=page_size,
+        total=total,
+    )
+
+
+def _parse_notification_envelope(payload: object) -> tuple[str, Mapping[str, object], str]:
+    """Return (event, content, timestamp) from one webhook push message."""
+    message = _require_message_mapping(payload)
+    if set(message) != _NOTIFICATION_KEYS:
+        _reject_message()
+    event = message.get("event")
+    timestamp = message.get("timestamp")
+    if (
+        not isinstance(event, str)
+        or not event
+        or not isinstance(timestamp, str)
+        or _NOTIFICATION_TIMESTAMP_PATTERN.fullmatch(timestamp) is None
+    ):
+        _reject_message()
+    return event, _require_message_mapping(message.get("content")), timestamp
+
+
+def _notification_text(content: Mapping[str, object], key: str) -> str:
+    value = content.get(key)
+    if not isinstance(value, str):
+        _reject_message()
+    stripped = value.strip()
+    if not stripped or any(
+        unicodedata.category(character).startswith("C") for character in stripped
+    ):
+        _reject_message()
+    return stripped
+
+
+def parse_archive_status_notification(
+    contract: BilibiliOpenApiContract, payload: object
+) -> ArchiveStatusNotification:
+    """Parse one archive-status webhook push; unknown events fail closed."""
+    event, content, timestamp = _parse_notification_envelope(payload)
+    documented_state = contract.notification_archive_events.get(event)
+    if documented_state is None:
+        _reject_message()
+    if set(content) != _NOTIFICATION_CONTENT_KEYS:
+        _reject_message()
+    resource_id = _notification_text(content, "resource_id")
+    if _RESOURCE_ID_PATTERN.fullmatch(resource_id) is None:
+        _reject_message()
+    state = content.get("state")
+    if type(state) is not int or state != documented_state:
+        _reject_message()
+    return ArchiveStatusNotification(
+        event=event,
+        openid=_notification_text(content, "openid"),
+        client_id=_notification_text(content, "client_id"),
+        resource_id=resource_id,
+        state=state,
+        state_desc=_notification_text(content, "state_desc"),
+        occurred_at_text=timestamp,
+    )
+
+
+def parse_webhook_verification(contract: BilibiliOpenApiContract, payload: object) -> int:
+    """Parse the webhook address-verification challenge and return its echo value."""
+    event, content, _ = _parse_notification_envelope(payload)
+    if event != contract.notification_verification_event:
+        _reject_message()
+    if set(content) != {"data"}:
+        _reject_message()
+    challenge = content.get("data")
+    if type(challenge) is not int:
+        _reject_message()
+    return challenge
+
+
+def compute_webhook_signature(app_secret: object, body: object) -> str:
+    """Compute the documented SHA1(app_secret + request_body) push signature."""
+    if not isinstance(app_secret, str) or not app_secret or not isinstance(body, bytes):
+        _reject_message()
+    return hashlib.sha1(app_secret.encode("utf-8") + body).hexdigest()
+
+
+def verify_webhook_signature(app_secret: object, body: object, signature: object) -> bool:
+    """Constant-time comparison against the documented push signature."""
+    if not isinstance(signature, str) or not signature:
+        return False
+    return hmac.compare_digest(compute_webhook_signature(app_secret, body), signature)
 
 
 def validate_upload_init_request(
@@ -683,6 +904,8 @@ def validate_archive_submission(
 
 __all__ = [
     "BILIBILI_OPEN_API_CONTRACT_VERSION",
+    "ArchiveListPage",
+    "ArchiveStatusNotification",
     "ArchiveStatusSnapshot",
     "ArchiveSubmissionReceipt",
     "BilibiliErrorCategory",
@@ -695,16 +918,21 @@ __all__ = [
     "TokenRefresh",
     "UploadSession",
     "classify_error_code",
+    "compute_webhook_signature",
     "load_bilibili_open_api_contract",
     "parse_archive_add",
+    "parse_archive_status_notification",
     "parse_archive_view",
+    "parse_archive_viewlist",
     "parse_cover_upload",
     "parse_token_grant",
     "parse_token_refresh",
     "parse_transfer_ack",
     "parse_upload_init",
+    "parse_webhook_verification",
     "plan_upload_parts",
     "validate_archive_submission",
     "validate_part_number",
     "validate_upload_init_request",
+    "verify_webhook_signature",
 ]

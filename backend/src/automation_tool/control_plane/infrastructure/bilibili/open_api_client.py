@@ -11,6 +11,7 @@ bundled here and nothing is retried implicitly.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from automation_tool.control_plane.infrastructure.bilibili.signing import (
 
 _LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "localhost"})
 _DEFAULT_TIMEOUT_SECONDS: Final = 30.0
+_RESOURCE_ID_PATTERN: Final = re.compile(r"^BV[0-9A-Za-z]{10}$")
 
 
 def _validated_url(value: object) -> str:
@@ -224,4 +226,122 @@ class HttpxBilibiliOpenApiGateway:
         )
 
 
-__all__ = ["BilibiliGatewayEndpoints", "HttpxBilibiliOpenApiGateway"]
+@dataclass(frozen=True, slots=True)
+class BilibiliQueryGatewayEndpoints:
+    """Query endpoint URLs; HTTPS-only except explicit loopback hosts."""
+
+    archive_view_url: str
+    archive_viewlist_url: str
+
+    def __post_init__(self) -> None:
+        for field in dataclass_fields(self):
+            _validated_url(getattr(self, field.name))
+
+    @classmethod
+    def from_contract(cls, contract: BilibiliOpenApiContract) -> Self:
+        if not isinstance(contract, BilibiliOpenApiContract):
+            raise BilibiliArchivePublishRejected
+        return cls(
+            archive_view_url=contract.archive_view_url,
+            archive_viewlist_url=contract.archive_viewlist_url,
+        )
+
+
+class HttpxBilibiliArchiveQueryGateway:
+    """Signed, read-only archive status queries; it cannot submit anything.
+
+    Both official query endpoints are GET requests with an empty body, so the
+    signature covers the constant empty-body MD5.  Responses are returned
+    unparsed; transport failures and unreadable responses raise
+    :class:`BilibiliGatewayUnreachable` for the reconciliation pacing logic.
+    """
+
+    def __init__(
+        self,
+        *,
+        contract: BilibiliOpenApiContract,
+        credentials: BilibiliApiCredentials,
+        endpoints: BilibiliQueryGatewayEndpoints | None = None,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
+        if (
+            not isinstance(contract, BilibiliOpenApiContract)
+            or not isinstance(credentials, BilibiliApiCredentials)
+            or (endpoints is not None and not isinstance(endpoints, BilibiliQueryGatewayEndpoints))
+            or not isinstance(timeout_seconds, int | float)
+            or isinstance(timeout_seconds, bool)
+            or not 0 < float(timeout_seconds) <= 600
+        ):
+            raise BilibiliArchivePublishRejected
+        self._contract = contract
+        self._credentials = credentials
+        self._endpoints = endpoints or BilibiliQueryGatewayEndpoints.from_contract(contract)
+        self._client = httpx2.AsyncClient(timeout=float(timeout_seconds))
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    def _require_token(self, access_token: object) -> str:
+        if not isinstance(access_token, str) or not access_token:
+            raise BilibiliArchivePublishRejected
+        return access_token
+
+    async def _get(self, url: str, *, access_token: str, params: dict[str, str]) -> object:
+        headers = build_signed_headers(
+            contract=self._contract,
+            credentials=self._credentials,
+            access_token=access_token,
+            body=b"",
+            content_type="application/json",
+            nonce=secrets.token_hex(16),
+            timestamp=int(time.time()),
+        )
+        try:
+            response = await self._client.get(url, headers=headers, params=params)
+        except httpx2.HTTPError:
+            raise BilibiliGatewayUnreachable from None
+        try:
+            payload: object = json.loads(response.content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise BilibiliGatewayUnreachable from None
+        return payload
+
+    async def archive_view(self, *, access_token: str, resource_id: str) -> object:
+        token = self._require_token(access_token)
+        if not isinstance(resource_id, str) or _RESOURCE_ID_PATTERN.fullmatch(resource_id) is None:
+            raise BilibiliArchivePublishRejected
+        return await self._get(
+            self._endpoints.archive_view_url,
+            access_token=token,
+            params={"resource_id": resource_id},
+        )
+
+    async def archive_viewlist(
+        self, *, access_token: str, page_number: int, page_size: int, status_filter: str
+    ) -> object:
+        token = self._require_token(access_token)
+        if (
+            type(page_number) is not int
+            or page_number < 1
+            or type(page_size) is not int
+            or not 1 <= page_size <= self._contract.page_size_max
+            or status_filter not in self._contract.archive_status_filters
+        ):
+            raise BilibiliArchivePublishRejected
+        return await self._get(
+            self._endpoints.archive_viewlist_url,
+            access_token=token,
+            params={
+                "pn": str(page_number),
+                "ps": str(page_size),
+                "status": str(status_filter),
+            },
+        )
+
+
+__all__ = [
+    "BilibiliGatewayEndpoints",
+    "BilibiliQueryGatewayEndpoints",
+    "HttpxBilibiliArchiveQueryGateway",
+    "HttpxBilibiliOpenApiGateway",
+]

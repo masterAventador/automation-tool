@@ -186,7 +186,7 @@ async def test_binding_migration_is_reversible_and_owner_cannot_be_reassigned(
                     updated_at=NOW,
                 )
             )
-        assert revision == "20260723_0031"
+        assert revision == "20260723_0033"
         assert columns == {
             "id",
             "user_id",

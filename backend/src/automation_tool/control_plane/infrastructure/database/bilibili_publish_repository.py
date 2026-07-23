@@ -27,12 +27,17 @@ from automation_tool.control_plane.application.bilibili_archive_publishing impor
     BilibiliPublishPreparation,
     BilibiliUploadType,
 )
+from automation_tool.control_plane.application.bilibili_archive_reconciliation import (
+    BilibiliReconciliationOutcome,
+    BilibiliReconciliationRecord,
+)
 from automation_tool.control_plane.domain.video_publishing import (
     PublishFailureCode,
     PublishJobId,
 )
 from automation_tool.control_plane.infrastructure.database.schema import (
     bilibili_publish_attempts,
+    bilibili_publish_reconciliations,
     bilibili_upload_parts,
 )
 from automation_tool.control_plane.infrastructure.database.session import Database
@@ -40,6 +45,12 @@ from automation_tool.control_plane.infrastructure.database.session import Databa
 _ACTIVE_COVER_PHASES = (
     BilibiliPublishPhase.PREPARED.value,
     BilibiliPublishPhase.VIDEO_UPLOADED.value,
+)
+
+_RECONCILABLE_PHASES = (
+    BilibiliPublishPhase.DISPATCHED.value,
+    BilibiliPublishPhase.SUBMITTED.value,
+    BilibiliPublishPhase.OUTCOME_UNCERTAIN.value,
 )
 
 
@@ -437,5 +448,259 @@ class SqlAlchemyBilibiliArchivePublishStore:
         if not updated:
             raise BilibiliArchivePublishRejected
 
+    async def list_reconcilable(self) -> tuple[BilibiliPublishAttemptRecord, ...]:
+        """Return every attempt PB-04 reconciliation must consume, oldest first."""
 
-__all__ = ["SqlAlchemyBilibiliArchivePublishStore"]
+        async def operation() -> tuple[BilibiliPublishAttemptRecord, ...]:
+            async with self._database.session() as session:
+                rows = await session.execute(
+                    select(bilibili_publish_attempts)
+                    .where(bilibili_publish_attempts.c.phase.in_(_RECONCILABLE_PHASES))
+                    .order_by(
+                        bilibili_publish_attempts.c.created_at,
+                        bilibili_publish_attempts.c.publish_job_id,
+                    )
+                )
+                return tuple(_record(row) for row in rows.mappings())
+
+        return await self._execute(operation())
+
+
+def _reconciliation_record(row: RowMapping) -> BilibiliReconciliationRecord:
+    failure_code = cast(str | None, row["failure_code"])
+    return BilibiliReconciliationRecord(
+        publish_job_id=PublishJobId.parse(row["publish_job_id"]),
+        outcome=BilibiliReconciliationOutcome(cast(str, row["outcome"])),
+        resource_id=cast(str | None, row["resource_id"]),
+        archive_state=cast(int | None, row["archive_state"]),
+        failure_code=None if failure_code is None else PublishFailureCode(failure_code),
+        last_checked_at=_optional_utc(row["last_checked_at"]),
+        settled_at=_optional_utc(row["settled_at"]),
+        created_at=_utc(row["created_at"]),
+        updated_at=_utc(row["updated_at"]),
+    )
+
+
+class SqlAlchemyBilibiliReconciliationStore:
+    """Durable, monotonic reconciliation outcomes; settled rows never change."""
+
+    def __init__(self, database: Database) -> None:
+        if not isinstance(database, Database):
+            raise BilibiliArchivePublishRejected
+        self._database = database
+
+    async def _execute[ResultT](self, operation: Coroutine[Any, Any, ResultT]) -> ResultT:
+        try:
+            return await operation
+        except BilibiliArchivePublishRejected:
+            raise
+        except IntegrityError:
+            raise BilibiliArchivePublishRejected from None
+        except SQLAlchemyError:
+            raise BilibiliArchivePublishUnavailable from None
+        except Exception:
+            raise BilibiliArchivePublishUnavailable from None
+
+    async def ensure_pending(
+        self, publish_job_id: PublishJobId, resource_id: str | None, at: datetime
+    ) -> BilibiliReconciliationRecord:
+        job_id = _require_job_id(publish_job_id)
+        if resource_id is not None and (
+            not isinstance(resource_id, str) or not resource_id or len(resource_id) > 16
+        ):
+            raise BilibiliArchivePublishRejected
+        moment = _utc(at)
+
+        async def operation() -> BilibiliReconciliationRecord:
+            async with self._database.session() as session:
+                await session.execute(
+                    postgresql_insert(bilibili_publish_reconciliations)
+                    .values(
+                        publish_job_id=job_id.uuid,
+                        outcome=BilibiliReconciliationOutcome.PENDING.value,
+                        resource_id=resource_id,
+                        archive_state=None,
+                        failure_code=None,
+                        last_checked_at=None,
+                        settled_at=None,
+                        created_at=moment,
+                        updated_at=moment,
+                    )
+                    .on_conflict_do_nothing(index_elements=["publish_job_id"])
+                )
+                row = (
+                    (
+                        await session.execute(
+                            select(bilibili_publish_reconciliations).where(
+                                bilibili_publish_reconciliations.c.publish_job_id == job_id.uuid
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                return _reconciliation_record(row)
+
+        return await self._execute(operation())
+
+    async def load(self, publish_job_id: PublishJobId) -> BilibiliReconciliationRecord | None:
+        job_id = _require_job_id(publish_job_id)
+
+        async def operation() -> BilibiliReconciliationRecord | None:
+            async with self._database.session() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(bilibili_publish_reconciliations).where(
+                                bilibili_publish_reconciliations.c.publish_job_id == job_id.uuid
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return None if row is None else _reconciliation_record(row)
+
+        return await self._execute(operation())
+
+    async def find_by_resource_id(self, resource_id: str) -> BilibiliReconciliationRecord | None:
+        if not isinstance(resource_id, str) or not resource_id or len(resource_id) > 16:
+            raise BilibiliArchivePublishRejected
+
+        async def operation() -> BilibiliReconciliationRecord | None:
+            async with self._database.session() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(bilibili_publish_reconciliations).where(
+                                bilibili_publish_reconciliations.c.resource_id == resource_id
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                return None if row is None else _reconciliation_record(row)
+
+        return await self._execute(operation())
+
+    async def list_unsettled(self) -> tuple[BilibiliReconciliationRecord, ...]:
+        async def operation() -> tuple[BilibiliReconciliationRecord, ...]:
+            async with self._database.session() as session:
+                rows = await session.execute(
+                    select(bilibili_publish_reconciliations)
+                    .where(
+                        bilibili_publish_reconciliations.c.outcome
+                        == BilibiliReconciliationOutcome.PENDING.value
+                    )
+                    .order_by(
+                        bilibili_publish_reconciliations.c.created_at,
+                        bilibili_publish_reconciliations.c.publish_job_id,
+                    )
+                )
+                return tuple(_reconciliation_record(row) for row in rows.mappings())
+
+        return await self._execute(operation())
+
+    async def _pending_update(
+        self, publish_job_id: PublishJobId, values: dict[str, object]
+    ) -> bool:
+        statement = (
+            update(bilibili_publish_reconciliations)
+            .where(
+                bilibili_publish_reconciliations.c.publish_job_id == publish_job_id.uuid,
+                bilibili_publish_reconciliations.c.outcome
+                == BilibiliReconciliationOutcome.PENDING.value,
+            )
+            .values(**values)
+            .returning(bilibili_publish_reconciliations.c.publish_job_id)
+        )
+
+        async def operation() -> bool:
+            async with self._database.session() as session:
+                result = await session.execute(statement)
+                return result.scalar_one_or_none() is not None
+
+        return await self._execute(operation())
+
+    async def record_checked(
+        self, publish_job_id: PublishJobId, archive_state: int | None, at: datetime
+    ) -> None:
+        job_id = _require_job_id(publish_job_id)
+        if archive_state is not None and type(archive_state) is not int:
+            raise BilibiliArchivePublishRejected
+        moment = _utc(at)
+        updated = await self._pending_update(
+            job_id,
+            {"archive_state": archive_state, "last_checked_at": moment, "updated_at": moment},
+        )
+        if not updated:
+            raise BilibiliArchivePublishRejected
+
+    async def adopt_resource_id(
+        self, publish_job_id: PublishJobId, resource_id: str, at: datetime
+    ) -> None:
+        job_id = _require_job_id(publish_job_id)
+        if not isinstance(resource_id, str) or not resource_id or len(resource_id) > 16:
+            raise BilibiliArchivePublishRejected
+        moment = _utc(at)
+        statement = (
+            update(bilibili_publish_reconciliations)
+            .where(
+                bilibili_publish_reconciliations.c.publish_job_id == job_id.uuid,
+                bilibili_publish_reconciliations.c.outcome
+                == BilibiliReconciliationOutcome.PENDING.value,
+                bilibili_publish_reconciliations.c.resource_id.is_(None),
+            )
+            .values(resource_id=resource_id, updated_at=moment)
+            .returning(bilibili_publish_reconciliations.c.publish_job_id)
+        )
+
+        async def operation() -> bool:
+            async with self._database.session() as session:
+                result = await session.execute(statement)
+                return result.scalar_one_or_none() is not None
+
+        if not await self._execute(operation()):
+            raise BilibiliArchivePublishRejected
+
+    async def settle(
+        self,
+        publish_job_id: PublishJobId,
+        outcome: BilibiliReconciliationOutcome,
+        archive_state: int | None,
+        failure_code: PublishFailureCode | None,
+        at: datetime,
+    ) -> bool:
+        job_id = _require_job_id(publish_job_id)
+        if (
+            not isinstance(outcome, BilibiliReconciliationOutcome)
+            or outcome is BilibiliReconciliationOutcome.PENDING
+            or (archive_state is not None and type(archive_state) is not int)
+            or (failure_code is not None and not isinstance(failure_code, PublishFailureCode))
+            or (failure_code is not None) is not (outcome is BilibiliReconciliationOutcome.FAILED)
+        ):
+            raise BilibiliArchivePublishRejected
+        moment = _utc(at)
+        settled = await self._pending_update(
+            job_id,
+            {
+                "outcome": outcome.value,
+                "archive_state": archive_state,
+                "failure_code": None if failure_code is None else failure_code.value,
+                "last_checked_at": moment,
+                "settled_at": moment,
+                "updated_at": moment,
+            },
+        )
+        if settled:
+            return True
+        if await self.load(job_id) is None:
+            raise BilibiliArchivePublishRejected
+        return False
+
+
+__all__ = [
+    "SqlAlchemyBilibiliArchivePublishStore",
+    "SqlAlchemyBilibiliReconciliationStore",
+]

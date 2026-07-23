@@ -241,7 +241,6 @@ class TestPublishJobStateMachine:
             PublishJobStatus.REJECTED,
             PublishJobStatus.FAILED,
             PublishJobStatus.CANCELLED,
-            PublishJobStatus.OUTCOME_UNCERTAIN,
         }
         assert PublishJobStateMachine.terminal_statuses() == frozenset(terminals)
         for terminal in terminals:
@@ -259,6 +258,38 @@ class TestPublishJobStateMachine:
             assert not PublishJobStateMachine.can_transition(
                 status, PublishJobStatus.OUTCOME_UNCERTAIN
             )
+
+    def test_uncertain_outcome_is_resolvable_by_reconciliation_only(self) -> None:
+        assert PublishJobStateMachine.is_terminal(PublishJobStatus.OUTCOME_UNCERTAIN) is False
+        assert PublishJobStateMachine.allowed_targets(
+            PublishJobStatus.OUTCOME_UNCERTAIN
+        ) == frozenset(
+            {
+                PublishJobStatus.PUBLISHED,
+                PublishJobStatus.REJECTED,
+                PublishJobStatus.FAILED,
+            }
+        )
+        for target in (
+            PublishJobStatus.DRAFT,
+            PublishJobStatus.AWAITING_APPROVAL,
+            PublishJobStatus.APPROVED,
+            PublishJobStatus.DISPATCHING,
+            PublishJobStatus.CANCELLING,
+            PublishJobStatus.CANCELLED,
+            PublishJobStatus.OUTCOME_UNCERTAIN,
+        ):
+            with pytest.raises(InvalidPublishJobTransition):
+                PublishJobStateMachine.transition(PublishJobStatus.OUTCOME_UNCERTAIN, target)
+
+    def test_reconciliation_targets_are_legal_from_both_ambiguous_states(self) -> None:
+        for origin in (PublishJobStatus.DISPATCHING, PublishJobStatus.OUTCOME_UNCERTAIN):
+            for target in (
+                PublishJobStatus.PUBLISHED,
+                PublishJobStatus.REJECTED,
+                PublishJobStatus.FAILED,
+            ):
+                assert PublishJobStateMachine.transition(origin, target) is target
 
     def test_cancel_is_cooperative(self) -> None:
         for status in (

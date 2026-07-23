@@ -1,0 +1,19 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-archive-viewlist-malformed-page",
+  "operation": "archive_viewlist",
+  "payload": {
+    "code": 0,
+    "data": {
+      "list": [],
+      "page": {
+        "pn": 1,
+        "ps": 50,
+        "total": "0"
+      }
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

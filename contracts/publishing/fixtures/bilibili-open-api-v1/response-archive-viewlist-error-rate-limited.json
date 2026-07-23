@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "rate_limited",
+  "expected_failure_code": "dependency_unavailable",
+  "fixture": "response-archive-viewlist-error-rate-limited",
+  "operation": "archive_viewlist",
+  "payload": {
+    "code": 127306,
+    "message": "接口请求频率过高，请确保请求量正常",
+    "ttl": 1
+  }
+}

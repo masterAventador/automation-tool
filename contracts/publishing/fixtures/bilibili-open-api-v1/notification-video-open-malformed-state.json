@@ -1,0 +1,17 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "notification-video-open-malformed-state",
+  "operation": "archive_notification",
+  "payload": {
+    "content": {
+      "client_id": "fixture-client-id",
+      "openid": "fixtureopenid00000000000000000001",
+      "resource_id": "BV1S9L90H082",
+      "state": -2,
+      "state_desc": "已退回"
+    },
+    "event": "video_open",
+    "timestamp": "2021-01-01 12:01:01"
+  }
+}

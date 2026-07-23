@@ -1,0 +1,20 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-archive-viewlist-empty",
+  "operation": "archive_viewlist",
+  "payload": {
+    "code": 0,
+    "data": {
+      "list": [],
+      "page": {
+        "pn": 1,
+        "ps": 50,
+        "total": 0
+      }
+    },
+    "message": "0",
+    "request_id": "fixture-request-id-viewlist-empty",
+    "ttl": 1
+  }
+}

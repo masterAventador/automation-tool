@@ -9,6 +9,8 @@ import pytest
 
 from automation_tool.control_plane.domain.bilibili_open_api import (
     BILIBILI_OPEN_API_CONTRACT_VERSION,
+    ArchiveListPage,
+    ArchiveStatusNotification,
     ArchiveStatusSnapshot,
     ArchiveSubmissionReceipt,
     BilibiliErrorCategory,
@@ -23,12 +25,15 @@ from automation_tool.control_plane.domain.bilibili_open_api import (
     classify_error_code,
     load_bilibili_open_api_contract,
     parse_archive_add,
+    parse_archive_status_notification,
     parse_archive_view,
+    parse_archive_viewlist,
     parse_cover_upload,
     parse_token_grant,
     parse_token_refresh,
     parse_transfer_ack,
     parse_upload_init,
+    parse_webhook_verification,
     plan_upload_parts,
     validate_archive_submission,
     validate_part_number,
@@ -545,6 +550,9 @@ def _judge_response(contract: BilibiliOpenApiContract, operation: str, payload: 
         "cover_upload": parse_cover_upload,
         "archive_add": parse_archive_add,
         "archive_view": parse_archive_view,
+        "archive_viewlist": parse_archive_viewlist,
+        "archive_notification": parse_archive_status_notification,
+        "webhook_verification": parse_webhook_verification,
     }
     return parsers[operation](contract, payload)
 
@@ -587,6 +595,9 @@ SUCCESS_TYPES = {
     "cover_upload": CoverUploadResult,
     "archive_add": ArchiveSubmissionReceipt,
     "archive_view": ArchiveStatusSnapshot,
+    "archive_viewlist": ArchiveListPage,
+    "archive_notification": ArchiveStatusNotification,
+    "webhook_verification": int,
 }
 
 
