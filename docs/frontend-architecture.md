@@ -73,9 +73,9 @@ Tauri/Rust ──只读 Resources──> 已验证的内置 Chromium
 
 当前 P9 本地 MVP 没有认证路由守卫，启动成功后固定进入 `/workbench`；后端不可用时进入可恢复的连接故障页。U9-04 将为客户 Demo 增加独立登录/恢复路由和业务路由守卫，未登录时不挂载工作台。
 
-App 启动边界已实现 checking、ready、blocked 及兼容 unavailable/revoked 状态和安全重试；ready 后才挂载正式工作台。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 组合 `TauriControlPlaneTransport` 与 `TauriStartupEnvironmentGateway`，并行检查 Control Plane、Local Executor、受信浏览器和 App 私有数据目录。Control Plane Health 若发现已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针；精确 401 单独映射吊销，网络/服务/协议故障映射普通不可用。
+App 启动边界已实现 checking、ready、blocked 及兼容 unavailable/revoked 状态和安全重试；ready 后才挂载正式工作台。F1-08 保留注入式 `StartupCheck` 用于孤立 UI 测试；生产 `main.tsx` 组合 `TauriControlPlaneTransport` 与 `TauriStartupEnvironmentGateway`，并行检查 Control Plane、Local Executor、内置浏览器组件和 App 私有数据目录。Control Plane Health 若发现已有长期凭据，还会换取 `app.control-plane` Session 并请求当前 Installation 访问探针；精确 401 单独映射吊销，网络/服务/协议故障映射普通不可用。
 
-本机诊断只经固定 `check_local_startup_environment` Command 返回 exact `{appData,executor,trustedBrowser}` 封闭枚举。Rust 复用既有 AppData 私有权限、BrowserProfile identity/DACL、浏览器受信发现、编译期动作信任配置和 signed Executor verifier；它不会启动 Executor 或浏览器，也不会序列化路径、版本、摘要、PID、凭据、页面内容或底层异常。本机问题可在 Gate 内展开既有浏览器设置与 Executor 诊断工具并重新检查；只有 Control Plane 不可用或 Installation 吊销时不展示无关本机修复入口。真实 WebView 只能 invoke 固定 Rust Command，禁止直接请求 Control Plane。
+本机诊断只经固定 `check_local_startup_environment` Command 返回 exact `{appData,executor,embeddedBrowser}` 封闭枚举。Rust 复用既有 AppData 私有权限、BrowserProfile identity/DACL、内置发行物 Manifest/摘要验证、编译期动作信任配置和 signed Executor verifier；它不会启动 Executor 或浏览器，也不会序列化路径、版本、摘要、PID、凭据、页面内容或底层异常。内置组件缺失、损坏或版本不兼容时，Gate 给出重新安装官方客户端的安全提示并保持工作台封锁，不提供 Chrome/Edge 选择或系统浏览器 fallback；本机修复工具只保留 Executor 诊断等仍有效能力。只有 Control Plane 不可用或 Installation 吊销时不展示无关本机修复入口。真实 WebView 只能 invoke 固定 Rust Command，禁止直接请求 Control Plane。
 
 U9-04 已在客户 Demo Profile 中把产品账号会话门禁放到启动组合根最外层：账号状态未确认、未登录或离线时不挂载 P9 启动检查、诊断工具或业务工作台；登录、恢复、改密、注销和重启 refresh 都经固定 Rust Command，React 只得到安全账号投影。U9-05 再在登录成功后增加账号所属 Installation 门禁，复用设备密钥证明完成自动归属绑定，不生成配对码、不轮询设备审批，也不要求后台逐设备批准。P9 本地 Profile 继续保持上一段四态和无产品登录入口。
 

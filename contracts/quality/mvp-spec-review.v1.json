@@ -77,7 +77,7 @@
       "evidence": [
         {"path": "frontend/src/main.tsx", "anchor": "const startupCheck = createDesktopStartupCheck("},
         {"path": "frontend/src-tauri/src/lib.rs", "anchor": "fn check_local_startup_environment("},
-        {"path": "frontend/e2e-tauri/startup-environment.spec.ts", "anchor": "repairs the trusted browser selection and reaches the workbench"}
+        {"path": "frontend/e2e-tauri/startup-environment.spec.ts", "anchor": "keeps the workbench blocked when the embedded browser is missing"}
       ]
     },
     {
