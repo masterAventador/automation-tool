@@ -1,0 +1,12 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "auth_rejected",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-part-upload-error-token",
+  "operation": "part_upload_ack",
+  "payload": {
+    "code": 127022,
+    "message": "upload_token验证错误"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "direction": "request",
+  "expected": "valid",
+  "fixture": "request-upload-init-small-valid",
+  "operation": "upload_init_request",
+  "payload": {
+    "file_name": "short-clip.flv",
+    "upload_type": "1"
+  }
+}

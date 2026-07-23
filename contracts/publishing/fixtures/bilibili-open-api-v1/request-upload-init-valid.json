@@ -1,0 +1,10 @@
+{
+  "direction": "request",
+  "expected": "valid",
+  "fixture": "request-upload-init-valid",
+  "operation": "upload_init_request",
+  "payload": {
+    "file_name": "demo.mp4",
+    "upload_type": "0"
+  }
+}

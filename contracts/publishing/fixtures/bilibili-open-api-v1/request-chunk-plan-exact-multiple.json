@@ -1,0 +1,9 @@
+{
+  "direction": "request",
+  "expected": "valid",
+  "fixture": "request-chunk-plan-exact-multiple",
+  "operation": "chunk_plan",
+  "payload": {
+    "total_size_bytes": 16777216
+  }
+}

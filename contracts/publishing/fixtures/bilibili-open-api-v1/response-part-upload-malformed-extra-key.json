@@ -1,0 +1,11 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-part-upload-malformed-extra-key",
+  "operation": "part_upload_ack",
+  "payload": {
+    "code": 0,
+    "message": "0",
+    "surprise": true
+  }
+}

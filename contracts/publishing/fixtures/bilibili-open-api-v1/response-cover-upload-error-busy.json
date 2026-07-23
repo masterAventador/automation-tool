@@ -1,0 +1,12 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "platform_busy",
+  "expected_failure_code": "dependency_unavailable",
+  "fixture": "response-cover-upload-error-busy",
+  "operation": "cover_upload",
+  "payload": {
+    "code": 4010,
+    "message": "服务异常"
+  }
+}

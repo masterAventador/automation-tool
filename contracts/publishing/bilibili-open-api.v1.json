@@ -1,0 +1,371 @@
+{
+  "contract": "bilibili-open-api",
+  "version": 1,
+  "verified_at": "2026-07-23",
+  "policy": {
+    "official_sources_only": true,
+    "https_only": true,
+    "rejected_legacy_endpoints": [
+      {
+        "endpoint": "https://passport.bilibili.com/register/pc_oauth2.html",
+        "reason": "官方网页应用接入文档声明 2025-03 起旧授权页停止维护和迭代，必须使用 account.bilibili.com 新授权页",
+        "source": "https://open.bilibili.com/doc/4/aac73b2e-4ff2-b75c-4c96-35ced865797b"
+      },
+      {
+        "endpoint": "https://passport.bilibili.com/api/v3/oauth2/*",
+        "reason": "B站客户端私有登录接口，不属于开放平台公开契约，禁止接入",
+        "source": "https://open.bilibili.com/doc/4/eaf0e2b5-bde9-b9a0-9be1-019bb455701c"
+      },
+      {
+        "endpoint": "https://member.bilibili.com/x/vu/web/add",
+        "reason": "B站创作中心网页私有投稿接口，不属于开放平台公开契约，禁止接入",
+        "source": "https://open.bilibili.com/doc/4/1c4302da-8171-d036-5400-ca0dec077045"
+      },
+      {
+        "endpoint": "http://member.bilibili.com/arcopen/*",
+        "reason": "官方示例仓库中的明文 http 端点按本项目 https-only 策略收紧，仅接受 https",
+        "source": "https://github.com/bilibili-openplatform/demo"
+      },
+      {
+        "endpoint": "https://bilibili.apifox.cn/*",
+        "reason": "第三方镜像文档，不作为契约事实源",
+        "source": "https://open.bilibili.com/doc/4/eaf0e2b5-bde9-b9a0-9be1-019bb455701c"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "name": "账号授权（OAuth2 换取与续期 access_token）",
+      "url": "https://open.bilibili.com/doc/4/eaf0e2b5-bde9-b9a0-9be1-019bb455701c",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "网页应用接入（授权页与回调）",
+      "url": "https://open.bilibili.com/doc/4/aac73b2e-4ff2-b75c-4c96-35ced865797b",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "接口签名实现标准和状态码",
+      "url": "https://open.bilibili.com/doc/4/8673959e-f7bb-56e6-6e68-d225f971b81b",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "接口权限白名单",
+      "url": "https://open.bilibili.com/doc/4/b2dc2f0e-c874-aed7-3d92-360929e79d3a",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "查询用户已授权权限列表",
+      "url": "https://open.bilibili.com/doc/4/08f935c5-29f1-e646-85a3-0b11c2830558",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：接口概览",
+      "url": "https://open.bilibili.com/doc/4/1c4302da-8171-d036-5400-ca0dec077045",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：文件上传预处理",
+      "url": "https://open.bilibili.com/doc/4/0c532c6a-e6fb-0aff-8021-905ae2409095",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：文件分片上传",
+      "url": "https://open.bilibili.com/doc/4/733a520a-c50f-7bb4-17cb-35338ba20500",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：文件分片合片",
+      "url": "https://open.bilibili.com/doc/4/0828e499-38d8-9e58-2a70-a7eaebf9dd64",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：单个小视频文件上传",
+      "url": "https://open.bilibili.com/doc/4/f22a0eee-c92d-0f1d-f69c-be170cf533c7",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：封面上传",
+      "url": "https://open.bilibili.com/doc/4/8243399e-50e3-4058-7f01-1ebe4c632cf8",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：视频稿件提交",
+      "url": "https://open.bilibili.com/doc/4/f7fc57dd-55a1-5cb1-cba4-61fb2994bf0f",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "服务端视频稿件投递：分区查询",
+      "url": "https://open.bilibili.com/doc/4/4f13299b-5316-142f-df6a-87313eaf85a9",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "视频稿件查询：查询单一视频稿件详情",
+      "url": "https://open.bilibili.com/doc/4/d9554788-dcef-f139-6217-b487d41c3826",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "视频稿件查询：查询用户视频稿件列表",
+      "url": "https://open.bilibili.com/doc/4/a24030b7-6b8f-b36c-32d8-a4aae67fcc35",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "消息推送：投稿失败消息（video_fail）",
+      "url": "https://open.bilibili.com/doc/4/bec4b752-37e3-0049-3a23-e85143d21797",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "沙盒环境（官方 MOCK 接口）",
+      "url": "https://open.bilibili.com/doc/4/c5fcba1e-58eb-2f84-c86b-88028b0656c0",
+      "verified_at": "2026-07-23"
+    },
+    {
+      "name": "哔哩哔哩开放平台官方示例代码库",
+      "url": "https://github.com/bilibili-openplatform/demo",
+      "verified_at": "2026-07-23"
+    }
+  ],
+  "oauth": {
+    "authorize_pc_url": "https://account.bilibili.com/pc/account-pc/auth/oauth",
+    "authorize_h5_url": "https://account.bilibili.com/h5/account-h5/auth/oauth",
+    "token_url": "https://api.bilibili.com/x/account-oauth2/v1/token",
+    "refresh_token_url": "https://api.bilibili.com/x/account-oauth2/v1/refresh_token",
+    "token_http_method": "POST",
+    "token_content_type": "application/x-www-form-urlencoded",
+    "grant_type_authorization_code": "authorization_code",
+    "grant_type_refresh_token": "refresh_token",
+    "authorize_state_required": true,
+    "expires_in_is_absolute_epoch_seconds": true,
+    "refresh_token_single_use": true,
+    "expired_access_token_requires_reauthorization": true,
+    "required_scope_for_video_publishing": "ARC_BASE",
+    "known_scopes": [
+      "ARC_BASE",
+      "ARC_DATA",
+      "ATC_BASE",
+      "ATC_DATA",
+      "LIVE_ROOM_DATA",
+      "SHOP_AFTERSALES_INFO",
+      "SHOP_COMMODITY_INFO",
+      "SHOP_LOGISTICS_INFO",
+      "SHOP_ORDER_INFO",
+      "SHOP_STOCK_INFO",
+      "SHOP_STORE_INFO",
+      "USER_ACTIVITY",
+      "USER_DATA",
+      "USER_INFO"
+    ]
+  },
+  "signature": {
+    "signature_version": "2.0",
+    "algorithm": "HMAC-SHA256",
+    "signed_headers": [
+      "x-bili-accesskeyid",
+      "x-bili-content-md5",
+      "x-bili-signature-method",
+      "x-bili-signature-nonce",
+      "x-bili-signature-version",
+      "x-bili-timestamp"
+    ],
+    "authorization_header": "Authorization",
+    "access_token_header": "access-token",
+    "accept": "application/json",
+    "timestamp_unit": "unix_seconds",
+    "timestamp_max_skew_seconds": 600,
+    "empty_body_md5": "d41d8cd98f00b204e9800998ecf8427e",
+    "signed_string_join": "key:value 按字典序以 \\n 连接，末尾不带换行"
+  },
+  "upload": {
+    "init_url": "https://member.bilibili.com/arcopen/fn/archive/video/init",
+    "part_upload_url": "https://openupos.bilivideo.com/video/v2/part/upload",
+    "complete_url": "https://member.bilibili.com/arcopen/fn/archive/video/complete",
+    "small_file_upload_url": "https://openupos.bilivideo.com/video/v2/upload",
+    "upload_types": ["0", "1"],
+    "small_file_max_bytes": 104857600,
+    "part_size_bytes": 8388608,
+    "part_number_starts_at": 1,
+    "max_part_count": 512,
+    "equal_part_sizes_except_last": true,
+    "max_parallel_part_uploads": 1,
+    "max_parallel_part_uploads_origin": "project_policy：官方文档未公布并发上限，首期串行上传，待凭据核验后再评估",
+    "video_max_bytes": 4294967296,
+    "video_max_duration_seconds": 18000,
+    "recommended_containers": ["mp4", "flv"],
+    "video_max_bitrate_mbps": 60,
+    "video_max_resolution": "4096x4096",
+    "video_max_fps": 120,
+    "keyframe_max_interval_seconds": 10,
+    "audio_max_bitrate_kbps": 320,
+    "audio_max_channels": 2,
+    "audio_max_sample_rate_hz": 48000
+  },
+  "cover": {
+    "upload_url": "https://member.bilibili.com/arcopen/fn/archive/cover/upload",
+    "content_type": "multipart/form-data",
+    "formats": ["jpeg", "png"],
+    "gif_rejected_error_code": 123038,
+    "max_bytes": 5242880,
+    "recommended_min_resolution": "1146x717",
+    "min_resolution": "960x600"
+  },
+  "submission": {
+    "add_url": "https://member.bilibili.com/arcopen/fn/archive/add-by-utoken",
+    "type_list_url": "https://member.bilibili.com/arcopen/fn/archive/type/list",
+    "title_max_chars": 80,
+    "title_max_chars_note": "文档写“长度小于80”，错误码 123030 写“超过80个字符”才报错；按错误码边界取 80，真实边界待凭据核验",
+    "description_max_chars": 250,
+    "tag_total_max_chars": 200,
+    "tag_separator": ",",
+    "copyright_original": 1,
+    "copyright_reprint": 2,
+    "source_required_when_reprint": true,
+    "no_reprint_values": [0, 1],
+    "tid_from_type_list_only": true,
+    "cover_from_cover_upload_only": true,
+    "operator_only_fields": ["topic_id", "mission_id"],
+    "resource_id_pattern": "^BV[0-9A-Za-z]{10}$",
+    "informal_member_daily_limit": 5
+  },
+  "query": {
+    "view_url": "https://member.bilibili.com/arcopen/fn/archive/view",
+    "viewlist_url": "https://member.bilibili.com/arcopen/fn/archive/viewlist",
+    "page_number_min": 1,
+    "page_size_min": 1,
+    "page_size_max": 50,
+    "status_filters": ["all", "is_pubing", "pubed", "not_pubed"],
+    "documented_states": {
+      "0": "开放浏览",
+      "-2": "已退回（来源：video_fail 消息推送示例）"
+    },
+    "state_enum_note": "addit_info.state 完整取值官方未公开，除 0 与 -2 外的取值待凭据核验；解析层只锁定类型为整数"
+  },
+  "rate_limits": {
+    "numeric_quotas_published": false,
+    "numeric_quotas_note": "官方公开文档未给出数值 QPS/配额，仅定义限流错误码；控制台可见配额待凭据核验",
+    "rate_limit_error_codes": [123015, 123026, 123029, 123036, 127009, 127306],
+    "archive_add_min_interval_seconds": 30,
+    "archive_add_min_interval_source_code": 123026
+  },
+  "sandbox": {
+    "note": "官方沙盒 MOCK 接口，须应用已获对应 scope 权限；返回 MOCK 数据，不影响正式环境",
+    "video_init_url": "https://member.bilibili.com/mock/video/part/init",
+    "video_part_upload_url": "https://member.bilibili.com/mock/video/part/upload",
+    "video_complete_url": "https://member.bilibili.com/mock/video/part/complete",
+    "cover_upload_url": "https://member.bilibili.com/mock/arcopen/fn/archive/cover/upload",
+    "archive_add_url": "https://member.bilibili.com/mock/arcopen/fn/archive/add",
+    "type_list_url": "https://member.bilibili.com/mock/arcopen/fn/archive/type/list",
+    "archive_view_url": "https://member.bilibili.com/mock/arcopen/fn/archive/view",
+    "archive_viewlist_url": "https://member.bilibili.com/mock/arcopen/fn/archive/viewlist"
+  },
+  "error_categories": [
+    "archive_conflict",
+    "auth_rejected",
+    "content_rejected",
+    "human_verification_required",
+    "platform_busy",
+    "rate_limited",
+    "request_malformed"
+  ],
+  "error_codes": {
+    "4000": {"meaning": "参数错误(一般是缺少参数)", "category": "request_malformed"},
+    "4001": {"meaning": "配置无效", "category": "request_malformed"},
+    "4002": {"meaning": "签名异常", "category": "request_malformed"},
+    "4003": {"meaning": "请求过期", "category": "request_malformed"},
+    "4004": {"meaning": "重复请求", "category": "request_malformed"},
+    "4005": {"meaning": "签名method异常", "category": "request_malformed"},
+    "4006": {"meaning": "签名版本异常", "category": "request_malformed"},
+    "4007": {"meaning": "Content-Type不为application/json", "category": "request_malformed"},
+    "4008": {"meaning": "MD5校验失败", "category": "request_malformed"},
+    "4009": {"meaning": "Accept不为application/json", "category": "request_malformed"},
+    "4010": {"meaning": "服务异常", "category": "platform_busy"},
+    "4011": {"meaning": "内部错误", "category": "platform_busy"},
+    "4012": {"meaning": "BizCode不支持该方法", "category": "request_malformed"},
+    "122000": {"meaning": "client_id错误", "category": "auth_rejected"},
+    "122001": {"meaning": "client_secret 错误", "category": "auth_rejected"},
+    "122002": {"meaning": "code未找到", "category": "auth_rejected"},
+    "122007": {"meaning": "refreshToken不合法", "category": "auth_rejected"},
+    "122008": {"meaning": "app_id不匹配", "category": "auth_rejected"},
+    "122009": {"meaning": "系统繁忙，获取用户数据失败，请稍后再试", "category": "platform_busy"},
+    "122010": {"meaning": "系统异常，相关用户操作失败", "category": "platform_busy"},
+    "127000": {"meaning": "缺少鉴权参数", "category": "auth_rejected"},
+    "127001": {"meaning": "access_token验证错误", "category": "auth_rejected"},
+    "127002": {"meaning": "sign验证错误", "category": "auth_rejected"},
+    "127003": {"meaning": "缺少mid或mid不匹配", "category": "auth_rejected"},
+    "127004": {"meaning": "client_id验证错误", "category": "auth_rejected"},
+    "127005": {"meaning": "机构认证未通过", "category": "auth_rejected"},
+    "127006": {"meaning": "应用认证未通过", "category": "auth_rejected"},
+    "127007": {"meaning": "应用无该接口权限", "category": "auth_rejected"},
+    "127008": {"meaning": "mid验证失败", "category": "auth_rejected"},
+    "127009": {"meaning": "接口请求次数达到上限", "category": "rate_limited"},
+    "127010": {"meaning": "sign白名单验证错误", "category": "auth_rejected"},
+    "127011": {"meaning": "该接口用户未授权", "category": "auth_rejected"},
+    "127022": {"meaning": "upload_token验证错误", "category": "auth_rejected"},
+    "127023": {"meaning": "client_token校验错误", "category": "auth_rejected"},
+    "127304": {"meaning": "接口访问受限，请确认应用已申请相关权限，且授权账号状态正常", "category": "auth_rejected"},
+    "127305": {"meaning": "白名单限制", "category": "auth_rejected"},
+    "127306": {"meaning": "接口请求频率过高，请确保请求量正常", "category": "rate_limited"},
+    "123001": {"meaning": "账号无权限操作", "category": "auth_rejected"},
+    "123002": {"meaning": "服务不可用", "category": "platform_busy"},
+    "123003": {"meaning": "该类型不支持投稿", "category": "content_rejected"},
+    "123004": {"meaning": "不存在该稿件", "category": "archive_conflict"},
+    "123005": {"meaning": "稿件已经被删除", "category": "archive_conflict"},
+    "123006": {"meaning": "异常视频提交", "category": "content_rejected"},
+    "123007": {"meaning": "当前稿件已锁定", "category": "archive_conflict"},
+    "123008": {"meaning": "参数错误", "category": "content_rejected"},
+    "123009": {"meaning": "该分区不存在", "category": "content_rejected"},
+    "123010": {"meaning": "该稿件类型不合法", "category": "content_rejected"},
+    "123011": {"meaning": "该活动不存在", "category": "content_rejected"},
+    "123012": {"meaning": "Tag参数不合法", "category": "content_rejected"},
+    "123013": {"meaning": "标题不合法", "category": "content_rejected"},
+    "123014": {"meaning": "描述信息不合法", "category": "content_rejected"},
+    "123015": {"meaning": "新增稿件同一个标题短时间内不能重复提交", "category": "rate_limited"},
+    "123016": {"meaning": "稿件转载来源不能为空", "category": "content_rejected"},
+    "123017": {"meaning": "稿件描述长度为零", "category": "content_rejected"},
+    "123018": {"meaning": "稿件描述长度太长，已超过限制", "category": "content_rejected"},
+    "123019": {"meaning": "稿件描述类型不存在或者不匹配", "category": "content_rejected"},
+    "123020": {"meaning": "稿件描述类型和对应的分区类型不匹配", "category": "content_rejected"},
+    "123021": {"meaning": "稿件描述类型和对应的创作类型不匹配", "category": "content_rejected"},
+    "123022": {"meaning": "第(%d)个Tag已被封印", "category": "content_rejected"},
+    "123023": {"meaning": "投稿暂不可用", "category": "platform_busy"},
+    "123024": {"meaning": "当前输入有敏感信息,请修正", "category": "content_rejected"},
+    "123026": {"meaning": "您投稿的频率过快，请稍等30秒", "category": "rate_limited"},
+    "123027": {"meaning": "转载类型稿件不支持活动参加哦~", "category": "content_rejected"},
+    "123028": {"meaning": "稿件后台处理中,请10秒后再尝试", "category": "platform_busy"},
+    "123029": {"meaning": "当前总提交视频个数已经超过上限", "category": "rate_limited"},
+    "123030": {"meaning": "稿件标题过长,已经超过80个字符", "category": "content_rejected"},
+    "123033": {"meaning": "第(%d)个视频的标题过长,已经超过80个字符", "category": "content_rejected"},
+    "123034": {"meaning": "开放联合投稿权限前的稿件，不可编辑为合作稿件", "category": "archive_conflict"},
+    "123035": {"meaning": "当前稿件已开放，不允许再次设置定时发布", "category": "archive_conflict"},
+    "123036": {"meaning": "非正式会员单日只能投递五个稿件", "category": "rate_limited"},
+    "123037": {"meaning": "您当前等级太低，无法投稿", "category": "auth_rejected"},
+    "123038": {"meaning": "封面不允许使用gif", "category": "content_rejected"},
+    "123039": {"meaning": "网络繁忙 请稍后再试", "category": "platform_busy"},
+    "123040": {"meaning": "不存该视频", "category": "archive_conflict"},
+    "123041": {"meaning": "该视频已经被UP主删除", "category": "archive_conflict"},
+    "123042": {"meaning": "视频提交需要二次确认", "category": "human_verification_required"},
+    "123043": {"meaning": "稿件任务已被取消", "category": "archive_conflict"},
+    "123044": {"meaning": "新人单P 系统升级中，敬请谅解", "category": "platform_busy"},
+    "123045": {"meaning": "定时发布设置错误", "category": "content_rejected"},
+    "123046": {"meaning": "视频章节内容含有非法字符", "category": "content_rejected"},
+    "123047": {"meaning": "当前话题和分区不匹配", "category": "content_rejected"},
+    "123048": {"meaning": "活动话题不允许修改", "category": "content_rejected"},
+    "123049": {"meaning": "当前话题无效", "category": "content_rejected"},
+    "123050": {"meaning": "投稿需要图片验证", "category": "human_verification_required"},
+    "123051": {"meaning": "投稿图片验证失败", "category": "human_verification_required"},
+    "123052": {"meaning": "您投稿的内容不符合平台社区规范", "category": "content_rejected"},
+    "123053": {"meaning": "稿件批量提交时mtime校验失败", "category": "archive_conflict"},
+    "123054": {"meaning": "稿件提交时mtime校验失败", "category": "archive_conflict"},
+    "123055": {"meaning": "稿件审核机器提交时mtime校验失败", "category": "archive_conflict"},
+    "123056": {"meaning": "稿件审核人工提交时mtime校验失败", "category": "archive_conflict"}
+  },
+  "pending_credential_verification": [
+    "开放平台控制台内本应用实际可申请/已开通的 scope 清单（文档只公开 scope 标识，控制台需登录）",
+    "各接口数值限流配额（QPS/每日调用量）；公开文档只定义限流错误码，控制台配额需登录核验",
+    "refresh_token 自身有效期与最长续期窗口（文档只声明单次使用，未公开有效期）",
+    "addit_info.state 除 0（开放浏览）与 -2（已退回）外的完整取值与语义",
+    "标题长度边界 79 或 80 的真实平台判定（文档与错误码文案不一致）",
+    "沙盒 MOCK 接口的真实响应样例与正式环境的差异",
+    "白名单开启后对本应用授权账号的实际影响",
+    "真实账号的授权页扫码、token 换取、上传、投稿与状态查询全链路"
+  ]
+}

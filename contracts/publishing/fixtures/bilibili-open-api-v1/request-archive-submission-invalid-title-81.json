@@ -1,0 +1,16 @@
+{
+  "direction": "request",
+  "expected": "invalid",
+  "fixture": "request-archive-submission-invalid-title-81",
+  "operation": "archive_submission",
+  "payload": {
+    "copyright": 1,
+    "cover_url": "https://archive.biliimg.com/bfs/archive/fixture.jpg",
+    "description": "样例描述",
+    "no_reprint": 0,
+    "source": null,
+    "tag": "科技,教程",
+    "tid": 21,
+    "title": "标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标标"
+  }
+}

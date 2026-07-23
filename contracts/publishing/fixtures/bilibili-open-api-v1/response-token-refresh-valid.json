@@ -1,0 +1,16 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-token-refresh-valid",
+  "operation": "oauth_token_refresh",
+  "payload": {
+    "code": 0,
+    "data": {
+      "access_token": "fixture-access-token-000000000000",
+      "expires_in": 1785340800,
+      "refresh_token": "fixture-refresh-token-00000000000"
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

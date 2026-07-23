@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "unknown",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-archive-add-error-unknown-code",
+  "operation": "archive_add",
+  "payload": {
+    "code": 999999,
+    "message": "未知错误",
+    "ttl": 1
+  }
+}

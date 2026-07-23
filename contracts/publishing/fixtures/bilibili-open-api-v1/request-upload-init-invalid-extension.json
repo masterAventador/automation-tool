@@ -1,0 +1,10 @@
+{
+  "direction": "request",
+  "expected": "invalid",
+  "fixture": "request-upload-init-invalid-extension",
+  "operation": "upload_init_request",
+  "payload": {
+    "file_name": "video",
+    "upload_type": "0"
+  }
+}

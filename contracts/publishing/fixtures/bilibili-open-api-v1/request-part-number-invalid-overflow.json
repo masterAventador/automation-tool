@@ -1,0 +1,9 @@
+{
+  "direction": "request",
+  "expected": "invalid",
+  "fixture": "request-part-number-invalid-overflow",
+  "operation": "part_number",
+  "payload": {
+    "part_number": 513
+  }
+}

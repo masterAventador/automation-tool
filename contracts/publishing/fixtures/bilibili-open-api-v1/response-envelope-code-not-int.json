@@ -1,0 +1,10 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-envelope-code-not-int",
+  "operation": "archive_add",
+  "payload": {
+    "code": "0",
+    "message": "0"
+  }
+}

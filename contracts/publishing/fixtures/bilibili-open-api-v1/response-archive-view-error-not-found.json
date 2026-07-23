@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "archive_conflict",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-archive-view-error-not-found",
+  "operation": "archive_view",
+  "payload": {
+    "code": 123004,
+    "message": "不存在该稿件",
+    "ttl": 1
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-upload-complete-valid",
+  "operation": "upload_complete_ack",
+  "payload": {
+    "code": 0,
+    "message": "0"
+  }
+}

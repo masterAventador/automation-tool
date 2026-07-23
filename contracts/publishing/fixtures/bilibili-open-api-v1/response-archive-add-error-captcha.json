@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "human_verification_required",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-archive-add-error-captcha",
+  "operation": "archive_add",
+  "payload": {
+    "code": 123050,
+    "message": "投稿需要图片验证",
+    "ttl": 1
+  }
+}

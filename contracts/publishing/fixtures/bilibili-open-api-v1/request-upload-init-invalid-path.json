@@ -1,0 +1,10 @@
+{
+  "direction": "request",
+  "expected": "invalid",
+  "fixture": "request-upload-init-invalid-path",
+  "operation": "upload_init_request",
+  "payload": {
+    "file_name": "../evil.mp4",
+    "upload_type": "0"
+  }
+}

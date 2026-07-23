@@ -1,0 +1,14 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-upload-init-malformed-token",
+  "operation": "upload_init",
+  "payload": {
+    "code": 0,
+    "data": {
+      "upload_token": 12345
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "auth_rejected",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-upload-init-error-scope",
+  "operation": "upload_init",
+  "payload": {
+    "code": 127011,
+    "message": "该接口用户未授权",
+    "ttl": 1
+  }
+}

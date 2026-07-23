@@ -1,0 +1,10 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-part-upload-valid",
+  "operation": "part_upload_ack",
+  "payload": {
+    "code": 0,
+    "message": "0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "content_rejected",
+  "expected_failure_code": "invalid_input",
+  "fixture": "response-archive-add-error-sensitive",
+  "operation": "archive_add",
+  "payload": {
+    "code": 123024,
+    "message": "当前输入有敏感信息,请修正",
+    "ttl": 1
+  }
+}

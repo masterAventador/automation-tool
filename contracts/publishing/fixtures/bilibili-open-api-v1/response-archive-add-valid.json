@@ -1,0 +1,14 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-archive-add-valid",
+  "operation": "archive_add",
+  "payload": {
+    "code": 0,
+    "data": {
+      "resource_id": "BV17B4y1s7R1"
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

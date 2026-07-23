@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "auth_rejected",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-token-refresh-error-reused",
+  "operation": "oauth_token_refresh",
+  "payload": {
+    "code": 122007,
+    "message": "refreshToken不合法",
+    "ttl": 1
+  }
+}

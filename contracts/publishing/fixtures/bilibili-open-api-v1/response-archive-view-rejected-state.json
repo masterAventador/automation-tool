@@ -1,0 +1,35 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-archive-view-rejected-state",
+  "operation": "archive_view",
+  "payload": {
+    "code": 0,
+    "data": {
+      "addit_info": {
+        "reject_reason": "内容不符合规范",
+        "state": -2,
+        "state_desc": "已退回"
+      },
+      "copyright": 1,
+      "cover": "https://i1.hdslb.com/bfs/archive/fixture.jpg",
+      "ctime": 1729154751,
+      "desc": "",
+      "no_reprint": 1,
+      "ptime": 1729154822,
+      "resource_id": "BV1MW421X7gM",
+      "tag": "生活记录",
+      "tid": 229,
+      "title": "契约样例稿件",
+      "video_info": {
+        "cid": 26300318231,
+        "duration": 5,
+        "filename": "fixturefilename000000000000000000",
+        "iframe_url": "player.bilibili.com/player.html?aid=0&bvid=BV1MW421X7gM&cid=26300318231&page=1",
+        "share_url": "https://www.bilibili.com/video/BV1MW421X7gM?share_source=open_plat"
+      }
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

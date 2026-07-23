@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "auth_rejected",
+  "expected_failure_code": "platform_error",
+  "fixture": "response-token-grant-error-bad-client",
+  "operation": "oauth_token_grant",
+  "payload": {
+    "code": 122000,
+    "message": "client_id错误",
+    "ttl": 1
+  }
+}

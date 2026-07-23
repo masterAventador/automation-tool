@@ -1,0 +1,12 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "request_malformed",
+  "expected_failure_code": "invalid_input",
+  "fixture": "response-upload-complete-error-expired",
+  "operation": "upload_complete_ack",
+  "payload": {
+    "code": 4003,
+    "message": "请求过期"
+  }
+}

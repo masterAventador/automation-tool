@@ -1,0 +1,9 @@
+{
+  "direction": "request",
+  "expected": "valid",
+  "fixture": "request-part-number-valid",
+  "operation": "part_number",
+  "payload": {
+    "part_number": 1
+  }
+}

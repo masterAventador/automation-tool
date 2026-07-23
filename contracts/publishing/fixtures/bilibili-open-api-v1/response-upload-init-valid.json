@@ -1,0 +1,15 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-upload-init-valid",
+  "operation": "upload_init",
+  "payload": {
+    "code": 0,
+    "data": {
+      "upload_token": "fixture-upload-token-000000000000"
+    },
+    "message": "0",
+    "request_id": "fixture-request-id-upload-init",
+    "ttl": 1
+  }
+}

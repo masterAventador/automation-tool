@@ -1,0 +1,15 @@
+{
+  "direction": "response",
+  "expected": "success",
+  "fixture": "response-cover-upload-valid",
+  "operation": "cover_upload",
+  "payload": {
+    "code": 0,
+    "data": {
+      "url": "https://archive.biliimg.com/bfs/archive/fixture0000000000000000000000000000000000.jpg"
+    },
+    "message": "0",
+    "request_id": "fixture-request-id-cover",
+    "ttl": 1
+  }
+}

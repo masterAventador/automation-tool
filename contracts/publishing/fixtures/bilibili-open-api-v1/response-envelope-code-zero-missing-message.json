@@ -1,0 +1,9 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-envelope-code-zero-missing-message",
+  "operation": "part_upload_ack",
+  "payload": {
+    "code": 0
+  }
+}

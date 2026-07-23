@@ -1,0 +1,20 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-token-grant-unknown-scope",
+  "operation": "oauth_token_grant",
+  "payload": {
+    "code": 0,
+    "data": {
+      "access_token": "fixture-access-token-000000000000",
+      "expires_in": 1785340800,
+      "refresh_token": "fixture-refresh-token-00000000000",
+      "scopes": [
+        "ARC_BASE",
+        "TOTALLY_UNKNOWN"
+      ]
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

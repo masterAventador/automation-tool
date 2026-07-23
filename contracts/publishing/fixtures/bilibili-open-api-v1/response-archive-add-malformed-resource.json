@@ -1,0 +1,14 @@
+{
+  "direction": "response",
+  "expected": "malformed",
+  "fixture": "response-archive-add-malformed-resource",
+  "operation": "archive_add",
+  "payload": {
+    "code": 0,
+    "data": {
+      "resource_id": "av170001"
+    },
+    "message": "0",
+    "ttl": 1
+  }
+}

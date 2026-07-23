@@ -1,0 +1,13 @@
+{
+  "direction": "response",
+  "expected": "platform_rejection",
+  "expected_category": "rate_limited",
+  "expected_failure_code": "dependency_unavailable",
+  "fixture": "response-archive-add-error-frequency",
+  "operation": "archive_add",
+  "payload": {
+    "code": 123026,
+    "message": "您投稿的频率过快，请稍等30秒",
+    "ttl": 1
+  }
+}
