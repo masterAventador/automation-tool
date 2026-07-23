@@ -17,9 +17,9 @@
 
 ## 按优先级执行
 
-### 1. EB-02 共用 Chromium 验证（最优先，解锁 EB-04/EB-05 及后续）
+### 1. EB-02 共用 Chromium 验证（✅ 2026-07-24 已完成）
 
-Git Bash 中：
+Windows 11 x86_64 实体机会话已按以下命令完成验证：
 
 ```bash
 uv sync --project tools/shared-browser-validation --locked
@@ -35,7 +35,15 @@ uv run --project tools/shared-browser-validation --locked python \
   --artifacts-dir "$TEMP/eb-02-artifacts"
 ```
 
-通过后：EB-02 → ✅；同时把 `$TEMP/eb-02-artifacts` 的关键输出摘录进 EB-02.md。
+Chromium 149.0.7827.55 / revision 1228 的同一 `chrome.exe` 已同时通过 headed
+Playwright、Browser Use `executable_path`、随机 loopback CDP 和独立 HyperFrames
+渲染；三套并发 Profile、134 个目录项、12 套风格及字体/媒体/Canvas/WebGL/WebGPU/
+透明/横竖屏矩阵全部通过，且没有第二套浏览器或进程残留。证据文件 SHA-256 为
+`3bab78042c135143377fc9791ed2ed54cd4aa859a294fa99628e37761cdbb161`，浏览器可执行
+文件 SHA-256 为 `b798f9e53a98d29eb7f36f8c409f905d3184780a04d2bcb56989067194784bd1`，
+134+12 结果摘要为
+`91c6bbc162cfc0cb2ed315cecd359b7ffdd65c3fe3be6f574a1b2e4e8abab8cf`。
+`docs/development/EB-02.md` 与专项 Roadmap 已同步为 `✅ 已完成`，并解锁 EB-04/EB-05。
 
 ### 2. IM 线冻结 Worker（IM-02/03/04 ✅）
 
