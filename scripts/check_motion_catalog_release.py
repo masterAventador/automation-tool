@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import posixpath
 import re
 import stat
@@ -37,6 +38,12 @@ class CheckError(SystemExit):
 
     def __init__(self, message: str) -> None:
         super().__init__(f"motion catalog release check failed: {message}")
+
+
+def is_link_or_reparse(path: Path) -> bool:
+    return path.is_symlink() or (
+        os.name == "nt" and hasattr(os.path, "isjunction") and os.path.isjunction(path)
+    )
 
 
 def load_json(path: Path) -> dict:
@@ -193,12 +200,20 @@ def verify_release(
         raise CheckError("release manifest input pins drifted from the lock")
 
     declared: dict[str, dict] = {}
+    casefold_declared: dict[str, str] = {}
     for record in manifest.get("files", []):
         path = record.get("path")
         if not isinstance(path, str) or path.startswith("/") or ".." in path.split("/"):
             raise CheckError(f"manifest file path is not canonical: {path!r}")
         if path in declared:
             raise CheckError(f"manifest declares {path} twice")
+        folded = path.casefold()
+        existing = casefold_declared.get(folded)
+        if existing is not None and existing != path:
+            raise CheckError(
+                f"manifest paths collide on a case-insensitive filesystem: {existing} != {path}"
+            )
+        casefold_declared[folded] = path
         declared[path] = record
     if not declared:
         raise CheckError("release manifest declares no files")
@@ -214,13 +229,19 @@ def verify_release(
     indicator_hits: list[str] = []
     item_texts: dict[str, dict[str, str]] = {}
     for path in sorted(release_root.rglob("*")):
-        if path.is_symlink():
-            raise CheckError(f"symlink is not allowed in the release tree: {path}")
+        if is_link_or_reparse(path):
+            raise CheckError(f"link/reparse point is not allowed in the release tree: {path}")
         if not path.is_file():
             continue
-        if path.stat().st_mode & WRITE_BITS:
+        metadata = path.stat()
+        if metadata.st_mode & WRITE_BITS:
             raise CheckError(
                 f"release file must be read-only: {path.relative_to(release_root).as_posix()}"
+            )
+        if os.name == "nt" and not (metadata.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY):
+            raise CheckError(
+                "release file must carry the Windows read-only attribute: "
+                f"{path.relative_to(release_root).as_posix()}"
             )
         relative = path.relative_to(release_root).as_posix()
         if relative == "manifest.json":

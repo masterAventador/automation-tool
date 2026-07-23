@@ -6,8 +6,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import stat
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -359,8 +361,40 @@ def test_release_gate_tamper_matrix() -> None:
         lock["generated"]["aggregateSha256"] = "0" * 64
 
     def symlink_file(release_root: Path, *_args) -> None:
-        target = release_root / "items/demo-social/link.svg"
-        target.symlink_to(release_root / "items/demo-social/assets/photo.svg")
+        item = release_root / "items/demo-social"
+        if os.name == "nt":
+            completed = subprocess.run(
+                [
+                    "cmd.exe",
+                    "/d",
+                    "/c",
+                    "mklink",
+                    "/J",
+                    str(item / "linked-assets"),
+                    str(item / "assets"),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            assert completed.returncode == 0, "mklink /J failed"
+            return
+        (item / "link.svg").symlink_to(item / "assets/photo.svg")
+
+    def casefold_collision(release_root: Path, *_args) -> None:
+        manifest_path = release_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        duplicate = dict(manifest["files"][0])
+        duplicate["path"] = duplicate["path"].upper()
+        manifest["files"].append(duplicate)
+        manifest_path.chmod(0o644)
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+            newline="\n",
+        )
+        manifest_path.chmod(0o444)
 
     expect_failure("digest drift", digest_drift)
     expect_failure("undeclared extra file", extra_file)
@@ -372,7 +406,27 @@ def test_release_gate_tamper_matrix() -> None:
     expect_failure("asset replacement entry hidden from the manifest", missing_replacement_entry)
     expect_failure("missing catalog item", missing_item)
     expect_failure("aggregate drift against the release lock", aggregate_drift)
-    expect_failure("symlink in the release tree", symlink_file)
+    expect_failure("link/reparse point in the release tree", symlink_file)
+    expect_failure("case-insensitive manifest path collision", casefold_collision)
+
+
+def test_windows_unicode_and_read_only_path_semantics() -> None:
+    if os.name != "nt":
+        return
+    with tempfile.TemporaryDirectory(prefix="automation-tool-bm14-unicode-") as temporary:
+        root = Path(temporary)
+        path = root / "目录-Ångström" / "头像-É.svg"
+        path.parent.mkdir()
+        path.write_bytes(b"<svg/>")
+        path.chmod(0o444)
+        metadata = path.stat()
+        assert not metadata.st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+        assert metadata.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+        case_variant = root / "目录-ångström" / "头像-é.svg"
+        assert case_variant.samefile(path), "NTFS case folding must resolve one file"
+        assert path.relative_to(root).as_posix() == "目录-Ångström/头像-É.svg"
+        assert path.read_bytes() == b"<svg/>"
+        path.chmod(0o644)
 
 
 def test_real_release_build_is_reproducible() -> None:
@@ -407,10 +461,17 @@ def test_real_release_build_is_reproducible() -> None:
             "release aggregate must match the locked digest"
         )
         for record in first["files"]:
-            mode = (first_root / record["path"]).stat().st_mode
-            assert not mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH), (
+            path = first_root / record["path"]
+            metadata = path.stat()
+            assert not metadata.st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH), (
                 f"release file must be read-only: {record['path']}"
             )
+            if os.name == "nt":
+                assert metadata.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+            if path.suffix.lower() in {".html", ".js", ".css", ".svg"}:
+                assert b"\r\n" not in path.read_bytes(), (
+                    f"generated text must use LF on every platform: {record['path']}"
+                )
         check.verify_release(first_root, lock, dep_lock, catalog_contract, overlay)
         for root in (first_root, second_root):
             for path in sorted(root.rglob("*"), reverse=True):
@@ -423,6 +484,7 @@ def main() -> None:
     test_trademark_rules()
     test_composed_asset_path()
     test_release_gate_tamper_matrix()
+    test_windows_unicode_and_read_only_path_semantics()
     test_real_release_build_is_reproducible()
     print("motion catalog release tests passed")
 

@@ -216,10 +216,8 @@ def generate_catalog(
             suffix = Path(record["path"]).suffix.lower()
             if suffix in TEXT_SUFFIXES:
                 depth = len(Path(destination_relative).parts) - 1
-                rewritten = rewrite_text(
-                    source.read_text(encoding="utf-8"), rules, depth=depth
-                )
-                destination.write_text(rewritten, encoding="utf-8")
+                rewritten = rewrite_text(source.read_text(encoding="utf-8"), rules, depth=depth)
+                destination.write_text(rewritten, encoding="utf-8", newline="\n")
             else:
                 shutil.copyfile(source, destination)
             item_files.append(destination_relative)
@@ -240,7 +238,7 @@ def generate_catalog(
     for sheet in lock["stylesheets"]:
         destination = catalog_root / sheet["localPath"]
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(stylesheet_css(sheet), encoding="utf-8")
+        destination.write_text(stylesheet_css(sheet), encoding="utf-8", newline="\n")
 
     files = []
     for path in sorted(catalog_root.rglob("*")):
@@ -249,9 +247,7 @@ def generate_catalog(
         relative = path.relative_to(catalog_root).as_posix()
         if relative == "manifest.json":
             raise BuildError("manifest.json must not pre-exist in a fresh catalog")
-        files.append(
-            {"path": relative, "sha256": sha256_file(path), "bytes": path.stat().st_size}
-        )
+        files.append({"path": relative, "sha256": sha256_file(path), "bytes": path.stat().st_size})
     manifest = {
         "schemaVersion": 1,
         "source": dict(lock["source"]),
@@ -260,7 +256,9 @@ def generate_catalog(
         "files": files,
     }
     (catalog_root / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
     return manifest
 
@@ -299,7 +297,9 @@ def main() -> None:
     if arguments.record_generated:
         lock["generated"] = generated
         arguments.lock.write_text(
-            json.dumps(lock, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            json.dumps(lock, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
         )
         print(f"lock manifest generated block updated: {generated}")
     elif lock["generated"] != generated:

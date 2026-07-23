@@ -82,9 +82,10 @@ def test_lock_manifest_contract() -> None:
         assert record["license"] == "OFL-1.1", f"{family} must carry a redistributable license"
         assert record["redistributable"] is True, family
         assert SHA256_PATTERN.match(record["licenseFileSha256"]), family
-        assert SHA256_PATTERN.match(record["googleFontsCommit"][:40] + "0" * 24) or len(
-            record["googleFontsCommit"]
-        ) == 40, family
+        assert (
+            SHA256_PATTERN.match(record["googleFontsCommit"][:40] + "0" * 24)
+            or len(record["googleFontsCommit"]) == 40
+        ), family
 
     # Artifacts must be canonical, unique and digest-locked.
     seen_paths: set[str] = set()
@@ -169,9 +170,7 @@ def test_builder_rewrites() -> None:
     assert not leftovers, f"rewrite left remote URLs: {leftovers}"
 
     try:
-        build.rewrite_text(
-            '<script src="https://evil.example.net/x.js"></script>', rules, depth=2
-        )
+        build.rewrite_text('<script src="https://evil.example.net/x.js"></script>', rules, depth=2)
     except build.BuildError:
         pass
     else:
@@ -190,9 +189,9 @@ def _mini_fixture(root: Path) -> tuple[dict, dict, dict]:
     dep_dir = catalog_root / "offline-deps/js"
     dep_dir.mkdir(parents=True)
     html = "<html><body>offline</body></html>"
-    (item_dir / "demo-item.html").write_text(html, encoding="utf-8")
+    (item_dir / "demo-item.html").write_text(html, encoding="utf-8", newline="\n")
     script = "// docs: https://docs.example-lib.org/guide\nconsole.log('offline');"
-    (dep_dir / "demo.js").write_text(script, encoding="utf-8")
+    (dep_dir / "demo.js").write_text(script, encoding="utf-8", newline="\n")
     files = [
         {
             "path": "items/demo-item/demo-item.html",
@@ -206,8 +205,9 @@ def _mini_fixture(root: Path) -> tuple[dict, dict, dict]:
         },
     ]
     aggregate = sha256_bytes(
-        "".join(f"{f['path']} {f['sha256']}\n" for f in sorted(files, key=lambda f: f["path"]))
-        .encode()
+        "".join(
+            f"{f['path']} {f['sha256']}\n" for f in sorted(files, key=lambda f: f["path"])
+        ).encode()
     )
     manifest = {
         "schemaVersion": 1,
@@ -224,7 +224,9 @@ def _mini_fixture(root: Path) -> tuple[dict, dict, dict]:
         "files": files,
     }
     (catalog_root / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+        newline="\n",
     )
     lock = {
         "layout": {"itemRoot": "items", "dependencyRoot": "offline-deps"},
@@ -241,9 +243,7 @@ def _mini_fixture(root: Path) -> tuple[dict, dict, dict]:
         ]
     }
     rights = {
-        "items": [
-            {"name": "demo-item", "conclusion": "needs_localization_and_asset_replacement"}
-        ]
+        "items": [{"name": "demo-item", "conclusion": "needs_localization_and_asset_replacement"}]
     }
     return lock, catalog_contract, rights
 
@@ -269,11 +269,11 @@ def test_check_tamper_matrix() -> None:
 
     def digest_drift(catalog_root: Path, *_args) -> None:
         (catalog_root / "items/demo-item/demo-item.html").write_text(
-            "<html>tampered</html>", encoding="utf-8"
+            "<html>tampered</html>", encoding="utf-8", newline="\n"
         )
 
     def extra_file(catalog_root: Path, *_args) -> None:
-        (catalog_root / "offline-deps/js/extra.js").write_text("x", encoding="utf-8")
+        (catalog_root / "offline-deps/js/extra.js").write_text("x", encoding="utf-8", newline="\n")
 
     def missing_file(catalog_root: Path, *_args) -> None:
         (catalog_root / "offline-deps/js/demo.js").unlink()
@@ -281,47 +281,55 @@ def test_check_tamper_matrix() -> None:
     def remote_url(catalog_root: Path, *_args) -> None:
         path = catalog_root / "items/demo-item/demo-item.html"
         body = '<script src="https://cdn.jsdelivr.net/npm/x@1/x.js"></script>'
-        path.write_text(body, encoding="utf-8")
+        path.write_text(body, encoding="utf-8", newline="\n")
         manifest = json.loads((catalog_root / "manifest.json").read_text(encoding="utf-8"))
         for record in manifest["files"]:
             if record["path"].endswith("demo-item.html"):
                 record["sha256"] = sha256_bytes(body.encode())
                 record["bytes"] = len(body.encode())
         (catalog_root / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+            newline="\n",
         )
 
     def documentation_url_in_item_file(catalog_root: Path, *_args) -> None:
         path = catalog_root / "items/demo-item/demo-item.html"
         body = "<html><!-- https://docs.example-lib.org/guide --></html>"
-        path.write_text(body, encoding="utf-8")
+        path.write_text(body, encoding="utf-8", newline="\n")
         manifest = json.loads((catalog_root / "manifest.json").read_text(encoding="utf-8"))
         for record in manifest["files"]:
             if record["path"].endswith("demo-item.html"):
                 record["sha256"] = sha256_bytes(body.encode())
                 record["bytes"] = len(body.encode())
         (catalog_root / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+            newline="\n",
         )
 
     def unlisted_domain_in_dependency(catalog_root: Path, *_args) -> None:
         path = catalog_root / "offline-deps/js/demo.js"
         body = "// docs: https://unreviewed.example.net/guide\nconsole.log('offline');"
-        path.write_text(body, encoding="utf-8")
+        path.write_text(body, encoding="utf-8", newline="\n")
         manifest = json.loads((catalog_root / "manifest.json").read_text(encoding="utf-8"))
         for record in manifest["files"]:
             if record["path"].endswith("demo.js"):
                 record["sha256"] = sha256_bytes(body.encode())
                 record["bytes"] = len(body.encode())
         (catalog_root / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+            newline="\n",
         )
 
     def hidden_pending_item(catalog_root: Path, *_args) -> None:
         manifest = json.loads((catalog_root / "manifest.json").read_text(encoding="utf-8"))
         manifest["items"][0]["pendingAssetReplacement"] = False
         (catalog_root / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            json.dumps(manifest, ensure_ascii=False),
+            encoding="utf-8",
+            newline="\n",
         )
 
     def missing_item(catalog_root: Path, _lock, catalog_contract, _rights) -> None:
