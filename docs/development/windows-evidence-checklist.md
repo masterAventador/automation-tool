@@ -78,6 +78,22 @@ python scripts/run_bm_03_acceptance.py --archive <EB-04 锁定的 chrome-win64.z
 reparse point 校验，以及真实 `chrome.exe` 的 CDP 管道 getVersion/Browser.close
 干净退出。通过后更新 `docs/development/BM-03.md` 遗留项。
 
+### 4.2 BM-04 HTML 渲染安全沙箱（依赖 EB-04 的 Windows 暂存）
+
+EB-04 完成 Windows 暂存后执行：
+
+```bash
+python scripts/test_motion_video_render_sandbox.py
+python scripts/run_bm_04_acceptance.py --archive <EB-04 锁定的 chrome-win64.zip>
+```
+
+补证要点：资源上限的进程组采样在 Windows 无 `/bin/ps`，需替换为 Job Object 内存/CPU
+统计或等价 API 并重验 CPU/内存超限强杀；detached 进程组终止改用 Windows Job Object；
+失效代理 `--proxy-server=127.0.0.1:9 --proxy-bypass-list=<-loopback>` 与子帧
+`Target.setAutoAttach` 递归拦截在 Windows 上重验诱饵端口 0 命中；入口/资产路径的
+reparse point 越界校验；真实恶意 HTML 的 navigation/download/popup/dialog 拦截与
+工作区外机密不可读。通过后更新 `docs/development/BM-04.md` 遗留项。
+
 ### 5. EB-04 Windows 浏览器构建暂存（新任务，可交给 Windows 机器上的会话执行）
 
 EB-03 已在 `contracts/browser/embedded-chromium-staging.v1.json` 预登记

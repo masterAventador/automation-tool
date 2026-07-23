@@ -551,10 +551,10 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 27 |
+| ⬜ 未开始 | 26 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 17 |
+| 🔍 待验收 | 18 |
 | ✅ 已完成 | 34 |
 | ⏸ 后置 | 9 |
 
@@ -646,7 +646,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | BM-01 | 上游源码与 12 套风格固定 | 固定 v0.7.68 和 submodule；只登记官网公开 12 套；英文标识到中文名称映射有契约测试 | AV-02 | ✅ 已完成 |
 | BM-02 | 隔离 Node 22 Worker | Tauri sidecar 打包命令行/SDK 适配器，验证版本握手、无全局 Node 前置、取消、退出和错误脱敏 | BM-01,VF-02 | 🔍 待验收 |
 | BM-03 | 共用 Chromium 渲染适配 | 只接收 Rust 已验证的单一完整 Chromium 路径，以独立无头进程和 RenderJob 临时目录启动；显式设置实际 Chromium major，禁用上游下载、系统浏览器发现和缓存 fallback | BM-02,EB-02 | 🔍 待验收 |
-| BM-04 | HTML 渲染安全沙箱 | 私有目录、默认断网、本地资源、导航/下载/file URL 拦截、CPU/内存/帧数/大小/时长限制和 prompt injection 测试 | BM-02,BM-03,VF-03 | ⬜ 未开始 |
+| BM-04 | HTML 渲染安全沙箱 | 私有目录、默认断网、本地资源、导航/下载/file URL 拦截、CPU/内存/帧数/大小/时长限制和 prompt injection 测试 | BM-02,BM-03,VF-03 | 🔍 待验收 |
 | BM-05 | AI 一句话到动效视频编排 | 受限 MotionAuthoringAgent 读取锁定 workflow，以封闭工具把 Brief→DESIGN/脚本/分镜→可 seek 的 HTML/动画→lint/check/snapshot→局部修正→提交 RenderJob；逐帧 Chromium/FFmpeg 不调用模型，Agent 无 Shell/任意文件/Profile/密钥权限，未配置模型时自动制作明确不可用 | BM-04,VF-01,VF-05 | ⬜ 未开始 |
 | BM-06 | 12 套风格目录与中文选择器 | 全部 12 套有预览、中文名、适用场景、标签和键盘可访问性；少一套、重复或混入未公开模板都失败 | BM-01,VF-07 | ✅ 已完成 |
 | BM-07 | 风格推荐、品牌微调与冻结 | 推荐 2～3 套但可看全量；品牌色/字体/Logo 覆盖、实际内容预览、frame.md 校验、版本/摘要冻结和当前 RenderJob 重现 | BM-05,BM-06 | ⬜ 未开始 |
