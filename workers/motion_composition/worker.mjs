@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /** Isolated process boundary for the motion-composition runtime. */
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 
 const WORKER_VERSION = "0.7.68";
 const PROTOCOL_VERSION = "1.0";
@@ -25,9 +26,52 @@ const RENDER_TIMEOUT_SECONDS_MINIMUM = 1;
 const RENDER_TIMEOUT_SECONDS_MAXIMUM = 60;
 const CHROMIUM_VERSION_PATTERN = /(?:^|\s|\/)(\d+)\.\d+\.\d+\.\d+/;
 const MAX_PROTOCOL_RESPONSE_BYTES = 64 * 1024;
+const SANDBOX_FRAMES_MAXIMUM = 600;
+const SANDBOX_SECONDS_MAXIMUM = 300;
+const SANDBOX_MEMORY_MEGABYTES_MINIMUM = 128;
+const SANDBOX_MEMORY_MEGABYTES_MAXIMUM = 8192;
+const SANDBOX_OUTPUT_BYTES_MAXIMUM = 2147483647;
+const SANDBOX_ASSETS_MAXIMUM = 128;
+const SANDBOX_RELATIVE_PATH_MAXIMUM = 512;
+const SANDBOX_MESSAGE_LIMIT_BYTES = 32 * 1024 * 1024;
+const SANDBOX_FRAMES_DIRECTORY = "frames";
+const RESOURCE_MONITOR_INTERVAL_MS = 300;
+const SANDBOX_FAILURES = {
+  mismatch: "chromium_major_mismatch",
+  output: "render_output_exceeded",
+  protocol: "render_protocol_invalid",
+  resource: "render_resource_exceeded",
+  timeout: "render_timeout",
+  unusable: "render_browser_unusable",
+};
 
 function fixedJson(value) {
   return JSON.stringify(value);
+}
+
+/** Deterministic JSON with recursively sorted keys; the sandbox HMAC binds to it. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const fields = Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`);
+    return `{${fields.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function killBrowserProcessGroup(child) {
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // The browser process group already exited.
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // The direct child already exited.
+  }
 }
 
 function hasExactKeys(value, keys) {
@@ -126,6 +170,126 @@ function validCommand(bootstrap, command, name) {
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }
 
+function validSandboxRelativePath(value) {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > SANDBOX_RELATIVE_PATH_MAXIMUM
+    || value.includes("\0")
+    || value.includes("\\")
+    || isAbsolute(value)
+  ) return false;
+  return value.split("/").every(
+    (segment) => segment !== "" && segment !== "." && segment !== "..",
+  );
+}
+
+function boundedInteger(value, minimum, maximum) {
+  return Number.isInteger(value) && value >= minimum && value <= maximum;
+}
+
+function validSandboxSpec(value) {
+  if (!hasExactKeys(value, [
+    "allowedAssets", "entryHtml", "frameCount", "maxCpuSeconds",
+    "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes", "workspace",
+  ])) return false;
+  if (typeof value.workspace !== "string" || !isAbsolute(value.workspace)) return false;
+  if (!validSandboxRelativePath(value.entryHtml)) return false;
+  if (
+    !Array.isArray(value.allowedAssets)
+    || value.allowedAssets.length > SANDBOX_ASSETS_MAXIMUM
+    || !value.allowedAssets.every(validSandboxRelativePath)
+  ) return false;
+  return boundedInteger(value.frameCount, 1, SANDBOX_FRAMES_MAXIMUM)
+    && boundedInteger(value.maxDurationSeconds, 1, SANDBOX_SECONDS_MAXIMUM)
+    && boundedInteger(value.maxCpuSeconds, 1, SANDBOX_SECONDS_MAXIMUM)
+    && boundedInteger(
+      value.maxMemoryMegabytes,
+      SANDBOX_MEMORY_MEGABYTES_MINIMUM,
+      SANDBOX_MEMORY_MEGABYTES_MAXIMUM,
+    )
+    && boundedInteger(value.maxOutputBytes, 1, SANDBOX_OUTPUT_BYTES_MAXIMUM);
+}
+
+/**
+ * Resolve the RenderJob workspace boundary: the entry document and every
+ * declared asset must be a regular, non-symlink file whose real path stays
+ * inside the workspace; the frames output directory must not exist yet.
+ */
+async function resolveSandboxWorkspace(spec) {
+  let workspaceMetadata;
+  try {
+    workspaceMetadata = await lstat(spec.workspace);
+  } catch {
+    return null;
+  }
+  if (!workspaceMetadata.isDirectory() || workspaceMetadata.isSymbolicLink()) return null;
+  let workspaceReal;
+  try {
+    workspaceReal = await realpath(spec.workspace);
+  } catch {
+    return null;
+  }
+  const containedFile = async (relative) => {
+    const absolute = join(workspaceReal, relative);
+    let metadata;
+    try {
+      metadata = await lstat(absolute);
+    } catch {
+      return null;
+    }
+    if (!metadata.isFile() || metadata.isSymbolicLink()) return null;
+    let real;
+    try {
+      real = await realpath(absolute);
+    } catch {
+      return null;
+    }
+    if (!real.startsWith(workspaceReal + sep)) return null;
+    return real;
+  };
+  const entryReal = await containedFile(spec.entryHtml);
+  if (entryReal === null) return null;
+  const assetReals = [];
+  for (const asset of spec.allowedAssets) {
+    const real = await containedFile(asset);
+    if (real === null) return null;
+    assetReals.push(real);
+  }
+  const framesDirectory = join(workspaceReal, SANDBOX_FRAMES_DIRECTORY);
+  try {
+    await lstat(framesDirectory);
+    return null;
+  } catch {
+    // The frames directory must not exist yet.
+  }
+  return { assetReals, entryReal, framesDirectory };
+}
+
+function validSandboxCommand(bootstrap, command) {
+  if (!hasExactKeys(command, [
+    "authenticationProof", "command", "jobId", "protocolVersion", "sandbox", "workerKind",
+  ])) return false;
+  if (command.command !== "worker.render.sandbox"
+      || command.protocolVersion !== PROTOCOL_VERSION
+      || command.workerKind !== "node"
+      || typeof command.jobId !== "string"
+      || !UUID_V4_PATTERN.test(command.jobId)) return false;
+  const expected = proof(
+    bootstrap.localSessionToken,
+    COMMAND_DOMAIN,
+    [
+      "worker.render.sandbox", "node", PROTOCOL_VERSION, command.jobId,
+      canonicalJson(command.sandbox),
+    ],
+    "atvwc1.",
+  );
+  if (typeof command.authenticationProof !== "string") return false;
+  const actualBytes = Buffer.from(command.authenticationProof);
+  const expectedBytes = Buffer.from(expected);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
+
 function runBrowserProcess(executablePath, browserArguments, environment, timeoutMs) {
   return new Promise((resolve) => {
     let child;
@@ -147,16 +311,7 @@ function runBrowserProcess(executablePath, browserArguments, environment, timeou
     let settled = false;
     const timer = setTimeout(() => {
       settled = true;
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The browser process group already exited.
-      }
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // The direct child already exited.
-      }
+      killBrowserProcessGroup(child);
       resolve({ status: "timeout" });
     }, timeoutMs);
     child.on("error", () => {
@@ -201,18 +356,7 @@ function runHeadlessProbe(executablePath, browserArguments, environment, timeout
       clearTimeout(timer);
       resolve(value);
     };
-    const killProcessGroup = () => {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The browser process group already exited.
-      }
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // The direct child already exited.
-      }
-    };
+    const killProcessGroup = () => killBrowserProcessGroup(child);
     const timer = setTimeout(() => {
       killProcessGroup();
       finish({ status: "timeout" });
@@ -318,6 +462,384 @@ async function renderVerify(renderBrowser, jobId) {
   }
 }
 
+function parseCpuSeconds(text) {
+  let days = 0;
+  let rest = text;
+  const dash = text.indexOf("-");
+  if (dash >= 0) {
+    days = Number(text.slice(0, dash));
+    rest = text.slice(dash + 1);
+  }
+  const parts = rest.split(":").map(Number);
+  if (!Number.isFinite(days) || parts.some((value) => !Number.isFinite(value))) return null;
+  return parts.reduce((total, value) => total * 60 + value, 0) + days * 86400;
+}
+
+/** Sum resident memory (KB) and cumulative CPU seconds over one process group. */
+function sampleProcessGroup(groupId) {
+  return new Promise((resolve) => {
+    execFile(
+      "/bin/ps",
+      ["-axo", "pgid=,rss=,time="],
+      { maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        let rssKilobytes = 0;
+        let cpuSeconds = 0;
+        let found = false;
+        for (const line of stdout.split("\n")) {
+          const fields = line.trim().split(/\s+/);
+          if (fields.length < 3 || Number(fields[0]) !== groupId) continue;
+          const rss = Number(fields[1]);
+          const cpu = parseCpuSeconds(fields[2]);
+          if (!Number.isFinite(rss) || cpu === null) continue;
+          found = true;
+          rssKilobytes += rss;
+          cpuSeconds += cpu;
+        }
+        resolve(found ? { cpuSeconds, rssKilobytes } : null);
+      },
+    );
+  });
+}
+
+/** Minimal CDP client over the `--remote-debugging-pipe` file descriptors. */
+class SandboxCdpPipe {
+  constructor(child, onEvent, onProtocolFailure) {
+    this.child = child;
+    this.nextId = 0;
+    this.pending = new Map();
+    this.buffer = "";
+    this.onEvent = onEvent;
+    this.onProtocolFailure = onProtocolFailure;
+    child.stdio[3].on("error", () => {});
+    child.stdio[4].on("error", () => {});
+    child.stdio[4].setEncoding("utf8");
+    child.stdio[4].on("data", (chunk) => this.consume(chunk));
+  }
+
+  consume(chunk) {
+    this.buffer += chunk;
+    for (;;) {
+      const separator = this.buffer.indexOf("\0");
+      if (separator < 0) {
+        if (this.buffer.length > SANDBOX_MESSAGE_LIMIT_BYTES) this.onProtocolFailure();
+        return;
+      }
+      const raw = this.buffer.slice(0, separator);
+      this.buffer = this.buffer.slice(separator + 1);
+      let message;
+      try {
+        message = JSON.parse(raw);
+      } catch {
+        this.onProtocolFailure();
+        return;
+      }
+      if (message === null || typeof message !== "object") {
+        this.onProtocolFailure();
+        return;
+      }
+      if (Number.isInteger(message.id) && this.pending.has(message.id)) {
+        const resolvePending = this.pending.get(message.id);
+        this.pending.delete(message.id);
+        resolvePending(message);
+      } else if (typeof message.method === "string") {
+        this.onEvent(message);
+      }
+    }
+  }
+
+  send(method, params, sessionId) {
+    this.nextId += 1;
+    const id = this.nextId;
+    const message = { id, method };
+    if (params !== undefined) message.params = params;
+    if (sessionId !== undefined) message.sessionId = sessionId;
+    return new Promise((resolvePending) => {
+      this.pending.set(id, resolvePending);
+      try {
+        this.child.stdio[3].write(`${fixedJson(message)}\0`);
+      } catch {
+        // A dead pipe surfaces through the close handler.
+      }
+    });
+  }
+}
+
+/**
+ * One sandboxed render session inside the real headless browser: default
+ * offline, request allowlist limited to the entry document and declared
+ * assets, navigation/download/popup/dialog interception, wall-clock, CPU,
+ * memory and output-byte budgets, and process-group kill on every exit.
+ */
+function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environment) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(renderBrowser.executablePath, [
+        "--headless",
+        "--remote-debugging-pipe",
+        "--use-mock-keychain",
+        "--password-store=basic",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-component-update",
+        "--disable-background-networking",
+        "--no-pings",
+        "--block-new-web-contents",
+        "--deny-permission-prompts",
+        "--dns-prefetch-disable",
+        "--disable-features=NetworkPrediction,PreconnectToSearch,OptimizationHints",
+        // Default disconnected: route every http/https/ws connection to a dead
+        // loopback proxy (local file:// is never proxied). Nothing reaches a
+        // real host even as a speculative preconnect. `<-loopback>` forces even
+        // loopback URLs through the dead proxy instead of bypassing it.
+        "--proxy-server=127.0.0.1:9",
+        "--proxy-bypass-list=<-loopback>",
+        `--user-data-dir=${join(jobDirectory, "profile")}`,
+        `--crash-dumps-dir=${join(jobDirectory, "crashes")}`,
+        "--window-size=640,360",
+        "about:blank",
+      ], {
+        detached: true,
+        env: environment,
+        stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
+      });
+    } catch {
+      resolve({ status: "unusable" });
+      return;
+    }
+    let settled = false;
+    let closing = false;
+    const counters = {
+      blockedDialogs: 0,
+      blockedDownloads: 0,
+      blockedNavigations: 0,
+      blockedPopups: 0,
+      blockedRequests: 0,
+    };
+    let framesCaptured = 0;
+    let outputBytes = 0;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(wallTimer);
+      clearInterval(monitorTimer);
+      killBrowserProcessGroup(child);
+      resolve(value);
+    };
+    const wallTimer = setTimeout(() => finish({ status: "timeout" }), spec.maxDurationSeconds * 1000);
+    let sampling = false;
+    const monitorTimer = setInterval(async () => {
+      if (settled || sampling) return;
+      sampling = true;
+      const sample = await sampleProcessGroup(child.pid);
+      sampling = false;
+      if (settled || sample === null) return;
+      if (
+        sample.cpuSeconds > spec.maxCpuSeconds
+        || sample.rssKilobytes > spec.maxMemoryMegabytes * 1024
+      ) finish({ status: "resource" });
+    }, RESOURCE_MONITOR_INTERVAL_MS);
+    child.on("error", () => finish({ status: "unusable" }));
+    child.on("close", (code) => {
+      if (closing && code === 0) {
+        finish({ counters, framesCaptured, outputBytes, status: "complete" });
+      } else {
+        finish({ status: "protocol" });
+      }
+    });
+
+    const entryUrl = pathToFileURL(resolved.entryReal).href;
+    const allowedPaths = new Set([resolved.entryReal, ...resolved.assetReals]);
+    let resolveLoad;
+    const loadFired = new Promise((resolvePending) => {
+      resolveLoad = resolvePending;
+    });
+    const allowedFileRequest = (url, isDocument) => {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return false;
+      }
+      if (parsed.protocol !== "file:") return false;
+      let path;
+      try {
+        path = decodeURIComponent(parsed.pathname);
+      } catch {
+        return false;
+      }
+      return isDocument ? path === resolved.entryReal : allowedPaths.has(path);
+    };
+    const onEvent = (message) => {
+      const params = message.params ?? {};
+      switch (message.method) {
+        case "Fetch.requestPaused": {
+          const url = typeof params.request?.url === "string" ? params.request.url : "";
+          const isDocument = params.resourceType === "Document";
+          if (allowedFileRequest(url, isDocument)) {
+            pipe.send("Fetch.continueRequest", { requestId: params.requestId }, message.sessionId);
+          } else {
+            if (isDocument) counters.blockedNavigations += 1;
+            else counters.blockedRequests += 1;
+            pipe.send(
+              "Fetch.failRequest",
+              { errorReason: "AccessDenied", requestId: params.requestId },
+              message.sessionId,
+            );
+          }
+          return;
+        }
+        case "Browser.downloadWillBegin":
+          counters.blockedDownloads += 1;
+          return;
+        case "Page.windowOpen":
+          // `--block-new-web-contents` denies the popup; this event proves the
+          // attempt was made and refused.
+          counters.blockedPopups += 1;
+          return;
+        case "Target.attachedToTarget":
+          // A child frame or worker attached: intercept it before it can run.
+          // `waitForDebuggerOnStart` holds it paused until interception is in
+          // place, closing the out-of-process-iframe network-escape hole.
+          installInterception(params.sessionId).then(
+            () => pipe.send("Runtime.runIfWaitingForDebugger", undefined, params.sessionId),
+            () => finish({ status: "protocol" }),
+          );
+          return;
+        case "Page.javascriptDialogOpening":
+          counters.blockedDialogs += 1;
+          pipe.send("Page.handleJavaScriptDialog", { accept: false }, message.sessionId);
+          return;
+        case "Page.loadEventFired":
+          resolveLoad();
+          return;
+        default:
+      }
+    };
+    const pipe = new SandboxCdpPipe(child, onEvent, () => finish({ status: "protocol" }));
+
+    // Install the full interception boundary on one session (the root page and
+    // every auto-attached child): default offline, request allowlist, dialog
+    // handling, and recursive auto-attach so descendants are intercepted too.
+    const installInterception = async (sessionId) => {
+      await pipe.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+      await pipe.send("Network.enable", {}, sessionId);
+      await pipe.send("Network.emulateNetworkConditions", {
+        downloadThroughput: -1,
+        latency: 0,
+        offline: true,
+        uploadThroughput: -1,
+      }, sessionId);
+      await pipe.send("Page.enable", {}, sessionId);
+      await pipe.send("Page.setDownloadBehavior", { behavior: "deny" }, sessionId);
+      await pipe.send("Target.setAutoAttach", {
+        autoAttach: true,
+        flatten: true,
+        waitForDebuggerOnStart: true,
+      }, sessionId);
+    };
+
+    (async () => {
+      const version = await pipe.send("Browser.getVersion");
+      const product = version?.result?.product;
+      const major = Number(
+        CHROMIUM_VERSION_PATTERN.exec(typeof product === "string" ? product : "")?.[1],
+      );
+      if (!Number.isInteger(major)) {
+        finish({ status: "protocol" });
+        return;
+      }
+      if (major !== renderBrowser.chromiumMajor) {
+        finish({ status: "mismatch" });
+        return;
+      }
+      await pipe.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true });
+      const created = await pipe.send("Target.createTarget", { url: "about:blank" });
+      const targetId = created?.result?.targetId;
+      if (typeof targetId !== "string") {
+        finish({ status: "protocol" });
+        return;
+      }
+      const attached = await pipe.send("Target.attachToTarget", { flatten: true, targetId });
+      const sessionId = attached?.result?.sessionId;
+      if (typeof sessionId !== "string") {
+        finish({ status: "protocol" });
+        return;
+      }
+      await installInterception(sessionId);
+      await pipe.send("Page.navigate", { url: entryUrl }, sessionId);
+      await loadFired;
+      for (let index = 1; index <= spec.frameCount; index += 1) {
+        const shot = await pipe.send("Page.captureScreenshot", { format: "png" }, sessionId);
+        const data = shot?.result?.data;
+        if (typeof data !== "string") {
+          finish({ status: "protocol" });
+          return;
+        }
+        const bytes = Buffer.from(data, "base64");
+        if (outputBytes + bytes.length > spec.maxOutputBytes) {
+          finish({ status: "output" });
+          return;
+        }
+        await writeFile(
+          join(resolved.framesDirectory, `frame-${String(index).padStart(5, "0")}.png`),
+          bytes,
+        );
+        outputBytes += bytes.length;
+        framesCaptured = index;
+      }
+      closing = true;
+      pipe.send("Browser.close");
+    })().catch(() => finish({ status: "protocol" }));
+  });
+}
+
+/**
+ * Run the sandboxed render for one RenderJob. The workspace boundary is
+ * resolved before any browser process exists, the executable major is
+ * re-verified, and the frames directory is removed on every failure path.
+ */
+async function renderSandbox(renderBrowser, jobId, spec) {
+  if (renderBrowser === null) return { failed: "render_browser_unavailable" };
+  const resolved = await resolveSandboxWorkspace(spec);
+  if (resolved === null) return { failed: "render_workspace_invalid" };
+  if ((await executableFileMetadata(renderBrowser.executablePath)) === null) {
+    return { failed: "render_browser_unusable" };
+  }
+  const jobDirectory = await mkdtemp(join(tmpdir(), `${RENDER_JOB_PREFIX}${jobId}-`));
+  let succeeded = false;
+  try {
+    const environment = { HOME: jobDirectory, TMPDIR: jobDirectory };
+    const version = await runBrowserProcess(
+      renderBrowser.executablePath,
+      ["--version"],
+      environment,
+      renderBrowser.launchTimeoutSeconds * 1000,
+    );
+    if (version.status === "timeout") return { failed: "render_timeout" };
+    if (version.status !== "exit" || version.code !== 0) {
+      return { failed: "render_browser_unusable" };
+    }
+    const major = Number(CHROMIUM_VERSION_PATTERN.exec(version.stdout)?.[1]);
+    if (!Number.isInteger(major)) return { failed: "render_browser_unusable" };
+    if (major !== renderBrowser.chromiumMajor) return { failed: "chromium_major_mismatch" };
+    await mkdir(resolved.framesDirectory);
+    const outcome = await runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environment);
+    if (outcome.status !== "complete") return { failed: SANDBOX_FAILURES[outcome.status] };
+    succeeded = true;
+    return { sandboxed: { chromiumMajor: renderBrowser.chromiumMajor, ...outcome } };
+  } finally {
+    await rm(jobDirectory, { recursive: true, force: true });
+    if (!succeeded) await rm(resolved.framesDirectory, { recursive: true, force: true });
+  }
+}
+
 function renderEventLine(bootstrap, jobId, result) {
   if (result.failed !== undefined) {
     return fixedJson({
@@ -339,6 +861,38 @@ function renderEventLine(bootstrap, jobId, result) {
     chromiumMajor: result.chromiumMajor,
     event: "worker.render.verified",
     jobId,
+    protocolVersion: PROTOCOL_VERSION,
+    workerKind: "node",
+    workerVersion: WORKER_VERSION,
+  });
+}
+
+function sandboxEventLine(bootstrap, jobId, result) {
+  if (result.failed !== undefined) return renderEventLine(bootstrap, jobId, result);
+  const sandboxed = result.sandboxed;
+  const detail = [
+    jobId,
+    sandboxed.chromiumMajor,
+    sandboxed.framesCaptured,
+    sandboxed.outputBytes,
+    sandboxed.counters.blockedRequests,
+    sandboxed.counters.blockedNavigations,
+    sandboxed.counters.blockedDownloads,
+    sandboxed.counters.blockedPopups,
+    sandboxed.counters.blockedDialogs,
+  ].join("\0");
+  return fixedJson({
+    authenticationProof: eventProof(bootstrap, "worker.render.sandboxed", detail),
+    blockedDialogs: sandboxed.counters.blockedDialogs,
+    blockedDownloads: sandboxed.counters.blockedDownloads,
+    blockedNavigations: sandboxed.counters.blockedNavigations,
+    blockedPopups: sandboxed.counters.blockedPopups,
+    blockedRequests: sandboxed.counters.blockedRequests,
+    chromiumMajor: sandboxed.chromiumMajor,
+    event: "worker.render.sandboxed",
+    framesCaptured: sandboxed.framesCaptured,
+    jobId,
+    outputBytes: sandboxed.outputBytes,
     protocolVersion: PROTOCOL_VERSION,
     workerKind: "node",
     workerVersion: WORKER_VERSION,
@@ -425,6 +979,13 @@ async function main() {
     if (validCommand(bootstrap, command, "worker.render.verify")) {
       const result = await renderVerify(bootstrap.renderBrowser, command.jobId);
       process.stdout.write(`${renderEventLine(bootstrap, command.jobId, result)}\n`);
+      continue;
+    }
+    if (validSandboxCommand(bootstrap, command)) {
+      const result = validSandboxSpec(command.sandbox)
+        ? await renderSandbox(bootstrap.renderBrowser, command.jobId, command.sandbox)
+        : { failed: "render_sandbox_invalid" };
+      process.stdout.write(`${sandboxEventLine(bootstrap, command.jobId, result)}\n`);
     }
   }
   await new Promise((resolve) => server.close(resolve));
