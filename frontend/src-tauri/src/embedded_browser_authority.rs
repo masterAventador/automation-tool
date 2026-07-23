@@ -9,9 +9,10 @@
 //! the closed component vocabulary EB-08 will surface; Debug output never
 //! reveals installation paths.
 
-use crate::embedded_browser_distribution::{EmbeddedBrowserDistribution, EmbeddedBrowserError};
+use crate::embedded_browser_distribution::{
+    cached_executable_still_sound, EmbeddedBrowserDistribution, EmbeddedBrowserError,
+};
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -82,7 +83,7 @@ impl EmbeddedBrowserAuthority {
             .lock()
             .map_err(|_| EmbeddedBrowserAuthorityError::Unavailable)?;
         if let Some(executable) = cache.as_ref() {
-            if executable_still_sound(executable) {
+            if cached_executable_still_sound(&self.resource_dir, executable, self.target_id) {
                 return Ok(executable.clone());
             }
             *cache = None;
@@ -93,24 +94,6 @@ impl EmbeddedBrowserAuthority {
         let executable = distribution.executable_path().to_path_buf();
         *cache = Some(executable.clone());
         Ok(executable)
-    }
-}
-
-fn executable_still_sound(path: &PathBuf) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
     }
 }
 

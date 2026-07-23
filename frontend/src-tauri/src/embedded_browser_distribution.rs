@@ -279,6 +279,43 @@ impl EmbeddedBrowserDistribution {
     }
 }
 
+pub(crate) fn cached_executable_still_sound(
+    resource_directory: &Path,
+    executable: &Path,
+    target_id: &str,
+) -> bool {
+    cached_executable_still_sound_inner(resource_directory, executable, target_id).is_ok()
+}
+
+fn cached_executable_still_sound_inner(
+    resource_directory: &Path,
+    executable: &Path,
+    target_id: &str,
+) -> Result<(), EmbeddedBrowserError> {
+    reject_link(resource_directory)?;
+    let resource_root = fs::canonicalize(resource_directory)?;
+    let root_path = resource_root.join(DISTRIBUTION_DIRECTORY);
+    reject_link(&root_path)?;
+    let root = fs::canonicalize(root_path)?;
+    if root.parent() != Some(resource_root.as_path()) || !executable.starts_with(&root) {
+        return Err(EmbeddedBrowserError::Invalid(
+            "cached executable escaped distribution",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        let relative = executable
+            .strip_prefix(&root)
+            .map_err(|_| EmbeddedBrowserError::Invalid("cached executable escaped distribution"))?;
+        let mut current = root;
+        for component in relative.components() {
+            current.push(component.as_os_str());
+            reject_link(&current)?;
+        }
+    }
+    assert_executable(executable, target_id)
+}
+
 fn release_target_id() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-arm64"
@@ -576,7 +613,7 @@ fn assert_pe_x86_64(path: &Path) -> Result<(), EmbeddedBrowserError> {
             .try_into()
             .map_err(|_| EmbeddedBrowserError::Invalid("PE header invalid"))?,
     ) as u64;
-    if pe_offset < 64 || pe_offset > MAX_PE_HEADER_OFFSET || pe_offset + 6 > length {
+    if !(64..=MAX_PE_HEADER_OFFSET).contains(&pe_offset) || pe_offset + 6 > length {
         return Err(EmbeddedBrowserError::Invalid("PE header offset invalid"));
     }
     file.seek(SeekFrom::Start(pe_offset))?;
