@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "policy": "fail_closed",
+  "verified_at": "2026-07-23",
+  "chromium": {
+    "browser_version": "149.0.7827.55",
+    "revision": "1228",
+    "title": "Chrome for Testing"
+  },
+  "targets": {
+    "macos-arm64": {
+      "buildable": true,
+      "download_url": "https://cdn.playwright.dev/builds/cft/149.0.7827.55/mac-arm64/chrome-mac-arm64.zip",
+      "redirect_host_allowlist": ["storage.googleapis.com"],
+      "redirect_path_prefix": "/chrome-for-testing-public/149.0.7827.55/mac-arm64/",
+      "archive_sha256": "311211b54c429245e2cec0314ee1e314085e9c00350215b95e1a879350786630",
+      "root_entry": "chrome-mac-arm64",
+      "executable": "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "forbidden_entry_substrings": [
+        "chrome-headless-shell",
+        "headless_shell",
+        "firefox",
+        "webkit"
+      ]
+    },
+    "windows-x86_64": {
+      "buildable": false,
+      "pending_reason": "windows evidence deferred by 2026-07-23 user decision; staged by EB-04 on a real Windows environment",
+      "download_url": "https://cdn.playwright.dev/builds/cft/149.0.7827.55/win64/chrome-win64.zip",
+      "redirect_host_allowlist": ["storage.googleapis.com"],
+      "redirect_path_prefix": "/chrome-for-testing-public/149.0.7827.55/win64/",
+      "archive_sha256": "PENDING_FIRST_VERIFIED_DOWNLOAD",
+      "root_entry": "chrome-win64",
+      "executable": "chrome-win64/chrome.exe",
+      "forbidden_entry_substrings": [
+        "chrome-headless-shell",
+        "headless_shell",
+        "firefox",
+        "webkit"
+      ]
+    }
+  },
+  "sources": {
+    "url_template_origin": "playwright 1.61.0 driver coreBundle cftUrl builds/cft/<version>/<platform>",
+    "redirect_target_origin": "official Chrome for Testing public bucket",
+    "compatibility_contract": "contracts/browser/embedded-chromium-compatibility.v1.json"
+  }
+}
