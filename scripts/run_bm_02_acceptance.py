@@ -73,14 +73,19 @@ def require_real_candidate() -> None:
             raise AssertionError("BM-02 packaged no-command boundary failed")
         environment = os.environ.copy()
         environment["BM02_PACKAGE_ROOT"] = str(package)
-        subprocess.run(
+        test_target = (
+            "local_video_orchestrator_windows"
+            if os.name == "nt"
+            else "local_video_orchestrator"
+        )
+        completed = subprocess.run(
             [
                 "cargo",
                 "test",
                 "--manifest-path",
                 "frontend/src-tauri/Cargo.toml",
                 "--test",
-                "local_video_orchestrator",
+                test_target,
                 "bundled_node_candidate_uses_packaged_runtime_and_protocol",
                 "--",
                 "--exact",
@@ -88,9 +93,15 @@ def require_real_candidate() -> None:
             ],
             cwd=ROOT,
             env=environment,
-            check=True,
+            capture_output=True,
+            text=True,
+            check=False,
             timeout=180,
         )
+        print(completed.stdout, end="")
+        print(completed.stderr, end="", file=sys.stderr)
+        if completed.returncode != 0 or "1 passed; 0 failed" not in completed.stdout:
+            raise AssertionError("BM-02 native Rust candidate test did not execute")
     if git_status() != before:
         raise AssertionError("BM-02 acceptance wrote into the upstream checkout")
 
@@ -98,15 +109,15 @@ def require_real_candidate() -> None:
 def require_evidence() -> None:
     text = (ROOT / "docs/development/BM-02.md").read_text(encoding="utf-8")
     for heading in (
-        "# BM-02 完成证据", "状态：🔍 待验收", "## RED", "## GREEN", "## 失败矩阵",
+        "# BM-02 完成证据", "状态：✅ 已完成", "## RED", "## GREEN", "## 失败矩阵",
         "## 正常用户路径验收", "## 真实边界", "## 清理", "## 文档变化",
     ):
         if heading not in text:
             raise AssertionError(f"BM-02 evidence is missing {heading}")
     roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     rows = [line for line in roadmap.splitlines() if line.startswith("| BM-02 |")]
-    if len(rows) != 1 or not rows[0].endswith("| 🔍 待验收 |"):
-        raise AssertionError("BM-02 roadmap status is not pending native validation")
+    if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
+        raise AssertionError("BM-02 roadmap status is not completed")
 
 
 def main() -> int:

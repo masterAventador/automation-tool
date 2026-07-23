@@ -82,11 +82,19 @@ PowerShell 可直接启动且只导入系统 DLL；`ffmpeg.exe` SHA-256 为
 `.exe` make 目标、相对输出目录、缺失动态运行时和非管理员 symlink 夹具问题均已修复并
 建立回归约束。
 
-### 4. BM-02 动效 Node Worker
+### 4. BM-02 动效 Node Worker（✅ 2026-07-24 已完成）
 
 ```bash
 python scripts/run_bm_02_acceptance.py
 ```
+
+Windows 11 x86_64 实体机会话下载摘要锁定的 Node 22.23.1 x64 官方归档，构建只含
+随包 `node.exe`、许可证和 Worker 的临时候选；空 PATH 下版本、no-command、ready、
+认证 health、UUIDv4/HMAC cancel、stop 和进程退出均通过。首轮修复清空环境时漏保留
+`SYSTEMROOT/WINDIR` 导致 Node CSPRNG 初始化失败；第二轮发现 Unix-only Rust 目标在
+Windows 实际为 0 tests，新增 Windows 原生测试并让 runner 强制要求
+`1 passed; 0 failed`。Clippy `-D warnings` 与 212 项前端契约通过；候选、归档、随机
+loopback 端口和进程均无残留，上游 submodule 零写入。
 
 ### 4.1 BM-03 共用 Chromium 渲染适配（依赖 EB-04 的 Windows 暂存）
 
