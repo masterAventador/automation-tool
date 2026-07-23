@@ -4,7 +4,7 @@
 >
 > 决策日期：2026-07-23
 >
-> 适用范围：首发 macOS arm64、Windows x86_64 桌面安装包，以及 Local Executor、Playwright、Browser Use 和品牌动效逐帧渲染
+> 适用范围：首发 macOS Apple Silicon（arm64）、macOS Intel（x86_64）、Windows x86_64 桌面安装包，以及 Local Executor、Playwright、Browser Use 和品牌动效逐帧渲染
 >
 > 替代：产品规划中的 ADR-P002“使用用户电脑外部 Chrome/Edge”
 
@@ -20,7 +20,7 @@
 
 - App 安装包携带一套完整 Chromium。它是 RPA、Browser Use 和品牌动效逐帧渲染唯一受支持的生产浏览器二进制；三种用途可以共用二进制，但默认使用不同进程、Context、Profile 和控制通道。
 - Chromium 必须与项目的 Playwright 锁定版本严格匹配。这里的“最新”是每次发布候选构建时升级并重新锁定 Playwright 与其对应 Chromium 修订，不是运行时下载最新浏览器，也不是独立追逐 Chromium 版本号。
-- macOS arm64 与 Windows x86_64 分别构建发行物。构建期记录来源、Playwright/Chromium 版本、修订、平台、架构、许可证和逐文件 SHA-256；安装后只从 Tauri `resource_dir` 解析并逐文件验证。
+- macOS arm64、macOS x86_64 与 Windows x86_64 分别构建发行物；每个目标的安装包只装配该目标的一套 Chromium，禁止把多架构或跨平台浏览器目录合并进同一包。构建期记录来源、Playwright/Chromium 版本、修订、平台、架构、许可证和逐文件 SHA-256；安装后只从 Tauri `resource_dir` 解析并逐文件验证。
 - 文件缺失、多出未声明浏览器、摘要或架构不符、版本不兼容、路径被 symlink/reparse point 替换时失败关闭。运行时不联网下载浏览器，不发现或回退到系统 Chrome/Edge，也不接受用户提供的浏览器路径。
 
 ### 运行所有权

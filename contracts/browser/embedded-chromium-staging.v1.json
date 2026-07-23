@@ -23,6 +23,21 @@
         "webkit"
       ]
     },
+    "macos-x86_64": {
+      "buildable": true,
+      "download_url": "https://cdn.playwright.dev/builds/cft/149.0.7827.55/mac-x64/chrome-mac-x64.zip",
+      "redirect_host_allowlist": ["storage.googleapis.com"],
+      "redirect_path_prefix": "/chrome-for-testing-public/149.0.7827.55/mac-x64/",
+      "archive_sha256": "4fff3b1bff4ab5acab495438d501fd56ecd326fc2e18670858930386dca864e6",
+      "root_entry": "chrome-mac-x64",
+      "executable": "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "forbidden_entry_substrings": [
+        "chrome-headless-shell",
+        "headless_shell",
+        "firefox",
+        "webkit"
+      ]
+    },
     "windows-x86_64": {
       "buildable": true,
       "download_url": "https://cdn.playwright.dev/builds/cft/149.0.7827.55/win64/chrome-win64.zip",

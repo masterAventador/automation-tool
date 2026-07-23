@@ -156,6 +156,25 @@ class DistributionTests(unittest.TestCase):
                 staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
             )
 
+    def test_second_platform_root_is_rejected(self) -> None:
+        other_root = (
+            "chrome-mac-arm64" if TARGET_ID == "windows-x86_64" else "chrome-win64"
+        )
+        extra = self.staging / other_root
+        extra.mkdir()
+        (extra / "second-platform-browser").write_bytes(b"x")
+        with self.assertRaises(DistributionRejected):
+            self._manifest()
+        (extra / "second-platform-browser").unlink()
+        extra.rmdir()
+        self._manifest()
+        extra.mkdir()
+        (extra / "second-platform-browser").write_bytes(b"x")
+        with self.assertRaises(DistributionRejected):
+            verify_distribution(
+                staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+            )
+
     def test_extra_browser_binary_is_rejected_by_name(self) -> None:
         self._manifest()
         extra = self.staging / ROOT_ENTRY / "chrome-headless-shell.exe"
@@ -180,6 +199,19 @@ class DistributionTests(unittest.TestCase):
         manifest_path = self._manifest()
         document = json.loads(manifest_path.read_text(encoding="utf-8"))
         document["runtime"]["chromium"]["browser_version"] = "150.0.0.0"
+        manifest_path.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaises(DistributionRejected):
+            verify_distribution(
+                staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+            )
+
+    def test_manifest_executable_target_drift_is_rejected(self) -> None:
+        manifest_path = self._manifest()
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        document["executable"] = (
+            "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/"
+            "Google Chrome for Testing"
+        )
         manifest_path.write_text(json.dumps(document), encoding="utf-8")
         with self.assertRaises(DistributionRejected):
             verify_distribution(

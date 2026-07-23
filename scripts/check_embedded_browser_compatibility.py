@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-CONTRACT_PATH = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-compatibility.v1.json"
+CONTRACT_PATH = (
+    REPOSITORY_ROOT / "contracts/browser/embedded-chromium-compatibility.v1.json"
+)
 FIXTURE_ROOT = REPOSITORY_ROOT / "contracts/browser/fixtures"
 
 
@@ -38,7 +40,9 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def require_exact_keys(value: Mapping[str, object], expected: set[str], name: str) -> None:
+def require_exact_keys(
+    value: Mapping[str, object], expected: set[str], name: str
+) -> None:
     actual = set(value)
     if actual != expected:
         missing = sorted(expected - actual)
@@ -115,10 +119,11 @@ def validate_contract(contract: Mapping[str, object]) -> None:
         fail("Chromium metadata authority differs from the installed Playwright driver")
 
     targets = contract["supported_targets"]
-    if not isinstance(targets, list) or len(targets) != 2:
-        fail("supported_targets must contain the two release targets")
+    if not isinstance(targets, list) or len(targets) != 3:
+        fail("supported_targets must contain the three release targets")
     expected_targets = {
         ("macos-arm64", "macos", "arm64"),
+        ("macos-x86_64", "macos", "x86_64"),
         ("windows-x86_64", "windows", "x86_64"),
     }
     actual_targets: set[tuple[object, object, object]] = set()
@@ -153,17 +158,23 @@ def validate_dependency_locks(contract: Mapping[str, object]) -> None:
     dependencies = pyproject["project"]["dependencies"]
     if f"playwright=={expected_python}" not in dependencies:
         fail("backend pyproject must pin the production Playwright version exactly")
-    backend_lock = tomllib.loads((REPOSITORY_ROOT / "backend/uv.lock").read_text(encoding="utf-8"))
+    backend_lock = tomllib.loads(
+        (REPOSITORY_ROOT / "backend/uv.lock").read_text(encoding="utf-8")
+    )
     if find_locked_version(backend_lock, "playwright") != expected_python:
         fail("backend uv.lock Playwright version differs from the contract")
 
     harness = require_mapping(contract["test_harness"], "test_harness")
     expected_node = str(harness["playwright_node"])
     package = load_json(REPOSITORY_ROOT / "frontend/package.json")
-    dev_dependencies = require_mapping(package.get("devDependencies"), "devDependencies")
+    dev_dependencies = require_mapping(
+        package.get("devDependencies"), "devDependencies"
+    )
     if dev_dependencies.get("@playwright/test") != expected_node:
         fail("frontend package.json must pin @playwright/test exactly")
-    lock_text = (REPOSITORY_ROOT / "frontend/pnpm-lock.yaml").read_text(encoding="utf-8")
+    lock_text = (REPOSITORY_ROOT / "frontend/pnpm-lock.yaml").read_text(
+        encoding="utf-8"
+    )
     escaped_node = re.escape(expected_node)
     lock_pattern = re.compile(
         rf"(?ms)^      '@playwright/test':\n"
@@ -188,7 +199,9 @@ def validate_installed_driver(contract: Mapping[str, object]) -> None:
     if not isinstance(browsers, list):
         fail("installed Playwright browsers.json has no browser list")
     matches = [
-        item for item in browsers if isinstance(item, dict) and item.get("name") == "chromium"
+        item
+        for item in browsers
+        if isinstance(item, dict) and item.get("name") == "chromium"
     ]
     if len(matches) != 1:
         fail("installed Playwright must have exactly one Chromium entry")
@@ -204,7 +217,9 @@ def validate_installed_driver(contract: Mapping[str, object]) -> None:
         fail(f"installed Playwright Chromium metadata differs: actual={actual}")
 
 
-def validate_component(component: Mapping[str, object], contract: Mapping[str, object]) -> None:
+def validate_component(
+    component: Mapping[str, object], contract: Mapping[str, object]
+) -> None:
     require_exact_keys(
         component,
         {"schema_version", "component", "target", "playwright_python", "chromium"},
@@ -218,7 +233,9 @@ def validate_component(component: Mapping[str, object], contract: Mapping[str, o
     if component["playwright_python"] != runtime["playwright_python"]:
         fail("component Playwright version differs from the production runtime")
     if component["chromium"] != runtime["chromium"]:
-        fail("component Chromium version or revision differs from the production runtime")
+        fail(
+            "component Chromium version or revision differs from the production runtime"
+        )
     target = require_mapping(component["target"], "component target")
     require_exact_keys(target, {"id", "os", "arch"}, "component target")
     supported_targets = contract["supported_targets"]
@@ -235,7 +252,11 @@ def expect_failure(name: str, action: Callable[[], object]) -> None:
 
 
 def run_self_test(contract: Mapping[str, object]) -> None:
-    for name in ("component-valid-macos-arm64.json", "component-valid-windows-x86_64.json"):
+    for name in (
+        "component-valid-macos-arm64.json",
+        "component-valid-macos-x86_64.json",
+        "component-valid-windows-x86_64.json",
+    ):
         validate_component(load_json(FIXTURE_ROOT / name), contract)
     for name in (
         "component-invalid-version.json",
@@ -243,7 +264,9 @@ def run_self_test(contract: Mapping[str, object]) -> None:
         "component-invalid-platform.json",
     ):
         component = load_json(FIXTURE_ROOT / name)
-        expect_failure(name, lambda component=component: validate_component(component, contract))
+        expect_failure(
+            name, lambda component=component: validate_component(component, contract)
+        )
 
     valid = load_json(FIXTURE_ROOT / "component-valid-macos-arm64.json")
     extra = dict(valid)
@@ -275,4 +298,6 @@ if __name__ == "__main__":
     try:
         main()
     except CompatibilityError as error:
-        raise SystemExit(f"embedded Chromium compatibility check failed: {error}") from error
+        raise SystemExit(
+            f"embedded Chromium compatibility check failed: {error}"
+        ) from error

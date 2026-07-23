@@ -98,14 +98,22 @@ print(json.dumps({{"version": version, "userAgent": title}}))
 
 def require_evidence() -> None:
     text = (ROOT / "docs/development/EB-03.md").read_text(encoding="utf-8")
-    for marker in ("# EB-03 完成证据", "## RED", "## GREEN", "## 失败矩阵", "## 清理"):
+    for marker in (
+        "# EB-03 完成证据",
+        "## RED",
+        "## GREEN",
+        "## 失败矩阵",
+        "## 清理",
+    ):
         if marker not in text:
             fail(f"EB-03 evidence is missing {marker}")
     roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(
         encoding="utf-8"
     )
     rows = [line for line in roadmap.splitlines() if line.startswith("| EB-03 |")]
-    if len(rows) != 1 or not rows[0].rstrip().endswith(("🧪 RED |", "🚧 实现中 |", "✅ 已完成 |")):
+    if len(rows) != 1 or not rows[0].rstrip().endswith(
+        ("🧪 RED |", "🚧 实现中 |", "🔍 待验收 |", "✅ 已完成 |")
+    ):
         fail("EB-03 roadmap row is missing or in an unexpected state")
 
 

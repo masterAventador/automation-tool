@@ -93,6 +93,20 @@ class StagingBuilderTests(unittest.TestCase):
                 "chrome-mac-arm64/Google Chrome for Testing.app/"
             )
         )
+        intel = self.contract.targets["macos-x86_64"]
+        windows = self.contract.targets["windows-x86_64"]
+        self.assertTrue(intel.buildable)
+        self.assertEqual(intel.root_entry, "chrome-mac-x64")
+        self.assertEqual(
+            intel.executable,
+            "chrome-mac-x64/Google Chrome for Testing.app/Contents/"
+            "MacOS/Google Chrome for Testing",
+        )
+        self.assertRegex(intel.archive_sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            {self.target.root_entry, intel.root_entry, windows.root_entry},
+            {"chrome-mac-arm64", "chrome-mac-x64", "chrome-win64"},
+        )
 
     def test_digest_mismatch_is_rejected(self) -> None:
         archive, _ = self._archive(_valid_entries())

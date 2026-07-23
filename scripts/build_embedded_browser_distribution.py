@@ -79,6 +79,16 @@ class VerificationReport:
     total_bytes: int
 
 
+def _require_single_target_tree(staging: Path, root_entry: str) -> None:
+    allowed_top_level = {
+        root_entry,
+        STAGING_MANIFEST_NAME,
+        DISTRIBUTION_MANIFEST_NAME,
+    }
+    if {entry.name for entry in staging.iterdir()} - allowed_top_level:
+        _reject("unexpected top-level distribution entry")
+
+
 def _locked_runtime() -> dict[str, object]:
     compatibility = _load_json(_COMPATIBILITY_CONTRACT)
     production = compatibility["production_runtime"]
@@ -97,9 +107,8 @@ def _locked_runtime() -> dict[str, object]:
         _reject("shared validation contract render engine invalid")
     if validation.get("browser_use_version") != package["version"]:
         _reject("browser use version differs between contracts")
-    if (
-        validation.get("chromium", {}).get("browser_version")
-        != chromium.get("browser_version")
+    if validation.get("chromium", {}).get("browser_version") != chromium.get(
+        "browser_version"
     ):
         _reject("chromium version differs between contracts")
     return {
@@ -134,13 +143,16 @@ def build_distribution_manifest(
         != contract.browser_version
     ):
         _reject("staging manifest does not match the locked contracts")
-    if enforce_archive_lock and staging_manifest.get("source", {}).get(
-        "archive_sha256"
-    ) != target.archive_sha256:
+    if (
+        enforce_archive_lock
+        and staging_manifest.get("source", {}).get("archive_sha256")
+        != target.archive_sha256
+    ):
         _reject("staging archive digest does not match the contract lock")
     entries = staging_manifest.get("entries")
     if not isinstance(entries, list) or not entries:
         _reject("staging manifest entries missing")
+    _require_single_target_tree(staging, target.root_entry)
 
     runtime = _locked_runtime()
     chromium_version = str(contract.browser_version)
@@ -174,9 +186,7 @@ def build_distribution_manifest(
                 "version": chromium_version,
                 "purl": f"pkg:generic/chrome-for-testing@{chromium_version}",
                 "source_url": target.download_url,
-                "hashes": [
-                    {"alg": "SHA-256", "content": target.archive_sha256}
-                ],
+                "hashes": [{"alg": "SHA-256", "content": target.archive_sha256}],
             }
         ],
     }
@@ -208,9 +218,12 @@ def verify_distribution(
     target = contract.targets.get(target_id)
     if target is None:
         _reject("unknown distribution target")
-    if enforce_archive_lock and document.get("source", {}).get(
-        "archive_sha256"
-    ) != target.archive_sha256:
+    if document.get("executable") != target.executable:
+        _reject("distribution executable differs from the target contract")
+    if (
+        enforce_archive_lock
+        and document.get("source", {}).get("archive_sha256") != target.archive_sha256
+    ):
         _reject("distribution archive digest does not match the contract lock")
 
     entries = document.get("entries")
@@ -243,6 +256,7 @@ def verify_distribution(
     root = staging / target.root_entry
     if not root.is_dir():
         _reject("staged root missing")
+    _require_single_target_tree(staging, target.root_entry)
     for path in root.rglob("*"):
         if path.is_dir() and not path.is_symlink():
             continue

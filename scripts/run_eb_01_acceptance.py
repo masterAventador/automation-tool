@@ -19,7 +19,9 @@ def require_file(relative_path: str) -> str:
 
 
 def main() -> None:
-    contract_text = require_file("contracts/browser/embedded-chromium-compatibility.v1.json")
+    contract_text = require_file(
+        "contracts/browser/embedded-chromium-compatibility.v1.json"
+    )
     contract = json.loads(contract_text)
     if contract["production_runtime"]["playwright_python"] != "1.61.0":
         raise AssertionError("生产 Playwright Python 必须精确锁定 1.61.0")
@@ -33,14 +35,15 @@ def main() -> None:
     }:
         raise AssertionError("Chromium 完整版本或修订号漂移")
     target_ids = {item["id"] for item in contract["supported_targets"]}
-    if target_ids != {"macos-arm64", "windows-x86_64"}:
-        raise AssertionError("EB-01 必须只声明首发两种目标平台")
+    if target_ids != {"macos-arm64", "macos-x86_64", "windows-x86_64"}:
+        raise AssertionError("EB-01 必须只声明首发三种目标架构")
     if contract["test_harness"]["playwright_node"] != "1.61.1":
         raise AssertionError("Node Playwright 测试工具必须精确锁定 1.61.1")
 
     require_file("scripts/check_embedded_browser_compatibility.py")
     for fixture in (
         "contracts/browser/fixtures/component-valid-macos-arm64.json",
+        "contracts/browser/fixtures/component-valid-macos-x86_64.json",
         "contracts/browser/fixtures/component-valid-windows-x86_64.json",
         "contracts/browser/fixtures/component-invalid-version.json",
         "contracts/browser/fixtures/component-invalid-revision.json",
@@ -86,6 +89,11 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (AssertionError, KeyError, json.JSONDecodeError, subprocess.CalledProcessError) as error:
+    except (
+        AssertionError,
+        KeyError,
+        json.JSONDecodeError,
+        subprocess.CalledProcessError,
+    ) as error:
         print(f"EB-01 acceptance failed: {error}", file=sys.stderr)
         raise SystemExit(1) from error

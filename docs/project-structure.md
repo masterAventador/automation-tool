@@ -29,8 +29,9 @@ automation-tool/
 ├── backend/                       # Python 可部署业务后端和本地执行器
 ├── contracts/                     # 跨 Rust/TypeScript/Python 的生成协议
 │   ├── browser/
-│   │   ├── embedded-chromium-compatibility.v1.json # 生产 Playwright、Chromium 完整版本/修订和双平台兼容契约
-│   │   └── fixtures/              # 双平台有效组件清单与版本/修订/平台错误样例
+│   │   ├── embedded-chromium-compatibility.v1.json # 生产 Playwright、Chromium 完整版本/修订和三目标架构兼容契约
+│   │   ├── embedded-chromium-staging.v1.json # macOS 双架构/Windows 独立归档、摘要、根与可执行文件锁
+│   │   └── fixtures/              # 三目标有效组件清单与版本/修订/平台错误样例
 │   ├── video/
 │   │   └── ffmpeg-toolchain.v1.json # FFmpeg/x264 版本、源码摘要、能力与双平台构建契约
 │   ├── deployment/

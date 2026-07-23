@@ -60,7 +60,7 @@ fn write_fixture() -> FixtureTree {
     fs::create_dir_all(&base).expect("fixture base");
     let resource_dir = base.join("resources");
     let root = resource_dir.join("embedded-browser");
-    let binary = b"chromium-binary".to_vec();
+    let binary = b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01\x00\x00\x00\x00".to_vec();
     let plist = b"<plist/>".to_vec();
     let framework = b"framework".to_vec();
 

@@ -554,8 +554,8 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | ⬜ 未开始 | 22 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 18 |
-| ✅ 已完成 | 38 |
+| 🔍 待验收 | 19 |
+| ✅ 已完成 | 37 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -584,9 +584,9 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| EB-01 | Playwright 与 Chromium 兼容矩阵 | 锁定 Playwright、完整 Chromium 版本/修订、macOS arm64 和 Windows x86_64；安装包内版本不匹配时 fail closed | AV-04 | ✅ 已完成 |
+| EB-01 | Playwright 与 Chromium 兼容矩阵 | 锁定 Playwright、完整 Chromium 版本/修订、macOS arm64、macOS x86_64 和 Windows x86_64；安装包内版本不匹配时 fail closed | AV-04 | ✅ 已完成 |
 | EB-02 | 三方共用 Chromium 前置验证门禁 | 在 macOS/Windows 用 EB-01 同一完整 Chromium 分别启动可见 RPA、Browser Use `executable_path`/随机 CDP 两种模式和独立无头渲染进程；渲染 12 套风格、全部 134 项单帧冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏，并验证三方并发、进程/Profile 隔离、控制权租约和无第二套浏览器下载；通过后 ADR 固定为一套，失败则先调整共同版本重跑并暂停后续任务 | AV-02,EB-01 | ✅ 已完成 |
-| EB-03 | macOS 浏览器构建暂存 | 构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动 | EB-02 | ✅ 已完成 |
+| EB-03 | macOS 浏览器构建暂存 | Apple Silicon 与 Intel 分目标构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动，单目标资源不得混入另一架构 | EB-02 | 🔍 待验收 |
 | EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 | ✅ 已完成 |
 | EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 | 🔍 待验收 |
 | EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | 🔍 待验收 |
@@ -599,7 +599,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | EB-13 | 评论链路原样迁移 | 本期不接 Browser Use；现有 ActionGate、内容哈希、prepare/dispatch/verify、单次发送和 outcome_uncertain 全部保持 | EB-12 | ⬜ 未开始 |
 | EB-14 | 私信与恢复链路原样迁移 | 本期不接 Browser Use；现有目标校验、频控、单次发送、结果验收、暂停/取消/紧停、崩溃和重启恢复保持 | EB-12 | ⬜ 未开始 |
 | EB-15 | 诊断、人工接管与进程清理 | headed 窗口、关闭顺序、进程树强杀、Profile 解锁、日志脱敏、休眠/退出/崩溃和手动关闭矩阵；Browser Use 独立会话/渲染进程不得接触运营 Profile/CDP，抖音发布持有租约的短生命周期接管除外 | EB-11..EB-14 | ⬜ 未开始 |
-| EB-16 | 首发安装包与签名 | 只打包一套完整 Chromium；macOS 内层签名/公证、Windows 签名、首次安装/卸载、包体积、进程退出和残留资源 | EB-15 | ⬜ 未开始 |
+| EB-16 | 首发安装包与签名 | macOS arm64、macOS x86_64、Windows x86_64 每个目标只打包对应的一套完整 Chromium；macOS 内层签名/公证、Windows 签名、首次安装/卸载、包体积、进程退出和残留资源 | EB-15 | ⬜ 未开始 |
 | EB-17 | 无浏览器干净机纵向验收 | macOS 和 Windows 都在未安装 Chrome/Edge 的全新环境，从 App 正式入口完成安装、RPA 启动、扫码、搜索、受控动作、Browser Use 隔离演示和动效渲染；运行时不下载第二套浏览器且无残留 | EB-16,BU-07 | ⬜ 未开始 |
 
 ### 9.3 Browser Use（7 项）

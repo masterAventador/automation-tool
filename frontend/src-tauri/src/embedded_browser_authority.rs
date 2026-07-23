@@ -131,6 +131,8 @@ fn classify(error: EmbeddedBrowserError) -> EmbeddedBrowserAuthorityError {
 pub fn release_target_id() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-arm64"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "macos-x86_64"
     } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         "windows-x86_64"
     } else {

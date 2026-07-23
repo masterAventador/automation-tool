@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
 const DISTRIBUTION_DIRECTORY: &str = "embedded-browser";
@@ -22,6 +22,7 @@ const STAGING_MANIFEST_FILE: &str = "staging-manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ENTRY_COUNT: usize = 20_000;
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_PE_HEADER_OFFSET: u64 = 16 * 1024 * 1024;
 
 const EXPECTED_PLAYWRIGHT: &str = "1.61.0";
 const EXPECTED_CHROMIUM_TITLE: &str = "Chrome for Testing";
@@ -152,7 +153,7 @@ impl EmbeddedBrowserDistribution {
         resource_directory: &Path,
         target_id: &str,
     ) -> Result<Self, EmbeddedBrowserError> {
-        if !matches!(target_id, "macos-arm64" | "windows-x86_64") {
+        if !matches!(target_id, "macos-arm64" | "macos-x86_64" | "windows-x86_64") {
             return Err(EmbeddedBrowserError::Invalid("unsupported release target"));
         }
         reject_link(resource_directory)?;
@@ -176,6 +177,11 @@ impl EmbeddedBrowserDistribution {
             || manifest.target != target_id
         {
             return Err(EmbeddedBrowserError::Invalid("manifest identity mismatch"));
+        }
+        if manifest.executable != expected_executable(target_id)? {
+            return Err(EmbeddedBrowserError::Invalid(
+                "manifest executable does not match release target",
+            ));
         }
         let runtime = &manifest.runtime;
         if runtime.playwright_python != EXPECTED_PLAYWRIGHT
@@ -276,10 +282,25 @@ impl EmbeddedBrowserDistribution {
 fn release_target_id() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-arm64"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "macos-x86_64"
     } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         "windows-x86_64"
     } else {
         "unsupported"
+    }
+}
+
+fn expected_executable(target_id: &str) -> Result<&'static str, EmbeddedBrowserError> {
+    match target_id {
+        "macos-arm64" => Ok(
+            "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        ),
+        "macos-x86_64" => Ok(
+            "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        ),
+        "windows-x86_64" => Ok("chrome-win64/chrome.exe"),
+        _ => Err(EmbeddedBrowserError::Invalid("unsupported release target")),
     }
 }
 
@@ -497,7 +518,7 @@ fn assert_executable(path: &Path, target_id: &str) -> Result<(), EmbeddedBrowser
     if !fs::metadata(path)?.is_file() {
         return Err(EmbeddedBrowserError::Invalid("executable missing"));
     }
-    if target_id == "macos-arm64" {
+    if target_id.starts_with("macos-") {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -505,6 +526,68 @@ fn assert_executable(path: &Path, target_id: &str) -> Result<(), EmbeddedBrowser
                 return Err(EmbeddedBrowserError::Invalid("executable bit missing"));
             }
         }
+        assert_macho_architecture(path, target_id)?;
+    } else if target_id == "windows-x86_64" {
+        assert_pe_x86_64(path)?;
+    } else {
+        return Err(EmbeddedBrowserError::Invalid("unsupported release target"));
+    }
+    Ok(())
+}
+
+fn assert_macho_architecture(path: &Path, target_id: &str) -> Result<(), EmbeddedBrowserError> {
+    let mut header = [0_u8; 12];
+    File::open(path)?.read_exact(&mut header)?;
+    if header[..4] != [0xcf, 0xfa, 0xed, 0xfe] {
+        return Err(EmbeddedBrowserError::Invalid(
+            "browser executable is not a thin 64-bit Mach-O",
+        ));
+    }
+    let actual = u32::from_le_bytes(
+        header[4..8]
+            .try_into()
+            .map_err(|_| EmbeddedBrowserError::Invalid("Mach-O header invalid"))?,
+    );
+    let expected = match target_id {
+        "macos-arm64" => 0x0100_000c,
+        "macos-x86_64" => 0x0100_0007,
+        _ => return Err(EmbeddedBrowserError::Invalid("unsupported macOS target")),
+    };
+    if actual != expected {
+        return Err(EmbeddedBrowserError::Invalid(
+            "browser Mach-O architecture mismatch",
+        ));
+    }
+    Ok(())
+}
+
+fn assert_pe_x86_64(path: &Path) -> Result<(), EmbeddedBrowserError> {
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    let mut dos_header = [0_u8; 64];
+    file.read_exact(&mut dos_header)?;
+    if dos_header[..2] != *b"MZ" {
+        return Err(EmbeddedBrowserError::Invalid(
+            "browser executable is not PE",
+        ));
+    }
+    let pe_offset = u32::from_le_bytes(
+        dos_header[0x3c..0x40]
+            .try_into()
+            .map_err(|_| EmbeddedBrowserError::Invalid("PE header invalid"))?,
+    ) as u64;
+    if pe_offset < 64 || pe_offset > MAX_PE_HEADER_OFFSET || pe_offset + 6 > length {
+        return Err(EmbeddedBrowserError::Invalid("PE header offset invalid"));
+    }
+    file.seek(SeekFrom::Start(pe_offset))?;
+    let mut coff_header = [0_u8; 6];
+    file.read_exact(&mut coff_header)?;
+    if coff_header[..4] != *b"PE\0\0"
+        || u16::from_le_bytes([coff_header[4], coff_header[5]]) != 0x8664
+    {
+        return Err(EmbeddedBrowserError::Invalid(
+            "browser PE architecture mismatch",
+        ));
     }
     Ok(())
 }

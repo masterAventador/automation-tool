@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy": "fail_closed",
-  "verified_at": "2026-07-23",
+  "verified_at": "2026-07-24",
   "production_runtime": {
     "playwright_python": "1.61.0",
     "driver_browsers_json_sha256": "ee39bc924bc3d1bd895626c2910f1292d109bbfeeb5abd113acb45e1951cc942",
@@ -22,6 +22,11 @@
       "id": "macos-arm64",
       "os": "macos",
       "arch": "arm64"
+    },
+    {
+      "id": "macos-x86_64",
+      "os": "macos",
+      "arch": "x86_64"
     },
     {
       "id": "windows-x86_64",
