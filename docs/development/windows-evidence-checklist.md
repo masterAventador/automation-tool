@@ -127,6 +127,12 @@ reparse point 越界校验；真实恶意 HTML 的 navigation/download/popup/dia
 Manifest、308 files / 435,574,347 bytes、PE `0x8664`、Playwright 离线启动
 149.0.7827.55 和进程零残留验收。
 
+### 5.1 EB-05 单一浏览器发行物 Manifest（✅ 2026-07-24 已完成）
+
+`run_eb_05_acceptance.py` 已扩展为按宿主选择原生目标，并在 Windows 11 x86_64 对 EB-04
+锁定归档完成 308 files / 435,574,347 bytes 的 Manifest 生成与逐文件摘要复验；故意篡改
+`chrome.exe` 后默认强锁校验拒绝，恢复后临时树清理。
+
 ### 6. BM-14 Windows 发布目录构建与只读属性验收
 
 macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
