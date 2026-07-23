@@ -43,7 +43,7 @@
     },
     {
       "id": "MVP-AC-03",
-      "criterion": "未登录抖音时，任务进入“等待平台登录”，并拉起可见的外部浏览器",
+      "criterion": "未登录抖音时，任务进入“等待平台登录”，并拉起可见的 App 内置运营浏览器",
       "result": "verified_automated",
       "evidence": [
         {
@@ -183,7 +183,7 @@
     },
     {
       "id": "MVP-AC-13",
-      "criterion": "macOS 和 Windows 分别完成安装、启动、外部浏览器、Local Executor 生命周期和真实测试账号验收",
+      "criterion": "macOS 和 Windows 分别完成安装、启动、内置 Chromium、Local Executor 生命周期和真实测试账号验收",
       "result": "pending_device_package",
       "evidence": [
         {

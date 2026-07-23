@@ -151,7 +151,7 @@
 
   const removeExternalNavigation = () => {
     document.querySelectorAll("a[href]").forEach((anchor) => {
-      let external = false;
+      let external;
       try {
         const destination = new URL(anchor.getAttribute("href"), window.location.href);
         external = destination.origin !== window.location.origin;

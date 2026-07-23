@@ -69,7 +69,7 @@ describe("model service settings", () => {
 
     await screen.findByText("文案模型服务");
     const section = purposeSection("文案模型服务");
-    const secret = "sk-vf05-ui-private-key-1234567890";
+    const secret = "sk-vf05-ui-secret-1234567890";
     await user.type(within(section).getByLabelText("文案模型服务 API Key"), secret);
     await user.click(within(section).getByRole("button", { name: "保存配置" }));
 

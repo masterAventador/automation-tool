@@ -906,7 +906,7 @@ fn verify_health(running: &RunningVideoWorker, timeout: Duration) -> Result<(), 
     let token = running.token.encoded();
     let request = Zeroizing::new(format!(
         "GET /health HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
-        &*token,
+        *token,
     ));
     stream
         .write_all(request.as_bytes())

@@ -8,7 +8,7 @@ const reviewUrl = new URL("contracts/quality/mvp-spec-review.v1.json", repositor
 const ACCEPTANCE_FRAGMENTS = [
   "全新安装后打开 App，不出现产品注册或登录页面",
   "App 自动完成 Control Plane 连通性、Local Executor、浏览器和数据目录诊断",
-  "未登录抖音时，任务进入“等待平台登录”，并拉起可见的外部浏览器",
+  "未登录抖音时，任务进入“等待平台登录”，并拉起可见的 App 内置运营浏览器",
   "用户扫码一次后，App 能检测登录并在下一次启动复用平台登录态",
   "用户能创建关键词任务，看到真实目标预览并排除目标",
   "用户确认后能在可见浏览器中完成受控动作",
@@ -18,7 +18,7 @@ const ACCEPTANCE_FRAGMENTS = [
   "App、Control Plane 或 Local Executor 崩溃重启后，不重复已经确认完成的副作用，并能恢复任务快照",
   "结果不确定的动作不会自动重试",
   "日志、事件和截图不泄漏 Cookie、Token、完整页面私密内容或本机私有路径",
-  "macOS 和 Windows 分别完成安装、启动、外部浏览器、Local Executor 生命周期和真实测试账号验收",
+  "macOS 和 Windows 分别完成安装、启动、内置 Chromium、Local Executor 生命周期和真实测试账号验收",
   "正式安装包不包含测试驱动、调试端口、测试凭据或真实运行数据",
 ];
 

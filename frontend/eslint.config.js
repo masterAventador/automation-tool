@@ -15,6 +15,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src-tauri/src/material_video_studio_init.js"],
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {

@@ -34,9 +34,9 @@
     },
     {
       "id": "MVP-ADR-06",
-      "decision": "运营自动化使用可见的外部 Chrome 或 Edge，不内嵌浏览器",
+      "decision": "运营自动化使用 App 内置并校验的 Chromium，在独立可见窗口中运行",
       "disposition": "conforms",
-      "evidence": [{"path": "docs/product-plan.md", "anchor": "ADR-P002：不内嵌运营浏览器"}]
+      "evidence": [{"path": "docs/product-plan.md", "anchor": "ADR-P002：内置运营浏览器（替代原决策）"}]
     },
     {
       "id": "MVP-ADR-07",
@@ -82,7 +82,7 @@
     },
     {
       "id": "MVP-AC-03",
-      "criterion": "未登录抖音时，任务进入“等待平台登录”，并拉起可见的外部浏览器",
+      "criterion": "未登录抖音时，任务进入“等待平台登录”，并拉起可见的 App 内置运营浏览器",
       "disposition": "automated_complete",
       "evidence": [
         {"path": "frontend/src-tauri/src/lib.rs", "anchor": "async fn start_task_discovery("},
@@ -155,7 +155,7 @@
     },
     {
       "id": "MVP-AC-13",
-      "criterion": "macOS 和 Windows 分别完成安装、启动、外部浏览器、Local Executor 生命周期和真实测试账号验收",
+      "criterion": "macOS 和 Windows 分别完成安装、启动、内置 Chromium、Local Executor 生命周期和真实测试账号验收",
       "disposition": "pending_packaging",
       "evidence": [{"path": "docs/development-roadmap.md", "anchor": "| P9-06 | macOS 干净安装 |"}]
     },
