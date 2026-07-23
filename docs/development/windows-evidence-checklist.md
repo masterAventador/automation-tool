@@ -102,6 +102,15 @@ EB-03 已在 `contracts/browser/embedded-chromium-staging.v1.json` 预登记
 `buildable=true`→复用 `scripts/build_embedded_chromium_staging.py` 与测试→
 新增 Windows 验收脚本（离线启动探针）→按台账激活/闭环。
 
+### 6. BM-14 Windows 发布目录构建与只读属性验收
+
+macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
+0444、150 处素材替换与商标指示词零残留）。Windows 侧待补：在 Windows 机器上重跑
+`scripts/build_motion_catalog_release.py` + `scripts/check_motion_catalog_release.py`，
+验证 NTFS 上的只读属性语义（`stat.S_IWRITE` 位与 `chmod 0444` 映射）、路径大小写与
+Unicode 文件名行为，以及聚合摘要与 macOS 结果一致。通过后更新
+`docs/development/BM-14.md` 遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；
