@@ -37,6 +37,10 @@ const COMMAND_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.video-worker-comm
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const BAILIAN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const CHROMIUM_MAJOR_MINIMUM: u32 = 100;
+const CHROMIUM_MAJOR_MAXIMUM: u32 = 999;
+const RENDER_LAUNCH_TIMEOUT_MINIMUM: Duration = Duration::from_secs(1);
+const RENDER_LAUNCH_TIMEOUT_MAXIMUM: Duration = Duration::from_secs(60);
 pub const MOTION_VIDEO_WORKER_VERSION: &str = "0.7.68";
 
 pub const DEFAULT_VIDEO_WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -74,6 +78,7 @@ pub enum VideoWorkerErrorCode {
     ConfigurationInvalid,
     NotRunning,
     ProcessUnavailable,
+    RenderRejected,
     TimedOut,
     VersionMismatch,
 }
@@ -138,7 +143,54 @@ pub struct VideoWorkerLaunch {
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
     script_model: Option<VideoWorkerScriptModelConfiguration>,
+    render_browser: Option<VideoWorkerRenderBrowserConfiguration>,
     web_ui: bool,
+}
+
+/// The single, already-verified embedded Chromium the render Worker may
+/// launch. No other browser source exists: the Worker never downloads,
+/// discovers a system browser or consults a cache fallback.
+#[derive(Clone)]
+pub struct VideoWorkerRenderBrowserConfiguration {
+    executable_path: PathBuf,
+    chromium_major: u32,
+    launch_timeout: Duration,
+}
+
+impl fmt::Debug for VideoWorkerRenderBrowserConfiguration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VideoWorkerRenderBrowserConfiguration")
+            .field("chromium_major", &self.chromium_major)
+            .field("launch_timeout", &self.launch_timeout)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VideoWorkerRenderBrowserConfiguration {
+    pub fn new(
+        executable_path: PathBuf,
+        chromium_major: u32,
+        launch_timeout: Duration,
+    ) -> Result<Self, VideoWorkerError> {
+        validate_executable_path(&executable_path)?;
+        if !(CHROMIUM_MAJOR_MINIMUM..=CHROMIUM_MAJOR_MAXIMUM).contains(&chromium_major)
+            || launch_timeout < RENDER_LAUNCH_TIMEOUT_MINIMUM
+            || launch_timeout > RENDER_LAUNCH_TIMEOUT_MAXIMUM
+            || launch_timeout.subsec_nanos() != 0
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            executable_path,
+            chromium_major,
+            launch_timeout,
+        })
+    }
+
+    pub const fn chromium_major(&self) -> u32 {
+        self.chromium_major
+    }
 }
 
 #[derive(Clone)]
@@ -205,6 +257,7 @@ impl VideoWorkerLaunch {
             expected_version,
             restart_policy,
             script_model: None,
+            render_browser: None,
             web_ui: false,
         })
     }
@@ -236,6 +289,14 @@ impl VideoWorkerLaunch {
 
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
         self.script_model = Some(configuration);
+        self
+    }
+
+    pub fn with_render_browser(
+        mut self,
+        configuration: VideoWorkerRenderBrowserConfiguration,
+    ) -> Self {
+        self.render_browser = Some(configuration);
         self
     }
 
@@ -447,7 +508,9 @@ impl LocalVideoOrchestrator {
         let mut workers = self.lock_workers()?;
         let running = workers.get_mut(&kind).ok_or_else(not_running)?;
         let job_id = job_id.hyphenated().to_string();
-        let authentication_proof = running.token.command_proof(kind, &job_id)?;
+        let authentication_proof = running
+            .token
+            .command_proof(kind, "worker.cancel", &job_id)?;
         let command = VideoWorkerCommandDocument {
             command: "worker.cancel",
             job_id: &job_id,
@@ -482,6 +545,88 @@ impl LocalVideoOrchestrator {
             return Err(authentication_rejected());
         }
         Ok(())
+    }
+
+    /// Ask the Node Worker to launch the configured embedded Chromium as an
+    /// independent headless process inside a fresh RenderJob directory and
+    /// prove that the actual Chromium major matches the verified expectation.
+    pub fn render_verify(
+        &self,
+        kind: VideoWorkerKind,
+        job_id: Uuid,
+    ) -> Result<u32, VideoWorkerError> {
+        let mut workers = self.lock_workers()?;
+        let running = workers.get_mut(&kind).ok_or_else(not_running)?;
+        let render_browser = running
+            .launch
+            .render_browser
+            .as_ref()
+            .ok_or_else(configuration_invalid)?;
+        // The Worker runs the browser twice (version probe and capture), each
+        // bounded by the launch timeout it received in its bootstrap.
+        let wait = self.request_timeout + 2 * render_browser.launch_timeout;
+        let expected_major = render_browser.chromium_major;
+        let job_id = job_id.hyphenated().to_string();
+        let authentication_proof =
+            running
+                .token
+                .command_proof(kind, "worker.render.verify", &job_id)?;
+        let command = VideoWorkerCommandDocument {
+            command: "worker.render.verify",
+            job_id: &job_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            worker_kind: kind.as_str(),
+            authentication_proof: &authentication_proof,
+        };
+        let mut bytes =
+            Zeroizing::new(serde_json::to_vec(&command).map_err(|_| process_unavailable())?);
+        bytes.push(b'\n');
+        running
+            .stdin
+            .write_all(&bytes)
+            .and_then(|()| running.stdin.flush())
+            .map_err(|_| process_unavailable())?;
+        let line = receive_line(&running.events, wait)?;
+        if let Ok(event) = serde_json::from_str::<VideoWorkerRenderVerifiedEvent>(&line) {
+            let detail = format!("{job_id}\0{}", event.chromium_major);
+            if event.event != "worker.render.verified"
+                || event.job_id != job_id
+                || event.protocol_version != WORKER_PROTOCOL_VERSION
+                || event.worker_kind != kind.as_str()
+                || event.worker_version != running.launch.expected_version
+                || event.chromium_major != expected_major
+                || !running.token.verify_event_proof(
+                    "worker.render.verified",
+                    kind,
+                    &event.worker_version,
+                    &detail,
+                    &event.authentication_proof,
+                )
+            {
+                return Err(authentication_rejected());
+            }
+            return Ok(event.chromium_major);
+        }
+        let event: VideoWorkerRenderFailedEvent =
+            serde_json::from_str(&line).map_err(|_| authentication_rejected())?;
+        let detail = format!("{job_id}\0{}", event.reason_code);
+        if event.event != "worker.render.failed"
+            || event.job_id != job_id
+            || event.protocol_version != WORKER_PROTOCOL_VERSION
+            || event.worker_kind != kind.as_str()
+            || event.worker_version != running.launch.expected_version
+            || !valid_render_reason_code(&event.reason_code)
+            || !running.token.verify_event_proof(
+                "worker.render.failed",
+                kind,
+                &event.worker_version,
+                &detail,
+                &event.authentication_proof,
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        Err(VideoWorkerError::new(VideoWorkerErrorCode::RenderRejected))
     }
 
     pub fn web_ui_endpoint(
@@ -617,6 +762,7 @@ impl VideoWorkerSessionToken {
     fn command_proof(
         &self,
         kind: VideoWorkerKind,
+        command: &'static str,
         job_id: &str,
     ) -> Result<Zeroizing<String>, VideoWorkerError> {
         let mut authenticator =
@@ -624,12 +770,7 @@ impl VideoWorkerSessionToken {
         update_authenticator(
             &mut authenticator,
             COMMAND_AUTHENTICATION_DOMAIN,
-            &[
-                "worker.cancel",
-                kind.as_str(),
-                WORKER_PROTOCOL_VERSION,
-                job_id,
-            ],
+            &[command, kind.as_str(), WORKER_PROTOCOL_VERSION, job_id],
         );
         Ok(Zeroizing::new(format!(
             "{COMMAND_PROOF_PREFIX}{}",
@@ -652,8 +793,17 @@ struct VideoWorkerBootstrapDocument<'a> {
     enable_web_ui: bool,
     local_session_token: &'a str,
     protocol_version: &'static str,
+    render_browser: Option<VideoWorkerRenderBrowserBootstrap<'a>>,
     script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
     worker_kind: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoWorkerRenderBrowserBootstrap<'a> {
+    chromium_major: u32,
+    executable_path: &'a str,
+    launch_timeout_seconds: u64,
 }
 
 #[derive(Serialize)]
@@ -700,6 +850,30 @@ struct VideoWorkerHealthEvent {
     worker_kind: String,
     worker_version: String,
     port: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerRenderVerifiedEvent {
+    authentication_proof: String,
+    chromium_major: u32,
+    event: String,
+    job_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerRenderFailedEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    protocol_version: String,
+    reason_code: String,
+    worker_kind: String,
+    worker_version: String,
 }
 
 #[derive(Deserialize)]
@@ -804,12 +978,24 @@ fn write_bootstrap(
         .asset_root
         .to_str()
         .ok_or_else(configuration_invalid)?;
+    let render_browser = match launch.render_browser.as_ref() {
+        None => None,
+        Some(configuration) => Some(VideoWorkerRenderBrowserBootstrap {
+            chromium_major: configuration.chromium_major,
+            executable_path: configuration
+                .executable_path
+                .to_str()
+                .ok_or_else(configuration_invalid)?,
+            launch_timeout_seconds: configuration.launch_timeout.as_secs(),
+        }),
+    };
     let document = VideoWorkerBootstrapDocument {
         asset_root,
         bootstrap_version: BOOTSTRAP_VERSION,
         enable_web_ui: launch.web_ui,
         local_session_token: &encoded,
         protocol_version: WORKER_PROTOCOL_VERSION,
+        render_browser,
         script_model: launch.script_model.as_ref().map(|configuration| {
             VideoWorkerScriptModelBootstrap {
                 api_key: &configuration.api_key,
@@ -1178,6 +1364,13 @@ fn valid_model_api_key(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn valid_render_reason_code(value: &str) -> bool {
+    (1..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
 }
 
 fn valid_web_ui_path(value: &str) -> bool {

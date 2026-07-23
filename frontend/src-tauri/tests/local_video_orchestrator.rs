@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
-    VideoWorkerRestartPolicy, VideoWorkerState,
+    VideoWorkerRenderBrowserConfiguration, VideoWorkerRestartPolicy, VideoWorkerState,
 };
 use uuid::Uuid;
 
@@ -151,7 +151,9 @@ impl Drop for TemporaryWorker {
 }
 
 fn orchestrator() -> LocalVideoOrchestrator {
-    LocalVideoOrchestrator::new(Duration::from_secs(3), Duration::from_secs(3))
+    // Ten seconds keeps slow interpreter start-up under full parallel test
+    // load from being misread as a worker start timeout.
+    LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
         .expect("orchestrator")
 }
 
@@ -198,6 +200,278 @@ fn bundled_node_candidate_uses_packaged_runtime_and_protocol() {
     let process_id = status.process_id().expect("process id");
     orchestrator.stop(VideoWorkerKind::Node).expect("stop");
     wait_until_stopped(process_id);
+}
+
+/// Extend the healthy fake with `worker.render.verify` support so the Rust
+/// render channel can be proven end to end: the fake records the bootstrap
+/// `renderBrowser.executablePath` into a marker file and answers with either
+/// a verified event (major taken from the bootstrap) or a failed event.
+fn render_worker(marker: &Path, failure_reason: Option<&str>, forge_proof: bool) -> String {
+    let marker_json = serde_json::to_string(&marker.to_string_lossy()).expect("marker path");
+    let reply = match failure_reason {
+        Some(reason) => format!(
+            "        detail = job_id + \"\\0\" + \"{reason}\"\n\
+             \x20       body = {{\n\
+             \x20           \"authenticationProof\": proof(\"worker.render.failed\", detail),\n\
+             \x20           \"event\": \"worker.render.failed\",\n\
+             \x20           \"jobId\": job_id,\n\
+             \x20           \"protocolVersion\": protocol,\n\
+             \x20           \"reasonCode\": \"{reason}\",\n\
+             \x20           \"workerKind\": kind,\n\
+             \x20           \"workerVersion\": version,\n\
+             \x20       }}\n"
+        ),
+        None => "        major = browser[\"chromiumMajor\"]\n\
+             \x20       detail = job_id + \"\\0\" + str(major)\n\
+             \x20       body = {\n\
+             \x20           \"authenticationProof\": proof(\"worker.render.verified\", detail),\n\
+             \x20           \"chromiumMajor\": major,\n\
+             \x20           \"event\": \"worker.render.verified\",\n\
+             \x20           \"jobId\": job_id,\n\
+             \x20           \"protocolVersion\": protocol,\n\
+             \x20           \"workerKind\": kind,\n\
+             \x20           \"workerVersion\": version,\n\
+             \x20       }\n"
+            .to_owned(),
+    };
+    let forge = if forge_proof {
+        "        body[\"authenticationProof\"] = \"atvwp1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n"
+    } else {
+        ""
+    };
+    HEALTHY_WORKER.replace(
+        "    if command.get(\"command\") == \"worker.cancel\" and hmac.compare_digest(supplied, encoded):",
+        &format!(
+            "    if command.get(\"command\") == \"worker.render.verify\":\n\
+             \x20       import pathlib\n\
+             \x20       render_expected = hmac.digest(\n\
+             \x20           key,\n\
+             \x20           b\"automation-tool.video-worker-command.v1\\0\" + b\"\\0\".join(\n\
+             \x20               value.encode() for value in [\"worker.render.verify\", kind, protocol, job_id]\n\
+             \x20           ),\n\
+             \x20           hashlib.sha256,\n\
+             \x20       )\n\
+             \x20       render_encoded = \"atvwc1.\" + base64.urlsafe_b64encode(render_expected).rstrip(b\"=\").decode()\n\
+             \x20       if not hmac.compare_digest(supplied, render_encoded):\n\
+             \x20           continue\n\
+             \x20       browser = bootstrap[\"renderBrowser\"]\n\
+             \x20       pathlib.Path({marker_json}).write_text(browser[\"executablePath\"])\n\
+             {reply}{forge}\
+             \x20       print(json.dumps(body, separators=(\",\", \":\")), flush=True)\n\
+             \x20       continue\n\
+             \x20   if command.get(\"command\") == \"worker.cancel\" and hmac.compare_digest(supplied, encoded):"
+        ),
+    )
+}
+
+fn executable_fixture(root: &Path, name: &str) -> PathBuf {
+    let path = root.join(name);
+    fs::write(&path, "#!/bin/sh\nexit 0\n").expect("fixture executable");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("fixture permissions");
+    path
+}
+
+fn render_configuration(executable: &Path) -> VideoWorkerRenderBrowserConfiguration {
+    VideoWorkerRenderBrowserConfiguration::new(
+        executable.to_path_buf(),
+        149,
+        Duration::from_secs(20),
+    )
+    .expect("render browser configuration")
+}
+
+#[test]
+fn rejects_invalid_render_browser_configurations() {
+    let fixture = TemporaryWorker::new(HEALTHY_WORKER);
+    let executable = executable_fixture(&fixture.root, "fake-chromium");
+    let plain = fixture.root.join("plain-file");
+    fs::write(&plain, "not executable").expect("plain file");
+    let link = fixture.root.join("chromium-link");
+    std::os::unix::fs::symlink(&executable, &link).expect("chromium symlink");
+
+    let invalid = [
+        (
+            Path::new("fake-chromium").to_path_buf(),
+            149,
+            Duration::from_secs(20),
+        ),
+        (
+            fixture.root.join("missing-chromium"),
+            149,
+            Duration::from_secs(20),
+        ),
+        (plain, 149, Duration::from_secs(20)),
+        (link, 149, Duration::from_secs(20)),
+        (executable.clone(), 99, Duration::from_secs(20)),
+        (executable.clone(), 1000, Duration::from_secs(20)),
+        (executable.clone(), 149, Duration::ZERO),
+        (executable.clone(), 149, Duration::from_secs(61)),
+        (executable.clone(), 149, Duration::from_millis(1500)),
+    ];
+    for (path, major, timeout) in invalid {
+        let error = VideoWorkerRenderBrowserConfiguration::new(path, major, timeout)
+            .err()
+            .expect("invalid render browser configuration must be rejected");
+        assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+    }
+    render_configuration(&executable);
+}
+
+#[test]
+fn render_bootstrap_channel_round_trips_through_a_worker() {
+    let marker = std::env::temp_dir().join(format!(
+        "automation-tool-bm03-marker-{}-{}",
+        std::process::id(),
+        TEMPORARY_WORKER_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+    ));
+    let fixture = TemporaryWorker::new(&render_worker(&marker, None, false));
+    let browser = executable_fixture(&fixture.root, "fake-chromium");
+    let orchestrator = orchestrator();
+    let status = orchestrator
+        .start(
+            fixture
+                .launch(VideoWorkerKind::Node)
+                .with_render_browser(render_configuration(&browser)),
+        )
+        .expect("start render-capable worker");
+    let job_id = Uuid::parse_str("6f1d9fbc-4b64-4f0e-9f0d-3a6a1b2c4d5e").expect("job ID");
+    let major = orchestrator
+        .render_verify(VideoWorkerKind::Node, job_id)
+        .expect("authenticated render verification");
+    assert_eq!(major, 149);
+    assert_eq!(
+        fs::read_to_string(&marker).expect("render marker"),
+        browser.to_string_lossy(),
+        "worker must receive exactly the Rust-verified Chromium path",
+    );
+    let process_id = status.process_id().expect("process id");
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+    wait_until_stopped(process_id);
+    let _ = fs::remove_file(marker);
+}
+
+#[test]
+fn render_failure_and_forged_render_proof_fail_closed() {
+    let marker = std::env::temp_dir().join(format!(
+        "automation-tool-bm03-failed-{}-{}",
+        std::process::id(),
+        TEMPORARY_WORKER_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+    ));
+    let job_id = Uuid::parse_str("0b7c9d28-6c4f-4d34-9f6a-2b1e0c9d8e7f").expect("job ID");
+
+    let failing = TemporaryWorker::new(&render_worker(
+        &marker,
+        Some("chromium_major_mismatch"),
+        false,
+    ));
+    let browser = executable_fixture(&failing.root, "fake-chromium");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(
+            failing
+                .launch(VideoWorkerKind::Node)
+                .with_render_browser(render_configuration(&browser)),
+        )
+        .expect("start failing render worker");
+    let error = orchestrator
+        .render_verify(VideoWorkerKind::Node, job_id)
+        .expect_err("render failure must fail closed");
+    assert_eq!(error.code(), VideoWorkerErrorCode::RenderRejected);
+    orchestrator
+        .stop(VideoWorkerKind::Node)
+        .expect("stop failing worker");
+
+    let forged = TemporaryWorker::new(&render_worker(&marker, None, true));
+    let forged_browser = executable_fixture(&forged.root, "fake-chromium");
+    orchestrator
+        .start(
+            forged
+                .launch(VideoWorkerKind::Node)
+                .with_render_browser(render_configuration(&forged_browser)),
+        )
+        .expect("start forged render worker");
+    let error = orchestrator
+        .render_verify(VideoWorkerKind::Node, job_id)
+        .expect_err("forged render proof must fail closed");
+    assert_eq!(error.code(), VideoWorkerErrorCode::AuthenticationRejected);
+    orchestrator
+        .stop(VideoWorkerKind::Node)
+        .expect("stop forged worker");
+    let _ = fs::remove_file(marker);
+}
+
+#[test]
+fn render_verify_without_a_configured_browser_is_rejected_without_ipc() {
+    let fixture = TemporaryWorker::new(HEALTHY_WORKER);
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(fixture.launch(VideoWorkerKind::Node))
+        .expect("start renderless worker");
+    let error = orchestrator
+        .render_verify(
+            VideoWorkerKind::Node,
+            Uuid::parse_str("9e8d7c6b-5a49-4321-8765-4321fedcba98").expect("job ID"),
+        )
+        .expect_err("render verify without a configured browser must be rejected");
+    assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+    orchestrator
+        .health(VideoWorkerKind::Node)
+        .expect("worker must stay healthy");
+}
+
+/// Real vertical chain, activated by `scripts/run_bm_03_acceptance.py`: the real
+/// `worker.mjs` on the isolated Node runtime receives the staged Chrome for
+/// Testing path from Rust and launches it headless inside a RenderJob directory.
+#[test]
+fn real_worker_render_verify_launches_the_locked_chromium() {
+    let (Some(browser), Some(major), Some(node)) = (
+        std::env::var_os("BM03_RENDER_BROWSER").map(PathBuf::from),
+        std::env::var("BM03_CHROMIUM_MAJOR")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok()),
+        std::env::var_os("BM03_NODE").map(PathBuf::from),
+    ) else {
+        return;
+    };
+    let worker = fs::canonicalize(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../workers/motion_composition/worker.mjs"),
+    )
+    .expect("worker entrypoint");
+    let fixture = TemporaryWorker::new(&format!(
+        "#!/bin/sh\nexec {} {}\n",
+        shell_quote(&node),
+        shell_quote(worker.as_path()),
+    ));
+    let launch = VideoWorkerLaunch::new(
+        VideoWorkerKind::Node,
+        fixture.executable.clone(),
+        fixture.root.clone(),
+        "0.7.68".to_owned(),
+        VideoWorkerRestartPolicy::new(0, Duration::ZERO).expect("restart policy"),
+    )
+    .expect("real worker launch")
+    .with_render_browser(
+        VideoWorkerRenderBrowserConfiguration::new(browser, major, Duration::from_secs(30))
+            .expect("real render browser configuration"),
+    );
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(30), Duration::from_secs(10))
+            .expect("orchestrator");
+    let status = orchestrator.start(launch).expect("start real Node worker");
+    assert_eq!(status.worker_version(), Some("0.7.68"));
+    orchestrator.health(VideoWorkerKind::Node).expect("health");
+    let job_id = Uuid::parse_str("3f2504e0-4f89-41d3-9a0c-0305e82c3301").expect("job ID");
+    let verified_major = orchestrator
+        .render_verify(VideoWorkerKind::Node, job_id)
+        .expect("real Chromium render verification");
+    assert_eq!(verified_major, major);
+    let process_id = status.process_id().expect("process id");
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+    wait_until_stopped(process_id);
+}
+
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
 
 fn crashing_worker(counter: &Path, crash_limit: &str) -> String {

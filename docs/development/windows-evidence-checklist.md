@@ -64,6 +64,20 @@ python scripts/check_video_media_toolchain.py \
 python scripts/run_bm_02_acceptance.py
 ```
 
+### 4.1 BM-03 共用 Chromium 渲染适配（依赖 EB-04 的 Windows 暂存）
+
+EB-04 完成 Windows 暂存后执行：
+
+```bash
+python scripts/test_motion_video_render_adapter.py
+python scripts/run_bm_03_acceptance.py --archive <EB-04 锁定的 chrome-win64.zip>
+```
+
+补证要点：Worker 对无头 Chromium 的 detached 进程组终止在 Windows 上的语义
+（`process.kill(-pid)` 不适用，需验证 Job Object/进程树清理路径）、可执行路径
+reparse point 校验，以及真实 `chrome.exe` 的 CDP 管道 getVersion/Browser.close
+干净退出。通过后更新 `docs/development/BM-03.md` 遗留项。
+
 ### 5. EB-04 Windows 浏览器构建暂存（新任务，可交给 Windows 机器上的会话执行）
 
 EB-03 已在 `contracts/browser/embedded-chromium-staging.v1.json` 预登记
