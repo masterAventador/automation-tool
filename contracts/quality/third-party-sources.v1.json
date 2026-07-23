@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "floatingReferencesAllowed": false,
+    "runtimeSourceUpdatesAllowed": false,
+    "submoduleModificationsAllowed": false,
+    "upgradeMode": "independent_reviewed_task",
+    "securityReviewCadence": "before_release_and_weekly"
+  },
+  "sources": [
+    {
+      "id": "moneyprinterturbo",
+      "path": "vendor/moneyprinterturbo",
+      "url": "https://github.com/harry0703/MoneyPrinterTurbo.git",
+      "tag": "v1.3.2",
+      "commit": "b1588e1fdc6c5e54358f66ca2ff323e1dddf1364",
+      "license": {
+        "spdx": "MIT",
+        "path": "LICENSE",
+        "sha256": "87dd19b6a0779e14a91c1b06423ef251df37e89666160c031130a26bae68c229"
+      },
+      "releaseUrl": "https://github.com/harry0703/MoneyPrinterTurbo/releases/tag/v1.3.2",
+      "securityAdvisoriesUrl": "https://github.com/harry0703/MoneyPrinterTurbo/security/advisories"
+    },
+    {
+      "id": "hyperframes",
+      "path": "vendor/hyperframes",
+      "url": "https://github.com/heygen-com/hyperframes.git",
+      "tag": "v0.7.68",
+      "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+      "tagObject": "646be2278c159618bbbbb917b6063709bcbb3962",
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "LICENSE",
+        "sha256": "4259155fb06f127687ee7b0a8a3682d45132db0f2da26cbc0b7a2d1e796436b8"
+      },
+      "releaseUrl": "https://github.com/heygen-com/hyperframes/releases/tag/v0.7.68",
+      "securityAdvisoriesUrl": "https://github.com/heygen-com/hyperframes/security/advisories"
+    }
+  ]
+}

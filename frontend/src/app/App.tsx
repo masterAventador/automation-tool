@@ -19,6 +19,9 @@ import { Diagnostics } from "../features/diagnostics/Diagnostics";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { AccountSessionGate } from "../features/account-session/AccountSessionGate";
 import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
+import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
+import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
+import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 
 interface AppProps {
   startupCheck: StartupCheck;
@@ -34,6 +37,8 @@ interface AppProps {
   platformSessionGateway?: PlatformSessionGateway;
   appUpdateGateway?: AppUpdateGateway;
   accountSessionGateway?: AccountSessionGateway;
+  modelServiceGateway?: ModelServiceGateway;
+  materialVideoStudioGateway?: MaterialVideoStudioGateway;
 }
 
 export function App({
@@ -50,6 +55,8 @@ export function App({
   platformSessionGateway,
   appUpdateGateway,
   accountSessionGateway,
+  modelServiceGateway,
+  materialVideoStudioGateway,
 }: AppProps) {
   const workbench = (
     <WorkbenchShell
@@ -63,6 +70,8 @@ export function App({
       platformAdapter={platformAdapter}
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
+      modelServiceGateway={modelServiceGateway}
+      materialVideoStudioGateway={materialVideoStudioGateway}
     />
   );
   const desktopApplication = (
@@ -71,6 +80,9 @@ export function App({
       repairTools={
         platformAdapter === undefined ? undefined : (
           <Space orientation="vertical" size="large" className="settings-stack">
+            {modelServiceGateway === undefined ? null : (
+              <ModelServiceSettings gateway={modelServiceGateway} />
+            )}
             <BrowserSettings platform={platformAdapter} />
             <Diagnostics platform={platformAdapter} />
           </Space>

@@ -63,6 +63,57 @@ fn browser_settings_acceptance_is_isolated_and_hidden() {
 }
 
 #[test]
+fn model_service_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.model-service-e2e.conf.json");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.vf05acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{
+            "label": "main",
+            "title": "自动化运营工具",
+            "visible": false
+        }])
+    );
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(capabilities[1]["identifier"], "wdio-model-service");
+    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
+}
+
+#[test]
+fn video_studio_acceptance_is_isolated_and_hidden() {
+    let config = read_json("tauri.video-studio-e2e.conf.json");
+    let capabilities = config["app"]["security"]["capabilities"]
+        .as_array()
+        .expect("acceptance capabilities must be an array");
+
+    assert_eq!(
+        config["identifier"],
+        "com.aventador.automationtool.vf06acceptance"
+    );
+    assert_eq!(
+        config["app"]["windows"],
+        serde_json::json!([{
+            "label": "main",
+            "title": "自动化运营工具",
+            "visible": false
+        }])
+    );
+    assert_eq!(capabilities[0], "main");
+    assert_eq!(capabilities[1]["identifier"], "wdio-video-studio");
+    assert_eq!(
+        capabilities[1]["windows"],
+        serde_json::json!(["main", "material-video-studio"])
+    );
+}
+
+#[test]
 fn installation_revocation_acceptance_is_isolated_and_hidden() {
     let config = read_json("tauri.installation-revocation-e2e.conf.json");
     let windows = config["app"]["windows"]

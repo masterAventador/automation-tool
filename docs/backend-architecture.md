@@ -13,7 +13,7 @@ Control Plane（本地开发 / 云端 Demo）
   负责任务、事件、配置、安装实例、后续内容与 AI
 
 Local Executor（永远在用户电脑）
-  负责 Chrome/Edge、微信、OCR、文件、平台登录态和真实副作用
+  负责内置 Chromium、微信、OCR、文件、平台登录态和真实副作用
 ```
 
 目标是让开发环境和客户 Demo 只切换 Control Plane `baseUrl`，不迁移业务代码或 RPA 实现。
@@ -34,7 +34,7 @@ Local Executor（永远在用户电脑）
 ### Local Executor
 
 - Python；
-- Playwright async API：外部 Chrome/Edge 自动化；
+- Playwright async API：App 内置 Chromium 自动化；
 - Pydantic：执行协议；
 - SQLite：仅保存本机执行幂等、恢复和 Artifact spool 元数据；
 - Windows UI Automation / macOS Accessibility：后续微信实现；
@@ -58,7 +58,7 @@ Tauri App
            ▼
       Local Executor ──outbound WebSocket──> Control Plane
            │
-           ├── Playwright ──> 外部 Chrome/Edge + 独立 Profile
+           ├── Playwright ──> 已验证的内置 Chromium + 独立 Profile
            └── UIA/AX/OCR ──> 微信客户端（后续）
 ```
 
@@ -96,7 +96,7 @@ Local Executor 负责：
 - 通过出站连接注册在线状态和心跳；
 - 接收版本化执行命令；
 - 在每次外部副作用前重新校验命令、截止时间和本机硬限制；
-- 管理系统 Chrome/Edge 和 App 独立运营 Profile；
+- 管理已验证的内置 Chromium 和 App 独立运营 Profile；
 - 检测平台登录态并请求扫码或人工接管；
 - 搜索、目标采集、预览、动作执行和结果验证；
 - 保存最少量本机执行账本和诊断 Artifact；
@@ -257,20 +257,28 @@ class SocialPlatformAdapter(Protocol):
 ### 8.1 主方案
 
 ```text
-系统已安装 Chrome/Edge 可执行文件
+安装包内与 Playwright 锁定版本严格匹配的 Chromium
        +
 App 私有 browser-profile/<platform>/<profile-id>
        +
 Playwright headed persistent context
 ```
 
-- 浏览器在 App 外部显示；
+- 运营浏览器使用独立可见窗口，不承载在 Tauri WebView；
+- 用户电脑无需预装 Chrome/Edge，运行时不发现、下载或回退到系统浏览器；
+- Tauri/Rust 从只读 Resources 校验浏览器 Manifest、逐文件摘要、版本、修订、平台、架构和路径身份，再通过受认证启动协议向 Executor 提供已验证的内置 Chromium；
+- 浏览器可执行路径不得来自用户输入、React、Control Plane、任务 payload、普通环境变量或设置；
 - 不使用 Tauri WebView 承载平台网页；
 - 不指向用户默认 Chrome `User Data`；
+- App 从未发布，首期直接创建全新运营 Profile，不迁移开发期 Profile、系统浏览器选择或 Cookie；
 - 每个平台 Profile 隔离；
 - 同一 Profile 同时只允许一个执行实例；
 - 首次扫码后复用独立 Profile 登录态；
 - Executor 只上报平台、健康、过期和 revision，不上传 Cookie。
+
+Local Executor、既有 Playwright RPA、Browser Use 和品牌动效逐帧渲染共用同一浏览器发行物，但默认使用不同进程、Context、Profile 和控制通道。运营 RPA 与 Browser Use 只有在独占页面租约下才能串行交接；渲染进程不得连接运营 Profile/CDP。EB-02 必须先完成双平台共同版本验证，通过前不得推进正式打包迁移。
+
+用户功能的最终验收必须从正式 App 正常页面入口启动可见运营浏览器并核对真实平台最终状态；Mock、单元测试、直接调用 Executor/API/Command、无头探针和测试专用页面都不能替代。缺少真实账号或正式环境时只保留待验收，不阻塞独立任务。
 
 B5-01 已明确不复用旧 `device_account_service` 的 tenant、owner、RBAC、Entitlement 或云端账号模型。当前 Profile ID 是 App 本机生成的 canonical UUIDv4，不是产品账号；Session 健康由真实页面封闭为 `missing/healthy/expired/risk/unknown`，只有 `healthy` 允许后续动作。B5-12 已把该事实接入正式 Executor WebSocket：本机 SQLite v2 为每个平台持久化正数、单调递增的 `session_revision`，同 epoch 的旧观察或从非健康状态直接回到健康均拒绝，重新登录或显式恢复必须推进 epoch。Control Plane 只在 `platform_session_health` 保存 Installation、平台、状态、revision、观察时间和更新时间六列；较低 revision、倒序观察和同 epoch 非健康→健康同样 fail closed，不保存 Cookie、二维码、验证码、页面原文、Executor/message ID 或 Profile 路径。
 
@@ -278,13 +286,13 @@ B5-13 在该投影上增加唯一已实现的查询 `GET /api/v1/platform-sessio
 
 B5-14 已实现跨边界安全注销。`POST /api/v1/platform-sessions/douyin/logout/prepare` 在 active Installation 行锁下创建或复用 `platform_session_gates`，revision 为当前投影 +1（无投影为 1）；门闩存在时 Task create 与新 offer 都 fail closed，同键既有 Task/command 重放仍保持幂等。command claim 也先锁同一 Installation：已排队、in-flight 待恢复或 delivered 待重投的工作命令不再取出，仅 `task.cancel`/`task.emergency_stop` 终止命令可继续投递。`missing` 不解除门闩，只有更高 revision 的真实 `healthy` 上报才能恢复新工作。App 在 prepare 后停止唯一 Executor/浏览器树并释放 Profile 锁，定向删除 current Profile，再重启 Executor 发送 path-free `douyin.logout.complete` 推进本机 epoch并经正式 WebSocket 上报 `missing`；最后必须重新查询到权威 `missing` 才成功。停止失败不删除 Profile，删除或上报失败不伪报完成且持续阻断新任务。
 
-### 8.2 浏览器发现
+### 8.2 旧系统浏览器发现实现（待迁移）
 
-按平台检测稳定路径：
+以下 B5-02～B5-04 内容只记录当前仓库中尚未被 EB 系列替换的历史实现，不再定义生产目标，也不得作为内置 Chromium 失败时的 fallback。原实现按平台检测稳定路径：
 
 - macOS：Google Chrome、Microsoft Edge；
 - Windows：注册表和标准安装位置；
-- 用户可在诊断页选择一个受支持浏览器；
+- 原设置页允许选择一个受支持浏览器；
 - 路径必须解析为允许的浏览器应用/签名，不能执行任意文件；
 - 未安装受支持浏览器时返回明确诊断，不静默下载未知程序。
 
@@ -898,6 +906,15 @@ H8-09 的首个生产消费者是页面漂移固定证据：正式 `task.discove
 
 P2 内容素材和成片需要云端共享时再启用对象存储，继续使用同一 Artifact 领域接口。
 
+VF-01 在 Control Plane 领域层建立唯一 `video_creation.py`。两种首期制作方式只用
+内部 `material_montage_v1`、`motion_composition_v1` 路由，共用不可变
+`ContentBrief → Storyboard → Timeline → RenderJob → Artifact` 对象和强类型 ID。
+Timeline 只表达画面、音频、字幕、片段与通用转场；Artifact 复用既有
+`ArtifactId`，只保存角色、受限媒体类型、大小、SHA-256 和来源谱系，不保存路径。
+模型名、供应商参数、密钥、Base URL、音色 ID、上游任务 ID 和任意扩展字典都不在
+领域对象中，必须留在后续 Adapter 私有边界。当前契约不持久化、不启动 Worker、
+不创建文件，也不改变 H8-09 本机 Artifact Store。
+
 ## 18. 错误模型
 
 稳定类别：
@@ -924,6 +941,10 @@ internal
 错误响应包含稳定 code、可安全展示 message、request/correlation ID 和明确 retryable；不返回原始异常、Cookie、页面内容或本机路径。
 
 ## 19. 安全与隐私
+
+AV-03 为后续浏览器与视频链路增加 `contracts/security/embedded-browser-video-threat-model.v1.json`：本地视频 Worker 只绑定随机 loopback 端口并由 Tauri 持有进程树和单会话能力；生成 HTML 在无 Node、默认断网、任务目录受限的独立渲染进程执行；素材下载逐跳防 SSRF、限大小/类型并遵守默认拒绝的权利清单；密钥、绝对路径、运营 Profile 和上游原始错误不得进入模型、WebView、任务、事件、日志或导出。
+
+后端领域和公开协议只使用 `material_montage_v1`、`motion_composition_v1` 等内部 ID。上游名称可以存在于 `vendor/`、Provider Adapter、源码锁和 SBOM，但不能成为公开 Task 名、错误消息、Artifact 文件名或日志字段；原始失败先映射到固定产品错误。任何用户功能最终仍须由正式 App 正常用户路径和真实最终状态验收，直接 Worker/CLI、Mock 或单元测试不能替代。
 
 - local Control Plane 只绑定 loopback；
 - Demo Control Plane 强制 HTTPS、产品账号认证、账号所属 Installation 认证和请求限流；
@@ -1009,12 +1030,14 @@ C10-03 的 PostgreSQL 权限事实只存在于 `deploy/postgresql/roles.sql` 与
 
 ### 真实边界
 
-- macOS/Windows 外部 Chrome/Edge；
+- macOS/Windows 正式 App 内置 Chromium；
 - 抖音测试账号扫码、复用、过期和注销；
 - 搜索、预览、受控动作和最终状态；
 - 验证码/风控转人工；
 - 本地 Control Plane 与云端 Demo Control Plane 各完成一次代表性端到端；
 - UI Harness 不能替代上述验收。
+
+上述用户可操作能力必须从正式 App 的正常用户入口完成真实路径和最终状态核对；Mock、单元测试、直接内部调用或测试专用入口不能让任务标记完成。
 
 ## 22. P2/P3 扩展边界
 

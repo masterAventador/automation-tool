@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "sourceProvider": "bailian",
+  "upstreamProvider": "openai",
+  "protocol": "openai_chat_completions",
+  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "purpose": "script",
+  "allowedModels": [
+    "deepseek-v4-pro",
+    "glm-5.2",
+    "qwen3.7-max-2026-06-08"
+  ],
+  "credentialSource": "native_model_service_store",
+  "credentialTransport": "private_worker_stdin_bootstrap",
+  "writesUpstreamConfig": false,
+  "exposesCredentialToReact": false,
+  "exposesCredentialToWebUiDom": false,
+  "logsCredentialOrRawProviderErrors": false,
+  "connectionTestOwner": "native_model_service_settings"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "shared-browser-validation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <27",
+    "pnpm": ">=11 <12"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "dependencies": {
+    "@hyperframes/producer": "0.7.68",
+    "gsap": "3.14.2",
+    "lottie-web": "5.13.0"
+  }
+}

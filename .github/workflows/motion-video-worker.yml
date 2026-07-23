@@ -1,0 +1,30 @@
+name: Motion video Worker package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "workers/motion_composition/**"
+      - "scripts/build_motion_video_worker_candidate.py"
+      - "scripts/run_bm_02_acceptance.py"
+      - "contracts/quality/motion-video-worker-package.v1.json"
+      - "frontend/src-tauri/src/local_video_orchestrator.rs"
+      - "frontend/src-tauri/tests/local_video_orchestrator.rs"
+
+permissions:
+  contents: read
+
+jobs:
+  native-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify isolated packaged Worker
+        run: python scripts/run_bm_02_acceptance.py

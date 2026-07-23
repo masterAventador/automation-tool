@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-23",
+  "package": {
+    "name": "browser-use",
+    "version": "0.13.6",
+    "requirement": "browser-use==0.13.6",
+    "release_date": "2026-07-17",
+    "python_minor": [3, 12],
+    "pyproject": "tools/browser-use-contract/pyproject.toml",
+    "lock": "tools/browser-use-contract/uv.lock",
+    "wheel_sha256": "sha256:dc284a6130d56368a0a2fa6d6d6d467296e61b3ec165b6b290aecc5ca19b4a9c"
+  },
+  "public_imports": {
+    "Agent": "browser_use.Agent",
+    "BrowserSession": "browser_use.BrowserSession",
+    "Tools": "browser_use.Tools",
+    "AgentHistoryList": "browser_use.agent.views.AgentHistoryList",
+    "AgentHistory": "browser_use.agent.views.AgentHistory",
+    "AgentOutput": "browser_use.agent.views.AgentOutput",
+    "ActionResult": "browser_use.agent.views.ActionResult"
+  },
+  "runtime_modules": {
+    "Agent": "browser_use.agent.service",
+    "BrowserSession": "browser_use.browser.session",
+    "Tools": "browser_use.tools.service",
+    "AgentHistoryList": "browser_use.agent.views",
+    "AgentHistory": "browser_use.agent.views",
+    "AgentOutput": "browser_use.agent.views",
+    "ActionResult": "browser_use.agent.views"
+  },
+  "parameters": {
+    "Agent": {
+      "task": "__required__",
+      "llm": null,
+      "browser_session": null,
+      "tools": null,
+      "sensitive_data": null,
+      "output_model_schema": null,
+      "use_vision": true,
+      "max_failures": 5,
+      "max_actions_per_step": 5,
+      "max_history_items": null,
+      "llm_timeout": null,
+      "step_timeout": 180
+    },
+    "Agent.run": {
+      "max_steps": 500,
+      "on_step_start": null,
+      "on_step_end": null
+    },
+    "BrowserSession": {
+      "id": null,
+      "cdp_url": null,
+      "is_local": false,
+      "executable_path": null,
+      "headless": null,
+      "user_data_dir": null,
+      "use_cloud": null,
+      "allowed_domains": null,
+      "keep_alive": null,
+      "enable_default_extensions": null,
+      "captcha_solver": null
+    },
+    "BrowserSession.start": {},
+    "Tools": {
+      "exclude_actions": null,
+      "output_model": null,
+      "display_files_in_done_text": true
+    },
+    "Tools.action": {
+      "description": "__required__"
+    }
+  },
+  "history": {
+    "list_fields": ["history", "usage"],
+    "item_fields": ["model_output", "result", "state", "metadata", "state_message"],
+    "action_result_fields": [
+      "is_done",
+      "success",
+      "error",
+      "attachments",
+      "images",
+      "extracted_content",
+      "metadata"
+    ],
+    "methods": [
+      "model_dump",
+      "save_to_file",
+      "load_from_file",
+      "is_done",
+      "is_successful",
+      "final_result",
+      "urls",
+      "action_names",
+      "screenshots"
+    ],
+    "fixture": "contracts/browser-use/fixtures/history-success.v1.json",
+    "expectations": {
+      "is_done": true,
+      "is_successful": true,
+      "final_result": "published",
+      "urls": ["https://example.invalid/success"],
+      "action_names": [],
+      "screenshots": [null]
+    }
+  }
+}

@@ -12,7 +12,7 @@
 
 1. 产品 UI：任务创建、目标预览、运行详情、结果、设置和诊断；
 2. 网络控制面：连接开发机本地或 Demo 云端 FastAPI；
-3. 本机原生能力：监管 Local Executor、打开外部浏览器、文件、通知、窗口和紧急停止。
+3. 本机原生能力：监管 Local Executor、验证并打开 App 内置运营浏览器、文件、通知、窗口和紧急停止。
 
 不建设面向用户的 Web 产品。Vite 浏览器模式只是测试专用 UI Harness。
 
@@ -51,6 +51,7 @@ React 页面与 Feature
 
 Tauri/Rust ──HTTPS/SSE──> Python Control Plane
 Tauri/Rust ──stdio/受认证 IPC──> Python Local Executor
+Tauri/Rust ──只读 Resources──> 已验证的内置 Chromium
 ```
 
 业务页面不感知当前 Control Plane 在本机还是云端，也不直接感知 Rust、Sidecar 或操作系统。
@@ -121,7 +122,7 @@ features/
 ├── task-runs/              # 快照、目标预览、事件、控制和结果
 ├── platform-sessions/      # 抖音服务端健康、本机处理与后续安全注销
 ├── diagnostics/            # 后端、Executor、浏览器和权限诊断
-└── settings/               # 本地保留、浏览器选择和诊断导出
+└── settings/               # 本地保留、内置浏览器组件状态和诊断导出
 ```
 
 规则：
@@ -323,7 +324,65 @@ E4-15 把测试隔离从源码约束扩展到实际 release 字节。`build.rs` 
 
 真实 release 审计最初发现 `tauri.conf.json` 的 `devUrl`/devCSP 即使 release 不使用仍会进入二进制，因此现已拆到只由 `pnpm tauri:dev` 显式合并的 `tauri.dev.conf.json`。自动化配置继续只用于各自 `--config` 测试构建；正式配置保持唯一可见主窗口、`withGlobalTauri=false`、唯一 `main` Capability 与生产 CSP。E4-15 临时 release target 每次唯一且结束删除，不启动 App、不绑定端口。
 
-B5-01 已冻结外部浏览器会话的迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
+### 6.1 AV-01 内置浏览器前端基线
+
+ADR-0001 已替代外部 Chrome/Edge 生产方案。Tauri/Rust 后续只从安装包 Resources 验证并启动与 Playwright 锁定版本匹配的 Chromium；React、普通设置、Control Plane 和任务参数都不能提供浏览器种类或可执行路径。
+
+- 启动门禁与诊断 UI 只展示 `浏览器组件正常`、`浏览器组件损坏`、`浏览器组件版本不兼容` 三类封闭结果及安全修复动作，不显示本机浏览器列表、安装路径、文件选择器或运行时下载按钮。
+- 首次使用直接创建全新 App 私有运营 Profile，不提供旧 Profile、旧浏览器选择或 Cookie 迁移入口。可见运营窗口继续支持扫码、验证码/风控暂停和人工接管。
+- 正常用户路径验收必须从正式 App 页面启动可见窗口并核对真实浏览器/平台结果；UI Harness、Mock Gateway、直接 invoke 和测试专用页面不能替代。
+- 现有 B5 浏览器发现、选择与系统浏览器验收段落保留为已实现历史和迁移输入；EB 系列完成前它们仍描述当前代码，不再定义目标生产架构，也不得成为 fallback。
+
+### 6.2 AV-03 用户品牌与不可信视频内容
+
+- 视频制作页面只显示“智能素材成片”和“品牌动效成片”，消费稳定内部 ID；上游项目名、CLI、原始错误和进程信息不能进入 React DTO、标题、菜单、按钮、加载、错误、无障碍文本、任务或导出。
+- `contracts/quality/user-facing-terminology.v1.json` 是中文展示与通俗术语契约，`scripts/check_user_facing_branding.py` 扫描正式 UI 源码和 Tauri 标题。独立第三方软件声明页是唯一名称白名单，但不是功能入口。
+- React 不渲染生成 HTML，也不能直连本机视频 Worker；只通过固定 Gateway 查看脱敏状态、预览和 Artifact。HTML 预览由隔离渲染面生成像素或受控媒体结果。
+- 外部模型调用前页面必须说明会离开本机的数据范围；任何密钥、绝对路径、运营 Profile、Cookie、原始 Worker 错误和上游名称都不能进入 WebView。
+- 静态扫描和 UI Harness 只能作为分层证据；用户功能仍要从正式 App 正常入口覆盖成功、失败、取消、人工接管、诊断和导出。
+
+### 6.3 VF-02 本地视频 Worker 生命周期
+
+`LocalVideoOrchestrator` 位于 Tauri Rust 边界，分别按 `Python`、`Node` 槽位线性管理两类
+视频 Worker；React、Control Plane 和 Worker 都不能自行发现、启动或复用其他进程。
+Worker 从标准输入一次性接收新生成的 256-bit 会话令牌，在自身绑定
+`127.0.0.1:0` 后返回端口、协议、精确版本和 HMAC 证明。Tauri 随后用同一会话在真实
+TCP `/health` 上复验，不把端口、令牌、可执行路径或原始错误暴露给 WebView。
+
+两个 Worker 与 Local Executor 复用 `ManagedProcessTree`：Unix 使用独立进程组，Windows
+使用 kill-on-close Job Object。启动失败、证明/版本不匹配、超时、取消、异常退出、恢复
+预算耗尽、显式停止和 App 释放都由该所有者清理完整进程树；崩溃恢复先杀后代再等待日志
+管道，避免渲染子进程继承句柄后卡死。VF-02 只提供内部生命周期，不注册用户 Command；
+后续 IM/BM Adapter 才提供受限业务调用，VF-06 才增加正常用户入口。
+
+### 6.4 VF-03 RenderJob 私有工作区
+
+Tauri 正式组合根持有唯一 `VideoJobWorkspaceStore`，存储根固定在 App 私有数据目录下，
+每个 UUIDv4 RenderJob 分配独立 `outputs/checkpoints/work` 目录和稳定目录 identity。只有
+受信 Worker Adapter 能取得重新校验后的输出目录；React、Tauri Command、Control Plane、
+日志、错误和 Artifact DTO 均不包含绝对路径。
+
+Worker 输出导入时先拒绝越界名称、symlink/reparse、identity 替换、单文件/单任务配额和
+剩余空间不足，再以固定大小缓冲区流式复制及计算 SHA-256。payload 与无路径 manifest
+先写入私有临时目录并 fsync，最后以一次目录 rename 原子发布；启动时只清理符合本协议
+命名和结构的中断临时目录。成片读取使用带剩余字节上限的流式 Reader，不把最高 32 GiB
+Artifact 整体载入内存。
+
+checkpoint 使用同目录临时文件、fsync 和原子替换，可在 App 重启后按 Job/名称恢复；
+`Keep` 写入保留截止时间，清理只删除已到期且整棵目录复验无链接的工作区，`Delete` 明确
+删除工作区。已经原子导入的 Artifact 独立存续，只能按稳定 Artifact ID 显式删除。
+
+### 6.5 VF-04 统一视频媒体工具
+
+Tauri 侧 `VideoMediaToolchain` 只解析 `resource_dir/media-toolchain` 的锁定发行物，逐文件
+校验摘要、目标、版本、许可、路径和可执行权限；系统 PATH、用户选择路径和运行时下载都
+不是生产来源。同一个已验证 FFmpeg/ffprobe 对通过环境变量分别交给 Python 与 Node Worker；
+路径不序列化、不写普通日志，也没有 WebView command。
+
+FFmpeg 8.1.2 与 x264 锁定源码、双平台原生构建、能力矩阵、GPL 对应源码和真实编码烟测
+详见 `video-media-toolchain-supply-chain.md`。
+
+B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
 
@@ -515,7 +574,7 @@ Playwright 使用受控窄 Adapter 驱动真实 React 页面交互；T3-19 的�
 - local/demo Profile 连接；
 - Rust 网络桥和事件；
 - Local Executor 真实子进程；
-- 外部 Chrome/Edge 启动与人工接管；
+- 内置 Chromium 启动、可见窗口与人工接管；
 - 文件、诊断、紧急停止和错误恢复；
 - macOS/Windows 分别冒烟。
 

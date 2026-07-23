@@ -1,0 +1,214 @@
+{
+  "version": "embedded-browser-video.threat-model.v1",
+  "scope": [
+    "embedded_chromium",
+    "browser_use",
+    "local_video_workers",
+    "generated_video_html",
+    "asset_ingestion",
+    "video_editing",
+    "content_publishing"
+  ],
+  "trustBoundaries": [
+    "tauri_rust_to_local_executor",
+    "tauri_rust_to_local_video_worker",
+    "control_plane_to_device",
+    "model_to_restricted_authoring_tools",
+    "untrusted_web_page_to_browser_agent",
+    "download_service_to_render_job",
+    "render_job_to_embedded_chromium",
+    "app_to_external_social_platform"
+  ],
+  "userFeatureAcceptance": "formal_app_normal_user_path_required",
+  "surfaces": {
+    "loopback_worker": {
+      "assets": [
+        "worker_session",
+        "render_job",
+        "local_cpu_memory_disk",
+        "user_materials"
+      ],
+      "threats": [
+        "fixed_or_external_bind_exposes_worker",
+        "port_race_or_cross_session_connection",
+        "browser_origin_or_csrf_abuses_worker",
+        "orphan_worker_survives_app_exit",
+        "unbounded_request_exhausts_device"
+      ],
+      "controls": [
+        "bind_random_loopback_port_only",
+        "tauri_spawns_and_owns_process_tree",
+        "high_entropy_single_session_token_over_private_bootstrap",
+        "strict_origin_host_content_type_and_request_size",
+        "capability_scoped_rpc_without_generic_proxy",
+        "bounded_start_health_cancel_stop_and_restart",
+        "run_id_scoped_data_and_port_ownership"
+      ],
+      "verification": [
+        "reject_non_loopback_bind",
+        "reject_missing_wrong_replayed_or_cross_worker_token",
+        "preflight_and_post_cleanup_port_check",
+        "app_exit_kills_owned_process_tree",
+        "oversized_concurrent_and_timeout_failure_matrix"
+      ]
+    },
+    "generated_html": {
+      "assets": [
+        "render_host",
+        "embedded_chromium",
+        "local_files",
+        "user_brand_assets"
+      ],
+      "threats": [
+        "script_reads_arbitrary_files_or_secrets",
+        "remote_navigation_script_font_or_media_load",
+        "popup_download_or_protocol_handler_escape",
+        "infinite_animation_or_resource_exhaustion",
+        "prompt_injection_expands_authoring_authority",
+        "generated_output_leaks_private_path_or_upstream_name"
+      ],
+      "controls": [
+        "treat_model_html_javascript_as_untrusted",
+        "render_job_directory_allowlist_and_no_node_integration",
+        "deny_network_file_escape_popup_download_and_external_protocol",
+        "local_content_security_policy_and_registered_asset_manifest",
+        "frame_duration_cpu_memory_disk_and_output_limits",
+        "authoring_model_uses_closed_tools_without_shell_or_arbitrary_files",
+        "separate_headless_process_without_operating_profile_or_cdp"
+      ],
+      "verification": [
+        "malicious_navigation_fetch_websocket_and_file_fixture",
+        "symlink_reparse_and_path_replacement_fixture",
+        "infinite_loop_large_canvas_and_gpu_failure_matrix",
+        "offline_render_and_zero_remote_url_scan",
+        "output_log_error_and_filename_leak_scan"
+      ]
+    },
+    "asset_download": {
+      "assets": [
+        "device_network",
+        "download_cache",
+        "render_job",
+        "asset_rights_records"
+      ],
+      "threats": [
+        "ssrf_private_network_or_cloud_metadata",
+        "redirect_dns_rebinding_or_scheme_change",
+        "oversized_decompression_bomb_or_mime_confusion",
+        "active_content_or_malware_enters_render_job",
+        "license_or_personality_rights_are_missing",
+        "authenticated_or_private_page_is_captured"
+      ],
+      "controls": [
+        "https_provider_allowlist_and_canonical_url",
+        "resolve_and_recheck_every_redirect_ip_and_dns_result",
+        "deny_loopback_private_link_local_multicast_and_metadata",
+        "stream_size_timeout_mime_magic_and_sha256_validation",
+        "quarantine_then_copy_declared_files_into_job",
+        "asset_rights_default_deny_contract",
+        "no_browser_cookie_header_or_authenticated_page_download"
+      ],
+      "verification": [
+        "ipv4_ipv6_encoded_ip_redirect_and_dns_rebinding_matrix",
+        "size_timeout_mime_archive_and_partial_download_matrix",
+        "unknown_rights_record_is_rejected",
+        "download_has_no_operating_profile_or_secret_access"
+      ]
+    },
+    "model_and_provider_secrets": {
+      "assets": [
+        "bailian_credentials",
+        "provider_api_keys",
+        "platform_credentials",
+        "user_prompts_and_materials"
+      ],
+      "threats": [
+        "secret_reaches_webview_prompt_log_task_or_submodule",
+        "model_receives_unapproved_user_or_platform_data",
+        "worker_can_read_all_provider_or_platform_credentials",
+        "error_or_export_discloses_secret_or_private_content",
+        "web_page_prompt_injection_requests_secret"
+      ],
+      "controls": [
+        "native_or_server_secret_store_never_returns_plaintext_to_react",
+        "task_scoped_capability_or_server_side_provider_call",
+        "explicit_data_scope_preview_before_external_model_call",
+        "provider_and_platform_credentials_are_separate",
+        "central_redaction_for_prompt_log_error_event_and_export",
+        "web_content_is_untrusted_data_not_agent_instruction"
+      ],
+      "verification": [
+        "canary_secret_across_ui_ipc_worker_log_error_task_and_export",
+        "prompt_injection_cannot_obtain_secret_or_expand_toolset",
+        "worker_process_environment_and_command_line_are_secret_free",
+        "cancel_crash_and_support_bundle_redaction_matrix"
+      ]
+    },
+    "local_paths": {
+      "assets": [
+        "app_data",
+        "operating_profiles",
+        "render_jobs",
+        "user_selected_files",
+        "artifacts"
+      ],
+      "threats": [
+        "absolute_path_leaks_to_ui_server_log_ormodel",
+        "user_or_model_supplied_path_escapes_allowed_root",
+        "symlink_reparse_hardlink_or_rename_replacement",
+        "cleanup_deletes_other_session_or_user_data",
+        "filename_contains_secret_upstream_name_or_private_identifier"
+      ],
+      "controls": [
+        "opaque_ids_cross_webview_control_plane_and_model_boundaries",
+        "rust_or_owned_worker_resolves_paths_from_fixed_roots",
+        "stable_identity_and_no_follow_open_for_every_sensitive_operation",
+        "run_id_ownership_manifest_and_targeted_cleanup",
+        "safe_generated_filename_from_internal_provider_id"
+      ],
+      "verification": [
+        "absolute_relative_unicode_and_reserved_name_matrix",
+        "symlink_reparse_hardlink_and_rename_race_matrix",
+        "logs_events_errors_ui_and_exports_contain_no_private_path",
+        "cleanup_preserves_unowned_run_profile_and_artifact"
+      ]
+    },
+    "upstream_name_leakage": {
+      "assets": [
+        "product_brand",
+        "user_interface",
+        "errors_logs_tasks_exports_and_artifact_names",
+        "required_legal_notices"
+      ],
+      "threats": [
+        "upstream_name_appears_in_menu_card_error_or_accessibility_text",
+        "worker_or_submodule_error_is_forwarded_verbatim",
+        "task_provider_filename_or_export_reveals_implementation",
+        "legal_disclosure_is_removed_or_shown_as_feature_brand"
+      ],
+      "controls": [
+        "stable_internal_provider_ids_and_chinese_display_names",
+        "closed_user_error_taxonomy_without_raw_upstream_error",
+        "forbidden_user_facing_term_static_scan",
+        "separate_third_party_software_legal_page_allowlist",
+        "safe_export_and_artifact_filename_contract"
+      ],
+      "verification": [
+        "source_ui_accessibility_error_log_task_and_export_scan",
+        "runtime_formal_app_navigation_andfailure_scan",
+        "legal_page_contains_required_notice_but_no_feature_entry",
+        "upstream_crash_maps_to_internal_fixed_error"
+      ]
+    }
+  },
+  "invariants": [
+    "no_user_feature_is_complete_without_formal_app_normal_user_path_acceptance",
+    "mock_unit_harness_or_direct_internal_call_is_not_final_acceptance",
+    "no_worker_listens_on_non_loopback_interface",
+    "no_generated_html_or_download_reads_operating_profile",
+    "no_model_or_web_page_can_request_shell_arbitrary_file_orsecret",
+    "no_absolute_private_path_crosses_ui_server_model_orlog_boundary",
+    "no_upstream_project_name_is_user_facing_outside_legal_disclosure",
+    "no_unregistered_asset_enters_distribution"
+  ]
+}

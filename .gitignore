@@ -40,6 +40,8 @@ frontend/*.tsbuildinfo
 frontend/src-tauri/target/
 frontend/src-tauri/gen/schemas/
 frontend/src-tauri/binaries/
+frontend/src-tauri/resources/media-toolchain/
+tools/shared-browser-validation/node_modules/
 
 # Python
 backend/.venv/
@@ -51,6 +53,8 @@ backend/htmlcov/
 backend/build/
 backend/dist/
 backend/*.spec.bak
+tools/shared-browser-validation/.venv/
+tools/browser-use-contract/.venv/
 __pycache__/
 *.py[cod]
 

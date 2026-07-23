@@ -38,6 +38,10 @@ P9 以前的第一期是本地单设备 MVP：
 
 `docs/development-roadmap.md` 是任务定义、依赖、状态和当前下一步的唯一事实源；`docs/development/<任务ID>.md` 是对应任务执行证据的唯一事实源：
 
+专项 Roadmap 例外：`docs/embedded-browser-video-studio-roadmap.md` 是其中 87 个内置浏览器、Browser Use、视频制作、视频剪辑和首期发布任务的唯一状态台账，只保留任务、依赖和当前状态；这些任务不得向 `docs/development-roadmap.md` 双写状态，也不得把完成记录不断追加到专项 Roadmap。每个专项任务必须单独使用 `docs/development/<任务ID>.md` 记录日期、提交、RED、GREEN、失败矩阵、正常用户路径验收或不适用原因、真实边界、清理和文档证据，并与代码及状态变更在同一提交完成。专项以外的任务仍遵守上一段规则。
+
+专项连续执行时，每个任务提交、推送并合并最新 `main` 后，都必须读取 `Asia/Shanghai` 当前时间。时间早于 09:00 才能自动激活下一任务；到达或超过 09:00 时，必须在 `docs/development/` 新增带停止时间、最后完成任务和停止原因的标记文档，以独立 `chore` 提交推送后停止，不得继续激活任务。
+
 - 开始任何小任务前，先检查前置依赖，并把对应行更新为 `🧪 RED` 或 `🚧 实现中`；
 - 同一时间最多一个小任务处于 `🧪 RED` 或 `🚧 实现中`；
 - 每个小任务开始时创建或更新独立的 `docs/development/<任务ID>.md`，记录 RED；完成后立即把路线图状态更新为 `✅ 已完成`，并在该独立文件中写入日期、提交、GREEN、真实边界、失败矩阵、清理和文档证据；
@@ -121,18 +125,20 @@ automation-tool/
 浏览器主方案固定为：
 
 ```text
-用户电脑已安装的 Chrome/Edge 可执行程序
+App 安装包内与 Playwright 锁定版本严格匹配的内置 Chromium
         +
 App 管理的独立运营 Profile
         +
-可见的外部浏览器窗口
+可见、可人工接管的独立运营窗口
 ```
 
 强制规则：
 
+- 用户电脑无需预装 Chrome 或 Edge；生产运行时只接受 Tauri Resources 中经 Manifest、版本、平台、架构和逐文件摘要验证的内置 Chromium，不发现、选择、下载或回退到系统浏览器；
 - 不在 Tauri WebView 内嵌抖音、小红书等运营网页；
 - 不直接自动化用户日常 Chrome/Edge 的默认 Profile；
 - 不读取、复制或上传用户默认浏览器 Cookie；
+- App 从未发布，首期直接创建全新 App 私有运营 Profile，不迁移开发期 Profile、系统浏览器选择或 Cookie；
 - 每个平台首次扫码或登录一次，后续复用 App 独立 Profile 中的平台登录态；
 - 浏览器必须默认有界面，用户能看见实际操作并随时人工接管；
 - 验证码、滑块、风险提示、异常登录和平台安全校验只能暂停并转人工，禁止实现绕过；
@@ -147,6 +153,9 @@ App 管理的独立运营 Profile
 - 内容渲染通过 `VideoRenderProvider` 隔离云端或本地实现；
 - AI 模型通过供应商无关 Adapter 接入；第一期 RPA 闭环不得依赖 AI 调用才能运行；
 - 禁止修改 Playwright、Tauri、FastAPI、LangGraph、模型 SDK 等第三方源码，禁止 Monkey Patch、私有 Fork 或复制内部实现；
+- `vendor/moneyprinterturbo` 与 `vendor/hyperframes` 只允许按 `contracts/quality/third-party-sources.v1.json` 的正式 tag/完整 commit 作为只读 Submodule 存在；禁止在 Submodule 内修改、跟随 branch/latest、运行时更新或绕过 `scripts/check_third_party_sources.py`。升级必须使用独立任务并同步 Gitlink、许可证摘要、资产权利清单和 SBOM；
+- 用户界面中的两种视频制作方式只允许显示“智能素材成片”和“品牌动效成片”；两个上游项目名只能出现在代码、内部诊断、SBOM 和独立第三方软件声明页，禁止进入菜单、卡片、按钮、帮助、错误、日志、任务、无障碍名称、文件名或导出。用户文案使用 `contracts/quality/user-facing-terminology.v1.json` 的通俗映射，禁止出现未解释的 `B-roll`、`PoC` 等术语，并运行 `scripts/check_user_facing_branding.py`；
+- 内置浏览器、Browser Use、视频制作和剪辑必须遵守 `contracts/security/embedded-browser-video-threat-model.v1.json`：随机 loopback Worker、生成 HTML、素材下载、密钥、路径和名称泄漏六类边界均默认拒绝并做失败矩阵；
 - 遇到上游问题依次使用公开扩展点、外围适配、锁定可用版本和提交上游 Issue/PR。
 
 ## 7. 安全与隐私
@@ -192,12 +201,13 @@ App 管理的独立运营 Profile
 - RPA 完成必须有受控平台账号的真实最终状态验证；DOM 可定位、按钮被点击、日志写“成功”或 Mock 返回成功都不能单独算完成；
 - 真实平台账号、扫码或人工安全校验暂时不可用时，不停下来等待用户：先用自建测试网页、隔离平台 Adapter 和无外部副作用的自动化把其余实现与失败矩阵完成；仅把必须验证平台最终状态的验收项标为 `🔍 待真实账号` 并登记补验收证据，然后自动继续下一个前置已满足且不依赖账号的任务；测试页或 Fake 证据不得冒充真实平台验收；
 - UI Harness 通过只能证明 React 业务交互，不能证明浏览器 RPA、微信、IPC、系统权限或 Sidecar 生命周期可用；
-- macOS 和 Windows 的正式包、权限和外部浏览器链路分别验收；平台专属功能不能用另一平台的单元测试代替；
+- macOS 和 Windows 的正式包、权限和内置 Chromium 链路分别验收；平台专属功能不能用另一平台的单元测试代替；
 - 正式安装包必须确认不含 WebDriver、调试端口、测试凭据和测试命令；
 - 测试数据与本地演示数据隔离，测试结束清理临时服务、浏览器和 Profile；
 - 已建立的 E2E 用例长期保留，产品行为变化时同步更新。
 - 自动化测试启动 Tauri App 时必须使用测试专用隐藏窗口配置在后台运行，不得抢占前台、弹出窗口或干扰用户当前电脑操作；正式产品构建仍保持正常可见，隐藏测试配置不得进入正式包。
-- 本机自动化测试启动外部浏览器时必须默认使用无头模式；只有真实扫码、人工安全校验或专门验证可见产品窗口且无法由无头模式替代时，才允许显式启用有头浏览器，并须提前告知用户。CI 的独立桌面 Runner 可以执行明确标记的可见浏览器验收，但常规本机全量门禁不得隐式触发它。
+- 本机自动化测试启动浏览器时必须默认使用无头模式；只有真实扫码、人工安全校验或专门验证可见产品窗口且无法由无头模式替代时，才允许显式启用有头浏览器，并须提前告知用户。CI 的独立桌面 Runner 可以执行明确标记的可见浏览器验收，但常规本机全量门禁不得隐式触发它。
+- 用户可操作功能只有从正式 App 的正常用户入口按真实页面路径执行，并核对真实进程、文件或外部平台最终状态，才算验收通过；Mock、fixture、单元测试、UI Harness、直接内部 API/函数/Command 或测试专用入口只能作为分层证据。缺少真实账号、密钥或正式环境时最多标 `🔍 待验收`，但继续推进不依赖该证据的任务；
 - 每个浏览器测试必须由确定的资源所有者在成功、失败、超时和取消路径关闭 Page、Context、Playwright driver 及其完整浏览器进程树；测试结束后复查本次项目隔离 Profile/进程无残留，只能清理本次 `automation-tool` 实例创建的资源，禁止积累后台浏览器或误杀用户及其他项目浏览器。
 
 ## 9. 失败矩阵与完成定义

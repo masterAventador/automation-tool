@@ -13,7 +13,7 @@ test("B5-08 owns one thread-confined browser context with bounded window operati
     readRepositoryFile("backend/src/automation_tool/executor/browser_runtime.py"),
     readRepositoryFile("backend/tests/unit/executor/test_browser_runtime_lifecycle.py"),
     readRepositoryFile("backend/tests/fixtures/packaged_browser_probe.py"),
-    readRepositoryFile("frontend/src-tauri/src/executor_manager.rs"),
+    readRepositoryFile("frontend/src-tauri/src/managed_process_tree.rs"),
     readRepositoryFile("frontend/src-tauri/tests/browser_packaged_runtime.rs"),
     readRepositoryFile("docs/backend-architecture.md"),
   ]);

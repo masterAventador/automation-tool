@@ -18,9 +18,15 @@ pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
+pub mod local_video_orchestrator;
+mod managed_process_tree;
+pub mod material_video_studio;
+pub mod model_service_settings;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
+pub mod video_job_workspace;
+pub mod video_media_toolchain;
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use account_session_vault::{
@@ -203,6 +209,99 @@ fn select_browser(
 }
 
 #[tauri::command]
+fn get_model_service_settings(
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.snapshot().map_err(Into::into)
+}
+
+#[tauri::command]
+fn configure_model_service(
+    request: model_service_settings::ConfigureModelServiceRequest,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.configure(&request).map_err(Into::into)
+}
+
+#[tauri::command]
+fn reuse_script_model_service_for_video(
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.reuse_script_for_video().map_err(Into::into)
+}
+
+#[tauri::command]
+fn clear_model_service(
+    purpose: model_service_settings::ModelServicePurpose,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelServiceSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.clear(purpose).map_err(Into::into)
+}
+
+#[tauri::command]
+async fn test_model_service_connection(
+    purpose: model_service_settings::ModelServicePurpose,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<
+    model_service_settings::ModelConnectionSnapshot,
+    model_service_settings::ModelServiceCommandError,
+> {
+    settings.test_connection(purpose).await.map_err(Into::into)
+}
+
+#[tauri::command]
+async fn open_material_video_studio(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    material_video_studio::MaterialVideoStudioSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::open(&app, &orchestrator, &settings, &workspaces)
+}
+
+#[tauri::command]
+fn get_material_render_jobs(
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    Vec<material_video_studio::MaterialRenderJobSnapshot>,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::jobs(&workspaces)
+}
+
+#[tauri::command]
+fn cancel_material_render_job(
+    render_job_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::cancel(&workspaces, render_job_id)
+}
+
+#[tauri::command]
+fn delete_material_video_artifact(
+    artifact_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::delete_artifact(&workspaces, artifact_id)
+}
+
+#[tauri::command]
+#[cfg(not(feature = "video-studio-e2e"))]
 fn check_local_startup_environment(
     startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
@@ -230,6 +329,16 @@ fn check_local_startup_environment(
         app_data,
         platform.startup_environment_state(),
         trusted_browser,
+    )
+}
+
+#[tauri::command]
+#[cfg(feature = "video-studio-e2e")]
+fn check_local_startup_environment() -> startup_environment::StartupEnvironmentSnapshot {
+    startup_environment::StartupEnvironmentSnapshot::new(
+        startup_environment::AppDataStartupState::Ready,
+        startup_environment::ExecutorStartupState::Ready,
+        startup_environment::TrustedBrowserStartupState::Ready,
     )
 }
 
@@ -652,11 +761,28 @@ async fn restart_executor(
 }
 
 #[tauri::command]
-#[cfg(feature = "desktop-e2e")]
+#[cfg(all(feature = "desktop-e2e", not(feature = "video-studio-e2e")))]
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
     client.check_health().await.map_err(map_control_plane_error)
+}
+
+#[cfg(feature = "video-studio-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoStudioAcceptanceHealth {
+    status: &'static str,
+    service_version: &'static str,
+}
+
+#[tauri::command]
+#[cfg(feature = "video-studio-e2e")]
+async fn check_control_plane_health() -> VideoStudioAcceptanceHealth {
+    VideoStudioAcceptanceHealth {
+        status: "available",
+        service_version: "video-studio-acceptance",
+    }
 }
 
 #[tauri::command]
@@ -2941,8 +3067,21 @@ pub fn run() {
             app.manage(browser_settings::BrowserSettingsService::initialize(
                 &app_data_directory,
             )?);
+            app.manage(
+                model_service_settings::initialize_production_model_service_settings(
+                    &app_data_directory,
+                )?,
+            );
             app.manage(startup_environment::StartupEnvironmentService::initialize(
                 &app_data_directory,
+            )?);
+            app.manage(local_video_orchestrator::LocalVideoOrchestrator::new(
+                local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
+                local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
+            )?);
+            app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
+                &app_data_directory,
+                video_job_workspace::production_video_workspace_policy(),
             )?);
             app.manage(browser_profiles::BrowserProfileStore::initialize(
                 &app_data_directory,
@@ -3008,6 +3147,15 @@ pub fn run() {
         set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser,
+        get_model_service_settings,
+        configure_model_service,
+        reuse_script_model_service_for_video,
+        clear_model_service,
+        test_model_service_connection,
+        open_material_video_studio,
+        get_material_render_jobs,
+        cancel_material_render_job,
+        delete_material_video_artifact,
         get_update_policy_record_for_acceptance,
         get_app_update_state,
         check_app_update_now,
@@ -3053,6 +3201,15 @@ pub fn run() {
         set_capture_successful_diagnostics,
         get_browser_settings,
         select_browser,
+        get_model_service_settings,
+        configure_model_service,
+        reuse_script_model_service_for_video,
+        clear_model_service,
+        test_model_service_connection,
+        open_material_video_studio,
+        get_material_render_jobs,
+        cancel_material_render_job,
+        delete_material_video_artifact,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3129,6 +3286,15 @@ pub fn run() {
         exit_app_for_acceptance,
         get_browser_settings,
         select_browser,
+        get_model_service_settings,
+        configure_model_service,
+        reuse_script_model_service_for_video,
+        clear_model_service,
+        test_model_service_connection,
+        open_material_video_studio,
+        get_material_render_jobs,
+        cancel_material_render_job,
+        delete_material_video_artifact,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3146,6 +3312,11 @@ pub fn run() {
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {
                 let _ = platform.shutdown_for_app_exit();
+            }
+            if let Some(orchestrator) =
+                app_handle.try_state::<local_video_orchestrator::LocalVideoOrchestrator>()
+            {
+                let _ = orchestrator.stop_all();
             }
         }
     });

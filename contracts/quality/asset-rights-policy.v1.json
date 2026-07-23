@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "defaultDecision": "deny",
+  "distributionRequiredFields": [
+    "id",
+    "category",
+    "source",
+    "sourceUrl",
+    "license",
+    "licenseVersionOrDate",
+    "acquiredAt",
+    "sha256",
+    "redistributionAllowed",
+    "commercialUseAllowed",
+    "reviewedBy",
+    "reviewedAt"
+  ],
+  "requiredCategories": {
+    "font": [
+      "source",
+      "license",
+      "sha256",
+      "embeddingAllowed",
+      "redistributionAllowed",
+      "attribution"
+    ],
+    "stock_media": [
+      "source",
+      "license",
+      "sha256",
+      "providerAssetId",
+      "modelRelease",
+      "propertyRelease",
+      "trademarkReview"
+    ],
+    "music_sfx": [
+      "source",
+      "license",
+      "sha256",
+      "syncUseAllowed",
+      "redistributionAllowed",
+      "contentIdRisk"
+    ],
+    "codec_binary": [
+      "source",
+      "license",
+      "sha256",
+      "version",
+      "buildConfiguration",
+      "targetMarkets",
+      "patentReview"
+    ],
+    "map_3d": [
+      "source",
+      "license",
+      "sha256",
+      "attribution",
+      "derivativeUseAllowed",
+      "redistributionAllowed"
+    ],
+    "generated": [
+      "source",
+      "license",
+      "sha256",
+      "model",
+      "modelVersion",
+      "generationRecord",
+      "humanRightsReview"
+    ]
+  },
+  "entries": []
+}

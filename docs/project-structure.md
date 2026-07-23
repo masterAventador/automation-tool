@@ -28,6 +28,11 @@ automation-tool/
 ├── frontend/                      # 桌面客户端 UI 与 Tauri 原生壳
 ├── backend/                       # Python 可部署业务后端和本地执行器
 ├── contracts/                     # 跨 Rust/TypeScript/Python 的生成协议
+│   ├── browser/
+│   │   ├── embedded-chromium-compatibility.v1.json # 生产 Playwright、Chromium 完整版本/修订和双平台兼容契约
+│   │   └── fixtures/              # 双平台有效组件清单与版本/修订/平台错误样例
+│   ├── video/
+│   │   └── ffmpeg-toolchain.v1.json # FFmpeg/x264 版本、源码摘要、能力与双平台构建契约
 │   ├── deployment/
 │   │   └── customer-demo-deployment.v1.json # C10-01 单实例 Demo 部署机器契约
 │   ├── openapi/                   # FastAPI OpenAPI 快照
@@ -35,7 +40,12 @@ automation-tool/
 │   ├── events/                    # 任务事件 JSON Schema
 │   ├── quality/
 │   │   ├── mvp-failure-matrix.v1.json # H8-15 可执行失败矩阵与测试证据登记
-│   │   └── mvp-spec-review.v1.json # H8-16 MVP 决策、验收状态与修复任务登记
+│   │   ├── mvp-spec-review.v1.json # H8-16 MVP 决策、验收状态与修复任务登记
+│   │   ├── third-party-sources.v1.json # 两个只读上游的 tag/commit/许可证锁
+│   │   ├── asset-rights-policy.v1.json # 字体/素材/音乐/编解码器等默认拒绝策略
+│   │   └── user-facing-terminology.v1.json # 两种中文制作方式、通俗映射与 UI 禁止词
+│   ├── security/
+│   │   └── embedded-browser-video-threat-model.v1.json # Worker/HTML/下载/密钥/路径/品牌威胁模型
 │   └── fixtures/
 │       └── douyin_discovery_pages/ # D6-15 六类离线 Fake 页面语料；只进测试
 │       ├── executor-v1/           # Python/Rust/TypeScript 共用 valid/invalid wire 样例
@@ -47,10 +57,15 @@ automation-tool/
 │   ├── project-structure.md
 │   ├── frontend-architecture.md
 │   ├── backend-architecture.md
+│   ├── third-party-source-governance.md
+│   ├── embedded-browser-video-security-and-branding.md
+│   ├── video-media-toolchain-supply-chain.md # 单一 FFmpeg/ffprobe 构建、许可、能力和运行时边界
 │   ├── customer-demo-deployment-design.md # C10-01 拓扑、资源、恢复与发布设计
 │   ├── development-roadmap.md
-│   ├── development/               # 每个任务独立的 RED/GREEN 与验收证据
-│   └── adr/                       # 后续重要架构决策
+│   ├── embedded-browser-video-studio-roadmap.md # 专项任务、依赖与状态轻量台账
+│   ├── development/               # 每个任务一个 `<任务ID>.md` 独立 RED/GREEN 与验收证据文件
+│   └── adr/
+│       └── 0001-embedded-chromium-runtime.md # 内置统一 Chromium 运行时决策
 ├── deploy/
 │   └── postgresql/                # C10-03 固定角色、最小权限与安全运维顺序
 ├── scripts/                       # 跨工程生成、检查、纵向验收和打包脚本
@@ -74,6 +89,15 @@ automation-tool/
 │   ├── run_t3_20_acceptance.py   # 隐藏 Tauri→Control Plane 同库重启→Executor 恢复验收
 │   ├── run_h8_01_acceptance.py   # 隐藏 Tauri→真实 Executor 安全暂停/恢复验收
 │   ├── run_h8_16e_acceptance.py  # 隐藏 Tauri 启动诊断→浏览器选择→ready 验收
+│   ├── run_av_01_acceptance.py   # 内置 Chromium 架构基线确定性检查
+│   ├── run_av_02_acceptance.py   # 两个 submodule、权利策略与 SBOM 验收
+│   ├── check_third_party_sources.py # 上游 Gitlink/许可证/工作树/SBOM 防漂移门禁
+│   ├── run_av_03_acceptance.py   # 威胁模型、中文术语和用户品牌契约验收
+│   ├── check_user_facing_branding.py # UI 上游名称和未解释术语静态门禁
+│   ├── run_av_04_acceptance.py   # 87 行任务、汇总、独立证据和旧 Roadmap 隔离验收
+│   ├── check_embedded_browser_video_roadmap.py # 专项轻量台账与每任务证据 CI 门禁
+│   ├── run_eb_01_acceptance.py   # Playwright/Chromium 完整版本与双平台兼容验收
+│   ├── check_embedded_browser_compatibility.py # 构建候选版本、修订、平台和架构 fail-closed 门禁
 │   ├── run_e4_07_acceptance.py   # signed Executor→Manager→Control Plane 生命周期验收
 │   ├── run_e4_12_acceptance.py   # signed Executor 任务回放与 SQLite 恢复验收
 │   ├── run_e4_14_acceptance.py   # 隐藏 Tauri→signed Executor 全生命周期验收
@@ -86,6 +110,11 @@ automation-tool/
 │   └── run_c10_03_acceptance.py  # 私网迁移、只读备份与隔离恢复验收
 ├── .github/
 │   └── workflows/                 # macOS/Windows CI 与安装包验证
+├── vendor/                         # 只读 Git submodule；禁止直接修改
+│   ├── moneyprinterturbo/          # v1.3.2 / b1588e1
+│   └── hyperframes/                # v0.7.68 / 71d84ff
+├── third_party/
+│   └── source-submodules.cdx.json  # 源码级 CycloneDX 1.6 基线
 ├── .local/                        # 开发运行数据，必须忽略
 ├── AGENTS.md
 ├── CLAUDE.md
@@ -289,7 +318,8 @@ backend/
 │       │   ├── bootstrap/         # 配置、注册、设备凭据和 Session 依赖装配
 │       │   ├── api/               # REST、设备认证、SSE/WebSocket 和错误映射
 │       │   ├── application/       # 注册、凭据、任务、工作台指标、配置、内容和工作流用例
-│       │   ├── domain/            # 稳定 ID、Task 执行状态、版本事件、快照与 Command 契约
+│       │   ├── domain/            # 稳定 ID、Task/视频领域状态、版本事件、快照与 Command 契约
+│       │   │   └── video_creation.py # VF-01 两种制作方式共用的不可变领域对象和硬边界
 │       │   └── infrastructure/
 │       │       ├── database/      # PostgreSQL 注册认证、任务、动作 evidence/连续失败、目标结果与工作台指标投影
 │       │       ├── security/      # Bootstrap 签名验证等密码学适配
@@ -475,6 +505,28 @@ U9-01 的 `contracts/security/account-threat-model-v1.json` 是客户 Demo 账�
 
 U9-02 在既有 Control Plane 分层内新增 `domain/accounts.py`、`application/customer_accounts.py`、`infrastructure/security/passwords.py` 和 `infrastructure/database/customer_account_repository.py`，没有建立第二个认证服务。`schema.py` 与 Alembic `20260722_0028_customer_accounts.py` 共同拥有 `users/user_password_credentials/account_audit_events`，审计不可变 trigger 也只由该迁移创建/回滚。领域/安全单元测试覆盖 canonical ID、固定 Argon2id/Pepper、输入与错误脱敏；`tests/integration/test_customer_account_lifecycle.py` 在真实 PostgreSQL 验证空库迁移/降级、最小列与约束、弱 hash/非规范身份旁路拒绝、并发创建/停用单赢家、恢复和审计不可修改。U9-03 将复用这些内部端口增加 API/Session，不得把 password hash 暴露到 FastAPI、React 或 Executor。
 
+VF-01 的 `control_plane/domain/video_creation.py` 不建立第二个 Artifact 存储，也不
+引入任何制作供应商 DTO。它定义 `ContentBriefId/StoryboardId/TimelineId/RenderJobId`
+强类型 ID，并让 `ContentBrief`、`Storyboard`、`Timeline`、`RenderJob` 与领域
+`Artifact` 只通过这些 ID 和既有 `ArtifactId` 关联。所有对象 frozen/slots、长度和
+数量有硬上限、时间为 UTC、Timeline 同轨不重叠且 RenderJob 终态事实自洽；
+VF-02/VF-03 才分别接生命周期与私有工作区。
+
+VF-02 的 Tauri 生命周期实现位于
+`frontend/src-tauri/src/local_video_orchestrator.rs`，跨平台完整进程树所有权下沉到
+`frontend/src-tauri/src/managed_process_tree.rs`，并由既有 Local Executor 与两类视频
+Worker 共同复用。对应真实进程/随机回环端口测试位于
+`frontend/src-tauri/tests/local_video_orchestrator.rs`，独立门禁为
+`scripts/run_vf_02_acceptance.py`。本任务没有增加 React 页面、Tauri Command、Worker
+发行物或第二套进程清理实现。
+
+VF-03 的本机视频文件边界位于 `frontend/src-tauri/src/video_job_workspace.rs`：Tauri
+组合根持有唯一 Store，每个 RenderJob 私有目录、checkpoint、空间/大小配额、保留删除、
+流式摘要和 Artifact 原子目录发布均在这里完成。真实文件系统测试位于
+`frontend/src-tauri/tests/video_job_workspace.rs`，独立门禁为
+`scripts/run_vf_03_acceptance.py`。现有 Python `executor/local_artifact.py` 继续只服务有界
+诊断字节，没有被扩成会把 GB 级视频整体读入内存的第二视频存储。
+
 U9-03 沿同一纵向切片新增 `application/account_sessions.py`、`api/account_sessions.py`、`bootstrap/account_sessions.py` 和唯一 `infrastructure/database/account_session_repository.py`；`schema.py`/Alembic `20260722_0029_account_sessions.py` 共同拥有产品 Session family/token、keyed 登录限流和运维恢复票据四张表。`tests/contract/test_account_session_api.py` 冻结五个公开 operation、三种专用 Bearer scheme 和统一脱敏错误；`tests/integration/test_account_session_lifecycle.py` 用真实 PostgreSQL 验证临时锁、来源限流、摘要持久化、refresh 单次轮换/重放整族吊销、注销、改密、恢复与迁移回滚；配置/工厂/数据库异常由两个单元测试文件覆盖。OpenAPI 与生成 TypeScript DTO 同步更新，但 U9-03 没有新增 React/Rust 存储或设备归属；这些分别留给 U9-04/U9-05。
 
 U9-04 在既有桌面分层中新增 `features/account-session/` 的安全投影与外层 Gate、`platform/tauri/account-session-gateway.ts` 的五个固定 invoke，以及 Rust `account_session_vault.rs`。正式 `main.tsx` 只为 `customer-demo` Profile 注入账号 gateway；默认 P9 Profile 行为不变。Rust vault 复用 `secure_store.rs`，把 access/refresh 作为单个 `product-account-session-v1` 记录留在 App 私有目录，`control_plane.rs` 只允许登录/refresh/注销/改密/恢复五条固定路径，`lib.rs` 只返回 unauthenticated 或 canonical active 账号投影。Gate 位于 `StartupGate` 外层，未登录不会挂载诊断或工作台；U9-05 的 Installation 自动归属不在本任务中提前实现。
@@ -607,7 +659,7 @@ Tauri App ──HTTP/SSE──> 本机 Control Plane（FastAPI 热更新）
     │                         └── PostgreSQL（本机 Docker）
     │
     └──监管 Local Executor ──受认证通道──> Control Plane
-         └── 系统 Chrome/Edge + App 独立运营 Profile
+         └── 已验证的内置 Chromium + App 独立运营 Profile
 ```
 
 客户 Demo：
@@ -618,11 +670,12 @@ Tauri App ──HTTPS/SSE──> 云端 Control Plane（同一 Python 包）
     │                         └── 云端 PostgreSQL
     │
     └──监管 Local Executor ──出站设备认证通道──> Control Plane
+         └── 已验证的内置 Chromium + App 独立运营 Profile
 ```
 
 App 使用受控 Profile 配置 `baseUrl`，开发和 Demo 只切换端点、凭据与基础设施，不修改业务源码。
 
-Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接和 PyInstaller `onedir` Local Executor。它不包含：
+Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接、PyInstaller `onedir` Local Executor，以及与 Playwright 锁定版本严格匹配的内置 Chromium 发行物和浏览器 Manifest 与逐文件摘要。它不包含：
 
 - Control Plane 或 PostgreSQL；
 - Web 前端服务器或公开网页；
@@ -630,6 +683,16 @@ Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接和 PyInstal
 - 用户默认 Chrome Profile；
 - 测试 WebDriver、测试 Adapter 或真实平台凭据；
 - 第一阶段未启用的 AI 中台。
+
+### 6.1 AV-01 内置浏览器目标结构
+
+ADR-0001 从 AV-01 起替代“发现并选择系统 Chrome/Edge”的生产基线。现有 `browser_discovery.rs`、`browser_settings.rs` 及 B5 验收说明是尚待 EB 系列迁移的历史实现，不代表允许长期保留生产 fallback。
+
+- Tauri Resources 是内置 Chromium 发行物的唯一来源；后续由 EB-03～EB-06 固定双平台目录、浏览器 Manifest 与逐文件摘要，并由 Rust 在启动前验证来源、版本、修订、平台、架构、完整文件集和路径身份。
+- 不接受用户提供的浏览器可执行路径；路径也不得来自 React、Control Plane、任务 payload、普通环境变量或 App 设置，用户不能选择系统浏览器。只有 Rust 验证后的绝对路径可以通过受认证 Executor 启动协议传入本机执行器。
+- Local Executor、Playwright、Browser Use 和品牌动效渲染共用同一已验证的内置 Chromium 发行物，但默认使用相互隔离的进程、Context、Profile 和控制通道。运营页面控制权只能通过独占租约串行交接。
+- App 从未发布，直接创建全新运营 Profile；不兼容或迁移开发期 Profile、浏览器选择文件、用户默认浏览器 Profile 或 Cookie。
+- 正式用户验收必须从可见 App 页面打开运营浏览器并核对真实进程与平台最终状态；测试探针、Mock、直接 Command 和无头集成测试只作为分层证据。
 
 ## 7. 本地运行数据
 
@@ -657,6 +720,7 @@ app-data/
 
 - 目录和文件权限按当前用户最小化；
 - 浏览器 Profile 不进入普通备份、日志或导出；
+- 首发不迁移开发期或系统浏览器 Profile；卸载与注销只处理 App 自己创建且已复验身份的目录；
 - Artifact、日志和诊断数据都有数量、大小和时间上限；H8-12 由唯一 Local Artifact Store 在初始化和写入前执行到期清理、最小磁盘余量治理与精确引用保护；
 - 数据迁移必须有 schema version、备份或可回滚策略；
 - 测试使用临时目录，不能读写真实 App 数据。

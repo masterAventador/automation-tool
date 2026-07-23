@@ -177,7 +177,7 @@ requires-dist = [
     { name = "asyncpg" },
     { name = "cryptography" },
     { name = "fastapi" },
-    { name = "playwright" },
+    { name = "playwright", specifier = "==1.61.0" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extras = ["asyncio"] },

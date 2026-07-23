@@ -13,7 +13,7 @@ RPA 运营 > 内容生产与分发 > AI 员工与工作流
 - 只有 Tauri 桌面客户端，不建设或部署 Web 产品；
 - 用户打开 App 后直接使用，不提供产品注册或登录页面；
 - 首个闭环只做抖音：平台登录、目标搜索、预览、受控评论/主动私信、人工接管和恢复；
-- 抖音、小红书等平台页面在外部 Chrome/Edge 窗口运行；
+- 抖音等平台页面在 App 管理的内置 Chromium 可见窗口运行，用户电脑无需预装 Chrome/Edge；
 - 使用 App 独立运营 Profile，不接管用户默认浏览器 Profile；
 - 业务 FastAPI 后端独立部署：开发时本机启动，客户 Demo 时部署云端；
 - Python Local Executor 随 App 运行在用户电脑，负责浏览器、微信、OCR 和本地文件。
@@ -23,7 +23,7 @@ RPA 运营 > 内容生产与分发 > AI 员工与工作流
 ```text
 Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
     │
-    └── Python Local Executor ──> Chrome/Edge / 微信
+    └── Python Local Executor ──> 已验证的内置 Chromium / 微信
 ```
 
 开发与客户 Demo 使用同一套 Control Plane 代码、数据库迁移和 API；App 通过受控 Profile 切换 `baseUrl`。
@@ -36,7 +36,19 @@ Tauri App ──HTTP/SSE──> Python/FastAPI Control Plane ──> PostgreSQL
 - [前端架构](docs/frontend-architecture.md)
 - [后端架构](docs/backend-architecture.md)
 - [任务级开发路线图与进度台账](docs/development-roadmap.md)
+- [内置浏览器与视频制作专项 Roadmap](docs/embedded-browser-video-studio-roadmap.md)
+- [第三方源码与许可证治理](docs/third-party-source-governance.md)
+- [内置浏览器与视频安全、术语和用户品牌](docs/embedded-browser-video-security-and-branding.md)
 - [项目协作规则](CLAUDE.md)
+
+克隆仓库后必须初始化锁定的只读上游源码：
+
+```bash
+git submodule update --init --recursive
+python3 scripts/check_third_party_sources.py
+```
+
+不得在 `vendor/` 内直接修改文件或切换到浮动分支；升级必须走独立任务并同步源码锁、许可证摘要和 SBOM。
 
 ## 当前状态
 

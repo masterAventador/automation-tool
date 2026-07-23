@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "host": "127.0.0.1",
+  "port": 0,
+  "capabilityPathPrefix": "studio-",
+  "capabilityEntropyBytes": 32,
+  "endpointTransport": "authenticated_worker_ready_event",
+  "endpointOwner": "tauri_only",
+  "reactReceivesEndpoint": false,
+  "userVisibleLocalhostUrl": false,
+  "newWindowsAllowed": false,
+  "downloadsAllowed": false,
+  "topLevelNavigation": "exact_loopback_port_and_capability_path",
+  "configurationRoot": "task_private_workspace",
+  "storageRoot": "task_private_workspace",
+  "upstreamSourceWritable": false,
+  "workerDescendantsStoppedWithAppWindow": true
+}

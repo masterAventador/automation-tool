@@ -10,6 +10,7 @@ rust-version = "1.88"
 desktop-test-driver = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 desktop-e2e = ["desktop-test-driver"]
 control-plane-e2e = ["desktop-test-driver"]
+video-studio-e2e = ["desktop-e2e"]
 
 [lib]
 name = "automation_tool_desktop_lib"

@@ -1,0 +1,66 @@
+name: Video media toolchain
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/embedded-browser-video-studio
+    paths:
+      - "contracts/video/ffmpeg-toolchain.v1.json"
+      - "scripts/build_video_media_toolchain.sh"
+      - "scripts/check_video_media_toolchain.py"
+      - ".github/workflows/video-media-toolchain.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Build from locked sources
+        run: scripts/build_video_media_toolchain.sh macos-arm64 frontend/src-tauri/resources/media-toolchain
+      - name: Validate capabilities and compatibility smoke
+        run: python3 scripts/check_video_media_toolchain.py --candidate frontend/src-tauri/resources/media-toolchain --target macos-arm64
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: video-media-toolchain-macos-arm64
+          path: frontend/src-tauri/resources/media-toolchain
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows-x86-64:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            curl
+            diffutils
+            make
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-zlib
+            nasm
+            tar
+            xz
+      - name: Build from locked sources
+        run: scripts/build_video_media_toolchain.sh windows-x86_64 frontend/src-tauri/resources/media-toolchain
+      - name: Validate capabilities and compatibility smoke
+        shell: pwsh
+        run: python scripts/check_video_media_toolchain.py --candidate frontend/src-tauri/resources/media-toolchain --target windows-x86_64
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: video-media-toolchain-windows-x86-64
+          path: frontend/src-tauri/resources/media-toolchain
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,25 @@
+{
+  "history": [
+    {
+      "model_output": null,
+      "result": [
+        {
+          "is_done": true,
+          "success": true,
+          "extracted_content": "published",
+          "include_extracted_content_only_once": false,
+          "include_in_memory": false
+        }
+      ],
+      "state": {
+        "tabs": [],
+        "screenshot_path": null,
+        "interacted_element": [],
+        "url": "https://example.invalid/success",
+        "title": "Success"
+      },
+      "metadata": null,
+      "state_message": null
+    }
+  ]
+}
