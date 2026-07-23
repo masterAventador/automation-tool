@@ -113,7 +113,11 @@ test("P9-05 rejects misplaced Executors, links, and incomplete package trust met
 
   const linked = await createBundle();
   try {
-    await symlink(join(linked.executor, "executor-manifest.v1.json"), join(linked.bundle, "linked"));
+    await symlink(
+      linked.executor,
+      join(linked.bundle, "linked"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
     await assert.rejects(
       auditReleaseBundle({
         bundleRoot: linked.bundle,

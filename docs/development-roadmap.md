@@ -556,8 +556,8 @@
 严格按顺序：
 
 1. `P9-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor`，真实候选 365 个文件、148 个 PE 文件、157,924,248 bytes，PE/依赖、Manifest、冻结入口、UIAutomation 和 Job Object 清理全部通过；
-2. `P9-04`（🔍 待正式 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；安装根 369 个文件、177,635,120 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过；正式发布仍需同 signer/证书链/时间戳/SmartScreen 验收；
-3. `P9-05`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-05-package-audit` GREEN；真实 NSIS 安装根扫描 `369 files / 177,635,120 bytes`，与 macOS build App/只读 DMG 内 App 一并确认无 WebDriver、调试 origin、测试凭据、运行期 Profile/SQLite/日志/诊断、用户素材和私钥，随后卸载零残留；
+2. `P9-04`（🔍 待正式 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；合并当日最新 `main` 后复验安装根 369 个文件、177,616,688 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过；正式发布仍需同 signer/证书链/时间戳/SmartScreen 验收；
+3. `P9-05`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-05-package-audit` GREEN；合并当日最新 `main` 后复验真实 NSIS 安装根 `369 files / 177,616,688 bytes`，与 macOS build App/只读 DMG 内 App 一并确认无 WebDriver、调试 origin、测试凭据、运行期 Profile/SQLite/日志/诊断、用户素材和私钥，随后卸载零残留；
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
 5. `P9-07`（🔍 待设备验收）：正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor/私有浏览器、主 PID 强停恢复、正式卸载和最小 ACL 证据 runner 已就绪；等待 Windows/签名包/授权账号/本地服务注册链补事实；
 6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
