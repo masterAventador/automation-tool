@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "policy": "fail_closed",
+  "verified_at": "2026-07-24",
+  "compatible_api": "openai_chat_completions",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "region": "cn-beijing",
+  "vision_default_model_id": "qwen3.7-max-2026-06-08",
+  "models": [
+    {
+      "model_id": "qwen3.7-max-2026-06-08",
+      "display_name": "通义千问 3.7 Max（多模态）",
+      "text": true,
+      "vision": true,
+      "function_calling": true,
+      "structured_output": true,
+      "context_window": 131072,
+      "dom_only_acceptance_required": false,
+      "source": "https://help.aliyun.com/zh/model-studio/vision/"
+    },
+    {
+      "model_id": "glm-5.2",
+      "display_name": "智谱 GLM 5.2",
+      "text": true,
+      "vision": false,
+      "function_calling": true,
+      "structured_output": true,
+      "context_window": 131072,
+      "dom_only_acceptance_required": true,
+      "source": "https://help.aliyun.com/zh/model-studio/glm"
+    },
+    {
+      "model_id": "deepseek-v4-pro",
+      "display_name": "DeepSeek V4 Pro",
+      "text": true,
+      "vision": false,
+      "function_calling": false,
+      "structured_output": true,
+      "context_window": 131072,
+      "dom_only_acceptance_required": true,
+      "source": "https://help.aliyun.com/zh/model-studio/deepseek-api"
+    }
+  ]
+}

@@ -551,10 +551,10 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | 状态 | 数量 |
 | --- | ---: |
-| ⬜ 未开始 | 24 |
+| ⬜ 未开始 | 23 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 18 |
+| 🔍 待验收 | 19 |
 | ✅ 已完成 | 36 |
 | ⏸ 后置 | 9 |
 
@@ -611,7 +611,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | BU-03 | 受限 Agent 与 Tools | 只保留观察、同域导航、点击、输入、选择、滚动和受控上传；结构化结果、allowed_domains/routes、步骤/时长/批量动作上限；移除任意 JS/文件/下载/跨域/Shell | BU-02 | ✅ 已完成 |
 | BU-04 | 页面动作所有权租约 | 建立 `BrowserSurfaceLease`；抖音发布时 Browser Use 经 CDP 独占运营浏览器动作权，暂停原 Playwright 执行器，超时/崩溃必定断开 CDP 并归还 | BU-02,EB-07 | ✅ 已完成 |
 | BU-05 | 安全策略与确认门禁 | 页面内容不可信、敏感数据发送前确认、外部副作用临界点确认、ActionGate/ledger/Verifier 复用；模型历史、DOM 和截图脱敏且不持有 Cookie/token | BU-03,BU-04 | ✅ 已完成 |
-| BU-06 | 百炼模型与受限能力接入 | `ChatOpenAI` 指向百炼兼容地址；锁最新稳定模型及能力快照，视觉默认 qwen3.7-max 最新多模态版本，DeepSeek/GLM 仅在 DOM-only 验收后可选；无通用 Browser Use 菜单 | BU-05,VF-05 | ⬜ 未开始 |
+| BU-06 | 百炼模型与受限能力接入 | `ChatOpenAI` 指向百炼兼容地址；锁最新稳定模型及能力快照，视觉默认 qwen3.7-max 最新多模态版本，DeepSeek/GLM 仅在 DOM-only 验收后可选；无通用 Browser Use 菜单 | BU-05,VF-05 | 🔍 待验收 |
 | BU-07 | 双平台正式包与攻击矩阵 | macOS/Windows 正式包使用唯一 Chromium 完成独立 Agent 与租约接管；覆盖 prompt injection、DOM/截图差异、模型不兼容、断网、超时、并发租约、CDP 暴露、进程清理和零真实副作用 | BU-06,EB-16 | ⬜ 未开始 |
 
 ### 9.4 视频基础（7 项）
