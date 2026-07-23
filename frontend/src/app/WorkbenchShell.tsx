@@ -35,7 +35,6 @@ import {
   PlatformSessionGatewayError,
   type PlatformSessionGateway,
 } from "../features/platform-sessions/platform-session-gateway";
-import { BrowserSettings } from "../features/settings/BrowserSettings";
 import type { PlatformAdapter } from "../platform/types";
 import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
@@ -145,12 +144,6 @@ const shellTaskTargetResultSource: TaskTargetResultSource = {
 };
 
 const shellPlatformAdapter: PlatformAdapter = {
-  async getBrowserSettings() {
-    return { availableBrowsers: [], selectedBrowser: null };
-  },
-  async selectBrowser() {
-    throw new Error("Browser selection is unavailable");
-  },
   async getExecutorStatus() {
     return { state: "stopped", version: null, buildId: null, restartCount: 0 };
   },
@@ -462,7 +455,6 @@ export function WorkbenchShell({
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />
                 <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
-                <BrowserSettings platform={platformAdapter} />
                 <Diagnostics platform={platformAdapter} />
               </Space>
             ) : showingTaskRun && selectedTaskId !== null ? (

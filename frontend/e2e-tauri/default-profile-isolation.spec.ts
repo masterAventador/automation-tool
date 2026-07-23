@@ -34,9 +34,6 @@ describe("B5-16 default browser Profile isolation", () => {
       core.invoke("prepare_platform_session_reuse_for_acceptance"),
     )) as Preparation;
     assert.match(preparation.installationId, UUID_V4);
-    await browser.tauri.execute(({ core }) =>
-      core.invoke("select_browser", { browser: "google_chrome" }),
-    );
 
     await browser.$("li=平台状态").click();
     await expect(await browser.$("h2")).toHaveText("平台状态");
