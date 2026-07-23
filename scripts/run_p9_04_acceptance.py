@@ -50,6 +50,8 @@ UPDATE_PUBLIC_KEY = base64.b64encode(
     b"RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
 ).decode()
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_TAURI_UNKNOWN_BUNDLE_MARKER = b"BUNDLE_TYPE_VAR_UNK"
+_TAURI_NSIS_BUNDLE_MARKER = b"BUNDLE_TYPE_VAR_NSS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,17 +103,33 @@ def run_checked(
 
 
 def run_powershell(script: str, *arguments: str) -> str:
-    completed = run_checked(
+    payload = json.dumps(
+        {"script": script, "arguments": list(arguments)},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    bootstrap = (
+        "$P904Payload=ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd());"
+        "$P904Arguments=@($P904Payload.arguments);"
+        "$P904Script=[ScriptBlock]::Create([string]$P904Payload.script);"
+        "& $P904Script @P904Arguments"
+    )
+    completed = subprocess.run(
         [
             powershell_executable(),
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            script,
-            *arguments,
+            bootstrap,
         ],
-        capture=True,
+        cwd=FRONTEND_ROOT,
+        env=installer_environment(),
+        check=True,
+        text=True,
+        input=payload,
+        capture_output=True,
+        timeout=1800,
     )
     return completed.stdout.strip()
 
@@ -134,6 +152,22 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def expected_nsis_binary_sha256(path: Path) -> str:
+    built_binary = path.read_bytes()
+    if (
+        len(_TAURI_UNKNOWN_BUNDLE_MARKER) != len(_TAURI_NSIS_BUNDLE_MARKER)
+        or built_binary.count(_TAURI_UNKNOWN_BUNDLE_MARKER) != 1
+        or _TAURI_NSIS_BUNDLE_MARKER in built_binary
+    ):
+        raise RuntimeError("P9-04 built binary has an invalid Tauri bundle marker")
+    bundled_binary = built_binary.replace(
+        _TAURI_UNKNOWN_BUNDLE_MARKER,
+        _TAURI_NSIS_BUNDLE_MARKER,
+        1,
+    )
+    return hashlib.sha256(bundled_binary).hexdigest()
+
+
 def package_files(root: Path) -> dict[str, tuple[int, str]]:
     result: dict[str, tuple[int, str]] = {}
     for path in sorted(root.rglob("*")):
@@ -141,7 +175,9 @@ def package_files(root: Path) -> dict[str, tuple[int, str]]:
         if stat.S_ISLNK(metadata.st_mode) or bool(
             getattr(metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
         ):
-            raise RuntimeError("P9-04 bundled Executor contains a link or reparse point")
+            raise RuntimeError(
+                "P9-04 bundled Executor contains a link or reparse point"
+            )
         if not stat.S_ISDIR(metadata.st_mode) and not stat.S_ISREG(metadata.st_mode):
             raise RuntimeError("P9-04 bundled Executor contains a special file")
         if stat.S_ISREG(metadata.st_mode):
@@ -187,7 +223,9 @@ def audit_release_bundle(bundle: Path, package: Path) -> None:
 
 
 def require_candidate_configuration() -> dict[str, Any]:
-    configuration: dict[str, Any] = json.loads(CANDIDATE_TAURI_CONFIG.read_text(encoding="utf-8"))
+    configuration: dict[str, Any] = json.loads(
+        CANDIDATE_TAURI_CONFIG.read_text(encoding="utf-8")
+    )
     bundle = configuration.get("bundle", {})
     windows = bundle.get("windows", {})
     nsis = windows.get("nsis", {})
@@ -206,7 +244,16 @@ def require_candidate_configuration() -> dict[str, Any]:
     return configuration
 
 
-def write_acceptance_configuration(temporary: Path, executor: Path, base: dict[str, Any]) -> Path:
+def write_acceptance_configuration(
+    temporary: Path, executor: Path, base: dict[str, Any]
+) -> Path:
+    executor_resource_source = os.path.relpath(executor, TAURI_ROOT).replace(
+        os.sep, "/"
+    )
+    if os.path.isabs(executor_resource_source) or ":" in executor_resource_source:
+        raise RuntimeError(
+            "P9-04 Executor resource source must be relative to the Tauri root"
+        )
     configuration: dict[str, Any] = json.loads(json.dumps(base))
     configuration.update(
         {
@@ -216,7 +263,7 @@ def write_acceptance_configuration(temporary: Path, executor: Path, base: dict[s
         }
     )
     configuration["bundle"]["resources"] = {
-        f"{os.fspath(executor)}{os.sep}": f"{EXECUTOR_RESOURCE.as_posix()}/"
+        f"{executor_resource_source}/": f"{EXECUTOR_RESOURCE.as_posix()}/"
     }
     destination = temporary / "tauri.p9-04.generated.json"
     destination.write_text(
@@ -260,23 +307,42 @@ def installer_environment() -> dict[str, str]:
     }
 
 
-def authenticode_status(path: Path) -> str:
-    return run_powershell(
-        "& { param([string]$LiteralPath) "
-        "(Get-AuthenticodeSignature -LiteralPath $LiteralPath).Status.ToString() }",
+def authenticode_facts(path: Path) -> dict[str, Any]:
+    output = run_powershell(
+        "param([string]$LiteralPath);"
+        "$signature=Get-AuthenticodeSignature -LiteralPath $LiteralPath;"
+        "[PSCustomObject]@{"
+        "status=$signature.Status.ToString();"
+        "hasSigner=($null -ne $signature.SignerCertificate);"
+        "hasTimestamp=($null -ne $signature.TimeStamperCertificate)"
+        "} | ConvertTo-Json -Compress",
         os.fspath(path),
     )
+    facts: Any = json.loads(output)
+    if (
+        not isinstance(facts, dict)
+        or set(facts) != {"status", "hasSigner", "hasTimestamp"}
+        or not isinstance(facts["status"], str)
+        or not isinstance(facts["hasSigner"], bool)
+        or not isinstance(facts["hasTimestamp"], bool)
+    ):
+        raise RuntimeError("P9-04 Authenticode facts are invalid")
+    return facts
 
 
 def require_unsigned(path: Path) -> None:
-    if authenticode_status(path) != "NotSigned":
-        raise RuntimeError("P9-04 ordinary candidate signing status is inconsistent")
+    facts = authenticode_facts(path)
+    if facts["status"] != "NotSigned" or facts["hasSigner"] or facts["hasTimestamp"]:
+        raise RuntimeError(
+            "P9-04 ordinary candidate signing status is inconsistent "
+            f"({json.dumps(facts, sort_keys=True)})"
+        )
 
 
 def require_file_version(path: Path) -> None:
     version = run_powershell(
-        "& { param([string]$LiteralPath) "
-        "(Get-Item -LiteralPath $LiteralPath).VersionInfo.ProductVersion }",
+        "param([string]$LiteralPath);"
+        "(Get-Item -LiteralPath $LiteralPath).VersionInfo.ProductVersion",
         os.fspath(path),
     ).split("+")[0]
     if version not in {"0.1.0", "0.1.0.0"}:
@@ -287,17 +353,35 @@ def normalized_windows_path(path: Path) -> str:
     return os.path.normcase(os.path.abspath(path))
 
 
+def parse_windows_registry_path(value: Any) -> Path:
+    literal = str(value).strip()
+    if literal.startswith('"') or literal.endswith('"'):
+        if not (literal.startswith('"') and literal.endswith('"')):
+            raise RuntimeError("P9-04 Windows registry path has unbalanced quoting")
+        literal = literal[1:-1]
+    if not literal or '"' in literal:
+        raise RuntimeError("P9-04 Windows registry path is invalid")
+    path = Path(literal)
+    if not path.is_absolute():
+        raise RuntimeError("P9-04 Windows registry path is not absolute")
+    return path
+
+
 def install_root() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         raise RuntimeError("P9-04 Windows local AppData is unavailable")
     root = Path(local_app_data) / PRODUCT_NAME
-    if normalized_windows_path(root.parent) != normalized_windows_path(Path(local_app_data)):
+    if normalized_windows_path(root.parent) != normalized_windows_path(
+        Path(local_app_data)
+    ):
         raise RuntimeError("P9-04 Windows install root is outside LocalAppData")
     return root
 
 
-def windows_registry_installations(*, machine_wide: bool) -> list[WindowsRegistryInstallation]:
+def windows_registry_installations(
+    *, machine_wide: bool
+) -> list[WindowsRegistryInstallation]:
     winreg: Any = importlib.import_module("winreg")
 
     hive = winreg.HKEY_LOCAL_MACHINE if machine_wide else winreg.HKEY_CURRENT_USER
@@ -319,30 +403,45 @@ def windows_registry_installations(*, machine_wide: bool) -> list[WindowsRegistr
         with parent:
             for index in range(winreg.QueryInfoKey(parent)[0]):
                 try:
-                    child = winreg.OpenKey(parent, winreg.EnumKey(parent, index))
+                    child = winreg.OpenKey(
+                        parent,
+                        winreg.EnumKey(parent, index),
+                        0,
+                        winreg.KEY_READ | view,
+                    )
                     with child:
-                        display_name = str(winreg.QueryValueEx(child, "DisplayName")[0])
+                        try:
+                            display_name = str(
+                                winreg.QueryValueEx(child, "DisplayName")[0]
+                            )
+                        except OSError:
+                            continue
                         if display_name != PRODUCT_NAME:
                             continue
-                        display_version = str(winreg.QueryValueEx(child, "DisplayVersion")[0])
-                        uninstall_string = str(
-                            winreg.QueryValueEx(child, "UninstallString")[0]
-                        ).strip()
-                        if uninstall_string.casefold() not in {
-                            os.fspath(expected_uninstaller).casefold(),
-                            f'"{expected_uninstaller}"'.casefold(),
-                        }:
+                        try:
+                            display_version = str(
+                                winreg.QueryValueEx(child, "DisplayVersion")[0]
+                            )
+                            uninstaller = parse_windows_registry_path(
+                                winreg.QueryValueEx(child, "UninstallString")[0]
+                            )
+                            location = parse_windows_registry_path(
+                                winreg.QueryValueEx(child, "InstallLocation")[0]
+                            )
+                        except OSError as error:
+                            raise RuntimeError(
+                                "P9-04 Windows uninstall registry record is incomplete"
+                            ) from error
+                        if normalized_windows_path(
+                            uninstaller
+                        ) != normalized_windows_path(expected_uninstaller):
                             raise RuntimeError(
                                 "P9-04 Windows uninstall registry path is unexpected"
                             )
-                        try:
-                            location = Path(str(winreg.QueryValueEx(child, "InstallLocation")[0]))
-                        except OSError:
-                            location = expected_root
                         identity = (
                             display_version.casefold(),
                             normalized_windows_path(location),
-                            normalized_windows_path(expected_uninstaller),
+                            normalized_windows_path(uninstaller),
                         )
                         if identity not in seen:
                             seen.add(identity)
@@ -350,14 +449,47 @@ def windows_registry_installations(*, machine_wide: bool) -> list[WindowsRegistr
                                 WindowsRegistryInstallation(
                                     display_version=display_version,
                                     install_location=location,
-                                    uninstaller=expected_uninstaller,
+                                    uninstaller=uninstaller,
                                 )
                             )
-                except RuntimeError:
-                    raise
                 except OSError:
                     continue
     return records
+
+
+def expected_windows_registry_values(*, machine_wide: bool) -> dict[str, Any]:
+    winreg: Any = importlib.import_module("winreg")
+    hive = winreg.HKEY_LOCAL_MACHINE if machine_wide else winreg.HKEY_CURRENT_USER
+    key_path = (
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall" f"\\{PRODUCT_NAME}"
+    )
+    snapshots: dict[str, Any] = {}
+    for view_name, view in (
+        ("64", winreg.KEY_WOW64_64KEY),
+        ("32", winreg.KEY_WOW64_32KEY),
+    ):
+        try:
+            key = winreg.OpenKey(hive, key_path, 0, winreg.KEY_READ | view)
+        except OSError as error:
+            snapshots[view_name] = {"missing": getattr(error, "winerror", None)}
+            continue
+        with key:
+            values: dict[str, Any] = {}
+            for index in range(winreg.QueryInfoKey(key)[1]):
+                name, value, _kind = winreg.EnumValue(key, index)
+                values[name] = value
+            snapshots[view_name] = values
+    return snapshots
+
+
+def related_installer_processes() -> Any:
+    output = run_powershell(
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.Name -like '*P904*' -or "
+        "$_.ExecutablePath -like '*P904*' } | "
+        "Select-Object ProcessId,Name,ExecutablePath | ConvertTo-Json -Compress"
+    )
+    return json.loads(output) if output else []
 
 
 def one_file(parent: Path, pattern: str, failure: str) -> Path:
@@ -382,20 +514,39 @@ def verify_registry_installation() -> None:
     ) or normalized_windows_path(record.uninstaller) != normalized_windows_path(
         install_root() / "uninstall.exe"
     ):
-        raise RuntimeError("P9-04 Windows registry installation boundary is inconsistent")
+        raise RuntimeError(
+            "P9-04 Windows registry installation boundary is inconsistent"
+        )
 
 
 def wait_for_installation() -> None:
     deadline = time.monotonic() + 60
+    current_user_records: list[WindowsRegistryInstallation] = []
     while time.monotonic() < deadline:
+        current_user_records = windows_registry_installations(machine_wide=False)
         if (
             (install_root() / f"{MAIN_BINARY_NAME}.exe").is_file()
             and (install_root() / "uninstall.exe").is_file()
-            and windows_registry_installations(machine_wide=False)
+            and current_user_records
         ):
             return
         time.sleep(0.1)
-    raise RuntimeError("P9-04 Windows candidate installation did not complete")
+    root = install_root()
+    raise RuntimeError(
+        "P9-04 Windows candidate installation did not complete "
+        f"(root={root.exists()}, "
+        f"binary={(root / f'{MAIN_BINARY_NAME}.exe').is_file()}, "
+        f"uninstaller={(root / 'uninstall.exe').is_file()}, "
+        f"hkcu_records={len(current_user_records)}, "
+        "hklm_records="
+        f"{len(windows_registry_installations(machine_wide=True))}, "
+        "hkcu_expected_key="
+        f"{json.dumps(expected_windows_registry_values(machine_wide=False), sort_keys=True)}, "
+        "hklm_expected_key="
+        f"{json.dumps(expected_windows_registry_values(machine_wide=True), sort_keys=True)}, "
+        "related_processes="
+        f"{json.dumps(related_installer_processes(), sort_keys=True)})"
+    )
 
 
 def uninstall_owned_application() -> None:
@@ -421,7 +572,7 @@ def uninstall_owned_application() -> None:
 def verify_installed_candidate(
     *,
     architecture: str,
-    expected_binary_sha256: str,
+    built_binary: Path,
     expected_inventory: dict[str, tuple[int, str]],
     private_key: Ed25519PrivateKey,
     temporary: Path,
@@ -433,8 +584,14 @@ def verify_installed_candidate(
     require_unsigned(binary)
     require_unsigned(uninstaller)
     require_file_version(binary)
-    if sha256(binary) != expected_binary_sha256:
-        raise RuntimeError("P9-04 installed Windows binary is not the built candidate")
+    expected_binary_sha256 = expected_nsis_binary_sha256(built_binary)
+    installed_binary_sha256 = sha256(binary)
+    if installed_binary_sha256 != expected_binary_sha256:
+        raise RuntimeError(
+            "P9-04 installed Windows binary is not the built candidate "
+            f"(expected_nsis_sha256={expected_binary_sha256}, "
+            f"installed_sha256={installed_binary_sha256})"
+        )
     verify_registry_installation()
     audit = audit_windows_executor_candidate(
         bundle_directory=package,
@@ -460,7 +617,17 @@ def main() -> int:
         raise RuntimeError("P9-04 isolated acceptance installation is already occupied")
 
     installation_claimed = False
-    with tempfile.TemporaryDirectory(prefix="automation-tool-p904-acceptance-") as raw:
+    local_acceptance_root = REPOSITORY_ROOT / ".local"
+    local_acceptance_root.mkdir(exist_ok=True)
+    local_root_metadata = local_acceptance_root.lstat()
+    if not stat.S_ISDIR(local_root_metadata.st_mode) or bool(
+        getattr(local_root_metadata, "st_file_attributes", 0)
+        & _FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise RuntimeError("P9-04 local acceptance root is unavailable")
+    with tempfile.TemporaryDirectory(
+        prefix="automation-tool-p904-acceptance-", dir=local_acceptance_root
+    ) as raw:
         temporary = Path(raw).resolve(strict=True)
         executor = temporary / "executor" / "automation-tool-executor"
         print("[P9-04] Building the isolated P9-02 Executor candidate")
@@ -485,7 +652,9 @@ def main() -> int:
         verify_manifest_signature(executor, private_key)
         expected_inventory = package_files(executor)
 
-        configuration = write_acceptance_configuration(temporary, executor, base_configuration)
+        configuration = write_acceptance_configuration(
+            temporary, executor, base_configuration
+        )
         target = temporary / "tauri-target"
         environment = release_environment(target, public_key)
         print("[P9-04] Building one production-mode ordinary NSIS candidate")
@@ -512,7 +681,6 @@ def main() -> int:
         require_unsigned(binary)
         require_unsigned(installer)
         require_file_version(binary)
-        expected_binary_sha256 = sha256(binary)
         run_checked(
             [
                 "node",
@@ -539,7 +707,7 @@ def main() -> int:
             wait_for_installation()
             installed_files, installed_bytes = verify_installed_candidate(
                 architecture=architecture,
-                expected_binary_sha256=expected_binary_sha256,
+                built_binary=binary,
                 expected_inventory=expected_inventory,
                 private_key=private_key,
                 temporary=temporary,
