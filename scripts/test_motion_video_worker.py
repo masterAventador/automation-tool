@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -15,22 +14,19 @@ WORKER = ROOT / "workers/motion_composition/worker.mjs"
 
 
 def run_worker(payload: str) -> subprocess.CompletedProcess[str]:
+    node = os.environ.get("BM02_NODE", shutil_which_node())
+    environment = {"PATH": ""}
+    if os.name == "nt":
+        for key in ("SYSTEMROOT", "WINDIR"):
+            if key in os.environ:
+                environment[key] = os.environ[key]
     return subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import os; os.execv(os.environ['BM02_NODE'], "
-            "[os.environ['BM02_NODE'], os.environ['BM02_WORKER']])",
-        ],
+        [node, str(WORKER)],
         input=payload,
         capture_output=True,
         text=True,
         timeout=10,
-        env={
-            "BM02_NODE": os.environ.get("BM02_NODE", shutil_which_node()),
-            "BM02_WORKER": str(WORKER),
-            "PATH": "",
-        },
+        env=environment,
     )
 
 
