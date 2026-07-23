@@ -1,0 +1,5049 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "id": "hyperframes",
+    "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+    "tag": "v0.7.68"
+  },
+  "codeLicense": {
+    "spdx": "Apache-2.0",
+    "coverage": "repository_source_only",
+    "note": "Apache-2.0 covers upstream code; it does not grant likeness, font, audio, trademark or third-party sample-asset redistribution rights."
+  },
+  "conclusions": [
+    "cleared",
+    "needs_localization",
+    "needs_asset_replacement",
+    "needs_localization_and_asset_replacement"
+  ],
+  "remoteDependencyCategories": [
+    "cloudflare_cdn",
+    "google_fonts_css",
+    "google_fonts_static",
+    "gstatic_draco",
+    "jsdelivr",
+    "placeholder_text"
+  ],
+  "assetKinds": [
+    "audio",
+    "font",
+    "image",
+    "model_3d",
+    "script",
+    "vector"
+  ],
+  "gpuTiers": [
+    "dom_css",
+    "canvas_2d",
+    "webgl",
+    "webgpu"
+  ],
+  "remoteDependencyPackages": [
+    {
+      "package": "d3",
+      "itemCount": 5,
+      "assumedLicense": "ISC",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "draco-decoder",
+      "itemCount": 3,
+      "assumedLicense": "Apache-2.0",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "es-atlas",
+      "itemCount": 1,
+      "assumedLicense": "unverified",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "gsap",
+      "itemCount": 125,
+      "assumedLicense": "GSAP Standard License (Webflow)",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "three",
+      "itemCount": 10,
+      "assumedLicense": "MIT",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "three.js",
+      "itemCount": 4,
+      "assumedLicense": "MIT",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "topojson-client",
+      "itemCount": 5,
+      "assumedLicense": "ISC",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "us-atlas",
+      "itemCount": 3,
+      "assumedLicense": "ISC",
+      "verification": "pending_bm12_localization"
+    },
+    {
+      "package": "world-atlas",
+      "itemCount": 1,
+      "assumedLicense": "ISC",
+      "verification": "pending_bm12_localization"
+    }
+  ],
+  "stats": {
+    "itemsWithRuntimeRemoteDependencies": 125,
+    "remoteDependencyCategoryCounts": {
+      "cloudflare_cdn": 4,
+      "google_fonts_css": 54,
+      "google_fonts_static": 34,
+      "gstatic_draco": 3,
+      "jsdelivr": 125,
+      "placeholder_text": 1
+    },
+    "itemsWithMapData": 5,
+    "itemsWithBundledSampleAssets": 28,
+    "itemsWithTrademarkIndicators": 68,
+    "gpuTierCounts": {
+      "dom_css": 88,
+      "canvas_2d": 16,
+      "webgl": 25,
+      "webgpu": 5
+    },
+    "googleFontFamilyCount": 18,
+    "conclusionCounts": {
+      "cleared": 7,
+      "needs_asset_replacement": 2,
+      "needs_localization": 57,
+      "needs_localization_and_asset_replacement": 68
+    }
+  },
+  "items": [
+    {
+      "name": "app-showcase",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "DM Sans"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "apple-money-count",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/sfx-production.wav",
+          "kind": "audio"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "youtube"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "blue-sweater-intro-video",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/joe-sai-avatar.png",
+          "kind": "image"
+        },
+        {
+          "path": "assets/sfx/integrated-melodic-tech-mix.wav",
+          "kind": "audio"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-blend-difference",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "caption-clip-wipe",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Poppins:wght@800&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Poppins"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-editorial-emphasis",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400&family=Playfair+Display:ital,wght@0,800;1,800&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter",
+        "Playfair Display"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-emoji-pop",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Gabarito:wght@900&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Gabarito"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-glitch-rgb",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Space Grotesk"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-gradient-fill",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Montserrat:wght@900&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Montserrat"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-highlight",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Montserrat"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes",
+        "tiktok"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-kinetic-slam",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Anton&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Anton"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-matrix-decode",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Space Grotesk"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-neon-accent",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Montserrat"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-neon-glow",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Outfit:wght@900&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Outfit"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-parallax-layers",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Instrument Serif"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-particle-burst",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Outfit:wght@900&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Outfit"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-pill-karaoke",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Poppins"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-texture",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Anton&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Anton"
+      ],
+      "bundledAssets": [
+        {
+          "path": "concrete-042-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "lava.png",
+          "kind": "image"
+        },
+        {
+          "path": "marble-012.png",
+          "kind": "image"
+        },
+        {
+          "path": "metal-046-b.png",
+          "kind": "image"
+        },
+        {
+          "path": "rock-058.png",
+          "kind": "image"
+        },
+        {
+          "path": "wood-066.png",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "caption-weight-shift",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Montserrat:wght@300;700&display=swap",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Montserrat"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "chromatic-radial-split",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "cinematic-zoom",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "code-3d-extrude",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "code-diff",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-highlight",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-morph",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-particle-assemble",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "code-scroll",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-shader-dissolve",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "code-snippet-apple-terminal-basic",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-dark",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-light",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-grass",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-homebrew",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-man-page",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-novel",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "hyperframes",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-ocean",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-pro",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-red-sands",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr",
+          "placeholder_text"
+        ],
+        "domains": [
+          "api.example.com",
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://api.example.com/status",
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-silver-aerogel",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-apple-terminal-solid-colors",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "hyperframes",
+        "sf_pro"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-dark-2026",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-dark-modern",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-dark-plus",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-flight",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-high-contrast",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-high-contrast-light",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-light-2026",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-light-modern",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-light-plus",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-monokai",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-solarized-light",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-visual-studio-dark",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-snippet-visual-studio-light",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "background.jpeg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "visual_studio",
+        "vscode"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "code-typing",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "cross-warp-morph",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "data-chart",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Libre+Franklin:wght@300;400;600&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Libre Baskerville",
+        "Libre Franklin"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "domain-warp-dissolve",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "flash-through-white",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "flowchart",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "flowchart-vertical",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "glitch",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "grain-overlay",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "gravitational-lens",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "grid-pixelate-wipe",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "instagram-follow",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "DM Sans"
+      ],
+      "bundledAssets": [
+        {
+          "path": "assets/avatar.jpg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "heygen",
+        "instagram"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "ios26-liquid-glass",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "gstatic_draco",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "www.gstatic.com"
+        ],
+        "packages": [
+          "draco-decoder",
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js",
+          "https://www.gstatic.com/draco/versioned/decoders/1.5.6/"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/icons/books.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/brave.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/calendar.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/chatgpt.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/contacts.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/files.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/find-my.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/fitness.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/gmail.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/home.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/instagram.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/itunes-store.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/messages.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/music.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/notify-messages.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/phone.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/photos.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/proton-mail.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/revolut.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/slack.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/stocks.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/translate.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/watch.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/weather.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/whatsapp.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/x.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "kind": "script"
+        },
+        {
+          "path": "models/iphone.glb",
+          "kind": "model_3d"
+        }
+      ],
+      "embeddedProvenanceMarkers": [
+        "creative_commons",
+        "sketchfab"
+      ],
+      "gpuRequirement": "webgpu",
+      "trademarkIndicators": [
+        "hyperframes",
+        "instagram",
+        "ios",
+        "iphone",
+        "macbook",
+        "spotify"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "light-leak",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "liquid-glass-context-menu",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "cloudflare_cdn",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "cdnjs.cloudflare.com"
+        ],
+        "packages": [
+          "gsap",
+          "three.js"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "kind": "script"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgpu",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "liquid-glass-media-controls",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "cloudflare_cdn",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "cdnjs.cloudflare.com"
+        ],
+        "packages": [
+          "gsap",
+          "three.js"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "kind": "script"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgpu",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "liquid-glass-notification",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "cloudflare_cdn",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "cdnjs.cloudflare.com"
+        ],
+        "packages": [
+          "gsap",
+          "three.js"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/hyperframes-logo-dark.svg",
+          "kind": "vector"
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "kind": "script"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgpu",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "liquid-glass-widgets",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "cloudflare_cdn",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "cdnjs.cloudflare.com"
+        ],
+        "packages": [
+          "gsap",
+          "three.js"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/hyperframes-logo-dark.svg",
+          "kind": "vector"
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "kind": "script"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgpu",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "logo-outro",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lower-third-bild",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/fonts/BarlowCondensed-Bold.woff2",
+          "kind": "font"
+        },
+        {
+          "path": "assets/fonts/BarlowCondensed-ExtraBold.woff2",
+          "kind": "font"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "bild"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "lt-accent-underline",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-bold-block",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-clean-bar",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-color-block",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-dark-card",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-kicker-name",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-mask-reveal",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-side-rule",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-soft-pill",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "lt-stack-bars",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "macos-notification",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes",
+        "macos"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "macos-tahoe-liquid-glass",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "gstatic_draco",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "www.gstatic.com"
+        ],
+        "packages": [
+          "draco-decoder",
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js",
+          "https://www.gstatic.com/draco/versioned/decoders/1.5.6/"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/icons/brave.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/calendar.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/dock-finder.png",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/dock-mail.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/dock-music.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/dock-photos.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/dock-safari.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/files.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/finder.png",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/mail.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/messages.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/music.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/photos.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/safari.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/slack.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/icons/toast-messages.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "assets/wallpapers/golden-gate-bridge-san-francisco-5k-0g.jpg",
+          "kind": "image"
+        },
+        {
+          "path": "models/macbook.glb",
+          "kind": "model_3d"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [
+        "apple",
+        "hyperframes",
+        "iphone",
+        "macbook",
+        "macos",
+        "spotify"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "morph-text",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Figtree:wght@900&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Figtree"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "motion-blur",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_asset_replacement"
+    },
+    {
+      "name": "news-ticker",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "north-korea-locked-down",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/korea-map.png",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "youtube"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "nyc-paris-flight",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/map-nyc-paris.png",
+          "kind": "image"
+        },
+        {
+          "path": "assets/sfx-mix.wav",
+          "kind": "audio"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "youtube"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "parallax-unzoom",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "parallax-zoom",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "reddit-post",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "DM Sans"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes",
+        "reddit"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "ridged-burn",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "ripple-waves",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "sdf-iris",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "shimmer-sweep",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "spain-map",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "d3",
+          "es-atlas",
+          "gsap",
+          "topojson-client"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js",
+          "https://cdn.jsdelivr.net/npm/es-atlas@0.6.0/es/autonomous_regions.json",
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": true,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "spotify-card",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "heygen",
+        "hyperframes",
+        "spotify"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "swirl-vortex",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "texture-mask-text",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "masks/asphalt-031.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/bark-014.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/brick.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/bricks-075-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/bricks-101.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/bricks-102.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/bricks-104.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/carpet.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/concrete-034.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/concrete-042-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/concrete-046.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/concrete-047-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/concrete.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/diamond-plate-009.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/fabric-080.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/fabric-083.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/grass-001.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/grass-004.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/grass-005.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/ground-037.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/ground-054.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/ground-068.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/ground-080.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/ground-103.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/ground-104.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/lava.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/leather-037.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/marble-012.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/marble-016.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-032.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-038.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-041-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-046-b.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-048-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-049-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-055-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal-061-b.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/metal.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/onyx.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/painted-plaster-017.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/paving-stones-138.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/paving-stones-150.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/plaster-001.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/road-007.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/road-008-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/road-009-c.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/road-012-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/road-012-b.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/road-013-a.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/rock-058.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/rock-063.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/rock.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/snow-015.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/snow.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/tiles-138.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/travertine-009.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-049.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-051.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-058.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-066.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-092.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-094.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-floor-051.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-floor-064.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood-floor-070.png",
+          "kind": "image"
+        },
+        {
+          "path": "masks/wood.png",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_asset_replacement"
+    },
+    {
+      "name": "thermal-distortion",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "tiktok-follow",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "DM Sans"
+      ],
+      "bundledAssets": [
+        {
+          "path": "assets/avatar.jpg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "heygen",
+        "tiktok"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "transitions-3d",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-blur",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-cover",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-destruction",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "canvas_2d",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-dissolve",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-distortion",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-grid",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-light",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-mechanical",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-other",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-push",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-radial",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "transitions-scale",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "ui-3d-reveal",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "heygen"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "us-map",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "d3",
+          "gsap",
+          "topojson-client",
+          "us-atlas"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js",
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+          "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": true,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "us-map-bubble",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "d3",
+          "gsap",
+          "topojson-client",
+          "us-atlas"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js",
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+          "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": true,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "us-map-flow",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "d3",
+          "gsap",
+          "topojson-client",
+          "us-atlas"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js",
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+          "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": true,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "us-map-hex",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "vfx-iphone-device",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "gstatic_draco",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "www.gstatic.com"
+        ],
+        "packages": [
+          "draco-decoder",
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/DRACOLoader.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js",
+          "https://www.gstatic.com/draco/versioned/decoders/1.5.6/"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "models/hyperframes-desktop.png",
+          "kind": "image"
+        },
+        {
+          "path": "models/hyperframes-mobile.png",
+          "kind": "image"
+        },
+        {
+          "path": "models/iphone.glb",
+          "kind": "model_3d"
+        },
+        {
+          "path": "models/macbook.glb",
+          "kind": "model_3d"
+        }
+      ],
+      "embeddedProvenanceMarkers": [
+        "creative_commons",
+        "sketchfab"
+      ],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [
+        "apple",
+        "hyperframes",
+        "iphone",
+        "macbook",
+        "spotify"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "vfx-liquid-background",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [
+        "apple"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "vfx-liquid-glass",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/EffectComposer.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/RenderPass.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/ShaderPass.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/CopyShader.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "vfx-magnetic",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "vfx-portal",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "vfx-shatter",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap",
+          "three"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "vfx-text-cursor",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800;900&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Big Shoulders Display"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [
+        "hyperframes"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "vignette",
+      "type": "component",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [],
+        "domains": [],
+        "packages": [],
+        "urls": []
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "cleared"
+    },
+    {
+      "name": "vpn-youtube-spot",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [],
+      "bundledAssets": [
+        {
+          "path": "assets/vpn-sfx.wav",
+          "kind": "audio"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "apple",
+        "sf_pro",
+        "youtube"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "whip-pan",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Lato:wght@400;700&display=block"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Bebas Neue",
+        "JetBrains Mono",
+        "Lato",
+        "Space Mono"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "webgl",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "world-map",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "d3",
+          "gsap",
+          "topojson-client",
+          "world-atlas"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js",
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+          "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": true,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization"
+    },
+    {
+      "name": "x-post",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "Inter"
+      ],
+      "bundledAssets": [],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "hyperframes",
+        "twitter"
+      ],
+      "sampleAssetRights": "none",
+      "conclusion": "needs_localization_and_asset_replacement"
+    },
+    {
+      "name": "yt-lower-third",
+      "type": "block",
+      "codeLicense": "Apache-2.0",
+      "remoteDependencies": {
+        "categories": [
+          "google_fonts_css",
+          "google_fonts_static",
+          "jsdelivr"
+        ],
+        "domains": [
+          "cdn.jsdelivr.net",
+          "fonts.googleapis.com",
+          "fonts.gstatic.com"
+        ],
+        "packages": [
+          "gsap"
+        ],
+        "urls": [
+          "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js",
+          "https://fonts.googleapis.com",
+          "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=block",
+          "https://fonts.gstatic.com"
+        ]
+      },
+      "mapData": false,
+      "googleFontFamilies": [
+        "DM Sans"
+      ],
+      "bundledAssets": [
+        {
+          "path": "assets/avatar.jpg",
+          "kind": "image"
+        }
+      ],
+      "embeddedProvenanceMarkers": [],
+      "gpuRequirement": "dom_css",
+      "trademarkIndicators": [
+        "heygen",
+        "youtube"
+      ],
+      "sampleAssetRights": "unverified",
+      "conclusion": "needs_localization_and_asset_replacement"
+    }
+  ]
+}

@@ -1,0 +1,3099 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "id": "hyperframes",
+    "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+    "tag": "v0.7.68",
+    "registryPath": "registry"
+  },
+  "counts": {
+    "total": 134,
+    "blocks": 109,
+    "components": 25,
+    "officialPreview": 100
+  },
+  "categories": [
+    "转场",
+    "字幕",
+    "代码演示",
+    "画面内复杂效果",
+    "人名与身份条",
+    "数据与地图",
+    "社交平台展示",
+    "产品与案例展示",
+    "文字效果",
+    "流程图",
+    "其他"
+  ],
+  "categoryCounts": {
+    "产品与案例展示": 6,
+    "社交平台展示": 8,
+    "文字效果": 5,
+    "字幕": 15,
+    "转场": 30,
+    "代码演示": 33,
+    "数据与地图": 7,
+    "流程图": 2,
+    "其他": 5,
+    "画面内复杂效果": 12,
+    "人名与身份条": 11
+  },
+  "items": [
+    {
+      "name": "app-showcase",
+      "type": "block",
+      "path": "registry/blocks/app-showcase",
+      "title": "App Showcase",
+      "category": "产品与案例展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "app-showcase.html",
+          "target": "compositions/app-showcase.html",
+          "sha256": "c7e1b4d8ec2a2c1f70a8ed67a147ba5c4985074eb475d611b2bec6d921b10ade",
+          "bytes": 32362
+        }
+      ]
+    },
+    {
+      "name": "apple-money-count",
+      "type": "block",
+      "path": "registry/blocks/apple-money-count",
+      "title": "Apple Money Count",
+      "category": "产品与案例展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "apple-money-count.html",
+          "target": "compositions/apple-money-count.html",
+          "sha256": "5c05d36bffa3f6a9f1c85fe00ea76d013591afc34b12d0accbb0776d245f7df4",
+          "bytes": 8108
+        },
+        {
+          "path": "assets/sfx-production.wav",
+          "target": "assets/sfx-production.wav",
+          "sha256": "1f67e32b14a9ed2e9445c6031859054d3ab9b30194f8dd2a03b86aef52635ad9",
+          "bytes": 960044
+        }
+      ]
+    },
+    {
+      "name": "blue-sweater-intro-video",
+      "type": "block",
+      "path": "registry/blocks/blue-sweater-intro-video",
+      "title": "Blue Sweater Intro Video",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "blue-sweater-intro-video.html",
+          "target": "compositions/blue-sweater-intro-video.html",
+          "sha256": "c3389f65b25d84491d0122da307e20235584ee6330f9794598a874c7a1a76bbd",
+          "bytes": 39730
+        },
+        {
+          "path": "assets/joe-sai-avatar.png",
+          "target": "assets/joe-sai-avatar.png",
+          "sha256": "10409e2bcf2a6bc632b41088159aad42fbc1f548bc14e70aba340bb7d360e9a3",
+          "bytes": 2000888
+        },
+        {
+          "path": "assets/sfx/integrated-melodic-tech-mix.wav",
+          "target": "assets/sfx/integrated-melodic-tech-mix.wav",
+          "sha256": "73c4fffc131648dfb4791e984b78ee41ff3a0cbd680a1ac467e0cc2dfc2ef68f",
+          "bytes": 2304078
+        }
+      ]
+    },
+    {
+      "name": "caption-blend-difference",
+      "type": "component",
+      "path": "registry/components/caption-blend-difference",
+      "title": "Blend Difference",
+      "category": "文字效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-blend-difference.html",
+          "target": "compositions/components/caption-blend-difference.html",
+          "sha256": "82dddc30094cfe03195485f0bf5bad686855732fdadc5a975e4da33eb6447e26",
+          "bytes": 2868
+        }
+      ]
+    },
+    {
+      "name": "caption-clip-wipe",
+      "type": "component",
+      "path": "registry/components/caption-clip-wipe",
+      "title": "Clip Wipe",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-clip-wipe.html",
+          "target": "compositions/components/caption-clip-wipe.html",
+          "sha256": "8b9e06353df3ea3bc0113a9c7ef3e480293a6ed75bee46744b053bf5e02dc5f6",
+          "bytes": 7211
+        }
+      ]
+    },
+    {
+      "name": "caption-editorial-emphasis",
+      "type": "component",
+      "path": "registry/components/caption-editorial-emphasis",
+      "title": "Editorial Emphasis",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-editorial-emphasis.html",
+          "target": "compositions/components/caption-editorial-emphasis.html",
+          "sha256": "6144571b6c73dbdec282284fe2277d3c958e15cddaf362295ba9cca02e705d1c",
+          "bytes": 12117
+        }
+      ]
+    },
+    {
+      "name": "caption-emoji-pop",
+      "type": "component",
+      "path": "registry/components/caption-emoji-pop",
+      "title": "Emoji Pop",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-emoji-pop.html",
+          "target": "compositions/components/caption-emoji-pop.html",
+          "sha256": "79e7cad5cf54dec70e7af59c8d0583531017bacca6bc9ee057bfad386904eb9b",
+          "bytes": 14146
+        }
+      ]
+    },
+    {
+      "name": "caption-glitch-rgb",
+      "type": "component",
+      "path": "registry/components/caption-glitch-rgb",
+      "title": "Glitch RGB",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-glitch-rgb.html",
+          "target": "compositions/components/caption-glitch-rgb.html",
+          "sha256": "65e588d27515cde0e361cddd6034a3dad647a86f50c02847c6cc453619d58648",
+          "bytes": 10882
+        }
+      ]
+    },
+    {
+      "name": "caption-gradient-fill",
+      "type": "component",
+      "path": "registry/components/caption-gradient-fill",
+      "title": "Gradient Fill",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-gradient-fill.html",
+          "target": "compositions/components/caption-gradient-fill.html",
+          "sha256": "6d08dc0a9f54d25b25590721ec579a3521a0079c70f32b292bd93697384c60ff",
+          "bytes": 7725
+        }
+      ]
+    },
+    {
+      "name": "caption-highlight",
+      "type": "component",
+      "path": "registry/components/caption-highlight",
+      "title": "Highlight",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-highlight.html",
+          "target": "compositions/components/caption-highlight.html",
+          "sha256": "77f877ddcef85e787453daa6724cec5e85a0678fcb098fe94f9b86ce0ef5f2f4",
+          "bytes": 8321
+        }
+      ]
+    },
+    {
+      "name": "caption-kinetic-slam",
+      "type": "component",
+      "path": "registry/components/caption-kinetic-slam",
+      "title": "Kinetic Slam",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-kinetic-slam.html",
+          "target": "compositions/components/caption-kinetic-slam.html",
+          "sha256": "86b7a54e045f626d1375636a2f1cde19c2f3cbdad1df1d7d0204fe6b4452044a",
+          "bytes": 6406
+        }
+      ]
+    },
+    {
+      "name": "caption-matrix-decode",
+      "type": "component",
+      "path": "registry/components/caption-matrix-decode",
+      "title": "Matrix Decode",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-matrix-decode.html",
+          "target": "compositions/components/caption-matrix-decode.html",
+          "sha256": "66ab359937a086c241945ed212f76d85fee4970ca77f29689eb34fd54a0744ae",
+          "bytes": 8521
+        }
+      ]
+    },
+    {
+      "name": "caption-neon-accent",
+      "type": "component",
+      "path": "registry/components/caption-neon-accent",
+      "title": "Neon Accent",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-neon-accent.html",
+          "target": "compositions/components/caption-neon-accent.html",
+          "sha256": "1c4af30ab35c6e3f754157cce2c364c75386f37059d47fa52446bca19200339d",
+          "bytes": 15951
+        }
+      ]
+    },
+    {
+      "name": "caption-neon-glow",
+      "type": "component",
+      "path": "registry/components/caption-neon-glow",
+      "title": "Neon Glow",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-neon-glow.html",
+          "target": "compositions/components/caption-neon-glow.html",
+          "sha256": "dc9d43d58879e1422837c213aa7f8921ca43b58f4e9c77f8463232585e05034c",
+          "bytes": 7444
+        }
+      ]
+    },
+    {
+      "name": "caption-parallax-layers",
+      "type": "component",
+      "path": "registry/components/caption-parallax-layers",
+      "title": "Parallax Layers",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-parallax-layers.html",
+          "target": "compositions/components/caption-parallax-layers.html",
+          "sha256": "e1c14eb380fa7d7b8c84798e40530e946ed140547c61d2e6f5111d712cb72d78",
+          "bytes": 11324
+        }
+      ]
+    },
+    {
+      "name": "caption-particle-burst",
+      "type": "component",
+      "path": "registry/components/caption-particle-burst",
+      "title": "Particle Burst",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-particle-burst.html",
+          "target": "compositions/components/caption-particle-burst.html",
+          "sha256": "48ec0a000e9c40cff891c2ca0e66ed4cf33c358bbeb2ca76fb3bdc8288bf5936",
+          "bytes": 9787
+        }
+      ]
+    },
+    {
+      "name": "caption-pill-karaoke",
+      "type": "component",
+      "path": "registry/components/caption-pill-karaoke",
+      "title": "Pill Karaoke",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-pill-karaoke.html",
+          "target": "compositions/components/caption-pill-karaoke.html",
+          "sha256": "cdbbc72af7fbac440c0bf5750cf9e3d4ded20f26588b00ac79399342ca60b3e3",
+          "bytes": 13113
+        }
+      ]
+    },
+    {
+      "name": "caption-texture",
+      "type": "component",
+      "path": "registry/components/caption-texture",
+      "title": "Texture",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-texture.html",
+          "target": "compositions/components/caption-texture.html",
+          "sha256": "472df187ffbe3e9ef04ce5bc53208da49b3abfc706531f44828e87045b4ebcad",
+          "bytes": 7082
+        },
+        {
+          "path": "lava.png",
+          "target": "compositions/components/lava.png",
+          "sha256": "a921282ec9f570e2e2d7591dd72c284ff054613fa370f8981090332924e2ce5c",
+          "bytes": 74455
+        },
+        {
+          "path": "marble-012.png",
+          "target": "compositions/components/marble-012.png",
+          "sha256": "a0429791f03a0ee265ede7c11f802db3e3077fd783d5e7e1061c7e3da770a018",
+          "bytes": 95146
+        },
+        {
+          "path": "metal-046-b.png",
+          "target": "compositions/components/metal-046-b.png",
+          "sha256": "8d2f2ff3544fa96155f4bb89d376953f11b1723f13d3110af6f9af07c659ab1b",
+          "bytes": 100739
+        },
+        {
+          "path": "wood-066.png",
+          "target": "compositions/components/wood-066.png",
+          "sha256": "ee2b237151cebee29c18aba3deea089592be20e92694c5a84f4b6e086df1689d",
+          "bytes": 83931
+        },
+        {
+          "path": "concrete-042-a.png",
+          "target": "compositions/components/concrete-042-a.png",
+          "sha256": "8ee5f31943e9ada8286b2e847eeb9a64a4bff3a8732efff54776bc5c1c6b8176",
+          "bytes": 86364
+        },
+        {
+          "path": "rock-058.png",
+          "target": "compositions/components/rock-058.png",
+          "sha256": "e3da7340588b79b7772b0b9fa13c2458038467e9c0b3b0d62c9536db92c95e6d",
+          "bytes": 80268
+        }
+      ]
+    },
+    {
+      "name": "caption-weight-shift",
+      "type": "component",
+      "path": "registry/components/caption-weight-shift",
+      "title": "Weight Shift",
+      "category": "字幕",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "caption-weight-shift.html",
+          "target": "compositions/components/caption-weight-shift.html",
+          "sha256": "8a5294debec3eadeb7ca0a8688c31a6e8c517ebb1c55ff410aa81df3807daa55",
+          "bytes": 13224
+        }
+      ]
+    },
+    {
+      "name": "chromatic-radial-split",
+      "type": "block",
+      "path": "registry/blocks/chromatic-radial-split",
+      "title": "Chromatic Radial Split",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "chromatic-radial-split.html",
+          "target": "compositions/chromatic-radial-split.html",
+          "sha256": "d328cc320397eb2109c6a2dab030bbcca7556c06c197416c288995aeef1e4d99",
+          "bytes": 12676
+        }
+      ]
+    },
+    {
+      "name": "cinematic-zoom",
+      "type": "block",
+      "path": "registry/blocks/cinematic-zoom",
+      "title": "Cinematic Zoom",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "cinematic-zoom.html",
+          "target": "compositions/cinematic-zoom.html",
+          "sha256": "72b3a83d5de6a56fd389044aa15e785dbb40d5402cea6b95684b6b9cec0e4aba",
+          "bytes": 12743
+        }
+      ]
+    },
+    {
+      "name": "code-3d-extrude",
+      "type": "block",
+      "path": "registry/blocks/code-3d-extrude",
+      "title": "Code 3D Extrude",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-3d-extrude.html",
+          "target": "compositions/code-3d-extrude.html",
+          "sha256": "0c09ca399fa26f1026cce71d58570e3d95e55f1c7ab96f57999f2df02db12826",
+          "bytes": 22193
+        }
+      ]
+    },
+    {
+      "name": "code-diff",
+      "type": "block",
+      "path": "registry/blocks/code-diff",
+      "title": "Code Diff",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-diff.html",
+          "target": "compositions/code-diff.html",
+          "sha256": "5356890fec4947e384b044d7dda3d03601432125a4ce60087caac0e3639d9d93",
+          "bytes": 26936
+        }
+      ]
+    },
+    {
+      "name": "code-highlight",
+      "type": "block",
+      "path": "registry/blocks/code-highlight",
+      "title": "Code Highlight Sweep",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-highlight.html",
+          "target": "compositions/code-highlight.html",
+          "sha256": "efe70af9e23cb4bec9cdad97f0e37c860c5c5b15eff2ce2f42dd6fe406a6215c",
+          "bytes": 24582
+        }
+      ]
+    },
+    {
+      "name": "code-morph",
+      "type": "block",
+      "path": "registry/blocks/code-morph",
+      "title": "Code Morph",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-morph.html",
+          "target": "compositions/code-morph.html",
+          "sha256": "26b2342609f1da2ef2f65fef5dbc0fc3230f78893c11569e4e055f3015f6e4a2",
+          "bytes": 41338
+        }
+      ]
+    },
+    {
+      "name": "code-particle-assemble",
+      "type": "block",
+      "path": "registry/blocks/code-particle-assemble",
+      "title": "Code Particle Assemble",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-particle-assemble.html",
+          "target": "compositions/code-particle-assemble.html",
+          "sha256": "2a6f422ec5d52060e3aaa26a509dfbd2d59c793964047930da7c680b9b94f681",
+          "bytes": 17685
+        }
+      ]
+    },
+    {
+      "name": "code-scroll",
+      "type": "block",
+      "path": "registry/blocks/code-scroll",
+      "title": "Code Scroll To Line",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-scroll.html",
+          "target": "compositions/code-scroll.html",
+          "sha256": "29291ee000f1bef15e999314d112ea153f21da2618083852323b617fee9cae86",
+          "bytes": 53845
+        }
+      ]
+    },
+    {
+      "name": "code-shader-dissolve",
+      "type": "block",
+      "path": "registry/blocks/code-shader-dissolve",
+      "title": "Code Shader Dissolve",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-shader-dissolve.html",
+          "target": "compositions/code-shader-dissolve.html",
+          "sha256": "32e4137d0693ccf0e85a627c7d0462174c34e04fca2f7cdf8e038ba02d47a8c1",
+          "bytes": 19803
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-basic",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-basic",
+      "title": "Code Snippet - Apple Terminal Basic",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-basic.html",
+          "target": "compositions/code-snippet-apple-terminal-basic.html",
+          "sha256": "58d4de1cb1c9b2048109b939393a762be7c278016a00184ac645ef5dc42c0253",
+          "bytes": 7219
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-dark",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-clear-dark",
+      "title": "Code Snippet - Apple Terminal Clear Dark",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-clear-dark.html",
+          "target": "compositions/code-snippet-apple-terminal-clear-dark.html",
+          "sha256": "4a8ed147fcb67be165edb11b5cc22331efca50f1ab7674c1d4d51dc21699daeb",
+          "bytes": 6765
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-light",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-clear-light",
+      "title": "Code Snippet - Apple Terminal Clear Light",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-clear-light.html",
+          "target": "compositions/code-snippet-apple-terminal-clear-light.html",
+          "sha256": "83336965c98e244d3ee8c28f166ef61eeabe880e035a73ca265105024934ff19",
+          "bytes": 6878
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-grass",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-grass",
+      "title": "Code Snippet - Apple Terminal Grass",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-grass.html",
+          "target": "compositions/code-snippet-apple-terminal-grass.html",
+          "sha256": "fc549647aa25c6fae57f92488d4bd4c85e5b7d8561333c818244c0117f20753b",
+          "bytes": 6711
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-homebrew",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-homebrew",
+      "title": "Code Snippet - Apple Terminal Homebrew",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-homebrew.html",
+          "target": "compositions/code-snippet-apple-terminal-homebrew.html",
+          "sha256": "52bf58983e5708556c373cb1156ac61bb48fac30fd8a52d6375db55041b0cb9c",
+          "bytes": 6718
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-man-page",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-man-page",
+      "title": "Code Snippet - Apple Terminal Man Page",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-man-page.html",
+          "target": "compositions/code-snippet-apple-terminal-man-page.html",
+          "sha256": "7b5fe2f5016afab3fe861e8971d2d7825e2314c06f236e553a10b7d33270da00",
+          "bytes": 6649
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-novel",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-novel",
+      "title": "Code Snippet - Apple Terminal Novel",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-novel.html",
+          "target": "compositions/code-snippet-apple-terminal-novel.html",
+          "sha256": "a71e099eb5ef9e952eec7cacc5f84aba95aaf0f63483dfcf61a85a6b19f514f5",
+          "bytes": 6675
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-ocean",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-ocean",
+      "title": "Code Snippet - Apple Terminal Ocean",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-ocean.html",
+          "target": "compositions/code-snippet-apple-terminal-ocean.html",
+          "sha256": "c8c9bb430a20f86c7c59025305dcbdb08d683f877d16be658a9be6d016e41bc9",
+          "bytes": 6904
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-pro",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-pro",
+      "title": "Code Snippet - Apple Terminal Pro",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-pro.html",
+          "target": "compositions/code-snippet-apple-terminal-pro.html",
+          "sha256": "597133c12cbba8c7f282ab02e6dc62e20301955bc72f7ef848706d42bbf57417",
+          "bytes": 6688
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-red-sands",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-red-sands",
+      "title": "Code Snippet - Apple Terminal Red Sands",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-red-sands.html",
+          "target": "compositions/code-snippet-apple-terminal-red-sands.html",
+          "sha256": "655496c219341f9e0663ed8b2453d89e607853fee01e6b91d2a762983c788050",
+          "bytes": 6694
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-silver-aerogel",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-silver-aerogel",
+      "title": "Code Snippet - Apple Terminal Silver Aerogel",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-silver-aerogel.html",
+          "target": "compositions/code-snippet-apple-terminal-silver-aerogel.html",
+          "sha256": "a05cc2ddf69b1f6b1f263247e5f5acfb4207c6fe42fd6508c16f3becdc11c1ef",
+          "bytes": 6758
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-solid-colors",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-apple-terminal-solid-colors",
+      "title": "Code Snippet - Apple Terminal Solid Colors",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-apple-terminal-solid-colors.html",
+          "target": "compositions/code-snippet-apple-terminal-solid-colors.html",
+          "sha256": "457340cfafdc2bda534358bbf1c0d87c1899473c4ef8e522dd941bd9ee975a34",
+          "bytes": 6749
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-dark-2026",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-dark-2026",
+      "title": "Code Snippet - Dark 2026",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-dark-2026.html",
+          "target": "compositions/code-snippet-dark-2026.html",
+          "sha256": "d6facdabeb24332b8803d6fc2b4fef9fdea3289535597c818cfa0c7e510162d5",
+          "bytes": 40207
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-dark-modern",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-dark-modern",
+      "title": "Code Snippet - Dark Modern",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-dark-modern.html",
+          "target": "compositions/code-snippet-dark-modern.html",
+          "sha256": "314ea4ab481fb60cfe6a51560fea65c69a72477c0cf4bb5d8616c046daf66e2f",
+          "bytes": 39997
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-dark-plus",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-dark-plus",
+      "title": "Code Snippet - Dark+",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-dark-plus.html",
+          "target": "compositions/code-snippet-dark-plus.html",
+          "sha256": "45eb34202a26b182ac16b2d2857bf73c74663d31ec5468d0fac9959f03df284b",
+          "bytes": 38415
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-flight",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-flight",
+      "title": "Code Snippet Flight",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-flight.html",
+          "target": "compositions/code-snippet-flight.html",
+          "sha256": "2619dbfa8f68b67678756b696b6f33d9ff4b3e01d254a5951c0db53158542300",
+          "bytes": 21165
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-high-contrast",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-high-contrast",
+      "title": "Code Snippet - High Contrast",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-high-contrast.html",
+          "target": "compositions/code-snippet-high-contrast.html",
+          "sha256": "56191e22510600015540ec103d5cf9a0038d1d33d07b7ee4603a14be01877ea5",
+          "bytes": 38374
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-high-contrast-light",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-high-contrast-light",
+      "title": "Code Snippet - High Contrast Light",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-high-contrast-light.html",
+          "target": "compositions/code-snippet-high-contrast-light.html",
+          "sha256": "43395426989543815f315b481ed665deb2bcfbb1f5e97a1ea1b25c7338662a90",
+          "bytes": 38281
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-light-2026",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-light-2026",
+      "title": "Code Snippet - Light 2026",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-light-2026.html",
+          "target": "compositions/code-snippet-light-2026.html",
+          "sha256": "7b12ea9995e7611b16da6879f2648ece710e8a4c738565350c93b4fef8bf8342",
+          "bytes": 40165
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-light-modern",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-light-modern",
+      "title": "Code Snippet - Light Modern",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-light-modern.html",
+          "target": "compositions/code-snippet-light-modern.html",
+          "sha256": "67b65dbab7600c81e30e31f4229c3bca657a5a1417284a15a834daf31bcd62b5",
+          "bytes": 40055
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-light-plus",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-light-plus",
+      "title": "Code Snippet - Light+",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-light-plus.html",
+          "target": "compositions/code-snippet-light-plus.html",
+          "sha256": "2c3b1341dcc811687384a89d2596f441d3ace5cb70aafcd22e054bde17344352",
+          "bytes": 38425
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-monokai",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-monokai",
+      "title": "Code Snippet - Monokai",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-monokai.html",
+          "target": "compositions/code-snippet-monokai.html",
+          "sha256": "30c86995c2dac7d32dd93027239667e477f0c6c39e41722ab2b0af93c014b8da",
+          "bytes": 39047
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-solarized-light",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-solarized-light",
+      "title": "Code Snippet - Solarized Light",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-solarized-light.html",
+          "target": "compositions/code-snippet-solarized-light.html",
+          "sha256": "4350e48f5099aa5110bdb7ab879de4566a864c6cb73e3d70237c3521d81bf74d",
+          "bytes": 39208
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-visual-studio-dark",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-visual-studio-dark",
+      "title": "Code Snippet - Visual Studio Dark",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-visual-studio-dark.html",
+          "target": "compositions/code-snippet-visual-studio-dark.html",
+          "sha256": "b64514d83bbc641789837deed0d915c206b008fe056d84153cfcc022f93f2035",
+          "bytes": 38504
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-visual-studio-light",
+      "type": "block",
+      "path": "registry/blocks/code-snippet-visual-studio-light",
+      "title": "Code Snippet - Visual Studio Light",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-snippet-visual-studio-light.html",
+          "target": "compositions/code-snippet-visual-studio-light.html",
+          "sha256": "d048bffa9a53ed7fd381305c13e10118be502e780b94879f381ff100d39d7620",
+          "bytes": 38514
+        },
+        {
+          "path": "background.jpeg",
+          "target": "assets/background.jpeg",
+          "sha256": "056cc5ffda649bc6ca15568722d808e09fca72f0a9865e215b76101ee86e38e5",
+          "bytes": 436888
+        }
+      ]
+    },
+    {
+      "name": "code-typing",
+      "type": "block",
+      "path": "registry/blocks/code-typing",
+      "title": "Code Typing",
+      "category": "代码演示",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "code-typing.html",
+          "target": "compositions/code-typing.html",
+          "sha256": "99477451bdffeb368523b9cf7b36ca8385c0c15c2438b46597269e179f9f8fdf",
+          "bytes": 25476
+        }
+      ]
+    },
+    {
+      "name": "cross-warp-morph",
+      "type": "block",
+      "path": "registry/blocks/cross-warp-morph",
+      "title": "Cross Warp Morph",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "cross-warp-morph.html",
+          "target": "compositions/cross-warp-morph.html",
+          "sha256": "fa9748f6f6059b2575d90eb98fd14a45de3c75e7dac1e925d997bc61e56ab85e",
+          "bytes": 13038
+        }
+      ]
+    },
+    {
+      "name": "data-chart",
+      "type": "block",
+      "path": "registry/blocks/data-chart",
+      "title": "Data Chart",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "data-chart.html",
+          "target": "compositions/data-chart.html",
+          "sha256": "02ccb24bfa21850d19c2842853256a3c47d5fd25dc746d6b99986bef268bf027",
+          "bytes": 13870
+        }
+      ]
+    },
+    {
+      "name": "domain-warp-dissolve",
+      "type": "block",
+      "path": "registry/blocks/domain-warp-dissolve",
+      "title": "Domain Warp Dissolve",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "domain-warp-dissolve.html",
+          "target": "compositions/domain-warp-dissolve.html",
+          "sha256": "7d910616bf3eb799c9904a941a5edeb99a00de14bf6e0a094844978c30b2a874",
+          "bytes": 13398
+        }
+      ]
+    },
+    {
+      "name": "flash-through-white",
+      "type": "block",
+      "path": "registry/blocks/flash-through-white",
+      "title": "Flash Through White",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "flash-through-white.html",
+          "target": "compositions/flash-through-white.html",
+          "sha256": "d63cdbe17d81c12ee23406dd2dacf7e6a9489121906a7a3a2f74980ece623bac",
+          "bytes": 12474
+        }
+      ]
+    },
+    {
+      "name": "flowchart",
+      "type": "block",
+      "path": "registry/blocks/flowchart",
+      "title": "Flowchart",
+      "category": "流程图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "flowchart.html",
+          "target": "compositions/flowchart.html",
+          "sha256": "3e1e2a86fbca29a62121342fbc9fa387d1fbdbfba7b72d5691be6a38807ed02b",
+          "bytes": 14482
+        }
+      ]
+    },
+    {
+      "name": "flowchart-vertical",
+      "type": "block",
+      "path": "registry/blocks/flowchart-vertical",
+      "title": "Flowchart Vertical",
+      "category": "流程图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "flowchart-vertical.html",
+          "target": "compositions/flowchart-vertical.html",
+          "sha256": "3e0ccbf02ecf53b7bb6047f3c360d261c3d9d26ca06f6a4e15434b7d5c2e86b6",
+          "bytes": 14202
+        }
+      ]
+    },
+    {
+      "name": "glitch",
+      "type": "block",
+      "path": "registry/blocks/glitch",
+      "title": "Glitch",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "glitch.html",
+          "target": "compositions/glitch.html",
+          "sha256": "f8101d1a5b71aa0ce4eb44444ee95e6ad0d7d16eb8b38b5ac81422a01fc5240b",
+          "bytes": 13000
+        }
+      ]
+    },
+    {
+      "name": "grain-overlay",
+      "type": "component",
+      "path": "registry/components/grain-overlay",
+      "title": "Grain Overlay",
+      "category": "其他",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "grain-overlay.html",
+          "target": "compositions/components/grain-overlay.html",
+          "sha256": "97a0da8f26feca9574abcf08b8186cef10ea4819b2aeabc30547ae16ed9ae80d",
+          "bytes": 1818
+        }
+      ]
+    },
+    {
+      "name": "gravitational-lens",
+      "type": "block",
+      "path": "registry/blocks/gravitational-lens",
+      "title": "Gravitational Lens",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "gravitational-lens.html",
+          "target": "compositions/gravitational-lens.html",
+          "sha256": "e873bcca352a2e2721c3fed5d7ea355145d9df9dc9d2454564609bea8e61e475",
+          "bytes": 12680
+        }
+      ]
+    },
+    {
+      "name": "grid-pixelate-wipe",
+      "type": "component",
+      "path": "registry/components/grid-pixelate-wipe",
+      "title": "Grid Pixelate Wipe",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "grid-pixelate-wipe.html",
+          "target": "compositions/components/grid-pixelate-wipe.html",
+          "sha256": "60981a8c4a97c1686014543cefdeac439daa621d3da9074485834f16ed7ac03c",
+          "bytes": 1942
+        }
+      ]
+    },
+    {
+      "name": "instagram-follow",
+      "type": "block",
+      "path": "registry/blocks/instagram-follow",
+      "title": "Instagram Follow",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "instagram-follow.html",
+          "target": "compositions/instagram-follow.html",
+          "sha256": "3809353c3d7ebf495931b874ae2d67f985bc051f1f92bddebc51a5a2dd6e1b6f",
+          "bytes": 7117
+        },
+        {
+          "path": "assets/avatar.jpg",
+          "target": "assets/avatar.jpg",
+          "sha256": "a300f59c31d2ea16195a2ff9a9af50b29c6aecc05d505d69f2a2132a53b99032",
+          "bytes": 5010
+        }
+      ]
+    },
+    {
+      "name": "ios26-liquid-glass",
+      "type": "block",
+      "path": "registry/blocks/ios26-liquid-glass",
+      "title": "iOS 26 Liquid Glass Home Screen",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "ios26-liquid-glass.html",
+          "target": "compositions/ios26-liquid-glass.html",
+          "sha256": "b38c1953ce4c9719fe242daa0975848bdd6c0d98adac27c971bf75ad577b4620",
+          "bytes": 45743
+        },
+        {
+          "path": "models/iphone.glb",
+          "target": "models/iphone.glb",
+          "sha256": "a628339ba9960424b1e6285d31423be0dedf02a71b02e4e61f706a2e4bb8770e",
+          "bytes": 887328
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "target": "lib/liquid-glass.iife.js",
+          "sha256": "e960fc4e523aa639d37ebe80bebbd8da6dcb805488a77e45585e80aa9ab98e4c",
+          "bytes": 35008
+        },
+        {
+          "path": "assets/icons/weather.jpg",
+          "target": "assets/icons/weather.jpg",
+          "sha256": "4a3b80889cebb41ae64f9a2edfe3485293f46278dbb268f47b92826ee80c4804",
+          "bytes": 26183
+        },
+        {
+          "path": "assets/icons/stocks.jpg",
+          "target": "assets/icons/stocks.jpg",
+          "sha256": "86f591a856149aaa98af2070db410dca6e2660786aba6d99d71cd37dba4af794",
+          "bytes": 32914
+        },
+        {
+          "path": "assets/icons/find-my.jpg",
+          "target": "assets/icons/find-my.jpg",
+          "sha256": "133975c557f2b1d5b3d4896c8def276e5f1cea2c7b87c46163270b95920ffa1d",
+          "bytes": 31466
+        },
+        {
+          "path": "assets/icons/home.jpg",
+          "target": "assets/icons/home.jpg",
+          "sha256": "e830283620536135cd8861767b752af70757d8c103ad7822f4749bc928fcdb9a",
+          "bytes": 26923
+        },
+        {
+          "path": "assets/icons/books.jpg",
+          "target": "assets/icons/books.jpg",
+          "sha256": "e54cc7816d9d12156d0006365927ed06244d1af737b9e1f139db0095a5778b6e",
+          "bytes": 24020
+        },
+        {
+          "path": "assets/icons/itunes-store.jpg",
+          "target": "assets/icons/itunes-store.jpg",
+          "sha256": "38fd49c8d14115e2d0f5b862929205461bed397aa217e0015d449f688cdc0a52",
+          "bytes": 23750
+        },
+        {
+          "path": "assets/icons/fitness.jpg",
+          "target": "assets/icons/fitness.jpg",
+          "sha256": "57085df38b273be845e77aa483dc3412a5a654a8475377f8bd263a3f96353838",
+          "bytes": 51050
+        },
+        {
+          "path": "assets/icons/watch.jpg",
+          "target": "assets/icons/watch.jpg",
+          "sha256": "0467760f53ee4d6cf877c315cac4a109e86ca36f5b0ed59d2b22749083a36677",
+          "bytes": 27317
+        },
+        {
+          "path": "assets/icons/contacts.jpg",
+          "target": "assets/icons/contacts.jpg",
+          "sha256": "f6c2640a1c19c3e3cde9827469486a5140e9847524bc05bf4b87d44c8e820f64",
+          "bytes": 24590
+        },
+        {
+          "path": "assets/icons/files.jpg",
+          "target": "assets/icons/files.jpg",
+          "sha256": "0780dac27f53fe4cf22d5135f725cc1f2f78748b755db0014008e8705540084e",
+          "bytes": 22655
+        },
+        {
+          "path": "assets/icons/translate.jpg",
+          "target": "assets/icons/translate.jpg",
+          "sha256": "28c3466d1ecbf30e95d34c0e896c72b7468a7826ecb51e2d12e484e45f84f684",
+          "bytes": 25644
+        },
+        {
+          "path": "assets/icons/calendar.jpg",
+          "target": "assets/icons/calendar.jpg",
+          "sha256": "a1c4ba842d1941d5ea467b934eee346b73f8803de48fd11556e0181d7551c69d",
+          "bytes": 17473
+        },
+        {
+          "path": "assets/icons/chatgpt.jpg",
+          "target": "assets/icons/chatgpt.jpg",
+          "sha256": "719ca431702bfc2320cda76829c23d234015e8b9c83a2ef9b78f372e4b80957b",
+          "bytes": 40501
+        },
+        {
+          "path": "assets/icons/slack.jpg",
+          "target": "assets/icons/slack.jpg",
+          "sha256": "919d352f7d618546e915133e7e456978ae549dc9559e466e8551c73c6e41dbf1",
+          "bytes": 28240
+        },
+        {
+          "path": "assets/icons/instagram.jpg",
+          "target": "assets/icons/instagram.jpg",
+          "sha256": "a0ed0190c4b361cb0124b260d2fb6c748c531cb3850dd2437ac8e6a8d4d08aac",
+          "bytes": 48559
+        },
+        {
+          "path": "assets/icons/x.jpg",
+          "target": "assets/icons/x.jpg",
+          "sha256": "60a68dd7210c966ccbe8e6dfc24ddee0aa1193cedb3cdd6e6c8c6e02f3923611",
+          "bytes": 19401
+        },
+        {
+          "path": "assets/icons/proton-mail.jpg",
+          "target": "assets/icons/proton-mail.jpg",
+          "sha256": "86801da39dc457b83588754755f8f487912148ddb1c0757346e861768f632969",
+          "bytes": 12684
+        },
+        {
+          "path": "assets/icons/gmail.jpg",
+          "target": "assets/icons/gmail.jpg",
+          "sha256": "f0d9dd220ced563566fd31aa927c00d6562fd308e10e73891b0f7adf54e5ea57",
+          "bytes": 17263
+        },
+        {
+          "path": "assets/icons/revolut.jpg",
+          "target": "assets/icons/revolut.jpg",
+          "sha256": "9aa8de5cd5092f036c9cba170dc0907dccdb81aa17352538a422167cf63e0061",
+          "bytes": 13540
+        },
+        {
+          "path": "assets/icons/photos.jpg",
+          "target": "assets/icons/photos.jpg",
+          "sha256": "2bb6166f2b46a07528739c76d82580b9af6638fcad63fc9f256dddb3193ba482",
+          "bytes": 34293
+        },
+        {
+          "path": "assets/icons/phone.jpg",
+          "target": "assets/icons/phone.jpg",
+          "sha256": "da6ec924a99c8d3cf0e96363cdef1e89728b0eed92ad6aaa9d633ec62b02bb3c",
+          "bytes": 21480
+        },
+        {
+          "path": "assets/icons/brave.jpg",
+          "target": "assets/icons/brave.jpg",
+          "sha256": "407d01c660156970878198f221457e867cbb47d67a94f7904211de1c1f3dfb42",
+          "bytes": 39431
+        },
+        {
+          "path": "assets/icons/messages.jpg",
+          "target": "assets/icons/messages.jpg",
+          "sha256": "183a84d8c46fc058688c67a3cbf348d0f905dc4bfa946a3a4ed129b43f50c4a1",
+          "bytes": 21527
+        },
+        {
+          "path": "assets/icons/whatsapp.jpg",
+          "target": "assets/icons/whatsapp.jpg",
+          "sha256": "37cf02fd6afa7181011445c83b2378a87b234d1716c3d415c01921d57c69e1a8",
+          "bytes": 36495
+        },
+        {
+          "path": "assets/icons/notify-messages.jpg",
+          "target": "assets/icons/notify-messages.jpg",
+          "sha256": "183a84d8c46fc058688c67a3cbf348d0f905dc4bfa946a3a4ed129b43f50c4a1",
+          "bytes": 21527
+        },
+        {
+          "path": "assets/icons/music.jpg",
+          "target": "assets/icons/music.jpg",
+          "sha256": "00bd6b886fd23c9e4d2f3e6b2eeb167c516df7b861466b895188df83fe50c04d",
+          "bytes": 24426
+        }
+      ]
+    },
+    {
+      "name": "light-leak",
+      "type": "block",
+      "path": "registry/blocks/light-leak",
+      "title": "Light Leak",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "light-leak.html",
+          "target": "compositions/light-leak.html",
+          "sha256": "018575074693864c3f0f71380f85f089c172f73717b80787640b2da3615345be",
+          "bytes": 12657
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-context-menu",
+      "type": "block",
+      "path": "registry/blocks/liquid-glass-context-menu",
+      "title": "Liquid Glass Context Menu",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "liquid-glass-context-menu.html",
+          "target": "compositions/liquid-glass-context-menu.html",
+          "sha256": "66a9787790eddfe38d281fbd10597bd40e093d5668b73ac2cc4b4b9f86ba8131",
+          "bytes": 21957
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "target": "compositions/lib/liquid-glass.iife.js",
+          "sha256": "e960fc4e523aa639d37ebe80bebbd8da6dcb805488a77e45585e80aa9ab98e4c",
+          "bytes": 35008
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-media-controls",
+      "type": "block",
+      "path": "registry/blocks/liquid-glass-media-controls",
+      "title": "Liquid Glass Media Controls",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "liquid-glass-media-controls.html",
+          "target": "compositions/liquid-glass-media-controls.html",
+          "sha256": "24ef179d01378866fc0687c5ac5c0b14ac23f5bc7cea0b98a0f3f3cfc1104358",
+          "bytes": 23248
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "target": "compositions/lib/liquid-glass.iife.js",
+          "sha256": "e960fc4e523aa639d37ebe80bebbd8da6dcb805488a77e45585e80aa9ab98e4c",
+          "bytes": 35008
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-notification",
+      "type": "block",
+      "path": "registry/blocks/liquid-glass-notification",
+      "title": "Liquid Glass Notification",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "liquid-glass-notification.html",
+          "target": "compositions/liquid-glass-notification.html",
+          "sha256": "5ca5479edf574d9544a841f447dc847c939400734cc0f132c4d7c1a9b4cd831f",
+          "bytes": 16947
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "target": "compositions/lib/liquid-glass.iife.js",
+          "sha256": "e960fc4e523aa639d37ebe80bebbd8da6dcb805488a77e45585e80aa9ab98e4c",
+          "bytes": 35008
+        },
+        {
+          "path": "assets/hyperframes-logo-dark.svg",
+          "target": "compositions/assets/hyperframes-logo-dark.svg",
+          "sha256": "f9f942c43b465616c3af2fb8b07daf1cc05a4776903bbb27beb2bb608060e6c7",
+          "bytes": 7245
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-widgets",
+      "type": "block",
+      "path": "registry/blocks/liquid-glass-widgets",
+      "title": "Liquid Glass Widgets",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "liquid-glass-widgets.html",
+          "target": "compositions/liquid-glass-widgets.html",
+          "sha256": "8fa24e519df7d1259feeb549231e923b8a5137fa9cd9c7c17150db52986cf746",
+          "bytes": 25969
+        },
+        {
+          "path": "assets/hyperframes-logo-dark.svg",
+          "target": "compositions/assets/hyperframes-logo-dark.svg",
+          "sha256": "f9f942c43b465616c3af2fb8b07daf1cc05a4776903bbb27beb2bb608060e6c7",
+          "bytes": 7245
+        },
+        {
+          "path": "lib/liquid-glass.iife.js",
+          "target": "compositions/lib/liquid-glass.iife.js",
+          "sha256": "e960fc4e523aa639d37ebe80bebbd8da6dcb805488a77e45585e80aa9ab98e4c",
+          "bytes": 35008
+        }
+      ]
+    },
+    {
+      "name": "logo-outro",
+      "type": "block",
+      "path": "registry/blocks/logo-outro",
+      "title": "Logo Outro",
+      "category": "其他",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "logo-outro.html",
+          "target": "compositions/logo-outro.html",
+          "sha256": "b3ed1e2dbdbe1f4a36bcf11e8a75f1f7eca7c29e5f75e86628fd8922629364ff",
+          "bytes": 6892
+        }
+      ]
+    },
+    {
+      "name": "lower-third-bild",
+      "type": "block",
+      "path": "registry/blocks/lower-third-bild",
+      "title": "Lower Third — BILD Style",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lower-third-bild.html",
+          "target": "compositions/lower-third-bild.html",
+          "sha256": "9f645b77aefefa4815990f7a498f220349ed5c9edd1be5e07da8100b797d3fee",
+          "bytes": 4042
+        },
+        {
+          "path": "assets/fonts/BarlowCondensed-Bold.woff2",
+          "target": "compositions/assets/fonts/BarlowCondensed-Bold.woff2",
+          "sha256": "75b7b8e878ea0c33be73e888d0d192df09da34af0cf428b69f8c208e0c27e688",
+          "bytes": 23028
+        },
+        {
+          "path": "assets/fonts/BarlowCondensed-ExtraBold.woff2",
+          "target": "compositions/assets/fonts/BarlowCondensed-ExtraBold.woff2",
+          "sha256": "2e5732c61470a890aee05ee399f6720664835efab8749dfc87d487e7882ffc44",
+          "bytes": 23116
+        }
+      ]
+    },
+    {
+      "name": "lt-accent-underline",
+      "type": "block",
+      "path": "registry/blocks/lt-accent-underline",
+      "title": "Lower Third — Accent Underline",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-accent-underline.html",
+          "target": "compositions/lt-accent-underline.html",
+          "sha256": "08e62fd35e14b99dd35e658b941f2b33781ff1cadb428d7b9626d69cfe3c4fe7",
+          "bytes": 3188
+        }
+      ]
+    },
+    {
+      "name": "lt-bold-block",
+      "type": "block",
+      "path": "registry/blocks/lt-bold-block",
+      "title": "Lower Third — Bold Block",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-bold-block.html",
+          "target": "compositions/lt-bold-block.html",
+          "sha256": "76a8470adf0bb1a8f3b2738efd206dfb151110b5fe65a3506a7d1852f804fce2",
+          "bytes": 3122
+        }
+      ]
+    },
+    {
+      "name": "lt-clean-bar",
+      "type": "block",
+      "path": "registry/blocks/lt-clean-bar",
+      "title": "Lower Third — Clean Bar",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-clean-bar.html",
+          "target": "compositions/lt-clean-bar.html",
+          "sha256": "6648b428ea74128368545a5cdf8d83a82e75dc468e9d3bbbac933e1463df5a67",
+          "bytes": 3277
+        }
+      ]
+    },
+    {
+      "name": "lt-color-block",
+      "type": "block",
+      "path": "registry/blocks/lt-color-block",
+      "title": "Lower Third — Color Block",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-color-block.html",
+          "target": "compositions/lt-color-block.html",
+          "sha256": "6fd10042c2bfb1998566f5626d1f301d0d87244d19c793ca4c30d7b8562fa640",
+          "bytes": 2942
+        }
+      ]
+    },
+    {
+      "name": "lt-dark-card",
+      "type": "block",
+      "path": "registry/blocks/lt-dark-card",
+      "title": "Lower Third — Dark Card",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-dark-card.html",
+          "target": "compositions/lt-dark-card.html",
+          "sha256": "b0386837dd6eccb06613a18b06d2ac9b17b3db755b80874d0e6c0d1aaa084bb7",
+          "bytes": 3230
+        }
+      ]
+    },
+    {
+      "name": "lt-kicker-name",
+      "type": "block",
+      "path": "registry/blocks/lt-kicker-name",
+      "title": "Lower Third — Kicker Name",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-kicker-name.html",
+          "target": "compositions/lt-kicker-name.html",
+          "sha256": "d802508401c2a14fb532fc6a71043f7daa908a4d8570bcda0fa2712cf2d2ead3",
+          "bytes": 3325
+        }
+      ]
+    },
+    {
+      "name": "lt-mask-reveal",
+      "type": "block",
+      "path": "registry/blocks/lt-mask-reveal",
+      "title": "Lower Third — Mask Reveal",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-mask-reveal.html",
+          "target": "compositions/lt-mask-reveal.html",
+          "sha256": "7f348ec3124e211f7ec8e7241f21220134504ab713143e3f9dc10e016892e2e3",
+          "bytes": 3882
+        }
+      ]
+    },
+    {
+      "name": "lt-side-rule",
+      "type": "block",
+      "path": "registry/blocks/lt-side-rule",
+      "title": "Lower Third — Side Rule",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-side-rule.html",
+          "target": "compositions/lt-side-rule.html",
+          "sha256": "faa20504273f478a470bb1fa99fc5ea81fb5709b279a9acee8b15b4996917527",
+          "bytes": 3321
+        }
+      ]
+    },
+    {
+      "name": "lt-soft-pill",
+      "type": "block",
+      "path": "registry/blocks/lt-soft-pill",
+      "title": "Lower Third — Soft Pill",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-soft-pill.html",
+          "target": "compositions/lt-soft-pill.html",
+          "sha256": "e1f14e3b482622e6005beec80678bc70ad661e15f3db3e3461fae414a81d5c83",
+          "bytes": 3420
+        }
+      ]
+    },
+    {
+      "name": "lt-stack-bars",
+      "type": "block",
+      "path": "registry/blocks/lt-stack-bars",
+      "title": "Lower Third — Stack Bars",
+      "category": "人名与身份条",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "lt-stack-bars.html",
+          "target": "compositions/lt-stack-bars.html",
+          "sha256": "ff98825092de17e862c8c24bd8acca839840548ef64b7fcbbb2710fe6dc130cf",
+          "bytes": 3144
+        }
+      ]
+    },
+    {
+      "name": "macos-notification",
+      "type": "block",
+      "path": "registry/blocks/macos-notification",
+      "title": "macOS Notification",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "macos-notification.html",
+          "target": "compositions/macos-notification.html",
+          "sha256": "bd6547f25f1c80c0d7dbdef0344627e92d57ace5e31237610928700b0a664d85",
+          "bytes": 5330
+        }
+      ]
+    },
+    {
+      "name": "macos-tahoe-liquid-glass",
+      "type": "block",
+      "path": "registry/blocks/macos-tahoe-liquid-glass",
+      "title": "macOS Tahoe Liquid Glass Desktop",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "macos-tahoe-liquid-glass.html",
+          "target": "compositions/macos-tahoe-liquid-glass.html",
+          "sha256": "1aabbaec2d4df664e471743ff9b90a1b5c5619bba52718606ac930e018fe1b50",
+          "bytes": 53881
+        },
+        {
+          "path": "models/macbook.glb",
+          "target": "models/macbook.glb",
+          "sha256": "d5ef292e9f5449b8cee77c6ddedee206545624010f0817d04d16537fe444b11d",
+          "bytes": 214184
+        },
+        {
+          "path": "assets/wallpapers/golden-gate-bridge-san-francisco-5k-0g.jpg",
+          "target": "assets/wallpapers/golden-gate-bridge-san-francisco-5k-0g.jpg",
+          "sha256": "3df3bfa4dd7eb335414c1519b66125934160161178a339ac6e5bd8d1e1ab5518",
+          "bytes": 1763717
+        },
+        {
+          "path": "assets/icons/finder.png",
+          "target": "assets/icons/finder.png",
+          "sha256": "c6ba3c460ea77557fd55bf2e6c060070edea464b235c738eb6693ca2403a104a",
+          "bytes": 279917
+        },
+        {
+          "path": "assets/icons/safari.jpg",
+          "target": "assets/icons/safari.jpg",
+          "sha256": "1e7da3801fb49746ccafdfc47c0b3fe97e2d89e4a9e5003aa9ea82e81943070e",
+          "bytes": 45366
+        },
+        {
+          "path": "assets/icons/mail.jpg",
+          "target": "assets/icons/mail.jpg",
+          "sha256": "523ef5a35af5993c09d71733cd54b1e3e9d9078462678ef738aace4ebfcf66ab",
+          "bytes": 23453
+        },
+        {
+          "path": "assets/icons/calendar.jpg",
+          "target": "assets/icons/calendar.jpg",
+          "sha256": "a1c4ba842d1941d5ea467b934eee346b73f8803de48fd11556e0181d7551c69d",
+          "bytes": 17473
+        },
+        {
+          "path": "assets/icons/photos.jpg",
+          "target": "assets/icons/photos.jpg",
+          "sha256": "2bb6166f2b46a07528739c76d82580b9af6638fcad63fc9f256dddb3193ba482",
+          "bytes": 34293
+        },
+        {
+          "path": "assets/icons/messages.jpg",
+          "target": "assets/icons/messages.jpg",
+          "sha256": "183a84d8c46fc058688c67a3cbf348d0f905dc4bfa946a3a4ed129b43f50c4a1",
+          "bytes": 21527
+        },
+        {
+          "path": "assets/icons/toast-messages.jpg",
+          "target": "assets/icons/toast-messages.jpg",
+          "sha256": "183a84d8c46fc058688c67a3cbf348d0f905dc4bfa946a3a4ed129b43f50c4a1",
+          "bytes": 21527
+        },
+        {
+          "path": "assets/icons/music.jpg",
+          "target": "assets/icons/music.jpg",
+          "sha256": "00bd6b886fd23c9e4d2f3e6b2eeb167c516df7b861466b895188df83fe50c04d",
+          "bytes": 24426
+        },
+        {
+          "path": "assets/icons/brave.jpg",
+          "target": "assets/icons/brave.jpg",
+          "sha256": "407d01c660156970878198f221457e867cbb47d67a94f7904211de1c1f3dfb42",
+          "bytes": 39431
+        },
+        {
+          "path": "assets/icons/slack.jpg",
+          "target": "assets/icons/slack.jpg",
+          "sha256": "919d352f7d618546e915133e7e456978ae549dc9559e466e8551c73c6e41dbf1",
+          "bytes": 28240
+        },
+        {
+          "path": "assets/icons/files.jpg",
+          "target": "assets/icons/files.jpg",
+          "sha256": "0780dac27f53fe4cf22d5135f725cc1f2f78748b755db0014008e8705540084e",
+          "bytes": 22655
+        },
+        {
+          "path": "assets/icons/dock-finder.png",
+          "target": "assets/icons/dock-finder.png",
+          "sha256": "c6ba3c460ea77557fd55bf2e6c060070edea464b235c738eb6693ca2403a104a",
+          "bytes": 279917
+        },
+        {
+          "path": "assets/icons/dock-safari.jpg",
+          "target": "assets/icons/dock-safari.jpg",
+          "sha256": "1e7da3801fb49746ccafdfc47c0b3fe97e2d89e4a9e5003aa9ea82e81943070e",
+          "bytes": 45366
+        },
+        {
+          "path": "assets/icons/dock-mail.jpg",
+          "target": "assets/icons/dock-mail.jpg",
+          "sha256": "523ef5a35af5993c09d71733cd54b1e3e9d9078462678ef738aace4ebfcf66ab",
+          "bytes": 23453
+        },
+        {
+          "path": "assets/icons/dock-photos.jpg",
+          "target": "assets/icons/dock-photos.jpg",
+          "sha256": "2bb6166f2b46a07528739c76d82580b9af6638fcad63fc9f256dddb3193ba482",
+          "bytes": 34293
+        },
+        {
+          "path": "assets/icons/dock-music.jpg",
+          "target": "assets/icons/dock-music.jpg",
+          "sha256": "00bd6b886fd23c9e4d2f3e6b2eeb167c516df7b861466b895188df83fe50c04d",
+          "bytes": 24426
+        }
+      ]
+    },
+    {
+      "name": "morph-text",
+      "type": "component",
+      "path": "registry/components/morph-text",
+      "title": "Morph Text",
+      "category": "文字效果",
+      "officialPreview": false,
+      "files": [
+        {
+          "path": "morph-text.html",
+          "target": "compositions/components/morph-text.html",
+          "sha256": "f90fb33c2dd96819c874504ba26036237761fb76fd77a370191617aeb2cac713",
+          "bytes": 6987
+        }
+      ]
+    },
+    {
+      "name": "motion-blur",
+      "type": "component",
+      "path": "registry/components/motion-blur",
+      "title": "Motion Blur",
+      "category": "其他",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "motion-blur.html",
+          "target": "compositions/components/motion-blur.html",
+          "sha256": "567e15335dc934da967450b484123048c8a17348df7b38a0eee1ab24c670eb87",
+          "bytes": 10455
+        }
+      ]
+    },
+    {
+      "name": "news-ticker",
+      "type": "block",
+      "path": "registry/blocks/news-ticker",
+      "title": "News Ticker",
+      "category": "其他",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "news-ticker.html",
+          "target": "compositions/news-ticker.html",
+          "sha256": "8da727da9c8c2e7adda0d5f7ce1991b5443eb65145d058ccfa64b3331fc565df",
+          "bytes": 11403
+        }
+      ]
+    },
+    {
+      "name": "north-korea-locked-down",
+      "type": "block",
+      "path": "registry/blocks/north-korea-locked-down",
+      "title": "North Korea Locked Down",
+      "category": "产品与案例展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "north-korea-locked-down.html",
+          "target": "compositions/north-korea-locked-down.html",
+          "sha256": "618e67988c9b3a7f7d8e44a5016acca86983cb8971f835451fb337fa491207a6",
+          "bytes": 8257
+        },
+        {
+          "path": "assets/korea-map.png",
+          "target": "assets/korea-map.png",
+          "sha256": "38198e4cc4ae82c04d4db28ea60a10caea18452607be72da03ad5d020bc0ebac",
+          "bytes": 491838
+        }
+      ]
+    },
+    {
+      "name": "nyc-paris-flight",
+      "type": "block",
+      "path": "registry/blocks/nyc-paris-flight",
+      "title": "NYC Paris Flight",
+      "category": "产品与案例展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "nyc-paris-flight.html",
+          "target": "compositions/nyc-paris-flight.html",
+          "sha256": "185fdae537f43f6cd3750d38ef23287c1a26c86108ebde9a90bda126acd3fa2c",
+          "bytes": 15105
+        },
+        {
+          "path": "assets/map-nyc-paris.png",
+          "target": "assets/map-nyc-paris.png",
+          "sha256": "982e87145e1f7aa4b97674dba2ceabc7605d67c46234d4f105cdb336ce411688",
+          "bytes": 451841
+        },
+        {
+          "path": "assets/sfx-mix.wav",
+          "target": "assets/sfx-mix.wav",
+          "sha256": "e3da3426014c629093ef5a50883f24de6445d5ea9f636ad029b25cb68f854493",
+          "bytes": 1152044
+        }
+      ]
+    },
+    {
+      "name": "parallax-unzoom",
+      "type": "component",
+      "path": "registry/components/parallax-unzoom",
+      "title": "Parallax Unzoom",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "parallax-unzoom.html",
+          "target": "compositions/components/parallax-unzoom.html",
+          "sha256": "0b98917fe6b89bcc054a6f3d33f42d837323e023b87cd2cd6fb15b8ab8284a20",
+          "bytes": 3452
+        }
+      ]
+    },
+    {
+      "name": "parallax-zoom",
+      "type": "component",
+      "path": "registry/components/parallax-zoom",
+      "title": "Parallax Zoom",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "parallax-zoom.html",
+          "target": "compositions/components/parallax-zoom.html",
+          "sha256": "330c37d5acc6bac8c48dc8e38d2dde7d8804a8dc2353bbe0fd6b66b13db65656",
+          "bytes": 3157
+        }
+      ]
+    },
+    {
+      "name": "reddit-post",
+      "type": "block",
+      "path": "registry/blocks/reddit-post",
+      "title": "Reddit Post Card",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "reddit-post.html",
+          "target": "compositions/reddit-post.html",
+          "sha256": "83f0b5cbf84a7365bab9e5bab1144b48e78a091611c8f078ebd9713361c4ea31",
+          "bytes": 8807
+        }
+      ]
+    },
+    {
+      "name": "ridged-burn",
+      "type": "block",
+      "path": "registry/blocks/ridged-burn",
+      "title": "Ridged Burn",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "ridged-burn.html",
+          "target": "compositions/ridged-burn.html",
+          "sha256": "fd6309001b327eba4004e3c334a2d45525fcd5730ba6fd2d2e095e21b5ecd477",
+          "bytes": 13318
+        }
+      ]
+    },
+    {
+      "name": "ripple-waves",
+      "type": "block",
+      "path": "registry/blocks/ripple-waves",
+      "title": "Ripple Waves",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "ripple-waves.html",
+          "target": "compositions/ripple-waves.html",
+          "sha256": "4b6c4df7f51c0a5fd163cf6c584876e169de3357190a6570474f6213f2d0db83",
+          "bytes": 12764
+        }
+      ]
+    },
+    {
+      "name": "sdf-iris",
+      "type": "block",
+      "path": "registry/blocks/sdf-iris",
+      "title": "SDF Iris",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "sdf-iris.html",
+          "target": "compositions/sdf-iris.html",
+          "sha256": "355dd21c493cb11d92f7153c7d8e4f0d832c67e3d094ce95e8abce73cea46e99",
+          "bytes": 12624
+        }
+      ]
+    },
+    {
+      "name": "shimmer-sweep",
+      "type": "component",
+      "path": "registry/components/shimmer-sweep",
+      "title": "Shimmer Sweep",
+      "category": "文字效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "shimmer-sweep.html",
+          "target": "compositions/components/shimmer-sweep.html",
+          "sha256": "0358db4e2ec9137c65771e17139741a13e2c12a37be5688fc6cfede9a718d8d6",
+          "bytes": 1917
+        }
+      ]
+    },
+    {
+      "name": "spain-map",
+      "type": "block",
+      "path": "registry/blocks/spain-map",
+      "title": "Spain Map",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "spain-map.html",
+          "target": "compositions/spain-map.html",
+          "sha256": "9b3a1303ef9c9648f35c552a7fa4696040ca436581e45a339ea3e633de569201",
+          "bytes": 12261
+        }
+      ]
+    },
+    {
+      "name": "spotify-card",
+      "type": "block",
+      "path": "registry/blocks/spotify-card",
+      "title": "Spotify Now Playing",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "spotify-card.html",
+          "target": "compositions/spotify-card.html",
+          "sha256": "1dba3177a10ce5522bbbbf4e56302220878f360c970186f68d263ead38203c78",
+          "bytes": 8746
+        }
+      ]
+    },
+    {
+      "name": "swirl-vortex",
+      "type": "block",
+      "path": "registry/blocks/swirl-vortex",
+      "title": "Swirl Vortex",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "swirl-vortex.html",
+          "target": "compositions/swirl-vortex.html",
+          "sha256": "d2ec8ec40dd47e584463b82f806dbc474aed8e1a94648e7637032ecb0f9f481b",
+          "bytes": 13155
+        }
+      ]
+    },
+    {
+      "name": "texture-mask-text",
+      "type": "component",
+      "path": "registry/components/texture-mask-text",
+      "title": "Texture Mask Text",
+      "category": "文字效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "texture-mask-text.html",
+          "target": "compositions/components/texture-mask-text/texture-mask-text.html",
+          "sha256": "c0e8cde773a2a7240f4e18d9b9a78d0089085d1c87ac9467cf26fc08ed0e6e0b",
+          "bytes": 17427
+        },
+        {
+          "path": "masks/lava.png",
+          "target": "assets/texture-mask-text/masks/lava.png",
+          "sha256": "a921282ec9f570e2e2d7591dd72c284ff054613fa370f8981090332924e2ce5c",
+          "bytes": 74455
+        },
+        {
+          "path": "masks/rock.png",
+          "target": "assets/texture-mask-text/masks/rock.png",
+          "sha256": "c6f7f00239eb0707870f6b29072df8966e59d04478d6e9416a5e6ce097a6bfae",
+          "bytes": 134167
+        },
+        {
+          "path": "masks/concrete.png",
+          "target": "assets/texture-mask-text/masks/concrete.png",
+          "sha256": "cef63116ef695361d4705d5f182f6cace043c3a223458415dc882b0f9289fe50",
+          "bytes": 180224
+        },
+        {
+          "path": "masks/brick.png",
+          "target": "assets/texture-mask-text/masks/brick.png",
+          "sha256": "aa86399c1b504ef3b3016ba7f6c40363cade1dede989fc6249d48008d9d68c3a",
+          "bytes": 40965
+        },
+        {
+          "path": "masks/wood.png",
+          "target": "assets/texture-mask-text/masks/wood.png",
+          "sha256": "751297ad6b60c00623e2b36db6ecff5697d173c9a8492989c1f68d9303316c4a",
+          "bytes": 42206
+        },
+        {
+          "path": "masks/onyx.png",
+          "target": "assets/texture-mask-text/masks/onyx.png",
+          "sha256": "995f81490eb3370eb311a1df9434ef70929d2b8268fb23d053d32a86858aeb38",
+          "bytes": 87125
+        },
+        {
+          "path": "masks/carpet.png",
+          "target": "assets/texture-mask-text/masks/carpet.png",
+          "sha256": "d04e6c357d7c9179c1f35525f2636fd2acaff7a7265efe2982d9a04e200b2648",
+          "bytes": 162484
+        },
+        {
+          "path": "masks/metal.png",
+          "target": "assets/texture-mask-text/masks/metal.png",
+          "sha256": "7cd714e74d9b29a83fe6ccdab8352b480a2fdd8cd1a6995d7792625f44f3ca4a",
+          "bytes": 199263
+        },
+        {
+          "path": "masks/snow.png",
+          "target": "assets/texture-mask-text/masks/snow.png",
+          "sha256": "e1ab94482b72bc0d81669e6645c37baf9be21508ecba311129efdce38b6a9818",
+          "bytes": 98158
+        },
+        {
+          "path": "masks/bricks-104.png",
+          "target": "assets/texture-mask-text/masks/bricks-104.png",
+          "sha256": "17aef4795a18bdbca8ea4bda329feb72fc3531f9d564c31171c49c0321bf35cc",
+          "bytes": 20183
+        },
+        {
+          "path": "masks/ground-103.png",
+          "target": "assets/texture-mask-text/masks/ground-103.png",
+          "sha256": "8dc2df48d2dfe7e1b5bb1a2817074eef139188da14bb8bdb7f5ee19e7485c2ef",
+          "bytes": 106568
+        },
+        {
+          "path": "masks/grass-005.png",
+          "target": "assets/texture-mask-text/masks/grass-005.png",
+          "sha256": "49f0ad0a2c1f7e4444ecf36af00cb4c53083bcd9cce801b50cf8981dc2df1442",
+          "bytes": 110747
+        },
+        {
+          "path": "masks/rock-063.png",
+          "target": "assets/texture-mask-text/masks/rock-063.png",
+          "sha256": "bc2b918bae00ee89d3fe0c9eeee6cad97278fa91d75a87adf7a6f817a69ae62e",
+          "bytes": 40295
+        },
+        {
+          "path": "masks/wood-094.png",
+          "target": "assets/texture-mask-text/masks/wood-094.png",
+          "sha256": "59d62dd0f528c9905ffd16f11083f30077666ff41662cef8922f60c5e38b387d",
+          "bytes": 72703
+        },
+        {
+          "path": "masks/road-012-a.png",
+          "target": "assets/texture-mask-text/masks/road-012-a.png",
+          "sha256": "efa088c098031d766fcb8230d9e50f15896caccde3675443da1a43b4d30c51d3",
+          "bytes": 112772
+        },
+        {
+          "path": "masks/wood-092.png",
+          "target": "assets/texture-mask-text/masks/wood-092.png",
+          "sha256": "89e949300f2912248f57773d9eea8229c82a857e6e3ffa9db2f3d5eced093459",
+          "bytes": 73659
+        },
+        {
+          "path": "masks/metal-049-a.png",
+          "target": "assets/texture-mask-text/masks/metal-049-a.png",
+          "sha256": "408c2ba08053a1f48278bc011042292968b7033d53a10c4a2a9032d1533d5e39",
+          "bytes": 96020
+        },
+        {
+          "path": "masks/wood-floor-051.png",
+          "target": "assets/texture-mask-text/masks/wood-floor-051.png",
+          "sha256": "ad4ad086d9972b793fc2f00d0e67bf7db87fe9e589383e59c4f7c67159d4b9a5",
+          "bytes": 42619
+        },
+        {
+          "path": "masks/paving-stones-150.png",
+          "target": "assets/texture-mask-text/masks/paving-stones-150.png",
+          "sha256": "f38a97103fee3c2bc447c25017a30e7e3c1ecdfd02b8b9c25281cbea33aa93b4",
+          "bytes": 42826
+        },
+        {
+          "path": "masks/road-008-a.png",
+          "target": "assets/texture-mask-text/masks/road-008-a.png",
+          "sha256": "8efa117d87f1e34a9969d36dc46bda7d30d56044e83c89903c0525f8b0193295",
+          "bytes": 118000
+        },
+        {
+          "path": "masks/road-007.png",
+          "target": "assets/texture-mask-text/masks/road-007.png",
+          "sha256": "9e85448c1c44be9094f09738f0daf0266196cde4af07defb68e3ce14560bfa28",
+          "bytes": 86128
+        },
+        {
+          "path": "masks/metal-055-a.png",
+          "target": "assets/texture-mask-text/masks/metal-055-a.png",
+          "sha256": "0d0311f0e7e1150a234160f513cad3fd27a091f10c4fd0d63d8decf4d35fc96b",
+          "bytes": 52872
+        },
+        {
+          "path": "masks/concrete-034.png",
+          "target": "assets/texture-mask-text/masks/concrete-034.png",
+          "sha256": "168df876f6709144fe3c87803c27d7d5807ab7776f1cf214214191690aa25bf5",
+          "bytes": 47015
+        },
+        {
+          "path": "masks/grass-001.png",
+          "target": "assets/texture-mask-text/masks/grass-001.png",
+          "sha256": "5b03882181b4b42da368f21f20cd910edf456ecb409d8c9d038bbcc7139394c8",
+          "bytes": 104393
+        },
+        {
+          "path": "masks/wood-051.png",
+          "target": "assets/texture-mask-text/masks/wood-051.png",
+          "sha256": "53ee0ba7d6e5151f1a2a08cb85560514c4a8d9fb3696016e208e114ed8a579ad",
+          "bytes": 45459
+        },
+        {
+          "path": "masks/asphalt-031.png",
+          "target": "assets/texture-mask-text/masks/asphalt-031.png",
+          "sha256": "246e18b10b02ec2f06a1114c49314d34df1cb78c6b5a463fca6961aaa96d6b3e",
+          "bytes": 115231
+        },
+        {
+          "path": "masks/wood-floor-064.png",
+          "target": "assets/texture-mask-text/masks/wood-floor-064.png",
+          "sha256": "f62b7e3cc6eafb5863b1ea765afc5e36a7457262e326f058e7b949b99c52d1e7",
+          "bytes": 40719
+        },
+        {
+          "path": "masks/concrete-047-a.png",
+          "target": "assets/texture-mask-text/masks/concrete-047-a.png",
+          "sha256": "930727b194865a519b7d630106ec12874d261276bacf48ca04e44a5d9d03853a",
+          "bytes": 114192
+        },
+        {
+          "path": "masks/metal-046-b.png",
+          "target": "assets/texture-mask-text/masks/metal-046-b.png",
+          "sha256": "8d2f2ff3544fa96155f4bb89d376953f11b1723f13d3110af6f9af07c659ab1b",
+          "bytes": 100739
+        },
+        {
+          "path": "masks/grass-004.png",
+          "target": "assets/texture-mask-text/masks/grass-004.png",
+          "sha256": "589bae7859fcbbbe7c19266934fac8ec088d20299909f051ba997c1d27db3bd3",
+          "bytes": 101875
+        },
+        {
+          "path": "masks/marble-012.png",
+          "target": "assets/texture-mask-text/masks/marble-012.png",
+          "sha256": "a0429791f03a0ee265ede7c11f802db3e3077fd783d5e7e1061c7e3da770a018",
+          "bytes": 95146
+        },
+        {
+          "path": "masks/ground-037.png",
+          "target": "assets/texture-mask-text/masks/ground-037.png",
+          "sha256": "40a799d2786af309e49d550799da90497012be2ebd0f943cca6143a40be8462c",
+          "bytes": 119389
+        },
+        {
+          "path": "masks/tiles-138.png",
+          "target": "assets/texture-mask-text/masks/tiles-138.png",
+          "sha256": "6f5ed5c9ea070b324b8d159ce8f88ba21ade899ec80b82623f327782d806f157",
+          "bytes": 112193
+        },
+        {
+          "path": "masks/wood-066.png",
+          "target": "assets/texture-mask-text/masks/wood-066.png",
+          "sha256": "ee2b237151cebee29c18aba3deea089592be20e92694c5a84f4b6e086df1689d",
+          "bytes": 83931
+        },
+        {
+          "path": "masks/concrete-046.png",
+          "target": "assets/texture-mask-text/masks/concrete-046.png",
+          "sha256": "e0dbe79d0542911aa838b5f8085aab0dccad420b288107af6d1bcb8641532699",
+          "bytes": 99553
+        },
+        {
+          "path": "masks/wood-049.png",
+          "target": "assets/texture-mask-text/masks/wood-049.png",
+          "sha256": "148e31a081873f2892b63c4279e32f15c517acfb320ceb2eee4436c0a30c7e5d",
+          "bytes": 41108
+        },
+        {
+          "path": "masks/road-013-a.png",
+          "target": "assets/texture-mask-text/masks/road-013-a.png",
+          "sha256": "22afa13c4e3a1c3964ef0d7ce6968dd24f948f66611c8624894a92b0a84e0950",
+          "bytes": 104988
+        },
+        {
+          "path": "masks/plaster-001.png",
+          "target": "assets/texture-mask-text/masks/plaster-001.png",
+          "sha256": "dde8a9173122fc44e9227c231e7e124fcc46d2f3985c1fa4c949f13139223ff4",
+          "bytes": 106563
+        },
+        {
+          "path": "masks/snow-015.png",
+          "target": "assets/texture-mask-text/masks/snow-015.png",
+          "sha256": "5d79ba6d8b18525b3fe0d877b8b45b329c21988cd5b2f694a6ff56b126b2a1e3",
+          "bytes": 65181
+        },
+        {
+          "path": "masks/road-012-b.png",
+          "target": "assets/texture-mask-text/masks/road-012-b.png",
+          "sha256": "9dc0b3e2b596235d6e10d720b8a614b85edc3057a1f84a4b17e30ca894c32746",
+          "bytes": 111834
+        },
+        {
+          "path": "masks/concrete-042-a.png",
+          "target": "assets/texture-mask-text/masks/concrete-042-a.png",
+          "sha256": "8ee5f31943e9ada8286b2e847eeb9a64a4bff3a8732efff54776bc5c1c6b8176",
+          "bytes": 86364
+        },
+        {
+          "path": "masks/bricks-102.png",
+          "target": "assets/texture-mask-text/masks/bricks-102.png",
+          "sha256": "a3cd35912022bf49160e80ec2da8bb5f83bb75f2994a1d74dbadafc3392f604f",
+          "bytes": 36042
+        },
+        {
+          "path": "masks/rock-058.png",
+          "target": "assets/texture-mask-text/masks/rock-058.png",
+          "sha256": "e3da7340588b79b7772b0b9fa13c2458038467e9c0b3b0d62c9536db92c95e6d",
+          "bytes": 80268
+        },
+        {
+          "path": "masks/wood-floor-070.png",
+          "target": "assets/texture-mask-text/masks/wood-floor-070.png",
+          "sha256": "19565cd026724054cc43923e4169fea45a059fd8500514a10a14b4482bb83ca0",
+          "bytes": 53026
+        },
+        {
+          "path": "masks/bricks-101.png",
+          "target": "assets/texture-mask-text/masks/bricks-101.png",
+          "sha256": "2f41a5e6725f4d7eed57c1055e8b0376ddd47e1ac63c6cd53f260cb036a3b526",
+          "bytes": 48396
+        },
+        {
+          "path": "masks/travertine-009.png",
+          "target": "assets/texture-mask-text/masks/travertine-009.png",
+          "sha256": "a7ae327516d095406069befffe72eeb70ca9475d101a0008d43b988bd09998f5",
+          "bytes": 68950
+        },
+        {
+          "path": "masks/ground-054.png",
+          "target": "assets/texture-mask-text/masks/ground-054.png",
+          "sha256": "971542bad18a2f74bdd1319d9530e274354fc797368cd4ed76bcbead60e5a024",
+          "bytes": 121186
+        },
+        {
+          "path": "masks/wood-058.png",
+          "target": "assets/texture-mask-text/masks/wood-058.png",
+          "sha256": "3d991151421f5d24cdafb72b48dccedc522ae4cca44142eda12095ff0278c56c",
+          "bytes": 83714
+        },
+        {
+          "path": "masks/ground-104.png",
+          "target": "assets/texture-mask-text/masks/ground-104.png",
+          "sha256": "f5c3384f8119311e3f7bb7eab11aa0cc06c5e55eee32209e708f07669fb33fd4",
+          "bytes": 98762
+        },
+        {
+          "path": "masks/painted-plaster-017.png",
+          "target": "assets/texture-mask-text/masks/painted-plaster-017.png",
+          "sha256": "1912637e473754c0cb878beb450300847cc058ed1b8d38b595bcaaa52e8f72f4",
+          "bytes": 54682
+        },
+        {
+          "path": "masks/paving-stones-138.png",
+          "target": "assets/texture-mask-text/masks/paving-stones-138.png",
+          "sha256": "1cf0487c2c1ed82f0547060beba185f6957ea16acc299047cd924b6c3985d3fe",
+          "bytes": 34993
+        },
+        {
+          "path": "masks/ground-068.png",
+          "target": "assets/texture-mask-text/masks/ground-068.png",
+          "sha256": "2f3e23f4763e50449eedd840945f643d3d825db949a52fc1a7c336a75efad751",
+          "bytes": 103647
+        },
+        {
+          "path": "masks/bricks-075-a.png",
+          "target": "assets/texture-mask-text/masks/bricks-075-a.png",
+          "sha256": "dd65311ddeee952196d8cce26765e7f39e2bea0f690bb2c13e124d71c43d6da1",
+          "bytes": 49358
+        },
+        {
+          "path": "masks/ground-080.png",
+          "target": "assets/texture-mask-text/masks/ground-080.png",
+          "sha256": "3932c28ad5695df2d04cab82e295a7612bda743e966f1aa3f93e9224edb16bcd",
+          "bytes": 106262
+        },
+        {
+          "path": "masks/road-009-c.png",
+          "target": "assets/texture-mask-text/masks/road-009-c.png",
+          "sha256": "2335417f0f7a0e92410a1931eb0d6cfa78764bebfa3a6284df92c8ed56c9c7fe",
+          "bytes": 74223
+        },
+        {
+          "path": "masks/bark-014.png",
+          "target": "assets/texture-mask-text/masks/bark-014.png",
+          "sha256": "07f2ae28ed088f8f17353d19c4ba489f5826346a8f9c7f77836ed672c7fd696a",
+          "bytes": 90664
+        },
+        {
+          "path": "masks/marble-016.png",
+          "target": "assets/texture-mask-text/masks/marble-016.png",
+          "sha256": "9ff56d6fbec50a3c4b4ae879eaf307b1beaae9a9fdc910d7a679b4cd0fa666a3",
+          "bytes": 102645
+        },
+        {
+          "path": "masks/fabric-083.png",
+          "target": "assets/texture-mask-text/masks/fabric-083.png",
+          "sha256": "84b0e11ee7227be027fc72728a86acfd49223e43f271abcc43d82931c39a6682",
+          "bytes": 88847
+        },
+        {
+          "path": "masks/metal-061-b.png",
+          "target": "assets/texture-mask-text/masks/metal-061-b.png",
+          "sha256": "d8429c3e4cbb37c26771faf1dd393f88d9d39c0f33313ab1d2fe65f07c24a744",
+          "bytes": 86632
+        },
+        {
+          "path": "masks/metal-048-a.png",
+          "target": "assets/texture-mask-text/masks/metal-048-a.png",
+          "sha256": "99afc502a6391ed0c9ea0af3dd7085b409daf2940e138e085d4b6ad65bf3dfca",
+          "bytes": 108305
+        },
+        {
+          "path": "masks/metal-032.png",
+          "target": "assets/texture-mask-text/masks/metal-032.png",
+          "sha256": "b44385cf1ef43e541eb84e4a691ca5f3e80070ded0019e9cd16a026ac45b09c6",
+          "bytes": 88206
+        },
+        {
+          "path": "masks/metal-041-a.png",
+          "target": "assets/texture-mask-text/masks/metal-041-a.png",
+          "sha256": "f261f3559c917ff92f873fa673297297a48c7437f587eae71bed44fbf520607a",
+          "bytes": 97927
+        },
+        {
+          "path": "masks/metal-038.png",
+          "target": "assets/texture-mask-text/masks/metal-038.png",
+          "sha256": "20a7d51f138496f8ad174d762ff3ffc8b0d9e6f12699e5713fb8cfa43dd94c80",
+          "bytes": 69371
+        },
+        {
+          "path": "masks/diamond-plate-009.png",
+          "target": "assets/texture-mask-text/masks/diamond-plate-009.png",
+          "sha256": "04526cb2e8f99ee3e8d70a0e978660d69946018d02ed6084cda931a4c805ce0a",
+          "bytes": 92336
+        },
+        {
+          "path": "masks/leather-037.png",
+          "target": "assets/texture-mask-text/masks/leather-037.png",
+          "sha256": "b59c4c545c32dd8b663516a6f7f75036cdbd567904f12319ad44f4a3ea0b25b6",
+          "bytes": 120972
+        },
+        {
+          "path": "masks/fabric-080.png",
+          "target": "assets/texture-mask-text/masks/fabric-080.png",
+          "sha256": "6bcdeba650d64804435976d08f82c42618949e0f61f771e1c3a98361db1a647c",
+          "bytes": 30924
+        }
+      ]
+    },
+    {
+      "name": "thermal-distortion",
+      "type": "block",
+      "path": "registry/blocks/thermal-distortion",
+      "title": "Thermal Distortion",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "thermal-distortion.html",
+          "target": "compositions/thermal-distortion.html",
+          "sha256": "cb82b1f76d6c2dcd0d555697fec0155105ba62395d555852ace032448127e276",
+          "bytes": 13284
+        }
+      ]
+    },
+    {
+      "name": "tiktok-follow",
+      "type": "block",
+      "path": "registry/blocks/tiktok-follow",
+      "title": "TikTok Follow",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "tiktok-follow.html",
+          "target": "compositions/tiktok-follow.html",
+          "sha256": "c38bdcf769d4674b197e6c625e4a3222895fdbaec20b79f2579848cc152718a1",
+          "bytes": 6312
+        },
+        {
+          "path": "assets/avatar.jpg",
+          "target": "assets/avatar.jpg",
+          "sha256": "a300f59c31d2ea16195a2ff9a9af50b29c6aecc05d505d69f2a2132a53b99032",
+          "bytes": 5010
+        }
+      ]
+    },
+    {
+      "name": "transitions-3d",
+      "type": "block",
+      "path": "registry/blocks/transitions-3d",
+      "title": "3D Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-3d.html",
+          "target": "compositions/transitions-3d.html",
+          "sha256": "54b3034238d1383f334d6a4234d5f45e74b7f646b84558f3ffe2bcbecb3a677c",
+          "bytes": 7004
+        }
+      ]
+    },
+    {
+      "name": "transitions-blur",
+      "type": "block",
+      "path": "registry/blocks/transitions-blur",
+      "title": "Blur Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-blur.html",
+          "target": "compositions/transitions-blur.html",
+          "sha256": "d493c347a9399f33cf02f7be887d67555681af48fe9f102c5247884d1c0518c3",
+          "bytes": 10614
+        }
+      ]
+    },
+    {
+      "name": "transitions-cover",
+      "type": "block",
+      "path": "registry/blocks/transitions-cover",
+      "title": "Cover Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-cover.html",
+          "target": "compositions/transitions-cover.html",
+          "sha256": "dc1d84f3401628d23b049ae7eff9719af54e700e1ab9adfde70e8a391e333ee6",
+          "bytes": 11345
+        }
+      ]
+    },
+    {
+      "name": "transitions-destruction",
+      "type": "block",
+      "path": "registry/blocks/transitions-destruction",
+      "title": "Destruction Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-destruction.html",
+          "target": "compositions/transitions-destruction.html",
+          "sha256": "d5cd1cdd3a1e087bbbc8f0b4e4a47b45170e612845b637453119ce95cd1cf3d9",
+          "bytes": 11754
+        }
+      ]
+    },
+    {
+      "name": "transitions-dissolve",
+      "type": "block",
+      "path": "registry/blocks/transitions-dissolve",
+      "title": "Dissolve Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-dissolve.html",
+          "target": "compositions/transitions-dissolve.html",
+          "sha256": "be35ea72f94bcf20ce5b4e4b4c39f99c9f734d6aa8d2244f33ff247439f31afb",
+          "bytes": 10838
+        }
+      ]
+    },
+    {
+      "name": "transitions-distortion",
+      "type": "block",
+      "path": "registry/blocks/transitions-distortion",
+      "title": "Distortion Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-distortion.html",
+          "target": "compositions/transitions-distortion.html",
+          "sha256": "1ed8fd8308a10f749fc920ce9d77df7985a1b024bfc66ed8555bbd4d25e5ad84",
+          "bytes": 11645
+        }
+      ]
+    },
+    {
+      "name": "transitions-grid",
+      "type": "block",
+      "path": "registry/blocks/transitions-grid",
+      "title": "Grid Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-grid.html",
+          "target": "compositions/transitions-grid.html",
+          "sha256": "abb3c444c9d73e97973a93f4fa810babc2deb80f575ebefb9b628599f8c94211",
+          "bytes": 8666
+        }
+      ]
+    },
+    {
+      "name": "transitions-light",
+      "type": "block",
+      "path": "registry/blocks/transitions-light",
+      "title": "Light Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-light.html",
+          "target": "compositions/transitions-light.html",
+          "sha256": "74b04f50a317191dc30ae8b849819bc51c24ec045b094fa553d9cc92d2a8ab74",
+          "bytes": 12191
+        }
+      ]
+    },
+    {
+      "name": "transitions-mechanical",
+      "type": "block",
+      "path": "registry/blocks/transitions-mechanical",
+      "title": "Mechanical Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-mechanical.html",
+          "target": "compositions/transitions-mechanical.html",
+          "sha256": "098589405f547834c5359d5c94a2f1dfed06c0780f23962e54c3e3577cea9c1f",
+          "bytes": 11320
+        }
+      ]
+    },
+    {
+      "name": "transitions-other",
+      "type": "block",
+      "path": "registry/blocks/transitions-other",
+      "title": "Other Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-other.html",
+          "target": "compositions/transitions-other.html",
+          "sha256": "3da08bf8cc6dacd298e8f313c9dd2ca95948ee911bde683a813abaf4706eb03b",
+          "bytes": 10754
+        }
+      ]
+    },
+    {
+      "name": "transitions-push",
+      "type": "block",
+      "path": "registry/blocks/transitions-push",
+      "title": "Push Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-push.html",
+          "target": "compositions/transitions-push.html",
+          "sha256": "6e94839890101bbcbf14cfe76c5d41d06738fa70b6d1c423e3b41692d52c8441",
+          "bytes": 10775
+        }
+      ]
+    },
+    {
+      "name": "transitions-radial",
+      "type": "block",
+      "path": "registry/blocks/transitions-radial",
+      "title": "Radial Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-radial.html",
+          "target": "compositions/transitions-radial.html",
+          "sha256": "2e723ae75e92e6e4c1c51e6c596122bb43df8c2fef1ff4363ed787588bec4111",
+          "bytes": 8821
+        }
+      ]
+    },
+    {
+      "name": "transitions-scale",
+      "type": "block",
+      "path": "registry/blocks/transitions-scale",
+      "title": "Scale Transitions",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "transitions-scale.html",
+          "target": "compositions/transitions-scale.html",
+          "sha256": "6781bb145004f49ca83ad57bacdba3c32678bee568ac5583b88211eec24be143",
+          "bytes": 9333
+        }
+      ]
+    },
+    {
+      "name": "ui-3d-reveal",
+      "type": "block",
+      "path": "registry/blocks/ui-3d-reveal",
+      "title": "3D UI Reveal",
+      "category": "产品与案例展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "ui-3d-reveal.html",
+          "target": "compositions/ui-3d-reveal.html",
+          "sha256": "dfc96a788dbdd8b6726e55f9e4093daa82bb8273d086b73774f12b5f386e9d30",
+          "bytes": 104513
+        }
+      ]
+    },
+    {
+      "name": "us-map",
+      "type": "block",
+      "path": "registry/blocks/us-map",
+      "title": "US Map",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "us-map.html",
+          "target": "compositions/us-map.html",
+          "sha256": "49aa2c343281624853a931cef628fc5bb4ca57fb9f56b208b2c8be93c8a00b44",
+          "bytes": 13637
+        }
+      ]
+    },
+    {
+      "name": "us-map-bubble",
+      "type": "block",
+      "path": "registry/blocks/us-map-bubble",
+      "title": "US Bubble Map",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "us-map-bubble.html",
+          "target": "compositions/us-map-bubble.html",
+          "sha256": "5d618342e3aea75f68dea79114dc45aca981f5454a7ffe62e02fabcab2d8eb46",
+          "bytes": 15793
+        }
+      ]
+    },
+    {
+      "name": "us-map-flow",
+      "type": "block",
+      "path": "registry/blocks/us-map-flow",
+      "title": "US Flow Map",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "us-map-flow.html",
+          "target": "compositions/us-map-flow.html",
+          "sha256": "d331e43b6e0bfa51dd7cdfceee8c3cf4c01186887e4c405bac3a0f5f35ba11f2",
+          "bytes": 13724
+        }
+      ]
+    },
+    {
+      "name": "us-map-hex",
+      "type": "block",
+      "path": "registry/blocks/us-map-hex",
+      "title": "US Hex Grid Map",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "us-map-hex.html",
+          "target": "compositions/us-map-hex.html",
+          "sha256": "55825b6c64bdab3f4f54bda3e54bddbbc68f1cf73c7a93e94183be5ab10a1d7e",
+          "bytes": 15390
+        }
+      ]
+    },
+    {
+      "name": "vfx-iphone-device",
+      "type": "block",
+      "path": "registry/blocks/vfx-iphone-device",
+      "title": "iPhone & MacBook 3D Showcase",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-iphone-device.html",
+          "target": "compositions/vfx-iphone-device.html",
+          "sha256": "72a5c493184cdcf100d4511e4f28014cc23a327ff422f0fe3ae5461c1cd566dd",
+          "bytes": 30053
+        },
+        {
+          "path": "models/iphone.glb",
+          "target": "models/iphone.glb",
+          "sha256": "a628339ba9960424b1e6285d31423be0dedf02a71b02e4e61f706a2e4bb8770e",
+          "bytes": 887328
+        },
+        {
+          "path": "models/macbook.glb",
+          "target": "models/macbook.glb",
+          "sha256": "d5ef292e9f5449b8cee77c6ddedee206545624010f0817d04d16537fe444b11d",
+          "bytes": 214184
+        },
+        {
+          "path": "models/hyperframes-mobile.png",
+          "target": "models/hyperframes-mobile.png",
+          "sha256": "3117d53b5563ce46683c7816780f247e79ae36e1fcca3cb7d474c5d31d9602ff",
+          "bytes": 76258
+        },
+        {
+          "path": "models/hyperframes-desktop.png",
+          "target": "models/hyperframes-desktop.png",
+          "sha256": "7065ac5c3cb424f8a3c051604ca9ba657800a4bdfab625619a752f7be810e081",
+          "bytes": 386587
+        }
+      ]
+    },
+    {
+      "name": "vfx-liquid-background",
+      "type": "block",
+      "path": "registry/blocks/vfx-liquid-background",
+      "title": "Liquid Background",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-liquid-background.html",
+          "target": "compositions/vfx-liquid-background.html",
+          "sha256": "0bdc2d57d292c5d4d937908fb02c9d646ee141014a90637534f331b49a46d5df",
+          "bytes": 43833
+        }
+      ]
+    },
+    {
+      "name": "vfx-liquid-glass",
+      "type": "block",
+      "path": "registry/blocks/vfx-liquid-glass",
+      "title": "Liquid Glass",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-liquid-glass.html",
+          "target": "compositions/vfx-liquid-glass.html",
+          "sha256": "1c3d3eeb6d64c59dd8f7d211792de1b9abd73547c07bf3e79bd59e2a2882fa2f",
+          "bytes": 27695
+        }
+      ]
+    },
+    {
+      "name": "vfx-magnetic",
+      "type": "block",
+      "path": "registry/blocks/vfx-magnetic",
+      "title": "Magnetic",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-magnetic.html",
+          "target": "compositions/vfx-magnetic.html",
+          "sha256": "5d8cb92132690f681c0acd5ad9c9a326d79fc59e8904eba9e6d1542acd54c1dd",
+          "bytes": 15291
+        }
+      ]
+    },
+    {
+      "name": "vfx-portal",
+      "type": "block",
+      "path": "registry/blocks/vfx-portal",
+      "title": "Portal",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-portal.html",
+          "target": "compositions/vfx-portal.html",
+          "sha256": "3a70718be5486fc7936bf4f2ddbd3addf53533048f2e53dee47b5b8de82c2526",
+          "bytes": 27022
+        }
+      ]
+    },
+    {
+      "name": "vfx-shatter",
+      "type": "block",
+      "path": "registry/blocks/vfx-shatter",
+      "title": "Shatter",
+      "category": "画面内复杂效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-shatter.html",
+          "target": "compositions/vfx-shatter.html",
+          "sha256": "8e74692cd23813233ad826ee1ec2379c4f6ec91128b774e8df4b8bf23bff3dbf",
+          "bytes": 38037
+        }
+      ]
+    },
+    {
+      "name": "vfx-text-cursor",
+      "type": "block",
+      "path": "registry/blocks/vfx-text-cursor",
+      "title": "VFX Text Cursor",
+      "category": "文字效果",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vfx-text-cursor.html",
+          "target": "compositions/vfx-text-cursor.html",
+          "sha256": "71834bda1e5a5a45aa137e5b0eca2b9ed408cb7dc9b47a0dd4008eb7b4cfe235",
+          "bytes": 34939
+        }
+      ]
+    },
+    {
+      "name": "vignette",
+      "type": "component",
+      "path": "registry/components/vignette",
+      "title": "Vignette",
+      "category": "其他",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vignette.html",
+          "target": "compositions/components/vignette.html",
+          "sha256": "b825476ca7bb89c0afbd6f1157b9813ac6a1ac82e9aa13a7cecd7ae305ebb2d5",
+          "bytes": 1491
+        }
+      ]
+    },
+    {
+      "name": "vpn-youtube-spot",
+      "type": "block",
+      "path": "registry/blocks/vpn-youtube-spot",
+      "title": "VPN YouTube Spot",
+      "category": "产品与案例展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "vpn-youtube-spot.html",
+          "target": "compositions/vpn-youtube-spot.html",
+          "sha256": "0190427d1c699647bc6ff527bb6b219921e4fa63387da554ba5089c7974d5218",
+          "bytes": 27410
+        },
+        {
+          "path": "assets/vpn-sfx.wav",
+          "target": "assets/vpn-sfx.wav",
+          "sha256": "f1f4fe4111dbd2659e6c32e0bae288649fb2066439e68084f523f809fd2cdd3c",
+          "bytes": 1344044
+        }
+      ]
+    },
+    {
+      "name": "whip-pan",
+      "type": "block",
+      "path": "registry/blocks/whip-pan",
+      "title": "Whip Pan",
+      "category": "转场",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "whip-pan.html",
+          "target": "compositions/whip-pan.html",
+          "sha256": "97a690de11f6dcebd6356bea84cba1af6ae61bfe03b9b7cc75a81368c93a12c9",
+          "bytes": 12613
+        }
+      ]
+    },
+    {
+      "name": "world-map",
+      "type": "block",
+      "path": "registry/blocks/world-map",
+      "title": "World Map",
+      "category": "数据与地图",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "world-map.html",
+          "target": "compositions/world-map.html",
+          "sha256": "f0e3f9b9841137f8639136a1bcd6fcb233c50f780ea8eb5792f20faa8f62e85d",
+          "bytes": 12899
+        }
+      ]
+    },
+    {
+      "name": "x-post",
+      "type": "block",
+      "path": "registry/blocks/x-post",
+      "title": "X Post Card",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "x-post.html",
+          "target": "compositions/x-post.html",
+          "sha256": "b515cb899491b5171f9cabdccdac2a2d133241f36eda934f232430095fd83e29",
+          "bytes": 13279
+        }
+      ]
+    },
+    {
+      "name": "yt-lower-third",
+      "type": "block",
+      "path": "registry/blocks/yt-lower-third",
+      "title": "YouTube Lower Third",
+      "category": "社交平台展示",
+      "officialPreview": true,
+      "files": [
+        {
+          "path": "yt-lower-third.html",
+          "target": "compositions/yt-lower-third.html",
+          "sha256": "35c8eaf005a39a52a68a2944f063628c77f5890f265da9c26de4683fcd904ba2",
+          "bytes": 5890
+        },
+        {
+          "path": "assets/avatar.jpg",
+          "target": "assets/avatar.jpg",
+          "sha256": "a300f59c31d2ea16195a2ff9a9af50b29c6aecc05d505d69f2a2132a53b99032",
+          "bytes": 5010
+        }
+      ]
+    }
+  ]
+}
