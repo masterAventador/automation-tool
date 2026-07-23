@@ -1,0 +1,3223 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-asset-overlay.v1",
+  "assetRoot": "assets/motion-catalog-overlay",
+  "source": {
+    "catalogRightsContract": "contracts/quality/motion-catalog-rights.v1.json",
+    "catalogRightsSha256": "983e1d3d3dfd6588c7c2f15c41c0f2d65f17a4aa2c076c6f2250e4c5f4c72f9b",
+    "upstreamCommit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+    "policy": "contracts/quality/asset-rights-policy.v1.json"
+  },
+  "counts": {
+    "items": 70,
+    "assetReplacementReferences": 150,
+    "trademarkReplacementItems": 68,
+    "trademarkReplacementReferences": 121,
+    "assets": 44
+  },
+  "assets": [
+    {
+      "id": "audio-ambient-tech",
+      "category": "music_sfx",
+      "path": "audio/ambient-tech.wav",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "d9918a76731fdafee1be94dd76c51fa8c31cb21cbc56889d2f710ba7a2f62efc",
+      "bytes": 79424,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "syncUseAllowed": true,
+      "contentIdRisk": "none-self-authored"
+    },
+    {
+      "id": "audio-count-rise",
+      "category": "music_sfx",
+      "path": "audio/count-rise.wav",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "0962f8f53aff0296030db9b24be2a02e69d0e470c6050ce8fd08659fd3740712",
+      "bytes": 39734,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "syncUseAllowed": true,
+      "contentIdRisk": "none-self-authored"
+    },
+    {
+      "id": "audio-route-chime",
+      "category": "music_sfx",
+      "path": "audio/route-chime.wav",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "ce5855520b0f565c10686e6ac1bf325445406bc75bd96e43691ecf79a9df8625",
+      "bytes": 52964,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "syncUseAllowed": true,
+      "contentIdRisk": "none-self-authored"
+    },
+    {
+      "id": "audio-soft-pulse",
+      "category": "music_sfx",
+      "path": "audio/soft-pulse.wav",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "fa2c5bf1228a527a9c521816e4117e83c6abb109e34dc245c82c770bdc0a6642",
+      "bytes": 44144,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "syncUseAllowed": true,
+      "contentIdRisk": "none-self-authored"
+    },
+    {
+      "id": "font-big-shoulders-display",
+      "category": "font",
+      "path": "fonts/big-shoulders-display-latin.woff2",
+      "source": "google-fonts-locked-by-bm12",
+      "sourceUrl": "https://fonts.gstatic.com/s/bigshouldersdisplay/v24/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1czNDuDJAM2w.woff2",
+      "license": "OFL-1.1",
+      "licenseVersionOrDate": "SIL Open Font License 1.1",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "203dd8ba4ae61b19cd2e00c66708f0d0f6d8484cdfdb1d7e8be37260d36a99b1",
+      "bytes": 35520,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "embeddingAllowed": true,
+      "attribution": "Big Shoulders Display authors; SIL Open Font License 1.1",
+      "bm12LockedSha256": "203dd8ba4ae61b19cd2e00c66708f0d0f6d8484cdfdb1d7e8be37260d36a99b1"
+    },
+    {
+      "id": "generated-avatar",
+      "category": "generated",
+      "path": "generated/avatar.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_YBFukgwcu5rJpWHtwjCseMPl",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "28cde837998d1c87afee49be353133791137b791048895822d7350374ad77fae",
+      "bytes": 1755005,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "avatar",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Entirely fictional adult creative professional portrait; friendly gender-neutral East Asian adult; centered square editorial studio photograph; warm-gray backdrop with muted teal and amber light; unbranded dark jacket; no logos, text, watermark, celebrity likeness, copyrighted character or recognizable product.",
+        "generatedAt": "2026-07-23T23:50:00+08:00"
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "generated-illustration",
+      "category": "generated",
+      "path": "generated/illustration.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_98Hiob6ehOXrPeHqy5TMgIvK",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "1cc23a428b540a9c5a527e676b645d99c158fc7cbd9495e022021f04f815da08",
+      "bytes": 2073534,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "illustration",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Original editorial illustration about ideas traveling between two anonymous creative cities; abstract luminous route across a stylized globe fragment; indigo, cobalt, cyan, cream, coral and yellow; no labels, national borders, flags, logos, app UI, text, watermark or copyrighted character.",
+        "generatedAt": "2026-07-23T23:50:00+08:00"
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ],
+      "libraryOnly": true,
+      "libraryUse": "BM-14/BM-15 可选原创插画母版"
+    },
+    {
+      "id": "generated-wallpaper",
+      "category": "generated",
+      "path": "generated/wallpaper.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_jR9XnWNMh05PbiSMlZ3qwu4e",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "8c6cd373a8c5ee0a941e3432056eabd8df993744bdb7b871c791e466e438ffa9",
+      "bytes": 1590887,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "wallpaper",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Original abstract widescreen landscape of layered translucent glass-like waves and folded mineral forms; midnight navy, slate, muted teal, warm sand and restrained coral; clean center negative space; no logos, devices, text, watermark or recognizable operating-system wallpaper.",
+        "generatedAt": "2026-07-23T23:50:00+08:00"
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "map-region-grid",
+      "category": "map_3d",
+      "path": "maps/region-grid.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2a604b76d3a0bdadc360475b1f844b1dd5c037b7d8b891e95787e0bc19ef4669",
+      "bytes": 664,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "derivativeUseAllowed": true
+    },
+    {
+      "id": "map-route-grid",
+      "category": "map_3d",
+      "path": "maps/route-grid.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "cde5765a682d5559cf5a91d2878f78e9df507cff292a2cfb1a02fa4e074acffc",
+      "bytes": 606,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "derivativeUseAllowed": true
+    },
+    {
+      "id": "model-portable-device",
+      "category": "map_3d",
+      "path": "models/portable-device.glb",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "a627858d946891d7cce4f2ae1f40dedaa55d71f8e88364e1468a833e493057ac",
+      "bytes": 944,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "derivativeUseAllowed": true
+    },
+    {
+      "id": "model-portable-display",
+      "category": "map_3d",
+      "path": "models/portable-display.glb",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "6a38e83bf71051c887dd30314347f1f20a9c08e0fa0cdea46e96fc744dd2b230",
+      "bytes": 1044,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project",
+      "derivativeUseAllowed": true
+    },
+    {
+      "id": "neutral-glass-script",
+      "category": "script",
+      "path": "scripts/neutral-glass.iife.js",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "49e9b8189ccc1aaa20144ab452a8aac2a1293eb37f22d6964f5ead8fc1bf09bd",
+      "bytes": 385,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "neutral-mark",
+      "category": "vector_ui",
+      "path": "ui/neutral-mark.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "766fc40a0bd1895f32bf8d18d95f3371c25098b33795a61915ddf0e6faaa4fa4",
+      "bytes": 300,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "texture-brick",
+      "category": "generated",
+      "path": "generated/textures/brick.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "d03f86ed354af86444da487bba24ab3284c9f848b1c2a6143266ec3c86f14968",
+      "bytes": 351109,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 1,
+          "row": 2,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-concrete",
+      "category": "generated",
+      "path": "generated/textures/concrete.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "d6217e9436b759073a96ced8bc94a3c4868253c16649665d81d12c3e3ca99ec0",
+      "bytes": 369794,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 0,
+          "row": 0,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-fabric",
+      "category": "generated",
+      "path": "generated/textures/fabric.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "561708438ab1e815aca4c671d5cf955f585a6115a1fce17b6eea3144be552cb0",
+      "bytes": 363410,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 0,
+          "row": 2,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-ground",
+      "category": "generated",
+      "path": "generated/textures/ground.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "75f53babaac3646f615df170776db1cddba64daa54b223859b297d0dd58fa0fe",
+      "bytes": 402785,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 2,
+          "row": 2,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-lava",
+      "category": "generated",
+      "path": "generated/textures/lava.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "f1b8079db8267115f1ea45394c9ad824ce470201fa463741e38f651607fc02bb",
+      "bytes": 366244,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 1,
+          "row": 0,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-marble",
+      "category": "generated",
+      "path": "generated/textures/marble.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "1177e3cfcb4f5033ff76128f567fd4eb692dc3d1de2172c9e4579fa2b1d734bf",
+      "bytes": 336130,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 2,
+          "row": 0,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-metal",
+      "category": "generated",
+      "path": "generated/textures/metal.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "14feca13634f2e3295cd4c5a40ae38577da96a99f9e7d2023ee33aadb0d46c12",
+      "bytes": 266997,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 0,
+          "row": 1,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-rock",
+      "category": "generated",
+      "path": "generated/textures/rock.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "419052869b30ac4687fc33e2e0bd7ecc1c343f72ee94184669bdebcb15f45ff5",
+      "bytes": 364431,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 1,
+          "row": 1,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "texture-wood",
+      "category": "generated",
+      "path": "generated/textures/wood.png",
+      "source": "openai-image-generation",
+      "sourceUrl": "openai-imagegen://call_NeTaiFCHy1kME2y13hoRTeRq",
+      "license": "contractual-output-ownership",
+      "licenseVersionOrDate": "OpenAI Terms effective 2026-01-01",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2acba90c28790641be51576a112b022989b0007fa25cfc652be80e62981057b8",
+      "bytes": 327593,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "model": "built-in-image-generation",
+      "modelVersion": "session-current",
+      "generationRecord": {
+        "role": "texture",
+        "model": "built-in-image-generation",
+        "modelVersion": "session-current",
+        "prompt": "Precise 3-by-3 source atlas of original seamless material swatches: concrete, volcanic mineral, pale veined stone, brushed dark metal, slate rock, warm wood, woven neutral fabric, fired brick and granular ground; flat diffuse lighting; no labels, logos, trademarks, watermark or proprietary material scan.",
+        "generatedAt": "2026-07-23T23:50:00+08:00",
+        "cropFromOriginalAtlas": {
+          "grid": "3x3",
+          "column": 2,
+          "row": 1,
+          "sourcePixels": [
+            1254,
+            1254
+          ],
+          "cropPixels": [
+            410,
+            410
+          ]
+        }
+      },
+      "humanRightsReview": {
+        "status": "passed",
+        "checks": [
+          "no real-person identity claim",
+          "no visible logo or trademark",
+          "no watermark or signature",
+          "no copyrighted character"
+        ]
+      },
+      "rightsBasis": "As between the user/customer and OpenAI, and to the extent permitted by applicable law, the user/customer owns the Output.",
+      "rightsSources": [
+        {
+          "url": "https://openai.com/policies/terms-of-use/",
+          "effective": "2026-01-01",
+          "section": "Content"
+        },
+        {
+          "url": "https://openai.com/policies/services-agreement/",
+          "effective": "2026-01-01",
+          "section": "4. Customer Content"
+        }
+      ],
+      "rightsCaveats": [
+        "output may not be unique",
+        "project remains responsible for third-party rights review",
+        "ownership is limited by applicable law"
+      ]
+    },
+    {
+      "id": "ui-activity",
+      "category": "vector_ui",
+      "path": "ui/activity.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "f3f11b5d330f59ecb07fd59088c97962f926084b2424787130db6380903e6a82",
+      "bytes": 289,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-browser",
+      "category": "vector_ui",
+      "path": "ui/browser.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "c1e5bcc4076c16b0d011d0badc4a2d9a5f4b3bbdf2c13391e3035a01bbbb72fe",
+      "bytes": 314,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-calendar",
+      "category": "vector_ui",
+      "path": "ui/calendar.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "bf20d775d0080ece954c6dcf76618a4e0cb819f0f799b0962e386a7cb86ec09f",
+      "bytes": 332,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-chart",
+      "category": "vector_ui",
+      "path": "ui/chart.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "cfe52ec86dd5eab85f7e629cf4f0cfc81afc136a070903b8b66c9adf2ef92359",
+      "bytes": 270,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-chat",
+      "category": "vector_ui",
+      "path": "ui/chat.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2670fc2bfb2653d2d9a851e8ce1d59e653182fd84b55dd05b19a9a68b7619148",
+      "bytes": 290,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-clock",
+      "category": "vector_ui",
+      "path": "ui/clock.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "5dbcbfb9893d9a51517f56eecfa14a5b96aff304670a863872341cb7b3ae2cce",
+      "bytes": 277,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-contacts",
+      "category": "vector_ui",
+      "path": "ui/contacts.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "82b0d293d8d9c4f4354abca8926f9a84be836bc600318707644247eebff1dcd8",
+      "bytes": 296,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-desktop-panel",
+      "category": "vector_ui",
+      "path": "ui/desktop-panel.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "9faf04bb0cc64a2d87b6da43eb354da6af06624a9d42274c2a89740b2da0d8f3",
+      "bytes": 544,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-files",
+      "category": "vector_ui",
+      "path": "ui/files.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2e655cfb4aff16c8f8f934adbff1b34ebd0bab4942b7d545b94e333b1a35aac0",
+      "bytes": 276,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-gallery",
+      "category": "vector_ui",
+      "path": "ui/gallery.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "929cea225b2a0c19ea1cb1843a5bafc0bff85f532daf4cd6c26365456a9e84c1",
+      "bytes": 338,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-home",
+      "category": "vector_ui",
+      "path": "ui/home.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "26e142598783f2bdfe718307683ad032448ccefa5e9588893c008979d103f954",
+      "bytes": 269,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-language",
+      "category": "vector_ui",
+      "path": "ui/language.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "fcc31dd8f464895b96c80ec7a0bea6b3fa52c9ed1619e90072c3566227205fd6",
+      "bytes": 314,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-library",
+      "category": "vector_ui",
+      "path": "ui/library.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "a303797626fa204ef23bdbc8344f45a54b5593c29d13e1a30192296ab7fd11e7",
+      "bytes": 282,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-location",
+      "category": "vector_ui",
+      "path": "ui/location.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "67ca420a6b04425f45bbd2a5aebf4da8d155a8f6c1cdb0d58a031362fe479ba5",
+      "bytes": 316,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-mail",
+      "category": "vector_ui",
+      "path": "ui/mail.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "d2ea2e78a55b7f3a0e8eed7dc4b4c5366af5794a25900312a7034a62283f9481",
+      "bytes": 301,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-mobile-panel",
+      "category": "vector_ui",
+      "path": "ui/mobile-panel.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2bf483f7e40731b9cb773b5d1c410df20167aed8ced658227ad5aba31c3c6bee",
+      "bytes": 542,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-music",
+      "category": "vector_ui",
+      "path": "ui/music.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2b57f07ce50590b484258f9c0f2782611d57666fe13aaae1388b5e13812c30b1",
+      "bytes": 317,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-phone",
+      "category": "vector_ui",
+      "path": "ui/phone.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "2793c1f5f81e36ff928696898b13be796cf8b69d922a22e577d000a885189a7d",
+      "bytes": 276,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-social",
+      "category": "vector_ui",
+      "path": "ui/social.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "146dc6b07484fbb7a7e2ead65341459052c8bd419fbb5ad2db309637c303fbb2",
+      "bytes": 347,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-wallet",
+      "category": "vector_ui",
+      "path": "ui/wallet.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "c371cc9fe18233bf7cedf42c12b427fcd1e718eba958249f4e382356993b447b",
+      "bytes": 316,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    },
+    {
+      "id": "ui-weather",
+      "category": "vector_ui",
+      "path": "ui/weather.svg",
+      "source": "project-self-authored",
+      "sourceUrl": "repository://scripts/build_motion_asset_overlay.py",
+      "license": "project-owned-original-source",
+      "licenseVersionOrDate": "2026-07-23",
+      "acquiredAt": "2026-07-23T23:50:00+08:00",
+      "sha256": "9b78c9787ce40727ad65d656e299ac7abfa4a26a0762bef86c1c73770eead741",
+      "bytes": 328,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-23T23:50:00+08:00",
+      "attribution": "Automation Tool project"
+    }
+  ],
+  "items": [
+    {
+      "name": "apple-money-count",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/sfx-production.wav",
+          "sourceKind": "audio",
+          "assetId": "audio-count-rise",
+          "replacementPath": "audio/count-rise.wav"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "youtube",
+          "replacement": "视频平台"
+        }
+      ]
+    },
+    {
+      "name": "blue-sweater-intro-video",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/joe-sai-avatar.png",
+          "sourceKind": "image",
+          "assetId": "generated-avatar",
+          "replacementPath": "generated/avatar.png"
+        },
+        {
+          "sourcePath": "assets/sfx/integrated-melodic-tech-mix.wav",
+          "sourceKind": "audio",
+          "assetId": "audio-ambient-tech",
+          "replacementPath": "audio/ambient-tech.wav"
+        }
+      ],
+      "trademarkReplacements": []
+    },
+    {
+      "name": "caption-clip-wipe",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-editorial-emphasis",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-emoji-pop",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-glitch-rgb",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-gradient-fill",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-highlight",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "tiktok",
+          "replacement": "短视频平台"
+        }
+      ]
+    },
+    {
+      "name": "caption-kinetic-slam",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-matrix-decode",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-neon-accent",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-neon-glow",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-parallax-layers",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-particle-burst",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-pill-karaoke",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-texture",
+      "type": "component",
+      "assetReplacements": [
+        {
+          "sourcePath": "concrete-042-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "lava.png",
+          "sourceKind": "image",
+          "assetId": "texture-lava",
+          "replacementPath": "generated/textures/lava.png"
+        },
+        {
+          "sourcePath": "marble-012.png",
+          "sourceKind": "image",
+          "assetId": "texture-marble",
+          "replacementPath": "generated/textures/marble.png"
+        },
+        {
+          "sourcePath": "metal-046-b.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "rock-058.png",
+          "sourceKind": "image",
+          "assetId": "texture-rock",
+          "replacementPath": "generated/textures/rock.png"
+        },
+        {
+          "sourcePath": "wood-066.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "caption-weight-shift",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "code-diff",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "code-highlight",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "code-morph",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "code-scroll",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-basic",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-dark",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-light",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-grass",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-homebrew",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-man-page",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-novel",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-ocean",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-pro",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-red-sands",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-silver-aerogel",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-apple-terminal-solid-colors",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-dark-2026",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-dark-modern",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-dark-plus",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-flight",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-high-contrast",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-high-contrast-light",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-light-2026",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-light-modern",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-light-plus",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-monokai",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-solarized-light",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-visual-studio-dark",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-visual-studio-light",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "background.jpeg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "visual_studio",
+          "replacement": "代码工作台"
+        },
+        {
+          "indicator": "vscode",
+          "replacement": "代码编辑器"
+        }
+      ]
+    },
+    {
+      "name": "code-typing",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "instagram-follow",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/avatar.jpg",
+          "sourceKind": "image",
+          "assetId": "generated-avatar",
+          "replacementPath": "generated/avatar.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "heygen",
+          "replacement": "人物创作平台"
+        },
+        {
+          "indicator": "instagram",
+          "replacement": "图片社区"
+        }
+      ]
+    },
+    {
+      "name": "ios26-liquid-glass",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/icons/books.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-library",
+          "replacementPath": "ui/library.svg"
+        },
+        {
+          "sourcePath": "assets/icons/brave.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-browser",
+          "replacementPath": "ui/browser.svg"
+        },
+        {
+          "sourcePath": "assets/icons/calendar.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-calendar",
+          "replacementPath": "ui/calendar.svg"
+        },
+        {
+          "sourcePath": "assets/icons/chatgpt.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/contacts.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-contacts",
+          "replacementPath": "ui/contacts.svg"
+        },
+        {
+          "sourcePath": "assets/icons/files.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-files",
+          "replacementPath": "ui/files.svg"
+        },
+        {
+          "sourcePath": "assets/icons/find-my.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-location",
+          "replacementPath": "ui/location.svg"
+        },
+        {
+          "sourcePath": "assets/icons/fitness.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-activity",
+          "replacementPath": "ui/activity.svg"
+        },
+        {
+          "sourcePath": "assets/icons/gmail.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-mail",
+          "replacementPath": "ui/mail.svg"
+        },
+        {
+          "sourcePath": "assets/icons/home.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-home",
+          "replacementPath": "ui/home.svg"
+        },
+        {
+          "sourcePath": "assets/icons/instagram.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-gallery",
+          "replacementPath": "ui/gallery.svg"
+        },
+        {
+          "sourcePath": "assets/icons/itunes-store.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-music",
+          "replacementPath": "ui/music.svg"
+        },
+        {
+          "sourcePath": "assets/icons/messages.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/music.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-music",
+          "replacementPath": "ui/music.svg"
+        },
+        {
+          "sourcePath": "assets/icons/notify-messages.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/phone.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-phone",
+          "replacementPath": "ui/phone.svg"
+        },
+        {
+          "sourcePath": "assets/icons/photos.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-gallery",
+          "replacementPath": "ui/gallery.svg"
+        },
+        {
+          "sourcePath": "assets/icons/proton-mail.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-mail",
+          "replacementPath": "ui/mail.svg"
+        },
+        {
+          "sourcePath": "assets/icons/revolut.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-wallet",
+          "replacementPath": "ui/wallet.svg"
+        },
+        {
+          "sourcePath": "assets/icons/slack.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/stocks.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chart",
+          "replacementPath": "ui/chart.svg"
+        },
+        {
+          "sourcePath": "assets/icons/translate.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-language",
+          "replacementPath": "ui/language.svg"
+        },
+        {
+          "sourcePath": "assets/icons/watch.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-clock",
+          "replacementPath": "ui/clock.svg"
+        },
+        {
+          "sourcePath": "assets/icons/weather.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-weather",
+          "replacementPath": "ui/weather.svg"
+        },
+        {
+          "sourcePath": "assets/icons/whatsapp.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/x.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-social",
+          "replacementPath": "ui/social.svg"
+        },
+        {
+          "sourcePath": "lib/liquid-glass.iife.js",
+          "sourceKind": "script",
+          "assetId": "neutral-glass-script",
+          "replacementPath": "scripts/neutral-glass.iife.js"
+        },
+        {
+          "sourcePath": "models/iphone.glb",
+          "sourceKind": "model_3d",
+          "assetId": "model-portable-device",
+          "replacementPath": "models/portable-device.glb"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "instagram",
+          "replacement": "图片社区"
+        },
+        {
+          "indicator": "ios",
+          "replacement": "移动系统"
+        },
+        {
+          "indicator": "iphone",
+          "replacement": "便携设备"
+        },
+        {
+          "indicator": "macbook",
+          "replacement": "便携工作站"
+        },
+        {
+          "indicator": "spotify",
+          "replacement": "音频平台"
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-notification",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/hyperframes-logo-dark.svg",
+          "sourceKind": "vector",
+          "assetId": "neutral-mark",
+          "replacementPath": "ui/neutral-mark.svg"
+        },
+        {
+          "sourcePath": "lib/liquid-glass.iife.js",
+          "sourceKind": "script",
+          "assetId": "neutral-glass-script",
+          "replacementPath": "scripts/neutral-glass.iife.js"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-widgets",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/hyperframes-logo-dark.svg",
+          "sourceKind": "vector",
+          "assetId": "neutral-mark",
+          "replacementPath": "ui/neutral-mark.svg"
+        },
+        {
+          "sourcePath": "lib/liquid-glass.iife.js",
+          "sourceKind": "script",
+          "assetId": "neutral-glass-script",
+          "replacementPath": "scripts/neutral-glass.iife.js"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "lower-third-bild",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/fonts/BarlowCondensed-Bold.woff2",
+          "sourceKind": "font",
+          "assetId": "font-big-shoulders-display",
+          "replacementPath": "fonts/big-shoulders-display-latin.woff2"
+        },
+        {
+          "sourcePath": "assets/fonts/BarlowCondensed-ExtraBold.woff2",
+          "sourceKind": "font",
+          "assetId": "font-big-shoulders-display",
+          "replacementPath": "fonts/big-shoulders-display-latin.woff2"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "bild",
+          "replacement": "每日简报"
+        }
+      ]
+    },
+    {
+      "name": "macos-notification",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "macos",
+          "replacement": "桌面系统"
+        }
+      ]
+    },
+    {
+      "name": "macos-tahoe-liquid-glass",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/icons/brave.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-browser",
+          "replacementPath": "ui/browser.svg"
+        },
+        {
+          "sourcePath": "assets/icons/calendar.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-calendar",
+          "replacementPath": "ui/calendar.svg"
+        },
+        {
+          "sourcePath": "assets/icons/dock-finder.png",
+          "sourceKind": "image",
+          "assetId": "ui-files",
+          "replacementPath": "ui/files.svg"
+        },
+        {
+          "sourcePath": "assets/icons/dock-mail.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-mail",
+          "replacementPath": "ui/mail.svg"
+        },
+        {
+          "sourcePath": "assets/icons/dock-music.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-music",
+          "replacementPath": "ui/music.svg"
+        },
+        {
+          "sourcePath": "assets/icons/dock-photos.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-gallery",
+          "replacementPath": "ui/gallery.svg"
+        },
+        {
+          "sourcePath": "assets/icons/dock-safari.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-browser",
+          "replacementPath": "ui/browser.svg"
+        },
+        {
+          "sourcePath": "assets/icons/files.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-files",
+          "replacementPath": "ui/files.svg"
+        },
+        {
+          "sourcePath": "assets/icons/finder.png",
+          "sourceKind": "image",
+          "assetId": "ui-files",
+          "replacementPath": "ui/files.svg"
+        },
+        {
+          "sourcePath": "assets/icons/mail.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-mail",
+          "replacementPath": "ui/mail.svg"
+        },
+        {
+          "sourcePath": "assets/icons/messages.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/music.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-music",
+          "replacementPath": "ui/music.svg"
+        },
+        {
+          "sourcePath": "assets/icons/photos.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-gallery",
+          "replacementPath": "ui/gallery.svg"
+        },
+        {
+          "sourcePath": "assets/icons/safari.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-browser",
+          "replacementPath": "ui/browser.svg"
+        },
+        {
+          "sourcePath": "assets/icons/slack.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/icons/toast-messages.jpg",
+          "sourceKind": "image",
+          "assetId": "ui-chat",
+          "replacementPath": "ui/chat.svg"
+        },
+        {
+          "sourcePath": "assets/wallpapers/golden-gate-bridge-san-francisco-5k-0g.jpg",
+          "sourceKind": "image",
+          "assetId": "generated-wallpaper",
+          "replacementPath": "generated/wallpaper.png"
+        },
+        {
+          "sourcePath": "models/macbook.glb",
+          "sourceKind": "model_3d",
+          "assetId": "model-portable-display",
+          "replacementPath": "models/portable-display.glb"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "iphone",
+          "replacement": "便携设备"
+        },
+        {
+          "indicator": "macbook",
+          "replacement": "便携工作站"
+        },
+        {
+          "indicator": "macos",
+          "replacement": "桌面系统"
+        },
+        {
+          "indicator": "spotify",
+          "replacement": "音频平台"
+        }
+      ]
+    },
+    {
+      "name": "motion-blur",
+      "type": "component",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "north-korea-locked-down",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/korea-map.png",
+          "sourceKind": "image",
+          "assetId": "map-region-grid",
+          "replacementPath": "maps/region-grid.svg"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "youtube",
+          "replacement": "视频平台"
+        }
+      ]
+    },
+    {
+      "name": "nyc-paris-flight",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/map-nyc-paris.png",
+          "sourceKind": "image",
+          "assetId": "map-route-grid",
+          "replacementPath": "maps/route-grid.svg"
+        },
+        {
+          "sourcePath": "assets/sfx-mix.wav",
+          "sourceKind": "audio",
+          "assetId": "audio-route-chime",
+          "replacementPath": "audio/route-chime.wav"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "youtube",
+          "replacement": "视频平台"
+        }
+      ]
+    },
+    {
+      "name": "reddit-post",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "reddit",
+          "replacement": "兴趣社区"
+        }
+      ]
+    },
+    {
+      "name": "spotify-card",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "heygen",
+          "replacement": "人物创作平台"
+        },
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "spotify",
+          "replacement": "音频平台"
+        }
+      ]
+    },
+    {
+      "name": "texture-mask-text",
+      "type": "component",
+      "assetReplacements": [
+        {
+          "sourcePath": "masks/asphalt-031.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/bark-014.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/brick.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/bricks-075-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/bricks-101.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/bricks-102.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/bricks-104.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/carpet.png",
+          "sourceKind": "image",
+          "assetId": "texture-fabric",
+          "replacementPath": "generated/textures/fabric.png"
+        },
+        {
+          "sourcePath": "masks/concrete-034.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/concrete-042-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/concrete-046.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/concrete-047-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/concrete.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/diamond-plate-009.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/fabric-080.png",
+          "sourceKind": "image",
+          "assetId": "texture-fabric",
+          "replacementPath": "generated/textures/fabric.png"
+        },
+        {
+          "sourcePath": "masks/fabric-083.png",
+          "sourceKind": "image",
+          "assetId": "texture-fabric",
+          "replacementPath": "generated/textures/fabric.png"
+        },
+        {
+          "sourcePath": "masks/grass-001.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/grass-004.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/grass-005.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/ground-037.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/ground-054.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/ground-068.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/ground-080.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/ground-103.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/ground-104.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/lava.png",
+          "sourceKind": "image",
+          "assetId": "texture-lava",
+          "replacementPath": "generated/textures/lava.png"
+        },
+        {
+          "sourcePath": "masks/leather-037.png",
+          "sourceKind": "image",
+          "assetId": "texture-fabric",
+          "replacementPath": "generated/textures/fabric.png"
+        },
+        {
+          "sourcePath": "masks/marble-012.png",
+          "sourceKind": "image",
+          "assetId": "texture-marble",
+          "replacementPath": "generated/textures/marble.png"
+        },
+        {
+          "sourcePath": "masks/marble-016.png",
+          "sourceKind": "image",
+          "assetId": "texture-marble",
+          "replacementPath": "generated/textures/marble.png"
+        },
+        {
+          "sourcePath": "masks/metal-032.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-038.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-041-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-046-b.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-048-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-049-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-055-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal-061-b.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/metal.png",
+          "sourceKind": "image",
+          "assetId": "texture-metal",
+          "replacementPath": "generated/textures/metal.png"
+        },
+        {
+          "sourcePath": "masks/onyx.png",
+          "sourceKind": "image",
+          "assetId": "texture-marble",
+          "replacementPath": "generated/textures/marble.png"
+        },
+        {
+          "sourcePath": "masks/painted-plaster-017.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/paving-stones-138.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/paving-stones-150.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/plaster-001.png",
+          "sourceKind": "image",
+          "assetId": "texture-concrete",
+          "replacementPath": "generated/textures/concrete.png"
+        },
+        {
+          "sourcePath": "masks/road-007.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/road-008-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/road-009-c.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/road-012-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/road-012-b.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/road-013-a.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/rock-058.png",
+          "sourceKind": "image",
+          "assetId": "texture-rock",
+          "replacementPath": "generated/textures/rock.png"
+        },
+        {
+          "sourcePath": "masks/rock-063.png",
+          "sourceKind": "image",
+          "assetId": "texture-rock",
+          "replacementPath": "generated/textures/rock.png"
+        },
+        {
+          "sourcePath": "masks/rock.png",
+          "sourceKind": "image",
+          "assetId": "texture-rock",
+          "replacementPath": "generated/textures/rock.png"
+        },
+        {
+          "sourcePath": "masks/snow-015.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/snow.png",
+          "sourceKind": "image",
+          "assetId": "texture-ground",
+          "replacementPath": "generated/textures/ground.png"
+        },
+        {
+          "sourcePath": "masks/tiles-138.png",
+          "sourceKind": "image",
+          "assetId": "texture-brick",
+          "replacementPath": "generated/textures/brick.png"
+        },
+        {
+          "sourcePath": "masks/travertine-009.png",
+          "sourceKind": "image",
+          "assetId": "texture-marble",
+          "replacementPath": "generated/textures/marble.png"
+        },
+        {
+          "sourcePath": "masks/wood-049.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-051.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-058.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-066.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-092.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-094.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-floor-051.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-floor-064.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood-floor-070.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        },
+        {
+          "sourcePath": "masks/wood.png",
+          "sourceKind": "image",
+          "assetId": "texture-wood",
+          "replacementPath": "generated/textures/wood.png"
+        }
+      ],
+      "trademarkReplacements": []
+    },
+    {
+      "name": "tiktok-follow",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/avatar.jpg",
+          "sourceKind": "image",
+          "assetId": "generated-avatar",
+          "replacementPath": "generated/avatar.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "heygen",
+          "replacement": "人物创作平台"
+        },
+        {
+          "indicator": "tiktok",
+          "replacement": "短视频平台"
+        }
+      ]
+    },
+    {
+      "name": "ui-3d-reveal",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "heygen",
+          "replacement": "人物创作平台"
+        }
+      ]
+    },
+    {
+      "name": "vfx-iphone-device",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "models/hyperframes-desktop.png",
+          "sourceKind": "image",
+          "assetId": "ui-desktop-panel",
+          "replacementPath": "ui/desktop-panel.svg"
+        },
+        {
+          "sourcePath": "models/hyperframes-mobile.png",
+          "sourceKind": "image",
+          "assetId": "ui-mobile-panel",
+          "replacementPath": "ui/mobile-panel.svg"
+        },
+        {
+          "sourcePath": "models/iphone.glb",
+          "sourceKind": "model_3d",
+          "assetId": "model-portable-device",
+          "replacementPath": "models/portable-device.glb"
+        },
+        {
+          "sourcePath": "models/macbook.glb",
+          "sourceKind": "model_3d",
+          "assetId": "model-portable-display",
+          "replacementPath": "models/portable-display.glb"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "iphone",
+          "replacement": "便携设备"
+        },
+        {
+          "indicator": "macbook",
+          "replacement": "便携工作站"
+        },
+        {
+          "indicator": "spotify",
+          "replacement": "音频平台"
+        }
+      ]
+    },
+    {
+      "name": "vfx-liquid-background",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        }
+      ]
+    },
+    {
+      "name": "vfx-portal",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "vfx-shatter",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "vfx-text-cursor",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        }
+      ]
+    },
+    {
+      "name": "vpn-youtube-spot",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/vpn-sfx.wav",
+          "sourceKind": "audio",
+          "assetId": "audio-soft-pulse",
+          "replacementPath": "audio/soft-pulse.wav"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "apple",
+          "replacement": "星云科技"
+        },
+        {
+          "indicator": "sf_pro",
+          "replacement": "开放界面字体"
+        },
+        {
+          "indicator": "youtube",
+          "replacement": "视频平台"
+        }
+      ]
+    },
+    {
+      "name": "x-post",
+      "type": "block",
+      "assetReplacements": [],
+      "trademarkReplacements": [
+        {
+          "indicator": "hyperframes",
+          "replacement": "动效画布"
+        },
+        {
+          "indicator": "twitter",
+          "replacement": "社交动态"
+        }
+      ]
+    },
+    {
+      "name": "yt-lower-third",
+      "type": "block",
+      "assetReplacements": [
+        {
+          "sourcePath": "assets/avatar.jpg",
+          "sourceKind": "image",
+          "assetId": "generated-avatar",
+          "replacementPath": "generated/avatar.png"
+        }
+      ],
+      "trademarkReplacements": [
+        {
+          "indicator": "heygen",
+          "replacement": "人物创作平台"
+        },
+        {
+          "indicator": "youtube",
+          "replacement": "视频平台"
+        }
+      ]
+    }
+  ]
+}
