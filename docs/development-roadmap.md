@@ -51,7 +51,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-08 与 U9-01～U9-05 已完成；P9-02/P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-08 与 U9-01～U9-05 已完成；P9-04 Windows 原生工程链、P9-03 macOS 候选、P9-05 完整包审计以及 P9-06/P9-07 双平台干净安装 runner 已就绪并保持各自 `🔍` 设备/正式签名验收。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -371,7 +371,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ✅ 已完成 |
-| P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | 🔍 待验收 |
+| P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ✅ 已完成 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | 🔍 待验收 |
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | 🔍 待验收 |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | 🔍 待验收 |
@@ -555,7 +555,7 @@
 
 严格按顺序：
 
-1. `P9-02`（🔍 待验收）：Windows Executor 构建器、PE/依赖审计、Manifest/冻结入口/UIAutomation/Job Object 原生 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor` 补最终事实；
+1. `P9-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor`，真实候选 365 个文件、148 个 PE 文件、157,924,248 bytes，PE/依赖、Manifest、冻结入口、UIAutomation 和 Job Object 清理全部通过；
 2. `P9-04`（🔍 待验收）：production-mode NSIS/currentUser 配置、只读 Executor Resources、非提权隔离安装/卸载/注册表/普通签名 runner 与 CI 已就绪；稍后在 Windows 实体机执行 `pnpm --dir frontend test:p9-04-windows-package`，正式发布再补 Authenticode；
 3. `P9-05`（🔍 待验收）：统一完整包 auditor 已在真实 macOS App/DMG 通过并接入 P9-04 Windows 安装根；稍后在 Windows 执行 `pnpm --dir frontend test:p9-05-package-audit` 补最终统计；
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
