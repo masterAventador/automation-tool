@@ -190,7 +190,8 @@ test("E4-15 rejects a test dependency, test resource, or non-production Tauri ca
 
 test("H8-15 rejects runtime Profile, database, Cookie, and diagnostic data", async () => {
   for (const relativePath of [
-    "browser-profiles/douyin/profile-marker",
+    "embedded-browser-profiles/douyin/profile-marker",
+    "browser-profiles/douyin/legacy-profile-marker",
     "Cookies",
     "executor-ledger.sqlite3",
     "artifacts/diagnostics/trace.json",

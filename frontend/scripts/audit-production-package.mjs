@@ -108,7 +108,7 @@ function assertLeastPrivilegeTauriConfig(configuration) {
   ];
   if (
     bundledPaths.some((path) => {
-      const normalized = path.toLowerCase();
+      const normalized = path.replaceAll("\\", "/").toLowerCase();
       return forbiddenResourceMarkers.some((marker) => normalized.includes(marker));
     })
   ) {
@@ -116,7 +116,7 @@ function assertLeastPrivilegeTauriConfig(configuration) {
   }
   if (
     bundledPaths.some((path) => {
-      const normalized = path.toLowerCase();
+      const normalized = path.replaceAll("\\", "/").toLowerCase();
       return forbiddenRuntimeDataMarkers.some((marker) => normalized.includes(marker));
     })
   ) {
@@ -151,7 +151,7 @@ async function filesUnder(directory) {
 async function assertNoTestAssets(distributionPath) {
   await assertProductionBoundaries(distributionPath);
   for (const path of await filesUnder(distributionPath)) {
-    const normalized = relative(distributionPath, path).toLowerCase();
+    const normalized = relative(distributionPath, path).replaceAll("\\", "/").toLowerCase();
     if (forbiddenResourceMarkers.some((marker) => normalized.includes(marker))) {
       throw new Error("Production assets contain a test resource");
     }

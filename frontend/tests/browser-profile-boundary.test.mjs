@@ -21,7 +21,14 @@ test("B5-05 keeps Profile creation inside Rust without a WebView path command", 
     /app\.manage\(browser_profiles::BrowserProfileStore::initialize\(\s*&app_data_directory/u,
   );
   assert.doesNotMatch(library, /tauri::command[\s\S]{0,300}(create|open)_.*profile/u);
-  assert.match(profiles, /const PROFILE_ROOT_DIRECTORY: &str = "browser-profiles";/u);
+  assert.match(
+    profiles,
+    /const PROFILE_ROOT_DIRECTORY: &str = "embedded-browser-profiles";/u,
+  );
+  assert.doesNotMatch(
+    profiles,
+    /const PROFILE_ROOT_DIRECTORY: &str = "browser-profiles";/u,
+  );
   assert.match(profiles, /const DOUYIN_DIRECTORY: &str = "douyin";/u);
   assert.doesNotMatch(profiles, /create_dir_all|remove_dir_all|canonicalize/u);
   assert.doesNotMatch(profiles, /xiaohongshu|kuaishou|wechat|cookie|account_id/u);

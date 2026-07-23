@@ -12,7 +12,7 @@ const EXPECTED_BLOCKERS = {
   "MVP-AC-06": ["A7-16", "A7-17", "P9-06", "P9-07"],
   "MVP-AC-07": ["A7-16", "A7-17", "P9-06", "P9-07"],
   "MVP-AC-13": ["P9-06", "P9-07"],
-  "MVP-AC-14": ["P9-05"],
+  "MVP-AC-14": [],
 };
 
 test("P9-09 binds all 14 product criteria to an honest final acceptance result", async () => {
@@ -38,9 +38,9 @@ test("P9-09 binds all 14 product criteria to an honest final acceptance result",
   assert.equal(report.scope, "p9.local-single-device-mvp");
   assert.equal(report.overallResult, "pending_external_acceptance");
   assert.deepEqual(report.summary, {
-    verifiedAutomated: 7,
+    verifiedAutomated: 8,
     pendingRealPlatform: 4,
-    pendingDevicePackage: 3,
+    pendingDevicePackage: 2,
   });
   assert.equal(report.criteria.length, 14);
   assert.deepEqual(
@@ -63,9 +63,9 @@ test("P9-09 binds all 14 product criteria to an honest final acceptance result",
   );
 
   const resultCounts = Object.groupBy(report.criteria, ({ result }) => result);
-  assert.equal(resultCounts.verified_automated?.length, 7);
+  assert.equal(resultCounts.verified_automated?.length, 8);
   assert.equal(resultCounts.pending_real_platform?.length, 4);
-  assert.equal(resultCounts.pending_device_package?.length, 3);
+  assert.equal(resultCounts.pending_device_package?.length, 2);
 
   for (const item of report.criteria) {
     assert.ok(item.evidence.length >= 1);

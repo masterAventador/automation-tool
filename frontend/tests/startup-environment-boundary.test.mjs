@@ -21,18 +21,19 @@ test("H8-16E composes every startup component through one path-free native aggre
   assert.match(startup, /Promise\.allSettled/u);
   assert.match(startup, /control_plane_unavailable/u);
   assert.match(startup, /executor_configuration_required/u);
-  assert.match(startup, /trusted_browser_selection_required/u);
+  assert.match(startup, /browser_component_missing/u);
+  assert.match(startup, /browser_component_damaged/u);
+  assert.match(startup, /browser_component_version_incompatible/u);
+  assert.doesNotMatch(startup, /trusted_browser_selection_required/u);
   assert.match(startup, /app_data_unavailable/u);
   assert.match(gateway, /"check_local_startup_environment"/u);
   assert.match(main, /createDesktopStartupCheck/u);
   assert.match(main, /new TauriStartupEnvironmentGateway\(\)/u);
   assert.match(entry, /fn check_local_startup_environment/u);
   assert.match(entry, /StartupEnvironmentService::initialize/u);
-  assert.ok(
-    entry.indexOf("BrowserSettingsService::initialize") <
-      entry.indexOf("StartupEnvironmentService::initialize"),
-    "the existing private AppData initializer must run before startup revalidation",
-  );
+  assert.match(entry, /EmbeddedBrowserAuthority::new/u);
+  assert.match(entry, /authority\.resolve\(\)/u);
+  assert.doesNotMatch(entry, /BrowserSettingsService::initialize/u);
   assert.match(nativeStartup, /StartupEnvironmentSnapshot/u);
   assert.match(platform, /validate_installed_package/u);
   assert.match(platform, /from_compile_time_configuration/u);

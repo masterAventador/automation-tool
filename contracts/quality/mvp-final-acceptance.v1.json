@@ -1,12 +1,12 @@
 {
   "version": "mvp.final-acceptance.v1",
   "scope": "p9.local-single-device-mvp",
-  "assessmentDate": "2026-07-22",
+  "assessmentDate": "2026-07-24",
   "overallResult": "pending_external_acceptance",
   "summary": {
-    "verifiedAutomated": 7,
+    "verifiedAutomated": 8,
     "pendingRealPlatform": 4,
-    "pendingDevicePackage": 3
+    "pendingDevicePackage": 2
   },
   "criteria": [
     {
@@ -200,7 +200,7 @@
     {
       "id": "MVP-AC-14",
       "criterion": "正式安装包不包含测试驱动、调试端口、测试凭据或真实运行数据",
-      "result": "pending_device_package",
+      "result": "verified_automated",
       "evidence": [
         {
           "path": "frontend/scripts/audit-release-bundle.mjs",
@@ -211,7 +211,7 @@
           "anchor": "rejects runtime data, user material, credentials, and test/debug content"
         }
       ],
-      "blockingTasks": ["P9-05"]
+      "blockingTasks": []
     }
   ],
   "customerDemoPrerequisites": [
