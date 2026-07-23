@@ -42,12 +42,17 @@ def run_git(*args: str, cwd: Path = REPOSITORY_ROOT) -> str:
     return result.stdout.strip()
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def run_git_bytes(*args: str, cwd: Path = REPOSITORY_ROOT) -> bytes:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip() or "git command failed"
+        fail(detail)
+    return result.stdout
 
 
 def safe_repository_path(value: object, field: str) -> tuple[str, Path]:
@@ -73,9 +78,7 @@ def validate_source(source: object) -> dict[str, str]:
         character not in "0123456789abcdef" for character in values["commit"]
     ):
         fail(f"{values['id']} commit must be a full lowercase SHA-1")
-    if not values["url"].startswith("https://github.com/") or not values["url"].endswith(
-        ".git"
-    ):
+    if not values["url"].startswith("https://github.com/") or not values["url"].endswith(".git"):
         fail(f"{values['id']} source URL must be an official HTTPS GitHub repository")
 
     relative_path, source_root = safe_repository_path(values["path"], "source.path")
@@ -87,23 +90,17 @@ def validate_source(source: object) -> dict[str, str]:
         fail(f"{values['id']} submodule is dirty; upstream source is read-only")
     if run_git("remote", "get-url", "origin", cwd=source_root) != values["url"]:
         fail(f"{values['id']} origin does not match the lock")
-    if run_git("describe", "--tags", "--exact-match", "HEAD", cwd=source_root) != values[
-        "tag"
-    ]:
+    if run_git("describe", "--tags", "--exact-match", "HEAD", cwd=source_root) != values["tag"]:
         fail(f"{values['id']} checkout is not the locked release tag")
 
     gitlink = run_git("ls-files", "--stage", "--", relative_path).split()
     if len(gitlink) < 4 or gitlink[0] != "160000" or gitlink[1] != values["commit"]:
         fail(f"{values['id']} parent gitlink does not match the locked commit")
     module_prefix = f"submodule.{relative_path}"
-    configured_path = run_git(
-        "config", "--file", ".gitmodules", "--get", f"{module_prefix}.path"
-    )
+    configured_path = run_git("config", "--file", ".gitmodules", "--get", f"{module_prefix}.path")
     if configured_path != relative_path:
         fail(f"{values['id']} .gitmodules path drifted")
-    if run_git("config", "--file", ".gitmodules", "--get", f"{module_prefix}.url") != values[
-        "url"
-    ]:
+    if run_git("config", "--file", ".gitmodules", "--get", f"{module_prefix}.url") != values["url"]:
         fail(f"{values['id']} .gitmodules URL drifted")
 
     license_record = source.get("license")
@@ -118,15 +115,22 @@ def validate_source(source: object) -> dict[str, str]:
     expected_license_hash = license_record.get("sha256")
     if not isinstance(expected_license_hash, str) or len(expected_license_hash) != 64:
         fail(f"{values['id']} license SHA-256 is invalid")
-    actual_license_hash = sha256(source_root / license_relative)
+    checked_out_license = source_root / license_relative
+    if not checked_out_license.is_file() or checked_out_license.is_symlink():
+        fail(f"{values['id']} license must be a regular checked-out file")
+    # Bind the license to the locked commit's exact blob. Git may materialize
+    # that blob with CRLF in a clean Windows checkout when core.autocrlf is
+    # enabled; hashing the working-tree bytes would make the same commit appear
+    # to have different license text on different platforms.
+    license_blob = run_git_bytes("show", f"HEAD:{license_relative}", cwd=source_root)
+    actual_license_hash = hashlib.sha256(license_blob).hexdigest()
     if actual_license_hash != expected_license_hash:
         fail(f"{values['id']} license text drifted")
 
     tag_object = source.get("tagObject")
     if tag_object is not None and (
         not isinstance(tag_object, str)
-        or run_git("rev-parse", f"{values['tag']}^{{tag}}", cwd=source_root)
-        != tag_object
+        or run_git("rev-parse", f"{values['tag']}^{{tag}}", cwd=source_root) != tag_object
     ):
         fail(f"{values['id']} annotated tag object drifted")
 
@@ -221,9 +225,7 @@ def validate_sbom(sources: list[dict[str, str]]) -> None:
         if not isinstance(properties, list):
             fail("source SBOM component properties are missing")
         property_map = {
-            item.get("name"): item.get("value")
-            for item in properties
-            if isinstance(item, dict)
+            item.get("name"): item.get("value") for item in properties if isinstance(item, dict)
         }
         commit = property_map.get("automation-tool:gitCommit")
         if not isinstance(commit, str):

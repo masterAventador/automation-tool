@@ -283,7 +283,7 @@ def _compose_item(
             leftovers = find_trademark_leftovers(text, ruleset)
             if leftovers:
                 raise BuildError(f"{name} keeps trademark indicators: {leftovers}")
-            destination.write_text(text, encoding="utf-8")
+            destination.write_text(text, encoding="utf-8", newline="\n")
         else:
             shutil.copyfile(staged_item_dir / relative, destination)
         item_files.add(f"{item_prefix}/{destination_relative}")
@@ -361,12 +361,20 @@ def build_release(
         shutil.copyfile(path, destination)
 
     files = []
+    casefold_paths: dict[str, str] = {}
     for path in sorted(release_root.rglob("*")):
         if not path.is_file():
             continue
         relative = path.relative_to(release_root).as_posix()
         if relative == "manifest.json":
             raise BuildError("manifest.json must not pre-exist in a fresh release tree")
+        folded = relative.casefold()
+        existing = casefold_paths.get(folded)
+        if existing is not None and existing != relative:
+            raise BuildError(
+                f"release paths collide on a case-insensitive filesystem: {existing} != {relative}"
+            )
+        casefold_paths[folded] = relative
         files.append({"path": relative, "sha256": sha256_file(path), "bytes": path.stat().st_size})
     manifest = {
         "schemaVersion": 1,
@@ -377,7 +385,9 @@ def build_release(
         "files": files,
     }
     (release_root / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
     for path in sorted(release_root.rglob("*")):
         if path.is_file():
@@ -417,7 +427,9 @@ def main() -> None:
     if arguments.record_generated:
         release_lock["generated"] = generated
         arguments.release_lock.write_text(
-            json.dumps(release_lock, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            json.dumps(release_lock, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
         )
         print(f"release lock generated block updated: {generated}")
     elif release_lock["generated"] != generated:

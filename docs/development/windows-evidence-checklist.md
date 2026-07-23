@@ -216,14 +216,25 @@ Windows 11 x86_64 实体机会话使用 EB-04 锁定归档现场暂存 308 文�
 凭据。Windows 外部 CDP 树按本次创建的 PID 定向清理；10 项 harness、Browser Use API
 self-test、ruff 与 212 项前端契约全部通过，无临时 Profile、端口或进程残留。
 
-### 6. BM-14 Windows 发布目录构建与只读属性验收
+### 6. BM-14 Windows 发布目录构建与只读属性验收（✅ 2026-07-24 已完成）
 
-macOS 已完成 134 项离线目录发布合成的全部确定性门禁（构建可复现、逐文件摘要、只读
-0444、150 处素材替换与商标指示词零残留）。Windows 侧待补：在 Windows 机器上重跑
-`scripts/build_motion_catalog_release.py` + `scripts/check_motion_catalog_release.py`，
-验证 NTFS 上的只读属性语义（`stat.S_IWRITE` 位与 `chmod 0444` 映射）、路径大小写与
-Unicode 文件名行为，以及聚合摘要与 macOS 结果一致。通过后更新
-`docs/development/BM-14.md` 遗留项。
+Windows 11 x86_64 实体机会话从锁定 URL 重建 BM-12 暂存，再连续两次运行
+`build_motion_catalog_release.py` 并通过 `check_motion_catalog_release.py` 和完整测试。
+首轮 RED 发现 Python 文本写入在 Windows 把生成内容转成 CRLF，导致同样 384 文件的
+BM-12 聚合摘要漂移；所有生成文本、manifest 和 relock 写入现固定 LF。修正后 BM-12
+聚合恢复锁定值 `128ea48c66685b2bbf8f0e8b0afaa9f27440cbeb85154b115d86ff4190336068`，
+BM-14 两次都生成 134 items / 310 files / 150 asset replacements / 68 trademark items，
+聚合与 macOS 锁定值
+`38160d1cc3c17821e6df57036583ac3b22c08dba6a3364396db888d59bd50a63`
+完全一致。
+
+Windows 专项断言确认每个产物同时清除 `stat.S_IWRITE` 并带
+`FILE_ATTRIBUTE_READONLY`，生成文本零 CRLF；非 ASCII `目录-Ångström/头像-É.svg`
+可按原 Unicode 路径回读，大小写变体解析为同一 NTFS 文件。manifest 与构建器新增
+casefold 路径碰撞拒绝，非提权 `mklink /J` reparse 夹具被门禁拒绝。第二轮 RED 还发现
+clean submodule 的许可证工作树可被 `core.autocrlf` 物化为 CRLF；治理门禁现从锁定 commit
+blob 计算许可证摘要，同时继续要求工作树为普通文件且 submodule 完全干净。所有 BM-12/
+BM-13/BM-14 门禁、Ruff、212 项前端契约和专项 Roadmap 检查通过，临时发布/依赖树已清理。
 
 ## 注意
 
