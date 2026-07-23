@@ -70,13 +70,6 @@ struct ExecutorDiagnosticsSnapshot {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BrowserSettingsCommandError {
-    code: &'static str,
-    retryable: bool,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct DiagnosticExportCommandError {
     code: &'static str,
     retryable: bool,
@@ -176,39 +169,6 @@ fn map_diagnostic_export_error(
         code,
         retryable: false,
     }
-}
-
-fn map_browser_settings_error(
-    error: browser_settings::BrowserSettingsError,
-) -> BrowserSettingsCommandError {
-    let code = match error.code() {
-        browser_settings::BrowserSettingsErrorCode::BrowserUnavailable => "browser_unavailable",
-        browser_settings::BrowserSettingsErrorCode::DiscoveryUnavailable => {
-            "browser_discovery_unavailable"
-        }
-        browser_settings::BrowserSettingsErrorCode::StorageUnavailable => "storage_unavailable",
-    };
-    BrowserSettingsCommandError {
-        code,
-        retryable: false,
-    }
-}
-
-#[tauri::command]
-fn get_browser_settings(
-    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
-) -> Result<browser_settings::BrowserSettingsSnapshot, BrowserSettingsCommandError> {
-    settings.snapshot().map_err(map_browser_settings_error)
-}
-
-#[tauri::command]
-fn select_browser(
-    browser: browser_discovery::SupportedBrowser,
-    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
-) -> Result<browser_settings::BrowserSettingsSnapshot, BrowserSettingsCommandError> {
-    settings
-        .select_browser(browser)
-        .map_err(map_browser_settings_error)
 }
 
 #[tauri::command]
@@ -361,7 +321,7 @@ fn delete_material_video_artifact(
 fn check_local_startup_environment(
     startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
-    settings: tauri::State<'_, browser_settings::BrowserSettingsService>,
+    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> startup_environment::StartupEnvironmentSnapshot {
     let app_data = if startup.app_data_state() == startup_environment::AppDataStartupState::Ready
@@ -371,20 +331,21 @@ fn check_local_startup_environment(
     } else {
         startup_environment::AppDataStartupState::Unavailable
     };
-    let trusted_browser = match settings.snapshot() {
-        Ok(snapshot) if snapshot.available_browsers().is_empty() => {
-            startup_environment::TrustedBrowserStartupState::Unavailable
+    // EB-08：健康状态来自内置发行物验证，不再询问系统浏览器发现/选择。
+    let embedded_browser = match authority.resolve() {
+        Ok(_) => startup_environment::EmbeddedBrowserStartupState::Ready,
+        Err(embedded_browser_authority::EmbeddedBrowserAuthorityError::ComponentMissing) => {
+            startup_environment::EmbeddedBrowserStartupState::ComponentMissing
         }
-        Ok(snapshot) if snapshot.selected_browser().is_none() => {
-            startup_environment::TrustedBrowserStartupState::SelectionRequired
+        Err(embedded_browser_authority::EmbeddedBrowserAuthorityError::VersionIncompatible) => {
+            startup_environment::EmbeddedBrowserStartupState::VersionIncompatible
         }
-        Ok(_) => startup_environment::TrustedBrowserStartupState::Ready,
-        Err(_) => startup_environment::TrustedBrowserStartupState::Unavailable,
+        Err(_) => startup_environment::EmbeddedBrowserStartupState::ComponentDamaged,
     };
     startup_environment::StartupEnvironmentSnapshot::new(
         app_data,
         platform.startup_environment_state(),
-        trusted_browser,
+        embedded_browser,
     )
 }
 
@@ -394,7 +355,7 @@ fn check_local_startup_environment() -> startup_environment::StartupEnvironmentS
     startup_environment::StartupEnvironmentSnapshot::new(
         startup_environment::AppDataStartupState::Ready,
         startup_environment::ExecutorStartupState::Ready,
-        startup_environment::TrustedBrowserStartupState::Ready,
+        startup_environment::EmbeddedBrowserStartupState::Ready,
     )
 }
 
@@ -673,6 +634,9 @@ async fn execute_douyin_login_command(
                 }
                 embedded_browser_authority::EmbeddedBrowserAuthorityError::ComponentInvalid => {
                     "browser_component_invalid"
+                }
+                embedded_browser_authority::EmbeddedBrowserAuthorityError::VersionIncompatible => {
+                    "browser_component_version_incompatible"
                 }
                 embedded_browser_authority::EmbeddedBrowserAuthorityError::Unavailable => {
                     "storage_unavailable"
@@ -3130,9 +3094,6 @@ pub fn run() {
                 None => None,
             };
             app.manage(update_coordinator);
-            app.manage(browser_settings::BrowserSettingsService::initialize(
-                &app_data_directory,
-            )?);
             app.manage(embedded_browser_authority::EmbeddedBrowserAuthority::new(
                 app
                     .path()
@@ -3223,8 +3184,6 @@ pub fn run() {
         emergency_stop_executor,
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,
-        get_browser_settings,
-        select_browser,
         get_model_service_settings,
         configure_model_service,
         reuse_script_model_service_for_video,
@@ -3281,8 +3240,6 @@ pub fn run() {
         emergency_stop_executor,
         get_browser_diagnostic_settings,
         set_capture_successful_diagnostics,
-        get_browser_settings,
-        select_browser,
         get_model_service_settings,
         configure_model_service,
         reuse_script_model_service_for_video,
@@ -3370,8 +3327,6 @@ pub fn run() {
         inject_executor_hang_for_acceptance,
         inject_hostile_executor_diagnostics_for_acceptance,
         exit_app_for_acceptance,
-        get_browser_settings,
-        select_browser,
         get_model_service_settings,
         configure_model_service,
         reuse_script_model_service_for_video,

@@ -74,9 +74,6 @@ describe("B5-15 platform Session restart acceptance", () => {
         core.invoke("prepare_platform_session_reuse_for_acceptance"),
       )) as Preparation;
       assert.match(preparation.installationId, UUID_V4);
-      await browser.tauri.execute(({ core }) =>
-        core.invoke("select_browser", { browser: "google_chrome" }),
-      );
       await openPlatformPage("尚未确认");
       const open = await browser.$("button=打开登录处理");
       await open.click();

@@ -41,6 +41,13 @@ const CHROMIUM_MAJOR_MINIMUM: u32 = 100;
 const CHROMIUM_MAJOR_MAXIMUM: u32 = 999;
 const RENDER_LAUNCH_TIMEOUT_MINIMUM: Duration = Duration::from_secs(1);
 const RENDER_LAUNCH_TIMEOUT_MAXIMUM: Duration = Duration::from_secs(60);
+const SANDBOX_FRAMES_MAXIMUM: u32 = 600;
+const SANDBOX_SECONDS_MAXIMUM: u32 = 300;
+const SANDBOX_MEMORY_MEGABYTES_MINIMUM: u32 = 128;
+const SANDBOX_MEMORY_MEGABYTES_MAXIMUM: u32 = 8192;
+const SANDBOX_OUTPUT_BYTES_MAXIMUM: u64 = 2_147_483_647;
+const SANDBOX_ASSETS_MAXIMUM: usize = 128;
+const SANDBOX_RELATIVE_PATH_MAXIMUM: usize = 512;
 pub const MOTION_VIDEO_WORKER_VERSION: &str = "0.7.68";
 
 pub const DEFAULT_VIDEO_WORKER_START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -191,6 +198,109 @@ impl VideoWorkerRenderBrowserConfiguration {
     pub const fn chromium_major(&self) -> u32 {
         self.chromium_major
     }
+}
+
+/// One RenderJob HTML render sandbox request. The workspace is the VF-03
+/// private RenderJob directory; the entry document and every declared asset
+/// are workspace-relative paths that the Worker re-validates for containment.
+#[derive(Clone)]
+pub struct VideoWorkerRenderSandboxRequest {
+    workspace: PathBuf,
+    entry_html: String,
+    allowed_assets: Vec<String>,
+    frame_count: u32,
+    max_duration_seconds: u32,
+    max_cpu_seconds: u32,
+    max_memory_megabytes: u32,
+    max_output_bytes: u64,
+}
+
+impl fmt::Debug for VideoWorkerRenderSandboxRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VideoWorkerRenderSandboxRequest")
+            .field("frame_count", &self.frame_count)
+            .field("max_duration_seconds", &self.max_duration_seconds)
+            .field("max_cpu_seconds", &self.max_cpu_seconds)
+            .field("max_memory_megabytes", &self.max_memory_megabytes)
+            .field("max_output_bytes", &self.max_output_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VideoWorkerRenderSandboxRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        workspace: PathBuf,
+        entry_html: String,
+        allowed_assets: Vec<String>,
+        frame_count: u32,
+        max_duration_seconds: u32,
+        max_cpu_seconds: u32,
+        max_memory_megabytes: u32,
+        max_output_bytes: u64,
+    ) -> Result<Self, VideoWorkerError> {
+        if !workspace.is_absolute()
+            || workspace.as_os_str().len() > MAX_PATH_BYTES
+            || !valid_sandbox_relative_path(&entry_html)
+            || allowed_assets.len() > SANDBOX_ASSETS_MAXIMUM
+            || !allowed_assets
+                .iter()
+                .all(|asset| valid_sandbox_relative_path(asset))
+            || !(1..=SANDBOX_FRAMES_MAXIMUM).contains(&frame_count)
+            || !(1..=SANDBOX_SECONDS_MAXIMUM).contains(&max_duration_seconds)
+            || !(1..=SANDBOX_SECONDS_MAXIMUM).contains(&max_cpu_seconds)
+            || !(SANDBOX_MEMORY_MEGABYTES_MINIMUM..=SANDBOX_MEMORY_MEGABYTES_MAXIMUM)
+                .contains(&max_memory_megabytes)
+            || !(1..=SANDBOX_OUTPUT_BYTES_MAXIMUM).contains(&max_output_bytes)
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            workspace,
+            entry_html,
+            allowed_assets,
+            frame_count,
+            max_duration_seconds,
+            max_cpu_seconds,
+            max_memory_megabytes,
+            max_output_bytes,
+        })
+    }
+
+    fn document(&self) -> Result<serde_json::Value, VideoWorkerError> {
+        let workspace = self.workspace.to_str().ok_or_else(configuration_invalid)?;
+        Ok(serde_json::json!({
+            "allowedAssets": self.allowed_assets,
+            "entryHtml": self.entry_html,
+            "frameCount": self.frame_count,
+            "maxCpuSeconds": self.max_cpu_seconds,
+            "maxDurationSeconds": self.max_duration_seconds,
+            "maxMemoryMegabytes": self.max_memory_megabytes,
+            "maxOutputBytes": self.max_output_bytes,
+            "workspace": workspace,
+        }))
+    }
+
+    fn canonical_json(&self) -> Result<String, VideoWorkerError> {
+        // serde_json::Value keeps object keys in sorted (BTreeMap) order and
+        // serializes compactly, matching the Worker's canonical HMAC form.
+        serde_json::to_string(&self.document()?).map_err(|_| process_unavailable())
+    }
+}
+
+/// The authenticated outcome of a completed render sandbox: how many frames
+/// were captured and how many hostile actions the sandbox refused.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VideoWorkerRenderSandboxSummary {
+    pub chromium_major: u32,
+    pub frames_captured: u32,
+    pub output_bytes: u64,
+    pub blocked_requests: u32,
+    pub blocked_navigations: u32,
+    pub blocked_downloads: u32,
+    pub blocked_popups: u32,
+    pub blocked_dialogs: u32,
 }
 
 #[derive(Clone)]
@@ -629,6 +739,116 @@ impl LocalVideoOrchestrator {
         Err(VideoWorkerError::new(VideoWorkerErrorCode::RenderRejected))
     }
 
+    /// Ask the Node Worker to render one RenderJob's HTML inside the sandbox:
+    /// private workspace containment, default offline, request allowlist,
+    /// navigation/download/popup/dialog interception, and CPU/memory/frame/
+    /// output/wall budgets. Returns the authenticated block-and-frame summary
+    /// or a fail-closed [`VideoWorkerErrorCode::RenderRejected`].
+    pub fn render_sandbox(
+        &self,
+        kind: VideoWorkerKind,
+        job_id: Uuid,
+        request: &VideoWorkerRenderSandboxRequest,
+    ) -> Result<VideoWorkerRenderSandboxSummary, VideoWorkerError> {
+        let mut workers = self.lock_workers()?;
+        let running = workers.get_mut(&kind).ok_or_else(not_running)?;
+        let render_browser = running
+            .launch
+            .render_browser
+            .as_ref()
+            .ok_or_else(configuration_invalid)?;
+        let expected_major = render_browser.chromium_major;
+        // The Worker runs a version probe (launch timeout) and then the render
+        // pass (its own wall budget) before answering.
+        let wait = self.request_timeout
+            + render_browser.launch_timeout
+            + Duration::from_secs(u64::from(request.max_duration_seconds));
+        let job_id = job_id.hyphenated().to_string();
+        let canonical_sandbox = request.canonical_json()?;
+        let authentication_proof =
+            running
+                .token
+                .sandbox_command_proof(kind, &job_id, &canonical_sandbox)?;
+        let command = VideoWorkerSandboxCommandDocument {
+            authentication_proof: &authentication_proof,
+            command: "worker.render.sandbox",
+            job_id: &job_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            sandbox: request.document()?,
+            worker_kind: kind.as_str(),
+        };
+        let mut bytes =
+            Zeroizing::new(serde_json::to_vec(&command).map_err(|_| process_unavailable())?);
+        bytes.push(b'\n');
+        running
+            .stdin
+            .write_all(&bytes)
+            .and_then(|()| running.stdin.flush())
+            .map_err(|_| process_unavailable())?;
+        let line = receive_line(&running.events, wait)?;
+        if let Ok(event) = serde_json::from_str::<VideoWorkerRenderSandboxedEvent>(&line) {
+            let detail = format!(
+                "{job_id}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+                event.chromium_major,
+                event.frames_captured,
+                event.output_bytes,
+                event.blocked_requests,
+                event.blocked_navigations,
+                event.blocked_downloads,
+                event.blocked_popups,
+                event.blocked_dialogs,
+            );
+            if event.event != "worker.render.sandboxed"
+                || event.job_id != job_id
+                || event.protocol_version != WORKER_PROTOCOL_VERSION
+                || event.worker_kind != kind.as_str()
+                || event.worker_version != running.launch.expected_version
+                || event.chromium_major != expected_major
+                || event.frames_captured > SANDBOX_FRAMES_MAXIMUM
+                || event.output_bytes > SANDBOX_OUTPUT_BYTES_MAXIMUM
+                || !running.token.verify_event_proof(
+                    "worker.render.sandboxed",
+                    kind,
+                    &event.worker_version,
+                    &detail,
+                    &event.authentication_proof,
+                )
+            {
+                return Err(authentication_rejected());
+            }
+            return Ok(VideoWorkerRenderSandboxSummary {
+                chromium_major: event.chromium_major,
+                frames_captured: event.frames_captured,
+                output_bytes: event.output_bytes,
+                blocked_requests: event.blocked_requests,
+                blocked_navigations: event.blocked_navigations,
+                blocked_downloads: event.blocked_downloads,
+                blocked_popups: event.blocked_popups,
+                blocked_dialogs: event.blocked_dialogs,
+            });
+        }
+        let event: VideoWorkerRenderFailedEvent =
+            serde_json::from_str(&line).map_err(|_| authentication_rejected())?;
+        let detail = format!("{job_id}\0{}", event.reason_code);
+        if event.event != "worker.render.failed"
+            || event.job_id != job_id
+            || event.protocol_version != WORKER_PROTOCOL_VERSION
+            || event.worker_kind != kind.as_str()
+            || event.worker_version != running.launch.expected_version
+            || !valid_render_reason_code(&event.reason_code)
+            || !running.token.verify_event_proof(
+                "worker.render.failed",
+                kind,
+                &event.worker_version,
+                &detail,
+                &event.authentication_proof,
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        Err(VideoWorkerError::new(VideoWorkerErrorCode::RenderRejected))
+    }
+
     pub fn web_ui_endpoint(
         &self,
         kind: VideoWorkerKind,
@@ -777,6 +997,31 @@ impl VideoWorkerSessionToken {
             URL_SAFE_NO_PAD.encode(authenticator.finalize().into_bytes())
         )))
     }
+
+    fn sandbox_command_proof(
+        &self,
+        kind: VideoWorkerKind,
+        job_id: &str,
+        canonical_sandbox: &str,
+    ) -> Result<Zeroizing<String>, VideoWorkerError> {
+        let mut authenticator =
+            HmacSha256::new_from_slice(&self.bytes).map_err(|_| process_unavailable())?;
+        update_authenticator(
+            &mut authenticator,
+            COMMAND_AUTHENTICATION_DOMAIN,
+            &[
+                "worker.render.sandbox",
+                kind.as_str(),
+                WORKER_PROTOCOL_VERSION,
+                job_id,
+                canonical_sandbox,
+            ],
+        );
+        Ok(Zeroizing::new(format!(
+            "{COMMAND_PROOF_PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(authenticator.finalize().into_bytes())
+        )))
+    }
 }
 
 impl Drop for VideoWorkerSessionToken {
@@ -826,6 +1071,17 @@ struct VideoWorkerCommandDocument<'a> {
     authentication_proof: &'a str,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoWorkerSandboxCommandDocument<'a> {
+    authentication_proof: &'a str,
+    command: &'static str,
+    job_id: &'a str,
+    protocol_version: &'static str,
+    sandbox: serde_json::Value,
+    worker_kind: &'static str,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VideoWorkerReadyEvent {
@@ -859,6 +1115,25 @@ struct VideoWorkerRenderVerifiedEvent {
     chromium_major: u32,
     event: String,
     job_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerRenderSandboxedEvent {
+    authentication_proof: String,
+    blocked_dialogs: u32,
+    blocked_downloads: u32,
+    blocked_navigations: u32,
+    blocked_popups: u32,
+    blocked_requests: u32,
+    chromium_major: u32,
+    event: String,
+    frames_captured: u32,
+    job_id: String,
+    output_bytes: u64,
     protocol_version: String,
     worker_kind: String,
     worker_version: String,
@@ -1364,6 +1639,20 @@ fn valid_model_api_key(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn valid_sandbox_relative_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > SANDBOX_RELATIVE_PATH_MAXIMUM
+        || value.contains('\0')
+        || value.contains('\\')
+        || value.starts_with('/')
+    {
+        return false;
+    }
+    value
+        .split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 fn valid_render_reason_code(value: &str) -> bool {

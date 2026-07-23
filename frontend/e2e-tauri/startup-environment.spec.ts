@@ -19,7 +19,8 @@ describe("H8-16E hidden App startup environment acceptance", () => {
   it("repairs the trusted browser selection and reaches the workbench", async () => {
     await expect(await browser.$("h2")).toHaveText("桌面运行环境需要处理");
     const blockedText = await browser.$("body").getText();
-    assert.match(blockedText, /尚未选择受信运营浏览器/);
+    // EB-08/EB-10：开发构建资源目录无内置发行物时按组件语义提示。
+    assert.match(blockedText, /浏览器组件缺失|浏览器组件损坏/);
     assert.doesNotMatch(blockedText, PRIVATE_VALUE_PATTERN);
 
     await browser.$("button=打开本地修复工具").click();

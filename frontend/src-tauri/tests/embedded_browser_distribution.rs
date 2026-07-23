@@ -241,7 +241,7 @@ fn runtime_version_drift_is_rejected() {
     });
     assert!(matches!(
         EmbeddedBrowserDistribution::load_for_target(&fixture.resource_dir, TARGET),
-        Err(EmbeddedBrowserError::Invalid(_))
+        Err(EmbeddedBrowserError::VersionIncompatible)
     ));
 }
 

@@ -159,3 +159,25 @@ fn real_distribution_resolves_through_the_authority() {
     assert_eq!(first, second);
     println!("EB07_REAL_OK");
 }
+
+#[test]
+fn version_drift_reports_version_incompatible_not_generic_damage() {
+    let fixture = write_fixture();
+    let manifest_path = fixture
+        .resource_dir
+        .join("embedded-browser")
+        .join("distribution-manifest.v1.json");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("read")).expect("parse");
+    document["runtime"]["chromium"]["browser_version"] = serde_json::json!("150.0.0.0");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&document).expect("json"),
+    )
+    .expect("write");
+    let authority = EmbeddedBrowserAuthority::new(fixture.resource_dir.clone(), TARGET);
+    assert!(matches!(
+        authority.resolve(),
+        Err(EmbeddedBrowserAuthorityError::VersionIncompatible)
+    ));
+}

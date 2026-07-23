@@ -7,13 +7,6 @@ export interface ExecutorManagerStatus {
   readonly restartCount: number;
 }
 
-export type SupportedBrowserId = "google_chrome" | "microsoft_edge";
-
-export interface BrowserSettingsSnapshot {
-  readonly availableBrowsers: readonly SupportedBrowserId[];
-  readonly selectedBrowser: SupportedBrowserId | null;
-}
-
 export interface BrowserDiagnosticSettingsSnapshot {
   readonly captureSuccessfulRuns: boolean;
 }
@@ -21,7 +14,11 @@ export interface BrowserDiagnosticSettingsSnapshot {
 export interface LocalStartupEnvironmentSnapshot {
   readonly appData: "ready" | "unavailable";
   readonly executor: "ready" | "configuration_required" | "unavailable";
-  readonly trustedBrowser: "ready" | "selection_required" | "unavailable";
+  readonly embeddedBrowser:
+    | "ready"
+    | "component_missing"
+    | "component_damaged"
+    | "version_incompatible";
 }
 
 export interface StartupEnvironmentGateway {
@@ -35,8 +32,6 @@ export interface DiagnosticExportReceipt {
 }
 
 export interface PlatformAdapter {
-  getBrowserSettings(): Promise<BrowserSettingsSnapshot>;
-  selectBrowser(browser: SupportedBrowserId): Promise<BrowserSettingsSnapshot>;
   getExecutorStatus(): Promise<ExecutorManagerStatus>;
   restartExecutor(): Promise<ExecutorManagerStatus>;
   getExecutorDiagnostics(): Promise<readonly string[]>;

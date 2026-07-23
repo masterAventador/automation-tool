@@ -7,7 +7,7 @@ import {
 } from "../types";
 import { safeNativeError } from "./platform-adapter";
 
-const SNAPSHOT_KEYS = ["appData", "executor", "trustedBrowser"];
+const SNAPSHOT_KEYS = ["appData", "embeddedBrowser", "executor"];
 
 function parseSnapshot(value: unknown): LocalStartupEnvironmentSnapshot {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -22,16 +22,17 @@ function parseSnapshot(value: unknown): LocalStartupEnvironmentSnapshot {
     (record.executor !== "ready" &&
       record.executor !== "configuration_required" &&
       record.executor !== "unavailable") ||
-    (record.trustedBrowser !== "ready" &&
-      record.trustedBrowser !== "selection_required" &&
-      record.trustedBrowser !== "unavailable")
+    (record.embeddedBrowser !== "ready" &&
+      record.embeddedBrowser !== "component_missing" &&
+      record.embeddedBrowser !== "component_damaged" &&
+      record.embeddedBrowser !== "version_incompatible")
   ) {
     throw new PlatformAdapterError("protocol_mismatch", false);
   }
   return {
     appData: record.appData,
     executor: record.executor,
-    trustedBrowser: record.trustedBrowser,
+    embeddedBrowser: record.embeddedBrowser,
   };
 }
 

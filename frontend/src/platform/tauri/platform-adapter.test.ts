@@ -12,7 +12,7 @@ describe("Tauri PlatformAdapter", () => {
     invoke.mockReset();
   });
 
-  it("uses only fixed browser-settings and Executor lifecycle Commands", async () => {
+  it("uses only fixed Executor lifecycle and diagnostics Commands", async () => {
     const stopped = {
       state: "stopped",
       version: null,
@@ -20,14 +20,6 @@ describe("Tauri PlatformAdapter", () => {
       restartCount: 0,
     };
     invoke
-      .mockResolvedValueOnce({
-        availableBrowsers: ["google_chrome"],
-        selectedBrowser: null,
-      })
-      .mockResolvedValueOnce({
-        availableBrowsers: ["google_chrome"],
-        selectedBrowser: "google_chrome",
-      })
       .mockResolvedValueOnce(stopped)
       .mockResolvedValueOnce({
         state: "running",
@@ -46,14 +38,6 @@ describe("Tauri PlatformAdapter", () => {
       .mockResolvedValueOnce({ captureSuccessfulRuns: true });
     const adapter = new TauriPlatformAdapter();
 
-    await expect(adapter.getBrowserSettings()).resolves.toEqual({
-      availableBrowsers: ["google_chrome"],
-      selectedBrowser: null,
-    });
-    await expect(adapter.selectBrowser("google_chrome")).resolves.toEqual({
-      availableBrowsers: ["google_chrome"],
-      selectedBrowser: "google_chrome",
-    });
     await expect(adapter.getExecutorStatus()).resolves.toEqual(stopped);
     await expect(adapter.restartExecutor()).resolves.toMatchObject({ state: "running" });
     await expect(adapter.getExecutorDiagnostics()).resolves.toEqual(["safe diagnostic"]);
@@ -70,8 +54,6 @@ describe("Tauri PlatformAdapter", () => {
       captureSuccessfulRuns: true,
     });
     expect(invoke.mock.calls).toEqual([
-      ["get_browser_settings"],
-      ["select_browser", { browser: "google_chrome" }],
       ["get_executor_status"],
       ["restart_executor"],
       ["get_executor_diagnostics"],
@@ -80,27 +62,6 @@ describe("Tauri PlatformAdapter", () => {
       ["get_browser_diagnostic_settings"],
       ["set_capture_successful_diagnostics", { enabled: true }],
     ]);
-  });
-
-  it("accepts Edge as the only discovered browser and rejects path-bearing snapshots", async () => {
-    const adapter = new TauriPlatformAdapter();
-    invoke.mockResolvedValueOnce({
-      availableBrowsers: ["microsoft_edge"],
-      selectedBrowser: "microsoft_edge",
-    });
-    await expect(adapter.getBrowserSettings()).resolves.toEqual({
-      availableBrowsers: ["microsoft_edge"],
-      selectedBrowser: "microsoft_edge",
-    });
-
-    invoke.mockResolvedValueOnce({
-      availableBrowsers: ["google_chrome"],
-      selectedBrowser: "google_chrome",
-      executablePath: "/private/browser",
-    });
-    await expect(adapter.getBrowserSettings()).rejects.toMatchObject({
-      code: "protocol_mismatch",
-    });
   });
 
   it("rejects malformed native values and never reflects native errors", async () => {

@@ -8,7 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
-    VideoWorkerRenderBrowserConfiguration, VideoWorkerRestartPolicy, VideoWorkerState,
+    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderSandboxRequest,
+    VideoWorkerRestartPolicy, VideoWorkerState,
 };
 use uuid::Uuid;
 
@@ -280,6 +281,77 @@ fn render_configuration(executable: &Path) -> VideoWorkerRenderBrowserConfigurat
     .expect("render browser configuration")
 }
 
+/// Extend the healthy fake with `worker.render.sandbox` support. The fake
+/// re-derives the canonical-sandbox-bound command proof (proving the Rust
+/// producer bound the HMAC to the exact same canonical JSON), then answers
+/// with a `worker.render.sandboxed` event whose block counters are fixed and
+/// whose `framesCaptured` echoes the requested `frameCount`. When `forge_proof`
+/// is set it corrupts the event proof so the Rust side must fail closed.
+fn sandbox_worker(forge_proof: bool) -> String {
+    let forge = if forge_proof {
+        "        body[\"authenticationProof\"] = \"atvwp1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n"
+    } else {
+        ""
+    };
+    HEALTHY_WORKER.replace(
+        "    if command.get(\"command\") == \"worker.cancel\" and hmac.compare_digest(supplied, encoded):",
+        &format!(
+            "    if command.get(\"command\") == \"worker.render.sandbox\":\n\
+             \x20       canonical = json.dumps(\n\
+             \x20           command[\"sandbox\"], sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False\n\
+             \x20       )\n\
+             \x20       sandbox_expected = hmac.digest(\n\
+             \x20           key,\n\
+             \x20           b\"automation-tool.video-worker-command.v1\\0\" + b\"\\0\".join(\n\
+             \x20               value.encode()\n\
+             \x20               for value in [\"worker.render.sandbox\", kind, protocol, job_id, canonical]\n\
+             \x20           ),\n\
+             \x20           hashlib.sha256,\n\
+             \x20       )\n\
+             \x20       sandbox_encoded = \"atvwc1.\" + base64.urlsafe_b64encode(sandbox_expected).rstrip(b\"=\").decode()\n\
+             \x20       if not hmac.compare_digest(supplied, sandbox_encoded):\n\
+             \x20           continue\n\
+             \x20       major = bootstrap[\"renderBrowser\"][\"chromiumMajor\"]\n\
+             \x20       frames = command[\"sandbox\"][\"frameCount\"]\n\
+             \x20       detail = \"\\0\".join(str(part) for part in [job_id, major, frames, 4096, 3, 1, 1, 1, 1])\n\
+             \x20       body = {{\n\
+             \x20           \"authenticationProof\": proof(\"worker.render.sandboxed\", detail),\n\
+             \x20           \"blockedDialogs\": 1,\n\
+             \x20           \"blockedDownloads\": 1,\n\
+             \x20           \"blockedNavigations\": 1,\n\
+             \x20           \"blockedPopups\": 1,\n\
+             \x20           \"blockedRequests\": 3,\n\
+             \x20           \"chromiumMajor\": major,\n\
+             \x20           \"event\": \"worker.render.sandboxed\",\n\
+             \x20           \"framesCaptured\": frames,\n\
+             \x20           \"jobId\": job_id,\n\
+             \x20           \"outputBytes\": 4096,\n\
+             \x20           \"protocolVersion\": protocol,\n\
+             \x20           \"workerKind\": kind,\n\
+             \x20           \"workerVersion\": version,\n\
+             \x20       }}\n\
+             {forge}\
+             \x20       print(json.dumps(body, separators=(\",\", \":\")), flush=True)\n\
+             \x20       continue\n\
+             \x20   if command.get(\"command\") == \"worker.cancel\" and hmac.compare_digest(supplied, encoded):"
+        ),
+    )
+}
+
+fn sandbox_request(workspace: &Path) -> VideoWorkerRenderSandboxRequest {
+    VideoWorkerRenderSandboxRequest::new(
+        workspace.to_path_buf(),
+        "entry.html".to_owned(),
+        vec!["assets/style.css".to_owned(), "assets/logo.png".to_owned()],
+        6,
+        20,
+        20,
+        1024,
+        50_000_000,
+    )
+    .expect("sandbox request")
+}
+
 #[test]
 fn rejects_invalid_render_browser_configurations() {
     let fixture = TemporaryWorker::new(HEALTHY_WORKER);
@@ -419,6 +491,181 @@ fn render_verify_without_a_configured_browser_is_rejected_without_ipc() {
         .expect("worker must stay healthy");
 }
 
+#[test]
+fn render_sandbox_rejects_invalid_requests() {
+    let root = std::env::temp_dir();
+    let invalid: [(&str, Vec<&str>, u32, u32, u32, u32, u64); 8] = [
+        (
+            "entry.html",
+            vec!["assets/style.css"],
+            0,
+            20,
+            20,
+            1024,
+            50_000_000,
+        ),
+        (
+            "entry.html",
+            vec!["assets/style.css"],
+            601,
+            20,
+            20,
+            1024,
+            50_000_000,
+        ),
+        (
+            "entry.html",
+            vec!["assets/style.css"],
+            6,
+            0,
+            20,
+            1024,
+            50_000_000,
+        ),
+        (
+            "entry.html",
+            vec!["assets/style.css"],
+            6,
+            20,
+            20,
+            64,
+            50_000_000,
+        ),
+        ("entry.html", vec!["assets/style.css"], 6, 20, 20, 1024, 0),
+        (
+            "../escape.html",
+            vec!["assets/style.css"],
+            6,
+            20,
+            20,
+            1024,
+            50_000_000,
+        ),
+        (
+            "/absolute.html",
+            vec!["assets/style.css"],
+            6,
+            20,
+            20,
+            1024,
+            50_000_000,
+        ),
+        (
+            "entry.html",
+            vec!["../secret.css"],
+            6,
+            20,
+            20,
+            1024,
+            50_000_000,
+        ),
+    ];
+    for (entry, assets, frames, duration, cpu, memory, output) in invalid {
+        let error = VideoWorkerRenderSandboxRequest::new(
+            root.join("workspace"),
+            entry.to_owned(),
+            assets.into_iter().map(str::to_owned).collect(),
+            frames,
+            duration,
+            cpu,
+            memory,
+            output,
+        )
+        .err()
+        .expect("invalid sandbox request must be rejected");
+        assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+    }
+    // A relative workspace is also rejected.
+    let error = VideoWorkerRenderSandboxRequest::new(
+        PathBuf::from("relative/workspace"),
+        "entry.html".to_owned(),
+        Vec::new(),
+        6,
+        20,
+        20,
+        1024,
+        50_000_000,
+    )
+    .err()
+    .expect("relative workspace must be rejected");
+    assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+}
+
+#[test]
+fn render_sandbox_binds_canonical_proof_and_parses_summary() {
+    let fixture = TemporaryWorker::new(&sandbox_worker(false));
+    let browser = executable_fixture(&fixture.root, "fake-chromium");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(
+            fixture
+                .launch(VideoWorkerKind::Node)
+                .with_render_browser(render_configuration(&browser)),
+        )
+        .expect("start sandbox-capable worker");
+    let job_id = Uuid::parse_str("5c9f1e0a-2d3b-4c5d-8e6f-7a8b9c0d1e2f").expect("job ID");
+    let summary = orchestrator
+        .render_sandbox(
+            VideoWorkerKind::Node,
+            job_id,
+            &sandbox_request(&fixture.root),
+        )
+        .expect("authenticated render sandbox summary");
+    assert_eq!(summary.chromium_major, 149);
+    assert_eq!(summary.frames_captured, 6);
+    assert_eq!(summary.output_bytes, 4096);
+    assert_eq!(summary.blocked_requests, 3);
+    assert_eq!(summary.blocked_navigations, 1);
+    assert_eq!(summary.blocked_downloads, 1);
+    assert_eq!(summary.blocked_popups, 1);
+    assert_eq!(summary.blocked_dialogs, 1);
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+}
+
+#[test]
+fn render_sandbox_forged_summary_proof_fails_closed() {
+    let fixture = TemporaryWorker::new(&sandbox_worker(true));
+    let browser = executable_fixture(&fixture.root, "fake-chromium");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(
+            fixture
+                .launch(VideoWorkerKind::Node)
+                .with_render_browser(render_configuration(&browser)),
+        )
+        .expect("start forged sandbox worker");
+    let job_id = Uuid::parse_str("11112222-3333-4444-8555-666677778888").expect("job ID");
+    let error = orchestrator
+        .render_sandbox(
+            VideoWorkerKind::Node,
+            job_id,
+            &sandbox_request(&fixture.root),
+        )
+        .expect_err("forged sandbox summary must fail closed");
+    assert_eq!(error.code(), VideoWorkerErrorCode::AuthenticationRejected);
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+}
+
+#[test]
+fn render_sandbox_without_a_configured_browser_is_rejected_without_ipc() {
+    let fixture = TemporaryWorker::new(HEALTHY_WORKER);
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(fixture.launch(VideoWorkerKind::Node))
+        .expect("start renderless worker");
+    let error = orchestrator
+        .render_sandbox(
+            VideoWorkerKind::Node,
+            Uuid::parse_str("aaaabbbb-cccc-4ddd-8eee-ffff00001111").expect("job ID"),
+            &sandbox_request(&fixture.root),
+        )
+        .expect_err("render sandbox without a configured browser must be rejected");
+    assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+    orchestrator
+        .health(VideoWorkerKind::Node)
+        .expect("worker must stay healthy");
+}
+
 /// Real vertical chain, activated by `scripts/run_bm_03_acceptance.py`: the real
 /// `worker.mjs` on the isolated Node runtime receives the staged Chrome for
 /// Testing path from Rust and launches it headless inside a RenderJob directory.
@@ -465,6 +712,99 @@ fn real_worker_render_verify_launches_the_locked_chromium() {
         .render_verify(VideoWorkerKind::Node, job_id)
         .expect("real Chromium render verification");
     assert_eq!(verified_major, major);
+    let process_id = status.process_id().expect("process id");
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+    wait_until_stopped(process_id);
+}
+
+/// Real render-sandbox chain, activated by `scripts/run_bm_04_acceptance.py`:
+/// the real `worker.mjs` renders a hostile HTML fixture through the real
+/// staged Chromium and must report the blocked navigation/request/download/
+/// popup/dialog actions while still capturing the requested frames.
+#[test]
+fn real_worker_render_sandbox_isolates_malicious_html() {
+    let (Some(browser), Some(major), Some(node), Some(workspace)) = (
+        std::env::var_os("BM04_RENDER_BROWSER").map(PathBuf::from),
+        std::env::var("BM04_CHROMIUM_MAJOR")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok()),
+        std::env::var_os("BM04_NODE").map(PathBuf::from),
+        std::env::var_os("BM04_WORKSPACE").map(PathBuf::from),
+    ) else {
+        return;
+    };
+    let worker = fs::canonicalize(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../workers/motion_composition/worker.mjs"),
+    )
+    .expect("worker entrypoint");
+    let fixture = TemporaryWorker::new(&format!(
+        "#!/bin/sh\nexec {} {}\n",
+        shell_quote(&node),
+        shell_quote(worker.as_path()),
+    ));
+    let launch = VideoWorkerLaunch::new(
+        VideoWorkerKind::Node,
+        fixture.executable.clone(),
+        fixture.root.clone(),
+        "0.7.68".to_owned(),
+        VideoWorkerRestartPolicy::new(0, Duration::ZERO).expect("restart policy"),
+    )
+    .expect("real worker launch")
+    .with_render_browser(
+        VideoWorkerRenderBrowserConfiguration::new(browser, major, Duration::from_secs(30))
+            .expect("real render browser configuration"),
+    );
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(30), Duration::from_secs(15))
+            .expect("orchestrator");
+    let status = orchestrator.start(launch).expect("start real Node worker");
+    orchestrator.health(VideoWorkerKind::Node).expect("health");
+    let request = VideoWorkerRenderSandboxRequest::new(
+        workspace.clone(),
+        "entry.html".to_owned(),
+        vec!["assets/style.css".to_owned()],
+        3,
+        60,
+        60,
+        2048,
+        50_000_000,
+    )
+    .expect("real sandbox request");
+    let job_id = Uuid::parse_str("6f9619ff-8b86-4d01-b42d-00cf4fc964ff").expect("job ID");
+    let summary = orchestrator
+        .render_sandbox(VideoWorkerKind::Node, job_id, &request)
+        .expect("real malicious HTML render sandbox");
+    assert_eq!(summary.chromium_major, major);
+    assert_eq!(
+        summary.frames_captured, 3,
+        "declared frames must be captured"
+    );
+    assert!(summary.output_bytes > 0, "frames must produce PNG output");
+    assert!(
+        summary.blocked_navigations >= 1,
+        "the hostile top-level navigation must be blocked",
+    );
+    assert!(
+        summary.blocked_requests >= 1,
+        "the remote subresource requests must be blocked",
+    );
+    assert!(
+        summary.blocked_downloads >= 1,
+        "the programmatic download must be blocked",
+    );
+    assert!(
+        summary.blocked_popups >= 1,
+        "the popup window must be blocked"
+    );
+    assert!(
+        summary.blocked_dialogs >= 1,
+        "the modal dialog must be blocked"
+    );
+    let frames = workspace.join("frames");
+    assert!(
+        frames.is_dir(),
+        "the sandbox must write frames into the workspace"
+    );
     let process_id = status.process_id().expect("process id");
     orchestrator.stop(VideoWorkerKind::Node).expect("stop");
     wait_until_stopped(process_id);
