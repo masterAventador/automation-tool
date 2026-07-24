@@ -95,6 +95,31 @@ _BEAT_ID: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _CATALOG_PART_ID: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _API_KEY: Final = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}$")
 
+_MOTION_CATALOG_PATH: Final = (
+    Path(__file__).resolve().parents[2] / "contracts/quality/motion-catalog.v1.json"
+)
+
+
+def _load_locked_catalog_part_ids() -> frozenset[str]:
+    """The frozen BM-11 catalog is the only source of selectable part ids."""
+    try:
+        catalog = json.loads(_MOTION_CATALOG_PATH.read_text(encoding="utf-8"))
+        ids = frozenset(str(item["name"]) for item in catalog["items"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: locked motion catalog is unreadable"
+        ) from error
+    if len(ids) != 134 or not all(
+        _CATALOG_PART_ID.fullmatch(part) is not None for part in ids
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: locked motion catalog drifted"
+        )
+    return ids
+
+
+LOCKED_CATALOG_PART_IDS: Final[frozenset[str]] = _load_locked_catalog_part_ids()
+
 MAX_BRIEF_CHARS: Final = 500
 MAX_DURATION_SECONDS: Final = 120
 MAX_SCRIPT_BEATS: Final = 12
@@ -318,10 +343,10 @@ class StoryboardBeat:
             isinstance(parts, list)
             and len(parts) <= 16
             and all(
-                type(part) is str and _CATALOG_PART_ID.fullmatch(part) is not None
+                type(part) is str and part in LOCKED_CATALOG_PART_IDS
                 for part in parts
             ),
-            "catalog_parts must be catalog ids",
+            "catalog_parts must be locked catalog ids",
         )
         return cls(
             beat_id=data["beat_id"],
@@ -938,6 +963,9 @@ def _first_message_contract(brief: MotionBrief, allowed_assets: tuple[str, ...])
         f"script 键：{{one_message, language, beats(1..{MAX_SCRIPT_BEATS} 条)}}。\n"
         "storyboard 键：{beats:[{beat_id, purpose, start_seconds, "
         "duration_seconds, catalog_parts[]}]}。\n"
+        "catalog_parts 请按每段分镜的内容从锁定零件目录自动选择（可为空数组，"
+        f"每段最多 16 项），只能使用以下 {len(LOCKED_CATALOG_PART_IDS)} 个 ID：\n"
+        f"{sorted(LOCKED_CATALOG_PART_IDS)}\n"
         "composition_html：一个独立 standalone 合成 HTML，根 div 需带 data-composition-id、"
         f"data-width、data-height、data-duration=\"{brief.duration_seconds}\"，至少一个 .clip。\n"
         f"只能引用这些本地资源：{list(allowed_assets)}；GSAP 运行时请用其中的本地脚本路径。\n"
