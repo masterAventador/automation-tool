@@ -18,8 +18,8 @@ const contract = JSON.parse(
   ),
 ) as MotionStylePresetContract;
 
-describe("BM-06 production App motion style catalog acceptance", () => {
-  it("lists all twelve Chinese styles with keyboard-accessible selection", async () => {
+describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
+  it("recommends, brand-tunes and expands all Chinese styles with keyboard selection", async () => {
     await browser
       .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
       .click();
@@ -47,6 +47,50 @@ describe("BM-06 production App motion style catalog acceptance", () => {
     await expect(group).toBeDisplayed();
     await expect(studio).toHaveText(expect.stringContaining("尚未选择风格"));
 
+    const recommendations = await group.$$("div[role='radio']");
+    assert.equal(recommendations.length, 3, "catalog must recommend exactly three styles first");
+    for (let index = 0; index < recommendations.length; index += 1) {
+      await expect(recommendations[index]!).toHaveText(expect.stringContaining("推荐"));
+    }
+
+    const headline = await studio.$("input[aria-label='预览标题']");
+    const previewBody = await studio.$("textarea[aria-label='预览正文']");
+    await headline.setValue("本周销售增长 38%");
+    await previewBody.setValue("华东区和续费业务共同推动增长。");
+    await studio.$("input[aria-label='品牌主色']").setValue("#1234ab");
+    await studio.$("input[aria-label='品牌辅助色']").setValue("#f2eadb");
+    await studio.$("input[aria-label='品牌字体']").setValue("Acme Sans");
+    const logoBytes =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    await browser.execute(
+      (encodedLogo: string) => {
+        const input = document.querySelector<HTMLInputElement>(
+          "input[aria-label='品牌 Logo 文件']",
+        );
+        if (input === null) throw new Error("brand logo input is missing");
+        const raw = globalThis.atob(encodedLogo);
+        const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([bytes], "avatar.png", { type: "image/png" }));
+        Object.defineProperty(input, "files", {
+          configurable: true,
+          value: transfer.files,
+        });
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+      logoBytes,
+    );
+
+    const actualPreview = await studio.$("section[aria-label='实际内容风格预览']");
+    await expect(actualPreview).toHaveText(expect.stringContaining("本周销售增长 38%"));
+    await expect(actualPreview).toHaveText(
+      expect.stringContaining("华东区和续费业务共同推动增长。"),
+    );
+    await expect(actualPreview).toHaveText(expect.stringContaining("Acme Sans"));
+    await expect(actualPreview).toHaveText(expect.stringContaining("avatar.png"));
+    await expect(actualPreview.$("img[alt='品牌 Logo 预览']")).toBeDisplayed();
+
+    await studio.$("button=查看全部 12 套风格").click();
     const radios = await group.$$("div[role='radio']");
     assert.equal(radios.length, 12, "catalog must expose exactly twelve styles");
     assert.equal(contract.presets.length, 12, "locked contract must expose twelve presets");
@@ -61,7 +105,7 @@ describe("BM-06 production App motion style catalog acceptance", () => {
       assert.equal(await radio.getAttribute("aria-checked"), "false");
       await expect(radio).toHaveText(expect.stringContaining("适用场景"));
       await expect(radio).toHaveText(expect.stringContaining("风格标签"));
-      await expect(radio).toHaveText(expect.stringContaining("示意预览"));
+      await expect(radio).toHaveText(expect.stringContaining("实际内容预览"));
     }
 
     const first = contract.presets[0]!;

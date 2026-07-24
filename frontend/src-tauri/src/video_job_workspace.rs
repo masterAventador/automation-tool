@@ -495,6 +495,24 @@ impl VideoJobWorkspaceStore {
         result
     }
 
+    pub fn remove_output(
+        &self,
+        workspace: &VideoJobWorkspace,
+        file_name: &str,
+    ) -> Result<(), VideoWorkspaceError> {
+        self.revalidate_workspace(workspace)?;
+        if !valid_file_name(file_name) {
+            return Err(path_rejected());
+        }
+        let output_directory = workspace.directory.join(OUTPUTS_DIRECTORY);
+        let output = output_directory.join(file_name);
+        safe_regular_file_metadata(&output)?.ok_or_else(|| {
+            VideoWorkspaceError::new(VideoWorkspaceErrorCode::NotFound)
+        })?;
+        fs::remove_file(output).map_err(|_| storage_unavailable())?;
+        sync_directory(&output_directory)
+    }
+
     pub fn open_artifact(
         &self,
         record: &VideoArtifactRecord,

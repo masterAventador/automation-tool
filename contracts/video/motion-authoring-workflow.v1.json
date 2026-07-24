@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "policy": "fail_closed",
+  "purpose": "BM-05 locked authoring workflow/skill/reference read by the restricted MotionAuthoringAgent",
+  "submodule": "vendor/hyperframes",
+  "submodule_version": "0.7.68",
+  "verified_at": "2026-07-24",
+  "max_reference_bytes": 65536,
+  "notes": "The agent reads only these pinned, digest-verified files as authoring rules. It never executes any command from them and never reads any other submodule path. A digest drift or missing file fails closed.",
+  "files": [
+    {
+      "path": "skills/hyperframes-core/references/minimal-composition.md",
+      "sha256": "3d20c3d098bb37318d01ac9b40594213a09244e30304e92620dbb9532ed4e9ce",
+      "role": "smallest renderable seekable composition skeleton"
+    },
+    {
+      "path": "skills/hyperframes-core/references/determinism-rules.md",
+      "sha256": "99245d3c3ff56bf029fef4173b4f5e9a8cfae4566bc0a814e7970b8836fdb75d",
+      "role": "determinism bans and the seekable timeline contract"
+    }
+  ]
+}

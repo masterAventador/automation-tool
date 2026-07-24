@@ -283,6 +283,21 @@ const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async deleteArtifact() {
     throw new Error("Material video studio is unavailable");
   },
+  async submitMotionDraft() {
+    throw new Error("Motion video studio is unavailable");
+  },
+  async motionJobs() {
+    return [];
+  },
+  async cancelMotionRenderJob() {
+    throw new Error("Motion video studio is unavailable");
+  },
+  async readMotionArtifact() {
+    throw new Error("Motion video studio is unavailable");
+  },
+  async deleteMotionArtifact() {
+    throw new Error("Motion video studio is unavailable");
+  },
 };
 
 interface WorkbenchShellProps {

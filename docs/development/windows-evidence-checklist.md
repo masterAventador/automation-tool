@@ -273,6 +273,42 @@ clean submodule 的许可证工作树可被 `core.autocrlf` 物化为 CRLF；治
 blob 计算许可证摘要，同时继续要求工作树为普通文件且 submodule 完全干净。所有 BM-12/
 BM-13/BM-14 门禁、Ruff、212 项前端契约和专项 Roadmap 检查通过，临时发布/依赖树已清理。
 
+### 7. BM-05 受限 MotionAuthoringAgent Windows 待补
+
+BM-05 的封闭工具面、模型不可信输出处理、失败矩阵、流式传输和真实百炼模型端到端
+编排验收（一句话→DESIGN/脚本/分镜→可 seek composition→lint/check/snapshot→提交
+RenderJob）已在 macOS 完成，逻辑本身跨平台（纯 Python，无 Rust/Node/浏览器）。
+Windows 侧待补：`AuthoringWorkspace` 的路径 containment 在 NTFS 上的 reparse point /
+大小写不敏感 / 8.3 短名 / Unicode 文件名越界语义重验（macOS 用 `realpath` +
+`relative_to`，Windows 需确认 reparse point 与短名不能绕过工作区边界）；以及 BM-05
+生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08（页面）与 BM-16（生产包
+冻结）在 Windows 平台一并补齐。通过后更新 `docs/development/BM-05.md` 遗留项。
+
+### 8. BM-07 风格微调与冻结 Windows 待补
+
+BM-07 已在 macOS 正式 Tauri App 完成推荐 3 套、展开全部 12 套、品牌色/字体、本地 PNG
+Logo、实际文案预览与键盘选择；锁定上游 builder 生成的品牌化 `frame.md` 已经 Schema、
+远程/主动内容、字体/Logo 文件签名、路径 containment 和摘要校验，并在两个 RenderJob
+私有目录重现相同冻结字节。macOS WebKit WebDriver 不支持 `uploadFile`，验收只能在正式
+App WebView 内把真实 PNG 字节构造成 `File` 交给生产文件输入控件，已证明生产
+`FileReader` 与 `<img>` 预览链路，但没有覆盖操作系统原生文件选择器。Windows 侧随 BM-08
+纵向验收：用原生文件选择器选真实 PNG/JPEG/WebP 和本地字体，确认页面预览、Rust/Worker
+提交到 RenderJob 的冻结摘要、NTFS reparse/大小写/短名 containment 与二次打开重现一致。
+
+### 9. BM-08 App 原生编辑、渲染与 Artifact 导入 Windows 待补
+
+BM-08 已在 macOS 真实测试版 Tauri App 完成正式用户入口全链路验收（编辑三段文案、
+风格与品牌素材、真实草稿预览、提交、渲染中取消并验证 cancelled checkpoint、恢复路径
+重试、真实 Chromium 90 帧渲染 + FFmpeg 编码、App 内解码播放约 3 秒 MP4、删除后
+Artifact 与工作副本双清理、ffprobe 与三帧视觉证据），入口为
+`python3 scripts/run_bm_08_acceptance.py`。Windows 侧待补：同脚本路径在 Windows 真实
+App 重跑（脚本当前对 `os.name == "nt"` 显式拒绝，需补 Windows worker/浏览器包装）；
+用原生文件选择器上传 Logo（macOS 只能以真实字节构造 `File` 交给生产输入控件）；
+Windows WebView2 对 `data:video/mp4;base64` 的 H.264 解码播放；NTFS
+reparse/大小写/短名下 RenderJob 工作区与 Artifact 删除语义。正式双平台安装包链路仍属
+BM-16。通过后更新 `docs/development/BM-08.md` 遗留项并评估 BM-05/BM-07/BM-08 三项
+`🔍 待验收` 状态闭合。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；

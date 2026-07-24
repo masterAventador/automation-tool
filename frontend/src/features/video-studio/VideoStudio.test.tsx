@@ -15,6 +15,25 @@ function gateway(): MaterialVideoStudioGateway {
     jobs: vi.fn().mockResolvedValue([]),
     cancel: vi.fn().mockResolvedValue(undefined),
     deleteArtifact: vi.fn().mockResolvedValue(undefined),
+    submitMotionDraft: vi.fn().mockResolvedValue({
+      renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+      revision: 1,
+      status: "queued",
+      progressPercent: 5,
+      subject: "新品发布",
+      styleDisplayName: "商务蓝",
+      artifactId: null,
+      artifactSizeBytes: null,
+      failureCode: null,
+    }),
+    motionJobs: vi.fn().mockResolvedValue([]),
+    cancelMotionRenderJob: vi.fn().mockResolvedValue(undefined),
+    readMotionArtifact: vi.fn().mockResolvedValue({
+      artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+      mediaType: "video/mp4",
+      base64: "AAAA",
+    }),
+    deleteMotionArtifact: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -32,7 +51,7 @@ describe("video studio shell", () => {
     expect(screen.getByRole("button", { name: "打开完整制作界面" })).toBeDisabled();
     expect(
       screen.getByText(
-        "选择“智能素材成片”后可打开完整制作界面；“品牌动效成片”将在对应流程接入后开放。",
+        "“智能素材成片”在独立完整界面制作；“品牌动效成片”在当前 App 内编辑和预览。",
       ),
     ).toBeVisible();
 
@@ -118,7 +137,7 @@ describe("video studio shell", () => {
     expect(screen.getByRole("radiogroup", { name: "选择整体画面风格" })).toBeVisible();
   });
 
-  it("lists all twelve locked styles with Chinese-only cards", async () => {
+  it("recommends three styles first and still lets users inspect all twelve", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);
 
@@ -126,6 +145,10 @@ describe("video studio shell", () => {
     await user.click(screen.getByRole("tab", { name: "制作设置" }));
 
     const group = screen.getByRole("radiogroup", { name: "选择整体画面风格" });
+    const recommended = within(group).getAllByRole("radio");
+    expect(recommended).toHaveLength(3);
+    expect(within(group).getAllByText("推荐")).toHaveLength(3);
+    await user.click(screen.getByRole("button", { name: "查看全部 12 套风格" }));
     const radios = within(group).getAllByRole("radio");
     expect(radios).toHaveLength(12);
     expect(radios.map((radio) => radio.getAttribute("aria-label"))).toEqual(
@@ -135,7 +158,7 @@ describe("video studio shell", () => {
       expect(radio).toHaveAttribute("aria-checked", "false");
       expect(within(radio).getByText("适用场景")).toBeVisible();
       expect(within(radio).getByText("风格标签")).toBeVisible();
-      expect(within(radio).getByText("示意预览")).toBeVisible();
+      expect(within(radio).getByText("实际内容预览")).toBeVisible();
     }
     expect(screen.getByText("尚未选择风格")).toBeVisible();
 
@@ -151,6 +174,7 @@ describe("video studio shell", () => {
 
     await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
     await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.click(screen.getByRole("button", { name: "查看全部 12 套风格" }));
 
     const group = screen.getByRole("radiogroup", { name: "选择整体画面风格" });
     const radios = within(group).getAllByRole("radio");
@@ -191,6 +215,42 @@ describe("video studio shell", () => {
     expect(checked).toHaveLength(1);
   });
 
+  it("previews actual copy with brand colors, font and a local logo", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+
+    const headline = screen.getByRole("textbox", { name: "预览标题" });
+    const body = screen.getByRole("textbox", { name: "预览正文" });
+    await user.clear(headline);
+    await user.type(headline, "本周销售增长 38%");
+    await user.clear(body);
+    await user.type(body, "华东区和续费业务共同推动增长。");
+    await user.type(screen.getByRole("textbox", { name: "品牌主色" }), "#1234ab");
+    await user.type(screen.getByRole("textbox", { name: "品牌辅助色" }), "#f2eadb");
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Acme Sans");
+    await user.upload(
+      screen.getByLabelText("品牌 Logo 文件"),
+      new File(["logo"], "acme-logo.png", { type: "image/png" }),
+    );
+
+    const preview = screen.getByRole("region", { name: "实际内容风格预览" });
+    expect(within(preview).getByText("本周销售增长 38%")).toBeVisible();
+    expect(within(preview).getByText("华东区和续费业务共同推动增长。")).toBeVisible();
+    expect(within(preview).getByText("Acme Sans")).toBeVisible();
+    expect(within(preview).getByText(/acme-logo\.png/u)).toBeVisible();
+    expect(
+      await within(preview).findByRole("img", { name: "品牌 Logo 预览" }),
+    ).toHaveAttribute("src", expect.stringMatching(/^data:image\/png;base64,/u));
+    expect(preview).toHaveStyle({ backgroundColor: "#f2eadb" });
+    expect(within(preview).getByText("本周销售增长 38%")).toHaveStyle({
+      color: "#1234ab",
+      fontFamily: "Acme Sans",
+    });
+  });
+
   it("shows only reconciled jobs and artifacts without inventing file paths", async () => {
     const user = userEvent.setup();
     const studioGateway = gateway();
@@ -226,5 +286,97 @@ describe("video studio shell", () => {
     expect(await screen.findByText("2.0 MB", { exact: false })).toBeVisible();
     expect(screen.getByRole("button", { name: "删除成片" })).toBeVisible();
     expect(document.body).not.toHaveTextContent(/\/private\/|[A-Z]:\\/u);
+  });
+
+  it("edits a three-beat manual draft, plays the real preview and submits it without claiming AI", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    expect(screen.getByRole("textbox", { name: "视频标题" })).toBeEnabled();
+    expect(screen.getByText("固定模板手工制作")).toBeVisible();
+    expect(screen.getByText("当前没有调用视频创作模型")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/网址|URL|抓取/u);
+
+    await user.click(screen.getByRole("tab", { name: "脚本与分镜" }));
+    const beatTitles = screen.getAllByRole("textbox", { name: /第 \d 段标题/u });
+    const beatCaptions = screen.getAllByRole("textbox", { name: /第 \d 段字幕/u });
+    expect(beatTitles).toHaveLength(3);
+    expect(beatCaptions).toHaveLength(3);
+    await user.clear(beatTitles[0]!);
+    await user.type(beatTitles[0]!, "增长看得见");
+    await user.clear(beatCaptions[0]!);
+    await user.type(beatCaptions[0]!, "字幕：本周销售增长 38%");
+
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    expect(screen.getByRole("region", { name: "品牌动效播放预览" })).toHaveTextContent(
+      "增长看得见",
+    );
+    await user.click(screen.getByRole("button", { name: "播放预览" }));
+    expect(await screen.findByText("第 2 段 / 3")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+    expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        creationMode: "manual_template_v1",
+        beats: expect.arrayContaining([
+          expect.objectContaining({
+            title: "增长看得见",
+            caption: "字幕：本周销售增长 38%",
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("shows native motion progress, cancels it and plays the imported MP4 artifact", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+        revision: 2,
+        status: "rendering",
+        progressPercent: 55,
+        subject: "新品发布",
+        styleDisplayName: "商务蓝",
+        artifactId: null,
+        artifactSizeBytes: null,
+        failureCode: null,
+      },
+      {
+        renderJobId: "d03fe6e3-cf14-41e8-a2a0-1d870db1a122",
+        revision: 4,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "季度增长",
+        styleDisplayName: "商务蓝",
+        artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+        artifactSizeBytes: 4096,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "制作任务" }));
+    expect(await screen.findByText("逐帧渲染中")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "取消品牌动效任务" }));
+    await user.click(screen.getByRole("button", { name: /确\s*定/u }));
+    expect(studioGateway.cancelMotionRenderJob).toHaveBeenCalledWith(
+      "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "成片" }));
+    await user.click(await screen.findByRole("button", { name: "播放季度增长" }));
+    expect(studioGateway.readMotionArtifact).toHaveBeenCalledWith(
+      "2c29395b-1015-43ae-84a7-6f1901caac09",
+    );
+    expect(await screen.findByLabelText("季度增长成片播放器")).toHaveAttribute(
+      "src",
+      "data:video/mp4;base64,AAAA",
+    );
   });
 });

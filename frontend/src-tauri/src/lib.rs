@@ -24,6 +24,7 @@ pub mod local_video_orchestrator;
 mod managed_process_tree;
 pub mod material_video_studio;
 pub mod model_service_settings;
+pub mod motion_video_studio;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
@@ -314,6 +315,400 @@ fn delete_material_video_artifact(
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
 ) -> Result<(), material_video_studio::MaterialVideoStudioError> {
     material_video_studio::delete_artifact(&workspaces, artifact_id)
+}
+
+struct MotionRuntimePaths {
+    worker: MotionWorkerSource,
+    browser: std::path::PathBuf,
+    chromium_major: u32,
+    ffmpeg: std::path::PathBuf,
+}
+
+enum MotionWorkerSource {
+    #[cfg(feature = "video-studio-e2e")]
+    Executable(std::path::PathBuf),
+    #[cfg(not(feature = "video-studio-e2e"))]
+    Package(std::path::PathBuf),
+}
+
+fn motion_runtime_paths(
+    _app: &tauri::AppHandle,
+    _authority: &embedded_browser_authority::EmbeddedBrowserAuthority,
+) -> Result<MotionRuntimePaths, motion_video_studio::MotionVideoStudioError> {
+    #[cfg(feature = "video-studio-e2e")]
+    {
+        let worker = std::env::var_os("AUTOMATION_TOOL_BM08_WORKER")
+            .map(std::path::PathBuf::from)
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .ok_or_else(motion_video_studio::render_unavailable)?;
+        let browser = std::env::var_os("AUTOMATION_TOOL_BM08_BROWSER")
+            .map(std::path::PathBuf::from)
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .ok_or_else(motion_video_studio::render_unavailable)?;
+        let ffmpeg = std::env::var_os("AUTOMATION_TOOL_BM08_FFMPEG")
+            .map(std::path::PathBuf::from)
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .ok_or_else(motion_video_studio::render_unavailable)?;
+        let chromium_major = std::env::var("AUTOMATION_TOOL_BM08_CHROMIUM_MAJOR")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .ok_or_else(motion_video_studio::render_unavailable)?;
+        return Ok(MotionRuntimePaths {
+            worker: MotionWorkerSource::Executable(worker),
+            browser,
+            chromium_major,
+            ffmpeg,
+        });
+    }
+    #[cfg(not(feature = "video-studio-e2e"))]
+    {
+        let resource_directory = _app
+            .path()
+            .resource_dir()
+            .map_err(|_| motion_video_studio::render_unavailable())?;
+        let browser = _authority
+            .resolve()
+            .map_err(|_| motion_video_studio::render_unavailable())?;
+        let compatibility: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/browser/embedded-chromium-compatibility.v1.json"
+        ))
+        .map_err(|_| motion_video_studio::render_unavailable())?;
+        let chromium_major = compatibility
+            .pointer("/production_runtime/chromium/browser_version")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| value.split('.').next())
+            .and_then(|value| value.parse::<u32>().ok())
+            .ok_or_else(motion_video_studio::render_unavailable)?;
+        let toolchain = video_media_toolchain::VideoMediaToolchain::load(&resource_directory)
+            .map_err(|_| motion_video_studio::render_unavailable())?;
+        Ok(MotionRuntimePaths {
+            worker: MotionWorkerSource::Package(
+                resource_directory
+                    .join("motion-video-worker")
+                    .join("package"),
+            ),
+            browser,
+            chromium_major,
+            ffmpeg: toolchain.ffmpeg_path().to_path_buf(),
+        })
+    }
+}
+
+fn motion_worker_launch(
+    source: MotionWorkerSource,
+    asset_root: std::path::PathBuf,
+    browser: std::path::PathBuf,
+    chromium_major: u32,
+) -> Result<local_video_orchestrator::VideoWorkerLaunch, motion_video_studio::MotionVideoStudioError>
+{
+    let policy =
+        local_video_orchestrator::VideoWorkerRestartPolicy::new(0, std::time::Duration::ZERO)
+            .map_err(|_| motion_video_studio::render_unavailable())?;
+    let launch = match source {
+        #[cfg(feature = "video-studio-e2e")]
+        MotionWorkerSource::Executable(executable) => {
+            local_video_orchestrator::VideoWorkerLaunch::new(
+                local_video_orchestrator::VideoWorkerKind::Node,
+                executable,
+                asset_root,
+                local_video_orchestrator::MOTION_VIDEO_WORKER_VERSION.to_owned(),
+                policy,
+            )
+        }
+        #[cfg(not(feature = "video-studio-e2e"))]
+        MotionWorkerSource::Package(package) => {
+            local_video_orchestrator::VideoWorkerLaunch::bundled_node(&package, asset_root, policy)
+        }
+    }
+    .map_err(|_| motion_video_studio::render_unavailable())?;
+    let browser = local_video_orchestrator::VideoWorkerRenderBrowserConfiguration::new(
+        browser,
+        chromium_major,
+        std::time::Duration::from_secs(30),
+    )
+    .map_err(|_| motion_video_studio::render_unavailable())?;
+    Ok(launch.with_render_browser(browser))
+}
+
+#[tauri::command]
+fn submit_motion_video_draft(
+    app: tauri::AppHandle,
+    request: motion_video_studio::MotionVideoDraftRequest,
+    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
+{
+    let runtime = motion_runtime_paths(&app, &authority)?;
+    let prepared = motion_video_studio::prepare_manual_render_job(&workspaces, &request)?;
+    let render_job_id = prepared.render_job_id();
+    let allowed_assets = prepared.allowed_assets().to_vec();
+    let (asset_root, _, _) =
+        motion_video_studio::workspace_render_paths(&workspaces, render_job_id)?;
+    let launch = match motion_worker_launch(
+        runtime.worker,
+        asset_root,
+        runtime.browser,
+        runtime.chromium_major,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            if let Ok(workspace) = workspaces.open(render_job_id) {
+                let _ = workspaces.finish(
+                    &workspace,
+                    video_job_workspace::VideoWorkspaceDisposition::Delete,
+                );
+            }
+            return Err(error);
+        }
+    };
+    if orchestrator.start(launch).is_err()
+        || orchestrator
+            .health(local_video_orchestrator::VideoWorkerKind::Node)
+            .is_err()
+    {
+        let _ = orchestrator.stop(local_video_orchestrator::VideoWorkerKind::Node);
+        if let Ok(workspace) = workspaces.open(render_job_id) {
+            let _ = workspaces.finish(
+                &workspace,
+                video_job_workspace::VideoWorkspaceDisposition::Delete,
+            );
+        }
+        return Err(motion_video_studio::render_unavailable());
+    }
+    let initial = motion_video_studio::snapshot(&workspaces, render_job_id)?;
+    std::thread::spawn(move || {
+        run_motion_render_job(app, render_job_id, allowed_assets, runtime.ffmpeg);
+    });
+    Ok(initial)
+}
+
+enum MotionRenderStageFailure {
+    Render,
+    Encoding,
+    Cancelled,
+}
+
+fn run_motion_render_job(
+    app: tauri::AppHandle,
+    render_job_id: uuid::Uuid,
+    allowed_assets: Vec<String>,
+    ffmpeg: std::path::PathBuf,
+) {
+    let workspaces = app.state::<video_job_workspace::VideoJobWorkspaceStore>();
+    let orchestrator = app.state::<local_video_orchestrator::LocalVideoOrchestrator>();
+    let outcome = (|| -> Result<(), MotionRenderStageFailure> {
+        if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+            .map_err(|_| MotionRenderStageFailure::Render)?
+        {
+            return Err(MotionRenderStageFailure::Cancelled);
+        }
+        motion_video_studio::advance(
+            &workspaces,
+            render_job_id,
+            motion_video_studio::MotionRenderJobStatus::Rendering,
+            55,
+            None,
+            None,
+        )
+        .map_err(|_| MotionRenderStageFailure::Render)?;
+        let (work, _, _) = motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
+            .map_err(|_| MotionRenderStageFailure::Render)?;
+        let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
+            work.clone(),
+            motion_video_studio::MOTION_COMPOSITION_FILE.to_owned(),
+            allowed_assets,
+            motion_video_studio::MOTION_FRAME_COUNT,
+            60,
+            60,
+            2048,
+            256 * 1024 * 1024,
+        )
+        .map_err(|_| MotionRenderStageFailure::Render)?;
+        orchestrator
+            .render_sandbox(
+                local_video_orchestrator::VideoWorkerKind::Node,
+                render_job_id,
+                &request,
+            )
+            .map_err(|_| {
+                if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+                    .unwrap_or(false)
+                {
+                    MotionRenderStageFailure::Cancelled
+                } else {
+                    MotionRenderStageFailure::Render
+                }
+            })?;
+        if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+            .map_err(|_| MotionRenderStageFailure::Render)?
+        {
+            return Err(MotionRenderStageFailure::Cancelled);
+        }
+        motion_video_studio::advance(
+            &workspaces,
+            render_job_id,
+            motion_video_studio::MotionRenderJobStatus::Encoding,
+            85,
+            None,
+            None,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        encode_motion_video(&workspaces, render_job_id, &ffmpeg)?;
+        let artifact = motion_video_studio::import_rendered_output(&workspaces, render_job_id)
+            .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        motion_video_studio::advance(
+            &workspaces,
+            render_job_id,
+            motion_video_studio::MotionRenderJobStatus::Succeeded,
+            100,
+            Some(&artifact),
+            None,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        Ok(())
+    })();
+    let _ = orchestrator.stop(local_video_orchestrator::VideoWorkerKind::Node);
+    if let Err(failure) = outcome {
+        let current = motion_video_studio::snapshot(&workspaces, render_job_id).ok();
+        if current.as_ref().is_some_and(|snapshot| {
+            snapshot.status() == motion_video_studio::MotionRenderJobStatus::Cancelled
+        }) {
+            // The command already wrote the authoritative cancelled state.
+        } else if !matches!(failure, MotionRenderStageFailure::Cancelled) {
+            let code = match failure {
+                MotionRenderStageFailure::Render => {
+                    motion_video_studio::MotionRenderFailureCode::RenderFailed
+                }
+                MotionRenderStageFailure::Encoding => {
+                    motion_video_studio::MotionRenderFailureCode::EncodingFailed
+                }
+                MotionRenderStageFailure::Cancelled => unreachable!(),
+            };
+            let progress = current
+                .map(|snapshot| snapshot.progress_percent())
+                .unwrap_or(5)
+                .min(99);
+            let _ = motion_video_studio::advance(
+                &workspaces,
+                render_job_id,
+                motion_video_studio::MotionRenderJobStatus::Failed,
+                progress,
+                None,
+                Some(code),
+            );
+        }
+    }
+    if let Ok((work, _, _)) =
+        motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
+    {
+        let _ = std::fs::remove_dir_all(work.join("frames"));
+    }
+    if let Ok(workspace) = workspaces.open(render_job_id) {
+        let _ = workspaces.finish(
+            &workspace,
+            video_job_workspace::VideoWorkspaceDisposition::Keep,
+        );
+    }
+}
+
+fn encode_motion_video(
+    workspaces: &video_job_workspace::VideoJobWorkspaceStore,
+    render_job_id: uuid::Uuid,
+    ffmpeg: &std::path::Path,
+) -> Result<(), MotionRenderStageFailure> {
+    let (work, _, output) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+    let input = work.join("frames").join("frame-%05d.png");
+    let mut child = std::process::Command::new(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-framerate",
+            "30",
+            "-start_number",
+            "1",
+            "-i",
+        ])
+        .arg(&input)
+        .args([
+            "-frames:v",
+            "90",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+        ])
+        .arg(&output)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        if motion_video_studio::cancellation_requested(workspaces, render_job_id).unwrap_or(false) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(output);
+            return Err(MotionRenderStageFailure::Cancelled);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) | Err(_) => return Err(MotionRenderStageFailure::Encoding),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(output);
+                return Err(MotionRenderStageFailure::Encoding);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn get_motion_render_jobs(
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    Vec<motion_video_studio::MotionRenderJobSnapshot>,
+    motion_video_studio::MotionVideoStudioError,
+> {
+    motion_video_studio::jobs(&workspaces)
+}
+
+#[tauri::command]
+fn cancel_motion_render_job(
+    render_job_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), motion_video_studio::MotionVideoStudioError> {
+    motion_video_studio::cancel(&workspaces, render_job_id)
+}
+
+#[tauri::command]
+fn read_motion_video_artifact(
+    artifact_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    motion_video_studio::MotionVideoArtifactPayload,
+    motion_video_studio::MotionVideoStudioError,
+> {
+    motion_video_studio::read_artifact(&workspaces, artifact_id)
+}
+
+#[tauri::command]
+fn delete_motion_video_artifact(
+    artifact_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), motion_video_studio::MotionVideoStudioError> {
+    motion_video_studio::delete_artifact(&workspaces, artifact_id)
 }
 
 #[tauri::command]
@@ -3197,6 +3592,11 @@ pub fn run() {
         get_material_render_jobs,
         cancel_material_render_job,
         delete_material_video_artifact,
+        submit_motion_video_draft,
+        get_motion_render_jobs,
+        cancel_motion_render_job,
+        read_motion_video_artifact,
+        delete_motion_video_artifact,
         get_update_policy_record_for_acceptance,
         get_app_update_state,
         check_app_update_now,
@@ -3253,6 +3653,11 @@ pub fn run() {
         get_material_render_jobs,
         cancel_material_render_job,
         delete_material_video_artifact,
+        submit_motion_video_draft,
+        get_motion_render_jobs,
+        cancel_motion_render_job,
+        read_motion_video_artifact,
+        delete_motion_video_artifact,
         get_app_update_state,
         check_app_update_now,
         decide_app_update
@@ -3340,6 +3745,11 @@ pub fn run() {
         get_material_render_jobs,
         cancel_material_render_job,
         delete_material_video_artifact,
+        submit_motion_video_draft,
+        get_motion_render_jobs,
+        cancel_motion_render_job,
+        read_motion_video_artifact,
+        delete_motion_video_artifact,
         get_app_update_state,
         check_app_update_now,
         decide_app_update

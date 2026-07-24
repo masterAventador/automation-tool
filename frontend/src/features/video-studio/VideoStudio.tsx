@@ -5,11 +5,35 @@ import { Alert, Button, Card, Empty, Input, Popconfirm, Progress, Space, Tabs, T
 import {
   MaterialVideoStudioGatewayError,
   type MaterialRenderJobSnapshot,
+  type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
+  type MotionRenderJobSnapshot,
+  type MotionVideoBeatDraft,
+  type MotionVideoDraftRequest,
 } from "./material-video-studio-gateway";
-import { MotionStyleCatalog } from "./MotionStyleCatalog";
+import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
+import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
 
 type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
+
+const DEFAULT_MOTION_BEATS: readonly MotionVideoBeatDraft[] = [
+  { title: "一个清晰的核心信息", caption: "字幕：先让观众知道这次更新是什么。" },
+  { title: "三个值得关注的亮点", caption: "字幕：用简洁画面解释价值和变化。" },
+  { title: "现在就开始行动", caption: "字幕：给观众一个明确的下一步。" },
+] as const;
+
+interface MotionDraft {
+  readonly subject: string;
+  readonly beats: readonly MotionVideoBeatDraft[];
+  readonly style: MotionStyleDraftSelection;
+}
+
+const EMPTY_MOTION_STYLE: MotionStyleDraftSelection = {
+  stylePresetId: null,
+  primaryColor: "",
+  secondaryColor: "",
+  logo: null,
+};
 
 interface VideoCreationMethodOption {
   readonly id: VideoCreationMethodId;
@@ -140,26 +164,32 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
   );
 }
 
-const OPEN_ERRORS = {
+const OPEN_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
   configuration_required: "请先到“设置与诊断”配置并测试文案模型服务。",
   process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
   storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
   view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
   job_unavailable: "制作任务状态暂时不可用，请稍后重试。",
+  draft_invalid: "草稿内容不符合要求，请检查后重试。",
+  render_unavailable: "本机渲染组件暂时不可用，请到设置与诊断检查组件。",
   protocol_mismatch: "视频制作服务版本不匹配，请更新 App 后重试。",
   operation_unavailable: "视频制作暂时不可用，请稍后重试。",
-} as const;
+};
 
 function NewVideoPage({
   gateway,
   onOpened,
   selectedMethod,
   onSelectMethod,
+  motionSubject,
+  onMotionSubjectChange,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
   readonly selectedMethod: VideoCreationMethodId | null;
   readonly onSelectMethod: (method: VideoCreationMethodId) => void;
+  readonly motionSubject: string;
+  readonly onMotionSubjectChange: (subject: string) => void;
 }) {
   const [opening, setOpening] = useState(false);
   const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -177,10 +207,34 @@ function NewVideoPage({
         </Typography.Text>
         <Input.TextArea
           aria-label="视频需求"
-          disabled
+          disabled={selectedMethod !== "motion_composition_v1"}
           rows={5}
-          placeholder="例如：用 30 秒介绍新品的三个亮点"
+          maxLength={80}
+          value={selectedMethod === "motion_composition_v1" ? motionSubject : ""}
+          onChange={(event) => onMotionSubjectChange(event.target.value)}
+          placeholder="例如：用品牌动效介绍新品的三个亮点"
         />
+        {selectedMethod === "motion_composition_v1" ? (
+          <Card size="small" title="固定模板手工制作">
+            <Space orientation="vertical" size="small">
+              <label>
+                <span>视频标题</span>
+                <Input
+                  aria-label="视频标题"
+                  maxLength={80}
+                  value={motionSubject}
+                  onChange={(event) => onMotionSubjectChange(event.target.value)}
+                />
+              </label>
+              <Alert
+                type="info"
+                showIcon
+                title="当前没有调用视频创作模型"
+                description="你正在从固定三段模板开始，后续文字、分镜、风格和品牌素材都由你手工调整。"
+              />
+            </Space>
+          </Card>
+        ) : null}
         <div className="video-method-heading">
           <div>
             <Typography.Title level={4}>选择制作方式</Typography.Title>
@@ -230,7 +284,7 @@ function NewVideoPage({
           <Alert
             type="info"
             showIcon
-            title="选择“智能素材成片”后可打开完整制作界面；“品牌动效成片”将在对应流程接入后开放。"
+            title="“智能素材成片”在独立完整界面制作；“品牌动效成片”在当前 App 内编辑和预览。"
           />
         ) : (
           <Alert type={openMessage.type} showIcon title={openMessage.text} />
@@ -267,7 +321,152 @@ function NewVideoPage({
   );
 }
 
-function SettingsPage({ method }: { readonly method: VideoCreationMethodId | null }) {
+function MotionScriptPage({
+  beats,
+  onChange,
+}: {
+  readonly beats: readonly MotionVideoBeatDraft[];
+  readonly onChange: (beats: readonly MotionVideoBeatDraft[]) => void;
+}) {
+  return (
+    <Card className="video-studio-panel" title="三段脚本与分镜">
+      <Space orientation="vertical" size="middle" className="motion-script-editor">
+        <Alert
+          type="info"
+          showIcon
+          title="每段 1 秒"
+          description="这里编辑的是固定模板声明过的文字变量；提交前仍可反复预览和精修。"
+        />
+        {beats.map((beat, index) => (
+          <Card key={index} size="small" title={`第 ${index + 1} 段`}>
+            <Space orientation="vertical" size="small" className="motion-script-fields">
+              <Input
+                aria-label={`第 ${index + 1} 段标题`}
+                maxLength={160}
+                value={beat.title}
+                onChange={(event) => {
+                  const next = beats.map((item, beatIndex) =>
+                    beatIndex === index ? { ...item, title: event.target.value } : item,
+                  );
+                  onChange(next);
+                }}
+              />
+              <Input
+                aria-label={`第 ${index + 1} 段字幕`}
+                maxLength={160}
+                value={beat.caption}
+                onChange={(event) => {
+                  const next = beats.map((item, beatIndex) =>
+                    beatIndex === index ? { ...item, caption: event.target.value } : item,
+                  );
+                  onChange(next);
+                }}
+              />
+            </Space>
+          </Card>
+        ))}
+      </Space>
+    </Card>
+  );
+}
+
+function MotionPreviewPage({
+  draft,
+  submitting,
+  onSubmit,
+}: {
+  readonly draft: MotionDraft;
+  readonly submitting: boolean;
+  readonly onSubmit: () => void;
+}) {
+  const [activeBeat, setActiveBeat] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setTimeout(() => {
+      setActiveBeat((current) => {
+        if (current >= 2) {
+          setPlaying(false);
+          return current;
+        }
+        return current + 1;
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [activeBeat, playing]);
+  const style = MOTION_STYLE_CATALOG.find((item) => item.id === draft.style.stylePresetId);
+  const primary = draft.style.primaryColor || style?.preview.accent || "#1f4fd8";
+  const secondary = draft.style.secondaryColor || style?.preview.paper || "#f4f1ea";
+  const beat = draft.beats[activeBeat]!;
+  const valid =
+    draft.subject.trim() !== "" &&
+    draft.beats.every((item) => item.title.trim() !== "" && item.caption.trim() !== "") &&
+    draft.style.stylePresetId !== null;
+  return (
+    <Card className="video-studio-panel" title="品牌动效播放预览">
+      <Space orientation="vertical" size="middle" className="motion-preview-workspace">
+        <section
+          role="region"
+          aria-label="品牌动效播放预览"
+          className="motion-playback-preview"
+          style={{
+            background: `linear-gradient(135deg, ${secondary}, #ffffff 58%, ${primary}22)`,
+          }}
+        >
+          <div className="motion-playback-brand" style={{ color: primary }}>
+            {draft.subject}
+          </div>
+          {draft.style.logo === null ? null : (
+            <img
+              className="motion-playback-logo"
+              src={draft.style.logo.previewUrl}
+              alt="品牌动效 Logo"
+            />
+          )}
+          <div className="motion-playback-scene">
+            <span style={{ color: primary }}>
+              第 {activeBeat + 1} 段 · {style?.displayName ?? "尚未选择风格"}
+            </span>
+            <h3>{beat.title}</h3>
+            <p>{beat.caption}</p>
+          </div>
+          <div className="motion-playback-progress" style={{ backgroundColor: primary }}>
+            第 {activeBeat + 1} 段 / 3
+          </div>
+        </section>
+        <Space wrap>
+          <Button
+            onClick={() => {
+              setActiveBeat(0);
+              setPlaying(true);
+            }}
+          >
+            播放预览
+          </Button>
+          <Button
+            type="primary"
+            loading={submitting}
+            disabled={!valid || submitting}
+            onClick={onSubmit}
+          >
+            提交本机渲染
+          </Button>
+        </Space>
+        {valid ? null : (
+          <Alert type="warning" showIcon title="请先补全标题、三段脚本并选择一套整体画面风格。" />
+        )}
+      </Space>
+    </Card>
+  );
+}
+
+function SettingsPage({
+  method,
+  onMotionStyleChange,
+}: {
+  readonly method: VideoCreationMethodId | null;
+  readonly onMotionStyleChange: (style: MotionStyleDraftSelection) => void;
+}) {
   if (method === null) {
     return <EmptyVideoPage page="settings" />;
   }
@@ -280,7 +479,7 @@ function SettingsPage({ method }: { readonly method: VideoCreationMethodId | nul
       </Card>
     );
   }
-  return <MotionStyleCatalog />;
+  return <MotionStyleCatalog onDraftChange={onMotionStyleChange} />;
 }
 
 const STATUS_COPY = {
@@ -290,18 +489,62 @@ const STATUS_COPY = {
   cancelled: { label: "已取消", color: "default" },
 } as const;
 
+const MOTION_STATUS_COPY = {
+  queued: { label: "准备中", color: "default" },
+  rendering: { label: "逐帧渲染中", color: "processing" },
+  encoding: { label: "正在合成视频", color: "processing" },
+  succeeded: { label: "已完成", color: "success" },
+  failed: { label: "制作失败", color: "error" },
+  cancelled: { label: "已取消", color: "default" },
+} as const;
+
 function JobPage({
   jobs,
+  motionJobs,
   busy,
   onCancel,
+  onCancelMotion,
 }: {
   readonly jobs: readonly MaterialRenderJobSnapshot[];
+  readonly motionJobs: readonly MotionRenderJobSnapshot[];
   readonly busy: boolean;
   readonly onCancel: (id: string) => void;
+  readonly onCancelMotion: (id: string) => void;
 }) {
-  if (jobs.length === 0) return <EmptyVideoPage page="jobs" />;
+  if (jobs.length === 0 && motionJobs.length === 0) return <EmptyVideoPage page="jobs" />;
   return (
     <Card className="video-studio-panel" title="本机制作任务">
+      {motionJobs.map((job) => (
+        <Space key={job.renderJobId} orientation="vertical" size="middle" className="video-job-card">
+          <Space wrap>
+            <Typography.Text strong>{job.subject}</Typography.Text>
+            <Tag color="blue">品牌动效成片</Tag>
+            <Tag>{job.styleDisplayName}</Tag>
+            <Tag color={MOTION_STATUS_COPY[job.status].color}>
+              {MOTION_STATUS_COPY[job.status].label}
+            </Tag>
+          </Space>
+          <Progress
+            percent={job.progressPercent}
+            {...(job.status === "failed" ? { status: "exception" as const } : {})}
+          />
+          {job.status === "failed" ? (
+            <Alert type="error" showIcon title="本机渲染未完成，请检查视频组件与磁盘空间后重试。" />
+          ) : null}
+          {["queued", "rendering", "encoding"].includes(job.status) ? (
+            <Popconfirm
+              title="确定取消这个品牌动效任务吗？"
+              okText="确定"
+              cancelText="返回"
+              onConfirm={() => onCancelMotion(job.renderJobId)}
+            >
+              <Button danger disabled={busy} aria-label="取消品牌动效任务">
+                取消任务
+              </Button>
+            </Popconfirm>
+          ) : null}
+        </Space>
+      ))}
       {jobs.map((job) => (
         <Space key={job.renderJobId} orientation="vertical" size="middle" className="video-job-card">
           <Space>
@@ -331,17 +574,74 @@ function JobPage({
 
 function ArtifactPage({
   jobs,
+  motionJobs,
   busy,
   onDelete,
+  onDeleteMotion,
+  onReadMotion,
 }: {
   readonly jobs: readonly MaterialRenderJobSnapshot[];
+  readonly motionJobs: readonly MotionRenderJobSnapshot[];
   readonly busy: boolean;
   readonly onDelete: (id: string) => void;
+  readonly onDeleteMotion: (id: string) => void;
+  readonly onReadMotion: (id: string) => Promise<string>;
 }) {
   const artifacts = jobs.filter((job) => job.artifactId !== null);
-  if (artifacts.length === 0) return <EmptyVideoPage page="artifacts" />;
+  const motionArtifacts = motionJobs.filter((job) => job.artifactId !== null);
+  const [playing, setPlaying] = useState<{ subject: string; source: string } | null>(null);
+  const [playError, setPlayError] = useState(false);
+  if (artifacts.length === 0 && motionArtifacts.length === 0) {
+    return <EmptyVideoPage page="artifacts" />;
+  }
   return (
     <Card className="video-studio-panel" title="已校验成片">
+      {playing === null ? null : (
+        <video
+          aria-label={`${playing.subject}成片播放器`}
+          className="motion-artifact-player"
+          src={playing.source}
+          autoPlay
+          controls
+          playsInline
+          onError={() => setPlayError(true)}
+        />
+      )}
+      {playError ? <Alert type="error" showIcon title="暂时无法读取这条成片。" /> : null}
+      {motionArtifacts.map((job) => (
+        <Space key={job.artifactId} orientation="vertical" size="small" className="video-job-card">
+          <Space wrap>
+            <Typography.Text strong>{job.subject}</Typography.Text>
+            <Tag color="blue">品牌动效成片</Tag>
+            <Tag>{job.styleDisplayName}</Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            MP4 视频 · {((job.artifactSizeBytes ?? 0) / 1024 / 1024).toFixed(1)} MB
+          </Typography.Text>
+          <Space wrap>
+            <Button
+              aria-label={`播放${job.subject}`}
+              disabled={busy}
+              onClick={() => {
+                setPlayError(false);
+                void onReadMotion(job.artifactId!)
+                  .then((source) => setPlaying({ subject: job.subject, source }))
+                  .catch(() => setPlayError(true));
+              }}
+            >
+              播放成片
+            </Button>
+            <Popconfirm
+              title="删除后无法恢复，确定删除吗？"
+              okText="确定"
+              cancelText="返回"
+              onConfirm={() => onDeleteMotion(job.artifactId!)}
+            >
+              <Button danger disabled={busy}>删除成片</Button>
+            </Popconfirm>
+          </Space>
+        </Space>
+      ))}
       {artifacts.map((job) => (
         <Space key={job.artifactId} orientation="vertical" size="small" className="video-job-card">
           <Typography.Text strong>{job.subject}</Typography.Text>
@@ -364,12 +664,20 @@ function ArtifactPage({
 
 export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudioGateway }) {
   const [jobs, setJobs] = useState<readonly MaterialRenderJobSnapshot[]>([]);
+  const [motionJobs, setMotionJobs] = useState<readonly MotionRenderJobSnapshot[]>([]);
   const [busy, setBusy] = useState(false);
   const [jobError, setJobError] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
+  const [motionDraft, setMotionDraft] = useState<MotionDraft>({
+    subject: "新品发布",
+    beats: DEFAULT_MOTION_BEATS,
+    style: EMPTY_MOTION_STYLE,
+  });
   const refresh = useCallback(() => {
-    void gateway.jobs().then((value) => {
-      setJobs(value);
+    void Promise.all([gateway.jobs(), gateway.motionJobs()]).then(([material, motion]) => {
+      setJobs(material);
+      setMotionJobs(motion);
       setJobError(false);
     }).catch(() => setJobError(true));
   }, [gateway]);
@@ -382,9 +690,60 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
     setBusy(true);
     void operation.then(refresh).catch(() => setJobError(true)).finally(() => setBusy(false));
   };
+  const onMotionStyleChange = useCallback((style: MotionStyleDraftSelection) => {
+    setMotionDraft((current) => ({ ...current, style }));
+  }, []);
+  const submitMotion = () => {
+    const style = MOTION_STYLE_CATALOG.find(
+      (item) => item.id === motionDraft.style.stylePresetId,
+    );
+    if (style === undefined) return;
+    const request: MotionVideoDraftRequest = {
+      creationMode: "manual_template_v1",
+      subject: motionDraft.subject.trim(),
+      stylePresetId: style.id,
+      primaryColor: motionDraft.style.primaryColor || style.preview.accent,
+      secondaryColor: motionDraft.style.secondaryColor || style.preview.paper,
+      beats: motionDraft.beats.map((beat) => ({
+        title: beat.title.trim(),
+        caption: beat.caption.trim(),
+      })),
+      logo:
+        motionDraft.style.logo === null
+          ? null
+          : {
+              fileName: motionDraft.style.logo.fileName,
+              mediaType: motionDraft.style.logo.mediaType,
+              bytes: motionDraft.style.logo.bytes,
+            },
+    };
+    setBusy(true);
+    setSubmitMessage(null);
+    void gateway
+      .submitMotionDraft(request)
+      .then(() => {
+        setSubmitMessage("已提交真实本机渲染任务，可到“制作任务”查看进度。");
+        refresh();
+      })
+      .catch((error: unknown) => {
+        const code =
+          error instanceof MaterialVideoStudioGatewayError
+            ? error.code
+            : "operation_unavailable";
+        setSubmitMessage(
+          code === "draft_invalid"
+            ? "草稿内容或品牌素材不符合本机冻结规则，请检查后重试。"
+            : code === "render_unavailable"
+              ? "本机渲染组件暂时不可用，请到设置与诊断检查组件。"
+              : "品牌动效任务暂时无法提交，请稍后重试。",
+        );
+      })
+      .finally(() => setBusy(false));
+  };
   return (
     <section className="video-studio" aria-label="视频制作工作区">
       {jobError ? <Alert type="warning" showIcon title="暂时无法读取制作任务，请稍后重试。" /> : null}
+      {submitMessage === null ? null : <Alert type="info" showIcon title={submitMessage} />}
       <Tabs
         defaultActiveKey="new"
         items={[
@@ -397,14 +756,83 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
                 onOpened={refresh}
                 selectedMethod={selectedMethod}
                 onSelectMethod={setSelectedMethod}
+                motionSubject={motionDraft.subject}
+                onMotionSubjectChange={(subject) =>
+                  setMotionDraft((current) => ({ ...current, subject }))
+                }
               />
             ),
           },
-          { key: "script", label: "脚本与分镜", children: <EmptyVideoPage page="script" /> },
-          { key: "settings", label: "制作设置", children: <SettingsPage method={selectedMethod} /> },
-          { key: "preview", label: "预览", children: <EmptyVideoPage page="preview" /> },
-          { key: "jobs", label: "制作任务", children: <JobPage jobs={jobs} busy={busy} onCancel={(id) => act(gateway.cancel(id))} /> },
-          { key: "artifacts", label: "成片", children: <ArtifactPage jobs={jobs} busy={busy} onDelete={(id) => act(gateway.deleteArtifact(id))} /> },
+          {
+            key: "script",
+            label: "脚本与分镜",
+            children:
+              selectedMethod === "motion_composition_v1" ? (
+                <MotionScriptPage
+                  beats={motionDraft.beats}
+                  onChange={(beats) =>
+                    setMotionDraft((current) => ({ ...current, beats }))
+                  }
+                />
+              ) : (
+                <EmptyVideoPage page="script" />
+              ),
+          },
+          {
+            key: "settings",
+            label: "制作设置",
+            children: (
+              <SettingsPage
+                method={selectedMethod}
+                onMotionStyleChange={onMotionStyleChange}
+              />
+            ),
+          },
+          {
+            key: "preview",
+            label: "预览",
+            children:
+              selectedMethod === "motion_composition_v1" ? (
+                <MotionPreviewPage
+                  draft={motionDraft}
+                  submitting={busy}
+                  onSubmit={submitMotion}
+                />
+              ) : (
+                <EmptyVideoPage page="preview" />
+              ),
+          },
+          {
+            key: "jobs",
+            label: "制作任务",
+            children: (
+              <JobPage
+                jobs={jobs}
+                motionJobs={motionJobs}
+                busy={busy}
+                onCancel={(id) => act(gateway.cancel(id))}
+                onCancelMotion={(id) => act(gateway.cancelMotionRenderJob(id))}
+              />
+            ),
+          },
+          {
+            key: "artifacts",
+            label: "成片",
+            children: (
+              <ArtifactPage
+                jobs={jobs}
+                motionJobs={motionJobs}
+                busy={busy}
+                onDelete={(id) => act(gateway.deleteArtifact(id))}
+                onDeleteMotion={(id) => act(gateway.deleteMotionArtifact(id))}
+                onReadMotion={(id) =>
+                  gateway
+                    .readMotionArtifact(id)
+                    .then((artifact) => `data:${artifact.mediaType};base64,${artifact.base64}`)
+                }
+              />
+            ),
+          },
         ]}
       />
     </section>

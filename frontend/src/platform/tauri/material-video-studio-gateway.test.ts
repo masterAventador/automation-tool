@@ -94,4 +94,49 @@ describe("Tauri material video studio gateway", () => {
       code: "protocol_mismatch",
     });
   });
+
+  it("uses narrow native commands for a manual motion RenderJob and its imported artifact", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const request = {
+      creationMode: "manual_template_v1" as const,
+      subject: "新品发布",
+      stylePresetId: "blue-professional",
+      primaryColor: "#1234ab",
+      secondaryColor: "#f2eadb",
+      beats: [
+        { title: "增长看得见", caption: "字幕：本周销售增长 38%" },
+        { title: "来自续费", caption: "字幕：客户持续选择我们" },
+        { title: "下一步行动", caption: "字幕：立即查看新版能力" },
+      ],
+      logo: null,
+    };
+    invoke.mockResolvedValueOnce({
+      renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+      revision: 1,
+      status: "queued",
+      progressPercent: 5,
+      subject: "新品发布",
+      styleDisplayName: "商务蓝",
+      artifactId: null,
+      artifactSizeBytes: null,
+      failureCode: null,
+    });
+    await expect(gateway.submitMotionDraft(request)).resolves.toMatchObject({
+      status: "queued",
+      subject: "新品发布",
+    });
+    expect(invoke).toHaveBeenCalledWith("submit_motion_video_draft", { request });
+
+    invoke.mockResolvedValueOnce({
+      artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+      mediaType: "video/mp4",
+      base64: "AAAA",
+    });
+    await expect(
+      gateway.readMotionArtifact("2c29395b-1015-43ae-84a7-6f1901caac09"),
+    ).resolves.toMatchObject({ mediaType: "video/mp4" });
+    expect(invoke).toHaveBeenCalledWith("read_motion_video_artifact", {
+      artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+    });
+  });
 });
