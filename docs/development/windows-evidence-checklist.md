@@ -245,6 +245,17 @@ clean submodule 的许可证工作树可被 `core.autocrlf` 物化为 CRLF；治
 blob 计算许可证摘要，同时继续要求工作树为普通文件且 submodule 完全干净。所有 BM-12/
 BM-13/BM-14 门禁、Ruff、212 项前端契约和专项 Roadmap 检查通过，临时发布/依赖树已清理。
 
+### 7. BM-05 受限 MotionAuthoringAgent Windows 待补
+
+BM-05 的封闭工具面、模型不可信输出处理、失败矩阵、流式传输和真实百炼模型端到端
+编排验收（一句话→DESIGN/脚本/分镜→可 seek composition→lint/check/snapshot→提交
+RenderJob）已在 macOS 完成，逻辑本身跨平台（纯 Python，无 Rust/Node/浏览器）。
+Windows 侧待补：`AuthoringWorkspace` 的路径 containment 在 NTFS 上的 reparse point /
+大小写不敏感 / 8.3 短名 / Unicode 文件名越界语义重验（macOS 用 `realpath` +
+`relative_to`，Windows 需确认 reparse point 与短名不能绕过工作区边界）；以及 BM-05
+生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08（页面）与 BM-16（生产包
+冻结）在 Windows 平台一并补齐。通过后更新 `docs/development/BM-05.md` 遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；
