@@ -256,6 +256,17 @@ Windows 侧待补：`AuthoringWorkspace` 的路径 containment 在 NTFS 上的 r
 生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08（页面）与 BM-16（生产包
 冻结）在 Windows 平台一并补齐。通过后更新 `docs/development/BM-05.md` 遗留项。
 
+### 8. BM-07 风格微调与冻结 Windows 待补
+
+BM-07 已在 macOS 正式 Tauri App 完成推荐 3 套、展开全部 12 套、品牌色/字体、本地 PNG
+Logo、实际文案预览与键盘选择；锁定上游 builder 生成的品牌化 `frame.md` 已经 Schema、
+远程/主动内容、字体/Logo 文件签名、路径 containment 和摘要校验，并在两个 RenderJob
+私有目录重现相同冻结字节。macOS WebKit WebDriver 不支持 `uploadFile`，验收只能在正式
+App WebView 内把真实 PNG 字节构造成 `File` 交给生产文件输入控件，已证明生产
+`FileReader` 与 `<img>` 预览链路，但没有覆盖操作系统原生文件选择器。Windows 侧随 BM-08
+纵向验收：用原生文件选择器选真实 PNG/JPEG/WebP 和本地字体，确认页面预览、Rust/Worker
+提交到 RenderJob 的冻结摘要、NTFS reparse/大小写/短名 containment 与二次打开重现一致。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；

@@ -1,24 +1,87 @@
 import { useRef, useState } from "react";
 
-import { Card, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Input, Select, Space, Tag, Typography } from "antd";
 
-import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
+import {
+  buildMotionStylePreview,
+  recommendMotionStyles,
+  validateBrandStyleDraft,
+  type BrandStyleDraft,
+  type MotionInformationDensity,
+} from "./motion-style-authoring";
+import { MOTION_STYLE_CATALOG, type MotionStyleOption } from "./motion-style-catalog";
+
+const EMPTY_BRAND: BrandStyleDraft = {
+  primaryColor: null,
+  secondaryColor: null,
+  fontFamily: null,
+  logoFileName: null,
+};
 
 export function MotionStyleCatalog() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIndex, setFocusIndex] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+  const [headline, setHeadline] = useState("本周销售增长说明");
+  const [body, setBody] = useState("展示关键指标、增长来源与下一步行动。");
+  const [industry, setIndustry] = useState("企业服务");
+  const [informationDensity, setInformationDensity] =
+    useState<MotionInformationDensity>("high");
+  const [primaryColor, setPrimaryColor] = useState("");
+  const [secondaryColor, setSecondaryColor] = useState("");
+  const [fontFamily, setFontFamily] = useState("");
+  const [logoFileName, setLogoFileName] = useState("");
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  let brand = EMPTY_BRAND;
+  let brandError: string | null = null;
+  try {
+    brand = validateBrandStyleDraft({
+      primaryColor,
+      secondaryColor,
+      fontFamily,
+      logoFileName,
+    });
+  } catch {
+    brandError = "品牌输入格式不正确：颜色请使用 #rrggbb，字体只填字体名称，Logo 请选择本地位图文件。";
+  }
+
+  let recommended: readonly MotionStyleOption[];
+  try {
+    recommended = recommendMotionStyles(MOTION_STYLE_CATALOG, {
+      brief: `${headline} ${body}`,
+      industry,
+      informationDensity,
+      ...(brand.primaryColor === null ? {} : { primaryColor: brand.primaryColor }),
+    });
+  } catch {
+    recommended = MOTION_STYLE_CATALOG.slice(0, 3);
+  }
+  const recommendedIds = new Set(recommended.map((style) => style.id));
+  const visibleStyles = showAll ? MOTION_STYLE_CATALOG : recommended;
   const selected = MOTION_STYLE_CATALOG.find((style) => style.id === selectedId);
+  const previewStyle = selected ?? recommended[0]!;
+  const previewContent = {
+    headline: headline.trim() === "" ? "请输入预览标题" : headline,
+    body: body.trim() === "" ? "请输入预览正文" : body,
+  };
+  const actualPreview = buildMotionStylePreview(
+    previewStyle,
+    previewContent,
+    brandError === null ? brand : EMPTY_BRAND,
+  );
 
   const focusCard = (index: number) => {
-    const total = MOTION_STYLE_CATALOG.length;
+    const total = visibleStyles.length;
     const next = (index + total) % total;
     setFocusIndex(next);
     cardRefs.current[next]?.focus();
   };
 
   const selectCard = (index: number) => {
-    const style = MOTION_STYLE_CATALOG[index];
+    const style = visibleStyles[index];
     if (style !== undefined) {
       setSelectedId(style.id);
       setFocusIndex(index);
@@ -43,7 +106,7 @@ export function MotionStyleCatalog() {
         break;
       case "End":
         event.preventDefault();
-        focusCard(MOTION_STYLE_CATALOG.length - 1);
+        focusCard(visibleStyles.length - 1);
         break;
       case "Enter":
       case " ":
@@ -59,8 +122,8 @@ export function MotionStyleCatalog() {
     <Card className="video-studio-panel" title="品牌动效成片 · 整体画面风格">
       <Space orientation="vertical" size="middle" className="motion-style-intro">
         <Typography.Text type="secondary">
-          共 12 套整体画面风格，来自当前锁定的组件版本。可以用鼠标点选，也可以用方向键浏览、回车键或空格键选择。
-          示意预览按各风格配色生成，实际画面以本机渲染结果为准。
+          先根据实际内容、行业、品牌主色和信息密度推荐 3 套；可以展开查看当前锁定版本的全部 12
+          套。选择与品牌微调会在提交任务时经过本地文件校验和摘要冻结。
         </Typography.Text>
         {selected === undefined ? (
           <Tag>尚未选择风格</Tag>
@@ -68,9 +131,184 @@ export function MotionStyleCatalog() {
           <Tag color="blue">已选择风格：{selected.displayName}</Tag>
         )}
       </Space>
+
+      <section className="motion-style-controls" aria-label="风格推荐与品牌微调">
+        <div className="motion-style-fields">
+          <label>
+            <span>预览标题</span>
+            <Input
+              aria-label="预览标题"
+              maxLength={80}
+              value={headline}
+              onChange={(event) => setHeadline(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>预览正文</span>
+            <Input.TextArea
+              aria-label="预览正文"
+              maxLength={240}
+              rows={2}
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>所属行业</span>
+            <Input
+              aria-label="所属行业"
+              maxLength={80}
+              value={industry}
+              onChange={(event) => setIndustry(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>信息密度</span>
+            <Select
+              aria-label="信息密度"
+              value={informationDensity}
+              options={[
+                { value: "low", label: "低" },
+                { value: "medium", label: "中" },
+                { value: "high", label: "高" },
+              ]}
+              onChange={(value: MotionInformationDensity) => setInformationDensity(value)}
+            />
+          </label>
+          <label>
+            <span>品牌主色</span>
+            <Input
+              aria-label="品牌主色"
+              maxLength={7}
+              placeholder="#rrggbb"
+              value={primaryColor}
+              onChange={(event) => setPrimaryColor(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>品牌辅助色</span>
+            <Input
+              aria-label="品牌辅助色"
+              maxLength={7}
+              placeholder="#rrggbb"
+              value={secondaryColor}
+              onChange={(event) => setSecondaryColor(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>品牌字体</span>
+            <Input
+              aria-label="品牌字体"
+              maxLength={80}
+              placeholder="例如 Acme Sans"
+              value={fontFamily}
+              onChange={(event) => setFontFamily(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>品牌 Logo 文件</span>
+            <input
+              aria-label="品牌 Logo 文件"
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (file === undefined) {
+                  setLogoFileName("");
+                  setLogoPreviewUrl(null);
+                  setLogoError(null);
+                  return;
+                }
+                const supported = /image\/(?:png|jpeg|webp)/u.test(file.type);
+                if (!supported || file.size > 4 * 1024 * 1024) {
+                  setLogoFileName("");
+                  setLogoPreviewUrl(null);
+                  setLogoError("Logo 只接受不超过 4 MB 的 PNG、JPEG 或 WebP 本地文件。");
+                  return;
+                }
+                setLogoFileName(file.name);
+                setLogoError(null);
+                const reader = new FileReader();
+                reader.addEventListener("load", () => {
+                  setLogoPreviewUrl(
+                    typeof reader.result === "string" ? reader.result : null,
+                  );
+                });
+                reader.addEventListener("error", () => {
+                  setLogoPreviewUrl(null);
+                  setLogoError("Logo 本地预览读取失败，请重新选择文件。");
+                });
+                reader.readAsDataURL(file);
+              }}
+            />
+          </label>
+        </div>
+        {brandError === null && logoError === null ? null : (
+          <Alert type="error" showIcon title={brandError ?? logoError} />
+        )}
+        <Typography.Text type="secondary">
+          自定义字体在冻结时必须同时提供本地字体文件；Logo 与字体不会自动上传到模型服务。
+        </Typography.Text>
+      </section>
+
+      <section
+        role="region"
+        aria-label="实际内容风格预览"
+        className="motion-style-actual-preview"
+        style={{ backgroundColor: actualPreview.paper, color: actualPreview.ink }}
+      >
+        <div className="motion-style-actual-preview-meta">
+          <Tag color="blue">{previewStyle.displayName}</Tag>
+          {actualPreview.logoFileName === null ? null : (
+            <span className="motion-style-logo-preview">
+              {logoPreviewUrl === null ? null : (
+                <img src={logoPreviewUrl} alt="品牌 Logo 预览" />
+              )}
+              Logo · {actualPreview.logoFileName}
+            </span>
+          )}
+        </div>
+        <h3
+          style={{
+            color: actualPreview.accent,
+            fontFamily: actualPreview.fontFamily ?? "inherit",
+          }}
+        >
+          {actualPreview.headline}
+        </h3>
+        <p style={{ fontFamily: actualPreview.fontFamily ?? "inherit" }}>
+          {actualPreview.body}
+        </p>
+        {actualPreview.fontFamily === null ? null : (
+          <Typography.Text>{actualPreview.fontFamily}</Typography.Text>
+        )}
+      </section>
+
+      <div className="motion-style-catalog-heading">
+        <div>
+          <Typography.Title level={4}>{showAll ? "全部 12 套风格" : "为你推荐"}</Typography.Title>
+          <Typography.Text type="secondary">
+            推荐只缩小初选范围，不会隐藏当前锁定版本中的可用风格。
+          </Typography.Text>
+        </div>
+        <Button
+          onClick={() => {
+            setShowAll((current) => !current);
+            setFocusIndex(0);
+          }}
+        >
+          {showAll ? "只看推荐风格" : "查看全部 12 套风格"}
+        </Button>
+      </div>
+
       <div role="radiogroup" aria-label="选择整体画面风格" className="motion-style-grid">
-        {MOTION_STYLE_CATALOG.map((style, index) => {
+        {visibleStyles.map((style, index) => {
           const checked = style.id === selectedId;
+          const cardPreview = buildMotionStylePreview(
+            style,
+            previewContent,
+            brandError === null ? brand : EMPTY_BRAND,
+          );
           return (
             <div
               key={style.id}
@@ -86,29 +324,25 @@ export function MotionStyleCatalog() {
               onKeyDown={(event) => handleKeyDown(event, index)}
             >
               <div
-                className="motion-style-preview"
-                aria-hidden="true"
-                style={{ backgroundColor: style.preview.paper }}
+                className="motion-style-preview motion-style-content-preview"
+                style={{
+                  backgroundColor: cardPreview.paper,
+                  color: cardPreview.ink,
+                  fontFamily: cardPreview.fontFamily ?? "inherit",
+                }}
               >
-                <span
-                  className="motion-style-preview-title"
-                  style={{ backgroundColor: style.preview.ink }}
-                />
-                <span
-                  className="motion-style-preview-accent"
-                  style={{ backgroundColor: style.preview.accent }}
-                />
-                <span
-                  className="motion-style-preview-line"
-                  style={{ backgroundColor: style.preview.ink }}
-                />
+                <strong style={{ color: cardPreview.accent }}>{cardPreview.headline}</strong>
+                <span>{cardPreview.body}</span>
               </div>
               <Typography.Text type="secondary" className="motion-style-preview-caption">
-                示意预览
+                实际内容预览
               </Typography.Text>
               <div className="motion-style-card-header">
                 <Typography.Title level={4}>{style.displayName}</Typography.Title>
-                {checked ? <Tag color="blue">已选择</Tag> : null}
+                <Space size={4}>
+                  {recommendedIds.has(style.id) ? <Tag color="gold">推荐</Tag> : null}
+                  {checked ? <Tag color="blue">已选择</Tag> : null}
+                </Space>
               </div>
               <Typography.Paragraph className="motion-style-summary">
                 {style.summary}

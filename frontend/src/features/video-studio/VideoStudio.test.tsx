@@ -118,7 +118,7 @@ describe("video studio shell", () => {
     expect(screen.getByRole("radiogroup", { name: "选择整体画面风格" })).toBeVisible();
   });
 
-  it("lists all twelve locked styles with Chinese-only cards", async () => {
+  it("recommends three styles first and still lets users inspect all twelve", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);
 
@@ -126,6 +126,10 @@ describe("video studio shell", () => {
     await user.click(screen.getByRole("tab", { name: "制作设置" }));
 
     const group = screen.getByRole("radiogroup", { name: "选择整体画面风格" });
+    const recommended = within(group).getAllByRole("radio");
+    expect(recommended).toHaveLength(3);
+    expect(within(group).getAllByText("推荐")).toHaveLength(3);
+    await user.click(screen.getByRole("button", { name: "查看全部 12 套风格" }));
     const radios = within(group).getAllByRole("radio");
     expect(radios).toHaveLength(12);
     expect(radios.map((radio) => radio.getAttribute("aria-label"))).toEqual(
@@ -135,7 +139,7 @@ describe("video studio shell", () => {
       expect(radio).toHaveAttribute("aria-checked", "false");
       expect(within(radio).getByText("适用场景")).toBeVisible();
       expect(within(radio).getByText("风格标签")).toBeVisible();
-      expect(within(radio).getByText("示意预览")).toBeVisible();
+      expect(within(radio).getByText("实际内容预览")).toBeVisible();
     }
     expect(screen.getByText("尚未选择风格")).toBeVisible();
 
@@ -151,6 +155,7 @@ describe("video studio shell", () => {
 
     await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
     await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.click(screen.getByRole("button", { name: "查看全部 12 套风格" }));
 
     const group = screen.getByRole("radiogroup", { name: "选择整体画面风格" });
     const radios = within(group).getAllByRole("radio");
@@ -189,6 +194,42 @@ describe("video studio shell", () => {
       (radio) => radio.getAttribute("aria-checked") === "true",
     );
     expect(checked).toHaveLength(1);
+  });
+
+  it("previews actual copy with brand colors, font and a local logo", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+
+    const headline = screen.getByRole("textbox", { name: "预览标题" });
+    const body = screen.getByRole("textbox", { name: "预览正文" });
+    await user.clear(headline);
+    await user.type(headline, "本周销售增长 38%");
+    await user.clear(body);
+    await user.type(body, "华东区和续费业务共同推动增长。");
+    await user.type(screen.getByRole("textbox", { name: "品牌主色" }), "#1234ab");
+    await user.type(screen.getByRole("textbox", { name: "品牌辅助色" }), "#f2eadb");
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Acme Sans");
+    await user.upload(
+      screen.getByLabelText("品牌 Logo 文件"),
+      new File(["logo"], "acme-logo.png", { type: "image/png" }),
+    );
+
+    const preview = screen.getByRole("region", { name: "实际内容风格预览" });
+    expect(within(preview).getByText("本周销售增长 38%")).toBeVisible();
+    expect(within(preview).getByText("华东区和续费业务共同推动增长。")).toBeVisible();
+    expect(within(preview).getByText("Acme Sans")).toBeVisible();
+    expect(within(preview).getByText(/acme-logo\.png/u)).toBeVisible();
+    expect(
+      await within(preview).findByRole("img", { name: "品牌 Logo 预览" }),
+    ).toHaveAttribute("src", expect.stringMatching(/^data:image\/png;base64,/u));
+    expect(preview).toHaveStyle({ backgroundColor: "#f2eadb" });
+    expect(within(preview).getByText("本周销售增长 38%")).toHaveStyle({
+      color: "#1234ab",
+      fontFamily: "Acme Sans",
+    });
   });
 
   it("shows only reconciled jobs and artifacts without inventing file paths", async () => {

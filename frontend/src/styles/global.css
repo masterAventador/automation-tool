@@ -292,6 +292,93 @@ body {
   margin-bottom: 18px;
 }
 
+.motion-style-controls {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+}
+
+.motion-style-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.motion-style-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+}
+
+.motion-style-fields input[type="file"] {
+  min-height: 32px;
+  padding: 4px;
+  color: var(--ant-color-text);
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border);
+  border-radius: 6px;
+}
+
+.motion-style-actual-preview {
+  display: grid;
+  min-height: 180px;
+  padding: 24px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 12px;
+  align-content: center;
+}
+
+.motion-style-actual-preview-meta,
+.motion-style-catalog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.motion-style-logo-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.motion-style-logo-preview img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  background: rgb(255 255 255 / 68%);
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: 8px;
+}
+
+.motion-style-actual-preview h3 {
+  margin: 16px 0 6px;
+  font-size: clamp(24px, 4vw, 42px);
+  line-height: 1.1;
+}
+
+.motion-style-actual-preview p {
+  max-width: 760px;
+  margin: 0 0 12px;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.motion-style-catalog-heading {
+  margin: 4px 0 14px;
+}
+
+.motion-style-catalog-heading .ant-typography {
+  margin: 0;
+}
+
 .motion-style-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -334,6 +421,27 @@ body {
   padding: 14px 18px;
   border: 1px solid var(--ant-color-border);
   border-radius: 8px;
+}
+
+.motion-style-content-preview {
+  align-content: center;
+  overflow: hidden;
+}
+
+.motion-style-content-preview strong,
+.motion-style-content-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.motion-style-content-preview strong {
+  font-size: 16px;
+}
+
+.motion-style-content-preview span {
+  font-size: 12px;
+  opacity: 0.78;
 }
 
 .motion-style-preview-title {

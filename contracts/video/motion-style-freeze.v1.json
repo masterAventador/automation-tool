@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "policy": "fail_closed",
+  "upstream_version": "v0.7.68",
+  "upstream_commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+  "source_root": "skills/hyperframes-creative/frame-presets",
+  "presets": [
+    {"id": "biennale-yellow", "path": "biennale-yellow/FRAME.md", "sha256": "76d22cced9c152b0edb520543cf34c4ce772a312caa7211c40d4315b53c053cf"},
+    {"id": "blockframe", "path": "blockframe/FRAME.md", "sha256": "ef8d9d47a209bed4ccc2d928c14a81cdaecb5129f5dc0cdc0dc40afc7ef92931"},
+    {"id": "blue-professional", "path": "blue-professional/FRAME.md", "sha256": "62e9a445885f6057084493de385a8ce20c3b4a299ae36a553ef54884f06bad68"},
+    {"id": "bold-poster", "path": "bold-poster/FRAME.md", "sha256": "af756ef993099f9ac78328f676eb79a6572ff0e9c2aacf12787471cd4525b171"},
+    {"id": "broadside", "path": "broadside/FRAME.md", "sha256": "3af0a1e5e61bece19841671672d7732082f03d5699b713475e90323a21dbcc89"},
+    {"id": "capsule", "path": "capsule/FRAME.md", "sha256": "f06dba67a3859f7c732b5177f7bcc58c94592caa5d6bbbcc6730a7876f5baa7a"},
+    {"id": "cartesian", "path": "cartesian/FRAME.md", "sha256": "3dc6a31813a333b2a7a1509ddbd3b4dabbbd7e12e6479b6cff10d69c185fec95"},
+    {"id": "cobalt-grid", "path": "cobalt-grid/FRAME.md", "sha256": "62a6c9e6e5188cc29b9c0098e9bb8e72c23f152d9a99dd92c58139d26b69b19f"},
+    {"id": "coral", "path": "coral/FRAME.md", "sha256": "8530ecb36d1bb2d53392d88d972df35beeba19a5bcb3260fc9b18a58de7cdfe8"},
+    {"id": "creative-mode", "path": "creative-mode/FRAME.md", "sha256": "c1a1359502d9fc79ef267305291fe0f651219c72d88088cee32327dd933dead8"},
+    {"id": "daisy-days", "path": "daisy-days/FRAME.md", "sha256": "42d827dbd279990052e171d04380b5e6bbc111ae391dc283deb7a452e70b9b97"},
+    {"id": "editorial-forest", "path": "editorial-forest/FRAME.md", "sha256": "ceeb2ab768367da1e1f3e1eca36ab9feeb3de3e4d15493319b0044c3d869329c"}
+  ]
+}
