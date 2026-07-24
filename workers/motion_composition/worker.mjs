@@ -3,7 +3,7 @@
 
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, sep } from "node:path";
@@ -25,6 +25,11 @@ const CHROMIUM_MAJOR_MAXIMUM = 999;
 const RENDER_TIMEOUT_SECONDS_MINIMUM = 1;
 const RENDER_TIMEOUT_SECONDS_MAXIMUM = 60;
 const CHROMIUM_VERSION_PATTERN = /(?:^|\s|\/)(\d+)\.\d+\.\d+\.\d+/;
+// The fixed composition viewport every captured frame must match exactly.
+// The created CDP target does not inherit `--window-size`, so the render
+// session also forces these metrics through the DevTools protocol.
+const RENDER_VIEWPORT_WIDTH = 640;
+const RENDER_VIEWPORT_HEIGHT = 360;
 const MAX_PROTOCOL_RESPONSE_BYTES = 64 * 1024;
 const SANDBOX_FRAMES_MAXIMUM = 600;
 const SANDBOX_SECONDS_MAXIMUM = 300;
@@ -35,8 +40,10 @@ const SANDBOX_ASSETS_MAXIMUM = 128;
 const SANDBOX_RELATIVE_PATH_MAXIMUM = 512;
 const SANDBOX_MESSAGE_LIMIT_BYTES = 32 * 1024 * 1024;
 const SANDBOX_FRAMES_DIRECTORY = "frames";
+const SANDBOX_CANCEL_FILE = ".automation-tool-cancel";
 const RESOURCE_MONITOR_INTERVAL_MS = 300;
 const SANDBOX_FAILURES = {
+  cancelled: "render_cancelled",
   mismatch: "chromium_major_mismatch",
   output: "render_output_exceeded",
   protocol: "render_protocol_invalid",
@@ -309,7 +316,7 @@ async function resolveSandboxWorkspace(spec) {
   } catch {
     // The frames directory must not exist yet.
   }
-  return { assetReals, entryReal, framesDirectory };
+  return { assetReals, entryReal, framesDirectory, workspaceReal };
 }
 
 function validSandboxCommand(bootstrap, command) {
@@ -754,7 +761,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         "--proxy-bypass-list=<-loopback>",
         `--user-data-dir=${join(jobDirectory, "profile")}`,
         `--crash-dumps-dir=${join(jobDirectory, "crashes")}`,
-        "--window-size=640,360",
+        `--window-size=${RENDER_VIEWPORT_WIDTH},${RENDER_VIEWPORT_HEIGHT}`,
         "about:blank",
       ], {
         detached: true,
@@ -925,9 +932,62 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         return;
       }
       await installInterception(sessionId);
+      const metrics = await pipe.send("Emulation.setDeviceMetricsOverride", {
+        width: RENDER_VIEWPORT_WIDTH,
+        height: RENDER_VIEWPORT_HEIGHT,
+        deviceScaleFactor: 1,
+        mobile: false,
+      }, sessionId);
+      if (metrics?.error !== undefined) {
+        finish({ status: "protocol" });
+        return;
+      }
       await pipe.send("Page.navigate", { url: entryUrl }, sessionId);
       await loadFired;
+      const timelineProbe = await pipe.send("Runtime.evaluate", {
+        expression: `(() => {
+          const root = document.querySelector('[data-composition-id][data-duration]');
+          const duration = Number(root?.getAttribute('data-duration'));
+          const timelines = Object.values(window.__timelines ?? {})
+            .filter((timeline) => timeline && typeof timeline.seek === 'function');
+          return {
+            duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+            timelineCount: timelines.length,
+          };
+        })()`,
+        returnByValue: true,
+      }, sessionId);
+      const timelineMetadata = timelineProbe?.result?.result?.value;
+      const seekableDuration = (
+        Number.isFinite(timelineMetadata?.duration)
+        && timelineMetadata.duration > 0
+        && Number.isInteger(timelineMetadata?.timelineCount)
+        && timelineMetadata.timelineCount > 0
+      ) ? timelineMetadata.duration : 0;
       for (let index = 1; index <= spec.frameCount; index += 1) {
+        try {
+          await access(join(resolved.workspaceReal, SANDBOX_CANCEL_FILE));
+          finish({ status: "cancelled" });
+          return;
+        } catch {
+          // The fixed cancellation marker is absent; continue this frame.
+        }
+        if (seekableDuration > 0) {
+          const time = seekableDuration * (index - 1) / spec.frameCount;
+          const seek = await pipe.send("Runtime.evaluate", {
+            expression: `(() => {
+              const time = ${JSON.stringify(time)};
+              for (const timeline of Object.values(window.__timelines ?? {})) {
+                if (timeline && typeof timeline.seek === 'function') timeline.seek(time, false);
+              }
+            })()`,
+            returnByValue: true,
+          }, sessionId);
+          if (seek?.result?.exceptionDetails !== undefined) {
+            finish({ status: "protocol" });
+            return;
+          }
+        }
         const shot = await pipe.send("Page.captureScreenshot", { format: "png" }, sessionId);
         const data = shot?.result?.data;
         if (typeof data !== "string") {

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Card, Input, Select, Space, Tag, Typography } from "antd";
 
@@ -18,7 +18,23 @@ const EMPTY_BRAND: BrandStyleDraft = {
   logoFileName: null,
 };
 
-export function MotionStyleCatalog() {
+export interface MotionStyleDraftSelection {
+  readonly stylePresetId: string | null;
+  readonly primaryColor: string;
+  readonly secondaryColor: string;
+  readonly logo: {
+    readonly fileName: string;
+    readonly mediaType: "image/png" | "image/jpeg" | "image/webp";
+    readonly bytes: readonly number[];
+    readonly previewUrl: string;
+  } | null;
+}
+
+export function MotionStyleCatalog({
+  onDraftChange,
+}: {
+  readonly onDraftChange?: ((draft: MotionStyleDraftSelection) => void) | undefined;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusIndex, setFocusIndex] = useState(0);
   const [showAll, setShowAll] = useState(false);
@@ -32,6 +48,9 @@ export function MotionStyleCatalog() {
   const [fontFamily, setFontFamily] = useState("");
   const [logoFileName, setLogoFileName] = useState("");
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [logoBytes, setLogoBytes] = useState<readonly number[] | null>(null);
+  const [logoMediaType, setLogoMediaType] =
+    useState<"image/png" | "image/jpeg" | "image/webp" | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
@@ -72,6 +91,32 @@ export function MotionStyleCatalog() {
     previewContent,
     brandError === null ? brand : EMPTY_BRAND,
   );
+
+  useEffect(() => {
+    onDraftChange?.({
+      stylePresetId: selectedId,
+      primaryColor,
+      secondaryColor,
+      logo:
+        logoPreviewUrl === null || logoBytes === null || logoMediaType === null
+          ? null
+          : {
+              fileName: logoFileName,
+              mediaType: logoMediaType,
+              bytes: logoBytes,
+              previewUrl: logoPreviewUrl,
+            },
+    });
+  }, [
+    logoBytes,
+    logoFileName,
+    logoMediaType,
+    logoPreviewUrl,
+    onDraftChange,
+    primaryColor,
+    secondaryColor,
+    selectedId,
+  ]);
 
   const focusCard = (index: number) => {
     const total = visibleStyles.length;
@@ -214,20 +259,32 @@ export function MotionStyleCatalog() {
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (file === undefined) {
-                  setLogoFileName("");
-                  setLogoPreviewUrl(null);
-                  setLogoError(null);
+                setLogoFileName("");
+                setLogoPreviewUrl(null);
+                setLogoBytes(null);
+                setLogoMediaType(null);
+                setLogoError(null);
                   return;
                 }
                 const supported = /image\/(?:png|jpeg|webp)/u.test(file.type);
                 if (!supported || file.size > 4 * 1024 * 1024) {
                   setLogoFileName("");
                   setLogoPreviewUrl(null);
+                  setLogoBytes(null);
+                  setLogoMediaType(null);
                   setLogoError("Logo 只接受不超过 4 MB 的 PNG、JPEG 或 WebP 本地文件。");
                   return;
                 }
                 setLogoFileName(file.name);
+                setLogoMediaType(file.type as "image/png" | "image/jpeg" | "image/webp");
                 setLogoError(null);
+                void file.arrayBuffer().then((value) => {
+                  setLogoBytes([...new Uint8Array(value)]);
+                }).catch(() => {
+                  setLogoBytes(null);
+                  setLogoMediaType(null);
+                  setLogoError("Logo 本地读取失败，请重新选择文件。");
+                });
                 const reader = new FileReader();
                 reader.addEventListener("load", () => {
                   setLogoPreviewUrl(
@@ -236,6 +293,8 @@ export function MotionStyleCatalog() {
                 });
                 reader.addEventListener("error", () => {
                   setLogoPreviewUrl(null);
+                  setLogoBytes(null);
+                  setLogoMediaType(null);
                   setLogoError("Logo 本地预览读取失败，请重新选择文件。");
                 });
                 reader.readAsDataURL(file);

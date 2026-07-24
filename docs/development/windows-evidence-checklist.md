@@ -295,6 +295,20 @@ App WebView 内把真实 PNG 字节构造成 `File` 交给生产文件输入控�
 纵向验收：用原生文件选择器选真实 PNG/JPEG/WebP 和本地字体，确认页面预览、Rust/Worker
 提交到 RenderJob 的冻结摘要、NTFS reparse/大小写/短名 containment 与二次打开重现一致。
 
+### 9. BM-08 App 原生编辑、渲染与 Artifact 导入 Windows 待补
+
+BM-08 已在 macOS 真实测试版 Tauri App 完成正式用户入口全链路验收（编辑三段文案、
+风格与品牌素材、真实草稿预览、提交、渲染中取消并验证 cancelled checkpoint、恢复路径
+重试、真实 Chromium 90 帧渲染 + FFmpeg 编码、App 内解码播放约 3 秒 MP4、删除后
+Artifact 与工作副本双清理、ffprobe 与三帧视觉证据），入口为
+`python3 scripts/run_bm_08_acceptance.py`。Windows 侧待补：同脚本路径在 Windows 真实
+App 重跑（脚本当前对 `os.name == "nt"` 显式拒绝，需补 Windows worker/浏览器包装）；
+用原生文件选择器上传 Logo（macOS 只能以真实字节构造 `File` 交给生产输入控件）；
+Windows WebView2 对 `data:video/mp4;base64` 的 H.264 解码播放；NTFS
+reparse/大小写/短名下 RenderJob 工作区与 Artifact 删除语义。正式双平台安装包链路仍属
+BM-16。通过后更新 `docs/development/BM-08.md` 遗留项并评估 BM-05/BM-07/BM-08 三项
+`🔍 待验收` 状态闭合。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；
