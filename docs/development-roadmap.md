@@ -373,7 +373,7 @@
 | P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ✅ 已完成 |
 | P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ✅ 已完成 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | 🔍 待验收 |
-| P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | 🔍 待验收 |
+| P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限；当前首发完整资源由 EB-16 装配 | P9-02 | 🔍 待 EB-16 正式包与 Authenticode |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ✅ 已完成 |
 | P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
 | P9-07 | Windows 干净安装 | 无 Python 前置；内置 Chromium/扫码/任务/恢复；DPI/杀进程/卸载行为 | P9-04,P9-05,EB-16 | 🔍 待 EB-16 正式签名包/账号/服务链 |
@@ -556,7 +556,7 @@
 严格按顺序：
 
 1. `P9-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor`，真实候选 365 个文件、148 个 PE 文件、157,924,248 bytes，PE/依赖、Manifest、冻结入口、UIAutomation 和 Job Object 清理全部通过；
-2. `P9-04`（🔍 待正式 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；合并当日最新 `main` 后复验安装根 369 个文件、177,616,688 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过；正式发布仍需同 signer/证书链/时间戳/SmartScreen 验收；
+2. `P9-04`（🔍 待 EB-16 正式包与 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；合并当日最新 `main` 后复验安装根 369 个文件、177,616,688 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过。该普通候选只装配 Executor，现行首发包的对应平台 Chromium 由尚未开始的 EB-16 装配；2026-07-25 当前用户/本机证书库 Code Signing certificate 均为 0，故还不能复验最终包的同 signer、证书链、时间戳与 SmartScreen；
 3. `P9-05`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-05-package-audit` GREEN；合并当日最新 `main` 后复验真实 NSIS 安装根 `369 files / 177,616,688 bytes`，与 macOS build App/只读 DMG 内 App 一并确认无 WebDriver、调试 origin、测试凭据、运行期 Profile/SQLite/日志/诊断、用户素材和私钥，随后卸载零残留；
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
 5. `P9-07`（🔍 待 EB-16 正式签名包/账号/服务链）：2026-07-25 已把 runner 从历史系统 Chrome/Edge 与 `browser-profiles` 迁移为安装根 `embedded-browser` 的唯一 `windows-x86_64` Chromium、`embedded-browser-profiles/douyin/<UUIDv4>` 和第二浏览器拒绝；正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor、主 PID 强停恢复、正式卸载和最小 ACL 证据入口已就绪。当前 Windows 证书库无 Code Signing certificate，P9-04 `NotSigned` 包只装配 Executor 且尚无 EB-16 Chromium 资源，同时缺授权账号与 production 注册链，故不能执行最终设备轮次；
