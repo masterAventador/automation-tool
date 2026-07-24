@@ -6,6 +6,34 @@
 > 全部完成，并由 Windows 机器上的会话把结果写入对应
 > `docs/development/<任务ID>.md` 后逐项提交。
 
+## 2026-07-25 两份 Roadmap 最终查漏
+
+本轮重新扫描 `docs/development-roadmap.md` 与
+`docs/embedded-browser-video-studio-roadmap.md`，并把每个 Windows/双平台任务与独立
+证据文件、Windows 实机记录和当前状态交叉核对。结论如下：
+
+- 主 Roadmap 已完成的 Windows 原生链无遗漏：F1-14，E4-03、E4-05、E4-07～E4-15，
+  B5-03～B5-08，P9-02、P9-05 均有对应 Windows 构建、文件系统/进程、真实 App 或安装根
+  证据；历史系统浏览器链已由 EB-10 替代，不再是当前包内 Chromium 的发布门禁。
+- 专项 Roadmap 已完成的 Windows 补证无遗漏：EB-01、EB-02、EB-04～EB-10、BU-02、
+  VF-04、IM-02～IM-05、BM-02～BM-04、BM-14 均有 Windows x86_64 证据。IM-05 的冻结
+  Worker、真实 Streamlit、正常 Tauri App/WebView2 与清理已经通过，继续保持 `🔍`
+  仅因真实生成/进度/取消/成片需要 IM-08 的外部服务条件，不是 Windows 技术链未验。
+- 当前已实现但不能完成正式 Windows 结论的条目只有：H8-22（无 Authenticode；
+  macOS 也缺 Developer ID/公证）、P9-04（EB-16 正式资源未装配且无 Authenticode）、
+  P9-07（还缺 EB-16 正式包、授权账号和 production 注册链）、P9-09（上述设备与平台
+  事实的 14 条汇总）、IM-07/IM-08（还缺正式双平台包和百炼/素材/配音凭据）。每项独立
+  证据文件均已记录不能替代的原因、解除条件和正式入口。
+- 2026-07-25 当前用户与本机证书库的 Code Signing certificate 数量均为 0；工作区也
+  没有百炼、素材站或配音验收配置。普通 `NotSigned` 包、确定性夹具、静态检查和人工
+  勾选都不能替代正式 Authenticode、真实账号或真实视频证据。
+- EB-16、EB-17、BU-07、BM-16、PB-07/PB-08、CQ-03/CQ-04，以及主 Roadmap 后续
+  RW-01/RW-02/RW-13 等仍为 `⬜ 未开始`。它们不是“已经做完但漏了 Windows 验收”的
+  条目，本轮按用户要求没有启动。
+
+本次查漏没有把任何外部阻塞项改绿，也没有发现新的、具备全部前置但尚未执行的 Windows
+验收命令。
+
 ## 一次性环境准备
 
 1. Git + Git LFS（`git lfs install`），克隆仓库：

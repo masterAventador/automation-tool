@@ -44,14 +44,14 @@
 | 范围 | 当前结果 |
 | --- | --- |
 | 竞品分析 | `✅ 已完成` 已完整阅读并转为能力地图；动态长期稳定性仍需我们自己的真实账号验证 |
-| 产品决策 | `✅ 已完成` Tauri-only、无产品登录 UI、RPA 优先、外部浏览器 + 独立 Profile |
+| 产品决策 | `✅ 已完成` Tauri-only、无产品登录 UI、RPA 优先、包内 Chromium + App 独立 Profile；历史外部 Chrome/Edge 决策已由 AV-01 替代 |
 | 后端决策 | `✅ 已完成` 独立 FastAPI Control Plane；开发本机、Demo 云端；PostgreSQL 从第一天使用 |
 | 本地执行决策 | `✅ 已完成` Python Local Executor 永远在用户电脑，随 Tauri 打包 |
 | 项目规则 | `✅ 已完成` 已从 `agent-platform` 筛选、改写并写入仓库 |
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-05、P9-08 与 U9-01～U9-05 已完成；H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机完成可选更新、强更重启、覆盖、失败恢复、HKCU 注册表和清理矩阵，仅双平台正式发布签名保持 `🔍`。P9-04 Windows 普通候选已完成生产构建、当前用户安装、HKCU-only 注册表、资源和卸载实机验收，仅正式 Authenticode 保持 `🔍`。P9-05 统一完整包审计已在 macOS App/DMG 与 Windows NSIS 安装根真实通过；P9-03 macOS 候选以及 P9-06/P9-07 双平台干净安装 runner 保持各自 `🔍` 设备/正式签名验收。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-05、P9-08 与 U9-01～U9-05 已完成；H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机完成可选更新、强更重启、覆盖、失败恢复、HKCU 注册表和清理矩阵，仅双平台正式发布签名保持 `🔍`。P9-04 Windows 普通候选已完成生产构建、当前用户安装、HKCU-only 注册表、资源和卸载实机验收，仅正式 Authenticode 保持 `🔍`。P9-05 统一完整包审计已在 macOS App/DMG 与 Windows NSIS 安装根真实通过；P9-03/P9-06 保持 macOS 正式签名/设备 `🔍`，P9-07 Windows runner 已迁移至包内 Chromium，明确等待 EB-16 正式 Authenticode 包、授权账号和 production 注册链。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -146,7 +146,7 @@
 | R0-01 | 完整研读竞品材料 | 静态分析、截图、视频行为和证据限制全部进入竞品报告 | — | ✅ 已完成 |
 | R0-02 | 锁定产品优先级 | 文档明确 `RPA > 内容 > AI`，没有旧 AI 中台优先残留 | R0-01 | ✅ 已完成 |
 | R0-03 | 锁定 MVP 边界 | 无产品登录 UI、单安装实例、抖音单平台纵向闭环 | R0-02 | ✅ 已完成 |
-| R0-04 | 锁定浏览器方案 | 外部 Chrome/Edge + App 独立 Profile；禁止默认 Profile/内嵌 WebView | R0-03 | ✅ 已完成 |
+| R0-04 | 锁定浏览器方案（历史） | 当时锁定外部 Chrome/Edge + App 独立 Profile；AV-01 已用包内 Chromium 替代，仍禁止默认 Profile/内嵌 WebView | R0-03 | ✅ 历史完成，已由 AV-01 替代 |
 | R0-05 | 锁定部署架构 | Control Plane 独立部署；开发本机、Demo 云端；Executor 本机 | R0-03 | ✅ 已完成 |
 | R0-06 | 迁移旧项目规则 | 新 `AGENTS.md`、`CLAUDE.md` 与当前方向一致 | R0-02 | ✅ 已完成 |
 | R0-07 | 建立产品与架构文档 | 产品、工程结构、前端和后端权威文档齐全且职责不重叠 | R0-05 | ✅ 已完成 |
@@ -265,7 +265,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | B5-01 | 审计旧 browser_session | 提取私有目录、Profile、状态机和注销逻辑；排除旧账号/RBAC | R0-12,E4-11 | ✅ 已完成 |
-| B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
+| B5-02 | macOS 浏览器发现（历史） | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试；EB-10 已删除生产系统浏览器入口 | B5-01 | ⛔ 已由 EB-10 替代 |
 | B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | ✅ 已完成 |
 | B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | ✅ 已完成 |
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ✅ 已完成 |
@@ -364,7 +364,7 @@
 | H8-19 | 通用更新策略机 | 可选更新支持立即安装/暂不安装/跳过版本；强制更新不可跳过，状态持久且版本单调 | H8-18 | ✅ 已完成 |
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ✅ 已完成 |
-| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | 🔍 待验收 |
+| H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | 🔍 待 Developer ID/公证与 Windows Authenticode |
 
 ## 14. Wave 9：双平台安装包与本地候选版
 
@@ -373,10 +373,10 @@
 | P9-01 | macOS Executor 构建 | PyInstaller onedir，依赖完整、无开发路径、签名准备 | H8-22 | ✅ 已完成 |
 | P9-02 | Windows Executor 构建 | PyInstaller onedir，Playwright/UIA 依赖和 Job Object 正常 | H8-22 | ✅ 已完成 |
 | P9-03 | macOS Tauri 候选包 | 签名、公证策略、最小 Capability/CSP | P9-01 | 🔍 待验收 |
-| P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | 🔍 待验收 |
+| P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限；当前首发完整资源由 EB-16 装配 | P9-02 | 🔍 待 EB-16 正式包与 Authenticode |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ✅ 已完成 |
 | P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
-| P9-07 | Windows 干净安装 | 无 Python 前置；同上；DPI/杀进程/卸载行为 | P9-04,P9-05 | 🔍 待设备验收 |
+| P9-07 | Windows 干净安装 | 无 Python 前置；内置 Chromium/扫码/任务/恢复；DPI/杀进程/卸载行为 | P9-04,P9-05,EB-16 | 🔍 待 EB-16 正式签名包/账号/服务链 |
 | P9-08 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-06,P9-07 | ✅ 已完成 |
 | P9-09 | 本地 MVP 最终验收 | 产品规划 14 条 MVP 验收全部通过并记录证据 | P9-08 | 🔍 待验收 |
 
@@ -556,18 +556,18 @@
 严格按顺序：
 
 1. `P9-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机执行 `pnpm --dir frontend test:p9-02-windows-executor`，真实候选 365 个文件、148 个 PE 文件、157,924,248 bytes，PE/依赖、Manifest、冻结入口、UIAutomation 和 Job Object 清理全部通过；
-2. `P9-04`（🔍 待正式 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；合并当日最新 `main` 后复验安装根 369 个文件、177,616,688 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过；正式发布仍需同 signer/证书链/时间戳/SmartScreen 验收；
+2. `P9-04`（🔍 待 EB-16 正式包与 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；合并当日最新 `main` 后复验安装根 369 个文件、177,616,688 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过。该普通候选只装配 Executor，现行首发包的对应平台 Chromium 由尚未开始的 EB-16 装配；2026-07-25 当前用户/本机证书库 Code Signing certificate 均为 0，故还不能复验最终包的同 signer、证书链、时间戳与 SmartScreen；
 3. `P9-05`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-05-package-audit` GREEN；合并当日最新 `main` 后复验真实 NSIS 安装根 `369 files / 177,616,688 bytes`，与 macOS build App/只读 DMG 内 App 一并确认无 WebDriver、调试 origin、测试凭据、运行期 Profile/SQLite/日志/诊断、用户素材和私钥，随后卸载零残留；
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
-5. `P9-07`（🔍 待设备验收）：正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor/私有浏览器、主 PID 强停恢复、正式卸载和最小 ACL 证据 runner 已就绪；等待 Windows/签名包/授权账号/本地服务注册链补事实；
+5. `P9-07`（🔍 待 EB-16 正式签名包/账号/服务链）：2026-07-25 已把 runner 从历史系统 Chrome/Edge 与 `browser-profiles` 迁移为安装根 `embedded-browser` 的唯一 `windows-x86_64` Chromium、`embedded-browser-profiles/douyin/<UUIDv4>` 和第二浏览器拒绝；正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor、主 PID 强停恢复、正式卸载和最小 ACL 证据入口已就绪。当前 Windows 证书库无 Code Signing certificate，P9-04 `NotSigned` 包只装配 Executor 且尚无 EB-16 Chromium 资源，同时缺授权账号与 production 注册链，故不能执行最终设备轮次；
 6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
-7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 7 条自动化确认、4 条待授权真实平台、3 条待正式双平台设备/包，未达到 14/14 前不得改绿；
+7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 8 条自动化确认、4 条待授权真实平台、2 条待正式双平台设备/包。Windows 普通候选、完整包审计和内置 Chromium runner 已分别在 P9-04/P9-05/P9-07 留证，但 EB-16 正式 Chromium 装配、Authenticode、授权账号和 production 注册链尚未满足，未达到 14/14 前不得改绿；
 8. `U9-01`（✅ 已完成）：客户 Demo 账号生命周期、登录/恢复、opaque Session、不可变设备归属、停用/吊销、审计及 12 类威胁已冻结为可执行契约；
 9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
 10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；
 11. `U9-04`（✅ 已完成）：customer-demo 外层账号门禁、Rust 私有账号 Session vault、登录/恢复/改密/注销、离线 fail-closed、重启 refresh 和隐藏真实 Tauri 未登录边界已完成；React 不接收 bearer secret；
 12. `C10-07`（✅ 已完成）：签名 Demo origin/allowlist 原生信任边界、HTTPS/WSS Transport 与 local/demo 全私有数据 namespace 隔离已完成；下一工程任务为 `C10-08`；
 13. `H8-22/P9-03`（🔍 待正式签名）：2026-07-24 H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机会话完成 0.1→0.3 可选更新、0.1→0.2 强更重启、0.4 损坏包失败恢复、HKCU 64/32 位注册表、整文件哈希、完整未签名事实和卸载零残留矩阵；仅 Developer ID/notarization 与 Authenticode 在受控签名环境补验，不阻塞上述工程任务；
-14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用。`B5-02` 已由 EB-10 替代：历史 Chrome 实机证据保留，未安装 Edge 的历史缺口不再是产品验收项，也不得据此恢复系统浏览器生产入口。
 15. `EB-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机以 Chrome for Testing 149.0.7827.55 / revision 1228 完成同一浏览器的 headed Playwright、Browser Use `executable_path`/随机 CDP、独立渲染和三 Profile 并发隔离；134 个目录项、12 套风格及媒体/GPU/透明/横竖屏矩阵全绿，Windows 证据摘要已写入专项契约，下一 Windows 专项任务为 `EB-04`。
 16. `EB-04`（✅ 已完成）：2026-07-24 从预登记官方地址下载 192,511,857-byte Windows x86_64 Chromium 归档，真实 SHA-256 `ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab` 已写回契约并翻转 `buildable=true`；双暂存 Manifest 字节一致、PE machine `0x8664`、Playwright 离线启动 149.0.7827.55 和按绝对路径零进程残留门禁通过。

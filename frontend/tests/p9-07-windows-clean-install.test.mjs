@@ -46,7 +46,7 @@ test("P9-07 accepts only one timestamped Authenticode installer and HKCU install
   assert.doesNotMatch(runner, /tauri["'],\s*["']build|build_windows_executor_candidate/u);
 });
 
-test("P9-07 verifies high DPI and Job-owned Python-free runtime before a main-process kill", async () => {
+test("P9-07 verifies high DPI and the packaged Chromium before a main-process kill", async () => {
   const runner = await readFile(
     new URL("scripts/run_p9_07_acceptance.py", repositoryRoot),
     "utf8",
@@ -59,9 +59,13 @@ test("P9-07 verifies high DPI and Job-owned Python-free runtime before a main-pr
   assert.match(runner, /Stop-Process/u);
   assert.doesNotMatch(runner, /taskkill|\/T/u);
   assert.match(runner, /python(?:3(?:\.\d+)?)?/iu);
-  assert.match(runner, /chrome\.exe|msedge\.exe/u);
+  assert.match(runner, /distribution-manifest\.v1\.json/u);
+  assert.match(runner, /windows-x86_64/u);
+  assert.match(runner, /chrome\.exe/u);
+  assert.doesNotMatch(runner, /"chrome" if|trusted browser|external Chrome or Edge/iu);
   assert.match(runner, /--user-data-dir/u);
-  assert.match(runner, /browser-profiles/u);
+  assert.match(runner, /embedded-browser-profiles/u);
+  assert.match(runner, /embedded-chromium/u);
   assert.match(runner, /local-executor/u);
 });
 
