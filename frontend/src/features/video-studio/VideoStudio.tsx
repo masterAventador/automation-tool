@@ -11,6 +11,7 @@ import {
   type MotionVideoBeatDraft,
   type MotionVideoDraftRequest,
 } from "./material-video-studio-gateway";
+import { MotionPartsCatalog } from "./MotionPartsCatalog";
 import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
 import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
 
@@ -666,6 +667,9 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
   const [jobs, setJobs] = useState<readonly MaterialRenderJobSnapshot[]>([]);
   const [motionJobs, setMotionJobs] = useState<readonly MotionRenderJobSnapshot[]>([]);
   const [busy, setBusy] = useState(false);
+  const [motionPartSelections, setMotionPartSelections] = useState<
+    readonly (readonly string[])[]
+  >([[], [], []]);
   const [jobError, setJobError] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
@@ -785,6 +789,17 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
               <SettingsPage
                 method={selectedMethod}
                 onMotionStyleChange={onMotionStyleChange}
+              />
+            ),
+          },
+          {
+            key: "parts",
+            label: "动效零件",
+            children: (
+              <MotionPartsCatalog
+                beats={motionDraft.beats}
+                selections={motionPartSelections}
+                onSelectionsChange={setMotionPartSelections}
               />
             ),
           },

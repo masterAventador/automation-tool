@@ -45,6 +45,7 @@ describe("video studio shell", () => {
     expect(screen.getByRole("tab", { name: "新建视频" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "脚本与分镜" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "制作设置" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "动效零件" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "预览" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "制作任务" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "成片" })).toBeVisible();
@@ -378,5 +379,36 @@ describe("video studio shell", () => {
       "src",
       "data:video/mp4;base64,AAAA",
     );
+  });
+
+  it("browses the 134 parts catalog and keeps per-beat overrides in the draft", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("tab", { name: "动效零件" }));
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    expect(within(browser).getAllByRole("listitem")).toHaveLength(134);
+    expect(
+      screen.getByText(/动效零件与 12 套整体风格不同/),
+    ).toBeVisible();
+
+    const card = within(browser).getByText("Data Chart").closest("li");
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "加入第 1 段" }),
+    );
+    expect(
+      within(screen.getByRole("region", { name: "分镜零件选用" })).getByText(
+        "第 1 段：已选 1 项",
+      ),
+    ).toBeVisible();
+
+    // The override survives switching pages.
+    await user.click(screen.getByRole("tab", { name: "脚本与分镜" }));
+    await user.click(screen.getByRole("tab", { name: "动效零件" }));
+    expect(
+      within(screen.getByRole("region", { name: "分镜零件选用" })).getByText(
+        "第 1 段：已选 1 项",
+      ),
+    ).toBeVisible();
   });
 });

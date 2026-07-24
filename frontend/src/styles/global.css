@@ -900,3 +900,51 @@ body {
 .recent-task-list li:last-child {
   border-bottom: 0;
 }
+
+.motion-parts-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.motion-parts-overrides .motion-parts-summary {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.motion-parts-summary li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.motion-parts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+  width: 100%;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.motion-parts-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid rgba(5, 5, 5, 0.12);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.motion-parts-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

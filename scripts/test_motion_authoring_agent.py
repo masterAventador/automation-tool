@@ -42,6 +42,8 @@ from motion_authoring_agent import (  # noqa: E402
     VideoCreationModelConfig,
     _accumulate_stream_content,
     call_video_creation_model,
+    LOCKED_CATALOG_PART_IDS,
+    _first_message_contract,
     check_composition,
     lint_composition,
     load_locked_authoring_workflow,
@@ -702,6 +704,44 @@ class TransportRedactionTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("transport failed", message)
         self.assertNotIn("sk-secret", message)
+
+
+class CatalogPartSelectionTest(unittest.TestCase):
+    """BM-15: per-beat catalog parts are validated against the locked 134-item
+    catalog and the model is offered the closed catalog for auto-selection."""
+
+    def test_storyboard_rejects_parts_outside_the_locked_catalog(self) -> None:
+        payload = _valid_storyboard()
+        payload["beats"][0]["catalog_parts"] = ["definitely-not-a-real-part"]
+        with self.assertRaises(MotionAuthoringRejected) as ctx:
+            StoryboardArtifact.from_payload(payload)
+        self.assertIn("catalog", str(ctx.exception))
+
+    def test_storyboard_accepts_locked_catalog_ids(self) -> None:
+        payload = _valid_storyboard()
+        payload["beats"][0]["catalog_parts"] = ["data-chart", "flowchart"]
+        storyboard = StoryboardArtifact.from_payload(payload)
+        self.assertEqual(
+            storyboard.beats[0].catalog_parts, ("data-chart", "flowchart")
+        )
+
+    def test_locked_catalog_part_ids_match_the_frozen_contract(self) -> None:
+        catalog = json.loads(
+            (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            LOCKED_CATALOG_PART_IDS,
+            frozenset(item["name"] for item in catalog["items"]),
+        )
+        self.assertEqual(len(LOCKED_CATALOG_PART_IDS), 134)
+
+    def test_first_message_offers_the_locked_parts_for_per_beat_selection(self) -> None:
+        prompt = _first_message_contract(_brief(), ("assets/gsap.min.js",))
+        self.assertIn("134", prompt)
+        self.assertIn("data-chart", prompt)
+        self.assertIn("catalog_parts", prompt)
 
 
 if __name__ == "__main__":
