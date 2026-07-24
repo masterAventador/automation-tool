@@ -561,7 +561,7 @@
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
 5. `P9-07`（🔍 待 EB-16 正式签名包/账号/服务链）：2026-07-25 已把 runner 从历史系统 Chrome/Edge 与 `browser-profiles` 迁移为安装根 `embedded-browser` 的唯一 `windows-x86_64` Chromium、`embedded-browser-profiles/douyin/<UUIDv4>` 和第二浏览器拒绝；正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor、主 PID 强停恢复、正式卸载和最小 ACL 证据入口已就绪。当前 Windows 证书库无 Code Signing certificate，P9-04 `NotSigned` 包只装配 Executor 且尚无 EB-16 Chromium 资源，同时缺授权账号与 production 注册链，故不能执行最终设备轮次；
 6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
-7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 7 条自动化确认、4 条待授权真实平台、3 条待正式双平台设备/包，未达到 14/14 前不得改绿；
+7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 8 条自动化确认、4 条待授权真实平台、2 条待正式双平台设备/包。Windows 普通候选、完整包审计和内置 Chromium runner 已分别在 P9-04/P9-05/P9-07 留证，但 EB-16 正式 Chromium 装配、Authenticode、授权账号和 production 注册链尚未满足，未达到 14/14 前不得改绿；
 8. `U9-01`（✅ 已完成）：客户 Demo 账号生命周期、登录/恢复、opaque Session、不可变设备归属、停用/吊销、审计及 12 类威胁已冻结为可执行契约；
 9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
 10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；
