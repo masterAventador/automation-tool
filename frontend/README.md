@@ -93,7 +93,7 @@ backend/.venv/bin/python scripts/run_e4_15_acceptance.py
 
 该脚本先实证缺失/畸形公钥的 release 构建失败，再用验收专用公开公钥在唯一临时 Cargo target 构建真实 production-mode Tauri binary；`audit-production-package.mjs` 扫描二进制、正式 Vite 资产、Tauri 配置和 `cargo tree --no-default-features`，拒绝 WebDriver/WDIO、所有验收 Command、测试 origin/资源/Sidecar、开发验证公钥和 1420 调试端口，并确认制品确实绑定本次预期发布公钥。App 不会启动，临时制品结束即删除。
 
-B5-02 的 `src-tauri/src/browser_discovery.rs` 只在 Rust 原生层发现 macOS 标准 `/Applications` Chrome/Edge。它通过 Security.framework 绑定正式 Bundle signing identifier、Developer Team、所有架构、嵌套代码和固定主可执行文件，并保存 App/入口 dev+inode 供启动前重新验签；React、Tauri IPC、Control Plane 和普通设置均没有任意路径入口。本机真实 Chrome 已经公开生产 API发现/复验通过，Microsoft Edge 因未安装保持真实验收待办；当前模块只发现不启动浏览器，也不读取用户默认 Profile。
+B5-02 的 `src-tauri/src/browser_discovery.rs` 是已退出生产的历史系统浏览器信任边界，只在 Rust 原生层发现 macOS 标准 `/Applications` Chrome/Edge。它通过 Security.framework 绑定正式 Bundle signing identifier、Developer Team、所有架构、嵌套代码和固定主可执行文件，并保存 App/入口 dev+inode 供复验；历史真实 Chrome 已通过公开生产 API 发现/复验，Microsoft Edge 因当时未安装而没有实机证据。ADR-0001/EB-10 已用包内 Chromium 替代并删除系统浏览器生产入口，因此不再补旧 Edge 验收，也不得把该模块恢复为 fallback。
 
 B5-04 已把浏览器枚举接入“设置与诊断”。WebView 只接收 `google_chrome` / `microsoft_edge` 和当前选择，不接收应用路径、可执行文件路径或 identity；保存 Command 只接受枚举，并在 Rust 内重新发现受信安装后才原子写入 `app_data_dir/settings/browser-selection-v1`。`pnpm test:browser-settings-tauri` 使用动态检查过的 loopback 端口、独立 `com.aventador.automationtool.b504acceptance` AppData 和唯一 `visible=false` Tauri App，从真实页面保存、刷新并重读选择，结束精确清理。
 

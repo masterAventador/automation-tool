@@ -44,7 +44,7 @@
 | 范围 | 当前结果 |
 | --- | --- |
 | 竞品分析 | `✅ 已完成` 已完整阅读并转为能力地图；动态长期稳定性仍需我们自己的真实账号验证 |
-| 产品决策 | `✅ 已完成` Tauri-only、无产品登录 UI、RPA 优先、外部浏览器 + 独立 Profile |
+| 产品决策 | `✅ 已完成` Tauri-only、无产品登录 UI、RPA 优先、包内 Chromium + App 独立 Profile；历史外部 Chrome/Edge 决策已由 AV-01 替代 |
 | 后端决策 | `✅ 已完成` 独立 FastAPI Control Plane；开发本机、Demo 云端；PostgreSQL 从第一天使用 |
 | 本地执行决策 | `✅ 已完成` Python Local Executor 永远在用户电脑，随 Tauri 打包 |
 | 项目规则 | `✅ 已完成` 已从 `agent-platform` 筛选、改写并写入仓库 |
@@ -146,7 +146,7 @@
 | R0-01 | 完整研读竞品材料 | 静态分析、截图、视频行为和证据限制全部进入竞品报告 | — | ✅ 已完成 |
 | R0-02 | 锁定产品优先级 | 文档明确 `RPA > 内容 > AI`，没有旧 AI 中台优先残留 | R0-01 | ✅ 已完成 |
 | R0-03 | 锁定 MVP 边界 | 无产品登录 UI、单安装实例、抖音单平台纵向闭环 | R0-02 | ✅ 已完成 |
-| R0-04 | 锁定浏览器方案 | 外部 Chrome/Edge + App 独立 Profile；禁止默认 Profile/内嵌 WebView | R0-03 | ✅ 已完成 |
+| R0-04 | 锁定浏览器方案（历史） | 当时锁定外部 Chrome/Edge + App 独立 Profile；AV-01 已用包内 Chromium 替代，仍禁止默认 Profile/内嵌 WebView | R0-03 | ✅ 历史完成，已由 AV-01 替代 |
 | R0-05 | 锁定部署架构 | Control Plane 独立部署；开发本机、Demo 云端；Executor 本机 | R0-03 | ✅ 已完成 |
 | R0-06 | 迁移旧项目规则 | 新 `AGENTS.md`、`CLAUDE.md` 与当前方向一致 | R0-02 | ✅ 已完成 |
 | R0-07 | 建立产品与架构文档 | 产品、工程结构、前端和后端权威文档齐全且职责不重叠 | R0-05 | ✅ 已完成 |
@@ -265,7 +265,7 @@
 | ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | B5-01 | 审计旧 browser_session | 提取私有目录、Profile、状态机和注销逻辑；排除旧账号/RBAC | R0-12,E4-11 | ✅ 已完成 |
-| B5-02 | macOS 浏览器发现 | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试 | B5-01 | 🔍 待 Edge 实机验收 |
+| B5-02 | macOS 浏览器发现（历史） | Chrome/Edge 标准应用、签名/Bundle ID allowlist、路径失效测试；EB-10 已删除生产系统浏览器入口 | B5-01 | ⛔ 已由 EB-10 替代 |
 | B5-03 | Windows 浏览器发现 | 注册表/标准路径、签名/产品 allowlist、路径失效测试 | B5-01 | ✅ 已完成 |
 | B5-04 | 浏览器选择设置 | 用户选择受支持浏览器；不能选任意可执行文件 | B5-02,B5-03 | ✅ 已完成 |
 | B5-05 | 私有 Profile 目录 | 平台/UUID 规范路径、权限、拒绝 symlink、原子创建 | B5-01 | ✅ 已完成 |
@@ -568,6 +568,6 @@
 11. `U9-04`（✅ 已完成）：customer-demo 外层账号门禁、Rust 私有账号 Session vault、登录/恢复/改密/注销、离线 fail-closed、重启 refresh 和隐藏真实 Tauri 未登录边界已完成；React 不接收 bearer secret；
 12. `C10-07`（✅ 已完成）：签名 Demo origin/allowlist 原生信任边界、HTTPS/WSS Transport 与 local/demo 全私有数据 namespace 隔离已完成；下一工程任务为 `C10-08`；
 13. `H8-22/P9-03`（🔍 待正式签名）：2026-07-24 H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机会话完成 0.1→0.3 可选更新、0.1→0.2 强更重启、0.4 损坏包失败恢复、HKCU 64/32 位注册表、整文件哈希、完整未签名事实和卸载零残留矩阵；仅 Developer ID/notarization 与 Authenticode 在受控签名环境补验，不阻塞上述工程任务；
-14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用；`B5-02` 的 Chrome FinderInfo 与未安装 Edge 也继续作为设备补验，不混入离线任务。
+14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用。`B5-02` 已由 EB-10 替代：历史 Chrome 实机证据保留，未安装 Edge 的历史缺口不再是产品验收项，也不得据此恢复系统浏览器生产入口。
 15. `EB-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机以 Chrome for Testing 149.0.7827.55 / revision 1228 完成同一浏览器的 headed Playwright、Browser Use `executable_path`/随机 CDP、独立渲染和三 Profile 并发隔离；134 个目录项、12 套风格及媒体/GPU/透明/横竖屏矩阵全绿，Windows 证据摘要已写入专项契约，下一 Windows 专项任务为 `EB-04`。
 16. `EB-04`（✅ 已完成）：2026-07-24 从预登记官方地址下载 192,511,857-byte Windows x86_64 Chromium 归档，真实 SHA-256 `ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab` 已写回契约并翻转 `buildable=true`；双暂存 Manifest 字节一致、PE machine `0x8664`、Playwright 离线启动 149.0.7827.55 和按绝对路径零进程残留门禁通过。
