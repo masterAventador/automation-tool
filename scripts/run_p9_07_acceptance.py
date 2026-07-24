@@ -15,16 +15,21 @@ import stat
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
+from uuid import UUID
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT: Final = REPOSITORY_ROOT / "frontend"
 PRODUCT_NAME: Final = "自动化运营工具"
 APP_IDENTIFIER: Final = "com.aventador.automationtool"
 EXECUTOR_RESOURCE: Final = Path("local-executor/package")
+EMBEDDED_BROWSER_RESOURCE: Final = Path("embedded-browser")
+EMBEDDED_BROWSER_MANIFEST: Final = "distribution-manifest.v1.json"
+EMBEDDED_PROFILE_ROOT: Final = Path("embedded-browser-profiles")
 EVIDENCE_SCHEMA: Final = "p9-07.windows-clean-install.v1"
 CODE_SIGNING_EKU: Final = "1.3.6.1.5.5.7.3.3"
 _FILE_ATTRIBUTE_REPARSE_POINT: Final = 0x400
@@ -39,8 +44,8 @@ CHECKPOINTS: Final[tuple[tuple[str, str], ...]] = (
         "用授权抖音测试账号创建 browse 任务，并确认 App 进入等待平台登录",
     ),
     (
-        "external_browser_open",
-        "确认 App 已打开可见的外部 Chrome 或 Edge，且当前仍保持打开",
+        "embedded_browser_open",
+        "确认 App 已打开安装包内置 Chromium 的可见运营窗口，且当前仍保持打开",
     ),
     ("platform_scan_detected", "完成一次扫码，并确认 App 检测到平台登录成功"),
     (
@@ -68,7 +73,7 @@ RECOVERY_CHECKPOINTS: Final[tuple[tuple[str, str], ...]] = (
     ("no_duplicate_action", "确认恢复过程没有重新执行已完成或结果不确定的动作"),
     (
         "forced_exit_ready",
-        "重新打开平台处理浏览器并保持打开，准备只强停 App 主进程",
+        "重新打开内置 Chromium 平台处理窗口并保持打开，准备只强停 App 主进程",
     ),
 )
 FORCED_RECOVERY_CHECKPOINTS: Final[tuple[tuple[str, str], ...]] = (
@@ -227,8 +232,7 @@ def require_plain_absolute_file(path: Path, suffix: str) -> Path:
     while cursor != cursor.parent:
         cursor_metadata = cursor.lstat()
         if stat.S_ISLNK(cursor_metadata.st_mode) or bool(
-            getattr(cursor_metadata, "st_file_attributes", 0)
-            & _FILE_ATTRIBUTE_REPARSE_POINT
+            getattr(cursor_metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
         ):
             raise RuntimeError("P9-07 input artifact is invalid")
         cursor = cursor.parent
@@ -237,9 +241,7 @@ def require_plain_absolute_file(path: Path, suffix: str) -> Path:
         not stat.S_ISREG(metadata.st_mode)
         or metadata.st_size <= 0
         or stat.S_ISLNK(metadata.st_mode)
-        or bool(
-            getattr(metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
-        )
+        or bool(getattr(metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
     ):
         raise RuntimeError("P9-07 input artifact is invalid")
     return path.resolve(strict=True)
@@ -253,10 +255,7 @@ def require_evidence_destination(path: Path) -> Path:
     if (
         not raw_parent.is_dir()
         or raw_parent.is_symlink()
-        or bool(
-            getattr(parent_metadata, "st_file_attributes", 0)
-            & _FILE_ATTRIBUTE_REPARSE_POINT
-        )
+        or bool(getattr(parent_metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
     ):
         raise RuntimeError("P9-07 evidence destination is invalid")
     parent = raw_parent.resolve(strict=True)
@@ -277,15 +276,11 @@ def require_device_boundary(arguments: Arguments) -> tuple[Path, Path]:
         raise RuntimeError("P9-07 requires an interactive console")
     require_non_elevated_process()
     if install_root().exists() or private_app_data().exists():
-        raise RuntimeError(
-            "Refusing to reuse an existing product installation or AppData"
-        )
-    if windows_registry_installations(
-        machine_wide=False
-    ) or windows_registry_installations(machine_wide=True):
-        raise RuntimeError(
-            "Refusing to reuse an existing product registry installation"
-        )
+        raise RuntimeError("Refusing to reuse an existing product installation or AppData")
+    if windows_registry_installations(machine_wide=False) or windows_registry_installations(
+        machine_wide=True
+    ):
+        raise RuntimeError("Refusing to reuse an existing product registry installation")
     return (
         require_plain_absolute_file(arguments.installer, ".exe"),
         require_evidence_destination(arguments.evidence),
@@ -300,9 +295,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def require_authenticode(
-    path: Path, expected_signer: str | None = None
-) -> AuthenticodeFacts:
+def require_authenticode(path: Path, expected_signer: str | None = None) -> AuthenticodeFacts:
     rendered = run_powershell(
         "& { param([string]$LiteralPath) "
         "$signature=Get-AuthenticodeSignature -LiteralPath $LiteralPath;"
@@ -343,10 +336,7 @@ def require_authenticode(
         or document.get("TimeStamperCertificate") is not True
         or not isinstance(thumbprint, str)
         or re.fullmatch(r"[0-9A-Fa-f]{40,64}", thumbprint) is None
-        or (
-            expected_signer is not None
-            and thumbprint.casefold() != expected_signer.casefold()
-        )
+        or (expected_signer is not None and thumbprint.casefold() != expected_signer.casefold())
     ):
         raise RuntimeError("P9-07 requires one valid timestamped Authenticode signer")
     return AuthenticodeFacts(signer_thumbprint=thumbprint.upper())
@@ -373,14 +363,10 @@ def windows_registry_installations(*, machine_wide: bool) -> list[RegistryInstal
                             continue
                         version = str(winreg.QueryValueEx(child, "DisplayVersion")[0])
                         try:
-                            location = Path(
-                                str(winreg.QueryValueEx(child, "InstallLocation")[0])
-                            )
+                            location = Path(str(winreg.QueryValueEx(child, "InstallLocation")[0]))
                         except OSError:
                             location = install_root()
-                        uninstall = str(
-                            winreg.QueryValueEx(child, "UninstallString")[0]
-                        ).strip()
+                        uninstall = str(winreg.QueryValueEx(child, "UninstallString")[0]).strip()
                         uninstaller = Path(uninstall.strip('"'))
                         identity = (
                             version.casefold(),
@@ -417,9 +403,7 @@ def verify_registry_installation(record: RegistryInstallation) -> None:
         raise RuntimeError("P9-07 installer wrote HKEY_LOCAL_MACHINE")
     if normalized_path(record.install_location) != normalized_path(
         expected_root
-    ) or normalized_path(record.uninstaller) != normalized_path(
-        expected_root / "uninstall.exe"
-    ):
+    ) or normalized_path(record.uninstaller) != normalized_path(expected_root / "uninstall.exe"):
         raise RuntimeError("P9-07 InstallLocation or UninstallString is invalid")
 
 
@@ -432,6 +416,65 @@ def installed_binary(root: Path) -> Path:
     if len(candidates) != 1:
         raise RuntimeError("P9-07 installed main executable is not unique")
     return candidates[0]
+
+
+def embedded_browser_executable(root: Path) -> Path:
+    distribution_root = root / EMBEDDED_BROWSER_RESOURCE
+    manifest_path = distribution_root / EMBEDDED_BROWSER_MANIFEST
+    try:
+        distribution_metadata = distribution_root.lstat()
+        manifest_metadata = manifest_path.lstat()
+    except OSError as error:
+        raise RuntimeError("P9-07 embedded Chromium distribution manifest is invalid") from error
+    if (
+        distribution_root.is_symlink()
+        or manifest_path.is_symlink()
+        or bool(
+            getattr(distribution_metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        )
+        or bool(getattr(manifest_metadata, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
+    ):
+        raise RuntimeError("P9-07 embedded Chromium distribution manifest is invalid")
+    try:
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("P9-07 embedded Chromium distribution manifest is invalid") from error
+    if (
+        not isinstance(document, dict)
+        or document.get("schemaVersion") != 1
+        or document.get("policy") != "fail_closed"
+        or document.get("target") != "windows-x86_64"
+    ):
+        raise RuntimeError("P9-07 embedded Chromium distribution manifest is invalid")
+    relative_value = document.get("executable")
+    if not isinstance(relative_value, str):
+        raise RuntimeError("P9-07 embedded Chromium executable is invalid")
+    relative = PurePosixPath(relative_value)
+    if (
+        relative.is_absolute()
+        or ".." in relative.parts
+        or str(relative) != relative_value
+        or relative.name.casefold() != "chrome.exe"
+    ):
+        raise RuntimeError("P9-07 embedded Chromium executable is invalid")
+    executable = distribution_root.joinpath(*relative.parts)
+    try:
+        resolved_root = distribution_root.resolve(strict=True)
+        resolved_executable = executable.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError("P9-07 embedded Chromium executable is invalid") from error
+    if (
+        resolved_executable.parent == resolved_root
+        or resolved_root not in resolved_executable.parents
+        or not resolved_executable.is_file()
+        or resolved_executable.is_symlink()
+        or bool(
+            getattr(resolved_executable.lstat(), "st_file_attributes", 0)
+            & _FILE_ATTRIBUTE_REPARSE_POINT
+        )
+    ):
+        raise RuntimeError("P9-07 embedded Chromium executable is invalid")
+    return resolved_executable
 
 
 def audit_release_bundle(root: Path) -> None:
@@ -478,9 +521,7 @@ def clean_runtime_environment() -> dict[str, str]:
         "WINDIR",
     }
     environment = {
-        name.upper(): value
-        for name, value in os.environ.items()
-        if name.upper() in allowed
+        name.upper(): value for name, value in os.environ.items() if name.upper() in allowed
     }
     system_root = environment.get("SYSTEMROOT") or environment.get("WINDIR")
     if not system_root:
@@ -529,9 +570,7 @@ def process_snapshot() -> list[ProcessRecord]:
     return records
 
 
-def descendant_records(
-    root_pid: int, records: list[ProcessRecord]
-) -> list[ProcessRecord]:
+def descendant_records(root_pid: int, records: list[ProcessRecord]) -> list[ProcessRecord]:
     identities = {root_pid}
     changed = True
     while changed:
@@ -630,43 +669,38 @@ def is_process_in_job(pid: int) -> bool:
 
 
 def sample_runtime_facts(
-    app_pid: int, window: WindowFacts
+    app_pid: int, window: WindowFacts, expected_browser_executable: Path
 ) -> tuple[RuntimeFacts, list[ProcessRecord]]:
     descendants = descendant_records(app_pid, process_snapshot())
-    python_count = sum(
-        bool(_PYTHON_PROCESS.fullmatch(record.name)) for record in descendants
-    )
+    python_count = sum(bool(_PYTHON_PROCESS.fullmatch(record.name)) for record in descendants)
     executors = [
-        record
-        for record in descendants
-        if record.name.casefold() == "automation-tool-executor.exe"
+        record for record in descendants if record.name.casefold() == "automation-tool-executor.exe"
     ]
     browser_records = [
-        record
-        for record in descendants
-        if record.name.casefold() in {"chrome.exe", "msedge.exe"}
+        record for record in descendants if record.name.casefold() in {"chrome.exe", "msedge.exe"}
     ]
-    browsers = {
-        "chrome" if record.name.casefold() == "chrome.exe" else "edge"
-        for record in browser_records
-    }
-    expected_profile = normalized_path(private_app_data() / "browser-profiles")
+    expected_profile_root = private_app_data() / EMBEDDED_PROFILE_ROOT
     if python_count != 0:
         raise RuntimeError("P9-07 App process tree depends on Python")
     if len(executors) != 1 or not is_process_in_job(executors[0].pid):
-        raise RuntimeError(
-            "P9-07 Local Executor is not owned by its Windows Job Object"
+        raise RuntimeError("P9-07 Local Executor is not owned by its Windows Job Object")
+    if not browser_records or any(
+        record.name.casefold() != "chrome.exe"
+        or normalized_path(Path(record.executable_path))
+        != normalized_path(expected_browser_executable)
+        or not command_uses_private_profile(
+            record.command_line,
+            expected_profile_root,
         )
-    if len(browsers) != 1 or not any(
-        command_uses_private_profile(record.command_line, expected_profile)
         for record in browser_records
     ):
         raise RuntimeError(
-            "P9-07 browser did not use one App-owned browser-profiles root"
+            "P9-07 runtime did not use the packaged Chromium and one "
+            "App-owned embedded-browser-profiles root"
         )
     return (
         RuntimeFacts(
-            browser=next(iter(browsers)),
+            browser="embedded-chromium",
             executor_process_count=len(executors),
             python_descendant_count=python_count,
             window=window,
@@ -675,9 +709,31 @@ def sample_runtime_facts(
     )
 
 
-def command_uses_private_profile(command_line: str, expected_profile: str) -> bool:
-    normalized = command_line.replace('"', "").replace("/", "\\").casefold()
-    return f"--user-data-dir={expected_profile.casefold()}" in normalized
+def command_uses_private_profile(command_line: str, expected_root: Path) -> bool:
+    match = re.search(
+        r'(?:^|\s)(?:"--user-data-dir=([^"]+)"|--user-data-dir="([^"]+)"|'
+        r"--user-data-dir=([^\s]+))",
+        command_line,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return False
+    raw_path = next((value for value in match.groups() if value is not None), None)
+    if raw_path is None:
+        return False
+    try:
+        normalized_root = Path(normalized_path(expected_root))
+        normalized_profile = Path(normalized_path(Path(raw_path)))
+        relative = normalized_profile.relative_to(normalized_root)
+        profile_id = UUID(relative.parts[1])
+    except (IndexError, ValueError):
+        return False
+    return (
+        len(relative.parts) == 2
+        and relative.parts[0].casefold() == "douyin"
+        and profile_id.version == 4
+        and str(profile_id) == relative.parts[1].casefold()
+    )
 
 
 def confirm_checkpoint(code: str, instruction: str) -> None:
@@ -703,9 +759,7 @@ def launch_app(binary: Path) -> tuple[subprocess.Popen[str], WindowFacts]:
         raise
 
 
-def wait_owned_processes_gone(
-    records: list[ProcessRecord], timeout: float = 30
-) -> None:
+def wait_owned_processes_gone(records: list[ProcessRecord], timeout: float = 30) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         current = process_snapshot()
@@ -732,8 +786,7 @@ def managed_processes() -> list[ProcessRecord]:
         record
         for record in process_snapshot()
         if path_is_within(record.executable_path, install_root())
-        or app_data_marker
-        in record.command_line.replace('"', "").replace("/", "\\").casefold()
+        or app_data_marker in record.command_line.replace('"', "").replace("/", "\\").casefold()
     ]
 
 
@@ -745,9 +798,7 @@ def require_no_managed_processes() -> None:
 def normal_close_checkpoint(
     process: subprocess.Popen[str], descendants: list[ProcessRecord], code: str
 ) -> None:
-    confirm_checkpoint(
-        code, "从 App 菜单正常退出，并等待外部浏览器与 Local Executor 一起关闭"
-    )
+    confirm_checkpoint(code, "从 App 菜单正常退出，并等待内置 Chromium 与 Local Executor 一起关闭")
     process.wait(timeout=30)
     if process.returncode != 0:
         raise RuntimeError("P9-07 App did not exit normally")
@@ -888,9 +939,7 @@ def write_evidence(
             **{code: True for code, _ in FORCED_RECOVERY_CHECKPOINTS},
         },
     }
-    payload = (
-        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode()
+    payload = (json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode=0o600)
     try:
         with os.fdopen(descriptor, "wb", closefd=False) as target:
@@ -946,6 +995,7 @@ def main() -> int:
         record = wait_for_installation()
         verify_registry_installation(record)
         binary = installed_binary(record.install_location)
+        browser_executable = embedded_browser_executable(record.install_location)
         require_authenticode(binary, installer_signer.signer_thumbprint)
         require_authenticode(record.uninstaller, installer_signer.signer_thumbprint)
         audit_release_bundle(record.install_location)
@@ -957,8 +1007,12 @@ def main() -> int:
         process, window = launch_app(binary)
         for code, instruction in CHECKPOINTS:
             confirm_checkpoint(code, instruction)
-            if code == "external_browser_open":
-                runtime, descendants = sample_runtime_facts(process.pid, window)
+            if code == "embedded_browser_open":
+                runtime, descendants = sample_runtime_facts(
+                    process.pid,
+                    window,
+                    browser_executable,
+                )
         require_private_app_data()
         normal_close_checkpoint(process, descendants, "first_app_closed")
         process = None
@@ -967,9 +1021,13 @@ def main() -> int:
         process, window = launch_app(binary)
         for code, instruction in RECOVERY_CHECKPOINTS:
             confirm_checkpoint(code, instruction)
-        second_runtime, descendants = sample_runtime_facts(process.pid, window)
+        second_runtime, descendants = sample_runtime_facts(
+            process.pid,
+            window,
+            browser_executable,
+        )
         if runtime is None or second_runtime.browser != runtime.browser:
-            raise RuntimeError("P9-07 trusted browser changed across restart")
+            raise RuntimeError("P9-07 embedded browser changed across restart")
         force_stop_main_process(process, descendants)
         process = None
         descendants = []
@@ -999,10 +1057,8 @@ def main() -> int:
                     uninstaller=install_root() / "uninstall.exe",
                 )
         if cleanup_record is not None and cleanup_record.uninstaller.is_file():
-            try:
+            with suppress(RuntimeError, subprocess.CalledProcessError):
                 uninstall_application(cleanup_record)
-            except (RuntimeError, subprocess.CalledProcessError):
-                pass
         if (
             not install_root().exists()
             and not windows_registry_installations(machine_wide=False)
@@ -1027,9 +1083,7 @@ def main() -> int:
         record.display_version,
         runtime,
     )
-    print(
-        f"[P9-07] Windows clean-install device acceptance passed; evidence: {evidence}"
-    )
+    print(f"[P9-07] Windows clean-install device acceptance passed; evidence: {evidence}")
     return 0
 
 

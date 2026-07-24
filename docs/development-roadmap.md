@@ -51,7 +51,7 @@
 | 产品/架构文档 | `✅ 已完成` 已建立产品、工程结构、前端和后端权威文档 |
 | 任务级开发台账 | `✅ 已完成` 已建立里程碑、失败矩阵、完成定义、任务和实时状态 |
 | 任务级路线图 | `✅ 已完成` 本文件已建立 |
-| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-05、P9-08 与 U9-01～U9-05 已完成；H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机完成可选更新、强更重启、覆盖、失败恢复、HKCU 注册表和清理矩阵，仅双平台正式发布签名保持 `🔍`。P9-04 Windows 普通候选已完成生产构建、当前用户安装、HKCU-only 注册表、资源和卸载实机验收，仅正式 Authenticode 保持 `🔍`。P9-05 统一完整包审计已在 macOS App/DMG 与 Windows NSIS 安装根真实通过；P9-03 macOS 候选以及 P9-06/P9-07 双平台干净安装 runner 保持各自 `🔍` 设备/正式签名验收。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
+| 产品代码 | `✅ 已完成` Wave 1～Wave 6 工程主线、A7-01～A7-15、H8-01～H8-21、P9-01、P9-02、P9-05、P9-08 与 U9-01～U9-05 已完成；H8-22 Windows 普通 NSIS 已在 Windows 11 x86_64 非提权实体机完成可选更新、强更重启、覆盖、失败恢复、HKCU 注册表和清理矩阵，仅双平台正式发布签名保持 `🔍`。P9-04 Windows 普通候选已完成生产构建、当前用户安装、HKCU-only 注册表、资源和卸载实机验收，仅正式 Authenticode 保持 `🔍`。P9-05 统一完整包审计已在 macOS App/DMG 与 Windows NSIS 安装根真实通过；P9-03/P9-06 保持 macOS 正式签名/设备 `🔍`，P9-07 Windows runner 已迁移至包内 Chromium，明确等待 EB-16 正式 Authenticode 包、授权账号和 production 注册链。U9-04 已建立 customer-demo 外层账号门禁与 Rust 私有账号 Session vault；U9-05 已接入账号 Session + Ed25519 设备证明的 Installation 原子不可变归属、凭据签发/轮换及登录前置绑定。H8-22 正式发布签名证据与 D6-16、A7-16、A7-17、B5-15 真实账号证据继续独立待补 |
 | Windows 原生验收集成 | `✅ 已完成` `chore/windows-native-validation` 记录的 Windows x86_64 实体机 GREEN 已逐文件审查并与 D6-09 后的 `main` 冲突解析；该分支无 GitHub Actions/PR 运行记录，未把分支名称当验收证据。合并树在 macOS 补齐跨平台严格 Mypy 边界后，Backend `1275 passed, 5 skipped`，Frontend 84 项 Node/145 项 Vitest 及 Lint/Type/API/生产边界全绿，Rust 三套配置、Rustfmt 与全目标全特性 Clippy 全绿 |
 | 稳定资源 ID | `✅ 已完成` installation/executor/task/execution attempt/action/artifact 六类规范 UUIDv4 值对象与非法值矩阵已验证 |
 | 本地 PostgreSQL | `✅ 已完成` 18.4 开发/测试双容器、健康检查、loopback 端口和独立存储已验证 |
@@ -376,7 +376,7 @@
 | P9-04 | Windows Tauri 候选包 | 签名、安装/卸载和最小系统权限 | P9-02 | 🔍 待验收 |
 | P9-05 | 正式包内容审计 | 无 WebDriver、调试端口、测试凭据、真实日志/Profile/素材 | P9-03,P9-04 | ✅ 已完成 |
 | P9-06 | macOS 干净安装 | 无 Python 前置；打开即用；Chrome/Edge/扫码/任务/恢复 | P9-03,P9-05 | 🔍 待设备验收 |
-| P9-07 | Windows 干净安装 | 无 Python 前置；同上；DPI/杀进程/卸载行为 | P9-04,P9-05 | 🔍 待设备验收 |
+| P9-07 | Windows 干净安装 | 无 Python 前置；内置 Chromium/扫码/任务/恢复；DPI/杀进程/卸载行为 | P9-04,P9-05,EB-16 | 🔍 待 EB-16 正式签名包/账号/服务链 |
 | P9-08 | 版本兼容/降级 | App/Executor/Control Plane 兼容矩阵，错误版本 fail closed | P9-06,P9-07 | ✅ 已完成 |
 | P9-09 | 本地 MVP 最终验收 | 产品规划 14 条 MVP 验收全部通过并记录证据 | P9-08 | 🔍 待验收 |
 
@@ -559,7 +559,7 @@
 2. `P9-04`（🔍 待正式 Authenticode）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-04-windows-package` GREEN；合并当日最新 `main` 后复验安装根 369 个文件、177,616,688 bytes，内置 Executor 367 个文件、157,979,594 bytes，生产审计、普通 `NotSigned` 事实、NSIS 全文件 SHA、当前用户静默安装、HKCU-only/HKLM-zero、Manifest/资源清单和卸载零残留全部通过；正式发布仍需同 signer/证书链/时间戳/SmartScreen 验收；
 3. `P9-05`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 非提权实体机会话执行 `pnpm --dir frontend test:p9-05-package-audit` GREEN；合并当日最新 `main` 后复验真实 NSIS 安装根 `369 files / 177,616,688 bytes`，与 macOS build App/只读 DMG 内 App 一并确认无 WebDriver、调试 origin、测试凭据、运行期 Profile/SQLite/日志/诊断、用户素材和私钥，随后卸载零残留；
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
-5. `P9-07`（🔍 待设备验收）：正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor/私有浏览器、主 PID 强停恢复、正式卸载和最小 ACL 证据 runner 已就绪；等待 Windows/签名包/授权账号/本地服务注册链补事实；
+5. `P9-07`（🔍 待 EB-16 正式签名包/账号/服务链）：2026-07-25 已把 runner 从历史系统 Chrome/Edge 与 `browser-profiles` 迁移为安装根 `embedded-browser` 的唯一 `windows-x86_64` Chromium、`embedded-browser-profiles/douyin/<UUIDv4>` 和第二浏览器拒绝；正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor、主 PID 强停恢复、正式卸载和最小 ACL 证据入口已就绪。当前 Windows 证书库无 Code Signing certificate，P9-04 `NotSigned` 包只装配 Executor 且尚无 EB-16 Chromium 资源，同时缺授权账号与 production 注册链，故不能执行最终设备轮次；
 6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
 7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 7 条自动化确认、4 条待授权真实平台、3 条待正式双平台设备/包，未达到 14/14 前不得改绿；
 8. `U9-01`（✅ 已完成）：客户 Demo 账号生命周期、登录/恢复、opaque Session、不可变设备归属、停用/吊销、审计及 12 类威胁已冻结为可执行契约；
