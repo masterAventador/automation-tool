@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,13 @@ worker_root = Path(SPECPATH)
 repository_root = worker_root.parents[1]
 upstream_root = repository_root / "vendor/moneyprinterturbo"
 sys.path.insert(0, str(upstream_root))
+
+contract = json.loads(
+    (repository_root / "contracts/quality/material-video-worker-package.v1.json").read_text(
+        encoding="utf-8"
+    )
+)
+excluded_modules = list(contract["build"]["excludedModules"])
 
 moviepy_datas, moviepy_binaries, moviepy_hiddenimports = collect_all("moviepy")
 imageio_datas, imageio_binaries, imageio_hiddenimports = collect_all("imageio")
@@ -91,7 +99,7 @@ analysis = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excluded_modules,
     noarchive=False,
     optimize=0,
 )

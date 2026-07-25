@@ -94,14 +94,35 @@ class PackageSizeBounds:
     max_package_bytes: int
 
 
-# Measured on the locked Chrome for Testing 149.0.7827.55 distribution
-# (331 files, 359,441,871 bytes). The ceiling is deliberately below two
-# architectures so a mixed-target package is rejected by weight alone.
+# Declared composition of one single-architecture release bundle, rounded up
+# from the measured macOS arm64 build. Every entry is a resource the product
+# cannot run without, so the package ceiling is derived from their sum instead
+# of being picked by hand.
+RELEASE_PAYLOAD_PARTS_MIB: Final = {
+    # Locked Chrome for Testing 149.0.7827.55 (333 files, 359,658,199 bytes).
+    "embedded-chromium": 343,
+    # Frozen RPA Executor sidecar (284 files, 184,686,384 bytes).
+    "local-executor": 177,
+    # Frozen intelligent-material worker after the unreachable-module trim
+    # (see contracts/quality/material-video-worker-package.v1.json).
+    "material-video-worker": 520,
+    # Frozen brand-motion worker with its private Node runtime (113,124,957 bytes).
+    "motion-video-worker": 108,
+    # Packaged ffmpeg/ffprobe plus the GPL source archive (44,095,804 bytes).
+    "media-toolchain": 43,
+    # Tauri shell, WebView assets, icons and manifests.
+    "app-shell-and-web-assets": 22,
+}
+
+# The browser ceiling stays deliberately below two architectures so a
+# mixed-target package is rejected by weight alone. The package ceiling is the
+# declared payload plus a 10% margin: large enough for normal drift, small
+# enough that a duplicated browser, executor or video worker still trips it.
 RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
     min_browser_bytes=320 * _MEBIBYTE,
     max_browser_bytes=420 * _MEBIBYTE,
     min_package_bytes=340 * _MEBIBYTE,
-    max_package_bytes=700 * _MEBIBYTE,
+    max_package_bytes=1330 * _MEBIBYTE,
 )
 
 
@@ -273,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "RELEASE_PAYLOAD_PARTS_MIB",
     "RELEASE_SIZE_BOUNDS",
     "PackageAuditReport",
     "PackageRejected",

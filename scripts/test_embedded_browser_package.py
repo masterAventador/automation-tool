@@ -35,6 +35,7 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from check_embedded_browser_package import (  # noqa: E402
+    RELEASE_PAYLOAD_PARTS_MIB,
     RELEASE_SIZE_BOUNDS,
     PackageRejected,
     PackageSizeBounds,
@@ -155,7 +156,27 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
         self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
         self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
-        self.assertLessEqual(bounds.max_package_bytes, 1200 * 1024 * 1024)
+
+    def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
+        payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
+        self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
+        self.assertLessEqual(
+            RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10
+        )
+
+    def test_declared_production_payload_lists_every_shipped_part(self) -> None:
+        self.assertEqual(
+            set(RELEASE_PAYLOAD_PARTS_MIB),
+            {
+                "embedded-chromium",
+                "local-executor",
+                "material-video-worker",
+                "motion-video-worker",
+                "media-toolchain",
+                "app-shell-and-web-assets",
+            },
+        )
+        self.assertTrue(all(value > 0 for value in RELEASE_PAYLOAD_PARTS_MIB.values()))
 
     def test_one_complete_target_browser_passes_and_is_measured(self) -> None:
         report = self._audit()
