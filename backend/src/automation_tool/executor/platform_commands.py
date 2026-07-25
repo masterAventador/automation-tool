@@ -192,9 +192,27 @@ class BrowserSurfaceOwningOperation(PlatformCommandOperation, Protocol):
     The router must be able to reclaim that surface before a login or logout
     command, so the capability is part of the type contract instead of a
     runtime probe that silently degrades into the M2 deadlock.
+
+    ``pending_approval`` is on the contract for the same reason: probed with
+    ``getattr`` instead, a missing method would be indistinguishable from
+    "nothing to approve", and the App would simply never be told the terms.
     """
 
     def release_surface(self) -> None: ...
+
+    def pending_approval(self) -> tuple[str, str] | None: ...
+
+
+@runtime_checkable
+class ApprovalPresentingOperation(Protocol):
+    """Anything that can say which approval terms are awaiting the operator.
+
+    Narrower than `BrowserSurfaceOwningOperation` on purpose: the worker needs
+    only this, and matching against the wider contract would silently answer
+    "nothing to approve" for a router that does not itself own the surface.
+    """
+
+    def pending_approval(self) -> tuple[str, str] | None: ...
 
 
 class _BinaryLineReader(Protocol):
@@ -226,6 +244,13 @@ class PlatformCommandWorker:
         self._result_output = result_output
         self._result_writer = result_writer
 
+    def pending_approval(self) -> tuple[str, str] | None:
+        """The approval terms this operation is waiting on, if it presents any."""
+        operation = self._operation
+        if not isinstance(operation, ApprovalPresentingOperation):
+            return None
+        return operation.pending_approval()
+
     def run(self, stop: threading.Event) -> None:
         if not isinstance(stop, threading.Event):
             raise PlatformCommandRejected
@@ -236,6 +261,8 @@ class PlatformCommandWorker:
                     break
                 command = read_platform_command(_SingleLineStream(source), self._authenticator)
                 state = self._operation.handle(command)
+                approval = self.pending_approval()
+                confirmation_id, target_account = approval or (None, None)
                 if self._result_writer is not None:
                     self._result_writer(
                         command_id=str(command.command_id),
@@ -249,6 +276,8 @@ class PlatformCommandWorker:
                         command_id=str(command.command_id),
                         state=state,
                         command_type=command.command_type,
+                        confirmation_id=confirmation_id,
+                        target_account=target_account,
                     )
         except PlatformCommandRejected:
             raise
@@ -486,6 +515,9 @@ class PlatformCommandRouter:
         self._login = login
         self._publish = publish
 
+    def pending_approval(self) -> tuple[str, str] | None:
+        return self._publish.pending_approval()
+
     def handle(self, command: PlatformCommand) -> str:
         if not isinstance(command, PlatformCommand):
             raise PlatformCommandRejected
@@ -569,6 +601,14 @@ class DouyinPublishPreflightCommandOperation:
         and handoff receipts are kept for reporting after the browser is gone.
         """
         return self._latest
+
+    def pending_approval(self) -> tuple[str, str] | None:
+        """The terms the next result frame must carry, or nothing to carry."""
+        approval = self._latest_approval
+        receipt = self._latest
+        if approval is None or receipt is None or receipt.target_account is None:
+            return None
+        return approval.confirmation_id, receipt.target_account
 
     def latest_approval(self) -> SideEffectApproval | None:
         """The critical-point summary awaiting the operator's answer, if any.
@@ -981,16 +1021,33 @@ def write_platform_command_result(
     command_id: str,
     state: str,
     command_type: str,
+    confirmation_id: str | None = None,
+    target_account: str | None = None,
 ) -> None:
+    """Write one authenticated result frame.
+
+    A preflight that stopped before submission also carries the terms of the
+    approval it wants: which account it is about to post to, and which
+    confirmation would authorize it. Both are bound into the proof, because
+    both are page-derived facts the App has no way to check for itself.
+    """
     import json
 
     try:
         proof = authenticator.proof_for_command_result(
             command_id=command_id,
             state=state,
+            confirmation_id=confirmation_id,
+            target_account=target_account,
+        )
+        approval = (
+            {}
+            if confirmation_id is None
+            else {"confirmationId": confirmation_id, "targetAccount": target_account}
         )
         source = json.dumps(
             {
+                **approval,
                 "authenticationProof": proof,
                 "commandId": command_id,
                 "event": "platform.command.completed",
@@ -1020,6 +1077,7 @@ __all__ = [
     "DOUYIN_QR_LOGIN_FLOW_VERSION",
     "MAX_PLATFORM_COMMAND_BYTES",
     "PUBLISH_RELEASED_STATE",
+    "ApprovalPresentingOperation",
     "BrowserSurfaceOwningOperation",
     "DouyinLoginCommandOperation",
     "DouyinPublishPreflightCommandOperation",

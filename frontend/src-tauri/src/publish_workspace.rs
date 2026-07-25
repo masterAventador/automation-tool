@@ -330,6 +330,34 @@ impl PublishWorkspace {
     }
 }
 
+/// What a preflight result means for the workspace.
+///
+/// `None` is not "nothing happened": a *ready* preflight is the reason to ask
+/// the operator, so it belongs to `await_approval` rather than to an outcome.
+/// Every other answer, including one this build does not recognize, ends the
+/// attempt — nothing was clicked, so calling it "not published" is honest.
+pub fn preflight_outcome(state: &str) -> Option<PublishOutcome> {
+    match state {
+        "publish_pre_submit_ready" => None,
+        "publish_handoff_required" => Some(PublishOutcome::HandedOff),
+        _ => Some(PublishOutcome::NotPublished),
+    }
+}
+
+/// What a dispatch result means for the workspace.
+///
+/// The click may already have happened by the time an answer arrives, so an
+/// answer this build cannot read is *uncertain*, never a clean failure: telling
+/// the operator "did not publish" about a post that exists is the one mistake
+/// this whole chain is built to avoid.
+pub fn dispatch_outcome(state: &str) -> PublishOutcome {
+    match state {
+        "publish_verified" => PublishOutcome::Published,
+        "publish_not_dispatched" => PublishOutcome::NotPublished,
+        _ => PublishOutcome::OutcomeUncertain,
+    }
+}
+
 fn readable(value: &str) -> bool {
     !value.trim().is_empty()
         && value.chars().count() <= MAX_APPROVAL_FIELD_CHARACTERS

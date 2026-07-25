@@ -330,3 +330,50 @@ fn starting_a_second_publish_keeps_the_first_ones_record() {
 
     assert_eq!(workspace.snapshot().audit.len(), 3);
 }
+
+// --- PB-07: projecting executor results onto the workspace ------------------
+
+#[test]
+fn a_preflight_result_moves_the_workspace_only_where_it_is_entitled_to() {
+    use automation_tool_desktop_lib::publish_workspace::preflight_outcome;
+
+    // A ready preflight is not an outcome; it is the reason to ask the operator.
+    assert_eq!(preflight_outcome("publish_pre_submit_ready"), None);
+    assert_eq!(
+        preflight_outcome("publish_handoff_required"),
+        Some(PublishOutcome::HandedOff)
+    );
+    assert_eq!(
+        preflight_outcome("publish_blocked"),
+        Some(PublishOutcome::NotPublished)
+    );
+    // Anything unrecognized is not quietly treated as a success.
+    assert_eq!(
+        preflight_outcome("healthy"),
+        Some(PublishOutcome::NotPublished)
+    );
+}
+
+#[test]
+fn a_dispatch_result_never_turns_an_unknown_answer_into_a_publish() {
+    use automation_tool_desktop_lib::publish_workspace::dispatch_outcome;
+
+    assert_eq!(dispatch_outcome("publish_verified"), PublishOutcome::Published);
+    assert_eq!(
+        dispatch_outcome("publish_outcome_uncertain"),
+        PublishOutcome::OutcomeUncertain
+    );
+    assert_eq!(
+        dispatch_outcome("publish_not_dispatched"),
+        PublishOutcome::NotPublished
+    );
+    // The click may already have happened, so an answer we cannot read is
+    // uncertain, never "did not publish".
+    for unreadable in ["", "healthy", "publish_pre_submit_ready", "publish_released"] {
+        assert_eq!(
+            dispatch_outcome(unreadable),
+            PublishOutcome::OutcomeUncertain,
+            "{unreadable} must not be read as a clean failure"
+        );
+    }
+}

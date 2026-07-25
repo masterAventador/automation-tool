@@ -28,6 +28,9 @@ _ALLOWED_COMMANDS = frozenset(("douyin.login.open", "douyin.login.recheck"))
 _ALLOWED_SESSION_COMMANDS = frozenset(("douyin.logout.complete", "douyin.publish.release"))
 _ALLOWED_PUBLISH_COMMANDS = frozenset(("douyin.publish.preflight",))
 _ALLOWED_PUBLISH_DISPATCH_COMMANDS = frozenset(("douyin.publish.dispatch",))
+# An account name is rendered in a confirmation dialog, so it is bounded far
+# more tightly than the publish copy that shares `_bounded_text`.
+MAX_RESULT_ACCOUNT_CHARACTERS = 64
 _MAX_PUBLISH_TEXT_CHARACTERS = 4096
 _ALLOWED_COMMAND_RESULTS = frozenset(
     (
@@ -282,13 +285,51 @@ class LocalSessionAuthenticator:
         if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
             raise LocalSessionAuthenticationRejected
 
-    def proof_for_command_result(self, *, command_id: str, state: str) -> str:
+    def proof_for_command_result(
+        self,
+        *,
+        command_id: str,
+        state: str,
+        confirmation_id: str | None = None,
+        target_account: str | None = None,
+    ) -> str:
+        """Bind one result, including the terms of any approval it carries.
+
+        A preflight that stops before submission has to tell the App which
+        account it is about to post to and which confirmation would authorize
+        it. Both are page-derived facts the App cannot check for itself, so
+        they are bound into the proof: an account name swapped on the way out
+        would otherwise be the operator approving one account and publishing to
+        another.
+        """
         _require_uuid_v4(command_id)
         if state not in _ALLOWED_COMMAND_RESULTS or type(state) is not str:
             raise LocalSessionAuthenticationRejected
+        if confirmation_id is None and target_account is None:
+            return self._proof(
+                _COMMAND_RESULT_AUTHENTICATION_DOMAIN,
+                (command_id, state, EXECUTOR_PROTOCOL_VERSION),
+            )
+        # Half an approval is not an approval: one term without the other would
+        # leave the App showing an account nobody can confirm, or confirming
+        # terms nobody was shown.
+        if confirmation_id is None or target_account is None:
+            raise LocalSessionAuthenticationRejected
+        _require_uuid_v4(confirmation_id)
+        if (
+            not _bounded_text(target_account)
+            or len(target_account) > MAX_RESULT_ACCOUNT_CHARACTERS
+        ):
+            raise LocalSessionAuthenticationRejected
         return self._proof(
             _COMMAND_RESULT_AUTHENTICATION_DOMAIN,
-            (command_id, state, EXECUTOR_PROTOCOL_VERSION),
+            (
+                command_id,
+                state,
+                confirmation_id,
+                target_account,
+                EXECUTOR_PROTOCOL_VERSION,
+            ),
         )
 
     def _proof(self, domain: bytes, parts: tuple[str, ...]) -> str:

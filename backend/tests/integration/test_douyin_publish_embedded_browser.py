@@ -311,10 +311,17 @@ def _input_value(page: Any, selector: str) -> str | None:
 
 
 def _result(document: dict[str, Any], harness: _PublishHarness) -> str:
-    """Verify the authenticated result frame and return its state."""
+    """Verify the authenticated result frame and return its state.
+
+    A preflight that stopped before submission also carries the terms of the
+    approval it wants, and those terms are part of what the proof binds — a
+    frame verified without them could have had its account name swapped.
+    """
     expected = harness.authenticator.proof_for_command_result(
         command_id=document["commandId"],
         state=document["state"],
+        confirmation_id=document.get("confirmationId"),
+        target_account=document.get("targetAccount"),
     )
     assert document["authenticationProof"] == expected
     assert document["platform"] == "douyin"
@@ -729,6 +736,8 @@ def _dispatch_result(document: dict[str, Any], harness: _PublishHarness) -> str:
     expected = harness.authenticator.proof_for_command_result(
         command_id=document["commandId"],
         state=document["state"],
+        confirmation_id=document.get("confirmationId"),
+        target_account=document.get("targetAccount"),
     )
     assert document["authenticationProof"] == expected
     assert document["platform"] == "douyin"
@@ -896,3 +905,32 @@ def test_one_approval_can_never_be_spent_on_a_second_click(
     assert _dispatch_result(results[1], harness) == "publish_verified"
     assert _dispatch_result(results[2], harness) == "publish_not_dispatched"
     assert harness.facts()["submitClicks"] == 1
+
+
+def test_a_ready_preflight_hands_the_app_the_terms_it_must_confirm(
+    harness: _PublishHarness,
+) -> None:
+    """Without these, the App can render an approval nobody can actually give."""
+    results = harness.run_worker(
+        [harness.command(command_id=COMMAND_ID, publish_job_id=PUBLISH_JOB_ID)]
+    )
+
+    assert _result(results[0], harness) == "publish_pre_submit_ready"
+    document = results[0]
+    assert document["targetAccount"] == TARGET_ACCOUNT
+    approval = harness.operation.latest_approval()
+    assert approval is not None
+    assert document["confirmationId"] == approval.confirmation_id
+
+
+def test_a_blocked_preflight_offers_no_terms_at_all(harness: _PublishHarness) -> None:
+    """Nothing reached a page the operator could approve, so nothing is offered."""
+    harness.page_state = "entry-drift"
+
+    results = harness.run_worker(
+        [harness.command(command_id=COMMAND_ID, publish_job_id=PUBLISH_JOB_ID)]
+    )
+
+    assert _result(results[0], harness) == "publish_blocked"
+    assert "confirmationId" not in results[0]
+    assert "targetAccount" not in results[0]

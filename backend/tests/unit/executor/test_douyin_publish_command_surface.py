@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 from pathlib import Path
 from queue import Queue
 from typing import Any, cast
@@ -24,6 +25,7 @@ from automation_tool.executor.platform_commands import (
     PlatformCommand,
     PlatformCommandRejected,
     PlatformCommandRouter,
+    PlatformCommandWorker,
     read_platform_command,
     write_platform_command_result,
 )
@@ -291,14 +293,23 @@ class LoginLikeOperation:
 
 
 class RecordingOperation(LoginLikeOperation):
-    """A double of a publish operation, which must be able to release the surface."""
+    """A double of a publish operation, which must satisfy its whole contract.
+
+    Releasing the surface and reporting pending approval terms are both on the
+    protocol, so a double missing either one is not a publish operation and the
+    router is right to refuse it.
+    """
 
     def __init__(self, state: str) -> None:
         super().__init__(state)
         self.released = 0
+        self.approval: tuple[str, str] | None = None
 
     def release_surface(self) -> None:
         self.released += 1
+
+    def pending_approval(self) -> tuple[str, str] | None:
+        return self.approval
 
 
 def test_router_dispatches_each_command_family_and_closes_both() -> None:
@@ -867,3 +878,134 @@ def test_a_dispatch_missing_its_own_identity_is_a_protocol_violation(
         assert operation.latest_release() is None
     finally:
         operation.close()
+
+
+def test_a_preflight_result_carries_the_approval_it_wants_confirmed() -> None:
+    """The App cannot ask for a confirmation it was never told the terms of."""
+    output = io.StringIO()
+
+    write_platform_command_result(
+        output,
+        authenticator(),
+        command_id=COMMAND_ID,
+        state="publish_pre_submit_ready",
+        command_type=DOUYIN_PUBLISH_PREFLIGHT_COMMAND,
+        confirmation_id=CONFIRMATION_ID,
+        target_account="自动化运营测试账号",
+    )
+
+    document = json.loads(output.getvalue())
+    assert document["confirmationId"] == CONFIRMATION_ID
+    assert document["targetAccount"] == "自动化运营测试账号"
+    assert document["authenticationProof"] == authenticator().proof_for_command_result(
+        command_id=COMMAND_ID,
+        state="publish_pre_submit_ready",
+        confirmation_id=CONFIRMATION_ID,
+        target_account="自动化运营测试账号",
+    )
+
+
+def test_the_approval_terms_are_bound_into_the_result_proof() -> None:
+    """An unbound account name could be swapped for another on the way to the App."""
+    source = authenticator()
+    baseline = dict(
+        command_id=COMMAND_ID,
+        state="publish_pre_submit_ready",
+        confirmation_id=CONFIRMATION_ID,
+        target_account="自动化运营测试账号",
+    )
+    proof = source.proof_for_command_result(**baseline)
+
+    for field, tampered in (
+        ("confirmation_id", "123e4567-e89b-42d3-a456-426614174099"),
+        ("target_account", "别人的账号"),
+        ("state", "publish_blocked"),
+    ):
+        assert (
+            source.proof_for_command_result(**{**baseline, field: tampered}) != proof
+        ), field
+
+
+def test_a_result_without_approval_terms_keeps_its_existing_binding() -> None:
+    """Login and logout frames must not change shape under a publish change."""
+    output = io.StringIO()
+
+    write_platform_command_result(
+        output,
+        authenticator(),
+        command_id=COMMAND_ID,
+        state="publish_blocked",
+        command_type=DOUYIN_PUBLISH_PREFLIGHT_COMMAND,
+    )
+
+    document = json.loads(output.getvalue())
+    assert "confirmationId" not in document
+    assert "targetAccount" not in document
+
+
+def test_approval_terms_outside_the_frozen_shape_are_refused() -> None:
+    for confirmation_id, target_account in [
+        ("not-a-uuid", "账号"),
+        (CONFIRMATION_ID, ""),
+        (CONFIRMATION_ID, "账号‮"),
+        (CONFIRMATION_ID, "x" * 200),
+    ]:
+        with pytest.raises(PlatformCommandRejected):
+            write_platform_command_result(
+                io.StringIO(),
+                authenticator(),
+                command_id=COMMAND_ID,
+                state="publish_pre_submit_ready",
+                command_type=DOUYIN_PUBLISH_PREFLIGHT_COMMAND,
+                confirmation_id=confirmation_id,
+                target_account=target_account,
+            )
+
+
+def test_the_worker_carries_the_pending_approval_into_the_result_frame() -> None:
+    """The App learns the terms from the same authenticated frame, or not at all."""
+    publish = RecordingOperation("publish_pre_submit_ready")
+    publish.approval = (CONFIRMATION_ID, "自动化运营测试账号")
+    output = io.StringIO()
+    worker = PlatformCommandWorker(
+        input_stream=cast(Any, io.BytesIO(publish_frame())),
+        authenticator=authenticator(),
+        operation=PlatformCommandRouter(login=RecordingOperation("healthy"), publish=publish),
+        result_output=output,
+    )
+
+    worker.run(threading.Event())
+
+    document = json.loads(output.getvalue())
+    assert document["state"] == "publish_pre_submit_ready"
+    assert document["confirmationId"] == CONFIRMATION_ID
+    assert document["targetAccount"] == "自动化运营测试账号"
+    assert document["authenticationProof"] == authenticator().proof_for_command_result(
+        command_id=COMMAND_ID,
+        state="publish_pre_submit_ready",
+        confirmation_id=CONFIRMATION_ID,
+        target_account="自动化运营测试账号",
+    )
+
+
+def test_a_result_frame_without_pending_terms_carries_none() -> None:
+    """A blocked preflight has nothing to approve, so it says nothing."""
+    publish = RecordingOperation("publish_blocked")
+    output = io.StringIO()
+    worker = PlatformCommandWorker(
+        input_stream=cast(Any, io.BytesIO(publish_frame())),
+        authenticator=authenticator(),
+        operation=PlatformCommandRouter(login=RecordingOperation("healthy"), publish=publish),
+        result_output=output,
+    )
+
+    worker.run(threading.Event())
+
+    document = json.loads(output.getvalue())
+    assert "confirmationId" not in document
+    assert "targetAccount" not in document
+
+
+def publish_frame() -> bytes:
+    return json.dumps(publish_payload()).encode("utf-8") + b"\n"
+
