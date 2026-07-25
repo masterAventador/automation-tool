@@ -47,6 +47,12 @@ DETERMINISM_FRAMES = 30
 # and a software-rasterising host (every Windows run here) is slower again.
 SHORT_RENDER_BUDGET_SECONDS = 120
 DETERMINISM_RENDER_BUDGET_SECONDS = 180
+# CPU seconds are summed across the whole browser process tree, so a render
+# that legitimately uses every core burns them far faster than wall clock —
+# on the Windows host a two-frame item already exceeded 120. Wall clock stays
+# the stall guard; the CPU ceiling only has to catch runaway consumption, so
+# it sits just under the sandbox maximum instead of tracking the wall budget.
+RENDER_CPU_BUDGET_SECONDS = 280
 
 
 def _run(
@@ -151,7 +157,7 @@ def _render_once(
             allowedAssets=allowed_assets,
             entryHtml=entry,
             frameCount=frame_count,
-            maxCpuSeconds=budget_seconds,
+            maxCpuSeconds=RENDER_CPU_BUDGET_SECONDS,
             maxDurationSeconds=budget_seconds,
             maxMemoryMegabytes=2048,
             maxOutputBytes=256 * 1024 * 1024,
