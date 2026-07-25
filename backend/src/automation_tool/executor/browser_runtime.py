@@ -62,6 +62,10 @@ class _BrowserContext(Protocol):
     @property
     def pages(self) -> list[_Page]: ...
 
+    def on(self, event: str, handler: Callable[[object], None]) -> None: ...
+
+    def cookies(self) -> list[object]: ...
+
     def set_default_timeout(self, timeout: float) -> None: ...
 
     def set_default_navigation_timeout(self, timeout: float) -> None: ...
@@ -151,6 +155,7 @@ class BrowserRuntime:
         self._owner_thread: int | None = None
         self._context: _BrowserContext | None = None
         self._playwright: _Playwright | None = None
+        self._disconnected = False
 
     def __repr__(self) -> str:
         return "BrowserRuntime(<redacted>)"
@@ -176,6 +181,13 @@ class BrowserRuntime:
         self._owner_thread = get_ident()
         self._context = context
         self._playwright = playwright
+        self._disconnected = False
+        try:
+            context.on("close", self._context_closed)
+        except Exception:
+            # A context without event support degrades to the running checks
+            # below; it never silently keeps a dead browser usable.
+            pass
         if self._diagnostics is not None:
             self._diagnostics.browser_window_available()
 
@@ -259,6 +271,7 @@ class BrowserRuntime:
         self._context = None
         self._playwright = None
         self._owner_thread = None
+        self._disconnected = False
         failed = False
         try:
             context.close(reason="automation-tool.runtime-close")
@@ -276,7 +289,28 @@ class BrowserRuntime:
         self._require_owner_thread()
         if self._context is None or self._playwright is None:
             raise BrowserRuntimeRejected
+        if self._disconnected or not self._context_reachable(self._context):
+            # The browser crashed or the operator closed it: fail closed
+            # instead of handing out a window backed by a dead process.
+            self._disconnected = True
+            self._window_unavailable()
+            raise BrowserRuntimeRejected
         return self._context
+
+    @staticmethod
+    def _context_reachable(context: _BrowserContext) -> bool:
+        """One cheap round trip: cached page handles outlive a dead browser."""
+        probe = getattr(context, "cookies", None)
+        if not callable(probe):
+            return True
+        try:
+            probe()
+        except Exception:
+            return False
+        return True
+
+    def _context_closed(self, _context: object) -> None:
+        self._disconnected = True
 
     def _require_owner_thread(self) -> None:
         if self._owner_thread is not None and self._owner_thread != get_ident():
