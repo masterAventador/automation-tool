@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any, cast
-
-import pytest
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.bounded_scroll import (
@@ -20,17 +17,14 @@ from automation_tool.executor.rpa.douyin.page_version import (
 from automation_tool.executor.rpa.douyin.search import DouyinSearchExecution
 from automation_tool.protocol import DouyinSearchInput
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_discovery_pages"
 HOME_DOCUMENT = (FIXTURE_ROOT / "home.html").read_text(encoding="utf-8")
 RESULT_DOCUMENT = (FIXTURE_ROOT / "results-infinite-scroll.html").read_text(encoding="utf-8")
 
 
 def test_production_search_then_bounded_scroll_uses_headless_browser_and_closes(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("D6-05 system Chrome acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-d6-05-profile"
     profile.mkdir(mode=0o700)
     search = DouyinSearchInput(keyword="新能源汽车", target_limit=3)
@@ -39,7 +33,7 @@ def test_production_search_then_bounded_scroll_uses_headless_browser_and_closes(
 
     with runtime.running(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )
