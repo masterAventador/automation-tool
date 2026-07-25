@@ -152,7 +152,9 @@ def test_real_postgresql_revocation_closes_live_websocket_and_rejects_reconnect(
     credential, installation_id = asyncio.run(prepare())
     app_database = Database.from_url(postgresql_url)
     sessions = DeviceSessionService(
-        repository=SqlAlchemyDeviceSessionRepository(app_database),
+        repository=SqlAlchemyDeviceSessionRepository(
+            app_database, require_installation_owner=False
+        ),
         clock=FixedClock(),
         session_factory=DeviceSessionFactory(
             secret_source=secrets.token_bytes,
@@ -221,7 +223,9 @@ def test_authenticated_websocket_invokes_the_production_action_orchestration_bou
     credential, installation_id = asyncio.run(prepare())
     app_database = Database.from_url(postgresql_url)
     sessions = DeviceSessionService(
-        repository=SqlAlchemyDeviceSessionRepository(app_database),
+        repository=SqlAlchemyDeviceSessionRepository(
+            app_database, require_installation_owner=False
+        ),
         clock=FixedClock(),
         session_factory=DeviceSessionFactory(
             secret_source=secrets.token_bytes,

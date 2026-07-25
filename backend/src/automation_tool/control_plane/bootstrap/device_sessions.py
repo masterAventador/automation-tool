@@ -19,10 +19,17 @@ class _SystemClock:
         return datetime.now(UTC)
 
 
-def device_session_service(database: Database) -> DeviceSessionService:
+def device_session_service(
+    database: Database,
+    *,
+    require_installation_owner: bool,
+) -> DeviceSessionService:
     """Build the session exchange from process-safe runtime dependencies."""
     return DeviceSessionService(
-        repository=SqlAlchemyDeviceSessionRepository(database),
+        repository=SqlAlchemyDeviceSessionRepository(
+            database,
+            require_installation_owner=require_installation_owner,
+        ),
         clock=_SystemClock(),
         session_factory=DeviceSessionFactory(
             secret_source=secrets.token_bytes,

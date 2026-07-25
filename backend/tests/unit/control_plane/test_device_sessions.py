@@ -10,7 +10,10 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from automation_tool.control_plane import create_app
+from automation_tool.control_plane.application.account_sessions import AccountSessionService
 from automation_tool.control_plane.application.device_credentials import (
+    DEVICE_CREDENTIAL_SCOPE,
     DeviceCredentialFactory,
     ParsedDeviceCredential,
 )
@@ -39,6 +42,7 @@ NOW = datetime(2026, 7, 18, 10, 0, tzinfo=UTC)
 SESSION_ID = UUID("9ef928d0-92af-45e5-96ac-cc97829b5812")
 INSTALLATION_ID = UUID("2a10fd92-c36d-4905-9e08-919ad0296bce")
 CREDENTIAL_ID = UUID("ed224c6f-21f5-4587-82fe-a5351e1182e6")
+OWNER_USER_ID = UUID("6f5b4c1a-2d8e-4f3b-9a07-1c2d3e4f5a6b")
 
 
 @dataclass
@@ -330,7 +334,7 @@ async def test_repository_rejects_a_session_removed_during_authentication() -> N
     transaction.__aexit__ = AsyncMock(return_value=None)
     database = MagicMock(spec=Database)
     database.session.return_value = transaction
-    repository = SqlAlchemyDeviceSessionRepository(database)
+    repository = SqlAlchemyDeviceSessionRepository(database, require_installation_owner=False)
     pending = session_factory().create()
 
     with pytest.raises(DeviceSessionRejected):
@@ -339,3 +343,175 @@ async def test_repository_rejects_a_session_removed_during_authentication() -> N
             required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
             authenticated_at=NOW,
         )
+
+
+def authenticating_database(
+    *,
+    pending: PendingDeviceSession,
+    owner_user_id: UUID | None,
+    owner_status: str = "active",
+    authenticated_at: datetime = NOW,
+) -> MagicMock:
+    """Mock exactly the four reads one otherwise valid authentication performs."""
+
+    def result(value: object) -> MagicMock:
+        query_result = MagicMock()
+        query_result.mappings.return_value.one_or_none.return_value = value
+        query_result.mappings.return_value.one.return_value = value
+        return query_result
+
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(
+        side_effect=[
+            result(
+                {
+                    "installation_id": INSTALLATION_ID,
+                    "device_credential_id": CREDENTIAL_ID,
+                }
+            ),
+            result({"owner_user_id": owner_user_id, "status": "active"}),
+            result(
+                {
+                    "id": CREDENTIAL_ID,
+                    "installation_id": INSTALLATION_ID,
+                    "version": 3,
+                    "status": "active",
+                    "scope": DEVICE_CREDENTIAL_SCOPE,
+                }
+            ),
+            result(
+                {
+                    "id": pending.session_id,
+                    "installation_id": INSTALLATION_ID,
+                    "device_credential_id": CREDENTIAL_ID,
+                    "credential_version": 3,
+                    "capability": DeviceSessionCapability.APP_CONTROL_PLANE.value,
+                    "secret_digest": pending.secret_digest,
+                    "not_before": authenticated_at - DEVICE_SESSION_CLOCK_SKEW,
+                    "expires_at": authenticated_at + DEVICE_SESSION_LIFETIME,
+                    "revoked_at": None,
+                }
+            ),
+        ]
+    )
+    session.scalar = AsyncMock(return_value=owner_status)
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=None)
+    database = MagicMock(spec=Database)
+    database.session.return_value = transaction
+    return database
+
+
+@pytest.mark.asyncio
+async def test_repository_rejects_an_unowned_installation_where_ownership_is_required() -> None:
+    pending = session_factory().create()
+    repository = SqlAlchemyDeviceSessionRepository(
+        authenticating_database(pending=pending, owner_user_id=None),
+        require_installation_owner=True,
+    )
+
+    with pytest.raises(DeviceSessionRejected):
+        await repository.authenticate(
+            presented_session=parse_device_session(pending.session_token),
+            required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+            authenticated_at=NOW,
+        )
+
+
+@pytest.mark.asyncio
+async def test_repository_accepts_an_unowned_installation_where_ownership_is_not_required() -> None:
+    pending = session_factory().create()
+    repository = SqlAlchemyDeviceSessionRepository(
+        authenticating_database(pending=pending, owner_user_id=None),
+        require_installation_owner=False,
+    )
+
+    authenticated = await repository.authenticate(
+        presented_session=parse_device_session(pending.session_token),
+        required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+        authenticated_at=NOW,
+    )
+
+    assert authenticated.installation_id == INSTALLATION_ID
+
+
+@pytest.mark.asyncio
+async def test_repository_still_accepts_an_owned_installation_where_ownership_is_required() -> None:
+    pending = session_factory().create()
+    repository = SqlAlchemyDeviceSessionRepository(
+        authenticating_database(pending=pending, owner_user_id=OWNER_USER_ID),
+        require_installation_owner=True,
+    )
+
+    authenticated = await repository.authenticate(
+        presented_session=parse_device_session(pending.session_token),
+        required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+        authenticated_at=NOW,
+    )
+
+    assert authenticated.installation_id == INSTALLATION_ID
+
+
+@pytest.mark.asyncio
+async def test_repository_rejects_a_disabled_owner_where_ownership_is_required() -> None:
+    pending = session_factory().create()
+    repository = SqlAlchemyDeviceSessionRepository(
+        authenticating_database(
+            pending=pending,
+            owner_user_id=OWNER_USER_ID,
+            owner_status="disabled",
+        ),
+        require_installation_owner=True,
+    )
+
+    with pytest.raises(DeviceSessionRejected):
+        await repository.authenticate(
+            presented_session=parse_device_session(pending.session_token),
+            required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+            authenticated_at=NOW,
+        )
+
+
+def test_repository_refuses_an_undecidable_installation_owner_requirement() -> None:
+    with pytest.raises(ValueError, match="Installation owner requirement is invalid"):
+        SqlAlchemyDeviceSessionRepository(
+            MagicMock(spec=Database),
+            require_installation_owner=cast(bool, "true"),
+        )
+
+
+def application_database(pending: PendingDeviceSession, owner_user_id: UUID | None) -> MagicMock:
+    return authenticating_database(
+        pending=pending,
+        owner_user_id=owner_user_id,
+        authenticated_at=datetime.now(UTC),
+    )
+
+
+@pytest.mark.asyncio
+async def test_configured_product_accounts_make_installation_ownership_mandatory() -> None:
+    pending = session_factory().create()
+    app = create_app(
+        database=application_database(pending, None),
+        account_session_service=MagicMock(spec=AccountSessionService),
+    )
+
+    with pytest.raises(DeviceSessionRejected):
+        await app.state.device_session_service.authenticate(
+            session_token=pending.session_token,
+            required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+        )
+
+
+@pytest.mark.asyncio
+async def test_deployments_without_product_accounts_keep_unowned_installations() -> None:
+    pending = session_factory().create()
+    app = create_app(database=application_database(pending, None))
+
+    authenticated = await app.state.device_session_service.authenticate(
+        session_token=pending.session_token,
+        required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
+    )
+
+    assert authenticated.installation_id == INSTALLATION_ID

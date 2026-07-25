@@ -96,7 +96,7 @@ async def seed_active_credential(database: Database) -> tuple[str, InstallationI
 
 def session_service(database: Database, clock: MutableClock) -> DeviceSessionService:
     return DeviceSessionService(
-        repository=SqlAlchemyDeviceSessionRepository(database),
+        repository=SqlAlchemyDeviceSessionRepository(database, require_installation_owner=False),
         clock=clock,
         session_factory=session_factory(),
     )

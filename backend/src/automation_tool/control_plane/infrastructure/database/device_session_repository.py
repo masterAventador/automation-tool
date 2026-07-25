@@ -33,8 +33,17 @@ from automation_tool.control_plane.infrastructure.database.session import Databa
 class SqlAlchemyDeviceSessionRepository:
     """Issue and authenticate digest-only sessions under their live parent credential."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, require_installation_owner: bool) -> None:
+        """Bind one deployment's Installation ownership requirement.
+
+        The requirement has no default: a deployment that carries product
+        accounts must never fall back to accepting an unowned Installation
+        because a caller forgot to state its policy.
+        """
+        if type(require_installation_owner) is not bool:
+            raise ValueError("Installation owner requirement is invalid")
         self._database = database
+        self._require_installation_owner = require_installation_owner
 
     async def issue(
         self,
@@ -113,7 +122,10 @@ class SqlAlchemyDeviceSessionRepository:
             if installation is None or installation["status"] != InstallationStatus.ACTIVE.value:
                 raise DeviceSessionRejected
             owner_user_id = installation["owner_user_id"]
-            if owner_user_id is not None:
+            if owner_user_id is None:
+                if self._require_installation_owner:
+                    raise DeviceSessionRejected
+            else:
                 owner_status = await session.scalar(
                     select(users.c.status).where(users.c.id == owner_user_id).with_for_update()
                 )

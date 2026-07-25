@@ -515,7 +515,9 @@ async def test_account_disable_invalidates_owned_device_exchange_and_live_sessio
             binding_service(database, user_id, clock), device_key, "bind-before-disable"
         )
         sessions = DeviceSessionService(
-            repository=SqlAlchemyDeviceSessionRepository(database),
+            repository=SqlAlchemyDeviceSessionRepository(
+                database, require_installation_owner=False
+            ),
             clock=clock,
             session_factory=DeviceSessionFactory(
                 secret_source=secrets.token_bytes,

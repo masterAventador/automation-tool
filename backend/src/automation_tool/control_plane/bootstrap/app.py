@@ -290,7 +290,15 @@ def create_app(
     if resolved_device_credential_service is None and isinstance(resolved_database, Database):
         resolved_device_credential_service = build_device_credential_service(resolved_database)
     if resolved_device_session_service is None and isinstance(resolved_database, Database):
-        resolved_device_session_service = build_device_session_service(resolved_database)
+        # A deployment that carries product accounts must not let an Installation
+        # reach business APIs without one. Ownership can only exist where accounts
+        # exist, so the same configuration decides both: enabling accounts enables
+        # the requirement, and there is no configuration that enables accounts
+        # while leaving unowned Installations addressable.
+        resolved_device_session_service = build_device_session_service(
+            resolved_database,
+            require_installation_owner=resolved_account_session_service is not None,
+        )
     if resolved_executor_connection_service is None and resolved_device_session_service is not None:
         resolved_executor_connection_service = ExecutorConnectionService(
             resolved_device_session_service

@@ -475,6 +475,8 @@ U9-05 在有效账号 Session 下复用现有两步设备密钥证明：Control 
 
 客户 Demo 不创建匿名设备申请端点，不生成配对码或 poll secret，也不提供后台逐设备审批队列。Demo 账号由认证运维入口创建/恢复，用户登录后客户端自动完成设备绑定；既有 bootstrap 仅保留在受控测试和明确迁移边界，不能用于客户业务 API。
 
+「bootstrap 不能用于客户业务 API」由设备 Session 认证本身强制，不依赖调用方自觉。部署是否要求 Installation 有账号归属，直接由该部署是否装配产品账号决定：账号 Pepper、Pepper 版本与账号指纹密钥三项齐备时账号体系成立，同一份配置同时把归属要求打开；`owner_user_id` 为空的 Installation 在 `app.control-plane` 与 `executor.connect` 每次认证时统一拒绝，与账号停用共享同一固定拒绝语义，不回显归属信息、账号标识或内部路径。本地单机部署没有账号体系，归属无从建立，同一条代码路径按同一配置判定为不要求，P9 本地 MVP 行为不变。归属要求没有独立开关，因此不存在「装配了账号却仍允许无归属 Installation」的配置组合；判定值不可省略，缺失即构建失败而不是放行。
+
 U9-01 的权威机器契约为 `contracts/security/account-threat-model-v1.json`。首版账号只使用不可变、大小写不敏感的 canonical `login_name`，不为 Demo 强制收集邮箱或手机号；账号只能由与终端用户认证分离的运维 capability 创建，状态封闭为 `active/locked/disabled`，不提供匿名注册、账号硬删除或用户自报角色。密码使用 Argon2id、每条唯一 salt 和数据库外 Pepper，明文密码不持久化；用户正常修改必须证明当前密码，遗忘恢复只能由运维完成产品外身份核验后签发 15 分钟、256-bit、digest-only、单次消费的 reset token，不开放可枚举账号的公开“找回申请”端点。
 
 产品 Session 固定为 opaque access/refresh 两类：access 最长 10 分钟，refresh 绝对最长 30 天且每次旋转单次使用；服务端只保存摘要并在每次使用时复验账号状态、凭据版本和 Session 状态，refresh 重放吊销整个 family。密码修改、密码重置和账号停用递增凭据版本并吊销全部产品 Session；账号停用还阻止登录、refresh、设备 Session 换票与业务访问。App 只经 Authorization header 发送产品能力，不使用浏览器 Cookie；Rust 私有存储持有 secret，React/Tauri IPC 只接收安全账号投影。
