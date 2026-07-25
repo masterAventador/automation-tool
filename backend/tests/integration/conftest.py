@@ -86,3 +86,37 @@ def postgresql_url() -> Iterator[str]:
         repository_root=REPOSITORY_ROOT,
     ):
         yield database_url
+
+
+sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
+from build_embedded_chromium_staging import (  # noqa: E402
+    build_staging,
+    load_staging_contract,
+)
+from run_bm_04_acceptance import current_target_id  # noqa: E402
+from run_bm_08_acceptance import CHROMIUM_CONTRACT, DEFAULT_ARCHIVES  # noqa: E402
+
+
+@pytest.fixture(scope="session")
+def staged_embedded_chromium(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The digest-verified staged embedded Chromium from the EB-03 cache.
+
+    Tests depending on this fixture never fall back to a system browser; a
+    missing archive cache skips instead of downloading anything.
+    """
+    target_id = current_target_id()
+    archive = DEFAULT_ARCHIVES.get(target_id)
+    if archive is None or not archive.is_file():
+        pytest.skip("embedded Chromium archive cache is unavailable")
+    contract = load_staging_contract(CHROMIUM_CONTRACT)
+    target = contract.targets[target_id]
+    if not target.buildable:
+        pytest.skip(f"embedded Chromium target is not buildable: {target_id}")
+    result = build_staging(
+        contract=contract,
+        target_id=target_id,
+        archive_path=archive.resolve(strict=True),
+        archive_sha256=target.archive_sha256,
+        output=tmp_path_factory.mktemp("automation-tool-eb11-chromium") / "staging",
+    )
+    return (result.output / Path(*target.executable.split("/"))).resolve(strict=True)
