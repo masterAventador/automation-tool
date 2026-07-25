@@ -5,7 +5,7 @@ from __future__ import annotations
 import signal
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -46,7 +46,9 @@ from automation_tool.executor.discovery_operation import ProductionDouyinDiscove
 from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
 from automation_tool.executor.platform_commands import (
     DouyinLoginCommandOperation,
+    DouyinPublishPreflightCommandOperation,
     PlatformCommandRejected,
+    PlatformCommandRouter,
     PlatformCommandWorker,
 )
 from automation_tool.executor.rpa.douyin.health import DouyinSessionHealthReporter
@@ -82,6 +84,34 @@ def stop_signal_event() -> Iterator[threading.Event]:
         signal.signal(signal.SIGTERM, previous_term)
         if isinstance(break_signal, int) and previous_break is not None:
             signal.signal(break_signal, previous_break)
+
+
+def build_platform_command_router(
+    *,
+    ledger: ExecutorLedger,
+    browser_authority: BrowserLaunchAuthority,
+    local_outbox: Queue[object],
+    runtime_factory: Callable[[], BrowserRuntime],
+) -> PlatformCommandRouter:
+    """Assemble the production command router shared by the executor and its tests.
+
+    ``local_outbox`` is drained straight onto the Control Plane socket and only
+    accepts protocol envelopes. The publish preflight has no Control Plane
+    message of its own yet, so it publishes nothing there and exposes its last
+    outcome through ``latest_receipt()``; PB-07 adds the App-facing projection.
+    """
+    return PlatformCommandRouter(
+        login=DouyinLoginCommandOperation(
+            health_reporter=DouyinSessionHealthReporter(ledger=ledger),
+            outbound=local_outbox,
+            browser_authority=browser_authority,
+            runtime_factory=runtime_factory,
+        ),
+        publish=DouyinPublishPreflightCommandOperation(
+            browser_authority=browser_authority,
+            runtime_factory=runtime_factory,
+        ),
+    )
 
 
 def _fixed_error(error: TextIO, message: str) -> None:
@@ -167,10 +197,10 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
             platform_worker = PlatformCommandWorker(
                 input_stream=stdin,
                 authenticator=authenticator,
-                operation=DouyinLoginCommandOperation(
-                    health_reporter=DouyinSessionHealthReporter(ledger=ledger),
-                    outbound=local_outbox,
+                operation=build_platform_command_router(
+                    ledger=ledger,
                     browser_authority=browser_authority,
+                    local_outbox=local_outbox,
                     runtime_factory=lambda: BrowserRuntime(
                         diagnostics=recovery_diagnostics,
                     ),

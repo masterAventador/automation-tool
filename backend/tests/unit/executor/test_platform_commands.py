@@ -115,6 +115,7 @@ def test_result_is_exact_authenticated_and_contains_no_local_path() -> None:
         authenticator,
         command_id=COMMAND_ID,
         state="awaiting_scan",
+        command_type="douyin.login.open",
     )
 
     result = json.loads(output.getvalue())
@@ -381,7 +382,13 @@ def test_worker_validates_dependencies_stop_writer_and_close_failures() -> None:
         operation=Operation(),
         result_writer=lambda **value: written.append(value),
     ).run(threading.Event())
-    assert written == [{"command_id": COMMAND_ID, "state": "awaiting_scan"}]
+    assert written == [
+        {
+            "command_id": COMMAND_ID,
+            "state": "awaiting_scan",
+            "command_type": "douyin.login.open",
+        }
+    ]
 
     with pytest.raises(PlatformCommandRejected):
         PlatformCommandWorker(
@@ -649,6 +656,7 @@ def test_reader_and_result_writer_fail_closed_on_invalid_io_and_oversized_output
             authenticator,
             command_id=COMMAND_ID,
             state="logged_out",
+            command_type="douyin.logout.complete",
         )
 
     monkeypatch.setattr(
@@ -662,4 +670,5 @@ def test_reader_and_result_writer_fail_closed_on_invalid_io_and_oversized_output
             authenticator,
             command_id=COMMAND_ID,
             state="logged_out",
+            command_type="douyin.logout.complete",
         )

@@ -490,6 +490,41 @@ Windows 侧待补（需真实 Windows 环境）：
    强制跑摘要门禁"这条关键机制用例——仍会真实执行。记录实际 skip 数；
 8. 通过后更新 `docs/development/EB-16.md` 遗留项。
 
+### 18. PB-05 抖音发布前流程 Windows 待补
+
+PB-05 已在 macOS 用真实 staged 内置 Chromium、真实持久运营 Profile、真实租约与真实
+`PlatformCommandWorker` 命令帧走通抖音发布前整链（打开发布页 → 受控上传 Artifact →
+填写标题简介 → 停在提交前），并在真实浏览器上覆盖登录失效、验证码/滑块/风控、遮罩、
+页面改版、发布按钮未激活与 Browser Use 接管期拒绝六类失败。入口
+`cd backend && uv run pytest tests/integration/test_douyin_publish_embedded_browser.py`。
+
+本任务的新增测试复用仓库既有的跨平台 helper，不自建第四份：Profile 私有性走
+`conftest.assert_private_profile_directory()`（Windows 上由 `browser_profiles_windows.rs`
+的受保护 DACL 保证，不用 `st_mode & 0o777`），Profile 创建走
+`create_private_profile_directory()`，进程查找与强杀走 `process_ids_matching()` /
+`terminate_process()`（Windows 走 CIM + `taskkill /F`，不用 `pgrep` / `SIGKILL`）。
+
+两处平台能力差异用显式 skip 标注而不是假装通过：`chmod(0o000)` 构造不可读文件、
+以及创建 symlink，都是 POSIX 专有能力，在 Windows 上分别只置只读属性、需要开发者
+模式；对应用例带 `skipif` / 能力探测 skip，Windows 侧的等价保证由 ACL 与 reparse
+point 判据覆盖。
+
+Windows 侧待补：
+
+- 同一套集成测试在 Windows staged 内置 Chromium 上重跑（22/22），确认
+  `set_input_files` 的 Windows 路径语义与真实上传一致、`assert_private_profile` 的
+  ACL 分支在真机通过；
+- Artifact 边界的 Windows 专属项：reparse point、`.mp4` 大小写扩展名、NTFS 硬链接
+  计数与拒绝读取权限在 Windows 上重验。symlink 用例在 Windows 需要开发者模式而被
+  跳过，**junction（`mklink /J`）不需要开发者模式**，Windows 侧用 junction 覆盖
+  reparse point 判据更容易；`chmod(0o000)` 那条不可读用例在 Windows 上没有等价
+  构造，需用 ACL 拒绝读取来覆盖；
+- `page_anchors` 的可见性探测（`visible=true`）在 Windows staged Chromium 上重跑
+  隐藏占位与真实挑战两条回归。
+
+真实抖音发布页与平台最终状态另标 🔍 待真实账号，不属 Windows 会话职责。通过后更新
+`docs/development/PB-05.md` 遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；

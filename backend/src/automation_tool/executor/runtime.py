@@ -155,7 +155,7 @@ class ExecutorProcessReporter:
     def stopped(self) -> None:
         self._write("executor.stopped")
 
-    def platform_command_result(self, *, command_id: str, state: str) -> None:
+    def platform_command_result(self, *, command_id: str, state: str, command_type: str) -> None:
         from automation_tool.executor.platform_commands import (
             write_platform_command_result,
         )
@@ -167,6 +167,7 @@ class ExecutorProcessReporter:
                     self._authenticator,
                     command_id=command_id,
                     state=state,
+                    command_type=command_type,
                 )
         except Exception:
             raise ExecutorProcessRejected from None

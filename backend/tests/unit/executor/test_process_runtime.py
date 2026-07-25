@@ -70,6 +70,7 @@ def test_reporter_writes_authenticated_platform_results_and_fails_closed() -> No
     process_reporter.platform_command_result(
         command_id="123e4567-e89b-42d3-a456-426614174005",
         state="logged_out",
+        command_type="douyin.logout.complete",
     )
 
     result = json.loads(output.getvalue())
@@ -84,6 +85,7 @@ def test_reporter_writes_authenticated_platform_results_and_fails_closed() -> No
         ExecutorProcessReporter(FailingOutput(), authenticator()).platform_command_result(
             command_id="123e4567-e89b-42d3-a456-426614174005",
             state="logged_out",
+            command_type="douyin.logout.complete",
         )
 
 

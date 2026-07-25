@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>automation-tool publish fixture</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.__submitClicks = 0;
+      window.__uploadedFileName = null;
+      window.__uploadedSize = null;
+      window.__state = "__INITIAL_STATE__";
+
+      const UPLOAD_ROUTE = "/creator-micro/content/upload";
+      const FORM_ROUTE = "/creator-micro/content/post/video";
+
+      function element(tag, attributes, text) {
+        const node = document.createElement(tag);
+        for (const [name, value] of Object.entries(attributes || {})) {
+          if (value === true) {
+            node.setAttribute(name, "");
+          } else if (value !== false && value !== null) {
+            node.setAttribute(name, value);
+          }
+        }
+        if (text) {
+          node.textContent = text;
+        }
+        return node;
+      }
+
+      function accountNode() {
+        return element(
+          "div",
+          { "data-e2e": "publish-account-name" },
+          "自动化运营测试账号"
+        );
+      }
+
+      function challengeNode(state) {
+        if (state === "captcha") {
+          return element("iframe", {
+            src: "https://rmc.bytedance.com/verifycenter/captcha/automation-tool-fixture",
+            title: "captcha",
+          });
+        }
+        return element(
+          "div",
+          { "data-e2e": "captcha-container" },
+          state === "slider" ? "请完成滑块验证" : "账号存在风险，请人工验证"
+        );
+      }
+
+      function uploadNode(root) {
+        const input = element("input", {
+          type: "file",
+          accept: "video/mp4,video/quicktime",
+          "data-e2e": "publish-artifact-input",
+        });
+        input.addEventListener("change", () => {
+          const file = input.files && input.files[0];
+          if (!file) {
+            return;
+          }
+          window.__uploadedFileName = file.name;
+          window.__uploadedSize = file.size;
+          history.pushState({}, "", FORM_ROUTE);
+          render();
+        });
+        root.appendChild(input);
+      }
+
+      function formNode(root) {
+        const state = window.__state;
+        const title = element("input", {
+          type: "text",
+          "data-e2e": "publish-title-input",
+          placeholder: "填写作品标题",
+        });
+        const description = element("textarea", {
+          "data-e2e": "publish-description-input",
+          placeholder: "添加作品简介",
+        });
+        const submit = element(
+          "button",
+          { type: "button", "data-e2e": "publish-submit", disabled: true },
+          "发布"
+        );
+        submit.addEventListener("click", () => {
+          window.__submitClicks += 1;
+        });
+        function refresh() {
+          const armed =
+            state !== "submit-locked" &&
+            title.value.trim().length > 0 &&
+            description.value.trim().length > 0;
+          if (armed) {
+            submit.removeAttribute("disabled");
+          } else {
+            submit.setAttribute("disabled", "");
+          }
+        }
+        title.addEventListener("input", refresh);
+        description.addEventListener("input", refresh);
+        if (state !== "form-drift") {
+          root.appendChild(title);
+        }
+        root.appendChild(description);
+        root.appendChild(submit);
+        refresh();
+      }
+
+      function render() {
+        const root = document.getElementById("root");
+        root.textContent = "";
+        const state = window.__state;
+        const path = location.pathname;
+        if (state === "login-expired") {
+          root.appendChild(
+            element("div", { "data-e2e": "login-panel" }, "登录已过期，请扫码登录")
+          );
+          return;
+        }
+        if (state === "captcha" || state === "slider" || state === "risk") {
+          root.appendChild(challengeNode(state));
+          return;
+        }
+        if (state === "mask") {
+          root.appendChild(
+            element("div", { "data-e2e": "publish-guide-mask" }, "新手引导遮罩")
+          );
+          return;
+        }
+        if (state === "hidden-challenge-first") {
+          // A pre-rendered hidden challenge placeholder precedes the real,
+          // visible one; a first-match-only probe would miss the real one.
+          const placeholder = element("div", {
+            "data-e2e": "captcha-container",
+            style: "display:none",
+          });
+          root.appendChild(placeholder);
+          root.appendChild(
+            element("div", { "data-e2e": "captcha-container" }, "请完成滑块验证")
+          );
+        }
+        if (state === "hidden-mask-first") {
+          const placeholder = element("div", {
+            "data-e2e": "publish-guide-mask",
+            style: "display:none",
+          });
+          root.appendChild(placeholder);
+          root.appendChild(
+            element("div", { "data-e2e": "publish-guide-mask" }, "新手引导遮罩")
+          );
+        }
+        root.appendChild(accountNode());
+        if (path === UPLOAD_ROUTE) {
+          if (state !== "entry-drift") {
+            uploadNode(root);
+          }
+          return;
+        }
+        if (path === FORM_ROUTE && state !== "no-form") {
+          formNode(root);
+        }
+      }
+
+      window.setState = function (state) {
+        window.__state = state;
+        render();
+      };
+
+      render();
+    </script>
+  </body>
+</html>

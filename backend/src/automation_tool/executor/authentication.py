@@ -11,6 +11,7 @@ from uuid import RFC_4122, UUID
 from pydantic import SecretStr
 
 from automation_tool.protocol import EXECUTOR_PROTOCOL_VERSION
+from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 _LOCAL_SESSION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-event.v1\0"
@@ -19,8 +20,11 @@ _ALLOWED_EVENTS = frozenset(("executor.healthy", "executor.stopped"))
 _COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-command.v1\0"
 _COMMAND_RESULT_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-result.v1\0"
 _COMMAND_PROOF_PREFIX = "atlcp1."
+_PUBLISH_COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-publish-command.v1\0"
 _ALLOWED_COMMANDS = frozenset(("douyin.login.open", "douyin.login.recheck"))
-_ALLOWED_SESSION_COMMANDS = frozenset(("douyin.logout.complete",))
+_ALLOWED_SESSION_COMMANDS = frozenset(("douyin.logout.complete", "douyin.publish.release"))
+_ALLOWED_PUBLISH_COMMANDS = frozenset(("douyin.publish.preflight",))
+_MAX_PUBLISH_TEXT_CHARACTERS = 4096
 _ALLOWED_COMMAND_RESULTS = frozenset(
     (
         "login_required",
@@ -31,6 +35,10 @@ _ALLOWED_COMMAND_RESULTS = frozenset(
         "handoff_required",
         "unknown",
         "logged_out",
+        "publish_pre_submit_ready",
+        "publish_handoff_required",
+        "publish_blocked",
+        "publish_released",
     )
 )
 
@@ -125,6 +133,77 @@ class LocalSessionAuthenticator:
         if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
             raise LocalSessionAuthenticationRejected
 
+    def proof_for_publish_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        executable_path: str,
+        profile_directory: str,
+        headless: bool,
+        publish_job_id: str,
+        artifact_path: str,
+        title: str,
+        description: str,
+    ) -> str:
+        """Bind the browser identity, artifact and user text into one publish proof."""
+        _require_uuid_v4(command_id)
+        _require_uuid_v4(publish_job_id)
+        if (
+            type(command_type) is not str
+            or command_type not in _ALLOWED_PUBLISH_COMMANDS
+            or not _bounded_text(executable_path)
+            or not _bounded_text(profile_directory)
+            or not _bounded_text(artifact_path)
+            or not _bounded_text(title)
+            or not _bounded_text(description)
+            or type(headless) is not bool
+        ):
+            raise LocalSessionAuthenticationRejected
+        return self._proof(
+            _PUBLISH_COMMAND_AUTHENTICATION_DOMAIN,
+            (
+                command_id,
+                command_type,
+                executable_path,
+                profile_directory,
+                "1" if headless else "0",
+                publish_job_id,
+                artifact_path,
+                title,
+                description,
+                EXECUTOR_PROTOCOL_VERSION,
+            ),
+        )
+
+    def verify_publish_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        executable_path: str,
+        profile_directory: str,
+        headless: bool,
+        publish_job_id: str,
+        artifact_path: str,
+        title: str,
+        description: str,
+        presented_proof: str,
+    ) -> None:
+        expected = self.proof_for_publish_command(
+            command_id=command_id,
+            command_type=command_type,
+            executable_path=executable_path,
+            profile_directory=profile_directory,
+            headless=headless,
+            publish_job_id=publish_job_id,
+            artifact_path=artifact_path,
+            title=title,
+            description=description,
+        )
+        if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
+            raise LocalSessionAuthenticationRejected
+
     def proof_for_session_command(self, *, command_id: str, command_type: str) -> str:
         _require_uuid_v4(command_id)
         if type(command_type) is not str or command_type not in _ALLOWED_SESSION_COMMANDS:
@@ -182,6 +261,15 @@ def _require_uuid_v4(value: object) -> None:
         raise LocalSessionAuthenticationRejected from None
 
 
+def _bounded_text(value: object) -> bool:
+    """Reject control characters so no field can impersonate the proof separator."""
+    return (
+        type(value) is str
+        and 1 <= len(value) <= _MAX_PUBLISH_TEXT_CHARACTERS
+        and not contains_control_or_bidi(value)
+    )
+
+
 def _require_command_fields(
     *,
     command_id: str,
@@ -194,12 +282,8 @@ def _require_command_fields(
     if (
         type(command_type) is not str
         or command_type not in _ALLOWED_COMMANDS
-        or type(executable_path) is not str
-        or not executable_path
-        or len(executable_path) > 4096
-        or type(profile_directory) is not str
-        or not profile_directory
-        or len(profile_directory) > 4096
+        or not _bounded_text(executable_path)
+        or not _bounded_text(profile_directory)
         or type(headless) is not bool
     ):
         raise LocalSessionAuthenticationRejected

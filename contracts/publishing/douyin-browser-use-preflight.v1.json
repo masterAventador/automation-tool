@@ -1,0 +1,35 @@
+{
+  "version": "douyin.browser-use-preflight.v1",
+  "platform": "douyin",
+  "agentMechanism": "browser_use",
+  "preflightImplementation": "deterministic_playwright",
+  "stopBeforeSubmit": true,
+  "surface": {
+    "host": "creator.douyin.com",
+    "entryUrl": "https://creator.douyin.com/creator-micro/content/upload",
+    "uploadRoute": "/creator-micro/content/upload",
+    "formRoute": "/creator-micro/content/post/video"
+  },
+  "agent": {
+    "allowedDomains": [
+      "https://creator.douyin.com"
+    ],
+    "allowedRoutePrefixes": [
+      "/creator-micro/content"
+    ],
+    "maxSteps": 30,
+    "maxActionsPerStep": 3,
+    "stepTimeoutSeconds": 120
+  },
+  "artifact": {
+    "maximumBytes": 4294967296,
+    "mediaTypes": {
+      "mov": "video/quicktime",
+      "mp4": "video/mp4"
+    }
+  },
+  "content": {
+    "titleMaximumCharacters": 30,
+    "descriptionMaximumCharacters": 1000
+  }
+}
