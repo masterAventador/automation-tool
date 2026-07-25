@@ -213,7 +213,7 @@ export function AppUpdateCenter({ gateway, showSettings }: AppUpdateCenterProps)
               <Space orientation="vertical" size={2}>
                 <Typography.Title level={3}>App 更新</Typography.Title>
                 <Typography.Text type="secondary">
-                  stable 通道；检查、下载、验签和安装都由 App 的 Rust 更新服务完成。
+                  稳定版通道；检查、下载、验签和安装都由 App 内置的更新服务完成。
                 </Typography.Text>
               </Space>
               <Tag color={stateColor(state)}>{statusText(state)}</Tag>

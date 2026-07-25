@@ -1,4 +1,5 @@
 import { App as AntDesignApp, ConfigProvider, Space } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 
 import { desktopQueryClient } from "./query-client";
@@ -105,6 +106,7 @@ export function App({
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider
+        locale={zhCN}
         theme={{
           token: {
             colorPrimary: "#2f6fed",

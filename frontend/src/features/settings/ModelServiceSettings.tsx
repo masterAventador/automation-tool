@@ -65,7 +65,7 @@ function quotaText(connection: ModelConnectionSnapshot): string {
     values.push(`剩余请求 ${connection.quota.remainingRequests.toLocaleString("zh-CN")} 次`);
   }
   if (connection.quota.remainingTokens !== null) {
-    values.push(`剩余 Token ${connection.quota.remainingTokens.toLocaleString("zh-CN")}`);
+    values.push(`剩余用量 ${connection.quota.remainingTokens.toLocaleString("zh-CN")}`);
   }
   return values.length === 0 ? "连接成功；服务未返回可用额度。" : `连接成功；${values.join("，")}。`;
 }
@@ -135,7 +135,7 @@ export function ModelServiceSettings({ gateway }: ModelServiceSettingsProps) {
     if (apiKey.length === 0) {
       setPurposeFailure((current) => ({
         ...current,
-        [purpose]: "请输入新的阿里百炼 API Key。已保存的密钥不会回显。",
+        [purpose]: "请输入新的阿里百炼 API Key（接口密钥）。已保存的密钥不会回显。",
       }));
       return;
     }
@@ -194,7 +194,7 @@ export function ModelServiceSettings({ gateway }: ModelServiceSettingsProps) {
             />
           </label>
           <label>
-            <Typography.Text>阿里百炼 API Key</Typography.Text>
+            <Typography.Text>阿里百炼 API Key（接口密钥）</Typography.Text>
             <Input.Password
               aria-label={`${copy.title} API Key`}
               autoComplete="new-password"

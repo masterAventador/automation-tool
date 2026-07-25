@@ -112,7 +112,7 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
       await waitForRenderedText(
         "RPA 运营工作台",
         taskId ?? "",
-        "Executor 在线",
+        "本机执行器在线",
         "运行中",
       );
       await browser.$(`button=${taskId ?? ""}`).click();
@@ -151,13 +151,13 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
         const body = await browser.$("body").getText();
         return (
           (await retry.isExisting()) ||
-          (body.includes(taskId) && body.includes("Executor 在线") && body.includes("运行中"))
+          (body.includes(taskId) && body.includes("本机执行器在线") && body.includes("运行中"))
         );
       },
       { timeout: 120_000, timeoutMsg: "H8-04 workbench did not restore its snapshot" },
     );
     if (await retry.isExisting()) await retry.click();
-    await waitForRenderedText("RPA 运营工作台", taskId, "Executor 在线", "运行中");
+    await waitForRenderedText("RPA 运营工作台", taskId, "本机执行器在线", "运行中");
     await browser.$(`button=${taskId}`).click();
     await waitForRenderedText(
       "任务运行详情",

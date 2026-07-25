@@ -14,7 +14,9 @@ describe("VF-06 production App video studio acceptance", () => {
     await expect(studio).toBeDisplayed();
     await expect(await studio.$("button=打开完整制作界面")).not.toBeEnabled();
     await expect(studio).toHaveText(
-      expect.stringContaining("选择“智能素材成片”后可打开完整制作界面"),
+      expect.stringContaining(
+        "“智能素材成片”在独立完整界面制作；“品牌动效成片”在当前 App 内编辑和预览。",
+      ),
     );
 
     const pages = [

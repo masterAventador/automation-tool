@@ -18,7 +18,7 @@ const DIAGNOSTICS: Record<
     description: "此设备的演示授权已被吊销或失效，请联系演示管理员重新授权。",
   },
   control_plane_unavailable: {
-    title: "Control Plane 不可用",
+    title: "控制服务不可用",
     description: "请检查本地服务或网络；诊断不会显示连接凭据或底层异常。",
   },
   executor_configuration_required: {
@@ -138,7 +138,7 @@ export function StartupGate({ startupCheck, repairTools, children }: StartupGate
           revoked
             ? "重新授权前不会启动业务功能；本机检查结果仍会安全列出。"
             : onlyControlPlane
-              ? "桌面应用已启动，但 Control Plane 当前不可用。请检查本地服务或网络后重试。"
+              ? "桌面应用已启动，但控制服务当前不可用。请检查本地服务或网络后重试。"
               : "业务功能保持关闭，处理下面的本机环境问题后重新检查。"
         }
         extra={

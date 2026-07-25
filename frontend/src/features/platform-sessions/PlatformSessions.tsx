@@ -130,7 +130,7 @@ export function PlatformSessions({
     <Card className="platform-session-card" title="抖音">
       <Space orientation="vertical" size="middle" className="platform-session-stack">
         <Typography.Text type="secondary">
-          App 使用独立运营 Profile；登录与人工处理在系统浏览器窗口完成，状态由本机执行器检查并回报服务端。
+          App 使用独立运营浏览器档案；登录与人工处理在系统浏览器窗口完成，状态由本机执行器检查并回报服务端。
         </Typography.Text>
         {failure ? (
           <Alert type="error" showIcon title="暂时无法读取抖音登录状态，请稍后重试。" />
@@ -171,7 +171,7 @@ export function PlatformSessions({
           </Button>
           <Popconfirm
             title="确定安全注销抖音吗？"
-            description="将停止本机抖音任务并删除此 App 专用的抖音登录 Profile。"
+            description="将停止本机抖音任务并删除此 App 专用的抖音登录浏览器档案。"
             okText="确认注销"
             cancelText="取消"
             onConfirm={() => logout()}

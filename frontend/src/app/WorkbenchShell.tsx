@@ -362,7 +362,7 @@ export function WorkbenchShell({
           </div>
           <Space orientation="vertical" size={0}>
             <Typography.Text strong>自动化运营工具</Typography.Text>
-            <Typography.Text className="brand-caption">RPA 运营</Typography.Text>
+            <Typography.Text className="brand-caption">自动替你操作网页</Typography.Text>
           </Space>
         </Flex>
         <nav aria-label="桌面主导航">
@@ -392,7 +392,7 @@ export function WorkbenchShell({
 
       <Layout>
         <Layout.Header className="desktop-header">
-          <Typography.Text type="secondary">抖音运营 MVP</Typography.Text>
+          <Typography.Text type="secondary">抖音运营</Typography.Text>
           <Tag color="blue">本机桌面模式</Tag>
         </Layout.Header>
         <Layout.Content className="desktop-content">
@@ -427,7 +427,7 @@ export function WorkbenchShell({
                       ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
-                    : "从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
+                    : "RPA 就是自动替你操作网页：从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
                 </Typography.Text>
               </Space>
               <Tag variant="filled" color="green">

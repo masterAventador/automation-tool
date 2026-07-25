@@ -127,8 +127,8 @@ describe("RPA workbench", () => {
   it("renders authoritative runtime, current Task, metrics, and recent Tasks", async () => {
     renderWorkbench();
 
-    expect(await screen.findByText("Control Plane 已连接")).toBeVisible();
-    expect(screen.getByText("Executor 在线")).toBeVisible();
+    expect(await screen.findByText("控制服务已连接")).toBeVisible();
+    expect(screen.getByText("本机执行器在线")).toBeVisible();
     expect(screen.getByRole("heading", { name: "当前任务" })).toBeVisible();
     expect(screen.getAllByText("运行中")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "最近任务" })).toBeVisible();
@@ -159,7 +159,7 @@ describe("RPA workbench", () => {
     const user = userEvent.setup();
     renderWorkbench(source(), workbenchGateway);
 
-    await screen.findByText("Executor 在线");
+    await screen.findByText("本机执行器在线");
     await user.click(screen.getByRole("button", { name: "全局紧急停止" }));
     await user.click(screen.getByRole("button", { name: "确认紧停" }));
 
@@ -187,7 +187,7 @@ describe("RPA workbench", () => {
     const user = userEvent.setup();
     renderWorkbench(source(), workbenchGateway);
 
-    await screen.findByText("Executor 在线");
+    await screen.findByText("本机执行器在线");
     for (const notice of ["紧停结果暂时无法确认，请查看任务状态", "紧停命令已提交"]) {
       await user.click(screen.getByRole("button", { name: "全局紧急停止" }));
       await user.click(screen.getByRole("button", { name: "确认紧停" }));

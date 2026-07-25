@@ -297,7 +297,7 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
           <Space orientation="vertical" size={4}>
             <Typography.Title level={2}>登录自动化运营工具</Typography.Title>
             <Typography.Text type="secondary">
-              客户 Demo 需要产品账号；平台扫码登录将在进入工作台后单独处理。
+              客户演示版需要产品账号；平台扫码登录将在进入工作台后单独处理。
             </Typography.Text>
           </Space>
           {state.notice === undefined ? null : (

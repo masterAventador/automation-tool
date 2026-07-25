@@ -179,9 +179,9 @@ export function Workbench({
   return (
     <Space className="workbench-content" orientation="vertical" size={16}>
       <Flex className="runtime-status-row" wrap gap={10}>
-        <Tag color="green">Control Plane 已连接</Tag>
+        <Tag color="green">控制服务已连接</Tag>
         <Tag color={runtime.data.executorStatus === "online" ? "green" : "default"}>
-          {runtime.data.executorStatus === "online" ? "Executor 在线" : "Executor 离线"}
+          {runtime.data.executorStatus === "online" ? "本机执行器在线" : "本机执行器离线"}
         </Tag>
       </Flex>
 
@@ -244,7 +244,7 @@ export function Workbench({
             </Button>
             <Popconfirm
               title="确认紧急停止当前任务？"
-              description="命令提交后仍以 Executor 返回的最终事实为准。"
+              description="命令提交后仍以本机执行器返回的最终事实为准。"
               okText="确认紧停"
               cancelText="继续运行"
               onConfirm={() => latestCurrent !== null && emergencyStop.mutate(latestCurrent)}

@@ -362,6 +362,22 @@ EB-15 已在 macOS 完成进程树拆除、Profile 解锁重启、外部强杀 f
 强杀改用 Windows 语义（无 pgrep/SIGKILL），Profile 锁释放与 headed 窗口接管在
 Windows staged 内置 Chromium 上重跑。通过后更新 `docs/development/EB-15.md` 遗留项。
 
+### 16. CQ-01 普通用户可理解性 Windows 待补
+
+CQ-01 已在 macOS 用隐藏 `video-studio-e2e` 测试 App 按左侧菜单真实路径完成验收：
+工作台 → 视频制作（两张制作方式卡片各 10 项必答说明、两者“最适合”互不相同）→
+动效零件（选“智能素材成片”时只给出归属说明，选“品牌动效成片”时给出 134 项目录并逐卡
+断言中文“适用”说明）→ 制作设置（12 套整体画面风格卡片数为 12）→ 视频剪辑（独立模块、
+空状态无 `No data`）→ 设置与诊断/平台状态/新建任务（无未解释行业词、无原始状态码），
+入口 `python3.12 scripts/run_cq_01_acceptance.py`（需 3.10+）。Windows 侧待补：同脚本在
+Windows 隐藏测试 App 上重跑，重点确认 antd 中文 locale 生效、系统中文字体回退后卡片必答项
+与概念区分文案不被截断或换行吞掉；以及正式安装包内同一批文案的显示。此外
+`控制服务`、`本机执行器`、`本机安装授权`、`剩余用量`、`客户演示版` 五处改名所影响的
+`control-plane-recovery`、`network-recovery`、`task-restart`、`app-crash-recovery`、
+`workbench-control`、`workbench-metrics`、`executor-crash-recovery`、`task-run`、
+`model-service` 真实 App 用例需在具备真实 Control Plane/PostgreSQL 的环境重跑。
+通过后更新 `docs/development/CQ-01.md` 遗留项并评估 `🔍 待验收` 闭合。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；

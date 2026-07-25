@@ -17,6 +17,51 @@
       "example": "输入一次产品更新，按品牌颜色生成标题、功能界面、数据和转场动画"
     }
   ],
+  "videoCreationMethodCardLabels": [
+    "最适合",
+    "不适合",
+    "举个例子",
+    "外部服务",
+    "本机处理",
+    "预计耗时",
+    "设备占用",
+    "临时磁盘",
+    "网络消耗",
+    "数据与隐私"
+  ],
+  "conceptDistinctions": [
+    {
+      "id": "video_creation_methods",
+      "displayName": "两种视频制作方式",
+      "sourceFile": "frontend/src/features/video-studio/VideoStudio.tsx",
+      "requiredCopy": [
+        "智能素材成片",
+        "品牌动效成片",
+        "选择制作方式",
+        "动效零件只属于“品牌动效成片”"
+      ],
+      "requiredCopyFrom": "videoCreationMethodCardLabels"
+    },
+    {
+      "id": "motion_style_catalog",
+      "displayName": "12 套整体画面风格",
+      "sourceFile": "frontend/src/features/video-studio/MotionStyleCatalog.tsx",
+      "requiredCopy": ["整体画面风格", "查看全部 12 套风格"]
+    },
+    {
+      "id": "motion_parts_catalog",
+      "displayName": "134 个动效零件",
+      "sourceFile": "frontend/src/features/video-studio/MotionPartsCatalog.tsx",
+      "requiredCopy": ["动效零件目录（134 项）", "动效零件与 12 套整体风格不同"]
+    },
+    {
+      "id": "video_editing_module",
+      "displayName": "独立视频剪辑模块",
+      "sourceFile": "frontend/src/app/WorkbenchShell.tsx",
+      "requiredCopy": ["视频剪辑", "独立于视频制作"]
+    }
+  ],
+  "partsCatalogProjection": "contracts/video/motion-catalog-ui.v1.json",
   "plainLanguageMappings": {
     "B-roll": "补充画面",
     "PoC": "前期验证",
@@ -28,8 +73,100 @@
     "RenderJob": "视频生成任务",
     "Browser Use": "智能网页操作",
     "Chromium": "浏览器组件",
-    "SBOM": "第三方软件清单"
+    "SBOM": "第三方软件清单",
+    "Control Plane": "控制服务",
+    "Executor": "本机执行器",
+    "Installation": "本机安装授权",
+    "Profile": "浏览器档案",
+    "Token": "用量",
+    "MVP": "首个可用版本",
+    "Demo": "演示版",
+    "Storyboard": "分镜",
+    "Render": "渲染",
+    "Pipeline": "处理流程",
+    "Workflow": "工作流程",
+    "Asset": "素材",
+    "Preset": "预设方案",
+    "Template": "模板",
+    "Prompt": "提示词",
+    "Schema": "数据格式",
+    "Payload": "数据内容",
+    "Endpoint": "服务地址",
+    "Sidecar": "随包组件",
+    "Webhook": "回调通知",
+    "Runtime": "运行环境",
+    "Session": "登录会话",
+    "Snapshot": "快照",
+    "Mock": "模拟数据",
+    "Fixture": "固定样例",
+    "Dashboard": "总览",
+    "WebView": "内嵌网页",
+    "SDK": "开发工具包",
+    "OCR": "图片文字识别",
+    "URL": "网址",
+    "Rust": "系统底层实现",
+    "stable": "稳定版",
+    "API Key": "接口密钥",
+    "AccessKey": "访问密钥",
+    "RPA": "自动替你操作网页"
   },
+  "unexplainedIndustryTerms": [
+    { "term": "Control Plane", "explanationScope": "segment" },
+    { "term": "Executor", "explanationScope": "segment" },
+    { "term": "Installation", "explanationScope": "segment" },
+    { "term": "Profile", "explanationScope": "segment" },
+    { "term": "Token", "explanationScope": "segment" },
+    { "term": "MVP", "explanationScope": "segment" },
+    { "term": "Demo", "explanationScope": "segment" },
+    { "term": "Provider", "explanationScope": "segment" },
+    { "term": "Worker", "explanationScope": "segment" },
+    { "term": "Artifact", "explanationScope": "segment" },
+    { "term": "Timeline", "explanationScope": "segment" },
+    { "term": "Storyboard", "explanationScope": "segment" },
+    { "term": "Render", "explanationScope": "segment" },
+    { "term": "Pipeline", "explanationScope": "segment" },
+    { "term": "Workflow", "explanationScope": "segment" },
+    { "term": "Asset", "explanationScope": "segment" },
+    { "term": "Preset", "explanationScope": "segment" },
+    { "term": "Template", "explanationScope": "segment" },
+    { "term": "Prompt", "explanationScope": "segment" },
+    { "term": "Schema", "explanationScope": "segment" },
+    { "term": "Payload", "explanationScope": "segment" },
+    { "term": "Endpoint", "explanationScope": "segment" },
+    { "term": "Sidecar", "explanationScope": "segment" },
+    { "term": "Webhook", "explanationScope": "segment" },
+    { "term": "Runtime", "explanationScope": "segment" },
+    { "term": "Session", "explanationScope": "segment" },
+    { "term": "Snapshot", "explanationScope": "segment" },
+    { "term": "Mock", "explanationScope": "segment" },
+    { "term": "Fixture", "explanationScope": "segment" },
+    { "term": "Dashboard", "explanationScope": "segment" },
+    { "term": "Chromium", "explanationScope": "segment" },
+    { "term": "Browser Use", "explanationScope": "segment" },
+    { "term": "WebView", "explanationScope": "segment" },
+    { "term": "SBOM", "explanationScope": "segment" },
+    { "term": "SDK", "explanationScope": "segment" },
+    { "term": "OCR", "explanationScope": "segment" },
+    { "term": "URL", "explanationScope": "segment" },
+    { "term": "LLM", "explanationScope": "segment" },
+    { "term": "Rust", "explanationScope": "segment" },
+    { "term": "stable", "explanationScope": "segment" },
+    {
+      "term": "API Key",
+      "explanationScope": "file",
+      "reason": "阿里百炼控制台原样字段名，改名后用户找不到对应输入框；同文件页面必须给出中文解释"
+    },
+    {
+      "term": "AccessKey",
+      "explanationScope": "file",
+      "reason": "阿里云控制台原样字段名，改名后用户找不到对应输入框；同文件页面必须给出中文解释"
+    },
+    {
+      "term": "RPA",
+      "explanationScope": "file",
+      "reason": "产品品类名称，保留但同文件页面必须写清它到底做什么"
+    }
+  ],
   "forbiddenUserFacingTerms": [
     "MoneyPrinterTurbo",
     "Money Printer Turbo",
