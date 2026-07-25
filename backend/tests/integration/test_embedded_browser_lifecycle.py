@@ -11,21 +11,22 @@ from __future__ import annotations
 import contextlib
 import io
 import os
-import signal
-import subprocess
 import time
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from conftest import create_private_profile_directory
-
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
     BrowserRuntime,
     BrowserRuntimeRejected,
 )
 from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
+from conftest import (
+    create_private_profile_directory,
+    process_ids_matching,
+    terminate_process,
+)
 
 _STATE_PAGE_URL = "https://www.douyin.com/automation-tool-eb-15-state"
 _STATE_PAGE_BODY = (
@@ -50,18 +51,7 @@ def _launch(executable: Path, profile: Path, *, headless: bool = True) -> Browse
 
 def _profile_process_ids(profile: Path) -> set[int]:
     """Every live process whose command line names this private profile."""
-    completed = subprocess.run(
-        ["pgrep", "-f", str(profile)],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-    return {
-        int(line)
-        for line in completed.stdout.split()
-        if line.strip().isdigit() and int(line) != os.getpid()
-    }
+    return process_ids_matching(str(profile))
 
 
 def _await_no_processes(profile: Path, *, timeout: float = 15.0) -> set[int]:
@@ -128,10 +118,7 @@ def test_external_kill_is_reported_and_the_profile_still_relaunches(
         victims = _profile_process_ids(profile)
         assert victims, "the browser process tree must be observable"
         for pid in victims:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                continue
+            terminate_process(pid)
         assert _await_no_processes(profile) == set()
         with pytest.raises(BrowserRuntimeRejected):
             runtime.primary_window()
@@ -165,10 +152,7 @@ def test_diagnostics_stay_bounded_and_never_leak_private_paths(
     try:
         _open_state_page(crashed)
         for pid in _profile_process_ids(profile):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                continue
+            terminate_process(pid)
         _await_no_processes(profile)
         with pytest.raises(BrowserRuntimeRejected):
             crashed.primary_window()

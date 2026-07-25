@@ -1,9 +1,11 @@
 import os
 import secrets
+import signal
 import socket
 import subprocess
 import sys
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
@@ -44,6 +46,64 @@ def create_private_profile_directory(path: Path) -> Path:
     """Create a profile directory as privately as the platform allows."""
     path.mkdir(mode=0o700)
     return path
+
+
+def process_ids_matching(needle: str) -> set[int]:
+    """Live process ids whose command line contains ``needle``, minus this one.
+
+    POSIX has ``pgrep -f``. Windows has neither ``pgrep`` nor a command-line
+    filter in ``tasklist``, so it queries the CIM process table instead. The
+    needle travels through the environment rather than the command line, so no
+    PowerShell quoting rule can alter a path containing spaces or backslashes.
+    """
+    if os.name == "nt":
+        script = (
+            "$needle = $env:AUTOMATION_TOOL_PROCESS_NEEDLE; "
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) } | "
+            "ForEach-Object { $_.ProcessId }"
+        )
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ]
+        environment = {**os.environ, "AUTOMATION_TOOL_PROCESS_NEEDLE": needle}
+    else:
+        command = ["pgrep", "-f", needle]
+        environment = None
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+        timeout=60,
+    )
+    return {
+        int(line)
+        for line in completed.stdout.split()
+        if line.strip().isdigit() and int(line) != os.getpid()
+    }
+
+
+def terminate_process(pid: int) -> None:
+    """Kill one process outright, ignoring one that is already gone.
+
+    ``SIGKILL`` does not exist on Windows; ``taskkill /F`` is its equivalent.
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)],
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+        return
+    with suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
 
 
 def unused_loopback_port() -> int:
