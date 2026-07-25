@@ -1,7 +1,17 @@
+import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { lstat, readdir, readFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+const repositoryRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const embeddedBrowserGate = resolve(repositoryRoot, "scripts/check_embedded_browser_package.py");
+// A standard python.org install on Windows provides only `python`/`py`, so a
+// POSIX-only candidate list would make the gate unreachable there — and an
+// unreachable gate is a rejected bundle, not a skipped check.
+const pythonCandidates = ["python3.12", "python3", "python"];
 
 const maximumFiles = 20_000;
 const maximumBytes = 16 * 1024 * 1024 * 1024;
@@ -132,6 +142,9 @@ async function collectBundleFiles(directory, root, state) {
     const path = resolve(directory, entry.name);
     const rendered = normalizedRelative(root, path);
     assertSafePath(rendered);
+    if (rendered === state.embeddedBrowser) {
+      continue;
+    }
     const metadata = await lstat(path);
     if (entry.isSymbolicLink() || metadata.isSymbolicLink()) {
       throw rejected();
@@ -153,7 +166,58 @@ async function collectBundleFiles(directory, root, state) {
   }
 }
 
-export async function auditReleaseBundle({ bundleRoot, executorPackagePath, platform }) {
+async function declaredDistributionTarget(browser) {
+  const manifest = JSON.parse(
+    await readFile(resolve(browser, "distribution-manifest.v1.json"), "utf8"),
+  );
+  const target = manifest?.target;
+  if (typeof target !== "string" || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(target)) {
+    throw rejected();
+  }
+  return target;
+}
+
+async function requireEmbeddedBrowserDigestGate(root, browser, platform) {
+  const target = await declaredDistributionTarget(browser);
+  const parameters = [
+    embeddedBrowserGate,
+    "--bundle-root",
+    root,
+    "--target",
+    target,
+    "--platform",
+    platform,
+  ];
+  let lastFailure;
+  for (const interpreter of pythonCandidates) {
+    try {
+      await execFileAsync(interpreter, parameters, { maxBuffer: 16 * 1024 * 1024 });
+      return;
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        lastFailure = error;
+        continue;
+      }
+      // Fixed rejection for the caller; the gate's own fixed message keeps a
+      // rejection diagnosable. Only the first stdout line is relayed — that is
+      // where the gate prints its fixed `release package rejected: …` text.
+      // Its stderr carries Python tracebacks on unexpected failures, which
+      // would leak repository and bundle absolute paths, so it is dropped.
+      const [firstLine = ""] = String(error?.stdout ?? "").split("\n");
+      process.stderr.write(`${firstLine}\n`);
+      throw rejected();
+    }
+  }
+  process.stderr.write(`embedded browser digest gate interpreter unavailable: ${lastFailure}\n`);
+  throw rejected();
+}
+
+export async function auditReleaseBundle({
+  bundleRoot,
+  embeddedBrowserPath,
+  executorPackagePath,
+  platform,
+}) {
   try {
     if (platform !== "macos" && platform !== "windows") {
       throw rejected();
@@ -177,7 +241,48 @@ export async function auditReleaseBundle({ bundleRoot, executorPackagePath, plat
       throw rejected();
     }
 
-    const state = { fileCount: 0, files: new Set(), packageSize: 0 };
+    // The embedded Chromium distribution is the one subtree this scanner
+    // cannot own: it is upstream code with declared symlinks. Skipping it is
+    // therefore bound to the stronger digest gate — this scanner itself runs
+    // `scripts/check_embedded_browser_package.py` over the same bundle.
+    //
+    // The binding is on the resource EXISTING, never on the caller declaring
+    // it. A caller-controlled switch would gate nothing where it matters: a
+    // bundler that dereferences the tree, and every Windows target, ship no
+    // symlink at all, so the unexcluded scan would accept a tampered or
+    // incomplete browser with exit code 0. `--embedded-browser` may only
+    // confirm the one legal location.
+    const expectedBrowser =
+      platform === "macos" ? "Contents/Resources/embedded-browser" : "embedded-browser";
+    const browser = resolve(root, expectedBrowser);
+    if (
+      embeddedBrowserPath !== undefined &&
+      normalizedRelative(root, resolve(embeddedBrowserPath)) !== expectedBrowser
+    ) {
+      throw rejected();
+    }
+    let browserMetadata;
+    try {
+      browserMetadata = await lstat(browser);
+    } catch (error) {
+      // Only a genuinely absent resource means "this bundle ships no browser";
+      // anything else (permission, I/O) must not degrade into skipping it.
+      if (error?.code !== "ENOENT") {
+        throw rejected();
+      }
+    }
+    let embeddedBrowser;
+    if (browserMetadata !== undefined) {
+      if (!browserMetadata.isDirectory() || browserMetadata.isSymbolicLink()) {
+        throw rejected();
+      }
+      await requireEmbeddedBrowserDigestGate(root, browser, platform);
+      embeddedBrowser = expectedBrowser;
+    } else if (embeddedBrowserPath !== undefined) {
+      throw rejected();
+    }
+
+    const state = { embeddedBrowser, fileCount: 0, files: new Set(), packageSize: 0 };
     await collectBundleFiles(root, root, state);
     const entry = `${expectedExecutor}/${
       platform === "macos" ? "automation-tool-executor" : "automation-tool-executor.exe"
@@ -210,11 +315,11 @@ function parseArguments(arguments_) {
     }
     values.set(key, value);
   }
+  const required = ["--bundle-root", "--executor-package", "--platform"];
+  const optional = ["--embedded-browser"];
   if (
-    values.size !== 3 ||
-    !values.has("--bundle-root") ||
-    !values.has("--executor-package") ||
-    !values.has("--platform")
+    required.some((key) => !values.has(key)) ||
+    [...values.keys()].some((key) => !required.includes(key) && !optional.includes(key))
   ) {
     throw rejected();
   }
@@ -225,6 +330,7 @@ async function runCommand() {
   const arguments_ = parseArguments(process.argv.slice(2));
   const result = await auditReleaseBundle({
     bundleRoot: arguments_.get("--bundle-root"),
+    embeddedBrowserPath: arguments_.get("--embedded-browser"),
     executorPackagePath: arguments_.get("--executor-package"),
     platform: arguments_.get("--platform"),
   });

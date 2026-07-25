@@ -16,6 +16,12 @@ const forbiddenBinaryMarkers = [
   "wdioTauri",
   "plugin:wdio|",
   "TAURI_WEBDRIVER_PORT",
+  // Kept as a byte marker because it is a WebDriver host name that never
+  // legitimately appears in shipped assets. Other driver names and hidden
+  // test window configuration are checked structurally instead: unqualified
+  // substring matching over a binary that embeds the whole frontend bundle
+  // would fail the release on unrelated third-party JSON or locale data.
+  "tauri-driver",
   "run_control_plane_acceptance",
   "register_installation_for_revocation_acceptance",
   "create_task_for_acceptance",

@@ -16,8 +16,9 @@ a platform mismatch or any version drift is rejected with a fixed message.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Final
 
 from build_embedded_chromium_staging import (
@@ -26,6 +27,7 @@ from build_embedded_chromium_staging import (
 from build_embedded_chromium_staging import (
     load_staging_contract,
     sha256_file,
+    symlink_target_is_confined,
 )
 
 DISTRIBUTION_MANIFEST_NAME: Final = "distribution-manifest.v1.json"
@@ -198,6 +200,34 @@ def build_distribution_manifest(
     return manifest_path
 
 
+def install_distribution(*, staging: Path, destination: Path) -> None:
+    """Install one staged distribution into a built application bundle.
+
+    The macOS Chrome for Testing framework is held together by relative
+    symlinks and the EB-05 manifest declares each of them. A bundler that
+    follows symlinks while copying resources drops the framework's
+    `Resources`, `Libraries` and `Helpers` links, duplicates the framework
+    binary and invalidates the upstream code signature, so the release
+    packager installs the tree itself instead of delegating the copy.
+
+    This only places bytes. The caller MUST run `verify_distribution` (or
+    `scripts/check_embedded_browser_package.py`, which wraps it) against the
+    installed location afterwards: nothing here proves the installed tree
+    still matches the manifest digests. A partially written destination is
+    removed before the failure propagates, so a failed install can be retried.
+    """
+    if destination.is_symlink() or destination.exists():
+        _reject("distribution destination already exists")
+    if not (staging / DISTRIBUTION_MANIFEST_NAME).is_file():
+        _reject("distribution manifest missing")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copytree(staging, destination, symlinks=True, copy_function=shutil.copy2)
+    except BaseException:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+
+
 def verify_distribution(
     *, staging: Path, target_id: str, enforce_archive_lock: bool = True
 ) -> VerificationReport:
@@ -239,10 +269,18 @@ def verify_distribution(
         expected_paths.add(relative)
         actual = staging / Path(*relative.split("/"))
         if entry.get("type") == "symlink":
-            if not actual.is_symlink() or str(actual.readlink()) != entry.get(
-                "targetPath"
-            ):
+            target_path = entry.get("targetPath")
+            if not actual.is_symlink() or str(actual.readlink()) != target_path:
                 _reject("symlink entry drifted")
+            # The manifest is an unsigned document inside the tree, so an
+            # audit of an already installed distribution must re-apply the
+            # staging confinement rule instead of trusting the declaration.
+            if not isinstance(target_path, str) or not symlink_target_is_confined(
+                entry_path=PurePosixPath(relative),
+                link_target=target_path,
+                root_entry=target.root_entry,
+            ):
+                _reject("symlink escapes the distribution root")
             continue
         if not actual.is_file() or actual.is_symlink():
             _reject("manifest file missing from staging")
@@ -280,5 +318,6 @@ __all__ = [
     "DistributionRejected",
     "VerificationReport",
     "build_distribution_manifest",
+    "install_distribution",
     "verify_distribution",
 ]

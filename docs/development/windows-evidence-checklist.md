@@ -389,6 +389,57 @@ EB-12/13/14 十个集成文件合计 `13 passed`，两次 `EXIT_CODE=0`。
 `tests/integration/conftest.py` 的跨平台 helper 修复（提交 `64788fa`）；生产
 Profile 的 Windows 私有性由 `browser_profiles_windows.rs` 的受保护 DACL 保证，
 EB-09 已单独验收，不受影响。各任务的真实抖音账号验收仍为 `🔍 待真实账号`。
+### 17. EB-16 首发安装包与签名 Windows 待补
+
+EB-16 已在 macOS arm64 完成真实正式安装包全链路：真实 `tauri build` 出包、装入唯一
+一套内置 Chromium（331 文件 / 359,441,871 bytes）、`.app` 实测 635 文件 /
+565,382,086 bytes、`.dmg` 约 257.4 MB、DMG 校验挂载安装、包内容负面检查、内外层签名
+核对、包内 Chromium 真跑（149.0.7827.55）、真启动正式包 App（真实 HTTP 启动检查 +
+Launch Services 前台注册）、真退出无进程残留、真卸载无残留资源。过程中发现并修复了一个
+真实缺陷：**Tauri bundler 复制资源会跟随并丢弃符号链接**，会拆坏 Chrome for Testing 的
+macOS Framework 并使上游签名失效；发布装配器改为自行保留符号链接装入并重新封章。
+
+入口（macOS）：
+
+```text
+AUTOMATION_TOOL_EB16_LAUNCH_VISIBLE_APP=1 \
+  backend/.venv/bin/python scripts/run_eb_16_acceptance.py
+python3.12 scripts/test_embedded_browser_package.py
+```
+
+Windows 侧待补（需真实 Windows 环境）：
+
+1. 用 `scripts/build_embedded_chromium_staging.py` + `build_embedded_browser_distribution.py`
+   暂存 `windows-x86_64` 目标，构建真实 NSIS 安装包（`--bundles nsis`），并把内置浏览器
+   按同样方式装入 `embedded-browser/`（Windows 无符号链接问题，但仍要核对逐文件摘要）；
+2. 跑 `node frontend/scripts/audit-release-bundle.mjs --platform windows
+   --bundle-root <安装目录> --executor-package <安装目录>/local-executor/package`。
+   **只需这一条**：审计器自己按平台推导内置浏览器位置（Windows 是 `<包根>/embedded-browser`）
+   并探测存在性，**存在就强制**执行
+   `scripts/check_embedded_browser_package.py --bundle-root … --target windows-x86_64
+   --platform windows` 并要求通过（包内只能有 `chrome-win64` 一套完整 Chromium，不得出现
+   `chrome-mac-arm64`/`chrome-mac-x64`、`chromedriver.exe`、`tauri-driver.exe`、
+   `msedgedriver.exe`、headless shell 或 `ms-playwright`）。绑定基于**资源存在性**而非
+   调用方声明，所以漏传参数不会变成零校验通过——这一点在 Windows 尤其关键，因为
+   `chrome-win64` 设计上没有符号链接，整树扫描不会像 macOS 那样"恰好"拒绝。
+   `--embedded-browser` 现在只能用来**确认**该位置，传错位置会被拒。
+   Windows 上需确保 `python3.12`、`python3` 或 `python` 三者之一在 PATH 上；三者都不可用
+   时门禁不可达，审计一律**拒绝**（不会跳过）；
+3. 跑 `node frontend/scripts/audit-production-package.mjs --binary <安装目录>/*.exe
+   --tauri-config <本次构建实际使用的合并配置>`：确认真实产物内没有 WebDriver、调试
+   端口、测试凭据、`*_for_acceptance` 测试命令，且窗口配置不是隐藏测试窗口；
+4. 记录 Windows 实测体积（安装包与安装目录），如与 macOS 差异较大需回头校准
+   `RELEASE_SIZE_BOUNDS`（当前上下界按 macOS 实测设定：浏览器树 320–420 MiB、整包
+   340–700 MiB）；
+5. Authenticode 签名（含时间戳）与 SmartScreen 表现——本机无 Windows 代码签名证书，
+   属 🔍 待凭据；
+6. 首次安装（`currentUser` NSIS）、启动正式包 App、退出后无 `chrome.exe` /
+   `automation-tool-executor.exe` 残留进程、卸载后 HKCU 注册表与 LocalAppData 零残留；
+7. 跑 `python scripts\test_embedded_browser_package.py`（确定性门禁套件）。该套件的
+   macOS 形态 fixture 需要创建符号链接，Windows 无开发者模式/`SeCreateSymbolicLink`
+   权限时会自动 skip 相关用例（`_REQUIRES_SYMLINKS`），其余用例——含"内置浏览器存在即
+   强制跑摘要门禁"这条关键机制用例——仍会真实执行。记录实际 skip 数；
+8. 通过后更新 `docs/development/EB-16.md` 遗留项。
 
 ## 注意
 
