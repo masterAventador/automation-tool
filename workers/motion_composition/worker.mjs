@@ -65,6 +65,23 @@ const WARM_UP_EXPRESSION_BODY = `
   ]);
   ${COMPOSITED_EXPRESSION_BODY}
 `;
+// CSS animations and transitions advance off the real clock, so a composition
+// that uses them renders differently every run no matter how long the capture
+// waits. Pausing them and driving `currentTime` from the same instant the
+// timeline is seeked to makes the whole frame a pure function of that time —
+// and lets the warm-up reach a still image at all.
+function frozenAnimationsExpression(timeMilliseconds) {
+  return `(() => {
+    for (const animation of document.getAnimations()) {
+      animation.pause();
+      try {
+        animation.currentTime = ${JSON.stringify(timeMilliseconds)};
+      } catch {
+        // A finished or immutable animation keeps whatever it settled on.
+      }
+    }
+  })()`;
+}
 const RESOURCE_MONITOR_INTERVAL_MS = 300;
 const SANDBOX_FAILURES = {
   cancelled: "render_cancelled",
@@ -1028,6 +1045,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
             for (const timeline of Object.values(window.__timelines ?? {})) {
               if (timeline && typeof timeline.seek === 'function') timeline.seek(0, false);
             }
+            ${frozenAnimationsExpression(0)};
             ${WARM_UP_EXPRESSION_BODY}
           })()`,
           awaitPromise: true,
@@ -1071,6 +1089,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
               for (const timeline of Object.values(window.__timelines ?? {})) {
                 if (timeline && typeof timeline.seek === 'function') timeline.seek(time, false);
               }
+              ${frozenAnimationsExpression(time * 1000)};
             })()`,
             returnByValue: true,
           }, sessionId);
