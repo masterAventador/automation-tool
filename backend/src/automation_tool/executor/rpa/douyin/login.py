@@ -12,6 +12,7 @@ from automation_tool.executor.browser_runtime import (
     BrowserRuntime,
     BrowserWindow,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import any_visible
 from automation_tool.executor.rpa.douyin.session import (
     DOUYIN_SESSION_HEALTHY_SELECTORS,
     DOUYIN_SESSION_PROBE_URL,
@@ -105,7 +106,9 @@ class _Locator(Protocol):
     @property
     def first(self) -> _Locator: ...
 
-    def is_visible(self) -> bool: ...
+    def count(self) -> int: ...
+
+    def locator(self, selector: str) -> _Locator: ...
 
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
@@ -303,11 +306,11 @@ def _unknown_session_observation(
 
 
 def _any_visible(page: _LoginPage, selectors: tuple[str, ...]) -> bool:
-    return any(page.locator(selector).first.is_visible() for selector in selectors)
+    return any_visible(page, selectors)
 
 
 def _all_visible(page: _LoginPage, selectors: tuple[str, ...]) -> bool:
-    return all(page.locator(selector).first.is_visible() for selector in selectors)
+    return all(any_visible(page, (selector,)) for selector in selectors)
 
 
 def _observation(

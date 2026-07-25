@@ -5,6 +5,7 @@ from typing import Any, cast
 import pytest
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.session import (
     DOUYIN_SESSION_PROBE_URL,
     DOUYIN_SESSION_SELECTOR_VERSION,
@@ -22,18 +23,29 @@ def test_session_probe_uses_the_official_protected_self_page() -> None:
 
 
 class FakeLocator:
-    def __init__(self, visible: bool, *, fail: bool = False) -> None:
-        self._visible = visible
+    """Models real match/visibility semantics: several matches, some hidden."""
+
+    def __init__(self, matches: list[bool], *, fail: bool = False) -> None:
+        self._matches = matches
         self._fail = fail
 
     @property
     def first(self) -> FakeLocator:
         return self
 
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return FakeLocator([match for match in self._matches if match], fail=self._fail)
+
+    def count(self) -> int:
+        if self._fail:
+            raise RuntimeError("private page failure")
+        return len(self._matches)
+
     def is_visible(self) -> bool:
         if self._fail:
             raise RuntimeError("private page failure")
-        return self._visible
+        return any(self._matches)
 
 
 class FakePage:
@@ -42,16 +54,23 @@ class FakePage:
         *,
         url: str = "https://www.douyin.com/",
         visible_selectors: set[str] | None = None,
+        hidden_selectors: set[str] | None = None,
         fail: bool = False,
     ) -> None:
         self.url = url
         self.visible_selectors = set() if visible_selectors is None else visible_selectors
+        self.hidden_selectors = set() if hidden_selectors is None else hidden_selectors
         self.fail = fail
         self.requested_selectors: list[str] = []
 
     def locator(self, selector: str) -> FakeLocator:
         self.requested_selectors.append(selector)
-        return FakeLocator(selector in self.visible_selectors, fail=self.fail)
+        matches: list[bool] = []
+        for candidate in selector.split(", "):
+            # Hidden placeholders are rendered before the visible node.
+            matches.extend(False for _ in range(candidate in self.hidden_selectors))
+            matches.extend(True for _ in range(candidate in self.visible_selectors))
+        return FakeLocator(matches, fail=self.fail)
 
 
 def window(page: FakePage) -> BrowserWindow:
@@ -184,3 +203,28 @@ def test_observation_and_internal_state_mapping_reject_changed_contracts(
 
     with pytest.raises(DouyinSessionDetectionRejected):
         _state_for(DouyinSessionEvidence.CONFLICTING)
+
+
+def test_a_hidden_placeholder_never_hides_a_visible_risk_challenge() -> None:
+    """Regression: a pre-rendered hidden captcha node must not fail open."""
+    page = FakePage(
+        hidden_selectors={'[data-e2e="captcha-container"]'},
+        visible_selectors={'[data-e2e="captcha-container"]'},
+    )
+
+    observation = DouyinSessionDetector().check(window(page))
+
+    assert observation.state is DouyinSessionState.RISK
+    assert observation.evidence is DouyinSessionEvidence.RISK_CHALLENGE
+    assert observation.circuit_open
+
+
+def test_a_hidden_login_entry_alone_is_not_treated_as_visible_evidence() -> None:
+    page = FakePage(
+        hidden_selectors={'[data-e2e="login-button"]'},
+        visible_selectors={'[data-e2e="user-avatar"]'},
+    )
+
+    observation = DouyinSessionDetector().check(window(page))
+
+    assert observation.state is DouyinSessionState.HEALTHY

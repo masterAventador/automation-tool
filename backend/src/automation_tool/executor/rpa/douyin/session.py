@@ -8,6 +8,7 @@ from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import any_visible
 from automation_tool.executor.rpa.douyin.page_version import DOUYIN_SESSION_PROBE_URL
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
@@ -94,7 +95,9 @@ class _Locator(Protocol):
     @property
     def first(self) -> _Locator: ...
 
-    def is_visible(self) -> bool: ...
+    def count(self) -> int: ...
+
+    def locator(self, selector: str) -> _Locator: ...
 
 
 class _SessionPage(Protocol):
@@ -125,7 +128,7 @@ class DouyinSessionDetector:
                     (DOUYIN_SESSION_HEALTHY_SELECTORS, DouyinSessionEvidence.AUTHENTICATED_SHELL),
                     (_MISSING_SELECTORS, DouyinSessionEvidence.LOGIN_ENTRY),
                 )
-                if _any_visible(page, selectors)
+                if any_visible(page, selectors)
             )
         except Exception:
             return _observation(
@@ -165,10 +168,6 @@ def _is_official_douyin_url(source: object) -> bool:
         )
     except ValueError:
         return False
-
-
-def _any_visible(page: _SessionPage, selectors: tuple[str, ...]) -> bool:
-    return any(page.locator(selector).first.is_visible() for selector in selectors)
 
 
 def _state_for(evidence: DouyinSessionEvidence) -> DouyinSessionState:

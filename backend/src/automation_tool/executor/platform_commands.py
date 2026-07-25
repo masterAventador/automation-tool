@@ -7,7 +7,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from queue import Queue
-from typing import Annotated, BinaryIO, Literal, Protocol, TextIO, runtime_checkable
+from types import MappingProxyType
+from typing import Annotated, BinaryIO, Final, Literal, Protocol, TextIO, cast, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -17,6 +18,7 @@ from automation_tool.executor.authentication import (
 )
 from automation_tool.executor.browser_authority import (
     BrowserLaunchAuthority,
+    BrowserLaunchAuthorityRejected,
     BrowserLaunchLease,
 )
 from automation_tool.executor.browser_runtime import (
@@ -24,9 +26,26 @@ from automation_tool.executor.browser_runtime import (
     BrowserRuntime,
     BrowserWindow,
 )
+from automation_tool.executor.browser_surface_lease import (
+    BrowserSurfaceLeaseManager,
+    SurfaceLeaseRejected,
+)
 from automation_tool.executor.rpa.douyin.login import (
     DouyinQrLoginFlow,
     DouyinQrLoginState,
+)
+from automation_tool.executor.rpa.douyin.publish_artifact import (
+    DouyinPublishArtifactRejected,
+    open_publish_artifact,
+)
+from automation_tool.executor.rpa.douyin.publish_preflight import (
+    DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
+    DouyinPublishPreflight,
+    DouyinPublishPreflightEvidence,
+    DouyinPublishPreflightIntent,
+    DouyinPublishPreflightReceipt,
+    DouyinPublishPreflightRejected,
+    DouyinPublishPreflightState,
 )
 from automation_tool.protocol import (
     EXECUTOR_PROTOCOL_VERSION,
@@ -39,6 +58,9 @@ from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 MAX_PLATFORM_COMMAND_BYTES = 16 * 1024
 DOUYIN_QR_LOGIN_FLOW_VERSION = "douyin.qr-login.v2"
+DOUYIN_PUBLISH_PREFLIGHT_COMMAND = "douyin.publish.preflight"
+DOUYIN_PUBLISH_RELEASE_COMMAND = "douyin.publish.release"
+PUBLISH_RELEASED_STATE = "publish_released"
 
 
 class PlatformCommandRejected(ValueError):
@@ -52,10 +74,18 @@ class PlatformCommand(BaseModel):
     authentication_proof: Annotated[
         str, Field(alias="authenticationProof", min_length=50, max_length=50)
     ]
-    command_id: MessageId = Field(alias="commandId")
-    command_type: Literal["douyin.login.open", "douyin.login.recheck", "douyin.logout.complete"] = (
-        Field(alias="commandType")
+    artifact_path: Annotated[str, Field(min_length=1, max_length=4096)] | None = Field(
+        default=None, alias="artifactPath"
     )
+    command_id: MessageId = Field(alias="commandId")
+    command_type: Literal[
+        "douyin.login.open",
+        "douyin.login.recheck",
+        "douyin.logout.complete",
+        "douyin.publish.preflight",
+        "douyin.publish.release",
+    ] = Field(alias="commandType")
+    description: Annotated[str, Field(min_length=1, max_length=4096)] | None = None
     executable_path: Annotated[str, Field(min_length=1, max_length=4096)] | None = Field(
         default=None, alias="executablePath"
     )
@@ -64,8 +94,17 @@ class PlatformCommand(BaseModel):
         default=None, alias="profileDirectory"
     )
     protocol_version: Literal["1.0"] = Field(alias="protocolVersion")
+    publish_job_id: MessageId | None = Field(default=None, alias="publishJobId")
+    title: Annotated[str, Field(min_length=1, max_length=4096)] | None = None
 
-    @field_validator("executable_path", "profile_directory")
+    @field_validator("description", "title")
+    @classmethod
+    def require_safe_publish_text(cls, value: str | None) -> str | None:
+        if value is not None and (contains_control_or_bidi(value) or not value.strip()):
+            raise ValueError("invalid publish text")
+        return value
+
+    @field_validator("artifact_path", "executable_path", "profile_directory")
     @classmethod
     def require_safe_absolute_path_shape(cls, value: str | None) -> str | None:
         if value is None:
@@ -83,7 +122,14 @@ class PlatformCommand(BaseModel):
     @model_validator(mode="after")
     def require_command_specific_fields(self) -> PlatformCommand:
         paths = (self.executable_path, self.profile_directory, self.headless)
-        if self.command_type == "douyin.logout.complete":
+        publish_fields = (self.artifact_path, self.description, self.publish_job_id, self.title)
+        if self.command_type == DOUYIN_PUBLISH_PREFLIGHT_COMMAND:
+            if any(value is None for value in (*paths, *publish_fields)):
+                raise ValueError("publish command requires browser identity and content")
+            return self
+        if any(value is not None for value in publish_fields):
+            raise ValueError("only the publish command carries publish content")
+        if self.command_type in {"douyin.logout.complete", DOUYIN_PUBLISH_RELEASE_COMMAND}:
             if paths != (None, None, None):
                 raise ValueError("logout command must be path free")
         elif any(value is None for value in paths):
@@ -99,6 +145,18 @@ class PlatformCommandOperation(Protocol):
     def handle(self, command: PlatformCommand) -> str: ...
 
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class BrowserSurfaceOwningOperation(PlatformCommandOperation, Protocol):
+    """An operation that may hold the single operations browser between commands.
+
+    The router must be able to reclaim that surface before a login or logout
+    command, so the capability is part of the type contract instead of a
+    runtime probe that silently degrades into the M2 deadlock.
+    """
+
+    def release_surface(self) -> None: ...
 
 
 class _BinaryLineReader(Protocol):
@@ -141,13 +199,18 @@ class PlatformCommandWorker:
                 command = read_platform_command(_SingleLineStream(source), self._authenticator)
                 state = self._operation.handle(command)
                 if self._result_writer is not None:
-                    self._result_writer(command_id=str(command.command_id), state=state)
+                    self._result_writer(
+                        command_id=str(command.command_id),
+                        state=state,
+                        command_type=command.command_type,
+                    )
                 else:
                     write_platform_command_result(
                         self._result_output,  # type: ignore[arg-type]
                         self._authenticator,
                         command_id=str(command.command_id),
                         state=state,
+                        command_type=command.command_type,
                     )
         except PlatformCommandRejected:
             raise
@@ -369,6 +432,273 @@ class DouyinLoginCommandOperation:
         self._close_active()
 
 
+class PlatformCommandRouter:
+    """Dispatch each authenticated command family to its owning operation."""
+
+    def __init__(
+        self,
+        *,
+        login: PlatformCommandOperation,
+        publish: BrowserSurfaceOwningOperation,
+    ) -> None:
+        if not isinstance(login, PlatformCommandOperation) or not isinstance(
+            publish, BrowserSurfaceOwningOperation
+        ):
+            raise PlatformCommandRejected
+        self._login = login
+        self._publish = publish
+
+    def handle(self, command: PlatformCommand) -> str:
+        if not isinstance(command, PlatformCommand):
+            raise PlatformCommandRejected
+        if command.command_type in _PUBLISH_COMMANDS:
+            return self._publish.handle(command)
+        # Login and logout own the operations browser next: a pre-submit hold is
+        # reclaimed first, otherwise the single browser authority stays locked
+        # and the user can never log out or log in again.
+        self._publish.release_surface()
+        return self._login.handle(command)
+
+    def close(self) -> None:
+        failure: Exception | None = None
+        for operation in (self._publish, self._login):
+            try:
+                operation.close()
+            except Exception as error:
+                failure = error
+        if failure is not None:
+            raise PlatformCommandRejected
+
+    def __repr__(self) -> str:
+        return "PlatformCommandRouter(<redacted>)"
+
+
+class DouyinPublishPreflightCommandOperation:
+    """Own the lease-guarded publish preflight that always stops before submission."""
+
+    def __init__(
+        self,
+        *,
+        runtime_factory: Callable[[], _Runtime] = BrowserRuntime,
+        browser_authority: BrowserLaunchAuthority | None = None,
+        surface_lease: BrowserSurfaceLeaseManager | None = None,
+    ) -> None:
+        if (
+            not callable(runtime_factory)
+            or (
+                browser_authority is not None
+                and not isinstance(browser_authority, BrowserLaunchAuthority)
+            )
+            or (
+                surface_lease is not None
+                and not isinstance(surface_lease, BrowserSurfaceLeaseManager)
+            )
+        ):
+            raise PlatformCommandRejected
+        self._runtime_factory = runtime_factory
+        self._browser_authority = browser_authority or BrowserLaunchAuthority()
+        self._surface_lease = surface_lease or BrowserSurfaceLeaseManager()
+        self._runtime: _Runtime | None = None
+        self._browser_lease: BrowserLaunchLease | None = None
+        self._latest: DouyinPublishPreflightReceipt | None = None
+
+    def __repr__(self) -> str:
+        return "DouyinPublishPreflightCommandOperation(<redacted>)"
+
+    def latest_receipt(self) -> DouyinPublishPreflightReceipt | None:
+        """The only observation point for the last preflight outcome.
+
+        Every command that returns a state also leaves a receipt here, so a
+        caller can always tell a rejected artifact from rejected content from a
+        browser that would not start. PB-06 reads the pre-submit receipt from
+        here to bind its confirmation; releasing the surface voids it, so a
+        *ready* receipt never describes a page that no longer exists. Blocked
+        and handoff receipts are kept for reporting after the browser is gone.
+        """
+        return self._latest
+
+    def surface_lease(self) -> BrowserSurfaceLeaseManager:
+        return self._surface_lease
+
+    def release_surface(self) -> None:
+        """Give the operations browser back, voiding only a dispatchable receipt.
+
+        A *ready* receipt describes a filled form on a page that is about to be
+        closed, so PB-06 must never see it again. A blocked or handoff receipt
+        is a reason, not a dispatch target, and stays available for reporting.
+        """
+        if self._latest is not None and self._latest.ready:
+            self._latest = None
+        self._close_active(best_effort=True)
+
+    def handle(self, command: PlatformCommand) -> str:
+        if (
+            not isinstance(command, PlatformCommand)
+            or command.command_type not in _PUBLISH_COMMANDS
+        ):
+            raise PlatformCommandRejected
+        if command.command_type == DOUYIN_PUBLISH_RELEASE_COMMAND:
+            self.release_surface()
+            return PUBLISH_RELEASED_STATE
+        self._latest = None
+        try:
+            if (
+                command.executable_path is None
+                or command.profile_directory is None
+                or command.headless is None
+                or command.artifact_path is None
+                or command.title is None
+                or command.description is None
+                or command.publish_job_id is None
+            ):
+                raise ValueError
+            try:
+                artifact = open_publish_artifact(Path(command.artifact_path))
+            except DouyinPublishArtifactRejected:
+                return self._blocked(DouyinPublishPreflightEvidence.ARTIFACT_REJECTED)
+            try:
+                intent = DouyinPublishPreflightIntent(
+                    artifact=artifact,
+                    title=command.title,
+                    description=command.description,
+                )
+            except DouyinPublishPreflightRejected:
+                # The command model bounds are wider than the publish policy.
+                return self._blocked(DouyinPublishPreflightEvidence.CONTENT_REJECTED)
+            # A previous browser that cannot be closed must not block this command:
+            # the user may have closed the visible operations window by hand.
+            self._close_active(best_effort=True)
+            try:
+                # Refuse before starting a browser when another controller owns the surface.
+                self._surface_lease.authorize_playwright_action()
+                window = self._begin(
+                    (command.executable_path, command.profile_directory, command.headless)
+                )
+            except (BrowserLaunchAuthorityRejected, SurfaceLeaseRejected) as error:
+                # Another controller still owns the single operations browser
+                # surface; the two causes need different user handling.
+                return self._blocked(
+                    DouyinPublishPreflightEvidence.BROWSER_BUSY
+                    if isinstance(error, BrowserLaunchAuthorityRejected)
+                    else DouyinPublishPreflightEvidence.SURFACE_NOT_OWNED
+                )
+            except Exception:
+                # The operations browser would not start - a locked profile from a
+                # browser that could not be closed is the common cause. This is a
+                # receipt for the user, never a reason to terminate the executor.
+                return self._blocked(DouyinPublishPreflightEvidence.BROWSER_UNAVAILABLE)
+            receipt = DouyinPublishPreflight(
+                window=window,
+                lease=self._surface_lease,
+            ).run(intent)
+            self._latest = receipt
+            if receipt.state is DouyinPublishPreflightState.BLOCKED:
+                # A handoff keeps the visible window open: the user has to finish
+                # the captcha, slider, risk check or login in it by hand.
+                self._close_active(best_effort=True)
+            return _PUBLISH_RESULT_FOR_STATE[receipt.state]
+        except PlatformCommandRejected:
+            raise
+        except Exception:
+            self._close_active(best_effort=True)
+            raise PlatformCommandRejected from None
+
+    def _blocked(self, evidence: DouyinPublishPreflightEvidence) -> str:
+        """Record and return one blocked outcome; a state always has a receipt."""
+        receipt = _blocked_publish_receipt(evidence)
+        self._latest = receipt
+        return _PUBLISH_RESULT_FOR_STATE[receipt.state]
+
+    def _begin(self, identity: tuple[str, str, bool]) -> BrowserWindow:
+        executable_path, profile_directory, headless = identity
+        request = BrowserLaunchRequest(
+            executable_path=Path(executable_path),
+            profile_directory=Path(profile_directory),
+            headless=headless,
+        )
+        self._browser_authority.authorize(request)
+        lease = self._browser_authority.acquire()
+        runtime = self._runtime_factory()
+        try:
+            runtime.start(lease.request)
+            window = cast(BrowserRuntime, runtime).primary_window()
+        except Exception:
+            try:
+                runtime.close()
+            finally:
+                lease.close()
+            raise
+        self._runtime = runtime
+        self._browser_lease = lease
+        return window
+
+    def _close_active(self, *, best_effort: bool = False) -> None:
+        runtime = self._runtime
+        lease = self._browser_lease
+        self._runtime = None
+        self._browser_lease = None
+        failed = False
+        for closeable in (runtime, lease):
+            if closeable is None:
+                continue
+            try:
+                closeable.close()
+            except Exception:
+                failed = True
+        if failed and not best_effort:
+            raise PlatformCommandRejected
+
+    def close(self) -> None:
+        self._close_active()
+
+
+_PUBLISH_RESULT_FOR_STATE = {
+    DouyinPublishPreflightState.PRE_SUBMIT_READY: "publish_pre_submit_ready",
+    DouyinPublishPreflightState.HANDOFF_REQUIRED: "publish_handoff_required",
+    DouyinPublishPreflightState.BLOCKED: "publish_blocked",
+}
+
+
+_PUBLISH_COMMANDS: Final = frozenset(
+    {DOUYIN_PUBLISH_PREFLIGHT_COMMAND, DOUYIN_PUBLISH_RELEASE_COMMAND}
+)
+
+
+def _blocked_publish_receipt(
+    evidence: DouyinPublishPreflightEvidence,
+) -> DouyinPublishPreflightReceipt:
+    return DouyinPublishPreflightReceipt(
+        state=DouyinPublishPreflightState.BLOCKED,
+        evidence=evidence,
+    )
+
+
+_FLOW_VERSION_BY_COMMAND: Final = MappingProxyType(
+    {
+        "douyin.login.open": DOUYIN_QR_LOGIN_FLOW_VERSION,
+        "douyin.login.recheck": DOUYIN_QR_LOGIN_FLOW_VERSION,
+        "douyin.logout.complete": "douyin.session-control.v1",
+        DOUYIN_PUBLISH_PREFLIGHT_COMMAND: DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
+        DOUYIN_PUBLISH_RELEASE_COMMAND: DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
+    }
+)
+
+
+def _flow_version_for_command(command_type: str) -> str:
+    """Look up the flow contract owned by one command family.
+
+    Deriving it from the result state instead only worked while every state
+    belonged to exactly one family, and silently mislabels the frame as soon as
+    two families share a state. A default here would rebuild that same defect
+    on the command type, so an unregistered family is rejected: a new command
+    family must register its flow contract in the same change that adds it.
+    """
+    flow_version = _FLOW_VERSION_BY_COMMAND.get(command_type) if type(command_type) is str else None
+    if flow_version is None:
+        raise PlatformCommandRejected
+    return flow_version
+
+
 class _SingleLineStream:
     def __init__(self, source: bytes) -> None:
         self._source = source
@@ -395,7 +725,27 @@ def read_platform_command(
             raise ValueError
         decoded = decode_bounded_json_object(source[:-1], maximum_bytes=MAX_PLATFORM_COMMAND_BYTES)
         command = PlatformCommand.model_validate(decoded)
-        if command.command_type == "douyin.logout.complete":
+        if command.command_type == DOUYIN_PUBLISH_PREFLIGHT_COMMAND:
+            assert command.executable_path is not None
+            assert command.profile_directory is not None
+            assert command.headless is not None
+            assert command.publish_job_id is not None
+            assert command.artifact_path is not None
+            assert command.title is not None
+            assert command.description is not None
+            authenticator.verify_publish_command(
+                command_id=str(command.command_id),
+                command_type=command.command_type,
+                executable_path=command.executable_path,
+                profile_directory=command.profile_directory,
+                headless=command.headless,
+                publish_job_id=str(command.publish_job_id),
+                artifact_path=command.artifact_path,
+                title=command.title,
+                description=command.description,
+                presented_proof=command.authentication_proof,
+            )
+        elif command.command_type in {"douyin.logout.complete", DOUYIN_PUBLISH_RELEASE_COMMAND}:
             authenticator.verify_session_command(
                 command_id=str(command.command_id),
                 command_type=command.command_type,
@@ -432,6 +782,7 @@ def write_platform_command_result(
     *,
     command_id: str,
     state: str,
+    command_type: str,
 ) -> None:
     import json
 
@@ -445,11 +796,7 @@ def write_platform_command_result(
                 "authenticationProof": proof,
                 "commandId": command_id,
                 "event": "platform.command.completed",
-                "flowVersion": (
-                    "douyin.session-control.v1"
-                    if state == "logged_out"
-                    else DOUYIN_QR_LOGIN_FLOW_VERSION
-                ),
+                "flowVersion": _flow_version_for_command(command_type),
                 "platform": "douyin",
                 "protocolVersion": EXECUTOR_PROTOCOL_VERSION,
                 "state": state,
@@ -467,12 +814,18 @@ def write_platform_command_result(
 
 
 __all__ = [
+    "DOUYIN_PUBLISH_PREFLIGHT_COMMAND",
+    "DOUYIN_PUBLISH_RELEASE_COMMAND",
     "DOUYIN_QR_LOGIN_FLOW_VERSION",
     "MAX_PLATFORM_COMMAND_BYTES",
+    "PUBLISH_RELEASED_STATE",
+    "BrowserSurfaceOwningOperation",
     "DouyinLoginCommandOperation",
+    "DouyinPublishPreflightCommandOperation",
     "PlatformCommand",
     "PlatformCommandOperation",
     "PlatformCommandRejected",
+    "PlatformCommandRouter",
     "PlatformCommandWorker",
     "read_platform_command",
     "write_platform_command_result",

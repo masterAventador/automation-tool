@@ -14,6 +14,7 @@ from automation_tool.executor.rpa.douyin.health import (
     DouyinSessionHealthReportRejected,
     SystemSessionHealthClock,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.protocol import PlatformSessionHealthEnvelope, PlatformSessionState
 
 NOW = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)
@@ -49,6 +50,13 @@ class Locator:
     def is_visible(self) -> bool:
         return self._visible
 
+    def locator(self, selector: str) -> Locator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self
+
+    def count(self) -> int:
+        return 1 if self._visible else 0
+
 
 class Page:
     url = "https://www.douyin.com/user/self"
@@ -57,7 +65,7 @@ class Page:
         self.selector = selector
 
     def locator(self, selector: str) -> Locator:
-        return Locator(selector == self.selector)
+        return Locator(self.selector in selector.split(", "))
 
 
 def window(selector: str) -> BrowserWindow:

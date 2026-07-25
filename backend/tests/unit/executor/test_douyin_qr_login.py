@@ -17,6 +17,7 @@ from automation_tool.executor.rpa.douyin.login import (
     DouyinQrLoginRejected,
     DouyinQrLoginState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 
 
 class FakeLocator:
@@ -36,6 +37,15 @@ class FakeLocator:
     @property
     def first(self) -> FakeLocator:
         return self
+
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self
+
+    def count(self) -> int:
+        if self._fail:
+            raise RuntimeError("private page failure")
+        return 1 if self._visible else 0
 
     def is_visible(self) -> bool:
         if self._fail:
@@ -81,11 +91,13 @@ class FakePage:
                 self.visible_selectors = selectors_after_wait
 
             wait_callback = replace_selectors
+        # Fixtures register either a single selector or a whole grouped selector.
+        candidates = {selector, *selector.split(", ")}
         return FakeLocator(
-            selector in self.visible_selectors,
-            fail=self.fail or selector in self.failed_selectors,
+            bool(candidates & self.visible_selectors),
+            fail=self.fail or bool(candidates & self.failed_selectors),
             wait_callback=wait_callback,
-            wait_fail=selector in self.wait_failure_selectors,
+            wait_fail=bool(candidates & self.wait_failure_selectors),
         )
 
     def close(self, **_options: object) -> None:
