@@ -397,3 +397,131 @@ fn the_proof_binding_agrees_with_the_python_authenticator() {
         "atlcp1.z8O9rIV67M3BQpYYu_PXWin1B6Y2XrJ8iMVAqpa07xE"
     );
 }
+
+#[test]
+fn a_ready_preflight_result_hands_back_the_terms_it_wants_confirmed() {
+    let (token, secret) = token();
+    let line = approval_result_line(
+        &secret,
+        COMMAND_ID,
+        "publish_pre_submit_ready",
+        CONFIRMATION_ID,
+        "自动化运营测试账号",
+    );
+
+    let parsed = token
+        .parse_platform_command_result(
+            COMMAND_ID,
+            LocalPlatformCommand::PreflightDouyinPublish,
+            &line,
+        )
+        .expect("a ready preflight result");
+
+    assert_eq!(parsed.confirmation_id(), Some(CONFIRMATION_ID));
+    assert_eq!(parsed.target_account(), Some("自动化运营测试账号"));
+}
+
+#[test]
+fn approval_terms_that_were_not_signed_are_refused() {
+    let (token, secret) = token();
+    // A frame whose account name was swapped after it was signed.
+    let mut document: Value = serde_json::from_str(&approval_result_line(
+        &secret,
+        COMMAND_ID,
+        "publish_pre_submit_ready",
+        CONFIRMATION_ID,
+        "自动化运营测试账号",
+    ))
+    .expect("a JSON result frame");
+    document["targetAccount"] = Value::String("别人的账号".to_owned());
+
+    assert!(token
+        .parse_platform_command_result(
+            COMMAND_ID,
+            LocalPlatformCommand::PreflightDouyinPublish,
+            &document.to_string(),
+        )
+        .is_err());
+}
+
+#[test]
+fn a_result_without_terms_still_verifies_under_the_shorter_binding() {
+    let (token, secret) = token();
+    let line = result_line(&secret, COMMAND_ID, "publish_blocked", "douyin.publish-preflight.v1");
+
+    let parsed = token
+        .parse_platform_command_result(
+            COMMAND_ID,
+            LocalPlatformCommand::PreflightDouyinPublish,
+            &line,
+        )
+        .expect("a blocked preflight result");
+
+    assert_eq!(parsed.confirmation_id(), None);
+    assert_eq!(parsed.target_account(), None);
+}
+
+#[test]
+fn half_a_set_of_terms_is_refused() {
+    let (token, secret) = token();
+    let mut document: Value = serde_json::from_str(&approval_result_line(
+        &secret,
+        COMMAND_ID,
+        "publish_pre_submit_ready",
+        CONFIRMATION_ID,
+        "自动化运营测试账号",
+    ))
+    .expect("a JSON result frame");
+    document.as_object_mut().expect("object").remove("targetAccount");
+
+    assert!(token
+        .parse_platform_command_result(
+            COMMAND_ID,
+            LocalPlatformCommand::PreflightDouyinPublish,
+            &document.to_string(),
+        )
+        .is_err());
+}
+
+fn approval_result_line(
+    secret: &str,
+    command_id: &str,
+    state: &str,
+    confirmation_id: &str,
+    target_account: &str,
+) -> String {
+    let mut authenticator =
+        Hmac::<Sha256>::new_from_slice(&decode_hex(secret)).expect("32-byte HMAC key");
+    authenticator.update(b"automation-tool.local-executor-result.v1\0");
+    for (index, part) in [
+        command_id,
+        state,
+        confirmation_id,
+        target_account,
+        PROTOCOL_VERSION,
+    ]
+    .iter()
+    .enumerate()
+    {
+        if index > 0 {
+            authenticator.update(b"\0");
+        }
+        authenticator.update(part.as_bytes());
+    }
+    let proof = format!(
+        "atlcp1.{}",
+        URL_SAFE_NO_PAD.encode(authenticator.finalize().into_bytes())
+    );
+    serde_json::to_string(&serde_json::json!({
+        "authenticationProof": proof,
+        "commandId": command_id,
+        "confirmationId": confirmation_id,
+        "event": "platform.command.completed",
+        "flowVersion": "douyin.publish-preflight.v1",
+        "platform": "douyin",
+        "protocolVersion": PROTOCOL_VERSION,
+        "state": state,
+        "targetAccount": target_account,
+    }))
+    .expect("a serializable result line")
+}

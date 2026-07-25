@@ -128,11 +128,23 @@ pub struct LocalPlatformCommandResult {
     platform: String,
     state: String,
     flow_version: String,
+    confirmation_id: Option<String>,
+    target_account: Option<String>,
 }
 
 impl LocalPlatformCommandResult {
     pub fn state(&self) -> &str {
         &self.state
+    }
+
+    /// The confirmation a ready preflight wants spent, if it offered one.
+    pub fn confirmation_id(&self) -> Option<&str> {
+        self.confirmation_id.as_deref()
+    }
+
+    /// The account a ready preflight is about to post to, if it offered one.
+    pub fn target_account(&self) -> Option<&str> {
+        self.target_account.as_deref()
     }
 }
 
@@ -189,11 +201,15 @@ struct LocalSessionCommandDocument<'a> {
 struct LocalPlatformCommandResultDocument {
     authentication_proof: String,
     command_id: String,
+    #[serde(default)]
+    confirmation_id: Option<String>,
     event: String,
     flow_version: String,
     platform: String,
     protocol_version: String,
     state: String,
+    #[serde(default)]
+    target_account: Option<String>,
 }
 
 impl LocalExecutorEvent {
@@ -537,17 +553,38 @@ impl LocalSessionToken {
         }
         self.verify_command_proof(
             COMMAND_RESULT_AUTHENTICATION_DOMAIN,
-            &[
-                expected_command_id,
-                &document.state,
-                EXECUTOR_PROTOCOL_VERSION,
-            ],
+            // The approval terms are part of what was signed. Verifying without
+            // them would accept a frame whose account name was swapped after
+            // signing, and the operator would confirm one account and publish
+            // to another.
+            &match (
+                document.confirmation_id.as_deref(),
+                document.target_account.as_deref(),
+            ) {
+                (None, None) => vec![
+                    expected_command_id,
+                    &document.state,
+                    EXECUTOR_PROTOCOL_VERSION,
+                ],
+                (Some(confirmation_id), Some(target_account)) => vec![
+                    expected_command_id,
+                    &document.state,
+                    confirmation_id,
+                    target_account,
+                    EXECUTOR_PROTOCOL_VERSION,
+                ],
+                // Half a set of terms is not a set of terms: it would leave the
+                // App showing an account nobody can confirm, or the reverse.
+                _ => return Err(ExecutorBootstrapError::authentication_rejected()),
+            },
             &document.authentication_proof,
         )?;
         Ok(LocalPlatformCommandResult {
             platform: document.platform,
             state: document.state,
             flow_version: document.flow_version,
+            confirmation_id: document.confirmation_id,
+            target_account: document.target_account,
         })
     }
 
