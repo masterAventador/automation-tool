@@ -100,11 +100,15 @@ popd >/dev/null
 
 export PKG_CONFIG_PATH="$PREFIX_DIR/lib/pkgconfig"
 pushd "$SOURCE_DIR/ffmpeg-${FFMPEG_VERSION}" >/dev/null
+# macOS ships bash 3.2, where `set -u` rejects an empty array's `[*]` as an
+# unbound variable. The macOS branch leaves FFMPEG_STATIC_LINK_FLAGS empty on
+# purpose, so the expansion below has to tolerate that. The Windows branch is
+# non-empty, where `:-` never applies and the flags stay exactly as before.
 ./configure \
   --prefix="$PREFIX_DIR" \
   --pkg-config-flags=--static \
   --extra-cflags="-I$PREFIX_DIR/include" \
-  --extra-ldflags="-L$PREFIX_DIR/lib ${FFMPEG_STATIC_LINK_FLAGS[*]}" \
+  --extra-ldflags="-L$PREFIX_DIR/lib ${FFMPEG_STATIC_LINK_FLAGS[*]:-}" \
   --enable-gpl \
   --enable-libx264 \
   --disable-autodetect \

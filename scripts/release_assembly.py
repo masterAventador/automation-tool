@@ -116,9 +116,149 @@ def install_and_seal(
     return installed
 
 
+class _VideoResource:
+    """One runtime resource the production video code resolves from Resources.
+
+    `staging_name` is what the build scripts produce; `installed_parts` is where
+    the production resolver actually looks, which is not always the same shape —
+    both Workers are read from `<name>/package/...` while the media toolchain is
+    read from `<name>/...` directly. Getting this mapping wrong produces a
+    bundle that looks complete and still fails at runtime, so the mapping is
+    declared once here rather than reconstructed at each call site.
+    """
+
+    def __init__(
+        self,
+        *,
+        staging_name: str,
+        installed_parts: tuple[str, ...],
+        required_files: tuple[str, ...],
+        windows_executables: tuple[str, ...] = (),
+    ) -> None:
+        self.staging_name = staging_name
+        self.installed_parts = installed_parts
+        self.required_files = required_files
+        self.windows_executables = windows_executables
+
+    def required_for(self, platform: str) -> tuple[str, ...]:
+        if platform != "windows":
+            return self.required_files
+        return tuple(
+            f"{name}.exe" if name in self.windows_executables else name
+            for name in self.required_files
+        )
+
+
+VIDEO_RUNTIME_RESOURCES: tuple[_VideoResource, ...] = (
+    _VideoResource(
+        staging_name="media-toolchain",
+        installed_parts=("media-toolchain",),
+        required_files=("bin/ffmpeg", "bin/ffprobe", "manifest.json"),
+        windows_executables=("bin/ffmpeg", "bin/ffprobe"),
+    ),
+    _VideoResource(
+        staging_name="motion-video-worker",
+        installed_parts=("motion-video-worker", "package"),
+        required_files=("runtime/node", "app/worker.mjs"),
+        windows_executables=("runtime/node",),
+    ),
+    _VideoResource(
+        staging_name="material-video-worker",
+        installed_parts=("material-video-worker", "package"),
+        required_files=("automation-tool-material-video-worker",),
+        windows_executables=("automation-tool-material-video-worker",),
+    ),
+)
+
+
+def resource_directory(application: Path, platform: str) -> Path:
+    """Return the directory the production resolver treats as its resource root."""
+    if platform == "macos":
+        return application.joinpath("Contents", "Resources")
+    if platform == "windows":
+        return application
+    _reject(f"unsupported package platform: {platform}")
+    raise AssertionError("unreachable")
+
+
+def require_packaged_video_runtime(
+    *, application: Path, platform: str
+) -> dict[str, Path]:
+    """Fail closed unless the bundle carries all three video runtime resources.
+
+    This is the second half of the same release gate as the browser. The video
+    resources went missing for the same reason the browser did — every BM/IM
+    acceptance script builds ffmpeg and both Workers itself and hands the paths
+    to a `video-studio-e2e` build through environment variables, while the
+    production build reads this directory and nothing ever wrote to it.
+    """
+    root = resource_directory(application, platform)
+    installed: dict[str, Path] = {}
+    for resource in VIDEO_RUNTIME_RESOURCES:
+        location = root.joinpath(*resource.installed_parts)
+        if not location.is_dir():
+            _reject(
+                f"the bundle carries no {resource.staging_name} at {location} — it "
+                "was built without the video runtime assembly step"
+            )
+        for name in resource.required_for(platform):
+            payload = location / name
+            if not payload.is_file() or payload.stat().st_size == 0:
+                _reject(
+                    f"{resource.staging_name} is incomplete: {name} is missing or "
+                    "empty, so the production resolver would find the directory "
+                    "and still fail to launch"
+                )
+        installed[resource.staging_name] = location
+    return installed
+
+
+def install_video_runtime(
+    *, application: Path, staging: Path, platform: str
+) -> dict[str, Path]:
+    """Install the three video runtime resources, then verify them as a set.
+
+    On any rejection every tree installed by this call is removed, so a failed
+    assembly cannot leave a partially populated bundle for a later step to
+    mistake for a finished one.
+    """
+    root = resource_directory(application, platform)
+    written: list[Path] = []
+    try:
+        for resource in VIDEO_RUNTIME_RESOURCES:
+            source = staging / resource.staging_name
+            if not source.is_dir():
+                _reject(
+                    f"the staging tree carries no {resource.staging_name} at {source}"
+                )
+            destination = root.joinpath(*resource.installed_parts)
+            if destination.is_symlink() or destination.exists():
+                _reject(
+                    f"the bundle already carries {resource.staging_name} at "
+                    f"{destination}"
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # The video resources contain no symlinked frameworks, so a plain
+            # copy is correct here; the browser needs its own installer because
+            # its framework links must survive.
+            shutil.copytree(source, destination, symlinks=True)
+            written.append(root / resource.installed_parts[0])
+        return require_packaged_video_runtime(
+            application=application, platform=platform
+        )
+    except BaseException:
+        for path in written:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
 __all__ = [
+    "VIDEO_RUNTIME_RESOURCES",
     "ReleaseAssemblyRejected",
     "install_and_seal",
+    "install_video_runtime",
     "require_packaged_browser",
+    "require_packaged_video_runtime",
+    "resource_directory",
     "seal_with_adhoc_signature",
 ]

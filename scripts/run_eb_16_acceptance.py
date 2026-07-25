@@ -56,8 +56,11 @@ from check_embedded_browser_package import (  # noqa: E402
 )
 from release_assembly import (  # noqa: E402
     install_and_seal,
+    install_video_runtime,
     require_packaged_browser,
+    require_packaged_video_runtime,
 )
+from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from run_p9_03_acceptance import (  # noqa: E402
     APP_IDENTIFIER,
     BASE_TAURI_CONFIG,
@@ -219,15 +222,27 @@ def build_release_package(
     return one_directory(target / "release/bundle/macos", ".app")
 
 
-def install_browser_and_sign(
-    application: Path, staging: Path, target_id: str
+def install_runtime_resources_and_sign(
+    application: Path, staging: Path, target_id: str, video_runtime: Path
 ) -> None:
     """Run the shared release assembly step, the same one a release uses.
 
     The acceptance script must not keep its own copy of this: when it did, the
     verified path and the shipped path were different paths, and the shipped
     one had no browser in it at all.
+
+    Ordering matters twice over. The video runtime is installed *before*
+    `install_and_seal`, because that call seals the bundle at the end and a
+    signature taken before a resource lands does not cover it. The browser is
+    installed last for the same reason it is installed here at all: the macOS
+    bundler destroys its symlinked framework, so it cannot be declared under
+    `bundle.resources` and has to arrive afterwards.
     """
+    announce("Installing the video runtime resources into the built bundle")
+    installed = install_video_runtime(
+        application=application, staging=video_runtime, platform="macos"
+    )
+    announce(f"Video runtime installed: {sorted(installed)}")
     announce("Installing the embedded browser, verifying it, then re-sealing")
     install_and_seal(
         application=application,
@@ -246,6 +261,10 @@ def create_disk_image(application: Path, output: Path, target_id: str) -> Path:
     require_packaged_browser(
         application=application, target_id=target_id, platform="macos"
     )
+    # The same gate for the video runtime. Without it a package ships whose
+    # video features fail on the user's machine while every acceptance run
+    # stays green, which is exactly what happened.
+    require_packaged_video_runtime(application=application, platform="macos")
     announce("Creating the release disk image from the final App bundle")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
@@ -888,7 +907,11 @@ def main() -> int:
         application = build_release_package(
             configuration=configuration, environment=environment, target=cargo_target
         )
-        install_browser_and_sign(application, browser, target_id)
+        announce("Preparing the pinned video runtime resources (cached per machine)")
+        video_runtime = prepare_video_runtime(platform="macos")
+        install_runtime_resources_and_sign(
+            application, browser, target_id, video_runtime
+        )
         disk_image = create_disk_image(
             application,
             cargo_target / "release/bundle/dmg" / f"{application.stem}_0.1.0.dmg",

@@ -67,9 +67,13 @@ from embedded_browser_archives import (  # noqa: E402
     WINDOWS_X86_64_ARCHIVE,
     archive_path,
 )
+from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from release_assembly import (  # noqa: E402
+    VIDEO_RUNTIME_RESOURCES,
     install_and_seal,
+    install_video_runtime,
     require_packaged_browser,
+    require_packaged_video_runtime,
 )
 from run_p9_04_acceptance import (  # noqa: E402
     authenticode_facts,
@@ -184,21 +188,32 @@ def relative_to_tauri_root(path: Path) -> str:
     return relative
 
 
-def write_release_configuration(
-    directory: Path, executor: Path, browser: Path
-) -> Path:
-    """Declare the two resource trees the NSIS bundler ships.
+def write_release_configuration(directory: Path, executor: Path, payload: Path) -> Path:
+    """Declare every resource tree the NSIS bundler ships.
 
     Unlike macOS, the embedded browser *is* declared here: the Windows target
     has no symlinks, so the bundler's copy is faithful, and an NSIS installer
-    cannot be opened after it is built. The tree named here has already been
+    cannot be opened after it is built. The trees named here have already been
     verified file-by-file by the release assembler.
+
+    The video runtime resources are declared from the same payload for the
+    same reason. Leaving them out is precisely the defect this wiring exists
+    to prevent: the production video code resolves them from the installed
+    resource directory, and a package that omits them fails on the user's
+    machine while every acceptance run stays green.
     """
     configuration = json.loads(CANDIDATE_TAURI_CONFIG.read_text(encoding="utf-8"))
-    configuration["bundle"]["resources"] = {
+    resources = {
         f"{relative_to_tauri_root(executor)}/": f"{EXECUTOR_RESOURCE.as_posix()}/",
-        f"{relative_to_tauri_root(browser)}/": f"{BROWSER_RESOURCE_NAME}/",
+        f"{relative_to_tauri_root(browser_resource_root(payload, 'windows'))}/": (
+            f"{BROWSER_RESOURCE_NAME}/"
+        ),
     }
+    for resource in VIDEO_RUNTIME_RESOURCES:
+        installed = payload.joinpath(*resource.installed_parts)
+        destination = "/".join(resource.installed_parts)
+        resources[f"{relative_to_tauri_root(installed)}/"] = f"{destination}/"
+    configuration["bundle"]["resources"] = resources
     destination = directory / "tauri.eb-16-windows.generated.json"
     destination.write_text(
         json.dumps(configuration, ensure_ascii=False, separators=(",", ":")),
@@ -239,9 +254,20 @@ def main_binary(directory: Path) -> Path:
     named = directory / f"{product_name()}.exe"
     if named.is_file():
         return named
-    return one_file(
-        directory, "*.exe", f"no single product executable exists in {directory}"
+    # The install root also holds the uninstaller NSIS generates for itself.
+    # It is not a product binary and is excluded by exact name only, so a
+    # genuine second executable still makes this ambiguous and fails.
+    candidates = sorted(
+        path
+        for path in directory.glob("*.exe")
+        if path.is_file() and path.name.lower() != "uninstall.exe"
     )
+    if len(candidates) != 1:
+        raise AcceptanceFailed(
+            f"no single product executable exists in {directory}: "
+            f"{[path.name for path in candidates]}"
+        )
+    return candidates[0]
 
 
 def build_release_package(
@@ -288,11 +314,21 @@ def install_package(installer: Path, root: Path) -> None:
     announce(f"Installing the built NSIS package into {root}")
     run_checked([os.fspath(installer), "/S"], environment=installer_environment())
     deadline = time.monotonic() + 300
-    binary = root / f"{product_name()}.exe"
     browser = browser_resource_root(root, "windows")
+
+    def product_executable_present() -> bool:
+        # Tauri names the installed binary after `mainBinaryName`, and the
+        # production configuration sets neither that nor a matching product
+        # name, so the binary is `automation-tool-desktop.exe`. Probe for any
+        # non-uninstaller executable instead of assuming a name.
+        return any(
+            path.is_file() and path.name.lower() != "uninstall.exe"
+            for path in root.glob("*.exe")
+        )
+
     while time.monotonic() < deadline:
         if (
-            binary.is_file()
+            product_executable_present()
             and (root / "uninstall.exe").is_file()
             and browser.is_dir()
             and windows_registry_installations(
@@ -303,8 +339,9 @@ def install_package(installer: Path, root: Path) -> None:
         time.sleep(0.2)
     raise AcceptanceFailed(
         "the NSIS installation did not complete "
-        f"(root={root.exists()}, binary={binary.is_file()}, "
-        f"uninstaller={(root / 'uninstall.exe').is_file()}, browser={browser.is_dir()})"
+        f"(root={root.exists()}, binary={product_executable_present()}, "
+        f"uninstaller={(root / 'uninstall.exe').is_file()}, browser={browser.is_dir()}, "
+        f"entries={sorted(path.name for path in root.iterdir())[:8] if root.is_dir() else []})"
     )
 
 
@@ -518,7 +555,13 @@ def main() -> int:
         # browser into the payload, re-verify it file-by-file against the
         # EB-05 manifest, then seal. Only then may a bundler touch it.
         payload = build_directory / "payload"
+        announce("Preparing the pinned video runtime resources (cached per machine)")
+        video_runtime = prepare_video_runtime(platform="windows")
         announce("Assembling the release payload, verifying it, then sealing")
+        installed_video = install_video_runtime(
+            application=payload, staging=video_runtime, platform="windows"
+        )
+        announce(f"Video runtime staged into the payload: {sorted(installed_video)}")
         install_and_seal(
             application=payload,
             staging=staging,
@@ -531,9 +574,10 @@ def main() -> int:
         require_packaged_browser(
             application=payload, target_id=TARGET_ID, platform="windows"
         )
+        require_packaged_video_runtime(application=payload, platform="windows")
 
         configuration = write_release_configuration(
-            build_directory, executor, browser_resource_root(payload, "windows")
+            build_directory, executor, payload
         )
         effective = effective_configuration(configuration, build_directory)
         environment = release_environment(cargo_target, public_key)

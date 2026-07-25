@@ -38,7 +38,9 @@ from check_embedded_browser_package import browser_resource_root  # noqa: E402
 from release_assembly import (  # noqa: E402
     ReleaseAssemblyRejected,
     install_and_seal,
+    install_video_runtime,
     require_packaged_browser,
+    require_packaged_video_runtime,
 )
 
 STAGING_CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
@@ -159,6 +161,108 @@ class AssemblerIsTheOnlyPathTests(unittest.TestCase):
         # If the acceptance script still called `install_distribution` itself,
         # the verified path and the shipped path could drift apart again.
         self.assertNotIn("install_distribution(", source)
+
+    def test_the_release_path_installs_and_gates_the_video_runtime(self) -> None:
+        # Writing the assembler without wiring it into the one path that
+        # produces a shipped package is exactly how the browser gap survived
+        # its first fix, and how `TauriPublishWorkspaceGateway` shipped
+        # unreachable. The gate has to be on the path, not merely available.
+        for script in ("run_eb_16_acceptance.py", "run_eb_16_windows_acceptance.py"):
+            with self.subTest(script=script):
+                source = (ROOT / "scripts" / script).read_text(encoding="utf-8")
+                self.assertIn("install_video_runtime(", source)
+                self.assertIn("require_packaged_video_runtime(", source)
+
+
+def _write_video_runtime(root: Path) -> None:
+    """Lay down a minimally shaped, non-empty video runtime staging tree."""
+    toolchain = root / "media-toolchain"
+    (toolchain / "bin").mkdir(parents=True)
+    (toolchain / "bin/ffmpeg").write_bytes(b"ffmpeg")
+    (toolchain / "bin/ffprobe").write_bytes(b"ffprobe")
+    (toolchain / "manifest.json").write_text("{}", encoding="utf-8")
+    motion = root / "motion-video-worker"
+    (motion / "runtime").mkdir(parents=True)
+    (motion / "app").mkdir()
+    (motion / "runtime/node").write_bytes(b"node")
+    (motion / "app/worker.mjs").write_text("export {};", encoding="utf-8")
+    material = root / "material-video-worker"
+    material.mkdir()
+    (material / "automation-tool-material-video-worker").write_bytes(b"worker")
+
+
+class VideoRuntimeReleaseGateTests(unittest.TestCase):
+    """The three video runtime resources need the same release gate as the browser.
+
+    Every BM/IM acceptance script builds ffmpeg and the two Workers itself and
+    hands their paths to a `video-studio-e2e` test build through environment
+    variables. The production build reads `Contents/Resources/` instead, and
+    nothing ever installed them there — so the shipped package showed
+    "本机视频制作服务暂时无法启动" and "本机渲染组件暂时不可用" on a user's
+    machine while every acceptance run stayed green.
+    """
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp(prefix="release-video-runtime-"))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.application = self.base / "Example.app"
+        (self.application / "Contents/Resources").mkdir(parents=True)
+        self.staging = self.base / "video-runtime"
+        _write_video_runtime(self.staging)
+
+    def test_a_bundle_without_the_video_runtime_is_rejected(self) -> None:
+        with self.assertRaises(ReleaseAssemblyRejected):
+            require_packaged_video_runtime(
+                application=self.application, platform=PLATFORM
+            )
+
+    def test_installing_the_video_runtime_satisfies_the_gate(self) -> None:
+        install_video_runtime(
+            application=self.application, staging=self.staging, platform=PLATFORM
+        )
+        installed = require_packaged_video_runtime(
+            application=self.application, platform=PLATFORM
+        )
+        self.assertEqual(
+            sorted(installed),
+            ["material-video-worker", "media-toolchain", "motion-video-worker"],
+        )
+
+    def test_each_missing_resource_is_named(self) -> None:
+        for resource in (
+            "media-toolchain",
+            "motion-video-worker",
+            "material-video-worker",
+        ):
+            with self.subTest(resource=resource):
+                application = self.base / f"Missing-{resource}.app"
+                (application / "Contents/Resources").mkdir(parents=True)
+                partial = self.base / f"staging-{resource}"
+                _write_video_runtime(partial)
+                shutil.rmtree(partial / resource)
+                with self.assertRaises(ReleaseAssemblyRejected) as caught:
+                    install_video_runtime(
+                        application=application, staging=partial, platform=PLATFORM
+                    )
+                self.assertIn(resource, str(caught.exception))
+
+    def test_an_empty_worker_payload_is_rejected(self) -> None:
+        # A directory that merely exists is exactly what the production
+        # resolver trips over: it finds the path and then fails to launch.
+        (self.staging / "motion-video-worker/runtime/node").unlink()
+        with self.assertRaises(ReleaseAssemblyRejected):
+            install_video_runtime(
+                application=self.application, staging=self.staging, platform=PLATFORM
+            )
+
+    def test_a_rejected_install_leaves_nothing_behind(self) -> None:
+        (self.staging / "material-video-worker/automation-tool-material-video-worker").unlink()
+        with self.assertRaises(ReleaseAssemblyRejected):
+            install_video_runtime(
+                application=self.application, staging=self.staging, platform=PLATFORM
+            )
+        resources = self.application / "Contents/Resources"
+        self.assertEqual(sorted(path.name for path in resources.iterdir()), [])
 
 
 if __name__ == "__main__":
