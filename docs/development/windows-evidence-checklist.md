@@ -273,16 +273,20 @@ clean submodule 的许可证工作树可被 `core.autocrlf` 物化为 CRLF；治
 blob 计算许可证摘要，同时继续要求工作树为普通文件且 submodule 完全干净。所有 BM-12/
 BM-13/BM-14 门禁、Ruff、212 项前端契约和专项 Roadmap 检查通过，临时发布/依赖树已清理。
 
-### 7. BM-05 受限 MotionAuthoringAgent Windows 待补
+### 7. BM-05 受限 MotionAuthoringAgent（路径 containment ✅ 2026-07-25 已完成）
 
 BM-05 的封闭工具面、模型不可信输出处理、失败矩阵、流式传输和真实百炼模型端到端
 编排验收（一句话→DESIGN/脚本/分镜→可 seek composition→lint/check/snapshot→提交
 RenderJob）已在 macOS 完成，逻辑本身跨平台（纯 Python，无 Rust/Node/浏览器）。
-Windows 侧待补：`AuthoringWorkspace` 的路径 containment 在 NTFS 上的 reparse point /
-大小写不敏感 / 8.3 短名 / Unicode 文件名越界语义重验（macOS 用 `realpath` +
-`relative_to`，Windows 需确认 reparse point 与短名不能绕过工作区边界）；以及 BM-05
-生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08（页面）与 BM-16（生产包
-冻结）在 Windows 平台一并补齐。通过后更新 `docs/development/BM-05.md` 遗留项。
+**2026-07-25 Windows 验收结果（Mac 经 SSH 远程发起，Windows 真机执行）**：路径
+containment 的 NTFS 语义重验**已完成，并修掉三个真实缺陷**——`a.html:hidden` 写入备用
+数据流而审计扫描列不出、`DESIGN.json` 大小写不敏感覆盖已有 `design.json` 而审计仍报原名、
+段尾点/空格被 Windows 静默剥离导致两个键塌成一个文件。详见 `docs/development/BM-05.md`
+遗留项表格。reparse point 与 8.3 短名经核实无需额外处理（`Path.resolve()` 会解析 junction
+并展开短名，随后被 `relative_to` 拦截）。
+
+Windows 侧仍待补：BM-05 生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08
+（页面）与 BM-16（生产包冻结）在 Windows 平台一并补齐。
 
 ### 8. BM-07 风格微调与冻结 Windows 待补
 

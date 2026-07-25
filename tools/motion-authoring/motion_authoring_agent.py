@@ -143,8 +143,26 @@ MAX_MODEL_RESPONSE_BYTES: Final = 262_144
 # --------------------------------------------------------------------------- #
 
 
+_RESERVED_DEVICE_NAMES: Final = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{digit}" for digit in "123456789"}
+    | {f"lpt{digit}" for digit in "123456789"}
+)
+
+
 def _validate_relative(path: object) -> str:
-    """Return a clean workspace-relative POSIX path or fail closed."""
+    """Return a clean workspace-relative POSIX path or fail closed.
+
+    Beyond the POSIX escapes, this rejects three names that only Windows
+    reinterprets — all three were observed being accepted on a real NTFS
+    volume while the audit scan could not see the result:
+
+    * `a.html:hidden` writes an alternate data stream that a directory scan
+      never lists, so the agent could leave bytes no audit reports;
+    * a segment ending in a dot or space is silently stripped by Windows, so
+      two distinct keys collapse onto one file;
+    * a reserved device name (`NUL`, `CON`, `COM1`, …) swallows the bytes.
+    """
     if type(path) is not str or not path:
         _reject("path must be a non-empty string")
         raise AssertionError  # pragma: no cover
@@ -153,7 +171,31 @@ def _validate_relative(path: object) -> str:
     segments = path.split("/")
     if any(segment in ("", ".", "..") for segment in segments):
         _reject("path must not contain empty, current or parent segments")
+    for segment in segments:
+        if ":" in segment:
+            _reject("path must not name an alternate data stream")
+        if segment != segment.rstrip(" ."):
+            _reject("path segment must not end with a dot or a space")
+        if segment.split(".", 1)[0].casefold() in _RESERVED_DEVICE_NAMES:
+            _reject("path must not name a reserved device")
     return path
+
+
+def _require_no_case_collision(target: Path) -> None:
+    """Reject a name that differs only by case from one already present.
+
+    NTFS and the default APFS volume are case-insensitive, so writing
+    `MAIN.html` next to `main.html` overwrites it while a directory scan keeps
+    reporting the original name — a reviewed artifact replaced through a key
+    no audit ever sees. Observed on a real Windows host.
+    """
+    parent = target.parent
+    if not parent.is_dir():
+        return
+    folded = target.name.casefold()
+    for existing in parent.iterdir():
+        if existing.name != target.name and existing.name.casefold() == folded:
+            _reject("path collides with an existing entry that differs only by case")
 
 
 class AuthoringWorkspace:
@@ -180,6 +222,7 @@ class AuthoringWorkspace:
             target.relative_to(self._root)
         except ValueError:
             _reject("path escapes the workspace")
+        _require_no_case_collision(target)
         return target
 
     def write_text(self, relative: str, text: str) -> Path:

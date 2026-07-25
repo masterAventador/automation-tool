@@ -230,6 +230,48 @@ class WorkspaceContainmentTests(unittest.TestCase):
                 with self.assertRaises(MotionAuthoringRejected):
                     tools.write_composition(bad, VALID_COMPOSITION)
 
+    def test_write_composition_rejects_ntfs_only_escapes(self) -> None:
+        """NTFS names that POSIX treats as ordinary but Windows reinterprets.
+
+        Verified on a real Windows host before this test existed: each of these
+        was accepted and written, yet `provided_assets` could not see the
+        result. `a.html:hidden` lands in an alternate data stream that the
+        audit scan never lists; `trailing.` and `trailing ` are silently
+        stripped, so two distinct keys collapse onto one file; `NUL` and the
+        other device names swallow the bytes entirely.
+        """
+        with TemporaryDirectory() as raw:
+            tools = MotionAuthoringTools(_make_workspace(Path(raw)))
+            for bad in (
+                "a.html:hidden",
+                "dir:stream/a.html",
+                "trailing./a.html",
+                "trailing /a.html",
+                "a.html.",
+                "a.html ",
+                "NUL",
+                "nul.html",
+                "CON",
+                "com1.html",
+                "LPT9",
+            ):
+                with self.assertRaises(MotionAuthoringRejected, msg=bad):
+                    tools.write_composition(bad, VALID_COMPOSITION)
+
+    def test_write_composition_rejects_a_case_only_collision(self) -> None:
+        """A case-insensitive volume silently overwrites the existing file.
+
+        Verified on a real Windows host: writing `DESIGN.json` after
+        `design.json` overwrote the original while the audit scan kept
+        reporting only the original name, so the agent could replace a
+        reviewed artifact through a key nobody audits.
+        """
+        with TemporaryDirectory() as raw:
+            tools = MotionAuthoringTools(_make_workspace(Path(raw)))
+            tools.write_composition("compositions/main.html", VALID_COMPOSITION)
+            with self.assertRaises(MotionAuthoringRejected):
+                tools.write_composition("compositions/MAIN.html", VALID_COMPOSITION)
+
     def test_write_composition_keeps_bytes_inside_workspace(self) -> None:
         with TemporaryDirectory() as raw:
             root = Path(raw)
