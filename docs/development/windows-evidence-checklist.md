@@ -34,6 +34,14 @@
 本次查漏没有把任何外部阻塞项改绿，也没有发现新的、具备全部前置但尚未执行的 Windows
 验收命令。
 
+## 需要 Windows 本机交互式会话的三项
+
+BM-07（原生文件选择器）、EB-15（有头运营窗口）、CQ-01（桌面 E2E）无法通过 `ssh winbox`
+完成——SSH 会话是提权令牌，产品的运营 Profile 属主校验必然失败；另有两项需要真实图形界面。
+
+给在 Windows 上执行的 agent 的操作 brief：**`docs/development/windows-manual-acceptance.md`**
+（含入口命令、判据、已知坑、以及 `schtasks /RL LIMITED` 这条未验证的自动化出路）。
+
 ## 一次性环境准备
 
 1. Git + Git LFS（`git lfs install`），克隆仓库：
