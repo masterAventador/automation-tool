@@ -181,21 +181,29 @@ def _validate_relative(path: object) -> str:
     return path
 
 
-def _require_no_case_collision(target: Path) -> None:
+def _require_no_case_collision(root: Path, relative: str) -> None:
     """Reject a name that differs only by case from one already present.
 
     NTFS and the default APFS volume are case-insensitive, so writing
     `MAIN.html` next to `main.html` overwrites it while a directory scan keeps
     reporting the original name — a reviewed artifact replaced through a key
     no audit ever sees. Observed on a real Windows host.
+
+    The comparison must use the requested segments, never a resolved path:
+    Windows resolves through `GetFinalPathNameByHandle`, which hands back the
+    on-disk casing, so a resolved name always equals the existing entry and the
+    check would silently pass. That is exactly how the first version of this
+    guard failed on a real Windows host while passing on macOS.
     """
-    parent = target.parent
-    if not parent.is_dir():
-        return
-    folded = target.name.casefold()
-    for existing in parent.iterdir():
-        if existing.name != target.name and existing.name.casefold() == folded:
-            _reject("path collides with an existing entry that differs only by case")
+    current = root
+    for segment in relative.split("/"):
+        if not current.is_dir():
+            return
+        folded = segment.casefold()
+        for existing in current.iterdir():
+            if existing.name != segment and existing.name.casefold() == folded:
+                _reject("path collides with an existing entry that differs only by case")
+        current = current / segment
 
 
 class AuthoringWorkspace:
@@ -222,7 +230,7 @@ class AuthoringWorkspace:
             target.relative_to(self._root)
         except ValueError:
             _reject("path escapes the workspace")
-        _require_no_case_collision(target)
+        _require_no_case_collision(self._root, clean)
         return target
 
     def write_text(self, relative: str, text: str) -> Path:

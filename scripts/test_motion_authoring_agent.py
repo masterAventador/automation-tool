@@ -271,6 +271,9 @@ class WorkspaceContainmentTests(unittest.TestCase):
             tools.write_composition("compositions/main.html", VALID_COMPOSITION)
             with self.assertRaises(MotionAuthoringRejected):
                 tools.write_composition("compositions/MAIN.html", VALID_COMPOSITION)
+            # An intermediate directory collides the same way.
+            with self.assertRaises(MotionAuthoringRejected):
+                tools.write_composition("Compositions/other.html", VALID_COMPOSITION)
 
     def test_write_composition_keeps_bytes_inside_workspace(self) -> None:
         with TemporaryDirectory() as raw:
