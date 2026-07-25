@@ -352,6 +352,16 @@ staged 内置 Chromium（4/4，目标校验/频控/单次发送/暂停-取消-�
 真实抖音私信最终状态另标 🔍 待真实账号。通过后更新 `docs/development/EB-14.md`
 遗留项。
 
+### 15. EB-15 诊断、人工接管与进程清理 Windows 待补
+
+EB-15 已在 macOS 完成进程树拆除、Profile 解锁重启、外部强杀 fail-closed 与有界
+脱敏诊断、真实 headed 接管窗口五条验收，并修复"崩溃后仍交出死窗口"的真实缺陷
+（`_require_running` 增加一次真实往返连通性探测）。入口
+`cd backend && uv run pytest tests/integration/test_embedded_browser_lifecycle.py`
+（headed 用例需 `AUTOMATION_TOOL_EB15_HEADED=1`）。Windows 侧待补：进程树查找与
+强杀改用 Windows 语义（无 pgrep/SIGKILL），Profile 锁释放与 headed 窗口接管在
+Windows staged 内置 Chromium 上重跑。通过后更新 `docs/development/EB-15.md` 遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；
