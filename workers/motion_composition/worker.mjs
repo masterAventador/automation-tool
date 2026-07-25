@@ -54,6 +54,9 @@ const COMPOSITED_EXPRESSION_BODY = `
 // settles — `decode()` stays pending forever and `catch` never runs, which
 // eats the whole render budget instead of costing one decode.
 const WARM_UP_DECODE_BUDGET_MS = 250;
+// How many settle-and-probe rounds the warm-up may take before the page
+// is declared unable to reach a stable state.
+const WARM_UP_STABLE_ATTEMPTS = 8;
 const WARM_UP_EXPRESSION_BODY = `
   await Promise.race([
     Promise.all(Array.from(document.images)
@@ -1011,23 +1014,47 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       // whose completion drifts across the next few frames. That is why an
       // early frame index still hashed differently between two Windows runs
       // after fonts and compositing were already awaited.
-      const warmed = await pipe.send("Runtime.evaluate", {
-        expression: `(async () => {
-          for (const timeline of Object.values(window.__timelines ?? {})) {
-            if (timeline && typeof timeline.seek === 'function') timeline.seek(0, false);
-          }
-          ${WARM_UP_EXPRESSION_BODY}
-        })()`,
-        awaitPromise: true,
-        returnByValue: true,
-      }, sessionId);
-      if (warmed?.result?.exceptionDetails !== undefined) {
-        finish({ status: "protocol" });
+      // Warm up until the composition stops changing, not for a fixed number
+      // of frames. A single settle is enough on an idle machine but not on a
+      // busy one: measured on Windows, this render is byte-identical across
+      // runs in isolation yet drifted in its early frames when it followed a
+      // twelve-style sweep. Capturing until two probes agree removes that
+      // dependency on how loaded the host happens to be.
+      let previousProbe = null;
+      let stable = false;
+      for (let attempt = 0; attempt < WARM_UP_STABLE_ATTEMPTS; attempt += 1) {
+        const warmed = await pipe.send("Runtime.evaluate", {
+          expression: `(async () => {
+            for (const timeline of Object.values(window.__timelines ?? {})) {
+              if (timeline && typeof timeline.seek === 'function') timeline.seek(0, false);
+            }
+            ${WARM_UP_EXPRESSION_BODY}
+          })()`,
+          awaitPromise: true,
+          returnByValue: true,
+        }, sessionId);
+        if (warmed?.result?.exceptionDetails !== undefined) {
+          finish({ status: "protocol" });
+          return;
+        }
+        const probe = await pipe.send("Page.captureScreenshot", { format: "png" }, sessionId);
+        const data = probe?.result?.data;
+        if (typeof data !== "string") {
+          finish({ status: "protocol" });
+          return;
+        }
+        if (data === previousProbe) {
+          stable = true;
+          break;
+        }
+        previousProbe = data;
+      }
+      if (!stable) {
+        // The page never settled within the warm-up budget; a render that
+        // cannot be reproduced must not be reported as a successful one.
+        finish({ status: "timeout" });
         return;
       }
-      // One discarded capture forces that first rasterisation to complete
-      // before any frame that is kept.
-      await pipe.send("Page.captureScreenshot", { format: "png" }, sessionId);
       for (let index = 1; index <= spec.frameCount; index += 1) {
         try {
           await access(join(resolved.workspaceReal, SANDBOX_CANCEL_FILE));
