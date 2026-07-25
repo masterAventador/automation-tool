@@ -43,7 +43,6 @@ sys.path.insert(0, str(BACKEND_ROOT / "src"))
 
 from build_embedded_browser_distribution import (  # noqa: E402
     build_distribution_manifest,
-    install_distribution,
 )
 from build_embedded_chromium_staging import (  # noqa: E402
     build_staging,
@@ -54,6 +53,10 @@ from check_embedded_browser_package import (  # noqa: E402
     PackageAuditReport,
     audit_embedded_browser_package,
     browser_resource_root,
+)
+from release_assembly import (  # noqa: E402
+    install_and_seal,
+    require_packaged_browser,
 )
 from run_p9_03_acceptance import (  # noqa: E402
     APP_IDENTIFIER,
@@ -216,16 +219,33 @@ def build_release_package(
     return one_directory(target / "release/bundle/macos", ".app")
 
 
-def install_browser_and_sign(application: Path, staging: Path) -> None:
-    announce("Installing the embedded browser resource with declared symlinks")
-    install_distribution(
-        staging=staging, destination=browser_resource_root(application, "macos")
+def install_browser_and_sign(
+    application: Path, staging: Path, target_id: str
+) -> None:
+    """Run the shared release assembly step, the same one a release uses.
+
+    The acceptance script must not keep its own copy of this: when it did, the
+    verified path and the shipped path were different paths, and the shipped
+    one had no browser in it at all.
+    """
+    announce("Installing the embedded browser, verifying it, then re-sealing")
+    install_and_seal(
+        application=application,
+        staging=staging,
+        target_id=target_id,
+        platform="macos",
+        seal=lambda bundle: run_checked(
+            ["codesign", "--force", "--sign", "-", os.fspath(bundle)]
+        ),
     )
-    announce("Re-sealing the App signature over the final bundle content")
-    run_checked(["codesign", "--force", "--sign", "-", os.fspath(application)])
 
 
-def create_disk_image(application: Path, output: Path) -> Path:
+def create_disk_image(application: Path, output: Path, target_id: str) -> Path:
+    # A bundle without a verified browser must not reach a distributable
+    # artifact; this is the gate the ordinary candidate build fails.
+    require_packaged_browser(
+        application=application, target_id=target_id, platform="macos"
+    )
     announce("Creating the release disk image from the final App bundle")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
@@ -868,10 +888,11 @@ def main() -> int:
         application = build_release_package(
             configuration=configuration, environment=environment, target=cargo_target
         )
-        install_browser_and_sign(application, browser)
+        install_browser_and_sign(application, browser, target_id)
         disk_image = create_disk_image(
             application,
             cargo_target / "release/bundle/dmg" / f"{application.stem}_0.1.0.dmg",
+            target_id,
         )
     else:
         private_key = None
