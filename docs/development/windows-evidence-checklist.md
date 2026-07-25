@@ -285,6 +285,12 @@ containment 的 NTFS 语义重验**已完成，并修掉三个真实缺陷**—�
 遗留项表格。reparse point 与 8.3 短名经核实无需额外处理（`Path.resolve()` 会解析 junction
 并展开短名，随后被 `relative_to` 拦截）。
 
+修复过程中真机复验又抓出一个只在 Windows 成立的失效：第一版大小写碰撞检查比对的是
+`resolve()` 之后的路径，而 `GetFinalPathNameByHandle` 会规范化成磁盘真实大小写，使检查
+恒不触发（macOS 不规范化，故同一份单测在 macOS 通过）。改用请求路径的原始段名逐段比对后，
+Windows 真机复验通过：`rejected ... differs only by case`，原文件未被覆盖；
+`python scripts\test_motion_authoring_agent.py` 在 Windows 真机 `Ran 48 tests ... OK`。
+
 Windows 侧仍待补：BM-05 生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08
 （页面）与 BM-16（生产包冻结）在 Windows 平台一并补齐。
 
