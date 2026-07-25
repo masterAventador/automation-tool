@@ -18,6 +18,7 @@ import json
 import threading
 from collections.abc import Iterator
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from queue import Queue
 from typing import Any, cast
@@ -42,6 +43,7 @@ from automation_tool.executor.browser_surface_lease import BrowserSurfaceLeaseMa
 from automation_tool.executor.cli import build_platform_command_router
 from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.platform_commands import (
+    DOUYIN_PUBLISH_DISPATCH_COMMAND,
     DOUYIN_PUBLISH_PREFLIGHT_COMMAND,
     DOUYIN_PUBLISH_RELEASE_COMMAND,
     DouyinPublishPreflightCommandOperation,
@@ -57,6 +59,12 @@ from automation_tool.executor.rpa.douyin.publish_preflight import (
     DouyinPublishPreflightEvidence,
     DouyinPublishPreflightState,
 )
+from automation_tool.executor.rpa.douyin.publish_release import (
+    DOUYIN_PUBLISH_RELEASE_FLOW_VERSION,
+    DouyinPublishReleaseEvidence,
+    DouyinPublishReleaseState,
+)
+from automation_tool.executor.side_effect_ledger import SideEffectState
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 PUBLISH_FIXTURE = BACKEND_ROOT / "tests/fixtures/douyin_publish_states.html"
@@ -92,6 +100,7 @@ class _PublishHarness:
             executor_id="123e4567-e89b-42d3-a456-426614174004",
         )
         self.operation = DouyinPublishPreflightCommandOperation(
+            ledger=self.ledger,
             browser_authority=self.authority,
             surface_lease=self.surface_lease,
             runtime_factory=self._runtime,
@@ -204,7 +213,7 @@ class _PublishHarness:
 
     def run_worker(
         self,
-        frames: list[bytes],
+        frames: list[Any],
         *,
         operation: Any = None,
         before_frame: dict[int, Any] | None = None,
@@ -247,9 +256,14 @@ class _PublishHarness:
 
 
 class _FrameStream:
-    """A stdin stream that lets a callback run between two command frames."""
+    """A stdin stream that lets a callback run between two command frames.
 
-    def __init__(self, frames: list[bytes], before_frame: dict[int, Any]) -> None:
+    A frame may also be a callable, which is how the App really behaves: the
+    dispatch command can only be built once the preflight has answered with the
+    confirmation the operator is being asked to approve.
+    """
+
+    def __init__(self, frames: list[Any], before_frame: dict[int, Any]) -> None:
         self._frames = list(frames)
         self._before_frame = before_frame
         self._index = 0
@@ -262,7 +276,7 @@ class _FrameStream:
             return b""
         frame = self._frames[self._index]
         self._index += 1
-        return frame
+        return cast(bytes, frame() if callable(frame) else frame)
 
 
 @pytest.fixture
@@ -314,6 +328,9 @@ LOGOUT_COMMAND_ID = "123e4567-e89b-42d3-a456-426614174012"
 RELEASE_COMMAND_ID = "123e4567-e89b-42d3-a456-426614174013"
 SECOND_COMMAND_ID = "123e4567-e89b-42d3-a456-426614174014"
 SECOND_PUBLISH_JOB_ID = "123e4567-e89b-42d3-a456-426614174015"
+THIRD_COMMAND_ID = "123e4567-e89b-42d3-a456-426614174016"
+CONFIRMATION_ID = "123e4567-e89b-42d3-a456-426614174017"
+TARGET_ACCOUNT = "自动化运营测试账号"
 
 
 def test_production_command_surface_reaches_pre_submit_and_never_submits(
@@ -440,6 +457,7 @@ def test_entry_route_is_the_frozen_creator_publish_url(harness: _PublishHarness)
         return runtime
 
     harness.operation = DouyinPublishPreflightCommandOperation(
+        ledger=harness.ledger,
         browser_authority=BrowserLaunchAuthority(),
         surface_lease=harness.surface_lease,
         runtime_factory=instrumented,
@@ -667,3 +685,214 @@ def test_releasing_the_surface_voids_a_dispatchable_receipt(
     assert _result(results[0], harness) == "publish_pre_submit_ready"
     assert _result(results[1], harness) == "publish_released"
     assert harness.operation.latest_receipt() is None
+
+
+# --- PB-06: the confirmed single dispatch on the real embedded Chromium -----
+
+
+def dispatch_frame(
+    harness: _PublishHarness,
+    *,
+    command_id: str = SECOND_COMMAND_ID,
+    publish_job_id: str = PUBLISH_JOB_ID,
+    confirmation_id: str | None = None,
+) -> bytes:
+    """Build the dispatch the App would send once the operator approved.
+
+    The confirmation identifier is read back from the executor, which is the
+    only place it exists: the App can only approve the summary it was handed.
+    """
+    if confirmation_id is None:
+        approval = harness.operation.latest_approval()
+        assert approval is not None, "a ready preflight must present a summary to approve"
+        assert TARGET_ACCOUNT in approval.summary
+        confirmation_id = approval.confirmation_id
+    payload = {
+        "commandId": command_id,
+        "commandType": DOUYIN_PUBLISH_DISPATCH_COMMAND,
+        "confirmationId": confirmation_id,
+        "protocolVersion": "1.0",
+        "publishJobId": publish_job_id,
+    }
+    payload["authenticationProof"] = harness.authenticator.proof_for_publish_dispatch_command(
+        command_id=command_id,
+        command_type=DOUYIN_PUBLISH_DISPATCH_COMMAND,
+        publish_job_id=publish_job_id,
+        confirmation_id=confirmation_id,
+    )
+    return (
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _dispatch_result(document: dict[str, Any], harness: _PublishHarness) -> str:
+    expected = harness.authenticator.proof_for_command_result(
+        command_id=document["commandId"],
+        state=document["state"],
+    )
+    assert document["authenticationProof"] == expected
+    assert document["platform"] == "douyin"
+    assert document["flowVersion"] == DOUYIN_PUBLISH_RELEASE_FLOW_VERSION
+    return cast(str, document["state"])
+
+
+def _confirmed_publish(harness: _PublishHarness) -> list[dict[str, Any]]:
+    return harness.run_worker(
+        [
+            harness.command(command_id=COMMAND_ID, publish_job_id=PUBLISH_JOB_ID),
+            lambda: dispatch_frame(harness),
+        ]
+    )
+
+
+def test_a_confirmed_publish_presses_once_and_is_proven_by_the_works_list(
+    harness: _PublishHarness,
+) -> None:
+    """The whole chain on the real browser: approve, press once, verify apart."""
+    results = _confirmed_publish(harness)
+
+    assert _result(results[0], harness) == "publish_pre_submit_ready"
+    assert _dispatch_result(results[1], harness) == "publish_verified"
+
+    release = harness.operation.latest_release()
+    assert release is not None
+    assert release.state is DouyinPublishReleaseState.VERIFIED
+    assert release.evidence is DouyinPublishReleaseEvidence.WORK_LISTED
+    assert release.dispatch_state is SideEffectState.VERIFIED
+    assert release.dispatch_revision == 3
+
+    recorded = harness.ledger.get_publish_dispatch(PUBLISH_JOB_ID)
+    assert recorded is not None
+    assert recorded.state is SideEffectState.VERIFIED
+
+    facts = harness.facts()
+    assert facts["submitClicks"] == 1
+    assert facts["url"] == "https://creator.douyin.com/creator-micro/content/manage"
+    # The approval and the filled form are both spent: nothing can press again.
+    assert harness.operation.latest_approval() is None
+    assert harness.operation.latest_receipt() is None
+    assert TITLE not in repr(release)
+
+
+def test_a_publish_the_works_list_never_shows_stays_uncertain(
+    harness: _PublishHarness,
+) -> None:
+    """The click landed on the real page; an empty list cannot undo that."""
+    harness.page_state = "submit-swallowed"
+
+    results = _confirmed_publish(harness)
+
+    assert _dispatch_result(results[1], harness) == "publish_outcome_uncertain"
+    release = harness.operation.latest_release()
+    assert release is not None
+    assert release.evidence is DouyinPublishReleaseEvidence.WORK_NOT_LISTED
+    assert release.dispatch_state is SideEffectState.UNCERTAIN
+    assert harness.facts()["submitClicks"] == 1
+
+
+def test_a_works_list_that_names_the_work_twice_cannot_identify_this_publish(
+    harness: _PublishHarness,
+) -> None:
+    harness.page_state = "submit-duplicates-work"
+
+    results = _confirmed_publish(harness)
+
+    assert _dispatch_result(results[1], harness) == "publish_outcome_uncertain"
+    release = harness.operation.latest_release()
+    assert release is not None
+    assert release.evidence is DouyinPublishReleaseEvidence.WORK_LISTED_AMBIGUOUSLY
+    assert harness.facts()["submitClicks"] == 1
+
+
+def test_a_hidden_duplicate_row_does_not_make_one_landed_publish_ambiguous(
+    harness: _PublishHarness,
+) -> None:
+    """Only what the operator can actually see counts as evidence."""
+    harness.page_state = "hidden-work-first"
+
+    results = _confirmed_publish(harness)
+
+    assert _dispatch_result(results[1], harness) == "publish_verified"
+    assert harness.facts()["submitClicks"] == 1
+
+
+def test_a_works_list_that_never_renders_leaves_the_outcome_uncertain(
+    harness: _PublishHarness,
+) -> None:
+    harness.page_state = "no-work-list"
+
+    results = _confirmed_publish(harness)
+
+    assert _dispatch_result(results[1], harness) == "publish_outcome_uncertain"
+    release = harness.operation.latest_release()
+    assert release is not None
+    assert release.evidence is DouyinPublishReleaseEvidence.WORKS_LIST_UNAVAILABLE
+    assert harness.facts()["submitClicks"] == 1
+
+
+def test_the_emergency_stop_reaches_a_confirmed_publish_before_the_click(
+    harness: _PublishHarness,
+) -> None:
+    """One latch stops task actions and publishing alike."""
+    results = harness.run_worker(
+        [
+            harness.command(command_id=COMMAND_ID, publish_job_id=PUBLISH_JOB_ID),
+            lambda: dispatch_frame(harness),
+        ],
+        before_frame={
+            1: lambda: harness.ledger.engage_action_emergency_stop(changed_at=datetime.now(UTC))
+        },
+    )
+
+    assert _dispatch_result(results[1], harness) == "publish_not_dispatched"
+    release = harness.operation.latest_release()
+    assert release is not None
+    assert release.evidence is DouyinPublishReleaseEvidence.LEDGER_UNAVAILABLE
+    assert harness.facts()["submitClicks"] == 0
+
+
+def test_a_dispatch_naming_a_confirmation_the_executor_never_issued_never_presses(
+    harness: _PublishHarness,
+) -> None:
+    """A correctly signed frame is still not an approval anyone gave."""
+    results = harness.run_worker(
+        [
+            harness.command(command_id=COMMAND_ID, publish_job_id=PUBLISH_JOB_ID),
+            lambda: dispatch_frame(harness, confirmation_id=CONFIRMATION_ID),
+        ]
+    )
+
+    assert _result(results[0], harness) == "publish_pre_submit_ready"
+    assert _dispatch_result(results[1], harness) == "publish_not_dispatched"
+    assert harness.facts()["submitClicks"] == 0
+    # The real approval was never spent, so a correct dispatch still works.
+    assert harness.operation.latest_approval() is not None
+
+
+def test_one_approval_can_never_be_spent_on_a_second_click(
+    harness: _PublishHarness,
+) -> None:
+    """The second dispatch has no approval left to spend, so nothing is pressed."""
+    spent: dict[str, str] = {}
+
+    def remember_and_build() -> bytes:
+        approval = harness.operation.latest_approval()
+        assert approval is not None
+        spent["confirmation_id"] = approval.confirmation_id
+        return dispatch_frame(harness, confirmation_id=approval.confirmation_id)
+
+    results = harness.run_worker(
+        [
+            harness.command(command_id=COMMAND_ID, publish_job_id=PUBLISH_JOB_ID),
+            remember_and_build,
+            lambda: dispatch_frame(
+                harness,
+                command_id=THIRD_COMMAND_ID,
+                confirmation_id=spent["confirmation_id"],
+            ),
+        ]
+    )
+
+    assert _dispatch_result(results[1], harness) == "publish_verified"
+    assert _dispatch_result(results[2], harness) == "publish_not_dispatched"
+    assert harness.facts()["submitClicks"] == 1

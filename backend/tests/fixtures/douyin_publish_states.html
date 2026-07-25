@@ -7,13 +7,37 @@
   <body>
     <div id="root"></div>
     <script>
-      window.__submitClicks = 0;
+      // A real navigation to the works list reloads this document, so the
+      // facts a test asserts afterwards have to outlive the page they were
+      // recorded on. Session storage is per-tab and same-origin, which is
+      // exactly the lifetime of one operations window.
+      function recall(key, fallback) {
+        try {
+          const stored = sessionStorage.getItem(key);
+          return stored === null ? fallback : JSON.parse(stored);
+        } catch (error) {
+          return fallback;
+        }
+      }
+
+      function remember(key, value) {
+        try {
+          sessionStorage.setItem(key, JSON.stringify(value));
+        } catch (error) {
+          // A storage-less context still renders; only the facts are lost.
+        }
+      }
+
+      window.__submitClicks = recall("submitClicks", 0);
+      window.__publishedTitles = recall("publishedTitles", []);
       window.__uploadedFileName = null;
       window.__uploadedSize = null;
       window.__state = "__INITIAL_STATE__";
 
       const UPLOAD_ROUTE = "/creator-micro/content/upload";
       const FORM_ROUTE = "/creator-micro/content/post/video";
+      const MANAGE_ROUTE = "/creator-micro/content/manage";
+
 
       function element(tag, attributes, text) {
         const node = document.createElement(tag);
@@ -89,6 +113,14 @@
         );
         submit.addEventListener("click", () => {
           window.__submitClicks += 1;
+          remember("submitClicks", window.__submitClicks);
+          if (state === "submit-swallowed") {
+            return;
+          }
+          const accepted =
+            state === "submit-duplicates-work" ? [title.value, title.value] : [title.value];
+          window.__publishedTitles = window.__publishedTitles.concat(accepted);
+          remember("publishedTitles", window.__publishedTitles);
         });
         function refresh() {
           const armed =
@@ -109,6 +141,36 @@
         root.appendChild(description);
         root.appendChild(submit);
         refresh();
+      }
+
+      function worksListNode(root) {
+        const list = element("div", { "data-e2e": "publish-work-list" });
+        if (window.__publishedTitles.length === 0) {
+          // A creator with no works still renders an empty state. Without it
+          // the container would collapse to zero height, and "the list loaded
+          // and holds nothing" would be indistinguishable from "no list".
+          list.appendChild(
+            element("div", { "data-e2e": "publish-work-empty" }, "暂无作品")
+          );
+        }
+        for (const title of window.__publishedTitles) {
+          const item = element("div", { "data-e2e": "publish-work-item" });
+          item.appendChild(
+            element("div", { "data-e2e": "publish-work-title" }, title)
+          );
+          list.appendChild(item);
+        }
+        if (window.__state === "hidden-work-first") {
+          // A pre-rendered hidden row precedes the real one; counting it would
+          // turn one landed publish into an ambiguous list.
+          const placeholder = element("div", {
+            "data-e2e": "publish-work-title",
+            style: "display:none",
+          });
+          placeholder.textContent = window.__publishedTitles[0] || "";
+          list.insertBefore(placeholder, list.firstChild);
+        }
+        root.appendChild(list);
       }
 
       function render() {
@@ -163,6 +225,10 @@
         }
         if (path === FORM_ROUTE && state !== "no-form") {
           formNode(root);
+          return;
+        }
+        if (path === MANAGE_ROUTE && state !== "no-work-list") {
+          worksListNode(root);
         }
       }
 

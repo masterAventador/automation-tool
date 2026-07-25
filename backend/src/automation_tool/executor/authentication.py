@@ -21,9 +21,13 @@ _COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-command.v1\0"
 _COMMAND_RESULT_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-result.v1\0"
 _COMMAND_PROOF_PREFIX = "atlcp1."
 _PUBLISH_COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-publish-command.v1\0"
+_PUBLISH_DISPATCH_AUTHENTICATION_DOMAIN = (
+    b"automation-tool.local-executor-publish-dispatch.v1\0"
+)
 _ALLOWED_COMMANDS = frozenset(("douyin.login.open", "douyin.login.recheck"))
 _ALLOWED_SESSION_COMMANDS = frozenset(("douyin.logout.complete", "douyin.publish.release"))
 _ALLOWED_PUBLISH_COMMANDS = frozenset(("douyin.publish.preflight",))
+_ALLOWED_PUBLISH_DISPATCH_COMMANDS = frozenset(("douyin.publish.dispatch",))
 _MAX_PUBLISH_TEXT_CHARACTERS = 4096
 _ALLOWED_COMMAND_RESULTS = frozenset(
     (
@@ -38,6 +42,9 @@ _ALLOWED_COMMAND_RESULTS = frozenset(
         "publish_pre_submit_ready",
         "publish_handoff_required",
         "publish_blocked",
+        "publish_verified",
+        "publish_outcome_uncertain",
+        "publish_not_dispatched",
         "publish_released",
     )
 )
@@ -200,6 +207,54 @@ class LocalSessionAuthenticator:
             artifact_path=artifact_path,
             title=title,
             description=description,
+        )
+        if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
+            raise LocalSessionAuthenticationRejected
+
+    def proof_for_publish_dispatch_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        publish_job_id: str,
+        confirmation_id: str,
+    ) -> str:
+        """Bind the job and the approval this dispatch is allowed to spend.
+
+        The dispatch carries no artifact or text of its own - it acts on the
+        pre-submit state the executor already holds - so what has to be
+        unforgeable is which job and which confirmation it names.
+        """
+        _require_uuid_v4(command_id)
+        _require_uuid_v4(publish_job_id)
+        _require_uuid_v4(confirmation_id)
+        if type(command_type) is not str or command_type not in _ALLOWED_PUBLISH_DISPATCH_COMMANDS:
+            raise LocalSessionAuthenticationRejected
+        return self._proof(
+            _PUBLISH_DISPATCH_AUTHENTICATION_DOMAIN,
+            (
+                command_id,
+                command_type,
+                publish_job_id,
+                confirmation_id,
+                EXECUTOR_PROTOCOL_VERSION,
+            ),
+        )
+
+    def verify_publish_dispatch_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        publish_job_id: str,
+        confirmation_id: str,
+        presented_proof: str,
+    ) -> None:
+        expected = self.proof_for_publish_dispatch_command(
+            command_id=command_id,
+            command_type=command_type,
+            publish_job_id=publish_job_id,
+            confirmation_id=confirmation_id,
         )
         if type(presented_proof) is not str or not hmac.compare_digest(expected, presented_proof):
             raise LocalSessionAuthenticationRejected

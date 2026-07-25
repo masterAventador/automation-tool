@@ -4,6 +4,7 @@ import re
 from typing import Any, cast
 
 import pytest
+
 from automation_tool.executor.rpa.douyin import (
     comment_page,
     direct_message_page,
@@ -20,7 +21,7 @@ from automation_tool.executor.rpa.douyin.page_anchors import (
 
 SELECTORS = ('[data-e2e="captcha-container"]', 'iframe[src*="/verifycenter/captcha/"]')
 ENGINE_PREFIX = re.compile(r"^\s*[a-zA-Z_][a-zA-Z0-9_-]*\s*=")
-UNIQUE_VISIBLE_GROUPS = (
+COMMA_JOINED_GROUPS = (
     comment_page._COMMENT_INPUT_SELECTORS,
     comment_page._COMMENT_SUBMIT_SELECTORS,
     comment_page._FINAL_CONFIRMATION_SELECTORS,
@@ -41,16 +42,19 @@ UNIQUE_VISIBLE_GROUPS = (
     publish_page.DOUYIN_PUBLISH_DESCRIPTION_SELECTORS,
     publish_page.DOUYIN_PUBLISH_SUBMIT_SELECTORS,
     publish_page.DOUYIN_PUBLISH_ACCOUNT_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_WORK_LIST_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_WORK_TITLE_SELECTORS,
 )
 
 
-@pytest.mark.parametrize("group", UNIQUE_VISIBLE_GROUPS)
+@pytest.mark.parametrize("group", COMMA_JOINED_GROUPS)
 def test_every_deduplicated_group_stays_css_only(group: tuple[str, ...]) -> None:
     """Comma-joining a Playwright engine selector silently breaks the whole group.
 
-    ``unique_visible`` joins its group into one selector, which only the CSS
-    engine can parse. A group that mixes in ``text=`` or another engine prefix
-    turns every probe of that page object into ``page_unavailable``.
+    ``unique_visible`` and every grouped wait join their selectors into one
+    string, which only the CSS engine can parse. A group that mixes in
+    ``text=`` or another engine prefix turns every probe of that page object
+    into ``page_unavailable``.
 
     Playwright reaches a non-CSS engine three ways, and comma-joining breaks
     on all three: an explicit prefix, a bare XPath it auto-detects, and the

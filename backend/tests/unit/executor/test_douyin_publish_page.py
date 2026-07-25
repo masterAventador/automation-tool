@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.publish_page import (
@@ -14,6 +16,7 @@ from automation_tool.executor.rpa.douyin.publish_page import (
     DOUYIN_PUBLISH_FORM_ROUTE,
     DOUYIN_PUBLISH_PAGE_SELECTOR_VERSION,
     DOUYIN_PUBLISH_UPLOAD_ROUTE,
+    MAX_DOUYIN_PUBLISH_WORKS_READ,
     DouyinPublishPage,
     DouyinPublishPageEvidence,
     DouyinPublishPageObservation,
@@ -22,7 +25,6 @@ from automation_tool.executor.rpa.douyin.publish_page import (
     DouyinPublishRoute,
     DouyinPublishRouteModel,
 )
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 CONTRACT_PATH = REPOSITORY_ROOT / "contracts/publishing/douyin-browser-use-preflight.v1.json"
@@ -103,6 +105,26 @@ class FakeLocator:
                 return self._page.texts[selector]
         return ""
 
+    def click(self, *, timeout: float) -> None:
+        assert timeout > 0
+        # Playwright presses the one element the group resolved to, not the group.
+        for selector in self.selector.split(", "):
+            if selector not in self._page.visible_selectors:
+                continue
+            failure = self._page.click_failures.get(selector)
+            if failure is not None:
+                raise failure
+            self._page.clicked.append(selector)
+
+    def element_handles(self) -> list[FakeHandle]:
+        """One resolution of the whole match set, the way Playwright snapshots."""
+        self._page.handle_resolutions += 1
+        return [
+            FakeHandle(index, text, self._page)
+            for index, (text, visible) in enumerate(self._page.work_titles)
+            if visible or not self._visible_only
+        ]
+
     def is_enabled(self) -> bool:
         if self.selector in self._page.disabled_selectors:
             return False
@@ -119,6 +141,23 @@ class FakeLocator:
         if not matches or not matches[0]:
             self._page.wait_timeouts.append(self.selector)
             raise PlaywrightTimeoutError("private wait timeout")
+
+
+class FakeHandle:
+    """A resolved node snapshot: it never re-evaluates its selector."""
+
+    def __init__(self, index: int, text: str, page: FakePage) -> None:
+        self._index = index
+        self._text = text
+        self._page = page
+
+    def inner_text(self) -> str:
+        if self._page.failing_handle_index == self._index:
+            raise RuntimeError("private row read failure")
+        return self._text
+
+    def dispose(self) -> None:
+        self._page.disposed.append(self._index)
 
 
 class FakePage:
@@ -138,8 +177,17 @@ class FakePage:
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
         self.wait_timeouts: list[str] = []
         self.navigations: list[str] = []
+        self.clicked: list[str] = []
+        self.requested_selectors: list[str] = []
+        self.work_titles: list[tuple[str, bool]] = []
+        self.disposed: list[int] = []
+        self.handle_resolutions = 0
+        self.failing_handle_index: int | None = None
+        self.click_failures: dict[str, BaseException] = {}
+        self.navigation_callbacks: dict[str, Callable[[], None]] = {}
 
     def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
         return FakeLocator(selector, self, wait_callback=self.wait_callbacks.get(selector))
 
     def goto(self, url: str, *, wait_until: str, timeout: float) -> None:
@@ -147,6 +195,9 @@ class FakePage:
         assert timeout > 0
         self.navigations.append(url)
         self.url = url
+        callback = self.navigation_callbacks.get(url)
+        if callback is not None:
+            callback()
 
 
 class FailingUrlPage(FakePage):
@@ -575,3 +626,157 @@ def test_absent_or_ambiguous_account_anchor_reports_nothing() -> None:
     page.visible_selectors.add(ACCOUNT_NAME)
     page.visible_selectors.add('[data-e2e="creator-account-name"]')
     assert DouyinPublishPage(window(page)).target_account() is None
+
+
+# --- PB-06: the single click and the independent works-list evidence ---------
+
+
+WORK_LIST = '[data-e2e="publish-work-list"]'
+WORK_TITLE = '[data-e2e="publish-work-title"]'
+MANAGE_URL = "https://creator.douyin.com/creator-micro/content/manage"
+
+
+def works_page(*titles: str) -> FakePage:
+    page = FakePage(url=MANAGE_URL, visible_selectors={WORK_LIST})
+    page.work_titles = [(title, True) for title in titles]
+    return page
+
+
+def test_the_manage_route_is_recognized_as_its_own_frozen_route() -> None:
+    assert DouyinPublishRouteModel().check(MANAGE_URL) is DouyinPublishRoute.MANAGE_LIST
+
+
+def test_the_works_list_is_reached_through_the_frozen_manage_route() -> None:
+    page = works_page()
+
+    observation = DouyinPublishPage(window(page)).open_works_list(timeout_milliseconds=1_000)
+
+    assert page.navigations == [MANAGE_URL]
+    assert observation.state is DouyinPublishPageState.WORKS_LIST_READY
+    assert observation.evidence is DouyinPublishPageEvidence.WORK_LIST_VISIBLE
+
+
+@pytest.mark.parametrize(
+    ("selector", "state"),
+    [
+        (LOGIN_PANEL, DouyinPublishPageState.LOGIN_REQUIRED),
+        (RISK_CHALLENGE, DouyinPublishPageState.RISK_CHALLENGE),
+        (BLOCKING_DIALOG, DouyinPublishPageState.DIALOG_BLOCKED),
+    ],
+)
+def test_the_works_list_reports_the_same_handoff_states_as_the_form(
+    selector: str,
+    state: DouyinPublishPageState,
+) -> None:
+    page = works_page()
+    page.visible_selectors.add(selector)
+
+    assert DouyinPublishPage(window(page)).observe().state is state
+
+
+def test_a_manage_page_without_its_list_anchor_is_not_evidence_of_anything() -> None:
+    page = FakePage(url=MANAGE_URL)
+
+    observation = DouyinPublishPage(window(page)).observe()
+
+    assert observation.state is DouyinPublishPageState.UNKNOWN
+    assert observation.evidence is DouyinPublishPageEvidence.REQUIRED_ANCHOR_MISSING
+
+
+def test_one_visible_work_with_the_confirmed_title_is_counted() -> None:
+    page = works_page("其他作品", "确认过的标题")
+
+    assert DouyinPublishPage(window(page)).works_titled("确认过的标题") == 1
+
+
+def test_no_work_with_the_confirmed_title_counts_zero() -> None:
+    page = works_page("其他作品")
+
+    assert DouyinPublishPage(window(page)).works_titled("确认过的标题") == 0
+
+
+def test_two_works_sharing_the_confirmed_title_are_both_counted() -> None:
+    """The caller has to treat an ambiguous list as uncertain, not as success."""
+    page = works_page("确认过的标题", "确认过的标题")
+
+    assert DouyinPublishPage(window(page)).works_titled("确认过的标题") == 2
+
+
+def test_a_hidden_work_row_is_not_independent_evidence() -> None:
+    page = works_page("其他作品")
+    page.work_titles.append(("确认过的标题", False))
+
+    assert DouyinPublishPage(window(page)).works_titled("确认过的标题") == 0
+
+
+def test_surrounding_whitespace_in_a_rendered_title_still_matches() -> None:
+    page = works_page("\n  确认过的标题\t ")
+
+    assert DouyinPublishPage(window(page)).works_titled("确认过的标题") == 1
+
+
+def test_the_confirmed_title_is_never_spliced_into_a_selector() -> None:
+    """A title is user content; interpolating it would be selector injection."""
+    hostile = '"], [data-e2e="publish-work-title'
+    page = works_page(hostile)
+
+    assert DouyinPublishPage(window(page)).works_titled(hostile) == 1
+    assert all(hostile not in selector for selector in page.requested_selectors)
+
+
+def test_every_row_snapshot_is_released_even_when_a_read_fails() -> None:
+    page = works_page("确认过的标题", "第二个作品")
+    page.failing_handle_index = 1
+
+    with pytest.raises(RuntimeError):
+        DouyinPublishPage(window(page)).works_titled("确认过的标题")
+
+    assert page.disposed == [0, 1]
+
+
+def test_the_rows_are_read_from_one_snapshot_not_re_resolved_per_field() -> None:
+    """A list that grows mid-read must not shift which row a title came from."""
+    page = works_page("确认过的标题")
+
+    DouyinPublishPage(window(page)).works_titled("确认过的标题")
+
+    assert page.handle_resolutions == 1
+
+
+def test_an_unbounded_works_list_is_refused_instead_of_read_row_by_row() -> None:
+    page = works_page(*[f"作品{index}" for index in range(MAX_DOUYIN_PUBLISH_WORKS_READ + 1)])
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).works_titled("作品0")
+
+    assert page.disposed == list(range(MAX_DOUYIN_PUBLISH_WORKS_READ + 1))
+
+
+def test_the_works_list_cannot_be_read_from_the_form_page() -> None:
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(form_page())).works_titled("确认过的标题")
+
+
+def test_the_submit_control_is_only_reachable_from_a_ready_form() -> None:
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(upload_page())).submit_control()
+
+
+def test_the_submit_control_presses_the_real_publish_button_once() -> None:
+    page = form_page()
+
+    DouyinPublishPage(window(page)).submit_control().click(timeout=1_000)
+
+    assert page.clicked == [SUBMIT_CONTROL]
+
+
+def test_the_submit_control_hands_back_nothing_but_the_click() -> None:
+    control = DouyinPublishPage(window(form_page())).submit_control()
+
+    assert not hasattr(control, "__dict__")
+    assert not hasattr(control, "_locator")
+    for forbidden in ("fill", "press", "evaluate", "goto", "set_input_files"):
+        assert not hasattr(control, forbidden), forbidden
+    exposed = [getattr(control, name) for name in dir(control) if not name.startswith("__")]
+    assert all(not isinstance(value, FakeLocator) for value in exposed)
+    assert "redacted" in repr(control)

@@ -96,9 +96,11 @@ def build_platform_command_router(
     """Assemble the production command router shared by the executor and its tests.
 
     ``local_outbox`` is drained straight onto the Control Plane socket and only
-    accepts protocol envelopes. The publish preflight has no Control Plane
-    message of its own yet, so it publishes nothing there and exposes its last
-    outcome through ``latest_receipt()``; PB-07 adds the App-facing projection.
+    accepts protocol envelopes. Publishing has no Control Plane message of its
+    own yet, so it publishes nothing there and exposes its last outcome through
+    ``latest_receipt()``, the pending critical-point summary through
+    ``latest_approval()`` and the dispatch outcome through ``latest_release()``;
+    PB-07 adds the App-facing projection of all three.
     """
     return PlatformCommandRouter(
         login=DouyinLoginCommandOperation(
@@ -108,6 +110,7 @@ def build_platform_command_router(
             runtime_factory=runtime_factory,
         ),
         publish=DouyinPublishPreflightCommandOperation(
+            ledger=ledger,
             browser_authority=browser_authority,
             runtime_factory=runtime_factory,
         ),

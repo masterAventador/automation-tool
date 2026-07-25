@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Final, cast
 from uuid import RFC_4122, UUID
 
-from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
+from automation_tool.executor.side_effect_ledger import (
+    LocalPublishDispatch,
+    LocalSideEffect,
+    SideEffectState,
+)
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_CLOCK_SKEW,
     ACTION_RESULT_EVIDENCE_VERSION,
@@ -32,9 +36,13 @@ from automation_tool.protocol import (
     TaskEventEnvelope,
     parse_executor_message,
 )
+from automation_tool.protocol.safe_text import is_sha256_hex
 
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
-_SCHEMA_VERSION: Final = 7
+# The durable shape callers and contracts pin against; bump it in the same
+# change that adds a migration.
+EXECUTOR_LEDGER_SCHEMA_VERSION: Final = 8
+_SCHEMA_VERSION: Final = EXECUTOR_LEDGER_SCHEMA_VERSION
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_PENDING_OUTBOX_ENTRIES: Final = 1000
 _MAX_PENDING_OUTBOX_BYTES: Final = 16 * 1024 * 1024
@@ -51,6 +59,12 @@ _SIDE_EFFECT_SELECT: Final = """
            s.verification_fingerprint, s.revision, a.deadline_at
     FROM executor_side_effects s
     LEFT JOIN executor_action_admissions a ON a.action_id = s.action_id
+"""
+
+_PUBLISH_DISPATCH_SELECT: Final = """
+    SELECT publish_job_id, content_hash, state, prepared_at, dispatched_at,
+           settled_at, verification_fingerprint, revision
+    FROM executor_publish_dispatches
 """
 
 
@@ -958,6 +972,268 @@ class ExecutorLedger:
                 return effect
         except Exception:
             raise ExecutorLedgerRejected from None
+
+    def get_publish_dispatch(self, publish_job_id: str) -> LocalPublishDispatch | None:
+        try:
+            canonical_job_id = _canonical_uuid_v4(publish_job_id)
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+            return None if row is None else _publish_dispatch(row, replayed=False)
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def prepare_publish_dispatch(
+        self,
+        *,
+        publish_job_id: str,
+        content_hash: str,
+        prepared_at: datetime,
+    ) -> LocalPublishDispatch:
+        """Record exactly what the operator confirmed before any click is possible."""
+
+        try:
+            canonical_job_id = _canonical_uuid_v4(publish_job_id)
+            canonical_prepared_at = _canonical_utc(prepared_at)
+            if not is_sha256_hex(content_hash) or canonical_prepared_at is None:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+                if existing is not None:
+                    dispatch = _publish_dispatch(existing, replayed=True)
+                    # A job identifier is never reusable for different content:
+                    # the confirmation the operator gave was for this digest.
+                    if dispatch.content_hash != content_hash:
+                        raise ValueError
+                    connection.commit()
+                    return dispatch
+                self._require_publish_permitted(connection)
+                connection.execute(
+                    """
+                    INSERT INTO executor_publish_dispatches (
+                        publish_job_id, content_hash, state, prepared_at,
+                        dispatched_at, settled_at, verification_fingerprint, revision
+                    ) VALUES (?, ?, 'prepared', ?, NULL, NULL, NULL, 1)
+                    """,
+                    (canonical_job_id, content_hash, _encode_utc(canonical_prepared_at)),
+                )
+                row = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+                dispatch = _publish_dispatch(
+                    cast(sqlite3.Row | tuple[object, ...], row),
+                    replayed=False,
+                )
+                connection.commit()
+                return dispatch
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def begin_publish_dispatch(
+        self,
+        *,
+        publish_job_id: str,
+        content_hash: str,
+        dispatched_at: datetime,
+        minimum_interval_seconds: int,
+    ) -> LocalPublishDispatch:
+        """Atomically grant at most one caller permission to press publish once."""
+
+        try:
+            canonical_job_id = _canonical_uuid_v4(publish_job_id)
+            canonical_dispatched_at = _canonical_utc(dispatched_at)
+            if (
+                not is_sha256_hex(content_hash)
+                or canonical_dispatched_at is None
+                or type(minimum_interval_seconds) is not int
+                or minimum_interval_seconds < 0
+            ):
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+                current = _publish_dispatch(
+                    cast(sqlite3.Row | tuple[object, ...], row),
+                    replayed=False,
+                )
+                if current.content_hash != content_hash:
+                    raise ValueError
+                if current.state is not SideEffectState.PREPARED:
+                    # Already spent: report the recorded outcome, never regrant.
+                    connection.commit()
+                    return _publish_dispatch(
+                        cast(sqlite3.Row | tuple[object, ...], row),
+                        replayed=True,
+                    )
+                self._require_publish_permitted(connection)
+                previous = connection.execute(
+                    """
+                    SELECT dispatched_at FROM executor_publish_dispatches
+                    WHERE dispatched_at IS NOT NULL AND publish_job_id != ?
+                    ORDER BY dispatched_at DESC LIMIT 1
+                    """,
+                    (canonical_job_id,),
+                ).fetchone()
+                if canonical_dispatched_at < current.prepared_at or (
+                    previous is not None
+                    and canonical_dispatched_at - _decode_utc(previous[0])
+                    < timedelta(seconds=minimum_interval_seconds)
+                ):
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_publish_dispatches
+                    SET state = 'dispatched', dispatched_at = ?, revision = 2
+                    WHERE publish_job_id = ? AND state = 'prepared' AND revision = 1
+                    """,
+                    (_encode_utc(canonical_dispatched_at), canonical_job_id),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - locked row cannot drift
+                    raise ValueError
+                changed = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+                dispatch = _publish_dispatch(
+                    cast(sqlite3.Row | tuple[object, ...], changed),
+                    replayed=False,
+                )
+                connection.commit()
+                return dispatch
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def verify_publish_dispatch(
+        self,
+        *,
+        publish_job_id: str,
+        content_hash: str,
+        verification_fingerprint: bytes,
+        verified_at: datetime,
+    ) -> LocalPublishDispatch:
+        return self._settle_publish_dispatch(
+            publish_job_id=publish_job_id,
+            content_hash=content_hash,
+            target_state=SideEffectState.VERIFIED,
+            verification_fingerprint=verification_fingerprint,
+            settled_at=verified_at,
+        )
+
+    def mark_publish_dispatch_uncertain(
+        self,
+        *,
+        publish_job_id: str,
+        content_hash: str,
+        uncertain_at: datetime,
+    ) -> LocalPublishDispatch:
+        return self._settle_publish_dispatch(
+            publish_job_id=publish_job_id,
+            content_hash=content_hash,
+            target_state=SideEffectState.UNCERTAIN,
+            verification_fingerprint=None,
+            settled_at=uncertain_at,
+        )
+
+    def _settle_publish_dispatch(
+        self,
+        *,
+        publish_job_id: str,
+        content_hash: str,
+        target_state: SideEffectState,
+        verification_fingerprint: bytes | None,
+        settled_at: datetime,
+    ) -> LocalPublishDispatch:
+        try:
+            canonical_job_id = _canonical_uuid_v4(publish_job_id)
+            canonical_settled_at = _canonical_utc(settled_at)
+            if target_state is SideEffectState.VERIFIED:
+                _require_fingerprint(verification_fingerprint)
+            elif (
+                target_state is not SideEffectState.UNCERTAIN
+                or verification_fingerprint is not None
+            ):
+                raise ValueError
+            if not is_sha256_hex(content_hash) or canonical_settled_at is None:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+                current = _publish_dispatch(
+                    cast(sqlite3.Row | tuple[object, ...], row),
+                    replayed=False,
+                )
+                if current.content_hash != content_hash:
+                    raise ValueError
+                if current.state is target_state:
+                    if current.verification_fingerprint != verification_fingerprint:
+                        raise ValueError
+                    connection.commit()
+                    return _publish_dispatch(
+                        cast(sqlite3.Row | tuple[object, ...], row),
+                        replayed=True,
+                    )
+                if (
+                    current.state is not SideEffectState.DISPATCHED
+                    or current.dispatched_at is None
+                    or canonical_settled_at < current.dispatched_at
+                ):
+                    raise ValueError
+                updated = connection.execute(
+                    """
+                    UPDATE executor_publish_dispatches
+                    SET state = ?, settled_at = ?, verification_fingerprint = ?, revision = 3
+                    WHERE publish_job_id = ? AND state = 'dispatched' AND revision = 2
+                    """,
+                    (
+                        target_state.value,
+                        _encode_utc(canonical_settled_at),
+                        verification_fingerprint,
+                        canonical_job_id,
+                    ),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - locked row cannot drift
+                    raise ValueError
+                changed = connection.execute(
+                    _PUBLISH_DISPATCH_SELECT + " WHERE publish_job_id = ?",
+                    (canonical_job_id,),
+                ).fetchone()
+                dispatch = _publish_dispatch(
+                    cast(sqlite3.Row | tuple[object, ...], changed),
+                    replayed=False,
+                )
+                connection.commit()
+                return dispatch
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    @staticmethod
+    def _require_publish_permitted(connection: sqlite3.Connection) -> None:
+        """The one-touch emergency stop covers publishing exactly as it covers actions."""
+        if _action_emergency_stop(
+            cast(
+                sqlite3.Row | tuple[object, ...],
+                connection.execute(
+                    """
+                    SELECT engaged, revision, changed_at
+                    FROM executor_action_guard WHERE singleton_id = 1
+                    """
+                ).fetchone(),
+            )
+        ).engaged:
+            raise ValueError
 
     def get_action_emergency_stop(self) -> LocalActionEmergencyStop:
         try:
@@ -2340,6 +2616,9 @@ class ExecutorLedger:
             if version == 6:
                 _migrate_v7(connection)
                 version = 7
+            if version == 7:
+                _migrate_v8(connection)
+                version = 8
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -2723,6 +3002,66 @@ def _migrate_v7(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 7")
 
 
+def _migrate_v8(connection: sqlite3.Connection) -> None:
+    """Record locally confirmed publishes, which carry no signed task authority.
+
+    Publishing is operator-confirmed rather than Control Plane-signed, so it
+    cannot key off ``executor_action_admissions`` the way a task action does.
+    It still needs the same at-most-once guarantee, so it gets its own narrow
+    table with the identical prepared/dispatched/settled shape - and nothing
+    from the publish itself beyond the confirmed content digest.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE executor_publish_dispatches (
+            publish_job_id TEXT PRIMARY KEY CHECK (length(publish_job_id) = 36),
+            content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+            state TEXT NOT NULL CHECK (
+                state IN ('prepared', 'dispatched', 'verified', 'uncertain')
+            ),
+            prepared_at TEXT NOT NULL,
+            dispatched_at TEXT,
+            settled_at TEXT,
+            verification_fingerprint BLOB,
+            revision INTEGER NOT NULL,
+            CHECK (
+                (
+                    state = 'prepared' AND revision = 1
+                    AND dispatched_at IS NULL AND settled_at IS NULL
+                    AND verification_fingerprint IS NULL
+                )
+                OR (
+                    state = 'dispatched' AND revision = 2
+                    AND dispatched_at IS NOT NULL AND dispatched_at >= prepared_at
+                    AND settled_at IS NULL AND verification_fingerprint IS NULL
+                )
+                OR (
+                    state = 'verified' AND revision = 3
+                    AND dispatched_at IS NOT NULL AND dispatched_at >= prepared_at
+                    AND settled_at IS NOT NULL AND settled_at >= dispatched_at
+                    AND verification_fingerprint IS NOT NULL
+                    AND length(verification_fingerprint) = 32
+                )
+                OR (
+                    state = 'uncertain' AND revision = 3
+                    AND dispatched_at IS NOT NULL AND dispatched_at >= prepared_at
+                    AND settled_at IS NOT NULL AND settled_at >= dispatched_at
+                    AND verification_fingerprint IS NULL
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX ix_executor_publish_dispatches_interval
+        ON executor_publish_dispatches (dispatched_at)
+        """
+    )
+    connection.execute("PRAGMA user_version = 8")
+
+
 def _require_pending_outbox_capacity(
     connection: sqlite3.Connection,
     envelopes: tuple[str, ...],
@@ -2871,6 +3210,24 @@ def _side_effect(row: sqlite3.Row | tuple[object, ...], *, replayed: bool) -> Lo
         settled_at=None if row[13] is None else _decode_utc(row[13]),
         verification_fingerprint=(None if row[14] is None else cast(bytes, row[14])),
         revision=cast(int, row[15]),
+        replayed=replayed,
+    )
+
+
+def _publish_dispatch(
+    row: sqlite3.Row | tuple[object, ...],
+    *,
+    replayed: bool,
+) -> LocalPublishDispatch:
+    return LocalPublishDispatch(
+        publish_job_id=cast(str, row[0]),
+        content_hash=cast(str, row[1]),
+        state=SideEffectState(cast(str, row[2])),
+        prepared_at=_decode_utc(row[3]),
+        dispatched_at=None if row[4] is None else _decode_utc(row[4]),
+        settled_at=None if row[5] is None else _decode_utc(row[5]),
+        verification_fingerprint=(None if row[6] is None else cast(bytes, row[6])),
+        revision=cast(int, row[7]),
         replayed=replayed,
     )
 

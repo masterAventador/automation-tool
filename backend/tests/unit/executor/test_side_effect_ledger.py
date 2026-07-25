@@ -11,7 +11,11 @@ from uuid import UUID
 
 import pytest
 
-from automation_tool.executor.ledger import ExecutorLedger, ExecutorLedgerRejected
+from automation_tool.executor.ledger import (
+    EXECUTOR_LEDGER_SCHEMA_VERSION,
+    ExecutorLedger,
+    ExecutorLedgerRejected,
+)
 from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_VERSION,
@@ -144,13 +148,14 @@ def test_a7_07_side_effect_state_machine_is_closed_and_redacted() -> None:
             replace(valid, **invalid)
 
 
-def test_v4_ledger_migrates_to_exact_v7_without_losing_action_admission(
+def test_v4_ledger_migrates_to_exact_v8_without_losing_action_admission(
     tmp_path: Path,
 ) -> None:
     state_directory = tmp_path / "legacy-v4"
     opened = ledger(state_directory)
     authorization = admit(opened, 1)
     with sqlite3.connect(opened.database_path) as connection:
+        connection.execute("DROP TABLE executor_publish_dispatches")
         connection.execute("DROP TABLE executor_side_effects")
         connection.execute("ALTER TABLE executor_action_guard DROP COLUMN network_connected")
         connection.execute("PRAGMA user_version = 4")
@@ -160,7 +165,9 @@ def test_v4_ledger_migrates_to_exact_v7_without_losing_action_admission(
     assert migrated.get_action_admission(str(authorization.action_id)) is not None
     assert migrated.get_side_effect(str(authorization.action_id)) is None
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            EXECUTOR_LEDGER_SCHEMA_VERSION,
+        )
         columns = {row[1] for row in connection.execute("PRAGMA table_info(executor_side_effects)")}
         invalid_states = (
             ("prepared", None, None, b"p" * 32, 1),

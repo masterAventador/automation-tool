@@ -18,6 +18,7 @@ import pytest
 from automation_tool.executor import ledger as ledger_module
 from automation_tool.executor.ledger import (
     EXECUTOR_LEDGER_FILE_NAME,
+    EXECUTOR_LEDGER_SCHEMA_VERSION,
     AttemptCheckpoint,
     AttemptCheckpointState,
     ExecutorLedger,
@@ -116,14 +117,16 @@ def ledger(state_directory: Path) -> ExecutorLedger:
     )
 
 
-def test_empty_private_directory_migrates_to_the_exact_v7_schema(tmp_path: Path) -> None:
+def test_empty_private_directory_migrates_to_the_exact_v8_schema(tmp_path: Path) -> None:
     state_directory = tmp_path / "executor-state"
 
     opened = ledger(state_directory)
 
     assert opened.database_path == state_directory / EXECUTOR_LEDGER_FILE_NAME
     with sqlite3.connect(opened.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            EXECUTOR_LEDGER_SCHEMA_VERSION,
+        )
         assert connection.execute(
             "SELECT network_connected FROM executor_action_guard WHERE singleton_id = 1"
         ).fetchone() == (1,)
@@ -148,6 +151,7 @@ def test_empty_private_directory_migrates_to_the_exact_v7_schema(tmp_path: Path)
         "executor_identity",
         "executor_outbox",
         "executor_platform_sessions",
+        "executor_publish_dispatches",
         "executor_side_effects",
     }
     if os.name != "nt":
@@ -271,6 +275,7 @@ def test_v1_ledger_is_migrated_in_place_without_losing_commands(tmp_path: Path) 
     source = command(1)
     opened.receive_command(source)
     with sqlite3.connect(opened.database_path) as connection:
+        connection.execute("DROP TABLE executor_publish_dispatches")
         connection.execute("DROP TABLE executor_side_effects")
         connection.execute("DROP TABLE executor_action_admissions")
         connection.execute("DROP TABLE executor_action_guard")
@@ -282,7 +287,9 @@ def test_v1_ledger_is_migrated_in_place_without_losing_commands(tmp_path: Path) 
 
     assert migrated.receive_command(source).replayed is True
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            EXECUTOR_LEDGER_SCHEMA_VERSION,
+        )
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'executor_platform_sessions'"
@@ -302,6 +309,7 @@ def test_v3_ledger_adds_an_initial_local_action_guard_without_losing_state(
         observed_at=NOW,
     )
     with sqlite3.connect(opened.database_path) as connection:
+        connection.execute("DROP TABLE executor_publish_dispatches")
         connection.execute("DROP TABLE executor_side_effects")
         connection.execute("DROP TABLE executor_action_admissions")
         connection.execute("DROP TABLE executor_action_guard")
@@ -315,7 +323,9 @@ def test_v3_ledger_adds_an_initial_local_action_guard_without_losing_state(
     assert migrated.get_action_emergency_stop().engaged is False
     assert migrated.get_action_emergency_stop().revision == 0
     with sqlite3.connect(migrated.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (
+            EXECUTOR_LEDGER_SCHEMA_VERSION,
+        )
         assert connection.execute("SELECT COUNT(*) FROM executor_action_admissions").fetchone() == (
             0,
         )
@@ -801,7 +811,7 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)
     with sqlite3.connect(opened.database_path) as connection:
-        connection.execute("PRAGMA user_version = 8")
+        connection.execute("PRAGMA user_version = 9")
     with pytest.raises(ExecutorLedgerRejected):
         ledger(state_directory)
 

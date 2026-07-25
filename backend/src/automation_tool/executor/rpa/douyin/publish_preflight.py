@@ -25,7 +25,6 @@ from automation_tool.executor.browser_surface_lease import (
 )
 from automation_tool.executor.browser_use_safety import redact_untrusted_text
 from automation_tool.executor.rpa.douyin.publish_artifact import (
-    SHA256_HEX_CHARACTERS,
     DouyinPublishArtifact,
     DouyinPublishArtifactRejected,
 )
@@ -36,7 +35,11 @@ from automation_tool.executor.rpa.douyin.publish_page import (
     DouyinPublishPageObservation,
     DouyinPublishPageState,
 )
-from automation_tool.protocol.safe_text import contains_control_or_bidi, is_unsafe_text
+from automation_tool.protocol.safe_text import (
+    contains_control_or_bidi,
+    is_sha256_hex,
+    is_unsafe_text,
+)
 
 DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION: Final = "douyin.publish-preflight.v1"
 MAX_DOUYIN_PUBLISH_TITLE_CHARACTERS: Final = 30
@@ -143,8 +146,7 @@ class DouyinPublishPreflightReceipt:
         ready = (
             self.state is DouyinPublishPreflightState.PRE_SUBMIT_READY
             and self.evidence is DouyinPublishPreflightEvidence.PRE_SUBMIT_CONFIRMED
-            and type(self.content_hash) is str
-            and len(self.content_hash) == SHA256_HEX_CHARACTERS
+            and is_sha256_hex(self.content_hash)
         )
         handoff = (
             self.state is DouyinPublishPreflightState.HANDOFF_REQUIRED

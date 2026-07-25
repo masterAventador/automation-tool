@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 from queue import Queue
 from typing import Any, cast
 
@@ -12,7 +13,9 @@ from automation_tool.executor.authentication import (
 )
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
 from automation_tool.executor.browser_surface_lease import LeaseState
+from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.platform_commands import (
+    DOUYIN_PUBLISH_DISPATCH_COMMAND,
     DOUYIN_PUBLISH_PREFLIGHT_COMMAND,
     DOUYIN_PUBLISH_RELEASE_COMMAND,
     DOUYIN_QR_LOGIN_FLOW_VERSION,
@@ -27,6 +30,11 @@ from automation_tool.executor.platform_commands import (
 from automation_tool.executor.rpa.douyin.publish_preflight import (
     DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
 )
+from automation_tool.executor.rpa.douyin.publish_release import (
+    DOUYIN_PUBLISH_RELEASE_FLOW_VERSION,
+    DouyinPublishReleaseEvidence,
+    DouyinPublishReleaseState,
+)
 from pydantic import SecretStr, ValidationError
 
 TOKEN = "".join(f"{value:02x}" for value in range(32))
@@ -37,6 +45,16 @@ PROFILE = "/opt/automation-tool/profile"
 ARTIFACT = "/opt/automation-tool/artifacts/clip.mp4"
 TITLE = "自动化运营工具测试标题"
 DESCRIPTION = "自动化运营工具测试简介"
+INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174011"
+EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174012"
+
+
+def publish_ledger(tmp_path: Any) -> ExecutorLedger:
+    return ExecutorLedger(
+        state_directory=Path(tmp_path) / "publish-ledger",
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
 
 
 def authenticator() -> LocalSessionAuthenticator:
@@ -307,6 +325,7 @@ def test_router_requires_real_operations() -> None:
 
 def publish_operation(tmp_path: Any) -> DouyinPublishPreflightCommandOperation:
     return DouyinPublishPreflightCommandOperation(
+        ledger=publish_ledger(tmp_path),
         browser_authority=BrowserLaunchAuthority(),
     )
 
@@ -384,13 +403,28 @@ def test_publish_operation_exposes_its_surface_lease_and_redacted_repr(tmp_path:
         operation.close()
 
 
-def test_publish_operation_rejects_unusable_construction() -> None:
+def test_publish_operation_rejects_unusable_construction(tmp_path: Any) -> None:
+    opened = publish_ledger(tmp_path)
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(runtime_factory=cast(Any, object()))
+        DouyinPublishPreflightCommandOperation(
+            ledger=opened, runtime_factory=cast(Any, object())
+        )
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(browser_authority=cast(Any, object()))
+        DouyinPublishPreflightCommandOperation(
+            ledger=opened, browser_authority=cast(Any, object())
+        )
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(surface_lease=cast(Any, object()))
+        DouyinPublishPreflightCommandOperation(
+            ledger=opened, surface_lease=cast(Any, object())
+        )
+    with pytest.raises(PlatformCommandRejected):
+        # A publish operation without a durable ledger could not enforce
+        # at-most-once, so it must not be constructible at all.
+        DouyinPublishPreflightCommandOperation(ledger=cast(Any, object()))
+    with pytest.raises(PlatformCommandRejected):
+        DouyinPublishPreflightCommandOperation(
+            ledger=opened, publish_policy=cast(Any, object())
+        )
 
 
 def publish_proof(**overrides: Any) -> str:
@@ -495,6 +529,7 @@ def test_a_busy_browser_is_reported_apart_from_a_borrowed_page_surface(
 
     authority = BrowserLaunchAuthority()
     operation = DouyinPublishPreflightCommandOperation(
+        ledger=publish_ledger(tmp_path),
         browser_authority=authority,
     )
     executable = tmp_path / "chromium"
@@ -687,3 +722,148 @@ def test_an_unregistered_command_family_has_no_flow_contract(command_type: Any) 
     """Failing open here would recreate the exact defect the family lookup fixed."""
     with pytest.raises(PlatformCommandRejected):
         result_document(state="awaiting_scan", command_type=command_type)
+
+
+# --- PB-06: the confirmed single dispatch ----------------------------------
+
+
+CONFIRMATION_ID = "123e4567-e89b-42d3-a456-426614174007"
+
+
+def dispatch_payload(**overrides: object) -> dict[str, object]:
+    source = authenticator()
+    payload: dict[str, object] = {
+        "commandId": COMMAND_ID,
+        "commandType": DOUYIN_PUBLISH_DISPATCH_COMMAND,
+        "confirmationId": CONFIRMATION_ID,
+        "protocolVersion": "1.0",
+        "publishJobId": PUBLISH_JOB_ID,
+    }
+    payload["authenticationProof"] = source.proof_for_publish_dispatch_command(
+        command_id=COMMAND_ID,
+        command_type=DOUYIN_PUBLISH_DISPATCH_COMMAND,
+        publish_job_id=PUBLISH_JOB_ID,
+        confirmation_id=CONFIRMATION_ID,
+    )
+    payload.update(overrides)
+    return payload
+
+
+def dispatch_command(**overrides: object) -> PlatformCommand:
+    return PlatformCommand.model_validate(dispatch_payload(**overrides))
+
+
+def test_dispatch_proof_binds_the_job_and_the_confirmation() -> None:
+    source = authenticator()
+    baseline: dict[str, Any] = dict(
+        command_id=COMMAND_ID,
+        command_type=DOUYIN_PUBLISH_DISPATCH_COMMAND,
+        publish_job_id=PUBLISH_JOB_ID,
+        confirmation_id=CONFIRMATION_ID,
+    )
+    proof = source.proof_for_publish_dispatch_command(**baseline)
+    source.verify_publish_dispatch_command(**baseline, presented_proof=proof)
+
+    for field, tampered in (
+        ("command_id", "123e4567-e89b-42d3-a456-426614174099"),
+        ("publish_job_id", "123e4567-e89b-42d3-a456-426614174098"),
+        ("confirmation_id", "123e4567-e89b-42d3-a456-426614174097"),
+    ):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            source.verify_publish_dispatch_command(
+                **{**baseline, field: tampered},
+                presented_proof=proof,
+            )
+
+
+def test_a_dispatch_frame_is_authenticated_as_its_own_command_family() -> None:
+    frame = json.dumps(dispatch_payload()).encode("utf-8") + b"\n"
+
+    command = read_platform_command(
+        cast(Any, io.BytesIO(frame)),
+        authenticator(),
+    )
+
+    assert command.command_type == DOUYIN_PUBLISH_DISPATCH_COMMAND
+    assert command.confirmation_id is not None
+
+
+def test_a_dispatch_frame_signed_as_a_preflight_is_refused() -> None:
+    source = authenticator()
+    forged = dispatch_payload(
+        authenticationProof=source.proof_for_session_command(
+            command_id=COMMAND_ID,
+            command_type=DOUYIN_PUBLISH_RELEASE_COMMAND,
+        )
+    )
+    frame = json.dumps(forged).encode("utf-8") + b"\n"
+
+    with pytest.raises(PlatformCommandRejected):
+        read_platform_command(cast(Any, io.BytesIO(frame)), authenticator())
+
+
+def test_a_dispatch_without_a_confirmation_is_not_a_valid_command() -> None:
+    with pytest.raises(ValidationError):
+        PlatformCommand.model_validate(
+            {**dispatch_payload(), "confirmationId": None},
+        )
+
+
+def test_the_dispatch_command_family_declares_its_own_flow_contract() -> None:
+    output = io.StringIO()
+
+    write_platform_command_result(
+        output,
+        authenticator(),
+        command_id=COMMAND_ID,
+        state="publish_outcome_uncertain",
+        command_type=DOUYIN_PUBLISH_DISPATCH_COMMAND,
+    )
+
+    assert json.loads(output.getvalue())["flowVersion"] == DOUYIN_PUBLISH_RELEASE_FLOW_VERSION
+
+
+def test_a_dispatch_without_a_pre_submit_receipt_is_not_dispatched(tmp_path: Any) -> None:
+    """Late is an outcome, not a protocol violation: the executor stays alive."""
+    operation = publish_operation(tmp_path)
+    try:
+        assert operation.latest_approval() is None
+
+        assert operation.handle(dispatch_command()) == "publish_not_dispatched"
+
+        release = operation.latest_release()
+        assert release is not None
+        assert release.state is DouyinPublishReleaseState.NOT_DISPATCHED
+        assert release.evidence is DouyinPublishReleaseEvidence.STALE_CONFIRMATION
+        assert release.dispatch_state is None
+    finally:
+        operation.close()
+
+
+def test_releasing_the_surface_voids_the_pending_approval_too(tmp_path: Any) -> None:
+    """An approval describes a filled page; the page is about to be closed."""
+    operation = publish_operation(tmp_path)
+    try:
+        operation.release_surface()
+        assert operation.latest_approval() is None
+
+        assert operation.handle(dispatch_command()) == "publish_not_dispatched"
+    finally:
+        operation.close()
+
+
+@pytest.mark.parametrize("missing", ["publish_job_id", "confirmation_id"])
+def test_a_dispatch_missing_its_own_identity_is_a_protocol_violation(
+    tmp_path: Any,
+    missing: str,
+) -> None:
+    """The model cannot produce this frame, so reaching it means something broke."""
+    fields = dispatch_command().__dict__
+    malformed = PlatformCommand.model_construct(**{**fields, missing: None})
+    operation = publish_operation(tmp_path)
+    try:
+        with pytest.raises(PlatformCommandRejected):
+            operation.handle(malformed)
+        assert operation.latest_release() is None
+    finally:
+        operation.close()

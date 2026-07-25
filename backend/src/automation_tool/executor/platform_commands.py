@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
+from hmac import compare_digest
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from queue import Queue
 from types import MappingProxyType
@@ -38,6 +40,12 @@ from automation_tool.executor.rpa.douyin.publish_artifact import (
     DouyinPublishArtifactRejected,
     open_publish_artifact,
 )
+from automation_tool.executor.action_gate import LocalActionHardPolicy
+from automation_tool.executor.browser_use_safety import (
+    SideEffectApproval,
+    SideEffectConfirmationGate,
+)
+from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.rpa.douyin.publish_preflight import (
     DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
     DouyinPublishPreflight,
@@ -46,6 +54,16 @@ from automation_tool.executor.rpa.douyin.publish_preflight import (
     DouyinPublishPreflightReceipt,
     DouyinPublishPreflightRejected,
     DouyinPublishPreflightState,
+)
+from automation_tool.executor.rpa.douyin.publish_release import (
+    DOUYIN_PUBLISH_CONFIRMATION_ACTION,
+    DOUYIN_PUBLISH_RELEASE_FLOW_VERSION,
+    DouyinPublishConfirmation,
+    DouyinPublishRelease,
+    DouyinPublishReleaseEvidence,
+    DouyinPublishReleaseReceipt,
+    DouyinPublishReleaseState,
+    SystemPublishReleaseClock,
 )
 from automation_tool.protocol import (
     EXECUTOR_PROTOCOL_VERSION,
@@ -60,6 +78,7 @@ MAX_PLATFORM_COMMAND_BYTES = 16 * 1024
 DOUYIN_QR_LOGIN_FLOW_VERSION = "douyin.qr-login.v2"
 DOUYIN_PUBLISH_PREFLIGHT_COMMAND = "douyin.publish.preflight"
 DOUYIN_PUBLISH_RELEASE_COMMAND = "douyin.publish.release"
+DOUYIN_PUBLISH_DISPATCH_COMMAND = "douyin.publish.dispatch"
 PUBLISH_RELEASED_STATE = "publish_released"
 
 
@@ -82,9 +101,11 @@ class PlatformCommand(BaseModel):
         "douyin.login.open",
         "douyin.login.recheck",
         "douyin.logout.complete",
+        "douyin.publish.dispatch",
         "douyin.publish.preflight",
         "douyin.publish.release",
     ] = Field(alias="commandType")
+    confirmation_id: MessageId | None = Field(default=None, alias="confirmationId")
     description: Annotated[str, Field(min_length=1, max_length=4096)] | None = None
     executable_path: Annotated[str, Field(min_length=1, max_length=4096)] | None = Field(
         default=None, alias="executablePath"
@@ -122,12 +143,29 @@ class PlatformCommand(BaseModel):
     @model_validator(mode="after")
     def require_command_specific_fields(self) -> PlatformCommand:
         paths = (self.executable_path, self.profile_directory, self.headless)
-        publish_fields = (self.artifact_path, self.description, self.publish_job_id, self.title)
+        content_fields = (self.artifact_path, self.description, self.title)
+        if self.command_type == DOUYIN_PUBLISH_DISPATCH_COMMAND:
+            # A dispatch acts on the pre-submit state the executor already
+            # holds, so it must carry the job and the approval and nothing
+            # that could contradict what was filled and confirmed.
+            if self.publish_job_id is None or self.confirmation_id is None:
+                raise ValueError("dispatch command requires a job and a confirmation")
+            if paths != (None, None, None) or any(
+                value is not None for value in content_fields
+            ):
+                raise ValueError("dispatch command must not restate publish content")
+            return self
+        if self.confirmation_id is not None:
+            raise ValueError("only the dispatch command carries a confirmation")
         if self.command_type == DOUYIN_PUBLISH_PREFLIGHT_COMMAND:
-            if any(value is None for value in (*paths, *publish_fields)):
+            if self.publish_job_id is None or any(
+                value is None for value in (*paths, *content_fields)
+            ):
                 raise ValueError("publish command requires browser identity and content")
             return self
-        if any(value is not None for value in publish_fields):
+        if self.publish_job_id is not None or any(
+            value is not None for value in content_fields
+        ):
             raise ValueError("only the publish command carries publish content")
         if self.command_type in {"douyin.logout.complete", DOUYIN_PUBLISH_RELEASE_COMMAND}:
             if paths != (None, None, None):
@@ -479,12 +517,15 @@ class DouyinPublishPreflightCommandOperation:
     def __init__(
         self,
         *,
+        ledger: ExecutorLedger,
         runtime_factory: Callable[[], _Runtime] = BrowserRuntime,
         browser_authority: BrowserLaunchAuthority | None = None,
         surface_lease: BrowserSurfaceLeaseManager | None = None,
+        publish_policy: LocalActionHardPolicy | None = None,
     ) -> None:
         if (
-            not callable(runtime_factory)
+            not isinstance(ledger, ExecutorLedger)
+            or not callable(runtime_factory)
             or (
                 browser_authority is not None
                 and not isinstance(browser_authority, BrowserLaunchAuthority)
@@ -493,14 +534,26 @@ class DouyinPublishPreflightCommandOperation:
                 surface_lease is not None
                 and not isinstance(surface_lease, BrowserSurfaceLeaseManager)
             )
+            or (
+                publish_policy is not None
+                and not isinstance(publish_policy, LocalActionHardPolicy)
+            )
         ):
             raise PlatformCommandRejected
         self._runtime_factory = runtime_factory
         self._browser_authority = browser_authority or BrowserLaunchAuthority()
         self._surface_lease = surface_lease or BrowserSurfaceLeaseManager()
+        self._ledger = ledger
+        self._policy = publish_policy or DEFAULT_PUBLISH_HARD_POLICY
+        self._confirmations = SideEffectConfirmationGate()
+        self._clock = SystemPublishReleaseClock()
         self._runtime: _Runtime | None = None
         self._browser_lease: BrowserLaunchLease | None = None
+        self._window: BrowserWindow | None = None
         self._latest: DouyinPublishPreflightReceipt | None = None
+        self._latest_intent: DouyinPublishPreflightIntent | None = None
+        self._latest_approval: SideEffectApproval | None = None
+        self._latest_release: DouyinPublishReleaseReceipt | None = None
 
     def __repr__(self) -> str:
         return "DouyinPublishPreflightCommandOperation(<redacted>)"
@@ -517,6 +570,19 @@ class DouyinPublishPreflightCommandOperation:
         """
         return self._latest
 
+    def latest_approval(self) -> SideEffectApproval | None:
+        """The critical-point summary awaiting the operator's answer, if any.
+
+        A ready preflight presents the target account and the content digest
+        here; PB-07 projects this to the App. It exists only while the filled
+        page it describes exists, so it is voided alongside a ready receipt.
+        """
+        return self._latest_approval
+
+    def latest_release(self) -> DouyinPublishReleaseReceipt | None:
+        """The outcome of the last dispatch, including an uncertain one."""
+        return self._latest_release
+
     def surface_lease(self) -> BrowserSurfaceLeaseManager:
         return self._surface_lease
 
@@ -524,11 +590,14 @@ class DouyinPublishPreflightCommandOperation:
         """Give the operations browser back, voiding only a dispatchable receipt.
 
         A *ready* receipt describes a filled form on a page that is about to be
-        closed, so PB-06 must never see it again. A blocked or handoff receipt
-        is a reason, not a dispatch target, and stays available for reporting.
+        closed, so PB-06 must never see it again, and the approval and intent
+        that describe the same page go with it. A blocked or handoff receipt is
+        a reason, not a dispatch target, and stays available for reporting.
         """
         if self._latest is not None and self._latest.ready:
             self._latest = None
+        self._latest_intent = None
+        self._latest_approval = None
         self._close_active(best_effort=True)
 
     def handle(self, command: PlatformCommand) -> str:
@@ -540,7 +609,12 @@ class DouyinPublishPreflightCommandOperation:
         if command.command_type == DOUYIN_PUBLISH_RELEASE_COMMAND:
             self.release_surface()
             return PUBLISH_RELEASED_STATE
+        if command.command_type == DOUYIN_PUBLISH_DISPATCH_COMMAND:
+            return self._dispatch(command)
         self._latest = None
+        self._latest_intent = None
+        self._latest_approval = None
+        self._latest_release = None
         try:
             if (
                 command.executable_path is None
@@ -587,11 +661,15 @@ class DouyinPublishPreflightCommandOperation:
                 # browser that could not be closed is the common cause. This is a
                 # receipt for the user, never a reason to terminate the executor.
                 return self._blocked(DouyinPublishPreflightEvidence.BROWSER_UNAVAILABLE)
+            self._window = window
             receipt = DouyinPublishPreflight(
                 window=window,
                 lease=self._surface_lease,
             ).run(intent)
             self._latest = receipt
+            if receipt.ready:
+                self._latest_intent = intent
+                self._present_confirmation(receipt)
             if receipt.state is DouyinPublishPreflightState.BLOCKED:
                 # A handoff keeps the visible window open: the user has to finish
                 # the captcha, slider, risk check or login in it by hand.
@@ -602,6 +680,96 @@ class DouyinPublishPreflightCommandOperation:
         except Exception:
             self._close_active(best_effort=True)
             raise PlatformCommandRejected from None
+
+    def _present_confirmation(self, receipt: DouyinPublishPreflightReceipt) -> None:
+        """Put the target account and content digest in front of the operator.
+
+        An account this executor could not read leaves no approval behind, so
+        the publish simply stays undispatchable: we do not ask anyone to
+        approve sending a video to an account we cannot name.
+        """
+        if receipt.target_account is None or receipt.content_hash is None:
+            return
+        try:
+            self._latest_approval = self._confirmations.present(
+                action=DOUYIN_PUBLISH_CONFIRMATION_ACTION,
+                target_account=receipt.target_account,
+                content_hash=receipt.content_hash,
+            )
+        except Exception:
+            self._latest_approval = None
+
+    def _dispatch(self, command: PlatformCommand) -> str:
+        """Spend one approval on one click against the page already held open.
+
+        An approval that is gone - already spent, or voided when the surface
+        went back to the user - is an ordinary outcome, not a protocol
+        violation: the operator pressed publish a moment too late. It is
+        reported as *not dispatched* rather than terminating the executor,
+        which would hand anyone who can send one frame a way to kill it.
+        """
+        receipt = self._latest
+        intent = self._latest_intent
+        approval = self._latest_approval
+        window = self._window
+        if command.publish_job_id is None or command.confirmation_id is None:
+            raise PlatformCommandRejected
+        if (
+            receipt is None
+            or not receipt.ready
+            or receipt.target_account is None
+            or receipt.content_hash is None
+            or intent is None
+            or approval is None
+            or window is None
+            or not compare_digest(approval.confirmation_id, str(command.confirmation_id))
+        ):
+            return self._not_dispatched(str(command.publish_job_id))
+        try:
+            confirmation = DouyinPublishConfirmation(
+                publish_job_id=str(command.publish_job_id),
+                content_hash=receipt.content_hash,
+                target_account=receipt.target_account,
+                dispatch_token=self._confirmations.authorize_dispatch(
+                    approval.confirmation_id,
+                    confirmed=True,
+                ),
+            )
+        except Exception:
+            return self._not_dispatched(str(command.publish_job_id))
+        # One approval, one click: the summary is spent whatever happens next.
+        self._latest_approval = None
+        try:
+            release = DouyinPublishRelease(
+                window=window,
+                lease=self._surface_lease,
+                ledger=self._ledger,
+                clock=self._clock,
+                policy=self._policy,
+                confirmation_gate=self._confirmations,
+            ).run(receipt=receipt, intent=intent, confirmation=confirmation)
+        except Exception:
+            raise PlatformCommandRejected from None
+        self._latest_release = release
+        if release.state is not DouyinPublishReleaseState.NOT_DISPATCHED:
+            # The page was pressed: the filled form is no longer a dispatch
+            # target, whatever the works list said about the outcome.
+            self._latest = None
+            self._latest_intent = None
+        return PUBLISH_DISPATCH_RESULT_FOR_STATE[release.state]
+
+    def _not_dispatched(self, publish_job_id: str) -> str:
+        """Record and return one publish that never reached the button."""
+        receipt = DouyinPublishReleaseReceipt(
+            publish_job_id=publish_job_id,
+            state=DouyinPublishReleaseState.NOT_DISPATCHED,
+            evidence=DouyinPublishReleaseEvidence.STALE_CONFIRMATION,
+            dispatch_state=None,
+            dispatch_revision=None,
+            replayed=False,
+        )
+        self._latest_release = receipt
+        return PUBLISH_DISPATCH_RESULT_FOR_STATE[receipt.state]
 
     def _blocked(self, evidence: DouyinPublishPreflightEvidence) -> str:
         """Record and return one blocked outcome; a state always has a receipt."""
@@ -637,6 +805,7 @@ class DouyinPublishPreflightCommandOperation:
         lease = self._browser_lease
         self._runtime = None
         self._browser_lease = None
+        self._window = None
         failed = False
         for closeable in (runtime, lease):
             if closeable is None:
@@ -658,9 +827,27 @@ _PUBLISH_RESULT_FOR_STATE = {
     DouyinPublishPreflightState.BLOCKED: "publish_blocked",
 }
 
+PUBLISH_DISPATCH_RESULT_FOR_STATE = {
+    DouyinPublishReleaseState.VERIFIED: "publish_verified",
+    DouyinPublishReleaseState.OUTCOME_UNCERTAIN: "publish_outcome_uncertain",
+    DouyinPublishReleaseState.NOT_DISPATCHED: "publish_not_dispatched",
+}
+
+# The local hard limits a publish runs under. They bind monotonically into the
+# ledger, so an installation that already committed to something stricter for
+# task actions keeps that stricter value here too.
+DEFAULT_PUBLISH_HARD_POLICY = LocalActionHardPolicy(
+    minimum_interval=timedelta(seconds=60),
+    task_action_limit=100,
+)
+
 
 _PUBLISH_COMMANDS: Final = frozenset(
-    {DOUYIN_PUBLISH_PREFLIGHT_COMMAND, DOUYIN_PUBLISH_RELEASE_COMMAND}
+    {
+        DOUYIN_PUBLISH_DISPATCH_COMMAND,
+        DOUYIN_PUBLISH_PREFLIGHT_COMMAND,
+        DOUYIN_PUBLISH_RELEASE_COMMAND,
+    }
 )
 
 
@@ -678,6 +865,7 @@ _FLOW_VERSION_BY_COMMAND: Final = MappingProxyType(
         "douyin.login.open": DOUYIN_QR_LOGIN_FLOW_VERSION,
         "douyin.login.recheck": DOUYIN_QR_LOGIN_FLOW_VERSION,
         "douyin.logout.complete": "douyin.session-control.v1",
+        DOUYIN_PUBLISH_DISPATCH_COMMAND: DOUYIN_PUBLISH_RELEASE_FLOW_VERSION,
         DOUYIN_PUBLISH_PREFLIGHT_COMMAND: DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
         DOUYIN_PUBLISH_RELEASE_COMMAND: DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
     }
@@ -725,7 +913,17 @@ def read_platform_command(
             raise ValueError
         decoded = decode_bounded_json_object(source[:-1], maximum_bytes=MAX_PLATFORM_COMMAND_BYTES)
         command = PlatformCommand.model_validate(decoded)
-        if command.command_type == DOUYIN_PUBLISH_PREFLIGHT_COMMAND:
+        if command.command_type == DOUYIN_PUBLISH_DISPATCH_COMMAND:
+            assert command.publish_job_id is not None
+            assert command.confirmation_id is not None
+            authenticator.verify_publish_dispatch_command(
+                command_id=str(command.command_id),
+                command_type=command.command_type,
+                publish_job_id=str(command.publish_job_id),
+                confirmation_id=str(command.confirmation_id),
+                presented_proof=command.authentication_proof,
+            )
+        elif command.command_type == DOUYIN_PUBLISH_PREFLIGHT_COMMAND:
             assert command.executable_path is not None
             assert command.profile_directory is not None
             assert command.headless is not None
@@ -814,6 +1012,9 @@ def write_platform_command_result(
 
 
 __all__ = [
+    "DEFAULT_PUBLISH_HARD_POLICY",
+    "DOUYIN_PUBLISH_DISPATCH_COMMAND",
+    "PUBLISH_DISPATCH_RESULT_FOR_STATE",
     "DOUYIN_PUBLISH_PREFLIGHT_COMMAND",
     "DOUYIN_PUBLISH_RELEASE_COMMAND",
     "DOUYIN_QR_LOGIN_FLOW_VERSION",

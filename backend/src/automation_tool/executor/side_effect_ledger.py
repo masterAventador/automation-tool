@@ -8,6 +8,7 @@ from enum import StrEnum
 from uuid import RFC_4122, UUID
 
 from automation_tool.protocol import DouyinSearchExposureAction
+from automation_tool.protocol.safe_text import is_sha256_hex
 
 
 class SideEffectState(StrEnum):
@@ -106,6 +107,83 @@ class LocalSideEffect:
         )
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalPublishDispatch:
+    """One locally confirmed publish click, recorded before it can happen.
+
+    A publish carries no Control Plane-signed authority and no task attempt, so
+    it cannot ride on ``LocalSideEffect``: the operator confirms it at the
+    critical point and the executor presses the button once. What binds the two
+    is ``content_hash`` - the digest of the artifact identity plus the exact
+    text the operator saw - so a confirmation can never be spent on content that
+    changed after it was shown. The publish text itself never lands here.
+    """
+
+    publish_job_id: str
+    content_hash: str
+    state: SideEffectState
+    prepared_at: datetime
+    dispatched_at: datetime | None
+    settled_at: datetime | None
+    verification_fingerprint: bytes | None
+    revision: int
+    replayed: bool
+
+    def __post_init__(self) -> None:
+        prepared_at = _canonical_utc(self.prepared_at)
+        dispatched_at = _canonical_utc(self.dispatched_at)
+        settled_at = _canonical_utc(self.settled_at)
+        prepared = (
+            self.state is SideEffectState.PREPARED
+            and self.revision == 1
+            and dispatched_at is None
+            and settled_at is None
+            and self.verification_fingerprint is None
+        )
+        dispatched = (
+            self.state is SideEffectState.DISPATCHED
+            and self.revision == 2
+            and dispatched_at is not None
+            and settled_at is None
+            and self.verification_fingerprint is None
+        )
+        verified = (
+            self.state is SideEffectState.VERIFIED
+            and self.revision == 3
+            and dispatched_at is not None
+            and settled_at is not None
+            and type(self.verification_fingerprint) is bytes
+            and len(self.verification_fingerprint) == 32
+        )
+        uncertain = (
+            self.state is SideEffectState.UNCERTAIN
+            and self.revision == 3
+            and dispatched_at is not None
+            and settled_at is not None
+            and self.verification_fingerprint is None
+        )
+        if (
+            not _canonical_uuid_v4(self.publish_job_id)
+            or not is_sha256_hex(self.content_hash)
+            or not isinstance(self.state, SideEffectState)
+            or prepared_at is None
+            or (dispatched_at is not None and dispatched_at < prepared_at)
+            or (settled_at is not None and (dispatched_at is None or settled_at < dispatched_at))
+            or not (prepared or dispatched or verified or uncertain)
+            or type(self.replayed) is not bool
+        ):
+            raise _ledger_rejected()
+        object.__setattr__(self, "prepared_at", prepared_at)
+        object.__setattr__(self, "dispatched_at", dispatched_at)
+        object.__setattr__(self, "settled_at", settled_at)
+
+    def __repr__(self) -> str:
+        return (
+            f"LocalPublishDispatch(state={self.state.value!r}, "
+            f"revision={self.revision!r}, replayed={self.replayed!r}, <redacted>)"
+        )
+
+
 def _canonical_uuid_v4(value: object) -> bool:
     if type(value) is not str:
         return False
@@ -135,4 +213,4 @@ def _ledger_rejected() -> Exception:
     return ExecutorLedgerRejected()
 
 
-__all__ = ["LocalSideEffect", "SideEffectState"]
+__all__ = ["LocalPublishDispatch", "LocalSideEffect", "SideEffectState"]

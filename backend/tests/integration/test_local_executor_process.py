@@ -38,6 +38,7 @@ from automation_tool.control_plane.application.executor_connections import (
     BoundExecutorConnection,
     ExecutorConnectionService,
 )
+from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 
 NOW = datetime(2026, 7, 19, 8, 0, tzinfo=UTC)
 INSTALLATION_ID = UUID("123e4567-e89b-42d3-a456-426614174003")
@@ -268,7 +269,9 @@ def test_real_process_bootstraps_over_stdin_heartbeats_to_control_plane_and_stop
         ledger_path = state_directory / "executor-ledger.sqlite3"
         assert ledger_path.is_file()
         with sqlite3.connect(ledger_path) as connection:
-            assert connection.execute("PRAGMA user_version").fetchone() == (7,)
+            assert connection.execute("PRAGMA user_version").fetchone() == (
+                EXECUTOR_LEDGER_SCHEMA_VERSION,
+            )
             assert connection.execute(
                 "SELECT installation_id, executor_id FROM executor_identity"
             ).fetchone() == (str(INSTALLATION_ID), str(EXECUTOR_ID))

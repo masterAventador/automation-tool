@@ -19,7 +19,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final, cast
 
-from automation_tool.protocol.safe_text import contains_control_or_bidi
+from automation_tool.protocol.safe_text import contains_control_or_bidi, is_sha256_hex
 
 MAX_DOUYIN_PUBLISH_ARTIFACT_BYTES: Final = 4 * 1024 * 1024 * 1024
 DOUYIN_PUBLISH_ARTIFACT_MEDIA_TYPES: Final = MappingProxyType(
@@ -31,7 +31,6 @@ DOUYIN_PUBLISH_ARTIFACT_MEDIA_TYPES: Final = MappingProxyType(
 
 _READ_CHUNK_BYTES: Final = 1024 * 1024
 _MAX_ARTIFACT_PATH_CHARACTERS: Final = 4096
-SHA256_HEX_CHARACTERS: Final = 64
 
 
 class DouyinPublishArtifactRejected(RuntimeError):
@@ -57,9 +56,7 @@ class DouyinPublishArtifact:
             or self.media_type not in set(DOUYIN_PUBLISH_ARTIFACT_MEDIA_TYPES.values())
             or type(self.size_bytes) is not int
             or not 1 <= self.size_bytes <= MAX_DOUYIN_PUBLISH_ARTIFACT_BYTES
-            or type(self.sha256) is not str
-            or len(self.sha256) != SHA256_HEX_CHARACTERS
-            or any(character not in "0123456789abcdef" for character in self.sha256)
+            or not is_sha256_hex(self.sha256)
         ):
             raise DouyinPublishArtifactRejected
 
@@ -203,7 +200,6 @@ def _identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
 __all__ = [
     "DOUYIN_PUBLISH_ARTIFACT_MEDIA_TYPES",
     "MAX_DOUYIN_PUBLISH_ARTIFACT_BYTES",
-    "SHA256_HEX_CHARACTERS",
     "DouyinPublishArtifact",
     "DouyinPublishArtifactRejected",
     "open_publish_artifact",

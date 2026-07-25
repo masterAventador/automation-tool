@@ -1,15 +1,22 @@
-"""PB-05: versioned, non-submitting Douyin creator publish Page Object.
+"""PB-05/PB-06: the versioned Douyin creator publish and works-list Page Object.
 
 The publish surface lives on the creator host and is recognized only through
 the frozen v1 routes and anchors. Every other page fact - a revised layout, a
 blocking overlay, an expired login panel or a captcha/slider/risk challenge -
-is reported as an explicit state instead of being guessed around. This object
-deliberately exposes no way to press the publish control: PB-05 stops before
-submission and PB-06 owns the single, confirmed dispatch.
+is reported as an explicit state instead of being guessed around.
+
+Pressing publish is reachable only through ``submit_control``, which needs a
+form that this object has just observed as ready. Nothing here decides that a
+publish may happen: PB-06 owns that decision and only reaches this control
+after the operator confirmed the exact content and the durable ledger granted
+one dispatch. The works list is modelled here too, because the only evidence
+this object accepts that a publish landed comes from that separate page rather
+than from the submit page's own message.
 """
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
@@ -33,7 +40,9 @@ DOUYIN_PUBLISH_PAGE_SELECTOR_VERSION = "douyin.publish-page.v1"
 DOUYIN_PUBLISH_HOST = "creator.douyin.com"
 DOUYIN_PUBLISH_UPLOAD_ROUTE = "/creator-micro/content/upload"
 DOUYIN_PUBLISH_FORM_ROUTE = "/creator-micro/content/post/video"
+DOUYIN_PUBLISH_MANAGE_ROUTE = "/creator-micro/content/manage"
 DOUYIN_PUBLISH_ENTRY_URL = f"https://{DOUYIN_PUBLISH_HOST}{DOUYIN_PUBLISH_UPLOAD_ROUTE}"
+DOUYIN_PUBLISH_MANAGE_URL = f"https://{DOUYIN_PUBLISH_HOST}{DOUYIN_PUBLISH_MANAGE_ROUTE}"
 
 DOUYIN_PUBLISH_ARTIFACT_SELECTORS = (
     '[data-e2e="publish-artifact-input"]',
@@ -55,6 +64,14 @@ DOUYIN_PUBLISH_ACCOUNT_SELECTORS = (
     '[data-e2e="publish-account-name"]',
     '[data-e2e="creator-account-name"]',
 )
+DOUYIN_PUBLISH_WORK_LIST_SELECTORS = (
+    '[data-e2e="publish-work-list"]',
+    '[data-e2e="content-manage-list"]',
+)
+DOUYIN_PUBLISH_WORK_TITLE_SELECTORS = (
+    '[data-e2e="publish-work-title"]',
+    '[data-e2e="content-manage-item-title"]',
+)
 _LOGIN_PANEL_SELECTORS = (
     '[data-e2e="login-panel"]',
     '[role="dialog"]:has-text("扫码登录")',
@@ -67,6 +84,10 @@ _BLOCKING_DIALOG_SELECTORS = (
 
 _MAX_PAGE_URL_CHARACTERS = 2048
 _MAX_WAIT_MILLISECONDS = 120_000
+# One screen of the works list is all the evidence a single publish needs. A
+# longer list means the page is not the one this adapter was frozen against,
+# and reading it row by row would turn a drifted page into a slow scan.
+MAX_DOUYIN_PUBLISH_WORKS_READ = 50
 
 
 class DouyinPublishPageRejected(RuntimeError):
@@ -79,12 +100,14 @@ class DouyinPublishPageRejected(RuntimeError):
 class DouyinPublishRoute(StrEnum):
     UPLOAD_ENTRY = "upload_entry"
     POST_FORM = "post_form"
+    MANAGE_LIST = "manage_list"
     UNKNOWN = "unknown"
 
 
 class DouyinPublishPageState(StrEnum):
     AWAITING_ARTIFACT = "awaiting_artifact"
     FORM_READY = "form_ready"
+    WORKS_LIST_READY = "works_list_ready"
     LOGIN_REQUIRED = "login_required"
     RISK_CHALLENGE = "risk_challenge"
     DIALOG_BLOCKED = "dialog_blocked"
@@ -94,6 +117,7 @@ class DouyinPublishPageState(StrEnum):
 class DouyinPublishPageEvidence(StrEnum):
     ARTIFACT_INPUT_VISIBLE = "artifact_input_visible"
     FORM_ANCHORS_VISIBLE = "form_anchors_visible"
+    WORK_LIST_VISIBLE = "work_list_visible"
     LOGIN_PANEL = "login_panel"
     RISK_CHALLENGE = "risk_challenge"
     BLOCKING_DIALOG = "blocking_dialog"
@@ -103,12 +127,20 @@ class DouyinPublishPageEvidence(StrEnum):
     PAGE_UNAVAILABLE = "page_unavailable"
 
 
-_KNOWN_ROUTES = (DouyinPublishRoute.UPLOAD_ENTRY, DouyinPublishRoute.POST_FORM)
+_KNOWN_ROUTES = (
+    DouyinPublishRoute.UPLOAD_ENTRY,
+    DouyinPublishRoute.POST_FORM,
+    DouyinPublishRoute.MANAGE_LIST,
+)
 _HANDOFF_STATES = frozenset(
     {DouyinPublishPageState.LOGIN_REQUIRED, DouyinPublishPageState.RISK_CHALLENGE}
 )
 _USABLE_STATES = frozenset(
-    {DouyinPublishPageState.AWAITING_ARTIFACT, DouyinPublishPageState.FORM_READY}
+    {
+        DouyinPublishPageState.AWAITING_ARTIFACT,
+        DouyinPublishPageState.FORM_READY,
+        DouyinPublishPageState.WORKS_LIST_READY,
+    }
 )
 _SHARED_FAILURE_OBSERVATIONS = (
     (DouyinPublishPageState.LOGIN_REQUIRED, DouyinPublishPageEvidence.LOGIN_PANEL),
@@ -129,6 +161,11 @@ _ALLOWED_OBSERVATIONS = frozenset(
             DouyinPublishRoute.POST_FORM,
             DouyinPublishPageState.FORM_READY,
             DouyinPublishPageEvidence.FORM_ANCHORS_VISIBLE,
+        ),
+        (
+            DouyinPublishRoute.MANAGE_LIST,
+            DouyinPublishPageState.WORKS_LIST_READY,
+            DouyinPublishPageEvidence.WORK_LIST_VISIBLE,
         ),
         *(
             (route, state, evidence)
@@ -192,6 +229,8 @@ class DouyinPublishRouteModel:
             return DouyinPublishRoute.UPLOAD_ENTRY
         if parsed.path == DOUYIN_PUBLISH_FORM_ROUTE:
             return DouyinPublishRoute.POST_FORM
+        if parsed.path == DOUYIN_PUBLISH_MANAGE_ROUTE:
+            return DouyinPublishRoute.MANAGE_LIST
         return DouyinPublishRoute.UNKNOWN
 
     def __repr__(self) -> str:
@@ -221,8 +260,26 @@ class _UploadLocator(Protocol):
     def set_input_files(self, files: object, *, timeout: float) -> None: ...
 
 
+class _ClickLocator(Protocol):
+    def click(self, *, timeout: float) -> None: ...
+
+
+class _SnapshotLocator(Protocol):
+    def element_handles(self) -> list[_RowSnapshot]: ...
+
+
+class _RowSnapshot(Protocol):
+    def inner_text(self) -> str: ...
+
+    def dispose(self) -> None: ...
+
+
 class _FillCallable(Protocol):
     def __call__(self, value: str, *, timeout: float) -> None: ...
+
+
+class _ClickCallable(Protocol):
+    def __call__(self, *, timeout: float) -> None: ...
 
 
 class _UploadCallable(Protocol):
@@ -255,6 +312,30 @@ class PublishTextField:
 
     def __repr__(self) -> str:
         return "PublishTextField(<redacted>)"
+
+
+class PublishSubmitControl:
+    """Press-only access to the publish button; see `PublishTextField`.
+
+    Holding one of these is not permission to publish. It is handed out only
+    after the form was observed ready, and the caller still has to have been
+    granted its single dispatch by the durable ledger before pressing.
+    """
+
+    __slots__ = ("click",)
+
+    click: _ClickCallable
+
+    def __init__(self, locator: object) -> None:
+        typed = cast(_ClickLocator, locator)
+
+        def click(*, timeout: float) -> None:
+            typed.click(timeout=timeout)
+
+        object.__setattr__(self, "click", click)
+
+    def __repr__(self) -> str:
+        return "PublishSubmitControl(<redacted>)"
 
 
 class PublishUploadField:
@@ -384,6 +465,55 @@ class DouyinPublishPage:
             timeout_milliseconds=timeout_milliseconds,
         )
 
+    def open_works_list(self, *, timeout_milliseconds: int) -> DouyinPublishPageObservation:
+        """Navigate to the works list, the page that can contradict the form."""
+        _require_timeout(timeout_milliseconds)
+        try:
+            self._page.goto(
+                DOUYIN_PUBLISH_MANAGE_URL,
+                wait_until="domcontentloaded",
+                timeout=float(timeout_milliseconds),
+            )
+        except Exception:
+            return _observation(
+                DouyinPublishRoute.UNKNOWN,
+                DouyinPublishPageState.UNKNOWN,
+                DouyinPublishPageEvidence.PAGE_UNAVAILABLE,
+            )
+        return self._wait_for(
+            expected=DouyinPublishPageState.WORKS_LIST_READY,
+            anchor_groups=DOUYIN_PUBLISH_WORK_LIST_ANCHORS,
+            timeout_milliseconds=timeout_milliseconds,
+        )
+
+    def works_titled(self, title: str) -> int:
+        """Count the visible works whose rendered title is exactly `title`.
+
+        The title is operator content, so it is never spliced into a selector -
+        the rows are located by frozen anchors and compared in Python. Each row
+        is read from one resolved snapshot rather than from a locator that
+        re-runs its selector per field, so a list that grows while it is being
+        read cannot make one row's title stand in for another's.
+        """
+        self._require_state(DouyinPublishPageState.WORKS_LIST_READY)
+        if type(title) is not str:
+            raise DouyinPublishPageRejected
+        try:
+            rows = cast(
+                _SnapshotLocator,
+                visible_matches(self._page, ", ".join(DOUYIN_PUBLISH_WORK_TITLE_SELECTORS)),
+            ).element_handles()
+        except Exception:
+            raise DouyinPublishPageRejected from None
+        try:
+            if len(rows) > MAX_DOUYIN_PUBLISH_WORKS_READ:
+                raise DouyinPublishPageRejected
+            return sum(1 for row in rows if row.inner_text().strip() == title)
+        finally:
+            for row in rows:
+                with suppress(Exception):
+                    row.dispose()
+
     def artifact_input(self) -> PublishUploadField:
         self._require_state(DouyinPublishPageState.AWAITING_ARTIFACT)
         return PublishUploadField(self._require_locator(DOUYIN_PUBLISH_ARTIFACT_SELECTORS))
@@ -409,6 +539,11 @@ class DouyinPublishPage:
         except Exception:
             return None
         return text if type(text) is str else None
+
+    def submit_control(self) -> PublishSubmitControl:
+        """Hand out the one press of the publish button, from a ready form only."""
+        self._require_state(DouyinPublishPageState.FORM_READY)
+        return PublishSubmitControl(self._require_locator(DOUYIN_PUBLISH_SUBMIT_SELECTORS))
 
     def submit_enabled(self) -> bool:
         """Report whether the publish control is armed; never press it in PB-05."""
@@ -476,9 +611,13 @@ DOUYIN_PUBLISH_FORM_ANCHORS: tuple[tuple[str, ...], ...] = (
     DOUYIN_PUBLISH_DESCRIPTION_SELECTORS,
     DOUYIN_PUBLISH_SUBMIT_SELECTORS,
 )
+DOUYIN_PUBLISH_WORK_LIST_ANCHORS: tuple[tuple[str, ...], ...] = (
+    DOUYIN_PUBLISH_WORK_LIST_SELECTORS,
+)
 _REQUIRED_ANCHORS = {
     DouyinPublishRoute.UPLOAD_ENTRY: DOUYIN_PUBLISH_ARTIFACT_ANCHORS,
     DouyinPublishRoute.POST_FORM: DOUYIN_PUBLISH_FORM_ANCHORS,
+    DouyinPublishRoute.MANAGE_LIST: DOUYIN_PUBLISH_WORK_LIST_ANCHORS,
 }
 _READY_FACTS = {
     DouyinPublishRoute.UPLOAD_ENTRY: (
@@ -488,6 +627,10 @@ _READY_FACTS = {
     DouyinPublishRoute.POST_FORM: (
         DouyinPublishPageState.FORM_READY,
         DouyinPublishPageEvidence.FORM_ANCHORS_VISIBLE,
+    ),
+    DouyinPublishRoute.MANAGE_LIST: (
+        DouyinPublishPageState.WORKS_LIST_READY,
+        DouyinPublishPageEvidence.WORK_LIST_VISIBLE,
     ),
 }
 
@@ -559,10 +702,15 @@ __all__ = [
     "DOUYIN_PUBLISH_ENTRY_URL",
     "DOUYIN_PUBLISH_FORM_ROUTE",
     "DOUYIN_PUBLISH_HOST",
+    "DOUYIN_PUBLISH_MANAGE_ROUTE",
+    "DOUYIN_PUBLISH_MANAGE_URL",
     "DOUYIN_PUBLISH_PAGE_SELECTOR_VERSION",
     "DOUYIN_PUBLISH_SUBMIT_SELECTORS",
     "DOUYIN_PUBLISH_TITLE_SELECTORS",
     "DOUYIN_PUBLISH_UPLOAD_ROUTE",
+    "DOUYIN_PUBLISH_WORK_LIST_SELECTORS",
+    "DOUYIN_PUBLISH_WORK_TITLE_SELECTORS",
+    "MAX_DOUYIN_PUBLISH_WORKS_READ",
     "DouyinPublishPage",
     "DouyinPublishPageEvidence",
     "DouyinPublishPageObservation",
@@ -570,6 +718,7 @@ __all__ = [
     "DouyinPublishPageState",
     "DouyinPublishRoute",
     "DouyinPublishRouteModel",
+    "PublishSubmitControl",
     "PublishTextField",
     "PublishUploadField",
 ]

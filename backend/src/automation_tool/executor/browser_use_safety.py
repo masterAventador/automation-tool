@@ -21,8 +21,9 @@ from dataclasses import dataclass, field
 from typing import Final, NoReturn
 from uuid import uuid4
 
+from automation_tool.protocol.safe_text import is_sha256_hex
+
 _KEY_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 _ACTION_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SECRET_PLACEHOLDER_PATTERN: Final = re.compile(r"<secret>([^<>]{1,64})</secret>")
 _MAX_SECRET_VALUE_CHARS: Final = 4096
@@ -152,7 +153,7 @@ class SideEffectConfirmationGate:
             or not target_account
             or len(target_account) > 128
             or type(content_hash) is not str
-            or _SHA256_PATTERN.fullmatch(content_hash) is None
+            or not is_sha256_hex(content_hash)
         ):
             _reject()
         confirmation_id = str(uuid4())

@@ -2,6 +2,9 @@
 
 import re
 
+SHA256_HEX_CHARACTERS = 64
+
+_LOWERCASE_HEX_DIGITS = frozenset("0123456789abcdef")
 _CONTROL_OR_BIDI_PATTERN = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 _PRIVATE_POSIX_PATH_PATTERN = re.compile(
     r"(?:^|[\s\"'=])/(?:users|home|root|tmp|var/folders)(?:/|$)",
@@ -36,4 +39,24 @@ def is_unsafe_text(value: str, *, maximum_characters: int) -> bool:
     )
 
 
-__all__ = ["contains_control_or_bidi", "is_unsafe_text"]
+def is_sha256_hex(value: object) -> bool:
+    """Return whether text is exactly one canonical lowercase SHA-256 digest.
+
+    Digests are the one publish projection allowed to persist and to cross the
+    local command boundary, so every producer and consumer has to agree on the
+    same shape - an uppercase or truncated variant must not compare equal to
+    the digest it was derived from.
+    """
+    return (
+        type(value) is str
+        and len(value) == SHA256_HEX_CHARACTERS
+        and all(character in _LOWERCASE_HEX_DIGITS for character in value)
+    )
+
+
+__all__ = [
+    "SHA256_HEX_CHARACTERS",
+    "contains_control_or_bidi",
+    "is_sha256_hex",
+    "is_unsafe_text",
+]

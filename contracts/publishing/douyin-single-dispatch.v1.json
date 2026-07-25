@@ -1,0 +1,63 @@
+{
+  "version": "douyin.publish-release.v1",
+  "platform": "douyin",
+  "selectorVersion": "douyin.publish-page.v1",
+  "buildsOn": "douyin.browser-use-preflight.v1",
+  "confirmation": {
+    "action": "douyin_publish",
+    "presents": ["targetAccount", "contentDigest"],
+    "digestCovers": ["artifactSha256", "sizeBytes", "mediaType", "title", "description"],
+    "singleUseDispatchToken": true,
+    "requiresReadableTargetAccount": true,
+    "spentBeforeLedgerGrant": true
+  },
+  "dispatch": {
+    "maximumClicks": 1,
+    "durableRecord": "executor_publish_dispatches",
+    "ledgerSchemaVersion": 8,
+    "states": ["prepared", "dispatched", "verified", "uncertain"],
+    "honoursEmergencyStop": true,
+    "minimumIntervalSecondsDefault": 60,
+    "intervalMeasuredFrom": "dispatchedAt",
+    "neverAutomaticallyReplays": true
+  },
+  "verification": {
+    "source": "works_list",
+    "route": "/creator-micro/content/manage",
+    "rule": "exactly one visible work whose rendered title equals the confirmed title",
+    "matchesCountedInProcess": true,
+    "maximumRowsRead": 50,
+    "zeroMatches": "outcome_uncertain",
+    "severalMatches": "outcome_uncertain",
+    "submitPageMessageIsNotEvidence": true
+  },
+  "outcomes": {
+    "not_dispatched": [
+      "stale_confirmation",
+      "surface_lost",
+      "ledger_unavailable",
+      "form_not_ready",
+      "submit_control_disabled",
+      "prepare_unavailable",
+      "dispatch_permission_rejected"
+    ],
+    "verified": ["work_listed", "replay_verified"],
+    "outcome_uncertain": [
+      "dispatch_timed_out",
+      "dispatch_unavailable",
+      "works_list_login_required",
+      "works_list_risk_challenge",
+      "works_list_unavailable",
+      "work_not_listed",
+      "work_listed_ambiguously",
+      "verification_unavailable",
+      "replay_uncertain"
+    ]
+  },
+  "localCommand": {
+    "commandType": "douyin.publish.dispatch",
+    "carries": ["publishJobId", "confirmationId"],
+    "restatesPublishContent": false,
+    "resultStates": ["publish_verified", "publish_outcome_uncertain", "publish_not_dispatched"]
+  }
+}
