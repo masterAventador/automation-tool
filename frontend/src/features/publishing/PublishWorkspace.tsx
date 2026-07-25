@@ -34,6 +34,22 @@ const OUTCOME_TONES: Record<
 
 interface PublishWorkspaceProps {
   readonly gateway: PublishWorkspaceGateway;
+  /**
+   * The finished video this page can publish, if the operator has one selected.
+   *
+   * The page never invents it: without a selected video there is nothing to
+   * publish, and offering a button that would post an unspecified file is worse
+   * than offering none.
+   */
+  readonly selectedVideo?: SelectedVideo;
+}
+
+export interface SelectedVideo {
+  readonly publishJobId: string;
+  readonly artifactPath: string;
+  readonly videoSummary: string;
+  readonly title: string;
+  readonly description: string;
 }
 
 /**
@@ -43,7 +59,7 @@ interface PublishWorkspaceProps {
  * a publish may happen: the critical point renders exactly what the executor
  * presented and spends exactly the approval it issued.
  */
-export function PublishWorkspace({ gateway }: PublishWorkspaceProps) {
+export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspaceProps) {
   const [snapshot, setSnapshot] = useState<PublishWorkspaceSnapshot | null>(null);
   const [unreadable, setUnreadable] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -120,11 +136,17 @@ export function PublishWorkspace({ gateway }: PublishWorkspaceProps) {
               {platform.availability === "awaiting_configuration" ? (
                 <Typography.Text type="secondary">{AWAITING_CONFIGURATION_HINT}</Typography.Text>
               ) : null}
-              {platform.availability === "ready" && snapshot.stage === "idle" ? (
+              {platform.availability === "ready" &&
+              snapshot.stage === "idle" &&
+              selectedVideo !== undefined ? (
                 <Button
                   type="primary"
                   disabled={busy}
-                  onClick={() => void run(() => gateway.beginPublish(platform.platform))}
+                  onClick={() =>
+                    void run(() =>
+                      gateway.beginPublish({ ...selectedVideo, platform: platform.platform }),
+                    )
+                  }
                 >
                   {`发布到${publishPlatformLabel(platform.platform)}`}
                 </Button>
@@ -162,7 +184,12 @@ export function PublishWorkspace({ gateway }: PublishWorkspaceProps) {
                     type="primary"
                     disabled={busy}
                     onClick={() =>
-                      void run(() => gateway.approvePublish(approval.confirmationId))
+                      void run(() =>
+                        gateway.approvePublish({
+                          publishJobId: approval.confirmationId,
+                          confirmationId: approval.confirmationId,
+                        }),
+                      )
                     }
                   >
                     确认发布
@@ -194,11 +221,16 @@ export function PublishWorkspace({ gateway }: PublishWorkspaceProps) {
                     description={OUTCOME_UNCERTAIN_HINT}
                   />
                 ) : null}
-                {snapshot.retryable && snapshot.target !== null ? (
+                {snapshot.retryable && snapshot.target !== null && selectedVideo !== undefined ? (
                   <Button
                     disabled={busy}
                     onClick={() =>
-                      void run(() => gateway.beginPublish(snapshot.target as PublishPlatform))
+                      void run(() =>
+                        gateway.beginPublish({
+                          ...selectedVideo,
+                          platform: snapshot.target as PublishPlatform,
+                        }),
+                      )
                     }
                   >
                     重新发布

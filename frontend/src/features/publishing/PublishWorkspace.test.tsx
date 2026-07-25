@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { PublishWorkspace } from "./PublishWorkspace";
+import { PublishWorkspace, type SelectedVideo } from "./PublishWorkspace";
 import {
   PublishWorkspaceGatewayError,
   type PublishWorkspaceGateway,
@@ -10,6 +10,16 @@ import {
 } from "./publish-workspace-gateway";
 
 const CONFIRMATION_ID = "123e4567-e89b-42d3-a456-426614174007";
+const PUBLISH_JOB_ID = "423e4567-e89b-42d3-a456-426614174001";
+
+/** A finished video the operator picked; the page never invents one. */
+const selectedVideo: SelectedVideo = {
+  publishJobId: PUBLISH_JOB_ID,
+  artifactPath: "/videos/clip.mp4",
+  videoSummary: "护肤知识讲解 · 12.4 MB",
+  title: "三分钟讲清油皮护肤",
+  description: "从洁面到防晒，按顺序讲一遍。",
+};
 
 function snapshot(overrides: Partial<PublishWorkspaceSnapshot> = {}): PublishWorkspaceSnapshot {
   return {
@@ -63,19 +73,30 @@ describe("publish workspace", () => {
       snapshot(),
       snapshot({ stage: "preparing", target: "douyin" }),
     );
-    render(<PublishWorkspace gateway={gateway} />);
+    render(<PublishWorkspace gateway={gateway} selectedVideo={selectedVideo} />);
 
     await userEvent.click(await screen.findByRole("button", { name: /发布到抖音/ }));
 
-    expect(gateway.beginPublish).toHaveBeenCalledWith("douyin");
+    expect(gateway.beginPublish).toHaveBeenCalledWith({
+      ...selectedVideo,
+      platform: "douyin",
+    });
     expect(await screen.findByText("准备中")).toBeInTheDocument();
   });
 
   it("offers no way to start a publish on an unconfigured platform", async () => {
-    render(<PublishWorkspace gateway={gatewayReturning(snapshot())} />);
+    render(<PublishWorkspace gateway={gatewayReturning(snapshot())} selectedVideo={selectedVideo} />);
 
     await screen.findByText("B站");
     expect(screen.queryByRole("button", { name: /发布到B站/ })).toBeNull();
+  });
+
+  it("offers no way to publish when no video has been selected", async () => {
+    // A button that would post an unspecified file is worse than no button.
+    render(<PublishWorkspace gateway={gatewayReturning(snapshot())} />);
+
+    await screen.findByText("抖音");
+    expect(screen.queryByRole("button", { name: /发布到抖音/ })).toBeNull();
   });
 
   it("shows the account, the video and the copy before anything is published", async () => {
@@ -103,7 +124,10 @@ describe("publish workspace", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /确认发布/ }));
 
-    expect(gateway.approvePublish).toHaveBeenCalledWith(CONFIRMATION_ID);
+    expect(gateway.approvePublish).toHaveBeenCalledWith({
+      publishJobId: CONFIRMATION_ID,
+      confirmationId: CONFIRMATION_ID,
+    });
     expect(await screen.findByText("发布中")).toBeInTheDocument();
   });
 
@@ -153,6 +177,7 @@ describe("publish workspace", () => {
   it("offers to publish again only when nothing was attempted", async () => {
     render(
       <PublishWorkspace
+        selectedVideo={selectedVideo}
         gateway={gatewayReturning(
           snapshot({
             stage: "settled",

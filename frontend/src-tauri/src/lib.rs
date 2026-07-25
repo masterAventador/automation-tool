@@ -1010,18 +1010,12 @@ async fn ensure_executor_running(
     }
 }
 
+/// EB-07：运营浏览器唯一路径源是内置发行物 Authority，无系统浏览器发现 fallback。
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-async fn execute_douyin_login_command(
-    command: executor_bootstrap::LocalPlatformCommand,
-    client: &control_plane::ControlPlaneClient,
-    vault: &ProductionDeviceCredentialVault,
-    platform: &executor_platform::ExecutorPlatformService,
+fn resolve_embedded_browser(
     authority: &embedded_browser_authority::EmbeddedBrowserAuthority,
-    profiles: &browser_profiles::BrowserProfileStore,
-) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
-    ensure_executor_running(client, vault, platform).await?;
-    // EB-07：运营浏览器唯一路径源是内置发行物 Authority，无系统浏览器发现 fallback。
-    let executable_path = authority
+) -> Result<std::path::PathBuf, ExecutorPlatformCommandError> {
+    authority
         .resolve()
         .map_err(|error| ExecutorPlatformCommandError {
             code: match error {
@@ -1039,7 +1033,20 @@ async fn execute_douyin_login_command(
                 }
             },
             retryable: false,
-        })?;
+        })
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+async fn execute_douyin_login_command(
+    command: executor_bootstrap::LocalPlatformCommand,
+    client: &control_plane::ControlPlaneClient,
+    vault: &ProductionDeviceCredentialVault,
+    platform: &executor_platform::ExecutorPlatformService,
+    authority: &embedded_browser_authority::EmbeddedBrowserAuthority,
+    profiles: &browser_profiles::BrowserProfileStore,
+) -> Result<executor_bootstrap::LocalPlatformCommandResult, ExecutorPlatformCommandError> {
+    ensure_executor_running(client, vault, platform).await?;
+    let executable_path = resolve_embedded_browser(authority)?;
     let profile = profiles
         .current_douyin_profile()
         .map_err(|_| ExecutorPlatformCommandError {
@@ -1174,6 +1181,255 @@ async fn logout_douyin_session(
         code: "timed_out",
         retryable: true,
     })
+}
+
+/// PB-07: one operator's publishing view, shared by the four publish Commands.
+///
+/// It lives in the App rather than the executor because it *is* a view: the
+/// executor owns the irreversible facts (its durable at-most-once ledger), and
+/// this owns only what the operator has been shown and has agreed to.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+pub struct PublishWorkspaceState(pub std::sync::Mutex<publish_workspace::PublishWorkspace>);
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn publish_workspace_unavailable() -> ExecutorPlatformCommandError {
+    ExecutorPlatformCommandError {
+        code: "storage_unavailable",
+        retryable: false,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_publish_workspace_error(
+    error: publish_workspace::PublishWorkspaceError,
+) -> ExecutorPlatformCommandError {
+    let code = match error {
+        publish_workspace::PublishWorkspaceError::UnknownPlatform => "configuration_invalid",
+        publish_workspace::PublishWorkspaceError::NotPublishable => "publish_not_available",
+        publish_workspace::PublishWorkspaceError::UnreadableApproval => "publish_not_confirmable",
+        publish_workspace::PublishWorkspaceError::NoApprovalPending => "publish_nothing_to_confirm",
+        publish_workspace::PublishWorkspaceError::AlreadyDispatched => "publish_already_dispatched",
+        publish_workspace::PublishWorkspaceError::NothingInFlight => "publish_nothing_in_flight",
+    };
+    ExecutorPlatformCommandError {
+        code,
+        retryable: false,
+    }
+}
+
+/// Refresh what the operator is allowed to do, then hand back the whole view.
+///
+/// Availability is read here rather than accepted from the App: a page that
+/// could assert its own platform was ready would be asserting its way past the
+/// one check that stops a publish being typed into a signed-out browser.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_publish_workspace(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    workspace: tauri::State<'_, PublishWorkspaceState>,
+) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
+    // A session this App cannot read is not a session it may publish through.
+    let signed_in = client
+        .get_douyin_platform_session(&vault)
+        .await
+        .map(|session| session.state() == "healthy")
+        .unwrap_or(false);
+    let mut held = workspace
+        .0
+        .lock()
+        .map_err(|_| publish_workspace_unavailable())?;
+    held.observe_douyin_signed_in(signed_in);
+    Ok(held.snapshot())
+}
+
+/// Open the publish page for one video and stop before submission.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn begin_publish(
+    platform: String,
+    publish_job_id: String,
+    artifact_path: String,
+    video_summary: String,
+    title: String,
+    description: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
+    profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
+    workspace: tauri::State<'_, PublishWorkspaceState>,
+) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
+    {
+        let mut held = workspace
+            .0
+            .lock()
+            .map_err(|_| publish_workspace_unavailable())?;
+        held.begin(&platform).map_err(map_publish_workspace_error)?;
+    }
+    ensure_executor_running(&client, &vault, &executor).await?;
+    let executable_path = resolve_embedded_browser(&authority)?;
+    let profile = profiles
+        .current_douyin_profile()
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "storage_unavailable",
+            retryable: false,
+        })?;
+    let service = executor.inner().clone();
+    // The same copy the operator will be asked to approve, kept here because the
+    // command below consumes one moving into the blocking call.
+    let approved_title = title.clone();
+    let approved_description = description.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        service.execute_publish_command(
+            publish_job_id,
+            executable_path,
+            profile,
+            cfg!(feature = "control-plane-e2e"),
+            std::path::PathBuf::from(artifact_path),
+            title,
+            description,
+        )
+    })
+    .await
+    .map_err(|_| ExecutorPlatformCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?;
+
+    let mut held = workspace
+        .0
+        .lock()
+        .map_err(|_| publish_workspace_unavailable())?;
+    let result = match outcome {
+        Err(error) => {
+            // Nothing ever reached a page the operator could have approved.
+            held.settle(publish_workspace::PublishOutcome::NotPublished);
+            return Err(map_executor_platform_error(error));
+        }
+        Ok(result) => result,
+    };
+    match publish_workspace::preflight_outcome(result.state()) {
+        Some(outcome) => held.settle(outcome),
+        None => {
+            // The executor signed these terms; they are not the App's to invent.
+            let (Some(confirmation_id), Some(target_account)) =
+                (result.confirmation_id(), result.target_account())
+            else {
+                held.settle(publish_workspace::PublishOutcome::NotPublished);
+                return Err(ExecutorPlatformCommandError {
+                    code: "publish_not_confirmable",
+                    retryable: false,
+                });
+            };
+            held.await_approval(
+                publish_workspace::PublishApproval::new(
+                    target_account,
+                    &video_summary,
+                    &approved_title,
+                    &approved_description,
+                    confirmation_id,
+                )
+                .map_err(map_publish_workspace_error)?,
+            );
+        }
+    }
+    Ok(held.snapshot())
+}
+
+/// Spend the operator's approval on the one click it authorizes.
+///
+/// The confirmation the App sends back must be the one the executor issued.
+/// Checking it here as well as in the executor is deliberate: this is the last
+/// place that still knows what was rendered, and an approval spent on terms
+/// nobody saw is the failure this whole chain exists to prevent.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn approve_publish(
+    publish_job_id: String,
+    confirmation_id: String,
+    executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    workspace: tauri::State<'_, PublishWorkspaceState>,
+) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
+    {
+        let mut held = workspace
+            .0
+            .lock()
+            .map_err(|_| publish_workspace_unavailable())?;
+        let pending = held.snapshot();
+        let terms = pending
+            .approval
+            .as_ref()
+            .ok_or(publish_workspace::PublishWorkspaceError::NoApprovalPending)
+            .map_err(map_publish_workspace_error)?;
+        if terms.confirmation_id != confirmation_id {
+            return Err(map_publish_workspace_error(
+                publish_workspace::PublishWorkspaceError::NoApprovalPending,
+            ));
+        }
+        held.approve().map_err(map_publish_workspace_error)?;
+    }
+    let service = executor.inner().clone();
+    let job = publish_job_id.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        service.execute_publish_dispatch_command(job, confirmation_id)
+    })
+    .await
+    .map_err(|_| ExecutorPlatformCommandError {
+        code: "process_unavailable",
+        retryable: true,
+    })?;
+
+    let mut held = workspace
+        .0
+        .lock()
+        .map_err(|_| publish_workspace_unavailable())?;
+    held.begin_verification();
+    match outcome {
+        // The click may already have happened, so a transport failure is not a
+        // clean "did not publish"; it is exactly what uncertain means.
+        Err(error) => {
+            held.settle(publish_workspace::PublishOutcome::OutcomeUncertain);
+            drop(held);
+            Err(map_executor_platform_error(error))
+        }
+        Ok(result) => {
+            held.settle(publish_workspace::dispatch_outcome(result.state()));
+            Ok(held.snapshot())
+        }
+    }
+}
+
+/// Give up a publish that has not been dispatched, and hand the browser back.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn cancel_publish(
+    executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    workspace: tauri::State<'_, PublishWorkspaceState>,
+) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
+    {
+        // Refuse before touching the browser: a dispatched publish has nothing
+        // local left to cancel, and saying otherwise would be a lie.
+        let mut held = workspace
+            .0
+            .lock()
+            .map_err(|_| publish_workspace_unavailable())?;
+        held.cancel().map_err(map_publish_workspace_error)?;
+    }
+    let service = executor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.release_publish_surface())
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(map_executor_platform_error)?;
+    let held = workspace
+        .0
+        .lock()
+        .map_err(|_| publish_workspace_unavailable())?;
+    Ok(held.snapshot())
 }
 
 #[tauri::command]
@@ -3507,6 +3763,9 @@ pub fn run() {
                     &app_data_directory,
                 )?,
             );
+            app.manage(PublishWorkspaceState(std::sync::Mutex::new(
+                publish_workspace::PublishWorkspace::new(false),
+            )));
             app.manage(startup_environment::StartupEnvironmentService::initialize(
                 &app_data_directory,
             )?);
@@ -3625,6 +3884,10 @@ pub fn run() {
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
+        get_publish_workspace,
+        begin_publish,
+        approve_publish,
+        cancel_publish,
         emergency_stop_workbench_task,
         pause_task_run,
         resume_task_run,
@@ -3685,6 +3948,10 @@ pub fn run() {
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
+        get_publish_workspace,
+        begin_publish,
+        approve_publish,
+        cancel_publish,
         emergency_stop_workbench_task,
         pause_task_run,
         resume_task_run,
