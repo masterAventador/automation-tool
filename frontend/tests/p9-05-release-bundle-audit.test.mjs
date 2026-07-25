@@ -111,6 +111,31 @@ test("P9-05 rejects misplaced Executors, links, and incomplete package trust met
     await rm(misplaced.root, { recursive: true, force: true });
   }
 
+  // PyInstaller trees legitimately carry relative symlinks that stay inside the
+  // package: the material video Worker lays 53 dynamic libraries out that way
+  // because that is where its loader looks. Rejecting every symlink outside the
+  // browser was free while the executor was the only other payload — it has
+  // none — and it is not free now. The property worth protecting is that a link
+  // cannot reach outside the package, which the escaping case below still
+  // covers. This mirrors the same narrowing already applied to the Python gate
+  // in `scripts/check_embedded_browser_package.py`.
+  const inside = await createBundle();
+  try {
+    await mkdir(join(inside.executor, "vendor"), { recursive: true });
+    await writeFile(join(inside.executor, "vendor/libexample.dylib"), "payload");
+    await symlink(
+      "vendor/libexample.dylib",
+      join(inside.executor, "libexample.dylib"),
+    );
+    await auditReleaseBundle({
+      bundleRoot: inside.bundle,
+      executorPackagePath: inside.executor,
+      platform: "macos",
+    });
+  } finally {
+    await rm(inside.root, { recursive: true, force: true });
+  }
+
   const linked = await createBundle();
   try {
     await symlink(

@@ -191,6 +191,11 @@ def _require_contained_symlink(link: Path, bundle_root: Path, browser_root: Path
     browser = browser_root.resolve()
     if target == browser or browser in target.parents:
         _reject("package contains a symlink into the browser distribution")
+    # Only file links are legitimate. A directory link gives one tree two paths,
+    # which would let a payload sit somewhere the "this resource lives here"
+    # checks never look. PyInstaller only ever links individual libraries.
+    if not target.is_file():
+        _reject("package contains a directory symlink")
 
 
 def audit_embedded_browser_package(

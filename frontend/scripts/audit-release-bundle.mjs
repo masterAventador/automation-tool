@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -100,6 +100,35 @@ function rejected() {
   return new Error("Release bundle is rejected");
 }
 
+async function requireContainedSymlink(link, root, state) {
+  let target;
+  try {
+    target = await realpath(link);
+  } catch {
+    // Missing target or a link loop: it cannot be shown to stay inside, and at
+    // runtime it is an unexplained failure rather than a missing file.
+    throw rejected();
+  }
+  const packageRoot = await realpath(root);
+  const rendered = relative(packageRoot, target).replaceAll("\\", "/");
+  if (isAbsolute(rendered) || rendered.startsWith("../")) {
+    throw rejected();
+  }
+  // Only file links are legitimate. A directory link gives one tree two paths,
+  // which would let a payload sit somewhere the "executor lives here" checks
+  // never look. PyInstaller only ever links individual libraries.
+  if (!(await lstat(target)).isFile()) {
+    throw rejected();
+  }
+  if (
+    state.embeddedBrowser !== undefined &&
+    (rendered === state.embeddedBrowser ||
+      rendered.startsWith(`${state.embeddedBrowser}/`))
+  ) {
+    throw rejected();
+  }
+}
+
 function normalizedRelative(root, path) {
   const rendered = relative(root, path).replaceAll("\\", "/");
   if (rendered === "" || rendered === "." || isAbsolute(rendered) || rendered.startsWith("../")) {
@@ -147,7 +176,14 @@ async function collectBundleFiles(directory, root, state) {
     }
     const metadata = await lstat(path);
     if (entry.isSymbolicLink() || metadata.isSymbolicLink()) {
-      throw rejected();
+      // A link that stays inside the package is legitimate: PyInstaller lays
+      // the material video Worker's 53 dynamic libraries out this way and its
+      // loader will not start without them. What must never happen is a link
+      // reaching outside the package, into the digest-verified browser tree, or
+      // pointing at nothing. Same narrowing as the Python gate in
+      // `scripts/check_embedded_browser_package.py`.
+      await requireContainedSymlink(path, root, state);
+      continue;
     }
     if (metadata.isDirectory()) {
       await collectBundleFiles(path, root, state);

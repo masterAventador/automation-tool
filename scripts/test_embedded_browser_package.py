@@ -286,6 +286,17 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         with self.assertRaises(PackageRejected):
             self._audit()
 
+    def test_a_directory_symlink_inside_the_package_is_rejected(self) -> None:
+        # Only file links are legitimate. A directory link gives one tree two
+        # paths, which would let a payload sit somewhere the "this resource
+        # lives here" checks never look. PyInstaller only links libraries.
+        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        (worker / "vendor").mkdir(parents=True)
+        (worker / "vendor/libexample.dylib").write_bytes(b"payload")
+        (worker / "mirror").symlink_to("vendor")
+        with self.assertRaises(PackageRejected):
+            self._audit()
+
     def test_a_dangling_symlink_is_rejected(self) -> None:
         # A link with no target cannot be shown to stay inside the package, and
         # at runtime it is an unexplained failure rather than a missing file.
