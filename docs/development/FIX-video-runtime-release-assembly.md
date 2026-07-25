@@ -137,8 +137,38 @@ macOS 自带 bash 3.2，`set -u` 下空数组 `[*]` 展开判为未绑定，而 
 
 ## 正常用户路径验收
 
-**未完成**。装配器与门禁已对真实缺陷包验证有效，但**尚未完整重建一次正式包并在其中操作视频制作功能**。
-在完成该验收前，本项不得标记完成。
+**未完成**。已完成的部分与仍缺的部分分开记：
+
+### 已完成：重建后的包确实带上了三份资源（2026-07-26）
+
+重跑 `scripts/run_eb_16_acceptance.py`，装配与出厂门禁均通过，包内三处**生产代码实际读取的位置**都已就位：
+
+```text
+Contents/Resources/media-toolchain/bin/ffmpeg                                  ✓
+Contents/Resources/motion-video-worker/package/app/worker.mjs                  ✓
+Contents/Resources/material-video-worker/package/automation-tool-material-video-worker  ✓
+
+require_packaged_video_runtime(application=..., platform='macos') → 三份就位，门禁通过
+```
+
+同一个门禁函数，对改动前那个包的输出是：
+
+```text
+release assembly rejected: the bundle carries no media-toolchain at
+.../Contents/Resources/media-toolchain — it was built without the video runtime assembly step
+```
+
+### 仍缺：在正式 App 里操作视频制作
+
+两个阻塞：
+
+1. **包体积超限，dmg 尚未产出**。装配之后的包审计拒绝：`release package is outside the release
+   size bounds`（上限 700 MiB）。素材成片 Worker 单独 647 MiB，其中约 270 MiB 经初步拆解是用不上的
+   （`pyarrow` 114M、`onnxruntime` 59M、`imageio_ffmpeg` 47M——产品已通过 `IMAGEIO_FFMPEG_EXE`
+   指向自带 ffmpeg、`streamlit` 29M——产品不走上游 WebUI）。**不调高上限，改为裁剪**，见 [T16]。
+2. **正式包不含 WebDriver**（项目规则第 8 节要求），无法被自动化驱动。按「单一构建路径规范」，
+   自动化验收应在"正式构建 + 仅 WebDriver 挂载"的验收构建上进行，而该形态成立的前提是
+   [T12] 消除其余构建期分叉——尤其测试构建对启动门禁的无条件放行。
 
 ## 真实边界
 
