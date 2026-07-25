@@ -32,7 +32,11 @@ from test_motion_video_render_adapter import (
     expect_ready,
     render_browser_document,
 )
-from test_motion_video_render_sandbox import sandbox_command_line, sandbox_spec
+from test_motion_video_render_sandbox import (
+    SANDBOX_CPU_PARALLELISM_MAXIMUM,
+    sandbox_command_line,
+    sandbox_spec,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-16-evidence"
@@ -47,12 +51,6 @@ DETERMINISM_FRAMES = 30
 # and a software-rasterising host (every Windows run here) is slower again.
 SHORT_RENDER_BUDGET_SECONDS = 120
 DETERMINISM_RENDER_BUDGET_SECONDS = 180
-# CPU seconds are summed across the whole browser process tree, so a render
-# that legitimately uses every core burns them far faster than wall clock —
-# on the Windows host a two-frame item already exceeded 120. Wall clock stays
-# the stall guard; the CPU ceiling only has to catch runaway consumption, so
-# it sits just under the sandbox maximum instead of tracking the wall budget.
-RENDER_CPU_BUDGET_SECONDS = 280
 
 
 def _run(
@@ -157,7 +155,12 @@ def _render_once(
             allowedAssets=allowed_assets,
             entryHtml=entry,
             frameCount=frame_count,
-            maxCpuSeconds=RENDER_CPU_BUDGET_SECONDS,
+            # Wall clock is the stall guard. CPU seconds are summed across the
+            # whole browser process tree, so a render that legitimately uses
+            # several cores accrues them far faster; the sandbox contract states
+            # that ceiling as the wall budget times the maximum declarable
+            # average core occupancy, which is what a render sweep may use.
+            maxCpuSeconds=budget_seconds * SANDBOX_CPU_PARALLELISM_MAXIMUM,
             maxDurationSeconds=budget_seconds,
             maxMemoryMegabytes=2048,
             maxOutputBytes=256 * 1024 * 1024,

@@ -129,6 +129,14 @@ MAX_COMPOSITION_BYTES: Final = 512_000
 DEFAULT_FPS: Final = 30
 MAX_FRAME_COUNT: Final = 600  # snapshot per-job frame budget (20s @ 30fps)
 MAX_FIX_ROUNDS: Final = 2
+# The BM-04 render sandbox budget contract, mirrored here so the submission a
+# model produces is admissible by construction. Wall clock is the stall guard;
+# CPU seconds are summed over the whole browser process tree and therefore
+# accrue N times faster on N cores, so their ceiling is the wall budget times
+# the highest average core occupancy one render may declare. Kept in step with
+# `contracts/video/motion-render-sandbox-budget.v1.json`.
+SANDBOX_WALL_SECONDS_MAXIMUM: Final = 300
+SANDBOX_CPU_PARALLELISM_MAXIMUM: Final = 8
 # A reasoning video-creation model streams a long reasoning phase before the
 # composition. The request is streamed, so this budget bounds the inter-chunk
 # gap, not the whole generation; a whole-response bound of 180s timed out the
@@ -648,13 +656,14 @@ class RenderJobSubmission:
 
     def to_sandbox_spec(self, workspace: str) -> dict[str, object]:
         """Return the BM-04 render-sandbox spec shape for this frozen job."""
+        wall_seconds = max(1, min(SANDBOX_WALL_SECONDS_MAXIMUM, self.duration_seconds))
         return {
             "workspace": workspace,
             "entryHtml": self.entry_html,
             "allowedAssets": list(self.allowed_assets),
             "frameCount": self.frame_count,
-            "maxDurationSeconds": max(1, min(300, self.duration_seconds)),
-            "maxCpuSeconds": max(1, min(300, self.duration_seconds * 10)),
+            "maxDurationSeconds": wall_seconds,
+            "maxCpuSeconds": wall_seconds * SANDBOX_CPU_PARALLELISM_MAXIMUM,
             "maxMemoryMegabytes": 2048,
             "maxOutputBytes": 256 * 1024 * 1024,
         }

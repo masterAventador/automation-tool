@@ -53,6 +53,13 @@ from test_motion_video_render_adapter import (
     write_windows_cdp_browser,
 )
 
+# The declared ceiling on average core occupancy for one render, stated here
+# independently of the implementation: `maxCpuSeconds` may never exceed
+# `maxDurationSeconds` times this factor. Kept in step with
+# `contracts/video/motion-render-sandbox-budget.v1.json` by the cross-language
+# contract test.
+SANDBOX_CPU_PARALLELISM_MAXIMUM = 8
+
 
 def canonical_json(value: object) -> str:
     """The cross-language canonical form the sandbox HMAC binds to."""
@@ -372,6 +379,11 @@ def test_sandbox_rejects_invalid_spec(assets: Path, decoy: Path) -> None:
         sandbox_spec(workspace, maxDurationSeconds=301),
         sandbox_spec(workspace, maxCpuSeconds=0),
         sandbox_spec(workspace, maxCpuSeconds=301),
+        # The default spec declares a 20 second wall budget, so its CPU ceiling
+        # is 20 * SANDBOX_CPU_PARALLELISM_MAXIMUM.
+        sandbox_spec(
+            workspace, maxCpuSeconds=20 * SANDBOX_CPU_PARALLELISM_MAXIMUM + 1
+        ),
         sandbox_spec(workspace, maxMemoryMegabytes=64),
         sandbox_spec(workspace, maxMemoryMegabytes=8193),
         sandbox_spec(workspace, maxOutputBytes=0),
@@ -481,6 +493,55 @@ def test_sandbox_null_render_browser_refuses_without_discovery(assets: Path, dec
     assert_workspace_untouched(workspace)
 
 
+def test_sandbox_cpu_budget_scales_with_the_wall_clock_budget(
+    assets: Path, decoy: Path
+) -> None:
+    """CPU seconds and wall-clock seconds are different quantities.
+
+    A render that saturates several cores accrues CPU seconds many times faster
+    than wall-clock seconds, so one shared ceiling is wrong in both directions:
+    it rejects a legitimate multi-core budget on a long render, and on a short
+    one it accepts a budget no host can physically reach, leaving the CPU guard
+    inert. The admissible CPU budget is the wall-clock budget times the declared
+    maximum average core occupancy, and nothing else.
+    """
+    decoy_record = write_decoy_browser(decoy)
+    workspace = make_workspace(assets)
+    session = WorkerSession(bootstrap_document(str(assets), None), poisoned_environment(decoy))
+    expect_ready(session)
+    parallelism = SANDBOX_CPU_PARALLELISM_MAXIMUM
+    # Accepted: at or below the declared parallelism the guard is reachable.
+    # `render_browser_unavailable` proves the spec itself cleared validation.
+    for accepted in (
+        sandbox_spec(workspace, maxDurationSeconds=120, maxCpuSeconds=480),
+        sandbox_spec(workspace, maxDurationSeconds=120, maxCpuSeconds=120 * parallelism),
+        sandbox_spec(workspace, maxDurationSeconds=1, maxCpuSeconds=parallelism),
+        sandbox_spec(workspace, maxDurationSeconds=300, maxCpuSeconds=300 * parallelism),
+    ):
+        expect_sandbox_failure(
+            session, sandbox_command_line(JOB_ID, accepted), "render_browser_unavailable"
+        )
+    # Rejected: above the declared parallelism the budget cannot be reached
+    # within the wall budget, so the CPU guard would never fire. The old shared
+    # 300-second ceiling accepted every one of these.
+    for rejected in (
+        sandbox_spec(workspace, maxDurationSeconds=1, maxCpuSeconds=parallelism + 1),
+        sandbox_spec(workspace, maxDurationSeconds=1, maxCpuSeconds=300),
+        sandbox_spec(workspace, maxDurationSeconds=30, maxCpuSeconds=300),
+        sandbox_spec(
+            workspace, maxDurationSeconds=120, maxCpuSeconds=120 * parallelism + 1
+        ),
+    ):
+        expect_sandbox_failure(
+            session, sandbox_command_line(JOB_ID, rejected), "render_sandbox_invalid"
+        )
+    code, _ = session.finish()
+    assert code == 0
+    assert not decoy_record.exists(), "spec validation must never consult a browser"
+    assert not render_job_directories(JOB_ID)
+    assert_workspace_untouched(workspace)
+
+
 def test_sandbox_forged_or_tampered_command_is_ignored(assets: Path, decoy: Path) -> None:
     executable, record = write_boundary_fake(assets / "forged")
     workspace = make_workspace(assets)
@@ -556,7 +617,16 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
     started = time.monotonic()
     expect_sandbox_failure(
         session,
-        sandbox_command_line(JOB_ID, sandbox_spec(workspace, maxDurationSeconds=1)),
+        sandbox_command_line(
+            JOB_ID,
+            # A one-second wall budget admits at most one second of CPU per
+            # declared core; the old shared ceiling let this spec claim 300.
+            sandbox_spec(
+                workspace,
+                maxDurationSeconds=1,
+                maxCpuSeconds=SANDBOX_CPU_PARALLELISM_MAXIMUM,
+            ),
+        ),
         "render_timeout",
     )
     assert time.monotonic() - started < 15, "wall budget must not wait for the hanging browser"
@@ -641,6 +711,7 @@ def main() -> int:
         test_sandbox_rejects_invalid_spec,
         test_sandbox_rejects_workspace_violations,
         test_sandbox_null_render_browser_refuses_without_discovery,
+        test_sandbox_cpu_budget_scales_with_the_wall_clock_budget,
         test_sandbox_forged_or_tampered_command_is_ignored,
         test_sandbox_rejects_chromium_major_mismatch,
         test_sandbox_isolation_flags_and_wall_timeout,

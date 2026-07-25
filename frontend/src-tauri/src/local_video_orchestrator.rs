@@ -42,7 +42,14 @@ const CHROMIUM_MAJOR_MAXIMUM: u32 = 999;
 const RENDER_LAUNCH_TIMEOUT_MINIMUM: Duration = Duration::from_secs(1);
 const RENDER_LAUNCH_TIMEOUT_MAXIMUM: Duration = Duration::from_secs(60);
 const SANDBOX_FRAMES_MAXIMUM: u32 = 600;
+/// Wall clock is the stall guard: a hung render is killed at this many seconds.
 const SANDBOX_SECONDS_MAXIMUM: u32 = 300;
+/// CPU seconds are a different quantity: the Worker sums them over the whole
+/// browser process tree, so a render occupying N cores accrues them N times
+/// faster than wall clock. The admissible CPU budget is the wall-clock budget
+/// times the highest average core occupancy one render may declare. See
+/// `contracts/video/motion-render-sandbox-budget.v1.json`.
+const SANDBOX_CPU_PARALLELISM_MAXIMUM: u32 = 8;
 const SANDBOX_MEMORY_MEGABYTES_MINIMUM: u32 = 128;
 const SANDBOX_MEMORY_MEGABYTES_MAXIMUM: u32 = 8192;
 const SANDBOX_OUTPUT_BYTES_MAXIMUM: u64 = 2_147_483_647;
@@ -249,7 +256,8 @@ impl VideoWorkerRenderSandboxRequest {
                 .all(|asset| valid_sandbox_relative_path(asset))
             || !(1..=SANDBOX_FRAMES_MAXIMUM).contains(&frame_count)
             || !(1..=SANDBOX_SECONDS_MAXIMUM).contains(&max_duration_seconds)
-            || !(1..=SANDBOX_SECONDS_MAXIMUM).contains(&max_cpu_seconds)
+            || !(1..=max_duration_seconds.saturating_mul(SANDBOX_CPU_PARALLELISM_MAXIMUM))
+                .contains(&max_cpu_seconds)
             || !(SANDBOX_MEMORY_MEGABYTES_MINIMUM..=SANDBOX_MEMORY_MEGABYTES_MAXIMUM)
                 .contains(&max_memory_megabytes)
             || !(1..=SANDBOX_OUTPUT_BYTES_MAXIMUM).contains(&max_output_bytes)

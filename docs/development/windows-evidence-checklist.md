@@ -343,13 +343,24 @@ Windows 真实内置 Chromium 上重跑，**前置确定性门禁、12 套风格
 探针立即给出决定性事实——**隔离环境下三次渲染逐帧字节完全一致**，漂移只在跟着 12 套风格
 sweep 之后的高负载时出现，问题性质因此从"渲染不确定"变成"负载下等待不足"。
 
-**Windows 侧剩余阻塞（一项）**：134 项 sweep 在整机被前序渲染压满后，某一项会触发
-`render_resource_exceeded`。已用局部探针证明**同一项单独渲染在同一预算下通过**
-（`cpu=280 memory=2048 -> PASSED`），故非产品缺陷。根因是 CPU 秒按整棵浏览器进程树累加，
-对渲染是错误的约束维度：16 核满载 20 墙钟秒即 320 CPU 秒，而沙箱契约
-`SANDBOX_SECONDS_MAXIMUM` 把 CPU 与墙钟共用 300 秒上限。彻底解决需要给 CPU 设独立上限
-（墙钟仍作卡死保护），这会改动 BM-04 的沙箱安全契约，**应作为独立任务处理，不夹带在本次
-补证据中**。
+**Windows 侧剩余阻塞（一项）→ 根因已修复，待真机复验（2026-07-25）**：134 项 sweep 在
+整机被前序渲染压满后，某一项会触发 `render_resource_exceeded`。已用局部探针证明**同一项
+单独渲染在同一预算下通过**（`cpu=280 memory=2048 -> PASSED`），故非产品缺陷。根因是 CPU 秒
+按整棵浏览器进程树累加，对渲染是错误的约束维度：16 核满载 20 墙钟秒即 320 CPU 秒，而沙箱
+契约 `SANDBOX_SECONDS_MAXIMUM` 把 CPU 与墙钟共用 300 秒上限。
+
+该契约缺陷已由独立任务 `docs/development/FIX-sandbox-cpu-budget.md` 修复：CPU 秒改用独立
+上限 `maxDurationSeconds × cpuParallelismMaximum`（契约
+`contracts/video/motion-render-sandbox-budget.v1.json`，`cpuParallelismMaximum = 8`），墙钟
+继续作卡死保护且语义不变；BM-16 的 sweep 预算随之从硬编码 `280` 收敛成由墙钟预算派生
+（短渲染 960、确定性 1440）。该修复同时**收紧**了短墙钟端——旧契约允许 1 秒墙钟声明 300
+CPU 秒，那是任何宿主都到不了的死约束，现在直接被拒。
+
+**本项仍未闭合的部分**：修复只在 macOS 上完成契约层与三层测试验证，**尚未在 Windows 16 核
+真机上重跑 `python scripts\run_bm_16_acceptance.py` 的 134 项 sweep**，因此不能断言原始现象
+已消失。Windows 会话接手时须：(1) 重跑完整 sweep 确认 134/134 通过；(2) 在 Windows 上重跑
+`python scripts\test_motion_video_render_sandbox.py`，确认新增的 CPU 预算用例在 CIM 采样分支
+下同样通过。两项完成后本条才可标记闭合。
 
 其余 Windows 侧待补：发布目录只读属性的 `FILE_ATTRIBUTE_READONLY` 语义；双平台正式安装包
 链路与包内容负面检查；跨机确定性比对；低配机与休眠恢复注入。通过后更新
