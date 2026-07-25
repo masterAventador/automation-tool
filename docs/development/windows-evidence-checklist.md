@@ -411,6 +411,29 @@ Profile/可执行文件/家目录路径；skip 的是有头窗口用例（按静
 **仍待补**：有头运营窗口的可见性与人工接管，需要 Windows 上已登录的桌面会话，
 且按静默运行规范必须显式开启才能跑。
 
+### 15.1 远程 SSH 验收的提权限制（2026-07-25 发现，影响所有涉及文件属主/ACL 的项）
+
+Windows 验收机的 sshd 以 SYSTEM 运行，SSH 会话拿到的是**已提权的完整管理员令牌**。
+实测后果：**该会话新建的任何目录，属主是 `BUILTIN\Administrators` 而不是登录用户**。
+
+本项目的运营 Profile 安全校验要求目录属主必须是当前用户
+（`browser_profiles_windows.rs` 的 `verify_private_acl_parts`），因此在 SSH 会话里：
+
+- `cargo test --locked --test browser_profiles` **12 个用例全部失败**（用临时目录）；
+- 真实 Tauri 测试 App 启动即 panic `browser profile unavailable`（App 由提权会话拉起，
+  它新建的 `embedded-browser-profiles` 子目录属主同样是 Administrators）。
+
+**这两个都不是产品缺陷**：用户双击运行 App 是非提权的，创建的目录属主就是本人，校验通过。
+已用 `(Get-Acl <新建目录>).Owner` 与 `#[track_caller]` 插桩双向确认（插桩已还原，工作树干净）。
+
+**因此以下验收项不能用当前的 SSH 远程链路完成**，需要用户在本机**交互式（非提权）会话**执行，
+或后续建立"以 LIMITED 权限运行整条验收链"的机制（任务计划程序 `/rl LIMITED`）：
+
+- 任何创建运营 Profile 的真实 App 启动（含 CQ-01 的桌面 E2E、BM-07/BM-08 的原生入口）；
+- `cargo test --test browser_profiles`、`--test browser_profile_locks` 等属主/ACL 相关用例。
+
+纯命令行、不校验属主的项（EB-11~15、BM-05、BM-16 等）不受影响，已正常远程完成。
+
 ### 16. CQ-01 普通用户可理解性 Windows 待补
 
 CQ-01 已在 macOS 用隐藏 `video-studio-e2e` 测试 App 按左侧菜单真实路径完成验收：
@@ -426,6 +449,11 @@ Windows 隐藏测试 App 上重跑，重点确认 antd 中文 locale 生效、�
 `workbench-control`、`workbench-metrics`、`executor-crash-recovery`、`task-run`、
 `model-service` 真实 App 用例需在具备真实 Control Plane/PostgreSQL 的环境重跑。
 通过后更新 `docs/development/CQ-01.md` 遗留项并评估 `🔍 待验收` 闭合。
+
+**2026-07-25 远程尝试结果**：vitest 回归与 Tauri 测试 App 构建均已通过（前置依赖问题一并
+解决：pnpm 默认用 junction 组织 `node_modules`，该机上被系统判为 untrusted mount point 导致
+模块不可达，改用 hoisted 布局后正常）。桌面 E2E 卡在 App 启动——原因是上面第 15.1 节的提权
+限制，非产品缺陷。该项需用户在本机交互式会话执行。
 
 **2026-07-25 Windows 验收结果（Mac 经 SSH 远程发起，Windows 真机执行）**：在
 `F:\automation-tool`（HEAD `64788fa`）用 Windows staged 内置 Chromium
