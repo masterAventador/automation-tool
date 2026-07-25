@@ -7,7 +7,10 @@ from PyInstaller.utils.hooks import collect_all
 backend_root = Path(SPECPATH)
 source_root = backend_root / "src"
 sys.path.insert(0, str(source_root))
-from automation_tool.executor.pyinstaller_support import materialize_internal_package_symlinks
+from automation_tool.executor.pyinstaller_support import (
+    materialize_internal_package_symlinks,
+    remove_browser_installer_scripts,
+)
 
 
 def remove_direct_url_metadata(entries):
@@ -40,6 +43,10 @@ analysis = Analysis(
     optimize=0,
 )
 analysis.datas = remove_direct_url_metadata(analysis.datas)
+# 上游 driver 自带的系统浏览器安装脚本不进正式包：产品只用包内 Chromium，
+# 打包它们等于在用户机器上留一条绕开该约束的现成路径。
+analysis.datas = remove_browser_installer_scripts(analysis.datas)
+analysis.binaries = remove_browser_installer_scripts(analysis.binaries)
 python_archive = PYZ(analysis.pure)
 
 executable = EXE(

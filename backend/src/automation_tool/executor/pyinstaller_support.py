@@ -28,6 +28,41 @@ def _reject() -> PyInstallerPackageMaterializationRejected:
     return PyInstallerPackageMaterializationRejected()
 
 
+# Playwright 的 driver 自带这批脚本，作用是联网下载并安装系统浏览器
+# （Chrome/Edge 各渠道、WebKit 的 WSL 支持、Windows 媒体包）。
+_BROWSER_INSTALLER_DIRECTORY = ("playwright", "driver", "package", "bin")
+_BROWSER_INSTALLER_PREFIXES = ("reinstall_", "install_")
+
+
+def remove_browser_installer_scripts(entries: list[tuple]) -> list[tuple]:
+    """Drop the upstream scripts that download and install a system browser.
+
+    The product may never discover, choose, download or fall back to a system
+    browser. Once these scripts are inside the release package the user's
+    machine carries a ready-made way around that rule, whether or not the
+    product ever calls them: unlike library code, they are directly runnable
+    downloaders.
+
+    The test is "the driver's bin directory plus an installer prefix", not a
+    filename keyword — a keyword would also catch the product's own files that
+    happen to be named install-something. The driver itself always stays; the
+    executor drives the embedded browser through it.
+    """
+    kept: list[tuple] = []
+    for entry in entries:
+        parts = Path(str(entry[0]).replace("\\", "/")).parts
+        in_driver_bin = any(
+            parts[index : index + len(_BROWSER_INSTALLER_DIRECTORY)]
+            == _BROWSER_INSTALLER_DIRECTORY
+            for index in range(len(parts))
+        )
+        name = parts[-1] if parts else ""
+        if in_driver_bin and name.startswith(_BROWSER_INSTALLER_PREFIXES):
+            continue
+        kept.append(entry)
+    return kept
+
+
 def materialize_internal_package_symlinks(package_root: Path) -> None:
     """Replace safe package-internal links with independent regular entries."""
 
@@ -86,4 +121,5 @@ def materialize_internal_package_symlinks(package_root: Path) -> None:
 __all__ = [
     "PyInstallerPackageMaterializationRejected",
     "materialize_internal_package_symlinks",
+    "remove_browser_installer_scripts",
 ]

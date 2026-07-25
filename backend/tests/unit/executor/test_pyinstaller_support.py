@@ -9,6 +9,7 @@ import pytest
 from automation_tool.executor.pyinstaller_support import (
     PyInstallerPackageMaterializationRejected,
     materialize_internal_package_symlinks,
+    remove_browser_installer_scripts,
 )
 
 
@@ -169,3 +170,50 @@ def test_materialization_rejects_a_link_created_after_copy(
         materialize_internal_package_symlinks(package_root)
 
     assert late_link.is_symlink()
+
+
+
+DRIVER_BIN = "playwright/driver/package/bin"
+
+
+def test_browser_installer_scripts_are_dropped_from_the_package() -> None:
+    """打包时必须丢掉上游那批"下载并安装系统浏览器"的脚本。
+
+    Playwright 的 driver 自带 17 个这样的脚本（Chrome/Edge 各渠道、WebKit WSL、
+    媒体包），作用就是联网下载并安装系统浏览器。产品的硬约束是"不发现、选择、
+    下载或回退到系统浏览器"，这些脚本一旦进正式包，用户机器上就多了一条能绕开
+    该约束的现成路径——即使产品自己从不调用它们。
+    """
+    entries = [
+        (f"{DRIVER_BIN}/reinstall_chrome_stable_mac.sh", "/src/a", "DATA"),
+        (f"{DRIVER_BIN}/reinstall_msedge_beta_win.ps1", "/src/b", "DATA"),
+        (f"{DRIVER_BIN}/install_media_pack.ps1", "/src/c", "DATA"),
+        (f"{DRIVER_BIN}/install_webkit_wsl.ps1", "/src/d", "DATA"),
+    ]
+    assert remove_browser_installer_scripts(entries) == []
+
+
+def test_the_playwright_driver_itself_is_kept() -> None:
+    """只丢安装脚本，不动 driver 本体——执行器要靠它驱动包内 Chromium。"""
+    entries = [
+        ("playwright/driver/package/cli.js", "/src/cli.js", "DATA"),
+        ("playwright/driver/node", "/src/node", "BINARY"),
+        (f"{DRIVER_BIN}/README.md", "/src/readme", "DATA"),
+    ]
+    assert remove_browser_installer_scripts(entries) == entries
+
+
+def test_a_script_outside_the_driver_bin_is_kept() -> None:
+    """判据是"driver 的安装脚本"，不是"文件名里有 install"——后者会误伤产品自己的脚本。"""
+    entries = [
+        ("automation_tool/install_notes.sh", "/src/notes", "DATA"),
+        ("automation_tool/py.typed", "/src/py.typed", "DATA"),
+    ]
+    assert remove_browser_installer_scripts(entries) == entries
+
+
+def test_windows_style_separators_are_handled() -> None:
+    """PyInstaller 在 Windows 上给出反斜杠路径，过滤不能只认斜杠。"""
+    windows_path = DRIVER_BIN.replace("/", "\\") + "\\reinstall_chrome_stable_win.ps1"
+    entries = [(windows_path, "/src/x", "DATA")]
+    assert remove_browser_installer_scripts(entries) == []
