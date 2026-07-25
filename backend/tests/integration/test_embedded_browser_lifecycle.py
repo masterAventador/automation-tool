@@ -8,6 +8,7 @@ actually see and take over the window; every other test stays headless.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import signal
@@ -134,10 +135,8 @@ def test_external_kill_is_reported_and_the_profile_still_relaunches(
         with pytest.raises(BrowserRuntimeRejected):
             runtime.primary_window()
     finally:
-        try:
+        with contextlib.suppress(BrowserRuntimeRejected):
             runtime.close()
-        except BrowserRuntimeRejected:
-            pass
     assert "browser_window_unavailable" in output.getvalue()
 
     recovered = BrowserRuntime()
@@ -173,10 +172,8 @@ def test_diagnostics_stay_bounded_and_never_leak_private_paths(
         with pytest.raises(BrowserRuntimeRejected):
             crashed.primary_window()
     finally:
-        try:
+        with contextlib.suppress(BrowserRuntimeRejected):
             crashed.close()
-        except BrowserRuntimeRejected:
-            pass
     emitted = output.getvalue()
     assert emitted.strip().splitlines() == [
         "executor.recovery browser_window_unavailable"
