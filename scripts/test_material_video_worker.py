@@ -188,5 +188,46 @@ class MaterialVideoWorkerExcludedModulesTest(unittest.TestCase):
             build_candidate_module.assert_excluded_modules_absent(candidate, contract)
 
 
+class MaterialVideoWorkerExcludedUpstreamResourcesTest(unittest.TestCase):
+    """Upstream asset directories the product does not ship must never be frozen in."""
+
+    def test_contract_declares_the_excluded_upstream_resources(self) -> None:
+        contract = build_candidate_module.load_contract()
+        excluded = build_candidate_module.excluded_upstream_resources(contract)
+        self.assertIn("songs", excluded)
+        for shipped in ("fonts", "public"):
+            self.assertNotIn(shipped, excluded)
+
+    def test_spec_ships_upstream_resources_without_the_excluded_ones(self) -> None:
+        spec = (ROOT / "workers/material_montage/material-video-worker.spec").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("excludedUpstreamResources", spec)
+        self.assertNotIn('(str(upstream_root / "resource"), "upstream/resource")', spec)
+
+    def test_candidate_carrying_an_excluded_upstream_resource_is_rejected(self) -> None:
+        contract = build_candidate_module.load_contract()
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "candidate"
+            songs = candidate / "_internal/upstream/resource/songs"
+            songs.mkdir(parents=True)
+            (songs / "output000.mp3").write_bytes(b"")
+            with self.assertRaisesRegex(
+                build_candidate_module.MaterialVideoWorkerPackageError, "songs"
+            ):
+                build_candidate_module.assert_excluded_upstream_resources_absent(
+                    candidate, contract
+                )
+
+    def test_candidate_without_excluded_upstream_resources_is_accepted(self) -> None:
+        contract = build_candidate_module.load_contract()
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "candidate"
+            (candidate / "_internal/upstream/resource/fonts").mkdir(parents=True)
+            build_candidate_module.assert_excluded_upstream_resources_absent(
+                candidate, contract
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

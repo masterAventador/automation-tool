@@ -18,6 +18,7 @@ contract = json.loads(
     )
 )
 excluded_modules = list(contract["build"]["excludedModules"])
+excluded_upstream_resources = set(contract["build"]["excludedUpstreamResources"])
 
 moviepy_datas, moviepy_binaries, moviepy_hiddenimports = collect_all("moviepy")
 imageio_datas, imageio_binaries, imageio_hiddenimports = collect_all("imageio")
@@ -73,8 +74,12 @@ datas = [
 ]
 for distribution in runtime_distributions:
     datas += copy_metadata(distribution)
+for entry in sorted((upstream_root / "resource").iterdir()):
+    if entry.name in excluded_upstream_resources:
+        continue
+    destination = f"upstream/resource/{entry.name}" if entry.is_dir() else "upstream/resource"
+    datas.append((str(entry), destination))
 datas += [
-    (str(upstream_root / "resource"), "upstream/resource"),
     (str(upstream_root / "webui"), "upstream/webui"),
     (str(upstream_root / "config.example.toml"), "upstream"),
     (str(upstream_root / "LICENSE"), "upstream"),

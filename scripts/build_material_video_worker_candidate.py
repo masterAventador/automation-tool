@@ -125,6 +125,36 @@ def assert_excluded_modules_absent(
         reject(f"候选仍包含产品用不到的模块：{','.join(present)}")
 
 
+def excluded_upstream_resources(contract: dict[str, object]) -> tuple[str, ...]:
+    """Return the upstream asset directories the release must not ship."""
+    build = contract.get("build")
+    if not isinstance(build, dict):
+        reject("构建工具契约缺失")
+    names = build.get("excludedUpstreamResources")
+    if not isinstance(names, list) or not names:
+        reject("排除上游资源契约缺失")
+    if any(
+        not isinstance(name, str) or not name or "/" in name or name in {".", ".."}
+        for name in names
+    ):
+        reject("排除上游资源契约无效")
+    return tuple(str(name) for name in names)
+
+
+def assert_excluded_upstream_resources_absent(
+    candidate: Path, contract: dict[str, object]
+) -> None:
+    """Fail closed when the frozen candidate still carries an excluded asset tree."""
+    resource_root = candidate / "_internal/upstream/resource"
+    present = sorted(
+        name
+        for name in excluded_upstream_resources(contract)
+        if (resource_root / name).exists()
+    )
+    if present:
+        reject(f"候选仍包含产品不再分发的上游资源：{','.join(present)}")
+
+
 @contextmanager
 def temporary_build_directory() -> Iterator[Path]:
     path = Path(tempfile.mkdtemp(prefix="material-video-worker-build-"))
@@ -345,6 +375,7 @@ def audit_candidate(
     ):
         reject("候选错误混入 RPA Executor")
     assert_excluded_modules_absent(candidate, contract)
+    assert_excluded_upstream_resources_absent(candidate, contract)
     inventory_path = (
         candidate / "_internal/licenses/material-video-worker-dependencies.json"
     )

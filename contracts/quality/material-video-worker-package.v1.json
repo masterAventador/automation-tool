@@ -29,7 +29,11 @@
       "tkinter",
       "_tkinter"
     ],
-    "excludedModulesReason": "Streamlit declares these but imports them only for dataframe, Arrow, chart and desktop-dialog paths. The product WebUI renders none of them, so they are unreachable weight in the frozen candidate."
+    "excludedModulesReason": "Streamlit declares these but imports them only for dataframe, Arrow, chart and desktop-dialog paths. The product WebUI renders none of them, so they are unreachable weight in the frozen candidate.",
+    "excludedUpstreamResources": [
+      "songs"
+    ],
+    "excludedUpstreamResourcesReason": "The 29 bundled background-music tracks carry no redistribution grant: contracts/quality/third-party-notice-ui.v1.json denies asset rights by default and registers no music_sfx entry. Background music is optional in every render path, so the release ships none and the upstream 'random background music' choice degrades to no music instead of shipping unlicensed audio."
   },
   "dependencies": {
     "expectedInstalledDistributionCountByTarget": {
