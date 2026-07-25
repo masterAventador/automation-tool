@@ -320,7 +320,7 @@ BM-16 已在 macOS 完成：聚合确定性门禁、锁定发布目录构建与�
 测试命令）；跨机确定性比对；低配机与休眠恢复注入。通过后更新
 `docs/development/BM-16.md` 遗留项并评估 BM-05/07/08/15/16 五项 `🔍 待验收` 闭合。
 
-### 11. EB-11 登录与 Session Windows 待补
+### 11. EB-11 登录与 Session Windows 验收（✅ 2026-07-25 已完成）
 
 EB-11 已在 macOS 用 staged 内置 Chromium + 全新 0o700 私有 Profile 完成登录整链
 （QR 状态机与人工接管、会话四态探测、重启复用、注销清理）与正式命令面
@@ -330,21 +330,21 @@ Windows 侧待补：同套测试在 Windows staged 内置 Chromium（EB-04 缓�
 Profile 权限语义按 Windows ACL 等价校验。真实扫码另标 🔍 待真实账号，不属 Windows
 会话职责。通过后更新 `docs/development/EB-11.md` 遗留项。
 
-### 12. EB-12 搜索/浏览/候选提取迁移 Windows 待补
+### 12. EB-12 搜索/浏览/候选提取迁移 Windows 验收（✅ 2026-07-25 已完成）
 
 EB-12 已在 macOS 把搜索执行、浏览、候选提取、有界滚动与页面漂移诊断五条链路的
 集成测试启动来源迁移到 staged 内置 Chromium（6/6，页面对象与失败矩阵零改动）。
 Windows 侧待补：同五套测试在 Windows staged 内置 Chromium 上重跑。真实抖音平台
 最终状态另标 🔍 待真实账号。通过后更新 `docs/development/EB-12.md` 遗留项。
 
-### 13. EB-13 评论链路迁移 Windows 待补
+### 13. EB-13 评论链路迁移 Windows 验收（✅ 2026-07-25 已完成）
 
 EB-13 已在 macOS 把评论页与评论动作集成测试启动来源迁移到 staged 内置 Chromium
 （3/3，ActionGate/哈希/单次发送/结果不确定矩阵零改动）。Windows 侧待补：同两套
 测试在 Windows staged 内置 Chromium 上重跑。真实抖音评论最终状态另标
 🔍 待真实账号。通过后更新 `docs/development/EB-13.md` 遗留项。
 
-### 14. EB-14 私信与恢复链路迁移 Windows 待补
+### 14. EB-14 私信与恢复链路迁移 Windows 验收（✅ 2026-07-25 已完成）
 
 EB-14 已在 macOS 把私信页、私信动作与 side-effect 恢复集成测试启动来源迁移到
 staged 内置 Chromium（4/4，目标校验/频控/单次发送/暂停-取消-紧停/崩溃-重启恢复
@@ -377,6 +377,18 @@ Windows 隐藏测试 App 上重跑，重点确认 antd 中文 locale 生效、�
 `workbench-control`、`workbench-metrics`、`executor-crash-recovery`、`task-run`、
 `model-service` 真实 App 用例需在具备真实 Control Plane/PostgreSQL 的环境重跑。
 通过后更新 `docs/development/CQ-01.md` 遗留项并评估 `🔍 待验收` 闭合。
+
+**2026-07-25 Windows 验收结果（Mac 经 SSH 远程发起，Windows 真机执行）**：在
+`F:\automation-tool`（HEAD `64788fa`）用 Windows staged 内置 Chromium
+（`.local\eb-04-windows\chrome-win64.zip`）真机运行：EB-11 `5 passed`；
+EB-12/13/14 十个集成文件合计 `13 passed`，两次 `EXIT_CODE=0`。
+
+首轮真机运行暴露的唯一障碍是测试侧的平台语义问题：19 处
+`os.stat().st_mode & 0o777 == 0o700` 与 `mkdir(mode=0o700)` 在 Windows 上
+不成立（mode 参数被忽略、`st_mode` 恒为 `0o777`）。已抽出
+`tests/integration/conftest.py` 的跨平台 helper 修复（提交 `64788fa`）；生产
+Profile 的 Windows 私有性由 `browser_profiles_windows.rs` 的受保护 DACL 保证，
+EB-09 已单独验收，不受影响。各任务的真实抖音账号验收仍为 `🔍 待真实账号`。
 
 ## 注意
 
