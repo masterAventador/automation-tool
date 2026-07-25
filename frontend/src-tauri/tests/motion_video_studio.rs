@@ -143,3 +143,71 @@ fn artifact_import_removes_the_working_copy_and_user_delete_removes_the_only_vid
     assert!(store.list_artifacts().unwrap().is_empty());
     assert!(!working_video.exists());
 }
+
+#[test]
+fn bm16_all_twelve_locked_styles_freeze_seekable_compositions() {
+    let contract: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../contracts/video/motion-style-freeze.v1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let presets: Vec<String> = contract["presets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|preset| preset["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(presets.len(), 12, "locked style contract must expose 12 presets");
+
+    let export = std::env::var_os("AUTOMATION_TOOL_BM16_STYLE_SWEEP_DIR").map(PathBuf::from);
+    if let Some(directory) = &export {
+        fs::create_dir_all(directory).unwrap();
+    }
+
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    for preset in &presets {
+        let request = MotionVideoDraftRequest::manual_template(
+            format!("风格验收 {preset}"),
+            preset.clone(),
+            "#1234ab".to_owned(),
+            "#f2eadb".to_owned(),
+            vec![
+                MotionVideoBeatDraft::new(
+                    "增长看得见".to_owned(),
+                    "字幕：本周销售增长 38%".to_owned(),
+                ),
+                MotionVideoBeatDraft::new(
+                    "来自续费".to_owned(),
+                    "字幕：客户持续选择我们".to_owned(),
+                ),
+                MotionVideoBeatDraft::new(
+                    "下一步行动".to_owned(),
+                    "字幕：立即查看新版能力".to_owned(),
+                ),
+            ],
+            None,
+        )
+        .unwrap_or_else(|error| panic!("style {preset} rejected a valid draft: {error:?}"));
+        let prepared = prepare_manual_render_job(&store, &request)
+            .unwrap_or_else(|error| panic!("style {preset} failed to freeze: {error:?}"));
+        let workspace = store.open(prepared.render_job_id()).unwrap();
+        let assets = store.worker_asset_directory(&workspace).unwrap();
+        let html = fs::read_to_string(assets.join("composition.html")).unwrap();
+        assert!(html.contains("window.__timelines"), "style {preset} lost the timeline");
+        assert!(html.contains("data-duration=\"3\""), "style {preset} lost the duration");
+        assert!(!html.contains("http://") && !html.contains("https://"),
+            "style {preset} leaked a remote reference");
+        let freeze = fs::read_to_string(assets.join("style-freeze.json")).unwrap();
+        assert!(
+            freeze.contains(&format!("\"stylePresetId\":\"{preset}\"")),
+            "style {preset} freeze metadata drifted"
+        );
+        if let Some(directory) = &export {
+            fs::write(directory.join(format!("{preset}.html")), &html).unwrap();
+        }
+    }
+}
