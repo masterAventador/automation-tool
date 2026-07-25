@@ -337,6 +337,13 @@ EB-12 已在 macOS 把搜索执行、浏览、候选提取、有界滚动与页�
 Windows 侧待补：同五套测试在 Windows staged 内置 Chromium 上重跑。真实抖音平台
 最终状态另标 🔍 待真实账号。通过后更新 `docs/development/EB-12.md` 遗留项。
 
+### 13. EB-13 评论链路迁移 Windows 待补
+
+EB-13 已在 macOS 把评论页与评论动作集成测试启动来源迁移到 staged 内置 Chromium
+（3/3，ActionGate/哈希/单次发送/结果不确定矩阵零改动）。Windows 侧待补：同两套
+测试在 Windows staged 内置 Chromium 上重跑。真实抖音评论最终状态另标
+🔍 待真实账号。通过后更新 `docs/development/EB-13.md` 遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；
