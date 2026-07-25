@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import os
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
-
-import pytest
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.ledger import ExecutorLedger
@@ -30,7 +27,6 @@ from automation_tool.protocol import (
     action_authorization_idempotency_key,
 )
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures"
 COMMENT_FIXTURE = FIXTURE_ROOT / "douyin_comment_pages" / "comment-action.html"
 MESSAGE_FIXTURE = FIXTURE_ROOT / "douyin_direct_message_pages" / "message-action.html"
@@ -92,10 +88,8 @@ def seed_dispatched(
 
 
 def test_production_recovery_reads_both_final_facts_without_dispatching(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("A7-13 system Chrome fake-page acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-a7-13-profile"
     profile.mkdir(mode=0o700)
     opened = ExecutorLedger(
@@ -123,7 +117,7 @@ def test_production_recovery_reads_both_final_facts_without_dispatching(
 
     with runtime.running(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )

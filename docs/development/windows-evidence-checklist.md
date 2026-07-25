@@ -344,6 +344,14 @@ EB-13 已在 macOS 把评论页与评论动作集成测试启动来源迁移到 
 测试在 Windows staged 内置 Chromium 上重跑。真实抖音评论最终状态另标
 🔍 待真实账号。通过后更新 `docs/development/EB-13.md` 遗留项。
 
+### 14. EB-14 私信与恢复链路迁移 Windows 待补
+
+EB-14 已在 macOS 把私信页、私信动作与 side-effect 恢复集成测试启动来源迁移到
+staged 内置 Chromium（4/4，目标校验/频控/单次发送/暂停-取消-紧停/崩溃-重启恢复
+矩阵零改动）。Windows 侧待补：同三套测试在 Windows staged 内置 Chromium 上重跑。
+真实抖音私信最终状态另标 🔍 待真实账号。通过后更新 `docs/development/EB-14.md`
+遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；

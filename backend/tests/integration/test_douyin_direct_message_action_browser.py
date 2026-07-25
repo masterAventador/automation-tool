@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import os
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from automation_tool.executor.action_authorization import (
@@ -40,7 +38,6 @@ from automation_tool.protocol import (
     encode_action_authorization_token,
 )
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE = (
     Path(__file__).resolve().parents[1]
     / "fixtures"
@@ -98,10 +95,8 @@ def authorization() -> tuple[str, ActionAuthorizationExpectation]:
 
 
 def test_production_direct_message_action_enters_and_dispatches_once_headlessly(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("A7-12 system Chrome fake-page acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-a7-12-profile"
     profile.mkdir(mode=0o700)
     clock = Clock()
@@ -134,7 +129,7 @@ def test_production_direct_message_action_enters_and_dispatches_once_headlessly(
 
     with runtime.running(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )
