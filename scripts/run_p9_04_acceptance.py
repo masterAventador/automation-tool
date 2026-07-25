@@ -367,11 +367,18 @@ def parse_windows_registry_path(value: Any) -> Path:
     return path
 
 
-def install_root() -> Path:
+def install_root(*, product_name: str = PRODUCT_NAME) -> Path:
+    """Where a `currentUser` NSIS package for `product_name` installs itself.
+
+    The product name is a parameter so the EB-16 Windows release acceptance can
+    reuse this and `windows_registry_installations` for the real product
+    instead of keeping a second copy of the same registry walk. The default
+    keeps every P9-04 call site unchanged.
+    """
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         raise RuntimeError("P9-04 Windows local AppData is unavailable")
-    root = Path(local_app_data) / PRODUCT_NAME
+    root = Path(local_app_data) / product_name
     if normalized_windows_path(root.parent) != normalized_windows_path(
         Path(local_app_data)
     ):
@@ -380,13 +387,13 @@ def install_root() -> Path:
 
 
 def windows_registry_installations(
-    *, machine_wide: bool
+    *, machine_wide: bool, product_name: str = PRODUCT_NAME
 ) -> list[WindowsRegistryInstallation]:
     winreg: Any = importlib.import_module("winreg")
 
     hive = winreg.HKEY_LOCAL_MACHINE if machine_wide else winreg.HKEY_CURRENT_USER
     parent_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
-    expected_root = install_root()
+    expected_root = install_root(product_name=product_name)
     expected_uninstaller = expected_root / "uninstall.exe"
     records: list[WindowsRegistryInstallation] = []
     seen: set[tuple[str, str, str]] = set()
@@ -416,7 +423,7 @@ def windows_registry_installations(
                             )
                         except OSError:
                             continue
-                        if display_name != PRODUCT_NAME:
+                        if display_name != product_name:
                             continue
                         try:
                             display_version = str(

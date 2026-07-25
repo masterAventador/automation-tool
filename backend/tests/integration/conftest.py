@@ -187,6 +187,12 @@ def staged_embedded_chromium(tmp_path_factory: pytest.TempPathFactory) -> Path:
     Tests depending on this fixture never fall back to a system browser; a
     missing archive cache skips instead of downloading anything.
     """
+    # PB-08 让同一套集成测试跑在**正式安装包内**的 Chromium 上，而不是构建期暂存
+    # 目录。路径由 PB-08 的验收脚本从包的发行物 Manifest 解析并校验落在包内，
+    # 这里只负责用它——测试本身不该知道包长什么样。
+    packaged = os.environ.get("AUTOMATION_TOOL_PACKAGED_BROWSER_EXECUTABLE")
+    if packaged:
+        return Path(packaged).resolve(strict=True)
     target_id = current_target_id()
     archive = DEFAULT_ARCHIVES.get(target_id)
     if archive is None or not archive.is_file():
