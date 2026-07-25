@@ -14,7 +14,9 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workers/material_montage"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import build_material_video_worker_candidate as build_candidate_module  # noqa: E402
 import worker_main  # noqa: E402
 from job_observation_bridge import (  # noqa: E402
     CANCEL_FILE,
@@ -144,6 +146,46 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
     def test_dependency_probe_rejects_non_startup_dependency(self) -> None:
         with self.assertRaisesRegex(ValueError, "not part of the startup set"):
             worker_main.dependency_probe("litellm")
+
+
+class MaterialVideoWorkerExcludedModulesTest(unittest.TestCase):
+    """The frozen candidate must not carry modules no product path can reach."""
+
+    def test_contract_declares_the_excluded_modules(self) -> None:
+        contract = build_candidate_module.load_contract()
+        excluded = build_candidate_module.excluded_modules(contract)
+        self.assertIn("pyarrow", excluded)
+        self.assertIn("tkinter", excluded)
+        for required in ("pandas", "streamlit", "moviepy", "faster_whisper"):
+            self.assertNotIn(required, excluded)
+
+    def test_spec_reads_the_excluded_modules_from_the_contract(self) -> None:
+        spec = (ROOT / "workers/material_montage/material-video-worker.spec").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("excludedModules", spec)
+        self.assertIn("excludes=excluded_modules", spec)
+        self.assertNotIn("excludes=[]", spec)
+
+    def test_candidate_carrying_an_excluded_module_is_rejected(self) -> None:
+        contract = build_candidate_module.load_contract()
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "candidate"
+            (candidate / "_internal/pyarrow").mkdir(parents=True)
+            (candidate / "_internal/pyarrow/__init__.py").write_bytes(b"")
+            with self.assertRaisesRegex(
+                build_candidate_module.MaterialVideoWorkerPackageError, "pyarrow"
+            ):
+                build_candidate_module.assert_excluded_modules_absent(
+                    candidate, contract
+                )
+
+    def test_candidate_without_excluded_modules_is_accepted(self) -> None:
+        contract = build_candidate_module.load_contract()
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "candidate"
+            (candidate / "_internal/pandas").mkdir(parents=True)
+            build_candidate_module.assert_excluded_modules_absent(candidate, contract)
 
 
 if __name__ == "__main__":

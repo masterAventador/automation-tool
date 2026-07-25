@@ -685,6 +685,24 @@ body {
   border-top: 0;
 }
 
+/* The licence itself, verbatim. Long lines wrap rather than scroll sideways,
+   and the block is tall enough to read in but capped so the page stays usable
+   with a 35 KB licence open. */
+.legal-notice-license-text {
+  max-height: 420px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #2b3444;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f7f9fc;
+  border: 1px solid #e7ebf2;
+  border-radius: 6px;
+}
+
 /* A licence obligation, not a destination: present, findable, and quiet. */
 .settings-legal-entry {
   width: 100%;
