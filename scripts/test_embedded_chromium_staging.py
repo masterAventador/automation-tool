@@ -44,7 +44,13 @@ def _write_zip(path: Path, entries: dict[str, bytes | tuple[str, str]]) -> str:
                 archive.writestr(info, payload[1])
             else:
                 info = zipfile.ZipInfo(name)
-                executable = name.endswith(("/Chromium", "Google Chrome for Testing"))
+                # Mirror the real locked archives: the browser executable
+                # carries the unix executable bit and nothing else does. The
+                # Windows archive is no exception — its `chrome.exe` ships as
+                # 0o100777 while `chrome.dll` ships as 0o100666.
+                executable = name.endswith(
+                    ("/Chromium", "Google Chrome for Testing", ".exe")
+                )
                 info.external_attr = (0o755 if executable else 0o644) << 16
                 archive.writestr(info, payload)
     return sha256_file(path)
