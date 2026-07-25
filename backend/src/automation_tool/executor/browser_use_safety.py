@@ -41,8 +41,9 @@ _REDACTIONS: Final = (
     # Local filesystem paths.
     (re.compile(r"/Users/[^\s'\"]+"), "[redacted-path]"),
     (re.compile(r"/home/[^\s'\"]+"), "[redacted-path]"),
+    # `\\\\?` covers both `C:\\Users\\…` and the doubled form that survives one
+    # round of JSON/log escaping; a separate single-backslash rule was redundant.
     (re.compile(r"[A-Za-z]:\\\\?Users\\\\?[^\s'\"]+"), "[redacted-path]"),
-    (re.compile(r"[A-Za-z]:\\Users\\[^\s'\"]+"), "[redacted-path]"),
 )
 
 
