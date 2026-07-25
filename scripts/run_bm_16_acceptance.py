@@ -184,7 +184,10 @@ def run_item_render_sweep(
     manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
     workspace = _writable_release_copy(release, run_root / "item-sweep")
     shared = sorted(
-        str(path.relative_to(workspace))
+        # The sandbox contract is POSIX-relative and rejects backslashes, so a
+        # native `str()` here makes every Windows sweep fail closed with
+        # `render_sandbox_invalid` before a single item renders.
+        path.relative_to(workspace).as_posix()
         for path in (workspace / "offline-deps").rglob("*")
         if path.is_file()
     )
