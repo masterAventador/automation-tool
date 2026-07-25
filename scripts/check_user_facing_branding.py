@@ -42,6 +42,10 @@ ATTRIBUTE_COPY = re.compile(
     r"(?:\"([^\"]*)\"|'([^']*)'|\{`([^`]*)`\}|\{\"([^\"]*)\"\})"
 )
 INTERPOLATION = re.compile(r"\$\{[^{}]*\}")
+# Rust `format!` and Python f-string placeholders. JSON braces are deliberately
+# left alone: `{"subject":"新品介绍"}` is copy, not a placeholder.
+NATIVE_INTERPOLATION = re.compile(r"\{[0-9A-Za-z_.\[\]]*(?::[^{}\"]*)?\}")
+RAW_STRING_OPENER = re.compile(r"b?r(#*)\"")
 QUOTED = re.compile(r"\"((?:[^\"\\\n]|\\.)*)\"|'((?:[^'\\\n]|\\.)*)'")
 EXPLANATION_SCOPES = {"segment", "file"}
 REGEX_PRECEDING = set("(,=:[!&|?{};+-*%~^\n\t ")
@@ -169,6 +173,105 @@ def script_literals(text: str) -> list[str]:
             previous_significant = character
         index += 1
     return literals
+
+
+def native_literals(suffix: str, text: str) -> list[str]:
+    """Return the string literal contents of a Rust or Python source.
+
+    Comments are skipped on purpose. An upstream project name is allowed in
+    code, internal notes and diagnostics — it is forbidden only where a user
+    can read it — so scanning a whole native file would fail on legitimate
+    constants such as the worker's environment variable names.
+    """
+    literals: list[str] = []
+    index = 0
+    length = len(text)
+    rust = suffix == ".rs"
+    line_comment = "//" if rust else "#"
+    while index < length:
+        character = text[index]
+        if text.startswith(line_comment, index):
+            index = text.find("\n", index)
+            if index == -1:
+                break
+            continue
+        if rust and text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = length if end == -1 else end + 2
+            continue
+        if rust and character in "br":
+            opener = RAW_STRING_OPENER.match(text, index)
+            if opener is not None:
+                terminator = '"' + opener.group(1)
+                start = opener.end()
+                end = text.find(terminator, start)
+                end = length if end == -1 else end
+                literals.append(text[start:end])
+                index = end + len(terminator)
+                continue
+        # Rust reserves `'` for lifetimes and char literals, neither of which
+        # can carry copy; Python uses it for ordinary strings.
+        if character == '"' or (not rust and character == "'"):
+            if not rust and text.startswith(character * 3, index):
+                start = index + 3
+                end = text.find(character * 3, start)
+                end = length if end == -1 else end
+                literals.append(text[start:end])
+                index = end + 3
+                continue
+            index += 1
+            start = index
+            while index < length:
+                current = text[index]
+                if current == "\\":
+                    index += 2
+                    continue
+                if current == character:
+                    break
+                # A Rust string may span lines; a Python single-quoted one may
+                # not, so a stray quote cannot swallow the rest of the file.
+                if current == "\n" and not rust:
+                    break
+                index += 1
+            literals.append(text[start:index])
+            index += 1
+            continue
+        index += 1
+    return literals
+
+
+def native_user_copy(suffix: str, text: str) -> list[str]:
+    """Return the fragments of a Rust or Python source a user can read.
+
+    A literal carrying Chinese is either operator copy or the platform text a
+    page object matches; identifiers, paths and protocol values in these two
+    languages are ASCII. That is what makes the distinction mechanical rather
+    than a judgement call about which module is "user-facing".
+    """
+    segments: list[str] = []
+    for literal in native_literals(suffix, text):
+        cleaned = NATIVE_INTERPOLATION.sub(" ", literal)
+        if CHINESE.search(cleaned):
+            segments.append(cleaned)
+    return segments
+
+
+def artifact_name_literals(text: str, extensions: list[str]) -> list[str]:
+    """Return the file names this source can put on a user's disk.
+
+    An artifact or export name carries no Chinese, so the copy rule above
+    cannot see it. A file name also cannot carry a Chinese explanation, so the
+    only rule it can break is the upstream-name one, and that is all that is
+    checked here.
+    """
+    names: list[str] = []
+    for extension in extensions:
+        pattern = re.compile(
+            rf"[0-9A-Za-z_\-{{}}.]+{re.escape(extension)}(?![0-9A-Za-z])",
+            flags=re.IGNORECASE,
+        )
+        names.extend(match.group(0) for match in pattern.finditer(text))
+    return names
 
 
 def attribute_copy(text: str) -> list[str]:
@@ -341,6 +444,21 @@ def scan_forbidden_terms(relative: str, text: str, terms: list[str]) -> list[str
     return violations
 
 
+def scan_forbidden_segments(
+    relative: str, segments: list[str], terms: list[str], surface: str
+) -> list[str]:
+    """Report forbidden terms inside already-extracted user-visible fragments."""
+    violations: list[str] = []
+    for segment in segments:
+        for term in terms:
+            if term_occurs(segment, term):
+                violations.append(
+                    f"{relative}: forbidden term {term!r} in {surface}: "
+                    f"{segment.strip()[:60]!r}"
+                )
+    return violations
+
+
 def scan_industry_terms(
     relative: str,
     segments: list[str],
@@ -433,6 +551,52 @@ def scan_parts_projection(root: Path, projection_path: str) -> list[str]:
     return violations
 
 
+def scan_policy(contract: dict[str, object], key: str) -> dict[str, object]:
+    """Return a validated scan policy block."""
+    policy = contract.get(key)
+    if not isinstance(policy, dict):
+        fail(f"{key} policy is missing")
+    for field in ("roots", "excludedGlobs", "textExtensions"):
+        value = policy.get(field)  # type: ignore[union-attr]
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            fail(f"{key}.{field} must be a string list")
+    maximum = policy.get("maximumFileBytes")  # type: ignore[union-attr]
+    if not isinstance(maximum, int) or maximum < 1:
+        fail(f"{key}.maximumFileBytes must be a positive integer")
+    return policy  # type: ignore[return-value]
+
+
+def read_scan_sources(
+    root: Path, policy: dict[str, object], legal_paths: list[str]
+) -> tuple[list[tuple[Path, str, str]], list[str]]:
+    """Return the readable sources a policy covers, plus any read failures."""
+    extensions = list(policy["textExtensions"])  # type: ignore[arg-type]
+    maximum_bytes = int(policy["maximumFileBytes"])  # type: ignore[arg-type]
+    sources: list[tuple[Path, str, str]] = []
+    violations: list[str] = []
+    for path in collect_files(
+        root,
+        list(policy["roots"]),  # type: ignore[arg-type]
+        list(policy["excludedGlobs"]),  # type: ignore[arg-type]
+    ):
+        relative = path.relative_to(root).as_posix()
+        if matches_glob(relative, legal_paths) or path.suffix.casefold() not in extensions:
+            continue
+        if path.stat().st_size > maximum_bytes:
+            violations.append(f"{relative}: file exceeds {maximum_bytes} bytes")
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            violations.append(f"{relative}: user-facing source is not UTF-8")
+            continue
+        except OSError as error:
+            violations.append(f"{relative}: cannot read user-facing source: {error}")
+            continue
+        sources.append((path, relative, text))
+    return sources, violations
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
@@ -450,57 +614,49 @@ def main() -> None:
     industry = list(contract["unexplainedIndustryTerms"])  # type: ignore[arg-type]
     distinctions = list(contract["conceptDistinctions"])  # type: ignore[arg-type]
     mappings = dict(contract["plainLanguageMappings"])  # type: ignore[arg-type]
-    scan = contract["staticScan"]
-    roots = scan.get("roots")  # type: ignore[union-attr]
-    excluded = scan.get("excludedGlobs")  # type: ignore[union-attr]
-    extensions = scan.get("textExtensions")  # type: ignore[union-attr]
-    maximum_bytes = scan.get("maximumFileBytes")  # type: ignore[union-attr]
+    static = scan_policy(contract, "staticScan")
+    native = scan_policy(contract, "nativeScan")
+    artifact_extensions = native.get("artifactFileExtensions")
+    if not isinstance(artifact_extensions, list) or not all(
+        isinstance(item, str) and item.startswith(".") for item in artifact_extensions
+    ):
+        fail("nativeScan.artifactFileExtensions must be a list of file extensions")
     legal_paths = contract.get("allowedLegalDisclosurePaths")
-    if not isinstance(roots, list) or not all(isinstance(item, str) for item in roots):
-        fail("staticScan.roots must be a string list")
-    if not isinstance(excluded, list) or not all(
-        isinstance(item, str) for item in excluded
-    ):
-        fail("staticScan.excludedGlobs must be a string list")
-    if not isinstance(extensions, list) or not all(
-        isinstance(item, str) for item in extensions
-    ):
-        fail("staticScan.textExtensions must be a string list")
-    if not isinstance(maximum_bytes, int) or maximum_bytes < 1:
-        fail("staticScan.maximumFileBytes must be a positive integer")
     if not isinstance(legal_paths, list) or not all(
         isinstance(item, str) for item in legal_paths
     ):
         fail("allowedLegalDisclosurePaths must be a string list")
 
-    violations: list[str] = []
-    scanned = 0
-    for path in collect_files(root, roots, excluded):
-        relative = path.relative_to(root).as_posix()
-        if matches_glob(relative, legal_paths) or path.suffix.casefold() not in extensions:
-            continue
-        size = path.stat().st_size
-        if size > maximum_bytes:
-            violations.append(f"{relative}: file exceeds {maximum_bytes} bytes")
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            violations.append(f"{relative}: user-facing source is not UTF-8")
-            continue
-        except OSError as error:
-            violations.append(f"{relative}: cannot read user-facing source: {error}")
-            continue
-        scanned += 1
+    # The shipped frontend must not name an upstream project anywhere, so the
+    # whole file is scanned there.
+    static_sources, violations = read_scan_sources(root, static, legal_paths)
+    for path, relative, text in static_sources:
         violations.extend(scan_forbidden_terms(relative, text, terms))
         segments = user_copy_segments(path.suffix.casefold(), text)
         violations.extend(scan_industry_terms(relative, segments, industry, mappings))
+
+    # Rust and Python legitimately name the upstream projects in constants and
+    # paths, so only what a user can read is scanned: the copy, and the file
+    # names this code puts on their disk.
+    native_sources, native_violations = read_scan_sources(root, native, legal_paths)
+    violations.extend(native_violations)
+    for path, relative, text in native_sources:
+        segments = native_user_copy(path.suffix.casefold(), text)
+        violations.extend(scan_forbidden_segments(relative, segments, terms, "user copy"))
+        violations.extend(scan_industry_terms(relative, segments, industry, mappings))
+        names = artifact_name_literals(text, artifact_extensions)
+        violations.extend(
+            scan_forbidden_segments(relative, names, terms, "artifact or export name")
+        )
 
     violations.extend(scan_concept_distinctions(root, distinctions, contract))
     violations.extend(scan_parts_projection(root, str(contract["partsCatalogProjection"])))
     if violations:
         fail("\n" + "\n".join(sorted(set(violations))))
-    print(f"user-facing branding and plain-language scan passed ({scanned} files)")
+    print(
+        "user-facing branding and plain-language scan passed "
+        f"({len(static_sources)} frontend, {len(native_sources)} native files)"
+    )
 
 
 def run_self_test() -> None:
@@ -579,6 +735,56 @@ def run_self_test() -> None:
     )
     if not any(industry_term_occurs(segment, "API Key") for segment in attributes):
         fail(f"self-test skipped accessibility name copy: {attributes}")
+
+    # Rust produces user copy of its own: window titles, the style names and
+    # error wording. Internal constants and comments in the same file may name
+    # the upstream projects, so only the copy is scanned, never the whole file.
+    rust_source = (
+        "//! 上游项目 MoneyPrinterTurbo 只出现在内部说明里\n"
+        'const FFMPEG: &str = "HYPERFRAMES_FFMPEG_PATH";\n'
+        'let window = builder.title("智能素材成片");\n'
+        'let notice = "等待 Executor 确认";\n'
+        'let raw = r#"{"subject":"新品介绍"}"#;\n'
+    )
+    rust_copy = native_user_copy(".rs", rust_source)
+    if "智能素材成片" not in rust_copy:
+        fail(f"self-test lost the Rust window title: {rust_copy}")
+    if not any("新品介绍" in segment for segment in rust_copy):
+        fail(f"self-test lost a Rust raw string literal: {rust_copy}")
+    if not any(industry_term_occurs(segment, "Executor") for segment in rust_copy):
+        fail(f"self-test lost Rust user copy: {rust_copy}")
+    if any("HYPERFRAMES" in segment or "MoneyPrinter" in segment for segment in rust_copy):
+        fail(f"self-test treated internal Rust code as user copy: {rust_copy}")
+
+    # Python produces the approval prompt the operator reads before a real
+    # action, and its selectors quote the platform's own Chinese text.
+    python_source = (
+        '# 内部注释可以写 MoneyPrinterTurbo\n'
+        'VENDOR = "vendor/moneyprinterturbo"\n'
+        'prompt = f"即将执行 {action}，目标账号 {target}"\n'  # noqa: RUF001
+        'notice = "等待 Executor 确认"\n'
+    )
+    python_copy = native_user_copy(".py", python_source)
+    if not any("即将执行" in segment for segment in python_copy):
+        fail(f"self-test lost the Python approval prompt: {python_copy}")
+    if not any(industry_term_occurs(segment, "Executor") for segment in python_copy):
+        fail(f"self-test lost Python user copy: {python_copy}")
+    if any("moneyprinterturbo" in segment for segment in python_copy):
+        fail(f"self-test treated an internal Python path as user copy: {python_copy}")
+
+    # An artifact or export name reaches the user as a file on their disk, and
+    # it carries no Chinese, so it is scanned as a name rather than as copy.
+    names = artifact_name_literals(
+        'const OUT: &str = "brand-motion-result.mp4";\n'
+        'let export = format!("automation-tool-diagnostics-{id}.zip");\n'
+        'let leak = "broll-01.mp4";\n',
+        [".mp4", ".zip"],
+    )
+    if "brand-motion-result.mp4" not in names or "broll-01.mp4" not in names:
+        fail(f"self-test lost an artifact file name: {names}")
+    leaked = [name for name in names if term_occurs(name, "broll")]
+    if leaked != ["broll-01.mp4"]:
+        fail(f"self-test did not catch an upstream artifact name: {names}")
     print("user-facing branding scanner self-test passed")
 
 

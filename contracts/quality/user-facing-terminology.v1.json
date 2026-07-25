@@ -227,6 +227,22 @@
     ],
     "maximumFileBytes": 1048576
   },
+  "nativeScan": {
+    "roots": ["frontend/src-tauri/src", "backend/src"],
+    "excludedGlobs": ["**/__pycache__/**"],
+    "textExtensions": [".py", ".rs"],
+    "artifactFileExtensions": [
+      ".csv",
+      ".mov",
+      ".mp3",
+      ".mp4",
+      ".srt",
+      ".vtt",
+      ".wav",
+      ".zip"
+    ],
+    "maximumFileBytes": 1048576
+  },
   "rules": [
     "internal_provider_ids_never_become_display_names",
     "raw_worker_submodule_or_provider_errors_never_reach_users",
