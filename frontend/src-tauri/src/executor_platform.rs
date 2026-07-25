@@ -274,6 +274,17 @@ pub struct ExecutorPlatformService {
     identity: LocalExecutorIdentity,
 }
 
+/// Whether a preflight outcome means the filled page must stay open.
+///
+/// Only a *ready* preflight is waiting for the operator: it holds a filled form
+/// that the approval will act on, so the profile stays leased. Every other
+/// outcome - blocked, handed off, or anything unrecognized - is finished with
+/// the browser, and a lease nobody will ever spend would lock the operations
+/// profile until the App restarts.
+pub fn publish_keeps_the_browser(state: &str) -> bool {
+    state == "publish_pre_submit_ready"
+}
+
 impl ExecutorPlatformService {
     pub fn initialize(app_data_directory: &Path) -> Result<Self, ExecutorPlatformError> {
         let paths = ExecutorPlatformPaths::from_app_data(app_data_directory)?;
@@ -510,6 +521,89 @@ impl ExecutorPlatformService {
         profile: BrowserProfile,
         headless: bool,
     ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        let profile_directory = profile.directory().to_path_buf();
+        // A login that reached `healthy` is finished with the browser; a login
+        // still waiting for a scan is not, and must keep the profile.
+        self.under_profile_lease(
+            profile,
+            |manager| {
+                manager
+                    .execute_platform_command(command, executable_path, profile_directory, headless)
+                    .map_err(map_manager_error)
+            },
+            |state| state == "healthy",
+        )
+    }
+
+    /// Open the publish page and stop before submission.
+    ///
+    /// Unlike a login, a *ready* preflight deliberately keeps the profile:
+    /// the filled page has to still be there when the operator approves.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_publish_command(
+        &self,
+        publish_job_id: String,
+        executable_path: PathBuf,
+        profile: BrowserProfile,
+        headless: bool,
+        artifact_path: PathBuf,
+        title: String,
+        description: String,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        let profile_directory = profile.directory().to_path_buf();
+        self.under_profile_lease(
+            profile,
+            |manager| {
+                manager
+                    .execute_publish_command(
+                        publish_job_id,
+                        executable_path,
+                        profile_directory,
+                        headless,
+                        artifact_path,
+                        title,
+                        description,
+                    )
+                    .map_err(map_manager_error)
+            },
+            |state| !publish_keeps_the_browser(state),
+        )
+    }
+
+    /// Spend one approval on one click; the page is already open and leased.
+    pub fn execute_publish_dispatch_command(
+        &self,
+        publish_job_id: String,
+        confirmation_id: String,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        let result = self
+            .manager
+            .execute_publish_dispatch_command(publish_job_id, confirmation_id)
+            .map_err(map_manager_error);
+        // Whatever the outcome, the click has been spent and the page is done.
+        self.settle_lease(result, |_| true)
+    }
+
+    /// Give the operations browser back without publishing anything.
+    pub fn release_publish_surface(&self) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        let result = self
+            .manager
+            .execute_session_command(LocalPlatformCommand::ReleaseDouyinPublishSurface)
+            .map_err(map_manager_error);
+        self.settle_lease(result, |_| true)
+    }
+
+    /// Run one command while this service owns the operations profile.
+    ///
+    /// A second controller asking for a different profile is refused rather
+    /// than served: there is one visible operations browser, and two owners of
+    /// it is how a publish ends up typed into somebody else's page.
+    fn under_profile_lease(
+        &self,
+        profile: BrowserProfile,
+        run: impl FnOnce(&ExecutorManager) -> Result<LocalPlatformCommandResult, ExecutorPlatformError>,
+        finished: impl FnOnce(&str) -> bool,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
         let profile_id = profile.profile_id().to_owned();
         let profile_directory = profile.directory().to_path_buf();
         let mut lease = self
@@ -518,6 +612,8 @@ impl ExecutorPlatformService {
             .map_err(|_| storage_unavailable())?;
         if let Some(current) = lease.as_ref() {
             if current.profile_id() != profile_id || current.directory() != profile_directory {
+                // Someone else owns the one operations browser. Their lease is
+                // theirs; failing here must not reach into it.
                 return Err(configuration_invalid());
             }
         } else {
@@ -527,15 +623,36 @@ impl ExecutorPlatformService {
                     .map_err(map_profile_error)?,
             );
         }
-        let result = self
-            .manager
-            .execute_platform_command(command, executable_path, profile_directory, headless)
-            .map_err(map_manager_error);
-        let release = result.is_err()
-            || result
-                .as_ref()
-                .is_ok_and(|value| value.state() == "healthy");
+        let result = run(&self.manager);
+        let release = match result.as_ref() {
+            Err(_) => true,
+            Ok(value) => finished(value.state()),
+        };
         if release {
+            let held = lease.take();
+            drop(lease);
+            if let Some(held) = held {
+                held.release().map_err(map_profile_error)?;
+            }
+        }
+        result
+    }
+
+    /// Release the held profile when this outcome means the browser is done.
+    fn settle_lease(
+        &self,
+        result: Result<LocalPlatformCommandResult, ExecutorPlatformError>,
+        finished: impl FnOnce(&str) -> bool,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+        let release = match result.as_ref() {
+            Err(_) => true,
+            Ok(value) => finished(value.state()),
+        };
+        if release {
+            let mut lease = self
+                .platform_profile_lease
+                .lock()
+                .map_err(|_| storage_unavailable())?;
             let held = lease.take();
             drop(lease);
             if let Some(held) = held {

@@ -192,3 +192,29 @@ fn task_emergency_stop_intent_is_private_idempotent_and_survives_app_restart() {
         0o600,
     );
 }
+
+/// PB-07: which preflight outcomes keep the operations profile leased.
+///
+/// The plumbing around this needs a real executor process and is covered by
+/// the desktop E2E, but the decision itself is assertable here, and getting it
+/// wrong either loses the filled page or locks the profile until restart.
+#[test]
+fn only_a_pre_submit_ready_publish_keeps_the_operations_browser() {
+    use automation_tool_desktop_lib::executor_platform::publish_keeps_the_browser;
+
+    assert!(publish_keeps_the_browser("publish_pre_submit_ready"));
+    for finished in [
+        "publish_handoff_required",
+        "publish_blocked",
+        "publish_verified",
+        "publish_outcome_uncertain",
+        "publish_not_dispatched",
+        "healthy",
+        "",
+    ] {
+        assert!(
+            !publish_keeps_the_browser(finished),
+            "{finished} must not hold the operations profile"
+        );
+    }
+}
