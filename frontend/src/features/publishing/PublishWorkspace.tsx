@@ -1,0 +1,214 @@
+import { Alert, Button, Card, Descriptions, Flex, Space, Spin, Tag, Typography } from "antd";
+import { useCallback, useEffect, useState } from "react";
+
+import {
+  AWAITING_CONFIGURATION_HINT,
+  OUTCOME_UNCERTAIN_HINT,
+  publishAvailabilityLabel,
+  publishOutcomeLabel,
+  publishPlatformLabel,
+  publishStageLabel,
+  type PublishPlatform,
+  type PublishPlatformState,
+  type PublishWorkspaceGateway,
+  type PublishWorkspaceSnapshot,
+} from "./publish-workspace-gateway";
+
+const AVAILABILITY_COLORS: Record<PublishPlatformState["availability"], string> = {
+  ready: "green",
+  awaiting_configuration: "default",
+  awaiting_sign_in: "orange",
+  unavailable: "red",
+};
+
+const OUTCOME_TONES: Record<
+  NonNullable<PublishWorkspaceSnapshot["outcome"]>,
+  "success" | "warning" | "info"
+> = {
+  published: "success",
+  outcome_uncertain: "warning",
+  not_published: "info",
+  handed_off: "warning",
+  cancelled: "info",
+};
+
+interface PublishWorkspaceProps {
+  readonly gateway: PublishWorkspaceGateway;
+}
+
+/**
+ * PB-07: the one page both publishing platforms are operated from.
+ *
+ * Nothing here knows how a platform is reached, and nothing here decides that
+ * a publish may happen: the critical point renders exactly what the executor
+ * presented and spends exactly the approval it issued.
+ */
+export function PublishWorkspace({ gateway }: PublishWorkspaceProps) {
+  const [snapshot, setSnapshot] = useState<PublishWorkspaceSnapshot | null>(null);
+  const [unreadable, setUnreadable] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [reloads, setReloads] = useState(0);
+
+  /** Run one operator-initiated action and adopt whatever the bridge answers. */
+  const run = useCallback(async (read: () => Promise<PublishWorkspaceSnapshot>) => {
+    setBusy(true);
+    try {
+      setSnapshot(await read());
+      setUnreadable(false);
+    } catch {
+      // One unreadable answer must not strand the operator on a blank page.
+      setUnreadable(true);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // An answer that arrives after this page is gone must not write to it.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const latest = await gateway.getWorkspace();
+        if (!cancelled) {
+          setSnapshot(latest);
+          setUnreadable(false);
+        }
+      } catch {
+        if (!cancelled) setUnreadable(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gateway, reloads]);
+
+  if (unreadable) {
+    return (
+      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Alert
+          type="warning"
+          showIcon
+          message="暂时读不到发布状态"
+          description="请稍后重试；已经提交过的发布不会因为这里读不到而重复提交。"
+        />
+        <Button onClick={() => setReloads((count) => count + 1)}>重试</Button>
+      </Space>
+    );
+  }
+
+  if (snapshot === null) {
+    return <Spin aria-label="正在读取发布状态" />;
+  }
+
+  const approval = snapshot.approval;
+  const outcome = snapshot.outcome;
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <Typography.Title level={4}>作品发布</Typography.Title>
+
+      <Flex gap="middle" wrap>
+        {snapshot.platforms.map((platform) => (
+          <Card key={platform.platform} size="small" style={{ minWidth: 220 }}>
+            <Space direction="vertical" size="small">
+              <Space>
+                <Typography.Text strong>{publishPlatformLabel(platform.platform)}</Typography.Text>
+                <Tag color={AVAILABILITY_COLORS[platform.availability]}>
+                  {publishAvailabilityLabel(platform.availability)}
+                </Tag>
+              </Space>
+              {platform.availability === "awaiting_configuration" ? (
+                <Typography.Text type="secondary">{AWAITING_CONFIGURATION_HINT}</Typography.Text>
+              ) : null}
+              {platform.availability === "ready" && snapshot.stage === "idle" ? (
+                <Button
+                  type="primary"
+                  disabled={busy}
+                  onClick={() => void run(() => gateway.beginPublish(platform.platform))}
+                >
+                  {`发布到${publishPlatformLabel(platform.platform)}`}
+                </Button>
+              ) : null}
+            </Space>
+          </Card>
+        ))}
+      </Flex>
+
+      {snapshot.stage === "idle" ? null : (
+        <Card size="small">
+          <Space direction="vertical" size="small" style={{ width: "100%" }}>
+            <Space>
+              <Typography.Text type="secondary">当前进度</Typography.Text>
+              <Tag>{publishStageLabel(snapshot.stage)}</Tag>
+              {snapshot.target === null ? null : (
+                <Typography.Text type="secondary">
+                  {publishPlatformLabel(snapshot.target as PublishPlatform)}
+                </Typography.Text>
+              )}
+            </Space>
+
+            {approval === null ? null : (
+              <div role="group" aria-label="确认发布内容">
+                <Descriptions size="small" column={1} bordered>
+                  <Descriptions.Item label="发布到账号">
+                    {approval.targetAccount}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="视频">{approval.videoSummary}</Descriptions.Item>
+                  <Descriptions.Item label="标题">{approval.title}</Descriptions.Item>
+                  <Descriptions.Item label="简介">{approval.description}</Descriptions.Item>
+                </Descriptions>
+                <Space style={{ marginTop: 12 }}>
+                  <Button
+                    type="primary"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => gateway.approvePublish(approval.confirmationId))
+                    }
+                  >
+                    确认发布
+                  </Button>
+                  <Button disabled={busy} onClick={() => void run(() => gateway.cancelPublish())}>
+                    取消
+                  </Button>
+                </Space>
+              </div>
+            )}
+
+            {snapshot.stage === "preparing" ? (
+              <Button disabled={busy} onClick={() => void run(() => gateway.cancelPublish())}>
+                取消
+              </Button>
+            ) : null}
+
+            {outcome === null ? null : (
+              <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                <Space>
+                  <Typography.Text type="secondary">结果</Typography.Text>
+                  <Tag>{publishOutcomeLabel(outcome)}</Tag>
+                </Space>
+                {outcome === "outcome_uncertain" ? (
+                  <Alert
+                    type={OUTCOME_TONES[outcome]}
+                    showIcon
+                    message="需要你到该平台核对一次"
+                    description={OUTCOME_UNCERTAIN_HINT}
+                  />
+                ) : null}
+                {snapshot.retryable && snapshot.target !== null ? (
+                  <Button
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => gateway.beginPublish(snapshot.target as PublishPlatform))
+                    }
+                  >
+                    重新发布
+                  </Button>
+                ) : null}
+              </Space>
+            )}
+          </Space>
+        </Card>
+      )}
+    </Space>
+  );
+}
