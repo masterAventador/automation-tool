@@ -22,6 +22,7 @@ function snapshot(overrides: Partial<PublishWorkspaceSnapshot> = {}): PublishWor
     approval: null,
     outcome: null,
     retryable: false,
+    audit: [],
     ...overrides,
   } as PublishWorkspaceSnapshot;
 }

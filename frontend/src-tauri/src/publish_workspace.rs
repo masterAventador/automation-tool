@@ -139,6 +139,21 @@ impl PublishApproval {
     }
 }
 
+/// One recorded step of a publish, in the order it happened.
+///
+/// This is a record of what was decided, not of what was published: the title
+/// and body are content, and copying them into a growing trail only widens
+/// where they live. The confirmation identity is kept because it is what ties
+/// an approval to the click it authorized.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishAuditEntry {
+    pub step: String,
+    pub platform: PublishPlatform,
+    pub confirmation_id: Option<String>,
+    pub outcome: Option<PublishOutcome>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishPlatformState {
@@ -155,6 +170,7 @@ pub struct PublishWorkspaceSnapshot {
     pub approval: Option<PublishApproval>,
     pub outcome: Option<PublishOutcome>,
     pub retryable: bool,
+    pub audit: Vec<PublishAuditEntry>,
 }
 
 impl PublishWorkspaceSnapshot {
@@ -173,6 +189,7 @@ pub struct PublishWorkspace {
     target: Option<PublishPlatform>,
     approval: Option<PublishApproval>,
     outcome: Option<PublishOutcome>,
+    audit: Vec<PublishAuditEntry>,
 }
 
 impl PublishWorkspace {
@@ -184,6 +201,7 @@ impl PublishWorkspace {
             target: None,
             approval: None,
             outcome: None,
+            audit: Vec::new(),
         }
     }
 
@@ -205,6 +223,7 @@ impl PublishWorkspace {
             approval: self.approval.clone(),
             outcome: self.outcome,
             retryable: self.retryable(),
+            audit: self.audit.clone(),
         }
     }
 
@@ -218,10 +237,13 @@ impl PublishWorkspace {
         self.target = Some(platform);
         self.approval = None;
         self.outcome = None;
+        // A new publish appends; it never erases what the last one did.
+        self.record("publish_started", None, None);
         Ok(())
     }
 
     pub fn await_approval(&mut self, approval: PublishApproval) {
+        self.record("approval_presented", Some(approval.confirmation_id.clone()), None);
         self.stage = PublishStage::AwaitingApproval;
         self.approval = Some(approval);
     }
@@ -232,17 +254,20 @@ impl PublishWorkspace {
             .take()
             .ok_or(PublishWorkspaceError::NoApprovalPending)?;
         self.stage = PublishStage::Publishing;
+        self.record("approval_given", Some(approval.confirmation_id.clone()), None);
         Ok(approval)
     }
 
     pub fn begin_verification(&mut self) {
         self.stage = PublishStage::Verifying;
+        self.record("verification_started", None, None);
     }
 
     pub fn settle(&mut self, outcome: PublishOutcome) {
         self.stage = PublishStage::Settled;
         self.approval = None;
         self.outcome = Some(outcome);
+        self.record("settled", None, Some(outcome));
     }
 
     /// Cancel a publish that has not been dispatched yet.
@@ -263,6 +288,24 @@ impl PublishWorkspace {
                 Ok(())
             }
         }
+    }
+
+    /// Append one step. A step with no target is a step that never happened.
+    fn record(
+        &mut self,
+        step: &str,
+        confirmation_id: Option<String>,
+        outcome: Option<PublishOutcome>,
+    ) {
+        let Some(platform) = self.target else {
+            return;
+        };
+        self.audit.push(PublishAuditEntry {
+            step: step.to_owned(),
+            platform,
+            confirmation_id,
+            outcome,
+        });
     }
 
     fn availability(&self, platform: PublishPlatform) -> PublishAvailability {

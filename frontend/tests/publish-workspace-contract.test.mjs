@@ -66,6 +66,18 @@ test("the publish workspace vocabulary has one definition in every language", as
   }
 });
 
+test("every audit step the Rust workspace can record is declared", async () => {
+  const sources = await readSources();
+  const contract = JSON.parse(sources.contract);
+
+  const recorded = [...sources.rust.matchAll(/self\.record\(\s*"([a-z_]+)"/gu)].map(
+    (match) => match[1],
+  );
+  assert.ok(recorded.length > 0, "the Rust workspace records no audit step at all");
+  assert.deepEqual([...new Set(recorded)].sort(), [...contract.auditSteps].sort());
+  assert.deepEqual(zodEnumMembers(sources.gateway, "publishAuditStep"), contract.auditSteps);
+});
+
 test("only the two platforms the capabilities contract enables are publishable", async () => {
   const sources = await readSources();
   const contract = JSON.parse(sources.contract);

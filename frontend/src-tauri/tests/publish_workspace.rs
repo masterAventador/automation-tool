@@ -242,3 +242,91 @@ fn a_listed_platform_reports_a_state_the_app_can_render_without_a_mechanism() {
         assert!(matches!(platform.platform.as_str(), "bilibili" | "douyin"));
     }
 }
+
+// --- PB-07: the audit trail -------------------------------------------------
+
+#[test]
+fn every_step_of_a_publish_is_recorded_in_order() {
+    let mut workspace = PublishWorkspace::new(false);
+    workspace.observe_douyin_signed_in(true);
+
+    workspace.begin("douyin").expect("publishable");
+    workspace.await_approval(ready_approval());
+    workspace.approve().expect("pending");
+    workspace.begin_verification();
+    workspace.settle(PublishOutcome::Published);
+
+    let snapshot = workspace.snapshot();
+    let steps: Vec<&str> = snapshot
+        .audit
+        .iter()
+        .map(|entry| entry.step.as_str())
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            "publish_started",
+            "approval_presented",
+            "approval_given",
+            "verification_started",
+            "settled",
+        ]
+    );
+}
+
+#[test]
+fn the_audit_records_the_decision_and_never_the_content() {
+    let mut workspace = PublishWorkspace::new(false);
+    workspace.observe_douyin_signed_in(true);
+    workspace.begin("douyin").expect("publishable");
+    workspace.await_approval(ready_approval());
+    workspace.approve().expect("pending");
+    workspace.settle(PublishOutcome::Published);
+
+    let projected = serde_json::to_string(&workspace.snapshot().audit).expect("serializable");
+
+    // An audit is a record of what was decided; the video's title and body are
+    // content, and copying them into a growing trail only widens where they live.
+    assert!(!projected.contains("自动化运营工具发布验收标题"));
+    assert!(!projected.contains("自动化运营工具发布验收简介"));
+    assert!(!projected.contains("自动化运营测试账号"));
+    assert!(projected.contains("123e4567-e89b-42d3-a456-426614174007"));
+}
+
+#[test]
+fn a_refused_step_leaves_no_trace_in_the_audit() {
+    let mut workspace = PublishWorkspace::new(false);
+
+    assert!(workspace.begin("bilibili").is_err());
+    assert!(workspace.approve().is_err());
+    assert!(workspace.cancel().is_err());
+
+    assert!(workspace.snapshot().audit.is_empty());
+}
+
+#[test]
+fn a_cancelled_publish_is_recorded_as_cancelled() {
+    let mut workspace = PublishWorkspace::new(false);
+    workspace.observe_douyin_signed_in(true);
+    workspace.begin("douyin").expect("publishable");
+    workspace.await_approval(ready_approval());
+
+    workspace.cancel().expect("in flight");
+
+    let audit = workspace.snapshot().audit;
+    let last = audit.last().expect("a settled step");
+    assert_eq!(last.step, "settled");
+    assert_eq!(last.outcome, Some(PublishOutcome::Cancelled));
+}
+
+#[test]
+fn starting_a_second_publish_keeps_the_first_ones_record() {
+    let mut workspace = PublishWorkspace::new(false);
+    workspace.observe_douyin_signed_in(true);
+    workspace.begin("douyin").expect("publishable");
+    workspace.settle(PublishOutcome::NotPublished);
+
+    workspace.begin("douyin").expect("publishable again");
+
+    assert_eq!(workspace.snapshot().audit.len(), 3);
+}

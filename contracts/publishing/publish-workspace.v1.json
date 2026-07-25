@@ -1,16 +1,45 @@
 {
   "version": "publish-workspace.v1",
   "locale": "zh-CN",
-  "platforms": ["bilibili", "douyin"],
-  "availability": ["ready", "awaiting_configuration", "awaiting_sign_in", "unavailable"],
-  "stages": ["idle", "preparing", "awaiting_approval", "publishing", "verifying", "settled"],
-  "outcomes": ["published", "outcome_uncertain", "not_published", "handed_off", "cancelled"],
+  "platforms": [
+    "bilibili",
+    "douyin"
+  ],
+  "availability": [
+    "ready",
+    "awaiting_configuration",
+    "awaiting_sign_in",
+    "unavailable"
+  ],
+  "stages": [
+    "idle",
+    "preparing",
+    "awaiting_approval",
+    "publishing",
+    "verifying",
+    "settled"
+  ],
+  "outcomes": [
+    "published",
+    "outcome_uncertain",
+    "not_published",
+    "handed_off",
+    "cancelled"
+  ],
+  "auditSteps": [
+    "publish_started",
+    "approval_presented",
+    "approval_given",
+    "verification_started",
+    "settled"
+  ],
   "projectsMechanismToTheApp": false,
   "notes": {
     "mechanism": "Which platform publishes through an official interface and which drives a visible operations browser is an internal fact. It changes what the executor does, never what the App renders, so it is deliberately absent from the projected DTO.",
     "availability": "A platform that has no credentials configured is 'awaiting_configuration' and stays listed. Hiding it, or failing the whole publishing module because one platform is unconfigured, would leave the operator unable to publish to the platform that IS ready.",
     "approval": "'awaiting_approval' is the critical point. The App must show the target account, the video summary and the copy, and must not offer a way to continue that skips them.",
-    "outcomeUncertain": "The publish was already attempted and the result could not be established. It is never retried automatically and never rendered as a failure the operator can simply repeat."
+    "outcomeUncertain": "The publish was already attempted and the result could not be established. It is never retried automatically and never rendered as a failure the operator can simply repeat.",
+    "audit": "The trail records what was decided, not what was published. Title and body are content; copying them into a growing record only widens where they live. The confirmation identity is kept because it is what ties one approval to the one click it authorized."
   },
   "userFacing": {
     "moduleTitle": "作品发布",

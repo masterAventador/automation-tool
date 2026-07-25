@@ -25,6 +25,14 @@ const readySnapshot = {
   },
   outcome: null,
   retryable: false,
+  audit: [
+    {
+      step: "publish_started",
+      platform: "douyin",
+      confirmationId: null,
+      outcome: null,
+    },
+  ],
 };
 
 describe("publish workspace snapshot", () => {
@@ -111,6 +119,32 @@ describe("publish workspace snapshot", () => {
         PublishWorkspaceGatewayError,
       );
     }
+  });
+
+  it("refuses an audit step the contract does not declare", () => {
+    expect(() =>
+      parsePublishWorkspaceSnapshot({
+        ...readySnapshot,
+        audit: [{ step: "quietly_published", platform: "douyin", confirmationId: null, outcome: null }],
+      }),
+    ).toThrow(PublishWorkspaceGatewayError);
+  });
+
+  it("refuses an audit entry carrying anything beyond the decision", () => {
+    expect(() =>
+      parsePublishWorkspaceSnapshot({
+        ...readySnapshot,
+        audit: [
+          {
+            step: "settled",
+            platform: "douyin",
+            confirmationId: null,
+            outcome: "published",
+            title: "三分钟讲清油皮护肤",
+          },
+        ],
+      }),
+    ).toThrow(PublishWorkspaceGatewayError);
   });
 
   it("refuses anything that is not the projection at all", () => {
