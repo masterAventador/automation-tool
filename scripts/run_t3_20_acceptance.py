@@ -9,7 +9,6 @@ import os
 import queue
 import secrets
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -21,6 +20,12 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    require_reserved_port_still_free,
+    reserve_control_plane_port,
+    startup_gate_environment,
+)
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -68,7 +73,7 @@ from automation_tool.executor import (
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-restart-e2e.conf.json"
-CONTROL_PLANE_PORT = 8765
+CONTROL_PLANE_PORT = reserve_control_plane_port()
 APP_IDENTIFIER = "com.aventador.automationtool.t320acceptance"
 ENVIRONMENT_ID = "t320-acceptance"
 TASK_KEYWORD = "T3-20 重启恢复"
@@ -85,11 +90,7 @@ class RestartCheckpoint:
 
 
 def require_control_plane_port_available() -> None:
-    with socket.socket() as listener:
-        try:
-            listener.bind(("127.0.0.1", CONTROL_PLANE_PORT))
-        except OSError as error:
-            raise RuntimeError("T3-20 requires an unused Control Plane port") from error
+    require_reserved_port_still_free(CONTROL_PLANE_PORT)
 
 
 def require_hidden_tauri_configuration() -> None:
@@ -177,7 +178,11 @@ def isolated_environment(
             "AUTOMATION_TOOL_T320_UP_FILE": str(signals["up"]),
         }
     )
-    return environment, database_url, signals
+    return (
+        startup_gate_environment(environment, control_plane_port=CONTROL_PLANE_PORT),
+        database_url,
+        signals,
+    )
 
 
 def start_control_plane(environment: dict[str, str]) -> subprocess.Popen[bytes]:
@@ -480,6 +485,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing T3-20 App data directory")
+    prepare_startup_gate(private_app_data)
 
     project_name = f"automation-tool-t320-{os.getpid()}"
     database_port = unused_loopback_port()

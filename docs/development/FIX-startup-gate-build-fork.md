@@ -261,14 +261,27 @@ fixture 签名者公钥与 `run_p9_04_acceptance.py` 的更新配置常量满足
    「四种构建编得过 + 328 项 Rust 测试通过 + 源码门禁拒绝分叉」。
 2. **视频线的 WDIO 验收现在跑不起来，这是本次修复的直接后果，不是回归。** 消除分叉后，
    `video-studio-e2e` 构建与正式包走同一条解析路径，于是它需要一个**真实完整**的运行环境：
+   - **编译期动作信任配置三元组**（`AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY` /
+     `AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS` /
+     `AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT`）必须在 `tauri build` 时随环境变量传入，
+     否则 `option_env!` 取不到值，判 `executor_configuration_required`；
    - `target/debug/embedded-browser/`：经 EB-05 逐文件摘要验证的发行物（否则 `authority.resolve()` 失败，
      启动门禁判 `browser_component_missing`，工作台不挂载，全部 spec 失败）；
    - `app_data/local-executor/package/`：签名的执行器包（否则 `executor_unavailable`）；
    - 可达的 Control Plane（否则 `control_plane_unavailable`）；
    - `target/debug/{media-toolchain,motion-video-worker/package,material-video-worker/package}`。
 
-   第四项已提供工具：`run_vf_06_acceptance.stage_video_runtime()` / `require_staged_video_runtime()` /
-   `require_staged_embedded_browser()`，配 6 项测试。前三项**没有做**。
+   **本文件初版把「签名的执行器包」列为第二项前置，这是错的，2026-07-26 的桌面 E2E 实跑证伪了它。**
+   `startup_environment_state()` 的第一步是
+   `ExecutorActionRuntimeInput::from_compile_time_configuration()`，返回 `Ok(None)` 时直接
+   `ConfigurationRequired`，**根本不会走到 `validate_installed_package()`**。也就是说：只装执行器包
+   解决不了问题，构建命令必须带上那三个环境变量；装包是在编译期配置满足之后才会暴露的下一道门。
+   证据见 `docs/development/desktop-e2e-run-20260726.md` 第 4.1 节的 A/B 探针输出。
+
+   最后一项已提供工具：`run_vf_06_acceptance.stage_video_runtime()` / `require_staged_video_runtime()` /
+   `require_staged_embedded_browser()`，配 6 项测试。前四项当时**没有做**；其中前三项已由
+   `scripts/desktop_e2e_prerequisites.py` 为 `control-plane-e2e` 那一层实现
+   （见 `docs/development/FIX-control-plane-e2e-prerequisites.md`），视频线尚未接入。
 3. **`run_bm_08_acceptance.py` 与 `run_im_05_acceptance.py` 未改动。** 它们仍在设置现在没人读的
    `AUTOMATION_TOOL_BM08_*` / `AUTOMATION_TOOL_IM05_WORKER`。**没有半改**是刻意的：
    BM-08 的确定性取消窗口靠 `_write_browser_wrapper` 给浏览器包一层 `sleep 3` 的 shell 包装，
@@ -305,7 +318,7 @@ fixture 签名者公钥与 `run_p9_04_acceptance.py` 的更新配置常量满足
 
 | 项 | 状态 |
 | --- | --- |
-| 为视频线验收提供真实内置浏览器 / 执行器包 / Control Plane，重跑 BM/IM/VF/CQ 全套 | 未做，本项完成的前提 |
+| 为视频线验收提供编译期动作信任配置 / 真实内置浏览器 / 执行器包 / Control Plane，重跑 BM/IM/VF/CQ 全套 | 未做，本项完成的前提。`control-plane-e2e` 那一层的同类前置已由 `scripts/desktop_e2e_prerequisites.py` 抽成共享实现，视频线可以直接复用而不必再写一份 |
 | BM-08 确定性取消窗口在单一构建路径下的替代机制 | 未做，需重新设计 |
 | `lib.rs:3819/3822` 执行器包根按 `debug_assertions` 分叉（debug 找 app_data、release 找 Resources） | **未消除。** 与本次同型：没有任何 debug 构建验证过 release 的查找位置 |
 | `desktop-e2e` 构建的临时身份与子集命令表 | 未消除，需要 desktop-e2e 也具备生产凭据保险箱 |

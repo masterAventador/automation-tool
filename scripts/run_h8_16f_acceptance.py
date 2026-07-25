@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import prepare_startup_gate
 from run_b5_13_acceptance import (
     require_no_residual_project_processes,
     terminate_process,
@@ -441,6 +442,11 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing H8-16F App data directory")
+    # The journey starts on the blocked diagnostics page and repairs the browser
+    # from settings, so the component has to be genuinely absent at startup.
+    prepare_startup_gate(
+        private_app_data, embedded_browser=False, executor_package=False
+    )
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
     app_process: subprocess.Popen[bytes] | None = None

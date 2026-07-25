@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from desktop_e2e_prerequisites import prepare_startup_gate
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -402,6 +403,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError(f"Refusing to reuse existing {APP_IDENTIFIER} App data")
+    prepare_startup_gate(private_app_data)
 
     project_name = f"automation-tool-h801-{os.getpid()}"
     database_port = unused_loopback_port()

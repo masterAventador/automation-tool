@@ -8,7 +8,6 @@ import json
 import os
 import secrets
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -17,6 +16,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    require_reserved_port_still_free,
+    reserve_control_plane_port,
+    startup_gate_environment,
+)
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -68,7 +73,7 @@ from automation_tool.executor import (
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-control-e2e.conf.json"
-CONTROL_PLANE_PORT = 8765
+CONTROL_PLANE_PORT = reserve_control_plane_port()
 APP_IDENTIFIER = "com.aventador.automationtool.t313acceptance"
 ENVIRONMENT_ID = "t313-acceptance"
 TASK_KEY = "task:control:tauri-acceptance"
@@ -76,11 +81,7 @@ DEVICE_CREDENTIAL_FILE = "device-credential-v1"
 
 
 def require_control_plane_port_available() -> None:
-    with socket.socket() as listener:
-        try:
-            listener.bind(("127.0.0.1", CONTROL_PLANE_PORT))
-        except OSError as error:
-            raise RuntimeError("T3-13 requires an unused local Control Plane port") from error
+    require_reserved_port_still_free(CONTROL_PLANE_PORT)
 
 
 def require_hidden_tauri_configuration() -> None:
@@ -153,7 +154,10 @@ def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
             "AUTOMATION_TOOL_T313_ENVIRONMENT_ID": ENVIRONMENT_ID,
         }
     )
-    return environment, database_url
+    return (
+        startup_gate_environment(environment, control_plane_port=CONTROL_PLANE_PORT),
+        database_url,
+    )
 
 
 async def wait_for_app_task(
@@ -368,6 +372,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing T3-13 App data directory")
+    prepare_startup_gate(private_app_data)
 
     project_name = f"automation-tool-t313-{os.getpid()}"
     database_port = unused_loopback_port()

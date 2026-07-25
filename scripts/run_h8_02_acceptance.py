@@ -14,6 +14,7 @@ import time
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from desktop_e2e_prerequisites import prepare_startup_gate
 from run_h8_01_acceptance import (
     run_offer_fixture,
     seed_local_checkpoint,
@@ -202,6 +203,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse existing H8-02 App data")
+    prepare_startup_gate(private_app_data)
 
     project_name = f"automation-tool-h802-{os.getpid()}"
     database_port = unused_loopback_port()

@@ -9,13 +9,18 @@ import os
 import re
 import secrets
 import shutil
-import socket
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    require_reserved_port_still_free,
+    reserve_control_plane_port,
+    startup_gate_environment,
+)
 from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -31,7 +36,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-create-form-e2e.conf.json"
-CONTROL_PLANE_PORT = 8765
+CONTROL_PLANE_PORT = reserve_control_plane_port()
 APP_IDENTIFIER = "com.aventador.automationtool.t317acceptance"
 ENVIRONMENT_ID = "t317-acceptance"
 IDEMPOTENCY_KEY_PATTERN = re.compile(
@@ -41,11 +46,7 @@ IDEMPOTENCY_KEY_PATTERN = re.compile(
 
 
 def require_control_plane_port_available() -> None:
-    with socket.socket() as listener:
-        try:
-            listener.bind(("127.0.0.1", CONTROL_PLANE_PORT))
-        except OSError as error:
-            raise RuntimeError("T3-17 requires an unused Control Plane port") from error
+    require_reserved_port_still_free(CONTROL_PLANE_PORT)
 
 
 def require_hidden_tauri_configuration() -> None:
@@ -118,7 +119,10 @@ def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
             "AUTOMATION_TOOL_T317_ENVIRONMENT_ID": ENVIRONMENT_ID,
         }
     )
-    return environment, database_url
+    return (
+        startup_gate_environment(environment, control_plane_port=CONTROL_PLANE_PORT),
+        database_url,
+    )
 
 
 async def verify_database_state(database_url: str, expected_public_key: bytes) -> None:
@@ -205,6 +209,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing T3-17 App data directory")
+    prepare_startup_gate(private_app_data)
 
     project_name = f"automation-tool-t317-{os.getpid()}"
     database_port = unused_loopback_port()

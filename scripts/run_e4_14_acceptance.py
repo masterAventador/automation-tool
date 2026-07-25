@@ -24,6 +24,10 @@ from uuid import UUID
 from acceptance_postgres import managed_test_postgres
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    startup_gate_environment,
+)
 from run_e4_07_acceptance import build_signed_executor
 from run_i2_13_acceptance import (
     BACKEND_ROOT,
@@ -148,7 +152,10 @@ def isolated_environment(
             ),
         }
     )
-    return environment, database_url
+    return (
+        startup_gate_environment(environment, control_plane_port=control_plane_port),
+        database_url,
+    )
 
 
 def install_executor_package(source: Path, private_app_data: Path) -> Path:
@@ -384,6 +391,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing E4-14 App data directory")
+    prepare_startup_gate(private_app_data, executor_package=False)
     environment, database_url = isolated_environment(
         control_plane_port=control_plane_port,
         database_port=database_port,

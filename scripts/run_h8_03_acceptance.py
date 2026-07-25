@@ -16,6 +16,7 @@ import time
 from contextlib import closing, suppress
 from pathlib import Path
 
+from desktop_e2e_prerequisites import prepare_startup_gate
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     assert_no_executor_process,
@@ -339,6 +340,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse existing H8-03 App data")
+    prepare_startup_gate(private_app_data, executor_package=False)
 
     project_name = f"automation-tool-h803-{os.getpid()}"
     database_port = unused_loopback_port()

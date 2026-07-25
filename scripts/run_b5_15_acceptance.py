@@ -19,6 +19,10 @@ from pathlib import Path
 from uuid import UUID
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    startup_gate_environment,
+)
 from run_b5_13_acceptance import (
     require_no_residual_project_processes,
     terminate_process,
@@ -155,7 +159,10 @@ def isolated_environment(
             ),
         }
     )
-    return environment, database_url
+    return (
+        startup_gate_environment(environment, control_plane_port=control_plane_port),
+        database_url,
+    )
 
 
 def write_page_state(path: Path, state: str) -> None:
@@ -263,6 +270,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing B5-15 App data directory")
+    prepare_startup_gate(private_app_data, executor_package=False)
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
     package_entrypoint: Path | None = None

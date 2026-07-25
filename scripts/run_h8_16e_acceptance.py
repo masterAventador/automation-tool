@@ -11,6 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from desktop_e2e_prerequisites import prepare_startup_gate
 from run_e4_07_acceptance import build_signed_executor, start_control_plane
 from run_e4_14_acceptance import (
     assert_no_executor_process,
@@ -81,6 +82,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing H8-16E App data directory")
+    prepare_startup_gate(private_app_data, embedded_browser=False, executor_package=False)
     webdriver_port = unused_loopback_port()
     control_plane = start_control_plane()
     require_port_closed(webdriver_port)

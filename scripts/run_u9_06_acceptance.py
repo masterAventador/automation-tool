@@ -18,6 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    require_reserved_port_still_free,
+    reserve_control_plane_port,
+    startup_gate_environment,
+)
 from run_e4_14_acceptance import start_control_plane
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -29,7 +35,7 @@ from run_t3_06_acceptance import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-CONTROL_PLANE_PORT = 8765
+CONTROL_PLANE_PORT = reserve_control_plane_port()
 APP_IDENTIFIER = "com.aventador.automationtool.u906acceptance"
 LOGIN_NAME = "demo.u906"
 PASSWORD = "U9-06 correct horse battery"
@@ -64,11 +70,7 @@ def require_hidden_configuration() -> None:
 
 
 def require_control_plane_port_available() -> None:
-    with socket.socket() as listener:
-        try:
-            listener.bind(("127.0.0.1", CONTROL_PLANE_PORT))
-        except OSError as error:
-            raise RuntimeError("U9-06 requires the fixed Control Plane port to be free") from error
+    require_reserved_port_still_free(CONTROL_PLANE_PORT)
 
 
 def isolated_environment(database_port: int) -> tuple[dict[str, str], str, str]:
@@ -106,7 +108,11 @@ def isolated_environment(database_port: int) -> tuple[dict[str, str], str, str]:
             "AUTOMATION_TOOL_U906_PASSWORD": PASSWORD,
         }
     )
-    return environment, database_url, capability
+    return (
+        startup_gate_environment(environment, control_plane_port=CONTROL_PLANE_PORT),
+        database_url,
+        capability,
+    )
 
 
 def account_operation(
@@ -259,6 +265,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing U9-06 App data directory")
+    prepare_startup_gate(private_app_data)
     project_name = f"automation-tool-u906-{os.getpid()}"
     environment, database_url, capability = isolated_environment(unused_loopback_port())
     compose = compose_command(project_name)

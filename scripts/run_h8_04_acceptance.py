@@ -10,7 +10,6 @@ import os
 import secrets
 import shutil
 import signal
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -22,6 +21,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    require_reserved_port_still_free,
+    reserve_control_plane_port,
+    startup_gate_environment,
+)
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     executor_entrypoint,
@@ -64,7 +69,7 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.app-crash-recovery-e2e.conf.json"
-CONTROL_PLANE_PORT = 8765
+CONTROL_PLANE_PORT = reserve_control_plane_port()
 APP_IDENTIFIER = "com.aventador.automationtool.h804acceptance"
 ENVIRONMENT_ID = "h804-acceptance"
 TASK_KEYWORD = "H8-04 App 崩溃恢复"
@@ -86,11 +91,7 @@ class DatabaseCheckpoint:
 
 
 def require_control_plane_port_available() -> None:
-    with socket.socket() as listener:
-        try:
-            listener.bind(("127.0.0.1", CONTROL_PLANE_PORT))
-        except OSError as error:
-            raise RuntimeError("H8-04 requires an unused Control Plane port") from error
+    require_reserved_port_still_free(CONTROL_PLANE_PORT)
 
 
 def require_hidden_tauri_configuration() -> None:
@@ -172,7 +173,10 @@ def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
             ),
         }
     )
-    return environment, database_url
+    return (
+        startup_gate_environment(environment, control_plane_port=CONTROL_PLANE_PORT),
+        database_url,
+    )
 
 
 def wait_for_signal(
@@ -522,6 +526,7 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing H8-04 App data directory")
+    prepare_startup_gate(private_app_data, executor_package=False)
 
     project_name = f"automation-tool-h804-{os.getpid()}"
     database_port = unused_loopback_port()
