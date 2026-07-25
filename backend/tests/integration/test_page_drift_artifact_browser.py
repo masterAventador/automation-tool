@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
 from uuid import UUID
-
-import pytest
 
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
 from automation_tool.executor.browser_diagnostic_artifact import (
@@ -34,7 +31,6 @@ from automation_tool.executor.page_drift_artifact import (
 from automation_tool.executor.rpa.douyin.page_version import DOUYIN_HOME_URL
 from automation_tool.protocol import PlatformSessionState, TaskDiscoveryCompletedEnvelope
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 NOW = datetime(2026, 7, 20, 5, 30, tzinfo=UTC)
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174003"
 EXECUTOR_ID = "123e4567-e89b-42d3-a456-426614174004"
@@ -119,10 +115,8 @@ def discovery_command() -> str:
 
 
 def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("D6-14 system Chrome acceptance currently requires macOS Chrome")
     RoutedRuntime.instances.clear()
     profile = tmp_path / "automation-tool-d6-14-profile"
     profile.mkdir(mode=0o700)
@@ -141,7 +135,7 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
     authority = BrowserLaunchAuthority()
     authority.authorize(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )

@@ -330,6 +330,13 @@ Windows 侧待补：同套测试在 Windows staged 内置 Chromium（EB-04 缓�
 Profile 权限语义按 Windows ACL 等价校验。真实扫码另标 🔍 待真实账号，不属 Windows
 会话职责。通过后更新 `docs/development/EB-11.md` 遗留项。
 
+### 12. EB-12 搜索/浏览/候选提取迁移 Windows 待补
+
+EB-12 已在 macOS 把搜索执行、浏览、候选提取、有界滚动与页面漂移诊断五条链路的
+集成测试启动来源迁移到 staged 内置 Chromium（6/6，页面对象与失败矩阵零改动）。
+Windows 侧待补：同五套测试在 Windows staged 内置 Chromium 上重跑。真实抖音平台
+最终状态另标 🔍 待真实账号。通过后更新 `docs/development/EB-12.md` 遗留项。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；

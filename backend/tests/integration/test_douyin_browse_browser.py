@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any, cast
-
-import pytest
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.browse import (
@@ -20,7 +17,6 @@ from automation_tool.protocol import (
     DouyinCandidateSummary,
 )
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_browse_pages"
 
 
@@ -34,10 +30,8 @@ def candidate(target_id: str) -> DouyinCandidate:
 
 
 def test_production_runtime_browses_fake_profiles_headlessly_without_sending_and_closes(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("A7-10 system Chrome fake-page acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-a7-10-profile"
     profile.mkdir(mode=0o700)
     documents = {
@@ -50,7 +44,7 @@ def test_production_runtime_browses_fake_profiles_headlessly_without_sending_and
 
     with runtime.running(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )
