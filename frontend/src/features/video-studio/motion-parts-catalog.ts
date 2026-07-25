@@ -1,4 +1,5 @@
 import contract from "../../../../contracts/video/motion-catalog-ui.v1.json";
+import type { MotionVideoDraftRequest } from "./material-video-studio-gateway";
 
 export interface MotionPartOption {
   readonly id: string;
@@ -57,6 +58,34 @@ const loaded = loadCatalog();
 
 export const MOTION_PARTS_CATEGORIES: readonly string[] = loaded.categories;
 export const MOTION_PARTS_CATALOG: readonly MotionPartOption[] = loaded.parts;
+
+/**
+ * Whether the chosen creation path turns per-beat part selections into pixels.
+ *
+ * `browse_only` is a fact about the product, not a feature flag: nothing
+ * between the submit request and the render worker carries a part id, so a
+ * tick made in that state would be dropped without a trace. The catalog stays
+ * readable either way; only the actions that imply an effect are withheld.
+ */
+export type MotionPartsUsage = "applies_to_output" | "browse_only";
+
+type MotionCreationMode = MotionVideoDraftRequest["creationMode"];
+
+// Keyed by creation mode on purpose: widening the request union stops this
+// record from compiling until someone states whether the new mode reads the
+// selections. Wiring the one-sentence automatic path is therefore the only
+// change needed to give the catalog its interactions back.
+const USAGE_BY_CREATION_MODE: Readonly<
+  Record<MotionCreationMode, MotionPartsUsage>
+> = {
+  // The fixed template composes from the overall style, the two colours and
+  // the beat text alone; see docs/development/FIX-motion-parts-selection-wiring.md.
+  manual_template_v1: "browse_only",
+};
+
+export function motionPartsUsage(mode: MotionCreationMode): MotionPartsUsage {
+  return USAGE_BY_CREATION_MODE[mode];
+}
 
 export function groupMotionPartsByCategory(): ReadonlyMap<
   string,

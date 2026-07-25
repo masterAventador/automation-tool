@@ -17,7 +17,7 @@ async function openMotionStudio() {
 }
 
 describe("BM-15 production App motion parts catalog acceptance", () => {
-  it("browses 134 parts by Chinese category and overrides a beat selection", async () => {
+  it("browses 134 parts by Chinese category and refuses to pretend a tick counts", async () => {
     const studio = await openMotionStudio();
 
     await studio.$("div[role='tab']=动效零件").click();
@@ -31,7 +31,17 @@ describe("BM-15 production App motion parts catalog acceptance", () => {
     await expect(overrides).toHaveText(
       expect.stringContaining("动效零件与 12 套整体风格不同"),
     );
-    await expect(overrides).toHaveText(expect.stringContaining("第 1 段：已选 0 项"));
+
+    // 固定模板手工制作 is the only mode the App can submit and its renderer
+    // never reads a part id, so the page has to say so before anything can be
+    // ticked, and no per-beat count may be presented as if it mattered.
+    await expect(studio).toHaveText(
+      expect.stringContaining("本次制作方式不会用到零件选择"),
+    );
+    await expect(overrides).toHaveText(
+      expect.stringContaining("第 1 段：本次制作不使用零件"),
+    );
+    assert.doesNotMatch(await overrides.getText(), /已选/);
 
     // Category filter narrows the grid to the Chinese category.
     await browserRegion
@@ -54,24 +64,27 @@ describe("BM-15 production App motion parts catalog acceptance", () => {
     const pageText = await studio.getText();
     assert.doesNotMatch(pageText, /apple-money-count|data-chart(?![a-z-])/);
 
-    // Override: add the part to beat 1 and confirm the selection sticks
-    // across page switches.
-    await card.$("button=加入第 1 段").click();
-    await expect(overrides).toHaveText(expect.stringContaining("第 1 段：已选 1 项"));
+    // Every selection action is withheld rather than silently ignored.
+    assert.equal(
+      await browserRegion.$$("button=加入第 1 段").length,
+      0,
+      "固定模板手工制作下不得提供“加入第 N 段”按钮",
+    );
+    const withheld = await card.$("button=本次制作不使用");
+    await expect(withheld).toBeDisabled();
+    const recommendButtons = await overrides.$$("button=自动推荐");
+    const recommendCount = await recommendButtons.length;
+    assert.ok(recommendCount > 0, "分镜零件选用必须为每段渲染“自动推荐”按钮");
+    for (let index = 0; index < recommendCount; index += 1) {
+      await expect(recommendButtons[index]!).toBeDisabled();
+    }
+
+    // The catalog itself stays fully browsable: the parts exist, they are just
+    // not wired into this creation path yet.
     await studio.$("div[role='tab']=脚本与分镜").click();
     await studio.$("div[role='tab']=动效零件").click();
     await expect(
-      await studio.$("section[aria-label='分镜零件选用']"),
-    ).toHaveText(expect.stringContaining("第 1 段：已选 1 项"));
-
-    // Deterministic per-beat auto recommendation stays within bounds.
-    await (
-      await studio.$("section[aria-label='分镜零件选用']")
-    )
-      .$$("button=自动推荐")[1]!
-      .click();
-    await expect(
-      await studio.$("section[aria-label='分镜零件选用']"),
-    ).toHaveText(expect.stringMatching(/第 2 段：已选 [1-3] 项/));
+      await studio.$("section[aria-label='动效零件目录']"),
+    ).toBeDisplayed();
   });
 });

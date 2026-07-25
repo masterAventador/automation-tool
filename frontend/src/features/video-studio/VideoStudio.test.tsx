@@ -446,7 +446,7 @@ describe("video studio shell", () => {
     expect(screen.getByText(/动效零件只属于“品牌动效成片”/)).toBeVisible();
   });
 
-  it("browses the 134 parts catalog and keeps per-beat overrides in the draft", async () => {
+  it("browses the 134 parts catalog and keeps every part visible", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);
 
@@ -457,24 +457,35 @@ describe("video studio shell", () => {
     expect(
       screen.getByText(/动效零件与 12 套整体风格不同/),
     ).toBeVisible();
+    expect(within(browser).getByText("数据图表动画")).toBeVisible();
+  });
 
-    const card = within(browser).getByText("数据图表动画").closest("li");
-    await user.click(
-      within(card as HTMLElement).getByRole("button", { name: "加入第 1 段" }),
-    );
-    expect(
-      within(screen.getByRole("region", { name: "分镜零件选用" })).getByText(
-        "第 1 段：已选 1 项",
-      ),
-    ).toBeVisible();
+  // The App can only submit 固定模板手工制作, and that renderer never reads a
+  // part id, so ticking one must be impossible rather than quietly ignored.
+  it("says in the 动效零件 tab that the submitted job ignores part selections", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
 
-    // The override survives switching pages.
-    await user.click(screen.getByRole("tab", { name: "脚本与分镜" }));
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
     await user.click(screen.getByRole("tab", { name: "动效零件" }));
+
+    expect(screen.getByText(/本次制作方式不会用到零件选择/)).toBeVisible();
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
     expect(
-      within(screen.getByRole("region", { name: "分镜零件选用" })).getByText(
-        "第 1 段：已选 1 项",
-      ),
-    ).toBeVisible();
+      within(browser).queryAllByRole("button", { name: "加入第 1 段" }),
+    ).toHaveLength(0);
+    const actions = within(browser).getAllByRole("button", {
+      name: "本次制作不使用",
+    });
+    expect(actions).toHaveLength(134);
+    for (const action of actions) expect(action).toBeDisabled();
+
+    const overrides = screen.getByRole("region", { name: "分镜零件选用" });
+    expect(within(overrides).queryAllByText(/已选/)).toHaveLength(0);
+    for (const button of within(overrides).getAllByRole("button", {
+      name: "自动推荐",
+    })) {
+      expect(button).toBeDisabled();
+    }
   });
 });

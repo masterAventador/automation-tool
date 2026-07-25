@@ -30,11 +30,17 @@ import {
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
+import { motionPartsUsage } from "./motion-parts-catalog";
 import { MotionPartsCatalog } from "./MotionPartsCatalog";
 import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
 import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
 
 type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
+
+// The single creation mode the App can submit. Declared once so the parts page
+// and the submitted request can never disagree about which mode is in play.
+const MOTION_CREATION_MODE: MotionVideoDraftRequest["creationMode"] =
+  "manual_template_v1";
 
 const SEED_MOTION_BEATS: readonly MotionVideoBeatDraft[] = [
   { title: "一个清晰的核心信息", caption: "字幕：先让观众知道这次更新是什么。" },
@@ -799,7 +805,7 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
     );
     if (style === undefined) return;
     const request: MotionVideoDraftRequest = {
-      creationMode: "manual_template_v1",
+      creationMode: MOTION_CREATION_MODE,
       subject: motionDraft.subject.trim(),
       stylePresetId: style.id,
       primaryColor: motionDraft.style.primaryColor || style.preview.accent,
@@ -901,6 +907,7 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
               selectedMethod === "motion_composition_v1" ? (
                 <MotionPartsCatalog
                   beats={motionDraft.beats}
+                  usage={motionPartsUsage(MOTION_CREATION_MODE)}
                   selections={motionPartSelections}
                   onSelectionsChange={setMotionPartSelections}
                 />

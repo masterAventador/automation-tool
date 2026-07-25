@@ -1,16 +1,30 @@
 import { useMemo, useState } from "react";
 
-import { Button, Radio, Tag, Typography } from "antd";
+import { Alert, Button, Radio, Tag, Typography } from "antd";
 
 import {
   MOTION_PARTS_CATALOG,
   MOTION_PARTS_CATEGORIES,
   recommendMotionPartsForBeat,
   type MotionPartOption,
+  type MotionPartsUsage,
 } from "./motion-parts-catalog";
 
 const ALL_CATEGORIES = "全部分类";
 const MAX_PARTS_PER_BEAT = 16;
+
+// Shown whenever the chosen creation path cannot turn a tick into pixels. It
+// sits above the catalog rather than inside the explanatory paragraph because
+// the operator has to read it before deciding to tick anything, and it says
+// what the capability is for instead of hiding it, so nobody concludes the
+// product has no parts.
+const UNUSED_NOTICE_TITLE = "本次制作方式不会用到零件选择";
+const UNUSED_NOTICE_DESCRIPTION =
+  "你现在用的是“固定模板手工制作”：成片画面只由整体风格、品牌颜色和你填写的文字决定，" +
+  "不会放入下面的任何零件。零件目前只服务于尚未开放的“一句话自动制作”，" +
+  "所以这里可以浏览了解有哪些零件，但暂时不能选用。";
+const UNUSED_PART_ACTION = "本次制作不使用";
+const UNUSED_BEAT_SUMMARY = "本次制作不使用零件";
 
 export interface MotionPartsBeat {
   readonly title: string;
@@ -19,15 +33,18 @@ export interface MotionPartsBeat {
 
 export function MotionPartsCatalog({
   beats,
+  usage,
   selections,
   onSelectionsChange,
 }: {
   readonly beats: readonly MotionPartsBeat[];
+  readonly usage: MotionPartsUsage;
   readonly selections: readonly (readonly string[])[];
   readonly onSelectionsChange: (
     next: readonly (readonly string[])[],
   ) => void;
 }) {
+  const selectable = usage === "applies_to_output";
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [activeBeat, setActiveBeat] = useState(0);
 
@@ -66,14 +83,23 @@ export function MotionPartsCatalog({
 
   return (
     <div className="motion-parts-catalog">
+      {selectable ? null : (
+        <Alert
+          type="warning"
+          showIcon
+          title={UNUSED_NOTICE_TITLE}
+          description={UNUSED_NOTICE_DESCRIPTION}
+        />
+      )}
       <section aria-label="分镜零件选用" role="region" className="motion-parts-overrides">
         <Typography.Title level={4}>分镜零件选用</Typography.Title>
         <Typography.Text type="secondary">
           动效零件与 12 套整体风格不同：整体风格决定画面的颜色与排版，零件是插入单个分镜的
-          画面模块。自动制作会按分镜自动选用零件，这里可以逐段查看并手工覆盖；提交固定模板
-          手工制作时不使用零件选用。
+          画面模块。
+          {selectable ? "自动制作会按分镜自动选用零件，这里可以逐段查看并手工覆盖。" : null}
         </Typography.Text>
         <Radio.Group
+          disabled={!selectable}
           value={activeBeat}
           onChange={(event) => setActiveBeat(Number(event.target.value))}
         >
@@ -87,10 +113,13 @@ export function MotionPartsCatalog({
           {beats.map((beat, index) => (
             <li key={beat.title || index}>
               <Typography.Text>
-                {`第 ${index + 1} 段：已选 ${(selections[index] ?? []).length} 项`}
+                {selectable
+                  ? `第 ${index + 1} 段：已选 ${(selections[index] ?? []).length} 项`
+                  : `第 ${index + 1} 段：${UNUSED_BEAT_SUMMARY}`}
               </Typography.Text>
               <Button
                 size="small"
+                disabled={!selectable}
                 onClick={() =>
                   replaceSelection(
                     index,
@@ -136,12 +165,15 @@ export function MotionPartsCatalog({
                 <Typography.Text type="secondary">{`来源：${part.provenanceLabel}`}</Typography.Text>
                 <Button
                   size="small"
-                  type={selected ? "default" : "primary"}
+                  disabled={!selectable}
+                  type={selectable && !selected ? "primary" : "default"}
                   onClick={() => togglePart(part)}
                 >
-                  {selected
-                    ? `从第 ${activeBeat + 1} 段移除`
-                    : `加入第 ${activeBeat + 1} 段`}
+                  {!selectable
+                    ? UNUSED_PART_ACTION
+                    : selected
+                      ? `从第 ${activeBeat + 1} 段移除`
+                      : `加入第 ${activeBeat + 1} 段`}
                 </Button>
               </li>
             );

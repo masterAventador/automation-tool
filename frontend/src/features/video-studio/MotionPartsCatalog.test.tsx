@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MotionPartsCatalog } from "./MotionPartsCatalog";
+import type { MotionPartsUsage } from "./motion-parts-catalog";
 
 const BEATS = [
   { title: "增长看得见", caption: "本周销售数据增长" },
@@ -12,10 +13,12 @@ const BEATS = [
 function renderCatalog(
   selections: readonly (readonly string[])[] = [[], [], []],
   onSelectionsChange = vi.fn(),
+  usage: MotionPartsUsage = "browse_only",
 ) {
   render(
     <MotionPartsCatalog
       beats={BEATS}
+      usage={usage}
       selections={selections}
       onSelectionsChange={onSelectionsChange}
     />,
@@ -78,7 +81,11 @@ describe("MotionPartsCatalog", () => {
   });
 
   it("toggles a part for the active beat and respects the override", () => {
-    const onChange = renderCatalog([["data-chart"], [], []]);
+    const onChange = renderCatalog(
+      [["data-chart"], [], []],
+      vi.fn(),
+      "applies_to_output",
+    );
     const overrides = screen.getByRole("region", { name: "分镜零件选用" });
     expect(within(overrides).getByText(/第 1 段：已选 1 项/)).toBeInTheDocument();
 
@@ -91,7 +98,7 @@ describe("MotionPartsCatalog", () => {
   });
 
   it("applies deterministic recommendations for a beat on demand", () => {
-    const onChange = renderCatalog();
+    const onChange = renderCatalog([[], [], []], vi.fn(), "applies_to_output");
     const overrides = screen.getByRole("region", { name: "分镜零件选用" });
     fireEvent.click(
       within(overrides).getAllByRole("button", { name: "自动推荐" })[0]!,
@@ -100,5 +107,90 @@ describe("MotionPartsCatalog", () => {
     const next = onChange.mock.calls[0]![0] as readonly (readonly string[])[];
     expect(next[0]!.length).toBeGreaterThan(0);
     expect(next[0]!.length).toBeLessThanOrEqual(3);
+  });
+});
+
+// The only creation path the App can submit today is the fixed template, whose
+// renderer never reads a part id. Until a path that consumes them exists, the
+// page has to say so before an operator can tick anything.
+describe("MotionPartsCatalog when the creation path ignores part selections", () => {
+  it("states it above the catalog, before anything can be ticked", () => {
+    renderCatalog();
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("本次制作方式不会用到零件选择");
+    expect(notice).toHaveTextContent("固定模板手工制作");
+
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    expect(
+      notice.compareDocumentPosition(browser) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("disables every part action and labels it instead of offering a beat", () => {
+    renderCatalog();
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    expect(
+      within(browser).queryAllByRole("button", { name: /加入第 1 段/ }),
+    ).toHaveLength(0);
+    const actions = within(browser).getAllByRole("button", {
+      name: "本次制作不使用",
+    });
+    expect(actions).toHaveLength(134);
+    for (const action of actions) expect(action).toBeDisabled();
+  });
+
+  it("never shows a per-beat count the film would honour", () => {
+    const onChange = renderCatalog([["data-chart"], [], []]);
+    const overrides = screen.getByRole("region", { name: "分镜零件选用" });
+    expect(within(overrides).queryAllByText(/已选/)).toHaveLength(0);
+    expect(
+      within(overrides).getAllByText(/本次制作不使用零件/),
+    ).toHaveLength(3);
+
+    const recommend = within(overrides).getAllByRole("button", {
+      name: "自动推荐",
+    });
+    expect(recommend).toHaveLength(3);
+    for (const button of recommend) expect(button).toBeDisabled();
+    fireEvent.click(recommend[0]!);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps all 134 parts browsable so the capability stays visible", () => {
+    renderCatalog();
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    expect(within(browser).getAllByRole("listitem")).toHaveLength(134);
+
+    fireEvent.click(within(browser).getByRole("radio", { name: "数据与地图" }));
+    const filtered = within(browser).getAllByRole("listitem");
+    expect(filtered.length).toBeLessThan(134);
+    expect(filtered.length).toBeGreaterThan(0);
+    const card = within(browser).getByText("数据图表动画").closest("li");
+    expect(within(card as HTMLElement).getByText(/适用：/)).toBeInTheDocument();
+  });
+});
+
+describe("MotionPartsCatalog when the creation path consumes part selections", () => {
+  it("drops the notice and restores per-beat selection", () => {
+    const onChange = renderCatalog([[], [], []], vi.fn(), "applies_to_output");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    const overrides = screen.getByRole("region", { name: "分镜零件选用" });
+    expect(within(overrides).getByText("第 1 段：已选 0 项")).toBeInTheDocument();
+    for (const button of within(overrides).getAllByRole("button", {
+      name: "自动推荐",
+    })) {
+      expect(button).toBeEnabled();
+    }
+
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    const card = within(browser).getByText("数据图表动画").closest("li");
+    const add = within(card as HTMLElement).getByRole("button", {
+      name: "加入第 1 段",
+    });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    expect(onChange).toHaveBeenCalledWith([["data-chart"], [], []]);
   });
 });

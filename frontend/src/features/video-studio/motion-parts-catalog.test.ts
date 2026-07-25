@@ -4,6 +4,7 @@ import {
   MOTION_PARTS_CATALOG,
   MOTION_PARTS_CATEGORIES,
   groupMotionPartsByCategory,
+  motionPartsUsage,
   recommendMotionPartsForBeat,
 } from "./motion-parts-catalog";
 
@@ -144,5 +145,11 @@ describe("motion parts catalog projection", () => {
       texts.flatMap((text, index) => recommendMotionPartsForBeat(text, index)),
     );
     expect(reached.size).toBeGreaterThanOrEqual(15);
+  });
+
+  // Flipping this without first making the renderer read a part id would put
+  // the misleading "已选 N 项" back on screen, so the claim is pinned here.
+  it("reports that the fixed template does not turn selections into pixels", () => {
+    expect(motionPartsUsage("manual_template_v1")).toBe("browse_only");
   });
 });
