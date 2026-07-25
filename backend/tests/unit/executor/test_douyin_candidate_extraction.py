@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, fields
 from typing import Any, cast
 
@@ -50,53 +51,99 @@ def visible(node: FakeNode) -> bool:
     return cast(bool, value)
 
 
+def descendants(nodes: list[FakeNode], selector: str) -> list[FakeNode]:
+    children: list[FakeNode] = []
+    for candidate in selector.split(", "):
+        for node in nodes:
+            children.extend(node.children.get(candidate, []))
+    return children
+
+
 class FakeLocator:
-    def __init__(self, page: FakePage, nodes: list[FakeNode]) -> None:
+    """Models Playwright's lazy locator: every read re-evaluates the query.
+
+    A locator holds a query, not a node. The list it points at can change
+    between two reads, which is exactly the window a candidate row must not be
+    read through.
+    """
+
+    def __init__(self, page: FakePage, resolve: Callable[[], list[FakeNode]]) -> None:
         self._page = page
-        self._nodes = nodes
+        self._resolve = resolve
 
     @property
     def first(self) -> FakeLocator:
-        return type(self)(self._page, self._nodes[:1])
+        return self.nth(0)
 
     def nth(self, index: int) -> FakeLocator:
-        return type(self)(self._page, self._nodes[index : index + 1])
+        return type(self)(self._page, lambda: self._resolve()[index : index + 1])
 
     def locator(self, selector: str) -> FakeLocator:
         if selector == VISIBLE_MATCH_ENGINE:
-            return type(self)(self._page, [node for node in self._nodes if visible(node)])
+            return type(self)(
+                self._page,
+                lambda: [node for node in self._resolve() if visible(node)],
+            )
         if self._page.nested_failure and selector == AUTHOR:
             raise RuntimeError("private nested locator failure")
-        children: list[FakeNode] = []
-        for candidate in selector.split(", "):
-            for node in self._nodes:
-                children.extend(node.children.get(candidate, []))
-        return type(self)(self._page, children)
+        return type(self)(self._page, lambda: descendants(self._resolve(), selector))
 
-    def is_visible(self) -> bool:
-        return bool(self._nodes) and visible(self._nodes[0])
+    def element_handle(self, *, timeout: float) -> FakeHandle:
+        assert timeout > 0
+        nodes = self._resolve()
+        if not nodes:
+            raise RuntimeError("private element handle timeout")
+        return FakeHandle(self._page, nodes[0])
 
     def count(self) -> int:
         if self._page.count_value is not None:
             return cast(int, self._page.count_value)
-        return len(self._nodes)
+        return len(self._resolve())
 
-    def get_attribute(self, name: str, *, timeout: float) -> str | None:
-        assert timeout > 0
-        if not self._nodes:
-            return None
-        value = self._nodes[0].attributes.get(name)
+
+class FakeHandle:
+    """Models an ElementHandle: one pinned node that is never re-resolved.
+
+    Its read surface deliberately differs from ``FakeLocator``'s: a handle has
+    no ``locator`` and its field reads take no timeout, because there is no
+    selector left to wait on.
+    """
+
+    def __init__(self, page: FakePage, node: FakeNode) -> None:
+        self._page = page
+        self._node = node
+        self.disposed = False
+        page.handles.append(self)
+
+    def query_selector_all(self, selector: str) -> list[FakeHandle]:
+        query, separator, engine = selector.partition(" >> ")
+        assert not separator or engine == VISIBLE_MATCH_ENGINE
+        if self._page.nested_failure and query == AUTHOR:
+            raise RuntimeError("private nested locator failure")
+        matched = descendants([self._node], query)
+        if separator:
+            matched = [node for node in matched if visible(node)]
+        return [type(self)(self._page, node) for node in matched]
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+    def is_visible(self) -> bool:
+        answer = visible(self._node)
+        self._page.drift("visibility")
+        return answer
+
+    def get_attribute(self, name: str) -> str | None:
+        value = self._node.attributes.get(name)
         if isinstance(value, Exception):
             raise value
         return cast(str | None, value)
 
-    def inner_text(self, *, timeout: float) -> str:
-        assert timeout > 0
-        if not self._nodes:
-            return ""
+    def inner_text(self) -> str:
         if self._page.drift_on_text:
             self._page.url = "https://www.douyin.com/live"
-        value = self._nodes[0].text
+        self._page.drift("text")
+        value = self._node.text
         if isinstance(value, Exception):
             raise value
         return cast(str, value)
@@ -117,15 +164,33 @@ class FakePage:
         self.count_value: object | None = None
         self.nested_failure = False
         self.drift_on_text = False
+        self.handles: list[FakeHandle] = []
+        self.drift_row: FakeNode | None = None
+        self.drift_trigger = ""
+        self.drifted = False
+
+    def drift(self, trigger: str) -> None:
+        """Reveal one more row at the top of the feed, once, mid-read.
+
+        A pre-rendered skeleton becoming visible shifts every later index of
+        the visible-filtered feed by one.
+        """
+        if self.drifted or self.drift_row is None or trigger != self.drift_trigger:
+            return
+        self.drifted = True
+        self.items.insert(0, self.drift_row)
 
     def locator(self, selector: str) -> FakeLocator:
+        return FakeLocator(self, lambda: self._match(selector))
+
+    def _match(self, selector: str) -> list[FakeNode]:
         matched: list[FakeNode] = []
         for candidate in selector.split(", "):
             if candidate == self.item_selector:
                 matched.extend(self.items)
             elif candidate in self.visible_selectors:
                 matched.append(FakeNode())
-        return FakeLocator(self, matched)
+        return matched
 
 
 def item(
@@ -357,6 +422,73 @@ def test_two_visible_author_nodes_in_one_card_fail_closed() -> None:
     assert observation.candidates == ()
 
 
+def drifting_row() -> FakeNode:
+    """The row that appears at the top of the feed while a candidate is read."""
+    return item(
+        target_id="creator-drift",
+        href="/user/creator-drift",
+        display_name="骨架占位",
+        public_handle="drift.one",
+    )
+
+
+def test_a_row_revealed_between_two_field_reads_cannot_mix_two_authors() -> None:
+    """One candidate's identity and display name must come from one row.
+
+    A lazy locator re-resolves ``nth(index)`` on every read, so a skeleton row
+    becoming visible at the top of the feed between the name read and the
+    identity read shifts the index onto a different card. The action would then
+    be aimed at one creator while the operator, and the rendered message, name
+    another.
+    """
+    page = FakePage(items=[item()])
+    page.drift_row = drifting_row()
+    page.drift_trigger = "text"
+
+    observation = extract(page, maximum=1)
+
+    assert page.drifted is True
+    assert observation.state is DouyinCandidateExtractionState.COMPLETED
+    candidate = observation.candidates[0]
+    assert (candidate.platform_target_id, candidate.summary.display_name) == (
+        "creator-001",
+        "创作者甲",
+    )
+    assert candidate.summary.public_handle == "creator.one"
+
+
+def test_the_row_whose_visibility_was_checked_is_the_row_that_is_read() -> None:
+    """The visibility gate is worthless if the next read lands on another row."""
+    page = FakePage(items=[item()])
+    page.drift_row = drifting_row()
+    page.drift_trigger = "visibility"
+
+    observation = extract(page, maximum=1)
+
+    assert page.drifted is True
+    assert observation.state is DouyinCandidateExtractionState.COMPLETED
+    candidate = observation.candidates[0]
+    assert (candidate.platform_target_id, candidate.summary.display_name) == (
+        "creator-001",
+        "创作者甲",
+    )
+
+
+def test_every_row_snapshot_is_released_on_success_and_on_failure() -> None:
+    """A pinned row holds a browser-side reference until it is disposed."""
+    read = FakePage(items=[item(), item(target_id="creator-002", href="/user/creator-002")])
+    assert extract(read, maximum=2).candidate_count == 2
+    assert read.handles and all(handle.disposed for handle in read.handles)
+
+    rejected = FakePage(items=[item(target_id=None, href=None)])
+    assert extract(rejected).evidence is DouyinCandidateExtractionEvidence.PRIVACY_REJECTED
+    assert rejected.handles and all(handle.disposed for handle in rejected.handles)
+
+    failed = FakePage(items=[item(display_name=RuntimeError("private name failure"))])
+    assert extract(failed).evidence is DouyinCandidateExtractionEvidence.PAGE_UNAVAILABLE
+    assert failed.handles and all(handle.disposed for handle in failed.handles)
+
+
 def test_only_hidden_rows_report_an_empty_snapshot_rather_than_a_privacy_rejection() -> None:
     """A feed that has rendered nothing visible is empty, not a page we must reject."""
     observation = extract(FakePage(items=[item(visible=False)]))
@@ -438,7 +570,7 @@ def test_page_count_failure_or_noncanonical_text_type_is_rejected() -> None:
     class InvalidFallbackPage(FakePage):
         def locator(self, selector: str) -> FakeLocator:
             if selector == RESULT_ITEM_FALLBACK:
-                return InvalidFallbackLocator(self, [])
+                return InvalidFallbackLocator(self, list)
             return super().locator(selector)
 
     assert (

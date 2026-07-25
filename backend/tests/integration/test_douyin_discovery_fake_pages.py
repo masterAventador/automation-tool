@@ -276,6 +276,8 @@ def test_fake_page_corpus_is_closed_and_contains_no_external_runtime_dependencie
         "results-normal.html",
         "results-empty.html",
         "results-infinite-scroll.html",
+        "results-lazy-rendering.html",
+        "results-two-visible-authors.html",
     }
 
     assert {path.name for path in FIXTURE_ROOT.iterdir()} == expected
