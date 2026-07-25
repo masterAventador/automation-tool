@@ -28,6 +28,12 @@ const UPSTREAM_NAMES = [
   "poc",
 ];
 
+/**
+ * Every navigation entry except 第三方软件声明. That page is the declared legal
+ * exception (`allowedLegalDisclosurePaths`) and is required to carry the
+ * upstream names; `e2e/third-party-software-notice.spec.ts` asserts it does.
+ * Do not add it here.
+ */
 const PAGES = [
   "工作台",
   "新建任务",

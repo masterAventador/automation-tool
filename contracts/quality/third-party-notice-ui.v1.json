@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1.0",
+  "id": "automation-tool.third-party-notice-ui.v1",
+  "upstreamProjects": [
+    {
+      "id": "moneyprinterturbo",
+      "name": "MoneyPrinterTurbo",
+      "repository": "harry0703/MoneyPrinterTurbo",
+      "sourceUrl": "https://github.com/harry0703/MoneyPrinterTurbo.git",
+      "version": "v1.3.2",
+      "commit": "b1588e1fdc6c5e54358f66ca2ff323e1dddf1364",
+      "license": "MIT"
+    },
+    {
+      "id": "hyperframes",
+      "name": "hyperframes",
+      "repository": "heygen-com/hyperframes",
+      "sourceUrl": "https://github.com/heygen-com/hyperframes.git",
+      "version": "v0.7.68",
+      "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+      "license": "Apache-2.0"
+    }
+  ],
+  "assetRights": {
+    "deniedByDefault": true,
+    "sharedRequiredFieldCount": 12,
+    "registeredEntryCount": 0,
+    "categories": [
+      {
+        "id": "codec_binary",
+        "requiredFieldCount": 7
+      },
+      {
+        "id": "font",
+        "requiredFieldCount": 6
+      },
+      {
+        "id": "generated",
+        "requiredFieldCount": 7
+      },
+      {
+        "id": "map_3d",
+        "requiredFieldCount": 6
+      },
+      {
+        "id": "music_sfx",
+        "requiredFieldCount": 6
+      },
+      {
+        "id": "stock_media",
+        "requiredFieldCount": 7
+      }
+    ]
+  },
+  "motionAssetRights": {
+    "codeLicense": "Apache-2.0",
+    "version": "v0.7.68",
+    "totalPartCount": 134,
+    "clearedPartCount": 7,
+    "partsNeedingWorkCount": 127,
+    "webFontFamilyCount": 18,
+    "bundledSampleAssetPartCount": 28,
+    "networkDependentPartCount": 125,
+    "dependencies": [
+      {
+        "name": "d3",
+        "license": "ISC",
+        "partCount": 5
+      },
+      {
+        "name": "draco-decoder",
+        "license": "Apache-2.0",
+        "partCount": 3
+      },
+      {
+        "name": "es-atlas",
+        "license": "unverified",
+        "partCount": 1
+      },
+      {
+        "name": "gsap",
+        "license": "GSAP Standard License (Webflow)",
+        "partCount": 125
+      },
+      {
+        "name": "three",
+        "license": "MIT",
+        "partCount": 10
+      },
+      {
+        "name": "three.js",
+        "license": "MIT",
+        "partCount": 4
+      },
+      {
+        "name": "topojson-client",
+        "license": "ISC",
+        "partCount": 5
+      },
+      {
+        "name": "us-atlas",
+        "license": "ISC",
+        "partCount": 3
+      },
+      {
+        "name": "world-atlas",
+        "license": "ISC",
+        "partCount": 1
+      }
+    ]
+  }
+}

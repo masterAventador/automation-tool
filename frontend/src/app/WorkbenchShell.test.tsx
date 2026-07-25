@@ -41,6 +41,41 @@ describe("workbench shell navigation", () => {
     expect(screen.getByRole("tab", { name: "剪辑项目" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "视频制作工作区" })).not.toBeInTheDocument();
   });
+
+  it("opens the third-party software notice from the normal left navigation", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "第三方软件声明" }));
+
+    expect(screen.getByRole("heading", { name: "第三方软件声明" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "上游开源项目" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "字体与素材权利" })).toBeVisible();
+  });
+
+  it("keeps the upstream names off every other page in the navigation", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "第三方软件声明" }));
+    expect(document.body.textContent?.toLowerCase() ?? "").toContain("moneyprinterturbo");
+
+    await user.click(screen.getByRole("menuitem", { name: "视频制作" }));
+    const rendered = document.body.textContent?.toLowerCase() ?? "";
+    for (const upstream of ["moneyprinterturbo", "hyperframes"]) {
+      expect(rendered).not.toContain(upstream);
+    }
+  });
 });
 
 describe("publishing", () => {

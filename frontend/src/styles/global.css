@@ -662,6 +662,46 @@ body {
   margin-top: 20px;
 }
 
+.legal-notice-stack {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.legal-notice-list,
+.legal-notice-tags {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.legal-notice-list > li {
+  display: grid;
+  gap: 6px;
+  padding: 16px 0;
+  border-top: 1px solid #e7ebf2;
+  justify-items: start;
+}
+
+.legal-notice-list > li:first-child {
+  border-top: 0;
+}
+
+.legal-notice-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.legal-notice-tags > li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  background: #f7f9fc;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+}
+
 .app-update-card {
   margin-top: 20px;
   border-color: #e7ebf2;

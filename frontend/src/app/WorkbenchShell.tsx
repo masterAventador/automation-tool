@@ -49,6 +49,7 @@ import {
   PublishWorkspaceGatewayError,
   type PublishWorkspaceGateway,
 } from "../features/publishing/publish-workspace-gateway";
+import { ThirdPartySoftwareNotice } from "../features/legal/third-party-software/ThirdPartySoftwareNotice";
 import { VideoEditingWorkbench } from "../features/video-editing/VideoEditingWorkbench";
 import {
   VideoEditingGatewayError,
@@ -64,6 +65,7 @@ const navigationItems = [
   { key: "publishing", label: "作品发布" },
   { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
+  { key: "legal", label: "第三方软件声明" },
 ];
 
 const shellTaskSource: TaskProjectionSource = {
@@ -370,6 +372,7 @@ export function WorkbenchShell({
   const showingVideoStudio = activePage === "video-studio";
   const showingVideoEditing = activePage === "video-editing";
   const showingPublishing = activePage === "publishing";
+  const showingLegal = activePage === "legal";
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -407,7 +410,8 @@ export function WorkbenchShell({
                 key === "video-editing" ||
                 key === "publishing" ||
                 key === "diagnostics" ||
-                key === "platform"
+                key === "platform" ||
+                key === "legal"
               ) {
                 setActivePage(key);
               }
@@ -441,6 +445,8 @@ export function WorkbenchShell({
                       ? "作品发布"
                     : showingDiagnostics
                       ? "设置与诊断"
+                    : showingLegal
+                      ? "第三方软件声明"
                     : showingTaskRun
                       ? "任务记录"
                       : "RPA 运营工作台"}
@@ -458,6 +464,8 @@ export function WorkbenchShell({
                       ? "把做好的视频发到 B站或抖音，发布前先确认账号与文案。"
                     : showingDiagnostics
                       ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
+                    : showingLegal
+                      ? "查看本产品用到的开源代码、许可证，以及字体与素材的权利结论。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "RPA 就是自动替你操作网页：从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
@@ -476,6 +484,8 @@ export function WorkbenchShell({
                     ? "发布边界"
                   : showingDiagnostics
                     ? "本地边界"
+                  : showingLegal
+                    ? "开源合规"
                   : showingTaskRun
                     ? "任务事实已连接"
                     : "工作台已就绪"}
@@ -506,6 +516,8 @@ export function WorkbenchShell({
                 gateway={publishWorkspaceGateway}
                 selectedVideo={selectedVideo}
               />
+            ) : showingLegal ? (
+              <ThirdPartySoftwareNotice />
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />
