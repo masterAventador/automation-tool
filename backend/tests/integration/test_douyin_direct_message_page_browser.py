@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any, cast
-
-import pytest
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.direct_message_page import (
@@ -14,7 +11,6 @@ from automation_tool.executor.rpa.douyin.direct_message_page import (
     DouyinDirectMessagePageState,
 )
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_direct_message_pages"
 ACTION_URL = "https://www.douyin.com/user/creator-001"
 PERMISSION_URL = "https://www.douyin.com/user/creator-002"
@@ -22,10 +18,8 @@ DRIFT_URL = "https://www.douyin.com/user/creator-003"
 
 
 def test_production_direct_message_page_uses_headless_fake_pages_and_closes(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("A7-09 system Chrome fake-page acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-a7-09-profile"
     profile.mkdir(mode=0o700)
     documents = {
@@ -37,7 +31,7 @@ def test_production_direct_message_page_uses_headless_fake_pages_and_closes(
 
     with runtime.running(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )
