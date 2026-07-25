@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <!--
+      A feed as a single-page app renders it: a pre-rendered skeleton row above
+      the real card, and template nodes inside the card. Revealing the skeleton
+      shifts every later index of the visible-filtered feed by one, which is why
+      a row has to be pinned before its fields are read.
+    -->
+    <main role="feed">
+      <article id="skeleton-row" hidden>
+        <a data-e2e="search-result-author"
+           data-user-id="creator-skeleton"
+           href="/user/creator-skeleton">
+          <span data-e2e="search-result-author-name">骨架占位</span>
+        </a>
+      </article>
+      <article id="loaded-row" data-page-copy="private-page-body">
+        <a data-e2e="search-result-author"
+           data-user-id="creator-ghost"
+           href="/user/creator-ghost"
+           hidden></a>
+        <span data-e2e="search-result-author-name" hidden>姓名占位</span>
+        <a data-e2e="search-result-author"
+           data-user-id="creator-001"
+           data-user-handle="creator.one"
+           data-avatar="/private/avatar-secret.jpg"
+           href="/user/creator-001?token=page-secret">
+          <span data-e2e="search-result-author-name">创作者甲</span>
+        </a>
+      </article>
+    </main>
+  </body>
+</html>

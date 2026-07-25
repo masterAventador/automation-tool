@@ -16,6 +16,7 @@ from automation_tool.executor.rpa.douyin.page_anchors import (
     AnchorConflict,
     any_visible,
     unique_visible,
+    unique_visible_in_snapshot,
 )
 
 SELECTORS = ('[data-e2e="captcha-container"]', 'iframe[src*="/verifycenter/captcha/"]')
@@ -51,6 +52,9 @@ def test_every_deduplicated_group_stays_css_only(group: tuple[str, ...]) -> None
     ``unique_visible`` joins its group into one selector, which only the CSS
     engine can parse. A group that mixes in ``text=`` or another engine prefix
     turns every probe of that page object into ``page_unavailable``.
+    ``unique_visible_in_snapshot`` joins the same way and then chains the
+    visible engine with ``>>``, so a group carrying its own ``>>`` would also
+    change which element the chain ends on.
 
     Playwright reaches a non-CSS engine three ways, and comma-joining breaks
     on all three: an explicit prefix, a bare XPath it auto-detects, and the
@@ -156,3 +160,48 @@ def test_anchor_uniqueness_uses_one_deduplicated_css_group() -> None:
     probe = FakePage([True])
     unique_visible(cast(Any, probe), SELECTORS)
     assert probe.requested == [", ".join(SELECTORS)]
+
+
+class FakeSnapshot:
+    """Models an ElementHandle: it resolves descendants once and is disposed."""
+
+    def __init__(self, matches: object = None) -> None:
+        self.matches: object = [] if matches is None else matches
+        self.disposed = False
+        self.queried: list[str] = []
+
+    def query_selector_all(self, selector: str) -> Any:
+        self.queried.append(selector)
+        return self.matches
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+def test_snapshot_probes_one_deduplicated_css_group_through_the_visible_engine() -> None:
+    """An ElementHandle has no `locator`, so the engine is chained with `>>`."""
+    node = FakeSnapshot()
+
+    assert unique_visible_in_snapshot(cast(Any, node), SELECTORS) is None
+    assert node.queried == [f"{', '.join(SELECTORS)} >> {VISIBLE_MATCH_ENGINE}"]
+
+
+def test_the_single_visible_snapshot_match_is_handed_to_the_caller_undisposed() -> None:
+    match = FakeSnapshot()
+
+    assert unique_visible_in_snapshot(cast(Any, FakeSnapshot([match])), SELECTORS) is match
+    assert match.disposed is False
+
+
+def test_several_visible_snapshot_matches_conflict_and_release_every_match() -> None:
+    """Picking one of two would name a different person than the page shows."""
+    matches = [FakeSnapshot(), FakeSnapshot()]
+
+    with pytest.raises(AnchorConflict):
+        unique_visible_in_snapshot(cast(Any, FakeSnapshot(matches)), SELECTORS)
+    assert all(match.disposed for match in matches)
+
+
+def test_invalid_snapshot_match_lists_are_rejected() -> None:
+    with pytest.raises(ValueError):
+        unique_visible_in_snapshot(cast(Any, FakeSnapshot(matches=(FakeSnapshot(),))), SELECTORS)

@@ -14,8 +14,10 @@ from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.rpa.douyin.page_anchors import (
     AnchorConflict,
     AnchorLocator,
+    AnchorSnapshot,
     any_visible,
     unique_visible,
+    unique_visible_in_snapshot,
     visible_matches,
 )
 from automation_tool.executor.rpa.douyin.page_version import (
@@ -70,7 +72,7 @@ _BLOCKING_DIALOG_SELECTORS = (
     '[data-e2e="modal"]',
 )
 _MAX_WAIT_MILLISECONDS = 60_000
-_CANDIDATE_FIELD_TIMEOUT_MILLISECONDS = 3_000
+_CANDIDATE_ROW_TIMEOUT_MILLISECONDS = 3_000
 _MAX_CANDIDATE_LINK_CHARACTERS = 2_048
 _DOUYIN_ORIGIN_HOST = "www.douyin.com"
 _DOUYIN_USER_PATH_PREFIX = "/user/"
@@ -227,23 +229,22 @@ class DouyinSearchPageObservation:
         )
 
 
-class _Locator(Protocol):
+class _Locator(AnchorLocator, Protocol):
     """The candidate reader's locator surface, on top of the shared anchor one."""
-
-    @property
-    def first(self) -> _Locator: ...
-
-    def count(self) -> int: ...
-
-    def locator(self, selector: str) -> _Locator: ...
-
-    def is_visible(self) -> bool: ...
 
     def nth(self, index: int) -> _Locator: ...
 
-    def get_attribute(self, name: str, *, timeout: float) -> str | None: ...
+    def element_handle(self, *, timeout: float) -> _Snapshot: ...
 
-    def inner_text(self, *, timeout: float) -> str: ...
+
+class _Snapshot(AnchorSnapshot, Protocol):
+    """One pinned candidate row or field, read without re-running a selector."""
+
+    def is_visible(self) -> bool: ...
+
+    def get_attribute(self, name: str) -> str | None: ...
+
+    def inner_text(self) -> str: ...
 
 
 class _WaitLocator(Protocol):
@@ -400,10 +401,9 @@ class DouyinSearchPage:
         candidates: list[DouyinCandidate] = []
         for index in range(min(count, maximum)):
             try:
-                candidate_item = locator.nth(index)
-                if not candidate_item.is_visible():
-                    raise DouyinSearchPagePrivacyRejected
-                candidates.append(_candidate_from_item(candidate_item, page_revision=page_revision))
+                candidates.append(
+                    _candidate_from_row(locator.nth(index), page_revision=page_revision)
+                )
             except (DouyinSearchPagePrivacyRejected, DouyinSearchPageRejected):
                 raise
             except DouyinCandidateRejected:
@@ -549,11 +549,33 @@ class DouyinSearchPage:
         )
 
 
-def _candidate_from_item(item: _Locator, *, page_revision: int) -> DouyinCandidate:
-    author = _required_nested_locator(item, _CANDIDATE_AUTHOR_SELECTORS)
-    name = _read_required_text(item, _CANDIDATE_NAME_SELECTORS).strip()
-    raw_target_id = _read_optional_attribute(author, "data-user-id")
-    raw_href = _read_optional_attribute(author, "href")
+def _candidate_from_row(row: _Locator, *, page_revision: int) -> DouyinCandidate:
+    """Pin the row before reading it, then read every fact off that one snapshot.
+
+    A locator re-runs its selector on every read, so between two reads the feed
+    can reveal or append a row and move every later index. The identity the
+    action is aimed at would then come from one card while the display name the
+    operator approves, and the message template renders, comes from another.
+    """
+
+    item = row.element_handle(timeout=_CANDIDATE_ROW_TIMEOUT_MILLISECONDS)
+    try:
+        if not item.is_visible():
+            raise DouyinSearchPagePrivacyRejected
+        return _candidate_from_item(item, page_revision=page_revision)
+    finally:
+        item.dispose()
+
+
+def _candidate_from_item(item: _Snapshot, *, page_revision: int) -> DouyinCandidate:
+    author = _required_nested_snapshot(item, _CANDIDATE_AUTHOR_SELECTORS)
+    try:
+        name = _read_required_text(item, _CANDIDATE_NAME_SELECTORS).strip()
+        raw_target_id = _read_optional_attribute(author, "data-user-id")
+        raw_href = _read_optional_attribute(author, "href")
+        raw_handle = _read_optional_attribute(author, "data-user-handle")
+    finally:
+        author.dispose()
     href_target_id = None if raw_href is None else _target_id_from_author_href(raw_href)
     if raw_target_id is None:
         if href_target_id is None:
@@ -563,7 +585,6 @@ def _candidate_from_item(item: _Locator, *, page_revision: int) -> DouyinCandida
         target_id = raw_target_id
         if href_target_id is not None and href_target_id != target_id:
             raise DouyinSearchPagePrivacyRejected
-    raw_handle = _read_optional_attribute(author, "data-user-handle")
     public_handle = None if raw_handle in {None, ""} else raw_handle
     return DouyinCandidate(
         platform_target_id=target_id,
@@ -576,32 +597,34 @@ def _candidate_from_item(item: _Locator, *, page_revision: int) -> DouyinCandida
     )
 
 
-def _required_nested_locator(item: _Locator, selectors: tuple[str, ...]) -> _Locator:
-    """Resolve the one visible field of a card; two of them name two people."""
+def _required_nested_snapshot(item: _Snapshot, selectors: tuple[str, ...]) -> _Snapshot:
+    """Resolve the one visible field of a pinned card; two of them name two people."""
 
     try:
-        locator = unique_visible(item, selectors)
+        node = unique_visible_in_snapshot(item, selectors)
     except Exception:
         raise DouyinSearchPageRejected from None
-    if locator is None:
+    if node is None:
         raise DouyinSearchPagePrivacyRejected
-    return cast(_Locator, locator)
+    return cast(_Snapshot, node)
 
 
-def _read_required_text(item: _Locator, selectors: tuple[str, ...]) -> str:
-    locator = _required_nested_locator(item, selectors)
+def _read_required_text(item: _Snapshot, selectors: tuple[str, ...]) -> str:
+    node = _required_nested_snapshot(item, selectors)
     try:
-        value = locator.inner_text(timeout=_CANDIDATE_FIELD_TIMEOUT_MILLISECONDS)
+        value = node.inner_text()
     except Exception:
         raise DouyinSearchPageRejected from None
+    finally:
+        node.dispose()
     if type(value) is not str:
         raise DouyinSearchPagePrivacyRejected
     return value
 
 
-def _read_optional_attribute(locator: _Locator, name: str) -> str | None:
+def _read_optional_attribute(node: _Snapshot, name: str) -> str | None:
     try:
-        value = locator.get_attribute(name, timeout=_CANDIDATE_FIELD_TIMEOUT_MILLISECONDS)
+        value = node.get_attribute(name)
     except Exception:
         raise DouyinSearchPageRejected from None
     if value is not None and type(value) is not str:
