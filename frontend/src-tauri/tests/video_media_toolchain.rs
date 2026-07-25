@@ -1,6 +1,7 @@
 use automation_tool_desktop_lib::video_media_toolchain::VideoMediaToolchain;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -185,4 +186,255 @@ fn source_is_not_exposed_as_a_webview_command_or_system_path_fallback() {
     assert!(!source.contains("std::env::var(\"PATH\")"));
     assert!(!source.contains("which::"));
     assert!(!source.contains("download"));
+}
+
+/// A stand-in Worker that records the environment its own process received
+/// before it answers the real bootstrap handshake.
+///
+/// Recording it from inside the spawned process is the only evidence that
+/// matters here: the packaged FFmpeg was resolved and verified for months
+/// while no Worker was ever told about it, so an assertion on the launch
+/// configuration — or on the resolver being called — would have stayed green
+/// throughout. Both upstream video engines fall back to the user's own FFmpeg
+/// when their variable is absent, and only the child's environment can tell
+/// the two situations apart.
+const ENVIRONMENT_PROBE_WORKER: &str = r#"#!/usr/bin/python3
+import base64, hashlib, hmac, json, os, socket, sys, threading
+
+with open(__MARKER_PATH__, "w") as handle:
+    json.dump(dict(os.environ), handle)
+
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["localSessionToken"])
+kind = bootstrap["workerKind"]
+protocol = bootstrap["protocolVersion"]
+version = "__WORKER_VERSION__"
+
+def proof(event, detail):
+    message = b"automation-tool.video-worker-event.v1\0" + b"\0".join(
+        value.encode() for value in [event, kind, protocol, version, detail]
+    )
+    digest = hmac.digest(key, message, hashlib.sha256)
+    return "atvwp1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+server = socket.socket()
+server.bind(("127.0.0.1", 0))
+server.listen()
+port = server.getsockname()[1]
+
+def serve():
+    while True:
+        try:
+            connection, _ = server.accept()
+        except OSError:
+            return
+        request = connection.recv(8192).decode(errors="replace")
+        authorized = "Authorization: Bearer " + bootstrap["localSessionToken"] in request
+        if authorized and request.startswith("GET /health HTTP/1.1"):
+            body = json.dumps({
+                "authenticationProof": proof("worker.health", str(port)),
+                "event": "worker.health",
+                "protocolVersion": protocol,
+                "workerKind": kind,
+                "workerVersion": version,
+                "port": port,
+            }, separators=(",", ":"))
+            response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body.encode())) + "\r\nConnection: close\r\n\r\n" + body
+        else:
+            response = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        connection.sendall(response.encode())
+        connection.close()
+
+threading.Thread(target=serve, daemon=True).start()
+print(json.dumps({
+    "authenticationProof": proof("worker.ready", str(port)),
+    "event": "worker.ready",
+    "protocolVersion": protocol,
+    "workerKind": kind,
+    "workerVersion": version,
+    "port": port,
+}, separators=(",", ":")), flush=True)
+
+for line in sys.stdin:
+    pass
+"#;
+
+/// The version `material_video_studio` expects from the smart-material Worker.
+#[cfg(unix)]
+const MATERIAL_WORKER_VERSION: &str = "1.3.2";
+
+#[cfg(unix)]
+fn write_environment_probe_worker(path: &Path, version: &str, marker: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    // An absolute interpreter is required: the brand-motion Worker is launched
+    // with a cleared environment, so `/usr/bin/env` would have no PATH to
+    // search.
+    let source = ENVIRONMENT_PROBE_WORKER
+        .replace(
+            "__MARKER_PATH__",
+            &serde_json::to_string(&marker.to_string_lossy()).unwrap(),
+        )
+        .replace("__WORKER_VERSION__", version);
+    fs::write(path, source).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[cfg(unix)]
+fn recorded_environment(marker: &Path) -> BTreeMap<String, String> {
+    serde_json::from_slice(&fs::read(marker).expect("the Worker recorded its environment")).unwrap()
+}
+
+#[cfg(unix)]
+fn probe_directory(temp: &TempDirectory, name: &str) -> PathBuf {
+    let path = temp.0.join(name);
+    fs::create_dir_all(&path).unwrap();
+    fs::canonicalize(path).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn the_smart_material_worker_process_receives_the_packaged_ffmpeg() {
+    use automation_tool_desktop_lib::local_video_orchestrator::{
+        LocalVideoOrchestrator, VideoWorkerKind, VideoWorkerState,
+    };
+    use automation_tool_desktop_lib::material_video_studio;
+    use std::time::Duration;
+
+    let temp = TempDirectory::new("material-environment");
+    write_package(&temp.0, "macos-arm64");
+    let toolchain = VideoMediaToolchain::load_for_target(&temp.0, "macos-arm64").unwrap();
+    let asset_root = probe_directory(&temp, "material-assets");
+    let marker = asset_root.join("environment.json");
+    let executable = probe_directory(&temp, "material-worker").join("worker");
+    write_environment_probe_worker(&executable, MATERIAL_WORKER_VERSION, &marker);
+
+    let launch = material_video_studio::material_worker_launch(executable, asset_root, &toolchain)
+        .expect("the studio builds its Worker launch from the packaged toolchain");
+    let orchestrator = LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
+        .expect("orchestrator");
+    let status = orchestrator.start(launch).expect("start the probe Worker");
+    assert_eq!(status.state(), VideoWorkerState::Running);
+    let environment = recorded_environment(&marker);
+    orchestrator.stop(VideoWorkerKind::Python).expect("stop");
+
+    assert_eq!(
+        environment.get("IMAGEIO_FFMPEG_EXE").map(String::as_str),
+        Some(toolchain.ffmpeg_path().to_string_lossy().as_ref()),
+        "the smart-material Worker resolves FFmpeg from this variable first and \
+         falls back to the user's own installation when it is missing"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_brand_motion_worker_process_receives_the_packaged_pair_and_nothing_else() {
+    use automation_tool_desktop_lib::local_video_orchestrator::{
+        LocalVideoOrchestrator, VideoWorkerKind, VideoWorkerState,
+    };
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    let temp = TempDirectory::new("motion-environment");
+    write_package(&temp.0, "macos-arm64");
+    let toolchain = VideoMediaToolchain::load_for_target(&temp.0, "macos-arm64").unwrap();
+    let asset_root = probe_directory(&temp, "motion-assets");
+    let marker = asset_root.join("environment.json");
+    let package = probe_directory(&temp, "motion-package");
+    fs::create_dir_all(package.join("runtime")).unwrap();
+    fs::create_dir_all(package.join("app")).unwrap();
+    fs::write(package.join("app/worker.mjs"), b"// probe\n").unwrap();
+    // The Worker's Node runtime is replaced by the probe; the orchestrator
+    // launches whatever the packaged layout names, so the handshake is real.
+    write_environment_probe_worker(&package.join("runtime/node"), "0.7.68", &marker);
+    let browser = temp.0.join("chromium");
+    fs::write(&browser, b"probe browser\n").unwrap();
+    fs::set_permissions(&browser, fs::Permissions::from_mode(0o700)).unwrap();
+    let browser = fs::canonicalize(browser).unwrap();
+
+    let launch = automation_tool_desktop_lib::motion_worker_launch(
+        package,
+        asset_root,
+        browser,
+        143,
+        toolchain.brand_motion_environment(),
+    )
+    .expect("the studio builds its Worker launch from the packaged toolchain");
+    let orchestrator = LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
+        .expect("orchestrator");
+    let status = orchestrator.start(launch).expect("start the probe Worker");
+    assert_eq!(status.state(), VideoWorkerState::Running);
+    let environment = recorded_environment(&marker);
+    orchestrator.stop(VideoWorkerKind::Node).expect("stop");
+
+    assert_eq!(
+        environment.get("HYPERFRAMES_FFMPEG_PATH").map(String::as_str),
+        Some(toolchain.ffmpeg_path().to_string_lossy().as_ref()),
+    );
+    assert_eq!(
+        environment
+            .get("HYPERFRAMES_FFPROBE_PATH")
+            .map(String::as_str),
+        Some(toolchain.ffprobe_path().to_string_lossy().as_ref()),
+    );
+    // The brand-motion Worker runs with a cleared environment. Injection must
+    // happen after that clearing, and must not smuggle the host's search path
+    // back in: with a PATH present the upstream engine would look there first
+    // whenever a variable is ever dropped.
+    assert!(!environment.contains_key("PATH"), "{environment:?}");
+}
+
+/// Walk a source file for one item's body, so a wiring assertion cannot be
+/// satisfied by an unrelated occurrence elsewhere in the file.
+fn function_body(source: &str, header: &str) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with(header))
+        .unwrap_or_else(|| panic!("{header} must exist"));
+    let mut depth = 0i32;
+    let mut opened = false;
+    let mut body = Vec::new();
+    for line in &lines[start..] {
+        body.push(*line);
+        depth += line.matches('{').count() as i32;
+        depth -= line.matches('}').count() as i32;
+        opened |= line.contains('{');
+        if opened && depth <= 0 {
+            break;
+        }
+    }
+    body.join("\n")
+}
+
+#[test]
+fn every_video_worker_launch_carries_the_packaged_environment_from_its_entry_point() {
+    let material = include_str!("../src/material_video_studio.rs");
+    let motion = include_str!("../src/lib.rs");
+    let orchestrator = include_str!("../src/local_video_orchestrator.rs");
+    for (source, item, required) in [
+        // The defect this pins: the resolver existed and was correct, but no
+        // entry point called it, so the packaged binary was never used.
+        (material, "pub(crate) fn open(", "material_worker_launch("),
+        (
+            material,
+            "pub fn material_worker_launch(",
+            "intelligent_material_environment()",
+        ),
+        (motion, "fn submit_motion_video_draft(", "motion_worker_launch("),
+        (
+            motion,
+            "fn submit_motion_video_draft(",
+            "brand_motion_environment()",
+        ),
+        (motion, "pub fn motion_worker_launch(", "with_environment("),
+        // ... and the stored map has to reach the process itself.
+        (orchestrator, "fn spawn_worker(", "command.env("),
+    ] {
+        assert!(
+            function_body(source, item).contains(required),
+            "{item} no longer contains {required}, so a video Worker can start \
+             without being told where the packaged FFmpeg is"
+        );
+    }
 }

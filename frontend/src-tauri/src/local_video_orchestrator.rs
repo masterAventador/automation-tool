@@ -30,6 +30,24 @@ const MAX_VERSION_BYTES: usize = 128;
 const MAX_PATH_BYTES: usize = 4096;
 const MAX_RESTARTS: u8 = 8;
 const MAX_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_ENVIRONMENT_ENTRIES: usize = 8;
+const MAX_ENVIRONMENT_NAME_BYTES: usize = 64;
+/// Names that decide which program or library a process loads. Handing a
+/// Worker one of them would relocate its runtime instead of naming a packaged
+/// dependency, so they are refused however the caller obtained the path.
+const FORBIDDEN_ENVIRONMENT_NAMES: &[&str] = &[
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "NODE_OPTIONS",
+    "PATH",
+    "PATHEXT",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+];
 const EVENT_PROOF_PREFIX: &str = "atvwp1.";
 const COMMAND_PROOF_PREFIX: &str = "atvwc1.";
 const EVENT_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.video-worker-event.v1\0";
@@ -157,6 +175,7 @@ pub struct VideoWorkerLaunch {
     executable_path: PathBuf,
     arguments: Vec<OsString>,
     isolated_environment: bool,
+    environment: BTreeMap<&'static str, PathBuf>,
     asset_root: PathBuf,
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
@@ -375,6 +394,7 @@ impl VideoWorkerLaunch {
             executable_path,
             arguments: Vec::new(),
             isolated_environment: false,
+            environment: BTreeMap::new(),
             asset_root,
             expected_version,
             restart_policy,
@@ -407,6 +427,35 @@ impl VideoWorkerLaunch {
         launch.arguments.push(entrypoint.into_os_string());
         launch.isolated_environment = true;
         Ok(launch)
+    }
+
+    /// Tell the Worker where a packaged native dependency lives.
+    ///
+    /// Both video engines resolve FFmpeg through an environment variable
+    /// first and search the user's machine when it is absent, so a Worker
+    /// started without this runs whatever build that machine happens to carry.
+    /// Every value is re-validated as an executable file belonging to the
+    /// caller's verified package: a launch is refused rather than started with
+    /// a variable that points at nothing.
+    pub fn with_environment(
+        mut self,
+        environment: BTreeMap<&'static str, &Path>,
+    ) -> Result<Self, VideoWorkerError> {
+        if environment.is_empty()
+            || self.environment.len().saturating_add(environment.len()) > MAX_ENVIRONMENT_ENTRIES
+        {
+            return Err(configuration_invalid());
+        }
+        for (name, value) in environment {
+            if !valid_environment_name(name) {
+                return Err(configuration_invalid());
+            }
+            validate_executable_path(value)?;
+            if self.environment.insert(name, value.to_path_buf()).is_some() {
+                return Err(configuration_invalid());
+            }
+        }
+        Ok(self)
     }
 
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
@@ -1201,6 +1250,11 @@ fn spawn_worker(
             command.env(name, &launch.asset_root);
         }
     }
+    // After any clearing, so an isolated Worker keeps exactly the packaged
+    // dependencies the App hands it and nothing the user's machine supplied.
+    for (name, value) in &launch.environment {
+        command.env(name, value);
+    }
     command
         .args(&launch.arguments)
         .stdin(Stdio::piped())
@@ -1653,6 +1707,15 @@ fn validate_directory_path(path: &Path) -> Result<(), VideoWorkerError> {
         return Err(configuration_invalid());
     }
     Ok(())
+}
+
+fn valid_environment_name(value: &str) -> bool {
+    (1..=MAX_ENVIRONMENT_NAME_BYTES).contains(&value.len())
+        && value.starts_with(|character: char| character.is_ascii_uppercase())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+        && !FORBIDDEN_ENVIRONMENT_NAMES.contains(&value)
 }
 
 fn valid_model_api_key(value: &str) -> bool {

@@ -8,6 +8,7 @@ use crate::model_service_settings::ProductionModelServiceSettings;
 use crate::video_job_workspace::{
     VideoJobWorkspaceStore, VideoWorkspaceDisposition, VideoWorkspaceError,
 };
+use crate::video_media_toolchain::VideoMediaToolchain;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -134,23 +135,22 @@ pub(crate) fn open(
         .material_video_script_model()
         .map_err(|_| configuration_required())?;
     let model_id = script_model.model_id().to_owned();
+    // Both packaged resources are resolved before a workspace exists, so a
+    // tampered or missing package refuses the studio instead of leaving an
+    // orphan job directory behind.
+    let executable = worker_executable(app)?;
+    let toolchain = media_toolchain(app)?;
     let workspace = workspaces.create_new().map_err(map_workspace_error)?;
     let asset_root = workspaces
         .worker_asset_directory(&workspace)
         .map_err(map_workspace_error)?;
-    let executable = worker_executable(app)?;
-    let policy = VideoWorkerRestartPolicy::new(1, Duration::from_millis(250))
-        .map_err(|_| process_unavailable())?;
-    let launch = VideoWorkerLaunch::new(
-        VideoWorkerKind::Python,
-        executable,
-        asset_root,
-        WORKER_VERSION.to_owned(),
-        policy,
-    )
-    .map_err(|_| process_unavailable())?
-    .with_script_model(script_model)
-    .with_web_ui();
+    let launch = match material_worker_launch(executable, asset_root, &toolchain) {
+        Ok(launch) => launch.with_script_model(script_model).with_web_ui(),
+        Err(error) => {
+            cleanup_workspace(workspaces, &workspace);
+            return Err(error);
+        }
+    };
     if set_active_workspace(Some(workspace.job_id())).is_err() {
         cleanup_workspace(workspaces, &workspace);
         return Err(job_unavailable());
@@ -522,6 +522,36 @@ fn worker_executable(app: &tauri::AppHandle) -> Result<PathBuf, MaterialVideoStu
         .resource_dir()
         .map(|root| root.join("material-video-worker/package").join(name))
         .map_err(|_| process_unavailable())
+}
+
+/// Verify the packaged FFmpeg pair that ships beside the Worker.
+fn media_toolchain(app: &tauri::AppHandle) -> Result<VideoMediaToolchain, MaterialVideoStudioError> {
+    let resource_directory = app.path().resource_dir().map_err(|_| process_unavailable())?;
+    VideoMediaToolchain::load(&resource_directory).map_err(|_| process_unavailable())
+}
+
+/// Build the one launch configuration the smart-material studio starts.
+///
+/// The packaged FFmpeg is passed here rather than left to the Worker: its
+/// upstream resolver takes `IMAGEIO_FFMPEG_EXE` first and otherwise searches
+/// the user's `PATH`, so a Worker started without this variable encodes with
+/// whatever FFmpeg that machine happens to have installed.
+pub fn material_worker_launch(
+    executable: PathBuf,
+    asset_root: PathBuf,
+    toolchain: &VideoMediaToolchain,
+) -> Result<VideoWorkerLaunch, MaterialVideoStudioError> {
+    let policy = VideoWorkerRestartPolicy::new(1, Duration::from_millis(250))
+        .map_err(|_| process_unavailable())?;
+    VideoWorkerLaunch::new(
+        VideoWorkerKind::Python,
+        executable,
+        asset_root,
+        WORKER_VERSION.to_owned(),
+        policy,
+    )
+    .and_then(|launch| launch.with_environment(toolchain.intelligent_material_environment()))
+    .map_err(|_| process_unavailable())
 }
 
 fn cleanup_workspace(

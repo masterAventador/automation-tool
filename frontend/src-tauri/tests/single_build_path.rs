@@ -50,6 +50,8 @@ const RUNTIME_DEPENDENCY_RESOLVERS: &[(&str, &str)] = &[
     ("lib.rs", "motion_runtime_paths"),
     ("lib.rs", "motion_worker_launch"),
     ("material_video_studio.rs", "worker_executable"),
+    ("material_video_studio.rs", "media_toolchain"),
+    ("material_video_studio.rs", "material_worker_launch"),
 ];
 
 /// Production functions allowed to carry an inline `cfg(feature = "*-e2e")`

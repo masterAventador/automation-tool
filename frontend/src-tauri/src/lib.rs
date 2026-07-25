@@ -332,7 +332,7 @@ struct MotionRuntimePaths {
     worker_package: std::path::PathBuf,
     browser: std::path::PathBuf,
     chromium_major: u32,
-    ffmpeg: std::path::PathBuf,
+    toolchain: video_media_toolchain::VideoMediaToolchain,
 }
 
 /// Resolve the packaged brand-motion runtime.
@@ -370,15 +370,22 @@ fn motion_runtime_paths(
             .join(PACKAGED_WORKER_SUBDIRECTORY),
         browser,
         chromium_major,
-        ffmpeg: toolchain.ffmpeg_path().to_path_buf(),
+        toolchain,
     })
 }
 
-fn motion_worker_launch(
+/// Build the one launch configuration the brand-motion studio starts.
+///
+/// The Worker runs with a cleared environment, so it is also told where the
+/// packaged FFmpeg pair lives: its upstream engine otherwise falls back to
+/// `which`, a manual `PATH` scan and finally the well-known Homebrew and
+/// `/usr/bin` locations, which would encode with the user's own build.
+pub fn motion_worker_launch(
     package: std::path::PathBuf,
     asset_root: std::path::PathBuf,
     browser: std::path::PathBuf,
     chromium_major: u32,
+    media_environment: std::collections::BTreeMap<&'static str, &std::path::Path>,
 ) -> Result<local_video_orchestrator::VideoWorkerLaunch, motion_video_studio::MotionVideoStudioError>
 {
     let policy =
@@ -386,6 +393,7 @@ fn motion_worker_launch(
             .map_err(|_| motion_video_studio::render_unavailable())?;
     let launch =
         local_video_orchestrator::VideoWorkerLaunch::bundled_node(&package, asset_root, policy)
+            .and_then(|launch| launch.with_environment(media_environment))
             .map_err(|_| motion_video_studio::render_unavailable())?;
     let browser = local_video_orchestrator::VideoWorkerRenderBrowserConfiguration::new(
         browser,
@@ -412,10 +420,11 @@ fn submit_motion_video_draft(
     let (asset_root, _, _) =
         motion_video_studio::workspace_render_paths(&workspaces, render_job_id)?;
     let launch = match motion_worker_launch(
-        runtime.worker_package,
+        runtime.worker_package.clone(),
         asset_root,
-        runtime.browser,
+        runtime.browser.clone(),
         runtime.chromium_major,
+        runtime.toolchain.brand_motion_environment(),
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -445,6 +454,7 @@ fn submit_motion_video_draft(
     let initial = motion_video_studio::snapshot(&workspaces, render_job_id)?;
     let frame_count = prepared.frame_count();
     let frames_per_second = prepared.frames_per_second();
+    let ffmpeg = runtime.toolchain.ffmpeg_path().to_path_buf();
     std::thread::spawn(move || {
         run_motion_render_job(
             app,
@@ -452,7 +462,7 @@ fn submit_motion_video_draft(
             allowed_assets,
             frame_count,
             frames_per_second,
-            runtime.ffmpeg,
+            ffmpeg,
         );
     });
     Ok(initial)

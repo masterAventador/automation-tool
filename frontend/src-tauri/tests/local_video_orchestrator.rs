@@ -922,6 +922,46 @@ fn starts_python_and_node_workers_on_distinct_authenticated_loopback_ports() {
 }
 
 #[test]
+fn rejects_worker_environment_values_that_are_not_packaged_executables() {
+    use std::collections::BTreeMap;
+
+    let fixture = TemporaryWorker::new(HEALTHY_WORKER);
+    let ffmpeg = fixture.root.join("ffmpeg");
+    fs::write(&ffmpeg, b"packaged ffmpeg\n").expect("packaged binary");
+    fs::set_permissions(&ffmpeg, fs::Permissions::from_mode(0o700)).expect("binary permissions");
+    let missing = fixture.root.join("absent");
+    let unreadable = fixture.root.join("notes.txt");
+    fs::write(&unreadable, b"not a program\n").expect("plain file");
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o600)).expect("file permissions");
+
+    for (name, value) in [
+        // A variable pointing at nothing is worse than none at all: the
+        // upstream engines hand it to a process spawn instead of resolving it,
+        // so the failure would surface far from its cause.
+        ("PACKAGED_FFMPEG_EXE", missing.as_path()),
+        ("PACKAGED_FFMPEG_EXE", unreadable.as_path()),
+        ("PACKAGED_FFMPEG_EXE", Path::new("ffmpeg")),
+        // Names that decide which program or library a process loads are not
+        // dependency paths and may never be injected.
+        ("PATH", ffmpeg.as_path()),
+        ("LD_PRELOAD", ffmpeg.as_path()),
+        ("NODE_OPTIONS", ffmpeg.as_path()),
+    ] {
+        let rejected = fixture
+            .launch(VideoWorkerKind::Python)
+            .with_environment(BTreeMap::from([(name, value)]))
+            .err()
+            .unwrap_or_else(|| panic!("{name} must be rejected"));
+        assert_eq!(rejected.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+    }
+
+    fixture
+        .launch(VideoWorkerKind::Python)
+        .with_environment(BTreeMap::from([("PACKAGED_FFMPEG_EXE", ffmpeg.as_path())]))
+        .expect("a verified packaged executable is accepted");
+}
+
+#[test]
 fn rejects_relative_symlink_duplicate_and_version_mismatch_launches() {
     let fixture = TemporaryWorker::new(HEALTHY_WORKER);
     let relative = VideoWorkerLaunch::new(
