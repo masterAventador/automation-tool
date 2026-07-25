@@ -13,37 +13,111 @@ import { describe, expect, it } from "vitest";
  * 必然显示"暂时读不到发布状态"。
  *
  * 单元测试和 UI Harness 都发现不了这一层——它们各自注入自己的替身，替身当然是通的。
- * 所以这里直接读 `main.tsx` 的源码，核对每个已交付的 Tauri 网关都被装配进去了。
- * 这是个粗糙的判据，但它管的正是"两边各自都对、接缝上漏了"这类问题。
+ * 所以这里直接读 `main.tsx` 的源码，核对装配。
+ *
+ * 第一版只检查「有没有 new 出来」，随后的全量装配审计指出它三个洞：漏了六个已构造的
+ * 网关、只有 publish 一项检查了「传下去」、以及最要命的——**完全不检查传下去的是不是
+ * 真网关**。VE-01～VE-08 八项标记已完成，`videoEditingGateway` 传的却是
+ * `createLocalVideoEditingGateway(window.sessionStorage)`，一个关掉 App 就清空、提交
+ * 永远失败的浏览器草稿壳，而这个测试当时全绿。
+ *
+ * 所以现在的判据是：**每个网关 prop 传下去的那个变量，必须绑定到 `new Tauri…()`**。
  */
 
 // jsdom 环境下 `import.meta.url` 不是 file: scheme，只能从 vitest 的工作目录解析。
 const MAIN = resolve("src/main.tsx");
+const source = readFileSync(MAIN, "utf8");
 
-/** 已交付、且工作台确实需要的 Tauri 网关。 */
-const REQUIRED_GATEWAYS = [
-  "TauriTaskCreationGateway",
-  "TauriTaskRunControlGateway",
-  "TauriTaskDiscoveryGateway",
-  "TauriWorkbenchGateway",
-  "TauriPlatformSessionGateway",
-  "TauriStartupEnvironmentGateway",
-  "TauriAppUpdateGateway",
-  "TauriModelServiceGateway",
-  "TauriVideoEditingServiceGateway",
-  "TauriMaterialVideoStudioGateway",
-  "TauriPublishWorkspaceGateway",
+/** `const x = new TauriFoo(...)` → x ↦ TauriFoo */
+function tauriBindings(text: string): ReadonlyMap<string, string> {
+  const bindings = new Map<string, string>();
+  const pattern = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[^;]*?\b)?new\s+(Tauri[\w$]*)\s*\(/gu;
+  for (const match of text.matchAll(pattern)) {
+    bindings.set(match[1]!, match[2]!);
+  }
+  return bindings;
+}
+
+/**
+ * JSX 里传下去的装配位 → 它绑定的变量名。
+ *
+ * 三种写法都算传下去了：`foo={bar}`、简写 `{foo}`（出现在条件展开里），以及
+ * `startupCheck={startupCheck}` 这种不以 Gateway 结尾的。所以这里不按名字后缀过滤，
+ * 由调用方决定关心哪些位置。
+ */
+function wiredProps(text: string): ReadonlyMap<string, string> {
+  const wired = new Map<string, string>();
+  const body = text.slice(text.indexOf("createRoot("));
+  for (const match of body.matchAll(/\b([A-Za-z_$][\w$]*)=\{([A-Za-z_$][\w$]*)\}/gu)) {
+    wired.set(match[1]!, match[2]!);
+  }
+  // `{...(x === undefined ? {} : { x })}`：条件装配的简写形式，同样是传下去了。
+  for (const match of body.matchAll(/\{\s*([A-Za-z_$][\w$]*)\s*\}\s*\)\s*\}/gu)) {
+    wired.set(match[1]!, match[1]!);
+  }
+  return wired;
+}
+
+const BINDINGS = tauriBindings(source);
+const WIRED = wiredProps(source);
+
+/**
+ * 必须由真实 Tauri 网关驱动的装配位。
+ *
+ * 这张表不是手抄的清单——每加一个 Tauri 网关就该加一行，遗漏会被下面
+ * 「每个 new 出来的网关都得用上」那条兜住。
+ */
+const REQUIRED_TAURI_PROPS = [
+  "taskCreationGateway",
+  "taskRunControlGateway",
+  "taskDiscoveryGateway",
+  "workbenchGateway",
+  "platformSessionGateway",
+  "appUpdateGateway",
+  "modelServiceGateway",
+  "videoEditingServiceGateway",
+  "materialVideoStudioGateway",
+  "publishWorkspaceGateway",
 ] as const;
 
-describe("production wiring", () => {
-  const source = readFileSync(MAIN, "utf8");
+function requireRealTauriGateway(prop: string): void {
+  const binding = WIRED.get(prop);
+  expect(binding, `${prop} is never handed to the workbench`).toBeDefined();
+  // 光传下去不够：传的必须是 `new Tauri…()` 的产物，而不是本地壳子或占位实现。
+  expect(
+    BINDINGS.get(binding!),
+    `${prop} is wired to \`${binding}\`, which is not constructed from a Tauri gateway`,
+  ).toMatch(/^Tauri/u);
+}
 
-  it.each(REQUIRED_GATEWAYS)("%s is constructed in main.tsx", (gateway) => {
-    expect(source).toContain(`new ${gateway}(`);
+describe("production wiring", () => {
+  it.each(REQUIRED_TAURI_PROPS)("%s is handed a real Tauri gateway", (prop) => {
+    requireRealTauriGateway(prop);
   });
 
-  it("hands the publish workspace gateway to the workbench", () => {
-    // 光构造出来不算数——不传下去，工作台照样回落到会抛错的占位网关。
-    expect(source).toMatch(/publishWorkspaceGateway=\{publishWorkspaceGateway\}/);
+  /**
+   * 已知未接线，等 [T4] 独立剪辑装配。
+   *
+   * VE-01～VE-08 八项全部标记已完成——阿里云的凭据、媒资暂存、Timeline 编译、任务提交、
+   * 回调对账、成片导入都实现了，还用真实凭据验过。但 `platform/tauri/` 下没有剪辑工作台
+   * 网关，生产 `invoke_handler` 里没有剪辑命令，FastAPI 也没有剪辑路由，两个
+   * repository 连 `database/__init__.py` 都没 re-export。`main.tsx` 传的是
+   * `createLocalVideoEditingGateway(window.sessionStorage)`：关掉 App 就清空，提交永远
+   * 返回不可用。
+   *
+   * 用 `it.fails` 而不是删掉这一条，是为了让现状留在测试里而不是留在备忘录里。装配补上
+   * 之后这条会因为「预期失败却通过了」而报错，那时把它移回上面的清单即可。
+   */
+  it.fails("videoEditingGateway is handed a real Tauri gateway", () => {
+    requireRealTauriGateway("videoEditingGateway");
+  });
+
+  it("hands every constructed Tauri gateway to something", () => {
+    // 反方向：构造了却没人用，等于没接。PB-07 是连构造都没有，这条防的是它的近亲。
+    const consumed = new Set(WIRED.values());
+    const orphans = [...BINDINGS.entries()]
+      .filter(([name]) => !consumed.has(name))
+      .map(([name, type]) => `${name} (${type})`);
+    expect(orphans, "constructed but never wired").toEqual([]);
   });
 });
