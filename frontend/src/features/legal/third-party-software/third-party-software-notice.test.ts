@@ -4,10 +4,14 @@ import projection from "../../../../../contracts/quality/third-party-notice-ui.v
 import {
   ASSET_CATEGORY_LABELS,
   ASSET_RIGHTS_NOTICE,
+  DISTRIBUTED_COMPONENT_NOTICES,
+  DISTRIBUTED_COMPONENT_PRESENTATION,
+  LICENSE_TEXTS,
   MOTION_ASSET_RIGHTS_NOTICE,
   UPSTREAM_PROJECT_NOTICES,
   UPSTREAM_PROJECT_PRESENTATION,
   buildAssetRightsNotice,
+  buildDistributedComponentNotices,
   buildMotionAssetRightsNotice,
   buildUpstreamProjectNotices,
 } from "./third-party-software-notice";
@@ -20,6 +24,22 @@ const PROJECT = {
   version: "v1.3.2",
   commit: "b1588e1fdc6c5e54358f66ca2ff323e1dddf1364",
   license: "MIT",
+  copyright: "Copyright (c) 2024 Harry",
+  licenseTextId: "mit",
+  packagedNoticePath: "material-video-worker/package/_internal/upstream/LICENSE",
+};
+
+const COMPONENT = {
+  id: "ffmpeg",
+  name: "FFmpeg",
+  version: "8.1.2",
+  license: "GPL-3.0-or-later",
+  copyleft: true,
+  licenseTextId: "gpl-3.0",
+  packagedNoticePath: "media-toolchain/COPYING.GPLv3",
+  noticeChannelId: null,
+  packagedSourcePaths: ["media-toolchain/source/ffmpeg-8.1.2.tar.xz"],
+  upstreamSourceUrl: "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
 };
 
 const MOTION = {
@@ -81,6 +101,7 @@ describe("upstream project notices", () => {
       buildUpstreamProjectNotices(
         [{ ...PROJECT, version: "" }],
         UPSTREAM_PROJECT_PRESENTATION,
+        LICENSE_TEXTS,
       ),
     ).toThrow(/version/u);
 
@@ -88,6 +109,7 @@ describe("upstream project notices", () => {
       buildUpstreamProjectNotices(
         [{ ...PROJECT, license: "" }],
         UPSTREAM_PROJECT_PRESENTATION,
+        LICENSE_TEXTS,
       ),
     ).toThrow(/licence/u);
 
@@ -95,6 +117,7 @@ describe("upstream project notices", () => {
       buildUpstreamProjectNotices(
         [{ ...PROJECT, name: "", repository: "" }],
         UPSTREAM_PROJECT_PRESENTATION,
+        LICENSE_TEXTS,
       ),
     ).toThrow(/name/u);
   });
@@ -104,14 +127,176 @@ describe("upstream project notices", () => {
       buildUpstreamProjectNotices(
         [{ ...PROJECT, id: "unknown-upstream" }],
         UPSTREAM_PROJECT_PRESENTATION,
+        LICENSE_TEXTS,
       ),
     ).toThrow(/explanation/u);
   });
 
   it("refuses an empty disclosure outright", () => {
-    expect(() => buildUpstreamProjectNotices([], UPSTREAM_PROJECT_PRESENTATION)).toThrow(
+    expect(() =>
+      buildUpstreamProjectNotices([], UPSTREAM_PROJECT_PRESENTATION, LICENSE_TEXTS),
+    ).toThrow(
       /no upstream project/u,
     );
+  });
+});
+
+describe("shipped licence texts", () => {
+  it("carries the verbatim text of every licence the projection binds", () => {
+    for (const text of projection.licenseTexts) {
+      const shipped = LICENSE_TEXTS[text.id];
+      expect(shipped, `no shipped text for ${text.id}`).toBeDefined();
+      expect(new TextEncoder().encode(shipped!).length).toBe(text.bytes);
+    }
+    expect(Object.keys(LICENSE_TEXTS).sort()).toEqual(
+      projection.licenseTexts.map((text) => text.id).sort(),
+    );
+  });
+
+  it("carries the whole GPL-3.0, not a summary of it", () => {
+    // A user offered "GPL-3.0" and nothing else has not been given the licence.
+    const gpl = LICENSE_TEXTS["gpl-3.0"]!;
+    expect(gpl).toContain("GNU GENERAL PUBLIC LICENSE");
+    expect(gpl).toContain("Version 3, 29 June 2007");
+    expect(gpl).toContain("Corresponding Source");
+    expect(gpl).toContain("END OF TERMS AND CONDITIONS");
+    expect(gpl.length).toBeGreaterThan(30000);
+  });
+
+  it("carries the upstream copyright line inside the MIT text it publishes", () => {
+    const mit = LICENSE_TEXTS["mit"]!;
+    for (const project of UPSTREAM_PROJECT_NOTICES) {
+      if (project.license !== "MIT") {
+        continue;
+      }
+      expect(mit).toContain(project.copyright);
+    }
+    expect(LICENSE_TEXTS["apache-2.0"]).toContain("Apache License");
+  });
+});
+
+describe("upstream project licence obligations", () => {
+  it("reproduces the copyright line and the licence text for every project", () => {
+    for (const notice of UPSTREAM_PROJECT_NOTICES) {
+      expect(notice.copyright).toMatch(/^Copyright/u);
+      expect(notice.licenseText).toBeTruthy();
+      expect(notice.licenseText).toBe(LICENSE_TEXTS[notice.licenseTextId]);
+    }
+  });
+
+  it("refuses a project whose copyright line was dropped", () => {
+    expect(() =>
+      buildUpstreamProjectNotices(
+        [{ ...PROJECT, copyright: "" }],
+        UPSTREAM_PROJECT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/copyright/u);
+  });
+
+  it("refuses a project whose licence text the App does not ship", () => {
+    expect(() =>
+      buildUpstreamProjectNotices(
+        [{ ...PROJECT, licenseTextId: "bsd-2-clause" }],
+        UPSTREAM_PROJECT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/licence text/u);
+  });
+});
+
+describe("distributed component notices", () => {
+  it("discloses every component the installer redistributes", () => {
+    expect(DISTRIBUTED_COMPONENT_NOTICES).toHaveLength(
+      projection.distributedComponents.length,
+    );
+    for (const source of projection.distributedComponents) {
+      const notice = DISTRIBUTED_COMPONENT_NOTICES.find(
+        (entry) => entry.id === source.id,
+      );
+      expect(notice, `no disclosure for ${source.id}`).toBeDefined();
+      expect(notice!.name).toBe(source.name);
+      expect(notice!.version).toBe(source.version);
+      expect(notice!.license).toBe(source.license);
+    }
+  });
+
+  it("names the media toolchain the notice used to omit entirely", () => {
+    const identifiers = DISTRIBUTED_COMPONENT_NOTICES.map((entry) => entry.id);
+    expect(identifiers).toContain("ffmpeg");
+    expect(identifiers).toContain("x264");
+
+    const ffmpeg = DISTRIBUTED_COMPONENT_NOTICES.find((entry) => entry.id === "ffmpeg")!;
+    expect(ffmpeg.license).toBe("GPL-3.0-or-later");
+    expect(ffmpeg.licenseText).toBe(LICENSE_TEXTS["gpl-3.0"]);
+    expect(ffmpeg.packagedSourcePaths.length).toBeGreaterThan(0);
+  });
+
+  it("explains in Chinese what each component is and how to read its licence", () => {
+    for (const notice of DISTRIBUTED_COMPONENT_NOTICES) {
+      expect(notice.role).toMatch(/[一-鿿]/u);
+      expect(notice.noticeHint).toMatch(/[一-鿿]/u);
+    }
+  });
+
+  it("refuses a copyleft component with no corresponding source published", () => {
+    expect(() =>
+      buildDistributedComponentNotices(
+        [{ ...COMPONENT, packagedSourcePaths: [] }],
+        DISTRIBUTED_COMPONENT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/source/u);
+  });
+
+  it("refuses a copyleft component with no upstream source address", () => {
+    expect(() =>
+      buildDistributedComponentNotices(
+        [{ ...COMPONENT, upstreamSourceUrl: null }],
+        DISTRIBUTED_COMPONENT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/source/u);
+  });
+
+  it("refuses a component that publishes no way to read its licence", () => {
+    expect(() =>
+      buildDistributedComponentNotices(
+        [
+          {
+            ...COMPONENT,
+            copyleft: false,
+            licenseTextId: null,
+            packagedNoticePath: null,
+            noticeChannelId: null,
+            packagedSourcePaths: [],
+            upstreamSourceUrl: null,
+          },
+        ],
+        DISTRIBUTED_COMPONENT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/licence/u);
+  });
+
+  it("refuses a component the page has no Chinese explanation for", () => {
+    expect(() =>
+      buildDistributedComponentNotices(
+        [{ ...COMPONENT, id: "unknown-component" }],
+        DISTRIBUTED_COMPONENT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/explanation/u);
+  });
+
+  it("refuses an empty disclosure outright", () => {
+    expect(() =>
+      buildDistributedComponentNotices(
+        [],
+        DISTRIBUTED_COMPONENT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/no distributed component/u);
   });
 });
 

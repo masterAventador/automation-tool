@@ -9,7 +9,10 @@
       "sourceUrl": "https://github.com/harry0703/MoneyPrinterTurbo.git",
       "version": "v1.3.2",
       "commit": "b1588e1fdc6c5e54358f66ca2ff323e1dddf1364",
-      "license": "MIT"
+      "license": "MIT",
+      "copyright": "Copyright (c) 2024 Harry",
+      "licenseTextId": "mit",
+      "packagedNoticePath": "material-video-worker/package/_internal/upstream/LICENSE"
     },
     {
       "id": "hyperframes",
@@ -18,7 +21,96 @@
       "sourceUrl": "https://github.com/heygen-com/hyperframes.git",
       "version": "v0.7.68",
       "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
-      "license": "Apache-2.0"
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 HeyGen, Inc.",
+      "licenseTextId": "apache-2.0",
+      "packagedNoticePath": null
+    }
+  ],
+  "distributedComponents": [
+    {
+      "id": "embedded-browser",
+      "name": "Chrome for Testing",
+      "version": "149.0.7827.55",
+      "license": "BSD-3-Clause AND LicenseRef-Google-Chrome-Terms-of-Service",
+      "copyleft": false,
+      "licenseTextId": null,
+      "packagedNoticePath": null,
+      "noticeChannelId": "chromium_credits_page",
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    },
+    {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "version": "8.1.2",
+      "license": "GPL-3.0-or-later",
+      "copyleft": true,
+      "licenseTextId": "gpl-3.0",
+      "packagedNoticePath": "media-toolchain/COPYING.GPLv3",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [
+        "media-toolchain/source/ffmpeg-8.1.2.tar.xz"
+      ],
+      "upstreamSourceUrl": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz"
+    },
+    {
+      "id": "x264",
+      "name": "x264",
+      "version": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+      "license": "GPL-2.0-or-later",
+      "copyleft": true,
+      "licenseTextId": "gpl-3.0",
+      "packagedNoticePath": "media-toolchain/COPYING.GPLv3",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [
+        "media-toolchain/source/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz"
+      ],
+      "upstreamSourceUrl": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz"
+    },
+    {
+      "id": "nodejs",
+      "name": "Node.js",
+      "version": "22.23.1",
+      "license": "MIT",
+      "copyleft": false,
+      "licenseTextId": null,
+      "packagedNoticePath": "motion-video-worker/package/NODE-LICENSE",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    },
+    {
+      "id": "material-video-worker-python",
+      "name": "CPython",
+      "version": "3.11.15",
+      "license": "PSF-2.0",
+      "copyleft": false,
+      "licenseTextId": null,
+      "packagedNoticePath": "material-video-worker/package/_internal/licenses/material-video-worker-dependencies.json",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    }
+  ],
+  "licenseTexts": [
+    {
+      "id": "apache-2.0",
+      "spdx": "Apache-2.0",
+      "sha256": "4259155fb06f127687ee7b0a8a3682d45132db0f2da26cbc0b7a2d1e796436b8",
+      "bytes": 10763
+    },
+    {
+      "id": "gpl-3.0",
+      "spdx": "GPL-3.0-only",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "bytes": 35147
+    },
+    {
+      "id": "mit",
+      "spdx": "MIT",
+      "sha256": "87dd19b6a0779e14a91c1b06423ef251df37e89666160c031130a26bae68c229",
+      "bytes": 1061
     }
   ],
   "assetRights": {

@@ -16,6 +16,7 @@ wording stays in the page: this file carries facts, not copy.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -24,13 +25,72 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCES_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-sources.v1.json"
 ASSET_RIGHTS_PATH = REPOSITORY_ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MOTION_RIGHTS_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog-rights.v1.json"
+FFMPEG_TOOLCHAIN_PATH = REPOSITORY_ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
+CHROMIUM_STAGING_PATH = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
+MOTION_WORKER_PATH = REPOSITORY_ROOT / "contracts/quality/motion-video-worker-package.v1.json"
+MATERIAL_WORKER_PATH = (
+    REPOSITORY_ROOT / "contracts/quality/material-video-worker-package.v1.json"
+)
 PROJECTION_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-notice-ui.v1.json"
+LICENSE_TEXT_ROOT = (
+    REPOSITORY_ROOT / "frontend/src/features/legal/third-party-software/license-texts"
+)
 
 SCHEMA_VERSION = "1.0"
 PROJECTION_ID = "automation-tool.third-party-notice-ui.v1"
 
 CLEARED_CONCLUSION = "cleared"
 REPOSITORY_ADDRESS = re.compile(r"^https://[^/]+/([^/]+)/([^/]+?)(?:\.git)?$")
+COPYRIGHT_LINE = re.compile(r"^\s*(Copyright\b.*?)\s*$", re.MULTILINE)
+
+# The licence texts the App itself carries so a user never has to open the
+# installed package to read one. `mit` and `apache-2.0` must be the locked
+# submodule LICENSE blobs byte for byte; `gpl-3.0` is FFmpeg 8.1.2's own
+# COPYING.GPLv3, the same file `scripts/build_video_media_toolchain.sh` copies
+# into `media-toolchain/`.
+LICENSE_TEXT_SPDX: dict[str, str] = {
+    "mit": "MIT",
+    "apache-2.0": "Apache-2.0",
+    "gpl-3.0": "GPL-3.0-only",
+}
+GPL_3_0_SHA256 = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+LICENSE_TEXT_BY_SPDX: dict[str, str] = {"MIT": "mit", "Apache-2.0": "apache-2.0"}
+
+# Where a locked submodule's own LICENSE file lands inside the installed
+# package. Only the material-video Worker carries one: its PyInstaller spec
+# copies `vendor/moneyprinterturbo/LICENSE` into `upstream/`. Nothing from the
+# motion project ships as a file — what the product distributes from it is the
+# derived 134-part catalogue compiled into the App bundle — so it has no
+# in-package path and relies on the licence text the App carries.
+UPSTREAM_PACKAGED_NOTICE: dict[str, str | None] = {
+    "moneyprinterturbo": "material-video-worker/package/_internal/upstream/LICENSE",
+    "hyperframes": None,
+}
+
+# Paths that no contract declares, each with the build step whose source must
+# still contain the file name. `_verify_packaged_paths` re-reads those scripts,
+# so a rename that leaves this notice pointing at a file the installer no longer
+# writes fails the gate instead of shipping a dead path to a user.
+PACKAGED_PATH_PRODUCERS: dict[str, str] = {
+    "motion-video-worker/package/NODE-LICENSE": (
+        "scripts/build_motion_video_worker_candidate.py"
+    ),
+    "material-video-worker/package/_internal/licenses/"
+    "material-video-worker-dependencies.json": (
+        "scripts/build_material_video_worker_candidate.py"
+    ),
+    "material-video-worker/package/_internal/upstream/LICENSE": (
+        "workers/material_montage/material-video-worker.spec"
+    ),
+}
+
+# The embedded browser is a Google build, not a Chromium source build: the
+# Chromium parts stay BSD-3-Clause while the assembled binary carries Google's
+# own terms. Its complete third-party notice is the credits page inside the
+# very browser the product ships, which is why it publishes a channel rather
+# than a file path.
+BROWSER_LICENSE = "BSD-3-Clause AND LicenseRef-Google-Chrome-Terms-of-Service"
+BROWSER_NOTICE_CHANNEL = "chromium_credits_page"
 
 
 class ProjectionError(RuntimeError):
@@ -63,6 +123,184 @@ def _attribute(identifier: str, url: str) -> tuple[str, str]:
     return f"{owner}/{name}", name
 
 
+def _normalized_bytes(path: Path) -> bytes:
+    """Read a licence text with line endings normalised.
+
+    A clean Windows checkout may materialize the same blob with CRLF, and a
+    licence that appears to change with the checkout would make every digest in
+    this projection platform-dependent.
+    """
+    try:
+        return path.read_bytes().replace(b"\r\n", b"\n")
+    except OSError as error:
+        raise ProjectionError(f"cannot read licence text {path.name}: {error}") from error
+
+
+def _copyright_line(identifier: str, license_path: Path) -> str:
+    """Return the upstream copyright notice MIT and Apache-2.0 oblige us to keep.
+
+    Deriving it from the locked LICENSE blob is the point: a retyped copyright
+    line is exactly the kind of thing that silently goes stale, and the source
+    gate already binds that blob to the locked commit.
+    """
+    text = _normalized_bytes(license_path).decode("utf-8")
+    match = COPYRIGHT_LINE.search(text)
+    if match is None:
+        raise ProjectionError(f"{identifier}: LICENSE carries no copyright line")
+    return match.group(1)
+
+
+def _license_texts() -> list[dict]:
+    """Bind every licence text the App ships to its bytes."""
+    texts = []
+    for identifier, spdx in sorted(LICENSE_TEXT_SPDX.items()):
+        path = LICENSE_TEXT_ROOT / f"{identifier}.txt"
+        payload = _normalized_bytes(path)
+        if not payload:
+            raise ProjectionError(f"{identifier}: shipped licence text is empty")
+        texts.append(
+            {
+                "id": identifier,
+                "spdx": spdx,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "bytes": len(payload),
+            }
+        )
+    return texts
+
+
+def _require_shipped_license_texts(sources: dict, texts: list[dict]) -> None:
+    """Refuse to publish a licence text that is not the licence.
+
+    The two submodule texts are compared against the locked LICENSE blobs and
+    the GPL text against a pinned digest, so this projection cannot advertise a
+    paraphrase, a truncation or the wrong version of a licence.
+    """
+    by_id = {text["id"]: text for text in texts}
+    for entry in sources.get("sources", []):
+        licence = entry.get("license")
+        if not isinstance(licence, dict):
+            raise ProjectionError("source license record is missing")
+        spdx = _text(licence.get("spdx"), "license.spdx")
+        identifier = LICENSE_TEXT_BY_SPDX.get(spdx)
+        if identifier is None:
+            raise ProjectionError(f"{spdx}: the App ships no text for this licence")
+        expected = _text(licence.get("sha256"), f"{spdx}: license.sha256")
+        if by_id[identifier]["sha256"] != expected:
+            raise ProjectionError(
+                f"{identifier}: shipped licence text is not the locked LICENSE blob"
+            )
+    if by_id["gpl-3.0"]["sha256"] != GPL_3_0_SHA256:
+        raise ProjectionError("gpl-3.0: shipped licence text is not FFmpeg's COPYING.GPLv3")
+
+
+def _media_toolchain_path(layout: dict, key: str) -> str:
+    root = _text(layout.get("root"), "package_layout.root")
+    return f"{root}/{_text(layout.get(key), f'package_layout.{key}')}"
+
+
+def _distributed_components(
+    ffmpeg_contract: dict, chromium: dict, motion_worker: dict, material_worker: dict
+) -> list[dict]:
+    """Every third-party runtime the installer puts on a user's disk.
+
+    These are the components whose licences the product has to satisfy as a
+    distributor, which is a different question from which upstream projects the
+    two video features are built on. FFmpeg and x264 are the reason this block
+    exists: they are GPL, they ship as executables, and a notice that never
+    names them or says where their source is fails the licence outright.
+    """
+    ffmpeg = ffmpeg_contract.get("ffmpeg")
+    x264 = ffmpeg_contract.get("x264")
+    layout = ffmpeg_contract.get("package_layout")
+    if not all(isinstance(value, dict) for value in (ffmpeg, x264, layout)):
+        raise ProjectionError("the media toolchain contract is incomplete")
+    assert isinstance(ffmpeg, dict) and isinstance(x264, dict) and isinstance(layout, dict)
+
+    browser = chromium.get("chromium")
+    if not isinstance(browser, dict):
+        raise ProjectionError("the embedded browser contract discloses no build")
+    runtime = motion_worker.get("runtime")
+    if not isinstance(runtime, dict):
+        raise ProjectionError("the motion Worker contract discloses no runtime")
+    python = material_worker.get("python")
+    if not isinstance(python, dict):
+        raise ProjectionError("the material Worker contract discloses no runtime")
+
+    licence_path = _media_toolchain_path(layout, "license")
+    return [
+        {
+            "id": "embedded-browser",
+            "name": _text(browser.get("title"), "chromium.title"),
+            "version": _text(browser.get("browser_version"), "chromium.browser_version"),
+            "license": BROWSER_LICENSE,
+            "copyleft": False,
+            "licenseTextId": None,
+            "packagedNoticePath": None,
+            "noticeChannelId": BROWSER_NOTICE_CHANNEL,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": None,
+        },
+        {
+            "id": "ffmpeg",
+            "name": "FFmpeg",
+            "version": _text(ffmpeg.get("version"), "ffmpeg.version"),
+            "license": _text(ffmpeg.get("license"), "ffmpeg.license"),
+            "copyleft": True,
+            "licenseTextId": "gpl-3.0",
+            "packagedNoticePath": licence_path,
+            "noticeChannelId": None,
+            "packagedSourcePaths": [_media_toolchain_path(layout, "source_archive")],
+            "upstreamSourceUrl": _text(ffmpeg.get("source_url"), "ffmpeg.source_url"),
+        },
+        {
+            "id": "x264",
+            "name": "x264",
+            "version": _text(x264.get("revision"), "x264.revision"),
+            "license": _text(x264.get("license"), "x264.license"),
+            "copyleft": True,
+            # x264 is GPL-2.0-or-later and is statically linked into the one
+            # FFmpeg executable, so the conveyed binary is a single GPL-3.0
+            # work and GPL-3.0 is the licence a recipient actually receives it
+            # under. Its own COPYING sits inside the bundled source archive.
+            "licenseTextId": "gpl-3.0",
+            "packagedNoticePath": licence_path,
+            "noticeChannelId": None,
+            "packagedSourcePaths": [_media_toolchain_path(layout, "x264_source_archive")],
+            "upstreamSourceUrl": _text(x264.get("source_url"), "x264.source_url"),
+        },
+        {
+            "id": "nodejs",
+            "name": "Node.js",
+            "version": _text(runtime.get("version"), "runtime.version"),
+            "license": "MIT",
+            "copyleft": False,
+            "licenseTextId": None,
+            "packagedNoticePath": "motion-video-worker/package/NODE-LICENSE",
+            "noticeChannelId": None,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": None,
+        },
+        {
+            "id": "material-video-worker-python",
+            "name": "CPython",
+            "version": _text(python.get("version"), "python.version"),
+            "license": "PSF-2.0",
+            "copyleft": False,
+            "licenseTextId": None,
+            # The same file lists every Python package frozen into that Worker
+            # with the licence each one declares.
+            "packagedNoticePath": (
+                "material-video-worker/package/_internal/licenses/"
+                "material-video-worker-dependencies.json"
+            ),
+            "noticeChannelId": None,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": None,
+        },
+    ]
+
+
 def _upstream_projects(sources: dict) -> list[dict]:
     entries = sources.get("sources")
     if not isinstance(entries, list) or not entries:
@@ -80,6 +318,14 @@ def _upstream_projects(sources: dict) -> list[dict]:
         if not isinstance(licence, dict):
             raise ProjectionError(f"{identifier}: license must be an object")
         repository, name = _attribute(identifier, url)
+        spdx = _text(licence.get("spdx"), f"{identifier}: license.spdx")
+        license_text_id = LICENSE_TEXT_BY_SPDX.get(spdx)
+        if license_text_id is None:
+            raise ProjectionError(f"{identifier}: the App ships no {spdx} licence text")
+        source_root = REPOSITORY_ROOT / _text(entry.get("path"), f"{identifier}: path")
+        license_file = source_root / _text(
+            licence.get("path"), f"{identifier}: license.path"
+        )
         projects.append(
             {
                 "id": identifier,
@@ -88,7 +334,10 @@ def _upstream_projects(sources: dict) -> list[dict]:
                 "sourceUrl": url,
                 "version": _text(entry.get("tag"), f"{identifier}: tag"),
                 "commit": commit,
-                "license": _text(licence.get("spdx"), f"{identifier}: license.spdx"),
+                "license": spdx,
+                "copyright": _copyright_line(identifier, license_file),
+                "licenseTextId": license_text_id,
+                "packagedNoticePath": UPSTREAM_PACKAGED_NOTICE.get(identifier),
             }
         )
     return projects
@@ -163,10 +412,20 @@ def _motion_asset_rights(review: dict) -> dict:
 
 
 def compose_projection() -> dict:
+    sources = _load(SOURCES_PATH)
+    texts = _license_texts()
+    _require_shipped_license_texts(sources, texts)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "id": PROJECTION_ID,
-        "upstreamProjects": _upstream_projects(_load(SOURCES_PATH)),
+        "upstreamProjects": _upstream_projects(sources),
+        "distributedComponents": _distributed_components(
+            _load(FFMPEG_TOOLCHAIN_PATH),
+            _load(CHROMIUM_STAGING_PATH),
+            _load(MOTION_WORKER_PATH),
+            _load(MATERIAL_WORKER_PATH),
+        ),
+        "licenseTexts": texts,
         "assetRights": _asset_rights(_load(ASSET_RIGHTS_PATH)),
         "motionAssetRights": _motion_asset_rights(_load(MOTION_RIGHTS_PATH)),
     }
