@@ -48,13 +48,18 @@ const COMPOSITED_EXPRESSION_BODY = `
     () => requestAnimationFrame(() => resolve(true))));
   return true;
 `;
-// The warm-up additionally decodes every image once. Decoding is idempotent
-// but walking the DOM per frame costs enough wall clock to blow the render
-// budget on a slower host, so it is paid exactly once, before the first kept
-// frame.
+// The warm-up additionally decodes every image once, paid before the first
+// kept frame rather than per frame. The bounded race matters: this runtime is
+// disconnected by design, so an `<img>` pointing at a remote host never
+// settles — `decode()` stays pending forever and `catch` never runs, which
+// eats the whole render budget instead of costing one decode.
+const WARM_UP_DECODE_BUDGET_MS = 1000;
 const WARM_UP_EXPRESSION_BODY = `
-  await Promise.all(Array.from(document.images)
-    .map((image) => image.decode().catch(() => undefined)));
+  await Promise.race([
+    Promise.all(Array.from(document.images)
+      .map((image) => image.decode().catch(() => undefined))),
+    new Promise((resolve) => setTimeout(resolve, ${WARM_UP_DECODE_BUDGET_MS})),
+  ]);
   ${COMPOSITED_EXPRESSION_BODY}
 `;
 const RESOURCE_MONITOR_INTERVAL_MS = 300;

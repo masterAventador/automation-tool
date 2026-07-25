@@ -40,6 +40,13 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 SWEEP_FRAMES = 2
 STYLE_FRAMES = 3
 DETERMINISM_FRAMES = 30
+# A two-frame sweep item must stay quick, so its budget doubles as a stall
+# guard. The 30-frame determinism render is a different shape: it also pays the
+# one-off warm-up, and a host that rasterises in software (every Windows run
+# here) is materially slower than this Mac, so it gets its own headroom rather
+# than weakening the sweep's guard.
+SHORT_RENDER_BUDGET_SECONDS = 55
+DETERMINISM_RENDER_BUDGET_SECONDS = 150
 
 
 def _run(
@@ -123,6 +130,7 @@ def _render_once(
     entry: str,
     allowed_assets: list[str],
     frame_count: int,
+    budget_seconds: int = SHORT_RENDER_BUDGET_SECONDS,
 ) -> dict[str, object]:
     """One real sandboxed render; returns the success event and frame digests."""
     frames = workspace / "frames"
@@ -143,8 +151,8 @@ def _render_once(
             allowedAssets=allowed_assets,
             entryHtml=entry,
             frameCount=frame_count,
-            maxCpuSeconds=55,
-            maxDurationSeconds=55,
+            maxCpuSeconds=budget_seconds,
+            maxDurationSeconds=budget_seconds,
             maxMemoryMegabytes=2048,
             maxOutputBytes=256 * 1024 * 1024,
         )
@@ -285,6 +293,7 @@ def run_double_run_determinism(
             "composition.html",
             [],
             DETERMINISM_FRAMES,
+            DETERMINISM_RENDER_BUDGET_SECONDS,
         )
         runs.append(list(rendered["frames"]))
     if runs[0] != runs[1]:
