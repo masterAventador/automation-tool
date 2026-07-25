@@ -29,10 +29,15 @@ const UPSTREAM_NAMES = [
 ];
 
 /**
- * Every navigation entry except 第三方软件声明. That page is the declared legal
- * exception (`allowedLegalDisclosurePaths`) and is required to carry the
- * upstream names; `e2e/third-party-software-notice.spec.ts` asserts it does.
- * Do not add it here.
+ * Every navigation entry. 开源软件许可 is deliberately absent: it is no longer a
+ * sidebar entry at all (it hangs off the foot of 设置与诊断), and it is the
+ * declared legal exception (`allowedLegalDisclosurePaths`) that is *required*
+ * to carry the upstream names — `e2e/third-party-software-notice.spec.ts`
+ * asserts it does. Do not add it here.
+ *
+ * 设置与诊断 below is walked without opening that entry, which is exactly the
+ * assertion that matters after the demotion: the settings page itself must
+ * still be clean even though the notice now hangs off it.
  */
 const PAGES = [
   "工作台",

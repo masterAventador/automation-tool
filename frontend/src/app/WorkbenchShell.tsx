@@ -1,4 +1,4 @@
-import { Badge, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
+import { Badge, Button, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
 import { useState } from "react";
 
 import {
@@ -65,8 +65,17 @@ const navigationItems = [
   { key: "publishing", label: "作品发布" },
   { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
-  { key: "legal", label: "第三方软件声明" },
 ];
+
+/**
+ * The open source licence notice is a licence obligation, not a daily operating
+ * tool, so it is not a sidebar destination. It hangs off the foot of 设置与诊断
+ * and keeps that entry selected while it is open — nothing else in the sidebar
+ * leads here, and an unselected sidebar would read as a broken page.
+ */
+const LEGAL_PAGE = "legal";
+const LEGAL_PAGE_SECTION = "diagnostics";
+const LEGAL_PAGE_TITLE = "开源软件许可";
 
 const shellTaskSource: TaskProjectionSource = {
   async getTask() {
@@ -372,7 +381,7 @@ export function WorkbenchShell({
   const showingVideoStudio = activePage === "video-studio";
   const showingVideoEditing = activePage === "video-editing";
   const showingPublishing = activePage === "publishing";
-  const showingLegal = activePage === "legal";
+  const showingLegal = activePage === LEGAL_PAGE;
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -399,7 +408,7 @@ export function WorkbenchShell({
         <nav aria-label="桌面主导航">
           <Menu
             mode="inline"
-            selectedKeys={[activePage]}
+            selectedKeys={[showingLegal ? LEGAL_PAGE_SECTION : activePage]}
             items={navigationItems}
             onClick={({ key }) => {
               if (
@@ -410,8 +419,7 @@ export function WorkbenchShell({
                 key === "video-editing" ||
                 key === "publishing" ||
                 key === "diagnostics" ||
-                key === "platform" ||
-                key === "legal"
+                key === "platform"
               ) {
                 setActivePage(key);
               }
@@ -446,7 +454,7 @@ export function WorkbenchShell({
                     : showingDiagnostics
                       ? "设置与诊断"
                     : showingLegal
-                      ? "第三方软件声明"
+                      ? LEGAL_PAGE_TITLE
                     : showingTaskRun
                       ? "任务记录"
                       : "RPA 运营工作台"}
@@ -465,7 +473,7 @@ export function WorkbenchShell({
                     : showingDiagnostics
                       ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
                     : showingLegal
-                      ? "查看本产品用到的开源代码、许可证，以及字体与素材的权利结论。"
+                      ? "本产品分发的开源组件、它们的许可证、固定版本和源码获取地址。"
                     : showingTaskRun
                       ? "从权威快照与持久事件查看运行状态和控制结果。"
                     : "RPA 就是自动替你操作网页：从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
@@ -523,6 +531,15 @@ export function WorkbenchShell({
                 <ModelServiceSettings gateway={modelServiceGateway} />
                 <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
                 <Diagnostics platform={platformAdapter} />
+                <div className="settings-legal-entry">
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => setActivePage(LEGAL_PAGE)}
+                  >
+                    {LEGAL_PAGE_TITLE}
+                  </Button>
+                </div>
               </Space>
             ) : showingTaskRun && selectedTaskId !== null ? (
               <TaskRunDetails

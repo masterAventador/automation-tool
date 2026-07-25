@@ -667,8 +667,7 @@ body {
   margin-top: 20px;
 }
 
-.legal-notice-list,
-.legal-notice-tags {
+.legal-notice-list {
   padding: 0;
   margin: 0;
   list-style: none;
@@ -686,20 +685,18 @@ body {
   border-top: 0;
 }
 
-.legal-notice-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-bottom: 12px;
+/* A licence obligation, not a destination: present, findable, and quiet. */
+.settings-legal-entry {
+  width: 100%;
+  padding-top: 4px;
+  text-align: center;
 }
 
-.legal-notice-tags > li {
-  display: grid;
-  gap: 2px;
-  padding: 8px 12px;
-  background: #f7f9fc;
-  border: 1px solid #e7ebf2;
-  border-radius: 8px;
+.settings-legal-entry .ant-btn-link {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+  color: #8a93a6;
 }
 
 .app-update-card {

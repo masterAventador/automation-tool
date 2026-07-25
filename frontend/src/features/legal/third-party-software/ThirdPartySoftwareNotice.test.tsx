@@ -44,48 +44,18 @@ describe("ThirdPartySoftwareNotice", () => {
     expect(within(region).getByText(/只出现在本页/u)).toBeInTheDocument();
   });
 
-  it("declares the font and material rights policy with its real numbers", () => {
+  it("keeps saying that the upstream code licence does not cover the material", () => {
     render(<ThirdPartySoftwareNotice />);
 
-    // Exact strings, not bare numbers: "12" is a substring of "125" and "127",
-    // which are all on this page, so a loose match would be ambiguous.
+    // Apache-2.0 on the motion code is not permission to redistribute the
+    // fonts, audio, likenesses and trademarks the parts pull in. Dropping this
+    // sentence would make the notice read as broader permission than it is.
     const region = screen.getByRole("region", { name: "字体与素材权利" });
-    expect(within(region).getByText(/默认拒绝/u)).toBeInTheDocument();
-    expect(within(region).getByText("字体")).toBeInTheDocument();
     expect(
       within(region).getByText(
-        `每一条要随安装包分发的素材，都必须先登记齐 ${String(
-          ASSET_RIGHTS_NOTICE.sharedRequiredFieldCount,
-        )} 项通用权利信息。`,
+        new RegExp(`${MOTION_ASSET_RIGHTS_NOTICE.codeLicense}[\\s\\S]*只覆盖代码`, "u"),
       ),
     ).toBeInTheDocument();
-    expect(
-      within(region).getByText(
-        `其中 ${String(
-          MOTION_ASSET_RIGHTS_NOTICE.webFontFamilyCount,
-        )} 个网络字体家族与 ${String(
-          MOTION_ASSET_RIGHTS_NOTICE.bundledSampleAssetPartCount,
-        )} 个自带示例素材的权利尚未核实。`,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(region).getByText(
-        `已核查 ${String(MOTION_ASSET_RIGHTS_NOTICE.totalPartCount)} 个动效零件：${String(
-          MOTION_ASSET_RIGHTS_NOTICE.clearedPartCount,
-        )} 个可直接使用，${String(
-          MOTION_ASSET_RIGHTS_NOTICE.partsNeedingWorkCount,
-        )} 个必须先本地化或更换素材才能随产品分发。`,
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("lists every borrowed package with its licence", () => {
-    render(<ThirdPartySoftwareNotice />);
-
-    const region = screen.getByRole("region", { name: "字体与素材权利" });
-    for (const dependency of MOTION_ASSET_RIGHTS_NOTICE.dependencies) {
-      expect(within(region).getByText(dependency.name)).toBeInTheDocument();
-    }
   });
 
   it("states honestly that nothing is bundled while the rights register is empty", () => {
@@ -94,5 +64,47 @@ describe("ThirdPartySoftwareNotice", () => {
     const region = screen.getByRole("region", { name: "字体与素材权利" });
     expect(ASSET_RIGHTS_NOTICE.registeredEntryCount).toBe(0);
     expect(within(region).getByText(/尚未随安装包分发/u)).toBeInTheDocument();
+    expect(within(region).getByText(/一律不随安装包分发/u)).toBeInTheDocument();
+  });
+
+  it("drops the internal rights-review progress the notice never owed anyone", () => {
+    render(<ThirdPartySoftwareNotice />);
+
+    // "134 个动效零件，X 个尚未核实，随产品分发前必须先本地化" is work tracking,
+    // not a licence disclosure, and every asset it talks about is one this
+    // build does not ship. Nothing legally required leaves with it.
+    expect(
+      screen.queryByRole("heading", { name: "动效零件的权利结论" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "动效零件引用的外部程序包" }),
+    ).not.toBeInTheDocument();
+
+    const rendered = document.body.textContent ?? "";
+    expect(rendered).not.toContain("尚未核实");
+    expect(rendered).not.toContain("初步判定");
+    expect(rendered).not.toContain("项通用权利信息");
+    expect(rendered).not.toContain("项专门信息");
+
+    for (const dependency of MOTION_ASSET_RIGHTS_NOTICE.dependencies) {
+      expect(screen.queryByText(dependency.name)).not.toBeInTheDocument();
+    }
+    for (const category of ASSET_RIGHTS_NOTICE.categories) {
+      expect(screen.queryByText(category.label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("still carries every fact the three licences oblige it to publish", () => {
+    render(<ThirdPartySoftwareNotice />);
+
+    // The trim above is only safe as long as this stays true.
+    const region = screen.getByRole("region", { name: "上游开源项目" });
+    for (const notice of UPSTREAM_PROJECT_NOTICES) {
+      expect(within(region).getByText(notice.name)).toBeInTheDocument();
+      expect(within(region).getByText(new RegExp(notice.license, "u"))).toBeInTheDocument();
+      expect(within(region).getByText(new RegExp(notice.commit, "u"))).toBeInTheDocument();
+      expect(within(region).getByText(new RegExp(notice.sourceUrl, "u"))).toBeInTheDocument();
+      expect(within(region).getByText(notice.boundary)).toBeInTheDocument();
+    }
   });
 });

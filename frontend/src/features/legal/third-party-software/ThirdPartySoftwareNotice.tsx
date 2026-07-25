@@ -7,12 +7,19 @@ import {
 } from "./third-party-software-notice";
 
 /**
- * 第三方软件声明。
+ * 开源软件许可（原「第三方软件声明」）。
  *
  * 这是产品里唯一一处允许写出上游开源项目原始名称的页面，路径已在
  * `contracts/quality/user-facing-terminology.v1.json` 的
  * `allowedLegalDisclosurePaths` 中登记。页面上的版本、许可证和数量都从锁定
  * 契约读出，不在这里重抄一份。
+ *
+ * 2026-07-26 降权：入口从左侧主导航挪到「设置与诊断」页脚，页面内容收敛到许可证
+ * 强制要求的事实（名称、产品功能、固定版本、许可证、固定提交、源码获取地址、只读
+ * 引用声明）。删掉的是内部权利核查进度（134 个动效零件的核查计数、"尚未核实"的
+ * 网络字体与示例素材、"初步判定"的外部程序包清单）——那是工作台账，不是许可证
+ * 公示，而且它谈的素材本构建一件都没分发。详见
+ * `docs/development/FIX-open-source-notice-demotion.md`。
  */
 export function ThirdPartySoftwareNotice() {
   return (
@@ -21,7 +28,7 @@ export function ThirdPartySoftwareNotice() {
         type="info"
         showIcon
         title="本页是公示页面，不影响任何正在运行的任务。"
-        description="这里列出本产品用到的开源代码、它们的许可证，以及字体和素材的权利结论。"
+        description="这里列出本产品分发的开源组件、它们的许可证、固定版本和源码获取地址。"
       />
 
       <Card title="上游开源项目">
@@ -56,70 +63,21 @@ export function ThirdPartySoftwareNotice() {
 
       <Card title="字体与素材权利">
         <section role="region" aria-label="字体与素材权利">
-          <Typography.Paragraph>
-            素材权利默认拒绝：没有登记齐权利信息的字体、图片、音频和视频，一律不随安装包分发。
-          </Typography.Paragraph>
-          <Typography.Paragraph>
-            每一条要随安装包分发的素材，都必须先登记齐{" "}
-            {ASSET_RIGHTS_NOTICE.sharedRequiredFieldCount} 项通用权利信息。
-          </Typography.Paragraph>
-          <ul className="legal-notice-tags">
-            {ASSET_RIGHTS_NOTICE.categories.map((category) => (
-              <li key={category.id}>
-                <Typography.Text strong>{category.label}</Typography.Text>
-                <Typography.Text type="secondary">
-                  另需 {category.requiredFieldCount} 项专门信息
-                </Typography.Text>
-              </li>
-            ))}
-          </ul>
           {ASSET_RIGHTS_NOTICE.registeredEntryCount === 0 ? (
             <Typography.Paragraph>
-              目前登记册是空的，也就是说本产品尚未随安装包分发任何第三方字体、图片、音频或视频素材。
+              本产品尚未随安装包分发任何第三方字体、图片、音频或视频素材；没有登记齐权利信息的素材，
+              一律不随安装包分发。
             </Typography.Paragraph>
           ) : (
             <Typography.Paragraph>
-              已登记 {ASSET_RIGHTS_NOTICE.registeredEntryCount} 条可随安装包分发的素材。
+              已登记 {ASSET_RIGHTS_NOTICE.registeredEntryCount}{" "}
+              条可随安装包分发的素材；没有登记齐权利信息的素材，一律不随安装包分发。
             </Typography.Paragraph>
           )}
-
-          <Typography.Title level={4}>动效零件的权利结论</Typography.Title>
-          <Typography.Paragraph>
-            {`已核查 ${String(MOTION_ASSET_RIGHTS_NOTICE.totalPartCount)} 个动效零件：${String(
-              MOTION_ASSET_RIGHTS_NOTICE.clearedPartCount,
-            )} 个可直接使用，${String(
-              MOTION_ASSET_RIGHTS_NOTICE.partsNeedingWorkCount,
-            )} 个必须先本地化或更换素材才能随产品分发。`}
-          </Typography.Paragraph>
-          <Typography.Paragraph>
-            {`其中 ${String(
-              MOTION_ASSET_RIGHTS_NOTICE.webFontFamilyCount,
-            )} 个网络字体家族与 ${String(
-              MOTION_ASSET_RIGHTS_NOTICE.bundledSampleAssetPartCount,
-            )} 个自带示例素材的权利尚未核实。`}
-          </Typography.Paragraph>
           <Typography.Paragraph type="secondary">
             上游代码本身使用 {MOTION_ASSET_RIGHTS_NOTICE.codeLicense} 许可证，但它只覆盖代码，
             不授予肖像、字体、音频、商标和示例素材的再分发权利。
           </Typography.Paragraph>
-
-          <Typography.Title level={4}>动效零件引用的外部程序包</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            以下许可证为初步判定，尚未逐项核实；随产品分发前必须改为本机文件并完成核实。
-          </Typography.Paragraph>
-          <ul className="legal-notice-list">
-            {MOTION_ASSET_RIGHTS_NOTICE.dependencies.map((dependency) => (
-              <li key={dependency.name}>
-                <Typography.Text strong>{dependency.name}</Typography.Text>
-                <Typography.Text type="secondary">
-                  许可证：{dependency.license}
-                </Typography.Text>
-                <Typography.Text type="secondary">
-                  被 {dependency.partCount} 个零件使用
-                </Typography.Text>
-              </li>
-            ))}
-          </ul>
         </section>
       </Card>
 

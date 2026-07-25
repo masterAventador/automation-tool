@@ -9,10 +9,16 @@ import { expect, test } from "@playwright/test";
  * `contracts/quality/user-facing-terminology.v1.json`
  * (`allowedLegalDisclosurePaths`), so the static scan skips it. Nothing else
  * checks that the page a user can actually reach still carries the notice,
- * which is what this walks: left navigation, click, read what is rendered.
+ * which is what this walks: 设置与诊断, the entry at its foot, click, read what
+ * is rendered.
+ *
+ * The notice left the sidebar on 2026-07-26 (see
+ * `docs/development/FIX-open-source-notice-demotion.md`). Demoting it is only
+ * allowed as long as it stays reachable, so the walk below is the thing that
+ * keeps the demotion honest.
  */
 
-test("the legal notice is reachable from the left navigation and names both projects", async ({
+test("the legal notice is reachable from settings and names both projects", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -26,9 +32,13 @@ test("the legal notice is reachable from the left navigation and names both proj
   await page.goto("/harness.html?health=available");
   await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
 
-  await page.getByRole("menuitem", { name: "第三方软件声明" }).click();
+  await expect(page.getByRole("menuitem", { name: "第三方软件声明" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "开源软件许可" })).toHaveCount(0);
 
-  await expect(page.getByRole("heading", { name: "第三方软件声明" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "设置与诊断" }).click();
+  await page.getByRole("button", { name: "开源软件许可" }).click();
+
+  await expect(page.getByRole("heading", { name: "开源软件许可" })).toBeVisible();
 
   const projects = page.getByRole("region", { name: "上游开源项目" });
   await expect(projects).toBeVisible();
@@ -55,7 +65,8 @@ test("leaving the notice takes the upstream names off the screen again", async (
   page,
 }) => {
   await page.goto("/harness.html?health=available");
-  await page.getByRole("menuitem", { name: "第三方软件声明" }).click();
+  await page.getByRole("menuitem", { name: "设置与诊断" }).click();
+  await page.getByRole("button", { name: "开源软件许可" }).click();
   await expect(page.getByRole("region", { name: "上游开源项目" })).toBeVisible();
 
   await page.getByRole("menuitem", { name: "视频制作" }).click();

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -183,6 +183,61 @@ describe("desktop startup", () => {
     expect(screen.getByText("当前已是最新版本")).toBeVisible();
     expect(platformAdapter.getExecutorStatus).toHaveBeenCalledTimes(1);
     expect(appUpdateGateway.getState).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * `App` is the second assembly entry: everything a user actually launches
+   * (`main.tsx`, the Tauri test entry, the harness) goes through it, never
+   * through `WorkbenchShell` directly. The shell's own test proves the shell;
+   * this proves the composition around it did not put the demoted notice back
+   * on the sidebar, or hide the settings entry that replaced it.
+   */
+  it("keeps the open source licence notice out of the assembled main navigation", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({ status: "ready" as const }),
+    };
+
+    render(<App startupCheck={startupCheck} />);
+
+    await screen.findByRole("heading", { name: "RPA 运营工作台" });
+    const navigation = screen.getByRole("navigation", { name: "桌面主导航" });
+    expect(
+      within(navigation).queryByRole("menuitem", { name: "第三方软件声明" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(navigation).queryByRole("menuitem", { name: "开源软件许可" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the open source licence notice from the foot of settings and diagnostics", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({ status: "ready" as const }),
+    };
+    const platformAdapter: PlatformAdapter = {
+      getExecutorStatus: vi.fn().mockResolvedValue({
+        state: "running",
+        version: "0.1.0",
+        buildId: "app-test",
+        restartCount: 0,
+      }),
+      restartExecutor: vi.fn(),
+      getExecutorDiagnostics: vi.fn().mockResolvedValue([]),
+      exportDiagnostics: vi.fn(),
+      emergencyStopExecutor: vi.fn(),
+      getBrowserDiagnosticSettings: vi.fn().mockResolvedValue({ captureSuccessfulRuns: false }),
+      setCaptureSuccessfulDiagnostics: vi.fn(),
+    };
+    const user = userEvent.setup();
+
+    render(<App startupCheck={startupCheck} platformAdapter={platformAdapter} />);
+
+    await screen.findByRole("heading", { name: "RPA 运营工作台" });
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(await screen.findByRole("button", { name: "开源软件许可" }));
+
+    expect(screen.getByRole("heading", { name: "开源软件许可" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "上游开源项目" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "字体与素材权利" })).toBeVisible();
   });
 
   it("opens the enabled platform status page through the injected real gateway boundary", async () => {

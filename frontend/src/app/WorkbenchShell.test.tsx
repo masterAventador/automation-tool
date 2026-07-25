@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
@@ -42,7 +42,26 @@ describe("workbench shell navigation", () => {
     expect(screen.queryByRole("region", { name: "视频制作工作区" })).not.toBeInTheDocument();
   });
 
-  it("opens the third-party software notice from the normal left navigation", async () => {
+  it("keeps the open source licence notice out of the main navigation", async () => {
+    // The notice is a legal obligation, not a daily operating tool. It stays
+    // reachable, but it no longer sits beside 视频制作 and 任务记录.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "桌面主导航" });
+    expect(
+      within(navigation).queryByRole("menuitem", { name: "第三方软件声明" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(navigation).queryByRole("menuitem", { name: "开源软件许可" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reaches the open source licence notice from the foot of settings and diagnostics", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -51,11 +70,51 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "第三方软件声明" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    const entry = screen.getByRole("button", { name: "开源软件许可" });
+    expect(entry).toBeVisible();
 
-    expect(screen.getByRole("heading", { name: "第三方软件声明" })).toBeVisible();
+    await user.click(entry);
+
+    expect(screen.getByRole("heading", { name: "开源软件许可" })).toBeVisible();
     expect(screen.getByRole("region", { name: "上游开源项目" })).toBeVisible();
     expect(screen.getByRole("region", { name: "字体与素材权利" })).toBeVisible();
+  });
+
+  it("keeps 设置与诊断 marked as the section the licence notice belongs to", async () => {
+    // Nothing else in the sidebar leads here, so an unselected sidebar would
+    // read as a broken page rather than a sub-page of settings.
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("button", { name: "开源软件许可" }));
+
+    expect(screen.getByRole("menuitem", { name: "设置与诊断" })).toHaveClass(
+      "ant-menu-item-selected",
+    );
+  });
+
+  it("returns to settings and diagnostics through the sidebar", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("button", { name: "开源软件许可" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+
+    expect(screen.getByRole("heading", { name: "设置与诊断" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "上游开源项目" })).not.toBeInTheDocument();
   });
 
   it("keeps the upstream names off every other page in the navigation", async () => {
@@ -67,7 +126,8 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "第三方软件声明" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("button", { name: "开源软件许可" }));
     expect(document.body.textContent?.toLowerCase() ?? "").toContain("moneyprinterturbo");
 
     await user.click(screen.getByRole("menuitem", { name: "视频制作" }));
