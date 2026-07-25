@@ -32,7 +32,16 @@ const RENDER_VIEWPORT_WIDTH = 640;
 const RENDER_VIEWPORT_HEIGHT = 360;
 const MAX_PROTOCOL_RESPONSE_BYTES = 64 * 1024;
 const SANDBOX_FRAMES_MAXIMUM = 600;
+// Wall clock is the stall guard: a hung render is killed at this many seconds.
 const SANDBOX_SECONDS_MAXIMUM = 300;
+// CPU seconds are a different quantity: they are summed over the whole browser
+// process tree, so a render occupying N cores accrues them N times faster than
+// wall clock. The admissible CPU budget is therefore the wall-clock budget
+// times the highest average core occupancy one render may declare — sharing the
+// wall-clock ceiling rejected legitimate multi-core budgets on long renders and,
+// on short ones, admitted a figure no host can reach, leaving the guard inert.
+// See `contracts/video/motion-render-sandbox-budget.v1.json`.
+const SANDBOX_CPU_PARALLELISM_MAXIMUM = 8;
 const SANDBOX_MEMORY_MEGABYTES_MINIMUM = 128;
 const SANDBOX_MEMORY_MEGABYTES_MAXIMUM = 8192;
 const SANDBOX_OUTPUT_BYTES_MAXIMUM = 2147483647;
@@ -296,7 +305,11 @@ function validSandboxSpec(value) {
   ) return false;
   return boundedInteger(value.frameCount, 1, SANDBOX_FRAMES_MAXIMUM)
     && boundedInteger(value.maxDurationSeconds, 1, SANDBOX_SECONDS_MAXIMUM)
-    && boundedInteger(value.maxCpuSeconds, 1, SANDBOX_SECONDS_MAXIMUM)
+    && boundedInteger(
+      value.maxCpuSeconds,
+      1,
+      value.maxDurationSeconds * SANDBOX_CPU_PARALLELISM_MAXIMUM,
+    )
     && boundedInteger(
       value.maxMemoryMegabytes,
       SANDBOX_MEMORY_MEGABYTES_MINIMUM,

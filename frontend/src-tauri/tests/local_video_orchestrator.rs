@@ -591,6 +591,60 @@ fn render_sandbox_rejects_invalid_requests() {
     assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
 }
 
+/// The declared ceiling on average core occupancy for one render, stated here
+/// independently of the orchestrator and kept in step with
+/// `contracts/video/motion-render-sandbox-budget.v1.json`.
+const SANDBOX_CPU_PARALLELISM_MAXIMUM: u32 = 8;
+
+/// CPU seconds and wall-clock seconds are different quantities: a render that
+/// saturates several cores accrues CPU seconds many times faster than wall
+/// clock. The admissible CPU budget is therefore the wall-clock budget times
+/// the declared maximum average core occupancy — sharing the wall-clock ceiling
+/// both rejects legitimate multi-core budgets and, on short budgets, admits a
+/// figure no host can reach, leaving the CPU guard inert.
+#[test]
+fn render_sandbox_scales_the_cpu_budget_with_the_wall_clock_budget() {
+    let root = std::env::temp_dir();
+    let request = |duration: u32, cpu: u32| {
+        VideoWorkerRenderSandboxRequest::new(
+            root.join("workspace"),
+            "entry.html".to_owned(),
+            vec!["assets/style.css".to_owned()],
+            6,
+            duration,
+            cpu,
+            1024,
+            50_000_000,
+        )
+    };
+    let parallelism = SANDBOX_CPU_PARALLELISM_MAXIMUM;
+    for (duration, cpu) in [
+        (120, 480),
+        (120, 120 * parallelism),
+        (1, parallelism),
+        (300, 300 * parallelism),
+    ] {
+        assert!(
+            request(duration, cpu).is_ok(),
+            "cpu={cpu} inside a {duration}s wall budget must be accepted"
+        );
+    }
+    for (duration, cpu) in [
+        (1, parallelism + 1),
+        (1, 300),
+        (30, 300),
+        (120, 120 * parallelism + 1),
+    ] {
+        let error = request(duration, cpu)
+            .expect_err("a CPU budget beyond the wall budget must be rejected");
+        assert_eq!(
+            error.code(),
+            VideoWorkerErrorCode::ConfigurationInvalid,
+            "cpu={cpu} beyond a {duration}s wall budget must be rejected"
+        );
+    }
+}
+
 #[test]
 fn render_sandbox_binds_canonical_proof_and_parses_summary() {
     let fixture = TemporaryWorker::new(&sandbox_worker(false));

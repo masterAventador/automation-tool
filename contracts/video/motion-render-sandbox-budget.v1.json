@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-render-sandbox-budget",
+  "version": "motion-render-sandbox-budget.v1",
+  "wallClockSecondsMaximum": 300,
+  "cpuParallelismMaximum": 8,
+  "cpuSecondsAbsoluteMaximum": 2400,
+  "cpuSecondsCeilingFormula": "maxDurationSeconds * cpuParallelismMaximum",
+  "definedIn": [
+    "workers/motion_composition/worker.mjs",
+    "frontend/src-tauri/src/local_video_orchestrator.rs",
+    "tools/motion-authoring/motion_authoring_agent.py",
+    "scripts/test_motion_video_render_sandbox.py"
+  ],
+  "enforcedBy": "frontend/tests/motion-render-sandbox-budget.test.mjs",
+  "rationale": {
+    "wallClock": "Stall guard. A render that hangs is killed at maxDurationSeconds, so the wall ceiling bounds how long one job may occupy the render slot. Unchanged by this contract.",
+    "cpu": "Device-load guard. CPU seconds are summed over the whole browser process tree, so a render occupying N cores accrues them N times faster than wall clock. maxCpuSeconds is therefore a different quantity from maxDurationSeconds and must not share its ceiling.",
+    "parallelism": "cpuParallelismMaximum is the highest average core occupancy one render may declare for its wall budget. At 8 the guard stays reachable on the 16-core acceptance hosts (half of what the machine could physically deliver), so genuine runaway fan-out still trips it, while a legitimate multi-core composition render (measured at roughly 2-3 cores average) has room.",
+    "tightening": "Sharing the 300 second wall ceiling left the CPU guard inert on short budgets: a 1 second wall budget could declare 300 CPU seconds, a figure no host can reach inside 1 wall second. The derived ceiling rejects that and every wall budget below 37.5 seconds is now bounded more tightly than before."
+  }
+}

@@ -492,6 +492,28 @@ class AgentAuthoringTests(unittest.TestCase):
             self.assertIn(RUNTIME_ASSET, spec["allowedAssets"])
             self.assertEqual(spec["frameCount"], 180)
 
+    def test_submission_cpu_budget_stays_inside_the_sandbox_contract(self) -> None:
+        """A submitted CPU budget must be admissible by the render sandbox.
+
+        CPU seconds are summed over the whole browser process tree, so the
+        sandbox caps them at the wall-clock budget times the maximum declarable
+        average core occupancy. A submission that asks for more is rejected as
+        `render_sandbox_invalid` and never renders a frame.
+        """
+        # Stated independently of the agent, per
+        # `contracts/video/motion-render-sandbox-budget.v1.json`.
+        parallelism = 8
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            agent = self._agent(workspace, ScriptedModel([_valid_model_payload()]))
+            result = agent.author(_brief())
+            spec = result.submission.to_sandbox_spec(str(root))
+            wall_seconds = spec["maxDurationSeconds"]
+            self.assertGreaterEqual(wall_seconds, 1)
+            self.assertGreaterEqual(spec["maxCpuSeconds"], 1)
+            self.assertLessEqual(spec["maxCpuSeconds"], wall_seconds * parallelism)
+
     def test_local_fix_loop_repairs_then_submits(self) -> None:
         broken = VALID_COMPOSITION.replace(
             "./runtime/gsap.min.js", "https://cdn.jsdelivr.net/gsap.js"
