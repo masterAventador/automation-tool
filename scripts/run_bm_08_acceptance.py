@@ -28,10 +28,22 @@ from run_vf_06_acceptance import (
 
 ROOT = Path(__file__).resolve().parents[1]
 CHROMIUM_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
+_EB_03_CACHE = ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
+
+
+def _first_existing(*candidates: Path) -> Path:
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
 DEFAULT_ARCHIVES = {
-    "macos-arm64": (
-        ROOT.parent.parent
-        / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
+    # The EB-03 archive cache lives in the primary checkout's .local; resolve
+    # it both from the primary checkout itself and from a wt/<task> worktree.
+    "macos-arm64": _first_existing(
+        ROOT / _EB_03_CACHE,
+        ROOT.parent.parent / _EB_03_CACHE,
     ),
     "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
     "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
