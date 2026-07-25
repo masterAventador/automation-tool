@@ -41,16 +41,21 @@ const SANDBOX_RELATIVE_PATH_MAXIMUM = 512;
 const SANDBOX_MESSAGE_LIMIT_BYTES = 32 * 1024 * 1024;
 const SANDBOX_FRAMES_DIRECTORY = "frames";
 const SANDBOX_CANCEL_FILE = ".automation-tool-cancel";
-// Wait until what is on screen is stable enough to hash: every image this
-// frame needs is decoded, and two animation frames have passed so the current
-// style has actually been composited. Shared by the warm-up and each frame so
-// the first kept frame is settled exactly like the rest.
-const SETTLE_EXPRESSION_BODY = `
-  await Promise.all(Array.from(document.images)
-    .map((image) => image.decode().catch(() => undefined)));
+// Two animation frames: the current style has actually been composited, so
+// what is captured is what the seek asked for. Cheap enough to run per frame.
+const COMPOSITED_EXPRESSION_BODY = `
   await new Promise((resolve) => requestAnimationFrame(
     () => requestAnimationFrame(() => resolve(true))));
   return true;
+`;
+// The warm-up additionally decodes every image once. Decoding is idempotent
+// but walking the DOM per frame costs enough wall clock to blow the render
+// budget on a slower host, so it is paid exactly once, before the first kept
+// frame.
+const WARM_UP_EXPRESSION_BODY = `
+  await Promise.all(Array.from(document.images)
+    .map((image) => image.decode().catch(() => undefined)));
+  ${COMPOSITED_EXPRESSION_BODY}
 `;
 const RESOURCE_MONITOR_INTERVAL_MS = 300;
 const SANDBOX_FAILURES = {
@@ -1006,7 +1011,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           for (const timeline of Object.values(window.__timelines ?? {})) {
             if (timeline && typeof timeline.seek === 'function') timeline.seek(0, false);
           }
-          ${SETTLE_EXPRESSION_BODY}
+          ${WARM_UP_EXPRESSION_BODY}
         })()`,
         awaitPromise: true,
         returnByValue: true,
@@ -1046,7 +1051,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           // animation frames, so the seeked state is actually rastered before
           // it is captured.
           const settled = await pipe.send("Runtime.evaluate", {
-            expression: `(async () => { ${SETTLE_EXPRESSION_BODY} })()`,
+            expression: `(async () => { ${COMPOSITED_EXPRESSION_BODY} })()`,
             awaitPromise: true,
             returnByValue: true,
           }, sessionId);
