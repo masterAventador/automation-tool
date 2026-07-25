@@ -944,6 +944,19 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       }
       await pipe.send("Page.navigate", { url: entryUrl }, sessionId);
       await loadFired;
+      // `load` only means the resources arrived. Web fonts are rasterised
+      // lazily, so capturing before they are ready lets the first frames of a
+      // run differ from the same frames of the next one. Observed on Windows,
+      // where the font backend differs from macOS.
+      const fontsReady = await pipe.send("Runtime.evaluate", {
+        expression: "document.fonts.ready.then(() => true)",
+        awaitPromise: true,
+        returnByValue: true,
+      }, sessionId);
+      if (fontsReady?.result?.exceptionDetails !== undefined) {
+        finish({ status: "protocol" });
+        return;
+      }
       const timelineProbe = await pipe.send("Runtime.evaluate", {
         expression: `(() => {
           const root = document.querySelector('[data-composition-id][data-duration]');
@@ -984,6 +997,21 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
             returnByValue: true,
           }, sessionId);
           if (seek?.result?.exceptionDetails !== undefined) {
+            finish({ status: "protocol" });
+            return;
+          }
+          // A seek updates style synchronously but compositing is not: two
+          // animation frames guarantee the seeked state was actually rastered
+          // before it is captured. Without this the same frame index can hash
+          // differently between two runs of the same composition.
+          const settled = await pipe.send("Runtime.evaluate", {
+            expression:
+              "new Promise((resolve) => requestAnimationFrame("
+              + "() => requestAnimationFrame(() => resolve(true))))",
+            awaitPromise: true,
+            returnByValue: true,
+          }, sessionId);
+          if (settled?.result?.exceptionDetails !== undefined) {
             finish({ status: "protocol" });
             return;
           }
