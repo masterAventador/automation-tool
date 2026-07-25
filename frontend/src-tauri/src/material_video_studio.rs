@@ -507,11 +507,12 @@ fn runtime_directory(
     Ok(directories.pop())
 }
 
+/// Resolve the packaged smart-material Worker.
+///
+/// Every build resolves it from the packaged resource directory. Test builds
+/// used to accept an environment-variable override, which meant no acceptance
+/// run ever proved the installer carries this executable.
 fn worker_executable(app: &tauri::AppHandle) -> Result<PathBuf, MaterialVideoStudioError> {
-    #[cfg(feature = "video-studio-e2e")]
-    if let Some(value) = std::env::var_os("AUTOMATION_TOOL_IM05_WORKER") {
-        return std::fs::canonicalize(PathBuf::from(value)).map_err(|_| process_unavailable());
-    }
     let name = if cfg!(windows) {
         "automation-tool-material-video-worker.exe"
     } else {

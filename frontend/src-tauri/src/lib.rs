@@ -1177,7 +1177,9 @@ async fn logout_douyin_session(
 /// It lives in the App rather than the executor because it *is* a view: the
 /// executor owns the irreversible facts (its durable at-most-once ledger), and
 /// this owns only what the operator has been shown and has agreed to.
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+/// The composition root manages this in every build, so it is declared in
+/// every build. Gating the type but not the `manage` call left the
+/// `video-studio-e2e` combination unable to compile at all.
 pub struct PublishWorkspaceState(pub std::sync::Mutex<publish_workspace::PublishWorkspace>);
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]

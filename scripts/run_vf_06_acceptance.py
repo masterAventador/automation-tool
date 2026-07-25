@@ -11,14 +11,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 TAURI_CONFIG = FRONTEND / "src-tauri" / "tauri.video-studio-e2e.conf.json"
 APP_IDENTIFIER = "com.aventador.automationtool.vf06acceptance"
+# `tauri build --debug --no-bundle` 产出裸可执行文件, Tauri 把它所在目录当作资源目录。
+DEBUG_APP_RESOURCE_ROOT = FRONTEND / "src-tauri" / "target" / "debug"
+EMBEDDED_BROWSER_MANIFEST = Path("embedded-browser") / "distribution-manifest.v1.json"
 
-# material-video-webui.spec.ts 属于 IM-05 验收范围: 它要求
-# AUTOMATION_TOOL_IM05_WORKER 指向真实冻结 Worker, 由
-# scripts/run_im_05_acceptance.py 构建并注入后单独覆盖;
+# material-video-webui.spec.ts 属于 IM-05 验收范围: 它要求真实冻结 Worker 已经装进
+# App 资源目录, 由 scripts/run_im_05_acceptance.py 构建并装配后单独覆盖;
 # VF-06 全量验收只运行不依赖冻结 Worker 的视频工作台 spec.
 SPECS = (
     "./e2e-tauri/video-studio.spec.ts",
@@ -68,6 +74,82 @@ def require_port_closed(port: int) -> None:
         probe.settimeout(0.2)
         if probe.connect_ex(("127.0.0.1", port)) == 0:
             raise RuntimeError(f"VF-06 refuses to reuse occupied loopback port {port}")
+
+
+class VideoRuntimeStagingRejected(RuntimeError):
+    """An acceptance App would start without the runtime it needs."""
+
+
+def stage_video_runtime(*, staging: Path, resource_root: Path) -> dict[str, Path]:
+    """Install the prepared video runtime where every build reads it.
+
+    The acceptance build resolves ffmpeg and both Workers from the packaged
+    resource directory, exactly as the release does. It used to accept the paths
+    from environment variables the acceptance scripts set, so no video
+    acceptance could notice that the shipped package carried none of them.
+
+    A debug target directory is reused across runs, so an existing tree is
+    replaced rather than refused; on any rejection every tree this call wrote is
+    removed, so a partial staging cannot be mistaken for a finished one.
+    """
+    written: list[Path] = []
+    try:
+        for resource in VIDEO_RUNTIME_RESOURCES:
+            source = staging / resource.staging_name
+            if not source.is_dir():
+                raise VideoRuntimeStagingRejected(
+                    f"the staging tree carries no {resource.staging_name} at {source}"
+                )
+            destination = resource_root.joinpath(*resource.installed_parts)
+            top = resource_root / resource.installed_parts[0]
+            shutil.rmtree(top, ignore_errors=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source, destination, symlinks=True)
+            written.append(top)
+        return require_staged_video_runtime(resource_root=resource_root)
+    except BaseException:
+        for path in written:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
+def require_staged_video_runtime(*, resource_root: Path) -> dict[str, Path]:
+    """Fail closed unless every video runtime resource is present and non-empty."""
+    platform = "windows" if sys.platform == "win32" else "macos"
+    installed: dict[str, Path] = {}
+    for resource in VIDEO_RUNTIME_RESOURCES:
+        location = resource_root.joinpath(*resource.installed_parts)
+        if not location.is_dir():
+            raise VideoRuntimeStagingRejected(
+                f"the acceptance App carries no {resource.staging_name} at {location}; "
+                "run scripts/prepare_video_runtime.py and stage it before building"
+            )
+        for name in resource.required_for(platform):
+            payload = location / name
+            if not payload.is_file() or payload.stat().st_size == 0:
+                raise VideoRuntimeStagingRejected(
+                    f"{resource.staging_name} is incomplete: {name} is missing or "
+                    "empty, so the resolver would find the directory and still fail"
+                )
+        installed[resource.staging_name] = location
+    return installed
+
+
+def require_staged_embedded_browser(*, resource_root: Path) -> Path:
+    """Fail closed unless the verified embedded browser is staged.
+
+    The startup gate resolves it through the same authority the release uses, so
+    an acceptance App without it never mounts the workbench and every spec fails
+    without saying why.
+    """
+    manifest = resource_root / EMBEDDED_BROWSER_MANIFEST
+    if not manifest.is_file():
+        raise VideoRuntimeStagingRejected(
+            f"the acceptance App carries no embedded-browser distribution at "
+            f"{manifest.parent}; build one with "
+            "scripts/build_embedded_browser_distribution.py and stage it there"
+        )
+    return manifest.parent
 
 
 def run_desktop_acceptance() -> None:
