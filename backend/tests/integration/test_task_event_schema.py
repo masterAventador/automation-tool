@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -35,7 +36,6 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0007"
-HEAD_REVISION = "20260723_0033"
 NOW = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)
 EXPECTED_EVENT_COLUMNS = {
     "task_id",

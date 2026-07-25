@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert, text, update
 from sqlalchemy.exc import IntegrityError
@@ -31,7 +32,6 @@ from automation_tool.control_plane.infrastructure.database import (
 )
 
 PREVIOUS_REVISION = "20260718_0006"
-HEAD_REVISION = "20260723_0033"
 NOW = datetime(2026, 7, 18, 16, 0, tzinfo=UTC)
 EXPECTED_ATTEMPT_COLUMNS = {
     "id",

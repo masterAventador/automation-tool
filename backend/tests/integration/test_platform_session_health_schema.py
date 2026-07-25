@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -30,7 +31,6 @@ from automation_tool.control_plane.infrastructure.database import (
 from automation_tool.protocol import PlatformSessionState
 
 PREVIOUS_REVISION = "20260718_0013"
-HEAD_REVISION = "20260723_0033"
 NOW = datetime(2026, 7, 19, 11, 30, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "installation_id",

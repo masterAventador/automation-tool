@@ -12,6 +12,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
@@ -119,7 +120,6 @@ from automation_tool.protocol import (
 )
 
 PREVIOUS_REVISION = "20260720_0019"
-HEAD_REVISION = "20260723_0033"
 NOW = datetime(2026, 7, 20, 1, 0, tzinfo=UTC)
 EXPECTED_COLUMNS = {
     "action_id",

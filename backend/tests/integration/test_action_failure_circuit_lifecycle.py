@@ -1,4 +1,5 @@
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import text
 
@@ -63,7 +64,7 @@ async def test_failure_circuit_migration_has_exact_tables_and_downgrades_cleanly
                     )
                 )
             )
-        assert revision == "20260723_0033"
+        assert revision == HEAD_REVISION
         assert result_columns == {
             "action_id",
             "installation_id",

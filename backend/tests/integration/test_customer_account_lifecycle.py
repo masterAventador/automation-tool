@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -36,7 +37,6 @@ from automation_tool.control_plane.infrastructure.security.passwords import (
     Argon2idPasswordHasher,
 )
 
-HEAD_REVISION = "20260723_0033"
 PREVIOUS_REVISION = "20260721_0027"
 NOW = datetime(2026, 7, 22, 10, 0, tzinfo=UTC)
 PASSWORD = "correct horse battery staple"

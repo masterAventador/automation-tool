@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import delete, insert, select, text, update
@@ -186,7 +187,7 @@ async def test_binding_migration_is_reversible_and_owner_cannot_be_reassigned(
                     updated_at=NOW,
                 )
             )
-        assert revision == "20260723_0033"
+        assert revision == HEAD_REVISION
         assert columns == {
             "id",
             "user_id",

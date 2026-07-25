@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -11,7 +12,6 @@ from automation_tool.control_plane.domain import InstallationId, InstallationSta
 from automation_tool.control_plane.infrastructure.database import Database, installations
 
 BASELINE_REVISION = "20260718_0001"
-HEAD_REVISION = "20260723_0033"
 EXPECTED_CONSTRAINTS = {
     "pk_installations",
     "uq_installations_device_public_key",

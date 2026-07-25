@@ -4,6 +4,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import delete, insert, text, update
 
@@ -285,7 +286,7 @@ async def test_task_action_evidence_migration_is_exact_and_reversible(
                     )
                 )
             )
-        assert revision == "20260723_0033"
+        assert revision == HEAD_REVISION
         assert "evidence_code" in columns
         assert "ck_task_actions_evidence_coherence" in checks
         assert ACTION_RESULT_EVIDENCE_VERSION == "action-result-evidence.v1"
