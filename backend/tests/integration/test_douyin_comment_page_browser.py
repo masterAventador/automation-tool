@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any, cast
-
-import pytest
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.comment_page import (
@@ -14,7 +11,6 @@ from automation_tool.executor.rpa.douyin.comment_page import (
     DouyinCommentPageState,
 )
 
-MACOS_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "douyin_comment_pages"
 ACTION_URL = "https://www.douyin.com/video/7351234567890123456"
 BLOCKED_URL = "https://www.douyin.com/video/7351234567890123457"
@@ -22,10 +18,8 @@ DRIFT_URL = "https://www.douyin.com/video/7351234567890123458"
 
 
 def test_production_comment_page_uses_headless_fake_pages_and_closes(
-    tmp_path: Path,
+    tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
-    if sys.platform != "darwin" or not MACOS_CHROME.is_file():
-        pytest.skip("A7-08 system Chrome fake-page acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-a7-08-profile"
     profile.mkdir(mode=0o700)
     documents = {
@@ -37,7 +31,7 @@ def test_production_comment_page_uses_headless_fake_pages_and_closes(
 
     with runtime.running(
         BrowserLaunchRequest(
-            executable_path=MACOS_CHROME,
+            executable_path=staged_embedded_chromium,
             profile_directory=profile,
             headless=True,
         )
