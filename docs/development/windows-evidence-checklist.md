@@ -352,15 +352,29 @@ staged 内置 Chromium（4/4，目标校验/频控/单次发送/暂停-取消-�
 真实抖音私信最终状态另标 🔍 待真实账号。通过后更新 `docs/development/EB-14.md`
 遗留项。
 
-### 15. EB-15 诊断、人工接管与进程清理 Windows 待补
+### 15. EB-15 诊断、人工接管与进程清理 ✅ 已完成（headed 一项仍待补）
 
 EB-15 已在 macOS 完成进程树拆除、Profile 解锁重启、外部强杀 fail-closed 与有界
 脱敏诊断、真实 headed 接管窗口五条验收，并修复"崩溃后仍交出死窗口"的真实缺陷
 （`_require_running` 增加一次真实往返连通性探测）。入口
 `cd backend && uv run pytest tests/integration/test_embedded_browser_lifecycle.py`
-（headed 用例需 `AUTOMATION_TOOL_EB15_HEADED=1`）。Windows 侧待补：进程树查找与
-强杀改用 Windows 语义（无 pgrep/SIGKILL），Profile 锁释放与 headed 窗口接管在
-Windows staged 内置 Chromium 上重跑。通过后更新 `docs/development/EB-15.md` 遗留项。
+（headed 用例需 `AUTOMATION_TOOL_EB15_HEADED=1`）。
+
+**2026-07-25 Windows 验收结果（Mac 经 SSH 远程发起，Windows 真机执行）**：在
+`F:\automation-tool`（HEAD `bdc9715`）用 Windows staged 内置 Chromium
+（`.local\eb-04-windows\chrome-win64.zip`）真机运行同一入口：
+**`4 passed, 1 skipped, EXIT=0`**（11.15s）。四条通过的是进程树完全拆除、Profile
+解锁后同一 Profile 干净重启、外部强杀后 fail-closed 并可恢复、诊断有界且不泄漏
+Profile/可执行文件/家目录路径；skip 的是有头窗口用例（按静默运行规范显式跳过）。
+
+前置改造（提交 `bdc9715`）：`pgrep -f` 与 `SIGKILL` 在 Windows 不存在，两个操作
+下沉到 `backend/tests/integration/conftest.py` 的 `process_ids_matching()` 与
+`terminate_process()`——POSIX 走 `pgrep`/`SIGKILL`，Windows 走 CIM 进程表与
+`taskkill /F`；匹配串经环境变量传入 PowerShell，避免含空格与反斜杠的路径被引号
+规则改写。下沉而非各写一份：PB-05 的发布链路集成测试是第二个调用方。
+
+**仍待补**：有头运营窗口的可见性与人工接管，需要 Windows 上已登录的桌面会话，
+且按静默运行规范必须显式开启才能跑。
 
 ### 16. CQ-01 普通用户可理解性 Windows 待补
 
