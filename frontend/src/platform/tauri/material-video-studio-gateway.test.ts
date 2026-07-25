@@ -103,6 +103,7 @@ describe("Tauri material video studio gateway", () => {
       stylePresetId: "blue-professional",
       primaryColor: "#1234ab",
       secondaryColor: "#f2eadb",
+      secondsPerBeat: 4,
       beats: [
         { title: "增长看得见", caption: "字幕：本周销售增长 38%" },
         { title: "来自续费", caption: "字幕：客户持续选择我们" },
@@ -138,5 +139,38 @@ describe("Tauri material video studio gateway", () => {
     expect(invoke).toHaveBeenCalledWith("read_motion_video_artifact", {
       artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
     });
+  });
+
+  it("refuses a storyboard outside the declared duration budget before touching the native command", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const beat = (index: number) => ({
+      title: `第 ${index} 段`,
+      caption: `字幕：第 ${index} 段说明`,
+    });
+    const base = {
+      creationMode: "manual_template_v1" as const,
+      subject: "新品发布",
+      stylePresetId: "blue-professional",
+      primaryColor: "#1234ab",
+      secondaryColor: "#f2eadb",
+      secondsPerBeat: 4,
+      beats: [beat(1), beat(2), beat(3)],
+      logo: null,
+    };
+
+    for (const request of [
+      { ...base, beats: [] },
+      { ...base, beats: Array.from({ length: 11 }, (_, index) => beat(index + 1)) },
+      { ...base, secondsPerBeat: 0 },
+      { ...base, secondsPerBeat: 11 },
+      { ...base, secondsPerBeat: 2.5 },
+      // Both factors are legal on their own; only their product is not.
+      { ...base, secondsPerBeat: 6, beats: Array.from({ length: 6 }, (_, i) => beat(i + 1)) },
+    ]) {
+      await expect(gateway.submitMotionDraft(request)).rejects.toMatchObject({
+        code: "protocol_mismatch",
+      });
+    }
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

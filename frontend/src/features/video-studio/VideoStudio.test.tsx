@@ -281,6 +281,68 @@ describe("video studio shell", () => {
     expect(document.body).not.toHaveTextContent(/\/private\/|[A-Z]:\\/u);
   });
 
+  it("lets the user choose the beat count and the seconds each beat runs", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "脚本与分镜" }));
+
+    // The retired fixed template announced itself; nothing may claim a fixed
+    // length or a fixed beat count any more.
+    expect(document.body).not.toHaveTextContent(/每段 1 秒|三段/u);
+    expect(screen.getByText(/^共 \d+ 段 · 每段 \d+ 秒 · 成片约 \d+ 秒$/u)).toBeVisible();
+
+    await user.clear(screen.getByLabelText("段数"));
+    await user.type(screen.getByLabelText("段数"), "5");
+    await user.clear(screen.getByLabelText("每段时长（秒）"));
+    await user.type(screen.getByLabelText("每段时长（秒）"), "4");
+
+    expect(screen.getAllByRole("textbox", { name: /第 \d+ 段标题/u })).toHaveLength(5);
+    expect(screen.getAllByRole("textbox", { name: /第 \d+ 段字幕/u })).toHaveLength(5);
+    expect(screen.getByText("共 5 段 · 每段 4 秒 · 成片约 20 秒")).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    expect(screen.getByRole("region", { name: "品牌动效播放预览" })).toHaveTextContent(
+      "第 1 段 / 5",
+    );
+
+    await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+    expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secondsPerBeat: 4,
+        beats: expect.arrayContaining([expect.objectContaining({ title: "第 5 段" })]),
+      }),
+    );
+    expect(vi.mocked(studioGateway.submitMotionDraft).mock.calls[0]![0].beats).toHaveLength(5);
+  });
+
+  it("refuses to submit a beat count and length whose product exceeds the render budget", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "脚本与分镜" }));
+    await user.clear(screen.getByLabelText("段数"));
+    await user.type(screen.getByLabelText("段数"), "5");
+    await user.clear(screen.getByLabelText("每段时长（秒）"));
+    await user.type(screen.getByLabelText("每段时长（秒）"), "6");
+
+    const warning = screen.getByText(/成片总长最多 20 秒/u);
+    expect(warning).toBeVisible();
+    expect(warning.textContent).toContain("30 秒");
+
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    expect(screen.getByRole("button", { name: "提交本机渲染" })).toBeDisabled();
+    expect(studioGateway.submitMotionDraft).not.toHaveBeenCalled();
+  });
+
   it("edits a three-beat manual draft, plays the real preview and submits it without claiming AI", async () => {
     const user = userEvent.setup();
     const studioGateway = gateway();
@@ -396,7 +458,7 @@ describe("video studio shell", () => {
       screen.getByText(/动效零件与 12 套整体风格不同/),
     ).toBeVisible();
 
-    const card = within(browser).getByText("Data Chart").closest("li");
+    const card = within(browser).getByText("数据图表动画").closest("li");
     await user.click(
       within(card as HTMLElement).getByRole("button", { name: "加入第 1 段" }),
     );

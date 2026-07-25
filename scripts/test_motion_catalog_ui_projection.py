@@ -4,8 +4,9 @@
 Proves ``contracts/video/motion-catalog-ui.v1.json`` is a deterministic,
 user-safe projection of the locked BM-11 catalog and rights ledgers: 134
 items with closed Chinese category/type/performance/device/applicability/
-provenance labels, sanitized display titles, and zero upstream names,
-trademark indicator forms, domains or URLs in the frontend-facing payload.
+provenance labels, fully localized Chinese part names, and zero upstream
+names, trademark indicator forms, domains or URLs in the frontend-facing
+payload.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ UPSTREAM_WORDS = re.compile(
     re.IGNORECASE,
 )
 URL_MARKERS = ("http://", "https://", "://", "www.", ".com", ".net", ".org", ".dev")
+ASCII_LETTER = re.compile(r"[A-Za-z]")
 
 
 def load(path: Path) -> dict:
@@ -65,6 +67,9 @@ def run_check(projection: Path = PROJECTION) -> subprocess.CompletedProcess[str]
     )
 
 
+EXECUTED_SCENARIOS: list[str] = []
+
+
 def expect_check_failure(name: str, projection: dict) -> None:
     with tempfile.TemporaryDirectory(
         prefix="automation-tool-bm15-test-"
@@ -76,6 +81,7 @@ def expect_check_failure(name: str, projection: dict) -> None:
         assert "motion catalog ui projection check failed" in result.stderr, (
             f"{name}: {result.stderr}"
         )
+    EXECUTED_SCENARIOS.append(name)
 
 
 def main() -> int:
@@ -121,6 +127,15 @@ def main() -> int:
         "projection ids must equal the locked catalog ids"
     )
 
+    # Every part name is fully localized: operators never read an upstream
+    # English name, and no two parts share a name in the picker.
+    titles = [item["displayTitle"] for item in items]
+    for title in titles:
+        assert ASCII_LETTER.search(title) is None, (
+            f"part name is not fully localized: {title!r}"
+        )
+    assert len(set(titles)) == 134, "every part name must be unique"
+
     rights_by_name = {entry["name"]: entry for entry in rights["items"]}
     gpu_to_performance = {
         "dom_css": "轻量",
@@ -147,7 +162,6 @@ def main() -> int:
             "displayTitle",
             "typeLabel",
             "category",
-            "officialPreview",
             "performanceLabel",
             "deviceRequirementLabel",
             "applicabilityLabel",
@@ -158,7 +172,6 @@ def main() -> int:
         assert item["performanceLabel"] in PERFORMANCE_LABELS
         assert item["deviceRequirementLabel"] in DEVICE_LABELS
         assert item["provenanceLabel"] in PROVENANCE_LABELS
-        assert isinstance(item["officialPreview"], bool)
         assert (
             isinstance(item["displayTitle"], str)
             and 1 <= len(item["displayTitle"]) <= 120
@@ -210,8 +223,72 @@ def main() -> int:
     expect_check_failure("count drift", tampered)
 
     tampered = clone()
-    tampered["items"][1]["officialPreview"] = not tampered["items"][1]["officialPreview"]
-    expect_check_failure("official preview flag flipped", tampered)
+    tampered["items"][0]["displayTitle"] = "Money Count"
+    expect_check_failure("untranslated part name", tampered)
+
+    tampered = clone()
+    tampered["items"][1]["displayTitle"] = tampered["items"][0]["displayTitle"]
+    expect_check_failure("duplicated part name", tampered)
+
+    tampered = clone()
+    for entry in tampered["items"]:
+        entry["officialPreview"] = True
+    expect_check_failure("official preview flag reintroduced", tampered)
+
+    assert len(EXECUTED_SCENARIOS) == 9, (
+        f"every tamper scenario must run, got {len(EXECUTED_SCENARIOS)}: "
+        f"{EXECUTED_SCENARIOS}"
+    )
+
+    # The localization rule must fail closed on its own, not only through the
+    # drift comparison: prove the builder and the gate each reject a bad name.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import build_motion_catalog_ui_projection as builder
+    import check_motion_catalog_ui_projection as gate
+
+    assert set(builder.DISPLAY_TITLES) == set(ids), (
+        "the localized name table must cover exactly the locked catalog ids"
+    )
+
+    original = dict(builder.DISPLAY_TITLES)
+    try:
+        builder.DISPLAY_TITLES[ids[0]] = "Money Count"
+        try:
+            builder.compose_projection()
+        except builder.ProjectionError as error:
+            assert "localized" in str(error), f"unexpected builder failure: {error}"
+        else:
+            raise AssertionError("builder must reject an untranslated name")
+
+        builder.DISPLAY_TITLES[ids[0]] = original[ids[1]]
+        try:
+            builder.compose_projection()
+        except builder.ProjectionError as error:
+            assert "duplicate" in str(error), f"unexpected builder failure: {error}"
+        else:
+            raise AssertionError("builder must reject a duplicated name")
+
+        del builder.DISPLAY_TITLES[ids[0]]
+        try:
+            builder.compose_projection()
+        except builder.ProjectionError as error:
+            assert "localized" in str(error), f"unexpected builder failure: {error}"
+        else:
+            raise AssertionError("builder must reject a missing name")
+    finally:
+        builder.DISPLAY_TITLES.clear()
+        builder.DISPLAY_TITLES.update(original)
+
+    for bad, reason in (
+        ([{"displayTitle": "Money Count"}], "localized"),
+        ([{"displayTitle": "金额数字滚动"}, {"displayTitle": "金额数字滚动"}], "duplicate"),
+    ):
+        try:
+            gate.require_localized_titles(bad)
+        except gate.CheckError as error:
+            assert reason in str(error), f"unexpected gate failure: {error}"
+        else:
+            raise AssertionError(f"gate must reject {reason} names")
 
     print("BM-15 motion catalog ui projection tests passed")
     return 0

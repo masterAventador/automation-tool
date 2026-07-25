@@ -24,7 +24,7 @@ describe("BM-15 production App motion parts catalog acceptance", () => {
     const browserRegion = await studio.$("section[aria-label='动效零件目录']");
     await expect(browserRegion).toBeDisplayed();
     await expect(browserRegion).toHaveText(
-      expect.stringContaining("动效零件目录（134 项）"),
+      expect.stringContaining("动效零件目录"),
     );
 
     const overrides = await studio.$("section[aria-label='分镜零件选用']");
@@ -42,14 +42,13 @@ describe("BM-15 production App motion parts catalog acceptance", () => {
 
     // The audited attributes are visible on a real card.
     const card = await browserRegion.$(
-      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='Data Chart']]",
+      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='数据图表动画']]",
     );
     await expect(card).toBeDisplayed();
     await expect(card).toHaveText(expect.stringContaining("性能：轻量"));
     await expect(card).toHaveText(expect.stringContaining("设备：任意设备"));
     await expect(card).toHaveText(expect.stringContaining("适用：数据指标与地理信息"));
     await expect(card).toHaveText(expect.stringContaining("来源：文字已本地化"));
-    await expect(card).toHaveText(expect.stringContaining("有官方在线预览"));
 
     // Raw ids and upstream indicator words never reach the page.
     const pageText = await studio.getText();

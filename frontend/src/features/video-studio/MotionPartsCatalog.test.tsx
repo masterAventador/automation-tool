@@ -28,32 +28,47 @@ describe("MotionPartsCatalog", () => {
     renderCatalog();
     const browser = screen.getByRole("region", { name: "动效零件目录" });
     expect(within(browser).getAllByRole("listitem")).toHaveLength(134);
-    expect(within(browser).getByText("Data Chart")).toBeInTheDocument();
+    expect(within(browser).getByText("数据图表动画")).toBeInTheDocument();
 
     fireEvent.click(within(browser).getByRole("radio", { name: "数据与地图" }));
     const filtered = within(browser).getAllByRole("listitem");
     expect(filtered.length).toBeLessThan(134);
     expect(filtered.length).toBeGreaterThan(0);
-    expect(within(browser).getByText("Data Chart")).toBeInTheDocument();
+    expect(within(browser).getByText("数据图表动画")).toBeInTheDocument();
+  });
+
+  it("titles the catalog without a hardcoded part count", () => {
+    renderCatalog();
+    const heading = screen.getByRole("heading", { name: "动效零件目录" });
+    expect(heading).toBeInTheDocument();
+    expect(heading.textContent).not.toMatch(/\d/);
   });
 
   it("shows performance, device, applicability and provenance for each part", () => {
     renderCatalog();
     const browser = screen.getByRole("region", { name: "动效零件目录" });
-    const card = within(browser).getByText("Data Chart").closest("li");
+    const card = within(browser).getByText("数据图表动画").closest("li");
     expect(card).not.toBeNull();
     const scoped = within(card as HTMLElement);
     expect(scoped.getByText(/性能：轻量/)).toBeInTheDocument();
     expect(scoped.getByText(/设备：任意设备/)).toBeInTheDocument();
     expect(scoped.getByText(/适用：数据指标与地理信息/)).toBeInTheDocument();
     expect(scoped.getByText(/来源：文字已本地化/)).toBeInTheDocument();
-    expect(scoped.getByText("有官方在线预览")).toBeInTheDocument();
+  });
+
+  it("drops the redundant category tag and the unreachable preview tag", () => {
+    renderCatalog();
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    const card = within(browser).getByText("数据图表动画").closest("li");
+    const scoped = within(card as HTMLElement);
+    expect(scoped.queryByText("数据与地图")).toBeNull();
+    expect(screen.queryByText("有官方在线预览")).toBeNull();
   });
 
   it("never renders raw part identifiers or upstream words", () => {
     renderCatalog();
     expect(screen.queryByText(/apple-money-count/)).not.toBeInTheDocument();
-    expect(screen.getByText("星云科技 Money Count")).toBeInTheDocument();
+    expect(screen.getByText("金额数字滚动")).toBeInTheDocument();
     expect(screen.queryByText(/整体风格样式包/)).not.toBeInTheDocument();
   });
 
@@ -68,7 +83,7 @@ describe("MotionPartsCatalog", () => {
     expect(within(overrides).getByText(/第 1 段：已选 1 项/)).toBeInTheDocument();
 
     const browser = screen.getByRole("region", { name: "动效零件目录" });
-    const card = within(browser).getByText("Data Chart").closest("li");
+    const card = within(browser).getByText("数据图表动画").closest("li");
     fireEvent.click(
       within(card as HTMLElement).getByRole("button", { name: /从第 1 段移除/ }),
     );

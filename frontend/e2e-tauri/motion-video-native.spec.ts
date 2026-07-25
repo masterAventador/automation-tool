@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { browser, expect } from "@wdio/globals";
 
 const SUBJECT = "BM08 品牌增长验证";
+const SECONDS_PER_BEAT = 1;
 const BEATS = [
   ["增长看得见", "字幕：本周销售增长 38%"],
   ["续费驱动增长", "字幕：客户持续选择新版"],
@@ -56,6 +57,15 @@ describe("BM-08 production App native brand-motion acceptance", () => {
     assert.doesNotMatch(await studio.getText(), /网址|URL|抓取/);
 
     await studio.$("div[role='tab']=脚本与分镜").click();
+    // Drive the real duration control instead of accepting the default, and
+    // pin it to the shortest beat so this acceptance keeps rendering exactly
+    // the frame count it always has.
+    await studio.$("input#motion-seconds-per-beat").setValue(SECONDS_PER_BEAT);
+    await expect(studio).toHaveText(
+      expect.stringContaining(
+        `共 ${BEATS.length} 段 · 每段 ${SECONDS_PER_BEAT} 秒 · 成片约 ${BEATS.length * SECONDS_PER_BEAT} 秒`,
+      ),
+    );
     for (let index = 0; index < BEATS.length; index += 1) {
       await studio
         .$(`input[aria-label='第 ${index + 1} 段标题']`)

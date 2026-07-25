@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Alert, Button, Card, Empty, Input, Popconfirm, Progress, Space, Tabs, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  Input,
+  InputNumber,
+  Popconfirm,
+  Progress,
+  Space,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
 
 import {
   MaterialVideoStudioGatewayError,
@@ -11,20 +24,40 @@ import {
   type MotionVideoBeatDraft,
   type MotionVideoDraftRequest,
 } from "./material-video-studio-gateway";
+import {
+  MOTION_DURATION_LIMITS,
+  motionDurationProblem,
+  motionStoryboardSummary,
+  resizeMotionBeats,
+} from "./motion-duration";
 import { MotionPartsCatalog } from "./MotionPartsCatalog";
 import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
 import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
 
 type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
 
-const DEFAULT_MOTION_BEATS: readonly MotionVideoBeatDraft[] = [
+const SEED_MOTION_BEATS: readonly MotionVideoBeatDraft[] = [
   { title: "一个清晰的核心信息", caption: "字幕：先让观众知道这次更新是什么。" },
   { title: "三个值得关注的亮点", caption: "字幕：用简洁画面解释价值和变化。" },
   { title: "现在就开始行动", caption: "字幕：给观众一个明确的下一步。" },
 ] as const;
 
+function createMotionBeat(index: number): MotionVideoBeatDraft {
+  return {
+    title: `第 ${index + 1} 段`,
+    caption: `字幕：第 ${index + 1} 段要说的话。`,
+  };
+}
+
+const DEFAULT_MOTION_BEATS = resizeMotionBeats(
+  SEED_MOTION_BEATS,
+  MOTION_DURATION_LIMITS.beatCountDefault,
+  createMotionBeat,
+);
+
 interface MotionDraft {
   readonly subject: string;
+  readonly secondsPerBeat: number;
   readonly beats: readonly MotionVideoBeatDraft[];
   readonly style: MotionStyleDraftSelection;
 }
@@ -236,7 +269,7 @@ function NewVideoPage({
                 type="info"
                 showIcon
                 title="当前没有调用视频创作模型"
-                description="你正在从固定三段模板开始，后续文字、分镜、风格和品牌素材都由你手工调整。"
+                description="你正在从固定模板开始，段数、每段时长、文字、分镜、风格和品牌素材都由你手工调整。"
               />
             </Space>
           </Card>
@@ -329,19 +362,57 @@ function NewVideoPage({
 
 function MotionScriptPage({
   beats,
+  secondsPerBeat,
   onChange,
+  onBeatCountChange,
+  onSecondsPerBeatChange,
 }: {
   readonly beats: readonly MotionVideoBeatDraft[];
+  readonly secondsPerBeat: number;
   readonly onChange: (beats: readonly MotionVideoBeatDraft[]) => void;
+  readonly onBeatCountChange: (beatCount: number) => void;
+  readonly onSecondsPerBeatChange: (secondsPerBeat: number) => void;
 }) {
+  const problem = motionDurationProblem(beats.length, secondsPerBeat);
   return (
-    <Card className="video-studio-panel" title="三段脚本与分镜">
+    <Card className="video-studio-panel" title="脚本与分镜">
       <Space orientation="vertical" size="middle" className="motion-script-editor">
+        <Space wrap size="middle" className="motion-script-duration">
+          <span>
+            <label htmlFor="motion-beat-count">段数</label>
+            <InputNumber
+              id="motion-beat-count"
+              min={MOTION_DURATION_LIMITS.beatCountMinimum}
+              max={MOTION_DURATION_LIMITS.beatCountMaximum}
+              precision={0}
+              value={beats.length}
+              onChange={(value) => {
+                if (typeof value === "number") onBeatCountChange(value);
+              }}
+            />
+          </span>
+          <span>
+            <label htmlFor="motion-seconds-per-beat">每段时长（秒）</label>
+            <InputNumber
+              id="motion-seconds-per-beat"
+              min={MOTION_DURATION_LIMITS.secondsPerBeatMinimum}
+              max={MOTION_DURATION_LIMITS.secondsPerBeatMaximum}
+              precision={0}
+              value={secondsPerBeat}
+              onChange={(value) => {
+                if (typeof value === "number") onSecondsPerBeatChange(value);
+              }}
+            />
+          </span>
+        </Space>
         <Alert
-          type="info"
+          type={problem === null ? "info" : "warning"}
           showIcon
-          title="每段 1 秒"
-          description="这里编辑的是固定模板声明过的文字变量；提交前仍可反复预览和精修。"
+          title={motionStoryboardSummary(beats.length, secondsPerBeat)}
+          description={
+            problem ??
+            "这里编辑的是固定模板声明过的文字变量；提交前仍可反复预览和精修。"
+          }
         />
         {beats.map((beat, index) => (
           <Card key={index} size="small" title={`第 ${index + 1} 段`}>
@@ -387,11 +458,12 @@ function MotionPreviewPage({
 }) {
   const [activeBeat, setActiveBeat] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const lastBeat = draft.beats.length - 1;
   useEffect(() => {
     if (!playing) return;
     const timer = window.setTimeout(() => {
       setActiveBeat((current) => {
-        if (current >= 2) {
+        if (current >= lastBeat) {
           setPlaying(false);
           return current;
         }
@@ -399,15 +471,17 @@ function MotionPreviewPage({
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activeBeat, playing]);
+  }, [activeBeat, lastBeat, playing]);
   const style = MOTION_STYLE_CATALOG.find((item) => item.id === draft.style.stylePresetId);
   const primary = draft.style.primaryColor || style?.preview.accent || "#1f4fd8";
   const secondary = draft.style.secondaryColor || style?.preview.paper || "#f4f1ea";
-  const beat = draft.beats[activeBeat]!;
+  const beat = draft.beats[Math.min(activeBeat, lastBeat)]!;
+  const durationProblem = motionDurationProblem(draft.beats.length, draft.secondsPerBeat);
   const valid =
     draft.subject.trim() !== "" &&
     draft.beats.every((item) => item.title.trim() !== "" && item.caption.trim() !== "") &&
-    draft.style.stylePresetId !== null;
+    draft.style.stylePresetId !== null &&
+    durationProblem === null;
   return (
     <Card className="video-studio-panel" title="品牌动效播放预览">
       <Space orientation="vertical" size="middle" className="motion-preview-workspace">
@@ -431,13 +505,13 @@ function MotionPreviewPage({
           )}
           <div className="motion-playback-scene">
             <span style={{ color: primary }}>
-              第 {activeBeat + 1} 段 · {style?.displayName ?? "尚未选择风格"}
+              第 {Math.min(activeBeat, lastBeat) + 1} 段 · {style?.displayName ?? "尚未选择风格"}
             </span>
             <h3>{beat.title}</h3>
             <p>{beat.caption}</p>
           </div>
           <div className="motion-playback-progress" style={{ backgroundColor: primary }}>
-            第 {activeBeat + 1} 段 / 3
+            第 {Math.min(activeBeat, lastBeat) + 1} 段 / {draft.beats.length}
           </div>
         </section>
         <Space wrap>
@@ -459,7 +533,11 @@ function MotionPreviewPage({
           </Button>
         </Space>
         {valid ? null : (
-          <Alert type="warning" showIcon title="请先补全标题、三段脚本并选择一套整体画面风格。" />
+          <Alert
+            type="warning"
+            showIcon
+            title={durationProblem ?? "请先补全标题、每段脚本并选择一套整体画面风格。"}
+          />
         )}
       </Space>
     </Card>
@@ -674,15 +752,28 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
   const [busy, setBusy] = useState(false);
   const [motionPartSelections, setMotionPartSelections] = useState<
     readonly (readonly string[])[]
-  >([[], [], []]);
+  >(() => DEFAULT_MOTION_BEATS.map(() => []));
   const [jobError, setJobError] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
   const [motionDraft, setMotionDraft] = useState<MotionDraft>({
     subject: "新品发布",
+    secondsPerBeat: MOTION_DURATION_LIMITS.secondsPerBeatDefault,
     beats: DEFAULT_MOTION_BEATS,
     style: EMPTY_MOTION_STYLE,
   });
+  // Per-beat part selections are indexed by beat, so they have to grow and
+  // shrink with the storyboard or a newly added beat would silently discard
+  // every part the user picks for it.
+  const changeMotionBeatCount = useCallback((beatCount: number) => {
+    setMotionDraft((current) => ({
+      ...current,
+      beats: resizeMotionBeats(current.beats, beatCount, createMotionBeat),
+    }));
+    setMotionPartSelections((current) =>
+      resizeMotionBeats(current, beatCount, () => []),
+    );
+  }, []);
   const refresh = useCallback(() => {
     void Promise.all([gateway.jobs(), gateway.motionJobs()]).then(([material, motion]) => {
       setJobs(material);
@@ -713,6 +804,7 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
       stylePresetId: style.id,
       primaryColor: motionDraft.style.primaryColor || style.preview.accent,
       secondaryColor: motionDraft.style.secondaryColor || style.preview.paper,
+      secondsPerBeat: motionDraft.secondsPerBeat,
       beats: motionDraft.beats.map((beat) => ({
         title: beat.title.trim(),
         caption: beat.caption.trim(),
@@ -779,8 +871,13 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
               selectedMethod === "motion_composition_v1" ? (
                 <MotionScriptPage
                   beats={motionDraft.beats}
+                  secondsPerBeat={motionDraft.secondsPerBeat}
                   onChange={(beats) =>
                     setMotionDraft((current) => ({ ...current, beats }))
+                  }
+                  onBeatCountChange={changeMotionBeatCount}
+                  onSecondsPerBeatChange={(secondsPerBeat) =>
+                    setMotionDraft((current) => ({ ...current, secondsPerBeat }))
                   }
                 />
               ) : (

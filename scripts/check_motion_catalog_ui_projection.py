@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from build_motion_catalog_ui_projection import (
     APPLICABILITY_LABELS,
+    ASCII_LETTER_PATTERN,
     DEVICE_LABELS,
     PERFORMANCE_LABELS,
     PROJECTION_PATH,
@@ -47,6 +48,29 @@ def _boundary_pattern(literal: str) -> re.Pattern[str]:
     )
 
 
+def require_localized_titles(items: list[dict]) -> None:
+    """Reject any part name an operator would read as English or as a twin.
+
+    Re-validated here rather than trusted from the builder: the drift check
+    only proves the candidate matches whatever the builder produced today, so
+    without this rule a builder regression would pass the gate unnoticed.
+    """
+    owners: dict[str, str] = {}
+    for item in items:
+        title = item.get("displayTitle")
+        _require(isinstance(title, str) and title != "", "part name is missing")
+        _require(
+            ASCII_LETTER_PATTERN.search(str(title)) is None,
+            f"part name is not localized into Chinese: {title}",
+        )
+        _require(
+            str(title) not in owners,
+            f"duplicated part name {title} on {item.get('id')} "
+            f"and {owners.get(str(title))}",
+        )
+        owners[str(title)] = str(item.get("id"))
+
+
 def check_projection(candidate_path: Path) -> str:
     try:
         candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
@@ -62,7 +86,12 @@ def check_projection(candidate_path: Path) -> str:
 
     items = candidate["items"]
     _require(len(items) == candidate["counts"]["total"] == 134, "item count drift")
+    require_localized_titles(items)
     for item in items:
+        _require(
+            "officialPreview" not in item,
+            "projection must not ship the upstream preview flag to the frontend",
+        )
         _require(item["typeLabel"] in TYPE_LABELS.values(), "type label drift")
         _require(
             item["performanceLabel"] in PERFORMANCE_LABELS.values(),
@@ -100,7 +129,7 @@ def check_projection(candidate_path: Path) -> str:
 
     return (
         f"{len(items)} items, {len(candidate['categories'])} categories, "
-        "labels closed, no indicator or URL leakage"
+        "labels closed, names fully localized, no indicator or URL leakage"
     )
 
 

@@ -33,6 +33,8 @@ export interface MotionVideoDraftRequest {
   readonly stylePresetId: string;
   readonly primaryColor: string;
   readonly secondaryColor: string;
+  /** How long every beat is held; the film length is this times the beat count. */
+  readonly secondsPerBeat: number;
   readonly beats: readonly MotionVideoBeatDraft[];
   readonly logo: MotionVideoLogoDraft | null;
 }

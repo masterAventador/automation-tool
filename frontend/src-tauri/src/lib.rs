@@ -318,85 +318,59 @@ fn delete_material_video_artifact(
     material_video_studio::delete_artifact(&workspaces, artifact_id)
 }
 
+/// Packaged-resource layout for the brand-motion Worker. `release_assembly`
+/// installs it here; nothing else in the App may name these directories.
+const MOTION_VIDEO_WORKER_DIRECTORY: &str = "motion-video-worker";
+const PACKAGED_WORKER_SUBDIRECTORY: &str = "package";
+
 struct MotionRuntimePaths {
-    worker: MotionWorkerSource,
+    worker_package: std::path::PathBuf,
     browser: std::path::PathBuf,
     chromium_major: u32,
     ffmpeg: std::path::PathBuf,
 }
 
-enum MotionWorkerSource {
-    #[cfg(feature = "video-studio-e2e")]
-    Executable(std::path::PathBuf),
-    #[cfg(not(feature = "video-studio-e2e"))]
-    Package(std::path::PathBuf),
-}
-
+/// Resolve the packaged brand-motion runtime.
+///
+/// Every build resolves it the same way. Test builds used to read these paths
+/// from environment variables instead, which made the whole video line immune
+/// to the one question that mattered — whether the installer actually carries
+/// the Worker, the browser and ffmpeg.
 fn motion_runtime_paths(
-    _app: &tauri::AppHandle,
-    _authority: &embedded_browser_authority::EmbeddedBrowserAuthority,
+    app: &tauri::AppHandle,
+    authority: &embedded_browser_authority::EmbeddedBrowserAuthority,
 ) -> Result<MotionRuntimePaths, motion_video_studio::MotionVideoStudioError> {
-    #[cfg(feature = "video-studio-e2e")]
-    {
-        let worker = std::env::var_os("AUTOMATION_TOOL_BM08_WORKER")
-            .map(std::path::PathBuf::from)
-            .and_then(|path| std::fs::canonicalize(path).ok())
-            .ok_or_else(motion_video_studio::render_unavailable)?;
-        let browser = std::env::var_os("AUTOMATION_TOOL_BM08_BROWSER")
-            .map(std::path::PathBuf::from)
-            .and_then(|path| std::fs::canonicalize(path).ok())
-            .ok_or_else(motion_video_studio::render_unavailable)?;
-        let ffmpeg = std::env::var_os("AUTOMATION_TOOL_BM08_FFMPEG")
-            .map(std::path::PathBuf::from)
-            .and_then(|path| std::fs::canonicalize(path).ok())
-            .ok_or_else(motion_video_studio::render_unavailable)?;
-        let chromium_major = std::env::var("AUTOMATION_TOOL_BM08_CHROMIUM_MAJOR")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .ok_or_else(motion_video_studio::render_unavailable)?;
-        return Ok(MotionRuntimePaths {
-            worker: MotionWorkerSource::Executable(worker),
-            browser,
-            chromium_major,
-            ffmpeg,
-        });
-    }
-    #[cfg(not(feature = "video-studio-e2e"))]
-    {
-        let resource_directory = _app
-            .path()
-            .resource_dir()
-            .map_err(|_| motion_video_studio::render_unavailable())?;
-        let browser = _authority
-            .resolve()
-            .map_err(|_| motion_video_studio::render_unavailable())?;
-        let compatibility: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../contracts/browser/embedded-chromium-compatibility.v1.json"
-        ))
+    let resource_directory = app
+        .path()
+        .resource_dir()
         .map_err(|_| motion_video_studio::render_unavailable())?;
-        let chromium_major = compatibility
-            .pointer("/production_runtime/chromium/browser_version")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| value.split('.').next())
-            .and_then(|value| value.parse::<u32>().ok())
-            .ok_or_else(motion_video_studio::render_unavailable)?;
-        let toolchain = video_media_toolchain::VideoMediaToolchain::load(&resource_directory)
-            .map_err(|_| motion_video_studio::render_unavailable())?;
-        Ok(MotionRuntimePaths {
-            worker: MotionWorkerSource::Package(
-                resource_directory
-                    .join("motion-video-worker")
-                    .join("package"),
-            ),
-            browser,
-            chromium_major,
-            ffmpeg: toolchain.ffmpeg_path().to_path_buf(),
-        })
-    }
+    let browser = authority
+        .resolve()
+        .map_err(|_| motion_video_studio::render_unavailable())?;
+    let compatibility: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../contracts/browser/embedded-chromium-compatibility.v1.json"
+    ))
+    .map_err(|_| motion_video_studio::render_unavailable())?;
+    let chromium_major = compatibility
+        .pointer("/production_runtime/chromium/browser_version")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.split('.').next())
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or_else(motion_video_studio::render_unavailable)?;
+    let toolchain = video_media_toolchain::VideoMediaToolchain::load(&resource_directory)
+        .map_err(|_| motion_video_studio::render_unavailable())?;
+    Ok(MotionRuntimePaths {
+        worker_package: resource_directory
+            .join(MOTION_VIDEO_WORKER_DIRECTORY)
+            .join(PACKAGED_WORKER_SUBDIRECTORY),
+        browser,
+        chromium_major,
+        ffmpeg: toolchain.ffmpeg_path().to_path_buf(),
+    })
 }
 
 fn motion_worker_launch(
-    source: MotionWorkerSource,
+    package: std::path::PathBuf,
     asset_root: std::path::PathBuf,
     browser: std::path::PathBuf,
     chromium_major: u32,
@@ -405,23 +379,9 @@ fn motion_worker_launch(
     let policy =
         local_video_orchestrator::VideoWorkerRestartPolicy::new(0, std::time::Duration::ZERO)
             .map_err(|_| motion_video_studio::render_unavailable())?;
-    let launch = match source {
-        #[cfg(feature = "video-studio-e2e")]
-        MotionWorkerSource::Executable(executable) => {
-            local_video_orchestrator::VideoWorkerLaunch::new(
-                local_video_orchestrator::VideoWorkerKind::Node,
-                executable,
-                asset_root,
-                local_video_orchestrator::MOTION_VIDEO_WORKER_VERSION.to_owned(),
-                policy,
-            )
-        }
-        #[cfg(not(feature = "video-studio-e2e"))]
-        MotionWorkerSource::Package(package) => {
-            local_video_orchestrator::VideoWorkerLaunch::bundled_node(&package, asset_root, policy)
-        }
-    }
-    .map_err(|_| motion_video_studio::render_unavailable())?;
+    let launch =
+        local_video_orchestrator::VideoWorkerLaunch::bundled_node(&package, asset_root, policy)
+            .map_err(|_| motion_video_studio::render_unavailable())?;
     let browser = local_video_orchestrator::VideoWorkerRenderBrowserConfiguration::new(
         browser,
         chromium_major,
@@ -447,7 +407,7 @@ fn submit_motion_video_draft(
     let (asset_root, _, _) =
         motion_video_studio::workspace_render_paths(&workspaces, render_job_id)?;
     let launch = match motion_worker_launch(
-        runtime.worker,
+        runtime.worker_package,
         asset_root,
         runtime.browser,
         runtime.chromium_major,
@@ -478,11 +438,24 @@ fn submit_motion_video_draft(
         return Err(motion_video_studio::render_unavailable());
     }
     let initial = motion_video_studio::snapshot(&workspaces, render_job_id)?;
+    let frame_count = prepared.frame_count();
+    let frames_per_second = prepared.frames_per_second();
     std::thread::spawn(move || {
-        run_motion_render_job(app, render_job_id, allowed_assets, runtime.ffmpeg);
+        run_motion_render_job(
+            app,
+            render_job_id,
+            allowed_assets,
+            frame_count,
+            frames_per_second,
+            runtime.ffmpeg,
+        );
     });
     Ok(initial)
 }
+
+/// The shortest deadline the MP4 encode step may be given, kept at the value
+/// the fixed three second template shipped with so no existing film loses time.
+const MOTION_ENCODE_DEADLINE_FLOOR_SECONDS: u64 = 120;
 
 enum MotionRenderStageFailure {
     Render,
@@ -494,6 +467,8 @@ fn run_motion_render_job(
     app: tauri::AppHandle,
     render_job_id: uuid::Uuid,
     allowed_assets: Vec<String>,
+    frame_count: u32,
+    frames_per_second: u32,
     ffmpeg: std::path::PathBuf,
 ) {
     let workspaces = app.state::<video_job_workspace::VideoJobWorkspaceStore>();
@@ -515,13 +490,17 @@ fn run_motion_render_job(
         .map_err(|_| MotionRenderStageFailure::Render)?;
         let (work, _, _) = motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
             .map_err(|_| MotionRenderStageFailure::Render)?;
+        // Wall clock and CPU seconds both follow the configured film length; a
+        // fixed budget would kill every film longer than the retired template.
+        let budget = motion_video_studio::render_sandbox_budget(frame_count)
+            .map_err(|_| MotionRenderStageFailure::Render)?;
         let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
             work.clone(),
             motion_video_studio::MOTION_COMPOSITION_FILE.to_owned(),
             allowed_assets,
-            motion_video_studio::MOTION_FRAME_COUNT,
-            60,
-            60,
+            frame_count,
+            budget.wall_seconds(),
+            budget.cpu_seconds(),
             2048,
             256 * 1024 * 1024,
         )
@@ -555,7 +534,13 @@ fn run_motion_render_job(
             None,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
-        encode_motion_video(&workspaces, render_job_id, &ffmpeg)?;
+        encode_motion_video(
+            &workspaces,
+            render_job_id,
+            &ffmpeg,
+            frame_count,
+            frames_per_second,
+        )?;
         let artifact = motion_video_studio::import_rendered_output(&workspaces, render_job_id)
             .map_err(|_| MotionRenderStageFailure::Encoding)?;
         motion_video_studio::advance(
@@ -617,10 +602,14 @@ fn encode_motion_video(
     workspaces: &video_job_workspace::VideoJobWorkspaceStore,
     render_job_id: uuid::Uuid,
     ffmpeg: &std::path::Path,
+    frame_count: u32,
+    frames_per_second: u32,
 ) -> Result<(), MotionRenderStageFailure> {
     let (work, _, output) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
     let input = work.join("frames").join("frame-%05d.png");
+    let frames_per_second = frames_per_second.to_string();
+    let frame_count_argument = frame_count.to_string();
     let mut child = std::process::Command::new(ffmpeg)
         .args([
             "-hide_banner",
@@ -629,7 +618,7 @@ fn encode_motion_video(
             "-nostdin",
             "-y",
             "-framerate",
-            "30",
+            &frames_per_second,
             "-start_number",
             "1",
             "-i",
@@ -637,7 +626,7 @@ fn encode_motion_video(
         .arg(&input)
         .args([
             "-frames:v",
-            "90",
+            &frame_count_argument,
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -651,7 +640,14 @@ fn encode_motion_video(
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // Encoding six times the frames cannot share a fixed deadline either. The
+    // derived render budget is the per-frame yardstick; the floor keeps the
+    // shortest films on the deadline they already shipped with.
+    let deadline_seconds = motion_video_studio::render_sandbox_budget(frame_count)
+        .map(|budget| u64::from(budget.wall_seconds()))
+        .unwrap_or(MOTION_ENCODE_DEADLINE_FLOOR_SECONDS)
+        .max(MOTION_ENCODE_DEADLINE_FLOOR_SECONDS);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(deadline_seconds);
     loop {
         if motion_video_studio::cancellation_requested(workspaces, render_job_id).unwrap_or(false) {
             let _ = child.kill();
@@ -712,8 +708,11 @@ fn delete_motion_video_artifact(
     motion_video_studio::delete_artifact(&workspaces, artifact_id)
 }
 
+/// The startup gate. It is the only place that refuses to mount the workbench
+/// when this installation is missing a runtime dependency, so every build —
+/// including every acceptance build — compiles exactly this one and performs
+/// exactly these probes.
 #[tauri::command]
-#[cfg(not(feature = "video-studio-e2e"))]
 fn check_local_startup_environment(
     startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
@@ -742,16 +741,6 @@ fn check_local_startup_environment(
         app_data,
         platform.startup_environment_state(),
         embedded_browser,
-    )
-}
-
-#[tauri::command]
-#[cfg(feature = "video-studio-e2e")]
-fn check_local_startup_environment() -> startup_environment::StartupEnvironmentSnapshot {
-    startup_environment::StartupEnvironmentSnapshot::new(
-        startup_environment::AppDataStartupState::Ready,
-        startup_environment::ExecutorStartupState::Ready,
-        startup_environment::EmbeddedBrowserStartupState::Ready,
     )
 }
 
@@ -1442,29 +1431,16 @@ async fn restart_executor(
     })
 }
 
+/// The UI-only desktop build has an ephemeral identity and no production
+/// credential vault, so it cannot run the installation-access check. It still
+/// contacts the real Control Plane: a build that reported a service it never
+/// called would hide an unreachable backend from every acceptance run.
 #[tauri::command]
-#[cfg(all(feature = "desktop-e2e", not(feature = "video-studio-e2e")))]
+#[cfg(feature = "desktop-e2e")]
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
     client.check_health().await.map_err(map_control_plane_error)
-}
-
-#[cfg(feature = "video-studio-e2e")]
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VideoStudioAcceptanceHealth {
-    status: &'static str,
-    service_version: &'static str,
-}
-
-#[tauri::command]
-#[cfg(feature = "video-studio-e2e")]
-async fn check_control_plane_health() -> VideoStudioAcceptanceHealth {
-    VideoStudioAcceptanceHealth {
-        status: "available",
-        service_version: "video-studio-acceptance",
-    }
 }
 
 #[tauri::command]

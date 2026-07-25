@@ -37,10 +37,16 @@ test("VF-04 keeps the Windows native build and reparse-point checks closed", asy
     build,
     /"ffmpeg\$\{EXE_SUFFIX\}" "ffprobe\$\{EXE_SUFFIX\}"/u,
   );
+  // The Windows flags must reach the linker, and the expansion must survive
+  // the macOS branch leaving the array empty: macOS ships bash 3.2, where
+  // `set -u` rejects an empty array's `[*]` as an unbound variable and the
+  // whole build dies before compiling anything. `:-` changes nothing for the
+  // non-empty Windows array, which is what this boundary test protects.
   assert.match(
     build,
-    /--extra-ldflags="-L\$PREFIX_DIR\/lib \$\{FFMPEG_STATIC_LINK_FLAGS\[\*\]\}"/u,
+    /--extra-ldflags="-L\$PREFIX_DIR\/lib \$\{FFMPEG_STATIC_LINK_FLAGS\[\*\](:-)?\}"/u,
   );
+  assert.match(build, /\$\{FFMPEG_STATIC_LINK_FLAGS\[\*\]:-\}/u);
 
   assert.match(checker, /FILE_ATTRIBUTE_REPARSE_POINT/u);
   assert.match(checker, /\["cmd\.exe", "\/d", "\/c", "mklink", "\/J"/u);

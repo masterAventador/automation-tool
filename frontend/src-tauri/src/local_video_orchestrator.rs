@@ -41,7 +41,11 @@ const CHROMIUM_MAJOR_MINIMUM: u32 = 100;
 const CHROMIUM_MAJOR_MAXIMUM: u32 = 999;
 const RENDER_LAUNCH_TIMEOUT_MINIMUM: Duration = Duration::from_secs(1);
 const RENDER_LAUNCH_TIMEOUT_MAXIMUM: Duration = Duration::from_secs(60);
-const SANDBOX_FRAMES_MAXIMUM: u32 = 600;
+/// The most frames one render sandbox run may capture. It is public because it
+/// is what bounds how long a brand-motion film may be: see
+/// `motion_video_studio::duration_limits`, which fails closed if the declared
+/// storyboard budget would ask for more frames than this.
+pub const SANDBOX_FRAMES_MAXIMUM: u32 = 600;
 /// Wall clock is the stall guard: a hung render is killed at this many seconds.
 const SANDBOX_SECONDS_MAXIMUM: u32 = 300;
 /// CPU seconds are a different quantity: the Worker sums them over the whole

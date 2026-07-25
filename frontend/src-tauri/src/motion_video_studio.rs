@@ -23,13 +23,14 @@ pub const MOTION_CANCEL_FILE: &str = ".automation-tool-cancel";
 pub const MOTION_OUTPUT_FILE: &str = "brand-motion-result.mp4";
 pub const MOTION_COMPOSITION_FILE: &str = "composition.html";
 pub const MOTION_FRAMES_PER_SECOND: u32 = 30;
-pub const MOTION_DURATION_SECONDS: u32 = 3;
-pub const MOTION_FRAME_COUNT: u32 = MOTION_FRAMES_PER_SECOND * MOTION_DURATION_SECONDS;
 const MAX_TEXT_CHARS: usize = 160;
 const MAX_SUBJECT_CHARS: usize = 80;
 const MAX_LOGO_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ARTIFACT_READ_BYTES: u64 = 32 * 1024 * 1024;
+const MILLIS_PER_SECOND: u32 = 1000;
 const STYLE_CONTRACT: &str = include_str!("../../../contracts/video/motion-style-freeze.v1.json");
+const DURATION_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -129,6 +130,7 @@ pub struct MotionVideoDraftRequest {
     style_preset_id: String,
     primary_color: String,
     secondary_color: String,
+    seconds_per_beat: u32,
     beats: Vec<MotionVideoBeatDraft>,
     logo: Option<MotionVideoLogoDraft>,
 }
@@ -139,6 +141,7 @@ impl MotionVideoDraftRequest {
         style_preset_id: String,
         primary_color: String,
         secondary_color: String,
+        seconds_per_beat: u32,
         beats: Vec<MotionVideoBeatDraft>,
         logo: Option<MotionVideoLogoDraft>,
     ) -> Result<Self, MotionVideoStudioError> {
@@ -148,6 +151,7 @@ impl MotionVideoDraftRequest {
             style_preset_id,
             primary_color,
             secondary_color,
+            seconds_per_beat,
             beats,
             logo,
         };
@@ -155,9 +159,9 @@ impl MotionVideoDraftRequest {
         Ok(value)
     }
 
-    fn validate(&self) -> Result<LockedStyle, MotionVideoStudioError> {
+    fn validate(&self) -> Result<(LockedStyle, MotionStoryboardPlan), MotionVideoStudioError> {
+        let plan = duration_limits()?.plan(self.beats.len(), self.seconds_per_beat)?;
         if self.creation_mode != "manual_template_v1"
-            || self.beats.len() != 3
             || !valid_color(&self.primary_color)
             || !valid_color(&self.secondary_color)
         {
@@ -170,8 +174,230 @@ impl MotionVideoDraftRequest {
         if let Some(logo) = &self.logo {
             logo.validated_file_name()?;
         }
-        locked_style(&self.style_preset_id)
+        Ok((locked_style(&self.style_preset_id)?, plan))
     }
+}
+
+/// The user-configured shape of one brand-motion film. Every frame count,
+/// timeline length and render budget in this module is derived from a plan; no
+/// caller may restate a duration of its own.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MotionStoryboardPlan {
+    beat_count: u32,
+    seconds_per_beat: u32,
+    frames_per_second: u32,
+}
+
+impl MotionStoryboardPlan {
+    pub const fn beat_count(&self) -> u32 {
+        self.beat_count
+    }
+
+    pub const fn seconds_per_beat(&self) -> u32 {
+        self.seconds_per_beat
+    }
+
+    pub const fn frames_per_second(&self) -> u32 {
+        self.frames_per_second
+    }
+
+    pub const fn total_seconds(&self) -> u32 {
+        self.beat_count * self.seconds_per_beat
+    }
+
+    pub const fn frame_count(&self) -> u32 {
+        self.total_seconds() * self.frames_per_second
+    }
+}
+
+/// The declared, contract-backed range a user may configure a storyboard in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MotionDurationLimits {
+    frames_per_second: u32,
+    beat_count_minimum: u32,
+    beat_count_maximum: u32,
+    seconds_per_beat_minimum: u32,
+    seconds_per_beat_maximum: u32,
+    total_seconds_maximum: u32,
+    render_wall_seconds_base: u32,
+    render_wall_millis_per_frame: u32,
+    render_cpu_parallelism: u32,
+}
+
+impl MotionDurationLimits {
+    pub const fn frames_per_second(&self) -> u32 {
+        self.frames_per_second
+    }
+
+    pub const fn beat_count_minimum(&self) -> u32 {
+        self.beat_count_minimum
+    }
+
+    pub const fn beat_count_maximum(&self) -> u32 {
+        self.beat_count_maximum
+    }
+
+    pub const fn seconds_per_beat_minimum(&self) -> u32 {
+        self.seconds_per_beat_minimum
+    }
+
+    pub const fn seconds_per_beat_maximum(&self) -> u32 {
+        self.seconds_per_beat_maximum
+    }
+
+    pub const fn total_seconds_maximum(&self) -> u32 {
+        self.total_seconds_maximum
+    }
+
+    pub const fn frame_count_maximum(&self) -> u32 {
+        self.total_seconds_maximum * self.frames_per_second
+    }
+
+    /// Both factors must be in range and so must their product: a beat count
+    /// and a beat length that are each legal can still ask for a film the
+    /// render sandbox cannot capture.
+    pub fn plan(
+        &self,
+        beat_count: usize,
+        seconds_per_beat: u32,
+    ) -> Result<MotionStoryboardPlan, MotionVideoStudioError> {
+        let beat_count = u32::try_from(beat_count).map_err(|_| draft_invalid())?;
+        if !(self.beat_count_minimum..=self.beat_count_maximum).contains(&beat_count)
+            || !(self.seconds_per_beat_minimum..=self.seconds_per_beat_maximum)
+                .contains(&seconds_per_beat)
+            || beat_count
+                .checked_mul(seconds_per_beat)
+                .is_none_or(|total| total > self.total_seconds_maximum)
+        {
+            return Err(draft_invalid());
+        }
+        Ok(MotionStoryboardPlan {
+            beat_count,
+            seconds_per_beat,
+            frames_per_second: self.frames_per_second,
+        })
+    }
+}
+
+/// The wall-clock and CPU seconds one render sandbox run may occupy. Both are
+/// derived from how many frames the film actually has, so a longer film is not
+/// killed as a stall and a shorter one does not reserve a budget it cannot use.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MotionRenderSandboxBudget {
+    wall_seconds: u32,
+    cpu_seconds: u32,
+}
+
+impl MotionRenderSandboxBudget {
+    pub const fn wall_seconds(&self) -> u32 {
+        self.wall_seconds
+    }
+
+    pub const fn cpu_seconds(&self) -> u32 {
+        self.cpu_seconds
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DurationContract {
+    schema_version: u8,
+    id: String,
+    version: String,
+    policy: String,
+    frames_per_second: u32,
+    beat_count_minimum: u32,
+    beat_count_maximum: u32,
+    beat_count_default: u32,
+    seconds_per_beat_minimum: u32,
+    seconds_per_beat_maximum: u32,
+    seconds_per_beat_default: u32,
+    total_seconds_maximum: u32,
+    render_wall_seconds_base: u32,
+    render_wall_millis_per_frame: u32,
+    render_cpu_parallelism: u32,
+    defined_in: Vec<String>,
+    enforced_by: String,
+    rationale: serde_json::Value,
+}
+
+/// Reads the single declared source of every storyboard bound, failing closed
+/// if the contract drifts from what this module and the render sandbox can
+/// actually honour.
+pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError> {
+    let contract: DurationContract =
+        serde_json::from_str(DURATION_CONTRACT).map_err(|_| draft_invalid())?;
+    let default_total = contract
+        .beat_count_default
+        .checked_mul(contract.seconds_per_beat_default)
+        .ok_or_else(draft_invalid)?;
+    let frame_count_maximum = contract
+        .total_seconds_maximum
+        .checked_mul(contract.frames_per_second)
+        .ok_or_else(draft_invalid)?;
+    if contract.schema_version != 1
+        || contract.id != "motion-storyboard-duration"
+        || contract.version != "motion-storyboard-duration.v1"
+        || contract.policy != "fail_closed"
+        || contract.defined_in.is_empty()
+        || contract.enforced_by.is_empty()
+        || !contract.rationale.is_object()
+        || contract.frames_per_second != MOTION_FRAMES_PER_SECOND
+        || contract.beat_count_minimum == 0
+        || contract.beat_count_minimum > contract.beat_count_default
+        || contract.beat_count_default > contract.beat_count_maximum
+        || contract.seconds_per_beat_minimum == 0
+        || contract.seconds_per_beat_minimum > contract.seconds_per_beat_default
+        || contract.seconds_per_beat_default > contract.seconds_per_beat_maximum
+        || contract.render_wall_seconds_base == 0
+        || contract.render_wall_millis_per_frame == 0
+        || contract.render_cpu_parallelism == 0
+        || default_total > contract.total_seconds_maximum
+        || contract.total_seconds_maximum
+            < contract.beat_count_minimum * contract.seconds_per_beat_minimum
+        // A total the render sandbox cannot capture would turn a legal user
+        // configuration into an opaque configuration error at submit time.
+        || frame_count_maximum > crate::local_video_orchestrator::SANDBOX_FRAMES_MAXIMUM
+    {
+        return Err(draft_invalid());
+    }
+    Ok(MotionDurationLimits {
+        frames_per_second: contract.frames_per_second,
+        beat_count_minimum: contract.beat_count_minimum,
+        beat_count_maximum: contract.beat_count_maximum,
+        seconds_per_beat_minimum: contract.seconds_per_beat_minimum,
+        seconds_per_beat_maximum: contract.seconds_per_beat_maximum,
+        total_seconds_maximum: contract.total_seconds_maximum,
+        render_wall_seconds_base: contract.render_wall_seconds_base,
+        render_wall_millis_per_frame: contract.render_wall_millis_per_frame,
+        render_cpu_parallelism: contract.render_cpu_parallelism,
+    })
+}
+
+/// Startup cost plus a per-frame cost, never a fixed number: a film with six
+/// times the frames needs six times the capture time.
+pub fn render_sandbox_budget(
+    frame_count: u32,
+) -> Result<MotionRenderSandboxBudget, MotionVideoStudioError> {
+    let limits = duration_limits()?;
+    if frame_count == 0 || frame_count > limits.frame_count_maximum() {
+        return Err(draft_invalid());
+    }
+    let capture_seconds = frame_count
+        .checked_mul(limits.render_wall_millis_per_frame)
+        .ok_or_else(draft_invalid)?
+        .div_ceil(MILLIS_PER_SECOND);
+    let wall_seconds = limits
+        .render_wall_seconds_base
+        .checked_add(capture_seconds)
+        .ok_or_else(draft_invalid)?;
+    let cpu_seconds = wall_seconds
+        .checked_mul(limits.render_cpu_parallelism)
+        .ok_or_else(draft_invalid)?;
+    Ok(MotionRenderSandboxBudget {
+        wall_seconds,
+        cpu_seconds,
+    })
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -229,6 +455,7 @@ pub struct MotionVideoArtifactPayload {
 pub struct PreparedMotionRenderJob {
     render_job_id: Uuid,
     allowed_assets: Vec<String>,
+    plan: MotionStoryboardPlan,
 }
 
 impl PreparedMotionRenderJob {
@@ -237,11 +464,15 @@ impl PreparedMotionRenderJob {
     }
 
     pub const fn frame_count(&self) -> u32 {
-        MOTION_FRAME_COUNT
+        self.plan.frame_count()
     }
 
     pub const fn frames_per_second(&self) -> u32 {
-        MOTION_FRAMES_PER_SECOND
+        self.plan.frames_per_second()
+    }
+
+    pub const fn total_seconds(&self) -> u32 {
+        self.plan.total_seconds()
     }
 
     pub fn allowed_assets(&self) -> &[String] {
@@ -309,9 +540,9 @@ pub fn prepare_manual_render_job(
     store: &VideoJobWorkspaceStore,
     draft: &MotionVideoDraftRequest,
 ) -> Result<PreparedMotionRenderJob, MotionVideoStudioError> {
-    let style = draft.validate()?;
+    let (style, plan) = draft.validate()?;
     let workspace = store.create_new().map_err(map_workspace_error)?;
-    let result = prepare_inside_workspace(store, &workspace, draft, &style);
+    let result = prepare_inside_workspace(store, &workspace, draft, &style, plan);
     if result.is_err() {
         let _ = store.finish(&workspace, VideoWorkspaceDisposition::Delete);
     }
@@ -323,6 +554,7 @@ fn prepare_inside_workspace(
     workspace: &VideoJobWorkspace,
     draft: &MotionVideoDraftRequest,
     style: &LockedStyle,
+    plan: MotionStoryboardPlan,
 ) -> Result<PreparedMotionRenderJob, MotionVideoStudioError> {
     let work = store
         .worker_asset_directory(workspace)
@@ -342,17 +574,19 @@ fn prepare_inside_workspace(
         "schemaVersion": 1,
         "creationMode": "manual_template_v1",
         "subject": draft.subject,
+        "secondsPerBeat": plan.seconds_per_beat(),
         "beats": draft.beats,
     }))
     .map_err(|_| storage_unavailable())?;
     write_private_file(&work.join("SCRIPT.json"), &script)?;
     let storyboard = serde_json::to_vec(&serde_json::json!({
         "schemaVersion": 1,
-        "durationSeconds": MOTION_DURATION_SECONDS,
+        "durationSeconds": plan.total_seconds(),
+        "secondsPerBeat": plan.seconds_per_beat(),
         "beats": draft.beats.iter().enumerate().map(|(index, beat)| serde_json::json!({
             "index": index,
-            "startSeconds": index,
-            "durationSeconds": 1,
+            "startSeconds": index as u32 * plan.seconds_per_beat(),
+            "durationSeconds": plan.seconds_per_beat(),
             "title": beat.title,
             "caption": beat.caption,
         })).collect::<Vec<_>>(),
@@ -360,7 +594,7 @@ fn prepare_inside_workspace(
     .map_err(|_| storage_unavailable())?;
     write_private_file(&work.join("STORYBOARD.json"), &storyboard)?;
 
-    let frame_markdown = manual_frame_markdown(draft, style, logo_file);
+    let frame_markdown = manual_frame_markdown(draft, style, logo_file, plan);
     write_private_file(&work.join("frame.md"), frame_markdown.as_bytes())?;
     let brand_tokens = serde_json::json!({
         "primaryColor": draft.primary_color,
@@ -384,7 +618,7 @@ fn prepare_inside_workspace(
         &serde_json::to_vec(&freeze).map_err(|_| storage_unavailable())?,
     )?;
 
-    let composition = manual_composition(draft, style, logo_file);
+    let composition = manual_composition(draft, style, logo_file, plan);
     write_private_file(&work.join(MOTION_COMPOSITION_FILE), composition.as_bytes())?;
     let render_job = RenderJobDocument {
         schema_version: 1,
@@ -392,9 +626,9 @@ fn prepare_inside_workspace(
         creation_mode: "manual_template_v1",
         entry_html: MOTION_COMPOSITION_FILE,
         allowed_assets: &allowed_assets,
-        frame_count: MOTION_FRAME_COUNT,
-        frames_per_second: MOTION_FRAMES_PER_SECOND,
-        duration_seconds: MOTION_DURATION_SECONDS,
+        frame_count: plan.frame_count(),
+        frames_per_second: plan.frames_per_second(),
+        duration_seconds: plan.total_seconds(),
         style_preset_id: &style.id,
     };
     write_private_file(
@@ -417,6 +651,7 @@ fn prepare_inside_workspace(
     Ok(PreparedMotionRenderJob {
         render_job_id: workspace.job_id(),
         allowed_assets,
+        plan,
     })
 }
 
@@ -750,12 +985,15 @@ fn manual_frame_markdown(
     draft: &MotionVideoDraftRequest,
     style: &LockedStyle,
     logo_file: Option<&str>,
+    plan: MotionStoryboardPlan,
 ) -> String {
     format!(
-        "---\nversion: 1\nname: {}\ncolors:\n  primary: {}\n  secondary: {}\n  ink: #17213a\ntypography:\n  fontFamily: system-ui\n---\n\n固定模板手工制作；三段分镜；Logo: {}\n",
+        "---\nversion: 1\nname: {}\ncolors:\n  primary: {}\n  secondary: {}\n  ink: #17213a\ntypography:\n  fontFamily: system-ui\n---\n\n固定模板手工制作；{} 段分镜，每段 {} 秒；Logo: {}\n",
         style.display_name,
         draft.primary_color,
         draft.secondary_color,
+        plan.beat_count(),
+        plan.seconds_per_beat(),
         logo_file.unwrap_or("none"),
     )
 }
@@ -764,6 +1002,7 @@ fn manual_composition(
     draft: &MotionVideoDraftRequest,
     style: &LockedStyle,
     logo_file: Option<&str>,
+    plan: MotionStoryboardPlan,
 ) -> String {
     let logo = logo_file.map_or_else(String::new, |file| {
         format!(
@@ -807,18 +1046,24 @@ fn manual_composition(
          background:#17213a;color:#fff;font-size:19px;font-weight:650}}.meter{{position:absolute;\
          left:58px;right:58px;bottom:34px;height:6px;border-radius:99px;background:#17213a18;\
          overflow:hidden}}.meter i{{display:block;height:100%;width:0;background:{primary}}}\
-         </style></head><body><main data-composition-id=\"manual-template\" data-duration=\"3\">\
+         </style></head><body>\
+         <main data-composition-id=\"manual-template\" data-duration=\"{total}\">\
          <div class=\"brand\">{subject}</div>{logo}{scenes}</main><script>\
          (function(){{const scenes=Array.from(document.querySelectorAll('.scene'));\
-         function seek(time){{const safe=Math.max(0,Math.min(2.999,Number(time)||0));\
-         const active=Math.min(2,Math.floor(safe));scenes.forEach((scene,index)=>{{\
+         const per={per},last={last},total={total};\
+         function seek(time){{const safe=Math.max(0,Math.min(total-0.001,Number(time)||0));\
+         const active=Math.min(last,Math.floor(safe/per));scenes.forEach((scene,index)=>{{\
          scene.classList.toggle('active',index===active);const meter=scene.querySelector('i');\
-         meter.style.width=(index<active?'100%':index>active?'0%':((safe-active)*100)+'%');}});}}\
+         meter.style.width=(index<active?'100%':index>active?'0%':\
+         (((safe-active*per)/per)*100)+'%');}});}}\
          window.__timelines={{'manual-template':{{seek:seek}}}};seek(0);}})();\
          </script></body></html>",
         primary = draft.primary_color,
         secondary = draft.secondary_color,
         subject = html_escape(draft.subject.trim()),
+        per = plan.seconds_per_beat(),
+        last = plan.beat_count() - 1,
+        total = plan.total_seconds(),
     )
 }
 

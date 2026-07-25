@@ -52,7 +52,7 @@
       "id": "motion_parts_catalog",
       "displayName": "134 个动效零件",
       "sourceFile": "frontend/src/features/video-studio/MotionPartsCatalog.tsx",
-      "requiredCopy": ["动效零件目录（134 项）", "动效零件与 12 套整体风格不同"]
+      "requiredCopy": ["动效零件目录", "动效零件与 12 套整体风格不同"]
     },
     {
       "id": "video_editing_module",

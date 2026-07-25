@@ -109,7 +109,7 @@ export function MotionPartsCatalog({
       </section>
 
       <section aria-label="动效零件目录" role="region" className="motion-parts-browser">
-        <Typography.Title level={4}>动效零件目录（134 项）</Typography.Title>
+        <Typography.Title level={4}>动效零件目录</Typography.Title>
         <Radio.Group
           value={category}
           onChange={(event) => setCategory(String(event.target.value))}
@@ -129,8 +129,6 @@ export function MotionPartsCatalog({
                 <div className="motion-parts-card-heading">
                   <Typography.Text strong>{part.displayTitle}</Typography.Text>
                   <Tag>{part.typeLabel}</Tag>
-                  <Tag color="blue">{part.category}</Tag>
-                  {part.officialPreview ? <Tag color="green">有官方在线预览</Tag> : null}
                 </div>
                 <Typography.Text type="secondary">{`性能：${part.performanceLabel}`}</Typography.Text>
                 <Typography.Text type="secondary">{`设备：${part.deviceRequirementLabel}`}</Typography.Text>

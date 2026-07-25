@@ -144,6 +144,34 @@ def _other_root_entries(target_id: str) -> frozenset[str]:
     )
 
 
+def _require_contained_symlink(link: Path, bundle_root: Path, browser_root: Path) -> None:
+    """Allow a symlink only when it resolves to another file in this package.
+
+    Rejecting every symlink outside the browser cost nothing while the executor
+    was the only other payload — it has none. The material video Worker has 53,
+    all of them PyInstaller's own layout (`_internal/libarrow.2300.dylib` →
+    `pyarrow/libarrow.2300.dylib`), and its loader will not start without them.
+
+    So the check is narrowed to the property the rule actually protects: a link
+    may not reach outside the package, may not reach into the verified browser
+    tree (which would give the browser a second path that never passed the
+    manifest check), and may not dangle.
+    """
+    try:
+        target = link.resolve(strict=True)
+    except (OSError, RuntimeError):
+        # Missing target, or a symlink loop. Either way it cannot be shown to
+        # stay inside, and at runtime it is an unexplained failure.
+        _reject("package contains a symlink that does not resolve")
+        raise AssertionError("unreachable")
+    package = bundle_root.resolve()
+    if not (target == package or package in target.parents):
+        _reject("package contains a symlink that resolves outside the package")
+    browser = browser_root.resolve()
+    if target == browser or browser in target.parents:
+        _reject("package contains a symlink into the browser distribution")
+
+
 def audit_embedded_browser_package(
     *,
     bundle_root: Path,
@@ -186,7 +214,8 @@ def audit_embedded_browser_package(
         if inside_browser:
             continue
         if stat.S_ISLNK(metadata.st_mode):
-            _reject("package contains a symlink outside the browser distribution")
+            _require_contained_symlink(path, bundle_root, browser_root)
+            continue
         if not stat.S_ISREG(metadata.st_mode):
             _reject("package contains a special file")
         name = path.name.lower()

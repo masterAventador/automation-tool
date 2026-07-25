@@ -35,10 +35,9 @@ PARTS_PROJECTION = {
     "items": [
         {
             "id": "caption-highlight",
-            "displayTitle": "Highlight",
+            "displayTitle": "高亮标记字幕",
             "typeLabel": "局部组件",
             "category": "文字效果",
-            "officialPreview": True,
             "performanceLabel": "轻量",
             "deviceRequirementLabel": "任意设备",
             "applicabilityLabel": "标题与文字动画",

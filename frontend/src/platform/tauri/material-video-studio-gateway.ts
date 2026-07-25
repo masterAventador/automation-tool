@@ -10,6 +10,7 @@ import {
   type MotionVideoArtifactPayload,
   type MotionVideoDraftRequest,
 } from "../../features/video-studio/material-video-studio-gateway";
+import { motionDurationProblem } from "../../features/video-studio/motion-duration";
 
 const MODELS = new Set(["deepseek-v4-pro", "glm-5.2", "qwen3.7-max-2026-06-08"]);
 const NATIVE_ERRORS = new Set<MaterialVideoStudioErrorCode>([
@@ -145,7 +146,7 @@ function validateMotionRequest(request: MotionVideoDraftRequest): void {
     !textValid(request.subject, 80) ||
     request.stylePresetId.length === 0 || request.stylePresetId.length > 64 ||
     !HEX_COLOR.test(request.primaryColor) || !HEX_COLOR.test(request.secondaryColor) ||
-    request.beats.length !== 3 ||
+    motionDurationProblem(request.beats.length, request.secondsPerBeat) !== null ||
     request.beats.some((beat) => !textValid(beat.title, 160) || !textValid(beat.caption, 160)) ||
     (logo !== null && (
       !/^[^/\\\0]{1,128}\.(?:png|jpe?g|webp)$/iu.test(logo.fileName) ||

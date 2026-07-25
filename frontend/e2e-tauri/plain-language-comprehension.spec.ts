@@ -142,7 +142,7 @@ describe("CQ-01 production App plain-language comprehension acceptance", () => {
     // because it only belongs to 品牌动效成片.
     const partsText = await studio.getText();
     assert.ok(
-      !partsText.includes("动效零件目录（134 项）"),
+      !partsText.includes("动效零件目录"),
       "选择“智能素材成片”时不应展示只属于“品牌动效成片”的 134 个动效零件目录",
     );
     assert.ok(
@@ -170,7 +170,7 @@ describe("CQ-01 production App plain-language comprehension acceptance", () => {
       expect.stringContaining("动效零件与 12 套整体风格不同"),
     );
     const catalog = await studio.$("section[aria-label='动效零件目录']");
-    await expect(catalog).toHaveText(expect.stringContaining("动效零件目录（134 项）"));
+    await expect(catalog).toHaveText(expect.stringContaining("动效零件目录"));
 
     // Every rendered part card carries a Chinese explanation next to its name,
     // so an English part name is never presented on its own.

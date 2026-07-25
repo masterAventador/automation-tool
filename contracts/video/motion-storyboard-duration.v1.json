@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-storyboard-duration",
+  "version": "motion-storyboard-duration.v1",
+  "policy": "fail_closed",
+  "framesPerSecond": 30,
+  "beatCountMinimum": 1,
+  "beatCountMaximum": 10,
+  "beatCountDefault": 3,
+  "secondsPerBeatMinimum": 1,
+  "secondsPerBeatMaximum": 10,
+  "secondsPerBeatDefault": 4,
+  "totalSecondsMaximum": 20,
+  "renderWallSecondsBase": 30,
+  "renderWallMillisPerFrame": 400,
+  "renderCpuParallelism": 3,
+  "definedIn": [
+    "frontend/src-tauri/src/motion_video_studio.rs",
+    "frontend/src/features/video-studio/motion-duration.ts"
+  ],
+  "enforcedBy": "frontend/src/features/video-studio/motion-duration.test.ts",
+  "rationale": {
+    "totalSecondsMaximum": "The render sandbox accepts at most SANDBOX_FRAMES_MAXIMUM (600) captured frames, so at framesPerSecond the longest admissible brand-motion film is 600 / 30 = 20 seconds. Declaring a larger total here would let a legal user configuration be refused by the sandbox as an opaque configuration error, which is why duration_limits() re-checks this product against the sandbox ceiling and fails closed.",
+    "beatCount": "One beat is the smallest storyboard that still renders a film. Ten is the point where the total budget can no longer give every beat two seconds, so beyond it the editor would only be able to produce beats too short to read.",
+    "secondsPerBeat": "One second is the shortest beat a viewer can read a title and a caption in. Ten seconds is half the whole budget: a single static template card held longer than that is a stall, not a shot.",
+    "defaults": "Three beats of four seconds is a twelve second film. The retired template produced three seconds in total, which is shorter than any usable social clip; the default now lands inside the range every platform accepts while staying well under the total budget.",
+    "renderWall": "Wall clock for a render is a fixed startup cost (browser launch, page load, warm-up stability probing) plus a per-frame cost (seek, composite, capture). Pinning it to one number meant a 90 frame render and a 600 frame render shared a 60 second budget, so the longest legal film would always be killed as a stall. At 30 + 0.4s per frame the longest film asks for 270 seconds, inside the 300 second sandbox ceiling.",
+    "renderCpuParallelism": "CPU seconds are summed over the whole browser process tree, so a render occupying N cores accrues them N times faster than wall clock. motion-render-sandbox-budget.v1 measures a legitimate composition render at roughly 2-3 cores average and permits at most 8. Declaring 3 leaves that measured render room without a false runaway trip, and still keeps the guard at three eighths of the permitted ceiling."
+  }
+}

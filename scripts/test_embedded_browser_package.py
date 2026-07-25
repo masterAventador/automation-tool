@@ -230,6 +230,50 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         with self.assertRaises(PackageRejected):
             self._audit()
 
+    def test_a_relative_symlink_that_stays_inside_the_package_is_allowed(self) -> None:
+        """PyInstaller trees legitimately carry these and cannot ship without them.
+
+        The material video Worker lays 53 dynamic libraries out this way — a
+        top-level `_internal/libarrow.2300.dylib` pointing at
+        `pyarrow/libarrow.2300.dylib` inside the same tree — because that is
+        where its loader looks. Rejecting every symlink outside the browser was
+        free when the only other payload was the executor, which has none. It is
+        not free now, and "points somewhere else in this same package" is not
+        the thing the rule exists to stop.
+        """
+        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        (worker / "vendor").mkdir(parents=True)
+        (worker / "vendor/libexample.dylib").write_bytes(b"payload")
+        (worker / "libexample.dylib").symlink_to("vendor/libexample.dylib")
+        self._audit()
+
+    def test_a_relative_symlink_climbing_out_of_the_package_is_rejected(self) -> None:
+        # `../` chains resolve outside just as surely as an absolute path does.
+        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker.mkdir(parents=True)
+        (worker / "escape").symlink_to("../../../../..")
+        with self.assertRaises(PackageRejected):
+            self._audit()
+
+    def test_a_symlink_into_the_browser_distribution_is_rejected(self) -> None:
+        # Resolving inside the package is not sufficient: a link into the
+        # browser tree lets a second, unverified path reach the browser without
+        # passing the manifest check.
+        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker.mkdir(parents=True)
+        (worker / "browser").symlink_to("../../embedded-browser")
+        with self.assertRaises(PackageRejected):
+            self._audit()
+
+    def test_a_dangling_symlink_is_rejected(self) -> None:
+        # A link with no target cannot be shown to stay inside the package, and
+        # at runtime it is an unexplained failure rather than a missing file.
+        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker.mkdir(parents=True)
+        (worker / "missing").symlink_to("nowhere.dylib")
+        with self.assertRaises(PackageRejected):
+            self._audit()
+
     def test_oversized_package_is_rejected(self) -> None:
         bounds = PackageSizeBounds(
             min_browser_bytes=1,
