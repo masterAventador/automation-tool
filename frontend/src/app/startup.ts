@@ -23,6 +23,7 @@ export type StartupCheckResult =
 
 export type StartupDiagnosticCode =
   | "installation_revoked"
+  | "installation_conflict"
   | "control_plane_unavailable"
   | "executor_configuration_required"
   | "executor_unavailable"
@@ -65,6 +66,25 @@ export function createTransportStartupCheck(transport: ControlPlaneTransport): S
   };
 }
 
+/**
+ * Only the two categories the native health command reports on purpose become
+ * their own diagnostic. Anything else is an outage, so no native cause can
+ * reach a rendered message.
+ */
+function controlPlaneDiagnostic(reason: unknown): StartupDiagnosticCode {
+  if (!(reason instanceof ControlPlaneTransportError)) {
+    return "control_plane_unavailable";
+  }
+  switch (reason.code) {
+    case "installation_access_denied":
+      return "installation_revoked";
+    case "installation_conflict":
+      return "installation_conflict";
+    default:
+      return "control_plane_unavailable";
+  }
+}
+
 export function createDesktopStartupCheck(
   transport: ControlPlaneTransport,
   environment: StartupEnvironmentGateway,
@@ -78,12 +98,7 @@ export function createDesktopStartupCheck(
       const diagnostics: StartupDiagnosticCode[] = [];
 
       if (controlPlane.status === "rejected") {
-        diagnostics.push(
-          controlPlane.reason instanceof ControlPlaneTransportError &&
-            controlPlane.reason.code === "installation_access_denied"
-            ? "installation_revoked"
-            : "control_plane_unavailable",
-        );
+        diagnostics.push(controlPlaneDiagnostic(controlPlane.reason));
       }
 
       if (local.status === "fulfilled" && isLocalEnvironment(local.value)) {

@@ -17,6 +17,11 @@ const DIAGNOSTICS: Record<
     title: "安装实例授权不可用",
     description: "此设备的演示授权已被吊销或失效，请联系演示管理员重新授权。",
   },
+  installation_conflict: {
+    title: "本机安装记录与业务服务不一致",
+    description:
+      "业务服务已经登记过本机设备，但本机没有保存下对应凭据，重试无法恢复。请重置本机设备身份后重新启动本地服务与客户端；如仍未恢复，请联系管理员。",
+  },
   control_plane_unavailable: {
     title: "控制服务不可用",
     description: "请检查本地服务或网络；诊断不会显示连接凭据或底层异常。",
@@ -116,6 +121,7 @@ export function StartupGate({ startupCheck, repairTools, children }: StartupGate
         ? ["installation_revoked"]
         : ["control_plane_unavailable"];
   const revoked = diagnostics.includes("installation_revoked");
+  const conflicted = !revoked && diagnostics.includes("installation_conflict");
   const onlyControlPlane =
     diagnostics.length === 1 && diagnostics[0] === "control_plane_unavailable";
   const canOpenRepairTools =
@@ -129,17 +135,21 @@ export function StartupGate({ startupCheck, repairTools, children }: StartupGate
           <Typography.Title level={2}>
             {revoked
               ? "当前安装实例已失效"
-              : onlyControlPlane
-                ? "暂时无法连接业务服务"
-                : "桌面运行环境需要处理"}
+              : conflicted
+                ? "本机设备注册需要重置"
+                : onlyControlPlane
+                  ? "暂时无法连接业务服务"
+                  : "桌面运行环境需要处理"}
           </Typography.Title>
         }
         subTitle={
           revoked
             ? "重新授权前不会启动业务功能；本机检查结果仍会安全列出。"
-            : onlyControlPlane
-              ? "桌面应用已启动，但控制服务当前不可用。请检查本地服务或网络后重试。"
-              : "业务功能保持关闭，处理下面的本机环境问题后重新检查。"
+            : conflicted
+              ? "重试不会恢复；按下面的说明重置本机设备身份后再重新检查。"
+              : onlyControlPlane
+                ? "桌面应用已启动，但控制服务当前不可用。请检查本地服务或网络后重试。"
+                : "业务功能保持关闭，处理下面的本机环境问题后重新检查。"
         }
         extra={
           <Space wrap>

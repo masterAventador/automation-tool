@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import json
 from datetime import UTC
+from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -12,6 +14,10 @@ from automation_tool.control_plane.bootstrap.device_credentials import (
 )
 from automation_tool.control_plane.bootstrap.device_sessions import (
     _SystemClock as DeviceSessionSystemClock,
+)
+from automation_tool.control_plane.bootstrap.local_provisioning import (
+    HANDOFF_FILE_NAME,
+    provision_local_registration_bootstrap,
 )
 from automation_tool.control_plane.bootstrap.registration import (
     RegistrationConfigurationError,
@@ -109,4 +115,54 @@ def test_default_app_factory_wires_valid_deployment_registration(
 
     assert isinstance(app.state.registration_service, InstallationRegistrationService)
     assert isinstance(app.state.database, Database)
+    asyncio.run(app.state.database.close())
+
+
+def test_provisioned_local_bootstrap_enables_the_same_registration_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID", raising=False)
+    monkeypatch.delenv("AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY", raising=False)
+    provisioned = provision_local_registration_bootstrap(tmp_path)
+
+    service = registration_service_from_environment(
+        database_without_connection(), provisioned=provisioned
+    )
+
+    assert isinstance(service, InstallationRegistrationService)
+    token = json.loads((tmp_path / HANDOFF_FILE_NAME).read_bytes())["token"]
+    verified = service._bootstrap_verifier.verify(token)
+    assert str(verified.grant.environment_id) == provisioned.environment_id
+
+
+def test_provisioned_bootstrap_conflicting_with_deployment_configuration_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    public_key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    monkeypatch.setenv("AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID", "demo-cn-1")
+    monkeypatch.setenv("AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY", base64url(public_key))
+    provisioned = provision_local_registration_bootstrap(tmp_path)
+
+    with pytest.raises(RegistrationConfigurationError):
+        registration_service_from_environment(
+            database_without_connection(), provisioned=provisioned
+        )
+
+
+def test_app_factory_wires_a_provisioned_local_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AUTOMATION_TOOL_DATABASE_URL",
+        "postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+    )
+    monkeypatch.delenv("AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID", raising=False)
+    monkeypatch.delenv("AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY", raising=False)
+
+    app = create_app(local_registration_bootstrap=provision_local_registration_bootstrap(tmp_path))
+
+    assert isinstance(app.state.registration_service, InstallationRegistrationService)
     asyncio.run(app.state.database.close())

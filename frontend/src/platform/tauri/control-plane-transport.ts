@@ -20,17 +20,28 @@ function isControlPlaneHealth(value: unknown): value is ControlPlaneHealth {
   );
 }
 
-function installationAccessError(value: unknown): ControlPlaneTransportError | undefined {
+/**
+ * The only native health failures the UI is allowed to describe on its own.
+ * Everything else stays an opaque transport failure, so a native cause can
+ * never reach a rendered message.
+ */
+const PRESERVED_NATIVE_CODES = [
+  "installation_access_denied",
+  "installation_conflict",
+] as const;
+
+function preservedNativeError(value: unknown): ControlPlaneTransportError | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
   }
   const record = value as Record<string, unknown>;
+  const preserved = PRESERVED_NATIVE_CODES.find((code) => record.code === code);
   if (
+    preserved !== undefined &&
     Object.keys(record).length === 2 &&
-    record.code === "installation_access_denied" &&
     record.retryable === false
   ) {
-    return new ControlPlaneTransportError("installation_access_denied", false);
+    return new ControlPlaneTransportError(preserved, false);
   }
   return undefined;
 }
@@ -53,9 +64,9 @@ export class TauriControlPlaneTransport implements ControlPlaneTransport {
       if (error instanceof ControlPlaneTransportError) {
         throw error;
       }
-      const denied = installationAccessError(error);
-      if (denied !== undefined) {
-        throw denied;
+      const preserved = preservedNativeError(error);
+      if (preserved !== undefined) {
+        throw preserved;
       }
       throw new ControlPlaneTransportError("transport_unavailable", true);
     }

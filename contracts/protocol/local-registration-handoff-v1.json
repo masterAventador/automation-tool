@@ -1,0 +1,44 @@
+{
+  "version": "local.registration.handoff.v1",
+  "purpose": "A local Control Plane hands one short-lived installation.register bootstrap to the App that shares the machine. It is the only production source of a first device registration; nothing else may mint one.",
+  "appIdentifier": "com.aventador.automationtool",
+  "fileName": "local-registration-bootstrap-v1",
+  "environmentId": "local",
+  "tokenPrefix": "atb1",
+  "documentVersion": 1,
+  "documentFields": ["environmentId", "expiresAt", "token", "version"],
+  "encoding": "canonical-json-utf8",
+  "canonicalForm": "Object keys sorted ascending, no insignificant whitespace, ASCII only. The file bytes must equal the canonical serialization exactly, so duplicate keys, reordering and padding are all rejected.",
+  "maxFileBytes": 4096,
+  "maxLifetimeSeconds": 600,
+  "filePermissions": "0600",
+  "directoryPermissions": "0700",
+  "consumption": "The App deletes the file after a registration that reached a stored device credential. A failed or uncertain registration leaves the file in place until it expires.",
+  "issuerPolicy": [
+    "signing_key_generated_in_memory_per_start",
+    "signing_private_key_never_persisted",
+    "public_key_configured_into_the_same_registration_service",
+    "issued_only_by_the_loopback_local_entry_point"
+  ],
+  "consumerPolicy": [
+    "treated_as_untrusted_external_input",
+    "read_only_when_the_device_credential_vault_is_empty",
+    "never_returned_to_the_webview_or_a_command_result",
+    "never_written_to_logs_or_error_payloads"
+  ],
+  "failurePolicy": [
+    "missing_file_leaves_the_app_unregistered",
+    "symlink_rejected",
+    "non_regular_file_rejected",
+    "group_or_other_readable_rejected",
+    "oversized_file_rejected",
+    "non_canonical_json_rejected",
+    "unknown_or_missing_field_rejected",
+    "duplicate_key_rejected",
+    "document_version_mismatch_rejected",
+    "environment_id_mismatch_rejected",
+    "token_format_rejected",
+    "expired_document_rejected",
+    "registration_conflict_reported_as_its_own_diagnostic"
+  ]
+}

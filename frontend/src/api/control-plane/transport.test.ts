@@ -60,6 +60,21 @@ describe("ControlPlaneTransport boundary", () => {
     });
   });
 
+  it("preserves the native installation conflict so startup can explain it", async () => {
+    invoke.mockRejectedValueOnce({
+      code: "installation_conflict",
+      retryable: false,
+    });
+    const transport = new TauriControlPlaneTransport();
+
+    await expect(transport.checkHealth()).rejects.toMatchObject({
+      name: "ControlPlaneTransportError",
+      code: "installation_conflict",
+      message: "Installation registration conflicts with the service",
+      retryable: false,
+    });
+  });
+
   it("rejects malformed native responses without treating protocol failures as retryable", async () => {
     invoke.mockResolvedValueOnce({
       status: "available",

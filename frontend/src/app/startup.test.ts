@@ -86,6 +86,22 @@ describe("desktop startup environment", () => {
     });
   });
 
+  it("reports a registration conflict as its own diagnostic, not as an outage", async () => {
+    const transport = controlPlane(
+      vi.fn().mockRejectedValue(new ControlPlaneTransportError("installation_conflict", false)),
+    );
+    const environment = localEnvironment({
+      appData: "ready",
+      executor: "ready",
+      embeddedBrowser: "ready",
+    });
+
+    await expect(createDesktopStartupCheck(transport, environment).check()).resolves.toEqual({
+      status: "blocked",
+      diagnostics: ["installation_conflict"],
+    });
+  });
+
   it("fails every local component closed when the native aggregate cannot be read", async () => {
     const transport = controlPlane(
       vi.fn().mockResolvedValue({ status: "available", serviceVersion: "0.1.0" }),

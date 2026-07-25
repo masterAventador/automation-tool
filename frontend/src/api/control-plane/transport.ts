@@ -15,12 +15,14 @@ export type ControlPlaneTransportErrorCode =
   | "transport_unavailable"
   | "operation_unavailable"
   | "installation_access_denied"
+  | "installation_conflict"
   | "request_cancelled";
 
 const PUBLIC_ERROR_MESSAGES: Record<ControlPlaneTransportErrorCode, string> = {
   transport_unavailable: "Control Plane transport is unavailable",
   operation_unavailable: "Control Plane operation is unavailable",
   installation_access_denied: "Installation access is unavailable",
+  installation_conflict: "Installation registration conflicts with the service",
   request_cancelled: "Control Plane request was cancelled",
 };
 

@@ -20,6 +20,7 @@ pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
+pub mod local_registration;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
 pub mod material_video_studio;
@@ -47,6 +48,10 @@ use device_identity::initialize_ephemeral_identity;
 use device_identity::initialize_production_identity;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_identity::ProductionDeviceIdentity;
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+use local_registration::{
+    initialize_local_registration_handoff_store, ProductionLocalRegistrationHandoffStore,
+};
 use tauri::Manager;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use zeroize::Zeroizing;
@@ -800,6 +805,7 @@ fn map_executor_connection_error(
             "installation_access_denied"
         }
         control_plane::ControlPlaneErrorCode::InstallationBusy => "operation_unavailable",
+        control_plane::ControlPlaneErrorCode::InstallationConflict => "installation_conflict",
         control_plane::ControlPlaneErrorCode::TransportUnavailable
         | control_plane::ControlPlaneErrorCode::OutcomeUncertain => "transport_unavailable",
         control_plane::ControlPlaneErrorCode::IdentityUnavailable
@@ -1449,17 +1455,92 @@ async fn check_control_plane_health(
 #[cfg(not(feature = "desktop-e2e"))]
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    handoff: tauri::State<'_, ProductionLocalRegistrationHandoffStore>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
     let health = client
         .check_health()
         .await
         .map_err(map_control_plane_error)?;
+    register_installation_from_local_handoff(&client, &identity, &vault, &handoff).await?;
     client
         .check_installation_access_if_registered(&vault)
         .await
         .map_err(map_control_plane_error)?;
     Ok(health)
+}
+
+/// The one production path from "no device credential" to a registered
+/// Installation.
+///
+/// A machine that runs its own Control Plane leaves a short-lived grant in the
+/// App private directory; this is where the App spends it. Every build compiles
+/// the same code, and the grant is completed through the ordinary
+/// challenge/device-proof registration, so no deployment has a second way to
+/// obtain a credential.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+struct ProductionInstallationRegistrar<'a> {
+    client: &'a control_plane::ControlPlaneClient,
+    identity: &'a ProductionDeviceIdentity,
+    vault: &'a ProductionDeviceCredentialVault,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl local_registration::InstallationRegistrar for ProductionInstallationRegistrar<'_> {
+    fn has_credential(&self) -> Result<bool, control_plane::ControlPlaneErrorCode> {
+        self.vault
+            .load()
+            .map(|stored| stored.is_some())
+            .map_err(|_| control_plane::ControlPlaneErrorCode::StorageUnavailable)
+    }
+
+    async fn register(
+        &self,
+        bootstrap: &control_plane::DemoBootstrap,
+    ) -> Result<(), control_plane::ControlPlaneErrorCode> {
+        self.client
+            .register_installation(bootstrap, self.identity, self.vault)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.code())
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+async fn register_installation_from_local_handoff(
+    client: &control_plane::ControlPlaneClient,
+    identity: &ProductionDeviceIdentity,
+    vault: &ProductionDeviceCredentialVault,
+    handoff: &ProductionLocalRegistrationHandoffStore,
+) -> Result<(), ControlPlaneCommandError> {
+    let Ok(now) = local_registration::current_unix_seconds() else {
+        return Ok(());
+    };
+    let registrar = ProductionInstallationRegistrar {
+        client,
+        identity,
+        vault,
+    };
+    match local_registration::ensure_installation_registered(&registrar, handoff, now).await {
+        // The service already holds an Installation for this device public key,
+        // which only happens when an accepted registration never reached the
+        // vault. Retrying cannot clear it, so it gets its own diagnostic rather
+        // than hiding inside a generic rejection.
+        local_registration::InstallationRegistrationOutcome::Conflict => {
+            Err(ControlPlaneCommandError {
+                code: "installation_conflict",
+                retryable: false,
+            })
+        }
+        // Every other outcome leaves the App exactly as registered as it was.
+        // A machine with no local Control Plane has always started this way, so
+        // an absent, expired or refused grant must not block startup.
+        local_registration::InstallationRegistrationOutcome::AlreadyRegistered
+        | local_registration::InstallationRegistrationOutcome::Registered
+        | local_registration::InstallationRegistrationOutcome::NotAttempted
+        | local_registration::InstallationRegistrationOutcome::Failed => Ok(()),
+    }
 }
 
 fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPlaneCommandError {
@@ -1473,6 +1554,7 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
             "installation_access_denied"
         }
         control_plane::ControlPlaneErrorCode::InstallationBusy => "installation_busy",
+        control_plane::ControlPlaneErrorCode::InstallationConflict => "installation_conflict",
         control_plane::ControlPlaneErrorCode::AuthenticationInvalid => "authentication_invalid",
         control_plane::ControlPlaneErrorCode::RecoveryInvalid => "recovery_invalid",
         control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "session_invalid",
@@ -3793,10 +3875,13 @@ pub fn run() {
                     initialize_production_device_credential_vault(&app_data_directory)?;
                 let account_session_vault =
                     initialize_production_account_session_vault(&app_data_directory)?;
+                let local_registration_handoff =
+                    initialize_local_registration_handoff_store(&app_data_directory)?;
                 debug_assert_eq!(device_identity.public_key().len(), 32);
                 app.manage(device_identity);
                 app.manage(device_credential_vault);
                 app.manage(account_session_vault);
+                app.manage(local_registration_handoff);
             }
             Ok(())
         });

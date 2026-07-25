@@ -269,4 +269,21 @@ describe("desktop startup", () => {
     expect(await screen.findByText("登录正常")).toBeVisible();
     expect(platformSessionGateway.getDouyinSession).toHaveBeenCalledOnce();
   });
+  it("explains a device registration conflict instead of blaming the local environment", async () => {
+    const startupCheck: StartupCheck = {
+      check: vi.fn().mockResolvedValue({
+        status: "blocked" as const,
+        diagnostics: ["installation_conflict" as const],
+      }),
+    };
+
+    render(<App startupCheck={startupCheck} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "本机设备注册需要重置" }),
+    ).toBeVisible();
+    expect(screen.getByText("本机安装记录与业务服务不一致")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "打开本地修复工具" })).toBeNull();
+    expect(document.body).not.toHaveTextContent(/\/Users\/|atb1\.|token=/iu);
+  });
 });

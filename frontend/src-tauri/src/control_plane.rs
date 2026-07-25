@@ -271,6 +271,7 @@ pub enum ControlPlaneErrorCode {
     RequestRejected,
     InstallationAccessDenied,
     InstallationBusy,
+    InstallationConflict,
     CredentialMissing,
     IdentityUnavailable,
     StorageUnavailable,
@@ -1831,6 +1832,19 @@ fn validate_response_metadata(
             && cache_control_is_private
         {
             ControlPlaneErrorCode::InstallationBusy
+        } else if metadata.status == 409
+            && matches!(
+                operation,
+                ControlPlaneOperation::CompleteInstallationRegistration
+            )
+        {
+            // The App always completes registration with a challenge it just
+            // issued, so the only conflict it can provoke is a service that
+            // already holds an Installation for this device public key. That
+            // happens when a previous registration was accepted but the
+            // credential never reached the vault, and it needs its own
+            // diagnostic: no retry can resolve it, only a new device identity.
+            ControlPlaneErrorCode::InstallationConflict
         } else if metadata.status == 401
             && matches!(operation, ControlPlaneOperation::LoginAccountSession)
         {
@@ -4511,6 +4525,39 @@ mod tests {
         .expect_err("503 access dependency failure");
         assert_eq!(unavailable.code(), ControlPlaneErrorCode::RequestRejected);
         assert!(unavailable.retryable());
+
+        let conflict = validate_response_metadata(
+            ControlPlaneOperation::CompleteInstallationRegistration,
+            "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+            &ResponseMetadata {
+                status: 409,
+                ..valid.clone()
+            },
+        )
+        .expect_err("this device public key already owns an installation");
+        assert_eq!(
+            conflict.code(),
+            ControlPlaneErrorCode::InstallationConflict,
+            "a service that already registered this device must be distinguishable \
+             from an ordinary rejection, or a failed credential write becomes a \
+             permanently unexplained failure"
+        );
+        assert!(!conflict.retryable());
+        for other in [
+            ControlPlaneOperation::IssueInstallationRegistrationChallenge,
+            ControlPlaneOperation::CreateTask,
+        ] {
+            let unrelated = validate_response_metadata(
+                other,
+                "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
+                &ResponseMetadata {
+                    status: 409,
+                    ..valid.clone()
+                },
+            )
+            .expect_err("unrelated conflict");
+            assert_eq!(unrelated.code(), ControlPlaneErrorCode::RequestRejected);
+        }
 
         let installation_busy = validate_response_metadata(
             ControlPlaneOperation::StartTaskDiscovery,

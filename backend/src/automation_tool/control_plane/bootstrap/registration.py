@@ -14,6 +14,9 @@ from automation_tool.control_plane.application.device_credentials import DeviceC
 from automation_tool.control_plane.application.registration import (
     InstallationRegistrationService,
 )
+from automation_tool.control_plane.bootstrap.local_provisioning import (
+    LocalRegistrationBootstrap,
+)
 from automation_tool.control_plane.domain import DemoEnvironmentId, InvalidDemoEnvironmentId
 from automation_tool.control_plane.infrastructure.database import Database
 from automation_tool.control_plane.infrastructure.database.registration import (
@@ -61,16 +64,28 @@ def _public_key(value: str) -> bytes:
 
 def registration_service_from_environment(
     database: Database,
+    *,
+    provisioned: LocalRegistrationBootstrap | None = None,
 ) -> InstallationRegistrationService | None:
-    """Build registration only when both exact public settings are present."""
+    """Build registration from exactly one source of bootstrap trust.
+
+    A deployment configures the environment pair; a loopback start hands in the
+    public half of the grant it just issued. Supplying both would leave two
+    keys able to register against one service, so it fails closed instead.
+    """
     settings = _RegistrationSettings()
-    if settings.demo_environment_id is None and settings.demo_bootstrap_public_key is None:
+    configured = (settings.demo_environment_id, settings.demo_bootstrap_public_key)
+    if provisioned is not None:
+        if any(value is not None for value in configured):
+            raise RegistrationConfigurationError
+        configured = (provisioned.environment_id, provisioned.public_key)
+    if configured[0] is None and configured[1] is None:
         return None
-    if settings.demo_environment_id is None or settings.demo_bootstrap_public_key is None:
+    if configured[0] is None or configured[1] is None:
         raise RegistrationConfigurationError
     try:
-        environment_id = DemoEnvironmentId.parse(settings.demo_environment_id)
-        verifier = Ed25519BootstrapTokenVerifier(_public_key(settings.demo_bootstrap_public_key))
+        environment_id = DemoEnvironmentId.parse(configured[0])
+        verifier = Ed25519BootstrapTokenVerifier(_public_key(configured[1]))
     except (
         BootstrapCredentialRejected,
         InvalidDemoEnvironmentId,

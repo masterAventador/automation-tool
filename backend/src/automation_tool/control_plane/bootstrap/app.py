@@ -112,6 +112,9 @@ from automation_tool.control_plane.bootstrap.device_sessions import (
 from automation_tool.control_plane.bootstrap.platform_sessions import (
     platform_session_health_service as build_platform_session_health_service,
 )
+from automation_tool.control_plane.bootstrap.local_provisioning import (
+    LocalRegistrationBootstrap,
+)
 from automation_tool.control_plane.bootstrap.registration import (
     registration_service_from_environment,
 )
@@ -197,6 +200,7 @@ def create_app(
     account_installation_binding_service: AccountInstallationBindingService | None = None,
     account_device_service: AccountDeviceService | None = None,
     registration_service: InstallationRegistrationService | None = None,
+    local_registration_bootstrap: LocalRegistrationBootstrap | None = None,
     device_credential_service: DeviceCredentialService | None = None,
     device_session_service: DeviceSessionService | None = None,
     executor_connection_service: ExecutorConnectionService | None = None,
@@ -286,7 +290,9 @@ def create_app(
         and isinstance(database, _FromEnvironment)
         and isinstance(resolved_database, Database)
     ):
-        resolved_registration_service = registration_service_from_environment(resolved_database)
+        resolved_registration_service = registration_service_from_environment(
+            resolved_database, provisioned=local_registration_bootstrap
+        )
     if resolved_device_credential_service is None and isinstance(resolved_database, Database):
         resolved_device_credential_service = build_device_credential_service(resolved_database)
     if resolved_device_session_service is None and isinstance(resolved_database, Database):
