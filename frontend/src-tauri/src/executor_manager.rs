@@ -1,8 +1,9 @@
 //! Linearized lifecycle for one verified Local Executor process.
 
 use crate::executor_bootstrap::{
-    ExecutorActionRuntimeInput, ExecutorBootstrapErrorCode, ExecutorBootstrapInput,
-    LocalExecutorEvent, LocalPlatformCommand, LocalPlatformCommandResult, LocalSessionToken,
+    ExecutorActionRuntimeInput, ExecutorBootstrapError, ExecutorBootstrapErrorCode,
+    ExecutorBootstrapInput, LocalExecutorEvent, LocalPlatformCommand, LocalPlatformCommandResult,
+    LocalSessionToken,
 };
 use crate::executor_diagnostics::{ExecutorDiagnostics, MAX_DIAGNOSTIC_LINE_BYTES};
 use crate::executor_package::{ExecutorPackageVerifier, VerifiedExecutorPackage};
@@ -464,6 +465,82 @@ impl ExecutorManager {
         profile_directory: PathBuf,
         headless: bool,
     ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
+        self.execute_command(command, |token, stdin, command_id| {
+            token.write_platform_command(
+                stdin,
+                command_id,
+                command,
+                &executable_path,
+                &profile_directory,
+                headless,
+            )
+        })
+    }
+
+    /// Open the publish page and stop before submission.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_publish_command(
+        &self,
+        publish_job_id: String,
+        executable_path: PathBuf,
+        profile_directory: PathBuf,
+        headless: bool,
+        artifact_path: PathBuf,
+        title: String,
+        description: String,
+    ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
+        self.execute_command(
+            LocalPlatformCommand::PreflightDouyinPublish,
+            |token, stdin, command_id| {
+                token.write_publish_command(
+                    stdin,
+                    command_id,
+                    &publish_job_id,
+                    &executable_path,
+                    &profile_directory,
+                    headless,
+                    &artifact_path,
+                    &title,
+                    &description,
+                )
+            },
+        )
+    }
+
+    /// Spend one approval on one click against the page already held open.
+    pub fn execute_publish_dispatch_command(
+        &self,
+        publish_job_id: String,
+        confirmation_id: String,
+    ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
+        self.execute_command(
+            LocalPlatformCommand::DispatchDouyinPublish,
+            |token, stdin, command_id| {
+                token.write_publish_dispatch_command(
+                    stdin,
+                    command_id,
+                    &publish_job_id,
+                    &confirmation_id,
+                )
+            },
+        )
+    }
+
+    /// Run one command frame against the supervised executor.
+    ///
+    /// Every command family differs only in the frame it writes, so they share
+    /// this: a frame that could not be written or answered leaves the executor
+    /// in an unknown state, and an unknown executor is stopped rather than
+    /// reused for the next command.
+    fn execute_command(
+        &self,
+        command: LocalPlatformCommand,
+        write_frame: impl FnOnce(
+            &LocalSessionToken,
+            &mut ChildStdin,
+            &str,
+        ) -> Result<(), ExecutorBootstrapError>,
+    ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
         let mut slot = self.lock_slot()?;
         reconcile_supervision(&self.core, &mut slot)?;
         let outcome = (|| {
@@ -476,18 +553,7 @@ impl ExecutorManager {
                 .stdin
                 .as_mut()
                 .ok_or_else(process_unavailable)?;
-            managed
-                .process
-                .token
-                .write_platform_command(
-                    stdin,
-                    &command_id,
-                    command,
-                    &executable_path,
-                    &profile_directory,
-                    headless,
-                )
-                .map_err(map_bootstrap_error)?;
+            write_frame(&managed.process.token, stdin, &command_id).map_err(map_bootstrap_error)?;
             receive_platform_command_result(
                 &managed.process,
                 &command_id,
@@ -509,38 +575,9 @@ impl ExecutorManager {
         &self,
         command: LocalPlatformCommand,
     ) -> Result<LocalPlatformCommandResult, ExecutorManagerError> {
-        let mut slot = self.lock_slot()?;
-        reconcile_supervision(&self.core, &mut slot)?;
-        let outcome = (|| {
-            let Some(ManagedExecutorLifecycle::Running(managed)) = slot.lifecycle.as_mut() else {
-                return Err(process_unavailable());
-            };
-            let command_id = generate_uuid_v4()?;
-            let stdin = managed
-                .process
-                .stdin
-                .as_mut()
-                .ok_or_else(process_unavailable)?;
-            managed
-                .process
-                .token
-                .write_session_command(stdin, &command_id, command)
-                .map_err(map_bootstrap_error)?;
-            receive_platform_command_result(
-                &managed.process,
-                &command_id,
-                command,
-                PLATFORM_COMMAND_TIMEOUT,
-            )
-        })();
-        if outcome.is_err() {
-            let restart_count = slot.status.restart_count();
-            if let Some(ManagedExecutorLifecycle::Running(mut managed)) = slot.lifecycle.take() {
-                force_stop(&mut managed.process);
-            }
-            slot.status = ExecutorManagerStatus::stopped(restart_count);
-        }
-        outcome
+        self.execute_command(command, |token, stdin, command_id| {
+            token.write_session_command(stdin, command_id, command)
+        })
     }
 
     pub fn status(&self) -> Result<ExecutorManagerStatus, ExecutorManagerError> {

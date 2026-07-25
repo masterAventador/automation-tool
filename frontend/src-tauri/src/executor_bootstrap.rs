@@ -22,6 +22,13 @@ const MAX_STATE_DIRECTORY_BYTES: usize = 4096;
 const PROOF_PREFIX: &str = "atlep1.";
 const AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-event.v1\0";
 const COMMAND_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-command.v1\0";
+const PUBLISH_COMMAND_AUTHENTICATION_DOMAIN: &[u8] =
+    b"automation-tool.local-executor-publish-command.v1\0";
+const PUBLISH_DISPATCH_AUTHENTICATION_DOMAIN: &[u8] =
+    b"automation-tool.local-executor-publish-dispatch.v1\0";
+/// One publish frame carries the operator's title and body, so it needs its
+/// own bound rather than the path-sized one the login frames live under.
+const MAX_PUBLISH_TEXT_CHARACTERS: usize = 4096;
 const COMMAND_RESULT_AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-result.v1\0";
 const COMMAND_PROOF_PREFIX: &str = "atlcp1.";
 const MAX_PLATFORM_COMMAND_BYTES: usize = 16 * 1024;
@@ -97,6 +104,9 @@ pub enum LocalPlatformCommand {
     OpenDouyinLogin,
     RecheckDouyinLogin,
     CompleteDouyinLogout,
+    PreflightDouyinPublish,
+    DispatchDouyinPublish,
+    ReleaseDouyinPublishSurface,
 }
 
 impl LocalPlatformCommand {
@@ -105,6 +115,9 @@ impl LocalPlatformCommand {
             Self::OpenDouyinLogin => "douyin.login.open",
             Self::RecheckDouyinLogin => "douyin.login.recheck",
             Self::CompleteDouyinLogout => "douyin.logout.complete",
+            Self::PreflightDouyinPublish => "douyin.publish.preflight",
+            Self::DispatchDouyinPublish => "douyin.publish.dispatch",
+            Self::ReleaseDouyinPublishSurface => "douyin.publish.release",
         }
     }
 }
@@ -133,6 +146,33 @@ struct LocalPlatformCommandDocument<'a> {
     headless: bool,
     profile_directory: &'a Path,
     protocol_version: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPublishCommandDocument<'a> {
+    artifact_path: &'a Path,
+    authentication_proof: &'a str,
+    command_id: &'a str,
+    command_type: &'static str,
+    description: &'a str,
+    executable_path: &'a Path,
+    headless: bool,
+    profile_directory: &'a Path,
+    protocol_version: &'static str,
+    publish_job_id: &'a str,
+    title: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPublishDispatchDocument<'a> {
+    authentication_proof: &'a str,
+    command_id: &'a str,
+    command_type: &'static str,
+    confirmation_id: &'a str,
+    protocol_version: &'static str,
+    publish_job_id: &'a str,
 }
 
 #[derive(Serialize)]
@@ -297,6 +337,125 @@ impl LocalSessionToken {
             .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())
     }
 
+    /// Write the frame that opens the publish page and stops before submission.
+    ///
+    /// The proof binds the browser identity, the artifact and the operator's
+    /// copy together, so a frame whose content was altered in flight cannot be
+    /// spent on the page this one described.
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_publish_command(
+        &self,
+        writer: &mut impl Write,
+        command_id: &str,
+        publish_job_id: &str,
+        executable_path: &Path,
+        profile_directory: &Path,
+        headless: bool,
+        artifact_path: &Path,
+        title: &str,
+        description: &str,
+    ) -> Result<(), ExecutorBootstrapError> {
+        require_uuid_v4(command_id)?;
+        require_uuid_v4(publish_job_id)?;
+        require_local_path(executable_path)?;
+        require_local_path(profile_directory)?;
+        require_local_path(artifact_path)?;
+        require_publish_text(title)?;
+        require_publish_text(description)?;
+        let executable = path_str(executable_path)?;
+        let profile = path_str(profile_directory)?;
+        let artifact = path_str(artifact_path)?;
+        let command = LocalPlatformCommand::PreflightDouyinPublish;
+        let proof = self.command_proof(
+            PUBLISH_COMMAND_AUTHENTICATION_DOMAIN,
+            &[
+                command_id,
+                command.as_str(),
+                executable,
+                profile,
+                if headless { "1" } else { "0" },
+                publish_job_id,
+                artifact,
+                title,
+                description,
+                EXECUTOR_PROTOCOL_VERSION,
+            ],
+        )?;
+        self.write_frame(
+            writer,
+            &LocalPublishCommandDocument {
+                artifact_path,
+                authentication_proof: &proof,
+                command_id,
+                command_type: command.as_str(),
+                description,
+                executable_path,
+                headless,
+                profile_directory,
+                protocol_version: EXECUTOR_PROTOCOL_VERSION,
+                publish_job_id,
+                title,
+            },
+        )
+    }
+
+    /// Write the frame that spends one approval on one click.
+    ///
+    /// It deliberately restates nothing about the content: the executor still
+    /// holds the page it filled, and a frame that carried the title again could
+    /// disagree with what the operator actually approved.
+    pub fn write_publish_dispatch_command(
+        &self,
+        writer: &mut impl Write,
+        command_id: &str,
+        publish_job_id: &str,
+        confirmation_id: &str,
+    ) -> Result<(), ExecutorBootstrapError> {
+        require_uuid_v4(command_id)?;
+        require_uuid_v4(publish_job_id)?;
+        require_uuid_v4(confirmation_id)?;
+        let command = LocalPlatformCommand::DispatchDouyinPublish;
+        let proof = self.command_proof(
+            PUBLISH_DISPATCH_AUTHENTICATION_DOMAIN,
+            &[
+                command_id,
+                command.as_str(),
+                publish_job_id,
+                confirmation_id,
+                EXECUTOR_PROTOCOL_VERSION,
+            ],
+        )?;
+        self.write_frame(
+            writer,
+            &LocalPublishDispatchDocument {
+                authentication_proof: &proof,
+                command_id,
+                command_type: command.as_str(),
+                confirmation_id,
+                protocol_version: EXECUTOR_PROTOCOL_VERSION,
+                publish_job_id,
+            },
+        )
+    }
+
+    fn write_frame(
+        &self,
+        writer: &mut impl Write,
+        document: &impl Serialize,
+    ) -> Result<(), ExecutorBootstrapError> {
+        let mut serialized = Zeroizing::new(
+            serde_json::to_vec(document).map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
+        );
+        serialized.push(b'\n');
+        if serialized.len() > MAX_PLATFORM_COMMAND_BYTES {
+            return Err(ExecutorBootstrapError::bootstrap_rejected());
+        }
+        writer
+            .write_all(&serialized)
+            .and_then(|()| writer.flush())
+            .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())
+    }
+
     pub fn write_session_command(
         &self,
         writer: &mut impl Write,
@@ -348,12 +507,24 @@ impl LocalSessionToken {
             LocalPlatformCommand::OpenDouyinLogin | LocalPlatformCommand::RecheckDouyinLogin => {
                 "douyin.qr-login.v2"
             }
+            LocalPlatformCommand::PreflightDouyinPublish
+            | LocalPlatformCommand::ReleaseDouyinPublishSurface => "douyin.publish-preflight.v1",
+            LocalPlatformCommand::DispatchDouyinPublish => "douyin.publish-release.v1",
         };
         let valid_state = match expected_command {
             LocalPlatformCommand::CompleteDouyinLogout => document.state == "logged_out",
             LocalPlatformCommand::OpenDouyinLogin | LocalPlatformCommand::RecheckDouyinLogin => {
                 valid_platform_command_state(&document.state)
             }
+            LocalPlatformCommand::PreflightDouyinPublish => matches!(
+                document.state.as_str(),
+                "publish_pre_submit_ready" | "publish_handoff_required" | "publish_blocked"
+            ),
+            LocalPlatformCommand::ReleaseDouyinPublishSurface => document.state == "publish_released",
+            LocalPlatformCommand::DispatchDouyinPublish => matches!(
+                document.state.as_str(),
+                "publish_verified" | "publish_outcome_uncertain" | "publish_not_dispatched"
+            ),
         };
         if document.command_id != expected_command_id
             || document.event != "platform.command.completed"
@@ -441,6 +612,32 @@ fn valid_platform_command_state(value: &str) -> bool {
             | "handoff_required"
             | "unknown"
     )
+}
+
+/// The one place a validated path becomes the string a proof binds.
+fn path_str(source: &Path) -> Result<&str, ExecutorBootstrapError> {
+    source
+        .to_str()
+        .ok_or_else(ExecutorBootstrapError::bootstrap_rejected)
+}
+
+/// Operator copy on its way into a one-line frame and then onto a page.
+///
+/// Controls and bidirectional overrides are refused here rather than escaped:
+/// they would survive JSON encoding intact and reappear in the executor's page,
+/// its logs and the operator's own confirmation screen.
+fn require_publish_text(value: &str) -> Result<(), ExecutorBootstrapError> {
+    let usable = !value.trim().is_empty()
+        && value.chars().count() <= MAX_PUBLISH_TEXT_CHARACTERS
+        && !value.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        });
+    if usable {
+        Ok(())
+    } else {
+        Err(ExecutorBootstrapError::bootstrap_rejected())
+    }
 }
 
 fn require_local_path(source: &Path) -> Result<(), ExecutorBootstrapError> {

@@ -1,0 +1,309 @@
+//! PB-07: the one shape the App renders for both publishing platforms.
+//!
+//! B站 publishes through an official interface and 抖音 through a visible
+//! operations browser. That difference decides what the executor does; it must
+//! never decide what the App renders, or the publishing page becomes two pages
+//! wearing one name. So this module projects a stage, an availability and an
+//! outcome, and deliberately carries no mechanism at all.
+//!
+//! A platform nobody has configured yet stays listed as `awaiting_configuration`
+//! rather than disappearing or failing the module: the operator must still be
+//! able to publish to the platform that *is* ready.
+//!
+//! The vocabulary is pinned by `contracts/publishing/publish-workspace.v1.json`
+//! and checked against the Zod schema by
+//! `frontend/tests/publish-workspace-contract.test.mjs`.
+
+use serde::Serialize;
+
+/// The two platforms `contracts/quality/publishing-capabilities.v1.json` enables.
+const PUBLISHABLE_PLATFORMS: [PublishPlatform; 2] =
+    [PublishPlatform::Bilibili, PublishPlatform::Douyin];
+
+const MAX_APPROVAL_FIELD_CHARACTERS: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum PublishPlatform {
+    #[serde(rename = "bilibili")]
+    Bilibili,
+    #[serde(rename = "douyin")]
+    Douyin,
+}
+
+impl PublishPlatform {
+    /// Recognize only the two enabled platforms, and only in canonical form.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "bilibili" => Some(Self::Bilibili),
+            "douyin" => Some(Self::Douyin),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bilibili => "bilibili",
+            Self::Douyin => "douyin",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum PublishAvailability {
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "awaiting_configuration")]
+    AwaitingConfiguration,
+    #[serde(rename = "awaiting_sign_in")]
+    AwaitingSignIn,
+    #[serde(rename = "unavailable")]
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum PublishStage {
+    #[serde(rename = "idle")]
+    Idle,
+    #[serde(rename = "preparing")]
+    Preparing,
+    #[serde(rename = "awaiting_approval")]
+    AwaitingApproval,
+    #[serde(rename = "publishing")]
+    Publishing,
+    #[serde(rename = "verifying")]
+    Verifying,
+    #[serde(rename = "settled")]
+    Settled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum PublishOutcome {
+    #[serde(rename = "published")]
+    Published,
+    #[serde(rename = "outcome_uncertain")]
+    OutcomeUncertain,
+    #[serde(rename = "not_published")]
+    NotPublished,
+    #[serde(rename = "handed_off")]
+    HandedOff,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublishWorkspaceError {
+    UnknownPlatform,
+    NotPublishable,
+    UnreadableApproval,
+    NoApprovalPending,
+    AlreadyDispatched,
+    NothingInFlight,
+}
+
+/// What the operator is shown at the publish critical point, and nothing else.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishApproval {
+    pub target_account: String,
+    pub video_summary: String,
+    pub title: String,
+    pub description: String,
+    pub confirmation_id: String,
+}
+
+impl PublishApproval {
+    /// Build one presentable approval, or refuse it before it reaches the App.
+    ///
+    /// Every field here is page- or operator-supplied text on its way to a
+    /// human decision, so an empty, over-long or control-bearing value is
+    /// rejected rather than rendered: an approval nobody can read is not an
+    /// approval anyone can give.
+    pub fn new(
+        target_account: &str,
+        video_summary: &str,
+        title: &str,
+        description: &str,
+        confirmation_id: &str,
+    ) -> Result<Self, PublishWorkspaceError> {
+        let fields = [target_account, video_summary, title, description];
+        if fields.iter().any(|field| !readable(field)) || !canonical_uuid_v4(confirmation_id) {
+            return Err(PublishWorkspaceError::UnreadableApproval);
+        }
+        Ok(Self {
+            target_account: target_account.to_owned(),
+            video_summary: video_summary.to_owned(),
+            title: title.to_owned(),
+            description: description.to_owned(),
+            confirmation_id: confirmation_id.to_owned(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishPlatformState {
+    pub platform: PublishPlatform,
+    pub availability: PublishAvailability,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishWorkspaceSnapshot {
+    pub platforms: Vec<PublishPlatformState>,
+    pub stage: PublishStage,
+    pub target: Option<PublishPlatform>,
+    pub approval: Option<PublishApproval>,
+    pub outcome: Option<PublishOutcome>,
+    pub retryable: bool,
+}
+
+impl PublishWorkspaceSnapshot {
+    pub fn platform(&self, platform: &str) -> Option<&PublishPlatformState> {
+        let wanted = PublishPlatform::parse(platform)?;
+        self.platforms.iter().find(|state| state.platform == wanted)
+    }
+}
+
+/// One operator's view of publishing: what is possible, and where one job is.
+#[derive(Clone, Debug)]
+pub struct PublishWorkspace {
+    official_credentials_configured: bool,
+    operations_browser_signed_in: bool,
+    stage: PublishStage,
+    target: Option<PublishPlatform>,
+    approval: Option<PublishApproval>,
+    outcome: Option<PublishOutcome>,
+}
+
+impl PublishWorkspace {
+    pub fn new(official_credentials_configured: bool) -> Self {
+        Self {
+            official_credentials_configured,
+            operations_browser_signed_in: false,
+            stage: PublishStage::Idle,
+            target: None,
+            approval: None,
+            outcome: None,
+        }
+    }
+
+    pub fn observe_douyin_signed_in(&mut self, signed_in: bool) {
+        self.operations_browser_signed_in = signed_in;
+    }
+
+    pub fn snapshot(&self) -> PublishWorkspaceSnapshot {
+        PublishWorkspaceSnapshot {
+            platforms: PUBLISHABLE_PLATFORMS
+                .iter()
+                .map(|platform| PublishPlatformState {
+                    platform: *platform,
+                    availability: self.availability(*platform),
+                })
+                .collect(),
+            stage: self.stage,
+            target: self.target,
+            approval: self.approval.clone(),
+            outcome: self.outcome,
+            retryable: self.retryable(),
+        }
+    }
+
+    pub fn begin(&mut self, platform: &str) -> Result<(), PublishWorkspaceError> {
+        let platform =
+            PublishPlatform::parse(platform).ok_or(PublishWorkspaceError::UnknownPlatform)?;
+        if self.availability(platform) != PublishAvailability::Ready {
+            return Err(PublishWorkspaceError::NotPublishable);
+        }
+        self.stage = PublishStage::Preparing;
+        self.target = Some(platform);
+        self.approval = None;
+        self.outcome = None;
+        Ok(())
+    }
+
+    pub fn await_approval(&mut self, approval: PublishApproval) {
+        self.stage = PublishStage::AwaitingApproval;
+        self.approval = Some(approval);
+    }
+
+    pub fn approve(&mut self) -> Result<PublishApproval, PublishWorkspaceError> {
+        let approval = self
+            .approval
+            .take()
+            .ok_or(PublishWorkspaceError::NoApprovalPending)?;
+        self.stage = PublishStage::Publishing;
+        Ok(approval)
+    }
+
+    pub fn begin_verification(&mut self) {
+        self.stage = PublishStage::Verifying;
+    }
+
+    pub fn settle(&mut self, outcome: PublishOutcome) {
+        self.stage = PublishStage::Settled;
+        self.approval = None;
+        self.outcome = Some(outcome);
+    }
+
+    /// Cancel a publish that has not been dispatched yet.
+    ///
+    /// Once the platform action is in flight there is nothing local left to
+    /// cancel, and reporting one would tell the operator the post did not
+    /// happen when it may well have.
+    pub fn cancel(&mut self) -> Result<(), PublishWorkspaceError> {
+        match self.stage {
+            PublishStage::Idle | PublishStage::Settled => {
+                Err(PublishWorkspaceError::NothingInFlight)
+            }
+            PublishStage::Publishing | PublishStage::Verifying => {
+                Err(PublishWorkspaceError::AlreadyDispatched)
+            }
+            PublishStage::Preparing | PublishStage::AwaitingApproval => {
+                self.settle(PublishOutcome::Cancelled);
+                Ok(())
+            }
+        }
+    }
+
+    fn availability(&self, platform: PublishPlatform) -> PublishAvailability {
+        match platform {
+            PublishPlatform::Bilibili if self.official_credentials_configured => {
+                PublishAvailability::Ready
+            }
+            PublishPlatform::Bilibili => PublishAvailability::AwaitingConfiguration,
+            PublishPlatform::Douyin if self.operations_browser_signed_in => {
+                PublishAvailability::Ready
+            }
+            PublishPlatform::Douyin => PublishAvailability::AwaitingSignIn,
+        }
+    }
+
+    /// An attempted publish whose result is unknown is never offered as a retry.
+    fn retryable(&self) -> bool {
+        matches!(
+            self.outcome,
+            Some(PublishOutcome::NotPublished) | Some(PublishOutcome::Cancelled)
+        )
+    }
+}
+
+fn readable(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value.chars().count() <= MAX_APPROVAL_FIELD_CHARACTERS
+        && !value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+}
+
+fn canonical_uuid_v4(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(index, byte)| match index {
+        8 | 13 | 18 | 23 => *byte == b'-',
+        14 => *byte == b'4',
+        19 => matches!(byte, b'8' | b'9' | b'a' | b'b'),
+        _ => byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'),
+    })
+}

@@ -25,6 +25,7 @@ mod managed_process_tree;
 pub mod material_video_studio;
 pub mod model_service_settings;
 pub mod motion_video_studio;
+pub mod publish_workspace;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
