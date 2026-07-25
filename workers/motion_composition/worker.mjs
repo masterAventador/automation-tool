@@ -53,7 +53,7 @@ const COMPOSITED_EXPRESSION_BODY = `
 // disconnected by design, so an `<img>` pointing at a remote host never
 // settles — `decode()` stays pending forever and `catch` never runs, which
 // eats the whole render budget instead of costing one decode.
-const WARM_UP_DECODE_BUDGET_MS = 1000;
+const WARM_UP_DECODE_BUDGET_MS = 250;
 const WARM_UP_EXPRESSION_BODY = `
   await Promise.race([
     Promise.all(Array.from(document.images)

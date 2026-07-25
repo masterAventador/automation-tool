@@ -40,13 +40,13 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 SWEEP_FRAMES = 2
 STYLE_FRAMES = 3
 DETERMINISM_FRAMES = 30
-# A two-frame sweep item must stay quick, so its budget doubles as a stall
-# guard. The 30-frame determinism render is a different shape: it also pays the
-# one-off warm-up, and a host that rasterises in software (every Windows run
-# here) is materially slower than this Mac, so it gets its own headroom rather
-# than weakening the sweep's guard.
-SHORT_RENDER_BUDGET_SECONDS = 55
-DETERMINISM_RENDER_BUDGET_SECONDS = 150
+# Every render now pays a one-off warm-up (seek to zero, bounded image decode,
+# two animation frames, one discarded capture) so the first kept frame is as
+# settled as the rest. Both budgets are stall guards, not performance targets:
+# the slowest sweep item plus that warm-up already exceeded 55s on this Mac,
+# and a software-rasterising host (every Windows run here) is slower again.
+SHORT_RENDER_BUDGET_SECONDS = 120
+DETERMINISM_RENDER_BUDGET_SECONDS = 180
 
 
 def _run(
