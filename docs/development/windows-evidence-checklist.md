@@ -309,6 +309,17 @@ reparse/大小写/短名下 RenderJob 工作区与 Artifact 删除语义。正�
 BM-16。通过后更新 `docs/development/BM-08.md` 遗留项并评估 BM-05/BM-07/BM-08 三项
 `🔍 待验收` 状态闭合。
 
+### 10. BM-16 确定性与正式包 Windows 待补
+
+BM-16 已在 macOS 完成：聚合确定性门禁、锁定发布目录构建与黑盒门禁、12 套风格
+冻结+真实渲染、同输入双跑 60 帧逐帧 SHA-256 一致、134 项逐项离线渲染 sweep
+（134/134 通过，仅 1 次外部请求被默认断网拦截）与无 URL 输入/抓取入口验证，入口
+`python3.12 scripts/run_bm_16_acceptance.py`（需 3.10+）。Windows 侧待补：同脚本
+在 Windows 真实内置 Chromium 上重跑（发布目录只读属性用 `FILE_ATTRIBUTE_READONLY`
+语义）；双平台正式安装包链路与包内容负面检查（无 WebDriver/调试端口/测试凭据/
+测试命令）；跨机确定性比对；低配机与休眠恢复注入。通过后更新
+`docs/development/BM-16.md` 遗留项并评估 BM-05/07/08/15/16 五项 `🔍 待验收` 闭合。
+
 ## 注意
 
 - 全程无头模式，不要跑出可见浏览器窗口（真实扫码类验收除外）；
