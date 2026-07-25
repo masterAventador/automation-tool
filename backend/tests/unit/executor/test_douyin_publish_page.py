@@ -10,6 +10,7 @@ from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.publish_page import (
     DOUYIN_PUBLISH_ENTRY_URL,
+    DOUYIN_PUBLISH_FORM_ANCHORS,
     DOUYIN_PUBLISH_FORM_ROUTE,
     DOUYIN_PUBLISH_PAGE_SELECTOR_VERSION,
     DOUYIN_PUBLISH_UPLOAD_ROUTE,
@@ -48,23 +49,29 @@ class FakeLocator:
         *,
         wait_callback: Callable[[], None] | None = None,
         visible_only: bool = False,
+        first_only: bool = False,
     ) -> None:
         self.selector = selector
         self._page = page
         self._wait_callback = wait_callback
         self._visible_only = visible_only
+        self._first_only = first_only
 
     @property
     def first(self) -> FakeLocator:
-        return self
+        return self._derived(visible_only=self._visible_only, first_only=True)
 
     def locator(self, selector: str) -> FakeLocator:
         assert selector == VISIBLE_MATCH_ENGINE
-        return FakeLocator(
+        return self._derived(visible_only=True, first_only=self._first_only)
+
+    def _derived(self, *, visible_only: bool, first_only: bool) -> FakeLocator:
+        return type(self)(
             self.selector,
             self._page,
             wait_callback=self._wait_callback,
-            visible_only=True,
+            visible_only=visible_only,
+            first_only=first_only,
         )
 
     def _matches(self) -> list[bool]:
@@ -72,7 +79,8 @@ class FakeLocator:
         for candidate in self.selector.split(", "):
             matches.extend(False for _ in range(candidate in self._page.hidden_selectors))
             matches.extend(True for _ in range(candidate in self._page.visible_selectors))
-        return [match for match in matches if match or not self._visible_only]
+        matches = [match for match in matches if match or not self._visible_only]
+        return matches[:1] if self._first_only else matches
 
     def count(self) -> int:
         if self.selector in self._page.failed_selectors:
@@ -107,7 +115,9 @@ class FakeLocator:
         assert timeout > 0
         if self._wait_callback is not None:
             self._wait_callback()
-        if not self.is_visible():
+        matches = self._matches()
+        if not matches or not matches[0]:
+            self._page.wait_timeouts.append(self.selector)
             raise PlaywrightTimeoutError("private wait timeout")
 
 
@@ -126,6 +136,7 @@ class FakePage:
         self.failed_selectors: set[str] = set()
         self.disabled_selectors: set[str] = set()
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
+        self.wait_timeouts: list[str] = []
         self.navigations: list[str] = []
 
     def locator(self, selector: str) -> FakeLocator:
@@ -421,16 +432,15 @@ def test_disabled_lookup_failure_is_rejected() -> None:
         publish_page.submit_enabled()
 
 
+class FailingWaitLocator(FakeLocator):
+    def wait_for(self, *, state: str, timeout: float) -> None:
+        raise RuntimeError("private wait failure")
+
+
 def test_non_timeout_wait_failure_reports_page_unavailable() -> None:
     class FailingWaitPage(FakePage):
         def locator(self, selector: str) -> FakeLocator:
-            locator = super().locator(selector)
-
-            def wait_for(*, state: str, timeout: float) -> None:
-                raise RuntimeError("private wait failure")
-
-            locator.wait_for = wait_for  # type: ignore[method-assign]
-            return locator
+            return FailingWaitLocator(selector, self)
 
     page = FailingWaitPage(url=FORM_URL)
     observation = DouyinPublishPage(window(page)).wait_for_form(timeout_milliseconds=1_000)
@@ -454,20 +464,18 @@ def test_invalid_locator_count_is_reported_as_unavailable() -> None:
 
 
 def test_unreadable_url_during_a_wait_still_reports_unavailable() -> None:
+    class BreakingWaitLocator(FakeLocator):
+        def wait_for(self, *, state: str, timeout: float) -> None:
+            cast(Any, self._page).broken = True
+            raise RuntimeError("private wait failure")
+
     class UnreadableAfterWaitPage(FakePage):
         def __init__(self) -> None:
             super().__init__(url=FORM_URL)
             self.broken = False
 
         def locator(self, selector: str) -> FakeLocator:
-            locator = FakePage.locator(self, selector)
-
-            def wait_for(*, state: str, timeout: float) -> None:
-                self.broken = True
-                raise RuntimeError("private wait failure")
-
-            locator.wait_for = wait_for  # type: ignore[method-assign]
-            return locator
+            return BreakingWaitLocator(selector, self)
 
         @property
         def url(self) -> str:
@@ -495,6 +503,28 @@ def test_a_hidden_placeholder_never_hides_a_visible_challenge() -> None:
 
     assert observation.state is DouyinPublishPageState.RISK_CHALLENGE
     assert observation.handoff_required
+
+
+def test_waiting_is_satisfied_by_the_visible_anchor_behind_a_hidden_placeholder() -> None:
+    """Pinning the wait to the first match can only ever burn the whole budget.
+
+    Entering the wait means the form anchors are not visible yet, so the first
+    match is the pre-rendered placeholder. It never becomes visible, and the
+    real field inserted behind it is never resolved, so a form that is in fact
+    ready is reported as a drifted page after the full timeout.
+    """
+    page = FakePage(url=FORM_URL)
+    page.hidden_selectors.update(FORM_SELECTORS)
+    for selectors in DOUYIN_PUBLISH_FORM_ANCHORS:
+        group = ", ".join(selectors)
+        page.wait_callbacks[group] = lambda anchors=selectors: page.visible_selectors.update(  # type: ignore[misc]
+            anchor for anchor in anchors if anchor in FORM_SELECTORS
+        )
+
+    observation = DouyinPublishPage(window(page)).wait_for_form(timeout_milliseconds=1_000)
+
+    assert observation.state is DouyinPublishPageState.FORM_READY
+    assert page.wait_timeouts == []
 
 
 def test_a_hidden_duplicate_anchor_is_not_a_conflict() -> None:

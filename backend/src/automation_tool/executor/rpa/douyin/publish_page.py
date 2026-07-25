@@ -24,6 +24,7 @@ from automation_tool.executor.rpa.douyin.page_anchors import (
     AnchorLocator,
     any_visible,
     unique_visible,
+    visible_matches,
 )
 from automation_tool.executor.rpa.douyin.session import DOUYIN_RISK_CHALLENGE_SELECTORS
 from automation_tool.protocol.safe_text import contains_control_or_bidi
@@ -451,10 +452,10 @@ class DouyinPublishPage:
             if remaining <= 0:
                 return self.observe()
             try:
-                cast(_WaitLocator, self._page.locator(", ".join(selectors))).first.wait_for(
-                    state="visible",
-                    timeout=remaining,
-                )
+                cast(
+                    _WaitLocator,
+                    visible_matches(self._page, ", ".join(selectors)),
+                ).first.wait_for(state="visible", timeout=remaining)
             except PlaywrightTimeoutError:
                 return self.observe()
             except Exception:

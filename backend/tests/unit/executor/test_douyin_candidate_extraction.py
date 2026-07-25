@@ -14,6 +14,7 @@ from automation_tool.executor.rpa.douyin.candidate_extraction import (
     DouyinCandidateExtractionRejected,
     DouyinCandidateExtractionState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import douyin_search_results_url
 from automation_tool.executor.rpa.douyin.search_page import DouyinSearchPage
 from automation_tool.protocol import DouyinCandidate, DouyinCandidateSource
@@ -42,6 +43,13 @@ class FakeNode:
         self.children = {} if children is None else children
 
 
+def visible(node: FakeNode) -> bool:
+    value = node.visible
+    if isinstance(value, Exception):
+        raise value
+    return cast(bool, value)
+
+
 class FakeLocator:
     def __init__(self, page: FakePage, nodes: list[FakeNode]) -> None:
         self._page = page
@@ -49,26 +57,24 @@ class FakeLocator:
 
     @property
     def first(self) -> FakeLocator:
-        return FakeLocator(self._page, self._nodes[:1])
+        return type(self)(self._page, self._nodes[:1])
 
     def nth(self, index: int) -> FakeLocator:
-        return FakeLocator(self._page, self._nodes[index : index + 1])
+        return type(self)(self._page, self._nodes[index : index + 1])
 
     def locator(self, selector: str) -> FakeLocator:
+        if selector == VISIBLE_MATCH_ENGINE:
+            return type(self)(self._page, [node for node in self._nodes if visible(node)])
         if self._page.nested_failure and selector == AUTHOR:
             raise RuntimeError("private nested locator failure")
         children: list[FakeNode] = []
-        for node in self._nodes:
-            children.extend(node.children.get(selector, []))
-        return FakeLocator(self._page, children)
+        for candidate in selector.split(", "):
+            for node in self._nodes:
+                children.extend(node.children.get(candidate, []))
+        return type(self)(self._page, children)
 
     def is_visible(self) -> bool:
-        if not self._nodes:
-            return False
-        value = self._nodes[0].visible
-        if isinstance(value, Exception):
-            raise value
-        return cast(bool, value)
+        return bool(self._nodes) and visible(self._nodes[0])
 
     def count(self) -> int:
         if self._page.count_value is not None:
@@ -113,11 +119,13 @@ class FakePage:
         self.drift_on_text = False
 
     def locator(self, selector: str) -> FakeLocator:
-        if selector == self.item_selector:
-            return FakeLocator(self, self.items)
-        if selector in self.visible_selectors:
-            return FakeLocator(self, [FakeNode()])
-        return FakeLocator(self, [])
+        matched: list[FakeNode] = []
+        for candidate in selector.split(", "):
+            if candidate == self.item_selector:
+                matched.extend(self.items)
+            elif candidate in self.visible_selectors:
+                matched.append(FakeNode())
+        return FakeLocator(self, matched)
 
 
 def item(
@@ -294,7 +302,6 @@ def test_conflicting_target_id_and_author_route_fail_closed() -> None:
         item(public_handle="bad/handle"),
         FakeNode(children={AUTHOR_NAME: [FakeNode(text="无作者链接")]}),
         FakeNode(children={AUTHOR: [FakeNode(attributes={"data-user-id": "creator-1"})]}),
-        item(visible=False),
     ),
 )
 def test_missing_or_noncanonical_controlled_fields_fail_closed(
@@ -305,6 +312,59 @@ def test_missing_or_noncanonical_controlled_fields_fail_closed(
     assert observation.state is DouyinCandidateExtractionState.UNKNOWN
     assert observation.evidence is DouyinCandidateExtractionEvidence.PRIVACY_REJECTED
     assert observation.candidates == ()
+
+
+def test_a_hidden_skeleton_row_is_skipped_instead_of_discarding_every_candidate() -> None:
+    """A pre-rendered skeleton row must not throw away the real rows behind it.
+
+    Counting unfiltered rows makes the first index the skeleton, and the
+    visibility check then rejects the whole snapshot. A result feed that always
+    renders a skeleton would therefore never yield a single candidate.
+    """
+    observation = extract(FakePage(items=[FakeNode(visible=False), item()]))
+
+    assert observation.state is DouyinCandidateExtractionState.COMPLETED
+    assert observation.evidence is DouyinCandidateExtractionEvidence.CANDIDATES_EXTRACTED
+    assert observation.candidate_count == 1
+    assert observation.candidates[0].platform_target_id == "creator-001"
+
+
+def test_a_hidden_author_placeholder_does_not_hide_the_real_author_node() -> None:
+    """The card's own template nodes must not look like a missing author."""
+    card = item()
+    card.children[AUTHOR].insert(0, FakeNode(visible=False, attributes={"data-user-id": "ghost"}))
+    card.children[AUTHOR_NAME].insert(0, FakeNode(visible=False, text="占位"))
+
+    observation = extract(FakePage(items=[card]))
+
+    assert observation.state is DouyinCandidateExtractionState.COMPLETED
+    assert observation.candidate_count == 1
+    assert observation.candidates[0].platform_target_id == "creator-001"
+    assert observation.candidates[0].summary.display_name == "创作者甲"
+
+
+def test_two_visible_author_nodes_in_one_card_fail_closed() -> None:
+    """Reading identity facts off an arbitrary one of two authors targets a stranger."""
+    card = item()
+    card.children[AUTHOR].append(
+        FakeNode(attributes={"data-user-id": "creator-002", "href": "/user/creator-002"})
+    )
+
+    observation = extract(FakePage(items=[card]))
+
+    assert observation.state is DouyinCandidateExtractionState.UNKNOWN
+    assert observation.evidence is DouyinCandidateExtractionEvidence.PAGE_UNAVAILABLE
+    assert observation.candidates == ()
+
+
+def test_only_hidden_rows_report_an_empty_snapshot_rather_than_a_privacy_rejection() -> None:
+    """A feed that has rendered nothing visible is empty, not a page we must reject."""
+    observation = extract(FakePage(items=[item(visible=False)]))
+
+    assert observation.state is DouyinCandidateExtractionState.COMPLETED
+    assert observation.evidence is DouyinCandidateExtractionEvidence.CANDIDATES_EXTRACTED
+    assert observation.candidates == ()
+    assert observation.candidate_count == 0
 
 
 @pytest.mark.parametrize(

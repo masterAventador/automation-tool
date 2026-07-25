@@ -11,6 +11,13 @@ from urllib.parse import urlsplit
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import (
+    AnchorConflict,
+    AnchorLocator,
+    any_visible,
+    unique_visible,
+    visible_matches,
+)
 from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageEntry,
     DouyinPageObservation,
@@ -221,20 +228,27 @@ class DouyinSearchPageObservation:
 
 
 class _Locator(Protocol):
+    """The candidate reader's locator surface, on top of the shared anchor one."""
+
     @property
     def first(self) -> _Locator: ...
 
-    def is_visible(self) -> bool: ...
-
     def count(self) -> int: ...
 
-    def nth(self, index: int) -> _Locator: ...
-
     def locator(self, selector: str) -> _Locator: ...
+
+    def is_visible(self) -> bool: ...
+
+    def nth(self, index: int) -> _Locator: ...
 
     def get_attribute(self, name: str, *, timeout: float) -> str | None: ...
 
     def inner_text(self, *, timeout: float) -> str: ...
+
+
+class _WaitLocator(Protocol):
+    @property
+    def first(self) -> _WaitLocator: ...
 
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
@@ -273,21 +287,27 @@ class DouyinSearchPage:
                 DouyinSearchPageEvidence.LOGIN_REDIRECT,
             )
         try:
-            if _visible_locator(self._page, _LOGIN_DIALOG_SELECTORS) is not None:
+            if any_visible(self._page, _LOGIN_DIALOG_SELECTORS):
                 return _observation(
                     version,
                     DouyinSearchPageState.LOGIN_REQUIRED,
                     DouyinSearchPageEvidence.LOGIN_DIALOG,
                 )
-            if _visible_locator(self._page, _BLOCKING_DIALOG_SELECTORS) is not None:
+            if any_visible(self._page, _BLOCKING_DIALOG_SELECTORS):
                 return _observation(
                     version,
                     DouyinSearchPageState.DIALOG_BLOCKED,
                     DouyinSearchPageEvidence.BLOCKING_DIALOG,
                 )
-            search_input = _visible_locator(self._page, _SEARCH_INPUT_SELECTORS)
-            search_submit = _visible_locator(self._page, _SEARCH_SUBMIT_SELECTORS)
-            result_list = _visible_locator(self._page, _RESULT_LIST_SELECTORS)
+            search_input = unique_visible(self._page, _SEARCH_INPUT_SELECTORS)
+            search_submit = unique_visible(self._page, _SEARCH_SUBMIT_SELECTORS)
+            result_list = unique_visible(self._page, _RESULT_LIST_SELECTORS)
+        except AnchorConflict:
+            return _observation(
+                version,
+                DouyinSearchPageState.UNKNOWN,
+                DouyinSearchPageEvidence.CONFLICTING_ANCHORS,
+            )
         except Exception:
             return _observation(
                 version,
@@ -331,15 +351,15 @@ class DouyinSearchPage:
             DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING,
         )
 
-    def search_input(self) -> _Locator:
+    def search_input(self) -> AnchorLocator:
         self._require_state(DouyinSearchPageState.HOME_READY)
         return self._require_locator(_SEARCH_INPUT_SELECTORS)
 
-    def search_submit(self) -> _Locator:
+    def search_submit(self) -> AnchorLocator:
         self._require_state(DouyinSearchPageState.HOME_READY)
         return self._require_locator(_SEARCH_SUBMIT_SELECTORS)
 
-    def result_list(self) -> _Locator:
+    def result_list(self) -> AnchorLocator:
         self._require_state(DouyinSearchPageState.RESULTS_READY)
         return self._require_locator(_RESULT_LIST_SELECTORS)
 
@@ -351,7 +371,7 @@ class DouyinSearchPage:
         self._require_state(DouyinSearchPageState.RESULTS_READY)
         try:
             for selector in _RESULT_ITEM_SELECTORS:
-                count = self._page.locator(selector).count()
+                count = visible_matches(self._page, selector).count()
                 if type(count) is not int or count < 0:
                     raise ValueError
                 if count:
@@ -393,15 +413,15 @@ class DouyinSearchPage:
         self._require_state(DouyinSearchPageState.RESULTS_READY)
         return tuple(candidates)
 
-    def login_dialog(self) -> _Locator:
+    def login_dialog(self) -> AnchorLocator:
         observation = self.observe()
         if observation.evidence is not DouyinSearchPageEvidence.LOGIN_DIALOG:
             raise DouyinSearchPageRejected
-        return self._require_locator(_LOGIN_DIALOG_SELECTORS)
+        return self._first_visible(_LOGIN_DIALOG_SELECTORS)
 
-    def blocking_dialog(self) -> _Locator:
+    def blocking_dialog(self) -> AnchorLocator:
         self._require_state(DouyinSearchPageState.DIALOG_BLOCKED)
-        return self._require_locator(_BLOCKING_DIALOG_SELECTORS)
+        return self._first_visible(_BLOCKING_DIALOG_SELECTORS)
 
     def wait_for_home_ready(
         self,
@@ -433,25 +453,42 @@ class DouyinSearchPage:
         if self.observe().state is not state:
             raise DouyinSearchPageRejected
 
-    def _require_locator(self, selectors: tuple[str, ...]) -> _Locator:
+    def _require_locator(self, selectors: tuple[str, ...]) -> AnchorLocator:
         try:
-            locator = _visible_locator(self._page, selectors)
+            locator = unique_visible(self._page, selectors)
         except Exception:
             raise DouyinSearchPageRejected from None
         if locator is None:
             raise DouyinSearchPageRejected
         return locator
 
+    def _first_visible(self, selectors: tuple[str, ...]) -> AnchorLocator:
+        """Hand back the first visible handoff anchor.
+
+        A handoff group is a gate, not a unique anchor: a captcha overlay and
+        the dialog shell around it are both legitimately visible at once, so
+        demanding a single match would turn the reason for stopping into an
+        unexplained page failure.
+        """
+
+        try:
+            for selector in selectors:
+                if any_visible(self._page, (selector,)):
+                    return visible_matches(self._page, selector).first
+        except Exception:
+            raise DouyinSearchPageRejected from None
+        raise DouyinSearchPageRejected
+
     def _result_items(self) -> tuple[_Locator, int]:
         try:
-            primary = self._page.locator(_RESULT_ITEM_SELECTORS[0])
+            primary = cast(_Locator, visible_matches(self._page, _RESULT_ITEM_SELECTORS[0]))
             primary_count = primary.count()
             if type(primary_count) is not int or primary_count < 0:
                 raise ValueError
             if primary_count:
                 return primary, primary_count
             for selector in _RESULT_ITEM_SELECTORS[1:]:
-                locator = self._page.locator(selector)
+                locator = cast(_Locator, visible_matches(self._page, selector))
                 count = locator.count()
                 if type(count) is not int or count < 0:
                     raise ValueError
@@ -481,10 +518,10 @@ class DouyinSearchPage:
             if remaining <= 0:
                 return self.observe()
             try:
-                self._page.locator(", ".join(selectors)).first.wait_for(
-                    state="visible",
-                    timeout=remaining,
-                )
+                cast(
+                    _WaitLocator,
+                    visible_matches(self._page, ", ".join(selectors)),
+                ).first.wait_for(state="visible", timeout=remaining)
             except PlaywrightTimeoutError:
                 return self.observe()
             except Exception:
@@ -510,14 +547,6 @@ class DouyinSearchPage:
             DouyinSearchPageState.UNKNOWN,
             DouyinSearchPageEvidence.PAGE_UNAVAILABLE,
         )
-
-
-def _visible_locator(page: _Page, selectors: tuple[str, ...]) -> _Locator | None:
-    for selector in selectors:
-        locator = page.locator(selector).first
-        if locator.is_visible():
-            return locator
-    return None
 
 
 def _candidate_from_item(item: _Locator, *, page_revision: int) -> DouyinCandidate:
@@ -548,14 +577,15 @@ def _candidate_from_item(item: _Locator, *, page_revision: int) -> DouyinCandida
 
 
 def _required_nested_locator(item: _Locator, selectors: tuple[str, ...]) -> _Locator:
+    """Resolve the one visible field of a card; two of them name two people."""
+
     try:
-        for selector in selectors:
-            locator = item.locator(selector).first
-            if locator.is_visible():
-                return locator
+        locator = unique_visible(item, selectors)
     except Exception:
         raise DouyinSearchPageRejected from None
-    raise DouyinSearchPagePrivacyRejected
+    if locator is None:
+        raise DouyinSearchPagePrivacyRejected
+    return cast(_Locator, locator)
 
 
 def _read_required_text(item: _Locator, selectors: tuple[str, ...]) -> str:

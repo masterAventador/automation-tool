@@ -9,6 +9,7 @@ from automation_tool.executor.rpa.douyin import (
     direct_message_page,
     profile_page,
     publish_page,
+    search_page,
 )
 from automation_tool.executor.rpa.douyin.page_anchors import (
     VISIBLE_MATCH_ENGINE,
@@ -30,6 +31,11 @@ UNIQUE_VISIBLE_GROUPS = (
     direct_message_page._MESSAGING_NOT_ALLOWED_SELECTORS,
     direct_message_page._FOLLOW_REQUIRED_SELECTORS,
     profile_page._PROFILE_ROOT_SELECTORS,
+    search_page._SEARCH_INPUT_SELECTORS,
+    search_page._SEARCH_SUBMIT_SELECTORS,
+    search_page._RESULT_LIST_SELECTORS,
+    search_page._CANDIDATE_AUTHOR_SELECTORS,
+    search_page._CANDIDATE_NAME_SELECTORS,
     publish_page.DOUYIN_PUBLISH_ARTIFACT_SELECTORS,
     publish_page.DOUYIN_PUBLISH_TITLE_SELECTORS,
     publish_page.DOUYIN_PUBLISH_DESCRIPTION_SELECTORS,

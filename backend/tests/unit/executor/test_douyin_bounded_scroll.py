@@ -16,6 +16,7 @@ from automation_tool.executor.rpa.douyin.bounded_scroll import (
     DouyinBoundedScrollRejected,
     DouyinBoundedScrollState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import douyin_search_results_url
 from automation_tool.executor.rpa.douyin.search import (
     DouyinSearchExecutionEvidence,
@@ -41,21 +42,27 @@ class FakeLocator:
     def first(self) -> FakeLocator:
         return self
 
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self
+
     def is_visible(self) -> bool:
         return any(
             candidate in self._page.visible_selectors for candidate in self._selector.split(", ")
         )
 
     def count(self) -> int:
-        if self._page.count_failure:
-            raise RuntimeError("private count failure")
         if self._selector == RESULT_ITEM:
+            if self._page.count_failure:
+                raise RuntimeError("private count failure")
             count = self._page.item_count
             if self._page.counts:
                 count = self._page.counts.pop(0)
                 self._page.item_count = count
             return count
-        return 0
+        return sum(
+            candidate in self._page.visible_selectors for candidate in self._selector.split(", ")
+        )
 
 
 class FakeMouse:

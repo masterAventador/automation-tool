@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <input aria-label="搜索" />
+    <button aria-label="搜索" onclick="runSearch()">搜索</button>
+    <div data-e2e="captcha-container" style="display: none">
+      <p>预渲染的验证占位</p>
+    </div>
+    <div data-e2e="captcha-container">
+      <p>请完成安全验证后继续</p>
+      <button type="button">开始验证</button>
+    </div>
+    <script>
+      window.__searchedKeyword = null;
+      function runSearch() {
+        window.__searchedKeyword = document.querySelector('input[aria-label="搜索"]').value;
+      }
+    </script>
+  </body>
+</html>

@@ -8,6 +8,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 import automation_tool.executor.rpa.douyin.search_page as search_page_module
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import (
     DOUYIN_HOME_URL,
     DOUYIN_SEARCH_ENTRY_URL,
@@ -26,7 +27,9 @@ from automation_tool.executor.rpa.douyin.search_page import (
 
 SEARCH_RESULTS_URL = f"{DOUYIN_SEARCH_ENTRY_URL}/keyword?type=general"
 SEARCH_INPUT = 'input[aria-label="搜索"]'
+SEARCH_INPUT_PLACEHOLDER = 'input[placeholder="搜索"]'
 SEARCH_BUTTON = 'button[aria-label="搜索"]'
+SEARCH_BUTTON_FALLBACK = '[data-e2e="searchbar-button"]'
 RESULT_LIST = '[role="feed"]'
 RESULT_ITEM = '[role="feed"] > article'
 RESULT_ITEM_FALLBACK = '[data-e2e="search-result-item"]'
@@ -34,54 +37,87 @@ LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
 RISK_CHALLENGE = 'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'
 VIDEO_DETAIL_URL = "https://www.douyin.com/video/7351234567890123456"
+INPUT_GROUP = 'input[aria-label="搜索"], input[placeholder="搜索"], [data-e2e="searchbar-input"]'
+SUBMIT_GROUP = (
+    'button[aria-label="搜索"], [role="button"][aria-label="搜索"], [data-e2e="searchbar-button"]'
+)
+RESULT_GROUP = '[role="feed"], [data-e2e="search-result-list"], [data-e2e="scroll-list"]'
 
 
 class FakeLocator:
+    """Models grouped matches plus Playwright's visible-only filtering."""
+
     def __init__(
         self,
         selector: str,
+        page: FakePage,
         *,
-        visible: bool,
-        fail: bool = False,
-        wait_callback: Callable[[], None] | None = None,
-        wait_failure: bool = False,
-        selector_counts: dict[str, object] | None = None,
-        failed_count_selectors: set[str] | None = None,
+        visible_only: bool = False,
+        first_only: bool = False,
     ) -> None:
         self.selector = selector
-        self.visible = visible
-        self.fail = fail
-        self.wait_callback = wait_callback
-        self.wait_failure = wait_failure
-        self._selector_counts = {} if selector_counts is None else selector_counts
-        self._failed_count_selectors = (
-            set() if failed_count_selectors is None else failed_count_selectors
-        )
+        self.page = page
+        self.visible_only = visible_only
+        self.first_only = first_only
+
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self._derived(visible_only=True, first_only=self.first_only)
 
     @property
     def first(self) -> FakeLocator:
-        return self
+        return self._derived(visible_only=self.visible_only, first_only=True)
 
     def is_visible(self) -> bool:
-        if self.fail:
-            raise RuntimeError("private page failure")
-        return self.visible
+        self._require_healthy("visibility")
+        matched = self._matched()
+        return bool(matched) and matched[0]
+
+    def count(self) -> int:
+        self._require_healthy("count")
+        for candidate in self._selectors():
+            if candidate in self.page.invalid_counts:
+                return cast(int, self.page.invalid_counts[candidate])
+        return len(self._matched())
 
     def wait_for(self, *, state: str, timeout: float) -> None:
         assert state == "visible"
         assert timeout > 0
-        if self.wait_failure:
+        if self.selector in self.page.wait_failure_selectors:
             raise RuntimeError("private wait failure")
-        if self.wait_callback is not None:
-            self.wait_callback()
+        callback = self.page.wait_callbacks.get(self.selector)
+        if callback is not None:
+            callback()
+        if self.selector in self.page.premature_wait_selectors:
             return
-        if not self.visible:
+        matched = self._matched()
+        if not matched or not matched[0]:
+            self.page.wait_timeouts.append(self.selector)
             raise PlaywrightTimeoutError("private wait timeout")
 
-    def count(self) -> int:
-        if self.selector in self._failed_count_selectors:
-            raise RuntimeError("private count failure")
-        return cast(int, self._selector_counts.get(self.selector, 0))
+    def _selectors(self) -> list[str]:
+        return self.selector.split(", ")
+
+    def _matched(self) -> list[bool]:
+        """Visibility of every matched element, in document order."""
+        matched = [
+            visible for selector in self._selectors() for visible in self.page.elements(selector)
+        ]
+        if self.visible_only:
+            matched = [visible for visible in matched if visible]
+        return matched[:1] if self.first_only else matched
+
+    def _require_healthy(self, kind: str) -> None:
+        if any(selector in self.page.failed_selectors for selector in self._selectors()):
+            raise RuntimeError(f"private {kind} failure")
+
+    def _derived(self, *, visible_only: bool, first_only: bool) -> FakeLocator:
+        return type(self)(
+            self.selector,
+            self.page,
+            visible_only=visible_only,
+            first_only=first_only,
+        )
 
 
 class FakePage:
@@ -90,29 +126,30 @@ class FakePage:
         *,
         url: str = DOUYIN_HOME_URL,
         visible_selectors: set[str] | None = None,
+        hidden_selectors: set[str] | None = None,
         failed_selectors: set[str] | None = None,
     ) -> None:
         self.url = url
         self.visible_selectors = set() if visible_selectors is None else visible_selectors
+        self.hidden_selectors = set() if hidden_selectors is None else hidden_selectors
         self.failed_selectors = set() if failed_selectors is None else failed_selectors
+        self.visible_counts: dict[str, int] = {}
+        self.invalid_counts: dict[str, object] = {}
         self.requested_selectors: list[str] = []
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
         self.wait_failure_selectors: set[str] = set()
-        self.selector_counts: dict[str, object] = {}
-        self.failed_count_selectors: set[str] = set()
+        self.premature_wait_selectors: set[str] = set()
+        self.wait_timeouts: list[str] = []
+
+    def elements(self, selector: str) -> tuple[bool, ...]:
+        """Like a single-page app, a hidden placeholder precedes the real element."""
+        placeholder = (False,) if selector in self.hidden_selectors else ()
+        rendered = self.visible_counts.get(selector, 1 if selector in self.visible_selectors else 0)
+        return placeholder + (True,) * rendered
 
     def locator(self, selector: str) -> FakeLocator:
         self.requested_selectors.append(selector)
-        return FakeLocator(
-            selector,
-            visible=selector in self.visible_selectors
-            or any(candidate in self.visible_selectors for candidate in selector.split(", ")),
-            fail=selector in self.failed_selectors,
-            wait_callback=self.wait_callbacks.get(selector),
-            wait_failure=selector in self.wait_failure_selectors,
-            selector_counts=self.selector_counts,
-            failed_count_selectors=self.failed_count_selectors,
-        )
+        return FakeLocator(selector, self)
 
 
 class ChangingAnchorPage(FakePage):
@@ -122,14 +159,13 @@ class ChangingAnchorPage(FakePage):
         self._input_requests = 0
 
     def locator(self, selector: str) -> FakeLocator:
-        if selector == SEARCH_INPUT:
+        if selector.startswith(SEARCH_INPUT):
             self._input_requests += 1
             if self._input_requests > 1:
-                return FakeLocator(
-                    selector,
-                    visible=False,
-                    fail=self.fail_after_observation,
-                )
+                if self.fail_after_observation:
+                    self.failed_selectors.add(SEARCH_INPUT)
+                else:
+                    self.visible_selectors.discard(SEARCH_INPUT)
         return super().locator(selector)
 
 
@@ -198,12 +234,12 @@ def test_known_route_and_matching_anchors_are_ready(
 def test_accessors_return_only_visible_versioned_anchors() -> None:
     home_page = FakePage(visible_selectors={SEARCH_INPUT, SEARCH_BUTTON})
     home = DouyinSearchPage(window(home_page))
-    assert cast(FakeLocator, home.search_input()).selector == SEARCH_INPUT
-    assert cast(FakeLocator, home.search_submit()).selector == SEARCH_BUTTON
+    assert cast(FakeLocator, home.search_input()).selector == INPUT_GROUP
+    assert cast(FakeLocator, home.search_submit()).selector == SUBMIT_GROUP
 
     result_page = FakePage(url=SEARCH_RESULTS_URL, visible_selectors={RESULT_LIST})
     results = DouyinSearchPage(window(result_page))
-    assert cast(FakeLocator, results.result_list()).selector == RESULT_LIST
+    assert cast(FakeLocator, results.result_list()).selector == RESULT_GROUP
 
 
 def test_session_entry_is_a_login_redirect_without_dom_guessing() -> None:
@@ -259,6 +295,136 @@ def test_non_login_dialog_or_risk_challenge_blocks_every_page_anchor(
     assert observation.state is DouyinSearchPageState.DIALOG_BLOCKED
     assert observation.evidence is DouyinSearchPageEvidence.BLOCKING_DIALOG
     assert cast(FakeLocator, search_page.blocking_dialog()).selector == blocking_selector
+
+
+@pytest.mark.parametrize(
+    ("dialog", "state"),
+    (
+        (LOGIN_DIALOG, DouyinSearchPageState.LOGIN_REQUIRED),
+        (BLOCKING_DIALOG, DouyinSearchPageState.DIALOG_BLOCKED),
+        (RISK_CHALLENGE, DouyinSearchPageState.DIALOG_BLOCKED),
+    ),
+)
+def test_a_hidden_placeholder_never_hides_the_handoff_dialog_behind_it(
+    dialog: str,
+    state: DouyinSearchPageState,
+) -> None:
+    """The fail-open regression: a placeholder must not mask a captcha or login panel.
+
+    A single-page app pre-renders hidden template nodes, so the first element
+    matching a handoff selector is routinely the placeholder. Probing only that
+    first match reports "no dialog", and the run keeps searching while a
+    verification challenge or an expired-login panel owns the screen. Rule 5 of
+    the project baseline allows exactly one answer here: stop and hand over.
+    """
+    page = FakePage(
+        visible_selectors={SEARCH_INPUT, SEARCH_BUTTON, dialog},
+        hidden_selectors={dialog},
+    )
+
+    observation = DouyinSearchPage(window(page)).observe()
+
+    assert observation.state is state
+    assert observation.evidence is (
+        DouyinSearchPageEvidence.LOGIN_DIALOG
+        if state is DouyinSearchPageState.LOGIN_REQUIRED
+        else DouyinSearchPageEvidence.BLOCKING_DIALOG
+    )
+    assert observation.ready is False
+    assert observation.circuit_open is True
+
+
+@pytest.mark.parametrize(
+    ("url", "visible", "hidden", "state", "evidence"),
+    (
+        (
+            DOUYIN_HOME_URL,
+            {SEARCH_INPUT, SEARCH_BUTTON},
+            {SEARCH_INPUT, SEARCH_BUTTON},
+            DouyinSearchPageState.HOME_READY,
+            DouyinSearchPageEvidence.SEARCH_ENTRY_VISIBLE,
+        ),
+        (
+            DOUYIN_HOME_URL,
+            {SEARCH_INPUT, SEARCH_BUTTON},
+            {SEARCH_INPUT_PLACEHOLDER, SEARCH_BUTTON_FALLBACK},
+            DouyinSearchPageState.HOME_READY,
+            DouyinSearchPageEvidence.SEARCH_ENTRY_VISIBLE,
+        ),
+        (
+            SEARCH_RESULTS_URL,
+            {RESULT_LIST},
+            {RESULT_LIST},
+            DouyinSearchPageState.RESULTS_READY,
+            DouyinSearchPageEvidence.RESULT_LIST_VISIBLE,
+        ),
+    ),
+)
+def test_hidden_placeholders_neither_hide_nor_duplicate_a_ready_anchor(
+    url: str,
+    visible: set[str],
+    hidden: set[str],
+    state: DouyinSearchPageState,
+    evidence: DouyinSearchPageEvidence,
+) -> None:
+    """Hidden template nodes are neither a missing anchor nor a second anchor."""
+    page = FakePage(url=url, visible_selectors=visible, hidden_selectors=hidden)
+
+    observation = DouyinSearchPage(window(page)).observe()
+
+    assert observation.state is state
+    assert observation.evidence is evidence
+    assert observation.ready is True
+
+
+@pytest.mark.parametrize(
+    ("url", "visible"),
+    (
+        (DOUYIN_HOME_URL, {SEARCH_INPUT, SEARCH_INPUT_PLACEHOLDER, SEARCH_BUTTON}),
+        (DOUYIN_HOME_URL, {SEARCH_INPUT, SEARCH_BUTTON, SEARCH_BUTTON_FALLBACK}),
+        (SEARCH_RESULTS_URL, {RESULT_LIST, '[data-e2e="search-result-list"]'}),
+    ),
+)
+def test_two_visible_anchors_in_one_group_are_reported_as_conflicting(
+    url: str,
+    visible: set[str],
+) -> None:
+    """Acting on the arbitrary first of two visible anchors is a silent side effect."""
+    page = FakePage(url=url, visible_selectors=visible)
+    search_page = DouyinSearchPage(window(page))
+
+    observation = search_page.observe()
+
+    assert observation.state is DouyinSearchPageState.UNKNOWN
+    assert observation.evidence is DouyinSearchPageEvidence.CONFLICTING_ANCHORS
+    assert observation.circuit_open is True
+
+
+def test_a_hidden_skeleton_item_is_neither_counted_nor_read_as_a_candidate() -> None:
+    """An unrendered skeleton row would inflate the count and shift every index."""
+    page = FakePage(url=SEARCH_RESULTS_URL, visible_selectors={RESULT_LIST})
+    page.hidden_selectors.add(RESULT_ITEM)
+    page.visible_counts[RESULT_ITEM] = 2
+
+    assert DouyinSearchPage(window(page)).result_item_count(maximum=20) == 2
+
+
+def test_waiting_is_satisfied_by_the_visible_anchor_behind_a_hidden_placeholder() -> None:
+    """Pinning the wait to the first match can only ever time out.
+
+    Entering the wait means no anchor is visible yet, so the first match is the
+    hidden placeholder. It never becomes visible, and the real element inserted
+    behind it is never resolved, so the wait burns its full budget while the
+    page has in fact been ready for most of it.
+    """
+    page = FakePage(hidden_selectors={SEARCH_INPUT, SEARCH_BUTTON})
+    page.wait_callbacks[INPUT_GROUP] = lambda: page.visible_selectors.add(SEARCH_INPUT)
+    page.wait_callbacks[SUBMIT_GROUP] = lambda: page.visible_selectors.add(SEARCH_BUTTON)
+
+    ready = DouyinSearchPage(window(page)).wait_for_home_ready(timeout_milliseconds=1_000)
+
+    assert ready.state is DouyinSearchPageState.HOME_READY
+    assert page.wait_timeouts == []
 
 
 @pytest.mark.parametrize(
@@ -389,7 +555,7 @@ def test_result_item_count_is_bounded_and_uses_versioned_fallbacks() -> None:
     search_page = DouyinSearchPage(window(page))
     assert search_page.result_item_count(maximum=20) == 0
 
-    page.selector_counts[RESULT_ITEM_FALLBACK] = 12
+    page.visible_counts[RESULT_ITEM_FALLBACK] = 12
     assert search_page.result_item_count(maximum=5) == 5
     assert RESULT_ITEM in page.requested_selectors
     assert RESULT_ITEM_FALLBACK in page.requested_selectors
@@ -403,11 +569,11 @@ def test_result_item_count_rejects_invalid_bounds_counts_or_page_state() -> None
             search_page.result_item_count(maximum=maximum)
 
     for invalid_count in (True, -1):
-        result_page.selector_counts[RESULT_ITEM] = invalid_count
+        result_page.invalid_counts[RESULT_ITEM] = invalid_count
         with pytest.raises(DouyinSearchPageRejected):
             search_page.result_item_count(maximum=20)
-    result_page.selector_counts.clear()
-    result_page.failed_count_selectors.add(RESULT_ITEM)
+    result_page.invalid_counts.clear()
+    result_page.failed_selectors.add(RESULT_ITEM)
     with pytest.raises(DouyinSearchPageRejected):
         search_page.result_item_count(maximum=20)
 
@@ -429,25 +595,15 @@ def test_bounded_waits_reject_invalid_timeout_and_return_ready_or_timeout_fact()
     timed_out = search_page.wait_for_home_ready(timeout_milliseconds=1_000)
     assert timed_out.evidence is DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING
 
-    input_group = (
-        'input[aria-label="搜索"], input[placeholder="搜索"], [data-e2e="searchbar-input"]'
-    )
-    submit_group = (
-        'button[aria-label="搜索"], [role="button"][aria-label="搜索"], '
-        '[data-e2e="searchbar-button"]'
-    )
-    page.wait_callbacks[input_group] = lambda: page.visible_selectors.add(SEARCH_INPUT)
-    page.wait_callbacks[submit_group] = lambda: page.visible_selectors.add(SEARCH_BUTTON)
+    page.wait_callbacks[INPUT_GROUP] = lambda: page.visible_selectors.add(SEARCH_INPUT)
+    page.wait_callbacks[SUBMIT_GROUP] = lambda: page.visible_selectors.add(SEARCH_BUTTON)
     ready = search_page.wait_for_home_ready(timeout_milliseconds=1_000)
     assert ready.state is DouyinSearchPageState.HOME_READY
 
 
 def test_wait_failure_is_page_unavailable_and_unknown_version_stays_closed() -> None:
-    input_group = (
-        'input[aria-label="搜索"], input[placeholder="搜索"], [data-e2e="searchbar-input"]'
-    )
     page = FakePage()
-    page.wait_failure_selectors.add(input_group)
+    page.wait_failure_selectors.add(INPUT_GROUP)
     unavailable = DouyinSearchPage(window(page)).wait_for_home_ready(timeout_milliseconds=1_000)
     assert unavailable.evidence is DouyinSearchPageEvidence.PAGE_UNAVAILABLE
 
@@ -456,15 +612,14 @@ def test_wait_failure_is_page_unavailable_and_unknown_version_stays_closed() -> 
         raise RuntimeError("private drift")
 
     page.wait_failure_selectors.clear()
-    page.wait_callbacks[input_group] = drift
+    page.wait_callbacks[INPUT_GROUP] = drift
     unknown = DouyinSearchPage(window(page)).wait_for_home_ready(timeout_milliseconds=1_000)
     assert unknown.evidence is DouyinSearchPageEvidence.PAGE_VERSION_UNKNOWN
 
 
 def test_wait_returns_last_missing_observation_when_anchor_wakes_without_visibility() -> None:
-    result_group = '[role="feed"], [data-e2e="search-result-list"], [data-e2e="scroll-list"]'
     page = FakePage(url=SEARCH_RESULTS_URL)
-    page.wait_callbacks[result_group] = lambda: None
+    page.premature_wait_selectors.add(RESULT_GROUP)
 
     observation = DouyinSearchPage(window(page)).wait_for_results_ready(timeout_milliseconds=1_000)
 
@@ -479,9 +634,6 @@ def test_elapsed_wait_and_failed_url_read_remain_closed(monkeypatch: pytest.Monk
     monkeypatch.undo()
 
     page = FailingSecondUrlPage()
-    input_group = (
-        'input[aria-label="搜索"], input[placeholder="搜索"], [data-e2e="searchbar-input"]'
-    )
-    page.wait_failure_selectors.add(input_group)
+    page.wait_failure_selectors.add(INPUT_GROUP)
     unavailable = DouyinSearchPage(window(page)).wait_for_home_ready(timeout_milliseconds=1_000)
     assert unavailable.evidence is DouyinSearchPageEvidence.PAGE_VERSION_UNKNOWN

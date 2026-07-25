@@ -270,6 +270,7 @@ def test_fake_page_corpus_is_closed_and_contains_no_external_runtime_dependencie
     expected = {
         "home.html",
         "home-dialog.html",
+        "home-risk-challenge.html",
         "login.html",
         "unknown-version.html",
         "results-normal.html",

@@ -7,6 +7,7 @@ import pytest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import (
     DOUYIN_HOME_URL,
     douyin_search_results_url,
@@ -24,6 +25,11 @@ from automation_tool.protocol import DouyinSearchInput
 SEARCH_INPUT = 'input[aria-label="搜索"]'
 SEARCH_BUTTON = 'button[aria-label="搜索"]'
 RESULT_LIST = '[role="feed"]'
+INPUT_GROUP = 'input[aria-label="搜索"], input[placeholder="搜索"], [data-e2e="searchbar-input"]'
+SUBMIT_GROUP = (
+    'button[aria-label="搜索"], [role="button"][aria-label="搜索"], [data-e2e="searchbar-button"]'
+)
+RESULT_GROUP = '[role="feed"], [data-e2e="search-result-list"], [data-e2e="scroll-list"]'
 LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
 
@@ -36,6 +42,17 @@ class FakeLocator:
     @property
     def first(self) -> FakeLocator:
         return self
+
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self
+
+    def count(self) -> int:
+        if self._page.fail_visibility:
+            raise RuntimeError("private count failure")
+        return sum(
+            candidate in self._page.visible_selectors for candidate in self.selector.split(", ")
+        )
 
     def is_visible(self) -> bool:
         if self._page.fail_visibility:
@@ -139,8 +156,8 @@ def test_search_uses_one_exact_bounded_action_sequence_and_page_object() -> None
 
     expected_url = douyin_search_results_url(request().keyword)
     assert page.navigations == [(DOUYIN_HOME_URL, "domcontentloaded", 30_000)]
-    assert page.fills == [(SEARCH_INPUT, "新能源汽车", 15_000)]
-    assert page.clicks == [(SEARCH_BUTTON, 15_000, True)]
+    assert page.fills == [(INPUT_GROUP, "新能源汽车", 15_000)]
+    assert page.clicks == [(SUBMIT_GROUP, 15_000, True)]
     assert page.url_waits == [(expected_url, "domcontentloaded", 30_000)]
     assert observation == DouyinSearchExecutionObservation(
         state=DouyinSearchExecutionState.SUCCEEDED,
@@ -154,20 +171,12 @@ def test_search_uses_one_exact_bounded_action_sequence_and_page_object() -> None
 
 def test_slow_home_and_result_anchors_are_waited_for_within_fixed_bounds() -> None:
     page = FakePage()
-    input_group = (
-        'input[aria-label="搜索"], input[placeholder="搜索"], [data-e2e="searchbar-input"]'
-    )
-    submit_group = (
-        'button[aria-label="搜索"], [role="button"][aria-label="搜索"], '
-        '[data-e2e="searchbar-button"]'
-    )
-    result_group = '[role="feed"], [data-e2e="search-result-list"], [data-e2e="scroll-list"]'
-    page.wait_callbacks[input_group] = lambda: page.visible_selectors.add(SEARCH_INPUT)
-    page.wait_callbacks[submit_group] = lambda: page.visible_selectors.add(SEARCH_BUTTON)
+    page.wait_callbacks[INPUT_GROUP] = lambda: page.visible_selectors.add(SEARCH_INPUT)
+    page.wait_callbacks[SUBMIT_GROUP] = lambda: page.visible_selectors.add(SEARCH_BUTTON)
 
     def begin_slow_results() -> None:
         page.visible_selectors.clear()
-        page.wait_callbacks[result_group] = lambda: page.visible_selectors.add(RESULT_LIST)
+        page.wait_callbacks[RESULT_GROUP] = lambda: page.visible_selectors.add(RESULT_LIST)
 
     page.after_url_wait = begin_slow_results
 
@@ -175,9 +184,9 @@ def test_slow_home_and_result_anchors_are_waited_for_within_fixed_bounds() -> No
 
     assert observation.state is DouyinSearchExecutionState.SUCCEEDED
     assert [selector for selector, _timeout in page.waits] == [
-        input_group,
-        submit_group,
-        result_group,
+        INPUT_GROUP,
+        SUBMIT_GROUP,
+        RESULT_GROUP,
     ]
     assert all(0 < timeout <= 10_000 for _selector, timeout in page.waits)
 
