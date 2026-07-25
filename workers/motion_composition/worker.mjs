@@ -41,6 +41,17 @@ const SANDBOX_RELATIVE_PATH_MAXIMUM = 512;
 const SANDBOX_MESSAGE_LIMIT_BYTES = 32 * 1024 * 1024;
 const SANDBOX_FRAMES_DIRECTORY = "frames";
 const SANDBOX_CANCEL_FILE = ".automation-tool-cancel";
+// Wait until what is on screen is stable enough to hash: every image this
+// frame needs is decoded, and two animation frames have passed so the current
+// style has actually been composited. Shared by the warm-up and each frame so
+// the first kept frame is settled exactly like the rest.
+const SETTLE_EXPRESSION_BODY = `
+  await Promise.all(Array.from(document.images)
+    .map((image) => image.decode().catch(() => undefined)));
+  await new Promise((resolve) => requestAnimationFrame(
+    () => requestAnimationFrame(() => resolve(true))));
+  return true;
+`;
 const RESOURCE_MONITOR_INTERVAL_MS = 300;
 const SANDBOX_FAILURES = {
   cancelled: "render_cancelled",
@@ -985,6 +996,28 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         && Number.isInteger(timelineMetadata?.timelineCount)
         && timelineMetadata.timelineCount > 0
       ) ? timelineMetadata.duration : 0;
+      // Warm up before the first kept frame. A composition's first paint
+      // triggers lazy work — image decode, canvas and SVG initialisation —
+      // whose completion drifts across the next few frames. That is why an
+      // early frame index still hashed differently between two Windows runs
+      // after fonts and compositing were already awaited.
+      const warmed = await pipe.send("Runtime.evaluate", {
+        expression: `(async () => {
+          for (const timeline of Object.values(window.__timelines ?? {})) {
+            if (timeline && typeof timeline.seek === 'function') timeline.seek(0, false);
+          }
+          ${SETTLE_EXPRESSION_BODY}
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      }, sessionId);
+      if (warmed?.result?.exceptionDetails !== undefined) {
+        finish({ status: "protocol" });
+        return;
+      }
+      // One discarded capture forces that first rasterisation to complete
+      // before any frame that is kept.
+      await pipe.send("Page.captureScreenshot", { format: "png" }, sessionId);
       for (let index = 1; index <= spec.frameCount; index += 1) {
         try {
           await access(join(resolved.workspaceReal, SANDBOX_CANCEL_FILE));
@@ -1008,14 +1041,12 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
             finish({ status: "protocol" });
             return;
           }
-          // A seek updates style synchronously but compositing is not: two
-          // animation frames guarantee the seeked state was actually rastered
-          // before it is captured. Without this the same frame index can hash
-          // differently between two runs of the same composition.
+          // A seek updates style synchronously but decoding and compositing
+          // are not: wait for the images this frame needs and for two
+          // animation frames, so the seeked state is actually rastered before
+          // it is captured.
           const settled = await pipe.send("Runtime.evaluate", {
-            expression:
-              "new Promise((resolve) => requestAnimationFrame("
-              + "() => requestAnimationFrame(() => resolve(true))))",
+            expression: `(async () => { ${SETTLE_EXPRESSION_BODY} })()`,
             awaitPromise: true,
             returnByValue: true,
           }, sessionId);
