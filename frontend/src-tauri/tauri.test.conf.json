@@ -1,4 +1,5 @@
 {
+  "identifier": "com.aventador.automationtool.uiharness",
   "$schema": "https://schema.tauri.app/config/2",
   "build": {
     "beforeBuildCommand": "pnpm build:desktop-e2e-assets"
