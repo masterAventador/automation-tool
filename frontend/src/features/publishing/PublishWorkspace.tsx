@@ -41,7 +41,7 @@ interface PublishWorkspaceProps {
    * publish, and offering a button that would post an unspecified file is worse
    * than offering none.
    */
-  readonly selectedVideo?: SelectedVideo;
+  readonly selectedVideo?: SelectedVideo | undefined;
 }
 
 export interface SelectedVideo {
@@ -100,11 +100,11 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
 
   if (unreadable) {
     return (
-      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
         <Alert
           type="warning"
           showIcon
-          message="暂时读不到发布状态"
+          title="暂时读不到发布状态"
           description="请稍后重试；已经提交过的发布不会因为这里读不到而重复提交。"
         />
         <Button onClick={() => setReloads((count) => count + 1)}>重试</Button>
@@ -120,13 +120,11 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
   const outcome = snapshot.outcome;
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      <Typography.Title level={4}>作品发布</Typography.Title>
-
+    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <Flex gap="middle" wrap>
         {snapshot.platforms.map((platform) => (
           <Card key={platform.platform} size="small" style={{ minWidth: 220 }}>
-            <Space direction="vertical" size="small">
+            <Space orientation="vertical" size="small">
               <Space>
                 <Typography.Text strong>{publishPlatformLabel(platform.platform)}</Typography.Text>
                 <Tag color={AVAILABILITY_COLORS[platform.availability]}>
@@ -158,7 +156,7 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
 
       {snapshot.stage === "idle" ? null : (
         <Card size="small">
-          <Space direction="vertical" size="small" style={{ width: "100%" }}>
+          <Space orientation="vertical" size="small" style={{ width: "100%" }}>
             <Space>
               <Typography.Text type="secondary">当前进度</Typography.Text>
               <Tag>{publishStageLabel(snapshot.stage)}</Tag>
@@ -208,7 +206,7 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
             ) : null}
 
             {outcome === null ? null : (
-              <Space direction="vertical" size="small" style={{ width: "100%" }}>
+              <Space orientation="vertical" size="small" style={{ width: "100%" }}>
                 <Space>
                   <Typography.Text type="secondary">结果</Typography.Text>
                   <Tag>{publishOutcomeLabel(outcome)}</Tag>
@@ -217,7 +215,7 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
                   <Alert
                     type={OUTCOME_TONES[outcome]}
                     showIcon
-                    message="需要你到该平台核对一次"
+                    title="需要你到该平台核对一次"
                     description={OUTCOME_UNCERTAIN_HINT}
                   />
                 ) : null}

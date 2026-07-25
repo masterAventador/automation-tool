@@ -44,6 +44,11 @@ import { VideoEditingServiceSettings } from "../features/settings/VideoEditingSe
 import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
 import { VideoStudio } from "../features/video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
+import { PublishWorkspace, type SelectedVideo } from "../features/publishing/PublishWorkspace";
+import {
+  PublishWorkspaceGatewayError,
+  type PublishWorkspaceGateway,
+} from "../features/publishing/publish-workspace-gateway";
 import { VideoEditingWorkbench } from "../features/video-editing/VideoEditingWorkbench";
 import {
   VideoEditingGatewayError,
@@ -56,6 +61,7 @@ const navigationItems = [
   { key: "task-runs", label: "任务记录" },
   { key: "video-studio", label: "视频制作" },
   { key: "video-editing", label: "视频剪辑" },
+  { key: "publishing", label: "作品发布" },
   { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
 ];
@@ -228,6 +234,23 @@ const shellModelServiceGateway: ModelServiceGateway = {
   },
 };
 
+/// Without a real bridge the page must say it cannot read the state, not
+/// invent one: a fabricated "ready" would offer a publish nothing can carry out.
+const shellPublishWorkspaceGateway: PublishWorkspaceGateway = {
+  async getWorkspace() {
+    throw new PublishWorkspaceGatewayError("bridge_unavailable");
+  },
+  async beginPublish() {
+    throw new PublishWorkspaceGatewayError("bridge_unavailable");
+  },
+  async approvePublish() {
+    throw new PublishWorkspaceGatewayError("bridge_unavailable");
+  },
+  async cancelPublish() {
+    throw new PublishWorkspaceGatewayError("bridge_unavailable");
+  },
+};
+
 const shellVideoEditingGateway: VideoEditingGateway = {
   async listProjects() {
     return [];
@@ -315,6 +338,8 @@ interface WorkbenchShellProps {
   readonly videoEditingServiceGateway?: VideoEditingServiceGateway | undefined;
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
+  readonly publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
+  readonly selectedVideo?: SelectedVideo | undefined;
 }
 
 export function WorkbenchShell({
@@ -332,6 +357,8 @@ export function WorkbenchShell({
   videoEditingServiceGateway = shellVideoEditingServiceGateway,
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
+  publishWorkspaceGateway = shellPublishWorkspaceGateway,
+  selectedVideo,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -342,6 +369,7 @@ export function WorkbenchShell({
   const showingPlatform = activePage === "platform";
   const showingVideoStudio = activePage === "video-studio";
   const showingVideoEditing = activePage === "video-editing";
+  const showingPublishing = activePage === "publishing";
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -377,6 +405,7 @@ export function WorkbenchShell({
                 key === "task-runs" ||
                 key === "video-studio" ||
                 key === "video-editing" ||
+                key === "publishing" ||
                 key === "diagnostics" ||
                 key === "platform"
               ) {
@@ -408,6 +437,8 @@ export function WorkbenchShell({
                       ? "视频制作"
                     : showingVideoEditing
                       ? "视频剪辑"
+                    : showingPublishing
+                      ? "作品发布"
                     : showingDiagnostics
                       ? "设置与诊断"
                     : showingTaskRun
@@ -423,6 +454,8 @@ export function WorkbenchShell({
                       ? "从需求、脚本与分镜到预览、任务和成片，按真实制作状态逐步推进。"
                     : showingVideoEditing
                       ? "把制作或导入的素材整理成时间轴，独立于视频制作管理剪辑项目与任务。"
+                    : showingPublishing
+                      ? "把做好的视频发到 B站或抖音，发布前先确认账号与文案。"
                     : showingDiagnostics
                       ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
                     : showingTaskRun
@@ -439,6 +472,8 @@ export function WorkbenchShell({
                     ? "视频工作区"
                   : showingVideoEditing
                     ? "剪辑工作区"
+                  : showingPublishing
+                    ? "发布边界"
                   : showingDiagnostics
                     ? "本地边界"
                   : showingTaskRun
@@ -466,6 +501,11 @@ export function WorkbenchShell({
               <VideoStudio gateway={materialVideoStudioGateway} />
             ) : showingVideoEditing ? (
               <VideoEditingWorkbench gateway={videoEditingGateway} />
+            ) : showingPublishing ? (
+              <PublishWorkspace
+                gateway={publishWorkspaceGateway}
+                selectedVideo={selectedVideo}
+              />
             ) : showingDiagnostics ? (
               <Space orientation="vertical" size="large" className="settings-stack">
                 <ModelServiceSettings gateway={modelServiceGateway} />

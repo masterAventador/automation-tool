@@ -8,6 +8,7 @@ import {
 } from "../api/control-plane/transport";
 import { App } from "../app/App";
 import { createTransportStartupCheck } from "../app/startup";
+import { HARNESS_SELECTED_VIDEO, TestHarnessPublishing } from "./publishing";
 import { TestHarnessTaskLifecycle } from "./task-lifecycle";
 import "../styles/global.css";
 
@@ -44,6 +45,17 @@ if (root === null) {
 
 const taskLifecycle =
   scenario === "task-lifecycle" ? new TestHarnessTaskLifecycle() : undefined;
+
+const publishing =
+  scenario === "publishing" || scenario === "publishing-uncertain"
+    ? new TestHarnessPublishing(
+        scenario === "publishing-uncertain" ? "outcome_uncertain" : "published",
+      )
+    : undefined;
+const publishingProps =
+  publishing === undefined
+    ? {}
+    : { publishWorkspaceGateway: publishing, selectedVideo: HARNESS_SELECTED_VIDEO };
 const taskLifecycleProps =
   taskLifecycle === undefined
     ? {}
@@ -59,6 +71,7 @@ createRoot(root).render(
     <App
       startupCheck={createTransportStartupCheck(transport)}
       {...taskLifecycleProps}
+      {...publishingProps}
     />
   </StrictMode>,
 );

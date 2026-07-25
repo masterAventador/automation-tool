@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
+import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
 import { WorkbenchShell } from "./WorkbenchShell";
 
 describe("workbench shell navigation", () => {
@@ -39,5 +40,75 @@ describe("workbench shell navigation", () => {
     expect(screen.getByRole("region", { name: "视频剪辑工作区" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "剪辑项目" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "视频制作工作区" })).not.toBeInTheDocument();
+  });
+});
+
+describe("publishing", () => {
+  function openPublishing(publishWorkspaceGateway?: PublishWorkspaceGateway) {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell publishWorkspaceGateway={publishWorkspaceGateway} />
+      </QueryClientProvider>,
+    );
+    return user;
+  }
+
+  it("is reachable from the main navigation", async () => {
+    const user = openPublishing();
+
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+
+    expect(await screen.findByRole("heading", { name: "作品发布" })).toBeVisible();
+  });
+
+  it("says it cannot read the state rather than inventing a publishable one", async () => {
+    // The shell has no bridge of its own; a fabricated "ready" would offer a
+    // publish that nothing could carry out.
+    const user = openPublishing();
+
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/发布状态/);
+    expect(screen.queryByRole("button", { name: /发布到/ })).toBeNull();
+  });
+
+  it("lists both platforms and never says how either is reached", async () => {
+    const user = openPublishing({
+      async getWorkspace() {
+        return {
+          platforms: [
+            { platform: "bilibili", availability: "awaiting_configuration" },
+            { platform: "douyin", availability: "ready" },
+          ],
+          stage: "idle",
+          target: null,
+          approval: null,
+          outcome: null,
+          retryable: false,
+          audit: [],
+        };
+      },
+      async beginPublish() {
+        throw new Error("not reached");
+      },
+      async approvePublish() {
+        throw new Error("not reached");
+      },
+      async cancelPublish() {
+        throw new Error("not reached");
+      },
+    });
+
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await screen.findByRole("heading", { name: "作品发布" });
+
+    expect(screen.getByText("B站")).toBeVisible();
+    expect(screen.getByText("抖音")).toBeVisible();
+    const rendered = document.body.textContent?.toLowerCase() ?? "";
+    for (const upstream of ["browser use", "playwright", "chromium", "browser_use"]) {
+      expect(rendered).not.toContain(upstream);
+    }
   });
 });

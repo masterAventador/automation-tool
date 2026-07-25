@@ -107,3 +107,73 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
   await expect(page.getByText("已成功").first()).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
+
+test("publishing walks the real user path from the left navigation", async ({ page }) => {
+  const consoleErrors = failOnConsoleErrors(page);
+
+  await page.goto("/harness.html?health=available&scenario=publishing");
+  await page.getByRole("menuitem", { name: "作品发布" }).click();
+
+  // Both platforms are listed; the one nobody configured says so instead of
+  // disappearing or taking the module down with it. Scoped to the cards
+  // because the page description names the platforms too.
+  const platforms = page.getByRole("button", { name: /发布到/ });
+  await expect(page.getByText("待配置")).toBeVisible();
+  await expect(page.getByText("待登录")).toHaveCount(0);
+  await expect(platforms).toHaveCount(1);
+
+  await page.getByRole("button", { name: /发布到抖音/ }).click();
+
+  // The critical point shows what is about to happen, in the operator's words.
+  const critical = page.getByRole("group", { name: "确认发布内容" });
+  await expect(critical).toBeVisible();
+  await expect(critical.getByText("自动化运营测试账号")).toBeVisible();
+  await expect(critical.getByText("三分钟讲清油皮护肤")).toBeVisible();
+
+  await page.getByRole("button", { name: /确认发布/ }).click();
+
+  await expect(page.getByText("已发布")).toBeVisible();
+  await expect(page.getByRole("button", { name: /确认发布/ })).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("an uncertain publish is never offered as something to repeat", async ({ page }) => {
+  const consoleErrors = failOnConsoleErrors(page);
+
+  await page.goto("/harness.html?health=available&scenario=publishing-uncertain");
+  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await page.getByRole("button", { name: /发布到抖音/ }).click();
+  await page.getByRole("button", { name: /确认发布/ }).click();
+
+  await expect(page.getByText("结果待人工确认")).toBeVisible();
+  await expect(page.getByText(/系统不会自动重试/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /重新发布/ })).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("cancelling before the confirmation leaves nothing published", async ({ page }) => {
+  const consoleErrors = failOnConsoleErrors(page);
+
+  await page.goto("/harness.html?health=available&scenario=publishing");
+  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await page.getByRole("button", { name: /发布到抖音/ }).click();
+  await page.getByRole("button", { name: /取\s?消/ }).click();
+
+  await expect(page.getByText("已取消")).toBeVisible();
+  await expect(page.getByRole("group", { name: "确认发布内容" })).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("the publishing page never tells the operator how a platform is reached", async ({
+  page,
+}) => {
+  await page.goto("/harness.html?health=available&scenario=publishing");
+  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await page.getByRole("button", { name: /发布到抖音/ }).click();
+  await expect(page.getByRole("group", { name: "确认发布内容" })).toBeVisible();
+
+  const rendered = ((await page.locator("body").textContent()) ?? "").toLowerCase();
+  for (const upstream of ["browser use", "playwright", "chromium", "browser_use", "official_api"]) {
+    expect(rendered).not.toContain(upstream);
+  }
+});

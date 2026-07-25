@@ -25,6 +25,8 @@ import type { VideoEditingServiceGateway } from "../features/settings/video-edit
 import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import type { VideoEditingGateway } from "../features/video-editing/video-editing-gateway";
+import type { SelectedVideo } from "../features/publishing/PublishWorkspace";
+import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
 
 interface AppProps {
   startupCheck: StartupCheck;
@@ -44,6 +46,8 @@ interface AppProps {
   videoEditingServiceGateway?: VideoEditingServiceGateway;
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
   videoEditingGateway?: VideoEditingGateway;
+  publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
+  selectedVideo?: SelectedVideo | undefined;
 }
 
 export function App({
@@ -64,6 +68,8 @@ export function App({
   videoEditingServiceGateway,
   materialVideoStudioGateway,
   videoEditingGateway,
+  publishWorkspaceGateway,
+  selectedVideo,
 }: AppProps) {
   const workbench = (
     <WorkbenchShell
@@ -81,6 +87,8 @@ export function App({
       videoEditingServiceGateway={videoEditingServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
+      publishWorkspaceGateway={publishWorkspaceGateway}
+      selectedVideo={selectedVideo}
     />
   );
   const desktopApplication = (
