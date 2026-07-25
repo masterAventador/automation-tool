@@ -42,7 +42,7 @@
       "id": "MVP-ADR-07",
       "decision": "平台登录态只进入 App 独立 Profile，不读取默认 Profile 或 Cookie",
       "disposition": "conforms",
-      "evidence": [{"path": "frontend/src/features/platform-sessions/PlatformSessions.tsx", "anchor": "App 使用独立运营 Profile"}]
+      "evidence": [{"path": "frontend/src/features/platform-sessions/PlatformSessions.tsx", "anchor": "App 使用独立运营浏览器档案"}]
     },
     {
       "id": "MVP-ADR-08",

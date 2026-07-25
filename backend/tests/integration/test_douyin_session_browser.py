@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
@@ -29,7 +30,7 @@ def test_isolated_official_origin_pages_use_the_production_browser_detector(
     if sys.platform != "darwin" or not MACOS_CHROME.is_file():
         pytest.skip("B5-09 isolated system Chrome acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-b5-09-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     fixture = FIXTURE.read_text(encoding="utf-8")
     runtime = BrowserRuntime()
 
@@ -67,7 +68,7 @@ def test_isolated_official_origin_pages_use_the_production_browser_detector(
             assert (observation.state, observation.evidence) == result
 
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 @pytest.mark.skipif(
@@ -78,7 +79,7 @@ def test_live_public_douyin_page_is_detected_as_missing_or_risk(tmp_path: Path) 
     if sys.platform != "darwin" or not MACOS_CHROME.is_file():
         pytest.skip("B5-09 live public acceptance currently requires macOS Chrome")
     profile = tmp_path / "automation-tool-b5-09-live-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     runtime = BrowserRuntime()
 
     with runtime.running(

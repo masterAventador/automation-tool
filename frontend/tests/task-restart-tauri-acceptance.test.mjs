@@ -25,7 +25,7 @@ test("T3-20 retains a hidden production-path restart acceptance", async () => {
   assert.match(tauriConfig, /com\.aventador\.automationtool\.t320acceptance/u);
   assert.match(tauriConfig, /"visible"\s*:\s*false/u);
   assert.match(wdioConfig, /e2e-tauri\/task-restart\.spec\.ts/u);
-  for (const fact of ["运行中", "Control Plane 不可用", "已取消", "任务已取消"]) {
+  for (const fact of ["运行中", "控制服务不可用", "已取消", "任务已取消"]) {
     assert.match(spec, new RegExp(fact));
   }
   assert.match(spec, /browser\.refresh\(\)/u);

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, cast
+
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.browse import (
@@ -33,7 +34,7 @@ def test_production_runtime_browses_fake_profiles_headlessly_without_sending_and
     tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-10-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     documents = {
         "ready-001": (FIXTURE_ROOT / "profile-ready.html").read_text(encoding="utf-8"),
         "login-001": (FIXTURE_ROOT / "profile-login.html").read_text(encoding="utf-8"),
@@ -96,7 +97,7 @@ def test_production_runtime_browses_fake_profiles_headlessly_without_sending_and
         ]
 
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 def test_browse_fake_page_corpus_is_closed_and_local() -> None:

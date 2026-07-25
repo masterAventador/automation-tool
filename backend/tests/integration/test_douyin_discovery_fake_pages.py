@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,6 +9,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
 from automation_tool.executor.browser_diagnostic_artifact import (
@@ -173,7 +173,7 @@ def test_formal_discovery_replays_every_fake_page_headlessly(
     if sys.platform != "darwin" or not MACOS_CHROME.is_file():
         pytest.skip("D6-15 system Chrome fake-page regression currently requires macOS Chrome")
     profile = tmp_path / f"automation-tool-d6-15-{scenario.name}-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     state = tmp_path / f"automation-tool-d6-15-{scenario.name}-state"
     ledger = ExecutorLedger(
         state_directory=state,
@@ -263,7 +263,7 @@ def test_formal_discovery_replays_every_fake_page_headlessly(
         assert "自动化运营" not in trace_source.decode("utf-8")
         assert "douyin.com" not in trace_source.decode("utf-8")
     assert not runtime.runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 def test_fake_page_corpus_is_closed_and_contains_no_external_runtime_dependencies() -> None:

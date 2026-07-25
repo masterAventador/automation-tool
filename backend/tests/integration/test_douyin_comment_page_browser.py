@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, cast
+
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.comment_page import (
@@ -21,7 +22,7 @@ def test_production_comment_page_uses_headless_fake_pages_and_closes(
     tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-08-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     documents = {
         ACTION_URL: (FIXTURE_ROOT / "comment-action.html").read_text(encoding="utf-8"),
         BLOCKED_URL: (FIXTURE_ROOT / "comment-blocked.html").read_text(encoding="utf-8"),
@@ -69,7 +70,7 @@ def test_production_comment_page_uses_headless_fake_pages_and_closes(
         assert drifted.evidence is DouyinCommentPageEvidence.CONFLICTING_ANCHORS
 
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 def test_comment_fake_page_corpus_is_closed_and_local() -> None:

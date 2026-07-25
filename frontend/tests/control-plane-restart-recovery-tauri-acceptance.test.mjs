@@ -25,7 +25,7 @@ test("H8-06 restarts the real Control Plane around one hidden App and signed Exe
   assert.match(spec, /prepare_control_plane_recovery_for_acceptance/u);
   assert.match(spec, /restart_executor/u);
   assert.match(spec, /取消命令已提交/u);
-  assert.match(spec, /Control Plane 不可用/u);
+  assert.match(spec, /控制服务不可用/u);
   assert.match(spec, /restartCount/u);
   assert.match(rustEntry, /prepare_control_plane_recovery_for_acceptance/u);
   assert.match(runner, /build_signed_executor/u);

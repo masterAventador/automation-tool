@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 from uuid import UUID
 
+from conftest import assert_private_profile_directory, create_private_profile_directory
+
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
 from automation_tool.executor.browser_diagnostic_artifact import (
     BROWSER_DIAGNOSTIC_RETENTION_SECONDS,
@@ -119,7 +121,7 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
 ) -> None:
     RoutedRuntime.instances.clear()
     profile = tmp_path / "automation-tool-d6-14-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     state = tmp_path / "automation-tool-d6-14-state"
     ledger = ExecutorLedger(
         state_directory=state,
@@ -241,4 +243,4 @@ def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
     assert current_trace["screenshot_artifact_id"] == str(current_screenshots[0].artifact_id)
     assert len(RoutedRuntime.instances) == 1
     assert not RoutedRuntime.instances[0].runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)

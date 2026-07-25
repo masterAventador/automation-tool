@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import queue
 import sys
 import threading
@@ -13,6 +12,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from conftest import assert_private_profile_directory
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import SecretStr
 from websockets.sync.server import Server, ServerConnection, serve
@@ -333,7 +333,7 @@ def test_formal_processor_executes_each_production_action_through_a_headless_bro
         assert effect is None
     else:
         assert effect is not None and effect.state is SideEffectState.VERIFIED
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 def test_local_executor_websocket_drives_production_comment_through_a_headless_browser(

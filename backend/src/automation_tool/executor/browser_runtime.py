@@ -64,8 +64,6 @@ class _BrowserContext(Protocol):
 
     def on(self, event: str, handler: Callable[[object], None]) -> None: ...
 
-    def cookies(self) -> list[object]: ...
-
     def set_default_timeout(self, timeout: float) -> None: ...
 
     def set_default_navigation_timeout(self, timeout: float) -> None: ...
@@ -79,6 +77,8 @@ class _BrowserContext(Protocol):
 
 class _Page(Protocol):
     def close(self, *, reason: str | None = None, run_before_unload: bool = False) -> None: ...
+
+    def title(self) -> str: ...
 
 
 class _PageInfo(Protocol):
@@ -182,12 +182,10 @@ class BrowserRuntime:
         self._context = context
         self._playwright = playwright
         self._disconnected = False
-        try:
+        # A context without event support degrades to the reachability probe
+        # below; it never silently keeps a dead browser usable.
+        with suppress(Exception):
             context.on("close", self._context_closed)
-        except Exception:
-            # A context without event support degrades to the running checks
-            # below; it never silently keeps a dead browser usable.
-            pass
         if self._diagnostics is not None:
             self._diagnostics.browser_window_available()
 
@@ -299,8 +297,16 @@ class BrowserRuntime:
 
     @staticmethod
     def _context_reachable(context: _BrowserContext) -> bool:
-        """One cheap round trip: cached page handles outlive a dead browser."""
-        probe = getattr(context, "cookies", None)
+        """One cheap round trip: cached page handles outlive a dead browser.
+
+        The round trip must stay inside this layer's boundary, so it asks an
+        existing page for its title instead of touching profile state. With no
+        page left, the caller's own `new_page` round trip fails closed.
+        """
+        pages = context.pages
+        if not pages:
+            return True
+        probe = getattr(pages[0], "title", None)
         if not callable(probe):
             return True
         try:

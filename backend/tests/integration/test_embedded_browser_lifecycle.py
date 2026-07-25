@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from conftest import create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
@@ -35,7 +36,7 @@ _STATE_PAGE_BODY = (
 
 def _private_profile(tmp_path: Path, name: str = "profile") -> Path:
     profile = tmp_path / f"automation-tool-eb-15-{name}"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     return profile
 
 

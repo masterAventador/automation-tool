@@ -34,7 +34,7 @@ test("H8-07 owns one hidden App network-flap recovery boundary", async () => {
   assert.match(spec, /prepare_network_recovery_for_acceptance/u);
   assert.match(spec, /restart_executor/u);
   assert.match(spec, /取消命令已提交/u);
-  assert.match(spec, /Control Plane 不可用/u);
+  assert.match(spec, /控制服务不可用/u);
   assert.match(spec, /restartCount/u);
   assert.match(spec, /AUTOMATION_TOOL_H807_FACTS_VERIFIED_SIGNAL/u);
   assert.match(rustEntry, /prepare_network_recovery_for_acceptance/u);

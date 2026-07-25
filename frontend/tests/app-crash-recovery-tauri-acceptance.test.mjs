@@ -30,7 +30,7 @@ test("H8-04 retains a hidden two-process App crash recovery acceptance", async (
   assert.match(spec, /AUTOMATION_TOOL_H804_PHASE/u);
   assert.match(spec, /prepare_app_crash_recovery_for_acceptance/u);
   assert.match(spec, /app_process_id_for_acceptance/u);
-  for (const fact of ["Executor 在线", "运行中", "任务开始", "步骤开始"]) {
+  for (const fact of ["本机执行器在线", "运行中", "任务开始", "步骤开始"]) {
     assert.match(spec, new RegExp(fact, "u"));
   }
   assert.match(rustEntry, /prepare_app_crash_recovery_for_acceptance/u);

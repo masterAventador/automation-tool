@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.login import (
@@ -29,7 +30,7 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
 ) -> None:
     require_macos_chrome()
     profile = tmp_path / "automation-tool-b5-10-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     fixture = FIXTURE.read_text(encoding="utf-8")
     runtime = BrowserRuntime()
 
@@ -97,7 +98,7 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
         assert len(runtime.windows()) == 1
 
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 @pytest.mark.skipif(
@@ -107,7 +108,7 @@ def test_real_system_chrome_uses_one_dedicated_window_for_the_complete_qr_flow(
 def test_live_blank_profile_opens_the_real_douyin_qr_panel(tmp_path: Path) -> None:
     require_macos_chrome()
     profile = tmp_path / "automation-tool-b5-10-live-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     runtime = BrowserRuntime()
 
     with runtime.running(

@@ -23,6 +23,29 @@ class AlembicRunner(Protocol):
     def __call__(self, database_url: str, *arguments: str) -> None: ...
 
 
+def assert_private_profile_directory(path: Path) -> None:
+    """Assert a browser profile directory is private to the current user.
+
+    POSIX carries the intent directly in the mode bits. Windows has no POSIX
+    mode (``mkdir(mode=...)`` is ignored) and a pytest temporary directory
+    inherits the ``%TEMP%`` ACL, which a test cannot tighten by itself, so the
+    mode-bit assertion is meaningless there. Production profile privacy on
+    Windows is enforced by the protected DACL in ``browser_profiles_windows.rs``
+    (current-user SID only, ``SE_DACL_PROTECTED``) and is covered by the EB-09
+    Rust tests, not by this fixture.
+    """
+    assert path.is_dir(), path
+    if os.name == "nt":
+        return
+    assert os.stat(path).st_mode & 0o777 == 0o700
+
+
+def create_private_profile_directory(path: Path) -> Path:
+    """Create a profile directory as privately as the platform allows."""
+    path.mkdir(mode=0o700)
+    return path
+
+
 def unused_loopback_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))

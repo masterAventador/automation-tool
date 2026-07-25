@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+from conftest import assert_private_profile_directory, create_private_profile_directory
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from automation_tool.executor.action_authorization import (
@@ -98,7 +98,7 @@ def test_production_direct_message_action_enters_and_dispatches_once_headlessly(
     tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-12-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     clock = Clock()
     ledger = ExecutorLedger(
         state_directory=tmp_path / "automation-tool-a7-12-state",
@@ -168,4 +168,4 @@ def test_production_direct_message_action_enters_and_dispatches_once_headlessly(
     persisted = ledger.get_side_effect(str(ACTION_ID))
     assert persisted is not None and persisted.state is SideEffectState.VERIFIED
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)

@@ -9,9 +9,10 @@ stays a pending real-account acceptance item in the task ledger.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, cast
+
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.login import (
@@ -33,7 +34,7 @@ PROBE_URL_PATTERN = "https://www.douyin.com/user/self*"
 
 def _private_profile(tmp_path: Path) -> Path:
     profile = tmp_path / "automation-tool-eb-11-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     return profile
 
 
@@ -91,7 +92,7 @@ def test_embedded_chromium_runs_the_complete_qr_flow_states(
         flow.close()
         assert len(runtime.windows()) == 1
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 def test_embedded_chromium_probes_session_health_and_invalidation(
@@ -166,7 +167,7 @@ def test_embedded_profile_restart_reuses_the_persisted_login_state(
         persisted = page.evaluate("window.localStorage.getItem('eb11')")
         assert persisted == marker, "profile restart must reuse persisted state"
     assert not second.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
 
 
 def test_logout_clears_the_profile_session_evidence(

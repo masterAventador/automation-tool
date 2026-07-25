@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
+
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.ledger import ExecutorLedger
@@ -91,7 +92,7 @@ def test_production_recovery_reads_both_final_facts_without_dispatching(
     tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-13-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     opened = ExecutorLedger(
         state_directory=tmp_path / "automation-tool-a7-13-state",
         installation_id=str(INSTALLATION_ID),
@@ -173,4 +174,4 @@ def test_production_recovery_reads_both_final_facts_without_dispatching(
     assert comment_effect is not None and comment_effect.state is SideEffectState.VERIFIED
     assert message_effect is not None and message_effect.state is SideEffectState.VERIFIED
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)

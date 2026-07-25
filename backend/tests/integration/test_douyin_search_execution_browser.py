@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, cast
+
+from conftest import assert_private_profile_directory, create_private_profile_directory
 
 from automation_tool.executor.browser_runtime import BrowserLaunchRequest, BrowserRuntime
 from automation_tool.executor.rpa.douyin.page_version import (
@@ -25,7 +26,7 @@ def test_production_browser_runtime_executes_search_headlessly_and_closes(
     tmp_path: Path, staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-d6-04-profile"
-    profile.mkdir(mode=0o700)
+    create_private_profile_directory(profile)
     search = DouyinSearchInput(keyword="新能源汽车", target_limit=20)
     expected_url = douyin_search_results_url(search.keyword)
     runtime = BrowserRuntime()
@@ -61,4 +62,4 @@ def test_production_browser_runtime_executes_search_headlessly_and_closes(
         assert routed_urls == [DOUYIN_HOME_URL, expected_url]
 
     assert not runtime.is_running
-    assert os.stat(profile).st_mode & 0o777 == 0o700
+    assert_private_profile_directory(profile)
