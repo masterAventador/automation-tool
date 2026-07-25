@@ -33,6 +33,29 @@ def _reject(message: str) -> None:
     raise StagingRejected(f"embedded chromium staging rejected: {message}")
 
 
+def symlink_target_is_confined(
+    *, entry_path: PurePosixPath, link_target: str, root_entry: str
+) -> bool:
+    """Whether one declared symlink stays inside the distribution root.
+
+    Shared by staged extraction (EB-03) and by distribution verification
+    (EB-05/EB-16) so an audit of an already installed tree applies the exact
+    same confinement rule as the build that produced it.
+    """
+    link_path = PurePosixPath(link_target)
+    if not link_target or link_path.is_absolute():
+        return False
+    resolved = PurePosixPath(*entry_path.parent.parts)
+    for part in link_path.parts:
+        if part == "..":
+            if not resolved.parts:
+                return False
+            resolved = PurePosixPath(*resolved.parts[:-1])
+        elif part != ".":
+            resolved = resolved / part
+    return bool(resolved.parts) and resolved.parts[0] == root_entry
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -170,18 +193,11 @@ def safe_extract(
                 if not allow_symlinks:
                     _reject("symlink is not allowed for this staging target")
                 link_target = archive.read(info).decode("utf-8", errors="strict")
-                link_path = PurePosixPath(link_target)
-                if link_path.is_absolute():
-                    _reject("absolute symlink in archive")
-                resolved = PurePosixPath(relative.parent)
-                for part in link_path.parts:
-                    if part == "..":
-                        if not resolved.parts:
-                            _reject("symlink escapes the staging root")
-                        resolved = PurePosixPath(*resolved.parts[:-1])
-                    elif part != ".":
-                        resolved = resolved / part
-                if not resolved.parts or resolved.parts[0] != root_entry:
+                if not symlink_target_is_confined(
+                    entry_path=PurePosixPath(*relative.parts),
+                    link_target=link_target,
+                    root_entry=root_entry,
+                ):
                     _reject("symlink escapes the staging root")
                 target.symlink_to(link_target)
                 continue

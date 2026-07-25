@@ -10,6 +10,10 @@
           "anchor": "export async function auditReleaseBundle("
         },
         {
+          "path": "scripts/check_embedded_browser_package.py",
+          "anchor": "def audit_embedded_browser_package("
+        },
+        {
           "path": "scripts/run_p9_07_acceptance.py",
           "anchor": "--interactive-device-acceptance"
         }

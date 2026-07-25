@@ -209,6 +209,14 @@
         {
           "path": "frontend/tests/p9-05-release-bundle-audit.test.mjs",
           "anchor": "rejects runtime data, user material, credentials, and test/debug content"
+        },
+        {
+          "path": "scripts/check_embedded_browser_package.py",
+          "anchor": "def audit_embedded_browser_package("
+        },
+        {
+          "path": "scripts/test_embedded_browser_package.py",
+          "anchor": "def test_exclusion_requires_the_digest_gate_to_pass("
         }
       ],
       "blockingTasks": []
