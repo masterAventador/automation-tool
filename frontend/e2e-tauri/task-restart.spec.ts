@@ -88,7 +88,7 @@ describe("T3-20 hidden App restart recovery acceptance", () => {
 
     await waitForSignal(downPath);
     await browser.refresh();
-    await waitForRenderedText("Control Plane 不可用", "重新检查");
+    await waitForRenderedText("控制服务不可用", "重新检查");
     await signal(unavailablePath);
 
     await waitForSignal(upPath);

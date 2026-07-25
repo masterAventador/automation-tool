@@ -54,8 +54,8 @@ describe("Workbench production-path acceptance", () => {
 
     await waitForRenderedText(
       preparation.taskId,
-      "Control Plane 已连接",
-      "Executor 在线",
+      "控制服务已连接",
+      "本机执行器在线",
       "运行中",
     );
 

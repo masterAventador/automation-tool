@@ -32,7 +32,7 @@ test("unavailable Harness shows safe diagnostics instead of login", async ({ pag
   await page.goto("/harness.html?health=unavailable");
 
   await expect(page.getByRole("heading", { name: "暂时无法连接业务服务" })).toBeVisible();
-  await expect(page.getByText("Control Plane 不可用")).toBeVisible();
+  await expect(page.getByText("控制服务不可用")).toBeVisible();
   await expect(page.getByRole("button", { name: "重新检查" })).toBeVisible();
   await expect(page.getByRole("button", { name: /登录|注册/ })).toHaveCount(0);
   expect(consoleErrors).toEqual([]);

@@ -303,7 +303,7 @@ describe("Task run details", () => {
     expect(taskId).toBe(TASK_ID);
     expect(key).toMatch(/^task:discover:start:[0-9a-f-]{36}$/u);
     expect(
-      await screen.findByText("目标发现命令已提交，等待 Executor 返回候选"),
+      await screen.findByText("目标发现命令已提交，等待本机执行器返回候选"),
     ).toBeVisible();
   });
 
@@ -717,7 +717,7 @@ describe("Task run details", () => {
     const [taskId, key] = vi.mocked(controlGateway.pauseTask).mock.calls[0] ?? [];
     expect(taskId).toBe(TASK_ID);
     expect(key).toMatch(/^task-run:pause:[0-9a-f-]{36}$/);
-    expect(await screen.findByText("暂停命令已提交，等待 Executor 确认")).toBeVisible();
+    expect(await screen.findByText("暂停命令已提交，等待本机执行器确认")).toBeVisible();
     expect(screen.getAllByText("运行中").length).toBeGreaterThanOrEqual(1);
   });
 
@@ -825,7 +825,7 @@ describe("Task run details", () => {
     const firstKey = vi.mocked(controlGateway.pauseTask).mock.calls[0]?.[1];
     const secondKey = vi.mocked(controlGateway.pauseTask).mock.calls[1]?.[1];
     expect(firstKey).toBe(secondKey);
-    expect(await screen.findByText("暂停命令已提交，等待 Executor 确认")).toBeVisible();
+    expect(await screen.findByText("暂停命令已提交，等待本机执行器确认")).toBeVisible();
   });
 
   it("closes every control after an authoritative terminal snapshot", async () => {

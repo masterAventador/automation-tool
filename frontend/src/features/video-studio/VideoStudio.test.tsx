@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
+import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import type { MaterialVideoStudioGateway } from "./material-video-studio-gateway";
 import { VideoStudio } from "./VideoStudio";
 
@@ -82,18 +83,9 @@ describe("video studio shell", () => {
     expect(materialMethod).toHaveAttribute("aria-pressed", "false");
     expect(motionMethod).toHaveAttribute("aria-pressed", "false");
 
-    for (const label of [
-      "最适合",
-      "不适合",
-      "举个例子",
-      "外部服务",
-      "本机处理",
-      "预计耗时",
-      "设备占用",
-      "临时磁盘",
-      "网络消耗",
-      "数据与隐私",
-    ]) {
+    // The comparison questions come from the terminology contract, which is
+    // also what the static gate and the real App acceptance read.
+    for (const label of terminology.videoCreationMethodCardLabels) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
 
@@ -381,10 +373,22 @@ describe("video studio shell", () => {
     );
   });
 
+  it("explains that 动效零件 belongs to 品牌动效成片 when another method is picked", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择智能素材成片" }));
+    await user.click(screen.getByRole("tab", { name: "动效零件" }));
+
+    expect(screen.queryByRole("region", { name: "动效零件目录" })).toBeNull();
+    expect(screen.getByText(/动效零件只属于“品牌动效成片”/)).toBeVisible();
+  });
+
   it("browses the 134 parts catalog and keeps per-beat overrides in the draft", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);
 
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
     await user.click(screen.getByRole("tab", { name: "动效零件" }));
     const browser = screen.getByRole("region", { name: "动效零件目录" });
     expect(within(browser).getAllByRole("listitem")).toHaveLength(134);

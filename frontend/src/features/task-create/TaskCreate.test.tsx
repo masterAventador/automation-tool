@@ -94,7 +94,7 @@ describe("Douyin search exposure Task creation", () => {
     await user.click(screen.getByRole("button", { name: "创建任务" }));
 
     expect(await screen.findByText("当前设备尚未授权")).toBeVisible();
-    expect(screen.getByText("请先完成本机 Installation 授权后再创建任务。")).toBeVisible();
+    expect(screen.getByText("请先完成本机安装授权后再创建任务。")).toBeVisible();
     expect(screen.queryByText("请检查业务服务连接后重试。")).not.toBeInTheDocument();
   });
 

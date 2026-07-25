@@ -60,7 +60,7 @@ describe("desktop startup", () => {
     expect(
       await screen.findByRole("heading", { name: "暂时无法连接业务服务" }),
     ).toBeVisible();
-    expect(screen.getByText("Control Plane 不可用")).toBeVisible();
+    expect(screen.getByText("控制服务不可用")).toBeVisible();
     expect(screen.queryByRole("button", { name: /登录/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "重新检查" }));

@@ -21,27 +21,16 @@ import type {
 
 const SAFE_FAILURE_MESSAGE = "暂时无法读取本地执行器状态。请稍后重试。";
 
-function statusLabel(status: ExecutorManagerStatus): string {
-  switch (status.state) {
-    case "running":
-      return "本地执行器运行中";
-    case "restarting":
-      return "本地执行器正在恢复";
-    case "stopped":
-      return "本地执行器已停止";
-  }
-}
-
-function statusColor(status: ExecutorManagerStatus): "green" | "gold" | "default" {
-  switch (status.state) {
-    case "running":
-      return "green";
-    case "restarting":
-      return "gold";
-    case "stopped":
-      return "default";
-  }
-}
+// One entry per executor state: the raw state name is never shown to users,
+// so heading, tag wording and tag colour are declared together.
+const STATUS_PRESENTATION: Record<
+  ExecutorManagerStatus["state"],
+  { readonly heading: string; readonly tag: string; readonly color: "green" | "gold" | "default" }
+> = {
+  running: { heading: "本地执行器运行中", tag: "运行中", color: "green" },
+  restarting: { heading: "本地执行器正在恢复", tag: "恢复中", color: "gold" },
+  stopped: { heading: "本地执行器已停止", tag: "已停止", color: "default" },
+};
 
 interface DiagnosticsProps {
   readonly platform: PlatformAdapter;
@@ -162,12 +151,16 @@ export function Diagnostics({ platform }: DiagnosticsProps) {
           <Space orientation="vertical" size="large" className="diagnostics-stack">
             <Flex justify="space-between" align="center" gap={16}>
               <Space orientation="vertical" size={4}>
-                <Typography.Title level={3}>{statusLabel(status)}</Typography.Title>
+                <Typography.Title level={3}>
+                  {STATUS_PRESENTATION[status.state].heading}
+                </Typography.Title>
                 <Typography.Text type="secondary">
-                  这里管理 App 自己启动的本地执行器，不会接触你的日常浏览器 Profile。
+                  这里管理 App 自己启动的本地执行器，不会接触你的日常浏览器档案。
                 </Typography.Text>
               </Space>
-              <Tag color={statusColor(status)}>{status.state}</Tag>
+              <Tag color={STATUS_PRESENTATION[status.state].color}>
+                {STATUS_PRESENTATION[status.state].tag}
+              </Tag>
             </Flex>
             <Descriptions column={2} size="small">
               <Descriptions.Item label="版本">{status.version ?? "未启动"}</Descriptions.Item>

@@ -407,7 +407,7 @@ export function TaskRunDetails({
     },
     onSuccess: async (result) => {
       setSubmitted(result);
-      setNotice(`${COMMAND_LABELS[result.operation]}命令已提交，等待 Executor 确认`);
+      setNotice(`${COMMAND_LABELS[result.operation]}命令已提交，等待本机执行器确认`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: taskProjectionKeys.detail(taskId) }),
         queryClient.invalidateQueries({ queryKey: taskProjectionKeys.lists() }),
@@ -437,7 +437,7 @@ export function TaskRunDetails({
     },
     onSuccess: async () => {
       discoveryKey.current = null;
-      setDiscoveryNotice("目标发现命令已提交，等待 Executor 返回候选");
+      setDiscoveryNotice("目标发现命令已提交，等待本机执行器返回候选");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: taskProjectionKeys.detail(taskId) }),
         queryClient.invalidateQueries({ queryKey: taskProjectionKeys.lists() }),
@@ -611,7 +611,7 @@ export function TaskRunDetails({
           </Button>
           <Popconfirm
             title="确认取消当前任务？"
-            description="提交后仍以 Executor 确认的最终事实为准。"
+            description="提交后仍以本机执行器确认的最终事实为准。"
             okText="确认取消"
             cancelText="继续运行"
             onConfirm={() => submit("cancel")}

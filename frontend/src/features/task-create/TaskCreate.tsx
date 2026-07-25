@@ -209,7 +209,7 @@ export function TaskCreate({ gateway, onCreated }: TaskCreateProps) {
               title={credentialMissing ? "当前设备尚未授权" : "任务创建失败"}
               description={
                 credentialMissing
-                  ? "请先完成本机 Installation 授权后再创建任务。"
+                  ? "请先完成本机安装授权后再创建任务。"
                   : "请检查业务服务连接后重试。"
               }
             />

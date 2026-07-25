@@ -63,8 +63,8 @@ describe("H8-14 workbench metrics production-path acceptance", () => {
 
     const bodyText = await browser.$("body").getText();
     assert.ok(bodyText.includes("累计任务"));
-    assert.ok(bodyText.includes("Control Plane 已连接"));
-    assert.ok(bodyText.includes("Executor 离线"));
+    assert.ok(bodyText.includes("控制服务已连接"));
+    assert.ok(bodyText.includes("本机执行器离线"));
     assert.doesNotMatch(
       bodyText,
       /Cookie|comment_body|message_body|executor-ledger|\/Users\/|[A-Z]:\\/i,

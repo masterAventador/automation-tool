@@ -109,7 +109,7 @@ describe("H8-05 hidden App Executor crash recovery acceptance", () => {
     await browser
       .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
       .click();
-    await waitForText(taskId ?? "", "结果待确认", "Executor 在线");
+    await waitForText(taskId ?? "", "结果待确认", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "结果待确认", "结果待确认");
     await signal(requiredEnvironment("AUTOMATION_TOOL_H805_RECOVERED_SIGNAL"), {

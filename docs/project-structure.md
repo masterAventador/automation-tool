@@ -94,7 +94,9 @@ automation-tool/
 │   ├── run_av_02_acceptance.py   # 两个 submodule、权利策略与 SBOM 验收
 │   ├── check_third_party_sources.py # 上游 Gitlink/许可证/工作树/SBOM 防漂移门禁
 │   ├── run_av_03_acceptance.py   # 威胁模型、中文术语和用户品牌契约验收
-│   ├── check_user_facing_branding.py # UI 上游名称和未解释术语静态门禁
+│   ├── check_user_facing_branding.py # UI 上游名称、未解释行业词与概念区分静态门禁
+│   ├── test_user_facing_branding.py  # 上述门禁的篡改矩阵测试
+│   ├── run_cq_01_acceptance.py   # 真实 App 普通用户可理解性用户路径验收
 │   ├── run_av_04_acceptance.py   # 87 行任务、汇总、独立证据和旧 Roadmap 隔离验收
 │   ├── check_embedded_browser_video_roadmap.py # 专项轻量台账与每任务证据 CI 门禁
 │   ├── run_eb_01_acceptance.py   # Playwright/Chromium 完整版本与双平台兼容验收

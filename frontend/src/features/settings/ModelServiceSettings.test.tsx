@@ -116,7 +116,7 @@ describe("model service settings", () => {
     await screen.findByText("文案模型服务");
     const section = purposeSection("文案模型服务");
     await user.click(within(section).getByRole("button", { name: /测试连接/u }));
-    expect(await within(section).findByText("连接成功；剩余请求 42 次，剩余 Token 1,234。"))
+    expect(await within(section).findByText("连接成功；剩余请求 42 次，剩余用量 1,234。"))
       .toBeVisible();
 
     vi.mocked(modelGateway.testConnection).mockRejectedValueOnce(

@@ -106,7 +106,7 @@ describe("Task run production-path acceptance", () => {
         core.invoke("restart_executor"),
       )) as { readonly state: string };
       assert.equal(executor.state, "running");
-      await waitForRenderedText("Executor 在线", "运行中");
+      await waitForRenderedText("本机执行器在线", "运行中");
       await openTask(preparation.emergencyTaskId);
       await writeSignal(
         requiredSignalPath("AUTOMATION_TOOL_H803_READY_SIGNAL"),
@@ -133,7 +133,7 @@ describe("Task run production-path acceptance", () => {
     await waitForRenderedText(
       preparation.controlledTaskId,
       preparation.emergencyTaskId,
-      "Executor 在线",
+      "本机执行器在线",
       "运行中",
     );
 

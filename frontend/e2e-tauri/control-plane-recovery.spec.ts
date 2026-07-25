@@ -109,7 +109,7 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
     await browser
       .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
       .click();
-    await waitForText(taskId ?? "", "运行中", "Executor 在线");
+    await waitForText(taskId ?? "", "运行中", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "运行中", "任务开始", "步骤开始");
     await signal(requiredEnvironment("AUTOMATION_TOOL_H806_EXECUTOR_READY_SIGNAL"));
@@ -128,7 +128,7 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
       "the stopped Control Plane",
     );
     await browser.refresh();
-    await waitForText("Control Plane 不可用", "重新检查");
+    await waitForText("控制服务不可用", "重新检查");
     const duringRestart = (await browser.tauri.execute(({ core }) =>
       core.invoke("get_executor_status"),
     )) as ExecutorStatus;
@@ -141,7 +141,7 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
       "the restarted Control Plane",
     );
     await browser.$("button=重新检查").click();
-    await waitForText("RPA 运营工作台", taskId ?? "", "已取消", "Executor 在线");
+    await waitForText("RPA 运营工作台", taskId ?? "", "已取消", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "已取消", "任务已取消");
     const recovered = (await browser.tauri.execute(({ core }) =>

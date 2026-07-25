@@ -134,6 +134,11 @@ const EMPTY_PAGES = {
     title: "尚未选择制作方式",
     description: "制作方式、画面风格、声音和输出规格将在后续任务接入。",
   },
+  parts: {
+    title: "动效零件只属于“品牌动效成片”",
+    description:
+      "动效零件是插入单个分镜的画面模块，选择“品牌动效成片”后才会用到；“智能素材成片”改用旁白配素材画面，不需要挑选零件。",
+  },
   preview: {
     title: "还没有可预览内容",
     description: "只有真实生成或导入的画面才会进入预览。",
@@ -795,13 +800,16 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
           {
             key: "parts",
             label: "动效零件",
-            children: (
-              <MotionPartsCatalog
-                beats={motionDraft.beats}
-                selections={motionPartSelections}
-                onSelectionsChange={setMotionPartSelections}
-              />
-            ),
+            children:
+              selectedMethod === "motion_composition_v1" ? (
+                <MotionPartsCatalog
+                  beats={motionDraft.beats}
+                  selections={motionPartSelections}
+                  onSelectionsChange={setMotionPartSelections}
+                />
+              ) : (
+                <EmptyVideoPage page="parts" />
+              ),
           },
           {
             key: "preview",

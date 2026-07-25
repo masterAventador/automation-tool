@@ -4,7 +4,9 @@
 >
 > 用户术语：`contracts/quality/user-facing-terminology.v1.json`
 >
-> 静态门禁：`python3 scripts/check_user_facing_branding.py`
+> 静态门禁：`python3.12 scripts/check_user_facing_branding.py`、`python3.12 scripts/test_user_facing_branding.py`
+>
+> 真实 App 用户路径验收：`python3.12 scripts/run_cq_01_acceptance.py`
 
 ## 1. 总原则
 
