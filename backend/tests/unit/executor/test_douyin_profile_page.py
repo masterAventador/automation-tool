@@ -9,6 +9,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 import automation_tool.executor.rpa.douyin.profile_page as profile_page_module
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import (
     DOUYIN_SESSION_PROBE_URL,
     DouyinPageEntry,
@@ -35,27 +36,33 @@ SECOND_VIDEO_ENTRY = '[data-e2e="user-detail"] a[href^="/video/"]'
 
 
 class FakeLocator:
-    def __init__(self, selector: str, page: FakePage) -> None:
+    def __init__(
+        self,
+        selector: str,
+        page: FakePage,
+        *,
+        visible_only: bool = False,
+        first_only: bool = False,
+    ) -> None:
         self.selector = selector
         self.page = page
+        self.visible_only = visible_only
+        self.first_only = first_only
+
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self._derived(visible_only=True, first_only=self.first_only)
 
     @property
     def first(self) -> FakeLocator:
-        return self
+        return self._derived(visible_only=self.visible_only, first_only=True)
 
     def count(self) -> int:
         if self.selector in self.page.failed_selectors:
             raise RuntimeError("private count failure")
         if self.selector in self.page.invalid_count_selectors:
             return cast(int, True)
-        return sum(
-            selector in self.page.visible_selectors for selector in self.selector.split(", ")
-        )
-
-    def is_visible(self) -> bool:
-        if self.selector in self.page.failed_selectors:
-            raise RuntimeError("private visibility failure")
-        return self.count() > 0
+        return len(self._matched())
 
     def wait_for(self, *, state: str, timeout: float) -> None:
         assert state == "visible"
@@ -67,13 +74,51 @@ class FakeLocator:
         callback = self.page.wait_callbacks.get(self.selector)
         if callback is not None:
             callback()
-        if not self.is_visible():
+        matched = self._matched()
+        if not matched or not matched[0]:
+            self.page.wait_timeouts.append(self.selector)
             raise PlaywrightTimeoutError("private wait timeout")
 
-    def get_attribute(self, name: str, *, timeout: float) -> str | None:
-        assert name == "href"
+    def element_handle(self, *, timeout: float) -> FakeElementHandle:
+        """Pin the resolved element, the way Playwright detaches it from the query."""
         assert timeout > 0
+        if not self._matched():
+            raise PlaywrightTimeoutError("private element handle timeout")
+        return FakeElementHandle(self.selector, self.page)
+
+    def _matched(self) -> list[bool]:
+        """Visibility of every matched element, in document order."""
+        matched = [
+            visible
+            for selector in self.selector.split(", ")
+            for visible in self.page.elements(selector)
+        ]
+        if self.visible_only:
+            matched = [visible for visible in matched if visible]
+        return matched[:1] if self.first_only else matched
+
+    def _derived(self, *, visible_only: bool, first_only: bool) -> FakeLocator:
+        return FakeLocator(
+            self.selector,
+            self.page,
+            visible_only=visible_only,
+            first_only=first_only,
+        )
+
+
+class FakeElementHandle:
+    def __init__(self, selector: str, page: FakePage) -> None:
+        self.selector = selector
+        self.page = page
+        self.clicks = 0
+
+    def get_attribute(self, name: str) -> str | None:
+        assert name == "href"
         return self.page.attributes.get(self.selector)
+
+    def click(self, *, timeout: float) -> None:
+        assert timeout > 0
+        self.clicks += 1
 
 
 class FakePage:
@@ -82,16 +127,25 @@ class FakePage:
         *,
         url: str = PROFILE_URL,
         visible_selectors: set[str] | None = None,
+        hidden_selectors: set[str] | None = None,
     ) -> None:
         self.url = url
         self.visible_selectors = set() if visible_selectors is None else visible_selectors
+        self.hidden_selectors = set() if hidden_selectors is None else hidden_selectors
         self.failed_selectors: set[str] = set()
         self.invalid_count_selectors: set[str] = set()
         self.failed_wait_selectors: set[str] = set()
         self.premature_wait_selectors: set[str] = set()
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
+        self.wait_timeouts: list[str] = []
         self.attributes: dict[str, str] = {}
         self.requested_selectors: list[str] = []
+
+    def elements(self, selector: str) -> tuple[bool, ...]:
+        """Like a single-page app, a hidden placeholder precedes the real element."""
+        placeholder = (False,) if selector in self.hidden_selectors else ()
+        rendered = (True,) if selector in self.visible_selectors else ()
+        return placeholder + rendered
 
     def locator(self, selector: str) -> FakeLocator:
         self.requested_selectors.append(selector)
@@ -165,6 +219,64 @@ def test_login_and_blocking_evidence_take_priority_over_profile_anchor(
     assert blocked.evidence is DouyinProfilePageEvidence.BLOCKING_DIALOG
 
 
+@pytest.mark.parametrize(
+    ("dialog", "state", "evidence"),
+    (
+        (
+            LOGIN_DIALOG,
+            DouyinProfilePageState.LOGIN_REQUIRED,
+            DouyinProfilePageEvidence.LOGIN_DIALOG,
+        ),
+        (
+            BLOCKING_DIALOG,
+            DouyinProfilePageState.DIALOG_BLOCKED,
+            DouyinProfilePageEvidence.BLOCKING_DIALOG,
+        ),
+    ),
+)
+def test_a_hidden_placeholder_never_hides_the_handoff_dialog_behind_it(
+    dialog: str,
+    state: DouyinProfilePageState,
+    evidence: DouyinProfilePageEvidence,
+) -> None:
+    """A pre-rendered placeholder must not mask the dialog that stops the run."""
+    page = FakePage(visible_selectors={PROFILE_ROOT, dialog}, hidden_selectors={dialog})
+
+    observation = DouyinProfilePage(window(page)).observe()
+
+    assert observation.state is state
+    assert observation.evidence is evidence
+    assert observation.circuit_open is True
+
+
+def test_hidden_placeholders_beside_one_visible_anchor_are_not_a_conflict() -> None:
+    """Hidden template nodes are not a second anchor, so the page stays usable."""
+    page = FakePage(
+        visible_selectors={PROFILE_ROOT},
+        hidden_selectors={PROFILE_ROOT, SECOND_PROFILE_ROOT},
+    )
+    profile_page = DouyinProfilePage(window(page))
+
+    observation = profile_page.observe()
+
+    assert observation.state is DouyinProfilePageState.READY
+    assert observation.evidence is DouyinProfilePageEvidence.PROFILE_ANCHOR_VISIBLE
+    assert PROFILE_ROOT in cast(FakeLocator, profile_page.profile_root()).selector
+
+
+def test_a_hidden_placeholder_link_never_hides_the_visible_video_entry() -> None:
+    """The first video anchor is the first visible one, not the first in the DOM."""
+    page = FakePage(
+        visible_selectors={PROFILE_ROOT, VIDEO_ENTRY},
+        hidden_selectors={VIDEO_ENTRY},
+    )
+    page.attributes[VIDEO_ENTRY] = "/video/7351234567890123456"
+
+    entry = DouyinProfilePage(window(page)).first_video_entry()
+
+    assert cast(FakeElementHandle, entry).selector.startswith(VIDEO_ENTRY)
+
+
 def test_non_profile_routes_stop_before_dom_queries() -> None:
     for url, state, evidence in (
         (
@@ -230,7 +342,8 @@ def test_first_video_entry_is_validated_without_clicking_or_exposing_the_href() 
 
     entry = DouyinProfilePage(window(page)).first_video_entry()
 
-    assert cast(FakeLocator, entry).selector.startswith(VIDEO_ENTRY)
+    assert cast(FakeElementHandle, entry).selector.startswith(VIDEO_ENTRY)
+    assert cast(FakeElementHandle, entry).clicks == 0
     for href in (None, "/video/0", "/video/private", "https://evil.example/video/1"):
         page.attributes[VIDEO_ENTRY] = cast(str, href)
         if href is None:
@@ -240,9 +353,8 @@ def test_first_video_entry_is_validated_without_clicking_or_exposing_the_href() 
 
     fallback = FakePage(visible_selectors={SECOND_PROFILE_ROOT, SECOND_VIDEO_ENTRY})
     fallback.attributes[SECOND_VIDEO_ENTRY] = "/video/7351234567890123456"
-    assert cast(FakeLocator, DouyinProfilePage(window(fallback)).first_video_entry()).selector == (
-        SECOND_VIDEO_ENTRY
-    )
+    fallback_entry = DouyinProfilePage(window(fallback)).first_video_entry()
+    assert cast(FakeElementHandle, fallback_entry).selector == SECOND_VIDEO_ENTRY
 
     with pytest.raises(DouyinProfilePageRejected):
         DouyinProfilePage(window(FakePage(visible_selectors={PROFILE_ROOT}))).first_video_entry()
@@ -250,6 +362,17 @@ def test_first_video_entry_is_validated_without_clicking_or_exposing_the_href() 
         DouyinProfilePage(
             window(FakePage(visible_selectors={PROFILE_ROOT, LOGIN_DIALOG}))
         ).first_video_entry()
+
+
+def test_waits_are_satisfied_by_any_visible_match_not_by_the_first_dom_match() -> None:
+    """A hidden placeholder must not burn the whole wait budget."""
+    page = FakePage(hidden_selectors={PROFILE_ROOT})
+    page.wait_callbacks[PROFILE_GROUP] = lambda: page.visible_selectors.add(PROFILE_ROOT)
+
+    observation = DouyinProfilePage(window(page)).wait_for_ready(timeout_milliseconds=100)
+
+    assert observation.ready is True
+    assert page.wait_timeouts == []
 
 
 def test_bounded_wait_covers_ready_timeout_failure_expiry_and_early_stop(

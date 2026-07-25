@@ -16,6 +16,7 @@ from automation_tool.executor.rpa.douyin.browse import (
     DouyinBrowseExecutionRejected,
     DouyinBrowseExecutionState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import douyin_user_profile_url
 from automation_tool.protocol import (
     DouyinCandidate,
@@ -37,15 +38,17 @@ class FakeLocator:
     def first(self) -> FakeLocator:
         return self
 
+    def locator(self, selector: str) -> FakeLocator:
+        """Every element this page models is on screen, so the filter keeps them all."""
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self
+
     def count(self) -> int:
+        if self.page.probe_failure:
+            raise RuntimeError("private probe failure")
         return sum(
             selector in self.page.visible_selectors for selector in self.selector.split(", ")
         )
-
-    def is_visible(self) -> bool:
-        if self.page.visibility_failure:
-            raise RuntimeError("private visibility failure")
-        return self.count() > 0
 
     def wait_for(self, *, state: str, timeout: float) -> None:
         assert state == "visible"
@@ -55,7 +58,7 @@ class FakeLocator:
         callback = self.page.wait_callbacks.get(self.selector)
         if callback is not None:
             callback()
-        if not self.is_visible():
+        if self.count() == 0:
             raise PlaywrightTimeoutError("private wait timeout")
 
 
@@ -68,7 +71,7 @@ class FakePage:
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
         self.goto_timeout = False
         self.goto_failure = False
-        self.visibility_failure = False
+        self.probe_failure = False
         self.wait_failure = False
         self.after_goto: Callable[[], None] | None = None
 
@@ -128,13 +131,13 @@ def test_browse_navigates_once_to_canonical_target_and_never_sends() -> None:
 
 
 @pytest.mark.parametrize(
-    ("checks", "expected_navigations", "expected_dom_queries"),
-    (([True], 0, 0), ([False, True], 1, 0), ([False, False, True], 1, 3)),
+    ("checks", "expected_navigations", "probes_dom"),
+    (([True], 0, False), ([False, True], 1, False), ([False, False, True], 1, True)),
 )
 def test_cancellation_at_each_checkpoint_stops_without_retry(
     checks: list[bool],
     expected_navigations: int,
-    expected_dom_queries: int,
+    probes_dom: bool,
 ) -> None:
     page = FakePage()
     page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
@@ -145,7 +148,7 @@ def test_cancellation_at_each_checkpoint_stops_without_retry(
     assert observation.state is DouyinBrowseExecutionState.CANCELLED
     assert observation.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_REQUESTED
     assert len(page.navigations) == expected_navigations
-    assert len(page.requested_selectors) == expected_dom_queries
+    assert bool(page.requested_selectors) is probes_dom
 
 
 @pytest.mark.parametrize("value", (None, 1, "false"))
@@ -165,12 +168,12 @@ def test_invalid_or_failed_cancellation_probe_fails_closed(value: object) -> Non
 
 
 @pytest.mark.parametrize(
-    ("checks", "expected_dom_queries"),
-    (([False, None], 0), ([False, False, None], 3)),
+    ("checks", "probes_dom"),
+    (([False, None], False), ([False, False, None], True)),
 )
 def test_cancellation_probe_unavailable_after_navigation_or_page_ready_is_closed(
     checks: list[bool | None],
-    expected_dom_queries: int,
+    probes_dom: bool,
 ) -> None:
     page = FakePage()
     page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
@@ -183,7 +186,7 @@ def test_cancellation_probe_unavailable_after_navigation_or_page_ready_is_closed
     assert observation.state is DouyinBrowseExecutionState.UNKNOWN
     assert observation.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE
     assert len(page.navigations) == 1
-    assert len(page.requested_selectors) == expected_dom_queries
+    assert bool(page.requested_selectors) is probes_dom
 
 
 @pytest.mark.parametrize(
@@ -268,7 +271,7 @@ def test_page_outcomes_map_to_closed_browse_results(
 
 def test_driver_failure_and_duplicate_profile_anchor_fail_closed() -> None:
     failed = FakePage()
-    failed.after_goto = lambda: setattr(failed, "visibility_failure", True)
+    failed.after_goto = lambda: setattr(failed, "probe_failure", True)
     unavailable = DouyinBrowseExecution(window(failed), candidate()).run(
         cancellation_requested=lambda: False
     )

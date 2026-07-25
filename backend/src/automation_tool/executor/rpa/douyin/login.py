@@ -256,8 +256,8 @@ class DouyinQrLoginFlow:
     ) -> DouyinQrLoginObservation:
         page = cast(_LoginPage, window.playwright_page)
         try:
-            qr_expired = _any_visible(page, _QR_EXPIRED_SELECTORS)
-            qr_confirmation = _any_visible(page, _QR_CONFIRMATION_SELECTORS)
+            qr_expired = any_visible(page, _QR_EXPIRED_SELECTORS)
+            qr_confirmation = any_visible(page, _QR_CONFIRMATION_SELECTORS)
             qr_visible = _all_visible(page, _QR_VISIBLE_SELECTORS)
         except Exception:
             return _observation(
@@ -303,10 +303,6 @@ def _unknown_session_observation(
         DouyinSessionEvidence.PAGE_UNAVAILABLE: DouyinQrLoginEvidence.PAGE_UNAVAILABLE,
     }.get(session.evidence, DouyinQrLoginEvidence.INSUFFICIENT)
     return _observation(DouyinQrLoginState.UNKNOWN, evidence)
-
-
-def _any_visible(page: _LoginPage, selectors: tuple[str, ...]) -> bool:
-    return any_visible(page, selectors)
 
 
 def _all_visible(page: _LoginPage, selectors: tuple[str, ...]) -> bool:

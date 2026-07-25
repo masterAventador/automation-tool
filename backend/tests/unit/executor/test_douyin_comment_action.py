@@ -30,6 +30,7 @@ from automation_tool.executor.rpa.douyin.comment_action import (
     DouyinCommentActionRejected,
     DouyinCommentActionState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.side_effect_ledger import SideEffectState
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_VERSION,
@@ -102,15 +103,17 @@ class Locator:
     def first(self) -> Locator:
         return self
 
+    def locator(self, selector: str) -> Locator:
+        """Every element this page models is on screen, so the filter keeps them all."""
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self
+
     def count(self) -> int:
         if self.page.locator_failure:
             raise RuntimeError("private locator failure")
         return sum(
             selector in self.page.visible_selectors for selector in self.selector.split(", ")
         )
-
-    def is_visible(self) -> bool:
-        return self.count() > 0
 
     def wait_for(self, *, state: str, timeout: float) -> None:
         assert state == "visible"

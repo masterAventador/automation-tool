@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import re
 from typing import Any, cast
 
 import pytest
+from automation_tool.executor.rpa.douyin import (
+    comment_page,
+    direct_message_page,
+    profile_page,
+    publish_page,
+)
 from automation_tool.executor.rpa.douyin.page_anchors import (
     VISIBLE_MATCH_ENGINE,
     AnchorConflict,
@@ -11,6 +18,43 @@ from automation_tool.executor.rpa.douyin.page_anchors import (
 )
 
 SELECTORS = ('[data-e2e="captcha-container"]', 'iframe[src*="/verifycenter/captcha/"]')
+ENGINE_PREFIX = re.compile(r"^\s*[a-zA-Z_][a-zA-Z0-9_-]*\s*=")
+UNIQUE_VISIBLE_GROUPS = (
+    comment_page._COMMENT_INPUT_SELECTORS,
+    comment_page._COMMENT_SUBMIT_SELECTORS,
+    comment_page._FINAL_CONFIRMATION_SELECTORS,
+    direct_message_page._MESSAGE_ENTRY_SELECTORS,
+    direct_message_page._MESSAGE_INPUT_SELECTORS,
+    direct_message_page._MESSAGE_SEND_SELECTORS,
+    direct_message_page._FINAL_CONFIRMATION_SELECTORS,
+    direct_message_page._MESSAGING_NOT_ALLOWED_SELECTORS,
+    direct_message_page._FOLLOW_REQUIRED_SELECTORS,
+    profile_page._PROFILE_ROOT_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_ARTIFACT_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_TITLE_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_DESCRIPTION_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_SUBMIT_SELECTORS,
+    publish_page.DOUYIN_PUBLISH_ACCOUNT_SELECTORS,
+)
+
+
+@pytest.mark.parametrize("group", UNIQUE_VISIBLE_GROUPS)
+def test_every_deduplicated_group_stays_css_only(group: tuple[str, ...]) -> None:
+    """Comma-joining a Playwright engine selector silently breaks the whole group.
+
+    ``unique_visible`` joins its group into one selector, which only the CSS
+    engine can parse. A group that mixes in ``text=`` or another engine prefix
+    turns every probe of that page object into ``page_unavailable``.
+
+    Playwright reaches a non-CSS engine three ways, and comma-joining breaks
+    on all three: an explicit prefix, a bare XPath it auto-detects, and the
+    ``>>`` chaining operator.
+    """
+    assert group
+    for selector in group:
+        assert not ENGINE_PREFIX.match(selector), selector
+        assert not selector.lstrip().startswith(("//", "..")), selector
+        assert ">>" not in selector, selector
 
 
 class FakeLocator:

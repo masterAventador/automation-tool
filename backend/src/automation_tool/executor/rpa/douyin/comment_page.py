@@ -10,6 +10,13 @@ from typing import Protocol, cast
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import (
+    AnchorConflict,
+    AnchorLocator,
+    any_visible,
+    unique_visible,
+    visible_matches,
+)
 from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageEntry,
     DouyinPageObservation,
@@ -189,17 +196,9 @@ class DouyinCommentPageObservation:
         )
 
 
-class _AnchorConflict(RuntimeError):
-    pass
-
-
-class _Locator(Protocol):
+class _WaitLocator(Protocol):
     @property
-    def first(self) -> _Locator: ...
-
-    def count(self) -> int: ...
-
-    def is_visible(self) -> bool: ...
+    def first(self) -> _WaitLocator: ...
 
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
@@ -208,7 +207,7 @@ class _Page(Protocol):
     @property
     def url(self) -> str: ...
 
-    def locator(self, selector: str) -> _Locator: ...
+    def locator(self, selector: str) -> AnchorLocator: ...
 
 
 class DouyinCommentPage:
@@ -247,27 +246,27 @@ class DouyinCommentPage:
                 DouyinCommentPageEvidence.PAGE_VERSION_UNKNOWN,
             )
         try:
-            if _unique_visible_locator(self._page, _LOGIN_DIALOG_SELECTORS) is not None:
+            if any_visible(self._page, _LOGIN_DIALOG_SELECTORS):
                 return _observation(
                     version,
                     DouyinCommentPageState.LOGIN_REQUIRED,
                     DouyinCommentPageEvidence.LOGIN_DIALOG,
                 )
-            if _unique_visible_locator(self._page, _BLOCKING_DIALOG_SELECTORS) is not None:
+            if any_visible(self._page, _BLOCKING_DIALOG_SELECTORS):
                 return _observation(
                     version,
                     DouyinCommentPageState.DIALOG_BLOCKED,
                     DouyinCommentPageEvidence.BLOCKING_DIALOG,
                 )
-            if _unique_visible_locator(self._page, _FINAL_CONFIRMATION_SELECTORS) is not None:
+            if unique_visible(self._page, _FINAL_CONFIRMATION_SELECTORS) is not None:
                 return _observation(
                     version,
                     DouyinCommentPageState.CONFIRMED,
                     DouyinCommentPageEvidence.FINAL_CONFIRMATION_VISIBLE,
                 )
-            comment_input = _unique_visible_locator(self._page, _COMMENT_INPUT_SELECTORS)
-            comment_submit = _unique_visible_locator(self._page, _COMMENT_SUBMIT_SELECTORS)
-        except _AnchorConflict:
+            comment_input = unique_visible(self._page, _COMMENT_INPUT_SELECTORS)
+            comment_submit = unique_visible(self._page, _COMMENT_SUBMIT_SELECTORS)
+        except AnchorConflict:
             return _observation(
                 version,
                 DouyinCommentPageState.UNKNOWN,
@@ -291,15 +290,15 @@ class DouyinCommentPage:
             DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING,
         )
 
-    def comment_input(self) -> _Locator:
+    def comment_input(self) -> AnchorLocator:
         self._require_state(DouyinCommentPageState.READY)
         return self._require_locator(_COMMENT_INPUT_SELECTORS)
 
-    def comment_submit(self) -> _Locator:
+    def comment_submit(self) -> AnchorLocator:
         self._require_state(DouyinCommentPageState.READY)
         return self._require_locator(_COMMENT_SUBMIT_SELECTORS)
 
-    def final_confirmation(self) -> _Locator:
+    def final_confirmation(self) -> AnchorLocator:
         self._require_state(DouyinCommentPageState.CONFIRMED)
         return self._require_locator(_FINAL_CONFIRMATION_SELECTORS)
 
@@ -321,9 +320,9 @@ class DouyinCommentPage:
         if self.observe().state is not expected:
             raise DouyinCommentPageRejected
 
-    def _require_locator(self, selectors: tuple[str, ...]) -> _Locator:
+    def _require_locator(self, selectors: tuple[str, ...]) -> AnchorLocator:
         try:
-            locator = _unique_visible_locator(self._page, selectors)
+            locator = unique_visible(self._page, selectors)
         except Exception:
             raise DouyinCommentPageRejected from None
         if locator is None:
@@ -351,10 +350,10 @@ class DouyinCommentPage:
             if remaining <= 0:
                 return self.observe()
             try:
-                self._page.locator(", ".join(selectors)).first.wait_for(
-                    state="visible",
-                    timeout=remaining,
-                )
+                cast(
+                    _WaitLocator,
+                    visible_matches(self._page, ", ".join(selectors)),
+                ).first.wait_for(state="visible", timeout=remaining)
             except PlaywrightTimeoutError:
                 return self.observe()
             except Exception:
@@ -374,22 +373,6 @@ class DouyinCommentPage:
             DouyinCommentPageState.UNKNOWN,
             DouyinCommentPageEvidence.PAGE_UNAVAILABLE,
         )
-
-
-def _unique_visible_locator(
-    page: _Page,
-    selectors: tuple[str, ...],
-) -> _Locator | None:
-    locator = page.locator(", ".join(selectors))
-    count = locator.count()
-    if type(count) is not int or count < 0:
-        raise ValueError
-    if count > 1:
-        raise _AnchorConflict
-    if count == 0:
-        return None
-    first = locator.first
-    return first if first.is_visible() else None
 
 
 def _can_wait(

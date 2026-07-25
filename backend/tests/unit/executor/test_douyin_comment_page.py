@@ -17,6 +17,7 @@ from automation_tool.executor.rpa.douyin.comment_page import (
     DouyinCommentPageRejected,
     DouyinCommentPageState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import (
     DOUYIN_SESSION_PROBE_URL,
     DouyinPageEntry,
@@ -27,11 +28,24 @@ from automation_tool.executor.rpa.douyin.page_version import (
 VIDEO_URL = "https://www.douyin.com/video/7351234567890123456"
 SEARCH_URL = "https://www.douyin.com/search/test?type=general"
 COMMENT_INPUT = 'textarea[aria-label="留下你的精彩评论"]'
+COMMENT_INPUT_PLACEHOLDER = 'textarea[placeholder="留下你的精彩评论"]'
 COMMENT_SUBMIT = 'button[aria-label="发表评论"]'
 FINAL_CONFIRMATION = '[role="status"]:has-text("评论成功")'
 LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
 BLOCKING_DIALOG = '[role="dialog"]'
 RISK_CHALLENGE = 'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]'
+INPUT_GROUP = (
+    'textarea[aria-label="留下你的精彩评论"], '
+    'textarea[placeholder="留下你的精彩评论"], '
+    '[contenteditable="true"][data-e2e="comment-input"], '
+    '[data-e2e="comment-textarea"]'
+)
+SUBMIT_GROUP = (
+    'button[aria-label="发表评论"], '
+    '[role="button"][aria-label="发表评论"], '
+    '[data-e2e="comment-submit"]'
+)
+FINAL_GROUP = '[role="status"]:has-text("评论成功"), [data-e2e="comment-publish-success"]'
 
 
 class FakeLocator:
@@ -40,41 +54,62 @@ class FakeLocator:
         selector: str,
         page: FakePage,
         *,
-        wait_callback: Callable[[], None] | None = None,
+        visible_only: bool = False,
+        first_only: bool = False,
     ) -> None:
         self.selector = selector
-        self._page = page
-        self._wait_callback = wait_callback
+        self.page = page
+        self.visible_only = visible_only
+        self.first_only = first_only
+
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self._derived(visible_only=True, first_only=self.first_only)
 
     @property
     def first(self) -> FakeLocator:
-        return self
+        return self._derived(visible_only=self.visible_only, first_only=True)
 
     def count(self) -> int:
-        if self.selector in self._page.failed_selectors:
+        if self.selector in self.page.failed_selectors:
             raise RuntimeError("private count failure")
-        if self.selector in self._page.invalid_count_selectors:
+        if self.selector in self.page.invalid_count_selectors:
             return cast(int, True)
-        return sum(
-            selector in self._page.visible_selectors for selector in self.selector.split(", ")
-        )
-
-    def is_visible(self) -> bool:
-        if self.selector in self._page.failed_selectors:
-            raise RuntimeError("private visibility failure")
-        return self.count() > 0
+        return len(self._matched())
 
     def wait_for(self, *, state: str, timeout: float) -> None:
         assert state == "visible"
         assert timeout > 0
-        if self.selector in self._page.failed_wait_selectors:
+        if self.selector in self.page.failed_wait_selectors:
             raise RuntimeError("private wait failure")
-        if self.selector in self._page.premature_wait_selectors:
+        if self.selector in self.page.premature_wait_selectors:
             return
-        if self._wait_callback is not None:
-            self._wait_callback()
-        if not self.is_visible():
+        callback = self.page.wait_callbacks.get(self.selector)
+        if callback is not None:
+            callback()
+        matched = self._matched()
+        if not matched or not matched[0]:
+            self.page.wait_timeouts.append(self.selector)
             raise PlaywrightTimeoutError("private wait timeout")
+
+    def _matched(self) -> list[bool]:
+        """Visibility of every matched element, in document order."""
+        matched = [
+            visible
+            for selector in self.selector.split(", ")
+            for visible in self.page.elements(selector)
+        ]
+        if self.visible_only:
+            matched = [visible for visible in matched if visible]
+        return matched[:1] if self.first_only else matched
+
+    def _derived(self, *, visible_only: bool, first_only: bool) -> FakeLocator:
+        return FakeLocator(
+            self.selector,
+            self.page,
+            visible_only=visible_only,
+            first_only=first_only,
+        )
 
 
 class FakePage:
@@ -83,23 +118,28 @@ class FakePage:
         *,
         url: str = VIDEO_URL,
         visible_selectors: set[str] | None = None,
+        hidden_selectors: set[str] | None = None,
     ) -> None:
         self.url = url
         self.visible_selectors = set() if visible_selectors is None else visible_selectors
+        self.hidden_selectors = set() if hidden_selectors is None else hidden_selectors
         self.failed_selectors: set[str] = set()
         self.invalid_count_selectors: set[str] = set()
         self.failed_wait_selectors: set[str] = set()
         self.premature_wait_selectors: set[str] = set()
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
+        self.wait_timeouts: list[str] = []
         self.requested_selectors: list[str] = []
+
+    def elements(self, selector: str) -> tuple[bool, ...]:
+        """Like a single-page app, a hidden placeholder precedes the real element."""
+        placeholder = (False,) if selector in self.hidden_selectors else ()
+        rendered = (True,) if selector in self.visible_selectors else ()
+        return placeholder + rendered
 
     def locator(self, selector: str) -> FakeLocator:
         self.requested_selectors.append(selector)
-        return FakeLocator(
-            selector,
-            self,
-            wait_callback=self.wait_callbacks.get(selector),
-        )
+        return FakeLocator(selector, self)
 
 
 def window(page: FakePage) -> BrowserWindow:
@@ -205,13 +245,54 @@ def test_login_and_blocking_evidence_take_priority_over_action_anchors(
 
 
 @pytest.mark.parametrize(
+    ("state", "evidence"),
+    (
+        (DouyinCommentPageState.LOGIN_REQUIRED, DouyinCommentPageEvidence.LOGIN_DIALOG),
+        (DouyinCommentPageState.DIALOG_BLOCKED, DouyinCommentPageEvidence.BLOCKING_DIALOG),
+    ),
+)
+def test_a_hidden_placeholder_never_hides_the_handoff_dialog_behind_it(
+    state: DouyinCommentPageState,
+    evidence: DouyinCommentPageEvidence,
+) -> None:
+    """A pre-rendered placeholder must not mask the dialog that stops the run."""
+    dialog = LOGIN_DIALOG if state is DouyinCommentPageState.LOGIN_REQUIRED else BLOCKING_DIALOG
+    page = FakePage(
+        visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT, dialog},
+        hidden_selectors={dialog},
+    )
+
+    observation = DouyinCommentPage(window(page)).observe()
+
+    assert observation.state is state
+    assert observation.evidence is evidence
+    assert observation.circuit_open is True
+
+
+def test_hidden_placeholders_beside_one_visible_anchor_are_not_a_conflict() -> None:
+    """Hidden template nodes are not a second anchor, so the page stays usable."""
+    page = FakePage(
+        visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT},
+        hidden_selectors={COMMENT_INPUT_PLACEHOLDER, '[data-e2e="comment-submit"]'},
+    )
+    comment_page = DouyinCommentPage(window(page))
+
+    observation = comment_page.observe()
+
+    assert observation.state is DouyinCommentPageState.READY
+    assert observation.evidence is DouyinCommentPageEvidence.INPUT_AND_SUBMIT_VISIBLE
+    assert COMMENT_INPUT in cast(FakeLocator, comment_page.comment_input()).selector
+    assert COMMENT_SUBMIT in cast(FakeLocator, comment_page.comment_submit()).selector
+
+
+@pytest.mark.parametrize(
     ("selectors", "evidence"),
     (
         (set(), DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING),
         ({COMMENT_INPUT}, DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING),
         ({COMMENT_SUBMIT}, DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING),
         (
-            {COMMENT_INPUT, COMMENT_SUBMIT, 'textarea[placeholder="留下你的精彩评论"]'},
+            {COMMENT_INPUT, COMMENT_SUBMIT, COMMENT_INPUT_PLACEHOLDER},
             DouyinCommentPageEvidence.CONFLICTING_ANCHORS,
         ),
     ),
@@ -258,20 +339,14 @@ def test_non_video_route_is_rejected_before_any_dom_query() -> None:
 
 
 def test_page_failures_bad_counts_and_mid_access_drift_are_safe() -> None:
-    input_group = (
-        'textarea[aria-label="留下你的精彩评论"], '
-        'textarea[placeholder="留下你的精彩评论"], '
-        '[contenteditable="true"][data-e2e="comment-input"], '
-        '[data-e2e="comment-textarea"]'
-    )
     failed = FakePage(visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT})
-    failed.failed_selectors.add(input_group)
+    failed.failed_selectors.add(INPUT_GROUP)
     observation = DouyinCommentPage(window(failed)).observe()
     assert observation.state is DouyinCommentPageState.UNKNOWN
     assert observation.evidence is DouyinCommentPageEvidence.PAGE_UNAVAILABLE
 
     invalid = FakePage(visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT})
-    invalid.invalid_count_selectors.add(input_group)
+    invalid.invalid_count_selectors.add(INPUT_GROUP)
     assert DouyinCommentPage(window(invalid)).observe().evidence is (
         DouyinCommentPageEvidence.PAGE_UNAVAILABLE
     )
@@ -291,35 +366,41 @@ def test_page_failures_bad_counts_and_mid_access_drift_are_safe() -> None:
     assert unavailable_url.evidence is DouyinCommentPageEvidence.PAGE_UNAVAILABLE
 
 
+def test_waits_are_satisfied_by_any_visible_match_not_by_the_first_dom_match() -> None:
+    """A hidden placeholder must not burn the whole wait budget.
+
+    ``wait_for_final`` runs against a success toast that disappears on its own,
+    so a wait that can only be satisfied by the first DOM match reports a
+    finished action as unconfirmed.
+    """
+    page = FakePage(hidden_selectors={COMMENT_INPUT, COMMENT_SUBMIT, FINAL_CONFIRMATION})
+    page.wait_callbacks[INPUT_GROUP] = lambda: page.visible_selectors.add(COMMENT_INPUT)
+    page.wait_callbacks[SUBMIT_GROUP] = lambda: page.visible_selectors.add(COMMENT_SUBMIT)
+    page.wait_callbacks[FINAL_GROUP] = lambda: page.visible_selectors.add(FINAL_CONFIRMATION)
+    comment_page = DouyinCommentPage(window(page))
+
+    assert comment_page.wait_for_ready(timeout_milliseconds=100).ready is True
+    assert comment_page.wait_for_final(timeout_milliseconds=100).confirmed is True
+    assert page.wait_timeouts == []
+
+
 def test_bounded_waits_reobserve_ready_final_timeout_and_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    input_group = (
-        'textarea[aria-label="留下你的精彩评论"], '
-        'textarea[placeholder="留下你的精彩评论"], '
-        '[contenteditable="true"][data-e2e="comment-input"], '
-        '[data-e2e="comment-textarea"]'
-    )
-    submit_group = (
-        'button[aria-label="发表评论"], '
-        '[role="button"][aria-label="发表评论"], '
-        '[data-e2e="comment-submit"]'
-    )
-    final_group = '[role="status"]:has-text("评论成功"), [data-e2e="comment-publish-success"]'
     page = FakePage()
-    page.wait_callbacks[input_group] = lambda: page.visible_selectors.add(COMMENT_INPUT)
-    page.wait_callbacks[submit_group] = lambda: page.visible_selectors.add(COMMENT_SUBMIT)
+    page.wait_callbacks[INPUT_GROUP] = lambda: page.visible_selectors.add(COMMENT_INPUT)
+    page.wait_callbacks[SUBMIT_GROUP] = lambda: page.visible_selectors.add(COMMENT_SUBMIT)
     comment_page = DouyinCommentPage(window(page))
     assert comment_page.wait_for_ready(timeout_milliseconds=100).ready is True
 
-    page.wait_callbacks[final_group] = lambda: page.visible_selectors.add(FINAL_CONFIRMATION)
+    page.wait_callbacks[FINAL_GROUP] = lambda: page.visible_selectors.add(FINAL_CONFIRMATION)
     assert comment_page.wait_for_final(timeout_milliseconds=100).confirmed is True
 
     timed_out = DouyinCommentPage(window(FakePage())).wait_for_ready(timeout_milliseconds=100)
     assert timed_out.evidence is DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING
 
     failed_page = FakePage()
-    failed_page.failed_wait_selectors.add(input_group)
+    failed_page.failed_wait_selectors.add(INPUT_GROUP)
     unavailable = DouyinCommentPage(window(failed_page)).wait_for_ready(timeout_milliseconds=100)
     assert unavailable.evidence is DouyinCommentPageEvidence.PAGE_UNAVAILABLE
 
@@ -333,7 +414,7 @@ def test_bounded_waits_reobserve_ready_final_timeout_and_failure(
     )
 
     premature = FakePage(visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT})
-    premature.premature_wait_selectors.add(final_group)
+    premature.premature_wait_selectors.add(FINAL_GROUP)
     still_ready = DouyinCommentPage(window(premature)).wait_for_final(timeout_milliseconds=100)
     assert still_ready.state is DouyinCommentPageState.READY
 

@@ -12,6 +12,7 @@ from automation_tool.executor.rpa.douyin.browse import (
     DouyinBrowseExecutionState,
 )
 from automation_tool.executor.rpa.douyin.page_version import douyin_user_profile_url
+from automation_tool.executor.rpa.douyin.profile_page import DouyinProfilePage
 from automation_tool.protocol import (
     DouyinCandidate,
     DouyinCandidateSource,
@@ -100,12 +101,54 @@ def test_production_runtime_browses_fake_profiles_headlessly_without_sending_and
     assert_private_profile_directory(profile)
 
 
+def test_a_lazy_skeleton_cannot_hijack_the_validated_video_entry(
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
+) -> None:
+    """The entry handed to the caller stays the anchor whose href was validated.
+
+    A profile keeps rendering while the executor works: a hidden skeleton in
+    front of the loaded card can become visible between the href check and the
+    click. Re-resolving at click time would open - and comment on - a different
+    video, which is an external side effect that cannot be taken back.
+    """
+    profile = tmp_path / "automation-tool-lazy-skeleton-profile"
+    create_private_profile_directory(profile)
+    document = (FIXTURE_ROOT / "profile-lazy-skeleton.html").read_text(encoding="utf-8")
+    runtime = BrowserRuntime()
+
+    with runtime.running(
+        BrowserLaunchRequest(
+            executable_path=staged_embedded_chromium,
+            profile_directory=profile,
+            headless=True,
+        )
+    ):
+        window = runtime.primary_window()
+        page = cast(Any, window.playwright_page)
+        page.route(
+            "https://www.douyin.com/user/**",
+            lambda route: route.fulfill(status=200, content_type="text/html", body=document),
+        )
+        page.goto(douyin_user_profile_url("skeleton-001"), wait_until="domcontentloaded")
+
+        entry = DouyinProfilePage(window).first_video_entry()
+        page.evaluate("document.querySelector('#skeleton').style.display = 'inline'")
+        cast(Any, entry).click(timeout=1_000)
+
+        assert page.evaluate("window.__clickedVideo") == "/video/7351234567890123456"
+
+    assert not runtime.is_running
+    assert_private_profile_directory(profile)
+
+
 def test_browse_fake_page_corpus_is_closed_and_local() -> None:
     expected = {
         "profile-ready.html",
         "profile-login.html",
         "profile-blocked.html",
         "profile-drift.html",
+        "profile-lazy-skeleton.html",
     }
     assert {path.name for path in FIXTURE_ROOT.iterdir()} == expected
     for path in FIXTURE_ROOT.iterdir():

@@ -17,6 +17,7 @@ from automation_tool.executor.rpa.douyin.direct_message_page import (
     DouyinDirectMessagePageRejected,
     DouyinDirectMessagePageState,
 )
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import (
     DOUYIN_SESSION_PROBE_URL,
     DouyinPageEntry,
@@ -26,6 +27,7 @@ from automation_tool.executor.rpa.douyin.page_version import (
 
 PROFILE_URL = "https://www.douyin.com/user/creator-001"
 MESSAGE_ENTRY = 'button[aria-label="私信"]'
+MESSAGE_ENTRY_ROLE = '[role="button"][aria-label="私信"]'
 MESSAGE_INPUT = 'textarea[aria-label="发送私信"]'
 MESSAGE_SEND = 'button[aria-label="发送私信"]'
 FINAL_CONFIRMATION = '[role="status"]:has-text("私信发送成功")'
@@ -37,25 +39,33 @@ RISK_CHALLENGE = 'iframe[src^="https://rmc.bytedance.com/verifycenter/captcha/"]
 
 
 class FakeLocator:
-    def __init__(self, selector: str, page: FakePage) -> None:
+    def __init__(
+        self,
+        selector: str,
+        page: FakePage,
+        *,
+        visible_only: bool = False,
+        first_only: bool = False,
+    ) -> None:
         self.selector = selector
         self.page = page
+        self.visible_only = visible_only
+        self.first_only = first_only
+
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return self._derived(visible_only=True, first_only=self.first_only)
 
     @property
     def first(self) -> FakeLocator:
-        return self
+        return self._derived(visible_only=self.visible_only, first_only=True)
 
     def count(self) -> int:
         if self.selector in self.page.failed_selectors:
             raise RuntimeError("private failure")
         if self.selector in self.page.invalid_count_selectors:
             return cast(int, True)
-        return sum(
-            selector in self.page.visible_selectors for selector in self.selector.split(", ")
-        )
-
-    def is_visible(self) -> bool:
-        return self.count() > 0
+        return len(self._matched())
 
     def wait_for(self, *, state: str, timeout: float) -> None:
         assert state == "visible"
@@ -67,8 +77,29 @@ class FakeLocator:
         callback = self.page.wait_callbacks.get(self.selector)
         if callback is not None:
             callback()
-        if not self.is_visible():
+        matched = self._matched()
+        if not matched or not matched[0]:
+            self.page.wait_timeouts.append(self.selector)
             raise PlaywrightTimeoutError("private wait timeout")
+
+    def _matched(self) -> list[bool]:
+        """Visibility of every matched element, in document order."""
+        matched = [
+            visible
+            for selector in self.selector.split(", ")
+            for visible in self.page.elements(selector)
+        ]
+        if self.visible_only:
+            matched = [visible for visible in matched if visible]
+        return matched[:1] if self.first_only else matched
+
+    def _derived(self, *, visible_only: bool, first_only: bool) -> FakeLocator:
+        return FakeLocator(
+            self.selector,
+            self.page,
+            visible_only=visible_only,
+            first_only=first_only,
+        )
 
 
 class FakePage:
@@ -77,15 +108,24 @@ class FakePage:
         *,
         url: str = PROFILE_URL,
         visible_selectors: set[str] | None = None,
+        hidden_selectors: set[str] | None = None,
     ) -> None:
         self.url = url
         self.visible_selectors = set() if visible_selectors is None else visible_selectors
+        self.hidden_selectors = set() if hidden_selectors is None else hidden_selectors
         self.failed_selectors: set[str] = set()
         self.invalid_count_selectors: set[str] = set()
         self.failed_wait_selectors: set[str] = set()
         self.premature_wait_selectors: set[str] = set()
         self.wait_callbacks: dict[str, Callable[[], None]] = {}
+        self.wait_timeouts: list[str] = []
         self.requested_selectors: list[str] = []
+
+    def elements(self, selector: str) -> tuple[bool, ...]:
+        """Like a single-page app, a hidden placeholder precedes the real element."""
+        placeholder = (False,) if selector in self.hidden_selectors else ()
+        rendered = (True,) if selector in self.visible_selectors else ()
+        return placeholder + rendered
 
     def locator(self, selector: str) -> FakeLocator:
         self.requested_selectors.append(selector)
@@ -252,6 +292,65 @@ def test_login_and_blocking_evidence_take_priority_over_message_anchors(
     assert blocked.circuit_open is True
 
 
+@pytest.mark.parametrize(
+    ("anchor", "state", "evidence"),
+    (
+        (
+            LOGIN_DIALOG,
+            DouyinDirectMessagePageState.LOGIN_REQUIRED,
+            DouyinDirectMessagePageEvidence.LOGIN_DIALOG,
+        ),
+        (
+            BLOCKING_DIALOG,
+            DouyinDirectMessagePageState.DIALOG_BLOCKED,
+            DouyinDirectMessagePageEvidence.BLOCKING_DIALOG,
+        ),
+        (
+            PERMISSION_DENIED,
+            DouyinDirectMessagePageState.PERMISSION_DENIED,
+            DouyinDirectMessagePageEvidence.MESSAGING_NOT_ALLOWED,
+        ),
+        (
+            FOLLOW_REQUIRED,
+            DouyinDirectMessagePageState.PERMISSION_DENIED,
+            DouyinDirectMessagePageEvidence.FOLLOW_REQUIRED,
+        ),
+    ),
+)
+def test_a_hidden_placeholder_never_hides_the_handoff_notice_behind_it(
+    anchor: str,
+    state: DouyinDirectMessagePageState,
+    evidence: DouyinDirectMessagePageEvidence,
+) -> None:
+    """A pre-rendered placeholder must not mask the notice that stops the run."""
+    page = FakePage(
+        visible_selectors={MESSAGE_ENTRY, anchor},
+        hidden_selectors={anchor},
+    )
+
+    observation = DouyinDirectMessagePage(window(page)).observe()
+
+    assert observation.state is state
+    assert observation.evidence is evidence
+    assert observation.circuit_open is True
+
+
+def test_hidden_placeholders_beside_one_visible_anchor_are_not_a_conflict() -> None:
+    """Hidden template nodes are not a second anchor, so the page stays usable."""
+    page = FakePage(
+        visible_selectors={MESSAGE_INPUT, MESSAGE_SEND},
+        hidden_selectors={MESSAGE_INPUT, MESSAGE_SEND, MESSAGE_ENTRY, MESSAGE_ENTRY_ROLE},
+    )
+    message_page = DouyinDirectMessagePage(window(page))
+
+    observation = message_page.observe()
+
+    assert observation.state is DouyinDirectMessagePageState.CONVERSATION_READY
+    assert observation.evidence is DouyinDirectMessagePageEvidence.INPUT_AND_SEND_VISIBLE
+    assert MESSAGE_INPUT in cast(FakeLocator, message_page.message_input()).selector
+    assert MESSAGE_SEND in cast(FakeLocator, message_page.message_send()).selector
+
+
 def test_partial_duplicate_conflicting_and_driver_failure_fail_closed() -> None:
     for selectors, evidence in (
         ({MESSAGE_INPUT}, DouyinDirectMessagePageEvidence.REQUIRED_ANCHOR_MISSING),
@@ -264,7 +363,7 @@ def test_partial_duplicate_conflicting_and_driver_failure_fail_closed() -> None:
             DouyinDirectMessagePageEvidence.CONFLICTING_ANCHORS,
         ),
         (
-            {MESSAGE_ENTRY, '[role="button"][aria-label="私信"]'},
+            {MESSAGE_ENTRY, MESSAGE_ENTRY_ROLE},
             DouyinDirectMessagePageEvidence.CONFLICTING_ANCHORS,
         ),
     ):
@@ -344,6 +443,28 @@ def test_constructor_repr_observation_and_waits_are_bounded() -> None:
     for invalid in (0, 60_001, True):
         with pytest.raises(DouyinDirectMessagePageRejected):
             message_page.wait_for_final(timeout_milliseconds=invalid)
+
+
+def test_waits_are_satisfied_by_any_visible_match_not_by_the_first_dom_match() -> None:
+    """A hidden placeholder must not burn the whole wait budget.
+
+    ``wait_for_final`` runs against a success toast that disappears on its own,
+    so a wait that can only be satisfied by the first DOM match reports a
+    delivered message as unconfirmed.
+    """
+    final_group = (
+        '[role="status"]:has-text("私信发送成功"), [data-e2e="direct-message-send-success"]'
+    )
+    page = FakePage(
+        visible_selectors={MESSAGE_INPUT, MESSAGE_SEND},
+        hidden_selectors={FINAL_CONFIRMATION},
+    )
+    page.wait_callbacks[final_group] = lambda: page.visible_selectors.add(FINAL_CONFIRMATION)
+
+    observation = DouyinDirectMessagePage(window(page)).wait_for_final(timeout_milliseconds=100)
+
+    assert observation.confirmed is True
+    assert page.wait_timeouts == []
 
 
 def test_bounded_waits_cover_transitions_timeouts_failures_and_early_stops(

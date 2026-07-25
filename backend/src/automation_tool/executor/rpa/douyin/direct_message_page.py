@@ -10,6 +10,13 @@ from typing import Protocol, cast
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import (
+    AnchorConflict,
+    AnchorLocator,
+    any_visible,
+    unique_visible,
+    visible_matches,
+)
 from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageEntry,
     DouyinPageObservation,
@@ -224,17 +231,9 @@ class DouyinDirectMessagePageObservation:
         )
 
 
-class _AnchorConflict(RuntimeError):
-    pass
-
-
-class _Locator(Protocol):
+class _WaitLocator(Protocol):
     @property
-    def first(self) -> _Locator: ...
-
-    def count(self) -> int: ...
-
-    def is_visible(self) -> bool: ...
+    def first(self) -> _WaitLocator: ...
 
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
@@ -243,7 +242,7 @@ class _Page(Protocol):
     @property
     def url(self) -> str: ...
 
-    def locator(self, selector: str) -> _Locator: ...
+    def locator(self, selector: str) -> AnchorLocator: ...
 
 
 class DouyinDirectMessagePage:
@@ -283,7 +282,7 @@ class DouyinDirectMessagePage:
             )
         try:
             result = self._observe_profile(version)
-        except _AnchorConflict:
+        except AnchorConflict:
             return _observation(
                 version,
                 DouyinDirectMessagePageState.UNKNOWN,
@@ -300,22 +299,22 @@ class DouyinDirectMessagePage:
     def _observe_profile(
         self, version: DouyinPageObservation
     ) -> DouyinDirectMessagePageObservation:
-        if _unique_visible_locator(self._page, _LOGIN_DIALOG_SELECTORS) is not None:
+        if any_visible(self._page, _LOGIN_DIALOG_SELECTORS):
             return _observation(
                 version,
                 DouyinDirectMessagePageState.LOGIN_REQUIRED,
                 DouyinDirectMessagePageEvidence.LOGIN_DIALOG,
             )
-        if _unique_visible_locator(self._page, _BLOCKING_DIALOG_SELECTORS) is not None:
+        if any_visible(self._page, _BLOCKING_DIALOG_SELECTORS):
             return _observation(
                 version,
                 DouyinDirectMessagePageState.DIALOG_BLOCKED,
                 DouyinDirectMessagePageEvidence.BLOCKING_DIALOG,
             )
-        unavailable = _unique_visible_locator(self._page, _MESSAGING_NOT_ALLOWED_SELECTORS)
-        follow_required = _unique_visible_locator(self._page, _FOLLOW_REQUIRED_SELECTORS)
+        unavailable = unique_visible(self._page, _MESSAGING_NOT_ALLOWED_SELECTORS)
+        follow_required = unique_visible(self._page, _FOLLOW_REQUIRED_SELECTORS)
         if unavailable is not None and follow_required is not None:
-            raise _AnchorConflict
+            raise AnchorConflict
         if unavailable is not None:
             return _observation(
                 version,
@@ -328,15 +327,15 @@ class DouyinDirectMessagePage:
                 DouyinDirectMessagePageState.PERMISSION_DENIED,
                 DouyinDirectMessagePageEvidence.FOLLOW_REQUIRED,
             )
-        if _unique_visible_locator(self._page, _FINAL_CONFIRMATION_SELECTORS) is not None:
+        if unique_visible(self._page, _FINAL_CONFIRMATION_SELECTORS) is not None:
             return _observation(
                 version,
                 DouyinDirectMessagePageState.CONFIRMED,
                 DouyinDirectMessagePageEvidence.FINAL_CONFIRMATION_VISIBLE,
             )
-        entry = _unique_visible_locator(self._page, _MESSAGE_ENTRY_SELECTORS)
-        message_input = _unique_visible_locator(self._page, _MESSAGE_INPUT_SELECTORS)
-        message_send = _unique_visible_locator(self._page, _MESSAGE_SEND_SELECTORS)
+        entry = unique_visible(self._page, _MESSAGE_ENTRY_SELECTORS)
+        message_input = unique_visible(self._page, _MESSAGE_INPUT_SELECTORS)
+        message_send = unique_visible(self._page, _MESSAGE_SEND_SELECTORS)
         if message_input is not None and message_send is not None:
             return _observation(
                 version,
@@ -350,30 +349,30 @@ class DouyinDirectMessagePage:
                 DouyinDirectMessagePageEvidence.ENTER_CONVERSATION_VISIBLE,
             )
         if entry is not None and (message_input is not None or message_send is not None):
-            raise _AnchorConflict
+            raise AnchorConflict
         return _observation(
             version,
             DouyinDirectMessagePageState.UNKNOWN,
             DouyinDirectMessagePageEvidence.REQUIRED_ANCHOR_MISSING,
         )
 
-    def enter_conversation(self) -> _Locator:
+    def enter_conversation(self) -> AnchorLocator:
         self._require_state(DouyinDirectMessagePageState.PROFILE_READY)
         return self._require_locator(_MESSAGE_ENTRY_SELECTORS)
 
-    def message_input(self) -> _Locator:
+    def message_input(self) -> AnchorLocator:
         self._require_state(DouyinDirectMessagePageState.CONVERSATION_READY)
         return self._require_locator(_MESSAGE_INPUT_SELECTORS)
 
-    def message_send(self) -> _Locator:
+    def message_send(self) -> AnchorLocator:
         self._require_state(DouyinDirectMessagePageState.CONVERSATION_READY)
         return self._require_locator(_MESSAGE_SEND_SELECTORS)
 
-    def final_confirmation(self) -> _Locator:
+    def final_confirmation(self) -> AnchorLocator:
         self._require_state(DouyinDirectMessagePageState.CONFIRMED)
         return self._require_locator(_FINAL_CONFIRMATION_SELECTORS)
 
-    def permission_notice(self) -> _Locator:
+    def permission_notice(self) -> AnchorLocator:
         observation = self.observe()
         if observation.state is not DouyinDirectMessagePageState.PERMISSION_DENIED:
             raise DouyinDirectMessagePageRejected
@@ -413,9 +412,9 @@ class DouyinDirectMessagePage:
         if self.observe().state is not expected:
             raise DouyinDirectMessagePageRejected
 
-    def _require_locator(self, selectors: tuple[str, ...]) -> _Locator:
+    def _require_locator(self, selectors: tuple[str, ...]) -> AnchorLocator:
         try:
-            locator = _unique_visible_locator(self._page, selectors)
+            locator = unique_visible(self._page, selectors)
         except Exception:
             raise DouyinDirectMessagePageRejected from None
         if locator is None:
@@ -443,9 +442,10 @@ class DouyinDirectMessagePage:
             if remaining <= 0:
                 return self.observe()
             try:
-                self._page.locator(", ".join(selectors)).first.wait_for(
-                    state="visible", timeout=remaining
-                )
+                cast(
+                    _WaitLocator,
+                    visible_matches(self._page, ", ".join(selectors)),
+                ).first.wait_for(state="visible", timeout=remaining)
             except PlaywrightTimeoutError:
                 return self.observe()
             except Exception:
@@ -465,19 +465,6 @@ class DouyinDirectMessagePage:
             DouyinDirectMessagePageState.UNKNOWN,
             DouyinDirectMessagePageEvidence.PAGE_UNAVAILABLE,
         )
-
-
-def _unique_visible_locator(page: _Page, selectors: tuple[str, ...]) -> _Locator | None:
-    locator = page.locator(", ".join(selectors))
-    count = locator.count()
-    if type(count) is not int or count < 0:
-        raise ValueError
-    if count > 1:
-        raise _AnchorConflict
-    if count == 0:
-        return None
-    first = locator.first
-    return first if first.is_visible() else None
 
 
 def _can_wait(

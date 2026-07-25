@@ -11,6 +11,13 @@ from urllib.parse import urljoin
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin.page_anchors import (
+    AnchorConflict,
+    AnchorLocator,
+    any_visible,
+    unique_visible,
+    visible_matches,
+)
 from automation_tool.executor.rpa.douyin.page_version import (
     DouyinPageEntry,
     DouyinPageObservation,
@@ -42,7 +49,7 @@ _BLOCKING_DIALOG_SELECTORS = (
     '[data-e2e="modal"]',
 )
 _MAX_WAIT_MILLISECONDS = 60_000
-_ATTRIBUTE_TIMEOUT_MILLISECONDS = 5_000
+_VIDEO_ENTRY_TIMEOUT_MILLISECONDS = 5_000
 
 
 class DouyinProfilePageRejected(RuntimeError):
@@ -169,28 +176,30 @@ class DouyinProfilePageObservation:
         )
 
 
-class _AnchorConflict(RuntimeError):
-    pass
-
-
-class _Locator(Protocol):
+class _WaitLocator(Protocol):
     @property
-    def first(self) -> _Locator: ...
-
-    def count(self) -> int: ...
-
-    def is_visible(self) -> bool: ...
+    def first(self) -> _WaitLocator: ...
 
     def wait_for(self, *, state: str, timeout: float) -> None: ...
 
-    def get_attribute(self, name: str, *, timeout: float) -> str | None: ...
+
+class _VideoEntryLocator(Protocol):
+    def element_handle(self, *, timeout: float) -> _PinnedVideoEntry: ...
+
+
+class _PinnedVideoEntry(Protocol):
+    """One resolved profile video anchor that cannot drift to another element."""
+
+    def get_attribute(self, name: str) -> str | None: ...
+
+    def click(self, *, timeout: float) -> None: ...
 
 
 class _Page(Protocol):
     @property
     def url(self) -> str: ...
 
-    def locator(self, selector: str) -> _Locator: ...
+    def locator(self, selector: str) -> AnchorLocator: ...
 
 
 class DouyinProfilePage:
@@ -230,7 +239,7 @@ class DouyinProfilePage:
             )
         try:
             return self._observe_profile(version)
-        except _AnchorConflict:
+        except AnchorConflict:
             return _observation(
                 version,
                 DouyinProfilePageState.UNKNOWN,
@@ -244,19 +253,19 @@ class DouyinProfilePage:
             )
 
     def _observe_profile(self, version: DouyinPageObservation) -> DouyinProfilePageObservation:
-        if _unique_visible_locator(self._page, _LOGIN_DIALOG_SELECTORS) is not None:
+        if any_visible(self._page, _LOGIN_DIALOG_SELECTORS):
             return _observation(
                 version,
                 DouyinProfilePageState.LOGIN_REQUIRED,
                 DouyinProfilePageEvidence.LOGIN_DIALOG,
             )
-        if _unique_visible_locator(self._page, _BLOCKING_DIALOG_SELECTORS) is not None:
+        if any_visible(self._page, _BLOCKING_DIALOG_SELECTORS):
             return _observation(
                 version,
                 DouyinProfilePageState.DIALOG_BLOCKED,
                 DouyinProfilePageEvidence.BLOCKING_DIALOG,
             )
-        if _unique_visible_locator(self._page, _PROFILE_ROOT_SELECTORS) is not None:
+        if unique_visible(self._page, _PROFILE_ROOT_SELECTORS) is not None:
             return _observation(
                 version,
                 DouyinProfilePageState.READY,
@@ -268,34 +277,42 @@ class DouyinProfilePage:
             DouyinProfilePageEvidence.REQUIRED_ANCHOR_MISSING,
         )
 
-    def profile_root(self) -> _Locator:
+    def profile_root(self) -> AnchorLocator:
         if self.observe().state is not DouyinProfilePageState.READY:
             raise DouyinProfilePageRejected
         try:
-            locator = _unique_visible_locator(self._page, _PROFILE_ROOT_SELECTORS)
+            locator = unique_visible(self._page, _PROFILE_ROOT_SELECTORS)
         except Exception:
             raise DouyinProfilePageRejected from None
         if locator is None:
             raise DouyinProfilePageRejected
         return locator
 
-    def first_video_entry(self) -> _Locator:
-        """Return one validated profile video locator without activating it."""
+    def first_video_entry(self) -> _PinnedVideoEntry:
+        """Return one validated profile video entry without activating it.
+
+        The anchor is pinned to the element whose href was validated. A profile
+        keeps rendering while the caller works, so re-resolving the selector at
+        click time could open a different video - an external side effect that
+        cannot be taken back.
+        """
 
         if self.observe().state is not DouyinProfilePageState.READY:
             raise DouyinProfilePageRejected
         try:
             for selector in _PROFILE_VIDEO_ENTRY_SELECTORS:
-                locator = self._page.locator(selector).first
-                if not locator.is_visible():
+                if not any_visible(self._page, (selector,)):
                     continue
-                href = locator.get_attribute(
-                    "href",
-                    timeout=_ATTRIBUTE_TIMEOUT_MILLISECONDS,
+                entry = cast(
+                    _VideoEntryLocator,
+                    visible_matches(self._page, selector).first,
+                ).element_handle(timeout=_VIDEO_ENTRY_TIMEOUT_MILLISECONDS)
+                destination = urljoin(
+                    "https://www.douyin.com/",
+                    entry.get_attribute("href") or "",
                 )
-                destination = urljoin("https://www.douyin.com/", href or "")
                 self._versions.require_entry(destination, DouyinPageEntry.VIDEO_DETAIL)
-                return locator
+                return entry
         except Exception:
             raise DouyinProfilePageRejected from None
         raise DouyinProfilePageRejected
@@ -314,10 +331,10 @@ class DouyinProfilePage:
         if remaining <= 0:
             return self.observe()
         try:
-            self._page.locator(", ".join(_PROFILE_ROOT_SELECTORS)).first.wait_for(
-                state="visible",
-                timeout=remaining,
-            )
+            cast(
+                _WaitLocator,
+                visible_matches(self._page, ", ".join(_PROFILE_ROOT_SELECTORS)),
+            ).first.wait_for(state="visible", timeout=remaining)
         except PlaywrightTimeoutError:
             return self.observe()
         except Exception:
@@ -334,19 +351,6 @@ class DouyinProfilePage:
             DouyinProfilePageState.UNKNOWN,
             DouyinProfilePageEvidence.PAGE_UNAVAILABLE,
         )
-
-
-def _unique_visible_locator(page: _Page, selectors: tuple[str, ...]) -> _Locator | None:
-    locator = page.locator(", ".join(selectors))
-    count = locator.count()
-    if type(count) is not int or count < 0:
-        raise ValueError
-    if count > 1:
-        raise _AnchorConflict
-    if count == 0:
-        return None
-    first = locator.first
-    return first if first.is_visible() else None
 
 
 def _can_wait(observation: DouyinProfilePageObservation) -> bool:

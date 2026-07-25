@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <main aria-label="用户主页">
+      <h1>隔离目标主页</h1>
+      <a id="skeleton" href="/video/7351234567890123499" style="display: none">占位骨架</a>
+      <a id="loaded" href="/video/7351234567890123456">第一条可评论作品</a>
+    </main>
+    <script>
+      window.__clickedVideo = null;
+      for (const link of document.querySelectorAll('a[href^="/video/"]')) {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          window.__clickedVideo = link.getAttribute("href");
+        });
+      }
+    </script>
+  </body>
+</html>
