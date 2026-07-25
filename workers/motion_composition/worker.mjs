@@ -752,6 +752,14 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         "--block-new-web-contents",
         "--deny-permission-prompts",
         "--dns-prefetch-disable",
+        // Byte-identical frames across runs: subpixel text antialiasing and the
+        // colour profile are host-dependent and can even differ between the
+        // first paint and later ones on the same host, which is how the same
+        // frame index hashed differently between two Windows runs.
+        "--disable-lcd-text",
+        "--disable-font-subpixel-positioning",
+        "--force-color-profile=srgb",
+        "--hide-scrollbars",
         "--disable-features=NetworkPrediction,PreconnectToSearch,OptimizationHints",
         // Default disconnected: route every http/https/ws connection to a dead
         // loopback proxy (local file:// is never proxied). Nothing reaches a
