@@ -39,6 +39,21 @@ export interface MotionVideoDraftRequest {
   readonly logo: MotionVideoLogoDraft | null;
 }
 
+/**
+ * A one-sentence brief, authored automatically instead of filled in by hand.
+ *
+ * It is a different submission from the fixed template, not a variant of it:
+ * the template carries the finished copy, this carries the intent and lets the
+ * authoring agent produce the copy, the storyboard and the composition.
+ */
+export interface MotionVideoBriefRequest {
+  readonly creationMode: "one_sentence_v1";
+  readonly brief: string;
+  readonly aspectRatio: string;
+  readonly durationSeconds: number;
+  readonly language: string;
+}
+
 export type MotionRenderJobStatus = "queued" | "rendering" | "encoding" | "succeeded" | "failed" | "cancelled";
 
 export interface MotionRenderJobSnapshot {
@@ -101,5 +116,6 @@ export interface MaterialVideoStudioGateway {
   cancelMotionRenderJob(renderJobId: string): Promise<void>;
   readMotionArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload>;
   deleteMotionArtifact(artifactId: string): Promise<void>;
+  submitMotionBrief(request: MotionVideoBriefRequest): Promise<MotionRenderJobSnapshot>;
   readMaterialArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload>;
 }

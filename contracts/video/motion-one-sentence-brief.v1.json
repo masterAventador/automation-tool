@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-one-sentence-brief",
+  "version": "motion-one-sentence-brief.v1",
+  "policy": "fail_closed",
+  "maxBriefCharacters": 500,
+  "maxBrandAssets": 32,
+  "aspectRatios": ["16:9", "9:16"],
+  "languages": ["zh", "en"],
+  "definedIn": [
+    "tools/motion-authoring/motion_authoring_agent.py",
+    "frontend/src/features/video-studio/motion-one-sentence.ts"
+  ],
+  "enforcedBy": "scripts/test_motion_authoring_agent.py",
+  "rationale": {
+    "problem": "The one-sentence entry is typed in the App and judged by the authoring agent in another process and another language. Every bound the user can violate — how long the sentence may be, which framings and languages are offered, how many brand assets may be attached — was a literal inside the agent, so the form could offer a choice the agent would refuse, or refuse one the agent would accept, and neither side could see the disagreement.",
+    "durationIsNotDeclaredHere": "The film length ceiling is deliberately absent from this file. It is already declared once in motion-storyboard-duration.v1.json as totalSecondsMaximum, which the storyboard editor and the native validator both read; restating it here would create the second source this contract exists to prevent. The agent reads it from there.",
+    "maxBriefCharacters": "Five hundred characters is a paragraph of intent, which is what this entry is for. Past that the user is writing the script rather than describing it, and the fixed-template path with its per-beat fields is the better tool.",
+    "changing": "Adding a framing or a language means changing this file alone; both the form and the agent follow it. Removing one is a product decision that has to consider films already authored under it."
+  }
+}

@@ -9,9 +9,14 @@ import {
   type MaterialRenderJobSnapshot,
   type MotionRenderJobSnapshot,
   type RenderedVideoArtifactPayload,
+  type MotionVideoBriefRequest,
   type MotionVideoDraftRequest,
 } from "../../features/video-studio/material-video-studio-gateway";
 import { motionDurationProblem } from "../../features/video-studio/motion-duration";
+import {
+  MOTION_BRIEF_LIMITS,
+  motionBriefProblem,
+} from "../../features/video-studio/motion-one-sentence";
 
 const MODELS = new Set(["deepseek-v4-pro", "glm-5.2", "qwen3.7-max-2026-06-08"]);
 const NATIVE_ERRORS = new Set<MaterialVideoStudioErrorCode>([
@@ -239,6 +244,28 @@ export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGatew
     try {
       await invoke("cancel_motion_render_job", { renderJobId });
     } catch (error) {
+      throw mapError(error);
+    }
+  }
+
+  async submitMotionBrief(
+    request: MotionVideoBriefRequest,
+  ): Promise<MotionRenderJobSnapshot> {
+    // The brief is judged against the same shared contract the authoring agent
+    // reads, so an input the agent would refuse never becomes a native call
+    // the user has to watch fail.
+    if (
+      request.creationMode !== "one_sentence_v1" ||
+      !MOTION_BRIEF_LIMITS.aspectRatios.includes(request.aspectRatio) ||
+      !MOTION_BRIEF_LIMITS.languages.includes(request.language) ||
+      motionBriefProblem(request.brief, request.durationSeconds) !== null
+    ) {
+      throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
+    }
+    try {
+      return parseMotionJob(await invoke("submit_motion_video_brief", { request }));
+    } catch (error) {
+      if (error instanceof MaterialVideoStudioGatewayError) throw error;
       throw mapError(error);
     }
   }

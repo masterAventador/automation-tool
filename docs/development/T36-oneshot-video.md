@@ -155,6 +155,134 @@ python3 scripts/cq_04_ledger_honesty.py          exit 0
 `control-plane-e2e` 构建上，而不是去修 `video-studio-e2e` 那条。这条判断本次没有实施，
 留给下一条工作线，见「未完成」。
 
+## 动效线一句话链路：开工前定下的两个设计点
+
+### gsap 运行时用哪一份（已核实，非推断）
+
+| 候选 | 版本 | sha256 | 摘要登记 |
+| --- | --- | --- | --- |
+| `vendor/hyperframes/skills/talking-head-recut/assets/vendor/gsap.min.js` | 3.15.0 | `c3a03a34…` | ❌ 无 |
+| `vendor/hyperframes/skills/music-to-video/references/motion-primitives/assets/gsap.min.js` | 3.15.0 | `92bb9a96…` | ❌ 无 |
+| `build_offline_motion_catalog.py` 产出 | **3.14.2** | `c174bfce…` | ✅ `contracts/video/offline-motion-dependencies.v1.json` |
+
+**结论：用 3.14.2，不用 hyperframes 自带的那两份。** 三条依据：
+
+1. **提示词契约自己钉的就是 3.14.2。**
+   `vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md:12` 写的是
+   `https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js`，而这份 md 被
+   `contracts/video/motion-authoring-workflow.v1.json` 摘要锁定、**原文喂给模型当构图说明书**。
+   seed 3.15.0 会造成「提示词说 3.14.2、运行时给 3.15.0」的错位；这条链路上一次出事
+   （`FIX-one-sentence-video-wiring.md` 的 D3）正是 GSAP 加载不到导致满帧静图，
+   运行时与提示词不一致是同一类故障的温床。
+2. **3.14.2 的再分发权利已核验登记**：`offline-motion-dependencies.v1.json` 的 `packages`
+   条目记 `redistributable: true`、`verification: verified_package_json_and_license_page_2026-07-23`、
+   许可证 GSAP Standard License (Webflow)；`artifacts` 条目锁了 `downloadUrl` 与 `sha256`。
+   走它不新增未登记资产；反而 hyperframes 那两份**都没有摘要登记**，用它才是新增。
+3. **「不在 git 里」不等于「没有归属」**：`.local/` 被忽略，但 3.14.2 是「锁定 URL + 摘要校验的
+   可复现下载」，与内置 Chromium、media-toolchain 同形态——那两个也不在仓库里。
+
+使用前必须按契约摘要校验，不匹配就拒绝，**不回退、不将就**（与字体、Chromium 同一套规矩）。
+
+> **升级 hyperframes 时必须核对的一项（本次查出，写下来免得下次踩）：**
+> hyperframes v0.7.68 这个上游**内部不一致**——它的 core 参考文档指向 gsap 3.14.2，
+> 它别的 skill 里却捆了两份 3.15.0 的副本（两份除 banner 空白与末尾换行外逐字节相同）。
+> 将来升级 Submodule 时，如果 `minimal-composition.md` 里的版本号变了而
+> `contracts/video/offline-motion-dependencies.v1.json` 没跟着变，就会再次出现
+> 提示词与运行时错位。**升级任务必须显式核对这两处版本是否一致。**
+
+### 编排代理跑在哪个进程里
+
+放进 **Local Executor**（`backend/src/automation_tool/executor/`），由 Rust 以一次性子进程方式
+调用，stdin/stdout 传 JSON。依据：
+
+- 代理是**纯标准库**（`urllib`/`json`/`re`/`hashlib`/`uuid`/`pathlib`，无第三方依赖），
+  进哪个包都不增加依赖，但它要拿模型 API Key、要往私有工作区写文件——
+  执行器本来就是「跑在用户电脑上、做真实本机副作用、密钥不进 argv/env/日志」的那个进程，
+  安全姿态一致；
+- 放进 material-video-worker 会把动效线的编排耦合进素材线的冻结包，并要动
+  `material-video-worker.spec` 与其包契约的文件数/字节审计；
+- 渲染侧完全不变：代理产出的 `renderjob.json` 与固定模板路径同源，
+  之后的 worker 启动、沙箱、静图门禁、编码、Artifact 导入、成片页播放全部复用
+  现有 `run_motion_render_job`。
+
+### 本次落地：一句话入口的前端与共享边界（第 5 步 + 第 3 步的一部分）
+
+#### RED
+
+```text
+python3 scripts/test_motion_authoring_agent.py
+  FAIL: test_a_film_longer_than_the_sandbox_can_capture_is_refused_at_the_brief
+        AssertionError: MotionAuthoringRejected not raised
+  ERROR: test_brief_bounds_come_from_the_shared_contract
+        FileNotFoundError: contracts/video/motion-one-sentence-brief.v1.json
+  Ran 70 tests — FAILED (failures=1, errors=1)
+
+cd frontend && npx vitest run src/features/video-studio/motion-one-sentence.test.ts \
+      src/features/video-studio/VideoStudio.test.tsx \
+      src/platform/tauri/material-video-studio-gateway.test.ts
+  × submits a one-sentence brief through its own narrow command
+      TypeError: gateway.submitMotionBrief is not a function
+  × refuses a brief the shared contract would reject before reaching the native side
+      TypeError: gateway.submitMotionBrief is not a function
+  × submits a one-sentence brief for automatic authoring
+      Unable to find a label with the text of: 一句话视频需求
+  × explains an empty one-sentence brief instead of submitting it
+      Unable to find a label with the text of: 一句话视频需求
+  Test Files  3 failed (3)      Tests  4 failed | 30 passed (34)
+```
+
+第一条 Python RED 是**真实缺陷**，不是为了制造红：编排代理把 brief 的时长上限写成 120 秒，
+而渲染沙箱只能捕获 600 帧（30fps 下 20 秒）。结果是 60 秒的 brief 会被接受、配置模型、
+创建工作区，然后才在 `author()` 里被帧预算拒绝——晚而且看不懂。产品早就在
+`motion-storyboard-duration.v1.json` 里声明过真正的上限（`totalSecondsMaximum: 20`）。
+
+前端四条都是断言/运行期失败，工作树全程可编译，不打断并行工作线。
+
+#### GREEN
+
+```text
+python3 scripts/test_motion_authoring_agent.py                    Ran 70 tests OK   (67 → 70)
+cd frontend && npx vitest run                                     60 文件 / 496 passed / 1 expected fail
+cd frontend && npx tsc -b                                         exit 0
+cd frontend/src-tauri && cargo test --test motion_video_studio \
+      --test material_video_artifact                              16 passed
+python3 scripts/check_user_facing_branding.py                     passed (52 frontend, 250 native)
+python3 scripts/check_embedded_browser_video_roadmap.py           valid
+python3 scripts/cq_04_ledger_honesty.py                           exit 0
+```
+
+#### 交付
+
+- **新增共享契约 `contracts/video/motion-one-sentence-brief.v1.json`**：一句话描述的字数上限、
+  可选画幅、可选语言、品牌素材数量上限。表单在 App 里、判它的编排代理在另一个进程另一门语言里，
+  边界各写一份就会出现"表单给了代理会拒绝的选项"而两边都看不见。
+  **片长上限有意不写进这份契约**——它已经在 `motion-storyboard-duration.v1.json` 里声明过一次，
+  再写一遍就是这份契约本身要消灭的第二个来源。
+- **编排代理改读契约**：`MAX_BRIEF_CHARS` / `MAX_BRAND_ASSETS` / 画幅 / 语言来自新契约，
+  `MAX_DURATION_SECONDS` 来自分镜时长契约，全部 fail closed（读不到或漂移就拒绝，
+  与既有 `_load_render_canvas()` 同一套写法）。顺手把三处契约路径收敛成一个 `_CONTRACTS_ROOT`，
+  将来把代理搬进执行器包只改一行。
+- **超时长的 brief 现在在最早的地方被拒**。既有那条
+  `test_rejects_over_budget_duration_before_calling_model` 同步更新：断言拦截发生在
+  `MotionBrief` 构造时，**同时保留对 `author()` 帧预算门禁的覆盖**——把该用例的 fps 调到 60，
+  因为 20 秒 @30fps 正好等于 600 帧预算，只有高于默认帧率时那道门才够得着。
+- **前端 `motion-one-sentence.ts`**：`MOTION_BRIEF_LIMITS` 从两份契约读出，
+  `motionBriefProblem()` 给出人话原因。字数按码点计，和代理的口径一致。
+- **网关 `submitMotionBrief`**：走自己的窄命令 `submit_motion_video_brief`，
+  不借用固定模板那条（两者提交的根本不是一回事）。提交前用同一份契约判一次，
+  代理会拒的输入不会变成一次用户要眼看着失败的原生调用。
+- **「新建视频」页新增「一句话自动制作」卡片**：描述一句 → 点「开始自动制作」→
+  提示到「制作任务」看进度。固定模板手工制作原样保留，两者并列。
+  进度沿用既有 `motionJobs` 轮询，成片沿用既有播放器，没有再造。
+
+#### 这一步**没有**做完的部分（诚实划线）
+
+- 第 3 步只完成了「代理边界收敛到契约」这一半。**代理搬进 Local Executor 包、
+  一次性子进程 CLI 入口（stdin/stdout JSON）尚未落地**；
+- 第 4 步（Rust `submit_motion_video_brief` 命令、gsap 3.14.2 摘要校验后 seed 进渲染工作区）**未开始**。
+  所以现在点「开始自动制作」在真实 App 里会落到"命令不存在"，前端这一半是先行的；
+- gsap 装配进正式包按决定三排在签名公证线之后，**最终验收在正式包上做**，尚未进行。
+
 ## 失败矩阵
 
 | 场景 | 行为 |

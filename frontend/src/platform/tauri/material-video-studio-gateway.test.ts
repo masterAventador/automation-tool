@@ -181,6 +181,48 @@ describe("Tauri material video studio gateway", () => {
     });
   });
 
+  // 一句话自动制作是 Demo 底线里的那条：它必须有自己的窄命令，
+  // 不能借用固定模板那条（两者提交的东西根本不是一回事）。
+  it("submits a one-sentence brief through its own narrow command", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const request = {
+      creationMode: "one_sentence_v1" as const,
+      brief: "用蓝色商务风做一段本周销售增长说明",
+      aspectRatio: "16:9" as const,
+      durationSeconds: 12,
+      language: "zh" as const,
+    };
+    invoke.mockResolvedValueOnce({
+      renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+      revision: 1,
+      status: "queued",
+      progressPercent: 5,
+      subject: "用蓝色商务风做一段本周销售增长说明",
+      styleDisplayName: "一句话自动制作",
+      artifactId: null,
+      artifactSizeBytes: null,
+      failureCode: null,
+    });
+    await expect(gateway.submitMotionBrief(request)).resolves.toMatchObject({
+      status: "queued",
+    });
+    expect(invoke).toHaveBeenCalledWith("submit_motion_video_brief", { request });
+  });
+
+  it("refuses a brief the shared contract would reject before reaching the native side", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    await expect(
+      gateway.submitMotionBrief({
+        creationMode: "one_sentence_v1",
+        brief: "   ",
+        aspectRatio: "16:9",
+        durationSeconds: 12,
+        language: "zh",
+      }),
+    ).rejects.toMatchObject({ code: "protocol_mismatch" });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("refuses a smart-material artifact id that is not a UUID v4", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     await expect(gateway.readMaterialArtifact("not-a-uuid")).rejects.toMatchObject({

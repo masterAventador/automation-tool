@@ -23,6 +23,7 @@ import {
   type MaterialVideoStudioGateway,
   type MotionRenderJobSnapshot,
   type MotionVideoBeatDraft,
+  type MotionVideoBriefRequest,
   type MotionVideoDraftRequest,
   type RenderedVideoArtifactPayload,
 } from "./material-video-studio-gateway";
@@ -32,6 +33,10 @@ import {
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
+import {
+  MOTION_BRIEF_LIMITS,
+  motionBriefProblem,
+} from "./motion-one-sentence";
 import { motionPartsUsage } from "./motion-parts-catalog";
 import { MotionPartsCatalog } from "./MotionPartsCatalog";
 import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
@@ -261,6 +266,10 @@ function NewVideoPage({
   onSelectMethod,
   motionSubject,
   onMotionSubjectChange,
+  brief,
+  onBriefChange,
+  briefBusy,
+  onSubmitBrief,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
@@ -268,6 +277,10 @@ function NewVideoPage({
   readonly onSelectMethod: (method: VideoCreationMethodId) => void;
   readonly motionSubject: string;
   readonly onMotionSubjectChange: (subject: string) => void;
+  readonly brief: string;
+  readonly onBriefChange: (brief: string) => void;
+  readonly briefBusy: boolean;
+  readonly onSubmitBrief: () => void;
 }) {
   const [opening, setOpening] = useState(false);
   const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -292,6 +305,32 @@ function NewVideoPage({
           onChange={(event) => onMotionSubjectChange(event.target.value)}
           placeholder="例如：用品牌动效介绍新品的三个亮点"
         />
+        {selectedMethod === "motion_composition_v1" ? (
+          <Card size="small" title="一句话自动制作">
+            <Space orientation="vertical" size="small">
+              <Input.TextArea
+                aria-label="一句话视频需求"
+                rows={3}
+                maxLength={MOTION_BRIEF_LIMITS.maxBriefCharacters}
+                value={brief}
+                onChange={(event) => onBriefChange(event.target.value)}
+                placeholder="例如：用蓝色商务风做一段本周销售增长说明"
+              />
+              <Typography.Text type="secondary">
+                描述一句就够了。文案、分镜和画面由视频创作模型自动生成，最长
+                {MOTION_BRIEF_LIMITS.durationSecondsMaximum} 秒，渲染仍在本机完成。
+              </Typography.Text>
+              <Button
+                type="primary"
+                loading={briefBusy}
+                disabled={briefBusy}
+                onClick={onSubmitBrief}
+              >
+                开始自动制作
+              </Button>
+            </Space>
+          </Card>
+        ) : null}
         {selectedMethod === "motion_composition_v1" ? (
           <Card size="small" title="固定模板手工制作">
             <Space orientation="vertical" size="small">
@@ -865,6 +904,7 @@ export function VideoStudio({
   const [jobError, setJobError] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
+  const [brief, setBrief] = useState("");
   const [motionDraft, setMotionDraft] = useState<MotionDraft>({
     subject: "新品发布",
     secondsPerBeat: MOTION_DURATION_LIMITS.secondsPerBeatDefault,
@@ -902,6 +942,52 @@ export function VideoStudio({
   const onMotionStyleChange = useCallback((style: MotionStyleDraftSelection) => {
     setMotionDraft((current) => ({ ...current, style }));
   }, []);
+  /**
+   * Hand a one-sentence brief to the authoring agent.
+   *
+   * The brief is checked here first so an empty or over-long sentence reads as
+   * a sentence to fix rather than as a failed submission; the same check runs
+   * again in the gateway and once more natively, because this one only guards
+   * the typing, not the request.
+   */
+  const submitBrief = () => {
+    const durationSeconds = MOTION_DURATION_LIMITS.beatCountDefault *
+      MOTION_DURATION_LIMITS.secondsPerBeatDefault;
+    const problem = motionBriefProblem(brief, durationSeconds);
+    if (problem !== null) {
+      setSubmitMessage(problem);
+      return;
+    }
+    const request: MotionVideoBriefRequest = {
+      creationMode: "one_sentence_v1",
+      brief: brief.trim(),
+      aspectRatio: MOTION_BRIEF_LIMITS.aspectRatios[0]!,
+      durationSeconds,
+      language: MOTION_BRIEF_LIMITS.languages[0]!,
+    };
+    setBusy(true);
+    setSubmitMessage(null);
+    void gateway
+      .submitMotionBrief(request)
+      .then(() => {
+        setSubmitMessage("已提交一句话自动制作，可到“制作任务”查看进度。");
+        refresh();
+      })
+      .catch((error: unknown) => {
+        const code =
+          error instanceof MaterialVideoStudioGatewayError
+            ? error.code
+            : "operation_unavailable";
+        setSubmitMessage(
+          code === "configuration_required"
+            ? "请先到“设置与诊断”配置视频创作模型服务。"
+            : code === "render_unavailable"
+              ? "本机渲染组件暂时不可用，请到设置与诊断检查组件。"
+              : "一句话自动制作暂时无法提交，请稍后重试。",
+        );
+      })
+      .finally(() => setBusy(false));
+  };
   const submitMotion = () => {
     const style = MOTION_STYLE_CATALOG.find(
       (item) => item.id === motionDraft.style.stylePresetId,
@@ -970,6 +1056,10 @@ export function VideoStudio({
                 onMotionSubjectChange={(subject) =>
                   setMotionDraft((current) => ({ ...current, subject }))
                 }
+                brief={brief}
+                onBriefChange={setBrief}
+                briefBusy={busy}
+                onSubmitBrief={submitBrief}
               />
             ),
           },

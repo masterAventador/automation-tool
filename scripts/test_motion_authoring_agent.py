@@ -29,6 +29,11 @@ sys.path.insert(0, str(ROOT / "tools/motion-authoring"))
 
 from motion_authoring_agent import (  # noqa: E402
     ALLOWED_TOOLS,
+    BRIEF_ASPECT_RATIOS,
+    BRIEF_LANGUAGES,
+    MAX_BRAND_ASSETS,
+    MAX_BRIEF_CHARS,
+    MAX_DURATION_SECONDS,
     AuthoringWorkspace,
     DesignArtifact,
     MotionAuthoringAgent,
@@ -686,10 +691,29 @@ class AgentAuthoringTests(unittest.TestCase):
                 ),
                 model_config=_model_config(),
                 model_call=spy,
-                fps=30,
+                # 20s at 30fps is exactly the 600 frame budget, so the guard is
+                # only reachable above the default frame rate.
+                fps=60,
             )
+            # The duration ceiling now refuses this at the brief itself, which is
+            # the earliest point it can be refused and the only one the user's
+            # form can mirror.
+            with self.assertRaises(MotionAuthoringRejected):
+                MotionBrief(
+                    text="x",
+                    aspect_ratio="16:9",
+                    duration_seconds=MAX_DURATION_SECONDS + 1,
+                    language="zh",
+                )
+            # The frame-budget guard inside author() still has to hold on its
+            # own: a brief inside the duration ceiling can still exceed the
+            # snapshot budget at a higher frame rate, and that combination is
+            # only visible here.
             over_budget = MotionBrief(
-                text="x", aspect_ratio="16:9", duration_seconds=30, language="zh"
+                text="x",
+                aspect_ratio="16:9",
+                duration_seconds=MAX_DURATION_SECONDS,
+                language="zh",
             )
             with self.assertRaises(MotionAuthoringRejected):
                 agent.author(over_budget)
@@ -1077,6 +1101,61 @@ class ClipSequencingGateTests(unittest.TestCase):
 
     def test_single_clip_composition_needs_no_switching(self) -> None:
         self.assertTrue(check_composition(VALID_COMPOSITION, duration_seconds=6).ok)
+
+
+class OneSentenceBriefBoundsTests(unittest.TestCase):
+    """The brief a user types must be judged against the bounds that actually apply.
+
+    `author()` re-checks `duration_seconds * fps <= MAX_FRAME_COUNT` and rejects
+    a film the render sandbox cannot capture — but only after the brief has been
+    accepted, a model has been configured and a workspace exists. A brief asking
+    for a minute of video therefore failed late and opaquely, while the product
+    already declares the real ceiling in one place: the storyboard duration
+    contract the editor and the native validator both read.
+    """
+
+    def _duration_contract(self) -> dict[str, object]:
+        return json.loads(
+            (ROOT / "contracts/video/motion-storyboard-duration.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def _brief_contract(self) -> dict[str, object]:
+        return json.loads(
+            (ROOT / "contracts/video/motion-one-sentence-brief.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_the_longest_admissible_film_is_accepted(self) -> None:
+        maximum = self._duration_contract()["totalSecondsMaximum"]
+        brief = MotionBrief(
+            text="用蓝色商务风做一段本周销售增长说明",
+            aspect_ratio="16:9",
+            duration_seconds=maximum,
+            language="zh",
+        )
+        self.assertEqual(brief.duration_seconds, maximum)
+
+    def test_a_film_longer_than_the_sandbox_can_capture_is_refused_at_the_brief(
+        self,
+    ) -> None:
+        maximum = self._duration_contract()["totalSecondsMaximum"]
+        with self.assertRaises(MotionAuthoringRejected):
+            MotionBrief(
+                text="用蓝色商务风做一段本周销售增长说明",
+                aspect_ratio="16:9",
+                duration_seconds=maximum + 1,
+                language="zh",
+            )
+
+    def test_brief_bounds_come_from_the_shared_contract(self) -> None:
+        contract = self._brief_contract()
+        self.assertEqual(MAX_BRIEF_CHARS, contract["maxBriefCharacters"])
+        self.assertEqual(MAX_BRAND_ASSETS, contract["maxBrandAssets"])
+        self.assertEqual(sorted(BRIEF_ASPECT_RATIOS), sorted(contract["aspectRatios"]))
+        self.assertEqual(sorted(BRIEF_LANGUAGES), sorted(contract["languages"]))
 
 
 if __name__ == "__main__":

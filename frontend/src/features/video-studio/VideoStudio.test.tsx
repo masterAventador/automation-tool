@@ -35,6 +35,17 @@ function gateway(): MaterialVideoStudioGateway {
       base64: "AAAA",
     }),
     deleteMotionArtifact: vi.fn().mockResolvedValue(undefined),
+    submitMotionBrief: vi.fn().mockResolvedValue({
+      renderJobId: "b1f0d0c6-1d2f-4a0e-9c3a-2b6f5e7d8a90",
+      revision: 1,
+      status: "queued",
+      progressPercent: 5,
+      subject: "用蓝色商务风做一段本周销售增长说明",
+      styleDisplayName: "一句话自动制作",
+      artifactId: null,
+      artifactSizeBytes: null,
+      failureCode: null,
+    }),
     readMaterialArtifact: vi.fn().mockResolvedValue({
       artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
       mediaType: "video/mp4",
@@ -553,6 +564,51 @@ describe("video studio shell", () => {
       "src",
       "data:video/mp4;base64,BBBB",
     );
+  });
+
+  /**
+   * 客户 Demo 的底线是「一句话生成视频」。品牌动效线此前只有固定模板手工制作：
+   * 用户要自己写段数、每段标题和字幕，那不是一句话，是填表。
+   * 这条用例守住真正的一句话入口：描述一句 → 提交 → 进「制作任务」看进度。
+   */
+  it("submits a one-sentence brief for automatic authoring", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.type(
+      screen.getByLabelText("一句话视频需求"),
+      "用蓝色商务风做一段本周销售增长说明",
+    );
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
+      expect.objectContaining({
+        creationMode: "one_sentence_v1",
+        brief: "用蓝色商务风做一段本周销售增长说明",
+      }),
+    );
+    expect(
+      await screen.findByText("已提交一句话自动制作，可到“制作任务”查看进度。"),
+    ).toBeVisible();
+  });
+
+  // 空描述不该发出去：让原生侧去拒绝，用户看到的是一次失败而不是一条说明。
+  it("explains an empty one-sentence brief instead of submitting it", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(studioGateway.submitMotionBrief).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("请先用一句话描述你想要的视频内容。"),
+    ).toBeVisible();
   });
 
   // 没接发布页的场合（比如还没装配好的外壳）不能凭空多出一个点了没反应的按钮。

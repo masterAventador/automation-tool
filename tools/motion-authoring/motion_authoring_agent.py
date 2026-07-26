@@ -89,8 +89,6 @@ LOCKED_STYLE_PRESET_IDS: Final[frozenset[str]] = frozenset(
 )
 
 _HEX_COLOR: Final = re.compile(r"^#[0-9a-fA-F]{6}$")
-_LANGUAGES: Final[frozenset[str]] = frozenset({"zh", "en"})
-_ASPECT_RATIOS: Final[frozenset[str]] = frozenset({"16:9", "9:16"})
 _BEAT_ID: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _CATALOG_PART_ID: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _API_KEY: Final = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}$")
@@ -120,9 +118,11 @@ def _load_locked_catalog_part_ids() -> frozenset[str]:
 
 LOCKED_CATALOG_PART_IDS: Final[frozenset[str]] = _load_locked_catalog_part_ids()
 
-_RENDER_CANVAS_PATH: Final = (
-    Path(__file__).resolve().parents[2] / "contracts/video/motion-render-canvas.v1.json"
-)
+# Every contract this module reads is resolved from one root, so relocating the
+# agent into the packaged Executor moves a single line rather than three.
+_CONTRACTS_ROOT: Final = Path(__file__).resolve().parents[2] / "contracts"
+
+_RENDER_CANVAS_PATH: Final = _CONTRACTS_ROOT / "video/motion-render-canvas.v1.json"
 
 
 def _load_render_canvas() -> tuple[int, int]:
@@ -156,11 +156,90 @@ def _load_render_canvas() -> tuple[int, int]:
 
 RENDER_CANVAS_WIDTH, RENDER_CANVAS_HEIGHT = _load_render_canvas()
 
-MAX_BRIEF_CHARS: Final = 500
-MAX_DURATION_SECONDS: Final = 120
+
+_BRIEF_CONTRACT_PATH: Final = (
+    _CONTRACTS_ROOT / "video/motion-one-sentence-brief.v1.json"
+)
+_DURATION_CONTRACT_PATH: Final = (
+    _CONTRACTS_ROOT / "video/motion-storyboard-duration.v1.json"
+)
+
+
+def _load_brief_bounds() -> tuple[int, int, frozenset[str], frozenset[str]]:
+    """The bounds a typed brief is judged against, read from their one declaration.
+
+    The form that collects the sentence lives in another process and another
+    language. When these were literals here, the form could offer a framing the
+    agent refuses — a disagreement neither side is able to see.
+    """
+    try:
+        contract = json.loads(_BRIEF_CONTRACT_PATH.read_text(encoding="utf-8"))
+        characters = contract["maxBriefCharacters"]
+        assets = contract["maxBrandAssets"]
+        ratios = contract["aspectRatios"]
+        languages = contract["languages"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: one-sentence brief contract is unreadable"
+        ) from error
+    if (
+        contract.get("schemaVersion") != 1
+        or contract.get("policy") != "fail_closed"
+        or type(characters) is not int
+        or not (1 <= characters <= 10_000)
+        or type(assets) is not int
+        or not (0 <= assets <= 1024)
+        or not isinstance(ratios, list)
+        or not ratios
+        or not all(type(value) is str and value for value in ratios)
+        or not isinstance(languages, list)
+        or not languages
+        or not all(type(value) is str and value for value in languages)
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: one-sentence brief contract drifted"
+        )
+    return characters, assets, frozenset(ratios), frozenset(languages)
+
+
+def _load_maximum_duration_seconds() -> int:
+    """The longest film the render sandbox can actually capture.
+
+    Declared once in the storyboard duration contract that the editor and the
+    native validator already read. Judging a brief against a looser number here
+    only moved the refusal later: `author()` re-checks the frame budget, so a
+    minute-long brief was accepted, a model was configured and a workspace was
+    created before anything said no.
+    """
+    try:
+        contract = json.loads(_DURATION_CONTRACT_PATH.read_text(encoding="utf-8"))
+        maximum = contract["totalSecondsMaximum"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: storyboard duration contract is unreadable"
+        ) from error
+    if (
+        contract.get("schemaVersion") != 1
+        or contract.get("policy") != "fail_closed"
+        or type(maximum) is not int
+        or not (1 <= maximum <= 3600)
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: storyboard duration contract drifted"
+        )
+    return maximum
+
+
+(
+    MAX_BRIEF_CHARS,
+    MAX_BRAND_ASSETS,
+    BRIEF_ASPECT_RATIOS,
+    BRIEF_LANGUAGES,
+) = _load_brief_bounds()
+MAX_DURATION_SECONDS: Final = _load_maximum_duration_seconds()
+
 MAX_SCRIPT_BEATS: Final = 12
 MAX_STORYBOARD_BEATS: Final = 24
-MAX_BRAND_ASSETS: Final = 32
 MAX_COMPOSITION_BYTES: Final = 512_000
 DEFAULT_FPS: Final = 30
 MAX_FRAME_COUNT: Final = 600  # snapshot per-job frame budget (20s @ 30fps)
@@ -375,7 +454,7 @@ class ScriptArtifact:
             type(data["one_message"]) is str and 1 <= len(data["one_message"]) <= 200,
             "one_message is out of range",
         )
-        _require(data["language"] in _LANGUAGES, "unsupported language")
+        _require(data["language"] in BRIEF_LANGUAGES, "unsupported language")
         beats = data["beats"]
         _require(
             isinstance(beats, list) and 1 <= len(beats) <= MAX_SCRIPT_BEATS,
@@ -505,13 +584,13 @@ class MotionBrief:
             type(self.text) is str and 1 <= len(self.text) <= MAX_BRIEF_CHARS,
             "brief text is out of range",
         )
-        _require(self.aspect_ratio in _ASPECT_RATIOS, "unsupported aspect ratio")
+        _require(self.aspect_ratio in BRIEF_ASPECT_RATIOS, "unsupported aspect ratio")
         _require(
             type(self.duration_seconds) is int
             and 1 <= self.duration_seconds <= MAX_DURATION_SECONDS,
             "duration is out of range",
         )
-        _require(self.language in _LANGUAGES, "unsupported language")
+        _require(self.language in BRIEF_LANGUAGES, "unsupported language")
         _require(
             isinstance(self.brand_assets, tuple) and len(self.brand_assets) <= MAX_BRAND_ASSETS,
             "too many brand assets",
@@ -1385,6 +1464,11 @@ class MotionAuthoringAgent:
 
 __all__ = [
     "ALLOWED_TOOLS",
+    "BRIEF_ASPECT_RATIOS",
+    "BRIEF_LANGUAGES",
+    "MAX_BRAND_ASSETS",
+    "MAX_BRIEF_CHARS",
+    "MAX_DURATION_SECONDS",
     "AuthoringResult",
     "AuthoringWorkspace",
     "CheckResult",
