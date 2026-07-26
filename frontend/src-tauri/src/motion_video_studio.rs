@@ -48,6 +48,10 @@ const MAX_AUTHORING_RUNTIME_BYTES: u64 = 4 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MotionVideoStudioErrorCode {
+    /// The one-sentence path needs a video-creation model the user has not set
+    /// up yet. It is its own code because "go configure a model" and "the
+    /// renderer is broken" send the user to two different places.
+    ConfigurationRequired,
     DraftInvalid,
     JobUnavailable,
     RenderUnavailable,
@@ -397,6 +401,26 @@ impl MotionDurationLimits {
 
     pub const fn frame_count_maximum(&self) -> u32 {
         self.total_seconds_maximum * self.frames_per_second
+    }
+
+    /// The plan for an automatically authored film.
+    ///
+    /// A brief has no beat grid — the agent decides the shots — so the film is
+    /// one beat of the requested length. Frame count and budgets are still
+    /// derived here, so the authored path can never ask the sandbox for
+    /// something the fixed-template path would be refused.
+    pub fn brief_plan(
+        &self,
+        duration_seconds: u32,
+    ) -> Result<MotionStoryboardPlan, MotionVideoStudioError> {
+        if duration_seconds == 0 || duration_seconds > self.total_seconds_maximum {
+            return Err(draft_invalid());
+        }
+        Ok(MotionStoryboardPlan {
+            beat_count: 1,
+            seconds_per_beat: duration_seconds,
+            frames_per_second: self.frames_per_second,
+        })
     }
 
     /// Both factors must be in range and so must their product: a beat count
@@ -854,6 +878,107 @@ pub fn seed_authoring_runtime(
     write_private_file(&destination, &bytes)?;
     Ok(destination)
 }
+
+/// What the authoring agent reports back after it has written a composition.
+///
+/// This crosses a process boundary from a component whose whole job is to turn
+/// untrusted model output into files, so it is parsed strictly and then
+/// re-checked field by field against the brief the user actually submitted.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AuthoredCompositionAnswer {
+    schema_version: u8,
+    status: String,
+    entry_html: String,
+    allowed_assets: Vec<String>,
+    frame_count: u32,
+    frames_per_second: u32,
+    duration_seconds: u32,
+    aspect_ratio: String,
+}
+
+/// The name the agent gives a run it completed.
+const AUTHORED_STATUS: &str = "authored";
+
+/// Turn an agent answer into a RenderJob, or refuse it.
+///
+/// The answer names the file the renderer will load and the assets the render
+/// sandbox will allow. Accepting it as given would let a buggy — or tampered —
+/// agent widen the sandbox or point the render at a file nobody authored, so
+/// every field is re-derived from the brief or re-checked against the
+/// workspace. Nothing here trusts the agent's arithmetic.
+pub fn accept_authored_render_job(
+    store: &VideoJobWorkspaceStore,
+    workspace: &VideoJobWorkspace,
+    request: &MotionVideoBriefRequest,
+    answer: &str,
+) -> Result<PreparedMotionRenderJob, MotionVideoStudioError> {
+    let answer: AuthoredCompositionAnswer =
+        serde_json::from_str(answer).map_err(|_| render_unavailable())?;
+    let plan = duration_limits()?.brief_plan(request.duration_seconds())?;
+    if answer.schema_version != 1
+        || answer.status != AUTHORED_STATUS
+        || answer.entry_html != MOTION_COMPOSITION_FILE
+        || answer.duration_seconds != request.duration_seconds()
+        || answer.aspect_ratio != request.aspect_ratio()
+        || answer.frames_per_second != plan.frames_per_second()
+        || answer.frame_count != plan.frame_count()
+    {
+        return Err(render_unavailable());
+    }
+    let work = store
+        .worker_asset_directory(workspace)
+        .map_err(map_workspace_error)?;
+    if !work.join(MOTION_COMPOSITION_FILE).is_file() {
+        return Err(render_unavailable());
+    }
+    let mut allowed_assets = Vec::new();
+    for asset in &answer.allowed_assets {
+        // The sandbox resolves these against the worker asset root, so an
+        // absolute path or a parent traversal would point outside the
+        // workspace the App bounds and eventually deletes.
+        if asset.is_empty()
+            || asset.len() > 256
+            || asset.starts_with('/')
+            || asset.contains('\\')
+            || Path::new(asset)
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+            || !work.join(asset).is_file()
+        {
+            return Err(render_unavailable());
+        }
+        allowed_assets.push(asset.clone());
+    }
+    if !allowed_assets
+        .iter()
+        .any(|asset| asset == AUTHORING_RUNTIME_ASSET)
+    {
+        return Err(render_unavailable());
+    }
+    let snapshot = MotionRenderJobSnapshot {
+        render_job_id: workspace.job_id(),
+        revision: 1,
+        status: MotionRenderJobStatus::Queued,
+        progress_percent: 5,
+        subject: request.brief().to_owned(),
+        style_display_name: MOTION_BRIEF_STYLE_DISPLAY_NAME.to_owned(),
+        artifact_id: None,
+        artifact_size_bytes: None,
+        failure_code: None,
+    };
+    save_snapshot(store, workspace, &snapshot)?;
+    Ok(PreparedMotionRenderJob {
+        render_job_id: workspace.job_id(),
+        allowed_assets,
+        plan,
+    })
+}
+
+/// How an automatically authored film is labelled in the jobs and artifacts
+/// pages. The fixed-template path shows the locked style there; this path has
+/// no style to show, so it says how the film was made instead.
+pub const MOTION_BRIEF_STYLE_DISPLAY_NAME: &str = "一句话自动制作";
 
 pub fn jobs(
     store: &VideoJobWorkspaceStore,
@@ -1409,7 +1534,14 @@ pub const fn render_unavailable() -> MotionVideoStudioError {
     }
 }
 
-const fn storage_unavailable() -> MotionVideoStudioError {
+pub const fn configuration_required() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::ConfigurationRequired,
+        retryable: false,
+    }
+}
+
+pub const fn storage_unavailable() -> MotionVideoStudioError {
     MotionVideoStudioError {
         code: MotionVideoStudioErrorCode::StorageUnavailable,
         retryable: false,

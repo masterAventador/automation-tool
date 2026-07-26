@@ -502,6 +502,221 @@ fn submit_motion_video_draft(
     Ok(initial)
 }
 
+/// Start the render for a prepared job, whichever way its composition was made.
+///
+/// The fixed template and the authored brief differ only in how the workspace
+/// came to hold a composition. From here they are the same job, so they run the
+/// same launch, the same sandbox and the same still-image gate rather than two
+/// paths that could drift.
+fn start_motion_render(
+    app: tauri::AppHandle,
+    orchestrator: &local_video_orchestrator::LocalVideoOrchestrator,
+    workspaces: &video_job_workspace::VideoJobWorkspaceStore,
+    runtime: &MotionRuntimePaths,
+    prepared: motion_video_studio::PreparedMotionRenderJob,
+) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
+{
+    let render_job_id = prepared.render_job_id();
+    let allowed_assets = prepared.allowed_assets().to_vec();
+    let (asset_root, _, _) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
+    let discard = || {
+        if let Ok(workspace) = workspaces.open(render_job_id) {
+            let _ = workspaces.finish(
+                &workspace,
+                video_job_workspace::VideoWorkspaceDisposition::Delete,
+            );
+        }
+    };
+    let launch = match motion_worker_launch(
+        runtime.worker_package.clone(),
+        asset_root,
+        runtime.browser.clone(),
+        runtime.chromium_major,
+        runtime.toolchain.brand_motion_environment(),
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            discard();
+            return Err(error);
+        }
+    };
+    if orchestrator.start(launch).is_err()
+        || orchestrator
+            .health(local_video_orchestrator::VideoWorkerKind::Node)
+            .is_err()
+    {
+        let _ = orchestrator.stop(local_video_orchestrator::VideoWorkerKind::Node);
+        discard();
+        return Err(motion_video_studio::render_unavailable());
+    }
+    let initial = motion_video_studio::snapshot(workspaces, render_job_id)?;
+    let frame_count = prepared.frame_count();
+    let frames_per_second = prepared.frames_per_second();
+    let ffmpeg = runtime.toolchain.ffmpeg_path().to_path_buf();
+    std::thread::spawn(move || {
+        run_motion_render_job(
+            app,
+            render_job_id,
+            allowed_assets,
+            frame_count,
+            frames_per_second,
+            ffmpeg,
+        );
+    });
+    Ok(initial)
+}
+
+/// How long the one-shot authoring run may take.
+///
+/// It is a model call with a bounded local-fix loop behind it, so the budget is
+/// generous; it is still bounded, because a hung child would otherwise hold the
+/// submit command open for as long as the model keeps the socket alive.
+const MOTION_AUTHORING_DEADLINE: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Run the authoring agent once, in the Executor package the user installed.
+///
+/// The model credential travels on stdin and nowhere else: not in `argv`, where
+/// every process listing would carry it, and not in the environment, which is
+/// inherited by whatever the child starts. The child is killed if it outlives
+/// its deadline, so a stalled model cannot pin the command open.
+fn run_motion_authoring(
+    entrypoint: &std::path::Path,
+    request: &serde_json::Value,
+) -> Result<String, motion_video_studio::MotionVideoStudioError> {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(entrypoint)
+        .arg("--author-motion")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| motion_video_studio::render_unavailable())?;
+    let payload = serde_json::to_vec(request)
+        .map_err(|_| motion_video_studio::render_unavailable())?;
+    let written = child
+        .stdin
+        .take()
+        .ok_or_else(motion_video_studio::render_unavailable)
+        .and_then(|mut stdin| {
+            stdin
+                .write_all(&payload)
+                .map_err(|_| motion_video_studio::render_unavailable())
+        });
+    if written.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(motion_video_studio::render_unavailable());
+    }
+    let deadline = std::time::Instant::now() + MOTION_AUTHORING_DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return Err(motion_video_studio::render_unavailable()),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(motion_video_studio::render_unavailable());
+            }
+        }
+    }
+    let mut answer = String::new();
+    child
+        .stdout
+        .take()
+        .ok_or_else(motion_video_studio::render_unavailable)
+        .and_then(|mut stdout| {
+            use std::io::Read as _;
+            let mut bounded = Vec::new();
+            std::io::Read::take(&mut stdout, 64 * 1024)
+                .read_to_end(&mut bounded)
+                .map_err(|_| motion_video_studio::render_unavailable())?;
+            answer = String::from_utf8(bounded)
+                .map_err(|_| motion_video_studio::render_unavailable())?;
+            Ok(())
+        })?;
+    Ok(answer)
+}
+
+/// Submit one typed sentence for automatic authoring and rendering.
+///
+/// The render half is deliberately the same one the fixed template uses: the
+/// agent produces a composition and a declared asset list, and from there the
+/// worker launch, the sandbox, the still-image gate, the encode and the
+/// artifact import are the code that is already in production. Only the way
+/// the composition came to exist is new.
+#[tauri::command]
+fn submit_motion_video_brief(
+    app: tauri::AppHandle,
+    request: motion_video_studio::MotionVideoBriefRequest,
+    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
+{
+    request.validate()?;
+    let runtime = motion_runtime_paths(&app, &authority)?;
+    let credential = settings
+        .credential_for_worker(model_service_settings::ModelServicePurpose::VideoCreative)
+        .map_err(|_| motion_video_studio::configuration_required())?;
+    let entrypoint = platform
+        .verified_entrypoint()
+        .map_err(|_| motion_video_studio::render_unavailable())?;
+    let workspace = workspaces
+        .create_new()
+        .map_err(|_| motion_video_studio::storage_unavailable())?;
+    let outcome = (|| {
+        motion_video_studio::seed_authoring_runtime(
+            &workspaces,
+            &workspace,
+            &runtime
+                .worker_package
+                .join(motion_video_studio::AUTHORING_RUNTIME_ASSET),
+        )?;
+        let work = workspaces
+            .worker_asset_directory(&workspace)
+            .map_err(|_| motion_video_studio::storage_unavailable())?;
+        let answer = run_motion_authoring(
+            &entrypoint,
+            &serde_json::json!({
+                "schemaVersion": 1,
+                "workspace": work,
+                "brief": request.brief(),
+                "aspectRatio": request.aspect_ratio(),
+                "durationSeconds": request.duration_seconds(),
+                "language": request.language(),
+                "brandAssets": [],
+                "model": {
+                    "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
+                    "modelId": credential.model_id().as_str(),
+                    "apiKey": credential.api_key(),
+                },
+            }),
+        )?;
+        motion_video_studio::accept_authored_render_job(
+            &workspaces,
+            &workspace,
+            &request,
+            &answer,
+        )
+    })();
+    let prepared = match outcome {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = workspaces.finish(
+                &workspace,
+                video_job_workspace::VideoWorkspaceDisposition::Delete,
+            );
+            return Err(error);
+        }
+    };
+    start_motion_render(app, &orchestrator, &workspaces, &runtime, prepared)
+}
+
 /// The shortest deadline the MP4 encode step may be given, kept at the value
 /// the fixed three second template shipped with so no existing film loses time.
 const MOTION_ENCODE_DEADLINE_FLOOR_SECONDS: u64 = 120;
@@ -4112,6 +4327,7 @@ pub fn run() {
         read_material_video_artifact,
         delete_material_video_artifact,
         submit_motion_video_draft,
+        submit_motion_video_brief,
         get_motion_render_jobs,
         cancel_motion_render_job,
         read_motion_video_artifact,
@@ -4178,6 +4394,7 @@ pub fn run() {
         read_material_video_artifact,
         delete_material_video_artifact,
         submit_motion_video_draft,
+        submit_motion_video_brief,
         get_motion_render_jobs,
         cancel_motion_render_job,
         read_motion_video_artifact,
@@ -4275,6 +4492,7 @@ pub fn run() {
         read_material_video_artifact,
         delete_material_video_artifact,
         submit_motion_video_draft,
+        submit_motion_video_brief,
         get_motion_render_jobs,
         cancel_motion_render_job,
         read_motion_video_artifact,

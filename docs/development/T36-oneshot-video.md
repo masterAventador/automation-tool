@@ -408,6 +408,58 @@ python3 scripts/cq_04_ledger_honesty.py                                  exit 0
   **没有 `.local/offline-motion-deps/` 缓存的机器上**能从锁定 URL 重建。
 - 因此**在真实 App 里点「开始自动制作」仍然会落到"命令不存在"**，端到端与正式包验收都未进行。
 
+### 本次落地：`submit_motion_video_brief` 命令接通（第 4 步的后半）
+
+#### RED
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_runtime
+  error[E0432]: unresolved import `accept_authored_render_job`
+```
+
+#### GREEN
+
+```text
+cargo test --test motion_authoring_runtime                        5 passed
+cargo build --lib                                                 OK
+cargo build --lib --features control-plane-e2e                    OK
+cargo build --lib --features video-studio-e2e                     OK
+cd frontend && npx tsc -b                                         exit 0
+```
+
+#### 交付
+
+- **`accept_authored_render_job()`：代理的答复是另一个进程送来的不可信输入，逐字段重算或重查。**
+  它指名渲染器要加载哪个文件、沙箱要放行哪些资源——原样采信等于让一个有 bug 或被篡改的
+  代理扩大沙箱、或者把渲染指向一个根本没人编排过的文件。因此：入口必须正好是
+  `MOTION_COMPOSITION_FILE`；时长、画幅必须与**用户提交的 brief** 一致；帧率、帧数由
+  `brief_plan()` 从时长重新算出来，不采信代理的算术；白名单里每一项都要是工作区内的相对
+  路径（拒绝绝对路径、`..`、反斜杠）且文件真实存在；且必须包含动画运行时。
+  有一条用例用 7 种变异逐个验证这些拒绝。
+- **`brief_plan()`**：brief 没有分镜网格（镜头由代理决定），所以按"一整段"成片计算帧预算，
+  与固定模板走同一套 `MotionStoryboardPlan`，不会出现"授权路径能问沙箱要一个模板路径
+  会被拒的东西"。
+- **`start_motion_render()`：两条提交路径共用同一段渲染起点。** 固定模板与一句话的区别只在
+  "工作区里的合成是怎么来的"，从这里往后是同一个 job——同一次 worker 启动、同一个沙箱、
+  同一道静图门禁、同一条编码与 Artifact 导入。原先那段启动逻辑从
+  `submit_motion_video_draft` 里抽出来，两边共用，避免以后各自漂移。
+- **凭据只走 stdin**：`run_motion_authoring()` 用 `--author-motion` 起子进程，模型 baseUrl /
+  modelId / apiKey 放在 stdin 的 JSON 里。**不进 argv**（进程列表人人可见）、
+  **不进环境变量**（会被子进程继承）、不进答复、不进日志（子进程 stderr 直接丢弃）。
+  10 分钟预算到点就 kill，避免模型挂住把命令一直撑开。
+- **执行器入口走已验证的那份**：`ExecutorManager::verified_entrypoint()` 复用与长驻执行器
+  启动完全相同的签名与清单校验——对执行器会被拒的包，对一次性运行同样被拒。不自己拼路径。
+- **新增 `ConfigurationRequired` 错误码**：没配视频创作模型时，用户该被送去"设置与诊断"，
+  而不是被告知"渲染组件坏了"。前端网关白名单本来就认这个码。
+- **三个 `invoke_handler` 全部注册**（脚本核对 `registered in 3 handlers`）。
+
+#### 仍然没做完
+
+- **gsap 还没进 `motion-video-worker/package/`**。命令按生产路径去资源目录取
+  `runtime/gsap.min.js`，**没有 vendor / `.local` 回退**，所以在 gsap 装配进包之前，
+  这条命令会在 seed 那步 fail closed。这是有意的：宁可拒绝，也不引入第二条读取路径。
+- 端到端（测试构建）与正式包最终验收都未进行。
+
 ## 失败矩阵
 
 | 场景 | 行为 |

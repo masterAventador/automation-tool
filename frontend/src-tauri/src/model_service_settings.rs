@@ -12,7 +12,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 const SCRIPT_CREDENTIAL_FILE: &str = "model-service-script-v1";
 const VIDEO_CREDENTIAL_FILE: &str = "model-service-video-creative-v1";
-const PRODUCTION_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+/// The one OpenAI-compatible endpoint every worker and agent is pointed at.
+/// Declared once so a second spelling can never reach a model this product did
+/// not configure.
+pub const PRODUCTION_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_API_KEY_LENGTH: usize = 256;
 const MAX_RESPONSE_BYTES: u64 = 64 * 1024;

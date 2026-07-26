@@ -395,6 +395,11 @@ impl ExecutorPlatformService {
         }
     }
 
+    /// The verified Executor entrypoint, for a one-shot run of that binary.
+    pub fn verified_entrypoint(&self) -> Result<std::path::PathBuf, ExecutorPlatformError> {
+        self.manager.verified_entrypoint().map_err(map_manager_error)
+    }
+
     pub fn diagnostics(&self) -> Result<Vec<String>, ExecutorPlatformError> {
         self.manager.diagnostics().map_err(map_manager_error)
     }

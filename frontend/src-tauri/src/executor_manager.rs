@@ -450,6 +450,20 @@ impl ExecutorManager {
         Ok(status)
     }
 
+    /// The entrypoint of the installed package, after the same signature and
+    /// inventory verification the long-lived executor launch performs.
+    ///
+    /// One-shot runs of this binary (the brand-motion authoring pass) go
+    /// through here rather than composing a path of their own, so a package
+    /// that would be refused for the executor is refused for them too.
+    pub fn verified_entrypoint(&self) -> Result<std::path::PathBuf, ExecutorManagerError> {
+        self.core
+            .verifier
+            .verify_current(&self.core.package_root)
+            .map(|package| package.entrypoint_path().to_path_buf())
+            .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::PackageRejected))
+    }
+
     pub fn validate_installed_package(&self) -> Result<(), ExecutorManagerError> {
         self.core
             .verifier

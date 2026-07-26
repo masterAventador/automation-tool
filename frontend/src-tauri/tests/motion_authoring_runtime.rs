@@ -161,3 +161,73 @@ fn a_brief_is_judged_against_the_same_contracts_the_agent_reads() {
         assert_eq!(error.code(), MotionVideoStudioErrorCode::DraftInvalid);
     }
 }
+
+/// The agent's answer is untrusted input from another process.
+///
+/// It names the file the renderer will load and the assets the sandbox will
+/// allow, so accepting it unchecked would let a compromised or simply buggy
+/// agent widen the sandbox or point the render at something that was never
+/// authored. Every field is therefore re-derived or re-checked against the
+/// brief the user actually submitted.
+#[test]
+fn an_authored_answer_is_rechecked_against_the_brief_before_it_becomes_a_render_job() {
+    use automation_tool_desktop_lib::motion_video_studio::{
+        accept_authored_render_job, MOTION_COMPOSITION_FILE,
+    };
+
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let workspace = store.create_new().unwrap();
+    let work = store.worker_asset_directory(&workspace).unwrap();
+    fs::create_dir_all(work.join("runtime")).unwrap();
+    fs::write(work.join(AUTHORING_RUNTIME_ASSET), b"/* runtime */").unwrap();
+    fs::write(work.join(MOTION_COMPOSITION_FILE), b"<html></html>").unwrap();
+    let request = MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        6,
+        "zh".to_owned(),
+    )
+    .unwrap();
+
+    let good = serde_json::json!({
+        "schemaVersion": 1,
+        "status": "authored",
+        "entryHtml": MOTION_COMPOSITION_FILE,
+        "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+        "frameCount": 6 * 30,
+        "framesPerSecond": 30,
+        "durationSeconds": 6,
+        "aspectRatio": "16:9",
+    });
+    let prepared = accept_authored_render_job(&store, &workspace, &request, &good.to_string())
+        .expect("a consistent answer is accepted");
+    assert_eq!(prepared.frame_count(), 6 * 30);
+    assert_eq!(prepared.allowed_assets(), [AUTHORING_RUNTIME_ASSET]);
+
+    for mutation in [
+        serde_json::json!({"status": "rejected"}),
+        // 指向一个不是编排产物的入口
+        serde_json::json!({"entryHtml": "runtime/gsap.min.js"}),
+        // 把沙箱白名单扩大到工作区之外
+        serde_json::json!({"allowedAssets": ["../../../etc/passwd"]}),
+        // 声明一个工作区里根本不存在的资源
+        serde_json::json!({"allowedAssets": ["runtime/absent.js"]}),
+        // 帧数与用户提交的时长对不上
+        serde_json::json!({"frameCount": 6 * 30 + 1}),
+        // 时长与用户提交的不一致
+        serde_json::json!({"durationSeconds": 7}),
+        // 画幅与用户提交的不一致
+        serde_json::json!({"aspectRatio": "9:16"}),
+    ] {
+        let mut document = good.clone();
+        for (key, value) in mutation.as_object().unwrap() {
+            document[key] = value.clone();
+        }
+        assert!(
+            accept_authored_render_job(&store, &workspace, &request, &document.to_string())
+                .is_err(),
+            "an answer disagreeing with the brief must not become a RenderJob: {document}"
+        );
+    }
+}
