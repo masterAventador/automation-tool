@@ -202,7 +202,7 @@ git status          # 应显示 On branch codex/resilience-batch，基线 705504
 | 任务 | 状态 | 提交 | RED 证据（看到的失败输出） | 备注 / 反驳 |
 |---|---|---|---|---|
 | T63 | ✅ 完成 | 本提交 | 旧诊断设置、旧策略 schema、通道切换和非规范 JSON 四组断言均先在启动失败处得到 RED | 已知 N-1 自动迁移并原子回写，通道切换清除旧候选/决策，未知版本继续 fail closed；诊断设置 6 项、策略 13 项回归通过 |
-| T64 | ⬜ | | | |
+| T64 | ✅ 完成 | 本提交 | 孤儿 package、孤儿 partial 和同尺寸错摘要 package 均先在启动强退或残留断言处得到 RED | 启动时清理可判定的文件/manifest 崩溃残态并同步目录，损坏 manifest、符号链接和清理失败继续 fail closed；缓存 8 项回归通过 |
 | T22 | ⬜ | | | |
 | T66a | ✅ 完成 | `e208b64` + 本提交 | `over_permissive_secret_files_are_repaired_for_load_save_and_delete` 先在 `repair and load: Unavailable` 断言失败 | 用同一个 `O_NOFOLLOW` 文件描述符核对 inode、修复权限并读取，消除复核发现的重开竞态；secure store 7 项、注册交接 15 项、更新策略 14 项回归通过 |
 | T58c | ⬜ | | | |
