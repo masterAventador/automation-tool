@@ -419,6 +419,10 @@ describe("video studio shell", () => {
     expect(studioGateway.submitMotionDraft).not.toHaveBeenCalled();
   });
 
+  // 这条实测稳定在 4.6 秒，而 vitest 的默认单条上限是 5 秒——不是它慢的问题，是
+  // 余量只剩 0.4 秒，机器一忙就翻面，而它一旦超时，同文件后面几条会跟着报
+  // 「找不到 开始自动制作 按钮」，看起来像是别的地方坏了。给一个明确的上限，让它
+  // 要么是真失败要么是真通过。
   it("edits a three-beat manual draft, plays the real preview and submits it without claiming AI", async () => {
     const user = userEvent.setup();
     const studioGateway = gateway();
@@ -463,7 +467,7 @@ describe("video studio shell", () => {
         ]),
       }),
     );
-  });
+  }, 20_000);
 
   it("shows native motion progress, cancels it and plays the imported MP4 artifact", async () => {
     const user = userEvent.setup();
@@ -693,19 +697,11 @@ describe("video studio shell", () => {
   });
 
   /**
-   * 只有真的读过这句话的失败，才有资格让用户去改这句话。
+   * 提交一句话需求，让网关以 `code` 失败，把卡片上那条提示原文取回来。
    *
-   * 失败注入实测（2026-07-26）：模型服务连不上，2 秒后界面说「判定这次描述做不
-   * 出来…请换一句更具体的描述后重试」；模型接上了却不再回话，363 秒后一字不差的
-   * 同一句。两次都没有任何东西读过用户那句描述。演示当天讲解人会照着这句话去改
-   * 文案，越改越错——真因在模型服务，改多少遍句子都没用。
-   *
-   * 编排子进程侧已经把「模型服务用不了」移出拒绝通道（见 entry.py 的
-   * `_MODEL_SERVICE_REASONS`），它现在落在 `authoring_crashed` 上。所以这个码的
-   * 文案必须点名模型服务和网络，并且不许再把责任推给描述；反过来，
-   * `authoring_refused` 是代理真的读完并拒绝了，那一句留着才是对的。
+   * 用 `paste` 而不是 `type`：走完一轮的开销主要在渲染和点击，但逐字符敲还要再花
+   * 半秒，而下面那条互不相同的用例要连走七轮。这里要断言的是文案，不是输入法。
    */
-  // 提交一句话需求，让网关以 `code` 失败，把卡片上那条提示原文取回来。
   const briefFailureText = async (code: MaterialVideoStudioErrorCode) => {
     resetMotionRunStore();
     const user = userEvent.setup();
@@ -717,7 +713,8 @@ describe("video studio shell", () => {
 
     await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
     await user.clear(screen.getByLabelText("一句话视频需求"));
-    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByLabelText("一句话视频需求"));
+    await user.paste("用蓝色商务风做一段说明");
     await user.click(screen.getByRole("button", { name: "开始自动制作" }));
 
     const text = (await screen.findByRole("alert")).textContent ?? "";
@@ -725,64 +722,89 @@ describe("video studio shell", () => {
     return text;
   };
 
-  it("only tells the user to rewrite the sentence when something actually read it", async () => {
-    // 只找「叫用户去改这句话」的说法。「不是描述写得不好」是撇清，不是指责，
-    // 不能算进来。
-    const asksForANewSentence = /换一句|更具体的描述|把描述写得/u;
-    for (const [code, blames] of [
-      ["authoring_refused", true],
-      ["authoring_timed_out", false],
-      ["authoring_crashed", false],
-      ["authoring_answer_invalid", false],
-      ["authoring_model_transport_failed", false],
-      ["authoring_model_timed_out", false],
-      ["authoring_installation_damaged", false],
-    ] as const) {
-      expect(asksForANewSentence.test(await briefFailureText(code))).toBe(blames);
-    }
-  });
+  /**
+   * 只有真的读过这句话的失败，才有资格让用户去改这句话。
+   *
+   * 失败注入实测（2026-07-26）：模型服务连不上，2 秒后界面说「判定这次描述做不
+   * 出来…请换一句更具体的描述后重试」；模型接上了却不再回话，363 秒后一字不差的
+   * 同一句；worktree 里 vendor 是空的，2 秒后还是那一句。三次都没有任何东西读过
+   * 用户那句描述。演示当天讲解人会照着这句话去改文案，越改越错——真因分别在模型
+   * 服务和安装包，改多少遍句子都没用。
+   *
+   * 子进程侧现在按原因 token 把这些移出拒绝通道（见
+   * contracts/video/motion-authoring-refusal.v1.json 的 nonRefusalOutcomes），
+   * 各自落在自己的码上。这条用例只守一件事：那句「换一句」只许出现在
+   * `authoring_refused` 上，因为它是唯一一个代理真的读完并拒绝了的。
+   */
+  // 只找「叫用户去改这句话」的说法。「不是描述写得不好」是撇清，不是指责，
+  // 不能算进来。
+  const ASKS_FOR_A_NEW_SENTENCE = /换一句|更具体的描述|把描述写得/u;
+
+  /**
+   * 每个码各自该说什么、不该说什么。
+   *
+   * 一个码一条用例，而不是一个循环走七遍：每次提交都是一整轮渲染加真实点击，
+   * 七轮加起来接近 vitest 默认的五秒上限，单独跑这个文件时过、全量并行时随机红。
+   * 拆开之后每条 400 毫秒上下，红的时候用例名也直接点出是哪个码。
+   */
+  it.each([
+    // 代理真的读完并拒绝了：唯一有资格叫用户改句子的一条。
+    ["authoring_refused", true, /换一句/u, null],
+    ["authoring_timed_out", false, /最长时间/u, null],
+    ["authoring_crashed", false, /我们这边/u, null],
+    ["authoring_answer_invalid", false, /本机校验/u, null],
+    // 完全没回应：能查的是网络和模型服务地址。
+    ["authoring_model_transport_failed", false, /网络.*视频创作模型服务|视频创作模型服务.*网络/su, null],
+    // 接上了但不回话：说清「已经接上」，不要再把人支去查网络。但也不许宣称
+    // 「网络是通的」——连接无声断掉同样会以读超时的形式到这里，那种情况下这句
+    // 话会把用户支离真正的原因。
+    ["authoring_model_timed_out", false, /已经接上/u, /检查网络|网络也是通的|网络没问题/u],
+    // 安装坏了：重试没有用，唯一的出路是重装。
+    ["authoring_installation_damaged", false, /重新安装/u, /请重试|稍后重试/u],
+  ] as const)(
+    "tells the user what to do about %s without blaming their sentence",
+    async (code, blames, required, forbidden) => {
+      const text = await briefFailureText(code);
+
+      // 兜底那句等于这个码根本没人写文案。
+      expect(text).not.toContain("一句话自动制作暂时无法提交");
+      expect(ASKS_FOR_A_NEW_SENTENCE.test(text)).toBe(blames);
+      expect(text).toMatch(required);
+      if (forbidden !== null) {
+        expect(text).not.toMatch(forbidden);
+      }
+    },
+  );
 
   /**
    * 拆出来的码只有说出不同的话才算拆开。
    *
    * 2026-07-26 的故障注入里，模型连不上和模型接上后不再回话走到同一句，
-   * 一个 2 秒一个 363 秒，用户看到的字一模一样。所以这里既比对每条提示
-   * 各自要带的落脚点，也直接断言几条互不相同。
+   * 一个 2 秒一个 363 秒，用户看到的字一模一样。上面那组用例逐个盯落脚点，
+   * 这条盯的是它们之间的关系——七条提示必须两两不同，这是逐条断言看不出来的。
+   *
+   * 它确实要跑满七轮，所以给了明确的上限而不是靠默认值撞运气。
    */
-  it("sends each authoring failure to a different place", async () => {
-    const said = new Map<MaterialVideoStudioErrorCode, string>();
-    for (const code of [
-      "authoring_refused",
-      "authoring_timed_out",
-      "authoring_crashed",
-      "authoring_answer_invalid",
-      "authoring_model_transport_failed",
-      "authoring_model_timed_out",
-      "authoring_installation_damaged",
-    ] as const) {
-      said.set(code, await briefFailureText(code));
-    }
+  it(
+    "never says the same thing about two different authoring failures",
+    async () => {
+      const said = new Set<string>();
+      for (const code of [
+        "authoring_refused",
+        "authoring_timed_out",
+        "authoring_crashed",
+        "authoring_answer_invalid",
+        "authoring_model_transport_failed",
+        "authoring_model_timed_out",
+        "authoring_installation_damaged",
+      ] as const) {
+        said.add(await briefFailureText(code));
+      }
 
-    // 一句都不许落到兜底那句上：兜底等于这个码没人写文案。
-    for (const [code, text] of said) {
-      expect(text, code).not.toContain("一句话自动制作暂时无法提交");
-      expect(text.length, code).toBeGreaterThan(10);
-    }
-    expect(new Set(said.values()).size).toBe(said.size);
-
-    // 完全没回应：能查的是网络和模型服务地址。
-    expect(said.get("authoring_model_transport_failed")).toMatch(/网络/u);
-    expect(said.get("authoring_model_transport_failed")).toMatch(/视频创作模型服务/u);
-    // 接上了但不回话：说清「已经接上」，不要再把人支去查网络。
-    // 但也不许宣称「网络是通的」——连接无声断掉同样会以读超时的形式到这里，
-    // 那种情况下这句话会把用户支离真正的原因。
-    expect(said.get("authoring_model_timed_out")).toMatch(/视频创作模型服务/u);
-    expect(said.get("authoring_model_timed_out")).toMatch(/已经接上/u);
-    expect(said.get("authoring_model_timed_out")).not.toMatch(/检查网络|网络也是通的|网络没问题/u);
-    // 安装坏了：重试没有用，唯一的出路是重装。
-    expect(said.get("authoring_installation_damaged")).toMatch(/重新安装/u);
-    expect(said.get("authoring_installation_damaged")).not.toMatch(/请重试|稍后重试/u);
-  });
+      expect(said.size).toBe(7);
+    },
+    20_000,
+  );
 
   /**
    * 我们自己的安装包坏了，绝不能说成用户的描述有问题。
