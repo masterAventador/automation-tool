@@ -206,7 +206,7 @@ git status          # 应显示 On branch codex/resilience-batch，基线 705504
 | T22 | ⬜ | | | |
 | T66a | ⬜ | | | |
 | T58c | ⬜ | | | |
-| T62 | ⬜ | | | |
+| T62 | ✅ 完成 | 本提交 | 防回归断言先捕获 `37`、`14`、`7/14` 与 `three browser_use scripts` 四处手抄计数 | 散文计数已移除；定向检查与 Ruff 通过，完整聚合 runner 仍受既存 `tools/browser-use-contract/.venv` 未挂载阻塞 |
 
 ---
 

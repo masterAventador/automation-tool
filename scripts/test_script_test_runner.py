@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the aggregate runner over `scripts/test_*.py`.
 
-14 of the 37 test scripts in this directory are reachable from no workflow and
-no acceptance entrypoint, and `backend/pyproject.toml` sets `testpaths=["tests"]`
-so pytest does not collect them either. One of them --
+Some test scripts in this directory are reachable from no workflow and no
+acceptance entrypoint, and `backend/pyproject.toml` sets `testpaths=["tests"]` so
+pytest does not collect them either. One of them --
 `test_video_studio_acceptance_scope.py` -- was failing for real while nobody was
 running it. A guard nobody executes is not a guard.
 
@@ -12,6 +12,7 @@ This file is itself discovered by the runner it tests.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -44,6 +45,30 @@ def check_discovery_includes_this_file() -> None:
     discovered = {path.name for path in run_script_tests.discover(REPOSITORY_ROOT)}
     if "test_script_test_runner.py" not in discovered:
         _fail("a new test script was not auto-discovered")
+
+
+def check_runner_documentation_does_not_copy_derived_counts() -> None:
+    """Inventory prose must not silently drift from glob-derived discovery."""
+    source = (REPOSITORY_ROOT / "scripts" / "run_script_tests.py").read_text(
+        encoding="utf-8"
+    )
+    copied_count_patterns = (
+        r"\b\d+\s+(?:self-contained\s+)?test scripts?\b",
+        r"\b\d+\s+of them\b",
+        r"\b\d+\s+false reds?\s+out of\s+\d+\b",
+        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"`browser_use`\s+scripts?\b",
+    )
+    copied_counts = [
+        match.group(0)
+        for pattern in copied_count_patterns
+        if (match := re.search(pattern, source, flags=re.IGNORECASE))
+    ]
+    if copied_counts:
+        _fail(
+            "runner documentation copies inventory counts that can silently expire: "
+            f"{copied_counts}"
+        )
 
 
 def check_interpreter_is_pinned_not_inherited() -> None:
@@ -83,6 +108,7 @@ def check_sub_project_scripts_get_their_own_environment() -> None:
 CHECKS = (
     check_discovery_finds_every_test_script,
     check_discovery_includes_this_file,
+    check_runner_documentation_does_not_copy_derived_counts,
     check_interpreter_is_pinned_not_inherited,
     check_sub_project_scripts_get_their_own_environment,
 )
