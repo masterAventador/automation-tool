@@ -43,6 +43,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
 from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
+from process_diagnostics import builder_diagnostic  # noqa: E402
 from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
 
 ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
@@ -141,8 +142,13 @@ def _build_media_toolchain(destination: Path, *, platform: str) -> None:
         check=False,
     )
     if completed.returncode != 0:
-        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-8:]
-        raise VideoRuntimeUnavailable("the media toolchain build failed:\n" + "\n".join(tail))
+        # Not `splitlines()[-8:]` on one stream. That is how the Windows
+        # acceptance machine reported `No working C compiler found.` as eight
+        # lines of curl progress bar on 2026-07-27: carriage returns count as
+        # line breaks, so one redrawn line fills any tail.
+        raise VideoRuntimeUnavailable(
+            "the media toolchain build failed:\n" + builder_diagnostic(completed)
+        )
 
 
 def _build_motion_worker(destination: Path) -> None:
