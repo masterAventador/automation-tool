@@ -102,11 +102,41 @@ python3 scripts/cq_04_ledger_honesty.py          exit 0
 
 ## 真实边界（生产同路径验收）
 
-**结论：真实 App 用户路径验收未取得。** 本次拿到的是分层证据（Rust 集成测试 + 组件/网关单测），
-按 CLAUDE.md 第 8 节，这只能证明状态机与 UI 投影，不能证明桌面链路可用。
+**结论：真实 App 用户路径验收未取得。** 本次预览功能拿到的是分层证据
+（Rust 集成测试 + 组件/网关单测），按 CLAUDE.md 第 8 节，这只能证明状态机与 UI 投影，
+不能证明桌面链路可用。
 
-未取得的原因是两条，都写在下面「未完成」里：验收环境要现搭，而且即使搭好，
-生成这一步还会撞上素材源 Key 缺失。**不把分层证据说成验收通过。**
+不过本次对**素材线的一句话生成**做了一次分层实跑（下一节），拿到了确定结论：
+包里的完整制作界面能起来、一句话文案能生成、卡在素材源 Key。
+即使把 App 验收环境搭好，生成这一步也会停在同一处。**不把分层证据说成验收通过。**
+
+### 实测：正式包里的完整制作界面能起来，一句话文案能生成，卡在素材源 Key
+
+这一段是**实跑结果，不是读代码的推断**。跑的是签名公证线今天 11:56 产出的正式包
+（`.local/customer-demo-release/verify/.../自动化运营工具.app`）里的冻结 Worker，
+按 `webui_runtime._child_command` 的原样命令启动，并注入包内 `IMAGEIO_FFMPEG_EXE`。
+
+**分层说明（重要）**：本次是直接调用 Worker 的 `--serve-webui` 入口，
+没有经过 `open_material_video_studio`，因此**不是生产同路径验收**，只是分层探针。
+它回答的是「包里那套上游 WebUI 到底能不能用」，不能替代真实 App 用户路径验收。
+
+按顺序拿到的结果：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 冻结 Worker 启动 + Streamlit 健康检查 | ✅ `health=200`、页面 `200`。用户几天前 dogfood 时的「视频制作服务无法启动」在这个包上不再复现 |
+| 私有配置预置 | ✅ 写出 `config.toml`，字幕字体已钉成 `NotoSansCJKsc-Bold.ttf`（合规换字体的那次改动确实生效） |
+| 文案模型注入 | ✅ 输入一句话「用三个要点介绍我们的新品上线」，点「使用AI生成视频文案和关键词」，**真实百炼模型返回了完整中文文案与英文关键词**。密钥经 stdin 一次性注入，未进 argv/env |
+| 点「生成视频」 | ❌ **`请先填写 Pexels API Key`**，任务根本没有创建（Worker 日志无 start task、`storage/tasks` 为空） |
+
+失败点在上游 `webui/Main.py:3030` 的出发前校验：`video_source == "pexels"` 且
+`pexels_api_keys` 为空时直接 `st.error` + `st.stop()`。这不是我们的代码坏了，
+是我们预置的上游配置里没有素材源 Key，而默认素材源就是 Pexels。
+
+顺带看到一件必须记下来的事：这个窗口是用户从「智能素材成片 → 打开完整制作界面」
+打开的产品窗口，页面顶部整幅显示 **`MoneyPrinterTurbo v1.3.2`**。按 CLAUDE.md 第 6 节，
+上游项目名禁止进入用户可见界面。`scripts/check_user_facing_branding.py` 只扫我们自己的文件，
+扫不到内嵌的上游 WebUI，所以这条一直是绿的。**客户 Demo 当场就会看到这个名字。**
 
 ### 顺带查清的一件事：验收环境比上一条工作线判断的要便宜
 
@@ -139,7 +169,10 @@ python3 scripts/cq_04_ledger_honesty.py          exit 0
 
 ## 清理
 
-本次未启动 App、未启动浏览器、未启动 Control Plane、未起 Docker 容器，因此无进程与端口残留。
+未启动 App、未启动 Control Plane、未起 Docker 容器。实跑探针启动过两次冻结 Worker
+（loopback 18901 / 18902，开跑前确认空闲）和一个无头 Chromium；跑完全部结束并核对：
+`automation-tool-material-video-worker` 0 个、`agent-browser-chrome` 0 个、两个端口均已释放。
+探针工作区、日志和三张截图用完即删，仓库内无残留文件。
 全程未运行 `scripts/run_u9_06_acceptance.py`，未写入
 `~/Library/Application Support/com.aventador.automationtool/`（只读列目录核对过一次现状：
 用户手工扫码的抖音 Profile 与凭据完好，`video-workspaces-v1` 下 3 个空工作区、0 个 Artifact，
@@ -153,15 +186,22 @@ python3 scripts/cq_04_ledger_honesty.py          exit 0
 
 按阻塞程度排序：
 
-1. **素材源 Key（产品级阻塞，不是代码问题）**：智能素材成片的一句话生成必须能搜到 B-roll 素材，
-   而 `pexels_api_keys` / `pixabay_api_keys` 在我们预置的配置里是空的，上游会直接抛错。
-   免费注册即可（<https://www.pexels.com/api/>），拿到后在完整制作界面的配置面板填入，
-   或者由我们在预置配置里带上。**在这件事解决之前，素材线的一句话生成在任何环境下都跑不通。**
-   另外注意上游那条报错会把整个 `config.app` 序列化进异常文本，含已填入的其他 Key——
-   如果决定预置，需要一并评估这条泄漏面。
-2. **真实 App 用户路径验收**：按上面「真实边界」的判断，在 `control-plane-e2e` 上新建一条
+1. **素材源 Key（产品级阻塞，不是代码问题，已实跑确认）**：默认素材源是 Pexels，
+   而 `pexels_api_keys` 在我们预置的配置里是空的，点「生成视频」当场被上游拦下
+   （`请先填写 Pexels API Key`），任务不创建。免费注册即可
+   （<https://www.pexels.com/api/>），拿到后可以在完整制作界面的配置面板手填，
+   或者由我们预置。**这件事解决之前，素材线的一句话生成在任何环境下都做不出视频。**
+   如果决定预置，注意两点：素材源 Key 属于凭据，应走 `secure_store` 而不是明文写进
+   `config.toml`；另外上游 `material.get_api_key` 在 Key 为空时会把整个 `config.app`
+   序列化进异常文本，含其他已填 Key，这条泄漏面要一并处理。
+2. **上游品牌名出现在用户可见窗口（合规问题，已实测看到）**：完整制作界面顶部整幅显示
+   `MoneyPrinterTurbo v1.3.2`，违反 CLAUDE.md 第 6 节。现有
+   `check_user_facing_branding.py` 只扫我们自己的文件，扫不到内嵌上游 WebUI。
+   Demo 之前需要处理（上游 `webui/Main.py` 是只读 Submodule，只能按
+   `_prepare_private_project` 已有的私有副本机制在装配期替换标题，或用注入的样式遮蔽）。
+3. **真实 App 用户路径验收**：按上面「真实边界」的判断，在 `control-plane-e2e` 上新建一条
    驱动（tauri conf + wdio conf + spec + `scripts/run_*_acceptance.py`），走
    打开 App → 视频制作 → 智能素材成片 → 打开完整制作界面 → 一句话生成 → 成片页播放 → 去发布。
    新增 spec 会落在 `frontend/e2e-tauri/`，本次作业面之外，需要先与占用该目录的工作线对齐。
-3. **品牌动效线的一句话入口**：执行器承载编排代理 → `submit_motion_video_brief` →
+4. **品牌动效线的一句话入口**：执行器承载编排代理 → `submit_motion_video_brief` →
    前端 `one_sentence_v1`。素材线通了之后它是加分项，不是 Demo 阻塞项。
