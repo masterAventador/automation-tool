@@ -773,9 +773,12 @@ describe("video studio shell", () => {
     // 完全没回应：能查的是网络和模型服务地址。
     expect(said.get("authoring_model_transport_failed")).toMatch(/网络/u);
     expect(said.get("authoring_model_transport_failed")).toMatch(/视频创作模型服务/u);
-    // 接上了但不回话：网络没问题，别再让人去查网络。
+    // 接上了但不回话：说清「已经接上」，不要再把人支去查网络。
+    // 但也不许宣称「网络是通的」——连接无声断掉同样会以读超时的形式到这里，
+    // 那种情况下这句话会把用户支离真正的原因。
     expect(said.get("authoring_model_timed_out")).toMatch(/视频创作模型服务/u);
-    expect(said.get("authoring_model_timed_out")).not.toMatch(/检查网络/u);
+    expect(said.get("authoring_model_timed_out")).toMatch(/已经接上/u);
+    expect(said.get("authoring_model_timed_out")).not.toMatch(/检查网络|网络也是通的|网络没问题/u);
     // 安装坏了：重试没有用，唯一的出路是重装。
     expect(said.get("authoring_installation_damaged")).toMatch(/重新安装/u);
     expect(said.get("authoring_installation_damaged")).not.toMatch(/请重试|稍后重试/u);

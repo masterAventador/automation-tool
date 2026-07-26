@@ -399,8 +399,11 @@ const AUTHORING_ERRORS = {
     "自动编排的结果没有通过本机校验，视频没有开始制作。这是我们这边的问题，不是描述写得不好，请重试；如果一直这样请反馈给我们。",
   authoring_model_transport_failed:
     "没有收到视频创作模型服务的任何回应，视频没有开始制作。这不是描述的问题：可能是网络不通，也可能是「设置与诊断」里填的服务地址不对或者服务没在运行。请先检查网络，再到「设置与诊断」测试视频创作模型服务，然后重试。",
+  // Says the connection was established, not that the network is fine: a
+  // connection that dies without an RST also surfaces here as a read timeout,
+  // and "网络也是通的" would send that user away from the real cause.
   authoring_model_timed_out:
-    "视频创作模型服务已经接上，但超过允许的最长等待时间都没有再返回内容，视频没有开始制作。这不是描述的问题，网络也是通的：服务可能在排队或者过载。请稍后重试；如果一直这样，到「设置与诊断」换一个模型再试。",
+    "视频创作模型服务已经接上，但超过允许的最长等待时间都没有再返回内容，视频没有开始制作。这不是描述的问题——服务可能在排队或过载，也可能是连接中途断了。请稍后重试；如果一直这样，到「设置与诊断」测试视频创作模型服务，或者换一个模型。",
   authoring_installation_damaged:
     "自动编排要用的程序文件没有通过完整性校验，视频没有开始制作。这不是描述的问题，也不是重试能解决的：请重新安装 App；重装之后仍然这样的话，请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;
