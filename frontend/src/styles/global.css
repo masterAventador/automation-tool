@@ -297,9 +297,12 @@ body {
   line-height: 1.6;
 }
 
+/* The button now sits between the summary and the detail rows rather than at
+   the foot of the card, so the 20px it used to hold above itself belongs
+   below. `.video-method-summary` already supplies the gap above. */
 .video-method-select {
   width: 100%;
-  margin-top: 20px;
+  margin-bottom: 20px;
 }
 
 .motion-script-editor,
