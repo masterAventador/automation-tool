@@ -340,6 +340,26 @@ def install_runtime_resources_and_sign(
     )
 
 
+def disk_image_command(*, volume_name: str, source: Path, output: Path) -> list[str]:
+    # No `-quiet`. It suppresses the progress lines *and* the failure reason:
+    # measured, hdiutil prints zero bytes when it refuses under `-quiet`. A
+    # release build that dies here would hand the operator an exit code and
+    # nothing else, which is how the 2026-07-27 failure cost an hour.
+    return [
+        "hdiutil",
+        "create",
+        "-volname",
+        volume_name,
+        "-srcfolder",
+        os.fspath(source),
+        "-fs",
+        "HFS+",
+        "-format",
+        "UDZO",
+        os.fspath(output),
+    ]
+
+
 def create_disk_image(
     application: Path, output: Path, target_id: str, identity: SigningIdentity
 ) -> Path:
@@ -382,20 +402,9 @@ def create_disk_image(
         run_checked(["ditto", os.fspath(application), os.fspath(staging / application.name)])
         (staging / "Applications").symlink_to("/Applications")
         run_checked(
-            [
-                "hdiutil",
-                "create",
-                "-volname",
-                application.stem,
-                "-srcfolder",
-                os.fspath(staging),
-                "-fs",
-                "HFS+",
-                "-format",
-                "UDZO",
-                "-quiet",
-                os.fspath(output),
-            ]
+            disk_image_command(
+                volume_name=application.stem, source=staging, output=output
+            )
         )
     # The disk image is itself a downloaded artifact, so it carries its own
     # signature and its own ticket; the customer's first Gatekeeper prompt is
