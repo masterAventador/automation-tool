@@ -427,6 +427,12 @@ cargo build --lib --features video-studio-e2e                     OK
 cd frontend && npx tsc -b                                         exit 0
 ```
 
+**本次没有跑出 cargo 全量结果。** 上面列的是实际跑过的：新增二进制 5 条、三种 feature 的
+`cargo build --lib` 全通过、`tsc -b` exit 0，另加 `motion_video_studio` 13 条、
+`material_video_artifact` 3 条、`single_build_path` 7 条。全量在本段结束时仍在跑，
+**没有拿到数就不写数**——台账里 42 二进制 / 383 通过那一处是上一次提交时的实测值，
+不适用于本次改动，下一段必须补跑并核对。
+
 #### 交付
 
 - **`accept_authored_render_job()`：代理的答复是另一个进程送来的不可信输入，逐字段重算或重查。**
