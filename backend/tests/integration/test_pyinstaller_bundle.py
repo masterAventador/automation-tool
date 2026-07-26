@@ -7,6 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# `conftest.py` puts the repository root on `sys.path`; this is the same route
+# it uses for `scripts.acceptance_postgres`.
+from scripts.frozen_artifact_environment import (  # type: ignore[import-not-found]
+    frozen_artifact_environment,
+)
+
 from automation_tool.executor.package_manifest import (
     EXECUTOR_MANIFEST_FILE_NAME,
     EXECUTOR_SIGNATURE_FILE_NAME,
@@ -101,7 +107,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         capture_output=True,
         check=False,
         timeout=30,
-        env={"PATH": os.defpath},
+        env=frozen_artifact_environment(),
     )
 
     assert startup.returncode == 2
@@ -114,7 +120,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         capture_output=True,
         check=False,
         timeout=45,
-        env={"PATH": os.defpath},
+        env=frozen_artifact_environment(),
     )
     assert unavailable.returncode == 1
     assert unavailable.stdout == b""
