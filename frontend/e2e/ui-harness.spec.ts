@@ -102,8 +102,12 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
-  await page.getByRole("button", { name: succeededTaskId! }).click();
+  // 最近任务 lists newest first and no longer labels its rows with the Task's
+  // UUID, so the row is picked the way an operator picks it — the top one — and
+  // the identity is then checked on the page it opens.
+  await page.locator(".recent-task-list button").first().click();
   await expect(page.getByRole("heading", { name: "任务运行详情" })).toBeVisible();
+  await expect(page.getByText(succeededTaskId!)).toBeVisible();
   await expect(page.getByText("任务完成")).toBeVisible();
   await expect(page.getByText("已成功").first()).toBeVisible();
   expect(consoleErrors).toEqual([]);
