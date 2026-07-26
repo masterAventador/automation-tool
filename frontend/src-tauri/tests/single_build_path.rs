@@ -583,3 +583,274 @@ fn the_account_commands_behind_the_login_screen_are_all_or_nothing() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// The other half of the startup gate: the frontend entry point
+// ---------------------------------------------------------------------------
+//
+// Everything above reads Rust. But the startup gate has two halves, and only
+// one of them is written in Rust: `check_local_startup_environment` answers,
+// and a `StartupCheck` mounted by the frontend entry module decides whether to
+// ask at all. Vite swaps that entry module per build mode
+// (`vite.config.ts` rewrites `/src/main.tsx`), so a build can bypass the whole
+// gate without a single `#[cfg]` — invisible to every guard in this file.
+//
+// That is not hypothetical. `app/startup.ts` still exports a check whose entire
+// body is `return { status: "ready" }`, and the `desktop-e2e` entry mounts it.
+// It is the same defect as the Rust stub this file was written to kill, in the
+// same place in the same flow, one language over.
+
+/// The module every release loads. Stubbing it can never be reviewed away: it
+/// *is* the production startup gate.
+const PRODUCTION_FRONTEND_ENTRYPOINT: &str = "main.tsx";
+
+/// Where a startup check reached through an import is defined.
+const FRONTEND_STARTUP_MODULE: &str = "app/startup.ts";
+
+/// The answer that means "this install is usable".
+const FRONTEND_READY_ANSWER: &str = "status: \"ready\"";
+
+/// A `check()` body reports ready without probing when it can reach that answer
+/// having awaited nothing.
+///
+/// "Awaits nothing *anywhere* in the body" is not enough, and this is not a
+/// hypothetical refinement: the first version of this guard used it and a
+/// mutation walked straight through. Inserting `return { status: "ready" };` at
+/// the top of the real production check left every later `await` sitting in
+/// unreachable code, so the body still looked like it probed. What matters is
+/// whether a ready answer is reachable *before* the first await, so that is
+/// what is measured.
+fn reports_ready_without_probing(check_body: &str) -> bool {
+    let Some(ready) = check_body.find(FRONTEND_READY_ANSWER) else {
+        return false;
+    };
+    check_body
+        .find("await ")
+        .is_none_or(|awaited| ready < awaited)
+}
+
+/// Frontend entry modules that mount such a check, each with the reason it is
+/// still tolerated and who owes its removal.
+///
+/// Asserted by set equality, so adding one *and* removing one both fail. The
+/// point is not that these two are acceptable — they are not — but that no
+/// third one can appear without somebody writing down why.
+const REVIEWED_STUBBED_FRONTEND_ENTRYPOINTS: &[(&str, &str)] = &[
+    // Mounts `app/startup.ts::desktopShellStartupCheck`. Used by every plain
+    // `desktop-e2e` build: `pnpm test:tauri` plus the update-policy,
+    // update-download, update-installation and diagnostic-export acceptance
+    // entries. Those runs are green today *because* this stub answers ready —
+    // they never reach the real gate, so they cannot prove a packaged
+    // dependency exists. Retirement is tracked in
+    // `docs/development/FIX-frontend-startup-gate-stub.md`; it is deliberately
+    // not done here, because switching them to the real gate makes all five
+    // require a reachable Control Plane and a staged embedded browser.
+    ("test-tauri-main.tsx", "plain desktop-e2e UI harness"),
+    // Declares its own inline `readyStartup`. Serves B5-04 browser-settings,
+    // whose user path (choosing a trusted system browser) was deleted by EB-10
+    // per the product rule that forbids system-browser selection. The entry
+    // dies with that acceptance rather than being repaired.
+    ("test-browser-settings-main.tsx", "B5-04, pending retirement"),
+];
+
+fn frontend_directory() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../src")
+}
+
+fn frontend_source(module: &str) -> String {
+    let path = frontend_directory().join(module);
+    fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("frontend module {module} must be readable: {error}"))
+}
+
+/// Every module Vite can install as the application entry, production included.
+///
+/// Read from `vite.config.ts` rather than listed here, so a new build mode
+/// brings its entry into this guard automatically instead of silently opting
+/// out of it.
+fn frontend_entrypoints() -> BTreeSet<String> {
+    let config = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../vite.config.ts"))
+        .expect("the Vite configuration must be readable");
+    let mut modules = BTreeSet::new();
+    for (index, _) in config.match_indices("\"/src/") {
+        let rest = &config[index + "\"/src/".len()..];
+        let end = rest.find('"').expect("an entry module path is quoted");
+        modules.insert(rest[..end].to_owned());
+    }
+    assert!(
+        modules.contains(PRODUCTION_FRONTEND_ENTRYPOINT),
+        "the Vite configuration never mentions {PRODUCTION_FRONTEND_ENTRYPOINT}; this \
+         scanner is reading the wrong file"
+    );
+    assert!(
+        modules.len() >= 5,
+        "found {} frontend entry modules; the scanner is looking in the wrong place",
+        modules.len()
+    );
+    modules
+}
+
+/// The identifier inside the first `startupCheck={...}` prop, if there is one.
+fn mounted_binding(source: &str) -> Option<String> {
+    let index = source.find("startupCheck={")?;
+    let rest = &source[index + "startupCheck={".len()..];
+    let end = rest.find('}')?;
+    Some(rest[..end].trim().to_owned())
+}
+
+/// Text from `start` until its braces balance again.
+fn balanced_block(source: &str, start: usize) -> String {
+    let mut depth = 0i32;
+    let mut opened = false;
+    for (offset, character) in source[start..].char_indices() {
+        match character {
+            '{' => {
+                depth += 1;
+                opened = true;
+            }
+            '}' => depth -= 1,
+            _ => {}
+        }
+        if opened && depth == 0 {
+            return source[start..start + offset + 1].to_owned();
+        }
+    }
+    panic!("a declaration starting at byte {start} never closes its braces");
+}
+
+/// The `check()` implementation an entry module actually mounts, following the
+/// one level of indirection each entry really uses: a constant declared beside
+/// it, a constant imported from the shared startup module, a factory called
+/// there, or a delegation to the production entry.
+///
+/// Every unresolvable shape panics rather than returning "not a stub". A
+/// scanner that quietly gives up would report exactly what a clean codebase
+/// reports, which is the failure mode this whole file exists to refuse.
+fn mounted_startup_check(module: &str) -> (String, String) {
+    let source = frontend_source(module);
+    let Some(name) = mounted_binding(&source) else {
+        assert!(
+            source.contains("\"./main\""),
+            "{module} mounts no startup check and does not delegate to \
+             {PRODUCTION_FRONTEND_ENTRYPOINT}, so this guard cannot tell what it starts"
+        );
+        return mounted_startup_check(PRODUCTION_FRONTEND_ENTRYPOINT);
+    };
+
+    let declaration = format!("const {name}");
+    let (origin, owner) = if source.contains(&declaration) {
+        (module.to_owned(), source)
+    } else {
+        assert!(
+            source.contains("from \"./app/startup\""),
+            "{module} mounts `{name}`, which it neither declares nor imports from \
+             {FRONTEND_STARTUP_MODULE}; this guard cannot follow it"
+        );
+        (
+            FRONTEND_STARTUP_MODULE.to_owned(),
+            frontend_source(FRONTEND_STARTUP_MODULE),
+        )
+    };
+
+    let start = owner
+        .find(&declaration)
+        .unwrap_or_else(|| panic!("{origin} declares no `{name}`"));
+    let head_end = owner[start..]
+        .find('\n')
+        .map_or(owner.len(), |offset| start + offset);
+    let head = &owner[start..head_end];
+
+    // `const x = createSomething(` — the behaviour lives in the factory.
+    if !head.contains('{') {
+        let assigned = head
+            .split_once('=')
+            .map(|(_, rest)| rest.trim())
+            .unwrap_or_else(|| panic!("{origin} declares `{name}` in a shape this guard cannot read"));
+        let factory = assigned
+            .split_once('(')
+            .map(|(callee, _)| callee.trim())
+            .unwrap_or_else(|| panic!("{origin} assigns `{name}` from a shape this guard cannot read"));
+        let startup = frontend_source(FRONTEND_STARTUP_MODULE);
+        let signature = format!("export function {factory}(");
+        let factory_start = startup.find(&signature).unwrap_or_else(|| {
+            panic!("{FRONTEND_STARTUP_MODULE} exports no `{factory}`, so `{name}` is unresolvable")
+        });
+        return (
+            format!("{FRONTEND_STARTUP_MODULE}::{factory}"),
+            balanced_block(&startup, factory_start),
+        );
+    }
+
+    (
+        format!("{origin}::{name}"),
+        balanced_block(&owner, start),
+    )
+}
+
+/// No build may reach the workbench without the startup gate having run.
+///
+/// The Rust guards above pin one half: the gate function is compiled
+/// identically everywhere and still performs its three probes. This pins the
+/// other half — that the entry module which decides whether to *call* it is not
+/// swapped for one that answers ready on its own. Both halves have to hold; the
+/// incident that produced this file only needed one of them to fail.
+#[test]
+fn no_frontend_entrypoint_declares_the_environment_ready_without_probing() {
+    let mut stubbed = BTreeSet::new();
+    let mut probing = BTreeSet::new();
+    for module in frontend_entrypoints() {
+        let (origin, block) = mounted_startup_check(&module);
+        let opening = block.find("check(").and_then(|index| {
+            block[index..]
+                .find('{')
+                .map(|offset| index + offset)
+        });
+        let opening = opening.unwrap_or_else(|| {
+            panic!(
+                "{module} resolves to {origin}, which declares no `check()`; this guard \
+                 is reading the wrong thing and would pass on anything"
+            )
+        });
+        if reports_ready_without_probing(&balanced_block(&block, opening)) {
+            stubbed.insert(module);
+        } else {
+            probing.insert(module);
+        }
+    }
+
+    // Checked before the vacuity guard below: when the production check is the
+    // one that was stubbed, every entry that delegates to it becomes a stub
+    // too, `probing` empties, and the vacuity message would report a broken
+    // scanner for what is actually the single worst outcome this file covers.
+    assert!(
+        !stubbed.contains(PRODUCTION_FRONTEND_ENTRYPOINT),
+        "{PRODUCTION_FRONTEND_ENTRYPOINT} mounts a startup check that can answer ready \
+         before awaiting anything; that is the production gate, and no review can \
+         excuse it"
+    );
+    // A resolver that silently returned empty bodies would report "no stubs"
+    // and pass. It must be able to recognise a real check to be trusted about
+    // a fake one.
+    assert!(
+        !probing.is_empty(),
+        "no frontend entry resolved to a startup check that probes anything, so this \
+         guard proved nothing"
+    );
+
+    let reviewed: BTreeSet<String> = REVIEWED_STUBBED_FRONTEND_ENTRYPOINTS
+        .iter()
+        .map(|(module, _)| (*module).to_owned())
+        .collect();
+    assert!(
+        !reviewed.contains(PRODUCTION_FRONTEND_ENTRYPOINT),
+        "{PRODUCTION_FRONTEND_ENTRYPOINT} is on the reviewed stub list; the production \
+         entry is never eligible"
+    );
+    assert_eq!(
+        stubbed, reviewed,
+        "the set of frontend entries whose startup check reports ready without probing \
+         changed. Such an entry cannot detect a missing packaged dependency, so every \
+         acceptance run built on it is green by construction. Add one only with the \
+         reason it exists and who retires it; remove one from the list when it is fixed."
+    );
+}
