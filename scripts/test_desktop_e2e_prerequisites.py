@@ -30,6 +30,7 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     ACTION_AUTHORIZATION_PUBLIC_KEY,
     CONTROL_PLANE_PORT_RANGE,
     DEBUG_APP_RESOURCE_ROOT,
+    OPERATIONS_PROFILE_ROOT,
     DesktopPrerequisiteRejected,
     control_plane_e2e_drivers,
     remove_staged_embedded_browser,
@@ -220,6 +221,56 @@ def check_the_derived_driver_set_matches_the_packaged_builds() -> None:
     assert sorted(path.name for path in control_plane_e2e_drivers()) == expected
 
 
+def check_every_driver_names_the_operations_profile_root_the_app_writes() -> None:
+    """The Profile root has one definition, and it is the one Rust creates.
+
+    EB-09 moved the store to `embedded-browser-profiles` and declared the old
+    development root neither migrated nor read. A driver that still reads the old
+    root passes its App phases and then fails on its own post-conditions, which
+    reads exactly like a product regression.
+    """
+    source = (
+        ROOT / "frontend/src-tauri/src/browser_profiles.rs"
+    ).read_text(encoding="utf-8")
+    declared = re.search(
+        r'const PROFILE_ROOT_DIRECTORY: &str = "([a-z-]+)";', source
+    )
+    assert declared is not None, "the Rust Profile root constant moved"
+    assert OPERATIONS_PROFILE_ROOT == declared.group(1), (
+        f"OPERATIONS_PROFILE_ROOT is {OPERATIONS_PROFILE_ROOT!r} but the App writes "
+        f"{declared.group(1)!r}"
+    )
+    stale = sorted(
+        path.name
+        for path in control_plane_e2e_drivers()
+        if '"browser-profiles"' in path.read_text(encoding="utf-8")
+    )
+    assert not stale, (
+        "these drivers still read the pre-EB-09 Profile root instead of "
+        f"OPERATIONS_PROFILE_ROOT: {', '.join(stale)}"
+    )
+
+
+def check_no_driver_pins_its_own_copy_of_the_executor_ledger_schema_version() -> None:
+    """The ledger schema version is asserted from the product constant, not a literal.
+
+    Each of these drivers froze the version that was current when it was written,
+    so every migration silently arms all of them at once: the App phases pass and
+    the driver then fails on its own post-condition, one task at a time, months
+    later.
+    """
+    stale = sorted(
+        path.name
+        for path in control_plane_e2e_drivers()
+        if "PRAGMA user_version" in (source := path.read_text(encoding="utf-8"))
+        and "EXECUTOR_LEDGER_SCHEMA_VERSION" not in source
+    )
+    assert not stale, (
+        "these drivers compare the Executor ledger schema version against their own "
+        f"frozen literal instead of EXECUTOR_LEDGER_SCHEMA_VERSION: {', '.join(stale)}"
+    )
+
+
 CHECKS = (
     check_the_startup_gate_environment_supplies_every_compile_time_input,
     check_the_startup_gate_environment_does_not_mutate_the_caller,
@@ -231,6 +282,8 @@ CHECKS = (
     check_removing_the_staged_browser_leaves_no_distribution,
     check_the_resource_root_is_where_the_acceptance_app_actually_runs,
     check_the_derived_driver_set_matches_the_packaged_builds,
+    check_every_driver_names_the_operations_profile_root_the_app_writes,
+    check_no_driver_pins_its_own_copy_of_the_executor_ledger_schema_version,
 )
 
 

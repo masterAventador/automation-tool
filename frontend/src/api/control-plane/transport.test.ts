@@ -60,6 +60,22 @@ describe("ControlPlaneTransport boundary", () => {
     });
   });
 
+  it("preserves the revocation category when the error carries its readable message", async () => {
+    invoke.mockRejectedValueOnce({
+      code: "installation_access_denied",
+      message: "native command error: installation_access_denied",
+      retryable: false,
+    });
+    const transport = new TauriControlPlaneTransport();
+
+    await expect(transport.checkHealth()).rejects.toMatchObject({
+      name: "ControlPlaneTransportError",
+      code: "installation_access_denied",
+      message: "Installation access is unavailable",
+      retryable: false,
+    });
+  });
+
   it("preserves the native installation conflict so startup can explain it", async () => {
     invoke.mockRejectedValueOnce({
       code: "installation_conflict",

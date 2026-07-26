@@ -43,23 +43,43 @@ describe("platform Session gateway contracts", () => {
   });
 
   it("accepts only the frozen local QR flow result", () => {
+    // The document below is what the Rust Command actually serializes; the two
+    // publish fields are always null for a login, and dropping them here is what
+    // made every real click fail as `protocol_mismatch`.
     expect(
       parsePlatformSessionAction({
         platform: "douyin",
         state: "awaiting_scan",
         flowVersion: "douyin.qr-login.v2",
+        confirmationId: null,
+        targetAccount: null,
       }),
     ).toEqual({
       platform: "douyin",
       state: "awaiting_scan",
       flowVersion: "douyin.qr-login.v2",
+      confirmationId: null,
+      targetAccount: null,
     });
-    expect(() =>
-      parsePlatformSessionAction({
+    for (const invalid of [
+      {
         platform: "douyin",
         state: "awaiting_scan",
         flowVersion: "private.v1",
-      }),
-    ).toThrow(PlatformSessionGatewayError);
+        confirmationId: null,
+        targetAccount: null,
+      },
+      { platform: "douyin", state: "awaiting_scan", flowVersion: "douyin.qr-login.v2" },
+      {
+        platform: "douyin",
+        state: "awaiting_scan",
+        flowVersion: "douyin.qr-login.v2",
+        confirmationId: null,
+        targetAccount: null,
+        profilePath: "/private/path",
+      },
+    ]) {
+      expect(() => parsePlatformSessionAction(invalid)).toThrow(PlatformSessionGatewayError);
+    }
   });
 });

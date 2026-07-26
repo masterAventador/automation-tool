@@ -62,6 +62,7 @@ from automation_tool.control_plane.infrastructure.database import (
     task_events,
     tasks,
 )
+from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 EXECUTOR_BUILD_ID = "h8-03-offline-emergency-stop"
@@ -321,7 +322,13 @@ def verify_local_state(
             "WHERE admission.execution_attempt_id = ? ORDER BY side_effect.action_id",
             (str(offer.execution_attempt_id),),
         ).fetchall()
-    if version != (5,) or guard is None or guard[0] != 1 or guard[1] < 1 or guard[2] is None:
+    if (
+        version != (EXECUTOR_LEDGER_SCHEMA_VERSION,)
+        or guard is None
+        or guard[0] != 1
+        or guard[1] < 1
+        or guard[2] is None
+    ):
         raise RuntimeError("H8-03 local action emergency latch is not durable")
     if checkpoint != (str(offer.task_id), 2, 3, "outcome_uncertain"):
         raise RuntimeError("H8-03 local Attempt checkpoint is invalid")

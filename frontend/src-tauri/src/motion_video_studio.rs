@@ -41,10 +41,16 @@ pub enum MotionVideoStudioErrorCode {
     StorageUnavailable,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MotionVideoStudioError {
     code: MotionVideoStudioErrorCode,
     retryable: bool,
+}
+
+impl Serialize for MotionVideoStudioError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
 }
 
 impl MotionVideoStudioError {

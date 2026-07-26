@@ -20,11 +20,15 @@ describe("Tauri platform Session gateway", () => {
         platform: "douyin",
         state: "awaiting_scan",
         flowVersion: "douyin.qr-login.v2",
+        confirmationId: null,
+        targetAccount: null,
       })
       .mockResolvedValueOnce({
         platform: "douyin",
         state: "healthy",
         flowVersion: "douyin.qr-login.v2",
+        confirmationId: null,
+        targetAccount: null,
       })
       .mockResolvedValueOnce({
         platform: "douyin",

@@ -186,10 +186,16 @@ impl Display for ModelServiceError {
 
 impl Error for ModelServiceError {}
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ModelServiceCommandError {
     code: ModelServiceErrorCode,
     retryable: bool,
+}
+
+impl Serialize for ModelServiceCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
 }
 
 impl From<ModelServiceError> for ModelServiceCommandError {

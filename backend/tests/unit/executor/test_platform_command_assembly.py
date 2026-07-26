@@ -8,14 +8,18 @@ own collaborators hides precisely the failures that kill the executor.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import queue
+import sys
 from datetime import UTC, datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 
 import pytest
+from automation_tool.executor import cli as executor_cli
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
 from automation_tool.executor.browser_authority import BrowserLaunchAuthority
@@ -244,6 +248,76 @@ def test_production_router_keeps_publish_facts_out_of_the_control_plane_outbox(
     assert socket.sources == []
     # The outcome is still observable, just not through the Control Plane queue.
     assert cast(Any, router._publish).latest_receipt() is not None
+
+
+FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
+FIXTURE_SUBSTITUTION = "vars(executor_cli)"
+
+
+def acceptance_executor_entrypoints() -> list[Path]:
+    """Every acceptance Executor entry point that swaps a production collaborator.
+
+    Each one is packaged into its own signed binary and is therefore imported by
+    nothing else in this suite. Without this list, a production constructor that
+    gains an argument leaves them uncallable, and the only symptom is a desktop
+    E2E driver that waits 120 seconds for a page fact that can never arrive.
+    """
+    found = sorted(
+        path
+        for path in FIXTURE_ROOT.glob("*_executor.py")
+        if FIXTURE_SUBSTITUTION in path.read_text(encoding="utf-8")
+    )
+    # An empty parametrization is a passing test that checks nothing, which is
+    # exactly the state this guard exists to end.
+    assert found, f"no acceptance Executor entry point found under {FIXTURE_ROOT}"
+    return found
+
+
+def load_acceptance_entrypoint(path: Path) -> ModuleType:
+    specification = importlib.util.spec_from_file_location(
+        f"automation_tool_acceptance_entrypoint_{path.stem}", path
+    )
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[specification.name] = module
+    try:
+        specification.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[specification.name]
+        raise
+    return module
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    acceptance_executor_entrypoints(),
+    ids=lambda path: path.stem,
+)
+def test_acceptance_executor_entrypoints_assemble_the_production_router(
+    entrypoint: Path, tmp_path: Path
+) -> None:
+    """Each packaged acceptance Executor must survive the production assembly.
+
+    Its `main()` performs the substitutions and then hands control to the real
+    `run_executor`, so a replacement whose signature drifted from the production
+    call site kills the process during startup - long before any assertion runs.
+    """
+    module = load_acceptance_entrypoint(entrypoint)
+    original = dict(vars(executor_cli))
+    vars(executor_cli)["main"] = lambda: None
+    try:
+        module.main()
+        router = build_platform_command_router(
+            ledger=ledger_for(tmp_path),
+            browser_authority=BrowserLaunchAuthority(),
+            local_outbox=queue.Queue(),
+            runtime_factory=BrowserRuntime,
+        )
+        router.close()
+    finally:
+        vars(executor_cli).clear()
+        vars(executor_cli).update(original)
+        del sys.modules[module.__name__]
 
 
 def test_login_health_still_reaches_the_control_plane_outbox(tmp_path: Path) -> None:

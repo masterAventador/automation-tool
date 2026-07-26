@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { nativeCommandErrorFields } from "./native-command-error";
 import {
   PlatformAdapterError,
   type BrowserDiagnosticSettingsSnapshot,
@@ -164,13 +165,9 @@ export function safeNativeError(value: unknown): PlatformAdapterError {
   if (value instanceof PlatformAdapterError) {
     return value;
   }
-  if (
-    isExactRecord(value, ["code", "retryable"]) &&
-    typeof value.code === "string" &&
-    NATIVE_ERROR_CODES.has(value.code as PlatformAdapterErrorCode) &&
-    typeof value.retryable === "boolean"
-  ) {
-    return new PlatformAdapterError(value.code as PlatformAdapterErrorCode, value.retryable);
+  const fields = nativeCommandErrorFields(value);
+  if (fields !== undefined && NATIVE_ERROR_CODES.has(fields.code as PlatformAdapterErrorCode)) {
+    return new PlatformAdapterError(fields.code as PlatformAdapterErrorCode, fields.retryable);
   }
   return new PlatformAdapterError("operation_unavailable", false);
 }

@@ -18,8 +18,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
+    CURRENT_DOUYIN_PROFILE_FILE,
+    OPERATIONS_PROFILE_ROOT,
     prepare_startup_gate,
     startup_gate_environment,
 )
@@ -173,8 +176,8 @@ def write_page_state(path: Path, state: str) -> None:
 
 
 def profile_identity(private_app_data: Path) -> ProfileIdentity:
-    profile_root = private_app_data / "browser-profiles"
-    marker = profile_root / "current-douyin-profile-v1"
+    profile_root = private_app_data / OPERATIONS_PROFILE_ROOT
+    marker = profile_root / CURRENT_DOUYIN_PROFILE_FILE
     encoded_profile_id = marker.read_bytes()
     try:
         profile_id = encoded_profile_id.decode("ascii")
@@ -203,7 +206,7 @@ def verify_local_session_state(private_app_data: Path) -> None:
         row = connection.execute(
             "SELECT platform, state, session_revision FROM executor_platform_sessions"
         ).fetchone()
-    if version != (2,) or row != ("douyin", "risk", 2):
+    if version != (EXECUTOR_LEDGER_SCHEMA_VERSION,) or row != ("douyin", "risk", 2):
         raise RuntimeError("B5-15 Local Executor Session epoch is invalid")
 
 

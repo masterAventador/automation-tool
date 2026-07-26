@@ -19,6 +19,8 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
+    CURRENT_DOUYIN_PROFILE_FILE,
+    OPERATIONS_PROFILE_ROOT,
     prepare_startup_gate,
     startup_gate_environment,
 )
@@ -190,8 +192,8 @@ async def verify_database_state(database_url: str) -> None:
 
 
 def verify_logout_local_state(private_app_data: Path) -> None:
-    profile_root = private_app_data / "browser-profiles"
-    current_marker = profile_root / "current-douyin-profile-v1"
+    profile_root = private_app_data / OPERATIONS_PROFILE_ROOT
+    current_marker = profile_root / CURRENT_DOUYIN_PROFILE_FILE
     platform_root = profile_root / "douyin"
     if current_marker.exists():
         raise RuntimeError("B5-14 safe logout retained the current Profile marker")

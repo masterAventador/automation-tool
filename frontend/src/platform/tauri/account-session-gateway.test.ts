@@ -100,4 +100,24 @@ describe("Tauri product account Session gateway", () => {
     expect(error).toBeInstanceOf(AccountSessionGatewayError);
     expect(error).toMatchObject({ code: "outcome_uncertain", retryable: false });
   });
+
+  it("keeps the native code when the error carries its readable message", () => {
+    const error = mapAccountSessionNativeError({
+      code: "session_invalid",
+      message: "native command error: session_invalid",
+      retryable: false,
+    });
+    expect(error).toBeInstanceOf(AccountSessionGatewayError);
+    expect(error).toMatchObject({ code: "session_invalid", retryable: false });
+  });
+
+  it("falls back to the opaque failure for an unknown code and never reflects its message", () => {
+    const error = mapAccountSessionNativeError({
+      code: "private-native-code",
+      message: "password=private-native-secret",
+      retryable: false,
+    });
+    expect(error).toMatchObject({ code: "transport_unavailable", retryable: true });
+    expect(JSON.stringify(error)).not.toContain("private-native-secret");
+  });
 });

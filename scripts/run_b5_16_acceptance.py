@@ -19,8 +19,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
+    CURRENT_DOUYIN_PROFILE_FILE,
+    OPERATIONS_PROFILE_ROOT,
     prepare_startup_gate,
     startup_gate_environment,
 )
@@ -172,8 +175,8 @@ def isolated_environment(
 
 
 def current_private_profile(private_app_data: Path) -> Path:
-    profile_root = private_app_data / "browser-profiles"
-    marker = profile_root / "current-douyin-profile-v1"
+    profile_root = private_app_data / OPERATIONS_PROFILE_ROOT
+    marker = profile_root / CURRENT_DOUYIN_PROFILE_FILE
     try:
         profile_id = marker.read_text(encoding="ascii")
         parsed = UUID(profile_id)
@@ -320,7 +323,11 @@ def verify_local_session_state(private_app_data: Path) -> None:
         row = connection.execute(
             "SELECT platform, state, session_revision FROM executor_platform_sessions"
         ).fetchone()
-    if version != (2,) or row != ("douyin", "expired", 1):
+    if version != (EXECUTOR_LEDGER_SCHEMA_VERSION,) or row != (
+        "douyin",
+        "expired",
+        1,
+    ):
         raise RuntimeError("B5-16 Local Executor Session state is invalid")
 
 

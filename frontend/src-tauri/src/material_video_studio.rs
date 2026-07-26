@@ -87,10 +87,16 @@ pub enum MaterialVideoStudioErrorCode {
     JobUnavailable,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MaterialVideoStudioError {
     code: MaterialVideoStudioErrorCode,
     retryable: bool,
+}
+
+impl Serialize for MaterialVideoStudioError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
 }
 
 impl MaterialVideoStudioError {

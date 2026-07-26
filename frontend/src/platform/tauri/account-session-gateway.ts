@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { z } from "zod";
 
+import { nativeCommandErrorFields } from "./native-command-error";
 import {
   AccountSessionGatewayError,
   parseAccountDevice,
@@ -16,27 +16,22 @@ import {
   type AccountSessionSnapshot,
 } from "../../features/account-session/account-session-gateway";
 
-const nativeErrorSchema = z
-  .object({
-    code: z.enum([
-      "authentication_invalid",
-      "recovery_invalid",
-      "session_invalid",
-      "transport_unavailable",
-      "storage_unavailable",
-      "outcome_uncertain",
-      "operation_unavailable",
-    ]),
-    retryable: z.boolean(),
-  })
-  .strict();
+const NATIVE_ERROR_CODES: ReadonlySet<string> = new Set([
+  "authentication_invalid",
+  "recovery_invalid",
+  "session_invalid",
+  "transport_unavailable",
+  "storage_unavailable",
+  "outcome_uncertain",
+  "operation_unavailable",
+]);
 
 export function mapAccountSessionNativeError(error: unknown): AccountSessionGatewayError {
-  const parsed = nativeErrorSchema.safeParse(error);
-  if (parsed.success) {
+  const fields = nativeCommandErrorFields(error);
+  if (fields !== undefined && NATIVE_ERROR_CODES.has(fields.code)) {
     return new AccountSessionGatewayError(
-      parsed.data.code as AccountSessionGatewayErrorCode,
-      parsed.data.retryable,
+      fields.code as AccountSessionGatewayErrorCode,
+      fields.retryable,
     );
   }
   return new AccountSessionGatewayError("transport_unavailable", true);

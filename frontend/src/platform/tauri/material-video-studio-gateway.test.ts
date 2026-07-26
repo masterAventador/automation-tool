@@ -52,6 +52,29 @@ describe("Tauri material video studio gateway", () => {
     expect(String(error)).not.toContain("never-reflect");
   });
 
+  it("keeps the native code when the error carries its readable message", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+
+    invoke.mockRejectedValueOnce({
+      code: "configuration_required",
+      message: "native command error: configuration_required",
+      retryable: false,
+    });
+    await expect(gateway.open()).rejects.toMatchObject({
+      code: "configuration_required",
+      retryable: false,
+    });
+
+    invoke.mockRejectedValueOnce({
+      code: "storage_unavailable",
+      message: "apiKey=sk-never-reflect",
+      retryable: false,
+    });
+    const reworded = await gateway.open().catch((value: unknown) => value);
+    expect(reworded).toMatchObject({ code: "storage_unavailable" });
+    expect(JSON.stringify(reworded)).not.toContain("never-reflect");
+  });
+
   it("strictly reconciles jobs and sends only opaque identifiers for mutations", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     const renderJobId = "3d594650-b5f4-4498-8e38-0cf85d6dfa72";

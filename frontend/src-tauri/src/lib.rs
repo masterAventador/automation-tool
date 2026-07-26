@@ -7,6 +7,7 @@ pub mod app_updates;
 pub mod browser_discovery;
 pub mod browser_profiles;
 pub mod browser_settings;
+pub mod command_error;
 pub mod control_plane;
 pub mod deployment_profile;
 pub mod device_credentials;
@@ -56,18 +57,26 @@ use tauri::Manager;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use zeroize::Zeroizing;
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct ControlPlaneCommandError {
     code: &'static str,
     retryable: bool,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+impl serde::Serialize for ControlPlaneCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
+}
+
 struct ExecutorPlatformCommandError {
     code: &'static str,
     retryable: bool,
+}
+
+impl serde::Serialize for ExecutorPlatformCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -75,24 +84,38 @@ struct ExecutorDiagnosticsSnapshot {
     lines: Vec<String>,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct DiagnosticExportCommandError {
     code: &'static str,
     retryable: bool,
 }
 
+impl serde::Serialize for DiagnosticExportCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
+}
+
 #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct UpdatePolicyAcceptanceError {
     code: &'static str,
 }
 
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
+impl serde::Serialize for UpdatePolicyAcceptanceError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, None, serializer)
+    }
+}
+
+#[derive(Debug)]
 struct AppUpdateDecisionCommandError {
     code: &'static str,
+}
+
+impl serde::Serialize for AppUpdateDecisionCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, None, serializer)
+    }
 }
 
 #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
@@ -4116,4 +4139,87 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The JavaScript side of every Tauri command rejection reads `error.message`
+    /// before it falls back to `String(error)`, and `String()` of a plain JSON
+    /// object is always `[object Object]`. A command error that carries no
+    /// `message` therefore reaches every JavaScript consumer — the product, the
+    /// browser console and the desktop E2E runner — with its code erased.
+    #[test]
+    fn a_control_plane_command_error_carries_a_readable_message() {
+        let wire = serde_json::to_value(ControlPlaneCommandError {
+            code: "installation_access_denied",
+            retryable: false,
+        })
+        .expect("a command error must serialize");
+
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "code": "installation_access_denied",
+                "message": "native command error: installation_access_denied",
+                "retryable": false,
+            }),
+            "the structured fields must survive unchanged and `message` must name the code"
+        );
+    }
+
+    #[test]
+    fn an_executor_platform_command_error_carries_a_readable_message() {
+        let wire = serde_json::to_value(ExecutorPlatformCommandError {
+            code: "executor_unavailable",
+            retryable: true,
+        })
+        .expect("a command error must serialize");
+
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "code": "executor_unavailable",
+                "message": "native command error: executor_unavailable",
+                "retryable": true,
+            })
+        );
+    }
+
+    #[test]
+    fn a_diagnostic_export_command_error_carries_a_readable_message() {
+        let wire = serde_json::to_value(DiagnosticExportCommandError {
+            code: "storage_unavailable",
+            retryable: false,
+        })
+        .expect("a command error must serialize");
+
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "code": "storage_unavailable",
+                "message": "native command error: storage_unavailable",
+                "retryable": false,
+            })
+        );
+    }
+
+    /// This one has no `retryable`, so it proves the shared serializer does not
+    /// invent a field the command never had.
+    #[test]
+    fn an_app_update_decision_error_carries_a_message_without_gaining_a_field() {
+        let wire = serde_json::to_value(AppUpdateDecisionCommandError {
+            code: "decision_unavailable",
+        })
+        .expect("a command error must serialize");
+
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "code": "decision_unavailable",
+                "message": "native command error: decision_unavailable",
+            })
+        );
+    }
 }

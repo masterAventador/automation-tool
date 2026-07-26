@@ -68,11 +68,19 @@ class AcceptanceBrowserRuntime(BrowserRuntime):
 
 
 class AcceptanceDouyinLoginCommandOperation(DouyinLoginCommandOperation):
-    def __init__(self, *, health_reporter: Any, outbound: Any) -> None:
+    def __init__(
+        self,
+        *,
+        health_reporter: Any,
+        outbound: Any,
+        browser_authority: Any,
+        **_: Any,
+    ) -> None:
         super().__init__(
             health_reporter=health_reporter,
             outbound=outbound,
             runtime_factory=lambda: AcceptanceBrowserRuntime(_state_path()),
+            browser_authority=browser_authority,
         )
 
 

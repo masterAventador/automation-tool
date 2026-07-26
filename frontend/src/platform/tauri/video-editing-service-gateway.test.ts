@@ -87,6 +87,29 @@ describe("Tauri video editing service gateway", () => {
     expect(String(failure)).not.toContain("secret paths");
   });
 
+  it("keeps the native code when the error carries its readable message", async () => {
+    const gateway = new TauriVideoEditingServiceGateway();
+
+    invoke.mockRejectedValueOnce({
+      code: "permission_denied",
+      message: "native command error: permission_denied",
+      retryable: false,
+    });
+    await expect(gateway.getSettings()).rejects.toMatchObject({
+      code: "permission_denied",
+      retryable: false,
+    });
+
+    invoke.mockRejectedValueOnce({
+      code: "permission_denied",
+      message: "accessKeyId=private-native-secret",
+      retryable: false,
+    });
+    const reworded = await gateway.getSettings().catch((error: unknown) => error);
+    expect(reworded).toMatchObject({ code: "permission_denied" });
+    expect(JSON.stringify(reworded)).not.toContain("private-native-secret");
+  });
+
   it("rejects malformed connection snapshots", async () => {
     invoke.mockResolvedValueOnce({ region: "cn-shanghai", status: "connected", extra: 1 });
     const gateway = new TauriVideoEditingServiceGateway();

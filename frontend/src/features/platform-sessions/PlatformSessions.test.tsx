@@ -18,6 +18,8 @@ function gateway(): PlatformSessionGateway {
       platform: "douyin",
       state: "awaiting_scan",
       flowVersion: "douyin.qr-login.v2",
+      confirmationId: null,
+      targetAccount: null,
     }),
     recheckDouyinLogin: vi.fn(async () => {
       state = "healthy";
@@ -25,6 +27,8 @@ function gateway(): PlatformSessionGateway {
         platform: "douyin" as const,
         state: "healthy" as const,
         flowVersion: "douyin.qr-login.v2" as const,
+        confirmationId: null,
+        targetAccount: null,
       };
     }),
     logoutDouyinSession: vi.fn(async () => {

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { nativeCommandErrorFields } from "./native-command-error";
 import {
   MaterialVideoStudioGatewayError,
   type MaterialVideoStudioErrorCode,
@@ -160,15 +161,11 @@ function validateMotionRequest(request: MotionVideoDraftRequest): void {
 }
 
 function mapError(error: unknown): MaterialVideoStudioGatewayError {
-  if (
-    exactRecord(error, ["code", "retryable"]) &&
-    typeof error.code === "string" &&
-    NATIVE_ERRORS.has(error.code as MaterialVideoStudioErrorCode) &&
-    typeof error.retryable === "boolean"
-  ) {
+  const fields = nativeCommandErrorFields(error);
+  if (fields !== undefined && NATIVE_ERRORS.has(fields.code as MaterialVideoStudioErrorCode)) {
     return new MaterialVideoStudioGatewayError(
-      error.code as MaterialVideoStudioErrorCode,
-      error.retryable,
+      fields.code as MaterialVideoStudioErrorCode,
+      fields.retryable,
     );
   }
   return new MaterialVideoStudioGatewayError("operation_unavailable", false);

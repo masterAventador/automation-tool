@@ -22,6 +22,7 @@ from pathlib import Path
 from uuid import UUID
 
 from acceptance_postgres import managed_test_postgres
+from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
@@ -305,8 +306,12 @@ def verify_executor_app_data(private_app_data: Path, installation_id: str) -> No
     if executor_id.version != 4 or str(executor_id) != executor_id_text:
         raise RuntimeError("E4-14 stable Executor identity is not canonical UUIDv4")
     with closing(sqlite3.connect(ledger_path)) as connection:
-        if connection.execute("PRAGMA user_version").fetchone() != (7,):
-            raise RuntimeError("E4-14 Executor ledger did not migrate to v7")
+        if connection.execute("PRAGMA user_version").fetchone() != (
+            EXECUTOR_LEDGER_SCHEMA_VERSION,
+        ):
+            raise RuntimeError(
+                "E4-14 Executor ledger did not migrate to the current schema"
+            )
         identity = connection.execute(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchone()

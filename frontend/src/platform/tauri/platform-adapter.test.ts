@@ -100,4 +100,33 @@ describe("Tauri PlatformAdapter", () => {
       code: "protocol_mismatch",
     });
   });
+
+  it("keeps the native code when the error carries its readable message", async () => {
+    const adapter = new TauriPlatformAdapter();
+
+    invoke.mockRejectedValueOnce({
+      code: "installation_access_denied",
+      message: "native command error: installation_access_denied",
+      retryable: false,
+    });
+    const error = await adapter.restartExecutor().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(PlatformAdapterError);
+    expect(error).toMatchObject({ code: "installation_access_denied", retryable: false });
+  });
+
+  it("never reflects a native message, however it was worded", async () => {
+    const adapter = new TauriPlatformAdapter();
+
+    invoke.mockRejectedValueOnce({
+      code: "storage_unavailable",
+      message: "password=private-native-secret",
+      retryable: false,
+    });
+    const error = await adapter.restartExecutor().catch((value: unknown) => value);
+
+    expect(error).toMatchObject({ code: "storage_unavailable" });
+    expect(JSON.stringify(error)).not.toContain("private-native-secret");
+    expect(String(error)).not.toContain("private-native-secret");
+  });
 });

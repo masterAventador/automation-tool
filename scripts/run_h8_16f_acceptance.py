@@ -18,6 +18,7 @@ from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import prepare_startup_gate
 from run_b5_13_acceptance import (
@@ -280,7 +281,7 @@ def verify_executor_private_data(private_app_data: Path) -> None:
         identities = connection.execute(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchall()
-    if version != (7,) or len(identities) != 1:
+    if version != (EXECUTOR_LEDGER_SCHEMA_VERSION,) or len(identities) != 1:
         raise RuntimeError(
             "H8-16F Local Executor ledger has an invalid identity or version"
         )

@@ -5,6 +5,7 @@ import {
   type ControlPlaneTransport,
 } from "../../api/control-plane/transport";
 import { invoke } from "@tauri-apps/api/core";
+import { nativeCommandErrorFields } from "./native-command-error";
 
 function isControlPlaneHealth(value: unknown): value is ControlPlaneHealth {
   if (typeof value !== "object" || value === null) {
@@ -31,19 +32,12 @@ const PRESERVED_NATIVE_CODES = [
 ] as const;
 
 function preservedNativeError(value: unknown): ControlPlaneTransportError | undefined {
-  if (typeof value !== "object" || value === null) {
+  const fields = nativeCommandErrorFields(value);
+  if (fields === undefined || fields.retryable !== false) {
     return undefined;
   }
-  const record = value as Record<string, unknown>;
-  const preserved = PRESERVED_NATIVE_CODES.find((code) => record.code === code);
-  if (
-    preserved !== undefined &&
-    Object.keys(record).length === 2 &&
-    record.retryable === false
-  ) {
-    return new ControlPlaneTransportError(preserved, false);
-  }
-  return undefined;
+  const preserved = PRESERVED_NATIVE_CODES.find((code) => fields.code === code);
+  return preserved === undefined ? undefined : new ControlPlaneTransportError(preserved, false);
 }
 
 export class TauriControlPlaneTransport implements ControlPlaneTransport {

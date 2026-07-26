@@ -123,4 +123,27 @@ describe("Tauri model service gateway", () => {
       retryable: true,
     });
   });
+
+  it("keeps the native code when the error carries its readable message", async () => {
+    const gateway = new TauriModelServiceGateway();
+
+    invoke.mockRejectedValueOnce({
+      code: "authentication_rejected",
+      message: "native command error: authentication_rejected",
+      retryable: false,
+    });
+    const error = await gateway.getSettings().catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(ModelServiceGatewayError);
+    expect(error).toMatchObject({ code: "authentication_rejected", retryable: false });
+
+    invoke.mockRejectedValueOnce({
+      code: "quota_exhausted",
+      message: "apiKey=sk-private-native-secret",
+      retryable: false,
+    });
+    const reworded = await gateway.getSettings().catch((value: unknown) => value);
+    expect(reworded).toMatchObject({ code: "quota_exhausted" });
+    expect(JSON.stringify(reworded)).not.toContain("private-native-secret");
+  });
 });

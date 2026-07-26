@@ -54,6 +54,12 @@ const platformSessionActionSchema = z
       "unknown",
     ]),
     flowVersion: z.literal("douyin.qr-login.v2"),
+    // PB-07 gave the publish and login command families one result DTO. Both
+    // fields belong to a publish preflight and are always null here, but the
+    // Rust producer always serializes them, so a schema that omits them rejects
+    // every real login result as `protocol_mismatch`.
+    confirmationId: z.string().nullable(),
+    targetAccount: z.string().nullable(),
   })
   .strict();
 

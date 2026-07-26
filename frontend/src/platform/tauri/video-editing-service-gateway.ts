@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { nativeCommandErrorFields } from "./native-command-error";
 import {
   VideoEditingServiceGatewayError,
   type AliyunEditingRegion,
@@ -95,15 +96,14 @@ function safeError(value: unknown): VideoEditingServiceGatewayError {
   if (value instanceof VideoEditingServiceGatewayError) {
     return value;
   }
+  const fields = nativeCommandErrorFields(value);
   if (
-    isExactRecord(value, ["code", "retryable"]) &&
-    typeof value.code === "string" &&
-    NATIVE_ERROR_CODES.has(value.code as VideoEditingServiceErrorCode) &&
-    typeof value.retryable === "boolean"
+    fields !== undefined &&
+    NATIVE_ERROR_CODES.has(fields.code as VideoEditingServiceErrorCode)
   ) {
     return new VideoEditingServiceGatewayError(
-      value.code as VideoEditingServiceErrorCode,
-      value.retryable,
+      fields.code as VideoEditingServiceErrorCode,
+      fields.retryable,
     );
   }
   return new VideoEditingServiceGatewayError("operation_unavailable", false);

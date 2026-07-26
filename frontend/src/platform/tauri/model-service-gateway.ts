@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { nativeCommandErrorFields } from "./native-command-error";
 import {
   ModelServiceGatewayError,
   type BailianModelId,
@@ -152,13 +153,9 @@ function safeError(value: unknown): ModelServiceGatewayError {
   if (value instanceof ModelServiceGatewayError) {
     return value;
   }
-  if (
-    isExactRecord(value, ["code", "retryable"]) &&
-    typeof value.code === "string" &&
-    NATIVE_ERROR_CODES.has(value.code as ModelServiceErrorCode) &&
-    typeof value.retryable === "boolean"
-  ) {
-    return new ModelServiceGatewayError(value.code as ModelServiceErrorCode, value.retryable);
+  const fields = nativeCommandErrorFields(value);
+  if (fields !== undefined && NATIVE_ERROR_CODES.has(fields.code as ModelServiceErrorCode)) {
+    return new ModelServiceGatewayError(fields.code as ModelServiceErrorCode, fields.retryable);
   }
   return new ModelServiceGatewayError("operation_unavailable", false);
 }

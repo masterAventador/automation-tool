@@ -48,6 +48,14 @@ DEBUG_APP_RESOURCE_ROOT: Final = FRONTEND_ROOT / "src-tauri" / "target" / "debug
 EMBEDDED_BROWSER_DIRECTORY: Final = "embedded-browser"
 DISTRIBUTION_MANIFEST_NAME: Final = "distribution-manifest.v1.json"
 
+# EB-09 moved `BrowserProfileStore` to a new root and declared the development-era
+# `browser-profiles` neither migrated nor read. Drivers that assert on the
+# operations Profile have to name the root the App actually writes, and naming it
+# once here keeps the next rename from silently splitting into N stale copies.
+# The single definition lives in `frontend/src-tauri/src/browser_profiles.rs`.
+OPERATIONS_PROFILE_ROOT: Final = "embedded-browser-profiles"
+CURRENT_DOUYIN_PROFILE_FILE: Final = "current-douyin-profile-v1"
+
 # Project-owned, traceable and outside every published port of this repository
 # (Control Plane 8765, Vite 1420, PostgreSQL 5432/5433) as well as the loopback
 # ephemeral range the drivers hand to PostgreSQL and WebDriver.
