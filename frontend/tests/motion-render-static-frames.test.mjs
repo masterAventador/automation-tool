@@ -1,0 +1,224 @@
+// A render that never moves must fail loudly instead of shipping a still image.
+//
+// The observed defect: the packaged authoring reference
+// (`vendor/hyperframes/.../minimal-composition.md`) demonstrates the animation
+// runtime as a CDN `<script src="https://...gsap...">`. The render sandbox is
+// offline by construction, so that tag resolves to nothing, `gsap` stays
+// undefined, and the inline setup throws before it can register
+// `window.__timelines`. The Worker then finds no seekable timeline, skips the
+// per-frame seek entirely (`if (seekableDuration > 0)`), screenshots the same
+// untouched first paint `frameCount` times and reports `status: "complete"`.
+// Every gate is green and the deliverable is a static picture.
+//
+// These tests drive the real `workers/motion_composition/worker.mjs` through
+// its real stdin protocol against a real Chromium, because the whole point is
+// what the Worker *reports* — a unit test of the comparison could not have
+// caught the `seekableDuration` short circuit that produces the frames.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+import { spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+const repositoryRoot = new URL("../../", import.meta.url);
+const WORKER = fileURLToPath(new URL("workers/motion_composition/worker.mjs", repositoryRoot));
+
+const WORKER_VERSION = "0.7.68";
+const PROTOCOL_VERSION = "1.0";
+const EVENT_DOMAIN = "automation-tool.video-worker-event.v1\0";
+const COMMAND_DOMAIN = "automation-tool.video-worker-command.v1\0";
+const TOKEN = "b".repeat(64);
+const JOB_ID = "7d444840-9dc0-41a2-bcd4-e15b02a4c51e";
+const FRAME_COUNT = 4;
+
+// Where a real embedded Chromium may already be staged on this machine. The
+// acceptance scripts stage one under `.local/`; an explicit path always wins.
+const BROWSER_CANDIDATES = [
+  ".local/release/build/embedded-browser/chrome-mac-arm64",
+  ".local/desktop-e2e/embedded-browser/macos-arm64/chrome-mac-arm64",
+  ".local/t44-release-verify/build/embedded-browser/chrome-mac-arm64",
+];
+const MAC_APP_SUFFIX = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+
+function locateRenderBrowser() {
+  const explicit = process.env.AUTOMATION_TOOL_RENDER_BROWSER;
+  if (typeof explicit === "string" && explicit.length > 0 && existsSync(explicit)) {
+    return explicit;
+  }
+  for (const candidate of BROWSER_CANDIDATES) {
+    const executable = fileURLToPath(new URL(`${candidate}/${MAC_APP_SUFFIX}`, repositoryRoot));
+    if (existsSync(executable)) return executable;
+  }
+  return null;
+}
+
+async function chromiumMajor(executable) {
+  const { stdout } = await execFileAsync(executable, ["--version"]);
+  const major = Number(/(\d+)\.\d+\.\d+\.\d+/u.exec(stdout)?.[1]);
+  assert.ok(Number.isInteger(major), `could not read a Chromium major from ${stdout}`);
+  return major;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function proof(domain, parts, prefix) {
+  const mac = createHmac("sha256", Buffer.from(TOKEN, "hex"));
+  mac.update(domain);
+  mac.update(parts.join("\0"));
+  return prefix + mac.digest("base64url");
+}
+
+function sandboxCommandLine(sandbox) {
+  return JSON.stringify({
+    authenticationProof: proof(
+      COMMAND_DOMAIN,
+      ["worker.render.sandbox", "node", PROTOCOL_VERSION, JOB_ID, canonicalJson(sandbox)],
+      "atvwc1.",
+    ),
+    command: "worker.render.sandbox",
+    jobId: JOB_ID,
+    protocolVersion: PROTOCOL_VERSION,
+    sandbox,
+    workerKind: "node",
+  });
+}
+
+function bootstrapLine(assetRoot, executable, major) {
+  return JSON.stringify({
+    assetRoot,
+    bootstrapVersion: "1",
+    enableWebUi: false,
+    localSessionToken: TOKEN,
+    protocolVersion: PROTOCOL_VERSION,
+    renderBrowser: {
+      chromiumMajor: major,
+      executablePath: executable,
+      launchTimeoutSeconds: 30,
+    },
+    scriptModel: null,
+    workerKind: "node",
+  });
+}
+
+const PAGE_HEAD = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<style>html,body{margin:0;background:#0b0f14}
+#root{position:relative;width:640px;height:360px;overflow:hidden}
+#bar{position:absolute;top:0;height:360px;width:60px;background:#ffffff}</style></head><body>
+<div id="root" data-composition-id="t86" data-duration="3" data-width="640" data-height="360">
+<div class="clip" id="only" data-start="0" data-duration="3" data-track-index="0">
+<div id="bar" style="left:0px"></div></div></div>`;
+
+// Registers a seekable timeline that actually repaints, so consecutive frames
+// differ. This is what a healthy composition looks like to the Worker.
+const MOVING_PAGE = `${PAGE_HEAD}<script>
+window.__timelines = { main: { seek(time) {
+  document.getElementById("bar").style.left = Math.round(time * 180) + "px";
+} } };
+</script></body></html>`;
+
+// The defect verbatim: the CDN tag the reference demonstrates cannot load in
+// the offline sandbox, so `gsap` is undefined and this throws before
+// `window.__timelines` is ever assigned.
+const FROZEN_PAGE = `${PAGE_HEAD}<script>
+const timeline = gsap.timeline({ paused: true });
+timeline.to("#bar", { left: 540, duration: 3 }, 0);
+window.__timelines = { main: timeline };
+</script></body></html>`;
+
+async function renderPage(html, executable, major) {
+  const base = await mkdtemp(join(tmpdir(), "t86-static-"));
+  const workspace = join(base, "workspace");
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, "entry.html"), html, "utf8");
+  const sandbox = {
+    allowedAssets: [],
+    entryHtml: "entry.html",
+    frameCount: FRAME_COUNT,
+    maxCpuSeconds: 120,
+    maxDurationSeconds: 60,
+    // A real Chromium process group idles well above a gigabyte; the budget
+    // here only needs to be loose enough that it is not what ends the render.
+    maxMemoryMegabytes: 8192,
+    maxOutputBytes: 50_000_000,
+    workspace,
+  };
+  const child = spawn(process.execPath, [WORKER], { stdio: ["pipe", "pipe", "pipe"] });
+  try {
+    const events = [];
+    let buffer = "";
+    const settled = new Promise((resolve, reject) => {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        buffer += chunk;
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          const event = JSON.parse(line);
+          events.push(event);
+          if (event.event !== "worker.ready") resolve(event);
+          newline = buffer.indexOf("\n");
+        }
+      });
+      child.on("error", reject);
+      child.on("exit", () => reject(new Error(`worker exited early: ${JSON.stringify(events)}`)));
+    });
+    child.stdin.write(`${bootstrapLine(base, executable, major)}\n`);
+    // The ready line carries the health port; the render command follows it.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    child.stdin.write(`${sandboxCommandLine(sandbox)}\n`);
+    return await settled;
+  } finally {
+    child.kill("SIGKILL");
+    await rm(base, { recursive: true, force: true });
+  }
+}
+
+test("a composition whose animation runtime never loads fails instead of shipping a still image", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const major = await chromiumMajor(executable);
+  const event = await renderPage(FROZEN_PAGE, executable, major);
+  assert.equal(
+    event.reasonCode,
+    "render_static_frames",
+    `a render where every frame is identical must be reported as a failure, got ${JSON.stringify(event)}`,
+  );
+  assert.equal(event.event, "worker.render.failed");
+});
+
+test("a composition that actually animates still renders", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const major = await chromiumMajor(executable);
+  const event = await renderPage(MOVING_PAGE, executable, major);
+  assert.equal(
+    event.event,
+    "worker.render.sandboxed",
+    `a moving composition must not be mistaken for a still one, got ${JSON.stringify(event)}`,
+  );
+  assert.equal(event.framesCaptured, FRAME_COUNT);
+});
