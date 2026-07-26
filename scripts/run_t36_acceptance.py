@@ -36,6 +36,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from desktop_e2e_prerequisites import (  # noqa: E402
+    EXECUTOR_PACKAGE_CACHE_ROOT,
+    SHARED_EXECUTOR_BUILD_ID,
+    install_signed_executor_package,
     prepare_startup_gate,
     startup_gate_environment,
 )
@@ -184,6 +187,67 @@ def read_model_key(secret: Path) -> str:
     return key
 
 
+def require_authoring_capable_executor(private_app_data: Path) -> None:
+    """The installed Executor must be able to answer the authoring protocol.
+
+    `ensure_signed_executor_package` caches the PyInstaller build under a
+    constant build id and reuses it whenever the manifest and signature files
+    are present. Nothing about `backend/src/automation_tool/executor/` takes
+    part in that key, so once the cache exists no change to the Executor ever
+    reaches an acceptance run again — the driver silently tests a build from
+    whenever the cache happened to be made.
+
+    That is what two T36 runs actually measured. The cached package predated
+    the one-shot authoring entry, so the App started it with `--author-motion`,
+    the frozen binary fell through to the long-lived executor path, read the
+    authoring request as a bootstrap document and exited 2 with an empty
+    stdout — which the App classifies, correctly, as `authoring_crashed`. The
+    product code was fine; the artefact under test was stale, and nothing in the
+    run said so.
+
+    An empty request is enough to tell the two apart without a credential and
+    without a model round trip: the entry answers every rejection with its
+    refusal document on stdout and exit 70, and it can only get that far if the
+    argument dispatch exists and the agent's startup contracts are in the
+    package. Anything else means this package cannot author, so it is rebuilt
+    rather than run.
+    """
+    entrypoint = private_app_data / "local-executor/package/automation-tool-executor"
+    if _answers_the_authoring_protocol(entrypoint):
+        return
+    print(
+        "[T36] The cached signed Executor cannot answer --author-motion; "
+        "rebuilding it instead of reporting its age as a product defect"
+    )
+    shutil.rmtree(EXECUTOR_PACKAGE_CACHE_ROOT / SHARED_EXECUTOR_BUILD_ID, ignore_errors=True)
+    shutil.rmtree(private_app_data / "local-executor", ignore_errors=True)
+    install_signed_executor_package(private_app_data)
+    if not _answers_the_authoring_protocol(entrypoint):
+        raise RuntimeError(
+            f"{entrypoint} does not answer the one-shot authoring protocol even after a "
+            "rebuild, so the one-sentence path cannot work in this App"
+        )
+
+
+def _answers_the_authoring_protocol(entrypoint: Path) -> bool:
+    if not entrypoint.is_file():
+        return False
+    child = subprocess.run(
+        [str(entrypoint), "--author-motion"],
+        input=b"",
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    if child.returncode != 70:
+        return False
+    try:
+        answer = json.loads(child.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return answer == {"schemaVersion": 1, "status": "rejected"}
+
+
 def prepare_resources() -> None:
     """Put the packaged parts where the App resolves them, then verify them.
 
@@ -193,6 +257,7 @@ def prepare_resources() -> None:
     would report as an unexplained blank window.
     """
     prepare_startup_gate(app_data_directory())
+    require_authoring_capable_executor(app_data_directory())
     require_staged_embedded_browser(resource_root=DEBUG_APP_RESOURCE_ROOT)
     platform = "windows" if sys.platform == "win32" else "macos"
     staging = prepare_video_runtime(platform=platform)

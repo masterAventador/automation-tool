@@ -1,7 +1,8 @@
 # T36 一句话生成视频的 App 内闭环与本地预览
 
-> 状态：🚧 部分完成 —— 「智能素材成片」的成片在 App 内可预览已实现并通过分层门禁；
-> **一句话生成链路的真实 App 用户路径验收未取得，且查出一个产品级阻塞（素材源 Key 缺失）**。
+> 状态：🚧 部分完成 —— **品牌动效线的「一句话生成 → 进度 → 成片在 App 内播放」
+> 已在真实 App 用户路径上跑通并留下成片证据**（见「真实 App 用户路径验收：通过」）；
+> 「智能素材成片」那条仍卡在素材源 Key 缺失这个产品级阻塞上，未取得验收。
 >
 > 日期：2026-07-26
 >
@@ -1245,7 +1246,245 @@ cd frontend && npx tsc -b              exit 0
 **本轮有意没做**：那会改动 `command_error` 的 wire（上一轮已定「耗时/细节不进 wire」），
 不该由我单方面推翻。可行做法与代价写在这里，等决定。
 
-## 失败矩阵
+### 本次落地：那 15 分钟根本不是产品的，子进程失败是一个过期的构建产物
+
+前两条工作线留下三个问题：提交命令占着主线程、15 分钟花在哪、子进程为什么非零退出。
+**三个都有答案了，其中两个的结论与此前的判断相反。**
+
+#### 一、「15 分钟」是验收驱动自己的预算，不是产品耗时（实证，非推断）
+
+`browser.waitUntil` 用 `Timer` 驱动条件函数，而 `Timer._checkCondition` 把**条件抛出的异常
+当成「还没满足」**：记下它、继续按 interval 轮询，直到整个预算耗尽才用**最后一次**的异常 reject。
+本仓库装的 `webdriverio@9.29.1` 逐字如此（`build/index.js` 的 `_checkCondition` / `_hasTime`）。
+
+用**它自己那份 `Timer`** 跑一次一开始就抛的条件：
+
+```text
+budget=10s  rejected after 10.0s  condition ran 10 times  message="condition failed at +9s"
+```
+
+条件在 +0s 就失败了，`waitUntil` 仍然跑满 10 秒，报出来的时间戳是 +9s。
+
+把 10 秒换成 spec 里的 `timeout: 900_000`，就是前两次运行报告的
+`submission failed after 905s`：**提交可能几秒就失败了，剩下 900 秒是这个 wait 在空转，
+而报出来的秒数是它最后一次重算的时刻。** 与之自洽的还有此前所有「不相容」的观察——
+点击后 41s / 57s 两次取样看到主线程在事件循环、tokio 全 park、无子进程、工作区为空、
+100 秒只烧 0.78 秒 CPU：**因为那时候命令早就跑完并且失败了，工作区也已经在失败路径上被删掉。**
+
+**「命令根本没开始执行」这个结论是错的，应当作废。** 它是被一个错误的时间轴推出来的。
+
+已修：本 spec 的两处 `waitUntil` 改成**返回**裁决而不是抛出，判定放在 wait 之后。
+`motion-video-native.spec.ts`（预算 120s）与 `material-video-webui.spec.ts`（预算 150s）
+各有一处同样的写法，**本次作业面之外，未改**，登记在「未完成」。
+
+#### 二、两处哈希不是瓶颈，而且只在 debug 验收构建里才贵（实测数字）
+
+用与产品逐字相同的读法（1 MB 缓冲、逐文件 SHA-256）在本机实测：
+
+| 载荷 | debug（opt-level 0） | release |
+| --- | --- | --- |
+| 执行器包 176.1 MB / 284 文件 | **6.07 s**（29.0 MB/s） | **0.35 s**（497 MB/s） |
+| media-toolchain 42.1 MB | **1.43 s** | **0.08 s** |
+| 内置 Chromium 343.0 MB | **11.55 s** | **0.67 s** |
+
+全仓无 `[profile.dev]` 覆盖、无 `.cargo/config.toml`，所以 debug 构建里 `sha2` 确实是
+opt-level 0，两者差 17 倍。但结论是反的：
+
+- **在用户拿到的 release 包里，这三处加起来约 1.1 秒**，不是瓶颈，**不该加缓存**。
+  缓存要回答「什么时候失效」，而这里被校验的是签名执行器包和内置浏览器——那是安全边界，
+  用 1 秒换一个新的失效面不划算。真要优化，正确的位置是给 debug 构建的 `sha2`
+  单独提 opt-level（只影响验收速度，不动产品代码），不是在产品里加缓存。
+- 内置浏览器那条本来就已经有缓存（`EmbeddedBrowserAuthority.verified` + 
+  `cached_executable_still_sound`），执行器包和 media-toolchain 没有——**这不对称是事实，
+  但它现在不值 1 秒。**
+
+#### 三、子进程非零退出的真相：验收装的是一个过期的执行器包
+
+把 `submit_motion_video_brief` 逐字构造的那份请求，直接喂给验收当时装进 App 的那个执行器：
+
+```text
+[probe] exit=2   stdout (0 bytes)   stderr "Local Executor bootstrap is rejected"
+[probe] the App would report: authoring_crashed
+```
+
+冻结二进制把 `--author-motion` 落到了长驻执行器那条路径，把编排请求当成 bootstrap 文档读，
+拒绝并退出 2，stdout 什么都没有。Rust 侧的分类完全正确：非零退出 + 没有拒绝文档 =
+`authoring_crashed`（拆码之前就是 `authoring_failed`）。**上一次运行报的就是它。**
+
+根因在 `scripts/desktop_e2e_prerequisites.py:347` 的 `ensure_signed_executor_package`：
+
+```python
+cached = EXECUTOR_PACKAGE_CACHE_ROOT / build_id
+if (cached / EXECUTOR_MANIFEST_NAME).is_file() and (...).is_file():
+    return cached
+```
+
+**缓存键就是一个常量字符串** `desktop-e2e-startup-gate`，
+`backend/src/automation_tool/executor/` 的任何内容都不参与。缓存一旦建立，
+**执行器的任何改动都再也进不了任何一次桌面验收**——包括本条线自己把编排代理搬进执行器包
+那次改动。本机那份缓存建于当天 05:01，早于 `--author-motion` 入口，
+`strings` 在包里找不到任何 `motion`。
+
+**这正是 CLAUDE.md「单一构建路径」要防的形态的一个变种**：验收跑的不是被改过的那份产物，
+而且没有任何门禁会说出来。产品代码是好的，被测的产物是旧的，两次运行都把它读成了产品缺陷。
+
+已修（在本作业面内）：`run_t36_acceptance.py` 的 `prepare_resources()` 增加
+`require_authoring_capable_executor()`——用**空请求**探一次装好的执行器，要求
+`exit 70` + `{"schemaVersion":1,"status":"rejected"}`。这一条不需要凭据、不需要模型往返，
+却同时证明了参数分派存在、`agent.py` 导入期读的四份契约在包里。不满足就**删缓存重建再验**，
+仍不满足才报错。**共享的 `desktop_e2e_prerequisites.py` 没有动**（其他工作线正在用它），
+缓存键该改成内容寻址这件事登记在「未完成」。
+
+#### 四、主线程阻塞（真缺陷，本次修掉）
+
+`submit_motion_video_brief` 声明为 `fn` 而不是 `async fn`，全仓也没有 `#[tauri::command(async)]`。
+逐层核对第三方源码：`tauri-macros-2.6.3/src/command/wrapper.rs:50` 默认
+`ExecutionContext::Blocking`，`:158` 只有 `asyncness` 能改它；
+`tauri-2.11.5/src/ipc/protocol.rs` 在协议回调里同步 `webview.on_message`；
+macOS 上那个回调是 WKWebView 的 `webView:startURLSchemeTask:`，走主线程。
+**所以提交命令（含最长 600 秒的 `try_wait` + `sleep(200ms)` 等待循环）全程占用主线程：
+窗口不重绘、别的命令派发不出去、取消按钮连点击事件都收不到。**
+
+##### RED
+
+新增 `frontend/src-tauri/tests/main_thread_responsiveness.rs`。它不硬编码命令名单：
+先声明一组「会等外部世界」的工作（各带理由），再从 `lib.rs` 里算出每个
+`#[tauri::command]` 的可达调用闭包，凡是够得着其中任何一项的同步命令一律判失败。
+
+```text
+cd frontend/src-tauri && cargo test --test main_thread_responsiveness
+  test every_guarded_wait_still_exists_where_it_is_claimed_to_be ... ok
+  test commands_that_wait_on_the_world_never_run_on_the_ui_thread ... FAILED
+
+  these commands are declared without `async`, so tauri runs them on the IPC callback
+  thread — the macOS main thread. ...
+    submit_motion_video_draft:      motion_runtime_paths
+    submit_motion_video_brief:      motion_runtime_paths / run_motion_authoring /
+                                    start_motion_render / verified_entrypoint
+    check_local_startup_environment: startup_environment_state
+```
+
+断言失败，不是编译失败；`lib` 全程可编译，不打断并行工作线。
+**这三个就是全部——门禁自己算出来的，不是我挑的。**
+
+##### GREEN
+
+```text
+cargo test --test main_thread_responsiveness                       2 passed
+cargo build --lib                                                  OK
+cargo build --lib --features desktop-e2e                           OK
+cargo build --lib --features control-plane-e2e                     OK
+cargo build --lib --features video-studio-e2e                      OK
+cargo test --test single_build_path                               10 passed
+cargo test --test video_media_toolchain                            9 passed
+cargo test --tests -- --test-threads=4       45 个测试二进制 / 392 passed / 0 failed
+cd frontend && npx vitest run                60 文件 / 501 passed / 1 expected fail
+cd frontend && npx tsc -b                                          exit 0
+python3 scripts/check_user_facing_branding.py                      passed (52 frontend, 252 native)
+backend/.venv/bin/python scripts/test_user_facing_branding.py      passed
+backend/.venv/bin/python scripts/test_video_studio_acceptance_scope.py  passed
+python3 scripts/check_embedded_browser_video_roadmap.py            valid
+python3 scripts/check_third_party_sources.py                       valid
+python3 scripts/cq_04_ledger_honesty.py                            exit 0
+```
+
+四个 feature 组合逐个编译、跑全量而不是只跑相关包：改的是三个构建共用的 `lib.rs`。
+
+`tests/video_media_toolchain.rs` 的接线守卫跟着改了落点：它原来钉在
+`submit_motion_video_draft` 体内的那份启动代码上，那份代码现在没有了。
+改成钉 `start_motion_render`（唯一的启动点），并**分别**钉住两个提交命令都到得了它——
+原先只覆盖固定模板那条，一句话那条从来没被这条守卫管过。
+变异检验两次：把 `brand_motion_environment()` 从 `start_motion_render` 拿掉 → 红；
+让 `submit_motion_video_brief` 不再走 `start_motion_render` → 红；还原 → 9 passed。
+
+##### 交付
+
+- **三个命令改 `async fn` + `spawn_blocking`**，不是只改 `async`：这些工作本来就是阻塞的
+  （校验包内字节、起进程、等进程），放在 async runtime 的 worker 上会占着一个 worker，
+  正确的位置是阻塞池——`export_diagnostics` 和 `restart_executor` 早就这么写了，
+  本次沿用同一形态而不是发明新的。
+- **`State<'_, T>` 借的是命令的句柄，去不了阻塞池**，所以工作在池里用自己那份
+  `AppHandle` 重新解析服务。用 `try_state` 而不是 `state`：没被 manage 的服务应该变成
+  这个命令自己的错误码，而不是池线程上的一次 panic。
+- **`submit_motion_video_draft` 不再自带一份启动逻辑**。它原来复制了
+  `start_motion_render` 的整段（launch → start → health → snapshot → 起渲染线程），
+  台账里却写着两边共用。现在真的共用了，同一处修一次就够。
+- **`check_local_startup_environment` 一并改**：它每次调用都整包校验执行器
+  （debug 6.07 s，首次还要加内置浏览器 11.55 s），而它是启动时第一个跑的命令。
+  一个卡住不重绘的窗口是客户看到的第一眼，看起来就是「双击没反应」。
+  改成 `async fn(app) -> Snapshot` 后不能再带 `State<'_>` 参数（tauri 要求带借用参数的
+  async 命令必须返回 `Result`，改返回类型会动前端契约），所以服务在闭包里解析，
+  并给出一个**fail closed** 的兜底快照：探针没跑成不等于通过。
+  三处探针（`authority.resolve()` / `profiles.revalidate_storage()` /
+  `platform.startup_environment_state()`）仍逐字留在这个函数体内，
+  `single_build_path` 那条守卫照常绿。
+- **短命令一个没动**。`get_motion_render_jobs`、各种 settings 读写都还是同步的：
+  把一次内存读搬去阻塞池只换来一次线程切换。
+
+##### 主线程真的空出来了（运行中取样，不是推断）
+
+在 App 真实跑一句话提交、编排子进程正在运行时对 App 取样 3 秒：
+
+```text
+Thread  DispatchQueue_1: com.apple.main-thread
+    2324/2324  ... tao::handle_event_loop / __CFRunLoopRun      ← 事件循环在转
+    同一份取样里还有 automation_tool_desktop_lib::get_material_render_jobs
+                                                                 ← 前端轮询照常被服务
+
+Thread_92162989（tokio 阻塞池线程）
+    tokio::runtime::blocking::task::BlockingTask::poll
+      submit_motion_video_brief::{{closure}}::{{closure}}
+        run_motion_authoring            2323/2324
+          std::thread::sleep → nanosleep → __semwait_signal
+```
+
+**提交命令和它的 200ms 等待循环在阻塞池线程上，主线程在跑事件循环。**
+改之前这两件事不可能同时成立。
+
+#### 五、真实 App 用户路径验收：通过
+
+```text
+backend/.venv/bin/python scripts/run_t36_acceptance.py
+
+[T36] The cached signed Executor cannot answer --author-motion; rebuilding it
+      instead of reporting its age as a product defect
+[T36] Starting isolated PostgreSQL as automation-tool-t36-99019
+[T36] Starting Control Plane on isolated port 54922
+
+[T36 step] +3s   workbench mounted
+[T36 step] +3s   model credential saved
+[T36 step] +3s   empty brief refused, no job created
+[T36 step] +3s   brief typed into the form
+[T36 step] +3s   submit clicked
+[T36 step] +181s brief submitted, waiting on the film
+[T36 step] +214s film finished, opening the artifact
+1 passing (3m 34.5s)
+
+T36 evidence film: {"codec_name":"h264","width":640,"height":360,
+                    "duration":"12.000000","nb_read_frames":"360"}
+T36 one-sentence App acceptance passed
+```
+
+一次真实用户路径，从正式设置表单存真实密钥开始，到成片在 App 里播放为止：
+
+| 段 | 耗时 |
+| --- | --- |
+| 挂载工作台 → 存密钥 → 空描述被拒 → 打字 → 点击 | 3 秒 |
+| **编排（真实模型往返 + 本地修正循环）** | **178 秒** |
+| 渲染 360 帧 + 编码 + 导入 Artifact | 33 秒 |
+| 成片页播放并解码（12.000 秒、360 帧、640×360 h264） | 收尾 |
+
+**四条证据现在全部拿到**（此前只有第 2 条）：
+
+| 证据 | 状态 |
+| --- | --- |
+| 1 进度是真的 | ✅ 至少一个运行中阶段出现过、百分比单调不回退、经过至少两个取值到 100 |
+| 2 成片真的在动 + 静图门禁拦得住 | ✅ 静图门禁在这一条真实任务上放行；`nb_read_frames=360` |
+| 3 预览能播 | ✅ 既有 `<video>` + base64 `data:` URL，`duration≈12s`、`currentTime>0`、无 `error` |
+| 4 超边界 brief 在 App 里被拒 | ✅ 空描述被人话拒绝且不产生任务（用户能触发的那一半） |
+
+**顺带作废的两个结论**：`MOTION_AUTHORING_DEADLINE`（600 秒）不需要加大——真实编排 178 秒；
+「提交命令很晚才开始」不成立——它一直是立刻开始的，只是当时在主线程上，而且几秒就失败了。
 
 ## 失败矩阵
 
@@ -1264,6 +1503,11 @@ cd frontend && npx tsc -b              exit 0
 | 正在忙（busy） | 播放按钮禁用，避免连点在切换途中改写播放源 |
 | 同一页里多条成片 | 按钮无障碍名称带片名（`播放{片名}`），不会播错一条 |
 | 外壳没有装配视频网关 | `WorkbenchShell` 的兜底网关明确抛错，不返回空数据假装成功 |
+| 编排跑满几分钟（真实情况：178 秒） | 命令在阻塞池线程上等，主线程继续跑事件循环、继续服务任务轮询；窗口不冻结 |
+| 启动门禁整包校验 519 MB（首次） | 同样在阻塞池上，启动画面照常重绘，不表现为「双击没反应」 |
+| 阻塞池任务 panic 或 runtime 正在关闭 | 提交类命令返回 `render_unavailable`（什么都没起来）；启动门禁返回全 `Unavailable` 的快照，**没探到不等于通过** |
+| 被 manage 的服务缺失 | `try_state` 转成该命令自己的错误码，不在池线程上 panic |
+| 装好的执行器包不认识 `--author-motion` | 验收在起跑前就发现（空请求必须换回 `exit 70` + 拒绝文档），删缓存重建再验；不把过期产物读成产品缺陷 |
 
 ## 清理
 
@@ -1291,6 +1535,27 @@ cd frontend && npx tsc -b              exit 0
 `~/Library/Application Support/com.aventador.automationtool/` 完好（手工扫码的抖音 Profile 与凭据仍在），
 **全程未写入该目录**；未触碰 `.local/t44-release-verify/` 与
 `docs/development/DEMO-preflight-checklist.md`。
+
+**本轮（主线程 + 过期执行器包）的清理**：跑了一次完整 `scripts/run_t36_acceptance.py`
+（隔离 Compose project name `automation-tool-t36-99019`，Control Plane 端口 54922，
+两个 loopback 端口开跑前均确认空闲，未接管任何来源不明的进程）。跑完核对：
+`docker ps -a` / `volume ls` / `network ls` 里 **0 个 t36 资源**，
+`automation-tool-desktop` / `automation-tool-executor` / `wdio` / `tauri-driver` /
+`Chrome for Testing` / `worker.mjs` 进程各 **0 个**，验收专属 App 数据目录
+`~/…/com.aventador.automationtool.t36acceptance` 已由脚本删除，生产前端资源已由 `finally` 还原。
+开跑前用 `pgrep -fl "cargo build|tauri build|cargo test"` 确认没有其他工作线在出包。
+
+哈希吞吐测量用的是**会话临时目录里的一个独立 crate**（只读 `.local/` 下的三份载荷，不写仓库），
+`waitUntil` 语义那次实验驱动的是 `node_modules` 里已装的那份 `Timer`（只读）。
+编排入口探针在系统临时目录建了一个工作区，跑完即删。App 运行期的 `sample` 输出只写会话临时目录。
+**这些一次性文件全部不进仓库。**
+
+**未运行 `scripts/run_u9_06_acceptance.py`**；只读列目录核对用户真实安装
+`~/Library/Application Support/com.aventador.automationtool/` 完好（手工扫码的抖音凭据仍在），
+**全程未写入该目录**；未触碰 `.local/release/`、`.local/t44-release-verify/`、
+`docs/development/DEMO-preflight-checklist.md`，以及其他工作线占用的
+`tests/local_video_orchestrator*.rs`、`tests/material_video_gateway.rs`、
+`scripts/run_bm_02/03/04_acceptance.py`、`scripts/run_im_03/04/05_acceptance.py`。
 
 **第四个码那一轮的清理**：起过一次 `run_t36_acceptance.py`（隔离 project name
 `automation-tool-t36-<pid>`），跑到一半按用户要求主动中止——**发 SIGINT 走脚本自己的
@@ -1333,9 +1598,30 @@ cd frontend && npx tsc -b              exit 0
    `check_user_facing_branding.py` 只扫我们自己的文件，扫不到内嵌上游 WebUI。
    Demo 之前需要处理（上游 `webui/Main.py` 是只读 Submodule，只能按
    `_prepare_private_project` 已有的私有副本机制在装配期替换标题，或用注入的样式遮蔽）。
-3. **真实 App 用户路径验收**：按上面「真实边界」的判断，在 `control-plane-e2e` 上新建一条
-   驱动（tauri conf + wdio conf + spec + `scripts/run_*_acceptance.py`），走
-   打开 App → 视频制作 → 智能素材成片 → 打开完整制作界面 → 一句话生成 → 成片页播放 → 去发布。
-   新增 spec 会落在 `frontend/e2e-tauri/`，本次作业面之外，需要先与占用该目录的工作线对齐。
-4. **品牌动效线的一句话入口**：执行器承载编排代理 → `submit_motion_video_brief` →
-   前端 `one_sentence_v1`。素材线通了之后它是加分项，不是 Demo 阻塞项。
+3. **素材线的真实 App 用户路径验收**：走 打开 App → 视频制作 → 智能素材成片 →
+   打开完整制作界面 → 一句话生成 → 成片页播放 → 去发布。动效线已经有
+   `run_t36_acceptance.py` 这条驱动可以照抄；素材线要先解掉第 1 条。
+4. **`ensure_signed_executor_package` 的缓存键是一个常量字符串**
+   （`scripts/desktop_e2e_prerequisites.py:347`，`build_id="desktop-e2e-startup-gate"`）。
+   `backend/src/automation_tool/executor/` 的内容不参与，所以缓存一旦建立，
+   **执行器的任何改动都进不了任何一次桌面验收**——本次那个「子进程非零退出」就是它造成的。
+   本次只在 `run_t36_acceptance.py` 里加了自己的探针，**共享文件没动**（其他工作线正在用）。
+   正解是把缓存键换成执行器源码 + spec 的内容摘要，让改了就自动重建；
+   这会影响所有 `run_*_acceptance.py`，需要单独一条任务并与占用这些文件的工作线对齐。
+5. **另外两条 spec 还在 `waitUntil` 条件里抛异常**：`motion-video-native.spec.ts`（预算 120 秒）、
+   `material-video-webui.spec.ts`（预算 150 秒）。失败时它们会空转完整个预算，
+   并报出一个描述 wait 自己而不是描述故障的时间戳。本次作业面之外，未改。
+   值得考虑加一条门禁：`e2e-tauri/` 里的 `waitUntil` 条件不许 `throw`。
+6. **`emergency_stop_executor` 是同型的同步命令**：它在主线程上调
+   `platform.emergency_stop()`（终止执行器进程树），而同一个文件里的
+   `logout_douyin_session` 对**同一个调用**已经用了
+   `spawn_blocking(move || service.emergency_stop())`，`ExecutorPlatformService` 也是 `Clone`，
+   所以是四行的改动。本次没动：它不在一句话链路上，而演示前动紧急停止这条安全控制、
+   又跑不了它自己的验收入口，代价大于收益。它没有被
+   `tests/main_thread_responsiveness.rs` 判红，因为守卫的种子清单里没有它——
+   要一起管的话，把 `emergency_stop` 加进那份清单即可。
+7. **debug 构建里 `sha2` 是 opt-level 0**（全仓无 `[profile.dev]` 覆盖、无 `.cargo/config.toml`），
+   29 MB/s 对 release 的 497 MB/s。产品不受影响，但每次桌面验收要为此多花约 19 秒
+   （执行器包 6.07 s + 内置浏览器 11.55 s + toolchain 1.43 s）。
+   要提速就给 dev profile 的这个依赖单独提 opt-level，**不要在产品里加哈希缓存**——
+   被校验的是签名执行器包和内置浏览器，那是安全边界，用 1 秒换一个新的失效面不划算。

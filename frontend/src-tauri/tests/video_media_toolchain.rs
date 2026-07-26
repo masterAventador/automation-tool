@@ -421,12 +421,22 @@ fn every_video_worker_launch_carries_the_packaged_environment_from_its_entry_poi
             "pub fn material_worker_launch(",
             "intelligent_material_environment()",
         ),
-        (motion, "fn submit_motion_video_draft(", "motion_worker_launch("),
+        // Both submit paths reach the Worker through one launch site, so the
+        // wiring is pinned there and the reachability of that site is pinned
+        // from each entry point. Pinning the launch inside one command left the
+        // other command — the one-sentence path — covered by nothing.
         (
             motion,
-            "fn submit_motion_video_draft(",
-            "brand_motion_environment()",
+            "async fn submit_motion_video_draft(",
+            "start_motion_render(",
         ),
+        (
+            motion,
+            "async fn submit_motion_video_brief(",
+            "start_motion_render(",
+        ),
+        (motion, "fn start_motion_render(", "motion_worker_launch("),
+        (motion, "fn start_motion_render(", "brand_motion_environment()"),
         (motion, "pub fn motion_worker_launch(", "with_environment("),
         // ... and the stored map has to reach the process itself.
         (orchestrator, "fn spawn_worker(", "command.env("),

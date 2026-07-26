@@ -437,68 +437,72 @@ pub fn motion_worker_launch(
     Ok(launch.with_render_browser(browser))
 }
 
+/// Run a command's blocking work somewhere that is not the UI thread.
+///
+/// A `#[tauri::command]` that is not declared `async` compiles to
+/// `ExecutionContext::Blocking` and is dispatched inside the IPC protocol
+/// callback, which on macOS is delivered on the main thread. The window is then
+/// frozen for the whole duration of the command: it does not repaint, no other
+/// command is dispatched, and a cancel button cannot even be clicked.
+///
+/// The video commands verify packaged bytes, start processes and wait for them
+/// to finish, so they are blocking by nature — which is why they belong on the
+/// blocking pool rather than on an async runtime worker, the same place
+/// `export_diagnostics` and `restart_executor` already put their own.
+async fn off_the_ui_thread<T, F>(work: F) -> Result<T, motion_video_studio::MotionVideoStudioError>
+where
+    F: FnOnce() -> Result<T, motion_video_studio::MotionVideoStudioError> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        // The work panicked or the runtime is shutting down. Nothing was
+        // authored, started or rendered, which is what this code already means
+        // everywhere else on this path.
+        .map_err(|_| motion_video_studio::render_unavailable())?
+}
+
+/// The services the render path needs, resolved from an owned handle.
+///
+/// A `tauri::State` argument borrows the command's handle, so it cannot travel
+/// to the blocking pool; the work looks the services up itself instead.
+/// `try_state` rather than `state` because a service that was never managed has
+/// to come back as this command's own error, not as a panic on a pool thread.
+fn motion_render_services(
+    app: &tauri::AppHandle,
+) -> Result<
+    (
+        tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
+        tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+        tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+    ),
+    motion_video_studio::MotionVideoStudioError,
+> {
+    let authority = app
+        .try_state::<embedded_browser_authority::EmbeddedBrowserAuthority>()
+        .ok_or_else(motion_video_studio::render_unavailable)?;
+    let orchestrator = app
+        .try_state::<local_video_orchestrator::LocalVideoOrchestrator>()
+        .ok_or_else(motion_video_studio::render_unavailable)?;
+    let workspaces = app
+        .try_state::<video_job_workspace::VideoJobWorkspaceStore>()
+        .ok_or_else(motion_video_studio::storage_unavailable)?;
+    Ok((authority, orchestrator, workspaces))
+}
+
 #[tauri::command]
-fn submit_motion_video_draft(
+async fn submit_motion_video_draft(
     app: tauri::AppHandle,
     request: motion_video_studio::MotionVideoDraftRequest,
-    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
-    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
-    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
 ) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
 {
-    let runtime = motion_runtime_paths(&app, &authority)?;
-    let prepared = motion_video_studio::prepare_manual_render_job(&workspaces, &request)?;
-    let render_job_id = prepared.render_job_id();
-    let allowed_assets = prepared.allowed_assets().to_vec();
-    let (asset_root, _, _) =
-        motion_video_studio::workspace_render_paths(&workspaces, render_job_id)?;
-    let launch = match motion_worker_launch(
-        runtime.worker_package.clone(),
-        asset_root,
-        runtime.browser.clone(),
-        runtime.chromium_major,
-        runtime.toolchain.brand_motion_environment(),
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            if let Ok(workspace) = workspaces.open(render_job_id) {
-                let _ = workspaces.finish(
-                    &workspace,
-                    video_job_workspace::VideoWorkspaceDisposition::Delete,
-                );
-            }
-            return Err(error);
-        }
-    };
-    if orchestrator.start(launch).is_err()
-        || orchestrator
-            .health(local_video_orchestrator::VideoWorkerKind::Node)
-            .is_err()
-    {
-        let _ = orchestrator.stop(local_video_orchestrator::VideoWorkerKind::Node);
-        if let Ok(workspace) = workspaces.open(render_job_id) {
-            let _ = workspaces.finish(
-                &workspace,
-                video_job_workspace::VideoWorkspaceDisposition::Delete,
-            );
-        }
-        return Err(motion_video_studio::render_unavailable());
-    }
-    let initial = motion_video_studio::snapshot(&workspaces, render_job_id)?;
-    let frame_count = prepared.frame_count();
-    let frames_per_second = prepared.frames_per_second();
-    let ffmpeg = runtime.toolchain.ffmpeg_path().to_path_buf();
-    std::thread::spawn(move || {
-        run_motion_render_job(
-            app,
-            render_job_id,
-            allowed_assets,
-            frame_count,
-            frames_per_second,
-            ffmpeg,
-        );
-    });
-    Ok(initial)
+    off_the_ui_thread(move || {
+        let (authority, orchestrator, workspaces) = motion_render_services(&app)?;
+        let runtime = motion_runtime_paths(&app, &authority)?;
+        let prepared = motion_video_studio::prepare_manual_render_job(&workspaces, &request)?;
+        start_motion_render(app.clone(), &orchestrator, &workspaces, &runtime, prepared)
+    })
+    .await
 }
 
 /// Start the render for a prepared job, whichever way its composition was made.
@@ -690,74 +694,79 @@ fn read_bounded_child_output(
 /// artifact import are the code that is already in production. Only the way
 /// the composition came to exist is new.
 #[tauri::command]
-fn submit_motion_video_brief(
+async fn submit_motion_video_brief(
     app: tauri::AppHandle,
     request: motion_video_studio::MotionVideoBriefRequest,
-    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
-    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
-    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
-    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
-    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
 ) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
 {
-    request.validate()?;
-    let runtime = motion_runtime_paths(&app, &authority)?;
-    let credential = settings
-        .credential_for_worker(model_service_settings::ModelServicePurpose::VideoCreative)
-        .map_err(|_| motion_video_studio::configuration_required())?;
-    let entrypoint = platform
-        .verified_entrypoint()
-        .map_err(|_| motion_video_studio::render_unavailable())?;
-    let workspace = workspaces
-        .create_new()
-        .map_err(|_| motion_video_studio::storage_unavailable())?;
-    let outcome = (|| {
-        motion_video_studio::seed_authoring_runtime(
-            &workspaces,
-            &workspace,
-            &runtime
-                .worker_package
-                .join(motion_video_studio::AUTHORING_RUNTIME_ASSET),
-        )?;
-        let work = workspaces
-            .worker_asset_directory(&workspace)
+    off_the_ui_thread(move || {
+        request.validate()?;
+        let (authority, orchestrator, workspaces) = motion_render_services(&app)?;
+        let platform = app
+            .try_state::<executor_platform::ExecutorPlatformService>()
+            .ok_or_else(motion_video_studio::render_unavailable)?;
+        let settings = app
+            .try_state::<model_service_settings::ProductionModelServiceSettings>()
+            .ok_or_else(motion_video_studio::configuration_required)?;
+        let runtime = motion_runtime_paths(&app, &authority)?;
+        let credential = settings
+            .credential_for_worker(model_service_settings::ModelServicePurpose::VideoCreative)
+            .map_err(|_| motion_video_studio::configuration_required())?;
+        let entrypoint = platform
+            .verified_entrypoint()
+            .map_err(|_| motion_video_studio::render_unavailable())?;
+        let workspace = workspaces
+            .create_new()
             .map_err(|_| motion_video_studio::storage_unavailable())?;
-        let answer = run_motion_authoring(
-            &entrypoint,
-            &serde_json::json!({
-                "schemaVersion": 1,
-                "workspace": work,
-                "brief": request.brief(),
-                "aspectRatio": request.aspect_ratio(),
-                "durationSeconds": request.duration_seconds(),
-                "language": request.language(),
-                "brandAssets": [],
-                "model": {
-                    "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
-                    "modelId": credential.model_id().as_str(),
-                    "apiKey": credential.api_key(),
-                },
-            }),
-            MOTION_AUTHORING_DEADLINE,
-        )?;
-        motion_video_studio::accept_authored_render_job(
-            &workspaces,
-            &workspace,
-            &request,
-            &answer,
-        )
-    })();
-    let prepared = match outcome {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            let _ = workspaces.finish(
+        let outcome = (|| {
+            motion_video_studio::seed_authoring_runtime(
+                &workspaces,
                 &workspace,
-                video_job_workspace::VideoWorkspaceDisposition::Delete,
-            );
-            return Err(error);
-        }
-    };
-    start_motion_render(app, &orchestrator, &workspaces, &runtime, prepared)
+                &runtime
+                    .worker_package
+                    .join(motion_video_studio::AUTHORING_RUNTIME_ASSET),
+            )?;
+            let work = workspaces
+                .worker_asset_directory(&workspace)
+                .map_err(|_| motion_video_studio::storage_unavailable())?;
+            let answer = run_motion_authoring(
+                &entrypoint,
+                &serde_json::json!({
+                    "schemaVersion": 1,
+                    "workspace": work,
+                    "brief": request.brief(),
+                    "aspectRatio": request.aspect_ratio(),
+                    "durationSeconds": request.duration_seconds(),
+                    "language": request.language(),
+                    "brandAssets": [],
+                    "model": {
+                        "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
+                        "modelId": credential.model_id().as_str(),
+                        "apiKey": credential.api_key(),
+                    },
+                }),
+                MOTION_AUTHORING_DEADLINE,
+            )?;
+            motion_video_studio::accept_authored_render_job(
+                &workspaces,
+                &workspace,
+                &request,
+                &answer,
+            )
+        })();
+        let prepared = match outcome {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let _ = workspaces.finish(
+                    &workspace,
+                    video_job_workspace::VideoWorkspaceDisposition::Delete,
+                );
+                return Err(error);
+            }
+        };
+        start_motion_render(app.clone(), &orchestrator, &workspaces, &runtime, prepared)
+    })
+    .await
 }
 
 /// The shortest deadline the MP4 encode step may be given, kept at the value
@@ -1038,34 +1047,64 @@ fn delete_motion_video_artifact(
 /// including every acceptance build — compiles exactly this one and performs
 /// exactly these probes.
 #[tauri::command]
-fn check_local_startup_environment(
-    startup: tauri::State<'_, startup_environment::StartupEnvironmentService>,
-    profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
-    authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
-    platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+async fn check_local_startup_environment(
+    app: tauri::AppHandle,
 ) -> startup_environment::StartupEnvironmentSnapshot {
-    let app_data = if startup.app_data_state() == startup_environment::AppDataStartupState::Ready
-        && profiles.revalidate_storage().is_ok()
-    {
-        startup_environment::AppDataStartupState::Ready
-    } else {
-        startup_environment::AppDataStartupState::Unavailable
-    };
-    // EB-08：健康状态来自内置发行物验证，不再询问系统浏览器发现/选择。
-    let embedded_browser = match authority.resolve() {
-        Ok(_) => startup_environment::EmbeddedBrowserStartupState::Ready,
-        Err(embedded_browser_authority::EmbeddedBrowserAuthorityError::ComponentMissing) => {
-            startup_environment::EmbeddedBrowserStartupState::ComponentMissing
-        }
-        Err(embedded_browser_authority::EmbeddedBrowserAuthorityError::VersionIncompatible) => {
-            startup_environment::EmbeddedBrowserStartupState::VersionIncompatible
-        }
-        Err(_) => startup_environment::EmbeddedBrowserStartupState::ComponentDamaged,
-    };
+    // The gate hashes every byte of the packaged Executor and, the first time,
+    // of the packaged browser as well — 519 MB between them, off a disk that is
+    // cold on the launch that matters most. That is not work the UI thread may
+    // own: a window that cannot repaint while it happens is the first thing a
+    // customer sees, and it looks exactly like a hang.
+    tauri::async_runtime::spawn_blocking(move || {
+        let (Some(startup), Some(profiles), Some(authority), Some(platform)) = (
+            app.try_state::<startup_environment::StartupEnvironmentService>(),
+            app.try_state::<browser_profiles::BrowserProfileStore>(),
+            app.try_state::<embedded_browser_authority::EmbeddedBrowserAuthority>(),
+            app.try_state::<executor_platform::ExecutorPlatformService>(),
+        ) else {
+            return startup_environment_unusable();
+        };
+        let app_data = if startup.app_data_state()
+            == startup_environment::AppDataStartupState::Ready
+            && profiles.revalidate_storage().is_ok()
+        {
+            startup_environment::AppDataStartupState::Ready
+        } else {
+            startup_environment::AppDataStartupState::Unavailable
+        };
+        // EB-08：健康状态来自内置发行物验证，不再询问系统浏览器发现/选择。
+        let embedded_browser = match authority.resolve() {
+            Ok(_) => startup_environment::EmbeddedBrowserStartupState::Ready,
+            Err(embedded_browser_authority::EmbeddedBrowserAuthorityError::ComponentMissing) => {
+                startup_environment::EmbeddedBrowserStartupState::ComponentMissing
+            }
+            Err(embedded_browser_authority::EmbeddedBrowserAuthorityError::VersionIncompatible) => {
+                startup_environment::EmbeddedBrowserStartupState::VersionIncompatible
+            }
+            Err(_) => startup_environment::EmbeddedBrowserStartupState::ComponentDamaged,
+        };
+        startup_environment::StartupEnvironmentSnapshot::new(
+            app_data,
+            platform.startup_environment_state(),
+            embedded_browser,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| startup_environment_unusable())
+}
+
+/// What the startup gate answers when it could not run its probes at all.
+///
+/// The gate is the only thing that keeps the workbench closed on an install
+/// that cannot run, so a probe that did not happen is not a pass. Nothing here
+/// is reachable once the App's own `setup` has succeeded — it manages all four
+/// of these services unconditionally — but a gate that reports ready because it
+/// could not ask is precisely the shape `single_build_path` exists to forbid.
+fn startup_environment_unusable() -> startup_environment::StartupEnvironmentSnapshot {
     startup_environment::StartupEnvironmentSnapshot::new(
-        app_data,
-        platform.startup_environment_state(),
-        embedded_browser,
+        startup_environment::AppDataStartupState::Unavailable,
+        startup_environment::ExecutorStartupState::Unavailable,
+        startup_environment::EmbeddedBrowserStartupState::ComponentDamaged,
     )
 }
 

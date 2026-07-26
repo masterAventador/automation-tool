@@ -182,31 +182,51 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     step("brief typed into the form");
     await studio.$("button=开始自动制作").click();
     step("submit clicked");
-    await browser.waitUntil(
+    // A verdict is *returned*, never thrown from inside the condition.
+    //
+    // `browser.waitUntil` builds a `Timer` that treats a throwing condition as
+    // "not satisfied yet": it records the error and keeps ticking for the whole
+    // budget, then rejects with the last one it saw. So a submission that
+    // failed in seconds used to be reported by this file as
+    // `submission failed after 905s` — 900s of which was this wait's own budget
+    // burning down while the failure card sat on screen unchanged, and the
+    // number came from the final re-evaluation rather than from the failure.
+    //
+    // Two runs were read as "the command takes fifteen minutes" because of it,
+    // and the App was sampled twice during those minutes and found completely
+    // idle, which was true and meant the opposite of what it looked like.
+    // Returning the verdict makes the wait end when the App answers.
+    const submission = await browser.waitUntil<string>(
       async () => {
         const text = await studio.getText();
         for (const [copy, meaning] of SUBMIT_FAILURES) {
           if (text.includes(copy)) {
-            throw new Error(
-              `submission failed after ${Math.round((Date.now() - startedAt) / 1000)}s: ${meaning}`,
-            );
+            return `submission failed after ${Math.round((Date.now() - startedAt) / 1000)}s: ${meaning}`;
           }
         }
-        return text.includes("已提交一句话自动制作");
+        return text.includes("已提交一句话自动制作") ? "submitted" : "";
       },
       { timeout: 900_000, interval: 1_000, timeoutMsg: "one-sentence submission never landed" },
     );
+    if (submission !== "submitted") {
+      throw new Error(submission);
+    }
 
     step("brief submitted, waiting on the film");
     // --- The progress a user watches ---------------------------------------
     await studio.$("div[role='tab']=制作任务").click();
     const stagesSeen: string[] = [];
     const percentsSeen: number[] = [];
-    await browser.waitUntil(
+    // Same rule as the submission wait: a failed render is returned, not
+    // thrown, so the run ends when the job fails instead of twenty minutes
+    // later with a timestamp that describes this wait rather than the render.
+    const render = await browser.waitUntil<string>(
       async () => {
         const text = await studio.getText();
         if (text.includes("制作失败")) {
-          throw new Error(`the real one-sentence render failed:\n${text}`);
+          return `the real one-sentence render failed after ${Math.round(
+            (Date.now() - startedAt) / 1000,
+          )}s:\n${text}`;
         }
         for (const stage of RUNNING_STAGES) {
           if (text.includes(stage) && !stagesSeen.includes(stage)) stagesSeen.push(stage);
@@ -219,10 +239,13 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
         if (percent !== null && percentsSeen[percentsSeen.length - 1] !== percent) {
           percentsSeen.push(percent);
         }
-        return text.includes("已完成");
+        return text.includes("已完成") ? "finished" : "";
       },
       { timeout: 1_200_000, interval: 1_000, timeoutMsg: "the film never finished" },
     );
+    if (render !== "finished") {
+      throw new Error(render);
+    }
     assert.ok(
       stagesSeen.length >= 1,
       `no running stage was ever shown; a job that only ever reads 已完成 is not progress. saw ${JSON.stringify(stagesSeen)}`,
