@@ -47,7 +47,11 @@ from build_embedded_browser_distribution import (  # noqa: E402
     build_distribution_manifest,
 )
 from build_embedded_chromium_staging import (  # noqa: E402
+    MANIFEST_NAME as STAGING_MANIFEST_NAME,
+)
+from build_embedded_chromium_staging import (  # noqa: E402
     build_staging,
+    generate_manifest,
     load_staging_contract,
     sha256_file,
 )
@@ -67,10 +71,16 @@ from production_assets import (  # noqa: E402
     snapshot_production_assets,
 )
 from release_assembly import (  # noqa: E402
+    SigningIdentity,
     install_and_seal,
     install_video_runtime,
+    inventoried_payloads,
+    load_signing_identity,
+    notarize_and_staple,
+    require_distributable_artifact,
     require_packaged_browser,
     require_packaged_video_runtime,
+    sign_tree,
 )
 from release_configuration import (  # noqa: E402
     effective_configuration,
@@ -135,7 +145,41 @@ def require_macos_target() -> tuple[str, str]:
     raise ReleaseFailed("this macOS architecture is unsupported")
 
 
-def stage_browser_distribution(target_id: str, archive: Path, output: Path) -> None:
+def refresh_staging_inventory(staging: Path, target_id: str) -> int:
+    """Re-take the staged tree's digest inventory after it has been signed.
+
+    `build_staging` inventories the tree as it comes out of the digest-locked
+    archive, and `build_distribution_manifest` copies that inventory forward.
+    Signing rewrites the bytes of every Mach-O it touches and adds a
+    `_CodeSignature` directory to each nested bundle, so an inventory taken
+    before signing describes a tree that no longer exists: `verify_distribution`
+    would report "file digest mismatch", and if it somehow did not, the Rust
+    resolver on the customer's machine would.
+
+    What still ties this tree to the locked upstream archive is
+    `source.archive_sha256`, which is carried through untouched and checked
+    against the contract by both the manifest builder and the verifier.
+    """
+    contract = load_staging_contract(STAGING_CONTRACT)
+    target = contract.targets.get(target_id)
+    if target is None:
+        raise ReleaseFailed(f"unknown staging target: {target_id}")
+    manifest_path = staging / STAGING_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = generate_manifest(staging, root_entry=target.root_entry)
+    manifest["entries"] = entries
+    manifest["fileCount"] = sum(1 for entry in entries if entry["type"] == "file")
+    manifest["totalBytes"] = sum(int(entry.get("size", 0)) for entry in entries)
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return int(manifest["fileCount"])
+
+
+def stage_browser_distribution(
+    target_id: str, archive: Path, output: Path, identity: SigningIdentity
+) -> None:
     announce(f"Staging the digest-locked {target_id} Chromium from {archive.name}")
     if not archive.is_file():
         raise ReleaseFailed(f"locked archive is not downloaded yet: {archive}")
@@ -147,11 +191,20 @@ def stage_browser_distribution(target_id: str, archive: Path, output: Path) -> N
         archive_sha256=sha256_file(archive),
         output=output,
     )
+    # Chrome for Testing arrives ad-hoc/linker-signed — `codesign -dvv` reports
+    # `TeamIdentifier=not set`, so there is no upstream Developer ID signature
+    # to preserve and nothing here can be notarised as it stands. Every Mach-O
+    # in the tree is re-signed under our identity, and only then is the digest
+    # inventory taken, because the manifest has to describe the shipped bytes.
+    announce("Signing the embedded browser before its manifest is taken")
+    signed = sign_tree(root=output, component="embedded-browser", identity=identity)
+    files = refresh_staging_inventory(output, target_id)
+    announce(f"Signed {len(signed)} browser code nodes across {files} files")
     build_distribution_manifest(staging=output, target_id=target_id)
 
 
 def build_executor_candidate(
-    output: Path, architecture: str, build_id: str
+    output: Path, architecture: str, build_id: str, identity: SigningIdentity
 ) -> tuple[Path, str, Any]:
     from automation_tool.executor.macos_candidate import build_macos_executor_candidate
     from automation_tool.executor.package_manifest import (
@@ -160,6 +213,13 @@ def build_executor_candidate(
 
     announce("Building the real signed Local Executor candidate")
     build_macos_executor_candidate(backend_root=BACKEND_ROOT, output_directory=output)
+    # The candidate builder applies ad-hoc signatures. They cannot be notarised,
+    # so every Mach-O is re-signed under the Developer ID here — and it has to
+    # happen now, before the inventory below: `executor-manifest.v1.json` records
+    # a SHA-256 for each of the package's files and the Rust bootstrap re-checks
+    # every one of them on the customer's machine.
+    signed = sign_tree(root=output, component="local-executor", identity=identity)
+    announce(f"Signed {len(signed)} Local Executor binaries before inventorying them")
     seed, public_key, private_key = executor_signing_material()
     write_signed_executor_manifest(
         bundle_directory=output,
@@ -196,8 +256,40 @@ def build_release_package(
     return one_directory(target / "release/bundle/macos", ".app")
 
 
+def sign_installed_video_runtime(
+    installed: dict[str, Path], identity: SigningIdentity, target_id: str
+) -> None:
+    """Sign the three video resources where they landed, innermost first.
+
+    They are signed in the bundle rather than in the shared per-machine cache
+    `prepare_video_runtime` maintains, so a signing run cannot leave a cache
+    entry that a later build would reuse without knowing how it was signed.
+
+    `media-toolchain` then needs its manifest re-taken. `video_media_toolchain.rs`
+    verifies a SHA-256 for every file it declares and rejects the package if one
+    file is missing, extra or altered — and signing ffmpeg alters it.
+    """
+    for name, location in sorted(installed.items()):
+        signed = sign_tree(root=location, component=name, identity=identity)
+        announce(f"Signed {len(signed)} {name} binaries")
+    toolchain = installed["media-toolchain"]
+    announce("Re-taking the media toolchain manifest over the signed binaries")
+    run_checked(
+        [
+            sys.executable,
+            os.fspath(REPOSITORY_ROOT / "scripts/write_video_media_toolchain_manifest.py"),
+            os.fspath(toolchain),
+            target_id,
+        ]
+    )
+
+
 def install_runtime_resources_and_sign(
-    application: Path, staging: Path, target_id: str, video_runtime: Path
+    application: Path,
+    staging: Path,
+    target_id: str,
+    video_runtime: Path,
+    identity: SigningIdentity,
 ) -> None:
     """Run the shared release assembly step, the same one a release uses.
 
@@ -205,31 +297,43 @@ def install_runtime_resources_and_sign(
     did, the verified path and the shipped path were different paths, and the
     shipped one had no browser in it at all.
 
-    Ordering matters twice over. The video runtime is installed *before*
-    `install_and_seal`, because that call seals the bundle at the end and a
-    signature taken before a resource lands does not cover it. The browser is
-    installed last for the same reason it is installed here at all: the macOS
+    Ordering matters three times over. The video runtime is installed and signed
+    *before* `install_and_seal`, because that call seals the bundle at the end
+    and a signature taken before a resource lands does not cover it. The browser
+    is installed last for the same reason it is installed here at all: the macOS
     bundler destroys its symlinked framework, so it cannot be declared under
-    `bundle.resources` and has to arrive afterwards.
+    `bundle.resources` and has to arrive afterwards. And the seal itself is the
+    outermost signature of the whole package, so it is applied once everything
+    inside is already signed.
     """
     announce("Installing the video runtime resources into the built bundle")
     installed = install_video_runtime(
         application=application, staging=video_runtime, platform="macos"
     )
     announce(f"Video runtime installed: {sorted(installed)}")
-    announce("Installing the embedded browser, verifying it, then re-sealing")
+    sign_installed_video_runtime(installed, identity, target_id)
+    announce("Installing the embedded browser, verifying it, then sealing the bundle")
     install_and_seal(
         application=application,
         staging=staging,
         target_id=target_id,
         platform="macos",
-        seal=lambda bundle: run_checked(
-            ["codesign", "--force", "--sign", "-", os.fspath(bundle)]
+        # The outermost signature. Everything nested is signed by now, so this
+        # seal covers a tree that will not change again — and it must leave the
+        # inventoried payloads untouched, or the manifests taken over them stop
+        # describing what the package actually carries.
+        seal=lambda bundle: sign_tree(
+            root=bundle,
+            component="application",
+            identity=identity,
+            exclude=inventoried_payloads(bundle, "macos"),
         ),
     )
 
 
-def create_disk_image(application: Path, output: Path, target_id: str) -> Path:
+def create_disk_image(
+    application: Path, output: Path, target_id: str, identity: SigningIdentity
+) -> Path:
     # A bundle without a verified browser must not reach a distributable
     # artifact; this is the gate an ordinary candidate build fails.
     require_packaged_browser(
@@ -239,6 +343,14 @@ def create_disk_image(application: Path, output: Path, target_id: str) -> Path:
     # video features fail on the user's machine while every acceptance run
     # stays green, which is exactly what happened.
     require_packaged_video_runtime(application=application, platform="macos")
+    # Notarised and stapled before the disk image is built, so the ticket
+    # travels inside the .app the customer drags out of it. A ticket stapled
+    # only to the disk image is not carried by the copied application, which
+    # then needs to reach Apple to open — and a demo on a bad network shows the
+    # customer the same refusal as an unsigned build.
+    announce("Notarising the application bundle (this waits on Apple)")
+    submission = notarize_and_staple(artifact=application, identity=identity)
+    announce(f"Application notarised and stapled (submission {submission})")
     announce("Creating the release disk image from the final App bundle")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
@@ -258,7 +370,43 @@ def create_disk_image(application: Path, output: Path, target_id: str) -> Path:
             os.fspath(output),
         ]
     )
+    # The disk image is itself a downloaded artifact, so it carries its own
+    # signature and its own ticket; the customer's first Gatekeeper prompt is
+    # about this file, not about the bundle inside it.
+    announce("Signing and notarising the disk image")
+    run_checked(
+        [
+            "codesign",
+            "--force",
+            "--sign",
+            identity.certificate,
+            "--timestamp",
+            os.fspath(output),
+        ]
+    )
+    submission = notarize_and_staple(artifact=output, identity=identity)
+    announce(f"Disk image notarised and stapled (submission {submission})")
     return output
+
+
+def require_distributable_release(disk_image: Path) -> str:
+    """The last gate: what the customer's machine will say about this file.
+
+    Everything before this is evidence about the build. This is the only step
+    that asks the question the customer actually asks, and it asks it of the
+    artifact the customer actually receives, in the state they receive it in —
+    quarantined, exactly as a browser download arrives.
+
+    "The notary service accepted the submission" is not this claim. Submission
+    and openability are different facts, and this project has already shipped a
+    package once on the strength of a green run that exercised something other
+    than what the user got.
+    """
+    announce("Gate: assessing the disk image as a quarantined download")
+    verdict = require_distributable_artifact(artifact=disk_image)
+    for line in verdict.strip().splitlines():
+        announce(f"  {line.strip()}")
+    return verdict
 
 
 def audit_release_artifact(
@@ -333,6 +481,12 @@ def build_macos_release(
     ordinary local-profile release. One path, one set of gates, either way.
     """
     target_id, architecture = require_macos_target()
+    # Resolved before anything is built. There is one identity and one reader
+    # for it: no environment variable or build mode can make an acceptance run
+    # and a customer build sign with different material, because that class of
+    # divergence is precisely what let a package ship with no browser in it.
+    identity = load_signing_identity()
+    announce(f"Signing this release as {identity.certificate}")
     resolved_archive = archive or DEFAULT_ARCHIVES[target_id]
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"
@@ -342,10 +496,10 @@ def build_macos_release(
     build_directory.mkdir(parents=True)
 
     browser = build_directory / "embedded-browser"
-    stage_browser_distribution(target_id, resolved_archive, browser)
+    stage_browser_distribution(target_id, resolved_archive, browser, identity)
     executor = build_directory / "executor" / "automation-tool-executor"
     _, public_key, private_key = build_executor_candidate(
-        executor, architecture, build_id
+        executor, architecture, build_id, identity
     )
     (build_directory / "executor-verifying-key").write_text(
         public_key, encoding="utf-8"
@@ -383,12 +537,12 @@ def build_macos_release(
     )
     announce("Preparing the pinned video runtime resources (cached per machine)")
     video_runtime = prepare_video_runtime(platform="macos")
-    install_runtime_resources_and_sign(application, browser, target_id, video_runtime)
-    disk_image = create_disk_image(
-        application,
-        cargo_target / "release/bundle/dmg" / f"{application.stem}_0.1.0.dmg",
-        target_id,
+    install_runtime_resources_and_sign(
+        application, browser, target_id, video_runtime, identity
     )
+    # Every content gate runs against the sealed bundle *before* notarisation.
+    # Notarising twice costs about ten minutes, and a package that is going to
+    # be refused for its contents should be refused now rather than after them.
     audit_release_artifact(
         application=application,
         target_id=target_id,
@@ -399,11 +553,20 @@ def build_macos_release(
     verify_manifest_signature(
         application / "Contents/Resources" / EXECUTOR_RESOURCE, private_key
     )
+    disk_image = create_disk_image(
+        application,
+        cargo_target / "release/bundle/dmg" / f"{application.stem}_0.1.0.dmg",
+        target_id,
+        identity,
+    )
+    gatekeeper = require_distributable_release(disk_image)
     result: dict[str, object] = {
         "application": os.fspath(application),
         "architecture": architecture,
         "disk_image": os.fspath(disk_image),
         "disk_image_bytes": disk_image.stat().st_size,
+        "gatekeeper": gatekeeper.strip().splitlines(),
+        "signed_by": identity.certificate,
         "target": target_id,
     }
     if deployment is not None:

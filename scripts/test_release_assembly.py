@@ -446,5 +446,427 @@ class VideoRuntimeReleaseGateTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in resources.iterdir()), [])
 
 
+# A 64-bit little-endian Mach-O header is all `signable_nodes` needs to
+# recognise code; the synthetic trees below carry nothing else.
+MACH_O_HEADER = b"\xcf\xfa\xed\xfe" + b"\x0c\x00\x00\x01" + b"\x00" * 24
+
+
+def _write_mach_o(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(MACH_O_HEADER)
+    path.chmod(0o755)
+    return path
+
+
+class RecordingRunner:
+    """Stand in for the real `codesign`/`xattr`/`spctl`/`notarytool` calls."""
+
+    def __init__(self, replies: dict[str, str] | None = None) -> None:
+        self.commands: list[list[str]] = []
+        self.replies = replies or {}
+
+    def __call__(self, command: list[str]) -> str:
+        self.commands.append(list(command))
+        for marker, reply in self.replies.items():
+            if marker in command[0]:
+                return reply
+        return ""
+
+    def tools(self) -> list[str]:
+        return [Path(command[0]).name for command in self.commands]
+
+
+class MacOSSigningContractTests(unittest.TestCase):
+    """The signing identity and every entitlement are declared once, with reasons.
+
+    An entitlement handed out to make a notarisation stop failing, with no
+    record of which component needed it or why, is indistinguishable later from
+    one nobody ever needed. The contract therefore carries the justification
+    next to the grant, and this test refuses a grant without one.
+    """
+
+    def setUp(self) -> None:
+        from release_assembly import MACOS_SIGNING_CONTRACT
+
+        self.path = MACOS_SIGNING_CONTRACT
+        self.contract = json.loads(self.path.read_text(encoding="utf-8"))
+
+    def test_the_contract_declares_a_developer_id_and_a_notary_profile(self) -> None:
+        from release_assembly import load_signing_identity
+
+        identity = load_signing_identity()
+        self.assertTrue(identity.certificate.startswith("Developer ID Application:"))
+        self.assertTrue(identity.team_id)
+        self.assertTrue(identity.notary_profile)
+        # The keychain profile is a local alias for credentials held outside
+        # this repository. The credentials themselves must never appear here.
+        document = self.path.read_text(encoding="utf-8")
+        for secret in ("password", "-----BEGIN", "app-specific", "AuthKey"):
+            self.assertNotIn(secret, document)
+
+    def test_every_signed_component_is_a_declared_release_resource(self) -> None:
+        from release_assembly import RELEASE_PACKAGE_RESOURCES
+
+        known = {str(resource["name"]) for resource in RELEASE_PACKAGE_RESOURCES}
+        known.add("application")
+        self.assertEqual(set(self.contract["components"]) - known, set())
+
+    def test_every_entitlement_names_its_component_and_its_reason(self) -> None:
+        import plistlib
+
+        from release_assembly import REPOSITORY_ROOT, entitlements_for
+
+        granted = 0
+        for name, component in self.contract["components"].items():
+            with self.subTest(component=name):
+                entitlements = component.get("entitlements")
+                if entitlements is None:
+                    self.assertIsNone(entitlements_for(name))
+                    continue
+                path = entitlements_for(name)
+                self.assertIsNotNone(path)
+                self.assertTrue(path.is_file(), f"{path} is declared but absent")
+                keys = set(plistlib.loads(path.read_bytes()))
+                reasons = entitlements["reasons"]
+                # Every key the plist actually grants must carry a written
+                # reason, and no reason may be recorded for a key that is not
+                # granted — otherwise the justification drifts from the grant.
+                self.assertEqual(keys, set(reasons))
+                for key, reason in reasons.items():
+                    self.assertGreater(
+                        len(reason), 30, f"{name}/{key} has no real justification"
+                    )
+                granted += len(keys)
+        # No assertion that `granted` is non-zero: how many entitlements this
+        # package needs is a fact about Apple's runtime, measured by signing and
+        # notarising it, not something a unit test may presume.
+        # The plists live where a reviewer of the Tauri bundle would look.
+        for name in self.contract["components"]:
+            path = entitlements_for(name)
+            if path is not None:
+                self.assertTrue(
+                    path.is_relative_to(REPOSITORY_ROOT / "frontend/src-tauri")
+                )
+
+
+class SigningOrderTests(unittest.TestCase):
+    """Nested code is signed before the bundle that contains it, always.
+
+    macOS seals a bundle over the bytes of everything inside it, so a signature
+    taken before a nested helper is signed does not survive the helper being
+    signed afterwards, and notarisation rejects the result. The order is a
+    property of the assembler, not of the operator remembering it.
+    """
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp(prefix="release-signing-order-"))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.application = self.base / "Example.app"
+        _write_mach_o(self.application / "Contents/MacOS/Example")
+        browser = self.application / "Contents/Resources/embedded-browser/Chrome.app"
+        _write_mach_o(browser / "Contents/MacOS/Chrome")
+        framework = browser / "Contents/Frameworks/Chrome Framework.framework"
+        version = framework / "Versions/149.0"
+        _write_mach_o(version / "Chrome Framework")
+        _write_mach_o(version / "Libraries/libEGL.dylib")
+        _write_mach_o(version / "Helpers/Chrome Helper (GPU).app/Contents/MacOS/Chrome Helper (GPU)")
+        (framework / "Versions/Current").symlink_to("149.0")
+        (framework / "Chrome Framework").symlink_to("Versions/Current/Chrome Framework")
+        self.framework = framework
+        self.browser = browser
+
+    def test_every_nested_node_is_signed_before_the_node_that_contains_it(self) -> None:
+        from release_assembly import signable_nodes
+
+        nodes = signable_nodes(self.application)
+        self.assertIn(self.application, nodes)
+        position = {node: index for index, node in enumerate(nodes)}
+        for node in nodes:
+            for other in nodes:
+                if node != other and node.is_relative_to(other):
+                    self.assertLess(
+                        position[node],
+                        position[other],
+                        f"{node} must be signed before {other}",
+                    )
+        # The bundle the user launches is sealed last, over everything else.
+        self.assertEqual(nodes[-1], self.application)
+
+    def test_the_framework_symlinks_are_never_signed_in_place(self) -> None:
+        from release_assembly import signable_nodes
+
+        # EB-16 measured what happens when the Chrome for Testing framework's
+        # relative links are treated as ordinary files: the framework is
+        # destroyed. Handing one to `codesign` replaces the link with a file.
+        for node in signable_nodes(self.application):
+            self.assertFalse(node.is_symlink(), f"{node} is a symlink")
+
+    def test_an_already_inventoried_payload_is_never_signed_again(self) -> None:
+        from release_assembly import signable_nodes
+
+        # Three payloads in this package carry their own digest manifest, taken
+        # over the signed bytes and re-verified on the customer's machine. The
+        # outermost seal must not touch them: re-signing rewrites every Mach-O
+        # it visits, which would leave each manifest describing a tree that no
+        # longer exists and the product refusing its own resources at startup.
+        nodes = signable_nodes(
+            self.application,
+            exclude=(self.application / "Contents/Resources/embedded-browser",),
+        )
+        self.assertIn(self.application, nodes)
+        for node in nodes:
+            self.assertFalse(
+                node.is_relative_to(
+                    self.application / "Contents/Resources/embedded-browser"
+                ),
+                f"{node} belongs to a payload that was already signed and inventoried",
+            )
+        # The application's own code is still signed.
+        self.assertIn(self.application / "Contents/MacOS/Example", nodes)
+
+    def test_the_outer_seal_excludes_every_declared_release_resource(self) -> None:
+        from release_assembly import RELEASE_PACKAGE_RESOURCES, inventoried_payloads
+
+        # Derived from the one resource declaration, not hand-listed here: a
+        # resource added to the contract without being excluded would be
+        # silently re-signed and would break its manifest.
+        excluded = inventoried_payloads(self.application, platform="macos")
+        self.assertEqual(len(excluded), len(RELEASE_PACKAGE_RESOURCES))
+        for resource in RELEASE_PACKAGE_RESOURCES:
+            expected = self.application.joinpath(
+                "Contents/Resources", *resource["installedParts"]
+            )
+            self.assertIn(expected, excluded)
+
+    def test_signing_asks_for_a_hardened_runtime_and_a_secure_timestamp(self) -> None:
+        from release_assembly import SigningIdentity, sign_tree
+
+        identity = SigningIdentity(
+            certificate="Developer ID Application: Example (TEAMID1234)",
+            team_id="TEAMID1234",
+            notary_profile="example-notary",
+        )
+        runner = RecordingRunner()
+        signed = sign_tree(
+            root=self.application,
+            component="application",
+            identity=identity,
+            run=runner,
+        )
+        self.assertEqual(len(signed), len(runner.commands))
+        self.assertTrue(runner.commands)
+        for command in runner.commands:
+            self.assertEqual(Path(command[0]).name, "codesign")
+            # Notarisation rejects a signature without a hardened runtime or
+            # without a secure timestamp, whatever else is right about it.
+            self.assertIn("--options", command)
+            self.assertIn("runtime", command)
+            self.assertIn("--timestamp", command)
+            self.assertIn(identity.certificate, command)
+            # An ad-hoc signature cannot be notarised. It must not survive
+            # anywhere on the path that produces a distributable package.
+            self.assertNotIn("-", command[command.index("--sign") + 1 :][:1])
+
+
+class DistributionGateTests(unittest.TestCase):
+    """A package is distributable only if a quarantined copy still opens.
+
+    "The notary service accepted the submission" and "the customer can open the
+    download" are different claims, and this project has already shipped once on
+    the strength of the wrong one. The gate therefore reproduces what the
+    customer's machine does: it marks the artifact as downloaded and asks
+    Gatekeeper.
+    """
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp(prefix="release-gate-"))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.disk_image = self.base / "Example_0.1.0.dmg"
+        self.disk_image.write_bytes(b"synthetic disk image")
+
+    def gate(self, verdict: str) -> RecordingRunner:
+        from release_assembly import require_distributable_artifact
+
+        runner = RecordingRunner(replies={"spctl": verdict})
+        require_distributable_artifact(artifact=self.disk_image, run=runner)
+        return runner
+
+    def test_a_quarantined_notarised_disk_image_is_distributable(self) -> None:
+        runner = self.gate(
+            "Example_0.1.0.dmg: accepted\n"
+            "source=Notarized Developer ID\n"
+            "origin=Developer ID Application: Example (TEAMID1234)\n"
+        )
+        self.assertEqual(runner.tools(), ["xattr", "spctl"])
+        # The quarantine flag has to be applied before the assessment, or the
+        # assessment is not the one the customer's machine performs.
+        self.assertIn("com.apple.quarantine", runner.commands[0])
+        self.assertIn(str(self.disk_image), runner.commands[0])
+        self.assertIn("--context", runner.commands[1])
+        self.assertIn("context:primary-signature", runner.commands[1])
+
+    def test_an_unnotarised_disk_image_is_refused(self) -> None:
+        with self.assertRaises(ReleaseAssemblyRejected):
+            self.gate("Example_0.1.0.dmg: rejected\nsource=no usable signature\n")
+
+    def test_a_signed_but_unnotarised_disk_image_is_refused(self) -> None:
+        # This is the shape the mistake takes: a real Developer ID signature,
+        # a submission that was accepted, and a ticket that never got stapled.
+        with self.assertRaises(ReleaseAssemblyRejected):
+            self.gate(
+                "Example_0.1.0.dmg: accepted\nsource=Unnotarized Developer ID\n"
+            )
+
+    def test_an_ad_hoc_disk_image_is_refused(self) -> None:
+        with self.assertRaises(ReleaseAssemblyRejected):
+            self.gate("Example_0.1.0.dmg: accepted\nsource=Insufficient Context\n")
+
+
+class NoSilentAdHocSealTests(unittest.TestCase):
+    """Sealing a bundle ad-hoc must be something a caller asks for, not a default.
+
+    `install_and_seal` used to default to `seal_with_adhoc_signature`, and by the
+    time every release path passed its own Developer ID seal that default had no
+    callers left — only the ability to hand a future one a bundle Gatekeeper
+    offers the customer "Move to Trash" for, without anybody typing anything to
+    that effect.
+    """
+
+    def test_install_and_seal_has_no_default_seal(self) -> None:
+        import inspect
+
+        import release_assembly
+
+        parameter = inspect.signature(release_assembly.install_and_seal).parameters[
+            "seal"
+        ]
+        self.assertIs(parameter.default, inspect.Parameter.empty)
+
+    def test_the_ad_hoc_sealer_is_gone_rather_than_merely_unused(self) -> None:
+        import release_assembly
+
+        self.assertFalse(hasattr(release_assembly, "seal_with_adhoc_signature"))
+        source = (ROOT / "scripts/release_assembly.py").read_text(encoding="utf-8")
+        self.assertNotIn('"--sign", "-"', source)
+
+
+class StagingInventoryRefreshTests(unittest.TestCase):
+    """The browser manifest has to describe the signed tree, not the staged one.
+
+    `build_staging` inventories the tree as it comes out of the digest-locked
+    archive and `build_distribution_manifest` carries that inventory forward.
+    Signing rewrites every Mach-O it touches, so without re-taking the
+    inventory the shipped package disagrees with its own manifest — and the
+    disagreement surfaces on the customer's machine, where the Rust resolver
+    refuses the browser it was given.
+    """
+
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory(prefix="staging-refresh-test-")
+        self.addCleanup(self._directory.cleanup)
+        self.base = Path(self._directory.name)
+        self.staging = self.base / "staging"
+        archive = self.base / "archive.zip"
+        digest = _write_zip(
+            archive,
+            {EXECUTABLE: b"synthetic browser binary", INFO_PLIST: b"<plist/>"},
+        )
+        build_staging(
+            contract=load_staging_contract(STAGING_CONTRACT_PATH),
+            target_id=TARGET_ID,
+            archive_path=archive,
+            archive_sha256=digest,
+            output=self.staging,
+        )
+
+    def test_a_signed_tree_fails_verification_until_the_inventory_is_retaken(
+        self,
+    ) -> None:
+        from build_embedded_browser_distribution import (
+            DistributionRejected,
+            build_distribution_manifest,
+            verify_distribution,
+        )
+        from build_release_package import refresh_staging_inventory
+
+        # Stand in for what `codesign` does: rewrite the executable's bytes.
+        (self.staging / EXECUTABLE).write_bytes(b"synthetic browser binary SIGNED")
+        build_distribution_manifest(
+            staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+        )
+        # Built from the stale staging inventory, the manifest describes bytes
+        # that are no longer there.
+        with self.assertRaises(DistributionRejected):
+            verify_distribution(
+                staging=self.staging,
+                target_id=TARGET_ID,
+                enforce_archive_lock=False,
+            )
+        refresh_staging_inventory(self.staging, TARGET_ID)
+        build_distribution_manifest(
+            staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+        )
+        report = verify_distribution(
+            staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+        )
+        self.assertGreater(report.verified_files, 0)
+
+    def test_the_refresh_keeps_the_tree_tied_to_the_locked_archive(self) -> None:
+        from build_release_package import refresh_staging_inventory
+
+        before = json.loads(
+            (self.staging / "staging-manifest.json").read_text(encoding="utf-8")
+        )
+        refresh_staging_inventory(self.staging, TARGET_ID)
+        after = json.loads(
+            (self.staging / "staging-manifest.json").read_text(encoding="utf-8")
+        )
+        # Re-taking the inventory must not quietly relax the one fact that ties
+        # this tree to the upstream archive the contract pins.
+        self.assertEqual(after["source"], before["source"])
+        self.assertEqual(after["target"], before["target"])
+        self.assertEqual(after["chromium"], before["chromium"])
+
+
+class ReleasePathSignsAndNotarisesTests(unittest.TestCase):
+    """The gate has to be on the path that ships, not merely available."""
+
+    def setUp(self) -> None:
+        self.source = (ROOT / "scripts/build_release_package.py").read_text(
+            encoding="utf-8"
+        )
+
+    def test_the_release_path_signs_notarises_staples_and_gates(self) -> None:
+        for call in (
+            "sign_tree(",
+            "notarize_and_staple(",
+            "require_distributable_artifact(",
+        ):
+            with self.subTest(call=call):
+                self.assertIn(call, self.source)
+
+    def test_the_release_path_no_longer_ships_an_ad_hoc_signature(self) -> None:
+        # `codesign --sign -` produced every package built so far. Gatekeeper
+        # offers the customer "Move to Trash" for those, so no path that
+        # produces a distributable artifact may still reach for it.
+        self.assertNotIn('"--sign", "-"', self.source)
+        self.assertNotIn("'--sign', '-'", self.source)
+
+    def test_each_digest_manifest_is_written_after_its_payload_is_signed(self) -> None:
+        # Signing rewrites the bytes of every Mach-O it touches. Three manifests
+        # in this package record those bytes and are re-verified on the
+        # customer's machine, so each has to be produced from the signed tree.
+        for earlier, later in (
+            ("sign_tree(", "build_distribution_manifest("),
+            ("sign_tree(", "write_signed_executor_manifest("),
+        ):
+            with self.subTest(pair=(earlier, later)):
+                self.assertLess(
+                    self.source.index(earlier),
+                    self.source.index(later),
+                    f"{earlier} must run before {later}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

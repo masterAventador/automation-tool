@@ -11,10 +11,10 @@ WebDriver, no hidden test window configuration, real measured sizes, inner
 code signatures, DMG round trip, install, launch, quit, process residue and
 uninstall residue.
 
-Signing identity: this host has no Apple Developer ID, so the package is
-built ad-hoc (`signingIdentity: "-"`). Developer ID signing, notarization and
-Gatekeeper acceptance stay external credential gates and are recorded as
-outstanding evidence in `docs/development/EB-16.md`.
+Signing identity: the package is signed, notarised and stapled under the
+Developer ID declared in `contracts/quality/macos-release-signing.v1.json`, and
+the run ends by assessing the disk image as a quarantined download — the same
+gate, on the same artifact, as a customer release (T44).
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ from check_embedded_browser_package import (  # noqa: E402
     audit_embedded_browser_package,
     browser_resource_root,
 )
+from release_assembly import load_signing_identity  # noqa: E402
 from build_release_package import (  # noqa: E402
     DEFAULT_ARCHIVES,
     ReleaseFailed,
@@ -53,6 +54,7 @@ from build_release_package import (  # noqa: E402
     build_release_package,
     create_disk_image,
     install_runtime_resources_and_sign,
+    require_distributable_release,
     stage_browser_distribution,
 )
 from release_configuration import (  # noqa: E402
@@ -243,15 +245,26 @@ def verify_embedded_mach_o_signature(path: Path, expected_identifier: str) -> No
     """Verify one embedded Mach-O signature outside its enclosing bundle.
 
     `codesign --verify` on a path inside a bundle always re-resolves to the
-    bundle, and Chrome for Testing ships without bundle-level code seals
-    (`_CodeSignature` is absent upstream), so the packaged code is verified by
-    checking the embedded ad-hoc linker signature of the Mach-O itself.
+    bundle, so the packaged code is checked by reading the embedded signature of
+    the Mach-O itself.
+
+    Chrome for Testing arrives ad-hoc/linker-signed and this used to assert
+    exactly that. It cannot any more, and the reason is the point of T44: an
+    ad-hoc signature is unnotarisable, so Gatekeeper offers the customer "Move
+    to Trash". The browser is now re-signed under our Developer ID before its
+    manifest is taken, and what this asserts is the property that replaced the
+    old one — our team, and a hardened runtime.
     """
     rendered = signature_details(path)
     if f"Identifier={expected_identifier}" not in rendered:
         raise AcceptanceFailed("packaged browser code identity drifted")
-    if "linker-signed" not in rendered or "adhoc" not in rendered:
-        raise AcceptanceFailed("packaged browser lost its upstream code signature")
+    identity = load_signing_identity()
+    if f"TeamIdentifier={identity.team_id}" not in rendered:
+        raise AcceptanceFailed("packaged browser is not signed by the release team")
+    if "runtime" not in rendered:
+        raise AcceptanceFailed("packaged browser was signed without a hardened runtime")
+    if "adhoc" in rendered:
+        raise AcceptanceFailed("packaged browser still carries an ad-hoc signature")
     with tempfile.TemporaryDirectory(
         prefix="automation-tool-eb16-signature-", dir="/private/tmp"
     ) as raw:
@@ -744,10 +757,14 @@ def main() -> int:
             shutil.rmtree(build_directory)
         build_directory.mkdir(parents=True)
         browser = build_directory / "embedded-browser"
-        stage_browser_distribution(target_id, archive, browser)
+        # The same identity, read the same way, as a customer release. An
+        # acceptance run that signed differently — or not at all — would be
+        # accepting an artifact nobody ships.
+        identity = load_signing_identity()
+        stage_browser_distribution(target_id, archive, browser, identity)
         executor = build_directory / "executor" / "automation-tool-executor"
         _, public_key, private_key = build_executor_candidate(
-            executor, architecture, "eb-16-macos-release"
+            executor, architecture, "eb-16-macos-release", identity
         )
         (build_directory / "executor-verifying-key").write_text(
             public_key, encoding="utf-8"
@@ -766,13 +783,15 @@ def main() -> int:
         announce("Preparing the pinned video runtime resources (cached per machine)")
         video_runtime = prepare_video_runtime(platform="macos")
         install_runtime_resources_and_sign(
-            application, browser, target_id, video_runtime
+            application, browser, target_id, video_runtime, identity
         )
         disk_image = create_disk_image(
             application,
             cargo_target / "release/bundle/dmg" / f"{application.stem}_0.1.0.dmg",
             target_id,
+            identity,
         )
+        require_distributable_release(disk_image)
     else:
         private_key = None
         public_key = (build_directory / "executor-verifying-key").read_text(
