@@ -13,21 +13,18 @@ import { expect, test, type Page } from "@playwright/test";
  * less capable than the product for no reason.
  *
  * Viewport is 1280x800, the size the production Tauri window opens at
- * (`src-tauri/tauri.conf.json`), pinned below rather than inherited.
- */
-
-/**
- * Pinned, because the shared config does not actually deliver what it says.
+ * (`src-tauri/tauri.conf.json`), inherited from `playwright.config.ts`, which
+ * reads it from that file.
  *
- * `playwright.config.ts` declares `viewport: {1280, 800}` at the top level, but
- * its one project spreads `devices["Desktop Chrome"]`, and a project-level
- * `use` wins — that preset carries 1280x720, so every spec in this directory
- * runs 80px shorter than the file headers claim (open as T96). Width is 1280
- * either way, so the measurements below are unaffected, but the number this
- * file reports has to be the number it ran at. Pinned here rather than in the
- * shared config, which would quietly relax the fold line for every other spec.
+ * It was pinned locally when this file was written, because the shared config
+ * declared 800 at the top level and its one project then spread
+ * `devices["Desktop Chrome"]` over it — a project-level `use` wins, and that
+ * preset carries 1280x720, so every spec here ran 80px shorter than its header
+ * claimed. T96 fixed the config and `e2e/viewport-baseline.spec.ts` now asserts
+ * the delivered viewport against `tauri.conf.json`, so the pin was redundant
+ * and removed. Every assertion in this file measures width, which was 1280
+ * before and after, so nothing below changed value.
  */
-test.use({ viewport: { width: 1280, height: 800 } });
 
 const HARNESS = "/harness.html?health=available";
 

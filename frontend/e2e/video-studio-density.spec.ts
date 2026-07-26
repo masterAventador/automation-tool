@@ -1,22 +1,22 @@
 import { expect, test, type Page } from "@playwright/test";
+import { MINIMUM_WINDOW } from "./production-window";
 
 /**
  * 视频制作: whether the first step of making a video is reachable without
  * scrolling.
  *
- * The viewport is pinned to 1280x800 below, which is the production Tauri
- * window (`src-tauri/tauri.conf.json` declares width 1280, height 800) — the
+ * The viewport is the shared one from `playwright.config.ts`, which reads the
+ * production Tauri window out of `src-tauri/tauri.conf.json` — 1280x800, the
  * size a customer gets on first launch.
  *
- * It has to be pinned here rather than inherited. `playwright.config.ts` does
- * set `use.viewport` to 1280x800, but its only project spreads
- * `devices["Desktop Chrome"]` on top of that, and that preset carries its own
- * 1280x720 — so the config's declared height loses and every spec in this
- * folder actually runs 80px shorter than the window it claims to be measuring.
- * Measured, not read: `page.viewportSize()` returned 720 on the first run of
- * this file. Left alone rather than corrected in the shared config, because
- * lengthening the viewport would relax every other spec's fold at a moment
- * when several lines are editing this app at once.
+ * It used to be pinned in this file, because the shared config declared 800 and
+ * then threw it away: its one project spread `devices["Desktop Chrome"]`, whose
+ * own 1280x720 wins over the top-level `use`, so every spec in this folder ran
+ * 80px shorter than its header claimed. T96 fixed the config and added
+ * `e2e/viewport-baseline.spec.ts`, which asserts the delivered viewport against
+ * `tauri.conf.json` — so the local pin became a second copy of a number that is
+ * now guarded in one place, and was removed. The fold assertions below are
+ * unaffected by that removal: they ran at 800 pinned, and run at 800 inherited.
  *
  * Measured on 2026-07-26 before this file existed: the two 选择 buttons on the
  * 新建视频 tab sat at y=1043 and y=1066 against a 800px viewport, so the first
@@ -31,9 +31,6 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 const HARNESS = "/harness.html?health=available";
-
-/** The production window, as declared in `src-tauri/tauri.conf.json`. */
-test.use({ viewport: { width: 1280, height: 800 } });
 
 /** Both cards in 选择制作方式, by the accessible name each button carries. */
 const METHOD_BUTTONS = ["选择智能素材成片", "选择品牌动效成片"] as const;
@@ -138,16 +135,19 @@ test.describe("视频制作 opens on a screen the operator can act on", () => {
 /**
  * The same question at the smallest window the product allows.
  *
- * `tauri.conf.json` sets `minWidth` 960 / `minHeight` 640, so this is a size a
- * user can genuinely drag the window down to, and it is the worst case for this
- * screen: the cards are narrower, so the summary above the button wraps onto
- * more lines and pushes it further down while the fold rises by 160px.
- * Measured after the fix, the lower of the two buttons ends at y=611 against a
- * 640 fold — 29px of clearance, thin enough that it is worth a test rather than
- * an assumption.
+ * `tauri.conf.json` sets `minWidth` 960 / `minHeight` 640 — read below rather
+ * than copied — so this is a size a user can genuinely drag the window down to,
+ * and it is the worst case for this screen: the cards are narrower, so the
+ * summary above the button wraps onto more lines and pushes it further down
+ * while the fold rises by 160px.
+ *
+ * This is also where the real margin lives. Re-measured on 2026-07-27 after the
+ * T96 viewport fix: at the 800 default both buttons end at y=589, a slack 211px
+ * above the fold; at this minimum they end at y=611 against a 640 fold — 29px.
+ * The default-size assertions are the regression guard, this one is the edge.
  */
 test.describe("窗口拖到最小时首屏仍有可按下的动作", () => {
-  test.use({ viewport: { width: 960, height: 640 } });
+  test.use({ viewport: MINIMUM_WINDOW });
 
   for (const name of METHOD_BUTTONS) {
     test(`「${name}」在首屏之内`, async ({ page }) => {
