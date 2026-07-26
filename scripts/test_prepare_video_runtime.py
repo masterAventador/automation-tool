@@ -22,22 +22,94 @@ byte is downloaded; what is under test is the mapping, which is what was absent.
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import subprocess
 import sys
 import unittest
+from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "prepare_video_runtime.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import prepare_video_runtime  # noqa: E402
 from video_runtime_cache import STAMP_VERSION, contract_fingerprint  # noqa: E402
 
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
 # What `release-package-resources.v1.json` says the Worker is installed as.
 INSTALLED = ("motion-video-worker", "package")
+
+
+def declared_inputs(resource: str) -> tuple[Path, ...]:
+    """What `prepare()` actually hands the cache as that resource's key.
+
+    Read off the real call rather than off a constant, because the defect this
+    covers was a call site that named fewer inputs than the build consumes.
+    Both the build and the font fetch are stubbed: this asks what the key is
+    made of, and answering that must not cost a PyInstaller run.
+    """
+    recorded: dict[str, tuple[Path, ...]] = {}
+
+    def record(*, name: str, contracts: Iterable[Path], build: object, root: Path) -> Path:
+        recorded[name] = tuple(Path(entry) for entry in contracts)
+        return Path(root) / name
+
+    with (
+        TemporaryDirectory(prefix="automation-tool-declared-inputs-") as directory,
+        mock.patch.object(prepare_video_runtime, "ensure_cached", record),
+        mock.patch.object(prepare_video_runtime, "ensure_subtitle_fonts", lambda **_: None),
+    ):
+        prepare_video_runtime.prepare(platform="macos", root=Path(directory), only=[resource])
+    return recorded[resource]
+
+
+# Every top-level directory a build input can live in. A literal naming one of
+# these inside a build driver is a repository file whose bytes reach the
+# artifact, so it has to be in that artifact's cache key.
+BUILD_INPUT_PATTERN = re.compile(
+    r"(?<![\w./-])((?:backend|contracts|frontend|scripts|vendor|workers)/[A-Za-z0-9_./-]+)"
+)
+
+# The scripts and spec files that turn pinned inputs into each artifact. Their
+# path literals are what the gate below reads.
+BUILD_DRIVERS: dict[str, tuple[Path, ...]] = {
+    "media-toolchain": (
+        ROOT / "scripts/build_video_media_toolchain.sh",
+        ROOT / "scripts/write_video_media_toolchain_manifest.py",
+    ),
+    "motion-video-worker": (ROOT / "scripts/build_motion_video_worker_candidate.py",),
+    "material-video-worker": (
+        ROOT / "scripts/build_material_video_worker_candidate.py",
+        ROOT / "workers/material_montage/material-video-worker.spec",
+        ROOT / "scripts/subtitle_font_assets.py",
+    ),
+}
+
+# Inputs deliberately kept out of a cache key, each with the reason it cannot
+# silently change the artifact. An unlisted, undeclared input fails the gate.
+EXEMPT_BUILD_INPUTS: dict[str, str] = {
+    "vendor/moneyprinterturbo": (
+        "a ~900 MB pinned submodule; digesting it on every cache lookup is not "
+        "viable, and its exact commit is pinned by "
+        "contracts/quality/third-party-sources.v1.json, which is declared in "
+        "its place"
+    ),
+    "scripts/run_bm_02_acceptance.py": (
+        "named only in the message that tells a developer which entrypoint to "
+        "run; it calls the builder rather than feeding it, so its bytes cannot "
+        "reach the artifact"
+    ),
+}
+
+
+def covered_by(inputs: tuple[Path, ...], path: Path) -> bool:
+    """Whether a declared input digests this path, directly or as its tree."""
+    return any(entry == path or entry in path.parents for entry in inputs)
 
 
 def stamped_motion_worker(staging: Path) -> Path:
@@ -53,7 +125,7 @@ def stamped_motion_worker(staging: Path) -> Path:
             {
                 "version": STAMP_VERSION,
                 "name": "motion-video-worker",
-                "fingerprint": contract_fingerprint([MOTION_WORKER_CONTRACT, MOTION_WORKER_SOURCE]),
+                "fingerprint": contract_fingerprint(declared_inputs("motion-video-worker")),
             }
         )
         + "\n",
@@ -70,6 +142,143 @@ def run_prepare(*arguments: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+class CacheKeysCoverEveryBuildInput(unittest.TestCase):
+    """A staged artifact is only reusable if its key names everything it is made of.
+
+    On 07-26 a user reported that all three background-music options in the
+    material Worker produced silence. T32 fixed it and the commit shipped. The
+    package the user built that evening still carried the control, and today's
+    comparison of the two binaries found the reason: `material-video-worker`
+    declared two contract files as its cache key and nothing else, so the
+    Worker sources PyInstaller freezes could change without the cache noticing.
+    The release step asked for the Worker, the cache said the pinned inputs
+    were unchanged, and it handed back the binary from before the fix.
+
+    The Worker source case is the reported one. The two tests that matter more
+    are the ones for the other two artifacts and the gate at the end: the same
+    omission is available to anyone who adds a build input later.
+    """
+
+    def test_every_material_worker_source_file_is_in_its_cache_key(self) -> None:
+        inputs = declared_inputs("material-video-worker")
+        sources = sorted(
+            path
+            for path in (ROOT / "workers/material_montage").rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts
+        )
+        self.assertTrue(sources, "the material Worker source package must exist")
+        uncovered = [
+            path.relative_to(ROOT).as_posix() for path in sources if not covered_by(inputs, path)
+        ]
+        self.assertEqual(
+            [],
+            uncovered,
+            "editing these files changes the frozen Worker but not its cache key, "
+            "so a release reuses the binary built before the change",
+        )
+
+    def test_the_frozen_worker_is_rebuilt_after_its_web_ui_source_changes(self) -> None:
+        """The reported defect, asserted as behaviour rather than as a file list.
+
+        The declared inputs are copied so the repository is never written to;
+        the fingerprint is deliberately independent of where a checkout lives,
+        which is what makes the copy a faithful stand-in.
+        """
+        webui = ROOT / "workers/material_montage/webui_runtime.py"
+        self.assertTrue(webui.is_file(), "the file T32 edited must still exist")
+        with TemporaryDirectory(prefix="automation-tool-worker-edit-") as directory:
+            copied = []
+            for index, entry in enumerate(declared_inputs("material-video-worker")):
+                target = Path(directory) / str(index) / entry.name
+                target.parent.mkdir(parents=True)
+                if entry.is_dir():
+                    shutil.copytree(entry, target)
+                else:
+                    shutil.copy2(entry, target)
+                copied.append(target)
+            edited = next(
+                (path / webui.name for path in copied if (path / webui.name).is_file()),
+                None,
+            )
+            self.assertIsNotNone(edited, f"{webui.name} must be inside a declared input")
+
+            before = contract_fingerprint(copied)
+            assert edited is not None
+            edited.write_text(
+                edited.read_text(encoding="utf-8") + "\n# the T32 fix\n", encoding="utf-8"
+            )
+
+            self.assertNotEqual(
+                before,
+                contract_fingerprint(copied),
+                "the Worker web UI changed and the cache still calls the old build current",
+            )
+
+    def test_every_motion_worker_build_input_is_in_its_cache_key(self) -> None:
+        inputs = declared_inputs("motion-video-worker")
+        for relative in (
+            "workers/motion_composition/worker.mjs",
+            "contracts/quality/motion-video-worker-package.v1.json",
+            # Pins the animation runtime digest that is written into the package.
+            "contracts/video/offline-motion-dependencies.v1.json",
+            "scripts/build_motion_video_worker_candidate.py",
+        ):
+            with self.subTest(relative):
+                self.assertTrue(covered_by(inputs, ROOT / relative))
+
+    def test_every_media_toolchain_build_input_is_in_its_cache_key(self) -> None:
+        inputs = declared_inputs("media-toolchain")
+        for relative in (
+            "contracts/video/ffmpeg-toolchain.v1.json",
+            "scripts/build_video_media_toolchain.sh",
+            # Writes manifest.json into the built toolchain, so its bytes are
+            # part of the artifact the release verifies.
+            "scripts/write_video_media_toolchain_manifest.py",
+        ):
+            with self.subTest(relative):
+                self.assertTrue(covered_by(inputs, ROOT / relative))
+
+    def test_no_build_driver_reads_a_repository_path_outside_its_cache_key(self) -> None:
+        """The gate: a new build input has to be declared or explained.
+
+        Content digests catch an edit to a file already in the key. They cannot
+        catch the other half of this defect's shape -- a driver that grows a new
+        input nobody adds to the key -- because the new file was never digested
+        to begin with. This reads the drivers themselves: every repository path
+        they name has to be covered by that artifact's key, or listed with the
+        reason it cannot change the artifact.
+        """
+        for resource, drivers in BUILD_DRIVERS.items():
+            inputs = declared_inputs(resource)
+            for driver in drivers:
+                with self.subTest(resource=resource, driver=driver.name):
+                    self.assertTrue(
+                        covered_by(inputs, driver),
+                        f"{driver.relative_to(ROOT)} decides what {resource} contains, "
+                        "so editing it must invalidate the cached artifact",
+                    )
+                    named = {
+                        match
+                        for match in BUILD_INPUT_PATTERN.findall(
+                            driver.read_text(encoding="utf-8")
+                        )
+                        if (ROOT / match).exists()
+                    }
+                    undeclared = sorted(
+                        relative
+                        for relative in named
+                        if relative not in EXEMPT_BUILD_INPUTS
+                        and not covered_by(inputs, ROOT / relative)
+                    )
+                    self.assertEqual(
+                        [],
+                        undeclared,
+                        f"{driver.relative_to(ROOT)} reads these while building "
+                        f"{resource}, but they are not in its cache key and carry no "
+                        "recorded reason for being left out",
+                    )
 
 
 class InstallIntoAResourceDirectory(unittest.TestCase):
