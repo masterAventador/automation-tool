@@ -356,6 +356,54 @@ EXIT 70   STDOUT {"schemaVersion":1,"status":"rejected"}   STDERR (空)
    （异常是英文内部串，入口有意不转发原因，用户文案由 Rust 侧映射产生），
    但是否要换成更有原则的机制（比如给提示词一个 `promptText` 分类）应由 T46 那条线决定。
 
+### 本次落地：gsap 摘要校验 seed 与 brief 的原生判定（第 4 步的一部分）
+
+打包落点已定：**`motion-video-worker/package/`**。它是包内 5 块载荷里**没有逐文件清单**的两块之一，
+不进 `distribution-manifest.v1.json` / `executor-manifest.v1.json`+Ed25519 / media-toolchain
+`manifest.json` 任何一份的覆盖范围，因此不与签名顺序耦合；语义上 gsap 是渲染期依赖
+（合成在浏览器里加载它），与动效 Worker 同属一块载荷；`motion_runtime_paths()` 已解析该目录。
+
+#### RED
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_runtime
+  error[E0432]: unresolved imports `seed_authoring_runtime`, `MotionVideoBriefRequest`,
+                                   `AUTHORING_RUNTIME_ASSET`
+```
+
+只影响这一个新增测试二进制，`lib` 始终可编译。
+
+#### GREEN
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_runtime      4 passed
+```
+
+#### 交付
+
+- **`seed_authoring_runtime()`：校验在使用之前，不匹配就拒绝，不回退不将就。**
+  期望摘要来自 `contracts/video/offline-motion-dependencies.v1.json` 里 gsap 的 `sha256`
+  （`c174bfce…`），与 `build_offline_motion_catalog.py` 装配时用的是同一处声明——
+  "release 装配进去的字节"和"这里接受的字节"不可能变成两个决定。
+  摘要不符、不是普通文件、超过 4 MB 一律 `render_unavailable`，且**什么都不写下**
+  （有专门用例断言拒绝后目标路径不存在）。若放行一个不对的 runtime，结果正是这条线
+  已经出过一次的形态：合成加载不到动画库 → 一动不动 → 编码出一个每一层都判成功的静图。
+- **`AUTHORING_RUNTIME_ASSET` 只声明一次**（`runtime/gsap.min.js`）：编排提示词里写的就是
+  这个路径，散写第二遍就会和提示词漂移。
+- **`MotionVideoBriefRequest::one_sentence()`**：按**代理读的同两份契约**判定
+  （`motion-one-sentence-brief.v1.json` 的字数/画幅/语言 + `motion-storyboard-duration.v1.json`
+  的片长上限）。原生侧接受的 brief，代理也一定接受——**用户不该在一次子进程往返之后
+  才发现某条边界**。
+
+#### 第 4 步**没有**做完的部分
+
+- **Rust `submit_motion_video_brief` 命令本身还没写**：起执行器 `--author-motion` 一次性子进程、
+  把视频创作模型（`ModelServicePurpose::VideoCreative`）经 stdin 递进去、解析答复、
+  再复用现有 `run_motion_render_job`。三个 `invoke_handler` 也还没注册。
+- **gsap 还没进 `motion-video-worker/package/`**：要改动效 Worker 的构建脚本，并保证在
+  **没有 `.local/offline-motion-deps/` 缓存的机器上**能从锁定 URL 重建。
+- 因此**在真实 App 里点「开始自动制作」仍然会落到"命令不存在"**，端到端与正式包验收都未进行。
+
 ## 失败矩阵
 
 | 场景 | 行为 |

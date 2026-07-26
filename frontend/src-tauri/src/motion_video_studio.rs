@@ -29,6 +29,21 @@ const MILLIS_PER_SECOND: u32 = 1000;
 const STYLE_CONTRACT: &str = include_str!("../../../contracts/video/motion-style-freeze.v1.json");
 const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
+const BRIEF_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-one-sentence-brief.v1.json");
+const OFFLINE_MOTION_DEPENDENCIES: &str =
+    include_str!("../../../contracts/video/offline-motion-dependencies.v1.json");
+
+/// Where the authored composition loads its animation runtime from, relative to
+/// the worker asset root. The authoring prompt names this exact path, so it is
+/// declared once here and never spelled out again.
+pub const AUTHORING_RUNTIME_ASSET: &str = "runtime/gsap.min.js";
+/// The package the locked catalog calls this runtime.
+const AUTHORING_RUNTIME_PACKAGE: &str = "gsap";
+/// The largest runtime this seed will read. The locked build is ~72 KB; a file
+/// far past that is not the declared artifact and is refused before it is read
+/// into memory.
+const MAX_AUTHORING_RUNTIME_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,6 +196,133 @@ impl MotionVideoDraftRequest {
         Ok((locked_style(&self.style_preset_id)?, plan))
     }
 }
+
+/// The declared bounds a typed one-sentence brief is judged against.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MotionBriefLimits {
+    max_brief_characters: usize,
+    max_brand_assets: usize,
+    aspect_ratios: Vec<String>,
+    languages: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BriefContract {
+    schema_version: u8,
+    policy: String,
+    max_brief_characters: usize,
+    max_brand_assets: usize,
+    aspect_ratios: Vec<String>,
+    languages: Vec<String>,
+}
+
+/// Reads the one declaration of what a brief may contain.
+///
+/// The authoring agent reads the same file. When these bounds lived in two
+/// places the form could offer a framing the agent refuses, and neither side
+/// could see the disagreement.
+pub fn brief_limits() -> Result<MotionBriefLimits, MotionVideoStudioError> {
+    let contract: BriefContract =
+        serde_json::from_str(BRIEF_CONTRACT).map_err(|_| draft_invalid())?;
+    if contract.schema_version != 1
+        || contract.policy != "fail_closed"
+        || contract.max_brief_characters == 0
+        || contract.aspect_ratios.is_empty()
+        || contract.languages.is_empty()
+    {
+        return Err(draft_invalid());
+    }
+    Ok(MotionBriefLimits {
+        max_brief_characters: contract.max_brief_characters,
+        max_brand_assets: contract.max_brand_assets,
+        aspect_ratios: contract.aspect_ratios,
+        languages: contract.languages,
+    })
+}
+
+impl MotionBriefLimits {
+    pub const fn max_brand_assets(&self) -> usize {
+        self.max_brand_assets
+    }
+}
+
+/// One typed sentence, on its way to the authoring agent.
+///
+/// This is not a variant of the fixed template: the template carries finished
+/// copy and a chosen style, this carries intent and lets the agent produce the
+/// copy, the storyboard and the composition.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MotionVideoBriefRequest {
+    creation_mode: String,
+    brief: String,
+    aspect_ratio: String,
+    duration_seconds: u32,
+    language: String,
+}
+
+impl MotionVideoBriefRequest {
+    pub fn one_sentence(
+        brief: String,
+        aspect_ratio: String,
+        duration_seconds: u32,
+        language: String,
+    ) -> Result<Self, MotionVideoStudioError> {
+        let value = Self {
+            creation_mode: MOTION_BRIEF_CREATION_MODE.to_owned(),
+            brief,
+            aspect_ratio,
+            duration_seconds,
+            language,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    pub fn brief(&self) -> &str {
+        self.brief.trim()
+    }
+
+    pub fn aspect_ratio(&self) -> &str {
+        &self.aspect_ratio
+    }
+
+    pub const fn duration_seconds(&self) -> u32 {
+        self.duration_seconds
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
+    /// Judged against the two contracts the agent reads, so a brief this side
+    /// accepts is one the agent will also accept — the round trip through a
+    /// subprocess is not where a user should discover a bound.
+    pub fn validate(&self) -> Result<(), MotionVideoStudioError> {
+        let limits = brief_limits()?;
+        let duration = duration_limits()?;
+        let trimmed = self.brief.trim();
+        if self.creation_mode != MOTION_BRIEF_CREATION_MODE
+            || trimmed.is_empty()
+            || trimmed.chars().count() > limits.max_brief_characters
+            || !limits
+                .aspect_ratios
+                .iter()
+                .any(|value| value == &self.aspect_ratio)
+            || !limits.languages.iter().any(|value| value == &self.language)
+            || self.duration_seconds == 0
+            || self.duration_seconds > duration.total_seconds_maximum()
+        {
+            return Err(draft_invalid());
+        }
+        validate_copy(trimmed, limits.max_brief_characters)
+    }
+}
+
+/// The single creation mode this request carries, declared once so the request
+/// and the mode the agent is told to work in can never disagree.
+pub const MOTION_BRIEF_CREATION_MODE: &str = "one_sentence_v1";
 
 /// The user-configured shape of one brand-motion film. Every frame count,
 /// timeline length and render budget in this module is derived from a plan; no
@@ -650,6 +792,67 @@ fn prepare_inside_workspace(
         allowed_assets,
         plan,
     })
+}
+
+/// The digest the locked dependency catalog declares for the animation runtime.
+///
+/// Read from the same contract `build_offline_motion_catalog.py` locks, so the
+/// bytes the release assembles and the bytes this seed accepts can never be
+/// two different decisions.
+fn locked_authoring_runtime_digest() -> Result<String, MotionVideoStudioError> {
+    let contract: serde_json::Value =
+        serde_json::from_str(OFFLINE_MOTION_DEPENDENCIES).map_err(|_| render_unavailable())?;
+    if contract.get("schemaVersion").and_then(serde_json::Value::as_u64) != Some(1) {
+        return Err(render_unavailable());
+    }
+    let digest = contract
+        .get("artifacts")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(render_unavailable)?
+        .iter()
+        .find(|artifact| {
+            artifact.get("package").and_then(serde_json::Value::as_str)
+                == Some(AUTHORING_RUNTIME_PACKAGE)
+        })
+        .and_then(|artifact| artifact.get("sha256"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(render_unavailable)?;
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(render_unavailable());
+    }
+    Ok(digest.to_owned())
+}
+
+/// Place the animation runtime the authored composition will load, or refuse.
+///
+/// The digest is checked against the locked catalog before anything is written,
+/// on the same terms as the packaged fonts and Chromium: a runtime that is not
+/// the declared one is refused outright. Falling back to it would produce
+/// exactly the failure this line already shipped once — a composition that
+/// loads nothing, animates nothing and encodes into a still picture that every
+/// other check reads as a finished video.
+pub fn seed_authoring_runtime(
+    store: &VideoJobWorkspaceStore,
+    workspace: &VideoJobWorkspace,
+    source: &Path,
+) -> Result<PathBuf, MotionVideoStudioError> {
+    let expected = locked_authoring_runtime_digest()?;
+    let metadata = fs::symlink_metadata(source).map_err(|_| render_unavailable())?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_AUTHORING_RUNTIME_BYTES {
+        return Err(render_unavailable());
+    }
+    let bytes = fs::read(source).map_err(|_| render_unavailable())?;
+    if sha256_hex(&bytes) != expected {
+        return Err(render_unavailable());
+    }
+    let work = store
+        .worker_asset_directory(workspace)
+        .map_err(map_workspace_error)?;
+    let destination = work.join(AUTHORING_RUNTIME_ASSET);
+    let parent = destination.parent().ok_or_else(render_unavailable)?;
+    fs::create_dir_all(parent).map_err(|_| storage_unavailable())?;
+    write_private_file(&destination, &bytes)?;
+    Ok(destination)
 }
 
 pub fn jobs(
