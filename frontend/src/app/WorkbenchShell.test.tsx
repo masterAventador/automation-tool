@@ -1,12 +1,18 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
+import type {
+  MaterialVideoStudioGateway,
+  MotionRenderJobSnapshot,
+} from "../features/video-studio/material-video-studio-gateway";
 import {
   failMotionRun,
+  motionRunSnapshot,
   resetMotionRunStore,
+  settleMotionRun,
   startMotionRun,
 } from "../features/video-studio/motion-run-store";
 import { WorkbenchShell } from "./WorkbenchShell";
@@ -225,6 +231,233 @@ describe("workbench shell navigation", () => {
     const rendered = document.body.textContent?.toLowerCase() ?? "";
     for (const upstream of ["moneyprinterturbo", "hyperframes"]) {
       expect(rendered).not.toContain(upstream);
+    }
+  });
+});
+
+/**
+ * 渲染阶段的失败必须在用户不在那一页的时候也被看见。
+ *
+ * T91 修掉了编排阶段（2–3 分钟）的那一半，并在自己的记录里登记了剩下的一半：
+ * `refresh()` 每 2 秒轮询 `motionJobs()`，可它只在 `VideoStudio` 挂载时跑，外壳
+ * 一切页就把它卸载了。于是「提交成功 → store 记的是 info 消息 → 侧边栏是蓝点
+ * 『正在进行中』（此刻属实）→ 用户切走 → 渲染失败 → 没有任何东西去查」，那个蓝点
+ * 就一直挂着说这条正在跑。窗口比编排短（实测一段 12 秒的成片渲染约 10 秒），但
+ * 形状和 T91 修掉的那次一模一样：标记在，只是它在说谎。
+ */
+describe("video studio watched from anywhere in the app", () => {
+  const RENDERING_JOB: MotionRenderJobSnapshot = {
+    renderJobId: "b1f0d0c6-1d2f-4a0e-9c3a-2b6f5e7d8a90",
+    revision: 1,
+    status: "rendering",
+    progressPercent: 40,
+    subject: "用蓝色商务风做一段本周销售增长说明",
+    styleDisplayName: "一句话自动制作",
+    artifactId: null,
+    artifactSizeBytes: null,
+    failureCode: null,
+  };
+  const FAILED_JOB: MotionRenderJobSnapshot = {
+    ...RENDERING_JOB,
+    status: "failed",
+    progressPercent: 62,
+    failureCode: "render_failed",
+  };
+  const SUCCEEDED_JOB: MotionRenderJobSnapshot = {
+    ...RENDERING_JOB,
+    status: "succeeded",
+    progressPercent: 100,
+    artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+    artifactSizeBytes: 4096,
+  };
+
+  function studioGateway(
+    motionJobs: MaterialVideoStudioGateway["motionJobs"],
+  ): MaterialVideoStudioGateway {
+    return {
+      open: vi.fn().mockRejectedValue(new Error("not reached")),
+      jobs: vi.fn().mockResolvedValue([]),
+      cancel: vi.fn().mockRejectedValue(new Error("not reached")),
+      deleteArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
+      submitMotionDraft: vi.fn().mockRejectedValue(new Error("not reached")),
+      motionJobs,
+      cancelMotionRenderJob: vi.fn().mockRejectedValue(new Error("not reached")),
+      readMotionArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
+      deleteMotionArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
+      submitMotionBrief: vi.fn().mockRejectedValue(new Error("not reached")),
+      readMaterialArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
+    };
+  }
+
+  function openShellOnWorkbench(gateway: MaterialVideoStudioGateway) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const mounted = render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell materialVideoStudioGateway={gateway} />
+      </QueryClientProvider>,
+    );
+    // 用户就在别的页面上——这正是缺陷成立的前提。
+    expect(screen.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+    return mounted;
+  }
+
+  /** 提交已经返回、本机渲染已经开始，而用户此刻在别的页面。 */
+  function renderStartedElsewhere() {
+    settleMotionRun(RENDERING_JOB.renderJobId, 12, {
+      tone: "info",
+      text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
+    });
+  }
+
+  beforeEach(() => {
+    resetMotionRunStore();
+  });
+
+  it("says the render failed even though the operator never came back to the page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockResolvedValue([RENDERING_JOB]);
+      renderStartedElsewhere();
+      openShellOnWorkbench(studioGateway(motionJobs));
+
+      motionJobs.mockResolvedValue([FAILED_JOB]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      expect(within(entry).getByText("失败")).toBeVisible();
+      expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 看不见和没事发生是两件事，标记必须说得出区别。
+   *
+   * 把轮询搬到外壳，就等于新造了一个会自己失败的东西：桥断了、命令抛异常、原生侧
+   * 没起来，`motionJobs()` 每一次都会 reject。如果那时候什么都不说，蓝点就会一直
+   * 挂着「正在进行中」——本任务修的正是这个形状，不能在修它的过程中造出第二个。
+   */
+  it("says it cannot read the run rather than claiming it is still running", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockRejectedValue(new Error("bridge is down"));
+      renderStartedElsewhere();
+      openShellOnWorkbench(studioGateway(motionJobs));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      expect(within(entry).getByText("未知")).toBeVisible();
+      expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** 读得到了就不要继续吓人：一次抖动不是一个持续的故障。 */
+  it("goes back to the running mark once it can read the run again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockRejectedValue(new Error("bridge is down"));
+      renderStartedElsewhere();
+      openShellOnWorkbench(studioGateway(motionJobs));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      expect(within(entry).getByText("未知")).toBeVisible();
+
+      motionJobs.mockResolvedValue([RENDERING_JOB]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      const recovered = screen.getByRole("menuitem", { name: /视频制作/u });
+      expect(within(recovered).queryByText("未知")).toBeNull();
+      expect(within(recovered).getByTitle("视频制作正在进行中")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 这条守的是代价，不是行为。
+   *
+   * 把轮询搬到外壳最贵的一种做法，是让它在整个 App 生命周期里一直转。本会话没有
+   * 提交过任何东西时，外壳一次都不该去问。
+   */
+  it("asks nothing at all when this session has no film outstanding", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockResolvedValue([]);
+      openShellOnWorkbench(studioGateway(motionJobs));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(motionJobs).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 清理漏一个，代价就是把一个过期的答案写进 store。
+   *
+   * 定时器好清，正在路上的那次读不好清：它可能在外壳已经拆掉之后才 settle。真要
+   * 漏了，App 退出那一刻的一次读会在没人再看的时候把「失败」写进去，而下一次打开
+   * App 时那条记录已经不属于任何一次运行。所以除了 `clearInterval`，还必须有一个
+   * 旗子把拆卸之后回来的答案挡掉。
+   */
+  it("does not write an answer that arrives after it has been torn down", async () => {
+    let release: (jobs: readonly MotionRenderJobSnapshot[]) => void = () => {};
+    const motionJobs = vi.fn().mockReturnValue(
+      new Promise<readonly MotionRenderJobSnapshot[]>((resolve) => {
+        release = resolve;
+      }),
+    );
+    renderStartedElsewhere();
+    const mounted = openShellOnWorkbench(studioGateway(motionJobs));
+    expect(motionJobs).toHaveBeenCalled();
+
+    // 读还在路上时，App 关掉了。
+    mounted.unmount();
+    await act(async () => {
+      release([FAILED_JOB]);
+      await Promise.resolve();
+    });
+
+    expect(motionRunSnapshot().message?.tone).toBe("info");
+    expect(motionRunSnapshot().ownJobs.get(RENDERING_JOB.renderJobId)?.ended).toBe(false);
+  });
+
+  /** 片子做完了就不用再看着了——定时器必须自己停，不能靠用户回到那一页才停。 */
+  it("stops asking once the film it was watching has ended", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockResolvedValue([SUCCEEDED_JOB]);
+      renderStartedElsewhere();
+      openShellOnWorkbench(studioGateway(motionJobs));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      const asked = motionJobs.mock.calls.length;
+      expect(asked).toBeGreaterThan(0);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(motionJobs.mock.calls.length).toBe(asked);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
