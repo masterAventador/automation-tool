@@ -24,6 +24,7 @@ import {
   type TaskSnapshot,
   type TaskStatus,
 } from "../../api/control-plane/task-projections";
+import { collapseExpandIcon } from "../../components/collapse-expand-icon";
 import { followTaskProjection } from "../task-runs/task-projection-controller";
 import {
   workbenchKeys,
@@ -321,6 +322,14 @@ export function Workbench({
             <Collapse
               ghost
               size="small"
+              /*
+               * Supplying the arrow to keep it out of the header's name; see
+               * `components/collapse-expand-icon`. antd's default arrow is
+               * labelled "collapsed"/"expanded", and a name computed from
+               * content swallows it, so this control reported as
+               * 「collapsed 诊断信息」.
+               */
+              expandIcon={collapseExpandIcon}
               items={[
                 {
                   key: "diagnostics",

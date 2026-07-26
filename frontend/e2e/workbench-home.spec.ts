@@ -79,9 +79,13 @@ test("每一行最近任务都说得出自己是什么时候的", async ({ page 
 test("诊断信息 still holds the counters an operator needs", async ({ page }) => {
   await openWorkbenchWithTwoTasks(page);
 
-  // Matched loosely: antd puts an `aria-label` on the expand icon, so the
-  // header's accessible name is "<折叠状态> 诊断信息".
-  await page.getByRole("button", { name: /诊断信息/ }).click();
+  // Exact, because the name is now exactly the label. It used to be
+  // "<折叠状态> 诊断信息" — antd labels its expand icon "collapsed"/"expanded"
+  // and a name computed from content swallowed it — and this call site matched
+  // loosely to work around that. T99 supplied an `aria-hidden` arrow instead
+  // (`components/collapse-expand-icon`), so the workaround is gone and the
+  // assertion is now strong enough to catch the pollution coming back.
+  await page.getByRole("button", { name: "诊断信息", exact: true }).click();
 
   const diagnostics = page.locator(".current-task-card");
   await expect(diagnostics.getByText("Revision")).toBeVisible();
