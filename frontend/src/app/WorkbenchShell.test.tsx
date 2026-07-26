@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -39,10 +39,9 @@ describe("workbench shell navigation", () => {
    * 侧边栏、顶栏、导航项全都没有标记。演示当天讲解人几乎一定会切页去讲别的
    * 功能，回来看到空列表会以为没提交成功，然后再点一次，于是真的再跑一遍编排。
    *
-   * 失败也一样：编排是几分钟后才失败的，那时用户可能在别的页面，而这个标记是
-   * 他知道「视频制作那边有事」的唯一途径。
+   * 这条只管「在跑」这一半；失败那一半在下一条，因为两者说的话必须不一样。
    */
-  it("marks the video entry while a film is being made and after it fails", () => {
+  it("marks the video entry while a film is being made", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     startMotionRun({
       kind: "one_sentence",
@@ -63,13 +62,41 @@ describe("workbench shell navigation", () => {
         "视频制作正在进行中",
       ),
     ).toBeNull();
+  });
 
-    failMotionRun({ tone: "error", text: "自动编排中途出错，视频没有开始制作。" });
-    expect(
-      within(screen.getByRole("menuitem", { name: "视频制作" })).getByTitle(
-        "视频制作正在进行中",
-      ),
-    ).toBeInTheDocument();
+  /**
+   * 失败了还挂着「正在进行中」，等于把失败藏起来。
+   *
+   * 实测（2026-07-26 失败注入）：任务第 4 秒就失败了，用户切到别的页面，**第 12
+   * 分钟界面仍然什么都不说**——全屏关键词扫描（做不出来 / 超时 / 出错 / 失败 /
+   * 不可用 / 无法）全阴性。侧边栏那个点是当时唯一的标记，可它一来只有悬停才看得
+   * 见的 `title`，二来那句 `title` 写的是「视频制作正在进行中」——它不但没说失败，
+   * 还在说这条正在跑。这正是本项目反复吃亏的静默失败：标记在，只是它在说谎。
+   *
+   * 所以失败态必须自己有一句**看得见的文字**，并且不许再自称进行中。
+   */
+  it("says the film failed in the sidebar instead of claiming it is still running", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    startMotionRun({
+      kind: "one_sentence",
+      subject: "用蓝色商务风做一段本周销售增长说明",
+      startedAt: Date.now(),
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      failMotionRun({ tone: "error", text: "自动编排没能完成，视频没有开始制作。" });
+    });
+
+    // 失败那个词也进了这一项的无障碍名（视频制作 失败），所以这里按子串取——
+    // 屏幕阅读器听得见它，正是这条用例要的。
+    const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+    expect(within(entry).getByText("失败")).toBeVisible();
+    expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
   });
 
   it("leaves the video entry unmarked when nothing is being made", () => {

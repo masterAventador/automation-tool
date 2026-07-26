@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  motionRunNeedsAttention,
+  motionRunAttention,
   motionRunSnapshot,
   resetMotionRunStore,
 } from "./motion-run-store";
@@ -653,7 +653,7 @@ describe("video studio shell", () => {
     for (const [code, expected] of [
       ["authoring_timed_out", "自动编排超时"],
       ["authoring_refused", "判定这次描述做不出来"],
-      ["authoring_crashed", "自动编排中途出错"],
+      ["authoring_crashed", "自动编排没能完成"],
       ["authoring_answer_invalid", "没有通过本机校验"],
     ] as const) {
       // 运行状态活在组件之外，所以每一轮都要从干净的store 重新开始，
@@ -673,6 +673,54 @@ describe("video studio shell", () => {
 
       expect(await screen.findByText(new RegExp(expected))).toBeVisible();
       expect(screen.queryByText(/本机渲染组件暂时不可用/)).toBeNull();
+      view.unmount();
+    }
+  });
+
+  /**
+   * 只有真的读过这句话的失败，才有资格让用户去改这句话。
+   *
+   * 失败注入实测（2026-07-26）：模型服务连不上，2 秒后界面说「判定这次描述做不
+   * 出来…请换一句更具体的描述后重试」；模型接上了却不再回话，363 秒后一字不差的
+   * 同一句。两次都没有任何东西读过用户那句描述。演示当天讲解人会照着这句话去改
+   * 文案，越改越错——真因在模型服务，改多少遍句子都没用。
+   *
+   * 编排子进程侧已经把「模型服务用不了」移出拒绝通道（见 entry.py 的
+   * `_MODEL_SERVICE_REASONS`），它现在落在 `authoring_crashed` 上。所以这个码的
+   * 文案必须点名模型服务和网络，并且不许再把责任推给描述；反过来，
+   * `authoring_refused` 是代理真的读完并拒绝了，那一句留着才是对的。
+   */
+  it("only tells the user to rewrite the sentence when something actually read it", async () => {
+    // 只找「叫用户去改这句话」的说法。「不是描述写得不好」是撇清，不是指责，
+    // 不能算进来。
+    const asksForANewSentence = /换一句|更具体的描述|把描述写得/u;
+    for (const [code, blames] of [
+      ["authoring_refused", true],
+      ["authoring_timed_out", false],
+      ["authoring_crashed", false],
+      ["authoring_answer_invalid", false],
+    ] as const) {
+      resetMotionRunStore();
+      const user = userEvent.setup();
+      const studioGateway = gateway();
+      studioGateway.submitMotionBrief = vi
+        .fn()
+        .mockRejectedValue(new MaterialVideoStudioGatewayError(code, true));
+      const view = render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.clear(screen.getByLabelText("一句话视频需求"));
+      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+      const alert = await screen.findByRole("alert");
+      expect(asksForANewSentence.test(alert.textContent ?? "")).toBe(blames);
+      if (code === "authoring_crashed") {
+        // 模型服务连不上和中途不再回话都落在这个码上，所以它必须说出用户此刻
+        // 真正能做的事：看网络、去「设置与诊断」测模型服务。
+        expect(alert).toHaveTextContent(/视频创作模型服务/u);
+        expect(alert).toHaveTextContent(/网络/u);
+      }
       view.unmount();
     }
   });
@@ -876,6 +924,51 @@ describe("video studio shell", () => {
   });
 
   /**
+   * 一个只会往上走的秒表，回答不了「这正常吗」。
+   *
+   * 走字的钟解决的是「它还活着吗」。但等到 87 秒的时候，用户唯一想知道的是这算
+   * 不算久——没有参照物，2 分钟的正常等待和已经挂掉的等待长得一模一样，于是他要
+   * 么白等，要么在正常范围内就重新提交，真的再跑一遍编排。演示当天更糟：讲解人
+   * 得当着客户面盯着一个不知道要转多久的圈。
+   *
+   * 参照物用实测值，不用预测：2026-07-26 连续七次成功，提交到完成中位数 124 秒、
+   * 最长 178 秒。说给人听的时候取整到分钟——「通常 2 分 4 秒」是一种假精度，这个
+   * 数字不配。超过实测最长的那一次之后，说的仍然是事实（已经比实测最长的还久）
+   * 加上最可能的成因，不是断言。
+   */
+  it("says how long the wait normally is, and says when it has gone past that", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const studioGateway = gateway();
+      studioGateway.submitMotionBrief = vi.fn().mockReturnValue(new Promise(() => {}));
+      render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+      const jobs = await screen.findByRole("tabpanel");
+      // 94 秒：还在实测的正常范围里，给出参照物，不要报警。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(94_000);
+      });
+      expect(jobs).toHaveTextContent(/通常 2 分钟左右/u);
+      expect(jobs).toHaveTextContent(/最长约 3 分钟/u);
+      expect(jobs).not.toHaveTextContent(/超过/u);
+
+      // 208 秒：过了实测最长的 178 秒，必须说出来。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(114_000);
+      });
+      expect(jobs).toHaveTextContent(/超过/u);
+      expect(jobs).toHaveTextContent(/视频创作模型服务/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * 渲染阶段的任务卡此前只有一条百分比。
    *
    * 而这条百分比在原生侧是**状态的另一种写法**：`validate_snapshot` 只允许
@@ -1002,7 +1095,7 @@ describe("video studio shell", () => {
     // 用户已经处理过这条结果了，侧边栏那个「有事」的标记就该灭掉，
     // 否则它会一直亮到下一次提交。
     expect(screen.queryByText(/已提交一句话自动制作/u)).toBeNull();
-    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(false);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
     expect(
       await screen.findByRole("button", {
         name: "播放用蓝色商务风做一段本周销售增长说明",
@@ -1136,7 +1229,7 @@ describe("video studio shell", () => {
 
     render(<VideoStudio gateway={studioGateway} />);
 
-    expect(await screen.findByText(/自动编排中途出错/u)).toBeVisible();
+    expect(await screen.findByText(/自动编排没能完成/u)).toBeVisible();
 
     await user.click(screen.getByRole("tab", { name: "新建视频" }));
     // 选择按钮的无障碍名恒为「选择…」，选中与否挂在 aria-pressed 上。

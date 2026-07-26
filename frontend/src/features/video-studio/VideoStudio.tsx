@@ -84,19 +84,64 @@ const DEFAULT_MOTION_BEATS = resizeMotionBeats(
 );
 
 /**
- * How long a submission that has not come back yet has been going.
+ * How long the authoring pass really takes, measured rather than predicted.
+ *
+ * Seven consecutive successful one-sentence runs on 2026-07-26: median 124
+ * seconds from pressing the button to a finished film, longest 178. These are
+ * the only honest numbers available — the native side's own 600 second budget
+ * is a stall guard, not an expectation, and printing it would invent a ten
+ * minute wait out of a two minute one.
+ *
+ * Spoken to the minute on purpose. "通常 2 分 4 秒" is a precision the median of
+ * seven runs does not have, and a false precision is its own kind of lie.
+ */
+const MOTION_AUTHORING_MEASURED = {
+  typicalSeconds: 124,
+  longestSeconds: 178,
+} as const;
+
+function spokenMinutes(seconds: number): string {
+  return `${Math.round(seconds / 60)} 分钟`;
+}
+
+/**
+ * How long a submission that has not come back yet has been going, and whether
+ * that is normal.
  *
  * There is no job to show for it: `submit_motion_video_brief` writes the job
  * snapshot only after the authoring pass has succeeded, so for 136–178 seconds
  * (measured) the jobs list was literally empty and the operator had no way to
  * tell a submission in flight from one that never happened. Some of them
  * pressed the button again.
+ *
+ * A clock alone fixed only half of that. At 87 seconds the number answers "is
+ * it alive" and says nothing at all about "is this normal", and without a
+ * reference a healthy two minute wait looks exactly like a dead one — which is
+ * the same button-pressed-twice again, just later. So the measured range is on
+ * screen beside the clock.
+ *
+ * Past the longest run ever measured it stops offering reassurance it no longer
+ * has. What it says then is still a fact — this has gone on longer than any
+ * measured run — plus the likeliest reason, because a model that took the
+ * connection and then went quiet is exactly what this looks like from here and
+ * the operator can go and check it. It is not a claim that the run has failed:
+ * nothing here knows that.
  */
 function motionPendingLabel(pending: MotionRunPending, now: number): string {
-  const elapsed = motionSpokenDuration(Math.max(0, Math.floor((now - pending.startedAt) / 1000)));
-  return pending.kind === "one_sentence"
-    ? `正在自动编排这条视频 · 已用 ${elapsed}`
-    : `正在提交本机渲染任务 · 已用 ${elapsed}`;
+  const seconds = Math.max(0, Math.floor((now - pending.startedAt) / 1000));
+  const elapsed = motionSpokenDuration(seconds);
+  if (pending.kind !== "one_sentence") {
+    return `正在提交本机渲染任务 · 已用 ${elapsed}`;
+  }
+  const reference =
+    seconds > MOTION_AUTHORING_MEASURED.longestSeconds
+      ? `已经超过实测最长的 ${spokenMinutes(
+          MOTION_AUTHORING_MEASURED.longestSeconds,
+        )}，可能是视频创作模型服务没有回应`
+      : `通常 ${spokenMinutes(
+          MOTION_AUTHORING_MEASURED.typicalSeconds,
+        )}左右，最长约 ${spokenMinutes(MOTION_AUTHORING_MEASURED.longestSeconds)}`;
+  return `正在自动编排这条视频 · 已用 ${elapsed} · ${reference}`;
 }
 
 /**
@@ -320,16 +365,26 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
  * move at all and being told to rewrite their sentence is both useless and
  * untrue. Those two must never share a sentence.
  *
+ * Only `authoring_refused` may ask for a different sentence, because it is the
+ * only one of the four where anything read the sentence at all. Failure
+ * injection on 2026-07-26 found the model service failing two ways — never
+ * reached, and reached but silent thereafter — and both told the user their
+ * description could not be made: after two seconds and after 363. The child now
+ * keeps model-service failures out of the refusal document (see
+ * `_MODEL_SERVICE_REASONS` in `entry.py`), so they arrive as `authoring_crashed`
+ * and that code has to name the model service and the network, which are what
+ * the user can actually go and look at.
+ *
  * Written once and used by both the studio's open path and the one-sentence
  * submit path so the two can never describe the same code differently.
  */
 const AUTHORING_ERRORS = {
   authoring_timed_out:
-    "自动编排超时，已经停下来，没有开始制作视频。请稍后重试；把描述写得更短、更具体通常会更快完成。",
+    "自动编排超时，已经停下来，视频没有开始制作。多半是视频创作模型服务一直没有回应，请稍后重试。",
   authoring_refused:
-    "自动编排判定这次描述做不出来，视频没有开始制作。请换一句更具体的描述后重试。",
+    "自动编排读完之后，判定这次描述做不出来，视频没有开始制作。这不是网络或模型服务的问题，请换一句更具体的描述后重试。",
   authoring_crashed:
-    "自动编排中途出错，视频没有开始制作。这是我们这边的问题，不是描述写得不好；请重试，反复出现请反馈给我们。",
+    "自动编排没能完成，视频没有开始制作。这不是描述的问题：视频创作模型服务可能连不上，或者接上之后不再回应，也可能是我们这边出错。请先检查网络，再到「设置与诊断」测试视频创作模型服务，然后重试。",
   authoring_answer_invalid:
     "自动编排的结果没有通过本机校验，视频没有开始制作。这是我们这边的问题，不是描述写得不好，请重试；如果一直这样请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;

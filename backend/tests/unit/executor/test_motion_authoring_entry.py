@@ -18,8 +18,10 @@ from __future__ import annotations
 import ast
 import io
 import json
+import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,11 @@ import automation_tool.executor.motion_authoring.entry as motion_authoring_entry
 from automation_tool.executor.motion_authoring import (
     MotionAuthoringEntryRejected,
     run_motion_authoring_entry,
+)
+from automation_tool.executor.motion_authoring.agent import (
+    MotionAuthoringRejected,
+    VideoCreationModelConfig,
+    call_video_creation_model,
 )
 
 BRIEF = "用蓝色商务风做一段本周销售增长说明"
@@ -306,3 +313,109 @@ def test_every_fixed_upstream_rejection_has_its_own_closed_reason_token() -> Non
         )
         is None
     )
+
+
+def _unused_loopback_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _model_at(base_url: str) -> VideoCreationModelConfig:
+    return VideoCreationModelConfig(
+        base_url=base_url, model_id=MODEL["modelId"], api_key=MODEL["apiKey"]
+    )
+
+
+def test_a_model_that_never_answers_is_not_the_same_failure_as_one_that_is_not_there() -> None:
+    """A model that is not there and a model that goes quiet are two failures.
+
+    Failure injection measured both on 2026-07-26, and the user was told the
+    same thing by both: an unreachable model produced "judged this description
+    impossible, try a more specific one" after two seconds, and a model that
+    took the connection and then sent nothing produced it word for word after
+    363. That number is MODEL_TIMEOUT_SECONDS plus the connect, and the two
+    paths met at one `except OSError` in `call_video_creation_model`, which gave
+    them one reason and made them indistinguishable from there on.
+
+    Real sockets over the real transport: one port nobody listens on, and one
+    that accepts the connection and never writes a byte. The timeouts are
+    seconds rather than minutes; the shape is the one that was measured.
+    """
+    dead_port = _unused_loopback_port()
+    with pytest.raises(MotionAuthoringRejected) as unreachable:
+        call_video_creation_model(
+            _model_at(f"https://127.0.0.1:{dead_port}/v1"),
+            [{"role": "user", "content": "hi"}],
+            timeout_seconds=5,
+        )
+
+    stop = threading.Event()
+    listener = socket.socket()
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        stalled_port = int(listener.getsockname()[1])
+
+        def accept_and_stall() -> None:
+            connection, _ = listener.accept()
+            stop.wait(30)
+            connection.close()
+
+        stalling = threading.Thread(target=accept_and_stall, daemon=True)
+        stalling.start()
+        try:
+            with pytest.raises(MotionAuthoringRejected) as stalling_model:
+                call_video_creation_model(
+                    _model_at(f"https://127.0.0.1:{stalled_port}/v1"),
+                    [{"role": "user", "content": "hi"}],
+                    timeout_seconds=2,
+                )
+        finally:
+            stop.set()
+            stalling.join(timeout=5)
+    finally:
+        listener.close()
+
+    assert str(unreachable.value) != str(stalling_model.value)
+    classifier: Any = motion_authoring_entry._closed_rejection_reason
+    assert classifier(str(unreachable.value)) != classifier(str(stalling_model.value))
+    assert classifier(str(unreachable.value)) is not None
+    assert classifier(str(stalling_model.value)) is not None
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["video_creation_model_transport_failed", "video_creation_model_unavailable"],
+)
+def test_a_model_service_failure_is_never_answered_as_a_refusal_of_the_brief(
+    monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    """An unusable model service is not the agent declining this brief.
+
+    The refusal document means something: `answer_is_refusal` recognises it and
+    reports `authoring_refused`, which the card words as the agent having read
+    this description and judged it impossible, and which asks the user for a
+    more specific sentence. Nothing read the sentence when the model was never
+    reached, so answering that way sends the user to rewrite something that was
+    never the problem.
+
+    Model-service failures therefore leave the refusal channel. The document
+    still carries its own closed reason, so nothing is lost for the day the App
+    reads it.
+    """
+    def raise_model_service_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise MotionAuthoringEntryRejected(reason)
+
+    monkeypatch.setattr(
+        motion_authoring_entry, "run_motion_authoring_entry", raise_model_service_failure
+    )
+    output = io.StringIO()
+
+    assert (
+        motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output) != 0
+    )
+    answer = json.loads(output.getvalue())
+    assert motion_authoring_entry.parse_motion_authoring_refusal(answer) is None
+    assert answer["status"] != "rejected"
+    assert answer["rejectionReason"] == reason

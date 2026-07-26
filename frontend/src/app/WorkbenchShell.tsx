@@ -44,8 +44,9 @@ import { VideoEditingServiceSettings } from "../features/settings/VideoEditingSe
 import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
 import { VideoStudio } from "../features/video-studio/VideoStudio";
 import {
-  motionRunNeedsAttention,
+  motionRunAttention,
   useMotionRun,
+  type MotionRunAttention,
 } from "../features/video-studio/motion-run-store";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import { PublishWorkspace, type SelectedVideo } from "../features/publishing/PublishWorkspace";
@@ -73,6 +74,9 @@ const navigationItems = [
 
 /** What the mark on the 视频制作 entry says when you hover it. */
 const VIDEO_STUDIO_RUNNING_TITLE = "视频制作正在进行中";
+const VIDEO_STUDIO_FAILED_TITLE = "视频制作失败了，去看看";
+/** The one word a failed run puts on screen from every other page. */
+const VIDEO_STUDIO_FAILED_MARK = "失败";
 
 /**
  * Put a mark on 视频制作 while a film is being made, and until its result has
@@ -82,22 +86,41 @@ const VIDEO_STUDIO_RUNNING_TITLE = "视频制作正在进行中";
  * and nobody stands on one page that long. Every other surface of this shell
  * was silent about it: leave the page and the App looked exactly as if nothing
  * had ever been submitted, which is what made operators submit a second time
- * and start a second authoring run. A failure that lands while the operator is
- * elsewhere has the same problem and worse consequences.
+ * and start a second authoring run.
  *
- * The mark is a dot rather than words so the entry's accessible name stays
- * 视频制作 and nothing that navigates by name has to change; the reason is
- * carried in a `title` so it is available rather than merely visible.
+ * A run in flight is a dot, so the entry's accessible name stays 视频制作 and
+ * nothing that navigates by name has to change; the reason is carried in a
+ * `title` so it is available rather than merely visible.
+ *
+ * A failure is not a dot. Measured on 2026-07-26: a run failed at four seconds
+ * while the operator was elsewhere, and at twelve minutes a full-screen sweep
+ * for 失败, 出错, 超时, 不可用 and 无法 came back empty — because the only mark
+ * was a dot, and its hover text said 视频制作正在进行中. The mark was there and
+ * it was telling the operator the opposite of what had happened. A failure has
+ * to carry its own word, on screen, without hovering anything.
+ *
+ * That word does join the entry's accessible name, which becomes 视频制作 失败
+ * for as long as the failure is unread. That is the point rather than a cost —
+ * a screen reader is exactly where a silent failure is most silent — and it is
+ * only reachable from the failed branch. Anything selecting this entry has to
+ * match the name as a substring, which is what both Playwright's `getByRole`
+ * and the desktop suite's `normalize-space()` XPath already do.
  */
-function navigationItemsWith(videoStudioRunning: boolean) {
-  if (!videoStudioRunning) return navigationItems;
+function navigationItemsWith(attention: MotionRunAttention) {
+  if (attention === "none") return navigationItems;
+  const failed = attention === "failed";
   return navigationItems.map((item) =>
     item.key === "video-studio"
       ? {
           ...item,
           label: (
-            <Badge dot offset={[6, 2]}>
-              <span title={VIDEO_STUDIO_RUNNING_TITLE}>{item.label}</span>
+            <Badge
+              {...(failed ? { count: VIDEO_STUDIO_FAILED_MARK } : { dot: true })}
+              offset={[6, 2]}
+            >
+              <span title={failed ? VIDEO_STUDIO_FAILED_TITLE : VIDEO_STUDIO_RUNNING_TITLE}>
+                {item.label}
+              </span>
             </Badge>
           ),
         }
@@ -435,7 +458,7 @@ export function WorkbenchShell({
   const showingVideoStudio = activePage === "video-studio";
   // Read from the store rather than from `VideoStudio`, which is unmounted
   // exactly when this mark matters most.
-  const videoStudioRunning = motionRunNeedsAttention(useMotionRun());
+  const videoStudioAttention = motionRunAttention(useMotionRun());
   const showingVideoEditing = activePage === "video-editing";
   const showingPublishing = activePage === "publishing";
   const showingLegal = activePage === LEGAL_PAGE;
@@ -493,7 +516,7 @@ export function WorkbenchShell({
           <Menu
             mode="inline"
             selectedKeys={[showingLegal ? LEGAL_PAGE_SECTION : activePage]}
-            items={navigationItemsWith(videoStudioRunning)}
+            items={navigationItemsWith(videoStudioAttention)}
             onClick={({ key }) => {
               if (
                 key === "workbench" ||
