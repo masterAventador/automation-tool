@@ -24,6 +24,7 @@ describe("generic desktop update contract", () => {
   it("accepts every closed native state and every user decision", () => {
     for (const state of [
       { state: "idle" },
+      { state: "disabled" },
       { state: "checking", trigger: "startup" },
       { state: "up_to_date", trigger: "manual" },
       { state: "available", release },
@@ -43,6 +44,19 @@ describe("generic desktop update contract", () => {
     for (const decision of ["install_now", "defer", "skip_version"]) {
       expect(appUpdateDecisionSchema.parse(decision)).toBe(decision);
     }
+  });
+
+  it("keeps updates being switched off apart from an update that actually failed", () => {
+    expect(parseAppUpdateState({ state: "disabled" })).toEqual({ state: "disabled" });
+    expect(() =>
+      parseAppUpdateState({
+        state: "disabled",
+        stage: "configuration",
+        code: "configuration_invalid",
+        retryable: false,
+      }),
+    ).toThrow();
+    expect(() => parseAppUpdateState({ state: "failed", code: "updates_disabled" })).toThrow();
   });
 
   it("fails closed on private updater fields, malformed progress and business policy", () => {

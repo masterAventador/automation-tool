@@ -22,6 +22,15 @@ pub const DEFAULT_UPDATE_POLL_INTERVAL: Duration = Duration::from_secs(6 * 60 * 
 pub const MAX_UPDATE_POLL_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// 状态互斥锁中毒是唯一一种「读写状态本身失败」的故障：持锁线程 panic 之后，协调器
+/// 既读不出也写不进当前状态。写入路径和读取路径必须给出同一个结论，否则同一次故障
+/// 会被前端当成两件事。这是真故障，不是「本构建没开更新」，所以保持在 `Failed` 上。
+const STATE_STORE_UNAVAILABLE: UpdateState = UpdateState::Failed {
+    stage: UpdateErrorStage::Storage,
+    code: UpdateErrorCode::StorageUnavailable,
+    retryable: false,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UpdateCheckErrorCode {
     ConfigurationInvalid,
@@ -162,6 +171,11 @@ impl AppUpdateCoordinator {
             .lock()
             .map(|state| state.clone())
             .map_err(|_| UpdateCheckError::check_unavailable())
+    }
+
+    /// 命令层需要一个没有 `Result` 的快照，它必须自己说清楚读不到状态是怎么回事。
+    pub fn observed_state(&self) -> UpdateState {
+        state_snapshot(&self.state)
     }
 
     pub async fn check(&self, trigger: UpdateCheckTrigger) -> UpdateState {
@@ -409,11 +423,7 @@ impl AppUpdateCoordinator {
                 *state = next.clone();
                 next
             }
-            Err(_) => UpdateState::Failed {
-                stage: UpdateErrorStage::Storage,
-                code: UpdateErrorCode::StorageUnavailable,
-                retryable: false,
-            },
+            Err(_) => STATE_STORE_UNAVAILABLE,
         }
     }
 
@@ -423,6 +433,52 @@ impl AppUpdateCoordinator {
             code,
             retryable,
         })
+    }
+}
+
+fn state_snapshot(state: &Mutex<UpdateState>) -> UpdateState {
+    match state.lock() {
+        Ok(state) => state.clone(),
+        Err(_) => STATE_STORE_UNAVAILABLE,
+    }
+}
+
+#[cfg(test)]
+mod state_snapshot_tests {
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    use super::{state_snapshot, UpdateState};
+
+    /// 状态互斥锁只有在持锁线程 panic 后才会中毒，也就是更新子系统内部真的坏了。
+    /// 这和「这个构建根本没开更新」是两件事：后者是受支持的正常配置，前者必须响亮。
+    /// 两者一旦共用一个错误码，界面就会对着一台坏掉的更新器说「此版本未启用自动更新」。
+    #[test]
+    fn a_poisoned_state_lock_stays_a_loud_failure_instead_of_claiming_updates_are_off() {
+        let state = Arc::new(Mutex::new(UpdateState::Idle));
+        let poisoner = Arc::clone(&state);
+        let panicked = thread::spawn(move || {
+            let _guard = poisoner
+                .lock()
+                .expect("the poisoning thread must take the lock");
+            panic!("poison the update state lock");
+        })
+        .join();
+        assert!(panicked.is_err(), "the poisoning thread must have panicked");
+        assert!(
+            state.lock().is_err(),
+            "the state lock must really be poisoned"
+        );
+
+        assert_eq!(
+            serde_json::to_value(state_snapshot(&state)).expect("state must serialize"),
+            serde_json::json!({
+                "state": "failed",
+                "stage": "storage",
+                "code": "storage_unavailable",
+                "retryable": false
+            })
+        );
     }
 }
 

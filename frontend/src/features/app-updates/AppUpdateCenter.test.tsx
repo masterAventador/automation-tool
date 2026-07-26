@@ -125,6 +125,16 @@ describe("generic App update UI", () => {
   });
 
   it("does not alarm the user when this build never enabled updates", async () => {
+    const source = gateway({ state: "disabled" });
+    renderCenter(source, true);
+
+    const tag = await statusTag();
+    await waitFor(() => expect(tag).toHaveTextContent("此版本未启用自动更新"));
+    expect(tag).not.toHaveClass("ant-tag-red");
+    expect(document.body).not.toHaveTextContent("更新当前不可用");
+  });
+
+  it("keeps a build whose update configuration is broken loudly visible", async () => {
     const source = gateway({
       state: "failed",
       stage: "configuration",
@@ -134,9 +144,24 @@ describe("generic App update UI", () => {
     renderCenter(source, true);
 
     const tag = await statusTag();
-    await waitFor(() => expect(tag).toHaveTextContent("此版本未启用自动更新"));
-    expect(tag).not.toHaveClass("ant-tag-red");
-    expect(document.body).not.toHaveTextContent("更新当前不可用");
+    await waitFor(() => expect(tag).toHaveTextContent("更新当前不可用"));
+    expect(tag).toHaveClass("ant-tag-red");
+    expect(document.body).not.toHaveTextContent("此版本未启用自动更新");
+  });
+
+  it("keeps an unreadable update state loudly visible instead of calling updates switched off", async () => {
+    const source = gateway({
+      state: "failed",
+      stage: "storage",
+      code: "storage_unavailable",
+      retryable: false,
+    });
+    renderCenter(source, true);
+
+    const tag = await statusTag();
+    await waitFor(() => expect(tag).toHaveTextContent("更新当前不可用"));
+    expect(tag).toHaveClass("ant-tag-red");
+    expect(document.body).not.toHaveTextContent("此版本未启用自动更新");
   });
 
   it("treats an unreachable update server as a retryable notice instead of a failure", async () => {

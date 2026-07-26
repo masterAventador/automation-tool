@@ -150,6 +150,9 @@ pub enum UpdateErrorCode {
 )]
 pub enum UpdateState {
     Idle,
+    /// 这个构建没有配置更新，是受支持的正常配置，不是失败。它必须与 `Failed` 分开：
+    /// 一旦共用 `Failed`，界面要么对正常构建报错，要么把真实的配置失败降级成中性文案。
+    Disabled,
     Checking {
         trigger: UpdateCheckTrigger,
     },
@@ -437,6 +440,7 @@ mod tests {
             .expect("fixture release must be valid");
         let states = [
             UpdateState::Idle,
+            UpdateState::Disabled,
             UpdateState::Checking {
                 trigger: UpdateCheckTrigger::Startup,
             },
@@ -472,6 +476,7 @@ mod tests {
         assert!(!serialized.contains("total_bytes"));
         for expected in [
             "idle",
+            "disabled",
             "checking",
             "up_to_date",
             "available",

@@ -95,6 +95,8 @@ const readyUpdateSchema = z
 
 export const appUpdateStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("idle") }).strict(),
+  // 这个构建没有配置更新，是受支持的正常配置，所以它是一个独立状态而不是失败码。
+  z.object({ state: z.literal("disabled") }).strict(),
   z.object({ state: z.literal("checking"), trigger: checkTriggerSchema }).strict(),
   z.object({ state: z.literal("up_to_date"), trigger: checkTriggerSchema }).strict(),
   z.object({ state: z.literal("available"), release: appUpdateReleaseSchema }).strict(),
