@@ -340,24 +340,120 @@ def install_runtime_resources_and_sign(
     )
 
 
-def disk_image_command(*, volume_name: str, source: Path, output: Path) -> list[str]:
-    # No `-quiet`. It suppresses the progress lines *and* the failure reason:
-    # measured, hdiutil prints zero bytes when it refuses under `-quiet`. A
-    # release build that dies here would hand the operator an exit code and
-    # nothing else, which is how the 2026-07-27 failure cost an hour.
+def writable_image_command(
+    *, volume_name: str, megabytes: int, output: Path
+) -> list[str]:
+    # No `-quiet` anywhere in this file. It suppresses the progress lines *and*
+    # the failure reason: measured, hdiutil prints zero bytes when it refuses
+    # under `-quiet`. A release build that died here would hand the operator an
+    # exit code and nothing else, which is how the 2026-07-27 failure cost an
+    # hour before the reason could be recovered by hand.
     return [
         "hdiutil",
         "create",
-        "-volname",
-        volume_name,
-        "-srcfolder",
-        os.fspath(source),
+        "-size",
+        f"{megabytes}m",
         "-fs",
         "HFS+",
-        "-format",
-        "UDZO",
+        "-volname",
+        volume_name,
+        "-type",
+        "UDIF",
+        "-o",
         os.fspath(output),
     ]
+
+
+def attach_command(*, image: Path, mountpoint: Path) -> list[str]:
+    # An explicit `-mountpoint` outside `/Volumes`, plus `-nobrowse`. Two
+    # reasons, both measured: parallel release lines would otherwise collide on
+    # `/Volumes/<volume name>`, and a volume that never appears in `/Volumes`
+    # cannot be left behind as a stale mount for the next build to trip over.
+    return [
+        "hdiutil",
+        "attach",
+        os.fspath(image),
+        "-mountpoint",
+        os.fspath(mountpoint),
+        "-nobrowse",
+    ]
+
+
+def image_megabytes(source: Path) -> int:
+    """Room for `source` plus filesystem overhead, in whole megabytes."""
+    total = 0
+    for path in source.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        total += path.stat().st_size
+    # HFS+ metadata, the catalog, and the slack a full volume needs to accept
+    # the last file. Generous on purpose: the image is compressed afterwards,
+    # so unused space costs nothing in the artifact the customer downloads,
+    # while too little space fails the build.
+    return max(64, int(total / (1024 * 1024) * 1.25) + 64)
+
+
+def fill_disk_image(*, source: Path, volume_name: str, output: Path) -> Path:
+    """Build a compressed image holding everything in `source`.
+
+    `hdiutil create -srcfolder` used to do this in one call and can no longer
+    do it at all. Measured 2026-07-27 with the real signed and notarised
+    bundle: it fails with `could not access /Volumes/<vol>/<app>.app -
+    Operation not permitted`. The same staging directory succeeds when the
+    bundle is renamed so it does not end in `.app`, and a synthetic `Probe.app`
+    stub also succeeds — so it is neither the name nor the size, it is a
+    genuine application bundle. It fails for the pre-T84 form (handing
+    `-srcfolder` the .app directly) too, so this is not a regression T84
+    introduced; that path had simply stopped working by the time it was next
+    run.
+
+    `ditto` in this process copies the very same bundle onto the very same
+    mounted volume without complaint, so the refusal belongs to the helper
+    hdiutil delegates its copying to. Hence: create the volume empty, fill it
+    ourselves, then compress.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent) as scratch_root:
+        scratch = Path(scratch_root)
+        writable = scratch / "writable.dmg"
+        mountpoint = scratch / "volume"
+        mountpoint.mkdir()
+        run_checked(
+            writable_image_command(
+                volume_name=volume_name,
+                megabytes=image_megabytes(source),
+                output=writable,
+            )
+        )
+        run_checked(attach_command(image=writable, mountpoint=mountpoint))
+        try:
+            for entry in sorted(source.iterdir()):
+                destination = mountpoint / entry.name
+                if entry.is_symlink():
+                    destination.symlink_to(os.readlink(entry))
+                else:
+                    # `ditto` preserves the signature; a plain copy does not
+                    # reliably.
+                    run_checked(
+                        ["ditto", os.fspath(entry), os.fspath(destination)]
+                    )
+        finally:
+            # Always, including on failure: a leaked mount survives this
+            # process and the next build inherits it.
+            run_checked(["hdiutil", "detach", os.fspath(mountpoint)])
+        run_checked(
+            [
+                "hdiutil",
+                "convert",
+                os.fspath(writable),
+                "-format",
+                "UDZO",
+                "-o",
+                os.fspath(output),
+            ]
+        )
+    return output
 
 
 def create_disk_image(
@@ -381,14 +477,11 @@ def create_disk_image(
     submission = notarize_and_staple(artifact=application, identity=identity)
     announce(f"Application notarised and stapled (submission {submission})")
     announce("Creating the release disk image from the final App bundle")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.unlink(missing_ok=True)
     # Image a staging directory rather than the bare .app, so the volume also
-    # carries the `Applications` symlink the customer drags onto. Handing
-    # `-srcfolder` the .app itself produces a volume containing nothing but
-    # that one bundle — which is what shipped: the 20:52 image had no symlink,
-    # no `.background`, no `.DS_Store`, and no way to install without opening
-    # a second Finder window.
+    # carries the `Applications` symlink the customer drags onto. A volume
+    # holding nothing but the bundle is what shipped on 2026-07-26: no symlink,
+    # no drag target, and no way to install without opening a second Finder
+    # window.
     #
     # This cannot be fixed in `tauri.conf.json`. The build runs
     # `tauri build --bundles app`, so Tauri's DMG bundler never executes and
@@ -401,10 +494,8 @@ def create_disk_image(
         # `ditto` preserves the signature; a plain copy does not reliably.
         run_checked(["ditto", os.fspath(application), os.fspath(staging / application.name)])
         (staging / "Applications").symlink_to("/Applications")
-        run_checked(
-            disk_image_command(
-                volume_name=application.stem, source=staging, output=output
-            )
+        fill_disk_image(
+            source=staging, volume_name=application.stem, output=output
         )
     # The disk image is itself a downloaded artifact, so it carries its own
     # signature and its own ticket; the customer's first Gatekeeper prompt is
