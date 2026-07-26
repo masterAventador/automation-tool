@@ -1,5 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 import { PRODUCTION_WINDOW } from "./e2e/production-window";
+import { harnessPort } from "./src/test-harness/harness-port";
+
+// Derived, not written down: parallel worktrees each need their own, and a
+// fixed 1420 made whichever line started second fail as if it were flaky.
+const ORIGIN = `http://127.0.0.1:${harnessPort(process.cwd(), process.env)}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -9,7 +14,7 @@ export default defineConfig({
   reporter: [["list"]],
   outputDir: "test-results/playwright",
   use: {
-    baseURL: "http://127.0.0.1:1420",
+    baseURL: ORIGIN,
     headless: true,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
@@ -37,7 +42,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "pnpm dev",
-    url: "http://127.0.0.1:1420/harness.html",
+    url: `${ORIGIN}/harness.html`,
     reuseExistingServer: false,
     timeout: 30_000,
   },

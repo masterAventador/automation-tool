@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { harnessPort } from "./src/test-harness/harness-port";
+
 const desktopE2EMode = "desktop-e2e";
 const controlPlaneE2EMode = "control-plane-e2e";
 const browserSettingsE2EMode = "browser-settings-e2e";
@@ -48,7 +50,10 @@ export default defineConfig(({ mode }) => ({
   clearScreen: false,
   server: {
     host: "127.0.0.1",
-    port: 1420,
+    // Derived from the checkout so parallel worktrees do not fight over one
+    // port. `strictPort` stays on: silently landing on a different port is how
+    // Playwright ends up talking to somebody else's dev server.
+    port: harnessPort(process.cwd(), process.env),
     strictPort: true,
     watch: {
       ignored: ["**/src-tauri/target/**"],
