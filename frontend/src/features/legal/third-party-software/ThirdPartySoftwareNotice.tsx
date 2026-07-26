@@ -1,5 +1,6 @@
 import { Alert, Card, Collapse, Space, Tag, Typography } from "antd";
 
+import { collapseExpandIcon } from "../../../components/collapse-expand-icon";
 import {
   ASSET_RIGHTS_NOTICE,
   DISTRIBUTED_COMPONENT_NOTICES,
@@ -126,6 +127,14 @@ export function ThirdPartySoftwareNotice() {
             不需要联网，也不需要打开安装目录。
           </Typography.Paragraph>
           <Collapse
+            /*
+             * Supplying the arrow to keep it out of the header's name; see
+             * `components/collapse-expand-icon`. antd's default arrow is
+             * labelled "collapsed"/"expanded", and a name computed from content
+             * swallows it, so these four reported as
+             * 「collapsed MIT 许可证全文（英文原文）」 and so on.
+             */
+            expandIcon={collapseExpandIcon}
             items={Object.entries(LICENSE_TEXTS).map(([identifier, text]) => ({
               key: identifier,
               label: `${LICENSE_TEXT_LABELS[identifier] ?? identifier} 许可证全文（英文原文）`,

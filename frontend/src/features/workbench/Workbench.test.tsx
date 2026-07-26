@@ -185,10 +185,11 @@ describe("RPA workbench", () => {
     expect(screen.queryByText("事件水位")).not.toBeInTheDocument();
     expect(screen.queryByText(RUNNING_TASK_ID)).not.toBeInTheDocument();
 
-    // Matched loosely: antd puts an `aria-label` on the expand icon, so the
-    // header's accessible name is "<折叠状态> 诊断信息" and the prefix follows
-    // whichever locale the surrounding ConfigProvider supplies.
-    await user.click(screen.getByRole("button", { name: /诊断信息/ }));
+    // A plain string, because the name is now exactly the label. Testing
+    // Library matches a string name in full, so this would not have matched the
+    // old "<折叠状态> 诊断信息" — which is why this call site used a regex until
+    // T99 supplied an `aria-hidden` arrow (`components/collapse-expand-icon`).
+    await user.click(screen.getByRole("button", { name: "诊断信息" }));
 
     // Presence, not visibility: jsdom does not run the panel's open animation,
     // so the content stays measured-but-hidden here. That the operator can
