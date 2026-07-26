@@ -399,7 +399,7 @@ def main() -> None:
         try:
             print("[H8-07] Building and signing the real PyInstaller Executor")
             package_source = build_signed_executor(workspace, build_id=EXECUTOR_BUILD_ID)
-            package_root = install_executor_package(package_source, private_app_data)
+            package_root = install_executor_package(package_source)
             package_entrypoint = executor_entrypoint(package_root)
 
             print("[H8-07] Building the dedicated hidden Tauri App")

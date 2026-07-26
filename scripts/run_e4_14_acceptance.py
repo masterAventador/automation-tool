@@ -26,6 +26,7 @@ from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
+    DEBUG_APP_RESOURCE_ROOT,
     prepare_startup_gate,
     startup_gate_environment,
     terminate_app_process_tree,
@@ -160,13 +161,14 @@ def isolated_environment(
     )
 
 
-def install_executor_package(source: Path, private_app_data: Path) -> Path:
-    local_executor = private_app_data / "local-executor"
-    local_executor.mkdir(parents=True, mode=0o700)
-    if os.name == "posix":
-        private_app_data.chmod(0o700)
-        local_executor.chmod(0o700)
+def install_executor_package(
+    source: Path, *, resource_root: Path = DEBUG_APP_RESOURCE_ROOT
+) -> Path:
+    """Stage a test package where every App build resolves packaged resources."""
+    local_executor = resource_root / "local-executor"
+    local_executor.mkdir(parents=True, exist_ok=True)
     package_root = local_executor / "package"
+    shutil.rmtree(package_root, ignore_errors=True)
     shutil.copytree(source, package_root)
     return package_root
 
@@ -422,10 +424,7 @@ def main() -> None:
                 workspace,
                 build_id=EXECUTOR_BUILD_ID,
             )
-            package_root = install_executor_package(
-                package_source,
-                private_app_data,
-            )
+            package_root = install_executor_package(package_source)
             package_entrypoint = executor_entrypoint(package_root)
 
             require_port_available(database_port)

@@ -188,7 +188,7 @@ def read_model_key(secret: Path) -> str:
     return key
 
 
-def require_authoring_capable_executor(private_app_data: Path) -> None:
+def require_authoring_capable_executor(_private_app_data: Path) -> None:
     """The installed Executor must be able to answer the authoring protocol.
 
     Older shared packages were cached under a constant build id. That is what
@@ -210,7 +210,9 @@ def require_authoring_capable_executor(private_app_data: Path) -> None:
     package. Anything else means this package cannot author, so it is rebuilt
     rather than run.
     """
-    entrypoint = private_app_data / "local-executor/package/automation-tool-executor"
+    entrypoint = (
+        DEBUG_APP_RESOURCE_ROOT / "local-executor/package/automation-tool-executor"
+    )
     if _answers_the_authoring_protocol(entrypoint):
         return
     print(
@@ -222,8 +224,8 @@ def require_authoring_capable_executor(private_app_data: Path) -> None:
         / executor_package_cache_key(SHARED_EXECUTOR_BUILD_ID),
         ignore_errors=True,
     )
-    shutil.rmtree(private_app_data / "local-executor", ignore_errors=True)
-    install_signed_executor_package(private_app_data)
+    shutil.rmtree(DEBUG_APP_RESOURCE_ROOT / "local-executor", ignore_errors=True)
+    install_signed_executor_package(resource_root=DEBUG_APP_RESOURCE_ROOT)
     if not _answers_the_authoring_protocol(entrypoint):
         raise RuntimeError(
             f"{entrypoint} does not answer the one-shot authoring protocol even after a "

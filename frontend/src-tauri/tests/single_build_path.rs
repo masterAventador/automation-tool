@@ -57,6 +57,9 @@ const RUNTIME_DEPENDENCY_RESOLVERS: &[(&str, &str)] = &[
 /// Production functions allowed to carry an inline `cfg(feature = "*-e2e")`
 /// branch, each with the reason it is not a product-behaviour fork.
 const REVIEWED_INLINE_FEATURE_BRANCHES: &[(&str, &str)] = &[
+    // Fixed diagnostics mirror the Executor commands that exist in each build;
+    // the branches add no lookup, input or success path.
+    ("app_logging.rs", "as_str"),
     // Composition root: mounts the WebDriver plugin and registers the command
     // set. Security rules forbid shipping the driver, so the mount itself is a
     // build difference; it changes no lookup the product performs.
@@ -461,6 +464,57 @@ fn the_startup_gate_is_compiled_identically_in_every_build() {
              checking that dependency"
         );
     }
+}
+
+#[test]
+fn the_executor_package_root_comes_from_tauri_resources_in_every_build() {
+    let items = functions();
+    let run = items
+        .iter()
+        .find(|item| item.file == "lib.rs" && item.name == "run")
+        .expect("lib.rs::run must compose the desktop application");
+    assert!(
+        !run.body.contains("cfg(debug_assertions)"),
+        "lib.rs::run selects the Local Executor package root by build mode; \
+         every build must exercise resource_dir()/local-executor/package"
+    );
+    assert!(
+        run.body.contains("resource_dir()")
+            && run.body.contains("join(\"local-executor\")")
+            && run.body.contains("join(\"package\")")
+            && run
+                .body
+                .contains("ExecutorPlatformService::initialize_with_package_root"),
+        "lib.rs::run must derive the Local Executor package from Tauri's resource directory"
+    );
+    assert!(
+        !run.body
+            .contains("ExecutorPlatformService::initialize(&app_data_directory)"),
+        "App data owns Executor state, not the signed package the App launches"
+    );
+}
+
+#[test]
+fn desktop_acceptance_stages_the_executor_at_the_same_resource_root() {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let prerequisites = fs::read_to_string(
+        repository_root.join("scripts/desktop_e2e_prerequisites.py"),
+    )
+    .expect("desktop prerequisite source");
+    let lifecycle =
+        fs::read_to_string(repository_root.join("scripts/run_e4_14_acceptance.py"))
+            .expect("Executor lifecycle acceptance source");
+    assert!(
+        prerequisites.contains("install_executor_package(")
+            && prerequisites.contains("resource_root=resource_root"),
+        "the shared startup preparation must stage the signed Executor in the \
+         debug App resource root, not in App data"
+    );
+    assert!(
+        lifecycle.contains("DEBUG_APP_RESOURCE_ROOT")
+            && !lifecycle.contains("local_executor = private_app_data"),
+        "custom Executor acceptance packages must use the same Tauri resource layout"
+    );
 }
 
 /// Every `invoke_handler` list in `lib.rs`, with the `#[cfg(...)]` that selects it.

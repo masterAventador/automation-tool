@@ -470,13 +470,15 @@ def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> 
 
 
 def install_signed_executor_package(
-    private_app_data: Path, *, build_id: str = SHARED_EXECUTOR_BUILD_ID
+    *,
+    build_id: str = SHARED_EXECUTOR_BUILD_ID,
+    resource_root: Path = DEBUG_APP_RESOURCE_ROOT,
 ) -> Path:
-    """Install the cached signed package where the debug build looks for it."""
+    """Install the cached signed package in the App's real resource layout."""
     package_source = ensure_signed_executor_package(build_id)
     from run_e4_14_acceptance import install_executor_package  # noqa: PLC0415
 
-    return install_executor_package(package_source, private_app_data)
+    return install_executor_package(package_source, resource_root=resource_root)
 
 
 # --------------------------------------------------------------------------- #
@@ -485,7 +487,7 @@ def install_signed_executor_package(
 
 
 def prepare_startup_gate(
-    private_app_data: Path,
+    _private_app_data: Path,
     *,
     build_id: str = SHARED_EXECUTOR_BUILD_ID,
     embedded_browser: bool = True,
@@ -503,7 +505,7 @@ def prepare_startup_gate(
     else:
         remove_staged_embedded_browser(resource_root=resource_root)
     if executor_package:
-        install_signed_executor_package(private_app_data, build_id=build_id)
+        install_signed_executor_package(build_id=build_id, resource_root=resource_root)
 
 
 def terminate_app_process_tree(app_process: subprocess.Popen[bytes]) -> None:

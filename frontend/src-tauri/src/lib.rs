@@ -4353,21 +4353,16 @@ pub fn run() {
                 &app_data_directory,
             )?);
             app_logging::record(app_logging::DesktopLogEvent::WorkspaceInitialized);
-            #[cfg(debug_assertions)]
+            let package_root = app
+                .path()
+                .resource_dir()?
+                .join("local-executor")
+                .join("package");
             let executor_platform =
-                executor_platform::ExecutorPlatformService::initialize(&app_data_directory)?;
-            #[cfg(not(debug_assertions))]
-            let executor_platform = {
-                let package_root = app
-                    .path()
-                    .resource_dir()?
-                    .join("local-executor")
-                    .join("package");
                 executor_platform::ExecutorPlatformService::initialize_with_package_root(
                     &app_data_directory,
                     &package_root,
-                )?
-            };
+                )?;
             app.manage(executor_platform);
             app_logging::record(app_logging::DesktopLogEvent::ExecutorServiceInitialized);
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
