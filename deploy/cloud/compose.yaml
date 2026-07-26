@@ -1,0 +1,177 @@
+# Single-instance customer Demo stack for one real cloud host.
+#
+# The host already runs an unrelated Nginx that owns 80/443, so that Nginx is
+# the public edge and this stack only ever binds loopback. PostgreSQL binds no
+# host port at all and is reachable solely through the private project network.
+#
+# Every network and volume is external so that `deploy_cloud_demo.py` owns the
+# lifecycle explicitly and no Compose default name can collide with another
+# project on the shared host.
+
+name: automation-tool-demo
+
+services:
+  postgres:
+    image: ${AUTOMATION_TOOL_DEMO_POSTGRES_IMAGE:?AUTOMATION_TOOL_DEMO_POSTGRES_IMAGE is required}
+    restart: unless-stopped
+    init: true
+    shm_size: 128mb
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - type: volume
+        source: postgres-data
+        target: /var/lib/postgresql
+      - type: volume
+        source: postgres-secrets
+        target: /run/secrets
+        read_only: true
+    networks:
+      demo:
+        aliases:
+          - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username postgres --dbname postgres"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+
+  migration:
+    profiles:
+      - migration
+    image: ${AUTOMATION_TOOL_DEMO_CONTROL_PLANE_IMAGE:?AUTOMATION_TOOL_DEMO_CONTROL_PLANE_IMAGE is required}
+    user: 65532:65532
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges=true
+    cap_drop:
+      - ALL
+    entrypoint: ["alembic"]
+    command: ["-c", "/app/alembic.ini", "upgrade", "head"]
+    volumes:
+      - type: volume
+        source: migration-secrets
+        target: /run/secrets
+        read_only: true
+    networks:
+      - demo
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  account-operations:
+    profiles:
+      - operations
+    image: ${AUTOMATION_TOOL_DEMO_CONTROL_PLANE_IMAGE:?AUTOMATION_TOOL_DEMO_CONTROL_PLANE_IMAGE is required}
+    user: 65532:65532
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges=true
+    cap_drop:
+      - ALL
+    entrypoint: ["automation-tool-account-operations"]
+    environment:
+      AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER_VERSION: ${AUTOMATION_TOOL_DEMO_ACCOUNT_PASSWORD_PEPPER_VERSION:?AUTOMATION_TOOL_DEMO_ACCOUNT_PASSWORD_PEPPER_VERSION is required}
+      AUTOMATION_TOOL_ACCOUNT_OPERATIONS_ACTOR_ID: ${AUTOMATION_TOOL_DEMO_ACCOUNT_OPERATIONS_ACTOR_ID:?AUTOMATION_TOOL_DEMO_ACCOUNT_OPERATIONS_ACTOR_ID is required}
+    volumes:
+      - type: volume
+        source: runtime-secrets
+        target: /run/secrets
+        read_only: true
+    networks:
+      - demo
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  control-plane:
+    image: ${AUTOMATION_TOOL_DEMO_CONTROL_PLANE_IMAGE:?AUTOMATION_TOOL_DEMO_CONTROL_PLANE_IMAGE is required}
+    user: 65532:65532
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges=true
+    cap_drop:
+      - ALL
+    init: true
+    stop_grace_period: 30s
+    environment:
+      AUTOMATION_TOOL_WORKERS: "1"
+      AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER_VERSION: ${AUTOMATION_TOOL_DEMO_ACCOUNT_PASSWORD_PEPPER_VERSION:?AUTOMATION_TOOL_DEMO_ACCOUNT_PASSWORD_PEPPER_VERSION is required}
+      AUTOMATION_TOOL_ACCOUNT_OPERATIONS_ACTOR_ID: ${AUTOMATION_TOOL_DEMO_ACCOUNT_OPERATIONS_ACTOR_ID:?AUTOMATION_TOOL_DEMO_ACCOUNT_OPERATIONS_ACTOR_ID is required}
+      AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID: ${AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID:?AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID is required}
+      AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY: ${AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY:?AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY is required}
+      AUTOMATION_TOOL_ACTION_MINIMUM_INTERVAL_SECONDS: ${AUTOMATION_TOOL_DEMO_ACTION_MINIMUM_INTERVAL_SECONDS:?AUTOMATION_TOOL_DEMO_ACTION_MINIMUM_INTERVAL_SECONDS is required}
+      AUTOMATION_TOOL_ACTION_TASK_LIMIT: ${AUTOMATION_TOOL_DEMO_ACTION_TASK_LIMIT:?AUTOMATION_TOOL_DEMO_ACTION_TASK_LIMIT is required}
+      AUTOMATION_TOOL_ACTION_DAILY_LIMIT: ${AUTOMATION_TOOL_DEMO_ACTION_DAILY_LIMIT:?AUTOMATION_TOOL_DEMO_ACTION_DAILY_LIMIT is required}
+      AUTOMATION_TOOL_ACTION_CONSECUTIVE_FAILURE_THRESHOLD: ${AUTOMATION_TOOL_DEMO_ACTION_CONSECUTIVE_FAILURE_THRESHOLD:?AUTOMATION_TOOL_DEMO_ACTION_CONSECUTIVE_FAILURE_THRESHOLD is required}
+    volumes:
+      - type: volume
+        source: runtime-secrets
+        target: /run/secrets
+        read_only: true
+    networks:
+      - demo
+    ports:
+      - name: control-plane
+        target: 8000
+        published: ${AUTOMATION_TOOL_DEMO_CONTROL_PLANE_PORT:?AUTOMATION_TOOL_DEMO_CONTROL_PLANE_PORT is required}
+        host_ip: ${AUTOMATION_TOOL_DEMO_BIND_ADDRESS:?AUTOMATION_TOOL_DEMO_BIND_ADDRESS is required}
+        protocol: tcp
+        mode: host
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2); assert response.status == 200; response.close()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+networks:
+  demo:
+    external: true
+    name: ${AUTOMATION_TOOL_DEMO_NETWORK:?AUTOMATION_TOOL_DEMO_NETWORK is required}
+
+volumes:
+  postgres-data:
+    external: true
+    name: ${AUTOMATION_TOOL_DEMO_POSTGRES_DATA_VOLUME:?AUTOMATION_TOOL_DEMO_POSTGRES_DATA_VOLUME is required}
+  postgres-secrets:
+    external: true
+    name: ${AUTOMATION_TOOL_DEMO_POSTGRES_SECRETS_VOLUME:?AUTOMATION_TOOL_DEMO_POSTGRES_SECRETS_VOLUME is required}
+  runtime-secrets:
+    external: true
+    name: ${AUTOMATION_TOOL_DEMO_RUNTIME_SECRETS_VOLUME:?AUTOMATION_TOOL_DEMO_RUNTIME_SECRETS_VOLUME is required}
+  migration-secrets:
+    external: true
+    name: ${AUTOMATION_TOOL_DEMO_MIGRATION_SECRETS_VOLUME:?AUTOMATION_TOOL_DEMO_MIGRATION_SECRETS_VOLUME is required}

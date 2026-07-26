@@ -14,7 +14,19 @@ WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-RUN uv sync --locked --no-dev --no-editable
+# Download the pinned artifacts from a path-identical mirror. The mirror serves
+# the same /packages/<a>/<b>/<digest>/<file> layout, so only the hostname of the
+# in-image copy of the lock changes; the committed uv.lock is untouched.
+#
+# This does NOT weaken dependency locking. `--locked` still refuses to resolve
+# anything the lock does not already pin, and every artifact is still verified
+# against the sha256 digest recorded in uv.lock, so a mirror can change how fast
+# the bytes arrive but not which bytes are accepted.
+#
+# The host is a committed constant, not a build argument: every builder -- CI,
+# workstation, cloud host -- resolves dependencies through the exact same path.
+RUN sed -i "s|https://files\.pythonhosted\.org/|https://pypi.tuna.tsinghua.edu.cn/|g" uv.lock \
+ && uv sync --locked --no-dev --no-editable
 
 FROM ${PYTHON_IMAGE} AS runtime
 

@@ -1,0 +1,24 @@
+{
+  "version": "automation-tool-cloud-demo.v1",
+  "demoHost": "at.xuanbai.tech",
+  "bindAddress": "127.0.0.1",
+  "controlPlanePort": 18800,
+  "postgresImage": "postgres:18.4-bookworm",
+  "databaseName": "automation_tool_demo",
+  "accountPasswordPepperVersion": 1,
+  "actionLimits": {
+    "minimumIntervalSeconds": 5,
+    "taskLimit": 20,
+    "dailyLimit": 100,
+    "consecutiveFailureThreshold": 3
+  },
+  "resources": {
+    "composeProject": "automation-tool-demo",
+    "network": "automation-tool-demo-net",
+    "postgresDataVolume": "automation-tool-demo-postgres-data",
+    "postgresSecretsVolume": "automation-tool-demo-postgres-secrets",
+    "runtimeSecretsVolume": "automation-tool-demo-runtime-secrets",
+    "migrationSecretsVolume": "automation-tool-demo-migration-secrets",
+    "imageRepository": "automation-tool-demo-control-plane"
+  }
+}
