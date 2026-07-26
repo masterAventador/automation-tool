@@ -78,7 +78,6 @@ const SANDBOX_FRAMES_DIRECTORY = "frames";
 // visible fits between them; a caller that asked for a handful of frames over
 // a long duration would be sampling too coarsely to judge motion at all.
 const STATIC_FRAME_COMPARISON_MINIMUM = 2;
-const SANDBOX_CANCEL_FILE = ".automation-tool-cancel";
 // Two animation frames: the current style has actually been composited, so
 // what is captured is what the seek asked for. Cheap enough to run per frame.
 const COMPOSITED_EXPRESSION_BODY = `
@@ -323,11 +322,16 @@ function boundedInteger(value, minimum, maximum) {
 
 function validSandboxSpec(value) {
   if (!hasExactKeys(value, [
-    "allowedAssets", "entryHtml", "frameCount", "maxCpuSeconds",
+    "allowedAssets", "cancelMarker", "entryHtml", "frameCount", "maxCpuSeconds",
     "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes", "workspace",
   ])) return false;
   if (typeof value.workspace !== "string" || !isAbsolute(value.workspace)) return false;
   if (!validSandboxRelativePath(value.entryHtml)) return false;
+  // This Worker holds no cancellation name of its own: the caller says which
+  // workspace file means "stop", so the two sides cannot hold names that
+  // disagree. The key is required rather than optional, so a caller that does
+  // not send one gets no render instead of an uncancellable one.
+  if (!validSandboxRelativePath(value.cancelMarker)) return false;
   if (
     !Array.isArray(value.allowedAssets)
     || value.allowedAssets.length > SANDBOX_ASSETS_MAXIMUM
@@ -1121,11 +1125,11 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       }
       for (let index = 1; index <= spec.frameCount; index += 1) {
         try {
-          await access(join(resolved.workspaceReal, SANDBOX_CANCEL_FILE));
+          await access(join(resolved.workspaceReal, spec.cancelMarker));
           finish({ status: "cancelled" });
           return;
         } catch {
-          // The fixed cancellation marker is absent; continue this frame.
+          // The cancellation marker the caller named is absent; continue.
         }
         if (seekableDuration > 0) {
           const time = seekableDuration * (index - 1) / spec.frameCount;

@@ -37,6 +37,7 @@ from test_motion_video_render_adapter import (
     LOCKED_MAJOR,
     PROTOCOL_VERSION,
     RENDER_JOB_PREFIX,
+    ROOT,
     TOKEN,
     WorkerSession,
     bootstrap_document,
@@ -94,9 +95,25 @@ def sandbox_command_line(job_id: str, sandbox: object, proof: str | None = None)
     )
 
 
+def cancel_marker_file_name() -> str:
+    """The declared workspace file whose appearance stops a render.
+
+    Read from the contract rather than repeated here: the Worker holds no
+    marker name of its own, so this driver has to name the same file the App
+    would, or it would be testing a convention nothing else uses.
+    """
+    contract = json.loads(
+        (ROOT / "contracts/video/motion-render-cancel-marker.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return contract["markerFileName"]
+
+
 def sandbox_spec(workspace: Path, **overrides: object) -> dict[str, object]:
     spec: dict[str, object] = {
         "allowedAssets": ["assets/style.css"],
+        "cancelMarker": cancel_marker_file_name(),
         "entryHtml": "entry.html",
         "frameCount": 3,
         "maxCpuSeconds": 20,
@@ -359,9 +376,22 @@ def test_sandbox_rejects_invalid_spec(assets: Path, decoy: Path) -> None:
     expect_ready(session)
     missing_key = sandbox_spec(workspace)
     del missing_key["frameCount"]
+    # A render whose caller did not name a cancellation marker is refused rather
+    # than started. This Worker holds no marker name of its own, so accepting
+    # the spec would mean rendering something the cancel button cannot reach —
+    # and that failure is silent by nature: the App still settles the job.
+    # See `contracts/video/motion-render-cancel-marker.v1.json`.
+    missing_cancel_marker = sandbox_spec(workspace)
+    del missing_cancel_marker["cancelMarker"]
     secret_relative = "secret-traversal"
     invalid_specs: list[object] = [
         missing_key,
+        missing_cancel_marker,
+        sandbox_spec(workspace, cancelMarker=""),
+        sandbox_spec(workspace, cancelMarker=f"../{secret_relative}"),
+        sandbox_spec(workspace, cancelMarker="/absolute/marker"),
+        sandbox_spec(workspace, cancelMarker="a\\b"),
+        sandbox_spec(workspace, cancelMarker=None),
         {**sandbox_spec(workspace), "shell": True},
         sandbox_spec(Path("relative/workspace")),
         sandbox_spec(workspace, entryHtml="/absolute/entry.html"),

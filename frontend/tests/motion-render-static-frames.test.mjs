@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,6 +37,12 @@ const COMMAND_DOMAIN = "automation-tool.video-worker-command.v1\0";
 const TOKEN = "b".repeat(64);
 const JOB_ID = "7d444840-9dc0-41a2-bcd4-e15b02a4c51e";
 const FRAME_COUNT = 4;
+const CANCEL_MARKER = JSON.parse(
+  await readFile(
+    new URL("contracts/video/motion-render-cancel-marker.v1.json", repositoryRoot),
+    "utf8",
+  ),
+).markerFileName;
 
 // Where a real embedded Chromium may already be staged on this machine. The
 // acceptance scripts stage one under `.local/`; an explicit path always wins.
@@ -147,6 +153,9 @@ async function renderPage(html, executable, major) {
   await writeFile(join(workspace, "entry.html"), html, "utf8");
   const sandbox = {
     allowedAssets: [],
+    // The Worker holds no cancellation name of its own; the caller supplies the
+    // declared one. See `contracts/video/motion-render-cancel-marker.v1.json`.
+    cancelMarker: CANCEL_MARKER,
     entryHtml: "entry.html",
     frameCount: FRAME_COUNT,
     maxCpuSeconds: 120,

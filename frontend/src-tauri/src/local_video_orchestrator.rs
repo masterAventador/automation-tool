@@ -237,6 +237,11 @@ impl VideoWorkerRenderBrowserConfiguration {
 pub struct VideoWorkerRenderSandboxRequest {
     workspace: PathBuf,
     entry_html: String,
+    /// The workspace file whose appearance tells the render to stop, named by
+    /// the caller rather than known by the Worker. Carried here for the same
+    /// reason `entry_html` is: it is the App's convention, and a Worker holding
+    /// its own copy of it is a second source that can drift silently.
+    cancel_marker: String,
     allowed_assets: Vec<String>,
     frame_count: u32,
     max_duration_seconds: u32,
@@ -263,6 +268,7 @@ impl VideoWorkerRenderSandboxRequest {
     pub fn new(
         workspace: PathBuf,
         entry_html: String,
+        cancel_marker: String,
         allowed_assets: Vec<String>,
         frame_count: u32,
         max_duration_seconds: u32,
@@ -273,6 +279,7 @@ impl VideoWorkerRenderSandboxRequest {
         if !workspace.is_absolute()
             || workspace.as_os_str().len() > MAX_PATH_BYTES
             || !valid_sandbox_relative_path(&entry_html)
+            || !valid_sandbox_relative_path(&cancel_marker)
             || allowed_assets.len() > SANDBOX_ASSETS_MAXIMUM
             || !allowed_assets
                 .iter()
@@ -290,6 +297,7 @@ impl VideoWorkerRenderSandboxRequest {
         Ok(Self {
             workspace,
             entry_html,
+            cancel_marker,
             allowed_assets,
             frame_count,
             max_duration_seconds,
@@ -303,6 +311,7 @@ impl VideoWorkerRenderSandboxRequest {
         let workspace = self.workspace.to_str().ok_or_else(configuration_invalid)?;
         Ok(serde_json::json!({
             "allowedAssets": self.allowed_assets,
+            "cancelMarker": self.cancel_marker,
             "entryHtml": self.entry_html,
             "frameCount": self.frame_count,
             "maxCpuSeconds": self.max_cpu_seconds,

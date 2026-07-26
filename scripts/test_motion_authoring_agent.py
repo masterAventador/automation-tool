@@ -568,6 +568,12 @@ class AgentAuthoringTests(unittest.TestCase):
                 "maxMemoryMegabytes",
                 "maxOutputBytes",
             })
+            # `cancelMarker` is deliberately absent. The submission says what to
+            # render; which workspace file stops a render is the App's control
+            # channel over its own child process, and this spec is built from
+            # model output. See
+            # `contracts/video/motion-render-cancel-marker.v1.json`.
+            self.assertNotIn("cancelMarker", spec)
             self.assertEqual(spec["workspace"], str(root))
             self.assertEqual(spec["entryHtml"], result.composition_path)
             self.assertIn(RUNTIME_ASSET, spec["allowedAssets"])

@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub const MOTION_RENDER_JOB_CHECKPOINT: &str = "motion-render-job";
-pub const MOTION_CANCEL_FILE: &str = ".automation-tool-cancel";
 pub const MOTION_OUTPUT_FILE: &str = "brand-motion-result.mp4";
 pub const MOTION_COMPOSITION_FILE: &str = "composition.html";
 pub const MOTION_FRAMES_PER_SECOND: u32 = 30;
@@ -36,6 +35,36 @@ const AUTHORING_REFUSAL_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-authoring-refusal.v1.json");
 const OFFLINE_MOTION_DEPENDENCIES: &str =
     include_str!("../../../contracts/video/offline-motion-dependencies.v1.json");
+const CANCEL_MARKER_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-render-cancel-marker.v1.json");
+
+/// The file whose appearance in a RenderJob workspace means "stop".
+///
+/// It is read from the declared contract rather than written here because the
+/// Worker is the other half of this convention, and the two used to hold one
+/// literal each with nothing connecting them. Editing one of a matched pair is
+/// the quietest defect this feature can have: the button answers, the job reads
+/// 已取消 and only the render carries on. So the name exists once, and the
+/// Worker is handed it in the render request instead of knowing it.
+///
+/// Every caller that could otherwise start an uncancellable render goes through
+/// here first, so an unreadable contract stops the render rather than producing
+/// one that ignores the button.
+pub fn cancel_marker_file_name() -> Result<&'static str, MotionVideoStudioError> {
+    static NAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let document: serde_json::Value = serde_json::from_str(CANCEL_MARKER_CONTRACT).ok()?;
+        let name = document.get("markerFileName")?.as_str()?;
+        // A marker that is a path, or empty, would be a workspace escape rather
+        // than a cancellation; the Worker refuses those too.
+        if name.is_empty() || name.contains(['/', '\\', '\0']) || name == "." || name == ".." {
+            return None;
+        }
+        Some(name.to_owned())
+    })
+    .as_deref()
+    .ok_or_else(authoring_installation_damaged)
+}
 
 /// Where the authored composition loads its animation runtime from, relative to
 /// the worker asset root. The authoring prompt names this exact path, so it is
@@ -1357,7 +1386,7 @@ pub fn cancel(
     let marker = store
         .worker_asset_directory(&workspace)
         .map_err(map_workspace_error)?
-        .join(MOTION_CANCEL_FILE);
+        .join(cancel_marker_file_name()?);
     match OpenOptions::new().create_new(true).write(true).open(marker) {
         Ok(mut file) => file
             .write_all(b"cancel\n")
@@ -1385,7 +1414,7 @@ pub fn cancellation_requested(
     let marker = store
         .worker_asset_directory(&workspace)
         .map_err(map_workspace_error)?
-        .join(MOTION_CANCEL_FILE);
+        .join(cancel_marker_file_name()?);
     match fs::symlink_metadata(marker) {
         Ok(metadata) => Ok(metadata.file_type().is_file() && !metadata.file_type().is_symlink()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),

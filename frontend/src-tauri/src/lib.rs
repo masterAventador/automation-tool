@@ -823,6 +823,12 @@ fn run_motion_render_job(
         let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
             work.clone(),
             motion_video_studio::MOTION_COMPOSITION_FILE.to_owned(),
+            // Resolved before the Worker is asked to render anything: a render
+            // that starts without a cancellation marker it recognises is one the
+            // user's cancel button cannot reach.
+            motion_video_studio::cancel_marker_file_name()
+                .map_err(|_| MotionRenderStageFailure::Render)?
+                .to_owned(),
             allowed_assets,
             frame_count,
             budget.wall_seconds(),

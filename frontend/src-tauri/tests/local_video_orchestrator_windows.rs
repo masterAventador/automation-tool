@@ -10,6 +10,7 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
     VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderSandboxRequest,
     VideoWorkerRestartPolicy, VideoWorkerState,
 };
+use automation_tool_desktop_lib::motion_video_studio::cancel_marker_file_name;
 use uuid::Uuid;
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{
@@ -191,6 +192,9 @@ fn real_worker_render_sandbox_isolates_malicious_html() {
     let request = VideoWorkerRenderSandboxRequest::new(
         workspace.clone(),
         "entry.html".to_owned(),
+        cancel_marker_file_name()
+            .expect("declared cancellation marker")
+            .to_owned(),
         vec!["assets/style.css".to_owned()],
         3,
         60,

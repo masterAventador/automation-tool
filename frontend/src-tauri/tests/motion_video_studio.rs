@@ -1,8 +1,9 @@
 use automation_tool_desktop_lib::local_video_orchestrator::VideoWorkerRenderSandboxRequest;
 use automation_tool_desktop_lib::motion_video_studio::{
-    advance, delete_artifact, duration_limits, import_rendered_output, prepare_manual_render_job,
-    render_sandbox_budget, rendered_film_is_static, MotionRenderFailureCode, MotionRenderJobStatus,
-    MotionVideoBeatDraft, MotionVideoDraftRequest, MotionVideoStudioErrorCode,
+    advance, cancel, cancel_marker_file_name, cancellation_requested, delete_artifact,
+    duration_limits, import_rendered_output, prepare_manual_render_job, render_sandbox_budget,
+    rendered_film_is_static, MotionRenderFailureCode, MotionRenderJobStatus, MotionVideoBeatDraft,
+    MotionVideoDraftRequest, MotionVideoStudioErrorCode,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
@@ -224,6 +225,7 @@ fn the_render_sandbox_budget_follows_the_frame_count_instead_of_a_fixed_number()
         VideoWorkerRenderSandboxRequest::new(
             root.0.clone(),
             "composition.html".to_owned(),
+            cancel_marker_file_name().unwrap().to_owned(),
             Vec::new(),
             frames,
             budget.wall_seconds(),
@@ -500,5 +502,78 @@ fn a_static_render_reaches_the_user_as_its_own_failure_code() {
     assert_eq!(
         serde_json::to_value(MotionRenderFailureCode::StaticRender).unwrap(),
         serde_json::json!("static_render"),
+    );
+}
+
+/// The App creates exactly the file the contract declares, and the render
+/// request hands that same name to the Worker.
+///
+/// The two used to be separate literals — `MOTION_CANCEL_FILE` here and
+/// `SANDBOX_CANCEL_FILE` in `worker.mjs`. Editing one was invisible: the button
+/// still answers and the job still settles, and only the render keeps going.
+/// See `contracts/video/motion-render-cancel-marker.v1.json`.
+#[test]
+fn the_cancellation_marker_written_on_disk_is_the_one_the_contract_declares() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+
+    let declared: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../contracts/video/motion-render-cancel-marker.v1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let declared = declared["markerFileName"].as_str().unwrap();
+    assert_eq!(cancel_marker_file_name().unwrap(), declared);
+
+    assert!(!cancellation_requested(&store, job).unwrap());
+    cancel(&store, job).unwrap();
+
+    let workspace = store.open(job).unwrap();
+    let assets = store.worker_asset_directory(&workspace).unwrap();
+    assert!(
+        assets.join(declared).is_file(),
+        "the cancellation marker must be the declared file name",
+    );
+    assert!(cancellation_requested(&store, job).unwrap());
+}
+
+/// A marker name that could leave the RenderJob is refused before a render
+/// starts, so the Worker is never handed a path it would stat outside its
+/// workspace.
+///
+/// Containment is the transport's rule and it holds for any workspace-relative
+/// path, nested ones included. Staying at the workspace root is this product's
+/// narrower rule, and it is enforced where the name is resolved rather than
+/// where it is transported — so both are asserted, in the layer that owns each.
+#[test]
+fn a_cancellation_marker_that_escapes_the_workspace_is_not_a_render_request() {
+    let root = TempDirectory::new();
+    for escaping in ["../outside", "/absolute", "", ".", "..", "a\\b"] {
+        assert!(
+            VideoWorkerRenderSandboxRequest::new(
+                root.0.clone(),
+                "composition.html".to_owned(),
+                escaping.to_owned(),
+                Vec::new(),
+                90,
+                20,
+                20,
+                2048,
+                256 * 1024 * 1024,
+            )
+            .is_err(),
+            "a marker of {escaping:?} must not produce a render request",
+        );
+    }
+
+    let declared = cancel_marker_file_name().unwrap();
+    assert!(
+        !declared.is_empty() && !declared.contains(['/', '\\']),
+        "the declared marker is one file at the workspace root, never a path: {declared:?}",
     );
 }
