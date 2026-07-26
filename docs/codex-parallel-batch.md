@@ -367,7 +367,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **A** T50 注销界面报失败 | ✅ | 本提交 | Node 契约准确失败：`the authoritative projection must receive the full outer command budget` | 轮询预算由约 5 秒对齐为 60 秒；仓内 B5-13/B5-14 演示验收已包含安全注销步骤 |
 | **B** T61 artifact 门禁降级为清理 | ✅ | 本提交 | 启动恢复断言准确失败：`restarted store: VideoWorkspaceError { code: StorageUnavailable }` | 启动时仅清理损坏/中断删除的 artifact，清理失败才阻断；运行期 `list_artifacts()` 继续严格失败，外部软链目标不受触碰 |
 | **B** T65 `cleanup_expired` 无调用方 | ✅ | 本提交 | 启动清理断言准确失败：`expired workspace removed during startup` 实际收到 `Ok` | 初始化完成自愈后按当前时间执行 30 天保留清理；活跃 workspace 保留 |
-| **B** T66b 目录权限只检查不修复 | ⬜ | | | |
+| **B** T66b 目录权限只检查不修复 | ✅ | 本提交 | 迁移权限测试准确失败：`restarted store: VideoWorkspaceError { code: PathRejected }` | Unix 目录漂移通过 `O_NOFOLLOW` 打开、dev/inode 复核后 `fchmod 0700`；修复失败才报错，含 setgid/sticky 位也清除 |
 | **C** T72 门禁执行者三处空洞 | ⬜ | | | |
 | **C** T73 测试写进只读 vendor | ⬜ | | | |
 | **D** T40/T41 字体权利登记 | ⬜ | | | |

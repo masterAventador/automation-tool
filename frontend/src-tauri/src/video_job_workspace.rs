@@ -435,7 +435,7 @@ impl VideoJobWorkspaceStore {
             }
             Err(_) => return Err(storage_unavailable()),
         };
-        validate_private_directory_metadata(&metadata)?;
+        validate_private_directory_metadata(&directory, &metadata)?;
         let workspace = VideoJobWorkspace {
             job_id,
             identity: identity_from_metadata(&metadata),
@@ -607,9 +607,8 @@ impl VideoJobWorkspaceStore {
         }
         let output_directory = workspace.directory.join(OUTPUTS_DIRECTORY);
         let output = output_directory.join(file_name);
-        safe_regular_file_metadata(&output)?.ok_or_else(|| {
-            VideoWorkspaceError::new(VideoWorkspaceErrorCode::NotFound)
-        })?;
+        safe_regular_file_metadata(&output)?
+            .ok_or_else(|| VideoWorkspaceError::new(VideoWorkspaceErrorCode::NotFound))?;
         fs::remove_file(output).map_err(|_| storage_unavailable())?;
         sync_directory(&output_directory)
     }
@@ -743,8 +742,9 @@ impl VideoJobWorkspaceStore {
         }
         // A video deleted between choosing it and publishing it is its own
         // answer: the operator has to pick again, not see a storage fault.
-        match fs::symlink_metadata(self.artifact_directory(artifact_id)) {
-            Ok(metadata) => validate_private_directory_metadata(&metadata)?,
+        let artifact_directory = self.artifact_directory(artifact_id);
+        match fs::symlink_metadata(&artifact_directory) {
+            Ok(metadata) => validate_private_directory_metadata(&artifact_directory, &metadata)?,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Err(VideoWorkspaceError::new(VideoWorkspaceErrorCode::NotFound))
             }
@@ -818,7 +818,7 @@ impl VideoJobWorkspaceStore {
         }
         let directory = self.artifact_directory(artifact_id);
         match fs::symlink_metadata(&directory) {
-            Ok(metadata) => validate_private_directory_metadata(&metadata)?,
+            Ok(metadata) => validate_private_directory_metadata(&directory, &metadata)?,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
             Err(_) => return Err(storage_unavailable()),
         }
@@ -944,7 +944,7 @@ impl VideoJobWorkspaceStore {
                 .and_then(|name| Uuid::parse_str(name).ok());
             let private_directory = metadata.is_dir() && !unsafe_path_component(&metadata);
             let valid = if private_directory {
-                validate_private_directory_metadata(&metadata)?;
+                validate_private_directory_metadata(&path, &metadata)?;
                 artifact_id
                     .is_some_and(|artifact_id| self.load_artifact_record(artifact_id).is_ok())
             } else {
@@ -979,10 +979,11 @@ impl VideoJobWorkspaceStore {
             if !valid_partial_import_name(name) {
                 return Err(storage_unavailable());
             }
-            let metadata = fs::symlink_metadata(entry.path()).map_err(|_| storage_unavailable())?;
-            validate_private_directory_metadata(&metadata)?;
-            validate_workspace_tree(&entry.path())?;
-            fs::remove_dir_all(entry.path()).map_err(|_| storage_unavailable())?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|_| storage_unavailable())?;
+            validate_private_directory_metadata(&path, &metadata)?;
+            validate_workspace_tree(&path)?;
+            fs::remove_dir_all(path).map_err(|_| storage_unavailable())?;
             removed = true;
         }
         if removed {
@@ -1028,7 +1029,7 @@ struct DirectoryIdentity {
 
 fn directory_identity(path: &Path) -> Result<DirectoryIdentity, VideoWorkspaceError> {
     let metadata = fs::symlink_metadata(path).map_err(|_| path_rejected())?;
-    validate_private_directory_metadata(&metadata)?;
+    validate_private_directory_metadata(path, &metadata)?;
     Ok(identity_from_metadata(&metadata))
 }
 
@@ -1305,7 +1306,7 @@ fn available_bytes(_path: &Path) -> Result<u64, VideoWorkspaceError> {
 
 fn ensure_private_directory(path: &Path) -> Result<(), VideoWorkspaceError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) => validate_private_directory_metadata(&metadata),
+        Ok(metadata) => validate_private_directory_metadata(path, &metadata),
         Err(error) if error.kind() == ErrorKind::NotFound => create_private_directory(path),
         Err(_) => Err(storage_unavailable()),
     }
@@ -1325,18 +1326,42 @@ fn create_private_directory(path: &Path) -> Result<(), VideoWorkspaceError> {
 
 fn require_private_directory(path: &Path) -> Result<(), VideoWorkspaceError> {
     let metadata = fs::symlink_metadata(path).map_err(|_| path_rejected())?;
-    validate_private_directory_metadata(&metadata)
+    validate_private_directory_metadata(path, &metadata)
 }
 
-fn validate_private_directory_metadata(metadata: &fs::Metadata) -> Result<(), VideoWorkspaceError> {
+fn validate_private_directory_metadata(
+    _path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), VideoWorkspaceError> {
     if unsafe_path_component(metadata) || !metadata.is_dir() {
         return Err(path_rejected());
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            return Err(path_rejected());
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+        if metadata.permissions().mode() & 0o7777 != 0o700 {
+            let directory = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(_path)
+                .map_err(|_| storage_unavailable())?;
+            let opened = directory.metadata().map_err(|_| storage_unavailable())?;
+            if !opened.is_dir() || opened.dev() != metadata.dev() || opened.ino() != metadata.ino()
+            {
+                return Err(path_rejected());
+            }
+            if unsafe { libc::fchmod(directory.as_raw_fd(), 0o700) } != 0 {
+                return Err(storage_unavailable());
+            }
+            let repaired = directory.metadata().map_err(|_| storage_unavailable())?;
+            if repaired.dev() != metadata.dev()
+                || repaired.ino() != metadata.ino()
+                || repaired.permissions().mode() & 0o7777 != 0o700
+            {
+                return Err(storage_unavailable());
+            }
         }
     }
     Ok(())

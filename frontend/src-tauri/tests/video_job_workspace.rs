@@ -472,6 +472,57 @@ fn startup_removes_expired_retained_workspaces_without_manual_cleanup() {
 }
 
 #[test]
+fn startup_repairs_migrated_private_directory_permissions() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace_id = job("123e4567-e89b-42d3-a456-426614174216");
+    let workspace = store.create(workspace_id).expect("workspace");
+    let workspace_directory = store
+        .worker_output_directory(&workspace)
+        .expect("worker output")
+        .parent()
+        .expect("workspace directory")
+        .to_path_buf();
+    drop(store);
+
+    let store_directory = root.path().join("video-workspaces-v1");
+    let drifted_directories = [
+        root.path().to_path_buf(),
+        store_directory.clone(),
+        store_directory.join("jobs"),
+        store_directory.join("artifacts"),
+        store_directory.join("publish-staging"),
+        workspace_directory.clone(),
+        workspace_directory.join("outputs"),
+        workspace_directory.join("checkpoints"),
+        workspace_directory.join("work"),
+    ];
+    for (index, directory) in drifted_directories.iter().enumerate() {
+        let migrated_mode = match drifted_directories.len() - index {
+            1 => 0o600,
+            2 => 0o1700,
+            _ => 0o755,
+        };
+        fs::set_permissions(directory, fs::Permissions::from_mode(migrated_mode))
+            .expect("simulate migrated permissions");
+    }
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert!(restarted.open(workspace_id).is_ok());
+    for directory in &drifted_directories {
+        assert_eq!(
+            fs::symlink_metadata(directory)
+                .expect("repaired directory metadata")
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o700,
+        );
+    }
+}
+
+#[test]
 fn retention_cleanup_preserves_active_jobs_and_initialization_recovers_partial_imports() {
     let root = TemporaryRoot::new();
     let retained_policy =
