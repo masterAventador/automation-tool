@@ -54,7 +54,7 @@
 
 | ID | 任务 | 状态 | 说明 |
 |---|---|---|---|
-| T68 | 登录报「暂时无法完成账号操作」 | 🔍 待验收 | **根因已实证**：边界 nginx 用 `$request_id` 覆盖了 App 送的 `x-request-id`，App 比对回显不一致 → `ProtocolInvalid`。两份模板已修 + 门禁测试，**待用户授权部署 nginx 才能收口**。见 `docs/development/T68.md` |
+| T68 | 登录报「暂时无法完成账号操作」 | 🔍 待验收 | **根因已实证并已上线**：边界 nginx 用 `$request_id` 覆盖了 App 送的 `x-request-id`，App 比对回显不一致 → `ProtocolInvalid`，登录第一个请求就失败，所以 challenge 与 logout 从未发出。已部署并实测回显一致、登录+挑战两步四项校验全过。**只差用户在正式 App 里手工登录一次**（正式包无 WebDriver，见 T48），并复核 `installations` 0→1。见 `docs/development/T68.md` |
 | P0-0 | 用当前 main 出签名公证包 | 🚧 | 手上那个是 7 小时前的代码。产到 `.local/release`，已进入公证阶段 |
 | T58a | 点击后一分钟命令没开始 | ❌ 查证不成立 | 观察是对的、结论是错的。那 15 分钟是 `browser.waitUntil` 自己的 900 秒预算——它把条件抛出的异常当「还没满足」，跑满预算才用**最后一次**的异常 reject（用装的那份 `Timer` 实测过）。命令早就跑完并失败了，所以取样才看到主线程空闲、无子进程、工作区已删。**真缺陷是另一个**：提交命令声明为同步，全程占用主线程（最长 600 秒窗口冻结），已 TDD 修掉 |
 | T58 | 编排子进程非零退出 | ✅ | **是过期的构建产物，不是产品缺陷。** `ensure_signed_executor_package` 的缓存键是一个常量字符串，执行器源码不参与，所以验收一直在跑一个早于 `--author-motion` 入口的包；它把编排请求当 bootstrap 读，exit 2、stdout 空 → `authoring_crashed`。`run_t36_acceptance.py` 现在起跑前先探这个包，不合格就重建 |
