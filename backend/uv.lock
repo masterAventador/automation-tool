@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
@@ -150,7 +150,6 @@ dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx2" },
-    { name = "playwright" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -170,6 +169,9 @@ dev = [
     { name = "ruff" },
     { name = "types-jsonschema" },
 ]
+executor = [
+    { name = "playwright" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -179,7 +181,6 @@ requires-dist = [
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx2" },
-    { name = "playwright", specifier = "==1.61.0" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extras = ["asyncio"] },
@@ -199,6 +200,7 @@ dev = [
     { name = "ruff" },
     { name = "types-jsonschema" },
 ]
+executor = [{ name = "playwright", specifier = "==1.61.0" }]
 
 [[package]]
 name = "cffi"
