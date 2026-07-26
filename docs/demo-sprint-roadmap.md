@@ -51,7 +51,7 @@
 | ID | 任务 | 状态 | 说明 |
 |---|---|---|---|
 | T10 | 从正式包跑一遍所有用例 | ⬜ | 这是用户给这一轮定的目标本身，但要等生成视频通了才有意义 |
-| T61 | setup 失败即 abort，无兜底 | ⬜ | 风险面已查清（详情见下）。首次启动风险低，**真正的风险是用过一轮后的第二次启动**——正是演示场景。演示期可用流程规避，改不改待定 |
+| T61 | setup 失败即 abort，无兜底 | ⬜ | **风险面已查完，紧迫性下降**（详情见下）。「做完视频→正常退出→再打开」经导入链路核实是**安全的**，前一条线的高风险判断被推翻。剩余真实窗口只有「删除成片时强退」和硬断电。**建议做一处四行兜底**，不动 setup 结构 |
 | T48 | 登录 → 设备绑定接缝 | 👤 | 包里地址、Gatekeeper 放行、隔离启动**均已验**；登录链路自动化三条路全排除，需人工走。**不挡生成视频**（本地 Profile 不要求产品账号） |
 | T5 | 三份密钥按真实路径填一遍 | 👤 | 存密钥这一环已验通，这条是补正式验收 |
 | T6 | 抖音扫码登录与后续链路 | 👤 | **演示前一天必须做掉**，且要确认关掉 App 再打开登录态仍在。跟生成视频无关 |
@@ -78,7 +78,22 @@
 
 **没查完（如实记）**：21 个初始化读到底约 14 个，4 个 vault 只读到顶层；`recover_interrupted_imports` / `validate_artifact_inventory` 内部失败条件**未展开，而那是风险最高的一处**；Windows 路径完全没看。
 
-**演示期缓解（无需改代码）**：演示流程避免"做完视频后重启 App"；若必须重启，先确认上一次是正常退出而不是强退。
+**第二轮补完后的风险表**（按演示场景，代码依据见 `video_job_workspace.rs` / `secure_store.rs` / `app_update_cache.rs`）：
+
+| 场景 | 会不会 abort | 依据 |
+|---|---|---|
+| 全新 Mac 首次启动 | **不会** | 空 `artifacts/` / `publish-staging/` / `update-cache/` 全走平凡分支；4 个 vault 全走"文件不存在→创建" |
+| **做完视频、正常退出、再打开** | **不会** | `import_output` 是 payload `sync_all` → manifest `sync_all` → 临时目录 `sync_directory` → **整目录原子 rename** → 父目录 `sync_directory`。落地后必然齐全。**前一条线的高风险判断被推翻** |
+| 做完视频、强退、再打开 | 绝大多数不会，**两个非自愈窗口** | 自愈：`.import-*` 被 `recover_interrupted_imports` 删掉；staging 半成品被 `discard_staged_publish_artifacts` 删掉。**不自愈**：① `delete_artifact` 的 `remove_dir_all` 执行到一半被杀 → 目录只剩一个文件 → **永久 abort**；② 硬断电造成 payload 大小与 manifest 不符 → **永久 abort** |
+| 磁盘接近满 | 第二次起不会 | 已初始化的机器 setup 全程不写文件。**但 `ensure_free_space` 要求 1 GiB + 视频大小，不够时导入成片失败**——界面报错不是闪退，但演示会挂 |
+| Time Machine / 迁移助理恢复的账号 | **会，最高真实概率** | 三条独立路径：密钥文件权限被抬成含 group/other 位（`secure_store.rs:182` **只检查不修复**）；目录 mode 漂移（`validate_private_directory_metadata` 同样只检查不修复，而 `deployment_profile` 和 `secure_store` 对目录却是**强制 chmod 修复**——同一仓库两套策略）；祖先目录有软链 |
+| Windows 企业域 / AppData 重定向 | **会**（读代码推断，未上机验证） | `browser_profiles_windows.rs:504` 的 `\\?\UNC\` 前缀未剥离；`ensure_no_reparse_components` 拒绝路径上任何 junction |
+
+**策略不一致（真正的缺陷）**：`.import-*` 半成品清理继续 ✅、staging 半成品清理继续 ✅、**已落地 artifact 出任何问题直接 abort** ❌。对自己写的临时垃圾宽容，对自己写的正式产物零容忍到把整个 App 拉崩。
+
+**建议的最小兜底（四行，未做）**：把 `validate_artifact_inventory()`（`video_job_workspace.rs:379`）从「启动门禁」降级为「启动清理」——遇到坏 artifact 按 `recover_interrupted_imports` 已有做法删掉或挪进隔离目录，只有清理动作本身失败才 `Err`。`list_artifacts()` 作为运行期 API 的严格语义不动。换来的是把两个永久砖变成「丢一个视频，App 照常开」。已有测试夹具（`tests/video_job_workspace.rs:114/167/483`）。
+
+**演示前零成本预检（不改代码，已同步到检查清单）**：磁盘空闲 > 5 GiB；`ls -ld /Users /Users/<用户名> ~/Library ~/Library/Application\ Support` 四行都不是 `l` 开头。这两条覆盖了表里除强退外的全部剩余风险。
 
 ---
 
@@ -172,6 +187,11 @@
 | T50 | 注销成功但界面报失败 | 5 次复现 4 次。内层 ~5 秒轮询包在 60 秒超时里——**不是等不起，是自己先放弃了**。已从演示脚本摘掉「安全注销」 |
 | T58c | 拒绝原因要不要转发给用户 | 静态核查已确定**能拿到且不需要读 stderr**：`entry.py` 13 处 `_reject` 与 `agent.py` 全部拒绝消息都是固定字面量，唯二插值是结构标签和门禁码闭集，`MotionBrief` 越界消息也不回显 brief 原文。但转发要改共用 error wire，与"细节不进 wire"的决定冲突，代价写在台账里等决策 |
 | T62 | `run_script_tests.py` docstring 写死 "37 self-contained test scripts" | 实际已 41。代码本身是 glob 推导的没有功能问题，但这个会静默落后的散文计数**就写在那份讲"discovery is derived, never curated"的文档里** |
+| T63 | **三处「版本号一升就砖」，会同时打死所有老机器** | `executor_platform.rs:354` 诊断设置版本无迁移路径；`app_update_policy.rs:288` 发布通道名变更即 abort；`app_update_policy.rs:282` 要求存量文件**重新序列化后与磁盘字节逐字节相同**（字段顺序或序列化行为任何变化即 abort）。本次演示不可能触发（单一构建单一通道），但**第一次真正发版升级时会同时打死所有老机器** |
+| T64 | `AppUpdateCache` 有两个非自愈的强退窗口 | `download()` 尾段 351-357：`atomic_replace` 之后、`save_cache_manifest` 之前被杀 → package 有而 manifest 无 → 永久 abort；`partial_manifest.delete()` 之前被杀 → 同型。**本包里是死的**（feed URL 是 `.invalid` 保留域，永不解析），但**换成真 feed URL 就变成「更新到一半被强退 = 砖」的定时炸弹** |
+| T65 | `cleanup_expired` 生产代码里没有任何调用方 | 只有 `tests/video_job_workspace.rs:391` 调。30 天保留策略形同虚设，artifacts 单调增长，**启动时的 abort 面随视频数量线性增长** |
+| T66 | 目录权限策略两套：一套修复一套只检查 | `deployment_profile` 和 `secure_store` 对**目录**是强制 `chmod 0700` 修复；`validate_private_directory_metadata` 和 `ensure_private_file_permissions` 对目录/文件却**只检查不修复**。所以 Time Machine/迁移助理造成的权限漂移在一半路径上自愈、另一半上是永久闪退 |
+| T67 | Windows 企业域 AppData 重定向会启动即闪退 | `browser_profiles_windows.rs:504` 的 `normalized_path_key` 只剥 `\\?\` 前缀，**不处理 `\\?\UNC\`**；文件夹重定向到 UNC 共享或 SUBST 映射盘时 `final_path != normalized_path_key` → abort。另 `ensure_no_reparse_components` 拒绝路径上任何 junction（把 AppData 搬到 D 盘留 junction 是常见场景）。**读代码推断，未上机验证** |
 | T45 | Control Plane 镜像被打进 playwright | 约 50MB。代码层守住了 CLAUDE.md 4.2，打包层破了 |
 | T57 | desktop-e2e 入口的并/修/废 | **并**：VF-06 / BM-15 / VE-03 / VE-04 搬到 control-plane-e2e（+BM-06、CQ-01 并入）。**废**：B5-04（产品 UI 已删）、`workbench.spec.ts`、三条 0-click 的 update spec。**重新设计**：BM-08、IM-05。另注：`video-studio-e2e` 这个 feature 已不门控任何一行产品代码 |
 
