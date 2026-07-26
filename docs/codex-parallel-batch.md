@@ -376,7 +376,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **E** T75 另一处吞掉 PyInstaller 输出 | ✅ | 本提交 | 构建失败测试准确失败：`PyInstaller stdout: missing hidden import` 与 `PyInstaller stderr: build traceback` 均不在异常中 | E4-07 及同类 E4-09/E4-10、Windows candidate 均携带 stdout/stderr 各自最后 20 行，空输出也给固定诊断 |
 | **F** T26 剔除 Widevine CDM | ⬜ | | | 唯一有书面禁令的风险 |
 | **F** T24 执行器包根按 `debug_assertions` 分叉 | ✅ | 本提交 | 单路径守卫准确失败：`lib.rs::run selects the Local Executor package root by build mode`；验收装配守卫继而失败：`must stage the signed Executor in the debug App resource root` | 所有构建统一从 Tauri `resource_dir()/local-executor/package` 查找；共享与自定义桌面验收均把测试包挂载到同一资源布局，AppData 只留状态 |
-| **F** T45 Control Plane 镜像进 playwright | ⬜ | | | 独占 `uv.lock` |
+| **F** T45 Control Plane 镜像进 playwright | ✅ | 本提交（锁文件下一提交） | Python 契约准确失败：`KeyError: 'executor'`；Node 镜像契约准确失败：缺少 `--no-group executor` | Playwright 移入默认启用的 `executor` 依赖组，执行器/本地开发保持可用；Control Plane 镜像显式排除该组，离线 dry-run 确认会卸载 Playwright |
 | **F** T38 演示后回收清单 | ⬜ | | | 纯文档 |
 | **G** T76 `desktop-e2e` 入口让断言恒真 | ⬜ | | | 改完可能变红，那是真相浮出来 |
 | **G** T77 B5-13 前端投影与权威态不一致 | ⬜ | | | 先复核再动手 |

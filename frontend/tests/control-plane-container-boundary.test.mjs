@@ -20,8 +20,19 @@ test("C10-02 builds a locked production-only Control Plane image", async () => {
     /python:3\.12\.13-slim-bookworm@sha256:[a-f0-9]{64}/u,
   );
   assert.match(dockerfile, /ghcr\.io\/astral-sh\/uv:0\.11\.28@sha256:[a-f0-9]{64}/u);
-  assert.match(dockerfile, /uv sync --locked --no-dev --no-editable/u);
+  assert.match(
+    dockerfile,
+    /uv sync --locked --no-dev --no-group executor --no-editable/u,
+  );
   assert.doesNotMatch(dockerfile, /latest|playwright install|apt-get.*(?:chrome|chromium)/u);
+  assert.doesNotMatch(
+    pyproject,
+    /dependencies\s*=\s*\[[\s\S]*?"playwright==1\.61\.0"[\s\S]*?\]\s*\n\s*\[project\.scripts\]/u,
+  );
+  assert.match(
+    pyproject,
+    /executor\s*=\s*\[\s*"playwright==1\.61\.0",?\s*\]/u,
+  );
   assert.match(dockerfile, /USER 65532:65532/u);
   assert.match(dockerfile, /EXPOSE 8000/u);
   assert.match(dockerfile, /ENTRYPOINT \["automation-tool-control-plane-container"\]/u);
