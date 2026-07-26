@@ -180,7 +180,72 @@ Node 之所以不阻塞快档：仓库**没有 `.npmrc`**，因此 `engine-stric
 建议在做慢档之前用 `winget` 装 Node 26.x 对齐 CI。**本次未安装**——
 那是对一台共享验收机的系统改动，应当由人明确同意后再做。
 
-## 7. 未做
+## 7. 孤儿测试聚合执行者
+
+`scripts/` 有 38 个自足测试脚本，其中 14 个从任何 workflow 和验收入口都引用不到，
+而 `backend/pyproject.toml` 的 `testpaths = ["tests"]` 也不收它们——**只有人手敲文件名才会跑**。
+
+后果已经发生：`test_video_studio_acceptance_scope.py` 正红着，
+而它的全部职责就是防止 VF-06 漏跑 spec。**守卫本身在盲区里，它的沉默和成功长得一样。**
+
+`scripts/run_script_tests.py`：
+
+- **发现是推导的，不是登记的**——`glob("test_*.py")`。手工清单正是孤儿的成因：
+  文件写了、清单没改，它从出生起就没人跑。`test_script_test_runner.py` 断言
+  磁盘上每个 `test_*.py` 都会被收进去，包括它自己。
+- **解释器钉死**，不继承调用者的 `python3`。审计线实测过：系统 `python3`（3.9）
+  跑这批会得到 7 个 `datetime.UTC` / `zip(strict=)` 之类的**版本假象**。
+
+### 7.1 钉死一个解释器还不够
+
+首轮实跑 4 红，其中 3 个是 `browser_use` 相关脚本报 `ModuleNotFoundError`——
+它们的依赖只装在 `tools/browser-use-contract/.venv`，在 backend venv 下必然失败。
+**这是与「系统 3.9」同一族的假红，只是深了一层：不同脚本需要不同环境。**
+
+`interpreter_for()` 因此按脚本实际引用选环境，并由
+`check_sub_project_scripts_get_their_own_environment` 守住。
+
+### 7.2 实跑结果
+
+```text
+backend/.venv/bin/python scripts/run_script_tests.py
+  running 38 script tests
+  FAIL test_motion_video_render_adapter.py (9.3s)
+  1 of 38 script tests failed                     约 15 秒
+```
+
+**15 秒，放不进 6 秒的快档，作为独立一档。**
+
+剩下那 1 红是**真红**，不是环境问题：单独跑（非并发）同样失败，
+`test_render_timeout_kills_the_browser_process_group` 在
+`read_invocations(record)[-1]` 上 `IndexError`。它属动效/视频线，本次未修——
+但这正是聚合执行者上线第一天就该有的效果：**把一个没人知道的红变成会自己报警的红**。
+
+## 8. 顺带修掉的 P0：VF-06 漏跑通俗语言 spec
+
+`plain-language-comprehension.spec.ts` 在 `f123c45`（CQ-01）进入
+`wdio.video-studio.conf.ts` 的 `specs`，但 **VF-06 的 `SPECS` 从来没跟上**——
+`git log -S` 显示它从未出现在 `run_vf_06_acceptance.py` 里。
+
+判定它**应当**属于 VF-06，而不是改门禁期望，依据是与 IM-05 的**不对称**：
+
+| | 缺注入时 |
+| --- | --- |
+| `material-video-webui.spec.ts`（IM-05） | 需要真实冻结 Worker，VF-06 从不构建，**必然失败**——排除有正当理由 |
+| `plain-language-comprehension.spec.ts`（CQ-01） | `CQ01_PAGE_TEXT_FILE` 是可选的：`if (CAPTURE_FILE !== undefined)` 只护住落盘那一步，**缺了它照样跑完全部断言** |
+
+所以这条没有「跑不了」的理由；排除它只会让「用户可见文案不许出现未解释术语」
+这条明确的用户要求在 VF-06 全量里没人验（`check_user_facing_branding.py` 管静态扫描，
+这条 spec 管运行时真实渲染）。
+
+修法：加进 `SPECS`。`run_bm_06_acceptance.py` 复用同一个
+`desktop_wdio_arguments()`，自动跟随。
+
+**未实跑 VF-06 本身**：视频线驱动仍未接 `desktop_e2e_prerequisites`，
+在本机会停在启动门禁，与本次改动无关。这条只保证 spec 回到覆盖范围，
+不保证它在 VF-06 里当场通过。
+
+## 9. 未做
 
 1. **hook 未安装**（有意，理由见 §5.1）；`--pre-push` 模式本身已实现并实跑。
 2. **Windows 上未实跑门禁。** 取码方式建议用 `git bundle` + ssh 推到机上裸库，

@@ -215,7 +215,13 @@ def _mypy_environment(checkout: Path) -> dict[str, str]:
     return environment
 
 
-def _run_mypy(checkout: Path, target: str) -> tuple[bool, str]:
+# The three trees `backend/pyproject.toml`'s `files = ["src", "tests"]` leaves
+# unchecked. Measured `call-arg` baselines: scripts 0, tools 0, workers 0 -- so
+# extending here keeps the blocking code clean on arrival.
+PYTHON_CHECK_TARGETS: Final = ("scripts", "tools", "workers")
+
+
+def _run_mypy(checkout: Path, *targets: str) -> tuple[bool, str]:
     mypy = REPOSITORY_ROOT / "backend" / ".venv" / "bin" / "mypy"
     if not mypy.is_file():
         return False, f"mypy is not installed at {mypy}"
@@ -225,7 +231,7 @@ def _run_mypy(checkout: Path, target: str) -> tuple[bool, str]:
             "--ignore-missing-imports",
             "--no-error-summary",
             "--follow-imports=silent",
-            target,
+            *targets,
         ],
         cwd=checkout,
         env=_mypy_environment(checkout),
@@ -282,7 +288,7 @@ def run_python_check(checkout: Path) -> CheckResult:
     `tools/` and `workers/` -- where the second defect lived -- are checked by
     nothing at all.
     """
-    available, report = _run_mypy(checkout, "scripts")
+    available, report = _run_mypy(checkout, *PYTHON_CHECK_TARGETS)
     if not available:
         return CheckResult("python", False, report)
     blocking = blocking_errors(report)

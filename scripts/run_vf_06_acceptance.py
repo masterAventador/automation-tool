@@ -26,10 +26,18 @@ EMBEDDED_BROWSER_MANIFEST = Path("embedded-browser") / "distribution-manifest.v1
 # material-video-webui.spec.ts 属于 IM-05 验收范围: 它要求真实冻结 Worker 已经装进
 # App 资源目录, 由 scripts/run_im_05_acceptance.py 构建并装配后单独覆盖;
 # VF-06 全量验收只运行不依赖冻结 Worker 的视频工作台 spec.
+#
+# plain-language-comprehension.spec.ts 属于本范围, 尽管 CQ-01 另有自己的入口。
+# 它与 material-video-webui.spec.ts 的区别是决定性的: IM-05 那条没有冻结 Worker
+# 就必然失败, 而这条对 CQ-01 的 `CQ01_PAGE_TEXT_FILE` 只做可选处理
+# (`if (CAPTURE_FILE !== undefined)`), 缺了它照样跑完全部断言, 只是不落盘那份
+# 文本快照。所以这里没有「跑不了」的理由, 把它排除掉只会让通俗语言这条用户可见
+# 要求在 VF-06 全量里没人验。
 SPECS = (
     "./e2e-tauri/video-studio.spec.ts",
     "./e2e-tauri/video-creation-methods.spec.ts",
     "./e2e-tauri/motion-style-catalog.spec.ts",
+    "./e2e-tauri/plain-language-comprehension.spec.ts",
 )
 
 

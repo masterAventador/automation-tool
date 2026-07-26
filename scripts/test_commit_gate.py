@@ -129,6 +129,17 @@ def check_python_baseline_is_clean_for_blocking_codes() -> None:
             )
 
 
+def check_python_check_covers_every_tree_backend_config_omits() -> None:
+    """`files = ["src","tests"]` leaves three trees unchecked; cover all three.
+
+    Covering only `scripts/` left `tools/` and `workers/` in the same blind spot
+    the gate was built to close.
+    """
+    for tree in ("scripts", "tools", "workers"):
+        if tree not in commit_gate.PYTHON_CHECK_TARGETS:
+            _fail(f"{tree}/ is checked by nothing and is not in the gate either")
+
+
 def check_pre_push_gates_the_tip_of_each_pushed_ref() -> None:
     """git hands pre-push its work on stdin; the gate must read it, not guess."""
     stdin = (
@@ -175,6 +186,7 @@ CHECKS = (
     check_gate_detects_an_injected_typescript_defect,
     check_gate_detects_an_injected_python_defect,
     check_python_baseline_is_clean_for_blocking_codes,
+    check_python_check_covers_every_tree_backend_config_omits,
     check_pre_push_gates_the_tip_of_each_pushed_ref,
     check_pre_push_skips_deletions,
     check_checkout_is_removed_after_use,
