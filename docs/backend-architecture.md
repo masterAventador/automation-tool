@@ -537,13 +537,13 @@ payload
 - payload 不允许平台 Cookie、验证码、私有路径和内联截图；
 - 大文件通过受控 Artifact 引用，不通过 WebSocket 内联。
 
-I2-10 的正式 Pydantic 入口是 `parse_executor_message`。Envelope 以 `message_type` 做判别联合，当前把 28 种已声明 v1 类型精确分到 Executor 生命周期、平台健康、任务命令、任务回执、任务事件与发现批次/完成六类；公共字段拒绝未知项且模型冻结。`protocol_version` 必须显式为 `1.0`；message/correlation/installation/executor/task/attempt ID 都是用途隔离的 canonical 小写 RFC 4122 UUIDv4 字符串；时间必须为带时区 RFC3339 且精确 UTC，deadline 严格晚于 sent；幂等键为 1～128 字符受限字符集。I2-12 的跨语言 RED 证明 `2^63-1` 不能被 TypeScript `number` 精确表达，因此 sequence 已统一收紧为 `1..2^53-1` 的 strict safe integer。
+I2-10 的正式 Pydantic 入口是 `parse_executor_message`。Envelope 以 `message_type` 做判别联合，当前把正式源中声明的全部 v1 类型精确分到 Executor 生命周期、平台健康、任务命令、任务回执、任务事件与发现批次/完成；公共字段拒绝未知项且模型冻结。`protocol_version` 必须显式为 `1.0`；message/correlation/installation/executor/task/attempt ID 都是用途隔离的 canonical 小写 RFC 4122 UUIDv4 字符串；时间必须为带时区 RFC3339 且精确 UTC，deadline 严格晚于 sent；幂等键为 1～128 字符受限字符集。I2-12 的跨语言 RED 证明 `2^63-1` 不能被 TypeScript `number` 精确表达，因此 sequence 已统一收紧为 `1..2^53-1` 的 strict safe integer。
 
 正式解析只接受最大 32 KiB 的 UTF-8 JSON object，并拒绝重复 key。Payload 当前是后续任务消息 Schema 的受限容器：最大 16 KiB、深度 8、每层集合最多 64 项、字符串最多 4096 字符；递归拒绝 Cookie/Token/密码/私钥/凭据字段、凭据赋值文本、Bearer、私有绝对路径、`file://`、inline data URI、控制/双向字符和 NaN/Infinity。任何结构、语义、编码或资源限制失败都收敛成固定 `ExecutorProtocolError`，且异常对象不保留原始 cause/context；调用方不得直接把 Pydantic `ValidationError` 暴露到日志或远端。具体 payload 业务字段仍须随对应消息任务收紧。
 
-I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executor-v1.schema.json`，dialect 固定 Draft 2020-12，并内嵌 `$id`、wire/payload 资源上限和 `x-semantic-validation-required`。Schema 尽可能结构化表达当前 28 种 message type、required/unknown field、用途 ID pattern、幂等键、序号、任务作用域、payload 顶层项数和 UTC RFC3339 pattern；无法由标准 JSON Schema表达的 deadline 先后、重复 key、递归 payload 限制和隐私文本由显式语义扩展声明，不能静默省略。
+I2-11 已把 Pydantic 判别联合确定性导出为 `contracts/protocol/executor-v1.schema.json`，dialect 固定 Draft 2020-12，并内嵌 `$id`、wire/payload 资源上限和 `x-semantic-validation-required`。Schema 尽可能结构化表达正式联合中的全部 message type、required/unknown field、用途 ID pattern、幂等键、序号、任务作用域、payload 顶层项数和 UTC RFC3339 pattern；无法由标准 JSON Schema表达的 deadline 先后、重复 key、递归 payload 限制和隐私文本由显式语义扩展声明，不能静默省略。
 
-公共 `contracts/fixtures/executor-v1` 当前固定 12 个 valid 与 27 个 invalid wire 文件：17 个结构层无效样例必须由标准 Schema 和正式解析器同时拒绝，另 10 个语义层无效样例允许标准 Schema 接受但必须由正式解析器拒绝。Schema 生成器提供 write/check 两种模式，缺失或逐字漂移都用固定错误失败；Backend CI 在测试前执行 `--check`。Python、Rust、TypeScript 只能回放这套公共 fixtures 并实现相同语义扩展，不得各自另造“等价”样例。
+公共 `contracts/fixtures/executor-v1/valid` 与 `invalid` 下的全部 wire 文件都必须由正式解析器回放；结构层无效样例由标准 Schema 和正式解析器同时拒绝，语义层无效样例允许标准 Schema 接受但必须由正式解析器拒绝。精确文件集合和两类归属只在 `backend/tests/contract/test_executor_protocol_schema.py` 登记并校验。Schema 生成器提供 write/check 两种模式，缺失或逐字漂移都用固定错误失败；Backend CI 在测试前执行 `--check`。Python、Rust、TypeScript 只能回放这套公共 fixtures 并实现相同语义扩展，不得各自另造“等价”样例。
 
 I2-12 已实现三端一致性：TypeScript 以严格 Zod 判别联合校验完整 envelope，并在普通 `JSON.parse` 前扫描所有对象的重复 key；Rust 以 `serde(deny_unknown_fields)` DTO、递归唯一 key visitor 和同一资源/隐私策略完成正式解析。两端都只暴露固定 `ExecutorProtocolError`，不保留或反射被拒绝的 wire。时间比较精确到 RFC3339 允许的 6 位小数，`-00:00` 不作为 canonical UTC 接受；sequence 上限固定为三端都能无损表示的 `2^53-1`。
 
@@ -567,7 +567,7 @@ T3-10 增加独立 `FakeExecutorEngine` 与 `FakeExecutorClient`。引擎只导�
 
 Fake 客户端只接受无 userinfo/query/fragment 的固定 Executor `ws`/`wss` 路径、受限 Session 和有界命令数，使用共享的唯一子协议、32 KiB 限制和正式 Hello/结果/事件 envelope。T3-20 增加有界 `run_reconnecting`：同一 Engine/Session 跨连接保留幂等投影，按稳定 Command message ID 统计唯一命令，重投完整返回首次批次但不重复占用处理名额；非法预算/延迟、二进制或非 Command 帧、连接失败和预算耗尽统一 fail closed 且不泄密。核心不读取文件、不启动进程、不操作浏览器/桌面、不访问 Control Plane 数据库；内存状态只是测试场景投影，不能成为生产任务事实。T3-10 的真实 Uvicorn 验收选择不产生事件的 reject 场景验证当时的 Outbox/ACK 全链路；T3-11 已由生产 WebSocket 完成事件持久闭环，T3-20 再以真实停服/同库重启证明 pending Command 和已有事件跨进程恢复。
 
-T3-11 将 `TaskEventEnvelope` 纳入 bound WebSocket 消息，但不混入 heartbeat sequence 或 Command ACK 逻辑。事件应用服务只接受当前 14 种类型：非 step payload 必须为空；step 只允许可选 canonical `action_id`，progress 另要求 `0..100` strict integer。Action 无显式 ID 时只记录 Attempt-scoped 事件，不通过 ordinal、最近一条或“唯一活动动作”猜测归属。事件 deadline 已到、客户端时间晚于服务端、身份冒充和非法 payload 都在持久化前拒绝。
+T3-11 将 `TaskEventEnvelope` 纳入 bound WebSocket 消息，但不混入 heartbeat sequence 或 Command ACK 逻辑。事件应用服务只接受正式 `TaskEventEnvelope` 声明的封闭类型：非 step payload 必须为空；step 只允许可选 canonical `action_id`，progress 另要求 `0..100` strict integer。Action 无显式 ID 时只记录 Attempt-scoped 事件，不通过 ordinal、最近一条或“唯一活动动作”猜测归属。事件 deadline 已到、客户端时间晚于服务端、身份冒充和非法 payload 都在持久化前拒绝。
 
 PostgreSQL 仓储按 Installation + Task 锁行，要求事件 sequence 恰好等于 `last_event_sequence + 1`。`source_message_id`、`source_idempotency_key` 任一命中且 32 字节稳定意图指纹一致时幂等返回当前快照；key 冲突、同 sequence 不同事实、缺口和非精确迟到均拒绝，不缓存乱序事件。合法事件在同一事务内插入 `task_events`，Task 每条事件都以 revision/watermark CAS 前进；Attempt/Action 只在明确状态变化时各自 CAS 增 revision，并使用服务端接收时间写 started/finished。任一 scope、状态、时间、唯一约束或写入失败使整笔事务回滚。
 
@@ -808,18 +808,11 @@ B5-16 没有新增 Control Plane Profile API，也没有把浏览器路径下发
 ```text
 GET  /api/v1/health
 GET  /api/v1/version
-GET  /api/v1/capabilities
 ```
 
-P9-08 把当前 pre-1.0 release 的三端兼容关系冻结为可执行单值矩阵：
+P9-08 把当前 pre-1.0 release 的三端兼容关系冻结为可执行单值矩阵，覆盖 Desktop App 调用 Control Plane、Desktop App 装载本地 Executor，以及 Control Plane 接受 Executor WebSocket Hello。版本值只在 `contracts/protocol/runtime-compatibility-v1.json` 维护，不在架构文档复制第二份。
 
-| 调用方 | 被调用方 | 允许版本 |
-| --- | --- | --- |
-| Desktop App `0.1.0` | Control Plane / HTTP API | Control Plane `0.1.0`，API `v1` |
-| Desktop App `0.1.0` | bundled Local Executor | runtime `0.1.0`，protocol `1.0` |
-| Control Plane `0.1.0` | Executor WebSocket Hello | runtime `0.1.0`，protocol `1.0` |
-
-权威机器可读快照是 `contracts/protocol/runtime-compatibility-v1.json`。`/api/v1/version` 以 strict response 同时返回 `desktopApp`、`executorRuntime` 和 `executorProtocol` 的 current/minimum/maximum；当前 minimum 与 maximum 都等于 current，不隐含跨 patch/minor 兼容。App 的生产启动探针必须在 Health 后读取该端点，并核对 Health/Version 服务版本一致、App 自身版本、Control Plane、API、Executor runtime 与 protocol 全部命中矩阵；任何 malformed、旧版、新版、预发布、未知字段或范围漂移均 fail closed，且先于 Installation 访问请求。Desktop 的签名 Executor package verifier 继续拒绝非 `=0.1.0` 与版本回滚，Control Plane 的已认证 Hello 也独立拒绝非 `0.1.0` runtime；因此客户端声明、包签名和服务端握手任一层都不能单独放宽兼容性。
+`/api/v1/version` 以 strict response 同时返回 `desktopApp`、`executorRuntime` 和 `executorProtocol` 的 current/minimum/maximum；当前契约不隐含跨 patch/minor 兼容。App 的生产启动探针必须在 Health 后读取该端点，并核对 Health/Version 服务版本一致、App 自身版本、Control Plane、API、Executor runtime 与 protocol 全部命中矩阵；任何 malformed、旧版、新版、预发布、未知字段或范围漂移均 fail closed，且先于 Installation 访问请求。Desktop 的签名 Executor package verifier 继续拒绝契约范围外版本与版本回滚，Control Plane 的已认证 Hello 也独立执行同一兼容边界；因此客户端声明、包签名和服务端握手任一层都不能单独放宽兼容性。
 
 ### 安装实例
 

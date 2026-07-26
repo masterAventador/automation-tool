@@ -1,5 +1,5 @@
 {
-  "$comment": "The resource trees a distributable package must carry. Single source: scripts/release_assembly.py derives VIDEO_RUNTIME_RESOURCES from the video entries, frontend/scripts/audit-production-package.mjs derives its required-resource assertion from all of them, and scripts/check_release_package_wiring.py derives the release wiring gate from the same file. Adding a sixth resource here is what makes every one of those gates start demanding it.",
+  "$comment": "The resource trees a distributable package must carry. Single source: scripts/release_assembly.py derives VIDEO_RUNTIME_RESOURCES from the video entries, frontend/scripts/audit-production-package.mjs derives its required-resource assertion from all of them, and scripts/check_release_package_wiring.py derives the release wiring gate from the same file. Adding a resource here is what makes every one of those gates start demanding it.",
   "version": 1,
   "resourceRoot": {
     "macos": ["Contents", "Resources"],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Produce the three video runtime resources the production build needs.
+"""Produce the video runtime resources the production build needs.
 
 The production video code resolves ffmpeg and both Workers from the packaged
 resource directory. Nothing used to put them there: each BM/IM acceptance
@@ -22,7 +22,7 @@ told its reader to run this script, and running it did not help, because until
 that exits 0 while leaving the failure in place is worse than no remedy.
 
 Usage:
-    python3 scripts/prepare_video_runtime.py            # ensure all three
+    python3 scripts/prepare_video_runtime.py            # ensure all resources
     python3 scripts/prepare_video_runtime.py --print    # ensure and print root
     python3 scripts/prepare_video_runtime.py \\
         --only motion-video-worker \\

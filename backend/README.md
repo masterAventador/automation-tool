@@ -6,7 +6,7 @@
 
 `automation_tool.protocol.executor_envelope` 是 Control Plane 与 Local Executor 唯一共享的 v1 wire envelope。正式输入必须使用 `parse_executor_message` 解析：只接受最大 32 KiB 的 UTF-8 JSON object，拒绝重复 key、未知 envelope 字段、非 `1.0` 版本、未知 message type、非 canonical UUIDv4、非 UTC 时间、倒序 deadline、非法幂等键和超出 JavaScript 安全整数范围的序号。生命周期消息没有伪造的 task ID；任务命令、回执和事件必须同时绑定 task/attempt。Payload 最大 16 KiB、深度 8、单集合 64 项、单字符串 4096 字符，并拒绝 Cookie/Token/密钥字段、私有路径、inline data URI、非有限数字和双向控制字符；所有解析失败只返回不挂底层异常链的固定错误。
 
-权威 Schema 固定为 `contracts/protocol/executor-v1.schema.json`，只能由 Pydantic 源通过 `automation-tool-export-executor-schema` 生成。`contracts/fixtures/executor-v1/` 包含 12 个 valid 和 29 个 invalid wire 样例；标准 Draft 2020-12 validator 负责 17 个结构层失败，Python、Rust、TypeScript 正式解析器另外实现 Schema `x-semantic-validation-required` 声明的 12 个 deadline、重复 key、敏感信息、私有路径、inline data、非有限数字、递归资源和 Task 命令载荷语义失败。三端必须回放同一目录，不能复制另一套 fixture。
+权威 Schema 固定为 `contracts/protocol/executor-v1.schema.json`，只能由 Pydantic 源通过 `automation-tool-export-executor-schema` 生成。`contracts/fixtures/executor-v1/valid` 和 `invalid` 中的全部 wire 样例由三端共同回放；标准 Draft 2020-12 validator 负责结构层失败，Python、Rust、TypeScript 正式解析器另外实现 Schema `x-semantic-validation-required` 声明的 deadline、重复 key、敏感信息、私有路径、inline data、非有限数字、递归资源和 Task 命令载荷语义失败。分类由 `backend/tests/contract/test_executor_protocol_schema.py` 的 fixture 集合守住，不能在其他参考文档复制另一套计数或清单。
 
 资源 ID 统一使用规范小写 UUIDv4，并通过 `UserId`、`InstallationId`、`ExecutorId`、`TaskId`、`TargetId`、`ExecutionAttemptId`、`ActionId` 和 `ArtifactId` 值对象隔离；一次在线连接另使用短生命周期的 `ExecutorConnectionId`。外部字符串必须先调用对应类型的 `parse`，新资源调用 `new`；不能把普通字符串、另一类资源 ID 或非 UUIDv4 值直接带入领域层。
 
@@ -219,7 +219,7 @@ D6-15 的权威 Fake 页面只位于 `tests/fixtures/douyin_discovery_pages/`。
 
 D6-16 首轮真实 Profile 验收暴露首页风控 iframe 未被搜索 Page Object 识别、只能等到 `home_ready_timed_out`。`session.py` 现公开唯一 `DOUYIN_RISK_CHALLENGE_SELECTORS`，`search_page.py` 复用它并保持登录弹窗优先级；官方验证码 iframe 或 captcha container 与普通阻塞 dialog 一样立即返回 `DIALOG_BLOCKED/BLOCKING_DIALOG`，D6-04/D6-10 最终形成 `handoff_required`。该修复没有增加绕过、自动解题或验证码交互，也没有把 iframe URL、页面内容或 Session 数据写入 Artifact/日志。真实 Profile 已证明受保护页健康，但首页挑战尚未解除，真实候选/预览继续待补。
 
-Local Executor 的 `ExecutorCommandProcessor` 在 D6-10 的 SQLite v3 中先保存 `task.discover`，只通过 `ProductionDouyinDiscoveryOperation` 组合现有搜索、有界滚动和最小提取器，并将结果以最多 10 条 Candidate 的 `task.discovery_batch` 和唯一 `task.discovery_completed` 写入持久 outbox 后发送；A7-04/A7-07 已在不丢失这些事实的前提下依次原地迁移到 SQLite v4/v5。Control Plane 的 bounded accumulator 只接受当前已确认命令的连续批次；完成时在同一 PostgreSQL 事务复验 Installation/Task/Attempt/correlation/page revision、调用 D6-09 替换 Target、追加终态事件并把 Task 收敛到 `awaiting_confirmation`。登录失效、人工接管和失败分别进入封闭状态，不保存 Target；断线完整重放必须与已持久化快照精确一致。三端 Schema/解析器现共同覆盖 31 种消息、12 个 valid 和 29 个 invalid fixture。
+Local Executor 的 `ExecutorCommandProcessor` 在 D6-10 的 SQLite v3 中先保存 `task.discover`，只通过 `ProductionDouyinDiscoveryOperation` 组合现有搜索、有界滚动和最小提取器，并将结果以最多 10 条 Candidate 的 `task.discovery_batch` 和唯一 `task.discovery_completed` 写入持久 outbox 后发送；A7-04/A7-07 已在不丢失这些事实的前提下依次原地迁移到 SQLite v4/v5。Control Plane 的 bounded accumulator 只接受当前已确认命令的连续批次；完成时在同一 PostgreSQL 事务复验 Installation/Task/Attempt/correlation/page revision、调用 D6-09 替换 Target、追加终态事件并把 Task 收敛到 `awaiting_confirmation`。登录失效、人工接管和失败分别进入封闭状态，不保存 Target；断线完整重放必须与已持久化快照精确一致。三端 Schema/解析器现共同覆盖正式判别联合与公共 `valid`/`invalid` fixture 树。
 
 B5-11 把 flow 契约升级为 `douyin.qr-login.v2`，当前状态固定为 `login_required/awaiting_scan/awaiting_confirmation/qr_expired/healthy/handoff_required/unknown`。B5-09 发现 ByteDance 验证中心外层挑战后只投影 `handoff_required/risk_challenge`，不读取跨源挑战内容，也没有点击、填写、拖拽、验证码识别或绕过路径；同一个可见窗口留给用户处理。无参数 `recheck()` 只有重新观察到 `healthy` 才关闭熔断，挑战仍在、页面未知或登录失效都继续阻止副作用。代码不调用 Cookie/storage-state API，页面、二维码、验证码、Profile 路径和账号信息不进入协议、Tauri IPC 或日志。B5-13 已提供平台状态与重新检查，B5-14 已启用带二次确认的安全注销。
 
@@ -276,27 +276,7 @@ AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER_VERSION=1
 AUTOMATION_TOOL_ACCOUNT_FINGERPRINT_KEY=<different-32-byte-secret-base64url>
 ```
 
-服务只绑定 `127.0.0.1:8765`。启动时配置缺失会 fail closed；数据库断开时 Health 返回可重试的结构化 `503 dependency_unavailable`。当前端点为：
-
-- `GET http://127.0.0.1:8765/api/v1/health`
-- `GET http://127.0.0.1:8765/api/v1/version`
-- `POST http://127.0.0.1:8765/api/v1/account-sessions`
-- `POST http://127.0.0.1:8765/api/v1/account-sessions/refresh`
-- `DELETE http://127.0.0.1:8765/api/v1/account-sessions/current`
-- `POST http://127.0.0.1:8765/api/v1/account-password/changes`
-- `POST http://127.0.0.1:8765/api/v1/account-password/recovery`
-- `POST http://127.0.0.1:8765/api/v1/installations/registration-challenges`
-- `POST http://127.0.0.1:8765/api/v1/installations`
-- `GET http://127.0.0.1:8765/api/v1/installations/current`
-- `POST http://127.0.0.1:8765/api/v1/device-credentials/rotations`
-- `POST http://127.0.0.1:8765/api/v1/device-credentials/revocations`
-- `POST http://127.0.0.1:8765/api/v1/device-sessions`
-- `POST http://127.0.0.1:8765/api/v1/tasks`
-- `GET http://127.0.0.1:8765/api/v1/workbench/status`
-- `GET http://127.0.0.1:8765/api/v1/workbench/metrics`
-- `GET http://127.0.0.1:8765/api/v1/tasks`
-- `GET http://127.0.0.1:8765/api/v1/tasks/{task_id}`
-- `WS ws://127.0.0.1:8765/api/v1/executors/connect`
+服务只绑定 `127.0.0.1:8765`。启动时配置缺失会 fail closed；数据库断开时 Health 返回可重试的结构化 `503 dependency_unavailable`。HTTP 端点的完整清单只由 FastAPI 生成的 `contracts/openapi/control-plane.v1.json` 维护，从仓库根执行 `uv run --project backend automation-tool-export-openapi --output contracts/openapi/control-plane.v1.json --check` 可检查快照漂移，README 不再复制第二份。Executor 的 `WS /api/v1/executors/connect` 不属于 OpenAPI 可表达范围，因此仍由 `control_plane/api/executor_transport.py` 的正式 WebSocket 路由及其契约/集成测试守住。
 
 客户 Demo 容器不使用上述本机 CLI。`backend/Dockerfile` 通过 digest 锁定 Python/uv、多阶段 `uv sync --locked --no-dev --no-editable` 构建 `automation-tool-control-plane-container`，运行时固定非 root UID/GID 65532、一个 worker、内部端口 8000、`/api/v1/health` 和 30 秒 SIGTERM 优雅停止。镜像必须由 C10 部署流程提供 OCI `APP_VERSION`/`VCS_REF` 和运行时 Secret，不能发布 Control Plane 宿主端口或在镜像内执行 Alembic。真实只读容器门禁在仓库根目录执行：
 
@@ -306,7 +286,7 @@ uv run --project backend python scripts/run_c10_02_acceptance.py
 
 该门禁创建唯一名称的临时 PostgreSQL、网络和镜像，核对健康、版本、OCI 标签、无测试/浏览器资产、日志脱敏与优雅停止后精确清理；它不部署云环境。
 
-P9-08 的 `/api/v1/version` 同时发布 Desktop App、Executor runtime 与 Executor protocol 的 current/minimum/maximum。当前 `0.1.0` release 只接受 App `0.1.0`、Control Plane `0.1.0`、API `v1`、Executor `0.1.0` 和 protocol `1.0`；Desktop 会在 Health 后严格核对该矩阵，Executor WebSocket Hello 也独立拒绝旧版、新版与预发布 runtime。机器可读权威快照为 `contracts/protocol/runtime-compatibility-v1.json`，升级任一组件必须同步更新并通过 Python、Rust 与 Node 漂移门禁。
+P9-08 的 `/api/v1/version` 同时发布 Desktop App、Executor runtime 与 Executor protocol 的 current/minimum/maximum。Desktop 会在 Health 后严格核对机器可读权威快照 `contracts/protocol/runtime-compatibility-v1.json`，Executor WebSocket Hello 也独立拒绝不在该矩阵内的旧版、新版与预发布 runtime。当前值只在契约中维护；升级任一组件必须同步更新并通过 Python、Rust 与 Node 漂移门禁。
 
 迁移回滚验证（只对明确的测试数据库执行）：
 

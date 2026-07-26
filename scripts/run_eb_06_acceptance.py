@@ -5,7 +5,7 @@ Deterministic cargo tests first (synthetic trees, all rejection paths), then
 the real chain: the digest-locked archive is staged and promoted by the
 production Python builders into `<resources>/embedded-browser`, and the
 production Rust `EmbeddedBrowserDistribution::load_for_target` must verify
-all 331 files (~359MB digests) and resolve the executable. Ledger and
+every staged file and resolve the executable. Ledger and
 evidence checks close the run.
 """
 
