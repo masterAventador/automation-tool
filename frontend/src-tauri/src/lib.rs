@@ -1465,6 +1465,9 @@ async fn recheck_douyin_login(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+const DOUYIN_LOGOUT_PROJECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn logout_douyin_session(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -1521,20 +1524,26 @@ async fn logout_douyin_session(
         });
     }
 
-    for _ in 0..100 {
-        let snapshot = client
-            .get_douyin_platform_session(&vault)
-            .await
-            .map_err(map_executor_connection_error)?;
-        if snapshot.state() == "missing" {
-            return Ok(snapshot);
+    match tokio::time::timeout(DOUYIN_LOGOUT_PROJECTION_TIMEOUT, async {
+        loop {
+            let snapshot = client
+                .get_douyin_platform_session(&vault)
+                .await
+                .map_err(map_executor_connection_error)?;
+            if snapshot.state() == "missing" {
+                return Ok(snapshot);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    Err(ExecutorPlatformCommandError {
-        code: "timed_out",
-        retryable: true,
     })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(ExecutorPlatformCommandError {
+            code: "timed_out",
+            retryable: true,
+        }),
+    }
 }
 
 /// PB-07: one operator's publishing view, shared by the four publish Commands.
