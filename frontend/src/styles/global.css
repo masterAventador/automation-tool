@@ -748,7 +748,8 @@ body {
   box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
 }
 
-.platform-session-content {
+.platform-session-content,
+.publish-workspace-content {
   margin-top: 20px;
 }
 
@@ -1017,4 +1018,36 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+/* 视频剪辑 was the one feature whose class names were written in the JSX and
+   never given a rule here, so it had neither of the two things every other page
+   gets from this file. */
+
+/* One: the step below the page title, same as `.video-studio` and the rest. The
+   first thing on this page is an `Alert`, so with no margin its coloured border
+   sat directly under the title row's status tag. */
+.video-editing {
+  margin-top: 20px;
+}
+
+/* Two: width. `Space` is `inline-flex` and shrink-wraps, which left these panes
+   at 568px inside a 992px column — half the page blank. Every other feature
+   declares this: `.settings-stack`, `.platform-session-stack`,
+   `.task-create-stack`, `.diagnostics-stack`, `.video-studio-new-form`.
+   `.video-editing-timeline` and `.video-editing-preview` have the same problem
+   but only render once a draft project exists, which the UI Harness gateway
+   cannot create — they are unverified and deliberately left out. */
+.video-editing-projects,
+.video-editing-jobs {
+  width: 100%;
+}
+
+/* And again one level in. Widening only the pane grows the card to the full
+   column while the `Space` inside it keeps shrink-wrapping, which leaves a wide
+   card with its right half blank — worse than the narrow card was. Scoped to
+   the panel rather than named per card so the next card added here cannot be
+   the one that gets missed. */
+.video-editing-panel .ant-card-body > .ant-space {
+  width: 100%;
 }
