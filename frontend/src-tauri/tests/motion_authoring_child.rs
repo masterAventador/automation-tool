@@ -128,6 +128,9 @@ const REFUSAL_CONTRACT: &str =
 fn expected_code_for_class(class: &str) -> &'static str {
     match class {
         "app_request_invalid" => "authoring_crashed",
+        // Our defect too, reached from the other end: the child's own
+        // construction, not the request this side built.
+        "executor_defect" => "authoring_crashed",
         "installation_damaged" => "authoring_installation_damaged",
         "model_configuration_required" => "configuration_required",
         "model_timed_out" => "authoring_model_timed_out",
@@ -219,6 +222,40 @@ fn a_request_this_side_built_wrong_is_not_reported_as_a_refusal() {
     );
 
     assert_eq!(code, "authoring_crashed");
+}
+
+/// Five guards inside the child that can only fire because we built it wrong.
+///
+/// The workspace was not handed over, the pinned workflow reference was not
+/// handed over, the tools argument was the wrong type, or the tool surface no
+/// longer matches the closed allowlist. Nothing the user types reaches any of
+/// them, and nothing had read their sentence — yet all four arrived here as a
+/// refusal and told them to describe the film differently.
+///
+/// Both statuses are checked: the one a packaged child writes today, and the
+/// one it writes once the class exists. The reason token is the evidence in
+/// either case, so neither may resolve towards the user.
+#[test]
+fn our_own_wiring_defect_is_never_reported_as_the_description_being_wrong() {
+    let root = TempDirectory::new();
+
+    for reason in [
+        "agent_not_a_motionauthoringtools_instance",
+        "agent_tool_surface_does_not_match_the_closed_allowlist",
+        "agent_tools_require_an_authoringworkspace",
+        "agent_workflow_reference_required",
+        "agent_workspace_required",
+    ] {
+        for status in ["rejected", "executor_defect"] {
+            let code = code_for_answer(&root, &answer(status, reason));
+
+            assert_ne!(
+                code, "authoring_refused",
+                "{reason} on status {status} asks for a sentence nothing read"
+            );
+            assert_eq!(code, "authoring_crashed", "{reason} on status {status}");
+        }
+    }
 }
 
 /// A packaged Executor from before the statuses split still answers these on
