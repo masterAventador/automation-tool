@@ -677,6 +677,7 @@ pub enum MotionRenderJobStatus {
     Encoding,
     Succeeded,
     Failed,
+    Cancelling,
     Cancelled,
 }
 
@@ -1339,6 +1340,20 @@ pub fn advance(
     ) {
         return Ok(current);
     }
+    // Once a stop has been asked for the run may only settle. Without this a
+    // stage that was already in flight when the request landed would overwrite
+    // 正在取消 with 正在合成视频 and put the cancel button back on a job that is
+    // already stopping.
+    if current.status == MotionRenderJobStatus::Cancelling
+        && !matches!(
+            status,
+            MotionRenderJobStatus::Cancelled
+                | MotionRenderJobStatus::Succeeded
+                | MotionRenderJobStatus::Failed
+        )
+    {
+        return Err(job_unavailable());
+    }
     let valid = match status {
         MotionRenderJobStatus::Rendering => progress_percent == 55 && artifact.is_none(),
         MotionRenderJobStatus::Encoding => progress_percent == 85 && artifact.is_none(),
@@ -1348,7 +1363,7 @@ pub fn advance(
         MotionRenderJobStatus::Failed => {
             progress_percent < 100 && artifact.is_none() && failure_code.is_some()
         }
-        MotionRenderJobStatus::Cancelled => {
+        MotionRenderJobStatus::Cancelling | MotionRenderJobStatus::Cancelled => {
             progress_percent < 100 && artifact.is_none() && failure_code.is_none()
         }
         MotionRenderJobStatus::Queued => false,
@@ -1369,6 +1384,24 @@ pub fn advance(
     Ok(current)
 }
 
+/// Ask a running render to stop.
+///
+/// This records a *request*, and that is the whole of what this side knows.
+/// The render lives in a Worker process driving a browser and, later, in an
+/// FFmpeg child; only the thread that owns them can say the work has actually
+/// stopped, so only that thread writes the terminal `Cancelled`
+/// (`CLAUDE.md` §4.4). Settling the job here instead was not merely early — it
+/// dropped the executor's own settlement on the floor, because `advance`
+/// refuses to move a job that has already reached a terminal state. A film
+/// whose encode finished in the same instant was imported and then referenced
+/// by nothing.
+///
+/// `Cancelling` is a snapshot state rather than something the page remembers
+/// because the studio page unmounts whenever the operator clicks another
+/// sidebar entry, and a render outlives that by minutes. An "I already pressed
+/// cancel" kept in React would be gone when he came back — and gone again after
+/// a restart — leaving him looking at 正在合成视频 with the button offering
+/// itself a second time.
 pub fn cancel(
     store: &VideoJobWorkspaceStore,
     render_job_id: Uuid,
@@ -1380,6 +1413,7 @@ pub fn cancel(
         MotionRenderJobStatus::Queued
             | MotionRenderJobStatus::Rendering
             | MotionRenderJobStatus::Encoding
+            | MotionRenderJobStatus::Cancelling
     ) {
         return Err(job_unavailable());
     }
@@ -1395,10 +1429,15 @@ pub fn cancel(
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(_) => return Err(storage_unavailable()),
     }
+    // Pressing cancel twice is the same request, not a second state and not an
+    // error: the marker is already there and the executor is already stopping.
+    if current.status == MotionRenderJobStatus::Cancelling {
+        return Ok(());
+    }
     advance(
         store,
         render_job_id,
-        MotionRenderJobStatus::Cancelled,
+        MotionRenderJobStatus::Cancelling,
         current.progress_percent.min(99),
         None,
         None,
@@ -1617,9 +1656,9 @@ fn validate_snapshot(
         MotionRenderJobStatus::Rendering => snapshot.progress_percent == 55,
         MotionRenderJobStatus::Encoding => snapshot.progress_percent == 85,
         MotionRenderJobStatus::Succeeded => snapshot.progress_percent == 100,
-        MotionRenderJobStatus::Failed | MotionRenderJobStatus::Cancelled => {
-            snapshot.progress_percent < 100
-        }
+        MotionRenderJobStatus::Cancelling
+        | MotionRenderJobStatus::Failed
+        | MotionRenderJobStatus::Cancelled => snapshot.progress_percent < 100,
     };
     if snapshot.render_job_id != workspace_id
         || snapshot.render_job_id.get_version_num() != 4

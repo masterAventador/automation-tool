@@ -519,6 +519,41 @@ describe("video studio shell", () => {
   });
 
   /**
+   * 取消是协作式的：按下按钮只是把请求写下来，真正停下来的是那个开着浏览器
+   * 和编码器的执行线程。快照因此有「正在取消」这个中间态，界面必须认得它。
+   *
+   * 两件事都要成立：
+   *   - 按下之后立刻有反应（不是几秒钟毫无变化），
+   *   - 已经在停的任务不再重复提供取消按钮。
+   */
+  it("shows a cancellation that has been asked for but not yet confirmed", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "b1f2b0a5-3a1e-4b62-9f0d-6b3c1d2e4f50",
+        revision: 3,
+        status: "cancelling",
+        progressPercent: 85,
+        subject: "新品发布",
+        styleDisplayName: "商务蓝",
+        artifactId: null,
+        artifactSizeBytes: null,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "制作任务" }));
+
+    expect(await screen.findByText("正在取消")).toBeVisible();
+    expect(screen.queryByText("已取消")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "取消品牌动效任务" }),
+    ).toBeNull();
+  });
+
+  /**
    * 成片页是「做完之后」唯一的落脚点，发布页却在另一个页面。
    *
    * 没有这一步，用户做完一条视频就走到了死路：发布页只会说「还没有选定要发布的视频」，

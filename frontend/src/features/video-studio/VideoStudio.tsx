@@ -23,6 +23,7 @@ import {
   type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
   type MotionRenderJobSnapshot,
+  type MotionRenderJobStatus,
   type MotionVideoBeatDraft,
   type MotionVideoBriefRequest,
   type MotionVideoDraftRequest,
@@ -1001,10 +1002,29 @@ const MOTION_STATUS_COPY = {
   queued: { label: "准备中", color: "default" },
   rendering: { label: "逐帧渲染中", color: "processing" },
   encoding: { label: "正在合成视频", color: "processing" },
+  // 「正在取消」不是「已取消」：按钮按下去只是把请求写下来，真正停下来的是
+  // 那个开着浏览器和编码器的执行线程。这一格存在的意义就是让按下按钮立刻有
+  // 反应，同时不去替执行器宣布它已经停了。
+  cancelling: { label: "正在取消", color: "processing" },
   succeeded: { label: "已完成", color: "success" },
   failed: { label: "制作失败", color: "error" },
   cancelled: { label: "已取消", color: "default" },
 } as const;
+
+/** 还在跑、还需要显示用时的状态。 */
+const MOTION_IN_FLIGHT: readonly MotionRenderJobStatus[] = [
+  "queued",
+  "rendering",
+  "encoding",
+  "cancelling",
+];
+
+/** 还能被取消的状态——已经在取消的不再重复提供按钮。 */
+const MOTION_CANCELLABLE: readonly MotionRenderJobStatus[] = [
+  "queued",
+  "rendering",
+  "encoding",
+];
 
 function JobPage({
   jobs,
@@ -1066,7 +1086,7 @@ function JobPage({
           {job.status === "failed" ? (
             <Alert type="error" showIcon title={motionFailureAdvice(job.failureCode)} />
           ) : null}
-          {["queued", "rendering", "encoding"].includes(job.status)
+          {MOTION_IN_FLIGHT.includes(job.status)
             ? (() => {
                 const timing = motionJobTiming(ownMotionJobs.get(job.renderJobId), now);
                 return timing === null ? null : (
@@ -1074,7 +1094,7 @@ function JobPage({
                 );
               })()
             : null}
-          {["queued", "rendering", "encoding"].includes(job.status) ? (
+          {MOTION_CANCELLABLE.includes(job.status) ? (
             <Popconfirm
               title="确定取消这个品牌动效任务吗？"
               okText="确定"
