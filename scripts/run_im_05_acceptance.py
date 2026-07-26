@@ -14,6 +14,7 @@ from pathlib import Path
 
 from build_material_video_worker_candidate import (
     ENTRYPOINT,
+    WEB_UI_TEST_CASE,
     MaterialVideoWorkerAudit,
     build_candidate,
 )
@@ -34,8 +35,26 @@ def pnpm_executable() -> str:
     return resolved
 
 
-def run(command: list[str], *, environment: dict[str, str] | None = None) -> None:
-    subprocess.run(command, cwd=ROOT, env=environment, check=True)
+def run(
+    command: list[str],
+    *,
+    environment: dict[str, str] | None = None,
+    expect_summary: str | None = None,
+) -> None:
+    if expect_summary is None:
+        subprocess.run(command, cwd=ROOT, env=environment, check=True)
+        return
+    # A libtest run that selects nothing still exits 0, so a call that must
+    # execute cases asserts on the summary line rather than the exit code.
+    completed = subprocess.run(
+        command, cwd=ROOT, env=environment, capture_output=True, text=True, check=False
+    )
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    if completed.returncode != 0 or expect_summary not in completed.stdout:
+        raise AssertionError(
+            f"IM-05 expected `{expect_summary}` from: {' '.join(command)}"
+        )
 
 
 def app_data_directory() -> Path:
@@ -102,12 +121,16 @@ def require_real_frozen_webui(candidate: Path) -> None:
             "--test",
             "material_video_gateway",
             "--locked",
-            "frozen_worker_starts_real_web_ui_only_inside_the_task_workspace",
+            WEB_UI_TEST_CASE,
             "--",
+            # The case is `#[ignore]`d so an ordinary suite run cannot report it
+            # green without the frozen WebUI Worker staged above.
+            "--ignored",
             "--exact",
             "--test-threads=1",
         ],
         environment=environment,
+        expect_summary="1 passed; 0 failed",
     )
     for forbidden in (
         candidate / "config.toml",

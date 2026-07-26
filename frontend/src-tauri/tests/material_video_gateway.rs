@@ -77,11 +77,10 @@ impl Drop for TemporaryAssetRoot {
 }
 
 #[test]
+#[ignore = "requires the real frozen material-video Worker; run via scripts/run_im_03_acceptance.py"]
 fn frozen_worker_uses_the_authenticated_loopback_gateway_end_to_end() {
-    let Some(executable) = std::env::var_os("AUTOMATION_TOOL_IM03_WORKER") else {
-        eprintln!("real frozen worker is exercised by scripts/run_im_03_acceptance.py");
-        return;
-    };
+    let executable = std::env::var_os("AUTOMATION_TOOL_IM03_WORKER")
+        .expect("AUTOMATION_TOOL_IM03_WORKER is staged by scripts/run_im_03_acceptance.py");
     let executable = fs::canonicalize(PathBuf::from(executable)).expect("canonical worker path");
     assert!(executable.is_absolute());
     assert!(executable.is_file());
@@ -126,11 +125,10 @@ fn frozen_worker_uses_the_authenticated_loopback_gateway_end_to_end() {
 }
 
 #[test]
+#[ignore = "requires the real frozen material-video Worker; run via scripts/run_im_04_acceptance.py"]
 fn app_script_settings_configure_the_real_frozen_worker_without_public_secrets() {
-    let Some(executable) = std::env::var_os("AUTOMATION_TOOL_IM03_WORKER") else {
-        eprintln!("real frozen worker is exercised by scripts/run_im_04_acceptance.py");
-        return;
-    };
+    let executable = std::env::var_os("AUTOMATION_TOOL_IM03_WORKER")
+        .expect("AUTOMATION_TOOL_IM03_WORKER is staged by scripts/run_im_04_acceptance.py");
     let api_key = "sk-im04-private-frozen-key-1234567890";
     let settings = ModelServiceSettings::new(
         MemoryStore::default(),
@@ -183,11 +181,10 @@ fn app_script_settings_configure_the_real_frozen_worker_without_public_secrets()
 }
 
 #[test]
+#[ignore = "requires the real frozen material-video WebUI Worker; run via scripts/run_im_05_acceptance.py"]
 fn frozen_worker_starts_real_web_ui_only_inside_the_task_workspace() {
-    let Some(executable) = std::env::var_os("AUTOMATION_TOOL_IM05_WORKER") else {
-        eprintln!("real frozen WebUI is exercised by scripts/run_im_05_acceptance.py");
-        return;
-    };
+    let executable = std::env::var_os("AUTOMATION_TOOL_IM05_WORKER")
+        .expect("AUTOMATION_TOOL_IM05_WORKER is staged by scripts/run_im_05_acceptance.py");
     let executable = fs::canonicalize(PathBuf::from(executable)).expect("canonical worker path");
     assert!(executable.is_absolute());
     assert!(executable.is_file());

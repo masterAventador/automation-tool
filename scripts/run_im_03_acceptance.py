@@ -13,6 +13,7 @@ from pathlib import Path
 
 from build_material_video_worker_candidate import (
     ENTRYPOINT,
+    WEB_UI_TEST_CASE,
     MaterialVideoWorkerAudit,
     build_candidate,
 )
@@ -21,8 +22,26 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/security/material-video-gateway.v1.json"
 
 
-def run(command: list[str], *, environment: dict[str, str] | None = None) -> None:
-    subprocess.run(command, cwd=ROOT, env=environment, check=True)
+def run(
+    command: list[str],
+    *,
+    environment: dict[str, str] | None = None,
+    expect_summary: str | None = None,
+) -> None:
+    if expect_summary is None:
+        subprocess.run(command, cwd=ROOT, env=environment, check=True)
+        return
+    # A libtest run that selects nothing still exits 0, so a call that must
+    # execute cases asserts on the summary line rather than the exit code.
+    completed = subprocess.run(
+        command, cwd=ROOT, env=environment, capture_output=True, text=True, check=False
+    )
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    if completed.returncode != 0 or expect_summary not in completed.stdout:
+        raise AssertionError(
+            f"IM-03 expected `{expect_summary}` from: {' '.join(command)}"
+        )
 
 
 def require_contract() -> None:
@@ -63,9 +82,16 @@ def require_frozen_process() -> MaterialVideoWorkerAudit:
                 "material_video_gateway",
                 "--locked",
                 "--",
+                # The cases are `#[ignore]`d so an ordinary suite run cannot
+                # report them green without the frozen Worker staged above.
+                "--ignored",
+                # IM-05's case needs a Worker this driver does not stage.
+                "--skip",
+                WEB_UI_TEST_CASE,
                 "--test-threads=1",
             ],
             environment=environment,
+            expect_summary="2 passed; 0 failed",
         )
         if audit.file_count < 100 or audit.package_bytes < 100 * 1024 * 1024:
             raise AssertionError("IM-03 did not exercise the real frozen candidate")

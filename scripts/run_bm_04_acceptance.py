@@ -187,6 +187,9 @@ def run_production_chain(
             test_target,
             "real_worker_render_sandbox_isolates_malicious_html",
             "--",
+            # The case is `#[ignore]`d so an ordinary suite run cannot report it
+            # green without the staged Chromium and hostile workspace.
+            "--ignored",
             "--exact",
             "--nocapture",
         ],

@@ -78,10 +78,11 @@ fn render_browser_configuration_rejects_junction_ancestor() {
 }
 
 #[test]
+#[ignore = "requires the BM-02 packaged Node candidate; run via scripts/run_bm_02_acceptance.py"]
 fn bundled_node_candidate_uses_packaged_runtime_and_protocol() {
-    let Some(package_root) = std::env::var_os("BM02_PACKAGE_ROOT").map(PathBuf::from) else {
-        return;
-    };
+    let package_root = std::env::var_os("BM02_PACKAGE_ROOT")
+        .map(PathBuf::from)
+        .expect("BM02_PACKAGE_ROOT is staged by scripts/run_bm_02_acceptance.py");
     let asset_root = package_root.join("acceptance-assets");
     fs::create_dir(&asset_root).expect("asset root");
     let launch = VideoWorkerLaunch::bundled_node(
@@ -112,16 +113,18 @@ fn bundled_node_candidate_uses_packaged_runtime_and_protocol() {
 }
 
 #[test]
+#[ignore = "requires the BM-03 packaged Node candidate and staged Chromium; run via scripts/run_bm_03_acceptance.py"]
 fn real_worker_render_verify_launches_the_locked_chromium() {
-    let (Some(package_root), Some(browser), Some(major)) = (
-        std::env::var_os("BM03_PACKAGE_ROOT").map(PathBuf::from),
-        std::env::var_os("BM03_RENDER_BROWSER").map(PathBuf::from),
-        std::env::var("BM03_CHROMIUM_MAJOR")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok()),
-    ) else {
-        return;
-    };
+    let package_root = std::env::var_os("BM03_PACKAGE_ROOT")
+        .map(PathBuf::from)
+        .expect("BM03_PACKAGE_ROOT is staged by scripts/run_bm_03_acceptance.py");
+    let browser = std::env::var_os("BM03_RENDER_BROWSER")
+        .map(PathBuf::from)
+        .expect("BM03_RENDER_BROWSER is staged by scripts/run_bm_03_acceptance.py");
+    let major = std::env::var("BM03_CHROMIUM_MAJOR")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .expect("BM03_CHROMIUM_MAJOR is staged by scripts/run_bm_03_acceptance.py");
     let asset_root = package_root.join("acceptance-render-assets");
     fs::create_dir(&asset_root).expect("asset root");
     let launch = VideoWorkerLaunch::bundled_node(
@@ -153,17 +156,21 @@ fn real_worker_render_verify_launches_the_locked_chromium() {
 }
 
 #[test]
+#[ignore = "requires the BM-04 packaged Node candidate, staged Chromium and hostile workspace; run via scripts/run_bm_04_acceptance.py"]
 fn real_worker_render_sandbox_isolates_malicious_html() {
-    let (Some(package_root), Some(browser), Some(major), Some(workspace)) = (
-        std::env::var_os("BM04_PACKAGE_ROOT").map(PathBuf::from),
-        std::env::var_os("BM04_RENDER_BROWSER").map(PathBuf::from),
-        std::env::var("BM04_CHROMIUM_MAJOR")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok()),
-        std::env::var_os("BM04_WORKSPACE").map(PathBuf::from),
-    ) else {
-        return;
-    };
+    let package_root = std::env::var_os("BM04_PACKAGE_ROOT")
+        .map(PathBuf::from)
+        .expect("BM04_PACKAGE_ROOT is staged by scripts/run_bm_04_acceptance.py");
+    let browser = std::env::var_os("BM04_RENDER_BROWSER")
+        .map(PathBuf::from)
+        .expect("BM04_RENDER_BROWSER is staged by scripts/run_bm_04_acceptance.py");
+    let major = std::env::var("BM04_CHROMIUM_MAJOR")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .expect("BM04_CHROMIUM_MAJOR is staged by scripts/run_bm_04_acceptance.py");
+    let workspace = std::env::var_os("BM04_WORKSPACE")
+        .map(PathBuf::from)
+        .expect("BM04_WORKSPACE is staged by scripts/run_bm_04_acceptance.py");
     let asset_root = package_root.join("acceptance-sandbox-assets");
     fs::create_dir(&asset_root).expect("asset root");
     let launch = VideoWorkerLaunch::bundled_node(

@@ -88,6 +88,9 @@ def require_real_candidate() -> None:
                 test_target,
                 "bundled_node_candidate_uses_packaged_runtime_and_protocol",
                 "--",
+                # The case is `#[ignore]`d so an ordinary suite run cannot report
+                # it green without the packaged candidate staged below.
+                "--ignored",
                 "--exact",
                 "--nocapture",
             ],

@@ -129,6 +129,9 @@ def run_production_chain(
             test_target,
             "real_worker_render_verify_launches_the_locked_chromium",
             "--",
+            # The case is `#[ignore]`d so an ordinary suite run cannot report it
+            # green without the staged Chromium and Node runtime.
+            "--ignored",
             "--exact",
             "--nocapture",
         ],

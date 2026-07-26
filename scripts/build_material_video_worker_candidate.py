@@ -29,6 +29,11 @@ UPSTREAM = ROOT / "vendor/moneyprinterturbo"
 WORKER = ROOT / "workers/material_montage"
 CONTRACT_PATH = ROOT / "contracts/quality/material-video-worker-package.v1.json"
 ENTRYPOINT = "automation-tool-material-video-worker"
+# The `material_video_gateway` case that needs `AUTOMATION_TOOL_IM05_WORKER`.
+# IM-03 and IM-04 run the whole test binary and stage only the IM-03 Worker, so
+# they must skip this one by name; IM-05 selects it. Shared so the three drivers
+# cannot drift apart from each other or from the Rust test.
+WEB_UI_TEST_CASE = "frozen_worker_starts_real_web_ui_only_inside_the_task_workspace"
 
 
 class MaterialVideoWorkerPackageError(RuntimeError):
