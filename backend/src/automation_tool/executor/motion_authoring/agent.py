@@ -1299,6 +1299,18 @@ def call_video_creation_model(
     except OSError as error:
         # URLError, socket timeout and connection errors are all OSError; never
         # surface the key or upstream body, keep the reason bounded.
+        #
+        # A model that is not there and a model that took the connection and then
+        # stopped sending are not the same failure, and one reason for both is
+        # how they came to read as one sentence to the user: measured, the first
+        # answers in two seconds and the second in 363 — `timeout_seconds` above
+        # plus the connect — and both said "判定这次描述做不出来". The timeout
+        # arrives either bare, because `socket.timeout` is `TimeoutError`, or as
+        # the `reason` urllib wraps in a `URLError`, so both shapes are asked.
+        if isinstance(error, TimeoutError) or isinstance(
+            getattr(error, "reason", None), TimeoutError
+        ):
+            raise MotionAuthoringRejected("video creation model timed out") from error
         raise MotionAuthoringRejected("video creation model transport failed") from error
 
 

@@ -108,6 +108,7 @@
     "request_schema_unsupported",
     "request_shape_invalid",
     "request_too_large",
+    "video_creation_model_timed_out",
     "video_creation_model_transport_failed",
     "video_creation_model_unavailable",
     "workspace_missing",

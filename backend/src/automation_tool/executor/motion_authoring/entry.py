@@ -102,9 +102,14 @@ def _load_refusal_contract() -> tuple[frozenset[str], str, frozenset[str]]:
     _STATIC_GATE_CODES,
 ) = _load_refusal_contract()
 
+# Fixed findings that reach this boundary as a bare message, with no agent
+# prefix in front of them: the ones this file raises itself, and the ones
+# `call_video_creation_model` raises about the model service.
 _ENTRY_REASON_TOKENS: Final = {
     "model configuration is not the declared shape": "model_configuration_shape_invalid",
     "model configuration is not usable": "model_configuration_unusable",
+    "video creation model timed out": "video_creation_model_timed_out",
+    "video creation model transport failed": "video_creation_model_transport_failed",
     "workspace is missing": "workspace_missing",
     "workspace must be an absolute path the App already created": "workspace_not_absolute",
     "workspace is not a usable render workspace": "workspace_unusable",
@@ -281,8 +286,6 @@ def _closed_rejection_reason(raw: object) -> str | None:
     if raw.startswith(_BRIEF_REASON_PREFIX + _AGENT_REASON_PREFIX):
         body = raw.removeprefix(_BRIEF_REASON_PREFIX + _AGENT_REASON_PREFIX)
         return _closed_wire_reason(_BRIEF_REASON_TOKENS.get(body))
-    if raw == "video creation model transport failed":
-        return _closed_wire_reason("video_creation_model_transport_failed")
     if not raw.startswith(_AGENT_REASON_PREFIX):
         return None
     body = raw.removeprefix(_AGENT_REASON_PREFIX)
@@ -292,6 +295,32 @@ def _closed_rejection_reason(raw: object) -> str | None:
     if body not in _AGENT_FIXED_REJECTION_BODIES:
         return None
     return _closed_wire_reason(_agent_reason_token(body))
+
+
+_REFUSED_STATUS: Final = "rejected"
+
+# What the answer says when the model service could not be used at all.
+#
+# The refusal document is not a generic failure envelope: the App recognises it
+# and reports the run as `authoring_refused`, which is worded — correctly — as
+# the agent having read this brief and declined it, and tells the user to
+# describe the film differently. Nothing read the brief when the model was never
+# reached, so a model outage answered as a refusal sends the user to rewrite a
+# sentence that was never the problem. Measured on 2026-07-26: an unreachable
+# model produced exactly that sentence after two seconds, and a model that
+# stopped answering produced it word for word after 363.
+#
+# A status the refusal parser does not accept keeps those runs out of that
+# sentence. The document still carries its own closed reason, so the day the
+# App reads it the two can be told apart without another protocol change.
+_MODEL_UNUSABLE_STATUS: Final = "model_unusable"
+_MODEL_SERVICE_REASONS: Final = frozenset(
+    {
+        "video_creation_model_timed_out",
+        "video_creation_model_transport_failed",
+        "video_creation_model_unavailable",
+    }
+)
 
 
 class MotionAuthoringEntryRejected(ValueError):
@@ -312,7 +341,7 @@ def parse_motion_authoring_refusal(document: object) -> str | None:
         not isinstance(document, dict)
         or set(document) != _REFUSAL_FIELDS
         or document["schemaVersion"] != SCHEMA_VERSION
-        or document["status"] != "rejected"
+        or document["status"] != _REFUSED_STATUS
     ):
         return None
     return _closed_wire_reason(document["rejectionReason"])
@@ -437,7 +466,11 @@ def serve_one_motion_authoring_request(stream: BinaryIO, out: TextIO) -> int:
         return 0
     answer: dict[str, object] = {
         "schemaVersion": SCHEMA_VERSION,
-        "status": "rejected",
+        "status": (
+            _MODEL_UNUSABLE_STATUS
+            if rejection_reason in _MODEL_SERVICE_REASONS
+            else _REFUSED_STATUS
+        ),
     }
     if rejection_reason is not None:
         answer["rejectionReason"] = rejection_reason

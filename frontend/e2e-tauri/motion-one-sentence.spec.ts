@@ -50,8 +50,8 @@ const SUBMIT_FAILURES: readonly (readonly [string, string])[] = [
     "authoring_refused — the child completed the protocol and declined the request; this is the agent working, not breaking",
   ],
   [
-    "自动编排中途出错",
-    "authoring_crashed — the child died without writing the refusal document; this is a defect on our side and must be fixed, not retried",
+    "自动编排没能完成",
+    "authoring_crashed — the child did not write a refusal document: either it died, or it reported that the model service could not be used at all (entry.py keeps those out of the refusal channel so they stop reading as a refusal of the brief)",
   ],
   [
     "没有通过本机校验",

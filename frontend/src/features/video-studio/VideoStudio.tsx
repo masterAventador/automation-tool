@@ -320,16 +320,26 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
  * move at all and being told to rewrite their sentence is both useless and
  * untrue. Those two must never share a sentence.
  *
+ * Only `authoring_refused` may ask for a different sentence, because it is the
+ * only one of the four where anything read the sentence at all. Failure
+ * injection on 2026-07-26 found the model service failing two ways — never
+ * reached, and reached but silent thereafter — and both told the user their
+ * description could not be made: after two seconds and after 363. The child now
+ * keeps model-service failures out of the refusal document (see
+ * `_MODEL_SERVICE_REASONS` in `entry.py`), so they arrive as `authoring_crashed`
+ * and that code has to name the model service and the network, which are what
+ * the user can actually go and look at.
+ *
  * Written once and used by both the studio's open path and the one-sentence
  * submit path so the two can never describe the same code differently.
  */
 const AUTHORING_ERRORS = {
   authoring_timed_out:
-    "自动编排超时，已经停下来，没有开始制作视频。请稍后重试；把描述写得更短、更具体通常会更快完成。",
+    "自动编排超时，已经停下来，视频没有开始制作。多半是视频创作模型服务一直没有回应，请稍后重试。",
   authoring_refused:
-    "自动编排判定这次描述做不出来，视频没有开始制作。请换一句更具体的描述后重试。",
+    "自动编排读完之后，判定这次描述做不出来，视频没有开始制作。这不是网络或模型服务的问题，请换一句更具体的描述后重试。",
   authoring_crashed:
-    "自动编排中途出错，视频没有开始制作。这是我们这边的问题，不是描述写得不好；请重试，反复出现请反馈给我们。",
+    "自动编排没能完成，视频没有开始制作。这不是描述的问题：视频创作模型服务可能连不上，或者接上之后不再回应，也可能是我们这边出错。请先检查网络，再到「设置与诊断」测试视频创作模型服务，然后重试。",
   authoring_answer_invalid:
     "自动编排的结果没有通过本机校验，视频没有开始制作。这是我们这边的问题，不是描述写得不好，请重试；如果一直这样请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;
