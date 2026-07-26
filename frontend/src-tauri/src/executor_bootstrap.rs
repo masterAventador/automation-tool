@@ -975,6 +975,14 @@ fn require_state_directory(source: &Path) -> Result<(), ExecutorBootstrapError> 
 mod tests {
     use super::*;
 
+    /// An absolute path on *this* platform, because the validator under test
+    /// asks the native path flavour and a POSIX literal is simply relative on
+    /// Windows -- which made these cases pass or fail for the wrong reason.
+    #[cfg(windows)]
+    const STATE_DIRECTORY: &str = r"C:\automation-tool\executor-state";
+    #[cfg(not(windows))]
+    const STATE_DIRECTORY: &str = "/private/tmp/automation-tool-executor-test";
+
     #[test]
     fn fixed_cross_language_proof_vector_stays_stable() {
         let token = LocalSessionToken {
@@ -989,6 +997,12 @@ mod tests {
     }
 
     #[test]
+    // The fixed proof is an HMAC over these exact POSIX path strings, shared
+    // with the Python vector in `test_platform_commands.py`. Windows refuses
+    // such a path as non-absolute, so the vector cannot be produced there at
+    // all. Reported as an ignored case rather than compiled away, so the
+    // Windows run shows the gap instead of a quietly smaller total.
+    #[cfg_attr(windows, ignore = "the shared vector is expressed in POSIX paths")]
     fn fixed_platform_command_vectors_stay_cross_language_compatible() {
         let token = LocalSessionToken {
             bytes: std::array::from_fn(|index| index as u8),
@@ -1046,7 +1060,7 @@ mod tests {
                 "atds1.private-session",
                 "123e4567-e89b-42d3-a456-426614174003",
                 "123e4567-e89b-42d3-a456-426614174004",
-                Path::new("/private/tmp/automation-tool-executor-test"),
+                Path::new(STATE_DIRECTORY),
                 1,
             )
             .expect("valid bootstrap")
@@ -1089,7 +1103,7 @@ mod tests {
                 "atds1.private-session",
                 "123e4567-e89b-42d3-a456-426614174003",
                 "123e4567-e89b-42d3-a456-426614174004",
-                Path::new("/private/tmp/automation-tool-executor-test"),
+                Path::new(STATE_DIRECTORY),
                 1,
             )
             .is_err());

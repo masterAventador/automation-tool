@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,10 @@ def test_short_reads_from_a_truncated_file_fail_closed(tmp_path: Path) -> None:
         _read_exact_range(path, 8, 5)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="chmod(0o000) only clears the read-only bit on Windows; the file stays readable",
+)
 @pytest.mark.asyncio
 async def test_unreadable_file_fails_closed_on_read_range(tmp_path: Path) -> None:
     path = write_material(tmp_path, content=b"0123456789")

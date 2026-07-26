@@ -207,6 +207,27 @@ App 管理的独立运营 Profile
 - 用户可操作功能只有从正式 App 的正常用户入口按真实页面路径执行，并核对真实进程、文件或外部平台最终状态，才算验收通过；Mock、fixture、单元测试、UI Harness、直接内部 API/函数/Command 或测试专用入口只能作为分层证据。缺少真实账号、密钥或正式环境时最多标 `🔍 待验收`，但继续推进不依赖该证据的任务；
 - 每个浏览器测试必须由确定的资源所有者在成功、失败、超时和取消路径关闭 Page、Context、Playwright driver 及其完整浏览器进程树；测试结束后复查本次项目隔离 Profile/进程无残留，只能清理本次 `automation-tool` 实例创建的资源，禁止积累后台浏览器或误杀用户及其他项目浏览器。
 
+### 8.1 Worktree 一律用 `scripts/new_worktree.py` 创建
+
+**创建 worktree 必须走 `python3 scripts/new_worktree.py <名称> [提交]`，禁止手工 `git worktree add` 之后自行拼装 vendor、venv 与 node_modules。**
+
+`git worktree add` 留下的 `vendor/` 是空目录，而手工补齐它有三条路，其中两条会造成事故——这些都是 2026-07-26 实测出来的：
+
+- **软链**：`motion_style_freezer.py:105` 显式要求 vendor 根是真实非软链目录并直接拒绝。这是有意的供应链控制：vendor 的可信度建立在「这个目录**就是**那个锁定 commit 的检出」上，而软链可以指向任何地方；
+- **硬链（`cp -al`）**：共享 inode，一棵树里的写入会**穿透到另一棵树**。实测后果是主树 submodule 被检出成错误 commit 并留下 155 条暂存删除，而当时被误判成「共享 `.git/modules` 竞争」——核查后发现 git 早就给每棵 worktree 独立的 module 目录，污染源是硬链本身；
+- **`git submodule update --init`**：正确但要重新落地 879 MB，其中 581 MB 过 git-lfs smudge，实测超过十分钟，且必须串行。
+
+脚本走的是第四条：APFS `clonefile`（`cp -c -p -R`）。实测 **879 MB 用 0.9 秒、占 2 MB**，产出真实目录、独立 inode，写入互不影响；不支持 clone 的文件系统自动退回普通拷贝，只慢不错。
+
+两个必须由脚本负责、手工极易漏掉的细节：
+
+1. **每棵 worktree 的 submodule 元数据目录要各自一份**，并把 `core.worktree` 改写成绝对路径。拷贝过来的 `config` 仍带源树的相对 `core.worktree`，此时 `git config`（无论 `cwd=` 还是 `--git-dir=`）都会先 chdir 过去而失败 —— 只有 `git config --file` 不打开仓库，能改掉这一项；
+2. **`core.checkStat` 必须设为 `minimal`**。clone 换了 inode 会让 index 的 stat 缓存失效，git 于是逐个重读文件并跑 clean 过滤器；对于 blob 以内容而非指针形式存储的 LFS 路径，这个来回不还原原 blob，**68 个没动过的文件会报成 modified**，足以让 `check_third_party_sources.py` 判整棵树为脏而拒绝。`minimal` 比较 mtime 与大小、忽略 inode。
+
+判据是**门禁而不是形态**：树建完必须 `scripts/check_third_party_sources.py` 退出 0。上面那条 stat 缓存问题在结构检查（不是软链、不共享 inode、gitlink 正确）全绿的情况下依然存在，只有真跑门禁才暴露。
+
+不需要 vendor 的工作线（例如只看前端界面的）用 `--no-vendor`，那是最快也最省的做法。
+
 ## 9. 失败矩阵与完成定义
 
 每个跨进程、跨层或有外部副作用的任务，开发前必须覆盖适用的失败矩阵：

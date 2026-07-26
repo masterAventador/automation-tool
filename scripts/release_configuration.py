@@ -76,7 +76,14 @@ def assembler_installed_resources(platform: str) -> tuple[str, ...]:
 
 def relative_to_tauri_root(path: Path) -> str:
     """Tauri resolves resource sources against its own root, not the drive."""
-    relative = os.path.relpath(path, TAURI_ROOT).replace(os.sep, "/")
+    try:
+        relative = os.path.relpath(path, TAURI_ROOT).replace(os.sep, "/")
+    except ValueError:
+        # Windows raises rather than returning something the checks below can
+        # catch when the two paths sit on different drives -- which is the very
+        # case this rejects, so it is spelled as the rejection, not a crash.
+        _reject("resource source must be relative to the Tauri root")
+        raise AssertionError("unreachable") from None
     if os.path.isabs(relative) or ":" in relative:
         _reject("resource source must be relative to the Tauri root")
     return relative

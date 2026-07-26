@@ -133,7 +133,7 @@
     "test:e2e": "playwright test",
     "test:e4-15": "node --test tests/production-package-audit.test.mjs",
     "test:layers": "pnpm test && pnpm test:ui && pnpm test:rust && pnpm test:tauri",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --locked",
+    "test:rust": "pnpm build && cargo test --manifest-path src-tauri/Cargo.toml --locked",
     "test:tauri": "pnpm build:tauri:test && wdio run wdio.conf.ts",
     "test:ui": "playwright test",
     "test:unit": "vitest run",

@@ -74,6 +74,7 @@ def discover(repository_root: Path) -> list[Path]:
 
 
 def _venv_interpreter(environment: Path, platform_name: str) -> Path:
+    """Resolve the standard interpreter location for one venv and platform."""
     if platform_name == "nt":
         return environment / "Scripts" / "python.exe"
     return environment / "bin" / "python"
@@ -113,9 +114,7 @@ def _imports(script: Path) -> set[str]:
 
 def _requires(imports: set[str], marker: str) -> bool:
     return any(
-        module == marker
-        or module.startswith(f"{marker}.")
-        or module.startswith(f"{marker}_")
+        module == marker or module.startswith(f"{marker}.") or module.startswith(f"{marker}_")
         for module in imports
     )
 
@@ -177,9 +176,7 @@ def locked_vendor_revisions(lock_path: Path) -> dict[str, str]:
     try:
         lock = json.loads(lock_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"cannot read vendor source lock {lock_path}: {error}"
-        ) from error
+        raise RuntimeError(f"cannot read vendor source lock {lock_path}: {error}") from error
     sources = lock.get("sources") if isinstance(lock, dict) else None
     if not isinstance(sources, list):
         raise RuntimeError("vendor source lock has no sources list")
@@ -189,11 +186,7 @@ def locked_vendor_revisions(lock_path: Path) -> dict[str, str]:
             continue
         path = source.get("path")
         revision = source.get("commit")
-        if (
-            isinstance(path, str)
-            and isinstance(revision, str)
-            and path.startswith("vendor/")
-        ):
+        if isinstance(path, str) and isinstance(revision, str) and path.startswith("vendor/"):
             name = path.removeprefix("vendor/")
             if name in VENDOR_NAMES and path == f"vendor/{name}":
                 revisions[name] = revision
@@ -224,9 +217,7 @@ def dirty_vendors(
         problems: list[str] = []
         if completed.returncode != 0:
             problems.append(
-                completed.stderr.strip()
-                or completed.stdout.strip()
-                or "git status failed"
+                completed.stderr.strip() or completed.stdout.strip() or "git status failed"
             )
         elif completed.stdout.strip():
             problems.append(completed.stdout.strip())
@@ -243,9 +234,7 @@ def dirty_vendors(
                 problems.append("locked commit is missing")
             elif revision.returncode != 0:
                 problems.append(
-                    revision.stderr.strip()
-                    or revision.stdout.strip()
-                    or "cannot read vendor HEAD"
+                    revision.stderr.strip() or revision.stdout.strip() or "cannot read vendor HEAD"
                 )
             elif revision.stdout.strip() != expected:
                 problems.append(
@@ -360,10 +349,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--vendor-lock",
         type=Path,
-        default=REPOSITORY_ROOT
-        / "contracts"
-        / "quality"
-        / "third-party-sources.v1.json",
+        default=REPOSITORY_ROOT / "contracts" / "quality" / "third-party-sources.v1.json",
         help="source lock belonging to the tree under test",
     )
     arguments = parser.parse_args(argv)

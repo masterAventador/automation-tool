@@ -22,6 +22,25 @@ const AVAILABILITY_COLORS: Record<PublishPlatformState["availability"], string> 
   unavailable: "red",
 };
 
+/**
+ * Why the publish button is greyed out, in the words of what is still missing.
+ *
+ * Greying it out is right — the executor and the bridge both refuse unreadable
+ * copy — but the button carried no `title` and no `aria-describedby`, so an
+ * operator who filled in the title and watched it stay grey had nothing on
+ * screen telling him the description was the other half. `title` would not
+ * have worked either: browsers do not fire the native tooltip on a disabled
+ * button. A visible note the button points at is what the video studio's
+ * 提交本机渲染 already does, and a screen reader gets it too.
+ */
+function publishBlockedHint(title: string, description: string): string {
+  const missing = [
+    isPublishableCopy(title) ? null : "标题",
+    isPublishableCopy(description) ? null : "简介",
+  ].filter((field): field is string => field !== null);
+  return `请先填写上面的${missing.join("和")}，然后才能发布。`;
+}
+
 const OUTCOME_TONES: Record<
   NonNullable<PublishWorkspaceSnapshot["outcome"]>,
   "success" | "warning" | "info"
@@ -210,13 +229,26 @@ export function PublishWorkspace({
               {platform.availability === "ready" &&
               snapshot.stage === "idle" &&
               selectedVideo !== undefined ? (
-                <Button
-                  type="primary"
-                  disabled={busy || !publishable}
-                  onClick={() => void run(() => gateway.beginPublish(publishRequest(platform.platform)))}
-                >
-                  {`发布到${publishPlatformLabel(platform.platform)}`}
-                </Button>
+                <Space orientation="vertical" size={4}>
+                  <Button
+                    type="primary"
+                    disabled={busy || !publishable}
+                    {...(publishable
+                      ? {}
+                      : { "aria-describedby": `publish-blocked-${platform.platform}` })}
+                    onClick={() => void run(() => gateway.beginPublish(publishRequest(platform.platform)))}
+                  >
+                    {`发布到${publishPlatformLabel(platform.platform)}`}
+                  </Button>
+                  {publishable ? null : (
+                    <Typography.Text
+                      id={`publish-blocked-${platform.platform}`}
+                      type="secondary"
+                    >
+                      {publishBlockedHint(title, description)}
+                    </Typography.Text>
+                  )}
+                </Space>
               ) : null}
             </Space>
           </Card>

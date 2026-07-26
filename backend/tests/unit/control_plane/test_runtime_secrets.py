@@ -17,6 +17,28 @@ from automation_tool.control_plane.bootstrap.runtime_secrets import (
 )
 
 
+# File delivery authenticates a secret with POSIX ownership, permission bits and
+# `dir_fd`-relative opens. Windows has none of the three, so the mode is refused
+# there instead of approximated -- and the cases below, which assert the POSIX
+# rules themselves, are reported as skips rather than silently absent.
+POSIX_OWNERSHIP = hasattr(os, "geteuid") and hasattr(os, "getegid")
+
+posix_secret_files = pytest.mark.skipif(
+    not POSIX_OWNERSHIP,
+    reason="file-mode runtime secrets are defined by POSIX uid/gid/mode, absent on this platform",
+)
+
+
+def effective_user() -> int:
+    """The uid the validator compares against, or a placeholder when skipping."""
+    return os.geteuid() if POSIX_OWNERSHIP else -1
+
+
+def effective_group() -> int:
+    """The gid the validator compares against, or a placeholder when skipping."""
+    return os.getegid() if POSIX_OWNERSHIP else -1
+
+
 def metadata(*, mode: int, uid: int | None = None, gid: int | None = None) -> os.stat_result:
     return os.stat_result(
         (
@@ -24,8 +46,8 @@ def metadata(*, mode: int, uid: int | None = None, gid: int | None = None) -> os
             1,
             1,
             1,
-            os.geteuid() if uid is None else uid,
-            os.getegid() if gid is None else gid,
+            effective_user() if uid is None else uid,
+            effective_group() if gid is None else gid,
             1,
             0,
             0,
@@ -99,6 +121,7 @@ def test_file_mode_reads_only_the_fixed_name_and_enforces_required(
     ]
 
 
+@posix_secret_files
 def test_fixed_directory_missing_is_an_absent_secret(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -108,6 +131,7 @@ def test_fixed_directory_missing_is_an_absent_secret(
     assert runtime_secrets._file_secret(RuntimeSecretName.DATABASE_URL) is None
 
 
+@posix_secret_files
 def test_fixed_directory_open_error_is_normalized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -120,6 +144,7 @@ def test_fixed_directory_open_error_is_normalized(
         runtime_secrets._file_secret(RuntimeSecretName.DATABASE_URL)
 
 
+@posix_secret_files
 def test_fixed_directory_symlink_is_not_followed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -134,6 +159,7 @@ def test_fixed_directory_symlink_is_not_followed(
         runtime_secrets._file_secret(RuntimeSecretName.DATABASE_URL)
 
 
+@posix_secret_files
 def test_fixed_directory_delegates_to_bounded_reader(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -144,6 +170,7 @@ def test_fixed_directory_delegates_to_bounded_reader(
     assert runtime_secrets._file_secret(RuntimeSecretName.DATABASE_URL) == "fixed-value"
 
 
+@posix_secret_files
 def test_bounded_reader_returns_none_for_a_missing_fixed_file(tmp_path: Path) -> None:
     directory = os.open(tmp_path, os.O_RDONLY)
     try:
@@ -152,6 +179,7 @@ def test_bounded_reader_returns_none_for_a_missing_fixed_file(tmp_path: Path) ->
         os.close(directory)
 
 
+@posix_secret_files
 def test_bounded_reader_rejects_symlink_without_following_it(tmp_path: Path) -> None:
     target = write_secret(tmp_path, "target", b"do-not-follow")
     (tmp_path / RuntimeSecretName.DATABASE_URL.value).symlink_to(target)
@@ -163,6 +191,7 @@ def test_bounded_reader_rejects_symlink_without_following_it(tmp_path: Path) -> 
         os.close(directory)
 
 
+@posix_secret_files
 @pytest.mark.parametrize(
     "value",
     (
@@ -186,6 +215,7 @@ def test_bounded_reader_rejects_unsafe_content(tmp_path: Path, value: bytes) -> 
         os.close(directory)
 
 
+@posix_secret_files
 def test_bounded_reader_normalizes_read_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -204,6 +234,7 @@ def test_bounded_reader_normalizes_read_errors(
         os.close(directory)
 
 
+@posix_secret_files
 def test_bounded_reader_rejects_a_file_that_grows_after_first_read(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -219,13 +250,15 @@ def test_bounded_reader_rejects_a_file_that_grows_after_first_read(
         os.close(directory)
 
 
+@posix_secret_files
 def test_metadata_accepts_private_owner_and_root_runtime_group_files() -> None:
     _validate_metadata(metadata(mode=stat.S_IFREG | 0o400))
     root_group_file = metadata(mode=stat.S_IFREG | 0o440, uid=0)
     _validate_metadata(root_group_file)
-    assert root_group_file.st_gid == os.getegid()
+    assert root_group_file.st_gid == effective_group()
 
 
+@posix_secret_files
 @pytest.mark.parametrize(
     "candidate",
     (
@@ -243,3 +276,25 @@ def test_metadata_accepts_private_owner_and_root_runtime_group_files() -> None:
 def test_metadata_rejects_unsafe_type_owner_or_permissions(candidate: os.stat_result) -> None:
     with pytest.raises(RuntimeSecretError):
         _validate_metadata(candidate)
+
+
+@pytest.mark.skipif(
+    POSIX_OWNERSHIP,
+    reason="POSIX platforms implement file mode instead of refusing it",
+)
+def test_file_mode_fails_closed_where_posix_ownership_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Absent POSIX ownership the mode must refuse, not silently read nothing.
+
+    Returning `None` here would let a deployment start with every secret
+    unset and no error, which is the failure this fixed error exists to stop.
+    """
+    clear_secret_environment(monkeypatch)
+    monkeypatch.setenv("AUTOMATION_TOOL_RUNTIME_SECRET_MODE", "files")
+    monkeypatch.setattr(runtime_secrets, "_SECRET_DIRECTORY", str(tmp_path))
+    (tmp_path / RuntimeSecretName.DATABASE_URL.value).write_bytes(b"fixed-value")
+
+    with pytest.raises(RuntimeSecretError):
+        runtime_secret(RuntimeSecretName.DATABASE_URL)

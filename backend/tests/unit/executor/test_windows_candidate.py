@@ -178,7 +178,7 @@ def test_audit_rejects_wrong_architecture_symlinks_and_resource_limits(
         )
 
 
-def test_audit_rejects_invalid_roots_and_special_files(tmp_path: Path) -> None:
+def test_audit_rejects_an_invalid_root(tmp_path: Path) -> None:
     not_a_directory = _write(tmp_path / "not-a-directory")
     with pytest.raises(WindowsExecutorCandidateRejected):
         audit_windows_executor_candidate(
@@ -187,6 +187,15 @@ def test_audit_rejects_invalid_roots_and_special_files(tmp_path: Path) -> None:
             forbidden_development_roots=(),
         )
 
+
+# Split out rather than left joined to the case above: `os.mkfifo` does not
+# exist on Windows, so one AttributeError used to take the root check down with
+# it -- inside the file that audits Windows candidates.
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo"),
+    reason="no way to place a non-regular file inside a directory tree on this platform",
+)
+def test_audit_rejects_special_files(tmp_path: Path) -> None:
     bundle = _candidate(tmp_path / "special")
     fifo = bundle / "_internal/fifo"
     os.mkfifo(fifo)

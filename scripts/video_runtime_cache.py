@@ -45,10 +45,13 @@ def cache_root() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library/Caches" / CACHE_DIRECTORY_NAME
     if os.name == "nt":
+        # No extra `cache` leaf: the root's own name has to carry the project
+        # scope on every platform, so a stray directory is attributable to
+        # `automation-tool` from the directory name alone.
         base = os.environ.get("LOCALAPPDATA")
         if base:
-            return Path(base) / CACHE_DIRECTORY_NAME / "cache"
-        return Path.home() / "AppData/Local" / CACHE_DIRECTORY_NAME / "cache"
+            return Path(base) / CACHE_DIRECTORY_NAME
+        return Path.home() / "AppData/Local" / CACHE_DIRECTORY_NAME
     base = os.environ.get("XDG_CACHE_HOME")
     if base:
         return Path(base) / CACHE_DIRECTORY_NAME

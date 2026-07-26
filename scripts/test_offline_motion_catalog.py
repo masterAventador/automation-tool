@@ -353,10 +353,139 @@ def test_check_tamper_matrix() -> None:
     expect_failure("aggregate drift against lock", aggregate_drift)
 
 
+class _FakeResponse:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+
+def _with_patched_urlopen(build, responder):
+    """Swap the transport `fetch` uses, and always put the real one back.
+
+    `fetch` is a module-level function over the shared `urllib` module, so the
+    patch is process-wide while it is installed. Restoring it in a `finally` is
+    what keeps a failure in one of these cases from silently disabling every
+    download in the ones that follow.
+    """
+    import contextlib
+    import urllib.request
+
+    @contextlib.contextmanager
+    def patched():
+        original = urllib.request.urlopen
+        urllib.request.urlopen = responder
+        try:
+            yield
+        finally:
+            urllib.request.urlopen = original
+
+    return patched()
+
+
+def test_fetch_survives_transient_download_failures() -> None:
+    """A download that fails once must not fail the whole build.
+
+    Measured on 2026-07-26 while building this catalog from a clean tree: 6
+    requests, 5 succeeded, 1 failed, and because `fetch` made exactly one
+    attempt the build aborted. Only the per-file download cache made a rerun
+    cheap enough to get through -- it took four runs. Any gate that names this
+    builder as its prerequisite inherits that failure rate, so the retry has to
+    exist before the prerequisite is declared, not after.
+    """
+    build = load_module(BUILD)
+    build.DOWNLOAD_RETRY_BACKOFF_SECONDS = (0.0, 0.0, 0.0)
+    attempts: list[str] = []
+
+    def flaky(request, timeout=None):  # noqa: ANN001
+        attempts.append(request.full_url)
+        if len(attempts) < 3:
+            raise OSError("[Errno 54] Connection reset by peer")
+        return _FakeResponse(b"payload")
+
+    payload = None
+    failure: BaseException | None = None
+    with _with_patched_urlopen(build, flaky):
+        try:
+            payload = build.fetch("https://example.invalid/asset.js")
+        except BaseException as error:  # noqa: BLE001
+            failure = error
+
+    assert payload == b"payload", (
+        "fetch must retry a transient network failure rather than abort the "
+        f"whole build on the first one; attempts={len(attempts)} failure={failure!r}"
+    )
+    assert len(attempts) == 3, f"expected 3 attempts, made {len(attempts)}"
+
+
+def test_fetch_gives_up_loudly_instead_of_retrying_forever() -> None:
+    build = load_module(BUILD)
+    build.DOWNLOAD_RETRY_BACKOFF_SECONDS = (0.0, 0.0, 0.0)
+    attempts: list[str] = []
+
+    def always_down(request, timeout=None):  # noqa: ANN001
+        attempts.append(request.full_url)
+        raise OSError("[Errno 60] Operation timed out")
+
+    failure: BaseException | None = None
+    with _with_patched_urlopen(build, always_down):
+        try:
+            build.fetch("https://example.invalid/asset.js")
+        except BaseException as error:  # noqa: BLE001
+            failure = error
+
+    assert isinstance(failure, build.BuildError), (
+        f"a download that never recovers must fail the build, got {failure!r}"
+    )
+    assert len(attempts) == 4, (
+        f"the retry budget must be bounded and exhausted, made {len(attempts)} attempts"
+    )
+    assert "4 attempt" in str(failure), (
+        f"the failure must say how hard it tried: {failure}"
+    )
+
+
+def test_fetch_does_not_retry_a_url_that_will_never_exist() -> None:
+    """A 404 is an answer, not a hiccup. Retrying it only delays the report."""
+    import urllib.error
+
+    build = load_module(BUILD)
+    build.DOWNLOAD_RETRY_BACKOFF_SECONDS = (0.0, 0.0, 0.0)
+    attempts: list[str] = []
+
+    def not_found(request, timeout=None):  # noqa: ANN001
+        attempts.append(request.full_url)
+        raise urllib.error.HTTPError(
+            request.full_url, 404, "Not Found", {}, None  # type: ignore[arg-type]
+        )
+
+    failure: BaseException | None = None
+    with _with_patched_urlopen(build, not_found):
+        try:
+            build.fetch("https://example.invalid/gone.js")
+        except BaseException as error:  # noqa: BLE001
+            failure = error
+
+    assert isinstance(failure, build.BuildError), f"unexpected outcome: {failure!r}"
+    assert len(attempts) == 1, (
+        f"a permanent 404 must be reported at once, made {len(attempts)} attempts"
+    )
+
+
 def main() -> None:
     test_lock_manifest_contract()
     test_builder_rewrites()
     test_check_tamper_matrix()
+    test_fetch_survives_transient_download_failures()
+    test_fetch_gives_up_loudly_instead_of_retrying_forever()
+    test_fetch_does_not_retry_a_url_that_will_never_exist()
     print("offline motion catalog tests passed")
     print("executed checks: 3")
 

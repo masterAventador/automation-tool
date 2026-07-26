@@ -13,7 +13,21 @@ test("the four desktop test layers have explicit commands", async () => {
 
   assert.equal(packageJson.scripts["test:unit"], "vitest run");
   assert.equal(packageJson.scripts["test:ui"], "playwright test");
-  assert.match(packageJson.scripts["test:rust"], /^cargo test /);
+  // The Rust layer produces its own `frontend/dist` before compiling.
+  // `tauri::generate_context!` reads `frontendDist` at macro expansion time, so
+  // on a tree that has never run a build `cargo test` does not fail a test, it
+  // fails to compile: "The `frontendDist` configuration is set to `../dist` but
+  // this path doesn't exist". That made `test:rust` -- and `test:layers`, which
+  // runs it -- red on every fresh clone, for a reason unrelated to any change.
+  // This assertion used to be anchored at `^cargo test`, which forbade exactly
+  // the prerequisite step that fixes it. The layer still has to be an explicit
+  // command that really compiles and runs the Rust tests; it may now also
+  // produce what it needs. Building costs about three seconds and no network.
+  assert.match(packageJson.scripts["test:rust"], /^pnpm build && cargo test /);
+  assert.match(
+    packageJson.scripts["test:rust"],
+    /cargo test --manifest-path src-tauri\/Cargo\.toml --locked/,
+  );
   assert.match(packageJson.scripts["test:tauri"], /wdio run wdio\.conf\.ts/);
   assert.equal(
     packageJson.scripts["test:layers"],

@@ -15,6 +15,18 @@ from automation_tool.executor.macos_candidate import (
 )
 
 
+# This module audits the *macOS* candidate, and several of its fixtures are
+# POSIX artefacts rather than incidental spellings: a permission bit that
+# Windows does not model, a FIFO it cannot create, a `file://` development root
+# in POSIX shape. Those cases are reported as skips with a reason rather than
+# quietly counted as passes -- on Windows they were "passing" only because
+# nothing raised.
+requires_posix_filesystem = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the fixture needs POSIX permission bits, FIFOs or POSIX absolute paths",
+)
+
+
 def _write(path: Path, content: bytes = b"fixture") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -67,9 +79,10 @@ def test_audit_accepts_a_native_signing_ready_candidate(
 @pytest.mark.parametrize(
     "relative_path,content",
     (
-        (
+        pytest.param(
             "_internal/automation_tool-0.1.0.dist-info/direct_url.json",
             b'{"url":"file:///private/source/backend"}',
+            marks=requires_posix_filesystem,
         ),
         ("_internal/ms-playwright/chromium-123/chrome", b"browser-cache"),
     ),
@@ -211,7 +224,25 @@ def test_audit_rejects_each_browser_cache_directory_form(
         )
 
 
-def test_audit_rejects_invalid_roots_special_files_and_resource_limits(
+# Split out: `os.mkfifo` is absent on Windows, and one AttributeError used to
+# take the root and resource-limit checks down with it.
+@requires_posix_filesystem
+def test_audit_rejects_special_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
+    bundle = _candidate(tmp_path / "special")
+    fifo = bundle / "_internal/fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(MacOSExecutorCandidateRejected):
+        audit_macos_executor_candidate(
+            bundle_directory=bundle,
+            expected_architecture="aarch64",
+            forbidden_development_roots=(),
+        )
+
+
+def test_audit_rejects_invalid_roots_and_resource_limits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
@@ -219,16 +250,6 @@ def test_audit_rejects_invalid_roots_special_files_and_resource_limits(
     with pytest.raises(MacOSExecutorCandidateRejected):
         audit_macos_executor_candidate(
             bundle_directory=not_a_directory,
-            expected_architecture="aarch64",
-            forbidden_development_roots=(),
-        )
-
-    bundle = _candidate(tmp_path / "special")
-    fifo = bundle / "_internal/fifo"
-    os.mkfifo(fifo)
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        audit_macos_executor_candidate(
-            bundle_directory=bundle,
             expected_architecture="aarch64",
             forbidden_development_roots=(),
         )
@@ -251,7 +272,14 @@ def test_audit_rejects_invalid_roots_special_files_and_resource_limits(
         )
 
 
-@pytest.mark.parametrize("failure", ("missing", "not_executable", "not_mach_o"))
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "missing",
+        pytest.param("not_executable", marks=requires_posix_filesystem),
+        "not_mach_o",
+    ),
+)
 def test_audit_rejects_an_invalid_entrypoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -130,9 +130,7 @@ def check_runner_documentation_does_not_copy_derived_counts() -> None:
     """Inventory prose must not silently drift from glob-derived discovery."""
     copied_counts: dict[str, list[str]] = {}
     for name in ("run_script_tests.py", "test_script_test_runner.py"):
-        matches = _copied_inventory_counts(
-            _documentation_prose(REPOSITORY_ROOT / "scripts" / name)
-        )
+        matches = _copied_inventory_counts(_documentation_prose(REPOSITORY_ROOT / "scripts" / name))
         if matches:
             copied_counts[name] = matches
     if copied_counts:
@@ -170,17 +168,25 @@ def _fake_interpreters(repository: Path) -> tuple[Path, Path]:
     executable = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
     backend = repository / "backend" / ".venv" / executable[0] / executable[1]
     browser_use = (
-        repository
-        / "tools"
-        / "browser-use-contract"
-        / ".venv"
-        / executable[0]
-        / executable[1]
+        repository / "tools" / "browser-use-contract" / ".venv" / executable[0] / executable[1]
     )
     for executable in (backend, browser_use):
         executable.parent.mkdir(parents=True, exist_ok=True)
         executable.write_text("fixture executable\n", encoding="utf-8")
     return backend, browser_use
+
+
+def check_interpreter_layout_matches_this_platform() -> None:
+    """A venv puts its interpreter in a different place on Windows.
+
+    Pinning `bin/python` unconditionally means the runner aborts on Windows
+    before executing a single script, and reports that as one tidy `FATAL`
+    line rather than as a suite nobody ran -- the same shape as the orphans
+    this file exists to catch.
+    """
+    interpreter = run_script_tests.interpreter(REPOSITORY_ROOT)
+    if not interpreter.is_file():
+        _fail(f"pinned interpreter does not exist on this platform: {interpreter}")
 
 
 def check_sub_project_imports_select_their_environment_independently() -> None:
@@ -217,9 +223,7 @@ def check_sub_project_imports_select_their_environment_independently() -> None:
         )
         chosen = run_script_tests.interpreter_for(real_import, repository)
         if chosen != browser_use:
-            _fail(
-                f"an actual browser_use import did not select its environment: {chosen}"
-            )
+            _fail(f"an actual browser_use import did not select its environment: {chosen}")
 
 
 def check_windows_venv_layout_is_supported() -> None:
@@ -292,9 +296,7 @@ def check_child_imports_come_from_the_tree_under_test() -> None:
             else:
                 os.environ["PYTHONPATH"] = previous
         if not result.ok:
-            _fail(
-                f"child imported host source instead of checkout source: {result.output}"
-            )
+            _fail(f"child imported host source instead of checkout source: {result.output}")
 
 
 def check_unittest_count_is_reported() -> None:
@@ -410,17 +412,12 @@ def check_vendor_cleanliness_guard_self_proves() -> None:
             vendor_root,
             expected_revisions=expected_revisions,
         )
-        if (
-            "hyperframes" not in dirty
-            or "deliberate-pollution.txt" not in dirty["hyperframes"]
-        ):
+        if "hyperframes" not in dirty or "deliberate-pollution.txt" not in dirty["hyperframes"]:
             _fail(f"the deliberate vendor pollution was not detected: {dirty}")
         pollution.unlink()
 
         switched = vendor_root / "moneyprinterturbo"
-        switched.joinpath("tracked.txt").write_text(
-            "different clean head\n", encoding="utf-8"
-        )
+        switched.joinpath("tracked.txt").write_text("different clean head\n", encoding="utf-8")
         subprocess.run(["git", "add", "tracked.txt"], cwd=switched, check=True)
         subprocess.run(
             [
@@ -441,10 +438,7 @@ def check_vendor_cleanliness_guard_self_proves() -> None:
             vendor_root,
             expected_revisions=expected_revisions,
         )
-        if (
-            "moneyprinterturbo" not in dirty
-            or "locked commit" not in dirty["moneyprinterturbo"]
-        ):
+        if "moneyprinterturbo" not in dirty or "locked commit" not in dirty["moneyprinterturbo"]:
             _fail(f"a clean checkout at the wrong revision was not detected: {dirty}")
 
 
@@ -453,9 +447,7 @@ def check_vendor_tests_run_from_local_isolation() -> None:
     entrypoint = REPOSITORY_ROOT / "scripts" / "run_vendor_tests.py"
     if not entrypoint.is_file():
         _fail("scripts/run_vendor_tests.py is missing")
-    specification = importlib.util.spec_from_file_location(
-        "run_vendor_tests", entrypoint
-    )
+    specification = importlib.util.spec_from_file_location("run_vendor_tests", entrypoint)
     if specification is None or specification.loader is None:
         _fail("cannot load the isolated vendor test entrypoint")
     module = importlib.util.module_from_spec(specification)
@@ -514,8 +506,7 @@ def check_vendor_tests_run_from_local_isolation() -> None:
                 [
                     sys.executable,
                     "-c",
-                    f"from pathlib import Path; "
-                    f"Path({str(pollution)!r}).write_text('polluted\\n')",
+                    f"from pathlib import Path; Path({str(pollution)!r}).write_text('polluted\\n')",
                 ],
                 expected_revision=source_revision,
             )
@@ -566,6 +557,7 @@ CHECKS = (
     check_discovery_includes_deploy_tests,
     check_runner_documentation_does_not_copy_derived_counts,
     check_interpreter_is_pinned_not_inherited,
+    check_interpreter_layout_matches_this_platform,
     check_sub_project_imports_select_their_environment_independently,
     check_windows_venv_layout_is_supported,
     check_success_requires_countable_execution_evidence,

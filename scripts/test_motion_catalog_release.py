@@ -10,10 +10,15 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from gate_prerequisites import by_name, require  # noqa: E402
+
 BUILD = ROOT / "scripts/build_motion_catalog_release.py"
 CHECK = ROOT / "scripts/check_motion_catalog_release.py"
 RELEASE_LOCK = ROOT / "contracts/video/motion-catalog-release.v1.json"
@@ -21,7 +26,12 @@ DEP_LOCK = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 CATALOG = ROOT / "contracts/quality/motion-catalog.v1.json"
 RIGHTS = ROOT / "contracts/quality/motion-catalog-rights.v1.json"
 OVERLAY = ROOT / "contracts/quality/motion-asset-overlay.v1.json"
-STAGED_ROOT = ROOT / ".local/offline-motion-deps/catalog"
+# Declared once in `scripts/gate_prerequisites.py`, alongside the command that
+# produces it, so the remedy this test prints cannot drift from the path it
+# checks. The staged tree is a build input, not something this test can
+# synthesise: BM-14 rebuilds the release from it twice and requires the two
+# results to be byte-identical.
+STAGED_ROOT = ROOT / by_name("offline-motion-catalog").produces[0]
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -432,9 +442,7 @@ def test_windows_unicode_and_read_only_path_semantics() -> None:
 def test_real_release_build_is_reproducible() -> None:
     build = load_module(BUILD)
     check = load_module(CHECK)
-    assert STAGED_ROOT.is_dir(), (
-        "BM-12 staged catalog is missing; run scripts/build_offline_motion_catalog.py first"
-    )
+    require("offline-motion-catalog")
     lock = load_json(RELEASE_LOCK)
     dep_lock = load_json(DEP_LOCK)
     catalog_contract = load_json(CATALOG)

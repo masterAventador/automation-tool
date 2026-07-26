@@ -88,6 +88,13 @@ def _read_secret_file(directory_descriptor: int, name: RuntimeSecretName) -> str
 
 
 def _file_secret(name: RuntimeSecretName) -> str | None:
+    if os.open not in os.supports_dir_fd or not hasattr(os, "geteuid"):
+        # The guarantee this mode sells is POSIX ownership plus a
+        # directory-relative open that cannot be re-pointed between check and
+        # use. A platform offering neither cannot make it, so the mode is
+        # refused outright; approximating it would report every secret as
+        # merely absent and let a deployment start wide open.
+        raise RuntimeSecretError
     flags = (
         os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     )
