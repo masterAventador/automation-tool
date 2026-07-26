@@ -63,13 +63,34 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
     assert.equal(await logout.isEnabled(), true);
     await logout.click();
     await browser.$("button=确认注销").click();
-    await browser.waitUntil(
-      async () => {
-        const text = await browser.$("body").getText();
-        return text.includes("需要登录") && (await logout.isEnabled());
-      },
-      { timeout: 180_000, timeoutMsg: "safe logout did not render authoritative missing state" },
-    );
+    try {
+      await browser.waitUntil(
+        async () => {
+          const text = await browser.$("body").getText();
+          return text.includes("需要登录") && (await logout.isEnabled());
+        },
+        { timeout: 180_000 },
+      );
+    } catch {
+      // A bare timeout here costs another three-minute run to learn anything,
+      // because the page swallows a failed logout into one generic sentence.
+      // Report what the page and the authoritative projection actually said,
+      // the way the other specs in this directory already do.
+      const text = await browser.$("body").getText();
+      const session = await browser.tauri.execute(({ core }) =>
+        core.invoke("get_douyin_platform_session"),
+      );
+      throw new Error(
+        `safe logout did not render authoritative missing state: ${JSON.stringify({
+          authoritativeSession: session,
+          logoutStillPending: !(await logout.isEnabled()),
+          rendersMissing: text.includes("需要登录"),
+          rendersHealthy: text.includes("登录正常"),
+          rendersUnknown: text.includes("尚未确认"),
+          rendersReadFailure: text.includes("暂时无法读取抖音登录状态"),
+        })}`,
+      );
+    }
 
     const blocked = (await browser.tauri.execute(async ({ core }) => {
       try {
