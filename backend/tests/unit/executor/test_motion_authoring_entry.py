@@ -60,9 +60,15 @@ FIRST_AUTHORING_REPLY = json.dumps(
         # The injected DESIGN write failure happens before these fields are
         # parsed. Keeping them present still exercises the production response
         # shape without duplicating the large happy-path composition fixture.
+        #
+        # Exactly these three keys, no more: T92 moved the composition out of
+        # the model's reply and into this machine's template, and the first
+        # response is checked for the exact key set before anything is written.
+        # A stale fourth key here fails that check instead of the disk write,
+        # so the test would pass on the wrong rejection — which is what the
+        # T92/T106 merge produced until this line was removed.
         "script": None,
         "storyboard": None,
-        "composition_html": None,
     }
 )
 
