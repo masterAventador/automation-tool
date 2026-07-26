@@ -51,6 +51,22 @@ class LayerResult:
 # The whole gate, in the order that fails fastest first. `pnpm test:unit` and
 # `pnpm test:contracts` are separate entries on purpose: they used to be one
 # shell line, and the second one's exit code was discarded.
+def venv_python(os_name: str = os.name) -> str:
+    """Where the backend virtualenv keeps its interpreter, on this platform.
+
+    Every other layer names `sys.executable` or a tool on PATH; this one has to
+    name the backend's own environment, and the two platforms disagree on where
+    that is. It used to say `.venv/bin/python` outright, so on Windows the
+    aggregate reported a red backend layer that had nothing to do with the
+    product — measured on the acceptance machine 2026-07-27. A gate whose own
+    failure is indistinguishable from the thing it guards teaches people to
+    discount it.
+    """
+    if os_name == "nt":
+        return str(Path(".venv") / "Scripts" / "python.exe")
+    return str(Path(".venv") / "bin" / "python")
+
+
 LAYERS: tuple[Layer, ...] = (
     Layer("台账计数", [sys.executable, "scripts/check_demo_roadmap_counts.py"]),
     Layer("tsc", ["pnpm", "exec", "tsc", "-b"], "frontend"),
@@ -60,7 +76,7 @@ LAYERS: tuple[Layer, ...] = (
     Layer("playwright", ["pnpm", "exec", "playwright", "test"], "frontend"),
     Layer("scripts", [sys.executable, "scripts/run_script_tests.py"]),
     Layer("cargo", ["cargo", "test"], "frontend/src-tauri"),
-    Layer("backend", [".venv/bin/python", "-m", "pytest", "-q"], "backend"),
+    Layer("backend", [venv_python(), "-m", "pytest", "-q"], "backend"),
 )
 
 NOTHING_RAN = Layer("(没有任何层被执行)", [])

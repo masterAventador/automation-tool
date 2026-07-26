@@ -29,6 +29,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from run_full_regression import (  # noqa: E402
+    LAYERS,
+    venv_python,
     Layer,
     LayerResult,
     failures,
@@ -89,6 +91,38 @@ class Summarise(unittest.TestCase):
         summary = summarise([LayerResult(PASSES, 0, ""), LayerResult(PASSES, 0, "")])
 
         self.assertIn("2", summary)
+
+
+class TheBackendLayerRunsOnBothPlatforms(unittest.TestCase):
+    """The backend layer has to name an interpreter that exists where it runs.
+
+    It was the only layer with a path written into it — every other one uses
+    `sys.executable` or a tool on PATH. `.venv/bin/python` is the POSIX layout;
+    Windows puts it at `.venv/Scripts/python.exe`. Measured 2026-07-27 on the
+    Windows acceptance machine: running this aggregate there produced a red
+    backend layer that had nothing to do with the product, and the reader had
+    to know that before trusting anything else in the run. A gate whose own
+    failure looks exactly like the thing it guards is worse than no gate.
+    """
+
+    def test_the_interpreter_follows_the_platform_layout(self) -> None:
+        self.assertEqual(venv_python("posix"), str(Path(".venv") / "bin" / "python"))
+        self.assertEqual(
+            venv_python("nt"), str(Path(".venv") / "Scripts" / "python.exe")
+        )
+
+    def test_the_backend_interpreter_exists_on_this_machine(self) -> None:
+        # The check a string comparison cannot make. Tried first: assert no
+        # layer's command *starts with* `.venv`. It fails on the fix as well as
+        # on the bug, because the derived value looks exactly like the literal
+        # it replaced — the difference is where it comes from, which is not
+        # visible in the string.
+        backend = next(layer for layer in LAYERS if layer.name == "backend")
+        interpreter = ROOT / backend.directory / backend.command[0]
+        self.assertTrue(
+            interpreter.is_file(),
+            f"the backend layer names an interpreter that is not here: {interpreter}",
+        )
 
 
 if __name__ == "__main__":
