@@ -14,22 +14,22 @@
 
 | 小节 | 数量 |
 |---|---:|
-| ✅ 生产装配与出厂门禁 | 10 |
-| ✅ 云端与交付 | 3 |
+| ✅ 生产装配与出厂门禁 | 11 |
+| ✅ 云端与交付 | 6 |
 | ✅ 视频与内容 | 12 |
-| ✅ 验收基础设施与门禁 | 15 |
-| ❌ 查证不成立（观察真、结论错，无需修） | 4 |
-| **小计：已收口** | **44** |
-| 一、Demo 前必须收口 | 12 |
-| T73～T86（T10 那轮挖出的新任务） | 14 |
-| 冻结区·今晚撞见的技术债 | 11 |
+| ✅ 验收基础设施与门禁 | 17 |
+| ❌ 查证不成立（观察真、结论错，无需修） | 5 |
+| **小计：已收口** | **51** |
+| 一、Demo 前必须收口 | 9 |
+| T73～T91（T10 那轮挖出的新任务） | 12 |
+| 冻结区·今晚撞见的技术债 | 12 |
 | 冻结区·原有待办 | 10 |
-| **小计：未收口** | **47** |
-| **去重后总计** | **91** |
+| **小计：未收口** | **43** |
+| **去重后总计** | **94** |
 
-**T10 那一轮把任务从 74 涨到 91**——十七条新的全部来自「真的去跑一遍」，其中 T80/T81/T82 已在同一轮修完合并。
+**T10 那一轮把任务从 74 涨到 94**——二十条新的全部来自「真的去跑一遍」，其中 T80/T81/T82 已在同一轮修完合并，T83 已查证结论。
 
-**Demo 前要收口的是 12 项**，其余 35 项冻结或已派给 codex（见 `docs/codex-parallel-batch.md`）。
+**Demo 前要收口的是 9 项**，其余 34 项冻结或已派给 codex（见 `docs/codex-parallel-batch.md`）。
 
 > 这三个数由 `scripts/check_demo_roadmap_counts.py` 守着，改完台账跑一次即可。**但它守不住这段散文里的数字**——上面这两行以前就漂过。
 
@@ -37,9 +37,13 @@
 
 ## 当前下一步
 
-1. **👉 你现在就能做：打开手上那个 App 登录一次。** 登录的修复在服务器端，已部署并实测通过（登录 + 挑战两步、四项校验全过）。**不用换包** —— 17:12 那个 DMG 就行。账号 `xuanbai.demo` / 密码 `xuanbai891861`。登进工作台后告诉我，我复核 `installations` 是否 0→1，T68 才能标完成。
-2. **[T10] 在正式签名包上重跑一遍用户路径。** 一句话生成视频已在真实 App 里跑通，但跑的是 `control-plane-e2e` 的 debug 构建，**不是你拿到的签名包**。这是本轮目标本身。
+1. **等 codex 合并** → 跑最终全量回归 → 从那个 HEAD 出签名包（约一个半小时，大头是公证）→ **在那个包上复验用户路径**。最后一步才是 T10 的定义本身：验收必须发生在你实际拿到的产物上。现在这个包缺 UI 修复、缺 DMG 的 `Applications` 链接、缺 07-26 夜里合的四条。
+2. **👉 你现在就能做（30 秒）：完全退出 App 再打开，看「平台状态」还是不是「登录正常」。** 这验的是抖音登录态有没有落盘，是 T6 唯一未闭环的一项，与换不换包无关。
 3. 其余按下表顺序。**新发现一律记进冻结区，不派线去做。** Demo 前不再发散。
+
+> **07-26 22:40 台账纠偏。** T68、T48、T5 三条此前挂着「等你做」，实际早已完成，证据一直在磁盘和服务端：
+> `installations` 已从文档记录的 0 行变为 5 行且全部绑定账号；`device-credential-v1` 与最早那行逐秒吻合；三份密钥 20:22 就位并被那次成功出片真实使用。
+> **这三条是「复述台账」而不是「去查事实」造成的误报**——台账写什么就说什么，而台账本身落后于现实。判据：**说某项待办之前，先找到它此刻的证据在哪。** 找不到证据的「未完成」和找不到证据的「已完成」一样不可信。
 
 ---
 
@@ -50,15 +54,12 @@
 
 | ID | 任务 | 状态 | 并行 | 说明 |
 |---|---|---|---|---|
-| T68 | 产品账号登录报「暂时无法完成账号操作」 | 🔍 待验收 | 已完成 | **根因已实证并上线**：边界 nginx 用 `$request_id` 覆盖了 App 送的 `x-request-id`，App 比对回显不一致 → `ProtocolInvalid`，**登录第一个请求就失败**，所以 challenge 与 logout 从未发出（这解释了日志里「只有登录没有挑战」）。已部署实测回显一致。正式包无 WebDriver（T48），**最后一步只能你手工登录**。见 `docs/development/T68.md` |
 | T10 | 从正式签名包跑一遍所有用例 | 🚧 | ❌ 不可 | 本轮目标本身。与 T57b 的 e2e 重组直接冲突，必须我做。**已修四条真红**（见下「T10 已抓到的」）；正式包正在 `wt/release` 出，四条扫描线并行 |
 | T72 | 门禁执行者的三处空洞 | ⬜ | ✅ 可 | 全量扫描的副产物，同一类：① `run_script_tests.py` **没被接进任何门禁**（`grep -rn run_script_tests .github/` 零命中）——为「守卫没人执行」造的解药，自己没人执行；② `deploy/ingress/test_ingress_config.py`(2 条) 与 `deploy/cloud/test_cloud_deployment.py`(46 条) 共 **48 条断言无任何执行者**，pytest 的 `testpaths=["tests"]` 收不到、runner 只 glob `scripts/` 也收不到，唯一调用方式是 `docs/development/T68.md:131` 里一行手敲命令（实跑是绿的，属潜伏风险）；③ runner 只对**失败**脚本打印输出（`:145`），通过的 stdout 直接丢弃，于是「跑 50 条断言」和「什么都没跑就 return 0」在汇总里长得一模一样——实测 41 个脚本共 400 条检查，**11 个「通过」数不出任何执行证据**，其中 `test_video_studio_acceptance_scope.py` 正是当初红着躺了很久那条。另 `test_script_test_runner.py:73` 的元测试用与实现完全相同的子串判据去断言实现，恒真 |
 | T69 | App 全程零日志 | ⬜ | ❌ 不可 | 无 tracing / log / env_logger 依赖，零条日志调用。**演示机上一旦出问题，我们是瞎的**（今天就吃过亏：我让你跑二进制看 stderr，那条命令根本不可能有输出）。Demo 前只加「不改任何行为」的一层 |
 | T61 | setup 失败即 abort，无兜底（含 T66b、T65） | ⬜ | ❌ 不可 | 调研已完成，**紧迫性下降**：「做完视频→正常退出→再打开」经导入链路核实是安全的，前一条线的高风险判断被推翻。剩余真实窗口只有「删成片时强退」和硬断电。建议一处四行兜底，不动 setup 结构。**T66b（目录权限只检查不修复）和 T65（`cleanup_expired` 无调用方）都在 `video_job_workspace.rs` 同一条启动路径上，并进来一起改。** 全部证据见 `docs/development/T61-setup-abort-risk.md` |
 | T70 | 演示前检查清单补完 | 🚧 | ⚠️ 半 | §2、§5.1 已实测贴输出；§3 等最终 DMG，§7 等 T36 定型 |
-| T48 | 演示机上人工走登录 → 设备绑定 | 👤 | — | 包里地址、Gatekeeper 放行、隔离启动**均已验**；登录自动化三条路全排除。顺带验掉「客户双击后在 Gatekeeper 同意框点一次 Open」（清单 §4.3，自动化拍不到），和 T54 的正向确认（约 15 秒，会有可见窗口） |
-| T5 | 三份密钥按真实路径填一遍 | 👤 | — | 存密钥这一环已在真实 App 验通（模型密钥 HTTP 200），这条是补正式包上的验收 |
-| T6 | 抖音扫码登录与后续链路 | 👤 | — | **演示前一天必须做掉**，且要确认关掉 App 再打开登录态仍在。演示机数据目录与开发机隔离。跟生成视频无关 |
+| T6 | 抖音扫码登录与后续链路 | 🔍 待验收 | — | **扫码已完成并实测通过**，服务端记录 `state = healthy`。本机只读核对：指针 `current-douyin-profile-v1` 指向产品自建的 `739b9297-…`，档案目录 21:35 更新；此前我手工拷进去的污染档案 `df1c89f0` 已不在链路上。**换新包不用重扫**——档案在 `app_data_dir` 下按 bundle identifier `com.aventador.automationtool` 定位，构建之间不变。**只剩一件**：完全退出 App 再打开，确认仍是「登录正常」（预检清单 §375 第二步，验的是登录态落盘，不是当时那一刻通没通）。遗留两处旧档案（顶层 `embedded-browser-profiles/douyin/df1c89f0`、`browser-profiles/douyin/d2265434`）不在链路上，未清理——产品自管目录不手工动 |
 | T53 | Windows 验收机装 Node + pre-push hook | 👤 | — | 当前 v22.20.0 低于 `engines >=24 <27`，快档门禁不需要（`tsc` 只要 `>=14.17`）但**慢档必须对齐**。`.git/hooks/pre-push` 已被 git-lfs 占用，需人工插入共存。挂 pre-push 而非 pre-commit——后者跑在工作树上，而工作树正是被遮蔽的那个对象 |
 | T7 | Windows GUI 三项验收 | 👤 | — | 依赖 T53。你已授权装 Node |
 | T71 | 要不要补背景音乐 | 👤 决策 | — | 合规上无障碍（已有 4 个自制、权利全 `true` 的 `music_sfx`），但那 4 个是 1–2 秒音效不是 BGM。**做不做 / 几首 / 什么风格等你定** |
@@ -79,11 +80,13 @@
 
 判据：软链安不安全**不看体积，看有没有正常命令会去改写它**。`vendor/*` 只读 submodule 可以软链（先核对各 worktree gitlink 一致），`.venv` 和 `node_modules` 不行。
 
-### T10 跑全量与并行验收挖出的新任务（T73～T86）
+### T10 跑全量与并行验收挖出的新任务（T73～T91）
 
 > 这十四条全部产生于 T10 那一轮：五条并行验收线 + 一条 Windows 线 + 包审计两轮。
 > 编号从 T73 起，**T82 归 Windows 提权 ACL**（`docs/development/T82.md` 已占用），生成耗时那条顺延为 T83。
 > T84～T86 是包审计第二轮点出的演示日问题，07-26 夜间三条独立 worktree 并行修，**都是「演示当天客户会看见」而不是「代码不干净」**。
+> T90～T91 来自稳定性线的失败注入，**是演示当天客户会看见的产品缺陷，不是测试问题**。
+> T80/T81/T82 已修完合并、T83 已查证结论，四条都已移出本表——留在这里会让「未收口」虚高。
 
 | ID | 任务 | 状态 | 归属 | 依据 |
 |---|---|---|---|---|
@@ -94,10 +97,8 @@
 | T77 | ~~B5-13 前端投影与权威态不一致~~ → **前提已证伪** | 🔽 降级 | codex | 云端线拿到逐字节响应：权威态是 `{"platform":"douyin","state":"unknown","observedAt":null}`（恰好 57 字节），**不是 `missing`**。而 `unknown` 从 Python 到 Rust 到 Zod 到 UI 完全自洽，界面显示「尚未确认」。B5-13 描述的症状只在一个**被双侧守死、当前不可达**的组合下发生。**不是现网 bug**，改为「确认该链路对 unknown 的处理正确」即可 |
 | T78 | 视频线 7 驱动 / 8 spec 全卡启动门禁 | ⬜ | codex | `780abce` 拆桩后驱动没跟上，`prepare_startup_gate` 的 34 个调用者里这 7 个一个都没有。`T36-oneshot-video-preview.md:116` 记了但说「5 个 spec」，实测 8 个。依赖 T74 |
 | T79 | 124 个验收驱动无聚合执行器，48 个只被读源码不被执行 | ⬜ | codex | 按「引用」与「执行」分开判：被 npm script 点名 37、被真 subprocess 执行 4、**只被读源码从不执行 48**、**零执行者 35**。那 48 个最隐蔽：`.test.mjs` / `test_*.py` 只 `readFile` 驱动源码做文本断言，**绿的是「源码长这样」不是「能跑通」**——`run_t3_12` 在读者下全绿、真执行时 exit=1。`run_vf_01_acceptance.py` 全仓零命中 |
-| T80 | 四处门禁在干净树上跑不起来 | ✅ | 已合并 | `2cbb325`/`def5837`/`5fc876a`。B1 缺 offline 目录、B2 缺 `frontend/dist`（有传染性，`test:layers` 必断）、B3 缺 worker package 且**补救指路指错脚本**、B4 缺 EB-16 正式包。新增 `scripts/gate_prerequisites.py` 把「门禁→产物→生产者」单点声明，**提示信息从 `producer` 字段生成**，所以指错就是命令错。顺带修 `build_offline_motion_catalog.py` 的 `fetch()` 零重试——锁文件声明 **71 个下载产物**，零重试在干净机器上近乎必然失败 |
-| T81 | VF-04 自检只可能在 Windows 通过 | ✅ | 已合并 | `2cbb325`。`check_video_media_toolchain.py:539` 在 POSIX 造符号链接、Windows 造目录联接，而 `finally: linked.rmdir()` 对符号链接必然 `ENOTDIR`。**崩溃在 `finally`，断言本身已经通过了**——所以 macOS/Linux 从写下那天起就是红的 |
-| T82 | 以管理员身份运行时内置浏览器 Profile 子系统整块失效 | ✅ | 已合并 | `a440336`。`apply_private_acl` 只设 DACL（owner 传 `null_mut()`），而 `verify_private_acl_parts` 要求 `owner == TokenUser`；提权会话里 `TokenOwner` 是 `BUILTIN\Administrators` → `EqualSid` 失败 → `UnsafeDirectory`。双向证明：提权 20/20 失败、非提权 12/12 + 8/8 通过。**修创建端不修校验端**——owner 天然持有 `WRITE_DAC`，接受 Administrators 等于让机器上每个管理员都能改写它保护的东西。详见 `docs/development/T82.md` |
-| **T83** | **编排 136～178 秒，产出只有 9 个字段** | ⬜ | **我** | 用户看完成片提出的质疑，查代码后成立。模型实际被要求产出的只有 `DesignArtifact`（4 字段）+ `ScriptArtifact`（3 字段）共 **9 个字段几百字符**，**画面是本机模板渲染的，模型不产出任何动画代码**。qwen3.7-max 出这点 JSON 正常应是几秒，实测差一到两个数量级。三个候选原因有代码依据无实测：① `MAX_FIX_ROUNDS = 2`，最坏 **3 次串行往返**；② `MODEL_TIMEOUT_SECONDS = 360` 且流式超时约束**块间间隔**，docstring 明写按「推理模型会思考一分钟」设计；③ **查不出实际跑了几轮**，因为 App 零日志（T69）。稳定性线已在测纯模型端点对照——**那一刀能切开「模型慢」和「我们慢」**。若是后者，3 分半可能压到几十秒，直接改变演示体验 |
+| T90 | **模型侧三种失败都说同一句话，而且是错的** | ⬜ | **我** | 失败注入实测：模型连不上 → 2 秒后「判定这次描述做不出来…请换一句更具体的描述后重试」；模型卡死不断 → **363 秒后一字不差的同一句**。两种都不是用户的描述有问题，而产品让用户去改句子。演示当天讲解人会照着这句话去改文案，越改越错 |
+| T91 | **提交后切页 = 永远没有任何提示**（静默失败） | ⬜ | **我** | 任务第 4 秒就失败了，切到别的页面再回来，列表显示「还没有真实制作任务」，**第 12 分钟仍然什么都不说**；全屏关键词扫描全阴性（做不出来/超时/出错/失败/不可用/无法 全 no）。另：等待期间只有一个转圈的按钮——`setSubmitMessage(null)` 清空后不写新提示，那句「已提交」在 `.then()` 里，比字面意思晚一到两分钟。**演示当天最便宜的规避：提交后不要切页** |
 | T84 | DMG 里没有 `/Applications`，客户当场装不了 | 🚧 | `dmg-install` | 实测解析 `tauri.conf.json`，`bundle` 段的完整内容就是 `{"active": true}`——**没有任何 DMG 定制**。挂载后用户看到一个孤立的 App 图标，没有可以拖进去的目标。演示当天客户拿到包的第一个动作就卡在这里。修配置 + 门禁测试由该线做，**挂载核对（`hdiutil attach` 看有没有 `Applications -> /Applications`）由我在最终出包时做** |
 | T85 | 更新中心不用点就常显红字 | 🚧 | `update-ui` | 正式包审计里目视到的现象。代码事实：`AppUpdateCenter.tsx` 的 `stateColor()` **只有 `failed` 一个分支返回红**，所以红字必然来自状态机进了 `failed`；而状态机**根本没有「未配置 / 已关闭」这种状态**；组件 `useEffect` 挂载即轮询 `getState()`，**不需要用户点任何按钮**。演示时客户第一眼看到红字。派单时写死了边界：**不许为了消红把真实失败一起藏掉**——那是本项目反复吃亏的「静默成功」 |
 | T86 | 动效成片可能静默产出静止画面 | 🚧 | `motion-still` | **已经真实发生过一次。** 随包示范里出现 CDN 版 gsap，而渲染沙箱硬离线；模型照抄一个 `<script src="https://...">`，沙箱加载不到，**页面不报错、逐帧渲染照常跑完、产出每帧相同的静止视频**——链路全绿，成片是废的。`agent.py:731` 已提到离线路径 `compositions/runtime/gsap.min.js`，说明这条路存在，但示范与校验是否对齐要查证。修法两侧：入口拦外部 URL，出口检测「首帧/中帧/末帧全同」。**出口那道更值钱——它不依赖我们猜到全部失败原因** |
@@ -137,6 +138,7 @@
 |---|---|---|---|
 | T63 | **三处「版本号一升就砖」，会同时打死所有老机器** | 🤖 codex | `executor_platform.rs:354` 诊断设置版本无迁移路径；`app_update_policy.rs:288` 发布通道名变更即 abort；`app_update_policy.rs:282` 要求存量文件**重新序列化后与磁盘字节逐字节相同**（字段顺序或序列化行为任何变化即 abort）。本次演示不可能触发（单一构建单一通道），但**第一次真正发版升级时会同时打死所有老机器** |
 | T64 | `AppUpdateCache` 有两个非自愈的强退窗口 | 🤖 codex | `download()` 尾段 351-357：`atomic_replace` 之后、`save_cache_manifest` 之前被杀 → package 有而 manifest 无 → 永久 abort；`partial_manifest.delete()` 之前被杀 → 同型。**本包里是死的**（feed URL 是 `.invalid` 保留域，永不解析），但**换成真 feed URL 就变成「更新到一半被强退 = 砖」的定时炸弹** |
+| T92 | **把动效 HTML 从模型输出挪回本机模板** | 🤖 | T83 查明耗时严格正比于模型写的字节数，而 `composition_html` 占输出 70%。改成本机模板 + 模型只填结构化字段，提交到完成有望从两分多钟降到几十秒。**这是产品改动，演示前不动** |
 | T66a | 文件权限只检查不修复（`secure_store.rs` 那半） | 🤖 codex | `ensure_private_file_permissions`（`secure_store.rs:182`）对**文件**只检查不修复，而同文件对**目录**却是强制 `chmod 0700` 修复——同一个文件里两套策略。Time Machine / 迁移助理恢复的账号会造出带 group/other 位的密钥文件 → 永久闪退 |
 | T66b | 目录权限只检查不修复（`video_job_workspace.rs` 那半） | ❌ 我做 | `validate_private_directory_metadata`（`video_job_workspace.rs:1299`）同型，但**和 T61 在同一个文件同一条启动路径上**，并入 T61 一起改 |
 | T67 | Windows 企业域 AppData 重定向会启动即闪退 | ✅ 已合并 | `browser_profiles_windows.rs:504` 的 `normalized_path_key` 只剥 `\\?\` 前缀，**不处理 `\\?\UNC\`**；文件夹重定向到 UNC 共享或 SUBST 映射盘时 `final_path != normalized_path_key` → abort。另 `ensure_no_reparse_components` 拒绝路径上任何 junction（把 AppData 搬到 D 盘留 junction 是常见场景）。**读代码推断，未上机验证** |
@@ -174,6 +176,7 @@
 | T54 | 主窗口不向辅助功能暴露 | 是 **macOS 锁屏行为**。判据被推翻：Chrome / VS Code / ghostty 同一时刻 AX 全是 0。连带更正：「窗口可见 3.5 分钟」不成立，那段时间屏幕锁着 |
 | T46 | 上游品牌名在产品窗口顶部 | **产品路径不复现**（那是绕开产品窗口直连 Streamlit 才能看到的）。仍补了静态门禁覆盖内嵌 WebUI |
 | T31 | H8-22 打包 App 闪退 | **不复现**。四条证据：结构 / 装配 / 运行 / 崩溃报告归因 |
+| T83 | 编排 136～178 秒产出只有 9 个字段，慢得不合理 | **我的前提错了。** 第一次应答是**四个键**，第四个 `composition_html` 是一整份 standalone 动效 HTML（含 CSS 与完整 GSAP 时间轴），实测输出约 3200 token、**HTML 占 70%**；本机模板只提供 `runtime/gsap.min.js` 一个文件。把计时器套在代理自带的 `model_call` 注入点上实测：往返 **1 次**、修复轮 **0 次**（8/8）、**`localSeconds = 0.01`**（lint+check+snapshot+落盘共 10 毫秒）、首字节 40 毫秒。**最干净的一刀**：73 token 提示词、零产品代码，模型自己跑 **178 秒**，比产品的真实编排还慢。下行速率是常数 4497–4652 B/s（波动 3%），耗时严格正比于模型这次写了多少字节。**慢在模型写得多，不在我们**。可动的杠杆见 T92（冻结） |
 
 ### ✅ 生产装配与出厂门禁
 
@@ -181,6 +184,7 @@
 |---|---|
 | T44 | **正式包接上 Developer ID 签名与公证**。296 个代码节点签名、289 个 Mach-O 全本团队签名 0 例外、entitlements 只加 `allow-jit`（有对照实验）。判据：带 quarantine 判定 `accepted` |
 | T1 | 正式包补装三份视频运行时资源。病根：验收验的是「功能能不能跑通」，不是「用户拿到的那个包能不能跑通」 |
+| T82 | **以管理员身份运行时内置浏览器 Profile 子系统整块失效**（`a440336`）。`apply_private_acl` 只设 DACL（owner 传 `null_mut()`），而 `verify_private_acl_parts` 要求 `owner == TokenUser`；提权会话里 `TokenOwner` 是 `BUILTIN\Administrators` → `EqualSid` 失败 → `UnsafeDirectory`。双向证明：提权 20/20 失败、非提权 12/12 + 8/8 通过。**修创建端不修校验端**——owner 天然持有 `WRITE_DAC`，接受 Administrators 等于让机器上每个管理员都能改写它保护的东西。见 `docs/development/T82.md` |
 | T13 | 建立真正的生产构建路径与必需资源门禁，单一声明源 `contracts/quality/release-package-resources.v1.json` |
 | T21 | 唯一产包路径不在任何自动门禁里 → 独立发版命令 `scripts/build_release_package.py` |
 | T33 | 正式包需在干净工作树重建 |
@@ -197,6 +201,9 @@
 | T18 | **控制服务云端部署**。`https://at.xuanbai.tech` 真实可用。中途逮到两个真缺陷：重复部署必崩（首次全绿、第二次才炸）、AppleDouble 污染 Alembic。重新部署 31 秒 |
 | T17 | 云端 Demo bootstrap 可注册无账号 Installation |
 | T14 | 正式构建缺设备注册路径 |
+| T68 | **产品账号登录已在正式 App 里走通**。根因是边界 nginx 用 `$request_id` 覆盖了 App 送的 `x-request-id`，App 比对回显不一致 → `ProtocolInvalid`，**登录第一个请求就失败**，所以 challenge 与 logout 从未发出。修复已部署。**07-26 服务端实测收口**：`installations` 从文档记录的 0 行变为 5 行、全部 `active` 且 `owner_user_id` 非空。见 `docs/development/T68.md` |
+| T48 | **设备绑定已在真实链路成立**。本机 `profiles/demo-xuanbai/device-credential-v1` 创建于 20:19，与 `installations` 最早那行 `12:19:17+00` 逐秒吻合。**5 行不是「密钥每次重生成」**：多出来的来自各自独立 bundle identifier 的验收构建（例如 `…t36acceptance` 的设备身份 mtime 22:05，对应 `14:05:24+00` 那行），demo Profile 那把自 17:25 起未变。包里地址、Gatekeeper 放行、隔离启动此前均已验 |
+| T5 | **三份密钥已在签名包的 demo Profile 里就位**并被真实使用：`model-service-video-creative-v1`、`model-service-script-v1`、`video-editing-service-aliyun-v1`，均写于 20:22；你后来那次成功出片就是用它们跑的，比单独验收更强。演示当天只需确认百炼额度仍可用 |
 
 ### ✅ 视频与内容
 
@@ -234,6 +241,8 @@
 | T9 | 排查全部待验收任务缺什么 |
 | T15 | 法务页缺 ffmpeg GPLv3 条目与许可证全文 |
 | T3 | 第三方软件声明页降权到设置页底部 |
+| T80 | **四处门禁在干净树上跑不起来**（`2cbb325`/`def5837`/`5fc876a`）。B1 缺 offline 目录、B2 缺 `frontend/dist`（有传染性，`test:layers` 必断）、B3 缺 worker package 且**补救指路指错脚本**、B4 缺 EB-16 正式包。新增 `scripts/gate_prerequisites.py` 把「门禁→产物→生产者」单点声明，**提示信息从 `producer` 字段生成**，所以指错就是命令错。顺带修 `build_offline_motion_catalog.py` 的 `fetch()` 零重试——锁文件声明 71 个下载产物，零重试在干净机器上近乎必然失败 |
+| T81 | **VF-04 自检只可能在 Windows 通过**（`2cbb325`）。`check_video_media_toolchain.py:539` 在 POSIX 造符号链接、Windows 造目录联接，而 `finally: linked.rmdir()` 对符号链接必然 `ENOTDIR`。**崩溃在 `finally`，断言本身已经通过了**——所以 macOS/Linux 从写下那天起就是红的 |
 
 ---
 
