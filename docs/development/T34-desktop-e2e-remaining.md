@@ -326,10 +326,14 @@ src/platform/tauri/publish-workspace-gateway.ts(50,31): Property 'publishJobId' 
 而 `lint_composition` 本身是完整标注的：
 
 ```python
-# tools/motion-authoring/motion_authoring_agent.py:650
+# backend/src/automation_tool/executor/motion_authoring/agent.py
 def lint_composition(html: str, *, allowed_assets: frozenset[str],
                      max_bytes: int, entry_path: str) -> LintResult:
 ```
+
+（本次定位过程中该模块被 `889cf9e` 从 `tools/motion-authoring/` 搬到了
+`backend/src/`，正是在我读过它之后、写下结论之前。这本身又是一次
+「工作树在脚下变化」，也是门禁必须按提交而不是按工作树取根的直接理由。）
 
 所以 mypy 只要指过去就能抓到。要指对，`MYPYPATH` 必须覆盖 `scripts/` 里
 **全部** `sys.path.insert` 的静态目标（实测扫描结果）：
