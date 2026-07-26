@@ -619,7 +619,7 @@ function JobPage({
             {...(job.status === "failed" ? { status: "exception" as const } : {})}
           />
           {job.status === "failed" ? (
-            <Alert type="error" showIcon title="本机渲染未完成，请检查视频组件与磁盘空间后重试。" />
+            <Alert type="error" showIcon title={motionFailureAdvice(job.failureCode)} />
           ) : null}
           {["queued", "rendering", "encoding"].includes(job.status) ? (
             <Popconfirm
@@ -660,6 +660,18 @@ function JobPage({
       ))}
     </Card>
   );
+}
+
+/// A film that rendered every frame and never moved is not a broken renderer,
+/// and telling the user to check their disk sends them to fix something that
+/// was never wrong. The still-image case gets its own words.
+function motionFailureAdvice(
+  failureCode: MotionRenderJobSnapshot["failureCode"],
+): string {
+  if (failureCode === "static_render") {
+    return "这条成片的画面自始至终没有变化，已经停下来没有生成视频。换一句更具体的描述重新制作通常就能解决。";
+  }
+  return "本机渲染未完成，请检查视频组件与磁盘空间后重试。";
 }
 
 function ArtifactPage({

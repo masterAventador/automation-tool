@@ -108,6 +108,18 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
   expect(consoleErrors).toEqual([]);
 });
 
+/**
+ * Write the copy for the video already selected, the way an operator does.
+ *
+ * The publish button stays disabled until both fields are readable: the bridge
+ * and the executor both refuse unreadable copy, and finding that out after the
+ * visible operations browser has been opened wastes the only one there is.
+ */
+async function writeThePublishCopy(page: Page): Promise<void> {
+  await page.getByLabel("标题").fill("三分钟讲清油皮护肤");
+  await page.getByLabel("简介").fill("从洁面到防晒，按顺序讲一遍。");
+}
+
 test("publishing walks the real user path from the left navigation", async ({ page }) => {
   const consoleErrors = failOnConsoleErrors(page);
 
@@ -122,6 +134,11 @@ test("publishing walks the real user path from the left navigation", async ({ pa
   await expect(page.getByText("待登录")).toHaveCount(0);
   await expect(platforms).toHaveCount(1);
 
+  // The video came from the finished-videos page, and the page says which one.
+  await expect(page.getByRole("group", { name: "待发布视频" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /发布到抖音/ })).toBeDisabled();
+
+  await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
 
   // The critical point shows what is about to happen, in the operator's words.
@@ -142,6 +159,7 @@ test("an uncertain publish is never offered as something to repeat", async ({ pa
 
   await page.goto("/harness.html?health=available&scenario=publishing-uncertain");
   await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await page.getByRole("button", { name: /确认发布/ }).click();
 
@@ -156,6 +174,7 @@ test("cancelling before the confirmation leaves nothing published", async ({ pag
 
   await page.goto("/harness.html?health=available&scenario=publishing");
   await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await page.getByRole("button", { name: /取\s?消/ }).click();
 
@@ -169,6 +188,7 @@ test("the publishing page never tells the operator how a platform is reached", a
 }) => {
   await page.goto("/harness.html?health=available&scenario=publishing");
   await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await expect(page.getByRole("group", { name: "确认发布内容" })).toBeVisible();
 

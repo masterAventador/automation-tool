@@ -76,7 +76,7 @@
       "confirm": "确认发布",
       "cancel": "取消"
     },
-    "awaitingConfigurationHint": "该平台还没有配置发布凭据，配置后即可使用；其他平台不受影响。",
+    "awaitingConfigurationHint": "该平台的发布通道还在接入中，暂时不能发布；其他平台不受影响。",
     "outcomeUncertainHint": "这次发布已经提交过，但没能确认最终结果。请到该平台自行核对后再决定是否重发，系统不会自动重试。"
   }
 }

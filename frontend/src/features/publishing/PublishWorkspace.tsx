@@ -1,9 +1,10 @@
-import { Alert, Button, Card, Descriptions, Flex, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Flex, Input, Space, Spin, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 
 import {
   AWAITING_CONFIGURATION_HINT,
   OUTCOME_UNCERTAIN_HINT,
+  isPublishableCopy,
   publishAvailabilityLabel,
   publishOutcomeLabel,
   publishPlatformLabel,
@@ -39,17 +40,24 @@ interface PublishWorkspaceProps {
    *
    * The page never invents it: without a selected video there is nothing to
    * publish, and offering a button that would post an unspecified file is worse
-   * than offering none.
+   * than offering none. It arrives from the finished-videos page, which is
+   * where videos are managed; this page does not list them a second time.
    */
   readonly selectedVideo?: SelectedVideo | undefined;
+  /** Go back and pick a different video. Absent when there is nowhere to go. */
+  readonly onChangeSelection?: (() => void) | undefined;
 }
 
+/**
+ * The finished video the operator chose, named by identity.
+ *
+ * There is no path here on purpose — see `PublishRequest`. The summary is a
+ * label for the operator; what actually gets published is decided by the
+ * identity, in the bridge.
+ */
 export interface SelectedVideo {
-  readonly publishJobId: string;
-  readonly artifactPath: string;
+  readonly artifactId: string;
   readonly videoSummary: string;
-  readonly title: string;
-  readonly description: string;
 }
 
 /**
@@ -59,11 +67,17 @@ export interface SelectedVideo {
  * a publish may happen: the critical point renders exactly what the executor
  * presented and spends exactly the approval it issued.
  */
-export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspaceProps) {
+export function PublishWorkspace({
+  gateway,
+  selectedVideo,
+  onChangeSelection,
+}: PublishWorkspaceProps) {
   const [snapshot, setSnapshot] = useState<PublishWorkspaceSnapshot | null>(null);
   const [unreadable, setUnreadable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reloads, setReloads] = useState(0);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
 
   /** Run one operator-initiated action and adopt whatever the bridge answers. */
   const run = useCallback(async (read: () => Promise<PublishWorkspaceSnapshot>) => {
@@ -118,9 +132,68 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
 
   const approval = snapshot.approval;
   const outcome = snapshot.outcome;
+  // Everything a publish needs before a platform button is worth offering.
+  const publishable =
+    selectedVideo !== undefined && isPublishableCopy(title) && isPublishableCopy(description);
+  const publishRequest = (platform: PublishPlatform) => ({
+    platform,
+    artifactId: selectedVideo!.artifactId,
+    videoSummary: selectedVideo!.videoSummary,
+    title,
+    description,
+  });
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+      {selectedVideo !== undefined ? null : (
+        // Without this the page is a dead end: platforms are listed, no button
+        // appears, and nothing says why or what to do about it.
+        <Alert
+          type="info"
+          showIcon
+          title="还没有选定要发布的视频"
+          description="到「视频制作」的成片里挑一条，再回到这里发布。"
+          action={
+            onChangeSelection === undefined ? undefined : (
+              <Button size="small" onClick={onChangeSelection}>
+                去选一条
+              </Button>
+            )
+          }
+        />
+      )}
+
+      {selectedVideo === undefined ? null : (
+        <Card size="small" role="group" aria-label="待发布视频">
+          <Space orientation="vertical" size="small" style={{ width: "100%" }}>
+            <Space wrap>
+              <Typography.Text type="secondary">待发布视频</Typography.Text>
+              <Typography.Text strong>{selectedVideo.videoSummary}</Typography.Text>
+              {onChangeSelection === undefined ? null : (
+                <Button size="small" disabled={busy} onClick={onChangeSelection}>
+                  换一个
+                </Button>
+              )}
+            </Space>
+            <Input
+              aria-label="标题"
+              placeholder="给这条视频起个标题"
+              maxLength={256}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+            <Input.TextArea
+              aria-label="简介"
+              placeholder="写一句简介，观众会先看到它"
+              maxLength={256}
+              rows={3}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </Space>
+        </Card>
+      )}
+
       <Flex gap="middle" wrap>
         {snapshot.platforms.map((platform) => (
           <Card key={platform.platform} size="small" style={{ minWidth: 220 }}>
@@ -139,12 +212,8 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
               selectedVideo !== undefined ? (
                 <Button
                   type="primary"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      gateway.beginPublish({ ...selectedVideo, platform: platform.platform }),
-                    )
-                  }
+                  disabled={busy || !publishable}
+                  onClick={() => void run(() => gateway.beginPublish(publishRequest(platform.platform)))}
                 >
                   {`发布到${publishPlatformLabel(platform.platform)}`}
                 </Button>
@@ -183,10 +252,7 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
                     disabled={busy}
                     onClick={() =>
                       void run(() =>
-                        gateway.approvePublish({
-                          publishJobId: approval.confirmationId,
-                          confirmationId: approval.confirmationId,
-                        }),
+                        gateway.approvePublish({ confirmationId: approval.confirmationId }),
                       )
                     }
                   >
@@ -221,13 +287,10 @@ export function PublishWorkspace({ gateway, selectedVideo }: PublishWorkspacePro
                 ) : null}
                 {snapshot.retryable && snapshot.target !== null && selectedVideo !== undefined ? (
                   <Button
-                    disabled={busy}
+                    disabled={busy || !publishable}
                     onClick={() =>
                       void run(() =>
-                        gateway.beginPublish({
-                          ...selectedVideo,
-                          platform: snapshot.target as PublishPlatform,
-                        }),
+                        gateway.beginPublish(publishRequest(snapshot.target as PublishPlatform)),
                       )
                     }
                   >

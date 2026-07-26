@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
 // jsdom 环境下 `import.meta.url` 不是 file: scheme，只能从 vitest 的工作目录解析。
 const MAIN = resolve("src/main.tsx");
 const source = readFileSync(MAIN, "utf8");
+const shell = readFileSync(resolve("src/app/WorkbenchShell.tsx"), "utf8");
 
 /** `const x = new TauriFoo(...)` → x ↦ TauriFoo */
 function tauriBindings(text: string): ReadonlyMap<string, string> {
@@ -110,6 +111,41 @@ describe("production wiring", () => {
    */
   it.fails("videoEditingGateway is handed a real Tauri gateway", () => {
     requireRealTauriGateway("videoEditingGateway");
+  });
+
+  /**
+   * 发布页的成片来源必须真的有源头。
+   *
+   * `selectedVideo` 不是 `main.tsx` 传的网关，上面那些判据一条都覆盖不到它——它是
+   * `WorkbenchShell` 自己的状态。PB-07 的病根就是这一类：prop 通道从 `main.tsx` 一路
+   * 通到 `PublishWorkspace`，每一层都把它原样透传，而**没有任何东西往里灌值**，于是正式
+   * App 里「发布到抖音」这个按钮的渲染条件永远不成立。单元测试和 UI Harness 各自塞一个
+   * 测试替身进去，两边都绿。
+   */
+  it("lets the operator get back to choosing a video", () => {
+    // 选错了要能换。没有这条，选中的成片就是个死结。
+    expect(shell).toMatch(/onChangeSelection=\{[A-Za-z_$][\w$]*\}/u);
+    expect(shell, "the shell must own the selection, not just forward one").toMatch(
+      /useState<SelectedVideo \| undefined>/u,
+    );
+  });
+
+  /**
+   * 已知未接线：成片页还没有「去发布」。
+   *
+   * 交接的接收端（`WorkbenchShell` 持有选中成片、`PublishWorkspace` 渲染它、Rust 按
+   * `artifactId` 取件）都已就位，缺的是发起端那一个按钮——它在
+   * `src/features/video-studio/VideoStudio.tsx` 的成片卡片里，而该文件本次由另一条工作
+   * 线占用，没有动。补上之后这条会因为「预期失败却通过了」而报错，那时把它移到上面的
+   * 常规用例里即可。
+   *
+   * 用 `it.fails` 而不是写进备忘录，是因为备忘录不会在 CI 里说话。
+   */
+  it.fails("hands the finished-videos page a way to send one on to publishing", () => {
+    const handoff = /<VideoStudio[^>]*onPublishArtifact=\{([A-Za-z_$][\w$]*)\}/u.exec(shell);
+    expect(handoff, "VideoStudio is never given a publish handoff").not.toBeNull();
+    // 而且那个回调必须真的把成片写进选择状态，不能只是切页。
+    expect(shell).toMatch(new RegExp(`const ${handoff![1]!}[^;]*setSelectedVideo\\(`, "u"));
   });
 
   it("hands every constructed Tauri gateway to something", () => {

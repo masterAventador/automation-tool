@@ -431,3 +431,135 @@ fn tauri_composition_root_owns_the_workspace_store_without_webview_path_commands
     assert!(!source.contains("get_video_workspace_path"));
     assert!(!source.contains("get_video_artifact_path"));
 }
+
+#[test]
+fn only_a_finished_video_can_be_staged_for_publishing() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174220"))
+        .expect("workspace");
+    let outputs = store
+        .worker_output_directory(&workspace)
+        .expect("worker output");
+    fs::write(outputs.join("result.mp4"), b"rendered-video-bytes").expect("rendered output");
+    fs::write(outputs.join("cover.mp4"), b"intermediate-bytes").expect("intermediate output");
+    let rendered = store
+        .import_output(&workspace, "result.mp4", "video/mp4", "rendered_video")
+        .expect("rendered artifact");
+    // Same media type, different role: a working file is not a deliverable.
+    let intermediate = store
+        .import_output(&workspace, "cover.mp4", "video/mp4", "intermediate_render")
+        .expect("intermediate artifact");
+
+    let staged = store
+        .stage_publishable_artifact(rendered.artifact_id())
+        .expect("stage the finished video");
+    assert_eq!(staged.sha256(), rendered.sha256());
+    assert_eq!(staged.size_bytes(), rendered.size_bytes());
+    assert_eq!(staged.artifact_id(), rendered.artifact_id());
+    assert_eq!(
+        fs::read(staged.path()).expect("staged bytes"),
+        b"rendered-video-bytes",
+    );
+
+    assert_eq!(
+        store
+            .stage_publishable_artifact(intermediate.artifact_id())
+            .expect_err("a working file is not publishable")
+            .code(),
+        VideoWorkspaceErrorCode::ConfigurationInvalid,
+    );
+    assert_eq!(
+        store
+            .stage_publishable_artifact(job("123e4567-e89b-42d3-a456-426614174221"))
+            .expect_err("an artifact that does not exist is not publishable")
+            .code(),
+        VideoWorkspaceErrorCode::NotFound,
+    );
+    // A video deleted while it sat selected on the publish page is the same
+    // answer, and it must not take the staged copy of a different one with it.
+    store
+        .delete_artifact(rendered.artifact_id())
+        .expect("delete the chosen video");
+    assert_eq!(
+        store
+            .stage_publishable_artifact(rendered.artifact_id())
+            .expect_err("a deleted video is not publishable")
+            .code(),
+        VideoWorkspaceErrorCode::NotFound,
+    );
+}
+
+#[test]
+fn staging_keeps_one_copy_at_a_time_and_can_be_discarded() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174222"))
+        .expect("workspace");
+    let outputs = store
+        .worker_output_directory(&workspace)
+        .expect("worker output");
+    fs::write(outputs.join("first.mp4"), b"first-video").expect("first output");
+    fs::write(outputs.join("second.mp4"), b"second-video").expect("second output");
+    let first = store
+        .import_output(&workspace, "first.mp4", "video/mp4", "rendered_video")
+        .expect("first artifact");
+    let second = store
+        .import_output(&workspace, "second.mp4", "video/mp4", "rendered_video")
+        .expect("second artifact");
+
+    let first_staged = store
+        .stage_publishable_artifact(first.artifact_id())
+        .expect("stage first");
+    let second_staged = store
+        .stage_publishable_artifact(second.artifact_id())
+        .expect("stage second");
+
+    // A publish the operator walked away from must not leave a copy of the
+    // video lying around for the next one to pick up.
+    assert!(!first_staged.path().exists());
+    assert!(second_staged.path().exists());
+
+    store
+        .discard_staged_publish_artifacts()
+        .expect("discard staged copies");
+    assert!(!second_staged.path().exists());
+    // Discarding what was handed over never touches the Artifact itself.
+    assert_eq!(store.list_artifacts().expect("inventory").len(), 2);
+    // And discarding twice is not an error: cleanup runs on every exit path.
+    store
+        .discard_staged_publish_artifacts()
+        .expect("idempotent discard");
+}
+
+#[test]
+fn a_staged_copy_left_by_a_crash_does_not_survive_the_next_start() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174223"))
+        .expect("workspace");
+    fs::write(
+        store
+            .worker_output_directory(&workspace)
+            .expect("worker output")
+            .join("result.mp4"),
+        b"crash-video",
+    )
+    .expect("rendered output");
+    let artifact = store
+        .import_output(&workspace, "result.mp4", "video/mp4", "rendered_video")
+        .expect("artifact");
+    let staged = store
+        .stage_publishable_artifact(artifact.artifact_id())
+        .expect("stage");
+    assert!(staged.path().exists());
+    drop(store);
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert!(!staged.path().exists());
+    assert_eq!(restarted.list_artifacts().expect("inventory").len(), 1);
+}

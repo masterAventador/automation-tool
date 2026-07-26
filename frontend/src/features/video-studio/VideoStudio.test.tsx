@@ -281,6 +281,33 @@ describe("video studio shell", () => {
     expect(document.body).not.toHaveTextContent(/\/private\/|[A-Z]:\\/u);
   });
 
+  it("tells the user a still-image result apart from a broken render", async () => {
+    // "check the video components and disk space" is the wrong instruction for
+    // a film that rendered fine and simply never moved; the two failures need
+    // different words or the user retries the thing that was never broken.
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+        revision: 3,
+        status: "failed",
+        progressPercent: 55,
+        subject: "静止的片子",
+        styleDisplayName: "专业蓝",
+        artifactId: null,
+        artifactSizeBytes: null,
+        failureCode: "static_render",
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "制作任务" }));
+    expect(await screen.findByText("静止的片子")).toBeVisible();
+    expect(screen.getByText(/画面自始至终没有变化/u)).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/磁盘空间/u);
+  });
+
   it("lets the user choose the beat count and the seconds each beat runs", async () => {
     const user = userEvent.setup();
     const studioGateway = gateway();

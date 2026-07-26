@@ -80,8 +80,7 @@ describe("Publishing production-path acceptance", () => {
       core
         .invoke("begin_publish", {
           platform: "douyin",
-          publishJobId: "423e4567-e89b-42d3-a456-426614174001",
-          artifactPath: "/videos/acceptance-clip.mp4",
+          artifactId: "423e4567-e89b-42d3-a456-426614174001",
           videoSummary: "验收样片 · 1.2 MB",
           title: "验收标题",
           description: "验收简介",
@@ -99,8 +98,7 @@ describe("Publishing production-path acceptance", () => {
       core
         .invoke("begin_publish", {
           platform: "kuaishou",
-          publishJobId: "423e4567-e89b-42d3-a456-426614174002",
-          artifactPath: "/videos/acceptance-clip.mp4",
+          artifactId: "423e4567-e89b-42d3-a456-426614174002",
           videoSummary: "验收样片 · 1.2 MB",
           title: "验收标题",
           description: "验收简介",
@@ -117,7 +115,6 @@ describe("Publishing production-path acceptance", () => {
     const rejection = (await browser.tauri.execute(({ core }) =>
       core
         .invoke("approve_publish", {
-          publishJobId: "423e4567-e89b-42d3-a456-426614174001",
           confirmationId: "123e4567-e89b-42d3-a456-426614174007",
         })
         .then(() => null)

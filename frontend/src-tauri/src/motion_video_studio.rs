@@ -13,7 +13,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -423,6 +423,7 @@ pub enum MotionRenderFailureCode {
     RenderFailed,
     EncodingFailed,
     Interrupted,
+    StaticRender,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -853,6 +854,69 @@ pub fn workspace_render_paths(
         .map_err(map_workspace_error)?;
     let video = output.join(MOTION_OUTPUT_FILE);
     Ok((work, output, video))
+}
+
+/// The largest single captured frame this gate will read. A 1920x1080 PNG is
+/// a few megabytes; anything past this is not a frame the encoder would accept
+/// either, so refusing to buffer it is not a lost verdict.
+const MAX_FRAME_READ_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Report whether every captured frame is byte-identical.
+///
+/// A render that captures the frames it was asked for is reported as a success
+/// by the worker even when the composition never moved — and FFmpeg encodes
+/// those frames into a well-formed MP4 of exactly the right length. The result
+/// is a video file that is a still image, which every other check in this
+/// module calls a completed render.
+///
+/// That is not hypothetical: a composition sized to a stage larger than the
+/// capture viewport renders as the empty corner of itself, and several clips
+/// stacked at `inset: 0` never take turns. Both produce this shape. Comparing
+/// the frames is the only signal available here that separates them from a
+/// film that genuinely holds one image, so a one-frame film is never called
+/// static and the comparison stops at the first frame that differs.
+pub fn rendered_film_is_static(
+    frames_directory: &Path,
+    frame_count: u32,
+) -> Result<bool, MotionVideoStudioError> {
+    if frame_count == 0 || frame_count > crate::local_video_orchestrator::SANDBOX_FRAMES_MAXIMUM {
+        return Err(draft_invalid());
+    }
+    if frame_count == 1 {
+        return Ok(false);
+    }
+    let first = frame_digest(frames_directory, 1)?;
+    for index in 2..=frame_count {
+        if frame_digest(frames_directory, index)? != first {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn frame_digest(frames_directory: &Path, index: u32) -> Result<String, MotionVideoStudioError> {
+    let path = frames_directory.join(format!("frame-{index:05}.png"));
+    let metadata = fs::symlink_metadata(&path).map_err(|_| storage_unavailable())?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_FRAME_READ_BYTES {
+        return Err(storage_unavailable());
+    }
+    let mut file = File::open(&path).map_err(|_| storage_unavailable())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 128 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|_| storage_unavailable())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = hasher.finalize();
+    let mut value = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut value, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    Ok(value)
 }
 
 pub fn import_rendered_output(

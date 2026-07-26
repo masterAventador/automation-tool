@@ -42,8 +42,12 @@ from motion_authoring_agent import (  # noqa: E402
     VideoCreationModelConfig,
     _accumulate_stream_content,
     call_video_creation_model,
+    COMPOSITION_PATH,
     LOCKED_CATALOG_PART_IDS,
+    RENDER_CANVAS_HEIGHT,
+    RENDER_CANVAS_WIDTH,
     _first_message_contract,
+    _fix_message_contract,
     check_composition,
     lint_composition,
     load_locked_authoring_workflow,
@@ -61,18 +65,18 @@ VALID_COMPOSITION = """<!doctype html>
 <html lang="zh">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=1920, height=1080" />
+    <meta name="viewport" content="width=640, height=360" />
     <title>Composition</title>
     <script src="./runtime/gsap.min.js"></script>
     <style>
       body { margin: 0; background: #0b1f3a; color: #ffffff; }
-      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      #root { position: relative; width: 640px; height: 360px; overflow: hidden; }
       .clip { position: absolute; inset: 0; display: grid; place-items: center; }
     </style>
   </head>
   <body>
     <div id="root" data-composition-id="main" data-start="0"
-         data-width="1920" data-height="1080" data-duration="6">
+         data-width="640" data-height="360" data-duration="6">
       <section id="hook" class="clip" data-start="0" data-duration="6" data-track-index="1">
         <h1 id="title">本周销售增长</h1>
       </section>
@@ -81,6 +85,52 @@ VALID_COMPOSITION = """<!doctype html>
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
       tl.from("#title", { y: 48, opacity: 0, duration: 0.6 }, 0.2);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
+"""
+
+# Three clips that take the stage in turn, each opened and closed on the very
+# timeline the renderer seeks. This is the shape the authoring contract has to
+# teach, so the gate is written against it.
+SEQUENCED_COMPOSITION = """<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=640, height=360" />
+    <title>Composition</title>
+    <script src="./runtime/gsap.min.js"></script>
+    <style>
+      body { margin: 0; background: #0b1f3a; color: #ffffff; }
+      #root { position: relative; width: 640px; height: 360px; overflow: hidden; }
+      .clip { position: absolute; inset: 0; opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0"
+         data-width="640" data-height="360" data-duration="6">
+      <section id="scene-1" class="clip" data-start="0" data-duration="2" data-track-index="1">
+        <h1 id="title-1">开场</h1>
+      </section>
+      <section id="scene-2" class="clip" data-start="2" data-duration="2" data-track-index="2">
+        <h1 id="title-2">增长</h1>
+      </section>
+      <section id="scene-3" class="clip" data-start="4" data-duration="2" data-track-index="3">
+        <h1 id="title-3">收尾</h1>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.set("#scene-1", { autoAlpha: 1 }, 0);
+      tl.set("#scene-1", { autoAlpha: 0 }, 2);
+      tl.set("#scene-2", { autoAlpha: 1 }, 2);
+      tl.set("#scene-2", { autoAlpha: 0 }, 4);
+      tl.set("#scene-3", { autoAlpha: 1 }, 4);
+      tl.from("#title-1", { y: 24, opacity: 0, duration: 0.5 }, 0.2);
+      tl.from("#title-2", { y: 24, opacity: 0, duration: 0.5 }, 2.2);
+      tl.from("#title-3", { y: 24, opacity: 0, duration: 0.5 }, 4.2);
       window.__timelines["main"] = tl;
     </script>
   </body>
@@ -329,7 +379,10 @@ class LintCheckSnapshotTests(unittest.TestCase):
 
     def test_lint_accepts_local_only_seekable_composition(self) -> None:
         result = lint_composition(
-            VALID_COMPOSITION, allowed_assets=self.allowed, max_bytes=200_000
+            VALID_COMPOSITION,
+            allowed_assets=self.allowed,
+            max_bytes=200_000,
+            entry_path=COMPOSITION_PATH,
         )
         self.assertTrue(result.ok, result.findings)
 
@@ -337,13 +390,23 @@ class LintCheckSnapshotTests(unittest.TestCase):
         bad = VALID_COMPOSITION.replace(
             "./runtime/gsap.min.js", "https://cdn.jsdelivr.net/npm/gsap/dist/gsap.min.js"
         )
-        result = lint_composition(bad, allowed_assets=self.allowed, max_bytes=200_000)
+        result = lint_composition(
+            bad,
+            allowed_assets=self.allowed,
+            max_bytes=200_000,
+            entry_path=COMPOSITION_PATH,
+        )
         self.assertFalse(result.ok)
         self.assertIn("remote_reference", {finding.code for finding in result.findings})
 
     def test_lint_rejects_asset_outside_allowlist(self) -> None:
         bad = VALID_COMPOSITION.replace("./runtime/gsap.min.js", "./runtime/unknown.js")
-        result = lint_composition(bad, allowed_assets=self.allowed, max_bytes=200_000)
+        result = lint_composition(
+            bad,
+            allowed_assets=self.allowed,
+            max_bytes=200_000,
+            entry_path=COMPOSITION_PATH,
+        )
         self.assertFalse(result.ok)
         self.assertIn("undeclared_asset", {finding.code for finding in result.findings})
 
@@ -354,11 +417,21 @@ class LintCheckSnapshotTests(unittest.TestCase):
             ("duration: 0.6", "duration: 0.6, repeat: -1"),
         ):
             bad = VALID_COMPOSITION.replace(needle, replacement)
-            result = lint_composition(bad, allowed_assets=self.allowed, max_bytes=200_000)
+            result = lint_composition(
+            bad,
+            allowed_assets=self.allowed,
+            max_bytes=200_000,
+            entry_path=COMPOSITION_PATH,
+        )
             self.assertFalse(result.ok, (needle, replacement))
 
     def test_lint_rejects_oversized_html(self) -> None:
-        result = lint_composition(VALID_COMPOSITION, allowed_assets=self.allowed, max_bytes=64)
+        result = lint_composition(
+            VALID_COMPOSITION,
+            allowed_assets=self.allowed,
+            max_bytes=64,
+            entry_path=COMPOSITION_PATH,
+        )
         self.assertFalse(result.ok)
         self.assertIn("composition_too_large", {finding.code for finding in result.findings})
 
@@ -809,6 +882,201 @@ class CatalogPartSelectionTest(unittest.TestCase):
         self.assertIn("134", prompt)
         self.assertIn("data-chart", prompt)
         self.assertIn("catalog_parts", prompt)
+
+
+class EntryRelativeAssetResolutionTests(unittest.TestCase):
+    """Assets must be checked the way the browser resolves them.
+
+    The allowlist is workspace-relative, but a document resolves `src` against
+    its *own* directory. With the composition written to `compositions/`, a
+    correct-looking `runtime/gsap.min.js` became a request for
+    `compositions/runtime/gsap.min.js`, which the sandbox refused. GSAP was
+    then undefined, the inline script threw, no timeline was ever registered,
+    and the render produced a full set of identical frames while lint stayed
+    green.
+    """
+
+    def test_composition_is_written_at_the_workspace_root(self) -> None:
+        self.assertEqual(COMPOSITION_PATH, "composition.html")
+
+    def test_lint_rejects_a_reference_that_misses_from_a_nested_entry(self) -> None:
+        result = lint_composition(
+            VALID_COMPOSITION,
+            allowed_assets=frozenset({RUNTIME_ASSET}),
+            max_bytes=200_000,
+            entry_path="compositions/main.html",
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("undeclared_asset", result.codes())
+
+    def test_lint_accepts_a_reference_that_resolves_from_a_nested_entry(self) -> None:
+        nested = VALID_COMPOSITION.replace("./runtime/gsap.min.js", "../runtime/gsap.min.js")
+        result = lint_composition(
+            nested,
+            allowed_assets=frozenset({RUNTIME_ASSET}),
+            max_bytes=200_000,
+            entry_path="compositions/main.html",
+        )
+        self.assertTrue(result.ok, result.findings)
+
+    def test_lint_rejects_a_reference_that_climbs_out_of_the_workspace(self) -> None:
+        escaping = VALID_COMPOSITION.replace("./runtime/gsap.min.js", "../../secrets/key.js")
+        result = lint_composition(
+            escaping,
+            allowed_assets=frozenset({RUNTIME_ASSET}),
+            max_bytes=200_000,
+            entry_path="composition.html",
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("undeclared_asset", result.codes())
+
+    def test_lint_still_accepts_a_root_entry_referencing_the_allowlist(self) -> None:
+        result = lint_composition(
+            VALID_COMPOSITION,
+            allowed_assets=frozenset({RUNTIME_ASSET}),
+            max_bytes=200_000,
+            entry_path="composition.html",
+        )
+        self.assertTrue(result.ok, result.findings)
+
+
+class AuthoringContractStatesTheRenderRulesTests(unittest.TestCase):
+    """A gate the model is never told about only produces rejected drafts.
+
+    Both gates added here exist because the locked upstream reference states
+    the opposite (a 1920x1080 stage, one clip). The instruction the model
+    actually receives has to carry the render contract, or the fix loop just
+    burns its rounds.
+    """
+
+    def test_first_message_states_the_exact_capture_canvas(self) -> None:
+        prompt = _first_message_contract(_brief(), ("runtime/gsap.min.js",))
+        self.assertIn(str(RENDER_CANVAS_WIDTH), prompt)
+        self.assertIn(str(RENDER_CANVAS_HEIGHT), prompt)
+        self.assertNotIn("1920", prompt)
+
+    def test_first_message_states_the_clip_switching_rule(self) -> None:
+        prompt = _first_message_contract(_brief(), ("runtime/gsap.min.js",))
+        self.assertIn("autoAlpha", prompt)
+        self.assertIn("data-track-index", prompt)
+
+    def test_fix_message_explains_the_canvas_and_clip_codes(self) -> None:
+        check = check_composition(
+            VALID_COMPOSITION.replace(
+                f'data-width="{RENDER_CANVAS_WIDTH}" data-height="{RENDER_CANVAS_HEIGHT}"',
+                'data-width="1920" data-height="1080"',
+            ),
+            duration_seconds=6,
+        )
+        message = _fix_message_contract(
+            lint_composition(
+                VALID_COMPOSITION,
+                allowed_assets=frozenset(),
+                max_bytes=200_000,
+                entry_path=COMPOSITION_PATH,
+            ),
+            check,
+            _brief(),
+        )
+        self.assertIn("canvas_mismatch", message)
+        self.assertIn(f"{RENDER_CANVAS_WIDTH}", message)
+        self.assertIn("autoAlpha", message)
+
+
+class RenderCanvasGateTests(unittest.TestCase):
+    """The composition stage must be exactly the sandbox capture viewport.
+
+    The defect this closes: the locked authoring reference mandates a
+    1920x1080 stage while the render sandbox captures a fixed, smaller
+    viewport. A compliant composition then renders as the empty top-left
+    corner of its own stage — every frame identical, a valid MP4 that is a
+    still image. Neither side could see it, so the gate lives here, before a
+    browser is ever launched.
+    """
+
+    def test_canvas_constants_come_from_the_shared_contract(self) -> None:
+        contract = json.loads(
+            (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(RENDER_CANVAS_WIDTH, contract["width"])
+        self.assertEqual(RENDER_CANVAS_HEIGHT, contract["height"])
+
+    def test_check_accepts_a_composition_sized_to_the_capture_viewport(self) -> None:
+        self.assertTrue(check_composition(VALID_COMPOSITION, duration_seconds=6).ok)
+
+    def test_check_rejects_a_stage_larger_than_the_capture_viewport(self) -> None:
+        bad = VALID_COMPOSITION.replace(
+            f'data-width="{RENDER_CANVAS_WIDTH}" data-height="{RENDER_CANVAS_HEIGHT}"',
+            'data-width="1920" data-height="1080"',
+        )
+        result = check_composition(bad, duration_seconds=6)
+        self.assertFalse(result.ok)
+        self.assertIn("canvas_mismatch", result.codes())
+
+    def test_check_rejects_a_composition_that_declares_no_stage(self) -> None:
+        bad = VALID_COMPOSITION.replace(
+            f'data-width="{RENDER_CANVAS_WIDTH}" data-height="{RENDER_CANVAS_HEIGHT}"',
+            "",
+        )
+        result = check_composition(bad, duration_seconds=6)
+        self.assertFalse(result.ok)
+        self.assertIn("missing_canvas", result.codes())
+
+
+class ClipSequencingGateTests(unittest.TestCase):
+    """Clips must take turns instead of stacking on top of one another.
+
+    The reference composition carries a single clip, so it never states how
+    several clips share the timeline. A model following it emits N absolutely
+    positioned `inset: 0` scenes that are all visible at once and never
+    switch, which reads as one unreadable overlapping frame.
+    """
+
+    def test_check_accepts_sequenced_clips(self) -> None:
+        self.assertTrue(check_composition(SEQUENCED_COMPOSITION, duration_seconds=6).ok)
+
+    def test_check_rejects_clips_without_declared_intervals(self) -> None:
+        bad = SEQUENCED_COMPOSITION.replace(
+            'data-start="0" data-duration="2" data-track-index="1"',
+            'data-track-index="1"',
+        )
+        result = check_composition(bad, duration_seconds=6)
+        self.assertFalse(result.ok)
+        self.assertIn("clip_interval_invalid", result.codes())
+
+    def test_check_rejects_overlapping_clip_intervals(self) -> None:
+        bad = SEQUENCED_COMPOSITION.replace(
+            'data-start="2" data-duration="2" data-track-index="2"',
+            'data-start="1" data-duration="3" data-track-index="2"',
+        )
+        result = check_composition(bad, duration_seconds=6)
+        self.assertFalse(result.ok)
+        self.assertIn("clip_overlap", result.codes())
+
+    def test_check_rejects_clips_that_leave_the_timeline_uncovered(self) -> None:
+        bad = SEQUENCED_COMPOSITION.replace(
+            'data-start="4" data-duration="2" data-track-index="3"',
+            'data-start="4" data-duration="1" data-track-index="3"',
+        )
+        result = check_composition(bad, duration_seconds=6)
+        self.assertFalse(result.ok)
+        self.assertIn("clip_coverage", result.codes())
+
+    def test_check_rejects_stacked_clips_with_no_visibility_control(self) -> None:
+        """The exact shape the real model produced: several full-bleed clips,
+        entrance tweens only, nothing that ever hides a scene."""
+        bad = SEQUENCED_COMPOSITION.replace(
+            ".clip { position: absolute; inset: 0; opacity: 0; }",
+            ".clip { position: absolute; inset: 0; }",
+        ).replace("autoAlpha", "y")
+        result = check_composition(bad, duration_seconds=6)
+        self.assertFalse(result.ok)
+        self.assertIn("clip_visibility_uncontrolled", result.codes())
+
+    def test_single_clip_composition_needs_no_switching(self) -> None:
+        self.assertTrue(check_composition(VALID_COMPOSITION, duration_seconds=6).ok)
 
 
 if __name__ == "__main__":

@@ -499,6 +499,11 @@ enum MotionRenderStageFailure {
     Render,
     Encoding,
     Cancelled,
+    /// The render captured every frame it was asked for and they are all the
+    /// same image. Encoding that produces a well-formed MP4 of the right
+    /// length which is, in fact, a still picture — the one failure shape the
+    /// worker, FFmpeg and the artifact store all read as success.
+    StaticFilm,
 }
 
 fn run_motion_render_job(
@@ -563,6 +568,16 @@ fn run_motion_render_job(
         {
             return Err(MotionRenderStageFailure::Cancelled);
         }
+        // Between "the worker captured N frames" and "here is your video"
+        // this is the only check that can tell a film from a still image. A
+        // composition sized to the wrong stage, or one whose clips never take
+        // turns, reaches exactly this point with a full set of identical
+        // frames and every other signal green.
+        if motion_video_studio::rendered_film_is_static(&work.join("frames"), frame_count)
+            .map_err(|_| MotionRenderStageFailure::Render)?
+        {
+            return Err(MotionRenderStageFailure::StaticFilm);
+        }
         motion_video_studio::advance(
             &workspaces,
             render_job_id,
@@ -606,6 +621,9 @@ fn run_motion_render_job(
                 }
                 MotionRenderStageFailure::Encoding => {
                     motion_video_studio::MotionRenderFailureCode::EncodingFailed
+                }
+                MotionRenderStageFailure::StaticFilm => {
+                    motion_video_studio::MotionRenderFailureCode::StaticRender
                 }
                 MotionRenderStageFailure::Cancelled => unreachable!(),
             };
@@ -1247,6 +1265,29 @@ fn map_publish_workspace_error(
     }
 }
 
+/// Say why a chosen video cannot be published, without naming a local path.
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_video_workspace_error(
+    error: video_job_workspace::VideoWorkspaceError,
+) -> ExecutorPlatformCommandError {
+    use video_job_workspace::VideoWorkspaceErrorCode;
+    let code = match error.code() {
+        // The operator picked a video that is no longer there — most likely
+        // deleted from the finished-videos page while it sat selected.
+        VideoWorkspaceErrorCode::NotFound => "publish_video_unavailable",
+        // Registered, but not a finished video this App may publish.
+        VideoWorkspaceErrorCode::ConfigurationInvalid => "publish_video_not_publishable",
+        VideoWorkspaceErrorCode::QuotaExceeded => "storage_quota_exceeded",
+        VideoWorkspaceErrorCode::AlreadyExists
+        | VideoWorkspaceErrorCode::PathRejected
+        | VideoWorkspaceErrorCode::StorageUnavailable => "storage_unavailable",
+    };
+    ExecutorPlatformCommandError {
+        code,
+        retryable: false,
+    }
+}
+
 /// Refresh what the operator is allowed to do, then hand back the whole view.
 ///
 /// Availability is read here rather than accepted from the App: a page that
@@ -1279,8 +1320,7 @@ async fn get_publish_workspace(
 #[allow(clippy::too_many_arguments)]
 async fn begin_publish(
     platform: String,
-    publish_job_id: String,
-    artifact_path: String,
+    artifact_id: uuid::Uuid,
     video_summary: String,
     title: String,
     description: String,
@@ -1289,23 +1329,83 @@ async fn begin_publish(
     executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
     authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
-    {
+    // One publish, one identity, minted here. The page never supplies it, so it
+    // cannot make two publishes share one.
+    let publish_job_id = video_job_workspace::generate_uuid_v4()
+        .map_err(map_video_workspace_error)?
+        .hyphenated()
+        .to_string();
+    let target = {
         let mut held = workspace
             .0
             .lock()
             .map_err(|_| publish_workspace_unavailable())?;
-        held.begin(&platform).map_err(map_publish_workspace_error)?;
+        held.begin(&platform, publish_job_id.clone())
+            .map_err(map_publish_workspace_error)?
+    };
+    // Route before touching anything. Whether this platform is *allowed* and
+    // how it is *reached* are two questions, and answering only the first is
+    // how a B站 publish would have been typed into 抖音's browser.
+    match target.route() {
+        publish_workspace::PublishRoute::OperationsBrowser => {}
+        publish_workspace::PublishRoute::NotIntegrated => {
+            let mut held = workspace
+                .0
+                .lock()
+                .map_err(|_| publish_workspace_unavailable())?;
+            // Nothing was opened and nothing was sent, so this is a clean
+            // "did not publish" rather than an unknown outcome.
+            held.settle(publish_workspace::PublishOutcome::NotPublished);
+            return Err(ExecutorPlatformCommandError {
+                code: "publish_platform_not_integrated",
+                retryable: false,
+            });
+        }
     }
-    ensure_executor_running(&client, &vault, &executor).await?;
-    let executable_path = resolve_embedded_browser(&authority)?;
-    let profile = profiles
-        .current_douyin_profile()
-        .map_err(|_| ExecutorPlatformCommandError {
-            code: "storage_unavailable",
-            retryable: false,
-        })?;
+    // The publishable set is "a finished video this App produced", resolved by
+    // the store from an identity. The page never holds a local path, and the
+    // executor is handed a copy named the one way it will accept.
+    let staged = match workspaces.stage_publishable_artifact(artifact_id) {
+        Ok(staged) => staged,
+        Err(error) => {
+            let mut held = workspace
+                .0
+                .lock()
+                .map_err(|_| publish_workspace_unavailable())?;
+            held.settle(publish_workspace::PublishOutcome::NotPublished);
+            return Err(map_video_workspace_error(error));
+        }
+    };
+    let prepared = async {
+        ensure_executor_running(&client, &vault, &executor).await?;
+        let executable_path = resolve_embedded_browser(&authority)?;
+        let profile = profiles
+            .current_douyin_profile()
+            .map_err(|_| ExecutorPlatformCommandError {
+                code: "storage_unavailable",
+                retryable: false,
+            })?;
+        Ok::<_, ExecutorPlatformCommandError>((executable_path, profile))
+    }
+    .await;
+    let (executable_path, profile) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            // The copy of the video outlives nothing: a publish that never got
+            // as far as the browser must not leave one on disk.
+            let _ = workspaces.discard_staged_publish_artifacts();
+            let mut held = workspace
+                .0
+                .lock()
+                .map_err(|_| publish_workspace_unavailable())?;
+            held.settle(publish_workspace::PublishOutcome::NotPublished);
+            return Err(error);
+        }
+    };
+    let artifact_path = staged.path().to_path_buf();
     let service = executor.inner().clone();
     // The same copy the operator will be asked to approve, kept here because the
     // command below consumes one moving into the blocking call.
@@ -1317,7 +1417,7 @@ async fn begin_publish(
             executable_path,
             profile,
             cfg!(feature = "control-plane-e2e"),
-            std::path::PathBuf::from(artifact_path),
+            artifact_path,
             title,
             description,
         )
@@ -1336,33 +1436,48 @@ async fn begin_publish(
         Err(error) => {
             // Nothing ever reached a page the operator could have approved.
             held.settle(publish_workspace::PublishOutcome::NotPublished);
+            let _ = workspaces.discard_staged_publish_artifacts();
             return Err(map_executor_platform_error(error));
         }
         Ok(result) => result,
     };
     match publish_workspace::preflight_outcome(result.state()) {
-        Some(outcome) => held.settle(outcome),
+        Some(outcome) => {
+            held.settle(outcome);
+            // Settled before approval: the browser is not holding this file
+            // open for anyone, so the copy goes.
+            let _ = workspaces.discard_staged_publish_artifacts();
+        }
         None => {
             // The executor signed these terms; they are not the App's to invent.
             let (Some(confirmation_id), Some(target_account)) =
                 (result.confirmation_id(), result.target_account())
             else {
                 held.settle(publish_workspace::PublishOutcome::NotPublished);
+                let _ = workspaces.discard_staged_publish_artifacts();
                 return Err(ExecutorPlatformCommandError {
                     code: "publish_not_confirmable",
                     retryable: false,
                 });
             };
-            held.await_approval(
-                publish_workspace::PublishApproval::new(
-                    target_account,
-                    &video_summary,
-                    &approved_title,
-                    &approved_description,
-                    confirmation_id,
-                )
-                .map_err(map_publish_workspace_error)?,
-            );
+            let approval = match publish_workspace::PublishApproval::new(
+                target_account,
+                &video_summary,
+                &approved_title,
+                &approved_description,
+                confirmation_id,
+            ) {
+                Ok(approval) => approval,
+                Err(error) => {
+                    held.settle(publish_workspace::PublishOutcome::NotPublished);
+                    let _ = workspaces.discard_staged_publish_artifacts();
+                    return Err(map_publish_workspace_error(error));
+                }
+            };
+            // Held on purpose past this point: the page the operator is about
+            // to approve already has this file in it, and it stays until the
+            // publish settles one way or the other.
+            held.await_approval(approval);
         }
     }
     Ok(held.snapshot())
@@ -1377,12 +1492,12 @@ async fn begin_publish(
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn approve_publish(
-    publish_job_id: String,
     confirmation_id: String,
     executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
-    {
+    let publish_job_id = {
         let mut held = workspace
             .0
             .lock()
@@ -1398,8 +1513,16 @@ async fn approve_publish(
                 publish_workspace::PublishWorkspaceError::NoApprovalPending,
             ));
         }
+        // The job this approval belongs to is the one the bridge minted when the
+        // publish began, not the confirmation identity wearing a second hat.
+        let publish_job_id = held
+            .job_id()
+            .ok_or(publish_workspace::PublishWorkspaceError::NoApprovalPending)
+            .map_err(map_publish_workspace_error)?
+            .to_owned();
         held.approve().map_err(map_publish_workspace_error)?;
-    }
+        publish_job_id
+    };
     let service = executor.inner().clone();
     let job = publish_job_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -1416,6 +1539,9 @@ async fn approve_publish(
         .lock()
         .map_err(|_| publish_workspace_unavailable())?;
     held.begin_verification();
+    // The click has been spent either way, so the copy handed to the browser is
+    // finished with — including when the outcome is unknown.
+    let _ = workspaces.discard_staged_publish_artifacts();
     match outcome {
         // The click may already have happened, so a transport failure is not a
         // clean "did not publish"; it is exactly what uncertain means.
@@ -1436,6 +1562,7 @@ async fn approve_publish(
 #[tauri::command]
 async fn cancel_publish(
     executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
     {
@@ -1447,6 +1574,8 @@ async fn cancel_publish(
             .map_err(|_| publish_workspace_unavailable())?;
         held.cancel().map_err(map_publish_workspace_error)?;
     }
+    // The cancel was accepted, so nothing will be published from this copy.
+    let _ = workspaces.discard_staged_publish_artifacts();
     let service = executor.inner().clone();
     tauri::async_runtime::spawn_blocking(move || service.release_publish_surface())
         .await

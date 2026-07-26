@@ -207,3 +207,85 @@ describe("publishing", () => {
     }
   });
 });
+
+describe("finished video handed to the publishing page", () => {
+  const readyWorkspace: PublishWorkspaceGateway = {
+    async getWorkspace() {
+      return {
+        platforms: [
+          { platform: "bilibili", availability: "awaiting_configuration" },
+          { platform: "douyin", availability: "ready" },
+        ],
+        stage: "idle",
+        target: null,
+        approval: null,
+        outcome: null,
+        retryable: false,
+        audit: [],
+      };
+    },
+    async beginPublish() {
+      throw new Error("not reached");
+    },
+    async approvePublish() {
+      throw new Error("not reached");
+    },
+    async cancelPublish() {
+      throw new Error("not reached");
+    },
+  };
+
+  const chosen = {
+    artifactId: "423e4567-e89b-42d3-a456-426614174001",
+    videoSummary: "护肤知识讲解 · 12.4 MB",
+  } as const;
+
+  function openShell(selectedVideo?: typeof chosen) {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell
+          publishWorkspaceGateway={readyWorkspace}
+          {...(selectedVideo === undefined ? {} : { selectedVideo })}
+        />
+      </QueryClientProvider>,
+    );
+    return user;
+  }
+
+  it("carries the chosen video into the publishing page", async () => {
+    const user = openShell(chosen);
+
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+
+    const pending = await screen.findByRole("group", { name: "待发布视频" });
+    expect(within(pending).getByText("护肤知识讲解 · 12.4 MB")).toBeVisible();
+  });
+
+  it("sends the operator back to the finished videos to swap the selection", async () => {
+    // "换一个" is the only way back. Leaving the old selection in place while
+    // the operator goes looking for another one is how the wrong video gets
+    // published.
+    const user = openShell(chosen);
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    const pending = await screen.findByRole("group", { name: "待发布视频" });
+
+    await user.click(within(pending).getByRole("button", { name: "换一个" }));
+
+    expect(screen.getByRole("region", { name: "视频制作工作区" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await screen.findByRole("heading", { name: "作品发布" });
+    expect(screen.queryByRole("group", { name: "待发布视频" })).toBeNull();
+  });
+
+  it("offers nothing to publish until a video has been chosen", async () => {
+    const user = openShell();
+
+    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await screen.findByRole("heading", { name: "作品发布" });
+
+    expect(screen.queryByRole("group", { name: "待发布视频" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /发布到/ })).toBeNull();
+  });
+});

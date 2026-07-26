@@ -46,6 +46,39 @@ impl PublishPlatform {
             Self::Douyin => "douyin",
         }
     }
+
+    /// How this platform is actually reached.
+    ///
+    /// Deliberately exhaustive and deliberately a property of the platform.
+    /// Availability used to be the only thing the platform argument decided;
+    /// everything after it went to the operations browser and the 抖音 profile
+    /// unconditionally. Configuring the official platform's credentials would
+    /// therefore have published a B站 post through 抖音's browser, on 抖音's
+    /// account. A new platform now has to say here how it is reached, and the
+    /// compiler asks.
+    pub const fn route(self) -> PublishRoute {
+        match self {
+            Self::Bilibili => PublishRoute::NotIntegrated,
+            Self::Douyin => PublishRoute::OperationsBrowser,
+        }
+    }
+}
+
+/// The distinct ways a publish can be carried out, from the bridge's side.
+///
+/// This is not projected to the App — the page still renders one shape for both
+/// platforms. It exists so that "which platform" and "which machinery" cannot
+/// drift apart inside the bridge.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublishRoute {
+    /// The visible operations browser, driven by the local executor.
+    OperationsBrowser,
+    /// Reachable in principle, not connected to the App in this build.
+    ///
+    /// B站's official publishing exists on the server side and has no route out
+    /// of the App yet. Saying so is the honest answer; borrowing another
+    /// platform's route is not.
+    NotIntegrated,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -187,6 +220,7 @@ pub struct PublishWorkspace {
     operations_browser_signed_in: bool,
     stage: PublishStage,
     target: Option<PublishPlatform>,
+    job_id: Option<String>,
     approval: Option<PublishApproval>,
     outcome: Option<PublishOutcome>,
     audit: Vec<PublishAuditEntry>,
@@ -199,6 +233,7 @@ impl PublishWorkspace {
             operations_browser_signed_in: false,
             stage: PublishStage::Idle,
             target: None,
+            job_id: None,
             approval: None,
             outcome: None,
             audit: Vec::new(),
@@ -207,6 +242,16 @@ impl PublishWorkspace {
 
     pub fn observe_douyin_signed_in(&mut self, signed_in: bool) {
         self.operations_browser_signed_in = signed_in;
+    }
+
+    /// The identity of the publish currently in flight, if there is one.
+    ///
+    /// The page used to send the confirmation identity back as the publish job
+    /// identity because it had nothing else to send. Two different things
+    /// wearing one identity cannot be told apart afterwards, so the bridge mints
+    /// this when the publish begins and spends it without asking the page.
+    pub fn job_id(&self) -> Option<&str> {
+        self.job_id.as_deref()
     }
 
     pub fn snapshot(&self) -> PublishWorkspaceSnapshot {
@@ -227,7 +272,16 @@ impl PublishWorkspace {
         }
     }
 
-    pub fn begin(&mut self, platform: &str) -> Result<(), PublishWorkspaceError> {
+    /// Reserve the workspace for one publish, and answer where it must go.
+    ///
+    /// Returning the platform rather than `()` is what lets the caller route on
+    /// it: the parse already happened here, and re-deriving it upstream is how
+    /// the routing decision got skipped in the first place.
+    pub fn begin(
+        &mut self,
+        platform: &str,
+        publish_job_id: String,
+    ) -> Result<PublishPlatform, PublishWorkspaceError> {
         let platform =
             PublishPlatform::parse(platform).ok_or(PublishWorkspaceError::UnknownPlatform)?;
         if self.availability(platform) != PublishAvailability::Ready {
@@ -235,11 +289,12 @@ impl PublishWorkspace {
         }
         self.stage = PublishStage::Preparing;
         self.target = Some(platform);
+        self.job_id = Some(publish_job_id);
         self.approval = None;
         self.outcome = None;
         // A new publish appends; it never erases what the last one did.
         self.record("publish_started", None, None);
-        Ok(())
+        Ok(platform)
     }
 
     pub fn await_approval(&mut self, approval: PublishApproval) {
@@ -266,6 +321,9 @@ impl PublishWorkspace {
     pub fn settle(&mut self, outcome: PublishOutcome) {
         self.stage = PublishStage::Settled;
         self.approval = None;
+        // Nothing is in flight any more, so there is no job left to spend an
+        // approval against.
+        self.job_id = None;
         self.outcome = Some(outcome);
         self.record("settled", None, Some(outcome));
     }

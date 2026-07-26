@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-render-canvas",
+  "version": "motion-render-canvas.v1",
+  "policy": "fail_closed",
+  "width": 640,
+  "height": 360,
+  "definedIn": [
+    "workers/motion_composition/worker.mjs",
+    "tools/motion-authoring/motion_authoring_agent.py",
+    "frontend/src-tauri/src/motion_video_studio.rs"
+  ],
+  "enforcedBy": "scripts/test_motion_authoring_agent.py",
+  "rationale": {
+    "problem": "The render sandbox captures a fixed viewport, while the locked upstream authoring reference mandates a 1920x1080 stage. A composition that followed the reference rendered as the empty top-left corner of its own stage: 180 byte-identical frames encoded into a valid MP4 that was a still image. Neither the authoring gates nor the render sandbox could observe the disagreement, because neither knew the other's number.",
+    "resolution": "The capture viewport is one declared value read by every side. The authoring gate rejects any composition whose declared stage differs from it, so the mismatch fails before a browser is launched rather than after an MP4 exists.",
+    "changing": "Raising the canvas means changing this file and the sandbox spec together; the still-frame gate in the render job is the backstop that keeps a future mismatch loud."
+  }
+}

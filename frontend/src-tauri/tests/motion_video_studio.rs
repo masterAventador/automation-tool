@@ -1,8 +1,8 @@
 use automation_tool_desktop_lib::local_video_orchestrator::VideoWorkerRenderSandboxRequest;
 use automation_tool_desktop_lib::motion_video_studio::{
     advance, delete_artifact, duration_limits, import_rendered_output, prepare_manual_render_job,
-    render_sandbox_budget, MotionRenderJobStatus, MotionVideoBeatDraft, MotionVideoDraftRequest,
-    MotionVideoStudioErrorCode,
+    render_sandbox_budget, rendered_film_is_static, MotionRenderFailureCode, MotionRenderJobStatus,
+    MotionVideoBeatDraft, MotionVideoDraftRequest, MotionVideoStudioErrorCode,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
@@ -352,4 +352,101 @@ fn bm16_all_twelve_locked_styles_freeze_seekable_compositions() {
             fs::write(directory.join(format!("{preset}.html")), &html).unwrap();
         }
     }
+}
+
+/// Frames that never change mean the film is a still image. The render worker
+/// reports success either way — it captured exactly the frames it was asked
+/// for — and FFmpeg happily encodes them into a well-formed MP4. This gate is
+/// the only place between "render succeeded" and "here is your video" that can
+/// tell the difference, so it is what keeps a canvas or timeline mismatch loud.
+fn write_frames(directory: &Path, frame_count: u32, distinct: bool) {
+    fs::create_dir_all(directory).unwrap();
+    for index in 1..=frame_count {
+        let body = if distinct {
+            format!("frame payload {index}")
+        } else {
+            "frame payload constant".to_owned()
+        };
+        fs::write(
+            directory.join(format!("frame-{index:05}.png")),
+            body.as_bytes(),
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn a_film_whose_sampled_frames_all_match_is_reported_as_static() {
+    let root = TempDirectory::new();
+    let frames = root.0.join("frames");
+    write_frames(&frames, 180, false);
+
+    assert!(rendered_film_is_static(&frames, 180).unwrap());
+}
+
+#[test]
+fn a_film_with_moving_frames_is_not_reported_as_static() {
+    let root = TempDirectory::new();
+    let frames = root.0.join("frames");
+    write_frames(&frames, 180, true);
+
+    assert!(!rendered_film_is_static(&frames, 180).unwrap());
+}
+
+#[test]
+fn a_single_frame_film_is_never_called_static() {
+    let root = TempDirectory::new();
+    let frames = root.0.join("frames");
+    write_frames(&frames, 1, false);
+
+    assert!(!rendered_film_is_static(&frames, 1).unwrap());
+}
+
+#[test]
+fn a_film_that_only_moves_in_the_middle_is_not_reported_as_static() {
+    let root = TempDirectory::new();
+    let frames = root.0.join("frames");
+    write_frames(&frames, 180, false);
+    fs::write(frames.join("frame-00090.png"), b"a different middle frame").unwrap();
+
+    assert!(!rendered_film_is_static(&frames, 180).unwrap());
+}
+
+#[test]
+fn a_missing_frame_is_a_storage_failure_rather_than_a_verdict() {
+    // The gap has to fall inside a run of identical frames: that is the only
+    // shape where staying silent would let an incomplete capture be reported
+    // as a settled "static" verdict instead of the storage fault it is.
+    let root = TempDirectory::new();
+    let frames = root.0.join("frames");
+    write_frames(&frames, 180, false);
+    fs::remove_file(frames.join("frame-00090.png")).unwrap();
+
+    let error = rendered_film_is_static(&frames, 180).unwrap_err();
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::StorageUnavailable);
+}
+
+#[test]
+fn a_static_render_reaches_the_user_as_its_own_failure_code() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+
+    advance(&store, job, MotionRenderJobStatus::Rendering, 55, None, None).unwrap();
+    let snapshot = advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Failed,
+        55,
+        None,
+        Some(MotionRenderFailureCode::StaticRender),
+    )
+    .unwrap();
+
+    assert_eq!(snapshot.status(), MotionRenderJobStatus::Failed);
+    assert_eq!(
+        serde_json::to_value(MotionRenderFailureCode::StaticRender).unwrap(),
+        serde_json::json!("static_render"),
+    );
 }

@@ -350,6 +350,13 @@ interface WorkbenchShellProps {
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
   readonly publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
+  /**
+   * The video the publishing page starts with, if one is already chosen.
+   *
+   * Only a starting point. The shell owns the selection from then on, because
+   * choosing a video happens on one page and publishing it happens on another,
+   * and the two have to agree on which one it is.
+   */
   readonly selectedVideo?: SelectedVideo | undefined;
 }
 
@@ -369,11 +376,14 @@ export function WorkbenchShell({
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
   publishWorkspaceGateway = shellPublishWorkspaceGateway,
-  selectedVideo,
+  selectedVideo: initialSelectedVideo,
 }: WorkbenchShellProps) {
   const [activePage, setActivePage] = useState("workbench");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [autoOpenPlatformLogin, setAutoOpenPlatformLogin] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | undefined>(
+    initialSelectedVideo,
+  );
   const creatingTask = activePage === "task-create";
   const showingTaskRun = activePage === "task-runs";
   const showingDiagnostics = activePage === "diagnostics";
@@ -391,6 +401,19 @@ export function WorkbenchShell({
   const openPlatformPage = (openLogin: boolean) => {
     setAutoOpenPlatformLogin(openLogin);
     setActivePage("platform");
+  };
+
+  /**
+   * Go choose a video, and stop claiming one is selected on the way.
+   *
+   * Finished videos are managed on one page and published from another, so
+   * "换一个" is a trip back to the first. The selection is dropped before the
+   * trip rather than after it: a stale selection left showing while the
+   * operator picks a different one is how the wrong video gets published.
+   */
+  const chooseAnotherVideo = () => {
+    setSelectedVideo(undefined);
+    setActivePage("video-studio");
   };
 
   return (
@@ -523,6 +546,7 @@ export function WorkbenchShell({
               <PublishWorkspace
                 gateway={publishWorkspaceGateway}
                 selectedVideo={selectedVideo}
+                onChangeSelection={chooseAnotherVideo}
               />
             ) : showingLegal ? (
               <ThirdPartySoftwareNotice />

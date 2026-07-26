@@ -10,16 +10,29 @@ import {
 } from "./publish-workspace-gateway";
 
 const CONFIRMATION_ID = "123e4567-e89b-42d3-a456-426614174007";
-const PUBLISH_JOB_ID = "423e4567-e89b-42d3-a456-426614174001";
+const ARTIFACT_ID = "423e4567-e89b-42d3-a456-426614174001";
 
-/** A finished video the operator picked; the page never invents one. */
+/**
+ * A finished video the operator picked; the page never invents one.
+ *
+ * It is an identity, not a path. The page could not resolve a path to a real
+ * file even if it held one, and holding one would mean the bridge accepted
+ * whatever local file a page named.
+ */
 const selectedVideo: SelectedVideo = {
-  publishJobId: PUBLISH_JOB_ID,
-  artifactPath: "/videos/clip.mp4",
+  artifactId: ARTIFACT_ID,
   videoSummary: "护肤知识讲解 · 12.4 MB",
-  title: "三分钟讲清油皮护肤",
-  description: "从洁面到防晒，按顺序讲一遍。",
 };
+
+const TITLE = "三分钟讲清油皮护肤";
+const DESCRIPTION = "从洁面到防晒，按顺序讲一遍。";
+
+/** Fill the copy the way an operator does, then hand back the publish button. */
+async function writeTheCopy(): Promise<HTMLElement> {
+  await userEvent.type(await screen.findByLabelText("标题"), TITLE);
+  await userEvent.type(screen.getByLabelText("简介"), DESCRIPTION);
+  return screen.getByRole("button", { name: /发布到抖音/ });
+}
 
 function snapshot(overrides: Partial<PublishWorkspaceSnapshot> = {}): PublishWorkspaceSnapshot {
   return {
@@ -63,9 +76,17 @@ describe("publish workspace", () => {
     expect(await screen.findByText("B站")).toBeInTheDocument();
     expect(screen.getByText("抖音")).toBeInTheDocument();
     expect(screen.getByText("待配置")).toBeInTheDocument();
-    expect(
-      screen.getByText(/还没有配置发布凭据/, { exact: false }),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/还在接入中/, { exact: false })).toBeInTheDocument();
+  });
+
+  it("does not promise the operator something no part of this App can do", async () => {
+    // The hint used to read "配置后即可使用". There is no credential entry
+    // anywhere in the App and no authorization route behind it, so that told
+    // the operator to go looking for a screen that does not exist.
+    const { container } = render(<PublishWorkspace gateway={gatewayReturning(snapshot())} />);
+
+    await screen.findByText("待配置");
+    expect(container.textContent ?? "").not.toContain("配置后即可使用");
   });
 
   it("still lets the operator publish to the platform that is ready", async () => {
@@ -75,11 +96,14 @@ describe("publish workspace", () => {
     );
     render(<PublishWorkspace gateway={gateway} selectedVideo={selectedVideo} />);
 
-    await userEvent.click(await screen.findByRole("button", { name: /发布到抖音/ }));
+    await userEvent.click(await writeTheCopy());
 
     expect(gateway.beginPublish).toHaveBeenCalledWith({
-      ...selectedVideo,
       platform: "douyin",
+      artifactId: ARTIFACT_ID,
+      videoSummary: selectedVideo.videoSummary,
+      title: TITLE,
+      description: DESCRIPTION,
     });
     expect(await screen.findByText("准备中")).toBeInTheDocument();
   });
@@ -124,8 +148,9 @@ describe("publish workspace", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /确认发布/ }));
 
+    // The page has no publish job identity to send, and inventing one out of
+    // the confirmation identity is what it used to do.
     expect(gateway.approvePublish).toHaveBeenCalledWith({
-      publishJobId: CONFIRMATION_ID,
       confirmationId: CONFIRMATION_ID,
     });
     expect(await screen.findByText("发布中")).toBeInTheDocument();
@@ -189,7 +214,9 @@ describe("publish workspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: /重新发布/ })).toBeInTheDocument();
+    await userEvent.type(await screen.findByLabelText("标题"), TITLE);
+    await userEvent.type(screen.getByLabelText("简介"), DESCRIPTION);
+    expect(screen.getByRole("button", { name: /重新发布/ })).toBeEnabled();
   });
 
   it("keeps the module usable when the bridge cannot be read", async () => {
@@ -206,6 +233,48 @@ describe("publish workspace", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/发布状态/);
     await userEvent.click(screen.getByRole("button", { name: /重\s?试/ }));
     await waitFor(() => expect(gateway.getWorkspace).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows which video is about to be published, and lets it be swapped", async () => {
+    const changeSelection = vi.fn();
+    render(
+      <PublishWorkspace
+        gateway={gatewayReturning(snapshot())}
+        selectedVideo={selectedVideo}
+        onChangeSelection={changeSelection}
+      />,
+    );
+
+    const pending = await screen.findByRole("group", { name: "待发布视频" });
+    expect(within(pending).getByText("护肤知识讲解 · 12.4 MB")).toBeInTheDocument();
+    await userEvent.click(within(pending).getByRole("button", { name: /换一个/ }));
+
+    expect(changeSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it("will not publish a video with no copy written for it", async () => {
+    // The executor refuses unreadable copy, and so does the bridge. Finding
+    // that out after the operations browser has already been opened wastes the
+    // one visible browser the operator has.
+    const gateway = gatewayReturning(snapshot());
+    render(<PublishWorkspace gateway={gateway} selectedVideo={selectedVideo} />);
+
+    expect(await screen.findByRole("button", { name: /发布到抖音/ })).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText("标题"), TITLE);
+    expect(screen.getByRole("button", { name: /发布到抖音/ })).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText("简介"), DESCRIPTION);
+    expect(screen.getByRole("button", { name: /发布到抖音/ })).toBeEnabled();
+    expect(gateway.beginPublish).not.toHaveBeenCalled();
+  });
+
+  it("offers no copy to write when no video has been selected", async () => {
+    render(<PublishWorkspace gateway={gatewayReturning(snapshot())} />);
+
+    await screen.findByText("抖音");
+    expect(screen.queryByLabelText("标题")).toBeNull();
+    expect(screen.queryByRole("group", { name: "待发布视频" })).toBeNull();
   });
 
   it("never tells the operator how a platform is reached", async () => {

@@ -50,7 +50,12 @@ export interface MotionRenderJobSnapshot {
   readonly styleDisplayName: string;
   readonly artifactId: string | null;
   readonly artifactSizeBytes: number | null;
-  readonly failureCode: "render_failed" | "encoding_failed" | "interrupted" | null;
+  readonly failureCode:
+    | "render_failed"
+    | "encoding_failed"
+    | "interrupted"
+    | "static_render"
+    | null;
 }
 
 export interface MotionVideoArtifactPayload {

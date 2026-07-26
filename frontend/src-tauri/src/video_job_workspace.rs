@@ -13,11 +13,26 @@ use uuid::{Uuid, Variant};
 const STORE_DIRECTORY: &str = "video-workspaces-v1";
 const JOBS_DIRECTORY: &str = "jobs";
 const ARTIFACTS_DIRECTORY: &str = "artifacts";
+const PUBLISH_STAGING_DIRECTORY: &str = "publish-staging";
 const OUTPUTS_DIRECTORY: &str = "outputs";
 const CHECKPOINTS_DIRECTORY: &str = "checkpoints";
 const WORK_DIRECTORY: &str = "work";
 const ARTIFACT_PAYLOAD: &str = "payload";
 const ARTIFACT_MANIFEST: &str = "manifest.json";
+/// The one role and media type a publish may ever be handed.
+///
+/// Both creation lines label a finished video exactly this way, and narrowing
+/// the publishable set to it is what turns "some local file" into "something
+/// this App produced".
+const PUBLISHABLE_ROLE: &str = "rendered_video";
+const PUBLISHABLE_MEDIA_TYPE: &str = "video/mp4";
+/// The extension the executor requires, and it must be the only one.
+///
+/// `douyin/publish_artifact.py` accepts a path with exactly one suffix drawn
+/// from a frozen set. The stored payload has none at all, so a publish is
+/// handed a staged copy named `<artifactId>.mp4` — a hyphenated UUID carries
+/// no dot of its own, so the staged name has exactly one suffix.
+const PUBLISHABLE_EXTENSION: &str = "mp4";
 const MAX_WORKSPACE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 const MAX_CHECKPOINT_BYTES: u64 = 1024 * 1024;
@@ -243,9 +258,53 @@ impl VideoArtifactRecord {
 pub struct VideoJobWorkspaceStore {
     jobs_directory: PathBuf,
     artifacts_directory: PathBuf,
+    staging_directory: PathBuf,
     jobs_identity: DirectoryIdentity,
     artifacts_identity: DirectoryIdentity,
+    staging_identity: DirectoryIdentity,
     policy: VideoJobWorkspacePolicy,
+}
+
+/// One finished video, copied out under a name the executor will accept.
+///
+/// It exists only for the length of one publish. The Artifact it came from is
+/// never renamed, moved or exposed: this is a second, disposable file whose
+/// digest is re-proved against the manifest before it is handed over.
+#[derive(Clone, Eq, PartialEq)]
+pub struct StagedPublishArtifact {
+    path: PathBuf,
+    artifact_id: Uuid,
+    sha256: String,
+    size_bytes: u64,
+}
+
+impl StagedPublishArtifact {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn artifact_id(&self) -> Uuid {
+        self.artifact_id
+    }
+
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+}
+
+/// A local path is not something to print. Everything but it is safe to see.
+impl fmt::Debug for StagedPublishArtifact {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StagedPublishArtifact")
+            .field("artifact_id", &self.artifact_id)
+            .field("size_bytes", &self.size_bytes)
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for VideoJobWorkspaceStore {
@@ -268,19 +327,28 @@ impl VideoJobWorkspaceStore {
         ensure_private_directory(&store_directory)?;
         let jobs_directory = store_directory.join(JOBS_DIRECTORY);
         let artifacts_directory = store_directory.join(ARTIFACTS_DIRECTORY);
+        let staging_directory = store_directory.join(PUBLISH_STAGING_DIRECTORY);
         ensure_private_directory(&jobs_directory)?;
         ensure_private_directory(&artifacts_directory)?;
+        ensure_private_directory(&staging_directory)?;
         let jobs_identity = directory_identity(&jobs_directory)?;
         let artifacts_identity = directory_identity(&artifacts_directory)?;
+        let staging_identity = directory_identity(&staging_directory)?;
         let store = Self {
             jobs_directory,
             artifacts_directory,
+            staging_directory,
             jobs_identity,
             artifacts_identity,
+            staging_identity,
             policy,
         };
         store.recover_interrupted_imports()?;
         store.validate_artifact_inventory()?;
+        // A publish that was interrupted by a crash left a whole copy of a
+        // video behind. Nothing is ever resumed from it, so it goes now rather
+        // than sitting in the App's data directory until someone notices.
+        store.discard_staged_publish_artifacts()?;
         Ok(store)
     }
 
@@ -580,6 +648,100 @@ impl VideoJobWorkspaceStore {
         Ok(records)
     }
 
+    /// Hand one finished video to a publish, under a name the executor takes.
+    ///
+    /// Three things are settled here rather than anywhere upstream:
+    ///
+    /// * **Which files may be published at all.** Only a registered Artifact
+    ///   labelled as a finished MP4 qualifies, so the publish boundary can no
+    ///   longer be pointed at an arbitrary local file.
+    /// * **The name.** The stored payload has no extension and the executor
+    ///   requires exactly one, so it is copied to `<artifactId>.mp4`. No
+    ///   check on the executor side is relaxed to make this fit.
+    /// * **That it is a copy.** A hard link would be cheaper and does not
+    ///   work: the executor requires a single-link regular file, and linking
+    ///   makes both names multiply-linked.
+    ///
+    /// Only one video is ever staged at a time, so an abandoned publish cannot
+    /// leave a second copy behind.
+    pub fn stage_publishable_artifact(
+        &self,
+        artifact_id: Uuid,
+    ) -> Result<StagedPublishArtifact, VideoWorkspaceError> {
+        self.revalidate_roots()?;
+        if !valid_uuid_v4(artifact_id) {
+            return Err(configuration_invalid());
+        }
+        // A video deleted between choosing it and publishing it is its own
+        // answer: the operator has to pick again, not see a storage fault.
+        match fs::symlink_metadata(self.artifact_directory(artifact_id)) {
+            Ok(metadata) => validate_private_directory_metadata(&metadata)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Err(VideoWorkspaceError::new(VideoWorkspaceErrorCode::NotFound))
+            }
+            Err(_) => return Err(storage_unavailable()),
+        }
+        let record = self.load_artifact_record(artifact_id)?;
+        if record.role != PUBLISHABLE_ROLE || record.media_type != PUBLISHABLE_MEDIA_TYPE {
+            return Err(configuration_invalid());
+        }
+        self.discard_staged_publish_artifacts()?;
+        ensure_free_space(&self.staging_directory, record.size_bytes, self.policy)?;
+        let source = self.artifact_directory(artifact_id).join(ARTIFACT_PAYLOAD);
+        let source_metadata =
+            safe_regular_file_metadata(&source)?.ok_or_else(storage_unavailable)?;
+        let destination = self.staging_directory.join(format!(
+            "{}.{PUBLISHABLE_EXTENSION}",
+            artifact_id.hyphenated(),
+        ));
+        let result = (|| {
+            let (size_bytes, sha256) = copy_stable_file(
+                &source,
+                &destination,
+                source_metadata,
+                self.policy.maximum_artifact_bytes,
+            )?;
+            // What was copied has to be what the manifest says it is; a payload
+            // replaced between listing and staging is refused, not published.
+            if size_bytes != record.size_bytes || sha256 != record.sha256 {
+                return Err(storage_unavailable());
+            }
+            sync_directory(&self.staging_directory)?;
+            Ok(StagedPublishArtifact {
+                path: destination.clone(),
+                artifact_id,
+                sha256,
+                size_bytes,
+            })
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&destination);
+        }
+        result
+    }
+
+    /// Drop whatever was staged for publishing. Artifacts are never touched.
+    ///
+    /// Called on every exit path of a publish and once at startup, so it has to
+    /// be safe to call when there is nothing staged.
+    pub fn discard_staged_publish_artifacts(&self) -> Result<(), VideoWorkspaceError> {
+        require_directory_identity(&self.staging_directory, self.staging_identity)?;
+        let mut removed = false;
+        for entry in fs::read_dir(&self.staging_directory).map_err(|_| storage_unavailable())? {
+            let entry = entry.map_err(|_| storage_unavailable())?;
+            let path = entry.path();
+            // Anything that is not a plain private file here was not put here
+            // by this App, and removing it blindly is how a link gets followed.
+            safe_regular_file_metadata(&path)?.ok_or_else(path_rejected)?;
+            fs::remove_file(&path).map_err(|_| storage_unavailable())?;
+            removed = true;
+        }
+        if removed {
+            sync_directory(&self.staging_directory)?;
+        }
+        Ok(())
+    }
+
     pub fn delete_artifact(&self, artifact_id: Uuid) -> Result<(), VideoWorkspaceError> {
         self.revalidate_roots()?;
         if !valid_uuid_v4(artifact_id) {
@@ -731,7 +893,8 @@ impl VideoJobWorkspaceStore {
 
     fn revalidate_roots(&self) -> Result<(), VideoWorkspaceError> {
         require_directory_identity(&self.jobs_directory, self.jobs_identity)?;
-        require_directory_identity(&self.artifacts_directory, self.artifacts_identity)
+        require_directory_identity(&self.artifacts_directory, self.artifacts_identity)?;
+        require_directory_identity(&self.staging_directory, self.staging_identity)
     }
 
     fn revalidate_workspace(
@@ -1181,7 +1344,8 @@ fn valid_uuid_v4(value: Uuid) -> bool {
     value.get_version_num() == 4 && value.get_variant() == Variant::RFC4122
 }
 
-fn generate_uuid_v4() -> Result<Uuid, VideoWorkspaceError> {
+/// The crate's one UUIDv4 source, so nothing has to grow a second one.
+pub fn generate_uuid_v4() -> Result<Uuid, VideoWorkspaceError> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).map_err(|_| storage_unavailable())?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
