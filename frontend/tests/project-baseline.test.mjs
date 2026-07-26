@@ -14,7 +14,16 @@ test("desktop frontend owns one private pnpm package with the required stack", a
   assert.equal(packageJson.name, "automation-tool-desktop");
   assert.equal(packageJson.private, true);
   assert.match(packageJson.packageManager, /^pnpm@\d+\.\d+\.\d+$/);
+  // The declared stack. Growing it is allowed but has to be deliberate, which
+  // is what this assertion is for: `@ant-design/icons` was added on 2026-07-27
+  // so the Collapse expand icon could be redrawn without antd's
+  // `aria-label="collapsed"`, which was being absorbed into every collapse
+  // header's accessible name. Inlining antd's own SVG path instead would have
+  // meant copying an upstream internal, which CLAUDE.md §6 forbids. The
+  // package is antd's own dependency and already installed, so this declares
+  // something that was there rather than pulling anything new down.
   assert.deepEqual(Object.keys(packageJson.dependencies).sort(), [
+    "@ant-design/icons",
     "@tanstack/react-query",
     "@tauri-apps/api",
     "antd",
