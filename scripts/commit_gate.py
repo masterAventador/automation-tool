@@ -157,10 +157,28 @@ def _link_build_inputs(checkout: Path) -> None:
         modules.symlink_to(REPOSITORY_ROOT / "frontend" / "node_modules")
 
 
+def _node_tool(name: str) -> str | None:
+    """Resolve a Node CLI, which is a `.cmd` shim rather than an `.exe`.
+
+    `CreateProcess` only ever appends `.exe`, so a bare `npx` is not found on
+    Windows and the check died with `WinError 2` before running -- a crash
+    where a red or green result was expected. `shutil.which` applies PATHEXT
+    and returns the shim.
+    """
+    return shutil.which(name)
+
+
 def run_typescript_check(checkout: Path) -> CheckResult:
     _link_build_inputs(checkout)
+    npx = _node_tool("npx")
+    if npx is None:
+        return CheckResult(
+            name="typescript",
+            ok=False,
+            output="npx was not found on PATH, so the TypeScript check did not run",
+        )
     completed = subprocess.run(
-        ["npx", "tsc", "-b", "--pretty", "false"],
+        [npx, "tsc", "-b", "--pretty", "false"],
         cwd=checkout / "frontend",
         capture_output=True,
         text=True,
@@ -221,8 +239,21 @@ def _mypy_environment(checkout: Path) -> dict[str, str]:
 PYTHON_CHECK_TARGETS: Final = ("scripts", "tools", "workers")
 
 
+def _venv_executable(project_root: Path, name: str) -> Path:
+    """A console script inside a venv, whose folder and suffix are per-platform.
+
+    Windows puts these in `Scripts/` with an `.exe` suffix. Deliberately kept
+    local rather than shared with `run_script_tests.py`, which resolves the
+    same layout: that file is being rewritten on another branch, and four
+    duplicated lines cost less than the merge.
+    """
+    if os.name == "nt":
+        return project_root / ".venv" / "Scripts" / f"{name}.exe"
+    return project_root / ".venv" / "bin" / name
+
+
 def _run_mypy(checkout: Path, *targets: str) -> tuple[bool, str]:
-    mypy = REPOSITORY_ROOT / "backend" / ".venv" / "bin" / "mypy"
+    mypy = _venv_executable(REPOSITORY_ROOT / "backend", "mypy")
     if not mypy.is_file():
         return False, f"mypy is not installed at {mypy}"
     completed = subprocess.run(

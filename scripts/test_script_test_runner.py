@@ -134,6 +134,19 @@ def check_interpreter_is_pinned_not_inherited() -> None:
         _fail(f"runner must use the project venv interpreter, got {interpreter}")
 
 
+def check_interpreter_layout_matches_this_platform() -> None:
+    """A venv puts its interpreter in a different place on Windows.
+
+    Pinning `bin/python` unconditionally means the runner aborts on Windows
+    before executing a single script, and reports that as one tidy `FATAL`
+    line rather than as a suite nobody ran -- the same shape as the orphans
+    this file exists to catch.
+    """
+    interpreter = run_script_tests.interpreter(REPOSITORY_ROOT)
+    if not interpreter.is_file():
+        _fail(f"pinned interpreter does not exist on this platform: {interpreter}")
+
+
 def check_sub_project_scripts_get_their_own_environment() -> None:
     """Pinning one interpreter is necessary but not sufficient.
 
@@ -158,6 +171,7 @@ CHECKS = (
     check_discovery_includes_this_file,
     check_runner_documentation_does_not_copy_derived_counts,
     check_interpreter_is_pinned_not_inherited,
+    check_interpreter_layout_matches_this_platform,
     check_sub_project_scripts_get_their_own_environment,
 )
 

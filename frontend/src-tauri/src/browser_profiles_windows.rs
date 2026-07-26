@@ -28,8 +28,9 @@ use windows_sys::Win32::Security::{
     GetSecurityDescriptorControl, GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor,
     SetSecurityDescriptorControl, SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser,
     ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE,
-    DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PROTECTED_DACL_SECURITY_INFORMATION, PSID,
-    SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+    DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSID, SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY,
+    TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileAttributesW, GetFileInformationByHandle, GetFinalPathNameByHandleW, LockFileEx,
@@ -37,7 +38,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, INVALID_FILE_ATTRIBUTES, LOCKFILE_EXCLUSIVE_LOCK,
-    LOCKFILE_FAIL_IMMEDIATELY, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
+    LOCKFILE_FAIL_IMMEDIATELY, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::SECURITY_DESCRIPTOR_REVISION;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -135,6 +136,22 @@ enum AclPolicy {
     Ignore,
     Repair,
     Require,
+}
+
+impl AclPolicy {
+    /// The extra access repair needs, and that only repair is allowed to ask for.
+    ///
+    /// A process creates directories owned by its token's *default* owner, which
+    /// under elevation is `BUILTIN\Administrators` rather than the token user.
+    /// Repair therefore has to write an owner as well as a DACL, and
+    /// `SetSecurityInfo` refuses to write one without `WRITE_OWNER`. Verifying
+    /// and read-only opens keep the narrower mask they have always had.
+    fn extra_access(self) -> u32 {
+        match self {
+            Self::Repair => WRITE_OWNER,
+            Self::Ignore | Self::Require => 0,
+        }
+    }
 }
 
 pub(super) struct PlatformProfileStore {
@@ -495,7 +512,7 @@ fn open_absolute_directory(
 ) -> Result<DirectoryHandle, BrowserProfileError> {
     ensure_no_reparse_components(path)?;
     let file = OpenOptions::new()
-        .access_mode(FILE_GENERIC_READ | READ_CONTROL | WRITE_DAC)
+        .access_mode(FILE_GENERIC_READ | READ_CONTROL | WRITE_DAC | acl_policy.extra_access())
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
@@ -557,7 +574,7 @@ fn open_relative_directory(
     let status = unsafe {
         NtCreateFile(
             &mut handle,
-            FILE_GENERIC_READ | READ_CONTROL | WRITE_DAC,
+            FILE_GENERIC_READ | READ_CONTROL | WRITE_DAC | acl_policy.extra_access(),
             &attributes,
             &mut io_status,
             null(),
@@ -668,7 +685,11 @@ fn open_relative_lock_file(
     let status = unsafe {
         NtCreateFile(
             &mut handle,
-            FILE_GENERIC_READ | FILE_GENERIC_WRITE | READ_CONTROL | WRITE_DAC,
+            FILE_GENERIC_READ
+                | FILE_GENERIC_WRITE
+                | READ_CONTROL
+                | WRITE_DAC
+                | acl_policy.extra_access(),
             &attributes,
             &mut io_status,
             null(),
@@ -793,12 +814,21 @@ fn apply_private_acl_with_flags(file: &File, ace_flags: u32) -> Result<(), Brows
     {
         return Err(BrowserProfileError::storage_unavailable());
     }
+    // The owner is written, not just the DACL. An owner implicitly holds
+    // `READ_CONTROL` and `WRITE_DAC` no matter what the DACL says, so leaving
+    // the directory owned by `BUILTIN\Administrators` -- which is what an
+    // elevated process's default owner produces -- would let every other
+    // administrator on the machine rewrite this DACL and read the platform
+    // session it protects. It is also exactly what verification checks, so
+    // repairing without it produced a directory that could never verify.
     let status = unsafe {
         SetSecurityInfo(
             file.as_raw_handle() as HANDLE,
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            null_mut(),
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            sid,
             null_mut(),
             acl,
             null(),
@@ -830,7 +860,7 @@ fn verify_private_acl_with_flags(
         GetSecurityInfo(
             file.as_raw_handle() as HANDLE,
             SE_FILE_OBJECT,
-            windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
             &mut owner,
             null_mut(),
             &mut dacl,
@@ -1009,14 +1039,22 @@ fn final_path(file: &File) -> Result<String, BrowserProfileError> {
 }
 
 fn normalized_path_key(path: &Path) -> String {
-    let mut value = path.to_string_lossy().replace('/', "\\");
+    let mut value = path.to_string_lossy().replace('/', "\\").to_lowercase();
     if let Some(stripped) = value.strip_prefix("\\\\?\\") {
-        value = stripped.to_owned();
+        // `\\?\UNC\server\share` is the extended spelling of `\\server\share`,
+        // and `GetFinalPathNameByHandleW` only ever returns the extended one.
+        // Trimming just the `\\?\` left `unc\server\share`, which equals no
+        // path anyone can request, so a UNC-backed profile root could never
+        // match its own resolved path and always read as an unsafe directory.
+        value = match stripped.strip_prefix("unc\\") {
+            Some(share) => format!("\\\\{share}"),
+            None => stripped.to_owned(),
+        };
     }
     while value.ends_with('\\') && value.len() > 3 {
         value.pop();
     }
-    value.to_lowercase()
+    value
 }
 
 fn wide_null(path: &Path) -> Result<Vec<u16>, BrowserProfileError> {
@@ -1046,5 +1084,342 @@ fn require_safe_relative_name(value: &str) -> Result<(), BrowserProfileError> {
         require_safe_name(profile_id)
     } else {
         require_safe_name(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::browser_profiles::BrowserProfileErrorCode;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use windows_sys::Win32::Security::TokenOwner;
+
+    const PROFILE_ROOT: &str = "browser-profiles";
+    const PLATFORM: &str = "douyin";
+    const PROFILE_ID: &str = "00000000-0000-4000-8000-000000000001";
+
+    /// A directory named for this project, this process and this case.
+    ///
+    /// Anything left behind has to be attributable to `automation-tool` and to
+    /// one run, so a parallel run or another project's leftovers can never be
+    /// mistaken for this one's.
+    struct TemporaryDirectory {
+        path: PathBuf,
+    }
+
+    impl TemporaryDirectory {
+        fn create(tag: &str) -> Self {
+            static COUNTER: AtomicU32 = AtomicU32::new(0);
+            let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+            // Canonicalised for the same reason the integration fixtures do it:
+            // `%TEMP%` can be an 8.3 short path or a redirected one, and the
+            // guards under test compare a requested path against its resolved
+            // form -- an unresolved root fails them for reasons of environment
+            // rather than of behaviour.
+            let path = std::env::temp_dir()
+                .canonicalize()
+                .expect("the temporary root must be canonicalisable")
+                .join(format!(
+                "automation-tool-browser-profiles-{tag}-{}-{unique}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("temporary directory must be creatable");
+            Self { path }
+        }
+    }
+
+    impl Drop for TemporaryDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// A `subst` drive letter, unmapped again however the case ends.
+    struct SubstDrive {
+        letter: String,
+    }
+
+    impl SubstDrive {
+        fn map(target: &Path) -> Option<Self> {
+            let letter = ('P'..='Z')
+                .rev()
+                .map(|value| format!("{value}:"))
+                .find(|candidate| !Path::new(&format!("{candidate}\\")).exists())?;
+            let mapped = Command::new("cmd")
+                .args(["/c", "subst", &letter, &target.to_string_lossy()])
+                .status()
+                .ok()?
+                .success();
+            mapped.then(|| Self { letter })
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            PathBuf::from(format!("{}\\{name}", self.letter))
+        }
+    }
+
+    impl Drop for SubstDrive {
+        fn drop(&mut self) {
+            let _ = Command::new("cmd")
+                .args(["/c", "subst", &self.letter, "/d"])
+                .status();
+        }
+    }
+
+    fn opened(path: &Path, policy: AclPolicy, purpose: &str) -> DirectoryHandle {
+        match open_absolute_directory(path, policy) {
+            Ok(directory) => directory,
+            Err(error) => panic!("{purpose} (error code {:?})", error.code()),
+        }
+    }
+
+    fn refusal_code(path: &Path, purpose: &str) -> BrowserProfileErrorCode {
+        match open_absolute_directory(path, AclPolicy::Ignore) {
+            Ok(_) => panic!("{purpose}"),
+            Err(error) => error.code(),
+        }
+    }
+
+    fn created_profile(store: &PlatformProfileStore) -> PlatformProfile {
+        match store.create_profile(PROFILE_ID) {
+            Ok(profile) => profile,
+            Err(CreateProfileError::Collision) => panic!("a fresh profile id collided"),
+            Err(CreateProfileError::Failure(error)) => {
+                panic!("profile creation failed (error code {:?})", error.code())
+            }
+        }
+    }
+
+    fn owner_matches_token_user(file: &File) -> bool {
+        let user = CurrentUserSid::load().expect("the token user must be readable");
+        let mut owner: PSID = null_mut();
+        let mut descriptor = null_mut();
+        let status = unsafe {
+            GetSecurityInfo(
+                file.as_raw_handle() as HANDLE,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                &mut owner,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        assert_eq!(status, ERROR_SUCCESS, "the owner must be readable");
+        let matches = !owner.is_null() && unsafe { EqualSid(owner, user.sid()) != 0 };
+        unsafe {
+            LocalFree(descriptor as HLOCAL);
+        }
+        matches
+    }
+
+    /// Whether this process's *default* owner is something other than its user.
+    ///
+    /// True under elevation, where new objects are owned by
+    /// `BUILTIN\Administrators`. Printed so a run can be read as covering the
+    /// elevated case or not, rather than looking identical either way.
+    fn default_owner_differs_from_token_user() -> bool {
+        let mut token: HANDLE = null_mut();
+        assert_ne!(
+            unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) },
+            0,
+            "the process token must be openable"
+        );
+        let mut required = 0_u32;
+        unsafe {
+            GetTokenInformation(token, TokenOwner, null_mut(), 0, &mut required);
+        }
+        let mut buffer = vec![0_usize; (required as usize).div_ceil(size_of::<usize>()).max(1)];
+        let read = unsafe {
+            GetTokenInformation(
+                token,
+                TokenOwner,
+                buffer.as_mut_ptr().cast(),
+                required,
+                &mut required,
+            )
+        };
+        unsafe {
+            CloseHandle(token);
+        }
+        assert_ne!(read, 0, "the token owner must be readable");
+        let owner = unsafe { *buffer.as_ptr().cast::<PSID>() };
+        let user = CurrentUserSid::load().expect("the token user must be readable");
+        unsafe { EqualSid(owner, user.sid()) == 0 }
+    }
+
+    #[test]
+    fn repair_takes_ownership_instead_of_only_rewriting_the_dacl() {
+        let root = TemporaryDirectory::create("acl-owner");
+        // Printed so an elevated run and a non-elevated one are distinguishable
+        // in the output; only the elevated one reproduces the defect.
+        println!(
+            "default owner differs from token user: {}",
+            default_owner_differs_from_token_user()
+        );
+
+        let directory = opened(
+            &root.path,
+            AclPolicy::Repair,
+            "repair must be able to correct a directory it did not create",
+        );
+
+        assert!(
+            owner_matches_token_user(&directory.file),
+            "repair left the directory owned by the process default owner"
+        );
+        assert!(
+            verify_private_acl(&directory.file).is_ok(),
+            "a repaired directory must verify"
+        );
+    }
+
+    #[test]
+    fn a_store_initializes_under_the_process_default_owner() {
+        let root = TemporaryDirectory::create("store-init");
+
+        let store = match PlatformProfileStore::initialize(&root.path, PROFILE_ROOT, PLATFORM) {
+            Ok(store) => store,
+            Err(error) => panic!(
+                "store construction must not depend on who owns the app data directory \
+                 (error code {:?})",
+                error.code()
+            ),
+        };
+        let profile = created_profile(&store);
+        assert!(
+            store.revalidate_profile(PROFILE_ID, &profile).is_ok(),
+            "a freshly created profile must revalidate"
+        );
+        drop(profile);
+        assert!(
+            store.remove_profile(PROFILE_ID).is_ok(),
+            "profile removal must succeed"
+        );
+    }
+
+    #[test]
+    fn a_profile_lock_round_trips_under_the_process_default_owner() {
+        let root = TemporaryDirectory::create("store-lock");
+        let store = match PlatformProfileStore::initialize(&root.path, PROFILE_ROOT, PLATFORM) {
+            Ok(store) => store,
+            Err(error) => panic!("store construction failed (error code {:?})", error.code()),
+        };
+        let profile = created_profile(&store);
+
+        let lock = match profile.try_acquire_lock() {
+            Ok(lock) => lock,
+            Err(error) => panic!(
+                "the lock file must be creatable and verifiable (error code {:?})",
+                error.code()
+            ),
+        };
+        assert!(lock.release().is_ok(), "the lock must release");
+    }
+
+    #[test]
+    fn a_unc_path_and_its_final_path_form_share_one_key() {
+        // `GetFinalPathNameByHandleW` spells a UNC path `\\?\UNC\server\share`.
+        // Stripping only `\\?\` left `unc\server\share`, which matched nothing,
+        // so every UNC-backed profile root failed as an unsafe directory.
+        assert_eq!(
+            normalized_path_key(Path::new(r"\\server\share\browser-profiles")),
+            normalized_path_key(Path::new(r"\\?\UNC\server\share\browser-profiles")),
+        );
+    }
+
+    #[test]
+    fn a_drive_path_and_its_extended_form_share_one_key() {
+        assert_eq!(
+            normalized_path_key(Path::new(r"C:\Users\Test\browser-profiles")),
+            normalized_path_key(Path::new(r"\\?\C:\Users\Test\browser-profiles")),
+        );
+    }
+
+    #[test]
+    fn keys_ignore_case_separator_and_trailing_slashes() {
+        assert_eq!(
+            normalized_path_key(Path::new("C:/Users/Test/")),
+            normalized_path_key(Path::new(r"c:\users\test")),
+        );
+        assert_eq!(normalized_path_key(Path::new(r"C:\")), "c:\\");
+    }
+
+    #[test]
+    fn an_alias_drive_does_not_share_a_key_with_its_target() {
+        // A `subst` letter is a per-session alias any process in that session
+        // can re-point. Refusing it is the point of comparing the requested
+        // path against the resolved one, so the keys must stay different.
+        assert_ne!(
+            normalized_path_key(Path::new(r"Y:\browser-profiles")),
+            normalized_path_key(Path::new(r"\\?\C:\real\browser-profiles")),
+        );
+    }
+
+    #[test]
+    fn a_subst_alias_drive_is_refused() {
+        let root = TemporaryDirectory::create("subst");
+        let target = root.path.join("target");
+        fs::create_dir(&target).expect("target must be creatable");
+        fs::create_dir(target.join(PROFILE_ROOT)).expect("child must be creatable");
+
+        let Some(drive) = SubstDrive::map(&target) else {
+            panic!("no drive letter could be mapped, so this case did not run");
+        };
+
+        assert_eq!(
+            refusal_code(
+                &drive.path(PROFILE_ROOT),
+                "a path that only resolves through an alias drive must be refused",
+            ),
+            BrowserProfileErrorCode::UnsafeDirectory,
+        );
+        opened(
+            &target.join(PROFILE_ROOT),
+            AclPolicy::Ignore,
+            "the same directory reached by its real path must be accepted",
+        );
+    }
+
+    #[test]
+    fn a_junction_component_is_refused() {
+        let root = TemporaryDirectory::create("junction");
+        let target = root.path.join("target");
+        fs::create_dir(&target).expect("target must be creatable");
+        fs::create_dir(target.join(PROFILE_ROOT)).expect("child must be creatable");
+        let link = root.path.join("link");
+
+        let created = Command::new("cmd")
+            .args([
+                "/c",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &target.to_string_lossy(),
+            ])
+            .status()
+            .expect("mklink must be runnable")
+            .success();
+        assert!(created, "a junction is creatable without elevation");
+
+        // A junction is re-pointable by anyone who can write the parent, so a
+        // component that is one is refused rather than followed. Moving AppData
+        // and leaving a junction behind is therefore a refused layout -- loudly,
+        // which is the intended trade, not an accident of string comparison.
+        assert_eq!(
+            refusal_code(
+                &link.join(PROFILE_ROOT),
+                "a path crossing a junction must be refused",
+            ),
+            BrowserProfileErrorCode::UnsafeDirectory,
+        );
+        opened(
+            &target.join(PROFILE_ROOT),
+            AclPolicy::Ignore,
+            "the same directory reached without the junction must be accepted",
+        );
     }
 }

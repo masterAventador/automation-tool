@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import threading
 from pathlib import Path
 from queue import Queue
@@ -42,9 +43,14 @@ from pydantic import SecretStr, ValidationError
 TOKEN = "".join(f"{value:02x}" for value in range(32))
 COMMAND_ID = "123e4567-e89b-42d3-a456-426614174005"
 PUBLISH_JOB_ID = "123e4567-e89b-42d3-a456-426614174006"
-EXECUTABLE = "/opt/automation-tool/chromium"
-PROFILE = "/opt/automation-tool/profile"
-ARTIFACT = "/opt/automation-tool/artifacts/clip.mp4"
+# Absolute in this platform's own shape: the command validator asks the native
+# path flavour, so a POSIX literal is merely relative on Windows and the command
+# is rejected before anything under test is reached.
+_ROOT = r"C:\automation-tool" if os.name == "nt" else "/opt/automation-tool"
+EXECUTABLE = os.path.join(_ROOT, "chromium")
+PROFILE = os.path.join(_ROOT, "profile")
+OTHER_PROFILE = os.path.join(_ROOT, "other-profile")
+ARTIFACT = os.path.join(_ROOT, "artifacts", "clip.mp4")
 TITLE = "自动化运营工具测试标题"
 DESCRIPTION = "自动化运营工具测试简介"
 INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174011"
@@ -108,10 +114,10 @@ def test_publish_proof_binds_every_authenticated_field() -> None:
     proof = source.proof_for_publish_command(**baseline)
     source.verify_publish_command(**baseline, presented_proof=proof)
     for field, tampered in (
-        ("artifact_path", "/opt/automation-tool/artifacts/other.mp4"),
+        ("artifact_path", os.path.join(_ROOT, "artifacts", "other.mp4")),
         ("title", f"{TITLE}!"),
         ("description", f"{DESCRIPTION}!"),
-        ("profile_directory", "/opt/automation-tool/other-profile"),
+        ("profile_directory", OTHER_PROFILE),
         ("publish_job_id", "123e4567-e89b-42d3-a456-426614174007"),
         ("headless", False),
     ):
@@ -179,8 +185,8 @@ def test_authenticated_publish_frame_is_accepted() -> None:
     "overrides",
     [
         {"artifactPath": "clip.mp4"},
-        {"artifactPath": "/opt/automation-tool/../clip.mp4"},
-        {"artifactPath": "/opt/automation-tool/clip‮mp4"},
+        {"artifactPath": os.path.join(_ROOT, "..", "clip.mp4")},
+        {"artifactPath": os.path.join(_ROOT, "clip‮mp4")},
         {"title": ""},
         {"title": "标题\n"},
         {"description": "a" * 4097},
