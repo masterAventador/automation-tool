@@ -16,6 +16,34 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/quality/material-video-studio-theme.v1.json"
 INIT_SCRIPT = ROOT / "frontend/src-tauri/src/material_video_studio_init.js"
 
+# Every guard mechanism IM-06 pins in the embedded studio window. This is a
+# coverage declaration, not a sample: `test_material_studio_guard_declaration.py`
+# re-derives the pipeline steps and the fail-closed reasons from the script
+# itself and fails when this list falls behind them, so a guard cannot be added
+# to the window without being pinned here.
+INITIALIZATION_GUARD_MARKERS = (
+    # Window state and the fail-closed panel the user actually sees.
+    "data-automation-tool-studio-state",
+    "制作界面暂时不可用",
+    "window.top !== window.self",
+    # The reconcile pipeline, step by step.
+    "installTheme",
+    "removeTour",
+    "sanitizeTextAndAccessibility",
+    "removeExternalNavigation",
+    "productizeHeaderAndSettings",
+    "audit",
+    "hasRequiredStructure",
+    # Every way the guard can fail closed.
+    "content_policy_",
+    "initialization_error",
+    "structure_timeout",
+    # Product identity and settings ownership, also pinned by the Rust theme test.
+    "制作服务设置",
+    "素材\\s*API",
+    "120_000",
+)
+
 
 def run(command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, check=True)
@@ -51,15 +79,7 @@ def require_contract() -> None:
 
 def require_initialization_guard() -> None:
     source = INIT_SCRIPT.read_text(encoding="utf-8")
-    for marker in (
-        "data-automation-tool-studio-state",
-        "制作界面暂时不可用",
-        "removeExternalNavigation",
-        "sanitizeTextAndAccessibility",
-        "content_policy_",
-        "structure_timeout",
-        "window.top !== window.self",
-    ):
+    for marker in INITIALIZATION_GUARD_MARKERS:
         if marker not in source:
             raise AssertionError(f"IM-06 initialization guard is missing {marker}")
 
