@@ -60,9 +60,21 @@ pub enum MotionVideoStudioErrorCode {
     /// status and the deadline are the only things this side knows — and both
     /// of them are ours, containing nothing the model produced.
     AuthoringTimedOut,
-    /// The authoring child exited non-zero: it refused the request or it
-    /// crashed. Nothing was rendered and no packaged part was implicated.
-    AuthoringFailed,
+    /// The authoring child completed the protocol and said no: it decided the
+    /// request could not be authored.
+    ///
+    /// This is working software making a decision, so it is kept apart from
+    /// `AuthoringCrashed`. Reporting the two as one code says "the feature
+    /// refused you" and "the feature is broken" in the same words — it points
+    /// the user at the wrong move and hides every real defect among the
+    /// ordinary refusals.
+    AuthoringRefused,
+    /// The authoring child died without completing the protocol.
+    ///
+    /// Always a defect on our side: the user did nothing wrong and has no move
+    /// beyond retrying. A child that crashes cannot write the refusal document,
+    /// so its absence is what distinguishes this from `AuthoringRefused`.
+    AuthoringCrashed,
     /// The authoring child answered, and this side refused the answer.
     ///
     /// The answer names the file the renderer loads and the assets the sandbox
@@ -917,6 +929,37 @@ struct AuthoredCompositionAnswer {
 /// The name the agent gives a run it completed.
 const AUTHORED_STATUS: &str = "authored";
 
+/// The name the agent gives a run it declined to do.
+const REFUSED_STATUS: &str = "rejected";
+
+/// The whole of the document a refusing agent writes.
+///
+/// It carries no reason on purpose: the reason is assembled from the request
+/// and from values that passed through a model, and forwarding it would hand
+/// that text straight back out. Only the fact of the refusal crosses.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RefusedAuthoringAnswer {
+    schema_version: u8,
+    status: String,
+}
+
+/// Did the child that exited non-zero actually complete the refusal protocol?
+///
+/// This is the difference between "the agent decided it could not author this"
+/// and "the agent fell over", which are a product behaviour and a defect
+/// respectively. It is answered from the document rather than the exit status
+/// because only the document is evidence: a process that crashed cannot have
+/// written it, while any half-finished process can still return a number.
+///
+/// Nothing here is surfaced — the bytes are classified and dropped — and the
+/// child only ever writes its own two protocol documents to stdout, so no
+/// model output is involved either way.
+pub fn answer_is_refusal(answer: &str) -> bool {
+    serde_json::from_str::<RefusedAuthoringAnswer>(answer)
+        .is_ok_and(|answer| answer.schema_version == 1 && answer.status == REFUSED_STATUS)
+}
+
 /// Turn an agent answer into a RenderJob, or refuse it.
 ///
 /// The answer names the file the renderer will load and the assets the render
@@ -1558,9 +1601,16 @@ pub const fn authoring_timed_out() -> MotionVideoStudioError {
     }
 }
 
-pub const fn authoring_failed() -> MotionVideoStudioError {
+pub const fn authoring_refused() -> MotionVideoStudioError {
     MotionVideoStudioError {
-        code: MotionVideoStudioErrorCode::AuthoringFailed,
+        code: MotionVideoStudioErrorCode::AuthoringRefused,
+        retryable: true,
+    }
+}
+
+pub const fn authoring_crashed() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringCrashed,
         retryable: true,
     }
 }

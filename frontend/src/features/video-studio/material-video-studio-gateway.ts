@@ -86,7 +86,7 @@ export interface RenderedVideoArtifactPayload {
 }
 
 /**
- * The three ways an automatic authoring run ends badly, kept apart from each
+ * The four ways an automatic authoring run ends badly, kept apart from each
  * other and from `render_unavailable`.
  *
  * They used to be one code, together with a missing packaged runtime and a
@@ -99,7 +99,8 @@ export interface RenderedVideoArtifactPayload {
 export type MaterialVideoStudioErrorCode =
   | "configuration_required"
   | "authoring_timed_out"
-  | "authoring_failed"
+  | "authoring_refused"
+  | "authoring_crashed"
   | "authoring_answer_invalid"
   | "process_unavailable"
   | "storage_unavailable"

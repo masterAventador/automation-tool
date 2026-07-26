@@ -251,13 +251,18 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
 /**
  * What each way an automatic authoring run can fail means for the user.
  *
- * All three used to arrive as `render_unavailable` and therefore read
+ * All of them used to arrive as `render_unavailable` and therefore read
  * "本机渲染组件暂时不可用，请到设置与诊断检查组件" — a specific instruction
  * attached to a code too coarse to justify it, which sends the user to inspect
  * a component that was never involved. That is the same shape of misdirection
  * this line already shipped once. Each code now says what happened and what to
- * do about it, and the one the user cannot influence at all says so plainly
- * instead of implying they wrote a bad sentence.
+ * do about it.
+ *
+ * The split that matters most is refused against crashed. One is the agent
+ * deciding this film cannot be made, where the user's move is to describe it
+ * differently; the other is our software falling over, where the user has no
+ * move at all and being told to rewrite their sentence is both useless and
+ * untrue. Those two must never share a sentence.
  *
  * Written once and used by both the studio's open path and the one-sentence
  * submit path so the two can never describe the same code differently.
@@ -265,8 +270,10 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
 const AUTHORING_ERRORS = {
   authoring_timed_out:
     "自动编排超时，已经停下来，没有开始制作视频。请稍后重试；把描述写得更短、更具体通常会更快完成。",
-  authoring_failed:
-    "自动编排没有完成，视频没有开始制作。请换一句更具体的描述后重试。",
+  authoring_refused:
+    "自动编排判定这次描述做不出来，视频没有开始制作。请换一句更具体的描述后重试。",
+  authoring_crashed:
+    "自动编排中途出错，视频没有开始制作。这是我们这边的问题，不是描述写得不好；请重试，反复出现请反馈给我们。",
   authoring_answer_invalid:
     "自动编排的结果没有通过本机校验，视频没有开始制作。这是我们这边的问题，不是描述写得不好，请重试；如果一直这样请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;

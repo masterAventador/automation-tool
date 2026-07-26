@@ -636,7 +636,8 @@ describe("video studio shell", () => {
   it("says which part of the automatic run failed instead of blaming the renderer", async () => {
     for (const [code, expected] of [
       ["authoring_timed_out", "自动编排超时"],
-      ["authoring_failed", "自动编排没有完成"],
+      ["authoring_refused", "判定这次描述做不出来"],
+      ["authoring_crashed", "自动编排中途出错"],
       ["authoring_answer_invalid", "没有通过本机校验"],
     ] as const) {
       const user = userEvent.setup();

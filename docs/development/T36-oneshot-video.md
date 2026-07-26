@@ -1078,6 +1078,9 @@ python3 scripts/cq_04_ledger_honesty.py                          exit 0
 
 #### 拆完之后跑的那一次：答案是 `authoring_failed`
 
+> 这个码在**下一节**已经被再拆成 `authoring_refused` 与 `authoring_crashed`，
+> 代码里不再存在。本节保留它，是因为它是那一次运行的真实结论。
+
 ```text
 backend/.venv/bin/python scripts/run_t36_acceptance.py
 
@@ -1129,24 +1132,131 @@ App CPU        100 秒里累计 0.78 秒
 - 打字与点击各自一个阶段标记，下一次运行会直接给出
   `+Ns brief typed` / `+Ns submit clicked` / `+Ns 失败`，三段时间各归各的。
 
-#### 仍然分不出的一件事（留给下一次决定，本轮有意不做）
+### 本次落地：再拆第四个码，把「按预期拒绝」和「功能坏了」分开
 
-`authoring_failed` 同时覆盖两种情况：**子进程按协议拒绝**（`entry.py` 在 stdout 写
-`{"schemaVersion":1,"status":"rejected"}` 并 `exit 70`）与**子进程崩溃**（其它非零退出）。
-两者该做的事不同：前者是编排代理判定这次请求不可行，后者是我们的代码或依赖出了问题。
+上一节留下的那件事已经批准并做掉。`authoring_failed` 拆成两个：
 
-**区分它不需要读 stderr**：退出码 70 与那句 `{"status":"rejected"}` 都是我们自己定的协议常量，
-不含任何模型输出。但这超出了本轮「让失败可分辨」的范围，是否再拆一个码由下一条线决定。
+| 码 | 含义 | 性质 |
+| --- | --- | --- |
+| `authoring_refused` | 子进程走完协议、判定这次请求做不出来 | **产品行为**。用户该做的是换个描述 |
+| `authoring_crashed` | 子进程没走完协议就死了 | **缺陷**。用户什么都做不了，我们该看到一个必须修的红 |
+
+混在一个码里，等于把「功能按预期拒绝」和「功能坏了」说成同一件事——跟前面三个是同一个理由。
+
+#### 用协议文档判定，不用退出码
+
+`entry.py` 拒绝时会在 stdout 写 `{"schemaVersion":1,"status":"rejected"}` 再 `exit 70`，
+所以「读退出码等于 70」也能区分。**没有这么做**，两条理由：
+
+1. **70 会在两门语言里各存一份。** 一旦漂移，Rust 就会把「代理正常拒绝」报成
+   「我们的代码坏了」——正是这次要消灭的那种混淆。用文档判定则不需要跨语言常量。
+2. **文档是证据，退出码只是一个整数。** 崩掉的子进程写不出那份文档（traceback 走 stderr，
+   仍然丢弃），而任何半死的进程都还能返回一个数字。有一条专门用例守住这一点：
+   `the_refusal_is_judged_by_the_answer_and_not_by_the_exit_number`——
+   退出 70 但 stdout 是半截 traceback，判为 `authoring_crashed`。
+
+**stderr 的边界原样没动。** 新读的是 stdout，而子进程只往 stdout 写它自己那两份协议文档，
+拒绝文档里没有原因、没有任何模型内容；Rust 只做分类，读完即丢，不出现在任何码或文案里。
+
+#### RED
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_child
+  error[E0599]: no variant ... named `AuthoringRefused`
+  error[E0599]: no variant ... named `AuthoringCrashed`   (×2)
+```
+
+```text
+cd frontend && npx vitest run src/features/video-studio/VideoStudio.test.tsx \
+      src/platform/tauri/material-video-studio-gateway.test.ts
+  × keeps every authoring failure apart instead of flattening them
+      expected … to match object { code: 'authoring_refused' }
+  × says which part of the automatic run failed instead of blaming the renderer
+      Unable to find an element with the text: /判定这次描述做不出来/
+  Test Files  2 failed (2)      Tests  2 failed | 35 passed (37)
+```
+
+#### GREEN
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_child          6 passed (4 → 6)
+cd frontend/src-tauri && cargo build --lib                                 OK
+cd frontend/src-tauri && cargo build --lib --features desktop-e2e          OK
+cd frontend/src-tauri && cargo build --lib --features control-plane-e2e    OK
+cd frontend/src-tauri && cargo build --lib --features video-studio-e2e     OK
+cd frontend/src-tauri && cargo test --tests -- --test-threads=4
+                       43 个测试二进制 / 393 passed / 0 failed   (43/391 → 43/393)
+cd frontend && npx vitest run          60 文件 / 501 passed / 1 expected fail
+cd frontend && npx tsc -b              exit 0
+```
+
+#### 文案
+
+- `authoring_refused` →「自动编排判定这次描述做不出来，视频没有开始制作。请换一句更具体的描述后重试。」
+- `authoring_crashed` →「自动编排中途出错，视频没有开始制作。**这是我们这边的问题，不是描述写得不好**；请重试，反复出现请反馈给我们。」
+
+这两句必须永远不共用一段话：一句让用户改描述，另一句告诉用户改描述没有用。
+
+#### 边界：第四个码只有分层证据，**真实 App 验收未取得**
+
+拆完之后起过一次 `run_t36_acceptance.py`，**跑到一半被用户要求收敛而主动中止**
+（发 SIGINT 走脚本自己的 `finally` 清理，未强杀）。所以：
+
+- `authoring_refused` / `authoring_crashed` 目前只有 **cargo 集成测试 + vitest** 的分层证据；
+- **哪一种非零退出**（协议拒绝还是崩溃）**仍然未知**——上一次跑到的是拆分前的
+  `authoring_failed`，它同时覆盖两者，这正是本次拆开的原因；
+- 下一条工作线重跑一次即可拿到，代码与驱动都已就位。
+
+**中止前拿到的时间分解（这是新证据，值得记下来）**：
+
+```text
+[T36 step] +0s workbench mounted
+[T36 step] +0s model credential saved
+[T36 step] +0s empty brief refused, no job created
+[T36 step] +0s brief typed into the form     ← getValue 断言通过，描述确实进了表单
+[T36 step] +5s submit clicked
+```
+
+**打字 0 秒、点击 5 秒，前面全部只花 5 秒。** 所以那 15 分钟**全部落在提交命令内部**，
+不在输入上——「演示时用户也要在这个框里打字会不会也很慢」这条担心可以排除。
+
+同时对 App 进程再次取样（点击后 41 秒、57 秒各一次）：主线程仍在事件循环里、
+40+ 个 tokio 线程全部 park、`pgrep -P <app>` 无子进程、工作区目录为空，
+唯一在跑的仍是前端每 2 秒一次的任务轮询。**提交命令在点击后至少一分钟内没有开始执行**，
+这与上一轮的观察一致，原因仍未查明，是下一条线的第一个问题。
+
+### 拒绝原因能不能拿到：能，而且不需要读 stderr（已逐个调用点核查）
+
+`entry.py` 现在**不转发**拒绝原因，注释给的理由是「原因由调用方输入构造而成，
+转发等于把它原样回抛」。**逐个调用点核查后，这个顾虑对现在的代码并不成立：**
+
+| 来源 | 核查结果 |
+| --- | --- |
+| `entry.py` 的 13 处 `_reject(...)` | 全是固定字面量。唯一两处插值：`f"brief is outside the declared bounds: {error}"` 与 `str(error)`，两者转发的都是 `MotionAuthoringRejected` 的消息，见下 |
+| `agent.py` 的 `_reject` / `_require` 消息 | 全部固定字面量 |
+| `agent.py` 仅有的两处 `_reject(f"...")` | 插的是 `_exact_keys` 的结构标签，取值只有 `design` / `script` / `storyboard` 三个字面量 |
+| 直接 `raise MotionAuthoringRejected(...)`（8 处） | 全部固定字面量（契约不可读 / 契约漂移） |
+| 静态门失败那条 | `f"...: {sorted(lint.codes() | check.codes())}"`，插的是**我们自己的**门禁码闭集 |
+| `MotionBrief.__post_init__` | 固定字面量（`brief text is out of range` 等），**不回显 brief 原文** |
+
+**结论：这条链路上没有任何一条拒绝消息会引用模型输出或用户描述原文。**
+所以把原因作为一个闭集转发出来是安全的——它是我们自己的词汇，不是模型的。
+
+**本轮有意没做**：那会改动 `command_error` 的 wire（上一轮已定「耗时/细节不进 wire」），
+不该由我单方面推翻。可行做法与代价写在这里，等决定。
+
+## 失败矩阵
 
 ## 失败矩阵
 
 | 场景 | 行为 |
 | --- | --- |
 | 编排子进程跑满预算 | 杀掉子进程 → `authoring_timed_out`；界面说超时并建议稍后重试或缩短描述，不提渲染组件 |
-| 编排子进程非零退出（自己拒绝或崩溃） | `authoring_failed`；不读 stderr、不转发原因，界面建议换一句更具体的描述 |
+| 编排子进程走完协议后拒绝（stdout 有拒绝文档） | `authoring_refused`；不读 stderr、不转发原因，界面建议换一句更具体的描述 |
+| 编排子进程没走完协议就死了（stdout 无拒绝文档，含退出码为 70 但输出残缺的情形） | `authoring_crashed`；界面明说是我们的问题，不让用户白改描述 |
 | 编排答复不合格（解析失败、与 brief 不符、白名单越界、缺动画运行时、stdout 非 UTF-8） | `authoring_answer_invalid`；工作区删除，界面明说是我们的问题 |
 | 执行器入口起不到（`spawn` 失败） | 仍是 `render_unavailable`：一次编排都没发生，属于包的问题 |
-| 三个新码没进前端白名单 | 会被 `mapError` 压成 `operation_unavailable`（有网关用例守住，避免任务凭空消失） |
+| 新码没进前端白名单 | 会被 `mapError` 压成 `operation_unavailable`（有网关用例守住，避免任务凭空消失） |
 | 成片在点击播放前被删掉 | `NotFound` → `job_unavailable`，界面提示「暂时无法读取这条成片」，不报存储故障 |
 | 成片大于 32 MB | `QuotaExceeded` → `job_unavailable`，不把整条视频读进内存，也不给出误导性的存储错误 |
 | Artifact 存在但角色不是 `rendered_video` | 拒绝读取（有专门用例守住），播放器不会被喂到工作区里的其他文件 |
@@ -1181,6 +1291,19 @@ App CPU        100 秒里累计 0.78 秒
 `~/Library/Application Support/com.aventador.automationtool/` 完好（手工扫码的抖音 Profile 与凭据仍在），
 **全程未写入该目录**；未触碰 `.local/t44-release-verify/` 与
 `docs/development/DEMO-preflight-checklist.md`。
+
+**第四个码那一轮的清理**：起过一次 `run_t36_acceptance.py`（隔离 project name
+`automation-tool-t36-<pid>`），跑到一半按用户要求主动中止——**发 SIGINT 走脚本自己的
+`finally`，没有强杀**，避免留下孤儿容器。中止路径在 `finally` 末尾的
+`require_port_closed` 上二次报错（WebDriver 端口尚未释放），因此逐项手工核对并补清：
+生产前端资源已由 `finally` 还原、Docker t36 容器/卷/网络各 **0 个**、Control Plane 已停、
+隔离 App 数据目录已删；剩下的一个 wdio 孤儿进程与仍持有 WebDriver 端口的测试 App
+按 pid 定点终止（两者都由本次运行创建），复查端口已释放、
+`automation-tool-desktop` / `automation-tool-executor` / `wdio` / `Chrome for Testing` /
+`worker.mjs` 进程各 **0 个**。一次性诊断脚本与 `sample` 输出只存在会话临时目录，未进仓库。
+**未运行 `scripts/run_u9_06_acceptance.py`**，未写入
+`~/Library/Application Support/com.aventador.automationtool/`（只读核对完好），
+未触碰 `.local/t44-release-verify/` 与 `docs/development/DEMO-preflight-checklist.md`。
 
 **渲染半段那次实跑的清理**：未启动 App、未启动 Control Plane、未起 Docker。
 三次渲染各起一个无头内置 Chromium 与一个 node worker，由 `WorkerSession` 在成功/失败/收尾

@@ -609,10 +609,10 @@ pub fn run_motion_authoring(
         .ok_or_else(motion_video_studio::render_unavailable)
         .and_then(|mut stdin| {
             // A broken pipe here means the child is already gone before it
-            // ever read the request.
+            // ever read the request, so it cannot have decided anything.
             stdin
                 .write_all(&payload)
-                .map_err(|_| motion_video_studio::authoring_failed())
+                .map_err(|_| motion_video_studio::authoring_crashed())
         });
     if let Err(error) = written {
         let _ = child.kill();
@@ -620,10 +620,13 @@ pub fn run_motion_authoring(
         return Err(error);
     }
     let deadline = std::time::Instant::now() + budget;
+    let mut exited_cleanly = false;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) => return Err(motion_video_studio::authoring_failed()),
+            Ok(Some(status)) => {
+                exited_cleanly = status.success();
+                break;
+            }
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
@@ -637,29 +640,46 @@ pub fn run_motion_authoring(
                 // whatever it was doing.
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(motion_video_studio::authoring_failed());
+                return Err(motion_video_studio::authoring_crashed());
             }
         }
     }
-    let mut answer = String::new();
-    child
+    // Stdout is read whichever way the child exited. On the failure path it is
+    // the only thing that separates "the agent completed the protocol and said
+    // no" from "the agent fell over": one of those is the product working and
+    // the other is a defect, and they call for opposite things from the user.
+    // Standard error stays discarded — a refusal document carries no reason
+    // and no model output, so nothing the model produced is read here.
+    let answer = read_bounded_child_output(&mut child)?;
+    if exited_cleanly {
+        return Ok(answer);
+    }
+    Err(if motion_video_studio::answer_is_refusal(&answer) {
+        motion_video_studio::authoring_refused()
+    } else {
+        motion_video_studio::authoring_crashed()
+    })
+}
+
+/// Read what the authoring child wrote, up to a fixed ceiling.
+///
+/// The bound is what keeps a runaway child from being read into memory without
+/// limit; anything past it is not one of the two protocol documents anyway.
+fn read_bounded_child_output(
+    child: &mut std::process::Child,
+) -> Result<String, motion_video_studio::MotionVideoStudioError> {
+    use std::io::Read as _;
+    let mut stdout = child
         .stdout
         .take()
-        .ok_or_else(motion_video_studio::render_unavailable)
-        .and_then(|mut stdout| {
-            use std::io::Read as _;
-            let mut bounded = Vec::new();
-            // The child finished and then handed back bytes that cannot be
-            // read as an answer. That is an unusable answer, not a renderer
-            // that is unavailable.
-            std::io::Read::take(&mut stdout, 64 * 1024)
-                .read_to_end(&mut bounded)
-                .map_err(|_| motion_video_studio::authoring_answer_invalid())?;
-            answer = String::from_utf8(bounded)
-                .map_err(|_| motion_video_studio::authoring_answer_invalid())?;
-            Ok(())
-        })?;
-    Ok(answer)
+        .ok_or_else(motion_video_studio::render_unavailable)?;
+    let mut bounded = Vec::new();
+    // Bytes that cannot be read back as text are an unusable answer, not a
+    // renderer that is unavailable.
+    std::io::Read::take(&mut stdout, 64 * 1024)
+        .read_to_end(&mut bounded)
+        .map_err(|_| motion_video_studio::authoring_answer_invalid())?;
+    String::from_utf8(bounded).map_err(|_| motion_video_studio::authoring_answer_invalid())
 }
 
 /// Submit one typed sentence for automatic authoring and rendering.

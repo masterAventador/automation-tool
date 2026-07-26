@@ -9,10 +9,18 @@
 //! carry the user's own sentence or a fragment of their key — cannot reach a
 //! log. Nothing else was left to read.
 //!
-//! So the three things this side already knows for certain get their own codes:
-//! whether we killed the child for outliving its budget, whether the child
-//! itself exited non-zero, and whether it answered with something we refused.
-//! None of them requires reading a single byte the model produced.
+//! So the things this side already knows for certain get their own codes:
+//! whether we killed the child for outliving its budget, whether it completed
+//! our protocol and said no, whether it died without answering, and whether it
+//! answered with something we refused. None of them requires reading a single
+//! byte the model produced.
+//!
+//! The refusal is told from the crash by the document the child wrote on
+//! stdout, not by its exit number. Both would work when everything behaves,
+//! but only the document is *evidence*: a child that fell over cannot produce
+//! it, whereas an exit code is a single integer that a half-finished process
+//! can still return. It also keeps the number itself in one language instead
+//! of two that must be kept in step.
 //!
 //! The fixtures are shell scripts, so this file is Unix-only. What it covers —
 //! how an exit status and a deadline become an error code — is
@@ -104,12 +112,15 @@ fn a_child_that_outlives_its_deadline_is_reported_as_a_timeout() {
     );
 }
 
-/// The child decided it could not do the job — it refuses on stdout and exits
-/// 70 — or it crashed. Either way it is the authoring run that failed, not the
-/// packaged renderer, and the user must not be sent to check a component that
-/// was never involved.
+/// The child completed our protocol and said no: it wrote the refusal document
+/// on stdout and exited non-zero.
+///
+/// This is the agent deciding the request cannot be authored — a product
+/// behaviour, and the user's move is to describe the film differently. Calling
+/// it a crash would report working software as broken, and would bury the real
+/// crashes in the same bucket.
 #[test]
-fn a_child_that_exits_non_zero_is_reported_as_the_authoring_run_failing() {
+fn a_child_that_refuses_through_the_protocol_is_not_reported_as_a_crash() {
     let root = TempDirectory::new();
     let entrypoint = child(
         &root,
@@ -117,9 +128,43 @@ fn a_child_that_exits_non_zero_is_reported_as_the_authoring_run_failing() {
     );
 
     let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
-        .expect_err("a non-zero exit is not an answer");
+        .expect_err("a refusal is not an answer to render");
 
-    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringFailed);
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringRefused);
+}
+
+/// The child died without completing the protocol.
+///
+/// A crashing child cannot write the refusal document: its traceback goes to
+/// standard error, which is discarded so no model echo can reach a log, and
+/// stdout stays empty. That absence is the evidence — this side never has to
+/// trust an exit number to tell the two apart.
+#[test]
+fn a_child_that_dies_without_answering_is_reported_as_a_crash() {
+    let root = TempDirectory::new();
+    let entrypoint = child(&root, "echo 'Traceback (most recent call last):' >&2\nexit 1\n");
+
+    let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
+        .expect_err("a child that never answered has not refused anything");
+
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringCrashed);
+}
+
+/// The classification is the protocol document, not the exit status.
+///
+/// A child that exits with the refusal code but never produced the refusal
+/// document did not refuse anything — it fell over on the way. Reading the
+/// number alone would let a half-written crash present itself as a clean
+/// product decision, which is exactly the confusion these codes exist to end.
+#[test]
+fn the_refusal_is_judged_by_the_answer_and_not_by_the_exit_number() {
+    let root = TempDirectory::new();
+    let entrypoint = child(&root, "printf '%s' 'Traceback (most rec'\nexit 70\n");
+
+    let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
+        .expect_err("a truncated answer is not a refusal");
+
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringCrashed);
 }
 
 /// An entrypoint that cannot be started at all is not an authoring failure: no

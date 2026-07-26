@@ -46,8 +46,12 @@ const SUBMIT_FAILURES: readonly (readonly [string, string])[] = [
     "authoring_timed_out — the child outlived MOTION_AUTHORING_DEADLINE and was killed; the model round trip does not fit the budget",
   ],
   [
-    "自动编排没有完成",
-    "authoring_failed — the authoring child exited non-zero: it refused the request or it crashed",
+    "判定这次描述做不出来",
+    "authoring_refused — the child completed the protocol and declined the request; this is the agent working, not breaking",
+  ],
+  [
+    "自动编排中途出错",
+    "authoring_crashed — the child died without writing the refusal document; this is a defect on our side and must be fixed, not retried",
   ],
   [
     "没有通过本机校验",

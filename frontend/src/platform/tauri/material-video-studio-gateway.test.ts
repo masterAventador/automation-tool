@@ -210,12 +210,12 @@ describe("Tauri material video studio gateway", () => {
   });
 
   /**
-   * 原生侧把「编排超时被杀」「编排子进程非零退出」「答复没通过校验」拆成了三个码，
+   * 原生侧把「编排超时被杀」「按协议拒绝」「子进程崩溃」「答复没通过校验」拆成了四个码，
    * 网关这边如果不认它们，`mapError` 会一律压成 `operation_unavailable`——
    * 用户看到一句笼统的话，而下一个排查的人拿不到任何区分。
-   * 这条用例守住三个码原样穿过网关。
+   * 这条用例守住四个码原样穿过网关。
    */
-  it("keeps the three authoring failures apart instead of flattening them", async () => {
+  it("keeps every authoring failure apart instead of flattening them", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     const request = {
       creationMode: "one_sentence_v1" as const,
@@ -227,7 +227,8 @@ describe("Tauri material video studio gateway", () => {
 
     for (const code of [
       "authoring_timed_out",
-      "authoring_failed",
+      "authoring_refused",
+      "authoring_crashed",
       "authoring_answer_invalid",
     ] as const) {
       invoke.mockRejectedValueOnce({
