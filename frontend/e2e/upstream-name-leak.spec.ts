@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { writeThePublishCopy } from "./publish-copy";
 
 /**
  * CQ-02: no upstream technology name reaches the operator.
@@ -77,6 +78,7 @@ test("no page leaks an upstream name into the accessibility tree", async ({ page
 test("the publish critical point stays clean once it is rendered", async ({ page }) => {
   await page.goto("/harness.html?health=available&scenario=publishing");
   await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await expect(page.getByRole("group", { name: "确认发布内容" })).toBeVisible();
 
@@ -86,6 +88,7 @@ test("the publish critical point stays clean once it is rendered", async ({ page
 test("a settled uncertain publish stays clean in what it explains", async ({ page }) => {
   await page.goto("/harness.html?health=available&scenario=publishing-uncertain");
   await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await page.getByRole("button", { name: /确认发布/ }).click();
   await expect(page.getByText("结果待人工确认")).toBeVisible();

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { writeThePublishCopy } from "./publish-copy";
 
 function failOnConsoleErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -115,10 +116,6 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
  * and the executor both refuse unreadable copy, and finding that out after the
  * visible operations browser has been opened wastes the only one there is.
  */
-async function writeThePublishCopy(page: Page): Promise<void> {
-  await page.getByLabel("标题").fill("三分钟讲清油皮护肤");
-  await page.getByLabel("简介").fill("从洁面到防晒，按顺序讲一遍。");
-}
 
 test("publishing walks the real user path from the left navigation", async ({ page }) => {
   const consoleErrors = failOnConsoleErrors(page);
