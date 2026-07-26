@@ -12,8 +12,11 @@ This file is itself discovered by the runner it tests.
 
 from __future__ import annotations
 
+import ast
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,28 +50,73 @@ def check_discovery_includes_this_file() -> None:
         _fail("a new test script was not auto-discovered")
 
 
+_COUNT_WORD = (
+    r"(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
+    r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)"
+)
+_MULTIPLE_COUNT_WORD = (
+    r"(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+    r"thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)"
+)
+_COPIED_INVENTORY_PATTERNS = (
+    re.compile(
+        rf"\b{_COUNT_WORD}\b(?:\s+[\w-]+){{0,3}}\s+(?:scripts?|test\s+files?)\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(rf"\b{_MULTIPLE_COUNT_WORD}\s+of\s+them\b", flags=re.IGNORECASE),
+    re.compile(
+        rf"\b{_COUNT_WORD}\s+false\s+reds?\s+out\s+of\s+{_COUNT_WORD}\b",
+        flags=re.IGNORECASE,
+    ),
+)
+
+
+def _documentation_prose(path: Path) -> str:
+    """Only inspect prose, never runtime strings or derived result output."""
+    source = path.read_text(encoding="utf-8")
+    module_document = ast.get_docstring(ast.parse(source), clean=False) or ""
+    comments = (
+        token.string.removeprefix("#").strip()
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT
+    )
+    return "\n".join((module_document, *comments))
+
+
+def _copied_inventory_counts(prose: str) -> list[str]:
+    prose = prose.replace("`", "")
+    return [
+        match.group(0)
+        for pattern in _COPIED_INVENTORY_PATTERNS
+        for match in pattern.finditer(prose)
+    ]
+
+
 def check_runner_documentation_does_not_copy_derived_counts() -> None:
     """Inventory prose must not silently drift from glob-derived discovery."""
-    source = (REPOSITORY_ROOT / "scripts" / "run_script_tests.py").read_text(
-        encoding="utf-8"
-    )
-    copied_count_patterns = (
-        r"\b\d+\s+(?:self-contained\s+)?test scripts?\b",
-        r"\b\d+\s+of them\b",
-        r"\b\d+\s+false reds?\s+out of\s+\d+\b",
-        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+"
-        r"`browser_use`\s+scripts?\b",
-    )
-    copied_counts = [
-        match.group(0)
-        for pattern in copied_count_patterns
-        if (match := re.search(pattern, source, flags=re.IGNORECASE))
-    ]
+    copied_counts: dict[str, list[str]] = {}
+    for name in ("run_script_tests.py", "test_script_test_runner.py"):
+        matches = _copied_inventory_counts(
+            _documentation_prose(REPOSITORY_ROOT / "scripts" / name)
+        )
+        if matches:
+            copied_counts[name] = matches
     if copied_counts:
         _fail(
             "runner documentation copies inventory counts that can silently expire: "
             f"{copied_counts}"
         )
+    for stale_example in (
+        "There are 42 scripts.",
+        "42 orphaned test files are not collected.",
+        "eleven `browser_use` scripts need a sub-project environment.",
+        "7 false reds out of 14 were observed.",
+        "14 of them are not referenced by a workflow.",
+    ):
+        if not _copied_inventory_counts(stale_example):
+            _fail(f"inventory count detector can be bypassed by: {stale_example}")
 
 
 def check_interpreter_is_pinned_not_inherited() -> None:
