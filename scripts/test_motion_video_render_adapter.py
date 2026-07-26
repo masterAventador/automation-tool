@@ -324,6 +324,29 @@ fn main() {{
     return executable, record
 
 
+def warm_executable(executable: Path, record: Path) -> None:
+    """Pay the operating system's first-exec cost outside the worker's budget.
+
+    macOS scans a freshly written executable the first time it is run: measured
+    on these fakes it costs 450-640ms on an idle machine and 18ms once warm.
+    ``test_render_timeout_kills_the_browser_process_group`` hands the worker the
+    schema minimum ``launchTimeoutSeconds`` of 1, and the worker spends that
+    budget on the ``--version`` probe *before* it ever launches the headless
+    browser. On a loaded machine the one-off scan consumed the whole second, so
+    the worker killed the probe before the fake ran a single line: no headless
+    browser was launched, the record stayed empty, and the test read past the
+    end of it. Running the probe once here, then discarding what it recorded,
+    keeps the worker's second for the behaviour under test.
+    """
+    subprocess.run(
+        [str(executable), "--version"],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    )
+    record.unlink(missing_ok=True)
+
+
 def windows_process_exists(process_id: int) -> bool:
     if os.name != "nt":
         raise AssertionError("Windows process query requested on another platform")
@@ -642,6 +665,7 @@ def test_render_timeout_kills_the_browser_process_group(assets: Path, decoy: Pat
         executable, record = write_windows_hanging_browser(assets / "hang")
     else:
         executable, record = write_fake_browser(assets / "hang", hang_seconds=30)
+    warm_executable(executable, record)
     session = WorkerSession(
         bootstrap_document(
             str(assets), render_browser_document(executable, timeout_seconds=1)
@@ -658,9 +682,15 @@ def test_render_timeout_kills_the_browser_process_group(assets: Path, decoy: Pat
     code, _ = session.finish()
     assert code == 0
     if os.name == "nt":
-        parent, child = [
-            int(value) for value in record.read_text(encoding="utf-8").split()
-        ]
+        # An unlaunched browser is not a killed browser: without this the test
+        # reports a parse error on an empty record and hides the fact that the
+        # timeout fired before the process tree it claims to kill ever existed.
+        recorded = record.read_text(encoding="utf-8").split() if record.exists() else []
+        assert len(recorded) == 2, (
+            "the render timeout fired before the hanging browser recorded its "
+            f"process tree, so nothing here proves the tree was killed: {recorded}"
+        )
+        parent, child = [int(value) for value in recorded]
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             if not windows_process_exists(parent) and not windows_process_exists(child):
@@ -670,7 +700,17 @@ def test_render_timeout_kills_the_browser_process_group(assets: Path, decoy: Pat
             raise AssertionError("hanging render browser tree survived the timeout")
         assert not render_job_directories(JOB_ID)
         return
-    hanging = read_invocations(record)[-1]["pid"]
+    invocations = read_invocations(record)
+    assert invocations, (
+        "the render timeout fired before the browser was ever launched, so this "
+        "test observed no hanging process and proved nothing about killing one"
+    )
+    hanging_invocation = invocations[-1]
+    assert "--headless" in hanging_invocation["arguments"], (
+        "the last recorded launch is not the headless browser this test kills: "
+        f"{hanging_invocation['arguments']}"
+    )
+    hanging = hanging_invocation["pid"]
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         try:
