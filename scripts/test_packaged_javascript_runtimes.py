@@ -136,5 +136,66 @@ class SigningContract(unittest.TestCase):
         )
 
 
+
+class SilentSkips(unittest.TestCase):
+    """The two ways this gate quietly ignored a runtime.
+
+    A package audit on 2026-07-26 built one good and three bad packages and got
+    `all 1 ... evaluate an expression` with exit 0: three runtimes that exit 133
+    — the exact code from the original incident — were skipped without a word.
+    Two of the three were skipped by this file's own filters.
+
+    That is the failure mode this gate was written to end, reproduced inside the
+    gate. `os.access(X_OK)` and the symlink test read like tidy hygiene; both are
+    silent drops.
+    """
+
+    def test_a_runtime_without_its_executable_bit_is_a_failure_not_a_skip(self) -> None:
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            path = bundle / "Contents/Resources/a/node"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(WORKING, encoding="utf-8")
+            path.chmod(0o644)
+
+            failures = collect_runtime_failures(bundle)
+
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn("not executable", failures[0].output)
+
+    def test_a_symlinked_runtime_is_a_failure_not_a_skip(self) -> None:
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            real = make_runtime(bundle, "Contents/Resources/real/node", WORKING)
+            link = bundle / "Contents/Resources/b/node"
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(real)
+
+            failures = collect_runtime_failures(bundle)
+
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn("symlink", failures[0].output)
+
+
+class JitGrantCoverage(unittest.TestCase):
+    def test_the_report_names_every_binary_granted_allow_jit(self) -> None:
+        """State the gap instead of leaving it invisible.
+
+        The audit found eleven binaries carrying `allow-jit` in the shipped
+        package while this gate exercised two. Nine unexercised JIT grants is
+        not necessarily wrong — but it must be a number someone can read, not
+        something you discover by building a broken package on purpose.
+        """
+        from check_packaged_javascript_runtimes import summarise_jit_grants
+
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            make_runtime(bundle, "Contents/Resources/a/node", WORKING)
+
+            summary = summarise_jit_grants(bundle, exercised=1)
+
+        self.assertIn("exercised 1", summary)
+        self.assertIn("allow-jit", summary)
+
 if __name__ == "__main__":
     unittest.main()
