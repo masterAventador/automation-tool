@@ -1,10 +1,11 @@
 import { Alert, Button, Card, Flex, Popconfirm, Space, Spin, Tag, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type {
-  PlatformSessionAction,
-  PlatformSessionGateway,
-  PlatformSessionSnapshot,
+import {
+  PlatformSessionGatewayError,
+  type PlatformSessionAction,
+  type PlatformSessionGateway,
+  type PlatformSessionSnapshot,
 } from "./platform-session-gateway";
 
 const STATE_LABELS: Record<PlatformSessionSnapshot["state"], string> = {
@@ -36,6 +37,107 @@ const ACTION_MESSAGES: Record<PlatformSessionAction["state"], string> = {
 const HEALTH_PUBLICATION_ATTEMPTS = 100;
 const HEALTH_PUBLICATION_INTERVAL_MILLISECONDS = 50;
 
+const READ_FAILURE_TEXT = "暂时无法读取抖音登录状态，请稍后重试。";
+
+/**
+ * T109: what the operator is told when one of the two buttons does not finish.
+ *
+ * `internal` means the fault is in this program or its installation, and no
+ * amount of pressing the button again will change it. `temporary` means
+ * something outside settled state and retrying is meaningful. `needs_user`
+ * means there is a specific thing to do first. The distinction exists because
+ * this page used to answer every one of them with a single "please retry
+ * later", which is a lie in two cases out of three and the reason a real defect
+ * took a forensic reconstruction to locate instead of one screenshot.
+ */
+type PlatformSessionFailureKind = "internal" | "temporary" | "needs_user";
+
+interface PlatformSessionFailure {
+  readonly kind: PlatformSessionFailureKind;
+  readonly text: string;
+  /** The closed-set native code, shown so a report names the branch that failed. */
+  readonly code: string | null;
+}
+
+/**
+ * Classify one failed platform-session operation.
+ *
+ * Anything that is not a recognised gateway failure keeps the shape of an
+ * unknown failure rather than borrowing a neighbouring code's copy, and an
+ * unrecognised code follows the native side's own `retryable` answer instead of
+ * being quietly downgraded to "temporary" — the same rule T85 settled on for the
+ * update centre.
+ */
+function failurePresentation(error: unknown): PlatformSessionFailure {
+  if (!(error instanceof PlatformSessionGatewayError)) {
+    return { kind: "temporary", text: READ_FAILURE_TEXT, code: null };
+  }
+  const code = error.code;
+  switch (code) {
+    case "browser_component_missing":
+    case "browser_component_invalid":
+    case "browser_component_version_incompatible":
+      return {
+        kind: "internal",
+        text: "运营浏览器组件缺失或损坏，这是本产品安装包自身的问题，重新操作不会有效。请把下面的代码发给我们。",
+        code,
+      };
+    case "package_rejected":
+    case "authentication_rejected":
+    case "configuration_invalid":
+    case "storage_unavailable":
+    case "protocol_mismatch":
+    case "installation_conflict":
+    case "operation_unavailable":
+      return {
+        kind: "internal",
+        text: "抖音登录处理没有完成，这是本产品自身的问题，重新操作不会有效。请把下面的代码发给我们。",
+        code,
+      };
+    case "profile_in_use":
+      return {
+        kind: "needs_user",
+        text: "运营浏览器正在被占用。请先关掉已经打开的运营浏览器窗口，再重新操作。",
+        code,
+      };
+    case "profile_recovery_required":
+      return {
+        kind: "needs_user",
+        text: "上一次运营浏览器没有正常收尾。请先执行「安全注销」，再重新登录一次抖音。",
+        code,
+      };
+    case "credential_missing":
+    case "installation_access_denied":
+      return {
+        kind: "needs_user",
+        text: "本设备的授权已失效。请重新登录产品账号后再操作。",
+        code,
+      };
+    case "process_unavailable":
+      return { kind: "temporary", text: "本机执行器暂时不可用，可以稍后再操作一次。", code };
+    case "timed_out":
+      return { kind: "temporary", text: "本机执行器这次没有按时回应，可以稍后再操作一次。", code };
+    case "already_running":
+      return { kind: "temporary", text: "上一次操作还没结束，请等它完成后再操作。", code };
+    case "transport_unavailable":
+      return { kind: "temporary", text: "暂时连不上服务端，可以稍后再操作一次。", code };
+    case "health_publication_timed_out":
+      return {
+        kind: "temporary",
+        text: "本机已确认登录正常，但服务端状态还没同步过来。稍后刷新即可，不需要重复操作。",
+        code,
+      };
+    default:
+      return {
+        kind: error.retryable ? "temporary" : "internal",
+        text: error.retryable
+          ? "抖音登录处理这次没有完成，可以稍后再操作一次。"
+          : "抖音登录处理没有完成，重新操作不会有效。请把下面的代码发给我们。",
+        code,
+      };
+  }
+}
+
 async function readPublishedSnapshot(
   gateway: PlatformSessionGateway,
   action: PlatformSessionAction,
@@ -47,7 +149,10 @@ async function readPublishedSnapshot(
       globalThis.setTimeout(resolve, HEALTH_PUBLICATION_INTERVAL_MILLISECONDS),
     );
   }
-  throw new Error("authoritative platform health publication timed out");
+  // The local check succeeded; only the authoritative projection lagged. Saying
+  // "cannot read the login state" here would describe the opposite of what
+  // happened and send the operator back to press the same button.
+  throw new PlatformSessionGatewayError("health_publication_timed_out", true);
 }
 
 interface PlatformSessionsProps {
@@ -63,7 +168,7 @@ export function PlatformSessions({
 }: PlatformSessionsProps) {
   const [snapshot, setSnapshot] = useState<PlatformSessionSnapshot | null>(null);
   const [action, setAction] = useState<PlatformSessionAction | null>(null);
-  const [failure, setFailure] = useState(false);
+  const [failure, setFailure] = useState<PlatformSessionFailure | null>(null);
   const [pending, setPending] = useState<"open" | "recheck" | "logout" | null>(null);
   const autoOpenConsumed = useRef(false);
 
@@ -74,11 +179,13 @@ export function PlatformSessions({
       .then((value) => {
         if (active) {
           setSnapshot(value);
-          setFailure(false);
+          setFailure(null);
         }
       })
       .catch(() => {
-        if (active) setFailure(true);
+        // A first read that never arrived says nothing about which branch of the
+        // local handling would fail, so it keeps its own plain wording.
+        if (active) setFailure({ kind: "temporary", text: READ_FAILURE_TEXT, code: null });
       });
     return () => {
       active = false;
@@ -87,15 +194,15 @@ export function PlatformSessions({
 
   const run = useCallback(async (kind: "open" | "recheck") => {
     setPending(kind);
-    setFailure(false);
+    setFailure(null);
     try {
       const result =
         kind === "open" ? await gateway.openDouyinLogin() : await gateway.recheckDouyinLogin();
       const latest = await readPublishedSnapshot(gateway, result);
       setSnapshot(latest);
       setAction(result);
-    } catch {
-      setFailure(true);
+    } catch (error) {
+      setFailure(failurePresentation(error));
     } finally {
       setPending(null);
     }
@@ -114,13 +221,13 @@ export function PlatformSessions({
 
   const logout = async () => {
     setPending("logout");
-    setFailure(false);
+    setFailure(null);
     try {
       const result = await gateway.logoutDouyinSession();
       setSnapshot(result);
       setAction(null);
-    } catch {
-      setFailure(true);
+    } catch (error) {
+      setFailure(failurePresentation(error));
     } finally {
       setPending(null);
     }
@@ -132,10 +239,15 @@ export function PlatformSessions({
         <Typography.Text type="secondary">
           App 使用独立运营浏览器档案；登录与人工处理在系统浏览器窗口完成，状态由本机执行器检查并回报服务端。
         </Typography.Text>
-        {failure ? (
-          <Alert type="error" showIcon title="暂时无法读取抖音登录状态，请稍后重试。" />
+        {failure !== null ? (
+          <Alert
+            type={failure.kind === "temporary" ? "warning" : "error"}
+            showIcon
+            title={failure.text}
+            description={failure.code === null ? undefined : `故障代码：${failure.code}`}
+          />
         ) : null}
-        {snapshot === null && !failure ? (
+        {snapshot === null && failure === null ? (
           <Flex className="platform-session-loading" justify="center">
             <Spin description="正在读取登录状态" />
           </Flex>
