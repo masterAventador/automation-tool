@@ -74,21 +74,27 @@ test("the mounted disk image gives the customer somewhere to drag the app", asyn
   assert.notEqual(start, -1, "create_disk_image must exist");
   const next = command.indexOf("\ndef ", start + 1);
   const body = next === -1 ? command.slice(start) : command.slice(start, next);
-  // `hdiutil create -srcfolder <the .app>` images that one bundle, so the
-  // volume the customer mounts has a single entry and nothing to drag onto.
-  // The image has to be built from a staging directory that also carries the
-  // drop target. Every gate downstream asks Gatekeeper about the file and
-  // none of them ever looks inside the volume, so nothing else can catch this.
-  const srcfolder = /"-srcfolder",\s*os\.fspath\((\w+)\)/u.exec(body);
-  assert.ok(srcfolder, "create_disk_image must hand hdiutil a -srcfolder");
+  // Imaging the bundle on its own gives the customer a volume with a single
+  // entry and nothing to drag onto. The image has to be built from a staging
+  // directory that also carries the drop target.
+  //
+  // This used to assert the shape of the `hdiutil create -srcfolder` call,
+  // which is no longer how the image is filled: hdiutil's own copier refuses
+  // this signed bundle outright (measured 2026-07-27, `scripts/
+  // test_build_release_package.py` records the four controls), so the volume
+  // is now attached and filled with ditto. Naming one mechanism was the
+  // mistake — what matters is that a staging directory carrying the drop
+  // target is what reaches the assembler.
+  const filled = /fill_disk_image\(\s*source=(\w+)/u.exec(body);
+  assert.ok(filled, "create_disk_image must assemble the image from a source tree");
   assert.notEqual(
-    srcfolder[1],
+    filled[1],
     "application",
     "the image must be built from a staging directory, not the bare .app",
   );
   assert.match(
     body,
-    /"?\/Applications"?/u,
+    /symlink_to\("\/Applications"\)/u,
     "the staged volume must carry a link to /Applications to drag onto",
   );
 });
