@@ -14,36 +14,40 @@
 
 | 小节 | 数量 |
 |---|---:|
-| ✅ 生产装配与出厂门禁 | 14 |
-| ✅ 云端与交付 | 6 |
-| ✅ 视频与内容 | 22 |
-| ✅ 验收基础设施与门禁 | 21 |
-| ❌ 查证不成立（观察真、结论错，无需修） | 6 |
-| **小计：已收口** | **69** |
-| 一、Demo 前必须收口 | 9 |
-| T73～T100（T10 那轮挖出的新任务） | 11 |
-| 冻结区·今晚撞见的技术债 | 10 |
-| 冻结区·原有待办 | 10 |
-| **小计：未收口** | **40** |
-| **去重后总计** | **109** |
+| ✅ 生产装配与出厂门禁 | 28 |
+| ✅ 云端与交付 | 7 |
+| ✅ 视频与内容 | 25 |
+| ✅ 验收基础设施与门禁 | 30 |
+| ❌ 查证不成立（观察真、结论错，无需修） | 7 |
+| **小计：已收口** | **97** |
+| 一、Demo 前必须收口 | 5 |
+| T73～T100（T10 那轮挖出的新任务） | 3 |
+| 冻结区·今晚撞见的技术债 | 3 |
+| 冻结区·原有待办 | 3 |
+| 冻结区·T101/T90b 自报的新窗口 | 3 |
+| **小计：未收口** | **17** |
+| **去重后总计** | **114** |
 
-**T10 那一轮把任务从 74 涨到 109**——三十五条新的全部来自「真的去跑一遍」，其中 T80/T81/T82 已在同一轮修完合并，T83 已查证结论。
+**Demo 前要收口的是 5 项**，其中 **4 项要你动手**（T6、T53、T7、T71），**我这边只剩 T10**。
+其余 12 项都不挡演示：3 项来自 T10 那轮（T78 缺云凭据、T79 没做、T90b 缺正式包目视），9 项冻结到 Demo 之后。
 
-**Demo 前要收口的是 9 项**，其余 31 项冻结或已派给 codex（见 `docs/codex-parallel-batch.md`）。
-
-> 这三个数由 `scripts/check_demo_roadmap_counts.py` 守着，改完台账跑一次即可。**但它守不住这段散文里的数字**——上面这两行以前就漂过。
+> 这几个数由 `scripts/check_demo_roadmap_counts.py` 守着，改完台账跑一次即可。**但它守不住这段散文里的数字**——上面这行以前就漂过。
 
 ---
 
 ## 当前下一步
 
-1. **等 codex 合并** → 跑最终全量回归 → 从那个 HEAD 出签名包（约一个半小时，大头是公证）→ **在那个包上复验用户路径**。最后一步才是 T10 的定义本身：验收必须发生在你实际拿到的产物上。现在这个包缺 UI 修复、缺 DMG 的 `Applications` 链接、缺 07-26 夜里合的四条。
-2. **👉 你现在就能做（30 秒）：完全退出 App 再打开，看「平台状态」还是不是「登录正常」。** 这验的是抖音登录态有没有落盘，是 T6 唯一未闭环的一项，与换不换包无关。
+1. **从当前 HEAD 出签名包** → 跑最终全量回归 → **在那个包上复验用户路径**。这才是 T10 的定义本身：验收必须发生在你实际拿到的产物上。**磁盘上现在没有一个能演的包**：`/Applications` 里那个主二进制是 07-26 20:42 的，之后 `frontend/src` + `src-tauri/src` 又合入 40 笔；20:52 那个 DMG 挂载后卷里只有 `.app`、**没有 `Applications` 符号链接**（T84 的修复 22:42 才进，晚于那个包）。实测证据见 `docs/development/T70.md`。
+2. **👉 你现在就能做（30 秒）：完全退出 App 再打开，看「平台状态」还是不是「登录正常」。** 这是 T6 唯一未闭环的一项，与换不换包无关。**落盘那一层已经证完了**：App 未运行时磁盘上有 64 条 cookie（`.douyin.com` 47 条、`login.douyin.com` 1 条），剩下的只是 App 读回来并投影。
 3. 其余按下表顺序。**新发现一律记进冻结区，不派线去做。** Demo 前不再发散。
 
+> **07-27 T103 全量对账。** 未收口从 40 条核到 **15 条**（随后 T101/T90b 又报了 3 个新窗口，现为 17）。**25 条早就做完了，只是台账不知道**，最久的积压约 30 小时（T66a 07-26 18:46 就修好，一直挂在冻结区）。反方向的错（台账写着做完、实际没做）**一条都没有**。逐条证据、判据与查证中发现的产品缺陷见 `docs/development/T103.md`。
+>
 > **07-26 22:40 台账纠偏。** T68、T48、T5 三条此前挂着「等你做」，实际早已完成，证据一直在磁盘和服务端：
 > `installations` 已从文档记录的 0 行变为 5 行且全部绑定账号；`device-credential-v1` 与最早那行逐秒吻合；三份密钥 20:22 就位并被那次成功出片真实使用。
 > **这三条是「复述台账」而不是「去查事实」造成的误报**——台账写什么就说什么，而台账本身落后于现实。判据：**说某项待办之前，先找到它此刻的证据在哪。** 找不到证据的「未完成」和找不到证据的「已完成」一样不可信。
+>
+> **同一形状在 07-26 一天内至少发生四次**：T63/T64、codex 第二批 19 条、主线 T66a/T62/T22、夜间 T84/T85/T86。**代码合了、台账没回写**是这批任务唯一的系统性失效模式。台账里甚至出现过自相矛盾：T67 的「并行」列写着「✅ 已合并」，同一行却留在未收口表里，**没有任何东西会报错**——计数门禁守的是「数加不加得上」，守不住「这一行自己说的两句话对不对得上」。
 
 ---
 
@@ -54,13 +58,9 @@
 
 | ID | 任务 | 状态 | 并行 | 说明 |
 |---|---|---|---|---|
-| T10 | 从正式签名包跑一遍所有用例 | 🚧 | ❌ 不可 | 本轮目标本身。与 T57b 的 e2e 重组直接冲突，必须我做。**已修四条真红**（见下「T10 已抓到的」）；正式包正在 `wt/release` 出，四条扫描线并行 |
-| T72 | 门禁执行者的三处空洞 | ⬜ | ✅ 可 | 全量扫描的副产物，同一类：① `run_script_tests.py` **没被接进任何门禁**（`grep -rn run_script_tests .github/` 零命中）——为「守卫没人执行」造的解药，自己没人执行；② `deploy/ingress/test_ingress_config.py`(2 条) 与 `deploy/cloud/test_cloud_deployment.py`(46 条) 共 **48 条断言无任何执行者**，pytest 的 `testpaths=["tests"]` 收不到、runner 只 glob `scripts/` 也收不到，唯一调用方式是 `docs/development/T68.md:131` 里一行手敲命令（实跑是绿的，属潜伏风险）；③ runner 只对**失败**脚本打印输出（`:145`），通过的 stdout 直接丢弃，于是「跑 50 条断言」和「什么都没跑就 return 0」在汇总里长得一模一样——实测 41 个脚本共 400 条检查，**11 个「通过」数不出任何执行证据**，其中 `test_video_studio_acceptance_scope.py` 正是当初红着躺了很久那条。另 `test_script_test_runner.py:73` 的元测试用与实现完全相同的子串判据去断言实现，恒真 |
-| T69 | App 全程零日志 | ⬜ | ❌ 不可 | 无 tracing / log / env_logger 依赖，零条日志调用。**演示机上一旦出问题，我们是瞎的**（今天就吃过亏：我让你跑二进制看 stderr，那条命令根本不可能有输出）。Demo 前只加「不改任何行为」的一层 |
-| T61 | setup 失败即 abort，无兜底（含 T66b、T65） | ⬜ | ❌ 不可 | 调研已完成，**紧迫性下降**：「做完视频→正常退出→再打开」经导入链路核实是安全的，前一条线的高风险判断被推翻。剩余真实窗口只有「删成片时强退」和硬断电。建议一处四行兜底，不动 setup 结构。**T66b（目录权限只检查不修复）和 T65（`cleanup_expired` 无调用方）都在 `video_job_workspace.rs` 同一条启动路径上，并进来一起改。** 全部证据见 `docs/development/T61-setup-abort-risk.md` |
-| T70 | 演示前检查清单补完 | 🚧 | ⚠️ 半 | §2、§5.1 已实测贴输出；§3 等最终 DMG，§7 等 T36 定型 |
-| T6 | 抖音扫码登录与后续链路 | 🔍 待验收 | — | **扫码已完成并实测通过**，服务端记录 `state = healthy`。本机只读核对：指针 `current-douyin-profile-v1` 指向产品自建的 `739b9297-…`，档案目录 21:35 更新；此前我手工拷进去的污染档案 `df1c89f0` 已不在链路上。**换新包不用重扫**——档案在 `app_data_dir` 下按 bundle identifier `com.aventador.automationtool` 定位，构建之间不变。**只剩一件**：完全退出 App 再打开，确认仍是「登录正常」（预检清单 §375 第二步，验的是登录态落盘，不是当时那一刻通没通）。遗留两处旧档案（顶层 `embedded-browser-profiles/douyin/df1c89f0`、`browser-profiles/douyin/d2265434`）不在链路上，未清理——产品自管目录不手工动 |
-| T53 | Windows 验收机装 Node + pre-push hook | 👤 | — | 当前 v22.20.0 低于 `engines >=24 <27`，快档门禁不需要（`tsc` 只要 `>=14.17`）但**慢档必须对齐**。`.git/hooks/pre-push` 已被 git-lfs 占用，需人工插入共存。挂 pre-push 而非 pre-commit——后者跑在工作树上，而工作树正是被遮蔽的那个对象 |
+| T10 | 从正式签名包跑一遍所有用例 | 🚧 | ❌ 不可 | 本轮目标本身，必须我做。**已修四条真红**（见下「T10 已抓到的」）。**当前形态：磁盘上没有可演示的包**——`/Applications` 那个主二进制 07-26 20:42，之后又合入 40 笔提交；20:52 的 DMG 卷里没有 `Applications` 链接（T84 的修复 22:42 才进）。必须从当前 HEAD 重新出包，否则 T84/T85/T86 与夜间四条都不在客户拿到的产物里。实测见 `docs/development/T70.md` |
+| T6 | 抖音扫码登录与后续链路 | 🔍 待验收 | — | **扫码已完成并实测通过**，服务端记录 `state = healthy`。**落盘那一层 T103 已证完**：App 未运行时读磁盘，`profiles/demo-xuanbai/embedded-browser-profiles/douyin/739b9297-…/Default/Cookies` 45 KB（mtime 21:35），内含 **64 条 cookie，`.douyin.com` 47 条、`www.douyin.com` 15 条、`login.douyin.com` 1 条**（只统计 host 与行数，未读 name/value）；demo Profile 内两处指针都指向 `739b9297-…`。**换新包不用重扫**——档案按 bundle identifier `com.aventador.automationtool` 定位，构建之间不变。**只剩一件**：完全退出 App 再打开，确认仍是「登录正常」——那一步必须走真实用户路径，代替不了。顶层 `current-douyin-profile-v1` 仍指向污染档案 `df1c89f0`，不在 demo 链路上，未清理——产品自管目录不手工动 |
+| T53 | Windows 验收机装 Node + pre-push hook | 👤 | — | **07-27 实测复核仍未做**：`ssh winbox "node --version"` → **v22.20.0**（低于 `engines >=24 <27`），`Test-Path .git/hooks/pre-push` → **不存在**。快档门禁不需要（`tsc` 只要 `>=14.17`）但**慢档必须对齐**。挂 pre-push 而非 pre-commit——后者跑在工作树上，而工作树正是被遮蔽的那个对象 |
 | T7 | Windows GUI 三项验收 | 👤 | — | 依赖 T53。你已授权装 Node |
 | T71 | 要不要补背景音乐 | 👤 决策 | — | 合规上无障碍（已有 4 个自制、权利全 `true` 的 `music_sfx`），但那 4 个是 1–2 秒音效不是 BGM。**做不做 / 几首 / 什么风格等你定** |
 
@@ -82,25 +82,16 @@
 
 ### T10 跑全量与并行验收挖出的新任务（T73～T100）
 
-> 这十四条全部产生于 T10 那一轮：五条并行验收线 + 一条 Windows 线 + 包审计两轮。
+> 这批全部产生于 T10 那一轮：五条并行验收线 + 一条 Windows 线 + 包审计两轮。
 > 编号从 T73 起，**T82 归 Windows 提权 ACL**（`docs/development/T82.md` 已占用），生成耗时那条顺延为 T83。
-> T84～T86 是包审计第二轮点出的演示日问题，07-26 夜间三条独立 worktree 并行修，**都是「演示当天客户会看见」而不是「代码不干净」**。
-> T90～T91 来自稳定性线的失败注入，**是演示当天客户会看见的产品缺陷，不是测试问题**。
-> T80/T81/T82 已修完合并、T83 已查证结论，四条都已移出本表——留在这里会让「未收口」虚高。
+> T84～T86 是包审计第二轮点出的演示日问题，**都是「演示当天客户会看见」而不是「代码不干净」**。
+> **T80/T81/T82/T83 早已移出；T73～T77、T84～T86 经 T103 逐条查证已完成，同批移出**——留在这里会让「未收口」虚高，那正是这份台账要治的病。
 
 | ID | 任务 | 状态 | 归属 | 依据 |
 |---|---|---|---|---|
-| T73 | 测试把文件写进只读的 vendor submodule | ⬜ | codex | 跑完测试后 hyperframes 有 68 个 `output/compiled.html` 被改写、moneyprinterturbo 有 3 个 `.mp4` 被新建，`check_third_party_sources.py` 判整棵树为脏并拒绝 → **任何一次测试跑完，这道发版门禁就失败**。违反 CLAUDE.md 第 6 节。修复难点：`reset --hard` 清不掉（`.gitattributes` 声明走 LFS 而仓库存的是内容，clean 过滤器转换后与 index 对不上），只能整目录删除 + 全新检出 |
-| T74 | 执行器包缓存键是常量，34 个驱动永远拿不到新执行器 | ⬜ | codex | `desktop_e2e_prerequisites.py:75` 的 `SHARED_EXECUTOR_BUILD_ID` 是常量字符串，执行器源码不参与缓存键。**云端 E2E 线用 A/B 坐实**：旧缓存包 63 秒后 `exit=70`，重建包（只花 9 秒）132 秒成功，直接跑源码也成功。同文件 `:90` 还硬编码 `REPOSITORY_ROOT/.local/` 而不用 `archive_path()`，导致那 34 个驱动**从任何 worktree 跑都在第一步死** |
-| T75 | 另一处吞掉 PyInstaller 输出（主线漏修） | ⬜ | codex | `run_e4_07_acceptance.py:226` 的 `build_signed_executor` 同样 `capture_output=True` 后丢弃。`ce45efd` 只修了 `macos_candidate.py` 的 `_run_pyinstaller`，是另一个函数 |
-| T76 | `desktop-e2e` 前端入口让 workbench 断言恒真 | ⬜ | codex | `test:tauri` 与 `test:h8-19-app` **37 毫秒通过**。`test-tauri-main.tsx` 注入的 `desktopShellStartupCheck` 无条件返回 ready 且**不注入生产的 17 个 gateway**，于是 `workbench.spec.ts` 断言恒真，而它是该 spec 唯一执行者。对照组：`model-service-e2e` 的 `test-production-main.ts` 直接 `import("./main")` |
-| T77 | ~~B5-13 前端投影与权威态不一致~~ → **前提已证伪** | 🔽 降级 | codex | 云端线拿到逐字节响应：权威态是 `{"platform":"douyin","state":"unknown","observedAt":null}`（恰好 57 字节），**不是 `missing`**。而 `unknown` 从 Python 到 Rust 到 Zod 到 UI 完全自洽，界面显示「尚未确认」。B5-13 描述的症状只在一个**被双侧守死、当前不可达**的组合下发生。**不是现网 bug**，改为「确认该链路对 unknown 的处理正确」即可 |
-| T78 | 视频线 7 驱动 / 8 spec 全卡启动门禁 | ⬜ | codex | `780abce` 拆桩后驱动没跟上，`prepare_startup_gate` 的 34 个调用者里这 7 个一个都没有。`T36-oneshot-video-preview.md:116` 记了但说「5 个 spec」，实测 8 个。依赖 T74 |
-| T79 | 124 个验收驱动无聚合执行器，48 个只被读源码不被执行 | ⬜ | codex | 按「引用」与「执行」分开判：被 npm script 点名 37、被真 subprocess 执行 4、**只被读源码从不执行 48**、**零执行者 35**。那 48 个最隐蔽：`.test.mjs` / `test_*.py` 只 `readFile` 驱动源码做文本断言，**绿的是「源码长这样」不是「能跑通」**——`run_t3_12` 在读者下全绿、真执行时 exit=1。`run_vf_01_acceptance.py` 全仓零命中 |
-| T90b | **把失败原因区分带到 Rust** | 🚧 | `model-error-codes` | T90 已把 Python 与契约侧分开并有测试守着，但 `MotionVideoStudioError` 只有 `{code, retryable}`，`rejectionReason` 判完真假随即丢弃，**子进程能让 Rust 区分的只有拒绝/非拒绝两类**。确切改法写在 `docs/development/T90.md` 第六节。一并收进「安装包坏了」那类 |
-| T84 | DMG 里没有 `/Applications`，客户当场装不了 | 🚧 | `dmg-install` | 实测解析 `tauri.conf.json`，`bundle` 段的完整内容就是 `{"active": true}`——**没有任何 DMG 定制**。挂载后用户看到一个孤立的 App 图标，没有可以拖进去的目标。演示当天客户拿到包的第一个动作就卡在这里。修配置 + 门禁测试由该线做，**挂载核对（`hdiutil attach` 看有没有 `Applications -> /Applications`）由我在最终出包时做** |
-| T85 | 更新中心不用点就常显红字 | 🚧 | `update-ui` | 正式包审计里目视到的现象。代码事实：`AppUpdateCenter.tsx` 的 `stateColor()` **只有 `failed` 一个分支返回红**，所以红字必然来自状态机进了 `failed`；而状态机**根本没有「未配置 / 已关闭」这种状态**；组件 `useEffect` 挂载即轮询 `getState()`，**不需要用户点任何按钮**。演示时客户第一眼看到红字。派单时写死了边界：**不许为了消红把真实失败一起藏掉**——那是本项目反复吃亏的「静默成功」 |
-| T86 | 动效成片可能静默产出静止画面 | 🚧 | `motion-still` | **已经真实发生过一次。** 随包示范里出现 CDN 版 gsap，而渲染沙箱硬离线；模型照抄一个 `<script src="https://...">`，沙箱加载不到，**页面不报错、逐帧渲染照常跑完、产出每帧相同的静止视频**——链路全绿，成片是废的。`agent.py:731` 已提到离线路径 `compositions/runtime/gsap.min.js`，说明这条路存在，但示范与校验是否对齐要查证。修法两侧：入口拦外部 URL，出口检测「首帧/中帧/末帧全同」。**出口那道更值钱——它不依赖我们猜到全部失败原因** |
+| T78 | 视频线 8 驱动 / 9 spec 全卡启动门禁 | 🔍 待验收 | codex | 共享 `video_studio_startup_harness` 已负责隔离环境、内置浏览器、签名 Executor、唯一 Compose project 的隔离 PostgreSQL、正式 Alembic 链与真实 Control Plane。**7 条真实本机桌面驱动全绿**（VF-06 / BM-06 / BM-08 / BM-15 / CQ-01 / IM-05 / VE-03，真实隐藏 Tauri + 真实 IPC + 真实 PG）。**VE-04 缺阿里云凭据，8/8 未闭环**，因此保持 🔍 不标完成。合并后回归 `036c267` 已修（`0e41d59` 删掉被两个模块 import 的共享常量）。见 `docs/development/T78.md` |
+| T79 | 124 个验收驱动无聚合执行器，48 个只被读源码不被执行 | ⬜ | codex | **07-27 实测复核仍成立**：`ls scripts/run_*_acceptance.py \| wc -l` → 124；`run_vf_01_acceptance.py` 在 `scripts/`、`package.json`、`.github/`、`contracts/` 全部零命中；`run_script_tests.py` 与 `commit_gate.py` 都不 glob `run_*_acceptance.py`。第二批的 749 行改动属于 T78（只覆盖 8 个视频构建驱动），**不能替代 124 个驱动的聚合执行者**。`docs/development/T79.md` 自报 `⬜ 未完成`，并写明「不能把 `rg` 零命中包装成已经完成 TDD」 |
+| T90b | **把失败原因区分带到 Rust** | 🔍 待验收 | `model-error-codes` | **已合并**（`8de19ba`）。分类表落在 `contracts/video/motion-authoring-refusal.v1.json`，**Python 与 Rust 都从它读、不留第二份**：`entry.py:53` 与 `motion_video_studio.rs:36` 的 `include_str!` 指向同一份。错误码按传输层/超时/拒绝分开，不再把「连不上」说成「你的描述做不出来」。**缺正式签名包目视**，故 🔍。三处自报缺口已入账为 T106、T107（另一处见 T105），见 `docs/development/T90b.md` 第八节 |
 
 ### 「能在 App 里生成出一个视频」这条链路的收口状态
 
@@ -135,40 +126,41 @@
 
 | ID | 任务 | 并行 | 一句话 |
 |---|---|---|---|
-| T92 | **把动效 HTML 从模型输出挪回本机模板** | 🤖 | T83 查明耗时严格正比于模型写的字节数，而 `composition_html` 占输出 70%。改成本机模板 + 模型只填结构化字段，提交到完成有望从两分多钟降到几十秒。**这是产品改动，演示前不动** |
-| T66a | 文件权限只检查不修复（`secure_store.rs` 那半） | 🤖 codex | `ensure_private_file_permissions`（`secure_store.rs:182`）对**文件**只检查不修复，而同文件对**目录**却是强制 `chmod 0700` 修复——同一个文件里两套策略。Time Machine / 迁移助理恢复的账号会造出带 group/other 位的密钥文件 → 永久闪退 |
-| T66b | 目录权限只检查不修复（`video_job_workspace.rs` 那半） | ❌ 我做 | `validate_private_directory_metadata`（`video_job_workspace.rs:1299`）同型，但**和 T61 在同一个文件同一条启动路径上**，并入 T61 一起改 |
-| T67 | Windows 企业域 AppData 重定向会启动即闪退 | ✅ 已合并 | `browser_profiles_windows.rs:504` 的 `normalized_path_key` 只剥 `\\?\` 前缀，**不处理 `\\?\UNC\`**；文件夹重定向到 UNC 共享或 SUBST 映射盘时 `final_path != normalized_path_key` → abort。另 `ensure_no_reparse_components` 拒绝路径上任何 junction（把 AppData 搬到 D 盘留 junction 是常见场景）。**读代码推断，未上机验证** |
-| T65 | `cleanup_expired` 生产代码里没有任何调用方 | ❌ 与 T61 同文件 | 只有 `tests/video_job_workspace.rs:391` 调。30 天保留策略形同虚设，artifacts 单调增长，**启动时的 abort 面随视频数量线性增长** |
-| T50 | 注销成功但界面报失败 | 🤖 codex | 5 次复现 4 次。内层 ~5 秒轮询包在 60 秒超时里——**不是等不起，是自己先放弃了**。已从演示脚本摘掉「安全注销」 |
-| T58c | 拒绝原因要不要转发给用户 | 🤖 codex | 静态核查已确定**能拿到且不需要读 stderr**：`entry.py` 13 处 `_reject` 与 `agent.py` 全部拒绝消息都是固定字面量，唯二插值是结构标签和门禁码闭集，`MotionBrief` 越界消息也不回显 brief 原文。但转发要改共用 error wire，与「细节不进 wire」的决定冲突，代价写在台账里等决策 |
-| T62 | `run_script_tests.py` docstring 写死 "37 self-contained test scripts" | 🤖 codex | 实际已 41。代码本身是 glob 推导的没有功能问题，但这个会静默落后的散文计数**就写在那份讲 "discovery is derived, never curated" 的文档里** |
-| T45 | Control Plane 镜像被打进 playwright | ❌ 碰 `uv.lock` | 约 50MB。代码层守住了 CLAUDE.md 4.2，打包层破了 |
-| T57b | 按 T57 调研结论执行 e2e 入口的并/修/废 | ❌ 与 T10 冲突 | **并**：VF-06 / BM-15 / VE-03 / VE-04 搬到 control-plane-e2e（+BM-06、CQ-01 并入）。**废**：B5-04（产品 UI 已删）、`workbench.spec.ts`、三条 0-click 的 update spec。**重新设计**：BM-08、IM-05。另注：`video-studio-e2e` 这个 feature 已不门控任何一行产品代码 |
+| T92 | **把动效 HTML 从模型输出挪回本机模板** | 🤖 | T83 查明耗时严格正比于模型写的字节数，而 `composition_html` 占输出 70%。**07-27 复核仍成立**：`agent.py:1351/1364/1496` 的 `composition_html` 仍由模型产出并写盘。改成本机模板 + 模型只填结构化字段，提交到完成有望从两分多钟降到几十秒。**这是产品改动，演示前不动** |
+| T58c | 拒绝原因要不要转发给用户 | 🤖 codex | 静态核查已确定**能拿到且不需要读 stderr**：`entry.py` 13 处 `_reject` 与 `agent.py` 全部拒绝消息都是固定字面量，唯二插值是结构标签和门禁码闭集。**07-27 复核**：`motion_video_studio.rs:1010` 已有 `rejection_reason_is_closed()`，但 `:1054` 只用它做校验，字面量仍不进 wire。T90b 已把**类别**带到 Rust，**原因文本**转不转发仍是未决策项，与 T90b 是同一处改动 |
+| T57b | 按 T57 调研结论执行 e2e 入口的并/修/废 | ❌ 卡 `scripts/` 写面 | **⚠️ 部分完成，不是没动。已做**：视频族共用 Tauri build 从 `video-studio-e2e` 切到 `control-plane-e2e`；退役无 Python owner 的 `workbench.spec.ts` / `wdio.conf.ts` 与零点击的 H8-19 `update-policy.spec.ts`；新增动态所有权门禁 `frontend/tests/tauri-e2e-entry-ownership.test.mjs`（解析 npm `wdio run` 与 Python `subprocess.run`，只认真实执行者）。**未做**：B5-04 与两条 update spec 被 Python runner 硬编码，交接单禁止改 `scripts/`，直接删前端会造成确定性悬空。**卡点是 `scripts/` 写面，不是与 T10 冲突**——原理由已过期。见 `docs/development/T57b.md` |
 
 ### 原有待办
 
 | ID | 任务 | 并行 | 为什么冻结 |
 |---|---|---|---|
-| T4 | 补 VE 剪辑装配任务 | ❌ 需设计 | 大工程，Demo 不演。你此前明确困惑过「剪辑不需要上传素材吗」 |
-| T19 | 动效零件接 AI 一句话制作链路（方案 B） | ❌ 需设计 | 大工程 |
-| T22 | 自动更新在可发布包里从未配置 | ⚠️ 与 T63/T64 同文件 | Demo 不需要 |
-| T24 | 执行器包根按 `debug_assertions` 分叉 | ✅ 可 | |
-| T25 | 视频线 WDIO 验收补齐真实资源前置 | ❌ 与 T57b 重叠 | |
-| T26 | ~~内置浏览器换成 Chromium 开源构建~~ → **剔除 Widevine CDM** | ❌ 与 T10 冲突 | **任务标题的结论是反的，调研结论是不换**：Playwright 已停产 mac/win 的 Chromium 构建（实测 404）；所有 Chromium 开源构建不含 H.264/AAC，实测**抖音播放器彻底黑屏**；体积不降反增且 Windows 超门禁上限；而且 **CfT 在 `sec-ch-ua` 里报的就已经是 `"Chromium"`**，换掉的只是文件名不是被网站看到的身份。**唯一白纸黑字的分发禁令只针对一个文件**：macOS 版 CfT 里的 `libwidevinecdm.dylib`（20.2 MiB），LICENSE 明文禁止无协议分发；实测删掉它零功能损失、零门禁风险。正确任务是「留在 CfT + 剔除 Widevine」，1～2 人日而非 10～15。**因会改变正式包内容，须等 T10 收口后做。** 见 `docs/development/PLAN-chromium-replacement.md` |
+| T4 | 补 VE 剪辑装配任务 | ❌ 需设计 | 大工程，Demo 不演。你此前明确困惑过「剪辑不需要上传素材吗」。07-27 复核：无相关提交 |
+| T19 | 动效零件接 AI 一句话制作链路（方案 B） | ❌ 需设计 | 大工程。07-27 复核：无相关提交 |
 | T37 | 四条合规决策 | 👤 | 你已定：Demo 后处理 |
-| T40 | 包内 UTM Kabel KT 字体权利未判定 | ⚠️ 共享契约 | 合规，Demo 后。改 `contracts/quality/asset-rights-policy` 需独占 |
-| T41 | 动效叠加字体未进权利登记表 | ⚠️ 共享契约 | 同上。`big-shoulders-display-latin.woff2` 登记在另一份契约里 |
-| T38 | 演示后回收清单 | ✅ 可（纯文档） | 演示后才用 |
+
+### T101 与 T90b 自报的新窗口
+
+> 这三条**不是派单要求修的，是那两条线自己在证据文件里如实登记的缺口**。全部冻结到 Demo 之后，此处只做登记。
+> 编号从 T105 起（T104 已被内置 Chromium 的 JIT 门禁占用）。
+
+| ID | 任务 | 并行 | 一句话 |
+|---|---|---|---|
+| T105 | 用户取消渲染后侧边栏仍说「正在进行中」 | 🤖 | `settleMotionRun` 那条 info 消息没有任何东西去清，已用一次性探针实测确认返回 `running`。**没顺手修是对的**：message 是单槽，在监视器里 dismiss 会误清另一条任务的失败文案，多任务语义要单独设计。来源 `docs/development/T101.md` |
+| T106 | 4 个内部编程错误仍被说成「换一句更具体的描述」 | 🤖 | `agent_workspace_required`、`agent_workflow_reference_required`、`agent_not_a_motionauthoringtools_instance`、`agent_tool_surface_does_not_match_the_closed_allowlist` 不属于任何非拒绝类，仍落在 `authoring_refused`。**没收进分类的理由是它们从 `entry.py` 结构上到不了**——为了分类整齐把够不到的东西编进类里，正是派单时明令不要做的事。将来变得可达就要补。来源 `docs/development/T90b.md` §8(a) |
+| T107 | `MODEL_TIMEOUT_SECONDS = 360` 只活在 `agent.py` | 🤖 | 实测确认只在 `agent.py:277`。想在界面文案里说「6 分钟」就得先把它下沉到契约，否则会多出一份没人守的副本——所以现在文案写的是「超过允许的最长等待时间」。来源 `docs/development/T90b.md` §8(c) |
 
 ---
 
-## 三、已收口（42 项，无需再管）
+## 三、已收口（无需再管）
+
+> **本节 07-27 由 T103 全量对账扩充。** 每条新移入的都在代码或测试里独立核过，
+> 「证据」写的是核出来的东西（文件行号 / 测试名与输出 / 提交号及它实际改了什么），**不是抄 `docs/development/*.md` 的状态行**——那些也是索引不是证据。
 
 ### ❌ 查证不成立 —— 观察是真的，结论是错的
 
 | ID | 原判断 | 实际 |
 |---|---|---|
+| T77 | B5-13 前端投影与权威态不一致 | **前提已证伪，无需修。** 云端线拿到逐字节响应：权威态是 `{"platform":"douyin","state":"unknown","observedAt":null}`（恰好 57 字节），**不是 `missing`**；`unknown` 从 Python 到 Rust 到 Zod 到 UI 完全自洽，界面显示「尚未确认」。B5-13 的症状只在一个被双侧守死、当前不可达的组合下发生。**T103 复核**：`006078c` 未改 `frontend/src` 任何一行——这是有效的否定性交付，不是没做 |
 | T58a | 点击后一分钟命令没开始 | 那 15 分钟是 `browser.waitUntil` 自己的 900 秒预算——它把条件抛出的异常当「还没满足」，跑满预算才用**最后一次**的异常 reject（用装的那份 `Timer` 实测过）。命令早就跑完并失败了，所以取样才看到主线程空闲、无子进程、工作区已删。**真缺陷是另一个**：提交命令声明为同步，全程占用主线程，已 TDD 修掉（`b6cc046`） |
 | T54 | 主窗口不向辅助功能暴露 | 是 **macOS 锁屏行为**。判据被推翻：Chrome / VS Code / ghostty 同一时刻 AX 全是 0。连带更正：「窗口可见 3.5 分钟」不成立，那段时间屏幕锁着 |
 | T46 | 上游品牌名在产品窗口顶部 | **产品路径不复现**（那是绕开产品窗口直连 Streamlit 才能看到的）。仍补了静态门禁覆盖内嵌 WebUI |
@@ -194,6 +186,20 @@
 | T39 | 消除发版与开发环境的构建期分叉。登录界面此前只存在于 `customer-demo` 这个 Vite mode，正式包里整个被 tree-shake |
 | T55 | 账号命令没进 desktop-e2e handler。修接线错误但不拆掉设备凭据那条**有意的**安全边界 |
 | T59 | 前端入口里的第八处构建期分叉：`startup.ts:44` 的 `desktopShellStartupCheck` 无条件返回 ready，`single_build_path.rs` 只读 Rust 源码看不见它。**5 个入口全过是因为它们的前端根本不跑门禁** |
+| T69 | **App 全程零日志，演示机上一旦出问题我们是瞎的**（`090e756`）。原 Tauri App 无 tracing / log / env_logger 依赖、零条日志调用。现新增 `frontend/src-tauri/src/app_logging.rs`（28 KB）：**固定事件白名单** + AppData 私有落盘，单文件 1 MiB、最多 8 个、保留 7 天，异步有界队列满时**丢日志而不阻塞业务**；只记固定事件和封闭字段，不写原始错误详情。RED 是真红——`sensitive error detail reached the desktop log: Cookie=session-cookie`，证明的是「直接记录错误对象会泄漏 Cookie」而不只是「没有日志文件」。**T103 复核接线**：`lib.rs:2` 声明模块，`:4259` 初始化，`:4262/4266/4270/4322` 与 `:1313/1326/1350` 已接进 setup、Control Plane、Executor/Sidecar 生命周期。软链替换日志目录或文件被拒且不触碰外部目标。**遗留**：尚无一次正式 App 故障后从真实 AppData 导出安全日志的取证记录 |
+| T61 | **坏视频产物让 App 永久起不来**。`video_job_workspace.rs:349` 的 `initialize()` 现在依次调 `recover_interrupted_imports()`、`cleanup_invalid_artifacts()`、`cleanup_expired()`、`discard_staged_publish_artifacts()`；只有清理本身失败才阻断启动，运行期 `list_artifacts()` 仍严格 fail closed。**T103 实跑 `cargo test --test video_job_workspace` → 14 passed / 0 failed**，其中 `startup_discards_corrupt_artifacts_while_runtime_listing_stays_strict` 正是这条。调研见 `docs/development/T61-setup-abort-risk.md`（它推翻了前一条线「演示场景会 abort」的高风险判断）。**遗留**：尚无正式安装 App 的损坏产物重启验收，属 T10 写面 |
+| T65 | **`cleanup_expired` 生产代码里没有调用方**，30 天保留策略形同虚设。现由 `video_job_workspace.rs:380` 在启动自愈后按当前 UTC 执行。**T103 实跑**：`startup_removes_expired_retained_workspaces_without_manual_cleanup` 通过（同上 14/14）。与 T61/T66b 同一条启动路径、同一批修 |
+| T66a | **文件权限只检查不修复**（`secure_store.rs` 那半）。现 `:195` `libc::fchmod(fd, 0o600)`，`:199-204` 修复后复核 dev/ino/mode 拒绝替换竞态；`ensure_private_file_permissions`(:226) 委托给它。提交 `e208b64`(07-26 18:46)、`0f3c060`(19:12) 消除竞态。**这条修好后在冻结区躺了约 30 小时**，是本批积压最久的一条 |
+| T66b | **目录权限只检查不修复**（`video_job_workspace.rs` 那半）。现 `:1355` `libc::fchmod(dirfd, 0o700)` 并清 setgid/sticky，`:1358-1361` 复核 dev/ino/mode。**T103 实跑**：`startup_repairs_migrated_private_directory_permissions` 通过（同上 14/14）。**遗留**：Windows ACL 漂移不由这条 Unix 实现覆盖 |
+| T67 | **Windows 企业域 AppData 重定向会启动即闪退**。`browser_profiles_windows.rs:1049` 现在 `stripped.strip_prefix("unc\\")`，把 `\\?\UNC\server\share` 还原成 `\\server\share`；测试 `:1324 a_unc_path_and_its_final_path_form_share_one_key` 钉住。**已上机验证**：`docs/development/T67.md` 记录 Windows 提权实机 RED（左右值逐字贴出）→ GREEN `lib 9/9`。**台账原写「读代码推断，未上机验证」，这句是错的，本次更正**；同一行的「并行」列早已写着「✅ 已合并」却仍留在未收口表里，是台账内部自相矛盾 |
+| T22 | **自动更新在可发布包里从未配置**。`dabd226`（07-26 19:16，9 文件 +273）新增 `build.rs:89 require_release_update_configuration()`：release 构建要么显式 `AUTOMATION_TOOL_UPDATE_DISABLED=1` 且不给 endpoint/公钥，要么必须给通过 https / 三个占位符 / 保留主机名 / 无凭据片段校验的 endpoint + 公钥，否则 `panic!`。**「未配置」从事故变成被门禁约束、必须显式声明的一等公民配置**——这正是 T85 能把它渲染成中性状态的前提 |
+| T24 | **执行器包根按 `debug_assertions` 分叉**，违反单一构建路径。`d28f819` 统一到 `resource_dir()/local-executor/package`，桌面验收也把测试用签名执行器装到同一布局。**T103 复核**：`grep -n debug_assertions frontend/src-tauri/src/lib.rs` **零命中** |
+| T26 | ~~内置浏览器换成 Chromium 开源构建~~ → **剔除 Widevine CDM**。**任务标题的结论是反的，调研结论是不换**：Playwright 已停产 mac/win 的 Chromium 构建（实测 404）；开源构建不含 H.264/AAC，实测抖音播放器彻底黑屏；而 CfT 在 `sec-ch-ua` 里报的本就是 `"Chromium"`。**唯一白纸黑字的分发禁令只针对 `libwidevinecdm.dylib`**（20.2 MiB）。`d5e5111` 落地：`build_embedded_chromium_staging.py:379,398` 产出 `exclusions` 写进 staging manifest，`build_embedded_browser_distribution.py:185-198` 记 `widevine_excluded_remaining_cft_terms_unresolved`，`check_embedded_browser_package.py:102` 预算按剔除后校准。**遗留**：CfT 整体许可仍是明确的待法律确认边界，不在本任务范围 |
+| T40 | **包内 UTM Kabel KT 字体权利未判定**。`1660d21` 没有猜许可，而是登记为 `NOASSERTION` / `undetermined` / `deny`：`asset-rights-policy.v1.json:123` `font-utm-kabel-kt` 带 `rightsBlocker`（字体只写 "Free for everyone"，无许可证名与正文、无商用/再分发/嵌入授权）；`material-video-worker-package.v1.json:42` 把 `fonts/UTM Kabel KT.ttf` 列入 `excludedUpstreamResourceFiles` **物理排除**，五个字面全部换成 OFL 字体。**该字体权利本身仍是「无法确认」，不是已获授权** |
+| T41 | **动效叠加字体未进权利登记表**。`eb861c2` 把实际随资源使用的 `big-shoulders-display-latin.woff2` 绑定到精确 SHA-256：`asset-rights-policy.v1.json:161-167` `font-big-shoulders-display`，`license: OFL-1.1`，`sourceUrl` 指向 BM-12 锁定的 commit。条件分发（保留版权与许可证、不得单独售卖、衍生继续遵守 OFL）一并登记 |
+| T45 | **Control Plane 镜像被打进 playwright**（约 50MB）。`98ac834`/`2a3b293`/`92d0367` 把它移进默认启用的 `executor` 依赖组：`backend/pyproject.toml:49-50`、`:54 default-groups = ["dev","executor"]`；`backend/Dockerfile:29 uv sync --locked --no-dev --no-group executor --no-editable`。本机开发与执行器仍直接可用，镜像不再带它。**遗留**：没有留下真实镜像的逐层内容清单 |
+| T84 | **DMG 里没有 `/Applications`，客户当场装不了**。`179a720`（07-26 22:42）：`build_release_package.py:379` `(staging / "Applications").symlink_to("/Applications")`，`:381-394` 改用 `hdiutil create -srcfolder <staging>` 对暂存目录成像而不是对裸 `.app`。**修不在 `tauri.conf.json`**——构建跑的是 `tauri build --bundles app`，Tauri 的 DMG bundler 根本不执行，`bundle.macOS.dmg` 从不被读；`docs/development/T84.md` 记录了这个否定结论。**注意该证据文件写于 22:39，比修复早三分钟，读它会以为没修**。磁盘上 20:52 那个 DMG 缺链接是因为它早于修复，**T10 必须重新出包** |
+| T85 | **更新中心不用点就常显红字**（`ff9f660`）。根因不是 UI 写错：「发布构建显式关闭更新」是 `build.rs` 支持的一等公民配置（客户 Demo 包正是这样构建），却被原生层报成 `failed / configuration_invalid`，而组件挂载即轮询，**不需要用户点任何按钮**就渲染红色。改法是表现层新增单一分类函数 `failurePresentation`，`statusText` 与 `stateColor` 共同引用：`configuration_invalid` → 中性「此版本未启用自动更新」，`transport_unavailable` → 提示色。**派单时写死的边界被遵守**：验签失败、安装失败、存储不可用、清单被拒仍是红，**default 分支兜底为红，新增失败码不会被静默降级**。未改状态机、契约与任何 `.rs` |
 
 ### ✅ 云端与交付
 
@@ -205,6 +211,7 @@
 | T68 | **产品账号登录已在正式 App 里走通**。根因是边界 nginx 用 `$request_id` 覆盖了 App 送的 `x-request-id`，App 比对回显不一致 → `ProtocolInvalid`，**登录第一个请求就失败**，所以 challenge 与 logout 从未发出。修复已部署。**07-26 服务端实测收口**：`installations` 从文档记录的 0 行变为 5 行、全部 `active` 且 `owner_user_id` 非空。见 `docs/development/T68.md` |
 | T48 | **设备绑定已在真实链路成立**。本机 `profiles/demo-xuanbai/device-credential-v1` 创建于 20:19，与 `installations` 最早那行 `12:19:17+00` 逐秒吻合。**5 行不是「密钥每次重生成」**：多出来的来自各自独立 bundle identifier 的验收构建（例如 `…t36acceptance` 的设备身份 mtime 22:05，对应 `14:05:24+00` 那行），demo Profile 那把自 17:25 起未变。包里地址、Gatekeeper 放行、隔离启动此前均已验 |
 | T5 | **三份密钥已在签名包的 demo Profile 里就位**并被真实使用：`model-service-video-creative-v1`、`model-service-script-v1`、`video-editing-service-aliyun-v1`，均写于 20:22；你后来那次成功出片就是用它们跑的，比单独验收更强。演示当天只需确认百炼额度仍可用 |
+| T38 | **演示后回收清单**（`801772e`）。新增 `docs/customer-demo-post-demo-cleanup.md`，把业务冻结、账号与 Session 停用、设备凭据吊销、本机数据、PostgreSQL、对象存储、云资源、证据保留和双人复核写成可执行清单，并从演示运维手册链接过去；明确区分「删除」「吊销」「停止计费」和「保留审计证据」，只允许登记凭据 ID / 用途 / 指纹，**禁止读取或抄录密钥值**。纯文档任务，证据文件如实写明「无代码 RED」而不是事后编一次从未运行的失败测试。**遗留**：尚未在一次真实客户演示退场中逐项执行 |
 
 ### ✅ 视频与内容
 
@@ -232,6 +239,9 @@
 | T8 | 动效零件自动推荐与中文名映射 |
 | T29 | 零件区在固定模板路径下明确标为不参与 |
 | T20 | 发布页永远没有视频可发 → 成片页补上「去发布」 |
+| T50 | **注销成功但界面报失败**（`6197eba`，5 次复现 4 次）。病因与台账描述逐字对应：内层权威态轮询是 `for _ in 0..100` × 50 ms = **5 秒**，却包在 60 秒的外层预算里——**不是等不起，是自己先放弃了**。改为 `tokio::time::timeout(DOUYIN_LOGOUT_PROJECTION_TIMEOUT /* 60s */, async { loop { … } })`，内外层预算对齐，未改注销控制流也未放宽终态要求。**T103 实跑** `frontend/tests/platform-session-logout-acceptance.test.mjs` → 1 pass / 0 fail。**遗留**：修改后尚无真实抖音账号的注销最终状态验收，**演示脚本可以把「安全注销」放回去了，但要先补那次真实验收** |
+| T86 | **动效成片静默产出静止画面**（`0862e62`）。**已经真实发生过一次**：随包示范（`vendor/hyperframes` 的 `minimal-composition.md:12`）用的是 CDN 版 gsap 而渲染沙箱硬离线，模型最省事的「移除远程引用」方式就是删掉 script 标签保留 gsap 调用——这份合成通过全部静态检查，渲染时 gsap 未定义、`seekableDuration` 为 0，Worker 跳过逐帧 seek 却照常截图，**把同一张首屏截满 frameCount 次并报 complete**。修法两侧：出口 `worker.mjs` 判 `render_static_frames`（**逐帧与首帧字节比对**而非首/中/末采样——走完整数个循环的动画三帧采样可能相同却全程在动）；入口 `agent.py` 的 `check_composition` 新增 `missing_animation_runtime`，只拒绝「调用 gsap + 无任何 script src + 无内联定义」这个精确的不可运行形态。vendor 只读不能改，因此在提示词里点名覆盖那个 CDN 示范。**出口那道更值钱——它不依赖我们猜到全部失败原因**。真实 worker 进程 + 真实内置 Chromium 149 端到端复现并修复 |
+| T101 | **好消息也要送到 + 重启恢复查证**（`61f9d72`/`2f56129`）。①**已修**：成片做好而用户在别的页面时，侧边栏标记仍是「正在进行中」——新增第五种 attention（绿色角标「完成」，悬停「视频制作做好了，去看成片」）。这与 T91/T91b 是同一形状、符号相反。②**查证完成，本轮拒绝实现**，理由不是代价大而是**方案不闭环**：「这条片子用户看过没有」在原理上不可能来自渲染快照，只加 `startedAt` 会让历史上每条成片在每次开 App 时都弹一遍「已经做好了」，**比现在坏**。据此**更正 T91 的登记**：那条把「App 重启后不恢复」写成一个原生侧任务，那个描述是不完整的。剩余窗口另立 T105 |
 
 ### ✅ 验收基础设施与门禁
 
@@ -258,6 +268,15 @@
 | T3 | 第三方软件声明页降权到设置页底部 |
 | T80 | **四处门禁在干净树上跑不起来**（`2cbb325`/`def5837`/`5fc876a`）。B1 缺 offline 目录、B2 缺 `frontend/dist`（有传染性，`test:layers` 必断）、B3 缺 worker package 且**补救指路指错脚本**、B4 缺 EB-16 正式包。新增 `scripts/gate_prerequisites.py` 把「门禁→产物→生产者」单点声明，**提示信息从 `producer` 字段生成**，所以指错就是命令错。顺带修 `build_offline_motion_catalog.py` 的 `fetch()` 零重试——锁文件声明 71 个下载产物，零重试在干净机器上近乎必然失败 |
 | T81 | **VF-04 自检只可能在 Windows 通过**（`2cbb325`）。`check_video_media_toolchain.py:539` 在 POSIX 造符号链接、Windows 造目录联接，而 `finally: linked.rmdir()` 对符号链接必然 `ENOTDIR`。**崩溃在 `finally`，断言本身已经通过了**——所以 macOS/Linux 从写下那天起就是红的 |
+| T72 | **门禁执行者的三处空洞**（`050dfc9`）。三处逐条收口，**T103 全部实测复核**：① `run_script_tests.py` 没被接进任何门禁 → `commit_gate.py:521` 从被验 commit 的 checkout 执行它；② `deploy/` 下 48 条断言无执行者 → `discover()` 改为 `scripts/test_*.py` 加 `deploy/**/test_*.py` 的 rglob 派生，**实跑 `discover()` 得 56 条含那两个 deploy 文件**，直接执行得 `Ran 46 tests OK` 与 `Ran 2 tests OK`；③ 通过脚本的 stdout 被丢弃，「跑 50 条断言」与「什么都没跑就 return 0」长得一样 → `:303-313` 改为解析可数执行摘要，`returncode==0 且 checks==0` **判失败**，`aggregate_success()` 还要求非空且总数为正。④ 原先 `test_script_test_runner.py:73` 那个用与实现相同子串判据的恒真元测试**已被重写**为 `check_discovery_includes_deploy_tests`——造临时树放三个文件、比对发现集合，不再是子串启发式 |
+| T73 | **测试把文件写进只读的 vendor submodule**（`32f8b55`）。跑完测试后 hyperframes 有 68 个 `output/compiled.html` 被改写、moneyprinterturbo 有 3 个 `.mp4` 被新建，`check_third_party_sources.py` 判整棵树为脏 → **任何一次测试跑完，发版门禁就失败**。新增 `scripts/run_vendor_tests.py`：从本地对象创建 `.local/vendor-tests` 隔离 checkout，不下载、不写共享 `.git/modules`；真实 vendor 在运行前后都校验 clean 且 HEAD 等于锁定 revision。`commit_gate.py:47` 导入 `extract_archive`/`materialize_repository`，慢档按被验 commit 物化。Windows 无 clonefile 时走 archive fallback 产生真实目录，**不造软链** |
+| T74 | **执行器包缓存键是常量，34 个驱动永远拿不到新执行器**（`18ed7fc`）。缓存键现为 `desktop_e2e_prerequisites.py:439` 的 `f"{build_id}-inputs-v1-{executor_package_input_digest(...)}"`，摘要函数 `:419-430` 逐文件把 backend 源码、PyInstaller spec、锁文件、协议和只读资源喂进 sha256；归档解析 `:120-121` 改用 `archive_path()`，不再硬编码 `REPOSITORY_ROOT/.local`，**从任何 worktree 跑都不再第一步死**。**读代码时注意**：`SHARED_EXECUTOR_BUILD_ID` 这个常量仍在 `:93`，但它现在只是键的前缀不是键本身——只看那一行会误判成没修。**遗留**：没有逐一实跑 34 个调用方，所以不写成「34 条验收都拿到了新执行器」 |
+| T75 | **另一处吞掉 PyInstaller 输出**（`f3c6d00`）。`run_e4_07_acceptance.py:197` 新增 `_completed_process_diagnostic()`，`:244` 在 PyInstaller 非零退出时 `raise RuntimeError(f"E4-07 PyInstaller build failed\n{diagnostic}")`，两个流各保留最后 20 行、空输出用固定诊断避免又回到沉默失败；E4-09/E4-10 与 Windows candidate 同批覆盖。**T103 发现同函数内还剩一处未修**：`:272` 的打包签名失败分支仍是裸 `raise RuntimeError("E4-07 package signing failed")`，`capture_output=True` 抓走的两个流全丢——与 `ce45efd`、本条同族，修法现成（同文件 `:197`）。**已记入 `docs/development/T103.md` §4.2，未修** |
+| T76 | **`desktop-e2e` 前端入口让 workbench 断言恒真**（`fb6d122`）。旧入口注入无条件 ready 的启动桩且不注入生产的 17 个 gateway，`test:tauri` 与 `test:h8-19-app` **37 毫秒通过**。现 `frontend/src/test-tauri-main.tsx` 共 3 行，第 3 行 `void import("./main")`，保留受控桌面测试 Adapter 后直接加载生产组合根。**T103 实跑** `node --test frontend/tests/desktop-e2e-production-entry.test.mjs` → 1 pass / 0 fail。**该任务的完成定义是「测试不撒谎」，不是「工作台在所有环境已可用」**——修好后真实 Tauri 在环境未备时如实停在启动门禁，那正是恒真桩消失的证据 |
+| T62 | **`run_script_tests.py` docstring 写死 "37 self-contained test scripts"**（`cc24156`，07-26 18:45）。代码本身是 glob 推导的没有功能问题，但这个会静默落后的散文计数**就写在那份讲 "discovery is derived, never curated" 的文档里**。**T103 复核**：`git log -S "37 self-contained"` 确认该字串已被移除，当前 docstring 无任何计数（实际脚本数已 54） |
+| T25 | **视频线 WDIO 验收补齐真实资源前置**。逐项核对后只剩一个独立前置：signed Executor、隔离 PostgreSQL、Control Plane 与编译期启动配置由 `video_studio_startup_harness()` 每次运行自产；BM-08 与 IM-05 所需的视频 Worker / media toolchain 由各自驱动自产——**T103 复核**：`run_im_05_acceptance.py:22-23,149` 与 `run_bm_08_acceptance.py:16` 都 `from prepare_video_runtime import install/prepare` 并实际调用。见 `docs/development/T25.md` |
+| T70 | **演示前检查清单与 Runbook 逐条重核**（`87d7381`）。两份文件写于 07-26 下午，当晚到 07-27 凌晨 `frontend/src` 与 `src-tauri/src` 又合入 **40 笔**提交。逐条核完：A/B/C 三段原有 **23 条可执行检查里 11 条已不成立或不够用**，全部改对；补 6 处，其中 A8（挂载 DMG 确认有拖拽目标）是新增整条，清单 23 → 24 条；D 段 10 条待确认里 **4 条已有答案**移进已结案，另新增 3 条真没做的；Runbook **8 处**旧行为讲解词、点击路径和时间编排改对，含**一处幕号写错**（§5 路径 D 把「平台状态」说成幕 4，实在幕 2）。**头号结论：现在磁盘上没有一个可以拿去演示的包**（见「当前下一步」第 1 条）。方法上有意避免「用读代码推断布局」——凡涉及放不放得下、多宽、默认开不开，一律跑 Playwright 实测。**这份 `docs/development/T70.md` 是「逐条去核而不是照抄」的范本** |
+| T103 | **未收口任务全量对账**。台账声称还剩 40 项，**逐条查证后实为 15 项**（随后 T101/T90b 又自报 3 个新窗口，现 17）：**25 条早就做完了，只是台账不知道**，最久积压约 30 小时。**反方向的错（台账写着做完、实际没做）一条都没有**——已收口区抽查未发现虚报。判据是「说某一项的状态之前，先找到它此刻的证据在哪」：不抄 `docs/development/*.md` 的状态行（那 19 份是 `aef241f` 事后补录的，也是索引不是证据），每条 `✅` 都回代码或测试独立核过，最强的一档是**把台账描述的缺陷条件造出来跑，看它还复不复现**（T61/T65/T66b 就是这么定的）。顺带查明 codex 第二批 19 条：**15 条真做完、T79 没做且自己承认、T77 是有效的否定性交付、T78 部分完成**；那批补录整体诚实——19 份全部主动写明「未与原代码同提交」，9 份在状态行就带 `🔍` 缺口，**没有一份把「代码改了」写成「链路验了」**。查证中发现的 5 个产品缺陷与台账风险见 `docs/development/T103.md` §4 |
 
 ---
 
