@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -479,3 +480,57 @@ def test_framework_pruning_rejects_ambiguous_shapes(tmp_path: Path) -> None:
     binary.symlink_to(os.path.relpath(canonical, binary.parent))
     with pytest.raises(MacOSExecutorCandidateRejected):
         macos_candidate._prune_redundant_framework_binaries(bundle)
+
+
+def test_a_failed_pyinstaller_run_carries_its_own_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A build that fails must say why.
+
+    On 2026-07-26 a release build stopped at this call with the message
+    "macOS Executor candidate is rejected" and nothing else. PyInstaller had
+    printed the real reason — a missing vendored file the authoring agent reads
+    at startup — and `capture_output=True` had swallowed it. Finding it took a
+    hand-run of the same command. On a build machine there is nobody to do that.
+    """
+
+    def failing_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout=b"the Executor package cannot be built without vendor/x/y.md\n",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(macos_candidate.subprocess, "run", failing_run)
+
+    with pytest.raises(MacOSExecutorCandidateRejected) as captured:
+        macos_candidate._run_pyinstaller(
+            backend_root=tmp_path,
+            config_directory=tmp_path / "cache",
+            distribution_root=tmp_path / "dist",
+            python_executable=Path("/usr/bin/false"),
+            work_root=tmp_path / "work",
+        )
+
+    assert "vendor/x/y.md" in str(captured.value)
+
+
+def test_a_pyinstaller_run_that_says_nothing_still_reports_that_it_said_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def silent_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args=[], returncode=1, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(macos_candidate.subprocess, "run", silent_run)
+
+    with pytest.raises(MacOSExecutorCandidateRejected) as captured:
+        macos_candidate._run_pyinstaller(
+            backend_root=tmp_path,
+            config_directory=tmp_path / "cache",
+            distribution_root=tmp_path / "dist",
+            python_executable=Path("/usr/bin/false"),
+            work_root=tmp_path / "work",
+        )
+
+    assert "no output" in str(captured.value)

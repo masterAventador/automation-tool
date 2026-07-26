@@ -40,10 +40,19 @@ _BROWSER_DIRECTORY_PREFIXES = ("chromium-", "firefox-", "webkit-", "ffmpeg-")
 
 
 class MacOSExecutorCandidateRejected(ValueError):
-    """Fixed failure boundary for an unsafe or incomplete release candidate."""
+    """Fixed failure boundary for an unsafe or incomplete release candidate.
 
-    def __init__(self) -> None:
-        super().__init__("macOS Executor candidate is rejected")
+    The audit rejections stay deliberately uniform: which of the fifteen checks
+    tripped is not something a caller should branch on. A failed *build* is a
+    different thing — nobody is being denied information, the operator simply
+    needs to know what the builder said. This module is reached only from
+    `scripts/build_release_package.py` and the acceptance drivers; it is never
+    on a product runtime path, so a reason here cannot reach a user.
+    """
+
+    def __init__(self, reason: str = "") -> None:
+        message = "macOS Executor candidate is rejected"
+        super().__init__(f"{message}: {reason}" if reason else message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,8 +63,22 @@ class MacOSExecutorCandidateAudit:
     package_size: int
 
 
-def _reject() -> MacOSExecutorCandidateRejected:
-    return MacOSExecutorCandidateRejected()
+def _reject(reason: str = "") -> MacOSExecutorCandidateRejected:
+    return MacOSExecutorCandidateRejected(reason)
+
+
+_BUILDER_OUTPUT_LINES = 20
+
+
+def _builder_output(completed: subprocess.CompletedProcess[bytes]) -> str:
+    """The tail of what PyInstaller said, so a failed build explains itself."""
+    parts: list[str] = []
+    for name, raw in (("stderr", completed.stderr), ("stdout", completed.stdout)):
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else (raw or "")
+        lines = [line for line in text.splitlines() if line.strip()]
+        if lines:
+            parts.append(f"{name}:\n" + "\n".join(lines[-_BUILDER_OUTPUT_LINES:]))
+    return "\n".join(parts) if parts else "the builder produced no output"
 
 
 def _normalize_architecture(machine: str) -> str:
@@ -311,7 +334,7 @@ def _run_pyinstaller(  # pragma: no cover - exercised by the real macOS package 
         timeout=600,
     )
     if completed.returncode != 0:
-        raise _reject()
+        raise _reject(_builder_output(completed))
 
 
 def build_macos_executor_candidate(
