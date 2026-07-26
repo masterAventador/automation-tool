@@ -21,7 +21,42 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from new_worktree import clone_directory, gitdir_pointer  # noqa: E402
+from new_worktree import (  # noqa: E402
+    clone_directory,
+    gitdir_pointer,
+    worktree_add_command,
+)
+
+
+class WorktreeAddCommand(unittest.TestCase):
+    """A tree nobody can merge from is a tree that loses work.
+
+    The script detached by default and only made a branch when asked. Two
+    agents in a row committed onto that detached HEAD on 2026-07-26; both had
+    to notice and run `git switch -c` themselves, and the one that did not was
+    merged by raw SHA. A commit with no ref pointing at it is also collectable,
+    so "detached by default" is not a neutral default — it is a way to lose
+    work quietly. Since `CLAUDE.md` §8.1 makes this script the only sanctioned
+    way to create a worktree, the default has to be the safe one.
+    """
+
+    def test_a_branch_named_after_the_worktree_is_created_by_default(self) -> None:
+        command = worktree_add_command(Path("/repo/wt/sweep"), "origin/main", None)
+
+        self.assertIn("-b", command)
+        self.assertEqual("sweep", command[command.index("-b") + 1])
+
+    def test_an_explicit_branch_name_wins(self) -> None:
+        command = worktree_add_command(Path("/repo/wt/sweep"), "origin/main", "fix/x")
+
+        self.assertEqual("fix/x", command[command.index("-b") + 1])
+
+    def test_detaching_stays_available_for_read_only_trees(self) -> None:
+        # A release build or a scan never commits, and a branch it would leave
+        # behind is one more thing to clean up.
+        command = worktree_add_command(Path("/repo/wt/scan"), "origin/main", "")
+
+        self.assertNotIn("-b", command)
 
 
 class GitdirPointer(unittest.TestCase):

@@ -197,6 +197,29 @@ def run(command: list[str], cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def worktree_add_command(worktree: Path, commit: str, branch: str | None) -> list[str]:
+    """The `git worktree add` argv, including which ref the new tree ends up on.
+
+    `branch=None` means "you did not say", and the answer is a branch named
+    after the worktree. Only an explicit empty string detaches.
+
+    That default is the way round it is because the old one lost work. This
+    script used to detach unless `--branch` was passed, and on 2026-07-26 two
+    agents in a row committed onto the detached HEAD it produced: one noticed
+    and ran `git switch -c` itself, the other's commit had to be merged by raw
+    SHA because no branch name pointed at it. A commit with no ref is also
+    something git will eventually collect. Since `CLAUDE.md` §8.1 makes this
+    script the only sanctioned way to create a worktree, its default has to be
+    the one that keeps work reachable; a read-only tree that genuinely wants no
+    branch can still ask for `--detach`.
+    """
+    add = ["git", "worktree", "add"]
+    resolved = worktree.name if branch is None else branch
+    if resolved:
+        add += ["-b", resolved]
+    return [*add, os.fspath(worktree), commit]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name")
@@ -206,7 +229,15 @@ def main() -> None:
         action="store_true",
         help="skip submodules entirely; correct for lines that never read them",
     )
-    parser.add_argument("--branch", help="create this branch instead of detaching")
+    parser.add_argument(
+        "--branch",
+        help="name the branch something other than the worktree's own name",
+    )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="leave the tree on a detached HEAD; only for trees that never commit",
+    )
     arguments = parser.parse_args()
 
     root = REPOSITORY_ROOT
@@ -214,10 +245,8 @@ def main() -> None:
     if worktree.exists():
         raise SystemExit(f"{worktree} already exists")
 
-    add = ["git", "worktree", "add"]
-    if arguments.branch:
-        add += ["-b", arguments.branch]
-    run([*add, os.fspath(worktree), arguments.commit], root)
+    branch = "" if arguments.detach else arguments.branch
+    run(worktree_add_command(worktree, arguments.commit, branch), root)
 
     if arguments.no_vendor:
         print("  vendor skipped by request")
