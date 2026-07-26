@@ -462,6 +462,83 @@ describe("video studio shell", () => {
     );
   });
 
+  /**
+   * 成片页是「做完之后」唯一的落脚点，发布页却在另一个页面。
+   *
+   * 没有这一步，用户做完一条视频就走到了死路：发布页只会说「还没有选定要发布的视频」，
+   * 而成片页不提供任何把它送过去的办法。交接必须带上 artifactId（发布端凭它取件）和
+   * 一句人能看懂的说明（发布端把它显示给用户确认发的是哪一条）。
+   */
+  it("hands a finished video on to publishing", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    const publish = vi.fn();
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "d03fe6e3-cf14-41e8-a2a0-1d870db1a122",
+        revision: 4,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "季度增长",
+        styleDisplayName: "商务蓝",
+        artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+        artifactSizeBytes: 4096,
+        failureCode: null,
+      },
+    ]);
+    vi.mocked(studioGateway.jobs).mockResolvedValue([
+      {
+        renderJobId: "01b70168-c90d-4ac7-938a-51eb4754f32a",
+        revision: 4,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "知识讲解",
+        artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+        artifactSizeBytes: 2 * 1024 * 1024,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} onPublishArtifact={publish} />);
+
+    await user.click(screen.getByRole("tab", { name: "成片" }));
+    await user.click(await screen.findByRole("button", { name: "发布季度增长" }));
+    expect(publish).toHaveBeenCalledWith({
+      artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+      videoSummary: "季度增长 · 品牌动效成片",
+    });
+
+    // 两种制作方式产出的成片都存成同一种可发布 Artifact，成片页不能只放行其中一种。
+    await user.click(screen.getByRole("button", { name: "发布知识讲解" }));
+    expect(publish).toHaveBeenLastCalledWith({
+      artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+      videoSummary: "知识讲解 · 智能素材成片",
+    });
+  });
+
+  // 没接发布页的场合（比如还没装配好的外壳）不能凭空多出一个点了没反应的按钮。
+  it("omits the publish handoff when there is nowhere to hand it to", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "d03fe6e3-cf14-41e8-a2a0-1d870db1a122",
+        revision: 4,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "季度增长",
+        styleDisplayName: "商务蓝",
+        artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+        artifactSizeBytes: 4096,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "成片" }));
+    expect(await screen.findByRole("button", { name: "播放季度增长" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "发布季度增长" })).toBeNull();
+  });
+
   it("explains that 动效零件 belongs to 品牌动效成片 when another method is picked", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);

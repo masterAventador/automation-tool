@@ -416,6 +416,20 @@ export function WorkbenchShell({
     setActivePage("video-studio");
   };
 
+  /**
+   * Take a finished video from the studio over to publishing.
+   *
+   * The return leg of `chooseAnotherVideo`. Adopting the selection and moving
+   * pages has to be one action: a selection recorded without the trip leaves
+   * the operator staring at the finished-videos page wondering what happened,
+   * and a trip without the selection lands them on a publishing page that
+   * still says nothing is chosen.
+   */
+  const publishSelectedVideo = (video: SelectedVideo) => {
+    setSelectedVideo(video);
+    setActivePage("publishing");
+  };
+
   return (
     <Layout className="desktop-shell">
       <Layout.Sider className="desktop-sidebar" width={232} theme="light">
@@ -539,7 +553,10 @@ export function WorkbenchShell({
                 />
               </div>
             ) : showingVideoStudio ? (
-              <VideoStudio gateway={materialVideoStudioGateway} />
+              <VideoStudio
+                gateway={materialVideoStudioGateway}
+                onPublishArtifact={publishSelectedVideo}
+              />
             ) : showingVideoEditing ? (
               <VideoEditingWorkbench gateway={videoEditingGateway} />
             ) : showingPublishing ? (

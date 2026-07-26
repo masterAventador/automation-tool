@@ -25,7 +25,12 @@ const NATIVE_ERRORS = new Set<MaterialVideoStudioErrorCode>([
 ]);
 const JOB_STATUSES = new Set(["running", "succeeded", "failed", "cancelled"]);
 const MOTION_JOB_STATUSES = new Set(["queued", "rendering", "encoding", "succeeded", "failed", "cancelled"]);
-const MOTION_FAILURES = new Set(["render_failed", "encoding_failed", "interrupted"]);
+const MOTION_FAILURES = new Set([
+  "render_failed",
+  "encoding_failed",
+  "interrupted",
+  "static_render",
+]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;

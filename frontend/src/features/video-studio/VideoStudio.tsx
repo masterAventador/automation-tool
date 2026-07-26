@@ -15,6 +15,7 @@ import {
   Typography,
 } from "antd";
 
+import type { SelectedVideo } from "../publishing/PublishWorkspace";
 import {
   MaterialVideoStudioGatewayError,
   type MaterialRenderJobSnapshot,
@@ -163,6 +164,24 @@ const VIDEO_CREATION_METHODS: readonly VideoCreationMethodOption[] = [
     ],
   },
 ] as const;
+
+/**
+ * How a finished video is described once it leaves this page.
+ *
+ * The publishing page shows this string back to the operator as "待发布视频",
+ * so it has to say which video *and* which of the two creation methods made
+ * it — two videos about the same subject are otherwise indistinguishable
+ * there. The method name is read from the catalog above rather than written
+ * out again, so the label can never disagree with the card the user picked.
+ */
+function publishHandoff(
+  method: VideoCreationMethodId,
+  subject: string,
+  artifactId: string,
+): SelectedVideo {
+  const name = VIDEO_CREATION_METHODS.find((item) => item.id === method)!.name;
+  return { artifactId, videoSummary: `${subject} · ${name}` };
+}
 
 const EMPTY_PAGES = {
   script: {
@@ -681,6 +700,7 @@ function ArtifactPage({
   onDelete,
   onDeleteMotion,
   onReadMotion,
+  onPublish,
 }: {
   readonly jobs: readonly MaterialRenderJobSnapshot[];
   readonly motionJobs: readonly MotionRenderJobSnapshot[];
@@ -688,6 +708,7 @@ function ArtifactPage({
   readonly onDelete: (id: string) => void;
   readonly onDeleteMotion: (id: string) => void;
   readonly onReadMotion: (id: string) => Promise<string>;
+  readonly onPublish: ((video: SelectedVideo) => void) | undefined;
 }) {
   const artifacts = jobs.filter((job) => job.artifactId !== null);
   const motionArtifacts = motionJobs.filter((job) => job.artifactId !== null);
@@ -733,6 +754,20 @@ function ArtifactPage({
             >
               播放成片
             </Button>
+            {onPublish === undefined ? null : (
+              <Button
+                type="primary"
+                aria-label={`发布${job.subject}`}
+                disabled={busy}
+                onClick={() =>
+                  onPublish(
+                    publishHandoff("motion_composition_v1", job.subject, job.artifactId!),
+                  )
+                }
+              >
+                去发布
+              </Button>
+            )}
             <Popconfirm
               title="删除后无法恢复，确定删除吗？"
               okText="确定"
@@ -750,21 +785,50 @@ function ArtifactPage({
           <Typography.Text type="secondary">
             MP4 视频 · {((job.artifactSizeBytes ?? 0) / 1024 / 1024).toFixed(1)} MB
           </Typography.Text>
-          <Popconfirm
-            title="删除后无法恢复，确定删除吗？"
-            okText="确定"
-            cancelText="返回"
-            onConfirm={() => onDelete(job.artifactId!)}
-          >
-            <Button danger disabled={busy}>删除成片</Button>
-          </Popconfirm>
+          <Space wrap>
+            {onPublish === undefined ? null : (
+              <Button
+                type="primary"
+                aria-label={`发布${job.subject}`}
+                disabled={busy}
+                onClick={() =>
+                  onPublish(
+                    publishHandoff("material_montage_v1", job.subject, job.artifactId!),
+                  )
+                }
+              >
+                去发布
+              </Button>
+            )}
+            <Popconfirm
+              title="删除后无法恢复，确定删除吗？"
+              okText="确定"
+              cancelText="返回"
+              onConfirm={() => onDelete(job.artifactId!)}
+            >
+              <Button danger disabled={busy}>删除成片</Button>
+            </Popconfirm>
+          </Space>
         </Space>
       ))}
     </Card>
   );
 }
 
-export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudioGateway }) {
+export function VideoStudio({
+  gateway,
+  onPublishArtifact,
+}: {
+  readonly gateway: MaterialVideoStudioGateway;
+  /**
+   * Send a finished video on to the publishing page.
+   *
+   * Optional because the studio still has to render where there is no
+   * publishing page to hand to; a button that leads nowhere is worse than no
+   * button at all.
+   */
+  readonly onPublishArtifact?: ((video: SelectedVideo) => void) | undefined;
+}) {
   const [jobs, setJobs] = useState<readonly MaterialRenderJobSnapshot[]>([]);
   const [motionJobs, setMotionJobs] = useState<readonly MotionRenderJobSnapshot[]>([]);
   const [busy, setBusy] = useState(false);
@@ -964,6 +1028,7 @@ export function VideoStudio({ gateway }: { readonly gateway: MaterialVideoStudio
                 busy={busy}
                 onDelete={(id) => act(gateway.deleteArtifact(id))}
                 onDeleteMotion={(id) => act(gateway.deleteMotionArtifact(id))}
+                onPublish={onPublishArtifact}
                 onReadMotion={(id) =>
                   gateway
                     .readMotionArtifact(id)

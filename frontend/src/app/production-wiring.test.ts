@@ -131,17 +131,14 @@ describe("production wiring", () => {
   });
 
   /**
-   * 已知未接线：成片页还没有「去发布」。
+   * 成片页必须有「去发布」，而且它得真的把成片写进选择状态。
    *
    * 交接的接收端（`WorkbenchShell` 持有选中成片、`PublishWorkspace` 渲染它、Rust 按
-   * `artifactId` 取件）都已就位，缺的是发起端那一个按钮——它在
-   * `src/features/video-studio/VideoStudio.tsx` 的成片卡片里，而该文件本次由另一条工作
-   * 线占用，没有动。补上之后这条会因为「预期失败却通过了」而报错，那时把它移到上面的
-   * 常规用例里即可。
-   *
-   * 用 `it.fails` 而不是写进备忘录，是因为备忘录不会在 CI 里说话。
+   * `artifactId` 取件）早就就位，唯独发起端那一个按钮长期缺席：`WorkbenchShell` 渲染
+   * `<VideoStudio>` 时不传 `onPublishArtifact`，于是做完一条视频就没有下一步。这和 PB-07
+   * 是同一类病——通道每层都在，只是没有任何东西往里灌值。
    */
-  it.fails("hands the finished-videos page a way to send one on to publishing", () => {
+  it("hands the finished-videos page a way to send one on to publishing", () => {
     const handoff = /<VideoStudio[^>]*onPublishArtifact=\{([A-Za-z_$][\w$]*)\}/u.exec(shell);
     expect(handoff, "VideoStudio is never given a publish handoff").not.toBeNull();
     // 而且那个回调必须真的把成片写进选择状态，不能只是切页。

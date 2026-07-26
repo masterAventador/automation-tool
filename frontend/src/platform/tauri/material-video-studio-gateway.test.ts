@@ -164,6 +164,30 @@ describe("Tauri material video studio gateway", () => {
     });
   });
 
+  it("accepts a still-image render reported with its own failure code", async () => {
+    // The gate that catches a film whose frames never change reports
+    // `static_render`. A gateway allowlist that does not know the code turns a
+    // precise, actionable failure into a rejected snapshot, which reads to the
+    // user as the job vanishing.
+    const gateway = new TauriMaterialVideoStudioGateway();
+    invoke.mockResolvedValueOnce([
+      {
+        renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+        revision: 3,
+        status: "failed",
+        progressPercent: 55,
+        subject: "新品发布",
+        styleDisplayName: "商务蓝",
+        artifactId: null,
+        artifactSizeBytes: null,
+        failureCode: "static_render",
+      },
+    ]);
+    await expect(gateway.motionJobs()).resolves.toMatchObject([
+      { status: "failed", failureCode: "static_render" },
+    ]);
+  });
+
   it("refuses a storyboard outside the declared duration budget before touching the native command", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     const beat = (index: number) => ({
