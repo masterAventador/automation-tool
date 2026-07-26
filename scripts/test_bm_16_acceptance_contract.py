@@ -56,6 +56,7 @@ def main() -> int:
     ), "BM-16 roadmap row is missing, duplicated or inactive"
 
     print("BM-16 acceptance harness contract tests passed")
+    print("executed checks: 1")
     return 0
 
 

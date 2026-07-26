@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every `scripts/test_*.py`, with the interpreter pinned.
+"""Run the repository's standalone Python tests, with interpreters pinned.
 
 Why this exists
 ---------------
@@ -7,6 +7,9 @@ Why this exists
 and no acceptance entrypoint, and `backend/pyproject.toml` sets
 `testpaths = ["tests"]`, so pytest never collects them. They only run if a human
 types the filename.
+
+The deployment assertions under `deploy/` had the same blind spot, so discovery
+also derives every `deploy/**/test_*.py` instead of maintaining another list.
 
 One of them, `test_video_studio_acceptance_scope.py`, was failing for real:
 VF-06 had stopped covering `plain-language-comprehension.spec.ts`. The guard
@@ -29,12 +32,15 @@ Two properties matter more than convenience here:
 from __future__ import annotations
 
 import argparse
+import ast
 import concurrent.futures
+import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Mapping, Sequence
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parent.parent
 DEFAULT_TIMEOUT_SECONDS: Final = 600
@@ -51,20 +57,32 @@ class ScriptResult:
     ok: bool
     seconds: float
     output: str
+    checks: int
 
 
 def discover(repository_root: Path) -> list[Path]:
-    """Every test script in `scripts/`, derived from the directory itself."""
-    return sorted(
+    """Every standalone script and deployment test, derived from the tree."""
+    script_tests = (
         path
         for path in (repository_root / "scripts").glob("test_*.py")
         if path.name not in EXCLUDED
     )
+    deployment_tests = (repository_root / "deploy").rglob("test_*.py")
+    return sorted((*script_tests, *deployment_tests))
 
 
-def interpreter(repository_root: Path) -> Path:
+def _venv_interpreter(environment: Path, platform_name: str) -> Path:
+    if platform_name == "nt":
+        return environment / "Scripts" / "python.exe"
+    return environment / "bin" / "python"
+
+
+def interpreter(repository_root: Path, platform_name: str | None = None) -> Path:
     """The project interpreter, never the caller's ambient `python3`."""
-    return repository_root / "backend" / ".venv" / "bin" / "python"
+    return _venv_interpreter(
+        repository_root / "backend" / ".venv",
+        platform_name or os.name,
+    )
 
 
 # A script that reaches into a sub-project needs that sub-project's environment.
@@ -76,27 +94,117 @@ def interpreter(repository_root: Path) -> Path:
 SUB_PROJECT_ENVIRONMENTS: Final = (("tools/browser-use-contract", "browser_use"),)
 
 
-def interpreter_for(script: Path, repository_root: Path) -> Path:
+def _imports(script: Path) -> set[str]:
+    """Return imported module names; comments and string literals do not count."""
+    try:
+        tree = ast.parse(script.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return set()
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+    return imported
+
+
+def _requires(imports: set[str], marker: str) -> bool:
+    return any(
+        module == marker
+        or module.startswith(f"{marker}.")
+        or module.startswith(f"{marker}_")
+        for module in imports
+    )
+
+
+def interpreter_for(
+    script: Path,
+    repository_root: Path,
+    *,
+    project_python: Path | None = None,
+    sub_project_pythons: Mapping[str, Path] | None = None,
+    platform_name: str | None = None,
+) -> Path:
     """Pick the environment a script's imports actually require."""
-    source = script.read_text(encoding="utf-8", errors="replace")
+    imports = _imports(script)
     for directory, marker in SUB_PROJECT_ENVIRONMENTS:
-        if directory in source or marker in source:
-            candidate = repository_root / directory / ".venv" / "bin" / "python"
+        if _requires(imports, marker):
+            candidate = (
+                sub_project_pythons.get(directory)
+                if sub_project_pythons and directory in sub_project_pythons
+                else _venv_interpreter(
+                    repository_root / directory / ".venv",
+                    platform_name or os.name,
+                )
+            )
             if candidate.is_file():
                 return candidate
-    return interpreter(repository_root)
+    return project_python or interpreter(repository_root, platform_name)
+
+
+_UNITTEST_COUNT: Final = re.compile(
+    r"^Ran\s+(?P<count>\d+)\s+tests?\s+in\s+[^\r\n]+$",
+    flags=re.MULTILINE,
+)
+_EXPLICIT_COUNT: Final = re.compile(
+    r"^executed checks:\s+(?P<count>\d+)$",
+    flags=re.MULTILINE,
+)
+_PYTEST_COUNT: Final = re.compile(
+    r"^(?P<count>\d+)\s+passed(?:,\s+[^\r\n]+)?\s+in\s+\d+(?:\.\d+)?s$",
+    flags=re.MULTILINE,
+)
+
+
+def reported_check_count(output: str) -> int:
+    """Extract only complete standard or script-owned summary lines."""
+    explicit = [int(match.group("count")) for match in _EXPLICIT_COUNT.finditer(output)]
+    if explicit:
+        return max(explicit)
+    standard = [
+        int(match.group("count"))
+        for pattern in (_UNITTEST_COUNT, _PYTEST_COUNT)
+        for match in pattern.finditer(output)
+    ]
+    return sum(standard)
+
+
+def _child_environment(repository_root: Path) -> dict[str, str]:
+    """Put the tree under test ahead of editable working-tree installations."""
+    environment = dict(os.environ)
+    checkout_source = os.fspath(repository_root / "backend" / "src")
+    inherited = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        os.pathsep.join((checkout_source, inherited)) if inherited else checkout_source
+    )
+    return environment
 
 
 def run_one(
     script: Path,
     repository_root: Path,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    project_python: Path | None = None,
+    sub_project_pythons: Mapping[str, Path] | None = None,
 ) -> ScriptResult:
     started = time.monotonic()
     try:
         completed = subprocess.run(
-            [str(interpreter_for(script, repository_root)), str(script)],
+            [
+                str(
+                    interpreter_for(
+                        script,
+                        repository_root,
+                        project_python=project_python,
+                        sub_project_pythons=sub_project_pythons,
+                    )
+                ),
+                str(script),
+            ],
             cwd=repository_root,
+            env=_child_environment(repository_root),
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
@@ -104,33 +212,77 @@ def run_one(
         )
     except subprocess.TimeoutExpired:
         return ScriptResult(
-            script.name, False, time.monotonic() - started, "timed out"
+            script.relative_to(repository_root).as_posix(),
+            False,
+            time.monotonic() - started,
+            "timed out",
+            0,
         )
+    output = (completed.stdout + completed.stderr).strip()
+    checks = reported_check_count(output)
+    if completed.returncode == 0 and checks == 0:
+        output = "\n".join(
+            (
+                output,
+                "runner rejected success: no positive executed-check count was reported",
+            )
+        ).strip()
     return ScriptResult(
-        script.name,
-        completed.returncode == 0,
+        script.relative_to(repository_root).as_posix(),
+        completed.returncode == 0 and checks > 0,
         time.monotonic() - started,
-        (completed.stdout + completed.stderr).strip(),
+        output,
+        checks,
     )
 
 
-def main() -> int:
+def aggregate_success(results: Sequence[ScriptResult]) -> bool:
+    """Require actual positive evidence across a non-empty successful suite."""
+    return (
+        bool(results)
+        and all(result.ok for result in results)
+        and sum(result.checks for result in results) > 0
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
-    arguments = parser.parse_args()
+    parser.add_argument(
+        "--project-python",
+        type=Path,
+        help="project interpreter supplied by a commit checkout's host gate",
+    )
+    parser.add_argument(
+        "--browser-use-python",
+        type=Path,
+        help="browser-use interpreter supplied by a commit checkout's host gate",
+    )
+    arguments = parser.parse_args(argv)
 
-    python = interpreter(REPOSITORY_ROOT)
+    python = arguments.project_python or interpreter(REPOSITORY_ROOT)
     if not python.is_file():
         print(f"the project interpreter is missing: {python}")
         return 1
-
+    sub_project_pythons = (
+        {"tools/browser-use-contract": arguments.browser_use_python}
+        if arguments.browser_use_python
+        else None
+    )
     scripts = discover(REPOSITORY_ROOT)
     print(f"running {len(scripts)} script tests with {python}")
     results: list[ScriptResult] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=arguments.jobs) as pool:
         futures = {
-            pool.submit(run_one, script, REPOSITORY_ROOT, arguments.timeout): script
+            pool.submit(
+                run_one,
+                script,
+                REPOSITORY_ROOT,
+                arguments.timeout,
+                project_python=python,
+                sub_project_pythons=sub_project_pythons,
+            ): script
             for script in scripts
         }
         for future in concurrent.futures.as_completed(futures):
@@ -140,13 +292,19 @@ def main() -> int:
     failures = [result for result in results if not result.ok]
     for result in results:
         mark = "ok  " if result.ok else "FAIL"
-        print(f"{mark} {result.name} ({result.seconds:.1f}s)")
+        print(f"{mark} {result.name} ({result.seconds:.1f}s, {result.checks} checks)")
     for result in failures:
         print(f"\n----- {result.name} -----\n{result.output}")
     if failures:
         print(f"\n{len(failures)} of {len(results)} script tests failed")
         return 1
-    print(f"\nall {len(results)} script tests passed")
+    if not aggregate_success(results):
+        print("\nscript test suite reported zero executed checks")
+        return 1
+    print(
+        f"\nall {len(results)} script tests passed "
+        f"({sum(result.checks for result in results)} checks)"
+    )
     return 0
 
 

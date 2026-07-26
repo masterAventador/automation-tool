@@ -109,7 +109,11 @@ def main() -> int:
             f"CLAUDE.md, so it holds the line on only part of the baseline: {detail}"
         )
 
-    print(f"AV-01 pins all {len(rules)} CLAUDE.md browser rules with {len(quotes)} quotes")
+    print(
+        f"AV-01 pins all {len(rules)} CLAUDE.md browser rules with "
+        f"{len(quotes)} quotes"
+    )
+    print("executed checks: 1")
     return 0
 
 

@@ -173,7 +173,6 @@ def run_typescript_check(checkout: Path) -> CheckResult:
     )
 
 
-
 # Error codes the gate refuses a commit for. The rule for membership is not
 # "serious sounding" but measured: each must be *empty* across `scripts/` today,
 # so the gate can be adopted as "must be clean" without a preceding cleanup, and
@@ -210,7 +209,9 @@ def _mypy_environment(checkout: Path) -> dict[str, str]:
     environment = dict(os.environ)
     roots = discover_sys_path_roots(checkout) | set(MYPY_PATH_ROOTS)
     environment["MYPYPATH"] = os.pathsep.join(
-        os.fspath(checkout / root) for root in sorted(roots) if (checkout / root).is_dir()
+        os.fspath(checkout / root)
+        for root in sorted(roots)
+        if (checkout / root).is_dir()
     )
     return environment
 
@@ -304,20 +305,92 @@ def run_python_check(checkout: Path) -> CheckResult:
     )
 
 
+def _host_interpreter(environment: Path) -> Path:
+    if os.name == "nt":
+        return environment / "Scripts" / "python.exe"
+    return environment / "bin" / "python"
+
+
+_SCRIPT_TEST_SUMMARY: Final = re.compile(
+    r"^all \d+ script tests passed \((?P<count>\d+) checks\)$",
+    flags=re.MULTILINE,
+)
+
+
+def script_test_check_count(output: str) -> int | None:
+    matches = [
+        int(match.group("count")) for match in _SCRIPT_TEST_SUMMARY.finditer(output)
+    ]
+    if len(matches) != 1 or matches[0] <= 0:
+        return None
+    return matches[0]
+
+
+def run_script_test_check(checkout: Path) -> CheckResult:
+    """Run every standalone Python test from the commit under inspection."""
+    python = _host_interpreter(REPOSITORY_ROOT / "backend" / ".venv")
+    browser_use_python = _host_interpreter(
+        REPOSITORY_ROOT / "tools" / "browser-use-contract" / ".venv"
+    )
+    command = [
+        os.fspath(python),
+        os.fspath(checkout / "scripts" / "run_script_tests.py"),
+        "--project-python",
+        os.fspath(python),
+    ]
+    if browser_use_python.is_file():
+        command.extend(("--browser-use-python", os.fspath(browser_use_python)))
+    completed = subprocess.run(
+        command,
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = (completed.stdout + completed.stderr).strip()
+    executed_checks = script_test_check_count(output)
+    if completed.returncode == 0 and executed_checks is None:
+        output = "\n".join(
+            (
+                output,
+                "aggregate script tests did not report one positive check-count summary",
+            )
+        ).strip()
+    return CheckResult(
+        name=(
+            f"script-tests ({executed_checks} checks)"
+            if executed_checks is not None
+            else "script-tests"
+        ),
+        ok=completed.returncode == 0 and executed_checks is not None,
+        output=output,
+    )
+
+
 FAST_CHECKS: Final = (
     verify_gate_detects_known_defect,
     run_typescript_check,
     run_python_check,
 )
 
+SLOW_CHECKS: Final = (run_script_test_check,)
 
-def run_fast_tier(commit: str) -> list[CheckResult]:
+
+def run_tier(commit: str, checks: tuple) -> list[CheckResult]:
     with tempfile.TemporaryDirectory(prefix="automation-tool-commit-gate-") as scratch:
         checkout = checkout_commit(commit, Path(scratch) / "tree")
         try:
-            return [check(checkout) for check in FAST_CHECKS]
+            return [check(checkout) for check in checks]
         finally:
             discard_checkout(checkout)
+
+
+def run_fast_tier(commit: str) -> list[CheckResult]:
+    return run_tier(commit, FAST_CHECKS)
+
+
+def run_slow_tier(commit: str) -> list[CheckResult]:
+    return run_tier(commit, FAST_CHECKS + SLOW_CHECKS)
 
 
 _NULL_SHA: Final = "0" * 40
@@ -368,6 +441,11 @@ def main() -> int:
         action="store_true",
         help="read git's pre-push protocol on stdin and gate each pushed tip",
     )
+    parser.add_argument(
+        "--slow",
+        action="store_true",
+        help="also run the aggregate standalone and deployment test suite",
+    )
     arguments = parser.parse_args()
 
     if arguments.pre_push:
@@ -388,8 +466,10 @@ def main() -> int:
         text=True,
         check=False,
     ).stdout.strip()
-    print(f"commit gate: fast tier on {resolved or arguments.commit}")
-    return 1 if _report(resolved, run_fast_tier(arguments.commit)) else 0
+    tier = "slow" if arguments.slow else "fast"
+    run = run_slow_tier if arguments.slow else run_fast_tier
+    print(f"commit gate: {tier} tier on {resolved or arguments.commit}")
+    return 1 if _report(resolved, run(arguments.commit)) else 0
 
 
 if __name__ == "__main__":

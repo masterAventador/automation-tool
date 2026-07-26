@@ -358,6 +358,7 @@ def main() -> None:
     test_builder_rewrites()
     test_check_tamper_matrix()
     print("offline motion catalog tests passed")
+    print("executed checks: 3")
 
 
 if __name__ == "__main__":

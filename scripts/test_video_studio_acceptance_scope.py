@@ -134,6 +134,7 @@ def main() -> int:
             "hand-maintained list"
         )
     print("video-studio acceptance scope checks passed")
+    print("executed checks: 1")
     return 0
 
 

@@ -175,6 +175,7 @@ def main() -> int:
         check()
         print(f"ok  {check.__name__}")
     print(f"video studio runtime staging checks passed ({len(CHECKS)} checks)")
+    print(f"executed checks: {len(CHECKS)}")
     return 0
 
 

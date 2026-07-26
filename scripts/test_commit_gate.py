@@ -179,6 +179,34 @@ def check_checkout_is_removed_after_use() -> None:
             _fail("discarded checkout is still a registered git worktree")
 
 
+def check_slow_tier_runs_the_aggregate_script_suite() -> None:
+    """The aggregate runner must be reachable from a local commit gate."""
+    checks = getattr(commit_gate, "SLOW_CHECKS", ())
+    names = {getattr(check, "__name__", "") for check in checks}
+    if "run_script_test_check" not in names:
+        _fail("the commit gate has no slow-tier aggregate script test check")
+
+    source = Path(commit_gate.__file__).read_text(encoding="utf-8")
+    if "--slow" not in source:
+        _fail("the local commit gate exposes no --slow entrypoint")
+
+
+def check_slow_tier_requires_a_positive_visible_count() -> None:
+    """The outer gate must preserve the aggregate runner's evidence."""
+    parse_count = getattr(commit_gate, "script_test_check_count", None)
+    if parse_count is None:
+        _fail("the slow tier does not expose the aggregate check count")
+    summary = "all 45 script tests passed (412 checks)"
+    if parse_count(summary) != 412:
+        _fail("the slow tier cannot parse the aggregate runner's count")
+    for untrustworthy in (
+        "all script tests passed",
+        "all 0 script tests passed (0 checks)",
+    ):
+        if parse_count(untrustworthy) is not None:
+            _fail(f"the slow tier accepted uncounted evidence: {untrustworthy}")
+
+
 CHECKS = (
     check_mypy_path_covers_every_static_sys_path_insert,
     check_every_declared_root_exists,
@@ -190,6 +218,8 @@ CHECKS = (
     check_pre_push_gates_the_tip_of_each_pushed_ref,
     check_pre_push_skips_deletions,
     check_checkout_is_removed_after_use,
+    check_slow_tier_runs_the_aggregate_script_suite,
+    check_slow_tier_requires_a_positive_visible_count,
 )
 
 
@@ -207,6 +237,7 @@ def main() -> int:
         print(f"{failures} commit gate check(s) failed")
         return 1
     print(f"commit gate checks passed ({len(CHECKS)} checks)")
+    print(f"executed checks: {len(CHECKS)}")
     return 0
 
 

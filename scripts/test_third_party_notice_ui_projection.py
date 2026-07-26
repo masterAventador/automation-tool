@@ -611,6 +611,7 @@ def main() -> int:
     obligation_failure("shipped licence text whose bytes drifted", wrong_digest)
 
     print("third-party notice ui projection tests passed")
+    print("executed checks: 23")
     return 0
 
 

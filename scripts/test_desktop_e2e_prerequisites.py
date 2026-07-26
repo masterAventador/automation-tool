@@ -500,6 +500,7 @@ def main() -> int:
         check()
         print(f"ok  {check.__name__}")
     print(f"desktop e2e prerequisite checks passed ({len(CHECKS)} checks)")
+    print(f"executed checks: {len(CHECKS)}")
     return 0
 
 

@@ -149,6 +149,7 @@ def main() -> int:
         f"{len(declared)} event names across {len(declarations)} acceptance drivers "
         f"all exist in the {len(vocabulary)} name contract vocabulary"
     )
+    print("executed checks: 1")
     return 0
 
 

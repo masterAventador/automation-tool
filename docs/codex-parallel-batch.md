@@ -368,7 +368,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **B** T61 artifact 门禁降级为清理 | ✅ | 本提交 | 启动恢复断言准确失败：`restarted store: VideoWorkspaceError { code: StorageUnavailable }` | 启动时仅清理损坏/中断删除的 artifact，清理失败才阻断；运行期 `list_artifacts()` 继续严格失败，外部软链目标不受触碰 |
 | **B** T65 `cleanup_expired` 无调用方 | ✅ | 本提交 | 启动清理断言准确失败：`expired workspace removed during startup` 实际收到 `Ok` | 初始化完成自愈后按当前时间执行 30 天保留清理；活跃 workspace 保留 |
 | **B** T66b 目录权限只检查不修复 | ✅ | 本提交 | 迁移权限测试准确失败：`restarted store: VideoWorkspaceError { code: PathRejected }` | Unix 目录漂移通过 `O_NOFOLLOW` 打开、dev/inode 复核后 `fchmod 0700`；修复失败才报错，含 setgid/sticky 位也清除 |
-| **C** T72 门禁执行者三处空洞 | ⬜ | | | |
+| **C** T72 门禁执行者三处空洞 | ✅ | 本提交 | deploy 断言未被发现；静默 `exit 0`、空 aggregate 与偶然 `(9 checks)` 被误判为成功；host editable 包掩盖被验 commit 源码 | 派生发现 `scripts/test_*.py` 与 `deploy/**/test_*.py`；AST 选择解释器，checkout 源码优先；脚本统一报告正数执行计数，commit gate 新增 `--slow` 且执行被验 commit 的 aggregate runner |
 | **C** T73 测试写进只读 vendor | ⬜ | | | |
 | **D** T40 UTM Kabel KT 权利登记 | ✅ | 本提交 | 权利登记断言准确失败：`'font-utm-kabel-kt' not found`；物理排除断言继而失败：`'fonts/UTM Kabel KT.ttf' not found` | 精确字节仅有 “Free for everyone” 而无商用再分发/嵌入授权，登记为 `NOASSERTION`/undetermined/deny，并从 Worker 冻结清单物理排除、候选审计拒绝回流 |
 | **D** T41 Big Shoulders Display 权利登记 | ✅ | 本提交 | 精确资产登记断言准确失败：`'font-big-shoulders-display' not found` | WOFF2 字节与动效 overlay/offline lock 对齐；按 Google Fonts 锁定 OFL-1.1 与 SIL 官方正文有条件放行，记录保留版权/许可证、不得单独售卖、衍生继续 OFL 等条件 |
