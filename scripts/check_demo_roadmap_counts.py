@@ -84,6 +84,22 @@ def overview_numbers(text: str) -> dict[str, int]:
     return declared
 
 
+
+def _names_the_same_section(overview_label: str, heading: str) -> bool:
+    """Whether an overview row and a section heading are the same section.
+
+    Compared on the longest run of CJK/word characters they share rather than
+    by equality, because the two are worded differently by design — the
+    overview says `冻结区·今晚撞见的技术债`, the heading says `今晚撞见的技术债`.
+    """
+    stripped = _comparable(heading)
+    return bool(stripped) and stripped in _comparable(overview_label)
+
+
+def _comparable(value: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]", "", value)
+
+
 def count_discrepancies(text: str) -> list[str]:
     """Every way this ledger fails to add up, stated in full."""
     problems: list[str] = []
@@ -108,6 +124,30 @@ def count_discrepancies(text: str) -> list[str]:
         problems.append(f"进度总览里没有「{TOTAL_LABEL}」这一行，无法核对总数")
     elif total != distinct:
         problems.append(f"进度总览声明总计 {total}，实际唯一任务号 {distinct} 个")
+
+    # Each per-section number against the section it names. Without this the
+    # arithmetic can be perfect while every line of it is wrong: a count moved
+    # out of one section and into another still adds to the same total and
+    # still matches the distinct ids. Measured 2026-07-27 — the overview
+    # claimed 31 and 41 rows where the file held 29 and 42, and 11 un-closed
+    # against an actual 12, and every check above passed.
+    for label, declared_rows in declared.items():
+        if label.startswith(SUBTOTAL_PREFIX) or label == TOTAL_LABEL:
+            continue
+        matching = [
+            section for section in sections if _names_the_same_section(label, section)
+        ]
+        if len(matching) != 1:
+            # Deliberately silent: the overview and the headings word these
+            # differently on purpose, and a fuzzy match would only add a second
+            # place to maintain wrong. Unmatched labels are covered by the
+            # subtotal and total checks above.
+            continue
+        actual = len(sections[matching[0]])
+        if actual != declared_rows:
+            problems.append(
+                f"进度总览说「{label}」有 {declared_rows} 项，该小节实际 {actual} 行"
+            )
 
     subtotals = [value for key, value in declared.items() if key.startswith(SUBTOTAL_PREFIX)]
     if total is not None and subtotals and sum(subtotals) != total:

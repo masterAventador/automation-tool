@@ -65,8 +65,14 @@ class CountDiscrepancies(unittest.TestCase):
 
         problems = count_discrepancies(drifted)
 
-        self.assertEqual(1, len(problems), problems)
-        self.assertIn("T1", problems[0])
+        # Asserts that this problem is reported, not that it is the only one:
+        # duplicating a row also makes its section's row count disagree with
+        # the overview, which is a real second defect that a later check
+        # (added 2026-07-27) correctly reports. Pinning an exact problem count
+        # would make every honest new check look like a regression.
+        self.assertTrue(
+            any("T1" in problem for problem in problems), problems
+        )
 
     def test_a_total_that_disagrees_with_the_tables_is_reported(self) -> None:
         drifted = CONSISTENT.replace("| **去重后总计** | **3** |", "| **去重后总计** | **7** |")
@@ -99,6 +105,25 @@ class CountDiscrepancies(unittest.TestCase):
         ranged = CONSISTENT.replace("## 甲区", "## 甲区（T1～T2）")
 
         self.assertEqual([], count_discrepancies(ranged))
+
+    def test_a_subtotal_that_disagrees_with_its_own_section_is_reported(self) -> None:
+        """The arithmetic can be perfect while every line of it is wrong.
+
+        Found on 2026-07-27 by counting the sections by hand after the gate had
+        just passed: the overview claimed 31 rows in one closed section and 41
+        in another where the file held 29 and 42, and it claimed 11 un-closed
+        against an actual 12. Every existing check was satisfied — the
+        subtotals added to the total and the total matched the distinct ids —
+        because a number moved out of one section and into another cancels out.
+        A count that is only checked against other counts is not checked
+        against the thing it is counting.
+        """
+        moved = CONSISTENT.replace("| 甲区 | 2 |", "| 甲区 | 3 |").replace(
+            "| 乙区 | 1 |", "| 乙区 | 0 |"
+        )
+        reported = "\n".join(count_discrepancies(moved))
+        self.assertIn("甲区", reported)
+        self.assertIn("乙区", reported)
 
     def test_the_real_ledger_adds_up(self) -> None:
         """The live gate. This is the assertion that has to keep passing."""
