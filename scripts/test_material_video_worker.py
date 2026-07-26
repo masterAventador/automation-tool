@@ -31,9 +31,12 @@ from job_observation_bridge import (  # noqa: E402
 from webui_runtime import (  # noqa: E402
     WebUiRejected,
     _native_path_for_upstream,
+    _prepare_private_project,
     _private_config_document,
     default_subtitle_font_name,
 )
+
+UPSTREAM_WEBUI = ROOT / "vendor/moneyprinterturbo/webui"
 
 
 class MemoryStateFixture:
@@ -705,6 +708,56 @@ class MaterialVideoWorkerDefaultSubtitleFontTest(unittest.TestCase):
         excluded = build_candidate_module.excluded_upstream_resource_files(contract)
         self.assertIn("fonts/MicrosoftYaHeiBold.ttc", excluded)
         self.assertNotEqual(default_subtitle_font_name(), "MicrosoftYaHeiBold.ttc")
+
+
+class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
+    """A choice this release cannot honour must not stay on the product surface.
+
+    The release ships no background music, so upstream's three-way "background
+    music source" choice silently degrades to no music for every option. The
+    private WebUI project is what the user actually opens, so the controls are
+    removed there and replaced by a sentence that states the limit.
+    """
+
+    widget_keys = ("bgm_type_select", "bgm_volume_select", "custom_bgm_file_input")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._directory = tempfile.TemporaryDirectory()
+        runtime_root = Path(cls._directory.name) / "runtime"
+        runtime_root.mkdir()
+        _prepare_private_project(runtime_root)
+        cls.stylesheet = (runtime_root / "webui/styles.css").read_text(encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._directory.cleanup()
+
+    def test_release_ships_no_background_music_at_all(self) -> None:
+        contract = build_candidate_module.load_contract()
+        self.assertIn(
+            "songs", build_candidate_module.excluded_upstream_resources(contract)
+        )
+
+    def test_upstream_still_uses_the_widget_keys_the_overlay_targets(self) -> None:
+        source = (UPSTREAM_WEBUI / "Main.py").read_text(encoding="utf-8")
+        for key in self.widget_keys:
+            self.assertIn(f'key="{key}"', source)
+
+    def test_private_project_removes_every_background_music_control(self) -> None:
+        for key in self.widget_keys:
+            self.assertIn(f"st-key-{key}", self.stylesheet)
+
+    def test_private_project_states_that_this_release_has_no_background_music(
+        self,
+    ) -> None:
+        self.assertIn(
+            "当前版本不提供背景音乐素材，成片不会添加背景音乐。", self.stylesheet
+        )
+
+    def test_private_project_keeps_every_upstream_rule(self) -> None:
+        upstream = (UPSTREAM_WEBUI / "styles.css").read_text(encoding="utf-8")
+        self.assertTrue(self.stylesheet.startswith(upstream))
 
 
 if __name__ == "__main__":

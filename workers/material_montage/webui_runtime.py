@@ -39,6 +39,23 @@ STOP_TIMEOUT_SECONDS: Final = 5
 UI_SECTION_HEADER: Final = "[ui]"
 CONFIG_FILE_NAME: Final = "config.toml"
 EXAMPLE_CONFIG_FILE_NAME: Final = "config.example.toml"
+STYLESHEET_FILE_NAME: Final = "styles.css"
+
+# This release ships no background music: the upstream tracks carry no
+# redistribution grant, so `excludedUpstreamResources` in the worker package
+# contract drops `resource/songs` and every one of upstream's three "background
+# music source" choices degrades to no music at all. `webui/Main.py` is a
+# read-only submodule and exposes no option that hides the group, so the
+# controls are removed from the private runtime stylesheet the WebUI itself
+# loads, and the sentence below takes their place. Upstream keeps these widget
+# keys on the rendered containers as `st-key-<key>`, which is the same hook its
+# own stylesheet already uses for layout.
+BACKGROUND_MUSIC_REMOVED_WIDGET_KEYS: Final = (
+    "bgm_volume_select",
+    "custom_bgm_file_input",
+)
+BACKGROUND_MUSIC_NOTICE_WIDGET_KEY: Final = "bgm_type_select"
+BACKGROUND_MUSIC_NOTICE: Final = "当前版本不提供背景音乐素材，成片不会添加背景音乐。"
 
 
 class WebUiRejected(RuntimeError):
@@ -130,6 +147,41 @@ def _private_config_document(example: str, font_name: str) -> str:
         pinned = f'font_name = "{font_name}"\n'
         return "".join(lines[: index + 1]) + pinned + "".join(lines[index + 1 :])
     raise WebUiRejected("upstream configuration has no WebUI section")
+
+
+def _private_stylesheet_document(upstream: str) -> str:
+    """Return the upstream stylesheet with the unavailable choices removed.
+
+    The upstream rules are kept verbatim and the overlay is appended, so a
+    later upstream change cannot be silently dropped by a rewrite, and the
+    overlay always wins on equal specificity by being last.
+    """
+    removed = ",\n".join(
+        f'div[class*="st-key-{key}"]'
+        for key in BACKGROUND_MUSIC_REMOVED_WIDGET_KEYS
+    )
+    notice_container = f'div[class*="st-key-{BACKGROUND_MUSIC_NOTICE_WIDGET_KEY}"]'
+    return upstream + f"""
+/* 背景音乐：本次发行不随包提供任何背景音乐素材，上游「背景音乐来源」的三个
+   选项因此全部退化为「无背景音乐」。上游 WebUI 是只读依赖，没有隐藏这组控件
+   的配置项，所以在私有运行时样式里移除它们，并在原位说明当前版本的边界，
+   避免界面继续提供做不到的选择。 */
+{removed} {{
+    display: none !important;
+}}
+
+{notice_container} > * {{
+    display: none !important;
+}}
+
+{notice_container}::after {{
+    content: "{BACKGROUND_MUSIC_NOTICE}";
+    display: block;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    opacity: 0.72;
+}}
+"""
 
 
 def _reserve_port() -> int:
@@ -266,6 +318,13 @@ def _prepare_private_project(runtime_root: Path) -> Path:
     private_resource = runtime_root / "resource"
     shutil.copytree(upstream_webui, private_webui)
     shutil.copytree(upstream_resource, private_resource)
+    stylesheet = private_webui / STYLESHEET_FILE_NAME
+    if not stylesheet.is_file():
+        raise WebUiRejected("upstream WebUI stylesheet unavailable")
+    stylesheet.write_text(
+        _private_stylesheet_document(stylesheet.read_text(encoding="utf-8")),
+        encoding="utf-8",
+    )
     (runtime_root / "storage/tasks").mkdir(parents=True)
     return private_webui / "Main.py"
 
