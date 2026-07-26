@@ -203,6 +203,13 @@ df -h /
 
 **失败**：回到 3.1/3.2。**这一步必须在演示前一天做掉，让 App 完成首次授权**——不要留到演示当天现场第一次打开。
 
+> ⚠️ **这一条至今没有任何人实拍过，T48 也没有。** T48 在本机对**带 quarantine 的安装副本**跑了
+> `spctl -a -vvv --type execute`，得到 `accepted / source=Notarized Developer ID`——那是系统自己
+> 那套评估，结论可信；但取证之后 T48 为了不抢占前台执行了 `xattr -dr com.apple.quarantine` 才启动，
+> 所以**"客户在同意框上点一次 Open"这一下人工交互从未被真实走过**。
+> 演示当天客户要做的恰恰就是这一下。本条必须由人在演示机上手工完成，不能用 `spctl` 结论顶替。
+> 依据见 `docs/development/T48-package-cloud-vertical.md`。
+
 ### 4.4 App 能起来并停在工作台
 
 **动作**：启动 App，观察主界面。
