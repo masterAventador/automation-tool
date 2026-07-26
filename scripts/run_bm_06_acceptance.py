@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from desktop_e2e_prerequisites import video_studio_startup_harness
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
     FRONTEND,
@@ -42,20 +43,24 @@ def run_desktop_acceptance() -> None:
     environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
     try:
-        subprocess.run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        subprocess.run(
-            [pnpm_executable(), *desktop_wdio_arguments()],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            subprocess.run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            subprocess.run(
+                [pnpm_executable(), *desktop_wdio_arguments()],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
     finally:
         restore = subprocess.run(
             [pnpm_executable(), "build"],
@@ -86,9 +91,7 @@ def main() -> int:
     if missing:
         raise SystemExit(f"BM-06 missing deliverables: {', '.join(missing)}")
 
-    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(
-        encoding="utf-8"
-    )
+    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     rows = [line for line in roadmap.splitlines() if line.startswith("| BM-06 |")]
     if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
         raise SystemExit("BM-06 roadmap row is missing, duplicated or incomplete")

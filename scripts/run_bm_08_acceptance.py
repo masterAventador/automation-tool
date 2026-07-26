@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from build_embedded_chromium_staging import build_staging, load_staging_contract
+from desktop_e2e_prerequisites import video_studio_startup_harness
 from run_bm_04_acceptance import current_target_id
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
@@ -48,9 +49,7 @@ DEFAULT_ARCHIVES = {
     "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
     "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
 }
-DEFAULT_EVIDENCE = (
-    ROOT / ".local/embedded-browser-video-studio/bm-08-evidence"
-)
+DEFAULT_EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-08-evidence"
 
 
 def _run(
@@ -83,9 +82,7 @@ def _stage_chromium(archive: Path, run_root: Path) -> tuple[Path, int]:
         archive_sha256=target.archive_sha256,
         output=run_root / "staging",
     )
-    executable = (result.output / Path(*target.executable.split("/"))).resolve(
-        strict=True
-    )
+    executable = (result.output / Path(*target.executable.split("/"))).resolve(strict=True)
     return executable, int(contract.browser_version.split(".")[0])
 
 
@@ -134,9 +131,7 @@ def _validate_ffmpeg(ffmpeg: Path) -> Path:
         timeout=30,
     )
     contract = json.loads(
-        (ROOT / "contracts/video/ffmpeg-toolchain.v1.json").read_text(
-            encoding="utf-8"
-        )
+        (ROOT / "contracts/video/ffmpeg-toolchain.v1.json").read_text(encoding="utf-8")
     )
     version = contract["ffmpeg"]["version"]
     if not completed.stdout.startswith(f"ffmpeg version {version} "):
@@ -175,31 +170,22 @@ def run_deterministic_gates() -> None:
 
 
 def _validate_private_app_state(private_app_data: Path) -> None:
-    checkpoints = sorted(
-        private_app_data.rglob("motion-render-job.checkpoint")
-    )
+    checkpoints = sorted(private_app_data.rglob("motion-render-job.checkpoint"))
     if len(checkpoints) != 2:
         raise RuntimeError(
             f"BM-08 expected two real RenderJob checkpoints, found {len(checkpoints)}"
         )
-    snapshots = [
-        json.loads(checkpoint.read_text(encoding="utf-8"))
-        for checkpoint in checkpoints
-    ]
+    snapshots = [json.loads(checkpoint.read_text(encoding="utf-8")) for checkpoint in checkpoints]
     statuses = sorted(snapshot["status"] for snapshot in snapshots)
     if statuses != ["cancelled", "succeeded"]:
         raise RuntimeError(f"BM-08 real lifecycle statuses drifted: {statuses}")
-    succeeded = next(
-        snapshot for snapshot in snapshots if snapshot["status"] == "succeeded"
-    )
+    succeeded = next(snapshot for snapshot in snapshots if snapshot["status"] == "succeeded")
     if (
         succeeded["progressPercent"] != 100
         or succeeded["artifactId"] is not None
         or succeeded["artifactSizeBytes"] is not None
     ):
-        raise RuntimeError(
-            "BM-08 deleted Artifact was not removed from its succeeded checkpoint"
-        )
+        raise RuntimeError("BM-08 deleted Artifact was not removed from its succeeded checkpoint")
     artifacts = private_app_data / "video-workspaces-v1/artifacts"
     if not artifacts.is_dir() or any(artifacts.iterdir()):
         raise RuntimeError("BM-08 App deletion left an Artifact payload behind")
@@ -228,11 +214,7 @@ def _run_desktop_acceptance(
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key != "TAURI_WEBDRIVER_PORT"
-    }
+    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment.update(
         {
             "TAURI_WEBDRIVER_PORT": str(port),
@@ -244,27 +226,31 @@ def _run_desktop_acceptance(
         }
     )
     try:
-        _run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-        )
-        require_port_closed(port)
-        _run(
-            [
-                pnpm_executable(),
-                "exec",
-                "wdio",
-                "run",
-                "wdio.video-studio.conf.ts",
-                "--spec",
-                "./e2e-tauri/motion-video-native.spec.ts",
-            ],
-            cwd=FRONTEND,
-            env=environment,
-        )
-        require_port_closed(port)
-        _validate_private_app_state(private_app_data)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            _run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+            )
+            require_port_closed(port)
+            _run(
+                [
+                    pnpm_executable(),
+                    "exec",
+                    "wdio",
+                    "run",
+                    "wdio.video-studio.conf.ts",
+                    "--spec",
+                    "./e2e-tauri/motion-video-native.spec.ts",
+                ],
+                cwd=FRONTEND,
+                env=environment,
+            )
+            require_port_closed(port)
+            _validate_private_app_state(private_app_data)
     finally:
         restore = subprocess.run(
             [pnpm_executable(), "build"],
@@ -374,10 +360,7 @@ def _inspect_video(
     )
     (evidence / "frame-sha256.json").write_text(
         json.dumps(
-            {
-                scene.name: digest
-                for scene, digest in zip(scenes, digests)
-            },
+            {scene.name: digest for scene, digest in zip(scenes, digests)},
             indent=2,
         )
         + "\n",
@@ -393,20 +376,13 @@ def require_deliverables() -> None:
         ROOT / "workers/motion_composition/worker.mjs",
         ROOT / "docs/development/BM-08.md",
     )
-    missing = [
-        path.relative_to(ROOT).as_posix()
-        for path in required
-        if not path.is_file()
-    ]
+    missing = [path.relative_to(ROOT).as_posix() for path in required if not path.is_file()]
     if missing:
         raise RuntimeError(f"BM-08 missing deliverables: {', '.join(missing)}")
-    roadmap = (
-        ROOT / "docs/embedded-browser-video-studio-roadmap.md"
-    ).read_text(encoding="utf-8")
+    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     rows = [line for line in roadmap.splitlines() if line.startswith("| BM-08 |")]
     if len(rows) != 1 or not any(
-        rows[0].endswith(f"| {status} |")
-        for status in ("🚧 实现中", "🔍 待验收", "✅ 已完成")
+        rows[0].endswith(f"| {status} |") for status in ("🚧 实现中", "🔍 待验收", "✅ 已完成")
     ):
         raise RuntimeError("BM-08 roadmap row is missing, duplicated or inactive")
 
@@ -418,15 +394,9 @@ def main() -> int:
     arguments = parser.parse_args()
     require_deliverables()
     target_id = current_target_id()
-    archive = (
-        arguments.archive or DEFAULT_ARCHIVES[target_id]
-    ).resolve(strict=True)
-    evidence = (
-        arguments.evidence_directory or DEFAULT_EVIDENCE
-    ).resolve()
-    evidence_root = (
-        ROOT / ".local/embedded-browser-video-studio"
-    ).resolve()
+    archive = (arguments.archive or DEFAULT_ARCHIVES[target_id]).resolve(strict=True)
+    evidence = (arguments.evidence_directory or DEFAULT_EVIDENCE).resolve()
+    evidence_root = (ROOT / ".local/embedded-browser-video-studio").resolve()
     if not evidence.is_relative_to(evidence_root) or evidence == evidence_root:
         raise RuntimeError(
             "BM-08 evidence directory must be a child of the project .local evidence root"
@@ -435,11 +405,7 @@ def main() -> int:
         shutil.rmtree(evidence)
     evidence.mkdir(parents=True)
     evidence_video = evidence / "bm-08-real-app.mp4"
-    run_root = (
-        ROOT
-        / ".local/embedded-browser-video-studio"
-        / f"ebvs-bm08-{os.getpid()}"
-    )
+    run_root = ROOT / ".local/embedded-browser-video-studio" / f"ebvs-bm08-{os.getpid()}"
     run_root.mkdir(parents=True, exist_ok=False)
     try:
         run_deterministic_gates()

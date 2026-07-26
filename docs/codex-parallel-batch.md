@@ -260,15 +260,15 @@ async check() { return { status: "ready" }; }
 
 **注意**：这条落在前端 `frontend/src/`，与族 A 的 Rust 文件不冲突。
 
-#### T78（新）视频线 7 个驱动 / 8 个 spec 全卡启动门禁
+#### T78（新）视频线 8 个驱动 / 9 个唯一 spec 全卡启动门禁
 
-**现象**：视频线的 7 个驱动、8 个 spec **全部卡在启动门禁**。
+**复核后的实际范围**：从 `scripts/run_*_acceptance.py` 的可执行 AST 动态发现出 **8 个独立构建驱动**（原清单漏了 BM-06），共覆盖 **9 个唯一 spec**。不能再维护手写驱动表。
 
-**已知原因**：`780abce` 拆桩之后驱动没跟上——`prepare_startup_gate` 的 34 个调用者里，这 7 个**一个都没有**。
+**根因比原记录更深**：第一次按旧结论只给 7 个驱动补 `prepare_startup_gate` 后，旧门禁显示 `executed checks: 7`，但这是**假绿**。该函数只准备嵌入浏览器和签名 Executor；它不提供编译期动作授权环境，也不启动生产 Control Plane。`video-studio-e2e` 又固定调用 `http://127.0.0.1:8765`，所以只补这一个调用仍然会在真实启动门禁前失败。
 
-**已有记录但低估了范围**：`docs/development/T36-oneshot-video-preview.md:116` 记了这件事，但文档说「5 个 spec」，**实测受影响面更大（8 个）**。
+**已有记录低估了范围**：`docs/development/T36-oneshot-video-preview.md:116` 记的是 5 个 spec，最初交接写成 7 个驱动 / 8 个 spec；动态复核后的真实面是 8 个驱动 / 9 个唯一 spec。
 
-**要做的**：给这 7 个驱动补上 `prepare_startup_gate`。改完至少让它们能跑起来——**跑起来之后失败是新信息，跑不起来是没信息**。
+**实现**：8 个驱动统一用 `video_studio_startup_harness` 包住 build 与随后 WDIO/App 执行。共享 harness 先隔离环境并准备本地资源，再以随机 Compose project 启动隔离 PostgreSQL、执行生产 Alembic 链、在固定 8765 启动真实 Uvicorn Control Plane；退出和各失败阶段只清理由本轮持有的资源。8765 已占用时直接拒绝，绝不终止未知进程。结构门禁同时拒绝手写漏项、同名假实现、死分支、只包 build 不包 WDIO 的半套接线。
 
 **依赖**：这条和 T74（缓存键 + 硬编码路径）在同一批里，建议先做 T74 再做这条，否则你会在一个「执行器包永远是旧的」的地基上判断结果。
 
@@ -380,7 +380,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **F** T38 演示后回收清单 | ✅ | 本提交 | 纯文档任务无代码 RED；既有 C10-13 文档契约 2/2 通过 | 新增可执行退场手册，覆盖业务冻结、账号/Session/凭据吊销、本机数据、PostgreSQL、对象存储、云资源、证据保留与双人复核；只登记凭据 ID/指纹，禁止读取或记录密钥值 |
 | **G** T76 `desktop-e2e` 入口让断言恒真 | ✅ | 本提交 | Node 入口契约准确失败：`the desktop test entry must execute the production composition root`；Rust 单路径守卫发现桩白名单漂移 | WDIO 适配器后直接加载生产 `main.tsx` 及完整 gateway；真实 Tauri 现在如实停在“桌面运行环境需要处理”，不再由恒真桩伪造工作台成功 |
 | **G** T77 B5-13 前端投影与权威态不一致 | ✅ | 本提交（复核结论） | 无新增 RED：组件/网关 6 项与 B5-13/B5-14 契约 3 项均通过 | `state: "missing"` 已稳定投影为“需要登录”，仅 gateway 拒绝才显示“暂时无法读取”；扫描现象由 T50 的注销投影预算修复覆盖，因此不制造重复改动 |
-| **G** T78 视频线 7 驱动缺 `prepare_startup_gate` | ⬜ | | | 依赖 T74 |
+| **G** T78 视频线完整启动链 | 🔍 待真实验收 | 本提交 | 仅补 7 个 `prepare_startup_gate` 时旧门禁错误显示 `executed checks: 7`；动态完整门禁随后准确报出 8 个驱动均未导入完整 harness，生命周期测试报 `no attribute 'video_studio_startup_harness'`；后续 RED 又锁住 WDIO 越界、CP 健康失败泄漏、Compose 部分启动失败不清理及环境污染 | 动态范围为 8 个构建驱动 / 9 个唯一 spec；轻量结构与失败清理 11/11 通过。真实 VF-06/其余视频驱动结果由 root 复核后回填 |
 
 ---
 

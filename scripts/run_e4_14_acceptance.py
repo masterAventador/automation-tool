@@ -59,9 +59,7 @@ def require_port_available(port: int) -> None:
         try:
             listener.bind(("127.0.0.1", port))
         except OSError as error:
-            raise RuntimeError(
-                f"E4-14 refuses to reuse occupied loopback port {port}"
-            ) from error
+            raise RuntimeError(f"E4-14 refuses to reuse occupied loopback port {port}") from error
 
 
 def isolated_ports() -> tuple[int, int]:
@@ -125,9 +123,7 @@ def isolated_environment(
     *, control_plane_port: int, database_port: int
 ) -> tuple[dict[str, str], str]:
     environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("AUTOMATION_TOOL_")
+        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
     }
     database_password = secrets.token_hex(24)
     database_url = (
@@ -150,9 +146,7 @@ def isolated_environment(
             "AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY": bootstrap_public_key,
             "AUTOMATION_TOOL_E414_BOOTSTRAP_TOKEN": bootstrap_token,
             "AUTOMATION_TOOL_E414_ENVIRONMENT_ID": ENVIRONMENT_ID,
-            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": (
-                f"http://127.0.0.1:{control_plane_port}"
-            ),
+            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": (f"http://127.0.0.1:{control_plane_port}"),
         }
     )
     return (
@@ -173,9 +167,7 @@ def install_executor_package(
     return package_root
 
 
-def start_control_plane(
-    *, port: int, environment: dict[str, str]
-) -> subprocess.Popen[bytes]:
+def start_control_plane(*, port: int, environment: dict[str, str]) -> subprocess.Popen[bytes]:
     require_port_available(port)
     server = subprocess.Popen(
         [
@@ -199,16 +191,22 @@ def start_control_plane(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    wait_for_control_plane(port, server)
+    try:
+        wait_for_control_plane(port, server)
+    except BaseException:
+        if server.poll() is None:
+            server.terminate()
+            try:
+                server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+        raise
     return server
 
 
 def executor_entrypoint(package_root: Path) -> Path:
-    name = (
-        "automation-tool-executor.exe"
-        if sys.platform == "win32"
-        else "automation-tool-executor"
-    )
+    name = "automation-tool-executor.exe" if sys.platform == "win32" else "automation-tool-executor"
     path = package_root / name
     if not path.is_file():
         raise RuntimeError("E4-14 signed Executor entrypoint is missing")
@@ -257,10 +255,7 @@ def matching_executor_processes(entrypoint: Path) -> list[tuple[int, str]]:
         for row in rows
         if isinstance(row, dict)
         and isinstance(row.get("ProcessId"), int)
-        and (
-            row.get("ExecutablePath") == target
-            or target in str(row.get("CommandLine") or "")
-        )
+        and (row.get("ExecutablePath") == target or target in str(row.get("CommandLine") or ""))
     ]
 
 
@@ -312,9 +307,7 @@ def verify_executor_app_data(private_app_data: Path, installation_id: str) -> No
         if connection.execute("PRAGMA user_version").fetchone() != (
             EXECUTOR_LEDGER_SCHEMA_VERSION,
         ):
-            raise RuntimeError(
-                "E4-14 Executor ledger did not migrate to the current schema"
-            )
+            raise RuntimeError("E4-14 Executor ledger did not migrate to the current schema")
         identity = connection.execute(
             "SELECT installation_id, executor_id FROM executor_identity"
         ).fetchone()
@@ -365,9 +358,7 @@ async def acceptance_fact_summary(database_url: str) -> dict[str, object]:
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
-            installation_count = await connection.scalar(
-                text("select count(*) from installations")
-            )
+            installation_count = await connection.scalar(text("select count(*) from installations"))
             session_capabilities = (
                 await connection.execute(
                     text(
@@ -438,9 +429,7 @@ def main() -> None:
                 cwd=BACKEND_ROOT,
                 env=environment,
             )
-            print(
-                f"[E4-14] Starting Control Plane on isolated port {control_plane_port}"
-            )
+            print(f"[E4-14] Starting Control Plane on isolated port {control_plane_port}")
             server = start_control_plane(
                 port=control_plane_port,
                 environment=environment,
@@ -458,16 +447,12 @@ def main() -> None:
             try:
                 app_output_bytes, _ = app_process.communicate(timeout=420)
             except subprocess.TimeoutExpired as error:
-                raise RuntimeError(
-                    "E4-14 hidden App lifecycle did not finish"
-                ) from error
+                raise RuntimeError("E4-14 hidden App lifecycle did not finish") from error
             app_output = app_output_bytes.decode("utf-8", errors="replace")
             print(app_output, end="")
             if app_process.returncode != 0:
                 facts = asyncio.run(acceptance_fact_summary(database_url))
-                raise RuntimeError(
-                    f"E4-14 hidden App lifecycle acceptance failed: {facts}"
-                )
+                raise RuntimeError(f"E4-14 hidden App lifecycle acceptance failed: {facts}")
             app_process = None
 
             installation_rows = asyncio.run(_installation_ids(database_url))
@@ -503,9 +488,7 @@ async def _installation_ids(database_url: str) -> list[str]:
     try:
         async with engine.connect() as connection:
             return list(
-                await connection.scalars(
-                    text("select id::text from installations order by id")
-                )
+                await connection.scalars(text("select id::text from installations order by id"))
             )
     finally:
         await engine.dispose()
