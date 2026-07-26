@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import cast
 from zipfile import ZIP_STORED, ZipFile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from desktop_e2e_prerequisites import desktop_e2e_startup_harness  # noqa: E402
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = REPOSITORY_ROOT / "frontend"
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.diagnostic-export-e2e.conf.json"
@@ -200,57 +204,64 @@ def main() -> None:
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
-    environment = {
+    base_environment = {
         key: value
         for key, value in os.environ.items()
         if key not in {"TAURI_WEBDRIVER_PORT", "AUTOMATION_TOOL_H813_EXPORT_DIRECTORY"}
     }
-    environment["TAURI_WEBDRIVER_PORT"] = str(port)
+    base_environment["TAURI_WEBDRIVER_PORT"] = str(port)
     restore_failed = False
     with tempfile.TemporaryDirectory(prefix="automation-tool-h813-") as temporary:
         export_directory = Path(temporary).resolve()
-        environment["AUTOMATION_TOOL_H813_EXPORT_DIRECTORY"] = str(export_directory)
+        base_environment["AUTOMATION_TOOL_H813_EXPORT_DIRECTORY"] = str(export_directory)
+        # Seeded before the harness stages anything: these are the App's own
+        # private diagnostics files, and the harness only touches the resource
+        # directory the build reads from.
         expected = seed_artifacts(private_app_data)
-        try:
-            subprocess.run(
-                [pnpm_executable(), "build:tauri:diagnostic-export-test"],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=True,
-            )
-            require_port_closed(port)
-            wdio = subprocess.run(
-                [
-                    pnpm_executable(),
-                    "exec",
-                    "wdio",
-                    "run",
-                    "wdio.diagnostic-export.conf.ts",
-                ],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=False,
-            )
-            if wdio.returncode != 0:
-                package_count = len(tuple(export_directory.glob("*.zip")))
-                raise RuntimeError(
-                    f"H8-13 hidden App failed after producing {package_count} package(s)"
+        with desktop_e2e_startup_harness(
+            private_app_data,
+            environment=base_environment,
+        ) as environment:
+            try:
+                subprocess.run(
+                    [pnpm_executable(), "build:tauri:diagnostic-export-test"],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=True,
                 )
-            require_port_closed(port)
-            verify_export(export_directory, expected)
-        finally:
-            restore = subprocess.run(
-                [pnpm_executable(), "build"],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            restore_failed = restore.returncode != 0
-            if private_app_data.exists():
-                shutil.rmtree(private_app_data)
-            require_port_closed(port)
+                require_port_closed(port)
+                wdio = subprocess.run(
+                    [
+                        pnpm_executable(),
+                        "exec",
+                        "wdio",
+                        "run",
+                        "wdio.diagnostic-export.conf.ts",
+                    ],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=False,
+                )
+                if wdio.returncode != 0:
+                    package_count = len(tuple(export_directory.glob("*.zip")))
+                    raise RuntimeError(
+                        f"H8-13 hidden App failed after producing {package_count} package(s)"
+                    )
+                require_port_closed(port)
+                verify_export(export_directory, expected)
+            finally:
+                restore = subprocess.run(
+                    [pnpm_executable(), "build"],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                restore_failed = restore.returncode != 0
+                if private_app_data.exists():
+                    shutil.rmtree(private_app_data)
+                require_port_closed(port)
     if restore_failed:
         raise RuntimeError("H8-13 failed to restore production Vite assets")
 

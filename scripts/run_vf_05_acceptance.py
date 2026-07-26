@@ -12,6 +12,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from desktop_e2e_prerequisites import desktop_e2e_startup_harness  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -95,38 +98,49 @@ def run_desktop_acceptance() -> None:
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
-    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
-    environment["TAURI_WEBDRIVER_PORT"] = str(port)
-    try:
-        subprocess.run(
-            [pnpm_executable(), "build:tauri:model-service-test"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        subprocess.run(
-            [pnpm_executable(), "exec", "wdio", "run", "wdio.model-service.conf.ts"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        verify_private_credentials(private_app_data)
-    finally:
-        restore = subprocess.run(
-            [pnpm_executable(), "build"],
-            cwd=FRONTEND,
-            env=environment,
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if private_app_data.exists():
-            shutil.rmtree(private_app_data)
-        require_port_closed(port)
-        if restore.returncode != 0:
-            raise RuntimeError("VF-05 failed to restore production Vite assets")
+    base_environment = {
+        key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"
+    }
+    base_environment["TAURI_WEBDRIVER_PORT"] = str(port)
+    # The spec tolerates reaching the settings card through the startup repair
+    # panel, so this driver could "pass" on a blocked App. That is the weaker
+    # path: it proves the credential form works for a user whose install is
+    # broken, and says nothing about the settings page every working install
+    # actually uses. The harness makes the workbench the path under test.
+    with desktop_e2e_startup_harness(
+        private_app_data,
+        environment=base_environment,
+    ) as environment:
+        try:
+            subprocess.run(
+                [pnpm_executable(), "build:tauri:model-service-test"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            subprocess.run(
+                [pnpm_executable(), "exec", "wdio", "run", "wdio.model-service.conf.ts"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            verify_private_credentials(private_app_data)
+        finally:
+            restore = subprocess.run(
+                [pnpm_executable(), "build"],
+                cwd=FRONTEND,
+                env=environment,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if private_app_data.exists():
+                shutil.rmtree(private_app_data)
+            require_port_closed(port)
+            if restore.returncode != 0:
+                raise RuntimeError("VF-05 failed to restore production Vite assets")
 
 
 def main() -> int:

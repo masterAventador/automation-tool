@@ -36,6 +36,7 @@ ACCEPTANCE_ASSETS = FRONTEND_ROOT / "dist-h821"
 APP_IDENTIFIER = "com.aventador.automationtool.h821acceptance"
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+from desktop_e2e_prerequisites import desktop_e2e_startup_harness  # noqa: E402
 from run_h8_20_acceptance import (  # noqa: E402
     PAYLOAD,
     PUBLIC_KEY_TEXT,
@@ -245,49 +246,55 @@ def run() -> None:
         )
         server_thread.start()
         wait_for_port(update_port)
-        environment = isolated_environment(update_port, webdriver_port)
-        try:
-            subprocess.run(
-                [pnpm_executable(), "build:tauri:update-installation-test"],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=True,
-            )
-            run_hidden_app(environment, "optional", webdriver_port)
-            verify_cache(private_app_data, "0.3.0")
-            if artifact_ledger != ["0.2.0", "0.3.0"]:
-                raise RuntimeError(
-                    "H8-21 optional decisions did not replace the cached version"
+        # All three scenarios run on the one App this harness prepares: the
+        # startup gate is checked on every launch, so the forced-reopen scenario
+        # needs the same prerequisites standing as the first one.
+        with desktop_e2e_startup_harness(
+            private_app_data,
+            environment=isolated_environment(update_port, webdriver_port),
+        ) as environment:
+            try:
+                subprocess.run(
+                    [pnpm_executable(), "build:tauri:update-installation-test"],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=True,
                 )
+                run_hidden_app(environment, "optional", webdriver_port)
+                verify_cache(private_app_data, "0.3.0")
+                if artifact_ledger != ["0.2.0", "0.3.0"]:
+                    raise RuntimeError(
+                        "H8-21 optional decisions did not replace the cached version"
+                    )
 
-            shutil.rmtree(private_app_data)
-            artifact_ledger.clear()
-            mode.update({"scenario": "forced", "feed_count": 0})
-            run_hidden_app(environment, "forced-first", webdriver_port)
-            verify_cache(private_app_data, "0.2.0")
-            if artifact_ledger != ["0.2.0"]:
-                raise RuntimeError(
-                    "H8-21 forced first launch did not download exactly once"
-                )
-            run_hidden_app(environment, "forced-reopen", webdriver_port)
-            if artifact_ledger != ["0.2.0"]:
-                raise RuntimeError(
-                    "H8-21 forced reopen downloaded the verified package again"
-                )
-            verify_cache(private_app_data, "0.2.0")
-        finally:
-            if server is not None:
-                server.should_exit = True
-            if server_thread is not None:
-                server_thread.join(timeout=10)
-                if server_thread.is_alive():
-                    raise RuntimeError("H8-21 update server did not stop")
-            if private_app_data.exists():
                 shutil.rmtree(private_app_data)
-            if ACCEPTANCE_ASSETS.exists():
-                shutil.rmtree(ACCEPTANCE_ASSETS)
-            require_port_closed(update_port)
-            require_port_closed(webdriver_port)
+                artifact_ledger.clear()
+                mode.update({"scenario": "forced", "feed_count": 0})
+                run_hidden_app(environment, "forced-first", webdriver_port)
+                verify_cache(private_app_data, "0.2.0")
+                if artifact_ledger != ["0.2.0"]:
+                    raise RuntimeError(
+                        "H8-21 forced first launch did not download exactly once"
+                    )
+                run_hidden_app(environment, "forced-reopen", webdriver_port)
+                if artifact_ledger != ["0.2.0"]:
+                    raise RuntimeError(
+                        "H8-21 forced reopen downloaded the verified package again"
+                    )
+                verify_cache(private_app_data, "0.2.0")
+            finally:
+                if server is not None:
+                    server.should_exit = True
+                if server_thread is not None:
+                    server_thread.join(timeout=10)
+                    if server_thread.is_alive():
+                        raise RuntimeError("H8-21 update server did not stop")
+                if private_app_data.exists():
+                    shutil.rmtree(private_app_data)
+                if ACCEPTANCE_ASSETS.exists():
+                    shutil.rmtree(ACCEPTANCE_ASSETS)
+                require_port_closed(update_port)
+                require_port_closed(webdriver_port)
     if [entry["scenario"] for entry in feed_ledger].count("optional") != 4:
         raise RuntimeError(
             "H8-21 optional App did not use the expected four production checks"

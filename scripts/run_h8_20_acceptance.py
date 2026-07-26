@@ -30,6 +30,10 @@ from cryptography.x509.oid import NameOID
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from desktop_e2e_prerequisites import desktop_e2e_startup_harness  # noqa: E402
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 FRONTEND_ROOT = REPOSITORY_ROOT / "frontend"
@@ -309,43 +313,51 @@ def run() -> None:
         )
         server_thread.start()
         wait_for_port(update_port)
-        environment = isolated_environment(update_port, webdriver_port)
-        try:
-            subprocess.run(
-                [pnpm_executable(), "build:tauri:update-download-test"],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=True,
-            )
-            require_port_closed(webdriver_port)
-            subprocess.run(
-                [pnpm_executable(), "exec", "wdio", "run", "wdio.update-download.conf.ts"],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=True,
-            )
-            require_port_closed(webdriver_port)
-            verify_private_cache(private_app_data, request_ledger)
-        finally:
-            restore = subprocess.run(
-                [pnpm_executable(), "build"],
-                cwd=FRONTEND_ROOT,
-                env=environment,
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            restore_failed = restore.returncode != 0
-            if server is not None:
-                server.should_exit = True
-            if server_thread is not None:
-                server_thread.join(timeout=10)
-                if server_thread.is_alive():
-                    raise RuntimeError("H8-20 update server did not stop")
-            if private_app_data.exists():
-                shutil.rmtree(private_app_data)
-            require_port_closed(update_port)
-            require_port_closed(webdriver_port)
+        # The isolated update feed is this acceptance's own subject; the harness
+        # adds what the *startup gate* needs before the App will mount anything
+        # at all — the compile-time action-trust triple that `tauri build` bakes
+        # in, the verified embedded browser, the signed Executor package, and a
+        # Control Plane on the origin this build is compiled to call.
+        with desktop_e2e_startup_harness(
+            private_app_data,
+            environment=isolated_environment(update_port, webdriver_port),
+        ) as environment:
+            try:
+                subprocess.run(
+                    [pnpm_executable(), "build:tauri:update-download-test"],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=True,
+                )
+                require_port_closed(webdriver_port)
+                subprocess.run(
+                    [pnpm_executable(), "exec", "wdio", "run", "wdio.update-download.conf.ts"],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=True,
+                )
+                require_port_closed(webdriver_port)
+                verify_private_cache(private_app_data, request_ledger)
+            finally:
+                restore = subprocess.run(
+                    [pnpm_executable(), "build"],
+                    cwd=FRONTEND_ROOT,
+                    env=environment,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                restore_failed = restore.returncode != 0
+                if server is not None:
+                    server.should_exit = True
+                if server_thread is not None:
+                    server_thread.join(timeout=10)
+                    if server_thread.is_alive():
+                        raise RuntimeError("H8-20 update server did not stop")
+                if private_app_data.exists():
+                    shutil.rmtree(private_app_data)
+                require_port_closed(update_port)
+                require_port_closed(webdriver_port)
     if restore_failed:
         raise RuntimeError("H8-20 failed to restore production Vite assets")
     print("Hidden App production-feed resumable update acceptance passed")

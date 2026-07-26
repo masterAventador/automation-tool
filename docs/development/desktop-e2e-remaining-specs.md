@@ -12,6 +12,19 @@
 > 并行边界：全程另有一个会话在同一台机器上修 control-plane 层剩余失败
 > （T3-15/16/18、D6-10、H8-16F）。本次未触碰这些驱动、未触碰 `mvp-user-journey.spec.ts`。
 
+> **2026-07-27 更正（T125）：下面「通过（9）」里的六条已经作废，作废时刻是 2026-07-26
+> 21:16 的 `fb6d122`。** 本文件的实跑发生在**当天上午**，也就是那次提交**之前**；`fb6d122`
+> 把 `frontend/src/test-tauri-main.tsx` 从自建 composition root 改成 `void import("./main")`，
+> 启动检查随之从无条件返回 `ready` 的测试桩换成生产的 `createDesktopStartupCheck`。
+> 六条 `desktop-e2e` spec（`diagnostic-export`、`model-service`、`update-download`、
+> `update-ui`、`update-macos-package`、`update-windows-package`）的驱动当时都没有铺启动门禁
+> 前置，于是从那一刻起集体停在 spec 第一行
+> （`Expected: "RPA 运营工作台" / Received: "桌面运行环境需要处理"`）。
+>
+> **换句话说：这份记录在写下的那一刻是准确的，从当晚 21:16 起不再描述任何仍然成立的事实。**
+> 修复见 `docs/development/T125.md`；`update-installation` 与 `update-policy` 两条则是被
+> T57b 退役，不在 T125 范围内。
+
 ## 0. 结论摘要
 
 | 项 | 数 |
@@ -95,6 +108,11 @@
 ## 3. 逐条实跑结果
 
 ### 3.1 通过（9）
+
+> **T125 更正**：本表前五行（`diagnostic-export`、`model-service`、`update-download`、
+> `run_h8_21`、`run_h8_22`）记录的是 2026-07-26 **上午**的结果，`fb6d122`（当晚 21:16）之后
+> 这些驱动全部停在启动门禁。后四行不受影响：`workbench` / `update-policy` /
+> `account-session` 走的是别的构建族，`publishing` 的 spec 明确不经工作台。
 
 | spec | 驱动 | 输出 |
 | --- | --- | --- |

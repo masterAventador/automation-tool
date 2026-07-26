@@ -19,10 +19,21 @@ assertion while 27 task ledgers recorded a pass. Keeping the preparation here �
 rather than as a paragraph copied into 30 drivers — is what makes the next change
 to the gate reach all of them at once.
 
-The `video-studio-e2e` feature is the exception to the configurable-origin
-description above: its production transport always calls 127.0.0.1:8765. This
-module also owns the complete lifecycle harness that keeps a real isolated
-PostgreSQL and Control Plane alive around those Apps' build and WDIO execution.
+Point (4) is where the three families differ, because `option_env!` on the origin
+exists only under `control-plane-e2e`. Builds without that feature call the
+product default, 127.0.0.1:8765, and a harness for them has to own that exact
+endpoint rather than reserve a free one:
+
+* `control-plane-e2e` drivers pick a reserved port and bring up their own
+  Control Plane, because their subject usually *is* Control Plane state;
+* `video-studio-e2e` gets the complete lifecycle harness — real isolated
+  PostgreSQL, the production Alembic chain and the production Uvicorn service on
+  the product origin — because those Apps read and write real task data;
+* plain `desktop-e2e` gets `desktop_e2e_startup_harness`, which serves the same
+  production `create_app` on the same origin without a database. The gate asks
+  that service two things and nothing else — `/health` and `/version` — and
+  neither touches persistence, so a PostgreSQL container per driver would add
+  minutes to every run of a family that stores nothing there.
 
 Nothing here terminates an existing or unknown process to free a port. Lifecycle
 cleanup stops only a `Popen` handle this module's harness successfully started.
@@ -42,6 +53,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -105,10 +118,12 @@ ACTION_AUTHORIZATION_PUBLIC_KEY: Final = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGx
 LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS: Final = "1"
 LOCAL_ACTION_TASK_LIMIT: Final = "20"
 
-# `video-studio-e2e` does not compile the configurable Control Plane origin
-# used by `control-plane-e2e`. Its production transport therefore always calls
-# the product default and the complete harness must own exactly this endpoint.
-VIDEO_STUDIO_CONTROL_PLANE_PORT: Final = 8765
+# The origin the product itself is compiled to call. `control-plane-e2e` is the
+# only feature that turns it into an `option_env!`; every other build — the
+# release, and every plain `desktop-e2e` acceptance App — reaches exactly here.
+# A harness for those builds cannot pick a free port, so it must own this one,
+# which is also why it refuses rather than reclaims when something holds it.
+PRODUCT_CONTROL_PLANE_PORT: Final = 8765
 VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES: Final = frozenset(
     {
         "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO",
@@ -513,6 +528,125 @@ def prepare_startup_gate(
         install_signed_executor_package(build_id=build_id, resource_root=resource_root)
 
 
+# --------------------------------------------------------------------------- #
+# The plain `desktop-e2e` family: gate inputs plus the product's own origin
+# --------------------------------------------------------------------------- #
+
+
+class _HealthControlPlane:
+    """A Control Plane this harness started, and only that one.
+
+    Held as an object rather than a bare thread so cleanup can never be aimed at
+    a listener some other process owns: `stop` acts on the server instance this
+    module created and returns once its thread has actually left.
+    """
+
+    def __init__(self, server: object, thread: object) -> None:
+        self._server = server
+        self._thread = thread
+
+    def stop(self) -> None:
+        self._server.should_exit = True  # type: ignore[attr-defined]
+        self._thread.join(timeout=15)  # type: ignore[attr-defined]
+        if self._thread.is_alive():  # type: ignore[attr-defined]
+            raise DesktopPrerequisiteRejected(
+                "the acceptance Control Plane did not stop; it still holds "
+                f"127.0.0.1:{PRODUCT_CONTROL_PLANE_PORT}"
+            )
+
+
+def _start_health_control_plane(*, port: int) -> _HealthControlPlane:
+    """Serve the production Control Plane app the startup gate calls.
+
+    `create_app(database=None)` is a supported production configuration, not a
+    stub: the routes, the response models and the redaction middleware are the
+    real ones, and `/health` skips the connection probe exactly as it does for a
+    deployment that configured no database. Anything narrower would answer the
+    App's `/version` compatibility comparison wrongly and leave the gate closed
+    for a reason that looks like a product defect.
+    """
+    # Imported lazily: cache-only and staging-only users of this module must not
+    # need the backend's dependencies on the import path.
+    import uvicorn  # noqa: PLC0415
+
+    backend_source = REPOSITORY_ROOT / "backend" / "src"
+    if str(backend_source) not in sys.path:
+        sys.path.insert(0, str(backend_source))
+    from automation_tool.control_plane.bootstrap.app import create_app  # noqa: PLC0415
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(database=None),
+            host="127.0.0.1",
+            port=port,
+            access_log=False,
+            log_level="critical",
+        )
+    )
+    thread = threading.Thread(
+        target=server.run,
+        name="automation-tool-desktop-e2e-health",
+        daemon=True,
+    )
+    thread.start()
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if server.started:
+            return _HealthControlPlane(server, thread)
+        if not thread.is_alive():
+            break
+        time.sleep(0.05)
+    server.should_exit = True
+    thread.join(timeout=10)
+    raise DesktopPrerequisiteRejected(
+        f"the acceptance Control Plane did not start on 127.0.0.1:{port}"
+    )
+
+
+def require_product_origin_released(port: int) -> None:
+    """Fail if the origin this harness bound is still accepting connections."""
+    from run_i2_13_acceptance import require_port_closed  # noqa: PLC0415
+
+    require_port_closed(port)
+
+
+@contextmanager
+def desktop_e2e_startup_harness(
+    private_app_data: Path,
+    *,
+    environment: Mapping[str, str],
+    resource_root: Path = DEBUG_APP_RESOURCE_ROOT,
+) -> Iterator[dict[str, str]]:
+    """Yield the environment one plain `desktop-e2e` acceptance App needs.
+
+    The returned mapping is what the driver must build *and* run with: three of
+    the four values are read by `tauri build` through `option_env!`, so passing
+    them only to the WDIO run produces a binary that reports
+    "本地执行器动作配置缺失" and never mounts the workbench — which reads as a
+    broken product rather than a driver that prepared half of its inputs.
+
+    The caller's mapping is copied, never mutated: several drivers in this family
+    assemble an isolated update feed, TLS material or signing keys first and then
+    reuse that same dictionary for their own cleanup assertions.
+    """
+    if not port_is_free(PRODUCT_CONTROL_PLANE_PORT):
+        raise DesktopPrerequisiteRejected(
+            "this App is compiled to call "
+            f"{control_plane_origin(PRODUCT_CONTROL_PLANE_PORT)}, but that port is "
+            "occupied; stop its owner instead of reusing or terminating it"
+        )
+    prepare_startup_gate(private_app_data, resource_root=resource_root)
+    prepared = startup_gate_environment(
+        environment, control_plane_port=PRODUCT_CONTROL_PLANE_PORT
+    )
+    server = _start_health_control_plane(port=PRODUCT_CONTROL_PLANE_PORT)
+    try:
+        yield prepared
+    finally:
+        server.stop()
+        require_product_origin_released(PRODUCT_CONTROL_PLANE_PORT)
+
+
 def _video_studio_environment(
     environment: Mapping[str, str],
     *,
@@ -545,7 +679,7 @@ def _video_studio_environment(
     )
     return startup_gate_environment(
         prepared,
-        control_plane_port=VIDEO_STUDIO_CONTROL_PLANE_PORT,
+        control_plane_port=PRODUCT_CONTROL_PLANE_PORT,
     )
 
 
@@ -577,7 +711,7 @@ def video_studio_startup_harness(
     alive for the caller's build and WDIO run, then are removed even when server
     startup or the acceptance itself fails.
     """
-    if not port_is_free(VIDEO_STUDIO_CONTROL_PLANE_PORT):
+    if not port_is_free(PRODUCT_CONTROL_PLANE_PORT):
         raise DesktopPrerequisiteRejected(
             "video-studio-e2e is compiled to call http://127.0.0.1:8765, "
             "but that port is occupied; stop its owner instead of reusing or "
@@ -624,7 +758,7 @@ def video_studio_startup_harness(
                 env=prepared,
             )
             server = start_control_plane(
-                port=VIDEO_STUDIO_CONTROL_PLANE_PORT,
+                port=PRODUCT_CONTROL_PLANE_PORT,
                 environment=prepared,
             )
             control_plane_started = True
@@ -637,7 +771,7 @@ def video_studio_startup_harness(
         if server is not None:
             _terminate_owned_control_plane(server)
         if control_plane_started:
-            require_port_closed(VIDEO_STUDIO_CONTROL_PLANE_PORT)
+            require_port_closed(PRODUCT_CONTROL_PLANE_PORT)
         require_port_closed(database_port)
 
 
