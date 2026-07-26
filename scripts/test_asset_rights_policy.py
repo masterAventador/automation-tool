@@ -15,7 +15,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import check_third_party_sources  # noqa: E402
 
 POLICY_PATH = ROOT / "contracts/quality/asset-rights-policy.v1.json"
+OVERLAY_PATH = ROOT / "contracts/quality/motion-asset-overlay.v1.json"
+OFFLINE_DEPENDENCIES_PATH = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 UTM_FONT_PATH = ROOT / "vendor/moneyprinterturbo/resource/fonts/UTM Kabel KT.ttf"
+BIG_SHOULDERS_FONT_PATH = (
+    ROOT / "assets/motion-catalog-overlay/fonts/big-shoulders-display-latin.woff2"
+)
 UTM_ATTRIBUTION = (
     'Thiet ke boi Michael Dinh Kien - "In God We Trust - Free for everyone" '
     "Email: fontchudep@gmail.com; www.fontchudep.com; www.fontchudep.vn"
@@ -93,6 +98,68 @@ class FontRightsPolicyTests(unittest.TestCase):
                 for item in evidence
             ),
             "the decision must preserve the exact first-party notice in the binary",
+        )
+
+    def test_big_shoulders_registration_matches_the_shipped_woff2_and_ofl_lock(
+        self,
+    ) -> None:
+        policy = _load(POLICY_PATH)
+        entries = _entries(policy)
+        self.assertIn("font-big-shoulders-display", entries)
+        entry = entries["font-big-shoulders-display"]
+        overlay = _load(OVERLAY_PATH)
+        offline = _load(OFFLINE_DEPENDENCIES_PATH)
+
+        overlay_assets = overlay.get("assets")
+        self.assertIsInstance(overlay_assets, list)
+        overlay_entry = next(
+            asset
+            for asset in overlay_assets
+            if isinstance(asset, dict)
+            and asset.get("id") == "font-big-shoulders-display"
+        )
+        font_families = offline.get("fontFamilies")
+        self.assertIsInstance(font_families, list)
+        family = next(
+            font
+            for font in font_families
+            if isinstance(font, dict) and font.get("family") == "Big Shoulders Display"
+        )
+
+        self.assertEqual(entry["category"], "font")
+        self.assertEqual(entry["sha256"], _sha256(BIG_SHOULDERS_FONT_PATH))
+        self.assertEqual(entry["bytes"], BIG_SHOULDERS_FONT_PATH.stat().st_size)
+        for field in ("sourceUrl", "sha256", "bytes"):
+            self.assertEqual(entry[field], overlay_entry[field])
+        self.assertEqual(entry["license"], "OFL-1.1")
+        self.assertEqual(entry["licenseTextSha256"], family["licenseFileSha256"])
+        for permission in (
+            "redistributionAllowed",
+            "commercialUseAllowed",
+            "embeddingAllowed",
+        ):
+            self.assertIs(entry[permission], True)
+        self.assertEqual(
+            entry["attribution"],
+            "Copyright 2019 The Big Shoulders Project Authors "
+            "(https://github.com/xotypeco/big_shoulders)",
+        )
+        evidence_urls = {
+            item.get("url")
+            for item in entry["rightsEvidence"]
+            if isinstance(item, dict)
+        }
+        self.assertTrue(
+            any(
+                isinstance(url, str)
+                and url.startswith("https://github.com/google/fonts/blob/")
+                and url.endswith("/ofl/bigshouldersdisplay/OFL.txt")
+                for url in evidence_urls
+            )
+        )
+        self.assertIn(
+            "https://openfontlicense.org/open-font-license-official-text/",
+            evidence_urls,
         )
 
     def test_gate_rejects_a_duplicate_registered_asset_id(self) -> None:
