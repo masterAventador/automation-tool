@@ -161,6 +161,51 @@ describe("motion run store", () => {
   });
 
   /**
+   * 用户亲手掐掉的任务，侧边栏不能继续说它在跑。
+   *
+   * T101 把三种终态分开之后，这一条是唯一还没被接上的：取消让任务到达终态、让监视器
+   * 停下来，可 `motionRunAttention` 的 `running` 分支认的是 `message !== null`，而
+   * `settleMotionRun` 写下的那条 info 提示没有任何东西去清它。于是取消之后侧边栏一直
+   * 挂着「正在进行中」——又一次「标记在，只是它在说谎」。
+   *
+   * 判据是运行事实而不是那条提示：提示是**页面上的一条通告**，回答不了「还有没有东西
+   * 在跑」。真正回答这个问题的是 `pending` 和 `ownJobs` 里的 `outcome`，两者都是运行
+   * 事实。这里断言 `none` 而不是「不等于 running」，是因为取消之后确实什么都不欠他了。
+   */
+  it("stops claiming a run is in flight once the operator cancelled it", () => {
+    settleMotionRun(JOB_ID, 12, {
+      tone: "info",
+      text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
+    });
+    expect(motionRunAttention(motionRunSnapshot())).toBe("running");
+
+    endMotionJob(JOB_ID, "cancelled");
+
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
+  });
+
+  /**
+   * 同一处判据的另一张脸：关掉那条提示不等于渲染停了。
+   *
+   * 页面上那条 info 是 `closable` 的，用户随手就能关。判据一旦挂在提示上，关掉它就把
+   * 侧边栏的标记一起关掉了——而渲染还在跑，监视器也还在轮询。这比取消那半更坏：取消
+   * 至少是用户自己知道的事，这一条是**一条真的在跑的任务从屏幕上消失**。
+   *
+   * 两条用例合起来钉的是同一句话：`running` 必须来自运行事实，不是来自页面通告在不在。
+   */
+  it("keeps marking a render that is still going after its notice was closed", () => {
+    settleMotionRun(JOB_ID, 12, {
+      tone: "info",
+      text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
+    });
+
+    dismissMotionRunMessage();
+
+    expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(true);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("running");
+  });
+
+  /**
    * 一个角标只有一格，两件事同时成立时它必须拿出更要紧的那一件。
    *
    * 排序是：已知的坏结果 → 看不见 → 有东西可以取 → 有东西在跑。坏消息和看不见都是

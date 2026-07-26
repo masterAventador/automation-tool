@@ -270,6 +270,11 @@ describe("video studio watched from anywhere in the app", () => {
     artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
     artifactSizeBytes: 4096,
   };
+  const CANCELLED_JOB: MotionRenderJobSnapshot = {
+    ...RENDERING_JOB,
+    status: "cancelled",
+    progressPercent: 48,
+  };
 
   function studioGateway(
     motionJobs: MaterialVideoStudioGateway["motionJobs"],
@@ -363,6 +368,37 @@ describe("video studio watched from anywhere in the app", () => {
        * 东西会吭声。
        */
       expect(mark.closest(".ant-badge-count")).toHaveClass("ant-badge-color-green");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 用户自己按的取消，之后侧边栏不该还挂着「正在进行中」。
+   *
+   * 这是 T101 记录第七节第 5 条登记的那一条，形状和它上面两条完全一样：监视器已经把
+   * 这条任务标成 `cancelled`、定时器也停了，屏幕上却和以前一模一样——一个蓝点，悬停
+   * 写着「视频制作正在进行中」。取消的严重性低于失败（用户知道自己按了什么），但它
+   * 让侧边栏对着一条已经不存在的运行说话，跟前两条是同一个病。
+   *
+   * 断言不只是「没有蓝点」，还要「一个角标都没有」：改判据时最容易犯的错是把取消顺手
+   * 归到别的分支去，于是屏幕上冒出「完成」或者「失败」——那比蓝点更糟。
+   */
+  it("stops marking the entry once the operator has cancelled the run", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockResolvedValue([RENDERING_JOB]);
+      renderStartedElsewhere();
+      openShellOnWorkbench(studioGateway(motionJobs));
+
+      motionJobs.mockResolvedValue([CANCELLED_JOB]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
+      expect(entry.querySelector("sup")).toBeNull();
     } finally {
       vi.useRealTimers();
     }

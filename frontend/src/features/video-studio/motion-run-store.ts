@@ -275,11 +275,35 @@ export type MotionRunAttention = "none" | "running" | "failed" | "unknown" | "fi
  * then something to collect, then something in flight. Where two of them are
  * true at once — two films, one failed and one finished — the mark carries the
  * more consequential one and the studio page shows both.
+ *
+ * What "in flight" is read from is the part T105 had to correct. It used to be
+ * `pending !== null || message !== null`, inherited unchanged from the boolean
+ * `motionRunNeedsAttention` this function replaced, and `message` is the wrong
+ * thing to ask: it is a notice on the studio page, not a fact about whether
+ * anything is running. Two consequences, opposite in direction and both
+ * measured:
+ *
+ * - a run the operator cancelled left that notice behind — nothing clears it —
+ *   so the sidebar went on saying 正在进行中 about a run that no longer existed;
+ * - closing that notice, which the page lets him do with one click, took the
+ *   mark off a render that was still going and still being polled.
+ *
+ * So it reads the run facts instead: a submission that has not come back
+ * (`pending`), or a job this session started that is still owed an outcome —
+ * which is exactly `motionRunNeedsWatch`, the same fact that decides whether
+ * the watcher runs. The store has carried that per-job outcome since T101; this
+ * is the sidebar finally reading it rather than a second structure to hold it.
+ *
+ * `message` still answers the "failed" branch, and that is not an inconsistency
+ * to tidy away later: an authoring failure happens before any job exists (the
+ * native side writes the snapshot only after authoring returns, measured in
+ * T91), so the message is the only place that failure can live. Nothing keyed
+ * on a job could hold it.
  */
 export function motionRunAttention(current: MotionRunState): MotionRunAttention {
   if (current.message?.tone === "error") return "failed";
   if (current.tracking === "lost" && motionRunNeedsWatch(current)) return "unknown";
   if (motionRunHasUnopenedFilm(current)) return "finished";
-  if (current.pending !== null || current.message !== null) return "running";
+  if (current.pending !== null || motionRunNeedsWatch(current)) return "running";
   return "none";
 }

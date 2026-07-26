@@ -11,7 +11,7 @@ import { createTransportStartupCheck } from "../app/startup";
 import { createLocalVideoEditingGateway } from "../features/video-editing/local-video-editing-gateway";
 import { HARNESS_SELECTED_VIDEO, TestHarnessPublishing } from "./publishing";
 import { TestHarnessTaskLifecycle } from "./task-lifecycle";
-import { TestHarnessVideoStudio } from "./video-studio";
+import { TestHarnessVideoStudio, type HarnessRenderEnding } from "./video-studio";
 import "../styles/global.css";
 
 const HARNESS_RUNTIME_MARKER = "automation-tool-test-harness";
@@ -58,14 +58,20 @@ const publishingProps =
   publishing === undefined
     ? {}
     : { publishWorkspaceGateway: publishing, selectedVideo: HARNESS_SELECTED_VIDEO };
+/**
+ * Which scenario asks for which ending. A table rather than a chain of
+ * ternaries: the third ending is where that chain stopped being readable, and
+ * adding endings is the one thing this line is going to keep doing.
+ */
+const MOTION_RENDER_SCENARIOS: Readonly<Record<string, HarnessRenderEnding>> = {
+  "motion-render-failure": "failed",
+  "motion-render-success": "succeeded",
+  "motion-render-cancel": "cancelled",
+};
 const motionRenderEnding =
-  scenario === "motion-render-failure"
-    ? "failed"
-    : scenario === "motion-render-success"
-      ? "succeeded"
-      : null;
+  scenario === null ? undefined : MOTION_RENDER_SCENARIOS[scenario];
 const videoStudioProps =
-  motionRenderEnding === null
+  motionRenderEnding === undefined
     ? {}
     : { materialVideoStudioGateway: new TestHarnessVideoStudio(motionRenderEnding) };
 const taskLifecycleProps =
