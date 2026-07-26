@@ -13,10 +13,13 @@ This file is itself discovered by the runner it tests.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import os
 import re
+import subprocess
 import sys
+import tarfile
 import tempfile
 import tokenize
 from pathlib import Path
@@ -353,6 +356,210 @@ def check_empty_aggregate_fails_closed() -> None:
         _fail("an empty test result set was accepted")
 
 
+def _initialize_vendor_fixture(path: Path) -> str:
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=path, check=True)
+    (path / "tracked.txt").write_text("read only\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Vendor Fixture",
+            "-c",
+            "user.email=vendor-fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "fixture",
+        ],
+        cwd=path,
+        check=True,
+    )
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=path,
+        text=True,
+    ).strip()
+
+
+def check_vendor_cleanliness_guard_self_proves() -> None:
+    """The post-test guard must detect deliberate pollution in a fake vendor."""
+    dirty_vendors = getattr(run_script_tests, "dirty_vendors", None)
+    if dirty_vendors is None:
+        _fail("the aggregate runner has no vendor cleanliness guard")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        vendor_root = Path(scratch) / "vendor"
+        expected_revisions: dict[str, str] = {}
+        for name in ("hyperframes", "moneyprinterturbo"):
+            expected_revisions[name] = _initialize_vendor_fixture(vendor_root / name)
+        try:
+            clean = dirty_vendors(
+                vendor_root,
+                expected_revisions=expected_revisions,
+            )
+        except TypeError:
+            _fail("vendor cleanliness does not validate locked revisions")
+        if clean:
+            _fail("clean vendor fixtures were reported dirty")
+
+        pollution = vendor_root / "hyperframes" / "deliberate-pollution.txt"
+        pollution.write_text("the guard must catch this\n", encoding="utf-8")
+        dirty = dirty_vendors(
+            vendor_root,
+            expected_revisions=expected_revisions,
+        )
+        if (
+            "hyperframes" not in dirty
+            or "deliberate-pollution.txt" not in dirty["hyperframes"]
+        ):
+            _fail(f"the deliberate vendor pollution was not detected: {dirty}")
+        pollution.unlink()
+
+        switched = vendor_root / "moneyprinterturbo"
+        switched.joinpath("tracked.txt").write_text(
+            "different clean head\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "tracked.txt"], cwd=switched, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Vendor Fixture",
+                "-c",
+                "user.email=vendor-fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "wrong clean revision",
+            ],
+            cwd=switched,
+            check=True,
+        )
+        dirty = dirty_vendors(
+            vendor_root,
+            expected_revisions=expected_revisions,
+        )
+        if (
+            "moneyprinterturbo" not in dirty
+            or "locked commit" not in dirty["moneyprinterturbo"]
+        ):
+            _fail(f"a clean checkout at the wrong revision was not detected: {dirty}")
+
+
+def check_vendor_tests_run_from_local_isolation() -> None:
+    """Upstream tests must mutate an isolated `.local/` clone, never vendor."""
+    entrypoint = REPOSITORY_ROOT / "scripts" / "run_vendor_tests.py"
+    if not entrypoint.is_file():
+        _fail("scripts/run_vendor_tests.py is missing")
+    specification = importlib.util.spec_from_file_location(
+        "run_vendor_tests", entrypoint
+    )
+    if specification is None or specification.loader is None:
+        _fail("cannot load the isolated vendor test entrypoint")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+
+    with tempfile.TemporaryDirectory() as scratch:
+        repository = Path(scratch)
+        source = repository / "vendor" / "hyperframes"
+        local_root = repository / ".local" / "vendor-tests"
+        source_revision = _initialize_vendor_fixture(source)
+        try:
+            completed = module.run_in_isolation(
+                source,
+                local_root,
+                [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; "
+                    "Path('tracked.txt').write_text('changed\\n'); "
+                    "Path('output/compiled.html').parent.mkdir(parents=True); "
+                    "Path('output/compiled.html').write_text('generated\\n'); "
+                    "print(Path.cwd())",
+                ],
+                expected_revision=source_revision,
+            )
+        except TypeError:
+            _fail("isolated vendor tests do not validate the locked revision")
+        if completed.returncode != 0:
+            _fail(f"isolated fixture command failed: {completed.stderr}")
+        if source.joinpath("tracked.txt").read_text(encoding="utf-8") != "read only\n":
+            _fail("isolated test changed the tracked vendor source")
+        if source.joinpath("output/compiled.html").exists():
+            _fail("isolated test created output in vendor source")
+        reported_cwd = Path(completed.stdout.strip())
+        if local_root.resolve() not in reported_cwd.resolve().parents:
+            _fail(f"vendor test ran outside .local isolation: {reported_cwd}")
+
+        try:
+            module.run_in_isolation(
+                source,
+                local_root,
+                [sys.executable, "-c", "raise SystemExit(0)"],
+                expected_revision="0" * 40,
+            )
+        except RuntimeError as error:
+            if "does not match locked commit" not in str(error):
+                _fail(f"unexpected locked-revision failure: {error}")
+        else:
+            _fail("isolated entrypoint accepted a clean but unlocked vendor revision")
+
+        pollution = source / "deliberate-pollution.txt"
+        try:
+            module.run_in_isolation(
+                source,
+                local_root,
+                [
+                    sys.executable,
+                    "-c",
+                    f"from pathlib import Path; "
+                    f"Path({str(pollution)!r}).write_text('polluted\\n')",
+                ],
+                expected_revision=source_revision,
+            )
+        except RuntimeError as error:
+            if "changed during isolated test" not in str(error):
+                _fail(f"unexpected post-test vendor failure: {error}")
+        else:
+            _fail("isolated entrypoint did not detect an absolute-path vendor write")
+        finally:
+            pollution.unlink(missing_ok=True)
+
+
+def check_windows_archive_fallback_does_not_create_symlinks() -> None:
+    """Windows isolation must work without Developer Mode symlink privileges."""
+    entrypoint = REPOSITORY_ROOT / "scripts" / "run_vendor_tests.py"
+    specification = importlib.util.spec_from_file_location(
+        "run_vendor_tests_windows_archive",
+        entrypoint,
+    )
+    if specification is None or specification.loader is None:
+        _fail("cannot load the isolated vendor test entrypoint")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    extract_archive = getattr(module, "extract_archive", None)
+    if extract_archive is None:
+        _fail("vendor archive has no Windows symlink fallback")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        archive = root / "fixture.tar"
+        with tarfile.open(archive, "w") as bundle:
+            link = tarfile.TarInfo("nested/shared")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../shared"
+            bundle.addfile(link)
+        destination = root / "extracted"
+        extract_archive(archive, destination, platform_name="nt")
+        materialized = destination / "nested" / "shared"
+        if materialized.is_symlink() or not materialized.is_file():
+            _fail("Windows fallback attempted to create a real symlink")
+        if materialized.read_text(encoding="utf-8") != "../shared":
+            _fail("Windows fallback did not preserve the symlink target")
+
+
 CHECKS = (
     check_discovery_finds_every_test_script,
     check_discovery_includes_this_file,
@@ -367,6 +574,9 @@ CHECKS = (
     check_multiple_standard_summaries_are_aggregated,
     check_incidental_numbers_are_not_execution_evidence,
     check_empty_aggregate_fails_closed,
+    check_vendor_cleanliness_guard_self_proves,
+    check_vendor_tests_run_from_local_isolation,
+    check_windows_archive_fallback_does_not_create_symlinks,
 )
 
 

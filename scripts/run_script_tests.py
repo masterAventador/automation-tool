@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import ast
 import concurrent.futures
+import json
 import os
 import re
 import subprocess
@@ -44,6 +45,7 @@ from typing import Final, Mapping, Sequence
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parent.parent
 DEFAULT_TIMEOUT_SECONDS: Final = 600
+VENDOR_NAMES: Final = ("hyperframes", "moneyprinterturbo")
 
 # Scripts that drive real acceptance runs rather than check a property. They
 # start Docker, build Apps and take minutes each, so they are not part of this
@@ -170,6 +172,96 @@ def reported_check_count(output: str) -> int:
     return sum(standard)
 
 
+def locked_vendor_revisions(lock_path: Path) -> dict[str, str]:
+    """Read the exact submodule revisions required by the tree under test."""
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"cannot read vendor source lock {lock_path}: {error}"
+        ) from error
+    sources = lock.get("sources") if isinstance(lock, dict) else None
+    if not isinstance(sources, list):
+        raise RuntimeError("vendor source lock has no sources list")
+    revisions: dict[str, str] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        path = source.get("path")
+        revision = source.get("commit")
+        if (
+            isinstance(path, str)
+            and isinstance(revision, str)
+            and path.startswith("vendor/")
+        ):
+            name = path.removeprefix("vendor/")
+            if name in VENDOR_NAMES and path == f"vendor/{name}":
+                revisions[name] = revision
+    if set(revisions) != set(VENDOR_NAMES):
+        raise RuntimeError("vendor source lock does not pin every required vendor")
+    return revisions
+
+
+def dirty_vendors(
+    vendor_root: Path,
+    *,
+    expected_revisions: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Return read-only vendor trees that are absent, invalid, or dirty."""
+    dirty: dict[str, str] = {}
+    for name in VENDOR_NAMES:
+        source = vendor_root / name
+        if not (source / ".git").exists():
+            dirty[name] = "submodule is not initialized"
+            continue
+        completed = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        problems: list[str] = []
+        if completed.returncode != 0:
+            problems.append(
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or "git status failed"
+            )
+        elif completed.stdout.strip():
+            problems.append(completed.stdout.strip())
+        if expected_revisions is not None:
+            expected = expected_revisions.get(name)
+            revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if expected is None:
+                problems.append("locked commit is missing")
+            elif revision.returncode != 0:
+                problems.append(
+                    revision.stderr.strip()
+                    or revision.stdout.strip()
+                    or "cannot read vendor HEAD"
+                )
+            elif revision.stdout.strip() != expected:
+                problems.append(
+                    f"HEAD {revision.stdout.strip()} does not match locked commit {expected}"
+                )
+        if problems:
+            dirty[name] = "\n".join(problems)
+    return dirty
+
+
+def _report_dirty_vendors(phase: str, dirty: Mapping[str, str]) -> None:
+    print(f"vendor cleanliness check failed {phase}:")
+    for name, status in sorted(dirty.items()):
+        print(f"  {name}: {status}")
+
+
 def _child_environment(repository_root: Path) -> dict[str, str]:
     """Put the tree under test ahead of editable working-tree installations."""
     environment = dict(os.environ)
@@ -259,6 +351,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="browser-use interpreter supplied by a commit checkout's host gate",
     )
+    parser.add_argument(
+        "--vendor-root",
+        type=Path,
+        default=REPOSITORY_ROOT / "vendor",
+        help="read-only vendor root supplied by a commit checkout's host gate",
+    )
+    parser.add_argument(
+        "--vendor-lock",
+        type=Path,
+        default=REPOSITORY_ROOT
+        / "contracts"
+        / "quality"
+        / "third-party-sources.v1.json",
+        help="source lock belonging to the tree under test",
+    )
     arguments = parser.parse_args(argv)
 
     python = arguments.project_python or interpreter(REPOSITORY_ROOT)
@@ -270,6 +377,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.browser_use_python
         else None
     )
+    try:
+        expected_revisions = locked_vendor_revisions(arguments.vendor_lock)
+    except RuntimeError as error:
+        print(error)
+        return 1
+    dirty_before = dirty_vendors(
+        arguments.vendor_root,
+        expected_revisions=expected_revisions,
+    )
+    if dirty_before:
+        _report_dirty_vendors("before tests", dirty_before)
+        return 1
+
     scripts = discover(REPOSITORY_ROOT)
     print(f"running {len(scripts)} script tests with {python}")
     results: list[ScriptResult] = []
@@ -290,13 +410,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     results.sort(key=lambda result: result.name)
     failures = [result for result in results if not result.ok]
+    dirty_after = dirty_vendors(
+        arguments.vendor_root,
+        expected_revisions=expected_revisions,
+    )
     for result in results:
         mark = "ok  " if result.ok else "FAIL"
         print(f"{mark} {result.name} ({result.seconds:.1f}s, {result.checks} checks)")
     for result in failures:
         print(f"\n----- {result.name} -----\n{result.output}")
+    if dirty_after:
+        _report_dirty_vendors("after tests", dirty_after)
     if failures:
         print(f"\n{len(failures)} of {len(results)} script tests failed")
+        return 1
+    if dirty_after:
         return 1
     if not aggregate_success(results):
         print("\nscript test suite reported zero executed checks")

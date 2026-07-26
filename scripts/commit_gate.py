@@ -32,16 +32,19 @@ roots cannot silently fall behind.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+
+from run_vendor_tests import extract_archive, materialize_repository
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parent.parent
 SCRIPTS_DIRECTORY: Final = REPOSITORY_ROOT / "scripts"
@@ -134,8 +137,7 @@ def checkout_commit(commit: str, destination: Path) -> Path:
         )
         if completed.returncode != 0:
             raise RuntimeError(f"git archive failed for {commit}: {completed.stderr}")
-        with tarfile.open(archive_path) as bundle:
-            bundle.extractall(destination, filter="data")
+        extract_archive(archive_path, destination)
     finally:
         archive_path.unlink(missing_ok=True)
     return destination
@@ -311,6 +313,7 @@ def _host_interpreter(environment: Path) -> Path:
     return environment / "bin" / "python"
 
 
+VENDOR_NAMES: Final = ("hyperframes", "moneyprinterturbo")
 _SCRIPT_TEST_SUMMARY: Final = re.compile(
     r"^all \d+ script tests passed \((?P<count>\d+) checks\)$",
     flags=re.MULTILINE,
@@ -326,8 +329,158 @@ def script_test_check_count(output: str) -> int | None:
     return matches[0]
 
 
+def _locked_vendor_revisions(checkout: Path) -> dict[str, str]:
+    lock_path = checkout / "contracts" / "quality" / "third-party-sources.v1.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"cannot read the commit's vendor source lock: {error}"
+        ) from error
+    sources = lock.get("sources") if isinstance(lock, dict) else None
+    if not isinstance(sources, list):
+        raise RuntimeError("the commit's vendor source lock has no sources list")
+
+    revisions: dict[str, str] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        path = source.get("path")
+        revision = source.get("commit")
+        if not isinstance(path, str) or not isinstance(revision, str):
+            continue
+        prefix = "vendor/"
+        name = path.removeprefix(prefix)
+        if path != f"{prefix}{name}" or name not in VENDOR_NAMES:
+            continue
+        revisions[name] = revision
+    if set(revisions) != set(VENDOR_NAMES):
+        raise RuntimeError(
+            "the commit's vendor source lock does not pin every required vendor"
+        )
+    return revisions
+
+
+def _vendor_tree_snapshot(vendor_root: Path) -> dict[str, tuple[object, ...]]:
+    """Hash materialized vendor files so post-test drift is independently visible."""
+    snapshot: dict[str, tuple[object, ...]] = {}
+    for path in sorted(vendor_root.rglob("*")):
+        relative_path = path.relative_to(vendor_root)
+        if ".git" in relative_path.parts:
+            continue
+        relative = relative_path.as_posix()
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", os.readlink(path))
+            continue
+        if not path.is_file():
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        metadata = path.stat()
+        snapshot[relative] = (
+            "file",
+            metadata.st_size,
+            metadata.st_mode & 0o777,
+            digest.hexdigest(),
+        )
+    return snapshot
+
+
+def _changed_vendor_files(
+    vendor_root: Path,
+    baseline: dict[str, tuple[object, ...]],
+) -> list[str]:
+    current = _vendor_tree_snapshot(vendor_root)
+    return sorted(
+        path
+        for path in baseline.keys() | current.keys()
+        if baseline.get(path) != current.get(path)
+    )
+
+
+def _vendor_git_drift(
+    vendor_root: Path,
+    revisions: dict[str, str],
+) -> dict[str, str]:
+    drift: dict[str, str] = {}
+    for name in VENDOR_NAMES:
+        source = vendor_root / name
+        problems: list[str] = []
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if status.returncode != 0:
+            problems.append(
+                status.stderr.strip() or status.stdout.strip() or "git status failed"
+            )
+        elif status.stdout.strip():
+            problems.append(status.stdout.strip())
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if head.returncode != 0:
+            problems.append(
+                head.stderr.strip() or head.stdout.strip() or "cannot read vendor HEAD"
+            )
+        elif head.stdout.strip() != revisions[name]:
+            problems.append(
+                f"HEAD {head.stdout.strip()} does not match locked commit {revisions[name]}"
+            )
+        if problems:
+            drift[name] = "\n".join(problems)
+    return drift
+
+
+def _materialize_vendor_sources(
+    checkout: Path,
+    *,
+    vendor_root: Path = REPOSITORY_ROOT / "vendor",
+) -> dict[str, tuple[object, ...]]:
+    """Clone locked vendor revisions into the disposable commit checkout."""
+    revisions = _locked_vendor_revisions(checkout)
+    for name in VENDOR_NAMES:
+        source = vendor_root / name
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if status.returncode != 0:
+            detail = status.stderr.strip() or status.stdout.strip()
+            raise RuntimeError(f"cannot inspect vendor/{name}: {detail}")
+        if status.stdout.strip():
+            raise RuntimeError(
+                f"vendor/{name} is dirty before slow-tier tests:\n"
+                f"{status.stdout.strip()}"
+            )
+
+        materialize_repository(
+            source,
+            checkout / "vendor" / name,
+            revisions[name],
+        )
+    return _vendor_tree_snapshot(checkout / "vendor")
+
+
 def run_script_test_check(checkout: Path) -> CheckResult:
     """Run every standalone Python test from the commit under inspection."""
+    try:
+        vendor_baseline = _materialize_vendor_sources(checkout)
+        vendor_revisions = _locked_vendor_revisions(checkout)
+    except (OSError, RuntimeError) as error:
+        return CheckResult("script-tests", False, str(error))
     python = _host_interpreter(REPOSITORY_ROOT / "backend" / ".venv")
     browser_use_python = _host_interpreter(
         REPOSITORY_ROOT / "tools" / "browser-use-contract" / ".venv"
@@ -337,6 +490,10 @@ def run_script_test_check(checkout: Path) -> CheckResult:
         os.fspath(checkout / "scripts" / "run_script_tests.py"),
         "--project-python",
         os.fspath(python),
+        "--vendor-root",
+        os.fspath(REPOSITORY_ROOT / "vendor"),
+        "--vendor-lock",
+        os.fspath(checkout / "contracts" / "quality" / "third-party-sources.v1.json"),
     ]
     if browser_use_python.is_file():
         command.extend(("--browser-use-python", os.fspath(browser_use_python)))
@@ -349,11 +506,34 @@ def run_script_test_check(checkout: Path) -> CheckResult:
     )
     output = (completed.stdout + completed.stderr).strip()
     executed_checks = script_test_check_count(output)
+    try:
+        vendor_changes = _changed_vendor_files(
+            checkout / "vendor",
+            vendor_baseline,
+        )
+        vendor_git_drift = _vendor_git_drift(
+            checkout / "vendor",
+            vendor_revisions,
+        )
+        vendor_changes.extend(
+            f"{name}: {detail}" for name, detail in sorted(vendor_git_drift.items())
+        )
+    except OSError as error:
+        vendor_changes = [f"vendor snapshot failed: {error}"]
     if completed.returncode == 0 and executed_checks is None:
         output = "\n".join(
             (
                 output,
                 "aggregate script tests did not report one positive check-count summary",
+            )
+        ).strip()
+    if vendor_changes:
+        detail = "\n".join(f"  {path}" for path in vendor_changes[:20])
+        output = "\n".join(
+            (
+                output,
+                "isolated vendor source changed during script tests:",
+                detail,
             )
         ).strip()
     return CheckResult(
@@ -362,7 +542,11 @@ def run_script_test_check(checkout: Path) -> CheckResult:
             if executed_checks is not None
             else "script-tests"
         ),
-        ok=completed.returncode == 0 and executed_checks is not None,
+        ok=(
+            completed.returncode == 0
+            and executed_checks is not None
+            and not vendor_changes
+        ),
         output=output,
     )
 
