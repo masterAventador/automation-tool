@@ -66,11 +66,11 @@ SPEC = "./e2e-tauri/motion-one-sentence.spec.ts"
 # The App's workbench sits behind a startup gate that needs the compile-time
 # action-trust triple and a reachable Control Plane. The plain `desktop-e2e`
 # family that `video-studio-e2e` belongs to has no entrypoint that supplies
-# either — `run_vf_06_acceptance.py` and `run_b5_04_acceptance.py` both build
-# without them — so nothing in that family currently reaches the workbench at
-# all. Rather than repair a pipeline nobody has run in a long time, this
-# acceptance is built on `control-plane-e2e`, whose handler was verified to
-# register every video and publish command.
+# either — `run_vf_06_acceptance.py` builds without them — so nothing in that
+# family currently reaches the workbench at all. Rather than repair a pipeline
+# nobody has run in a long time, this acceptance is built on
+# `control-plane-e2e`, whose handler was verified to register every video and
+# publish command.
 #
 # This is a change of *test driver*, not of product path: the commands, the
 # resource resolution and the render pipeline are the same code either way.

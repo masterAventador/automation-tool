@@ -20,6 +20,10 @@ async function assertMissing(relativePath) {
   await assert.rejects(access(new URL(relativePath, frontendRoot)), { code: "ENOENT" });
 }
 
+async function assertMissingScript(fileName) {
+  await assert.rejects(access(new URL(fileName, scriptsRoot)), { code: "ENOENT" });
+}
+
 function npmScriptRunsWdioConfig(script, config) {
   const escapedConfig = config.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   return new RegExp(
@@ -391,31 +395,125 @@ test("the zero-click H8-19 WDIO surrogate stays retired", async () => {
   ]);
 });
 
-test("blocked retirement debt keeps its current Python owners until coordinated deletion", async () => {
-  const debt = [
-    {
-      runner: "run_b5_04_acceptance.py",
-      config: "wdio.browser-settings.conf.ts",
-      spec: "browser-settings.spec.ts",
-    },
-    {
-      runner: "run_h8_20_acceptance.py",
-      config: "wdio.update-download.conf.ts",
-      spec: "update-download.spec.ts",
-    },
-    {
-      runner: "run_h8_21_acceptance.py",
-      config: "wdio.update-installation.conf.ts",
-      spec: "update-installation.spec.ts",
-    },
+// Retiring an entry leaves a dangling reference behind whenever the executor is
+// cleaned up second. The ownership test above only walks entries that still
+// exist, so it cannot see a runner that builds an App and then invokes a config
+// nobody ships any more; that failure only shows up in a real desktop run.
+test("no executor points at a WDIO entry that no longer exists", async () => {
+  const [packageText, configs, specs, scriptSources] = await Promise.all([
+    readFile(new URL("package.json", frontendRoot), "utf8"),
+    readDirectorySources(frontendRoot, (name) => /^wdio.*\.conf\.ts$/u.test(name)),
+    readdir(specsRoot),
+    readDirectorySources(scriptsRoot, (name) => name.endsWith(".py")),
+  ]);
+  const configNames = new Set(configs.keys());
+  const specNames = new Set(specs.filter((name) => name.endsWith(".spec.ts")));
+  const sources = [
+    ...Object.entries(JSON.parse(packageText).scripts).map(
+      ([name, script]) => [`package.json:${name}`, script],
+    ),
+    // `scripts/test_*.py` build synthetic trees whose runner and config names are
+    // deliberately fictional, so they are named here rather than scanned.
+    ...[...scriptSources]
+      .filter(([name]) => !name.startsWith("test_"))
+      .map(([name, source]) => [`scripts/${name}`, source]),
+    ...[...configs].map(([name, source]) => [`frontend/${name}`, source]),
   ];
 
-  for (const { runner, config, spec } of debt) {
-    const [runnerSource, configSource] = await Promise.all([
-      readFile(new URL(runner, scriptsRoot), "utf8"),
-      readFile(new URL(config, frontendRoot), "utf8"),
-    ]);
-    assert.match(runnerSource, new RegExp(config.replaceAll(".", "\\."), "u"));
-    assert.match(configSource, new RegExp(spec.replaceAll(".", "\\."), "u"));
+  const runnerNames = new Set(scriptSources.keys());
+  const dangling = new Set();
+  for (const [origin, source] of sources) {
+    for (const [reference] of source.matchAll(/wdio\.[\w.-]+\.conf\.ts/gu)) {
+      if (!configNames.has(reference)) dangling.add(`${origin} -> ${reference}`);
+    }
+    for (const [, reference] of source.matchAll(/e2e-tauri\/([\w.-]+\.spec\.ts)/gu)) {
+      if (!specNames.has(reference)) dangling.add(`${origin} -> ${reference}`);
+    }
+    for (const [, reference] of source.matchAll(/(?:^|[\s/'"])(run_\w+\.py)/gu)) {
+      if (!runnerNames.has(reference)) dangling.add(`${origin} -> ${reference}`);
+    }
+    for (const [, imported] of source.matchAll(/^from\s+(run_\w+)\s+import/gmu)) {
+      if (!runnerNames.has(`${imported}.py`)) dangling.add(`${origin} -> ${imported}.py`);
+    }
   }
+  assert.deepEqual([...dangling], [], "an executor still names a deleted entry");
+});
+
+// EB-10 (`f34e503`, 2026-07-24) deleted the whole user path this acceptance
+// drove, because CLAUDE.md §5 forbids discovering or selecting a system
+// browser. The spec has failed in every real desktop run since. Its scaffolding
+// — Vite mode, stubbed entry module, Tauri config, npm scripts, Python runner —
+// only ever existed to serve it, so it goes with it.
+test("the browser-selection acceptance is retired with the product path it drove", async () => {
+  const [packageText, viteConfig, globalStyles, startupEnvironment] = await Promise.all([
+    readFile(new URL("package.json", frontendRoot), "utf8"),
+    readFile(new URL("vite.config.ts", frontendRoot), "utf8"),
+    readFile(new URL("src/styles/global.css", frontendRoot), "utf8"),
+    readFile(new URL("e2e-tauri/startup-environment.spec.ts", frontendRoot), "utf8"),
+  ]);
+  const { scripts } = JSON.parse(packageText);
+
+  for (const name of [
+    "test:browser-settings-tauri",
+    "build:tauri:browser-settings-test",
+    "build:browser-settings-e2e-assets",
+  ]) {
+    assert.equal(scripts[name], undefined);
+  }
+  assert.doesNotMatch(viteConfig, /browser-settings-e2e/u);
+  assert.doesNotMatch(globalStyles, /browser-settings-card/u);
+  // The absence itself stays asserted, by the one spec written after EB-10.
+  assert.match(startupEnvironment, /browser-settings-card/u);
+  await Promise.all([
+    assertMissing("wdio.browser-settings.conf.ts"),
+    assertMissing("e2e-tauri/browser-settings.spec.ts"),
+    assertMissing("src/test-browser-settings-main.tsx"),
+    assertMissing("src-tauri/tauri.browser-settings-e2e.conf.json"),
+    assertMissingScript("run_b5_04_acceptance.py"),
+  ]);
+});
+
+// `update-installation.spec.ts` and `update-ui.spec.ts` were driven by the same
+// runner, the same App build and the same production feed, over the same three
+// scenarios. The only difference was that one invoked `decide_app_update`
+// directly while the other clicked the buttons a user clicks — and CLAUDE.md §8
+// says a direct Command call is layered evidence, never acceptance. That makes
+// the zero-click spec a strictly weaker duplicate, and `run_h8_22_acceptance.py`
+// a second name for one run.
+test("the zero-click installation surrogate gives way to the clicking update UI", async () => {
+  const [packageText, runner] = await Promise.all([
+    readFile(new URL("package.json", frontendRoot), "utf8"),
+    readFile(new URL("run_h8_21_acceptance.py", scriptsRoot), "utf8"),
+  ]);
+  const { scripts } = JSON.parse(packageText);
+
+  assert.equal(scripts["test:h8-22-app"], undefined);
+  assert.notEqual(scripts["test:h8-21-app"], undefined);
+  // The shared hidden App build survives: it is what the surviving spec runs on.
+  assert.notEqual(scripts["build:tauri:update-installation-test"], undefined);
+  assert.match(runner, /wdio\.update-ui\.conf\.ts/u);
+  assert.doesNotMatch(runner, /wdio\.update-installation\.conf\.ts/u);
+  await Promise.all([
+    assertMissing("wdio.update-installation.conf.ts"),
+    assertMissing("e2e-tauri/update-installation.spec.ts"),
+    assertMissingScript("run_h8_22_acceptance.py"),
+  ]);
+});
+
+// H8-20 keeps its own spec because nothing else interrupts a download: the
+// resumable transfer, the retryable failure and the cache convergence are only
+// reachable through it. What it may not keep is triggering the recovery over
+// IPC, so the action moves onto the button in 设置与诊断. The one assertion the
+// retired H8-21 spec did not share — that the update flow opens no second
+// window — moves onto the surviving update UI spec.
+test("every retained update acceptance decides through visible App controls", async () => {
+  const [download, ui] = await Promise.all([
+    readFile(new URL("e2e-tauri/update-download.spec.ts", frontendRoot), "utf8"),
+    readFile(new URL("e2e-tauri/update-ui.spec.ts", frontendRoot), "utf8"),
+  ]);
+
+  assert.match(download, /button=检查更新/u);
+  assert.doesNotMatch(download, /invoke\("check_app_update_now"\)/u);
+  assert.doesNotMatch(download, /invoke\("decide_app_update"/u);
+  assert.match(ui, /listWindows\(\)/u);
 });

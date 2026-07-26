@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Run H8-21 through hidden Tauri App launches and the production update feed."""
+"""Run the update decision and installation acceptance (H8-21 and H8-22).
+
+The three scenarios below used to be driven twice: once by a spec that invoked
+`decide_app_update` over IPC, and once by `update-ui.spec.ts`, which clicks the
+buttons a user clicks. Same runner, same App build, same feed, same assertions
+about the cache and the artifact ledger — only the way the decision was made
+differed, and a direct Command call is layered evidence rather than acceptance.
+The clicking spec is therefore the only one left, and it answers for both tasks.
+"""
 
 from __future__ import annotations
 
@@ -166,12 +174,11 @@ def run_hidden_app(
     environment: dict[str, str],
     scenario: str,
     webdriver_port: int,
-    wdio_config: str,
 ) -> None:
     require_port_closed(webdriver_port)
     run_environment = {**environment, "H821_SCENARIO": scenario}
     subprocess.run(
-        [pnpm_executable(), "exec", "wdio", "run", wdio_config],
+        [pnpm_executable(), "exec", "wdio", "run", "wdio.update-ui.conf.ts"],
         cwd=FRONTEND_ROOT,
         env=run_environment,
         check=True,
@@ -203,12 +210,7 @@ def verify_cache(private_app_data: Path, expected_version: str) -> None:
                 raise RuntimeError("H8-21 cache file is not private")
 
 
-def run(wdio_config: str = "wdio.update-installation.conf.ts") -> None:
-    if wdio_config not in {
-        "wdio.update-installation.conf.ts",
-        "wdio.update-ui.conf.ts",
-    }:
-        raise RuntimeError("H8-21 WDIO configuration is invalid")
+def run() -> None:
     require_hidden_configuration()
     private_app_data = app_data_directory()
     if private_app_data.exists():
@@ -251,7 +253,7 @@ def run(wdio_config: str = "wdio.update-installation.conf.ts") -> None:
                 env=environment,
                 check=True,
             )
-            run_hidden_app(environment, "optional", webdriver_port, wdio_config)
+            run_hidden_app(environment, "optional", webdriver_port)
             verify_cache(private_app_data, "0.3.0")
             if artifact_ledger != ["0.2.0", "0.3.0"]:
                 raise RuntimeError(
@@ -261,13 +263,13 @@ def run(wdio_config: str = "wdio.update-installation.conf.ts") -> None:
             shutil.rmtree(private_app_data)
             artifact_ledger.clear()
             mode.update({"scenario": "forced", "feed_count": 0})
-            run_hidden_app(environment, "forced-first", webdriver_port, wdio_config)
+            run_hidden_app(environment, "forced-first", webdriver_port)
             verify_cache(private_app_data, "0.2.0")
             if artifact_ledger != ["0.2.0"]:
                 raise RuntimeError(
                     "H8-21 forced first launch did not download exactly once"
                 )
-            run_hidden_app(environment, "forced-reopen", webdriver_port, wdio_config)
+            run_hidden_app(environment, "forced-reopen", webdriver_port)
             if artifact_ledger != ["0.2.0"]:
                 raise RuntimeError(
                     "H8-21 forced reopen downloaded the verified package again"

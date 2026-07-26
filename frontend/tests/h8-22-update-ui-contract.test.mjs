@@ -29,7 +29,10 @@ test("H8-22 owns a hidden original-App UI acceptance without claiming platform s
   const [spec, config, runner] = await Promise.all([
     readFile(new URL("e2e-tauri/update-ui.spec.ts", frontendRoot), "utf8"),
     readFile(new URL("wdio.update-ui.conf.ts", frontendRoot), "utf8"),
-    readFile(new URL("../scripts/run_h8_22_acceptance.py", frontendRoot), "utf8"),
+    // One runner now serves H8-21 and H8-22: the decision coordination and the
+    // UI that reaches it are the same three scenarios on the same hidden App,
+    // so a second entry point would only run the identical acceptance twice.
+    readFile(new URL("../scripts/run_h8_21_acceptance.py", frontendRoot), "utf8"),
   ]);
 
   assert.match(spec, /button=稍后提醒/u);

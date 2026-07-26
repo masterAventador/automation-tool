@@ -5,7 +5,6 @@ import { harnessPort } from "./src/test-harness/harness-port";
 
 const desktopE2EMode = "desktop-e2e";
 const controlPlaneE2EMode = "control-plane-e2e";
-const browserSettingsE2EMode = "browser-settings-e2e";
 const modelServiceE2EMode = "model-service-e2e";
 
 export default defineConfig(({ mode }) => ({
@@ -19,16 +18,9 @@ export default defineConfig(({ mode }) => ({
           if (
             mode !== desktopE2EMode &&
             mode !== controlPlaneE2EMode &&
-            mode !== browserSettingsE2EMode &&
             mode !== modelServiceE2EMode
           ) {
             return html;
-          }
-          if (mode === browserSettingsE2EMode) {
-            return html.replace(
-              "/src/main.tsx",
-              "/src/test-browser-settings-main.tsx",
-            );
           }
           if (mode === modelServiceE2EMode) {
             return html.replace(

@@ -127,7 +127,10 @@ test("H8-20 validates a real hidden App against the production FastAPI feed", as
   assert.equal(configuration.identifier, "com.aventador.automationtool.h820acceptance");
   assert.equal(configuration.app.windows[0].visible, false);
   assert.match(wdioConfig, /update-download\.spec\.ts/u);
-  assert.match(spec, /check_app_update_now/u);
+  // The manual re-check is reached the way a user reaches it, from the button in
+  // 设置与诊断; invoking `check_app_update_now` from the spec proved the command
+  // worked, not that anybody could get to it.
+  assert.match(spec, /button=检查更新/u);
   assert.match(spec, /transport_unavailable/u);
   assert.match(runner, /create_app\(database=None, desktop_update_catalog=catalog\)/u);
   assert.match(runner, /bytes=2-/u);

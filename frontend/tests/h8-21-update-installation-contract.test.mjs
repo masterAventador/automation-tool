@@ -37,13 +37,16 @@ test("H8-21 routes decisions and cached packages through one Rust-only install c
   assert.doesNotMatch(packageManifest, /@tauri-apps\/plugin-updater/u);
 });
 
-test("H8-21 acceptance stays hidden and uses the production feed plus App commands", async () => {
+test("H8-21 acceptance stays hidden and decides through the production update UI", async () => {
   const [tauriConfig, spec, runner] = await Promise.all([
     readFile(
       new URL("src-tauri/tauri.update-installation-e2e.conf.json", frontendRoot),
       "utf8",
     ),
-    readFile(new URL("e2e-tauri/update-installation.spec.ts", frontendRoot), "utf8"),
+    // The zero-click surrogate that used to live here was retired: it drove the
+    // same runner, build and scenarios as `update-ui.spec.ts` but reached the
+    // decisions over IPC, which CLAUDE.md §8 does not accept as acceptance.
+    readFile(new URL("e2e-tauri/update-ui.spec.ts", frontendRoot), "utf8"),
     readFile(new URL("scripts/run_h8_21_acceptance.py", repositoryRoot), "utf8"),
   ]);
   const configuration = JSON.parse(tauriConfig);
@@ -51,8 +54,7 @@ test("H8-21 acceptance stays hidden and uses the production feed plus App comman
   assert.equal(configuration.identifier, "com.aventador.automationtool.h821acceptance");
   assert.equal(configuration.app.windows[0].visible, false);
   assert.equal(configuration.build.frontendDist, "../dist-h821");
-  assert.match(spec, /decide_app_update/u);
-  assert.match(spec, /install_now/u);
+  assert.match(spec, /button=立即安装/u);
   assert.match(spec, /installation_launched/u);
   assert.match(runner, /create_app\(database=None, desktop_update_catalog=/u);
   assert.match(runner, /AUTOMATION_TOOL_UPDATE_INSTALL_PROBE/u);
