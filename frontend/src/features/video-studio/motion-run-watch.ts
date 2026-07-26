@@ -40,12 +40,13 @@ import type {
   MotionRenderJobSnapshot,
 } from "./material-video-studio-gateway";
 import {
+  endMotionJob,
   failMotionRun,
-  markMotionJobEnded,
   motionRunNeedsWatch,
   motionRunSnapshot,
   reportMotionRunTracking,
   useMotionRun,
+  type MotionJobEnding,
 } from "./motion-run-store";
 
 /**
@@ -71,11 +72,19 @@ const WATCH_INTERVAL_MS = 5_000;
  */
 const LOST_AFTER_CONSECUTIVE_MISSES = 3;
 
-const ENDED_STATUSES: ReadonlySet<MotionRenderJobSnapshot["status"]> = new Set([
-  "succeeded",
-  "failed",
-  "cancelled",
-]);
+/**
+ * Which render statuses end a run, and how the store should record each.
+ *
+ * A lookup rather than a set of terminal statuses, because the store now keeps
+ * *how* a job ended and a `Set.has` check proves nothing to the compiler about
+ * which of the three it was. Statuses missing from this table are the ones that
+ * mean the render is still going.
+ */
+const ENDINGS: Partial<Record<MotionRenderJobSnapshot["status"], MotionJobEnding>> = {
+  succeeded: "succeeded",
+  failed: "failed",
+  cancelled: "cancelled",
+};
 
 /**
  * What the sidebar says about a render that died while nobody was looking.
@@ -125,7 +134,7 @@ export function useMotionRunWatch(gateway: MaterialVideoStudioGateway): void {
       if (stopped) return;
       let unseen = false;
       for (const [renderJobId, own] of motionRunSnapshot().ownJobs) {
-        if (own.ended) continue;
+        if (own.outcome !== "running") continue;
         const job = jobs.find((candidate) => candidate.renderJobId === renderJobId);
         // A job this session started that the App can no longer find is the
         // same problem as a read that threw: it is still owed an outcome and
@@ -135,13 +144,16 @@ export function useMotionRunWatch(gateway: MaterialVideoStudioGateway): void {
           unseen = true;
           continue;
         }
-        if (!ENDED_STATUSES.has(job.status)) continue;
-        if (job.status === "failed") {
+        const ending = ENDINGS[job.status];
+        if (ending === undefined) continue;
+        if (ending === "failed") {
           failMotionRun({ tone: "error", text: renderFailedText(job.subject) });
         }
         // Ended, not forgotten: a finished film is still owed its 去看成片
-        // announcement the next time the operator opens the page.
-        markMotionJobEnded(renderJobId);
+        // announcement the next time the operator opens the page — and, since
+        // the ending is recorded rather than flattened, the sidebar can now
+        // offer it from wherever the operator happens to be standing.
+        endMotionJob(renderJobId, ending);
       }
       if (unseen) {
         missed();

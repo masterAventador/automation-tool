@@ -58,10 +58,16 @@ const publishingProps =
   publishing === undefined
     ? {}
     : { publishWorkspaceGateway: publishing, selectedVideo: HARNESS_SELECTED_VIDEO };
-const videoStudioProps =
+const motionRenderEnding =
   scenario === "motion-render-failure"
-    ? { materialVideoStudioGateway: new TestHarnessVideoStudio() }
-    : {};
+    ? "failed"
+    : scenario === "motion-render-success"
+      ? "succeeded"
+      : null;
+const videoStudioProps =
+  motionRenderEnding === null
+    ? {}
+    : { materialVideoStudioGateway: new TestHarnessVideoStudio(motionRenderEnding) };
 const taskLifecycleProps =
   taskLifecycle === undefined
     ? {}

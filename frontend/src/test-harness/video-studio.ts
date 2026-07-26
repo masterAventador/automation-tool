@@ -9,24 +9,43 @@ import type {
 } from "../features/video-studio/material-video-studio-gateway";
 
 /**
- * A one-sentence film whose authoring succeeds and whose render then fails.
+ * A one-sentence film whose authoring succeeds and whose render then ends —
+ * badly or well, whichever the scenario asked for.
  *
  * The shell's own fallback gateway refuses the submission outright, which is
  * the timing `video-studio-one-sentence.spec.ts` already covers: the failure
  * arrives from the submit call itself. The window this harness exists for is
  * the other one — the submission succeeds, a real render job starts, and the
- * render dies afterwards, with nobody on the page to see it. Nothing in the
+ * render ends afterwards, with nobody on the page to see it. Nothing in the
  * product used to look at that job unless the studio page happened to be
  * mounted, so the sidebar went on showing 正在进行中 over a film that was over.
  *
- * The render is failed on a wall clock rather than after a fixed number of
+ * Both endings run through the same harness rather than two, because the
+ * defect is one shape with two faces: the sidebar keeps claiming progress no
+ * matter how the render actually finished. Splitting them would leave two
+ * copies of the timing to keep in step.
+ *
+ * The render is ended on a wall clock rather than after a fixed number of
  * polls, because two different pollers read this gateway at two different
  * rates and a count would make the test depend on which of them got there
  * first. Four seconds is long enough for the operator to have clicked away and
- * short enough to keep the spec quick; the spec never asserts on the interval
+ * short enough to keep the spec quick; the specs never assert on the interval
  * itself, only on what the sidebar says once the render is over.
  */
-const RENDER_FAILS_AFTER_MS = 4_000;
+const RENDER_ENDS_AFTER_MS = 4_000;
+
+/** How the harness render finishes. */
+export type HarnessRenderEnding = "failed" | "succeeded";
+
+/**
+ * The film the successful ending leaves behind.
+ *
+ * A v4 UUID because that is what the real gateway's parser insists on, and a
+ * different one from any unit-test fixture on purpose: nothing links the two,
+ * and a shared literal would suggest otherwise.
+ */
+const FINISHED_ARTIFACT_ID = "5d7e2a41-3c8b-4f19-9e6d-0a2b4c6d8e10";
+
 /**
  * The authoring pass is 124 seconds on the real thing (measured). It is
  * collapsed here on purpose: this scenario is about what happens *after*
@@ -42,6 +61,11 @@ function delay(milliseconds: number): Promise<void> {
 export class TestHarnessVideoStudio implements MaterialVideoStudioGateway {
   #job: MotionRenderJobSnapshot | null = null;
   #renderStartedAt = 0;
+  readonly #ending: HarnessRenderEnding;
+
+  constructor(ending: HarnessRenderEnding) {
+    this.#ending = ending;
+  }
 
   async open(): Promise<MaterialVideoStudioSnapshot> {
     return { state: "opened", modelId: "qwen3.7-max-2026-06-08" };
@@ -74,8 +98,21 @@ export class TestHarnessVideoStudio implements MaterialVideoStudioGateway {
 
   async motionJobs(): Promise<readonly MotionRenderJobSnapshot[]> {
     if (this.#job === null) return [];
-    if (Date.now() - this.#renderStartedAt < RENDER_FAILS_AFTER_MS) return [this.#job];
-    return [{ ...this.#job, status: "failed", progressPercent: 62, failureCode: "render_failed" }];
+    if (Date.now() - this.#renderStartedAt < RENDER_ENDS_AFTER_MS) return [this.#job];
+    if (this.#ending === "failed") {
+      return [
+        { ...this.#job, status: "failed", progressPercent: 62, failureCode: "render_failed" },
+      ];
+    }
+    return [
+      {
+        ...this.#job,
+        status: "succeeded",
+        progressPercent: 100,
+        artifactId: FINISHED_ARTIFACT_ID,
+        artifactSizeBytes: 4096,
+      },
+    ];
   }
 
   async cancelMotionRenderJob(): Promise<void> {
