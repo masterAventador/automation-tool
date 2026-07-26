@@ -25,6 +25,7 @@
     "build:tauri:browser-settings-test": "tauri build --debug --no-bundle --features desktop-e2e --config src-tauri/tauri.browser-settings-e2e.conf.json",
     "build:tauri:model-service-test": "tauri build --debug --no-bundle --features desktop-e2e --config src-tauri/tauri.model-service-e2e.conf.json",
     "build:tauri:video-studio-test": "tauri build --debug --no-bundle --features video-studio-e2e --config src-tauri/tauri.video-studio-e2e.conf.json",
+    "build:tauri:t36-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.t36-e2e.conf.json",
     "build:tauri:diagnostic-export-test": "tauri build --debug --no-bundle --features desktop-e2e --config src-tauri/tauri.diagnostic-export-e2e.conf.json",
     "build:tauri:executor-lifecycle-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.executor-lifecycle-e2e.conf.json",
     "build:tauri:installation-revocation-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.installation-revocation-e2e.conf.json",

@@ -56,6 +56,11 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     // on the workbench heading: mounted, blocked by the startup gate, or still
     // checking because a probe never came back. Whatever it is, report the
     // screen — "neither" sends the next person back to reproduce it by hand.
+    // A run that dies mid-way must say how far it got. Without these the only
+    // signal is a bare "Timeout" and the next person cannot tell a slow model
+    // from a stuck render from a page that never mounted.
+    const step = (name: string): void => console.log(`[T36 step] ${name}`);
+
     const startupScreen = async (): Promise<string> =>
       browser.execute(() => document.body?.innerText ?? "<empty document>");
     try {
@@ -72,6 +77,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
       throw new Error(`App is blocked at the startup gate:\n${await startupScreen()}`);
     }
 
+    step("workbench mounted");
     // --- The prerequisite, through the form a user actually fills ----------
     await openWorkbenchSection("设置与诊断");
     await expect(await browser.$("h2")).toHaveText("设置与诊断");
@@ -87,6 +93,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     );
     assert.doesNotMatch(await browser.$("body").getText(), new RegExp(apiKey));
 
+    step("model credential saved");
     // --- An empty sentence is refused before anything is started ----------
     const studio = await openVideoStudio();
     await expect(await studio.$("textarea[aria-label='一句话视频需求']")).toBeDisplayed();
@@ -104,6 +111,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     await expect(studio).toHaveText(expect.stringContaining("还没有真实制作任务"));
     await studio.$("div[role='tab']=新建视频").click();
 
+    step("empty brief refused, no job created");
     // --- One sentence, and nothing else ------------------------------------
     await studio.$("textarea[aria-label='一句话视频需求']").setValue(BRIEF);
     await studio.$("button=开始自动制作").click();
@@ -124,6 +132,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
       { timeout: 900_000, interval: 1_000, timeoutMsg: "one-sentence submission never landed" },
     );
 
+    step("brief submitted, waiting on the film");
     // --- The progress a user watches ---------------------------------------
     await studio.$("div[role='tab']=制作任务").click();
     const stagesSeen: string[] = [];
@@ -163,6 +172,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
       `progress never advanced through distinct values to 100: ${JSON.stringify(percentsSeen)}`,
     );
 
+    step("film finished, opening the artifact");
     // --- Preview, in the App, through the existing player -------------------
     await studio.$("div[role='tab']=成片").click();
     const play = await studio.$(`button[aria-label='播放${BRIEF}']`);

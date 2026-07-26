@@ -43,11 +43,8 @@ from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
 from run_i2_13_acceptance import BACKEND_ROOT, REPOSITORY_ROOT, compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
-    APP_IDENTIFIER,
     DEBUG_APP_RESOURCE_ROOT,
     FRONTEND,
-    TAURI_CONFIG,
-    app_data_directory,
     pnpm_executable,
     require_port_closed,
     require_staged_embedded_browser,
@@ -58,12 +55,54 @@ from run_vf_06_acceptance import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = "./e2e-tauri/motion-one-sentence.spec.ts"
+
+# Why this acceptance runs on a `control-plane-e2e` build and not on
+# `video-studio-e2e`, which is where the video studio's other specs live:
+#
+# The App's workbench sits behind a startup gate that needs the compile-time
+# action-trust triple and a reachable Control Plane. The plain `desktop-e2e`
+# family that `video-studio-e2e` belongs to has no entrypoint that supplies
+# either — `run_vf_06_acceptance.py` and `run_b5_04_acceptance.py` both build
+# without them — so nothing in that family currently reaches the workbench at
+# all. Rather than repair a pipeline nobody has run in a long time, this
+# acceptance is built on `control-plane-e2e`, whose handler was verified to
+# register every video and publish command.
+#
+# This is a change of *test driver*, not of product path: the commands, the
+# resource resolution and the render pipeline are the same code either way.
+# The single-build-path rule forbids a build changing where the product looks
+# for things; it does not require every acceptance to use the same driver.
+# The real acceptance is on the signed package regardless — a test build is
+# layered evidence wherever it runs.
+APP_IDENTIFIER = "com.aventador.automationtool.t36acceptance"
+TAURI_CONFIG = FRONTEND / "src-tauri" / "tauri.t36-e2e.conf.json"
+BUILD_SCRIPT = "build:tauri:t36-test"
+WDIO_CONFIG = "wdio.t36.conf.ts"
 DEFAULT_SECRET = ROOT / ".local/secrets/bailian-model.json"
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/t36-evidence"
 # Every isolated resource this run creates carries this stem plus the pid, so a
 # stray container, network or volume can always be traced back to one run of
 # this entrypoint and cleaned up without guessing whose it is.
 PROJECT_STEM = "automation-tool-t36"
+
+
+def app_data_directory() -> Path:
+    """This acceptance's own private App data directory.
+
+    Keyed to this entrypoint's identifier so that deleting it can never touch
+    another acceptance's state — or the user's real installation, which lives
+    under the unsuffixed identifier and holds hand-scanned platform sessions.
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
+    if sys.platform == "win32":
+        roaming = os.environ.get("APPDATA")
+        if roaming is None:
+            raise RuntimeError("Windows roaming AppData is unavailable")
+        return Path(roaming) / APP_IDENTIFIER
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
+    return base / APP_IDENTIFIER
 
 
 def isolated_ports() -> tuple[int, int]:
@@ -192,7 +231,7 @@ def run_desktop_acceptance(
     )
     try:
         subprocess.run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
+            [pnpm_executable(), BUILD_SCRIPT],
             cwd=FRONTEND,
             env=environment,
             check=True,
@@ -204,7 +243,7 @@ def run_desktop_acceptance(
                 "exec",
                 "wdio",
                 "run",
-                "wdio.video-studio.conf.ts",
+                WDIO_CONFIG,
                 "--spec",
                 SPEC,
             ],

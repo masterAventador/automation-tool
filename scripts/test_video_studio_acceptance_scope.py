@@ -29,10 +29,23 @@ DELEGATED_SPECS: dict[str, str] = {
     # Needs a real frozen Python Worker injected through
     # AUTOMATION_TOOL_IM05_WORKER, which the VF-06 entrypoint never builds.
     WEBUI_SPEC: "run_im_05_acceptance.py",
-    # Needs a real video-creation model key, a verified Executor package and the
-    # staged video runtime; VF-06 sets up none of the three, so it would fail on
-    # the first submission rather than on anything about the product.
-    "./e2e-tauri/motion-one-sentence.spec.ts": "run_t36_acceptance.py",
+}
+
+# Specs that left this wdio configuration for one of their own, with the runner
+# configuration they moved to and the entrypoint that drives it.
+#
+# Moving a spec out of a shared configuration is the easiest way to lose it:
+# nothing in the old configuration misses it, and the new one is only ever read
+# by the entrypoint that names it. So each move is recorded here and both ends
+# are checked — the configuration must list the spec, and the entrypoint must
+# name the configuration.
+RELOCATED_SPECS: dict[str, tuple[str, str]] = {
+    # Waits on a real model round trip and a 360 frame render, which do not fit
+    # the three minute Mocha budget this configuration gives its other specs.
+    "./e2e-tauri/motion-one-sentence.spec.ts": (
+        "wdio.t36.conf.ts",
+        "run_t36_acceptance.py",
+    ),
 }
 
 
@@ -75,6 +88,28 @@ def main() -> int:
             raise AssertionError(
                 f"{spec} is excluded from the VF-06 full run and {owner} no longer "
                 "references it, so nothing executes it at all"
+            )
+
+    for spec, (wdio_configuration, owner) in RELOCATED_SPECS.items():
+        if spec in configured:
+            raise AssertionError(
+                f"{spec} is recorded as relocated but is still listed in "
+                "wdio.video-studio.conf.ts; it would run twice, under two budgets"
+            )
+        relocated = ROOT / "frontend" / wdio_configuration
+        if not relocated.is_file() or spec not in relocated.read_text(encoding="utf-8"):
+            raise AssertionError(
+                f"{spec} moved to {wdio_configuration}, which does not list it; "
+                "the spec now belongs to no runner configuration at all"
+            )
+        entrypoint = ROOT / "scripts" / owner
+        if not entrypoint.is_file():
+            raise AssertionError(f"{spec} is driven by {owner}, which does not exist")
+        source = entrypoint.read_text(encoding="utf-8")
+        if wdio_configuration not in source or spec not in source:
+            raise AssertionError(
+                f"{owner} no longer names both {wdio_configuration} and {spec}, "
+                "so nothing executes that spec"
             )
 
     arguments = getattr(vf06, "desktop_wdio_arguments", list)()

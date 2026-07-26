@@ -828,15 +828,109 @@ Error: App reached neither the workbench nor the startup repair path
 是继续逐个修通，还是把视频线的验收改建在已经在跑的 `control-plane-e2e` 构建上，
 需要单独决定——不在本任务里顺手做。
 
+### 本次落地：App 验收改建在 `control-plane-e2e` 构建族上
+
+**这是有意选择，不是随手挑的。下一个人别以为 `video-studio-e2e` 那条路验过了——它没有。**
+
+| | `video-studio-e2e`（原计划） | `control-plane-e2e`（现选） |
+| --- | --- | --- |
+| 所属 feature 族 | `desktop-e2e` | 独立 |
+| 视频 + 发布命令 | 全在 | **全在**（前一条工作线已核实） |
+| 编译期动作信任三元组 | 该族**没有任何入口**注入 | `startup_gate_environment()`，多个入口在用 |
+| Control Plane | 该族**没有任何入口**起过 | 多个入口在起 |
+| 实测能否进工作台 | ❌ 四道门后仍未进 | 本次验证 |
+
+理由：App 的工作台在启动门禁后面，门禁要编译期三元组 + 可达 Control Plane。
+纯 `desktop-e2e` 族没有任何入口提供这两样（`run_vf_06_acceptance.py` 与
+`run_b5_04_acceptance.py` 都没有），**该族目前整体进不了工作台**。
+与其去修一条长期没人走的验收管道，不如把证据拿在已经在跑的构建族上。
+
+**这是换测试驱动，不是换产品路径。** 两个构建跑的是同一份产品代码：同样的命令、
+同样的资源解析、同样的渲染链路。「单一构建路径规范」禁止的是**产品去哪里找**
+文件/资源/进程因构建而异，不是要求所有验收共用一个驱动。而且真正的验收本来就在正式包上，
+测试构建在哪个族拿到「App 内点得通」，作为分层证据价值相同。
+
+**边界（写下来免得下次含糊）**：如果 `control-plane-e2e` 上也撞到**产品行为缺陷**
+（像账号门禁那种），照样修产品、单独报，不能靠挑一个"恰好能跑"的构建掩盖过去。
+
+新增件：`frontend/src-tauri/tauri.t36-e2e.conf.json`（独立 identifier
+`com.aventador.automationtool.t36acceptance`、隐藏窗口）、`pnpm build:tauri:t36-test`。
+Runner 自带 `app_data_directory()`，钉在自己的 identifier 上——删它永远碰不到别的验收，
+更碰不到用户那个不带后缀的真实安装（里面有手工扫码的平台会话）。
+
+#### 第五道门（我自己造的）：三分钟 Mocha 预算把渲染拦腰截断
+
+第一次在 `control-plane-e2e` 上跑，3 分 02 秒后一个**光秃秃的 `Error: Timeout`**，
+node 定时器堆栈，没有任何一句说卡在哪。3 分 02 秒对上了
+`wdio.video-studio.conf.ts` 里的 `mochaOpts.timeout: 180_000`——
+我在用例里写的 `this.timeout(1_500_000)` 没有生效。
+
+这条链路要等一次真实模型往返再等 360 帧渲染，本来就装不进 3 分钟；
+而把共享配置的预算抬到 30 分钟，会让同一份配置下另外 5 条 spec 的失败也慢到 30 分钟。
+所以给它**自己的 `frontend/wdio.t36.conf.ts`**（预算 30 分钟），
+顺带解决了"control-plane-e2e 构建跑在一个叫 video-studio 的配置下"这个名不副实。
+
+**搬走 spec 最容易把它搞丢**：旧配置不会想念它，新配置只有那个入口会读。
+所以门禁里新增 `RELOCATED_SPECS`（spec → 新配置 + 驱动它的入口），两头都校验——
+新配置必须列它、入口必须同时点名配置和 spec，并且旧配置里不许还留着（否则会按两套预算跑两遍）。
+变异检验：把新配置的 `specs` 清空 → 门禁报
+「moved to wdio.t36.conf.ts, which does not list it; the spec now belongs to no runner configuration at all」。
+
+用例同时补上阶段标记（`[T36 step] …`）：一个中途死掉的运行必须说清走到哪一步，
+否则下一个人只看到一句 `Timeout`，分不清是模型慢、渲染卡住、还是页面根本没挂载。
+
+#### `control-plane-e2e` 上的实跑：前三步真的走通了，第四步卡在提交
+
+```text
+[T36 step] workbench mounted                   ← 工作台真的挂载了
+[T36 step] model credential saved              ← 正式设置表单存下了真实密钥，页面不回显
+[T36 step] empty brief refused, no job created ← 空描述被人话拒绝，且没有产生任务
+Error: the App could not resolve the packaged render runtime
+1 failing (15m 5.4s)
+```
+
+**换构建族是对的判断**：`video-studio-e2e` 上四道门都没进得去工作台，
+`control-plane-e2e` 上一次就进去了，而且前三步全部是真实用户路径上的动作。
+其中第三步是**证据 4 里唯一用户能触发的那一半**，现在在真实 App 里拿到了。
+
+#### 第六道门：提交一句话后约 14 分钟，报 `render_unavailable`（**未修，按上限停手**）
+
+已经确定的事实：
+
+- 前三步约 1 分钟走完，剩下约 14 分钟全耗在「提交 → 等回应」这一步；
+- 最终错误码是 `render_unavailable`（用例专门分辨了 `configuration_required`
+  与 `render_unavailable`，所以不是模型没配）；
+- 同一个 `--author-motion` 入口在分层探针里跑 6 秒片长时**1～2 分钟就返回**，
+  而 App 提交的是 12 秒片长（`beatCountDefault × secondsPerBeatDefault`）。
+
+**尚未证实的推断**（写清楚，不当结论用）：`run_motion_authoring()` 的
+`MOTION_AUTHORING_DEADLINE` 是 600 秒，超时即 kill 子进程并返回 `render_unavailable`。
+14 分钟这个量级与「跑满 10 分钟被杀 + 轮询开销」吻合，但 `render_unavailable`
+是个粗粒度码，`motion_runtime_paths` / `seed_authoring_runtime` /
+`verified_entrypoint` / `accept_authored_render_job` / `start_motion_render`
+都会产出同一个码，而子进程 stderr 是**有意丢弃**的（防止把模型回显带出来）。
+**所以现在无法从外部断定是哪一处。**
+
+**顺带发现一个产品问题（未修，需单独决定）**：这条失败给用户看到的是
+「本机渲染组件暂时不可用，请到设置与诊断检查组件」。如果真因是模型调用慢或失败，
+这句话会把用户支去检查一个根本没坏的东西——和素材线那次「请检查视频组件与磁盘空间」
+是同一类误导。演示现场出现这句会很难看。
+
+**下一步建议**（不在本轮做）：先让这条路径的失败可分辨——把编排子进程的失败原因
+分成"超时 / 子进程非零退出 / 答复不合格"三个码，再决定 10 分钟预算够不够。
+在能分辨之前，加大超时或改文案都是猜。
+
 ### 四条证据的当前状态（不许含糊）
 
 | 证据 | 状态 |
 | --- | --- |
-| 1 进度是真的 | ❌ 未取得（App 进不去） |
+| 1 进度是真的 | ❌ 未取得（提交这一步就没过去） |
 | 2 成片真的在动 + 静图门禁拦得住 | ✅ 已取得（分层实跑，见上文） |
-| 3 预览能播 | ❌ 未取得（App 进不去） |
-| 4 超边界 brief 在 App 里被拒 | ⚠️ 查明**该路径不存在**：入口没有片长控件、文本框有 `maxLength`，
-五种越界里只有"空 brief"用户能触发。已改为明示成片时长，用例断言能到达的那一半 |
+| 3 预览能播 | ❌ 未取得（同上） |
+| 4 超边界 brief 在 App 里被拒 | ⚠️ 查明**原路径不存在**：入口没有片长控件、文本框有 `maxLength`，五种越界里只有"空 brief"用户能触发。**能到达的那一半已在真实 App 里拿到**（空描述被人话拒绝且不产生任务）；并已改为明示成片时长 |
+
+另外拿到但不在四条之列的：**真实 App 能挂载工作台、能从正式设置表单存下真实模型密钥
+且页面不回显**——这两件此前从没在 App 里验过。
 
 ### 本次落地：一句话卡片明示成片时长
 
