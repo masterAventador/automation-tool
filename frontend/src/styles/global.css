@@ -193,14 +193,20 @@ body {
   margin-top: 20px;
 }
 
+/* `min-height: 330px` used to live here, with `margin-block: 70px` on the
+   `.ant-empty` below it to centre a placeholder inside that box. Both arrived in
+   d331d90 「建立视频制作页面骨架」 in the same batch as `.video-studio-new-form`,
+   when five of the six tabs rendered nothing but a static placeholder and the
+   component had no gateway and no effects — so neither was ever a guard against
+   layout shifting as content loads; there was no content and nothing loaded.
+   They gave six identical skeletons one uniform panel height. That premise is
+   gone: every tab now renders real content, and what the pair left behind was a
+   330px card holding a 96px graphic with 234px of nothing around it. Removed
+   rather than re-tuned — antd's own `Empty` spacing is what the rest of this
+   product uses. */
 .video-studio-panel {
-  min-height: 330px;
   border-color: #e7ebf2;
   box-shadow: 0 8px 24px rgb(34 55 89 / 4%);
-}
-
-.video-studio-panel .ant-empty {
-  margin-block: 70px;
 }
 
 .video-job-card {
@@ -303,6 +309,38 @@ body {
 .video-method-select {
   width: 100%;
   margin-bottom: 20px;
+}
+
+/* The disclosure holding each card's ten explanatory rows. Ghost `Collapse`
+   already drops the panel's border and background; these only pull its padding
+   in so the label lines up with the button and the summary above it instead of
+   sitting 8px to their right. `!important` because antd generates these paddings
+   at a specificity this cannot otherwise reach — measured: without it the rule
+   changes nothing at all, the header keeps antd's 8px/12px. Same reason
+   `.video-method-summary` above already carries one. */
+.video-method-disclosure .ant-collapse-header {
+  padding-inline: 0 !important;
+}
+
+.video-method-disclosure .ant-collapse-content-box {
+  padding-inline: 0 !important;
+}
+
+/* Drawn here rather than taken from antd so it can be `aria-hidden`: antd's own
+   expand icon carries `aria-label="collapsed"`, which a name computed from
+   content reads out as part of the button. See `VideoStudio.tsx`. */
+.video-method-disclosure-arrow {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  transform: rotate(-45deg);
+  transition: transform 160ms ease;
+}
+
+.video-method-disclosure-arrow-open {
+  transform: rotate(45deg);
 }
 
 .motion-script-editor,

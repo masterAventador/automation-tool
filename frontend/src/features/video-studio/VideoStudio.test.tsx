@@ -119,6 +119,20 @@ describe("video studio shell", () => {
 
     // The comparison questions come from the terminology contract, which is
     // also what the static gate and the real App acceptance read.
+    //
+    // They start behind a disclosure on each card: expanded, the two ten-row
+    // tables were 466px and the single reason this step could not fit the
+    // screen it is given. Collapsed is therefore the state a customer meets,
+    // and it is asserted here rather than assumed — antd does not even mount a
+    // shut panel's contents, so a regression that dropped the rows entirely
+    // would otherwise look identical to a regression that merely hid them.
+    const firstLabel = terminology.videoCreationMethodCardLabels[0]!;
+    expect(screen.queryAllByText(firstLabel)).toHaveLength(0);
+
+    for (const method of ["智能素材成片", "品牌动效成片"]) {
+      await user.click(screen.getByRole("button", { name: `${method}的详细说明` }));
+    }
+
     for (const label of terminology.videoCreationMethodCardLabels) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
