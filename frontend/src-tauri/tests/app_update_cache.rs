@@ -341,6 +341,134 @@ fn startup_discards_a_replaced_package_that_no_longer_matches_the_old_manifest()
 }
 
 #[test]
+fn startup_recovers_the_window_between_the_package_replace_and_the_manifest_save() {
+    // `download` renames the verified partial onto the package path, then saves
+    // the cache manifest, then deletes the partial manifest. A kill between the
+    // first and the second step leaves exactly this on disk: a package no
+    // manifest describes, and a partial manifest whose file has been renamed
+    // away. Building the state directly is more repeatable than racing a kill.
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let package = app_data.cache_directory().join("candidate.package");
+    let partial_manifest = app_data.cache_directory().join("partial-manifest-v1");
+    write_private_file(&package, PAYLOAD);
+    write_private_file(&partial_manifest, &partial_manifest_fixture("0.2.0"));
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "a kill before the cache manifest was saved must be cleaned instead of aborting startup"
+    );
+    assert!(!package.exists());
+    assert!(!partial_manifest.exists());
+    assert_eq!(
+        reopened
+            .expect("recovered cache")
+            .cached()
+            .expect("cache state"),
+        None
+    );
+}
+
+#[test]
+fn startup_discards_a_cache_manifest_this_build_cannot_read() {
+    // What a rollback looks like: a newer build wrote a manifest with a field
+    // this one rejects. The package it describes is a disposable copy of a
+    // signed artifact, so the only thing at stake is one download - never the
+    // App's ability to launch.
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let package = app_data.cache_directory().join("candidate.package");
+    let manifest = app_data.cache_directory().join("cache-manifest-v1");
+    write_private_file(&package, PAYLOAD);
+    let mut newer: serde_json::Value =
+        serde_json::from_slice(&cache_manifest_fixture("0.2.0")).expect("manifest fixture");
+    newer["minimumHostVersion"] = json!("15.0");
+    write_private_file(
+        &manifest,
+        &serde_json::to_vec(&newer).expect("newer manifest fixture"),
+    );
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "an unreadable cache manifest must be discarded instead of aborting startup"
+    );
+    assert!(!package.exists());
+    assert!(!manifest.exists());
+    assert_eq!(
+        reopened
+            .expect("recovered cache")
+            .cached()
+            .expect("cache state"),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn startup_discards_a_cached_package_other_users_could_have_touched() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // A restore from a backup or a migration tool is the ordinary way a cache
+    // file comes back readable by everyone. We will not install from it, but
+    // deleting it is a complete answer - refusing to launch is not.
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let package = app_data.cache_directory().join("candidate.package");
+    let manifest = app_data.cache_directory().join("cache-manifest-v1");
+    write_private_file(&package, PAYLOAD);
+    write_private_file(&manifest, &cache_manifest_fixture("0.2.0"));
+    fs::set_permissions(&package, fs::Permissions::from_mode(0o644))
+        .expect("broaden package permissions");
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "a world readable cached package must be discarded instead of aborting startup"
+    );
+    assert!(!package.exists());
+    assert!(!manifest.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn startup_unlinks_a_link_left_at_a_cache_path_without_reading_through_it() {
+    use std::os::unix::fs::symlink;
+
+    // Refusing to launch leaves the link in place and the App unusable, which
+    // serves whoever put it there. Unlinking removes it without ever opening
+    // it, so the target is untouched and the next launch starts clean.
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let outside = app_data.0.with_extension("outside-package");
+    fs::write(&outside, b"must-survive").expect("outside fixture");
+    let package = app_data.cache_directory().join("candidate.package");
+    symlink(&outside, &package).expect("package symlink");
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "a link at a cache path must be unlinked instead of aborting startup"
+    );
+    assert!(!package.exists() && fs::symlink_metadata(&package).is_err());
+    assert_eq!(fs::read(&outside).expect("outside data"), b"must-survive");
+    fs::remove_file(outside).expect("remove outside fixture");
+}
+
+#[test]
 fn interrupted_download_resumes_by_range_then_atomically_becomes_the_only_cached_package() {
     let app_data = TemporaryAppData::new();
     let cache = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
@@ -590,11 +718,10 @@ fn cache_rejects_symlinked_files_and_never_reflects_private_paths() {
     fs::write(&manifest, b"{}").expect("corrupt cache manifest");
     fs::set_permissions(&manifest, fs::Permissions::from_mode(0o644))
         .expect("broaden manifest permissions");
-    assert_eq!(
-        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
-            .expect_err("unsafe manifest rejected")
-            .code(),
-        UpdateDownloadErrorCode::StorageUnavailable
+    assert!(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT)).is_ok(),
+        "a corrupt cache manifest must be discarded instead of aborting startup"
     );
+    assert!(!manifest.exists());
     fs::remove_file(outside).expect("remove outside fixture");
 }

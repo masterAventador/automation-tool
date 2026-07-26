@@ -42,6 +42,7 @@ pub(crate) enum DesktopLogEvent {
     // this project keeps meeting, so each of these is worth one line.
     UpdatePolicyDocumentMigrated,
     UpdatePolicyDocumentReplaced,
+    UpdateCacheStateRecovered,
     BrowserDiagnosticSettingsMigrated,
     BrowserDiagnosticSettingsReset,
     TaskEmergencyStopRecordDropped,
@@ -91,6 +92,7 @@ impl DesktopLogEvent {
             Self::AppSetupCompleted => "app.setup.completed",
             Self::UpdatePolicyDocumentMigrated => "app_update.policy_document.migrated",
             Self::UpdatePolicyDocumentReplaced => "app_update.policy_document.replaced",
+            Self::UpdateCacheStateRecovered => "app_update.cache_state.recovered",
             Self::BrowserDiagnosticSettingsMigrated => {
                 "executor.browser_diagnostic_settings.migrated"
             }
