@@ -1444,6 +1444,36 @@ impl ControlPlaneClient {
         task_id: &str,
         last_event_id: Option<u64>,
         stop_after: Option<u16>,
+        on_event: F,
+    ) -> Result<TaskEventStreamResult, ControlPlaneError>
+    where
+        S: SecretStore,
+        F: FnMut(&TaskEvent) -> bool,
+    {
+        let result = self
+            .stream_task_events_with_without_logging(
+                vault,
+                task_id,
+                last_event_id,
+                stop_after,
+                on_event,
+            )
+            .await;
+        if let Err(error) = &result {
+            crate::app_logging::record_failure(
+                crate::app_logging::DesktopLogEvent::ControlPlaneEventStreamFailed,
+                error,
+            );
+        }
+        result
+    }
+
+    async fn stream_task_events_with_without_logging<S, F>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        task_id: &str,
+        last_event_id: Option<u64>,
+        stop_after: Option<u16>,
         mut on_event: F,
     ) -> Result<TaskEventStreamResult, ControlPlaneError>
     where
@@ -1496,6 +1526,7 @@ impl ControlPlaneClient {
                 let frame = pending.drain(..frame_end).collect::<Vec<_>>();
                 let event = parse_sse_frame(&frame, task_id, expected_start + events.len() as u64)?;
                 if let Some(event) = event {
+                    crate::app_logging::record_task_status(event.task_status());
                     if !on_event(&event) {
                         return Err(protocol_invalid());
                     }
@@ -1536,6 +1567,7 @@ impl ControlPlaneClient {
             if let Some(event) =
                 parse_sse_frame(&frame, task_id, expected_start + events.len() as u64)?
             {
+                crate::app_logging::record_task_status(event.task_status());
                 if !on_event(&event) {
                     return Err(protocol_invalid());
                 }
@@ -1552,6 +1584,26 @@ impl ControlPlaneClient {
     }
 
     async fn execute(
+        &self,
+        operation: ControlPlaneOperation,
+        bearer: Option<&str>,
+        body: Option<&serde_json::Value>,
+        idempotency_key: Option<&str>,
+        target: Option<ControlPlaneRequestTarget<'_>>,
+    ) -> Result<Zeroizing<Vec<u8>>, ControlPlaneError> {
+        let result = self
+            .execute_without_logging(operation, bearer, body, idempotency_key, target)
+            .await;
+        if let Err(error) = &result {
+            crate::app_logging::record_failure(
+                crate::app_logging::DesktopLogEvent::ControlPlaneRequestFailed,
+                error,
+            );
+        }
+        result
+    }
+
+    async fn execute_without_logging(
         &self,
         operation: ControlPlaneOperation,
         bearer: Option<&str>,

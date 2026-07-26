@@ -1,4 +1,5 @@
 pub mod account_session_vault;
+mod app_logging;
 pub mod app_update_cache;
 pub mod app_update_coordinator;
 pub mod app_update_installation;
@@ -1307,6 +1308,7 @@ fn inject_hostile_executor_diagnostics_for_acceptance(
 fn emergency_stop_executor(
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
     platform
         .emergency_stop()
         .map_err(map_executor_platform_error)
@@ -1319,6 +1321,7 @@ async fn restart_executor(
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    app_logging::record(app_logging::DesktopLogEvent::ExecutorRestartRequested);
     let connection = client
         .issue_executor_connection(&vault)
         .await
@@ -1342,6 +1345,7 @@ async fn ensure_executor_running(
     let status = platform.status().map_err(map_executor_platform_error)?;
     match status.state() {
         executor_manager::ExecutorManagerState::Stopped => {
+            app_logging::record(app_logging::DesktopLogEvent::ExecutorAutoStartRequested);
             let connection = client
                 .issue_executor_connection(vault)
                 .await
@@ -4248,11 +4252,19 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            let app_data_root = app.path().app_data_dir()?;
+            if app_logging::initialize(&app_data_root).is_err() {
+                eprintln!("desktop fixed-event log unavailable");
+            }
+            app_logging::record(app_logging::DesktopLogEvent::AppSetupStarted);
             app.manage(control_plane::ControlPlaneClient::for_deployment_profile(
                 &deployment_profile,
             )?);
-            let app_data_root = app.path().app_data_dir()?;
+            app_logging::record(
+                app_logging::DesktopLogEvent::ControlPlaneClientInitialized,
+            );
             let app_data_directory = deployment_profile.prepare_data_directory(&app_data_root)?;
+            app_logging::record(app_logging::DesktopLogEvent::ProfileDataDirectoryReady);
             app.manage(ProductAccountRequirement(
                 deployment_profile.requires_product_account(),
             ));
@@ -4304,6 +4316,7 @@ pub fn run() {
                 None => None,
             };
             app.manage(update_coordinator);
+            app_logging::record(app_logging::DesktopLogEvent::UpdateCoordinatorInitialized);
             app.manage(embedded_browser_authority::EmbeddedBrowserAuthority::new(
                 app
                     .path()
@@ -4331,6 +4344,7 @@ pub fn run() {
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
             )?);
+            app_logging::record(app_logging::DesktopLogEvent::LocalServicesInitialized);
             app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
                 &app_data_directory,
                 video_job_workspace::production_video_workspace_policy(),
@@ -4338,6 +4352,7 @@ pub fn run() {
             app.manage(browser_profiles::BrowserProfileStore::initialize(
                 &app_data_directory,
             )?);
+            app_logging::record(app_logging::DesktopLogEvent::WorkspaceInitialized);
             #[cfg(debug_assertions)]
             let executor_platform =
                 executor_platform::ExecutorPlatformService::initialize(&app_data_directory)?;
@@ -4354,6 +4369,7 @@ pub fn run() {
                 )?
             };
             app.manage(executor_platform);
+            app_logging::record(app_logging::DesktopLogEvent::ExecutorServiceInitialized);
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
                 &app_data_directory,
             )?);
@@ -4389,6 +4405,8 @@ pub fn run() {
                 app.manage(device_credential_vault);
                 app.manage(local_registration_handoff);
             }
+            app_logging::record(app_logging::DesktopLogEvent::CredentialsInitialized);
+            app_logging::record(app_logging::DesktopLogEvent::AppSetupCompleted);
             Ok(())
         });
 
@@ -4610,6 +4628,7 @@ pub fn run() {
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
+            app_logging::record(app_logging::DesktopLogEvent::AppShutdownStarted);
             if let Some(platform) =
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {
