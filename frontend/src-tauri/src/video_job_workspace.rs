@@ -1,5 +1,6 @@
 //! Private, bounded RenderJob workspaces and atomic local video Artifact imports.
 
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -42,6 +43,10 @@ const MAX_MEDIA_TYPE_BYTES: usize = 192;
 const MAX_ROLE_BYTES: usize = 64;
 const MAX_FILE_NAME_BYTES: usize = 128;
 const COPY_BUFFER_BYTES: usize = 1024 * 1024;
+/// The largest finished film the in-App player will be handed. It is buffered
+/// whole and base64 encoded, so a bound belongs here rather than in whichever
+/// studio happens to ask.
+pub const MAX_RENDERED_VIDEO_READ_BYTES: u64 = 32 * 1024 * 1024;
 const WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -185,6 +190,33 @@ pub struct VideoArtifactRecord {
 pub struct VideoArtifactReader {
     file: File,
     remaining_bytes: u64,
+}
+
+/// One finished film, encoded for the in-App player.
+///
+/// The player is fed a `data:` URL, which is why the bytes travel base64 and
+/// not as a path: a path would need the file system opened up to the WebView
+/// for a file the App already owns and has already verified.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderedVideoArtifactPayload {
+    artifact_id: Uuid,
+    media_type: &'static str,
+    base64: String,
+}
+
+impl RenderedVideoArtifactPayload {
+    pub const fn artifact_id(&self) -> Uuid {
+        self.artifact_id
+    }
+
+    pub const fn media_type(&self) -> &'static str {
+        self.media_type
+    }
+
+    pub fn base64(&self) -> &str {
+        &self.base64
+    }
 }
 
 impl fmt::Debug for VideoArtifactReader {
@@ -628,6 +660,42 @@ impl VideoJobWorkspaceStore {
         Ok(VideoArtifactReader {
             file,
             remaining_bytes: record.size_bytes,
+        })
+    }
+
+    /// Read one finished film back for playback inside the App.
+    ///
+    /// Both creation methods import their result here under the same role and
+    /// media type, and both studios need the same three steps — find the
+    /// record, refuse one too large to hold in memory, verify and encode it —
+    /// so those steps live once, next to the store that owns them. The
+    /// verification in `open_artifact` is what makes the encoded payload
+    /// trustworthy; skipping it would hand the player whatever is on disk now.
+    pub fn read_rendered_video_artifact(
+        &self,
+        artifact_id: Uuid,
+    ) -> Result<RenderedVideoArtifactPayload, VideoWorkspaceError> {
+        let record = self
+            .list_artifacts()?
+            .into_iter()
+            .find(|record| {
+                record.artifact_id() == artifact_id
+                    && record.media_type() == PUBLISHABLE_MEDIA_TYPE
+                    && record.role() == PUBLISHABLE_ROLE
+            })
+            .ok_or_else(|| VideoWorkspaceError::new(VideoWorkspaceErrorCode::NotFound))?;
+        if record.size_bytes() > MAX_RENDERED_VIDEO_READ_BYTES {
+            return Err(quota_exceeded());
+        }
+        let mut reader = self.open_artifact(&record)?;
+        let mut bytes = Vec::with_capacity(record.size_bytes() as usize);
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|_| storage_unavailable())?;
+        Ok(RenderedVideoArtifactPayload {
+            artifact_id,
+            media_type: PUBLISHABLE_MEDIA_TYPE,
+            base64: base64::engine::general_purpose::STANDARD.encode(bytes),
         })
     }
 

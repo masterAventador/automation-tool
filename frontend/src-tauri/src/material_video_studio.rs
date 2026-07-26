@@ -6,7 +6,8 @@ use crate::local_video_orchestrator::{
 };
 use crate::model_service_settings::ProductionModelServiceSettings;
 use crate::video_job_workspace::{
-    VideoJobWorkspaceStore, VideoWorkspaceDisposition, VideoWorkspaceError,
+    RenderedVideoArtifactPayload, VideoJobWorkspaceStore, VideoWorkspaceDisposition,
+    VideoWorkspaceError, VideoWorkspaceErrorCode,
 };
 use crate::video_media_toolchain::VideoMediaToolchain;
 use serde::{Deserialize, Serialize};
@@ -349,6 +350,26 @@ pub(crate) fn cancel(
         }
         Err(_) => Err(job_unavailable()),
     }
+}
+
+/// Read a finished smart-material film back so the App can play it.
+///
+/// Both creation methods import the same kind of artifact, so the reading is
+/// the store's shared one; only the failure vocabulary is this studio's. A
+/// film that is gone or too large to hold answers "pick another one" rather
+/// than reporting a storage fault the user cannot act on.
+pub fn read_artifact(
+    workspaces: &VideoJobWorkspaceStore,
+    artifact_id: uuid::Uuid,
+) -> Result<RenderedVideoArtifactPayload, MaterialVideoStudioError> {
+    workspaces
+        .read_rendered_video_artifact(artifact_id)
+        .map_err(|error| match error.code() {
+            VideoWorkspaceErrorCode::NotFound | VideoWorkspaceErrorCode::QuotaExceeded => {
+                job_unavailable()
+            }
+            _ => map_workspace_error(error),
+        })
 }
 
 pub(crate) fn delete_artifact(

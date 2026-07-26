@@ -339,6 +339,17 @@ fn cancel_material_render_job(
 }
 
 #[tauri::command]
+fn read_material_video_artifact(
+    artifact_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<
+    video_job_workspace::RenderedVideoArtifactPayload,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::read_artifact(&workspaces, artifact_id)
+}
+
+#[tauri::command]
 fn delete_material_video_artifact(
     artifact_id: uuid::Uuid,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
@@ -750,7 +761,7 @@ fn read_motion_video_artifact(
     artifact_id: uuid::Uuid,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
 ) -> Result<
-    motion_video_studio::MotionVideoArtifactPayload,
+    video_job_workspace::RenderedVideoArtifactPayload,
     motion_video_studio::MotionVideoStudioError,
 > {
     motion_video_studio::read_artifact(&workspaces, artifact_id)
@@ -4098,6 +4109,7 @@ pub fn run() {
         open_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
+        read_material_video_artifact,
         delete_material_video_artifact,
         submit_motion_video_draft,
         get_motion_render_jobs,
@@ -4163,6 +4175,7 @@ pub fn run() {
         open_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
+        read_material_video_artifact,
         delete_material_video_artifact,
         submit_motion_video_draft,
         get_motion_render_jobs,
@@ -4259,6 +4272,7 @@ pub fn run() {
         open_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
+        read_material_video_artifact,
         delete_material_video_artifact,
         submit_motion_video_draft,
         get_motion_render_jobs,

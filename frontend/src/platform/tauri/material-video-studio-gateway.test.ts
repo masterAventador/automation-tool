@@ -164,6 +164,31 @@ describe("Tauri material video studio gateway", () => {
     });
   });
 
+  // 智能素材成片产出的是同一种 MP4 成片，取件也必须有自己的命令：没有它，
+  // 用户在 App 里看不到刚做完的视频，「本地预览」这半条链路只对动效成片成立。
+  it("reads a finished smart-material artifact through its own narrow command", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    invoke.mockResolvedValueOnce({
+      artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+      mediaType: "video/mp4",
+      base64: "BBBB",
+    });
+    await expect(
+      gateway.readMaterialArtifact("0f48954d-2df1-4168-8f33-b62c5772845a"),
+    ).resolves.toMatchObject({ mediaType: "video/mp4" });
+    expect(invoke).toHaveBeenCalledWith("read_material_video_artifact", {
+      artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+    });
+  });
+
+  it("refuses a smart-material artifact id that is not a UUID v4", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    await expect(gateway.readMaterialArtifact("not-a-uuid")).rejects.toMatchObject({
+      code: "protocol_mismatch",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("accepts a still-image render reported with its own failure code", async () => {
     // The gate that catches a film whose frames never change reports
     // `static_render`. A gateway allowlist that does not know the code turns a

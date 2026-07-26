@@ -6,10 +6,9 @@
 //! through the BM-04 renderer sandbox.
 
 use crate::video_job_workspace::{
-    VideoArtifactRecord, VideoJobWorkspace, VideoJobWorkspaceStore, VideoWorkspaceDisposition,
-    VideoWorkspaceError,
+    RenderedVideoArtifactPayload, VideoArtifactRecord, VideoJobWorkspace, VideoJobWorkspaceStore,
+    VideoWorkspaceDisposition, VideoWorkspaceError, VideoWorkspaceErrorCode,
 };
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -26,7 +25,6 @@ pub const MOTION_FRAMES_PER_SECOND: u32 = 30;
 const MAX_TEXT_CHARS: usize = 160;
 const MAX_SUBJECT_CHARS: usize = 80;
 const MAX_LOGO_BYTES: usize = 4 * 1024 * 1024;
-const MAX_ARTIFACT_READ_BYTES: u64 = 32 * 1024 * 1024;
 const MILLIS_PER_SECOND: u32 = 1000;
 const STYLE_CONTRACT: &str = include_str!("../../../contracts/video/motion-style-freeze.v1.json");
 const DURATION_CONTRACT: &str =
@@ -450,14 +448,6 @@ impl MotionRenderJobSnapshot {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MotionVideoArtifactPayload {
-    artifact_id: Uuid,
-    media_type: &'static str,
-    base64: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct PreparedMotionRenderJob {
     render_job_id: Uuid,
@@ -787,30 +777,21 @@ pub fn cancellation_requested(
 pub fn read_artifact(
     store: &VideoJobWorkspaceStore,
     artifact_id: Uuid,
-) -> Result<MotionVideoArtifactPayload, MotionVideoStudioError> {
-    let record = store
-        .list_artifacts()
-        .map_err(map_workspace_error)?
-        .into_iter()
-        .find(|record| {
-            record.artifact_id() == artifact_id
-                && record.media_type() == "video/mp4"
-                && record.role() == "rendered_video"
-        })
-        .ok_or_else(job_unavailable)?;
-    if record.size_bytes() > MAX_ARTIFACT_READ_BYTES {
-        return Err(job_unavailable());
+) -> Result<RenderedVideoArtifactPayload, MotionVideoStudioError> {
+    store
+        .read_rendered_video_artifact(artifact_id)
+        .map_err(map_rendered_video_error)
+}
+
+/// A film that is gone, is not a film, or is too large to hold is the user's
+/// answer — "pick another one" — not a storage fault they could act on.
+fn map_rendered_video_error(error: VideoWorkspaceError) -> MotionVideoStudioError {
+    match error.code() {
+        VideoWorkspaceErrorCode::NotFound | VideoWorkspaceErrorCode::QuotaExceeded => {
+            job_unavailable()
+        }
+        _ => storage_unavailable(),
     }
-    let mut reader = store.open_artifact(&record).map_err(map_workspace_error)?;
-    let mut bytes = Vec::with_capacity(record.size_bytes() as usize);
-    reader
-        .read_to_end(&mut bytes)
-        .map_err(|_| storage_unavailable())?;
-    Ok(MotionVideoArtifactPayload {
-        artifact_id,
-        media_type: "video/mp4",
-        base64: base64::engine::general_purpose::STANDARD.encode(bytes),
-    })
 }
 
 pub fn delete_artifact(

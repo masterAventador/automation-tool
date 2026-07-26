@@ -8,7 +8,7 @@ import {
   type MaterialVideoStudioSnapshot,
   type MaterialRenderJobSnapshot,
   type MotionRenderJobSnapshot,
-  type MotionVideoArtifactPayload,
+  type RenderedVideoArtifactPayload,
   type MotionVideoDraftRequest,
 } from "../../features/video-studio/material-video-studio-gateway";
 import { motionDurationProblem } from "../../features/video-studio/motion-duration";
@@ -129,7 +129,7 @@ function parseMotionJobs(value: unknown): readonly MotionRenderJobSnapshot[] {
   return value.map(parseMotionJob);
 }
 
-function parseMotionArtifact(value: unknown): MotionVideoArtifactPayload {
+function parseRenderedVideoArtifact(value: unknown): RenderedVideoArtifactPayload {
   if (
     !exactRecord(value, ["artifactId", "base64", "mediaType"]) ||
     typeof value.artifactId !== "string" || !UUID_V4.test(value.artifactId) ||
@@ -139,7 +139,7 @@ function parseMotionArtifact(value: unknown): MotionVideoArtifactPayload {
   ) {
     throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
   }
-  return value as unknown as MotionVideoArtifactPayload;
+  return value as unknown as RenderedVideoArtifactPayload;
 }
 
 function validateMotionRequest(request: MotionVideoDraftRequest): void {
@@ -243,12 +243,28 @@ export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGatew
     }
   }
 
-  async readMotionArtifact(artifactId: string): Promise<MotionVideoArtifactPayload> {
+  async readMotionArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload> {
+    return this.readRenderedVideo("read_motion_video_artifact", artifactId);
+  }
+
+  async readMaterialArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload> {
+    return this.readRenderedVideo("read_material_video_artifact", artifactId);
+  }
+
+  /**
+   * The two creation methods keep separate native commands because their
+   * failure vocabularies differ, but the identifier check, the payload check
+   * and the error mapping are the same work and are written once.
+   */
+  private async readRenderedVideo(
+    command: "read_motion_video_artifact" | "read_material_video_artifact",
+    artifactId: string,
+  ): Promise<RenderedVideoArtifactPayload> {
     if (!UUID_V4.test(artifactId)) {
       throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
     }
     try {
-      return parseMotionArtifact(await invoke("read_motion_video_artifact", { artifactId }));
+      return parseRenderedVideoArtifact(await invoke(command, { artifactId }));
     } catch (error) {
       if (error instanceof MaterialVideoStudioGatewayError) throw error;
       throw mapError(error);

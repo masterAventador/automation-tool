@@ -58,7 +58,13 @@ export interface MotionRenderJobSnapshot {
     | null;
 }
 
-export interface MotionVideoArtifactPayload {
+/**
+ * One finished film, encoded for the in-App player.
+ *
+ * Both creation methods import the same kind of MP4 artifact and both are read
+ * back through this shape, so it is not named after either of them.
+ */
+export interface RenderedVideoArtifactPayload {
   readonly artifactId: string;
   readonly mediaType: "video/mp4";
   readonly base64: string;
@@ -93,6 +99,7 @@ export interface MaterialVideoStudioGateway {
   submitMotionDraft(request: MotionVideoDraftRequest): Promise<MotionRenderJobSnapshot>;
   motionJobs(): Promise<readonly MotionRenderJobSnapshot[]>;
   cancelMotionRenderJob(renderJobId: string): Promise<void>;
-  readMotionArtifact(artifactId: string): Promise<MotionVideoArtifactPayload>;
+  readMotionArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload>;
   deleteMotionArtifact(artifactId: string): Promise<void>;
+  readMaterialArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload>;
 }

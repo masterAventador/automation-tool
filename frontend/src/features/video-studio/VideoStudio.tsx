@@ -24,6 +24,7 @@ import {
   type MotionRenderJobSnapshot,
   type MotionVideoBeatDraft,
   type MotionVideoDraftRequest,
+  type RenderedVideoArtifactPayload,
 } from "./material-video-studio-gateway";
 import {
   MOTION_DURATION_LIMITS,
@@ -181,6 +182,19 @@ function publishHandoff(
 ): SelectedVideo {
   const name = VIDEO_CREATION_METHODS.find((item) => item.id === method)!.name;
   return { artifactId, videoSummary: `${subject} · ${name}` };
+}
+
+/**
+ * Turn a verified artifact into something the player can accept.
+ *
+ * A `data:` URL is what keeps playback inside the App: the bytes are already
+ * verified and already in hand, so no file path has to be opened up to the
+ * WebView for a file the App itself owns.
+ */
+function playableSource(
+  artifact: Promise<RenderedVideoArtifactPayload>,
+): Promise<string> {
+  return artifact.then((value) => `data:${value.mediaType};base64,${value.base64}`);
 }
 
 const EMPTY_PAGES = {
@@ -700,6 +714,7 @@ function ArtifactPage({
   onDelete,
   onDeleteMotion,
   onReadMotion,
+  onReadMaterial,
   onPublish,
 }: {
   readonly jobs: readonly MaterialRenderJobSnapshot[];
@@ -708,12 +723,22 @@ function ArtifactPage({
   readonly onDelete: (id: string) => void;
   readonly onDeleteMotion: (id: string) => void;
   readonly onReadMotion: (id: string) => Promise<string>;
+  readonly onReadMaterial: (id: string) => Promise<string>;
   readonly onPublish: ((video: SelectedVideo) => void) | undefined;
 }) {
   const artifacts = jobs.filter((job) => job.artifactId !== null);
   const motionArtifacts = motionJobs.filter((job) => job.artifactId !== null);
   const [playing, setPlaying] = useState<{ subject: string; source: string } | null>(null);
   const [playError, setPlayError] = useState(false);
+  // One player, one error banner, one way in: both creation methods produce the
+  // same kind of MP4, and a second copy of this handler would be a second place
+  // for the failure path to drift.
+  const play = (subject: string, read: Promise<string>) => {
+    setPlayError(false);
+    void read
+      .then((source) => setPlaying({ subject, source }))
+      .catch(() => setPlayError(true));
+  };
   if (artifacts.length === 0 && motionArtifacts.length === 0) {
     return <EmptyVideoPage page="artifacts" />;
   }
@@ -745,12 +770,7 @@ function ArtifactPage({
             <Button
               aria-label={`播放${job.subject}`}
               disabled={busy}
-              onClick={() => {
-                setPlayError(false);
-                void onReadMotion(job.artifactId!)
-                  .then((source) => setPlaying({ subject: job.subject, source }))
-                  .catch(() => setPlayError(true));
-              }}
+              onClick={() => play(job.subject, onReadMotion(job.artifactId!))}
             >
               播放成片
             </Button>
@@ -786,6 +806,13 @@ function ArtifactPage({
             MP4 视频 · {((job.artifactSizeBytes ?? 0) / 1024 / 1024).toFixed(1)} MB
           </Typography.Text>
           <Space wrap>
+            <Button
+              aria-label={`播放${job.subject}`}
+              disabled={busy}
+              onClick={() => play(job.subject, onReadMaterial(job.artifactId!))}
+            >
+              播放成片
+            </Button>
             {onPublish === undefined ? null : (
               <Button
                 type="primary"
@@ -1029,11 +1056,8 @@ export function VideoStudio({
                 onDelete={(id) => act(gateway.deleteArtifact(id))}
                 onDeleteMotion={(id) => act(gateway.deleteMotionArtifact(id))}
                 onPublish={onPublishArtifact}
-                onReadMotion={(id) =>
-                  gateway
-                    .readMotionArtifact(id)
-                    .then((artifact) => `data:${artifact.mediaType};base64,${artifact.base64}`)
-                }
+                onReadMotion={(id) => playableSource(gateway.readMotionArtifact(id))}
+                onReadMaterial={(id) => playableSource(gateway.readMaterialArtifact(id))}
               />
             ),
           },

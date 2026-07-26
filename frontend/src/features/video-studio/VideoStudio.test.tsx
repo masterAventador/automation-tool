@@ -35,6 +35,11 @@ function gateway(): MaterialVideoStudioGateway {
       base64: "AAAA",
     }),
     deleteMotionArtifact: vi.fn().mockResolvedValue(undefined),
+    readMaterialArtifact: vi.fn().mockResolvedValue({
+      artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+      mediaType: "video/mp4",
+      base64: "BBBB",
+    }),
   };
 }
 
@@ -513,6 +518,41 @@ describe("video studio shell", () => {
       artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
       videoSummary: "知识讲解 · 智能素材成片",
     });
+  });
+
+  /**
+   * 「一句话生成视频并且可以本地预览」是这次客户 Demo 的底线，而这条底线上更接近可用的
+   * 是「智能素材成片」——它的一句话生成能力来自完整制作界面。可是做完之后，成片页只给
+   * 「品牌动效成片」放了播放器：素材成片只能删除或送去发布，用户在 App 里根本看不到自己
+   * 刚做完的视频长什么样，只能去别处找文件。两种制作方式产出的是同一种 MP4 成片，
+   * 预览不应该只认其中一种。
+   */
+  it("plays a finished smart-material video inside the App", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.jobs).mockResolvedValue([
+      {
+        renderJobId: "01b70168-c90d-4ac7-938a-51eb4754f32a",
+        revision: 4,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "知识讲解",
+        artifactId: "0f48954d-2df1-4168-8f33-b62c5772845a",
+        artifactSizeBytes: 2 * 1024 * 1024,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "成片" }));
+    await user.click(await screen.findByRole("button", { name: "播放知识讲解" }));
+    expect(studioGateway.readMaterialArtifact).toHaveBeenCalledWith(
+      "0f48954d-2df1-4168-8f33-b62c5772845a",
+    );
+    expect(await screen.findByLabelText("知识讲解成片播放器")).toHaveAttribute(
+      "src",
+      "data:video/mp4;base64,BBBB",
+    );
   });
 
   // 没接发布页的场合（比如还没装配好的外壳）不能凭空多出一个点了没反应的按钮。

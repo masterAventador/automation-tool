@@ -332,6 +332,9 @@ const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async deleteMotionArtifact() {
     throw new Error("Motion video studio is unavailable");
   },
+  async readMaterialArtifact() {
+    throw new Error("Material video studio is unavailable");
+  },
 };
 
 interface WorkbenchShellProps {
