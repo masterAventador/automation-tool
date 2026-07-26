@@ -156,8 +156,29 @@ def validate_dependency_locks(contract: Mapping[str, object]) -> None:
         (REPOSITORY_ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     )
     dependencies = pyproject["project"]["dependencies"]
-    if f"playwright=={expected_python}" not in dependencies:
-        fail("backend pyproject must pin the production Playwright version exactly")
+    dependency_groups = require_mapping(
+        pyproject.get("dependency-groups"), "backend dependency-groups"
+    )
+    executor_dependencies = dependency_groups.get("executor")
+    expected_dependency = f"playwright=={expected_python}"
+    if (
+        not isinstance(executor_dependencies, list)
+        or [
+            dependency
+            for dependency in executor_dependencies
+            if isinstance(dependency, str) and dependency.startswith("playwright")
+        ]
+        != [expected_dependency]
+    ):
+        fail(
+            "backend executor dependency group must pin the production "
+            "Playwright version exactly"
+        )
+    if any(
+        isinstance(dependency, str) and dependency.startswith("playwright")
+        for dependency in dependencies
+    ):
+        fail("backend core dependencies must not install the Executor's Playwright")
     backend_lock = tomllib.loads(
         (REPOSITORY_ROOT / "backend/uv.lock").read_text(encoding="utf-8")
     )
