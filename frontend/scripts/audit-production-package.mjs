@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstat, readdir, readFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -69,6 +69,24 @@ const forbiddenResourceMarkers = [
   "test_sidecar",
   "webdriver",
   "wdio",
+];
+// Capabilities a distributable package must be able to reach. These are Tauri
+// command names, not UI copy, so they survive rewording and minification and
+// they disappear precisely when the code that invokes them is compiled out.
+//
+// The product account login used to be mounted only when Vite built in
+// `customer-demo` mode. Release packages are built in the default mode, so the
+// account gateway was tree-shaken out and the shipped package had no way to log
+// in to a Control Plane that requires one — while every gate stayed green,
+// because every statement this audit made about package contents was a
+// negative one. Whether a deployment *requires* a login is configuration;
+// whether the package can present one is not.
+// Exported so a fixture cannot claim to model a release package while omitting
+// a capability the real audit demands: `scripts/test_embedded_browser_package.py`
+// reads this list rather than restating it.
+export const requiredDistributionMarkers = [
+  "restore_product_account_session",
+  "login_product_account",
 ];
 const forbiddenRuntimeDataMarkers = [
   "browser-profiles",
@@ -341,6 +359,22 @@ function assertDistributionBelongsToBinary(binary, distributionPath, files) {
   }
 }
 
+async function assertProductionCapabilities(files) {
+  const sources = await Promise.all(
+    files
+      .filter((path) => [".js", ".html"].includes(extname(path)))
+      .map((path) => readFile(path, "utf8")),
+  );
+  const bundle = sources.join("\n");
+  for (const marker of requiredDistributionMarkers) {
+    if (!bundle.includes(marker)) {
+      throw new Error(
+        `Production assets cannot reach a required capability: ${marker}`,
+      );
+    }
+  }
+}
+
 async function assertNoTestAssets(distributionPath, files) {
   await assertProductionBoundaries(distributionPath);
   for (const path of files) {
@@ -436,6 +470,7 @@ export async function auditProductionPackage({
   // statement is made about its contents.
   const files = await filesUnder(distributionPath);
   assertDistributionBelongsToBinary(binary, distributionPath, files);
+  await assertProductionCapabilities(files);
   await assertNoTestAssets(distributionPath, files);
 }
 

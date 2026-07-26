@@ -56,7 +56,13 @@ def run(
     return result
 
 
-def test_command(*, compiled_only: bool) -> list[str]:
+ISOLATED_ACCOUNT_INSTANCE_ENVIRONMENT = "AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE"
+ACCOUNT_REQUIREMENT_TEST = (
+    "the_deployment_configuration_decides_whether_a_product_account_is_required"
+)
+
+
+def test_command(*, compiled_only: bool, only: str | None = None) -> list[str]:
     command = [
         "cargo",
         "test",
@@ -66,7 +72,9 @@ def test_command(*, compiled_only: bool) -> list[str]:
         "deployment_profiles",
         "--locked",
     ]
-    if compiled_only:
+    if only is not None:
+        command.append(only)
+    elif compiled_only:
         command.append("compiled_profile_matches_build_contract")
     return command
 
@@ -112,16 +120,35 @@ def main() -> None:
         raise AcceptanceFailure("C10-07 tampered compiled profile was accepted")
 
     local_environment = os.environ.copy()
-    for name in (*PROFILE_ENVIRONMENT, "AUTOMATION_TOOL_C10_07_PROFILE_ACCEPTANCE"):
+    for name in (
+        *PROFILE_ENVIRONMENT,
+        "AUTOMATION_TOOL_C10_07_PROFILE_ACCEPTANCE",
+        ISOLATED_ACCOUNT_INSTANCE_ENVIRONMENT,
+    ):
         local_environment.pop(name, None)
     run(test_command(compiled_only=False), environment=local_environment)
+
+    # The login screen ships in every build; whether it stands in the way is a
+    # deployment configuration value. Compiling the same assertion both ways is
+    # what makes that switch provable: the U9-04 and U9-06 acceptance Apps run
+    # on loopback with no signed demo profile, so if the switch were read but
+    # ignored they would silently reach the workbench without ever logging in,
+    # and their whole subject would go untested.
+    isolated_environment = local_environment.copy()
+    isolated_environment[ISOLATED_ACCOUNT_INSTANCE_ENVIRONMENT] = "1"
+    run(
+        test_command(compiled_only=False, only=ACCOUNT_REQUIREMENT_TEST),
+        environment=isolated_environment,
+    )
     print(
         json.dumps(
             {
                 "allowedHosts": MANIFEST["allowedHosts"],
                 "baseUrl": MANIFEST["baseUrl"],
                 "compiledDemoProfile": True,
+                "isolatedInstanceRequiresAccount": True,
                 "localFallback": True,
+                "localRequiresAccount": False,
                 "profileId": MANIFEST["profileId"],
                 "tamperRejected": True,
             },

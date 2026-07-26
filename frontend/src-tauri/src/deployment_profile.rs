@@ -15,6 +15,14 @@ const LOCAL_BASE_URL: &str = "http://127.0.0.1:8765";
 const PROFILE_DIRECTORY: &str = "profiles";
 const MAX_ENCODED_PAYLOAD_LENGTH: usize = 4096;
 const MAX_ALLOWED_HOSTS: usize = 8;
+/// Set on a build that addresses an isolated Control Plane which does issue
+/// product accounts — the U9-04 and U9-06 acceptance Apps, which run against
+/// loopback and so carry no signed demo profile, yet must still meet the login
+/// screen. It is one-way by construction: it can add the requirement, never
+/// remove one, so a build that forgets it fails closed on a login screen
+/// instead of silently exposing the workbench.
+const ISOLATED_PRODUCT_ACCOUNT_INSTANCE: Option<&str> =
+    option_env!("AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeploymentProfileKind {
@@ -120,6 +128,21 @@ impl DeploymentProfile {
 
     pub fn allowed_hosts(&self) -> &[String] {
         &self.allowed_hosts
+    }
+
+    /// Whether this deployment issues product accounts, and therefore whether
+    /// the App must hold the workbench behind a login.
+    ///
+    /// This used to be a Vite build mode (`import.meta.env.MODE ===
+    /// "customer-demo"`), which decided whether the login screen was *compiled
+    /// into the bundle at all*. The release package is built in the default
+    /// mode, so it contained no login screen — a customer Demo package could
+    /// not be produced by any command. A build switch may select a
+    /// configuration value; it may not decide whether a product capability
+    /// exists. Every binary now compiles the login screen and both branches of
+    /// this function; only the answer differs.
+    pub fn requires_product_account(&self) -> bool {
+        self.kind == DeploymentProfileKind::Demo || ISOLATED_PRODUCT_ACCOUNT_INSTANCE.is_some()
     }
 
     pub fn prepare_data_directory(

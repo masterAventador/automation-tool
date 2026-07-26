@@ -13,6 +13,10 @@ const accountProjectionSchema = z
   .strict();
 
 const accountSessionSnapshotSchema = z.discriminatedUnion("state", [
+  // The deployment issues no product accounts at all, so there is nothing to
+  // log in to. Distinct from `unauthenticated`, which means this deployment
+  // does have accounts and this device holds no session for one.
+  z.object({ state: z.literal("not_required"), account: z.null() }).strict(),
   z.object({ state: z.literal("unauthenticated"), account: z.null() }).strict(),
   z.object({ state: z.literal("authenticated"), account: accountProjectionSchema }).strict(),
 ]);

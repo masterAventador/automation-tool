@@ -75,6 +75,11 @@ impl AccountProjection {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum AccountSessionSnapshot {
+    /// This deployment issues no product accounts, so there is nothing to log
+    /// in to. Distinct from `Unauthenticated`, which means the deployment does
+    /// have accounts and this device is not holding a session for one.
+    #[serde(rename_all = "camelCase")]
+    NotRequired { account: Option<AccountProjection> },
     #[serde(rename_all = "camelCase")]
     Unauthenticated { account: Option<AccountProjection> },
     #[serde(rename_all = "camelCase")]
@@ -82,6 +87,10 @@ pub enum AccountSessionSnapshot {
 }
 
 impl AccountSessionSnapshot {
+    pub fn not_required() -> Self {
+        Self::NotRequired { account: None }
+    }
+
     pub fn unauthenticated() -> Self {
         Self::Unauthenticated { account: None }
     }

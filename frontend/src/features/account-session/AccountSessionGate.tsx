@@ -23,6 +23,7 @@ import {
 
 type GateState =
   | { readonly kind: "checking" }
+  | { readonly kind: "not_required" }
   | { readonly kind: "offline" }
   | { readonly kind: "unauthenticated"; readonly notice?: string }
   | {
@@ -67,11 +68,13 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
       .restoreSession()
       .then((snapshot) => {
         if (active) {
-          setState(
-            snapshot.state === "authenticated"
-              ? { kind: "authenticated", snapshot }
-              : { kind: "unauthenticated" },
-          );
+          if (snapshot.state === "authenticated") {
+            setState({ kind: "authenticated", snapshot });
+          } else if (snapshot.state === "not_required") {
+            setState({ kind: "not_required" });
+          } else {
+            setState({ kind: "unauthenticated" });
+          }
         }
       })
       .catch(() => {
@@ -91,6 +94,13 @@ export function AccountSessionGate({ gateway, children }: AccountSessionGateProp
         </Space>
       </main>
     );
+  }
+
+  // A deployment without product accounts gets the workbench with no account
+  // chrome at all — the same component, standing aside rather than absent from
+  // the build.
+  if (state.kind === "not_required") {
+    return <>{children}</>;
   }
 
   if (state.kind === "offline") {

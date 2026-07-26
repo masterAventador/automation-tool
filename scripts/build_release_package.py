@@ -55,6 +55,12 @@ from check_embedded_browser_package import (  # noqa: E402
     audit_embedded_browser_package,
     browser_resource_root,
 )
+from customer_demo_release import (  # noqa: E402
+    CustomerDemoMaterial,
+    customer_demo_material,
+    describe_deployment,
+    require_compiled_deployment,
+)
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from production_assets import (  # noqa: E402
     AUDITED_DISTRIBUTION_NAME,
@@ -312,9 +318,20 @@ def audit_release_artifact(
 
 
 def build_macos_release(
-    *, work_directory: Path, archive: Path | None, build_id: str
+    *,
+    work_directory: Path,
+    archive: Path | None,
+    build_id: str,
+    deployment: CustomerDemoMaterial | None = None,
 ) -> dict[str, object]:
-    """Produce one distributable macOS package and pass every release gate."""
+    """Produce one distributable macOS package and pass every release gate.
+
+    With `deployment` supplied the package is a customer Demo one: it carries
+    the signed deployment profile, so it addresses that Control Plane and holds
+    its workbench behind a product account login, and it trusts that
+    deployment's action authorization key. Without it the package is the
+    ordinary local-profile release. One path, one set of gates, either way.
+    """
     target_id, architecture = require_macos_target()
     resolved_archive = archive or DEFAULT_ARCHIVES[target_id]
     build_directory = work_directory / "build"
@@ -341,10 +358,24 @@ def build_macos_release(
         directory=build_directory,
         name=EFFECTIVE_CONFIGURATION_NAME,
     )
-    environment = release_environment(cargo_target, public_key)
+    environment = release_environment(
+        cargo_target,
+        public_key,
+        deployment_profile=None if deployment is None else deployment.environment(),
+        action_authorization_public_key=(
+            None if deployment is None else deployment.action_authorization_public_key
+        ),
+    )
+    if deployment is not None:
+        announce(f"Building for the deployment at {deployment.base_url}")
     application = build_release_package(
         configuration=configuration, environment=environment, target=cargo_target
     )
+    if deployment is not None:
+        # Read back out of the finished binary. Everything before this was an
+        # instruction to a compiler that a stale cache may decline to follow.
+        require_compiled_deployment(app_binary(application), deployment)
+        announce(f"Binary carries the deployment profile for {deployment.base_url}")
     # Frozen next to the artifact it belongs to: the shared `frontend/dist` can
     # be rewritten by any concurrent build while the audits are still running.
     audited_assets = snapshot_production_assets(
@@ -368,22 +399,87 @@ def build_macos_release(
     verify_manifest_signature(
         application / "Contents/Resources" / EXECUTOR_RESOURCE, private_key
     )
-    return {
+    result: dict[str, object] = {
         "application": os.fspath(application),
         "architecture": architecture,
         "disk_image": os.fspath(disk_image),
         "disk_image_bytes": disk_image.stat().st_size,
         "target": target_id,
     }
+    if deployment is not None:
+        result["deployment"] = describe_deployment(deployment)
+    return result
 
 
-def parse_arguments() -> argparse.Namespace:
+DEPLOYMENT_ARGUMENTS = (
+    "deployment_profile",
+    "profile_signing_key",
+    "action_authorization_key",
+)
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("macos", "windows"), default="macos")
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIRECTORY)
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--build-id", default="macos-release")
-    return parser.parse_args()
+    # Paths only. The two key files hold private material that must not reach
+    # argv, the environment, a log line or this repository.
+    parser.add_argument(
+        "--deployment-profile",
+        type=Path,
+        help="JSON file declaring profileId, baseUrl and allowedHosts",
+    )
+    parser.add_argument(
+        "--profile-signing-key",
+        type=Path,
+        help="path to the Ed25519 seed that signs the deployment profile (mode 0600)",
+    )
+    parser.add_argument(
+        "--action-authorization-key",
+        type=Path,
+        help=(
+            "path to the Ed25519 seed the Control Plane holds as its "
+            "action-authorization-private-key Secret (mode 0600)"
+        ),
+    )
+    arguments = parser.parse_args(argv)
+    # Every step of a release runs a subprocess with `cwd=frontend/`, so a
+    # relative path given on the command line would be re-interpreted against
+    # a directory the operator never named. Bind them all to the invocation
+    # directory once, here, rather than at each of the places they are used.
+    for name in ("work_dir", "archive", *DEPLOYMENT_ARGUMENTS):
+        path = getattr(arguments, name)
+        if path is not None:
+            setattr(arguments, name, path.resolve())
+    return arguments
+
+
+def resolve_deployment(arguments: argparse.Namespace) -> CustomerDemoMaterial | None:
+    """All three of the customer Demo inputs, or none of them."""
+    supplied = {
+        name: getattr(arguments, name)
+        for name in DEPLOYMENT_ARGUMENTS
+        if getattr(arguments, name) is not None
+    }
+    if not supplied:
+        return None
+    if len(supplied) != len(DEPLOYMENT_ARGUMENTS):
+        missing = [
+            f"--{name.replace('_', '-')}"
+            for name in DEPLOYMENT_ARGUMENTS
+            if name not in supplied
+        ]
+        # A package built with two of the three would either fail to compile or,
+        # worse, ship pointing at a deployment whose action authorizations it
+        # cannot verify. There is no useful partial form.
+        raise ReleaseFailed(f"a customer Demo release also requires {missing}")
+    return customer_demo_material(
+        deployment_path=arguments.deployment_profile,
+        profile_signing_key_path=arguments.profile_signing_key,
+        action_authorization_key_path=arguments.action_authorization_key,
+    )
 
 
 def main() -> int:
@@ -397,10 +493,14 @@ def main() -> int:
             "scripts/run_eb_16_windows_acceptance.py; this command builds macOS "
             "packages only"
         )
+    # Resolved before anything is built: a deployment the App would reject is
+    # refused now rather than twenty minutes from now.
+    deployment = resolve_deployment(arguments)
     result = build_macos_release(
         work_directory=arguments.work_dir,
         archive=arguments.archive,
         build_id=arguments.build_id,
+        deployment=deployment,
     )
     (arguments.work_dir / "release-package.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True) + "\n",

@@ -38,14 +38,52 @@ test("U9-04 keeps account bearer secrets in one Rust vault behind fixed Commands
   assert.match(native, /logout_product_account/u);
   assert.match(app, /AccountSessionGate/u);
   assert.match(adapter, /parseAccountSessionSnapshot/u);
-  assert.match(main, /MODE === "customer-demo"/u);
-  assert.match(packageSource, /build:customer-demo-assets/u);
   assert.match(packageSource, /test:account-session-tauri/u);
   assert.match(tauriConfig, /"visible": false/u);
+
+  // The login screen must exist in every build and be mounted on the strength
+  // of a runtime answer. It used to be mounted only when Vite compiled the
+  // bundle in `customer-demo` mode, so the release package — built in the
+  // default mode — had no login screen in it at all, and no gate anywhere said
+  // so. A build mode may select a configuration value; it may not decide
+  // whether a product capability exists.
+  assert.match(main, /new TauriAccountSessionGateway\(\)/u);
+  assert.doesNotMatch(main, /import\.meta\.env/u);
+  assert.doesNotMatch(packageSource, /customer-demo-assets/u);
+  assert.match(tauriConfig, /"beforeBuildCommand": "pnpm build"/u);
 
   const webview = `${app}\n${adapter}`;
   assert.doesNotMatch(webview, /accessToken|refreshToken|localStorage|sessionStorage/u);
   assert.doesNotMatch(native, /system.*keychain|keyring|credential manager/iu);
+});
+
+test("the deployment configuration, not the build mode, decides whether login is required", async () => {
+  const [profile, native, gate, contract, packageSource] = await Promise.all([
+    read("src-tauri/src/deployment_profile.rs"),
+    read("src-tauri/src/lib.rs"),
+    read("src/features/account-session/AccountSessionGate.tsx"),
+    read("src/features/account-session/account-session-gateway.ts"),
+    read("package.json"),
+  ]);
+
+  // One read site, compiled into every binary. A local build may be pointed at
+  // an isolated instance that does issue product accounts (U9-04, U9-06); the
+  // switch can only ever *add* the requirement, never remove one, so a build
+  // that forgets it fails closed with a login screen rather than open.
+  assert.match(profile, /fn requires_product_account/u);
+  assert.match(profile, /AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE/u);
+  assert.match(profile, /option_env!/u);
+  assert.doesNotMatch(profile, /std::env::var/u);
+  assert.match(native, /requires_product_account/u);
+
+  // The runtime answer travels as a third snapshot state, so the one gateway
+  // and the one component serve every deployment.
+  assert.match(contract, /not_required/u);
+  assert.match(gate, /not_required/u);
+
+  // The Vite mode that used to carry the login screen is gone, not left behind
+  // as a second way to build the same assets.
+  assert.doesNotMatch(packageSource, /customer-demo/u);
 });
 
 test("U9-05 binds the native device before publishing an authenticated snapshot", async () => {

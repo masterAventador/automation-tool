@@ -9,6 +9,7 @@ plausible size. Every rejection path fails closed.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import shutil
@@ -528,6 +529,28 @@ RELEASE_ASSET_NAME = "index-RELEASE.js"
 EMBEDDED_ASSET_KEYS = f"/assets/{RELEASE_ASSET_NAME}".encode()
 
 
+@functools.cache
+def required_distribution_markers() -> tuple[str, ...]:
+    """The capabilities the real audit demands, read from the audit itself.
+
+    Restating them here would let this fixture keep passing after the audit
+    gained a requirement — which is exactly how a fixture stops modelling the
+    artifact it claims to stand for.
+    """
+    source = (
+        "import { requiredDistributionMarkers } from "
+        f"{json.dumps(PRODUCTION_PACKAGE_AUDIT.as_uri())};\n"
+        "process.stdout.write(JSON.stringify(requiredDistributionMarkers));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", source],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return tuple(json.loads(result.stdout))
+
+
 class ProductionPackageAuditTests(unittest.TestCase):
     """The E4-15 binary audit must reject hidden test window configuration."""
 
@@ -539,7 +562,11 @@ class ProductionPackageAuditTests(unittest.TestCase):
         (self.distribution / "assets").mkdir(parents=True)
         (self.distribution / "index.html").write_text("<html></html>", encoding="utf-8")
         (self.distribution / "assets" / RELEASE_ASSET_NAME).write_text(
-            "globalThis.desktop = true;", encoding="utf-8"
+            "globalThis.desktop = true;"
+            + "".join(
+                f"invoke({marker!r});" for marker in required_distribution_markers()
+            ),
+            encoding="utf-8",
         )
         self.cargo_manifest = self.base / "Cargo.toml"
         self.cargo_manifest.write_text(

@@ -65,7 +65,11 @@ async function createProductionFixture({ assetName = "app.js" } = {}) {
 
   await mkdir(assets, { recursive: true });
   await writeFile(join(distribution, "index.html"), "<main>desktop</main>");
-  await writeFile(join(assets, assetName), "console.log('production desktop')");
+  await writeFile(
+    join(assets, assetName),
+    "console.log('production desktop');invoke('restore_product_account_session');" +
+      "invoke('login_product_account')",
+  );
   await writeFile(
     binary,
     Buffer.concat([
@@ -95,6 +99,35 @@ async function createProductionFixture({ assetName = "app.js" } = {}) {
   );
   return { binary, cargoManifest, distribution, root, tauriConfig };
 }
+
+test("E4-15 refuses a package whose assets cannot reach the product account login", async () => {
+  const fixture = await createProductionFixture();
+  try {
+    // Exactly what a build fork produces. The login screen used to be mounted
+    // only when Vite compiled in `customer-demo` mode, so the release build
+    // tree-shook the account gateway away and shipped a package that could not
+    // log in to anything — and every gate stayed green. A package audit that
+    // only looks for forbidden strings cannot see a missing capability, so it
+    // has to be asked the positive question too.
+    await writeFile(
+      join(fixture.distribution, "assets", "app.js"),
+      "console.log('production desktop')",
+    );
+    await assert.rejects(
+      auditProductionPackage({
+        binaryPath: fixture.binary,
+        cargoManifestPath: fixture.cargoManifest,
+        dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+        distributionPath: fixture.distribution,
+        expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+        tauriConfigPath: fixture.tauriConfig,
+      }),
+      /cannot reach a required capability: (restore_product_account_session|login_product_account)/u,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
 
 test("E4-15 accepts only a release artifact with an isolated production dependency tree", async () => {
   const fixture = await createProductionFixture();
@@ -348,6 +381,139 @@ test("every package audit runner freezes the distribution it audits instead of r
       /"--dist",\s*\n?\s*os\.fspath\(PRODUCTION_ASSETS\)/u,
       `${runner} must not hand the shared frontend/dist to the audit`,
     );
+  }
+});
+
+// The five resource trees the production Rust code resolves out of the packaged
+// resource directory. On 2026-07-26 three of them shipped absent: every gate
+// stayed green because the only statement the audit made about `bundle.resources`
+// was a negative one — it looked for forbidden strings, so an empty declaration
+// and a complete one were indistinguishable to it. These fixtures build a real
+// packaged layout so the audit can be asked the positive question instead.
+const MACOS_PACKAGE_RESOURCES = {
+  "embedded-browser/distribution-manifest.v1.json": '{"target":"macos-arm64"}',
+  "local-executor/package/automation-tool-executor": "executor",
+  "media-toolchain/bin/ffmpeg": "ffmpeg",
+  "media-toolchain/bin/ffprobe": "ffprobe",
+  "media-toolchain/manifest.json": "{}",
+  "motion-video-worker/package/runtime/node": "node",
+  "motion-video-worker/package/app/worker.mjs": "export {};",
+  "material-video-worker/package/automation-tool-material-video-worker": "worker",
+};
+
+async function createPackagedFixture({ omit = [], declare = ["local-executor/package/"] } = {}) {
+  const fixture = await createProductionFixture({ assetName: "index-PRODUCTION.js" });
+  const packageRoot = join(fixture.root, "自动化运营工具.app");
+  const binary = join(packageRoot, "Contents", "MacOS", "自动化运营工具");
+  await mkdir(dirname(binary), { recursive: true });
+  await cp(fixture.binary, binary);
+  for (const [relativePath, payload] of Object.entries(MACOS_PACKAGE_RESOURCES)) {
+    if (omit.some((prefix) => relativePath.startsWith(prefix))) {
+      continue;
+    }
+    const target = join(packageRoot, "Contents", "Resources", relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, payload);
+  }
+  const config = JSON.parse(await readFile(fixture.tauriConfig, "utf8"));
+  config.bundle.resources = Object.fromEntries(
+    declare.map((destination) => [`build/${destination}`, destination]),
+  );
+  await writeFile(fixture.tauriConfig, JSON.stringify(config));
+  return { ...fixture, binary, packageRoot };
+}
+
+function auditPackaged(fixture, overrides = {}) {
+  return auditProductionPackage({
+    binaryPath: fixture.binary,
+    cargoManifestPath: fixture.cargoManifest,
+    dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+    distributionPath: fixture.distribution,
+    expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+    tauriConfigPath: fixture.tauriConfig,
+    ...overrides,
+  });
+}
+
+test("P9-05 accepts a package that carries every declared release resource", async () => {
+  const fixture = await createPackagedFixture();
+  try {
+    await assert.doesNotReject(auditPackaged(fixture));
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 refuses a production config that declares no bundler resource at all", async () => {
+  const fixture = await createPackagedFixture({ declare: [] });
+  try {
+    await assert.rejects(
+      auditPackaged(fixture),
+      /Production Tauri config does not declare a required release resource: local-executor/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 refuses a package whose video runtime never reached the resource directory", async () => {
+  for (const resource of ["media-toolchain", "motion-video-worker", "material-video-worker"]) {
+    const fixture = await createPackagedFixture({ omit: [resource] });
+    try {
+      await assert.rejects(
+        auditPackaged(fixture),
+        new RegExp(`Production package is missing a required release resource: ${resource}`),
+        resource,
+      );
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("P9-05 refuses a package whose browser or Executor tree is absent", async () => {
+  for (const resource of ["embedded-browser", "local-executor"]) {
+    const fixture = await createPackagedFixture({ omit: [resource] });
+    try {
+      await assert.rejects(
+        auditPackaged(fixture),
+        new RegExp(`Production package is missing a required release resource: ${resource}`),
+        resource,
+      );
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("P9-05 refuses a package whose required resource file is present but empty", async () => {
+  const fixture = await createPackagedFixture();
+  try {
+    await writeFile(
+      join(fixture.packageRoot, "Contents/Resources/motion-video-worker/package/runtime/node"),
+      "",
+    );
+    await assert.rejects(
+      auditPackaged(fixture),
+      /Production package is missing a required release resource: motion-video-worker/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 requires every release resource to be declared on Windows, where the bundler ships them all", async () => {
+  const fixture = await createPackagedFixture();
+  try {
+    await assert.rejects(
+      auditPackaged(fixture, {
+        packageRoot: join(fixture.packageRoot, "Contents/Resources"),
+        packagePlatform: "windows",
+      }),
+      /Production Tauri config does not declare a required release resource: embedded-browser/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
   }
 });
 

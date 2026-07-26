@@ -48,8 +48,12 @@ const videoEditingServiceGateway = new TauriVideoEditingServiceGateway();
 const materialVideoStudioGateway = new TauriMaterialVideoStudioGateway();
 const publishWorkspaceGateway = new TauriPublishWorkspaceGateway();
 const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
-const accountSessionGateway =
-  import.meta.env.MODE === "customer-demo" ? new TauriAccountSessionGateway() : undefined;
+// Always constructed. Whether a product account is actually required is a
+// property of the deployment this build was configured for, answered at
+// runtime by `restore_product_account_session`. Selecting it by Vite mode
+// meant the release package — built in the default mode — contained no login
+// screen at all, so no command could produce a customer Demo package.
+const accountSessionGateway = new TauriAccountSessionGateway();
 
 createRoot(root).render(
   <StrictMode>
@@ -70,7 +74,7 @@ createRoot(root).render(
       materialVideoStudioGateway={materialVideoStudioGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
       videoEditingGateway={videoEditingGateway}
-      {...(accountSessionGateway === undefined ? {} : { accountSessionGateway })}
+      accountSessionGateway={accountSessionGateway}
     />
   </StrictMode>,
 );

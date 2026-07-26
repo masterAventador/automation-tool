@@ -10,6 +10,7 @@ import {
 } from "./account-session-gateway";
 
 const unauthenticated: AccountSessionSnapshot = { state: "unauthenticated", account: null };
+const notRequired: AccountSessionSnapshot = { state: "not_required", account: null };
 const authenticated: AccountSessionSnapshot = {
   state: "authenticated",
   account: {
@@ -40,6 +41,25 @@ function gateway(overrides: Partial<AccountSessionGateway> = {}): AccountSession
 }
 
 describe("customer Demo product account gate", () => {
+  it("mounts the workbench directly on a deployment that issues no product accounts", async () => {
+    const accountGateway = gateway({
+      restoreSession: vi.fn().mockResolvedValue(notRequired),
+    });
+
+    render(
+      <AccountSessionGate gateway={accountGateway}>
+        <div>受保护工作台</div>
+      </AccountSessionGate>,
+    );
+
+    // The local deployment has no product accounts, so the same component that
+    // guards the customer Demo has to step aside here rather than be compiled
+    // out of the build. Nothing on the login path may appear.
+    expect(await screen.findByText("受保护工作台")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "登录自动化运营工具" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("产品账号状态")).not.toBeInTheDocument();
+  });
+
   it("does not mount the business workbench before a successful login", async () => {
     const accountGateway = gateway();
     const user = userEvent.setup();

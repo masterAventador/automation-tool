@@ -27,6 +27,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed={DEPLOYMENT_PROFILE_PAYLOAD_ENVIRONMENT}");
     println!("cargo:rerun-if-env-changed={DEPLOYMENT_PROFILE_SIGNATURE_ENVIRONMENT}");
     println!("cargo:rerun-if-env-changed={DEPLOYMENT_PROFILE_VERIFYING_KEY_ENVIRONMENT}");
+    println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE");
     validate_optional_deployment_profile();
     require_release_executor_verifying_key();
     require_release_update_configuration();

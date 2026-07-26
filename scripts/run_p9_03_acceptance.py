@@ -128,7 +128,23 @@ def write_candidate_configuration(temporary: Path, executor: Path) -> Path:
     return destination
 
 
-def release_environment(target: Path, executor_public_key: str) -> dict[str, str]:
+def release_environment(
+    target: Path,
+    executor_public_key: str,
+    *,
+    deployment_profile: dict[str, str] | None = None,
+    action_authorization_public_key: str | None = None,
+) -> dict[str, str]:
+    """The environment one release build compiles under.
+
+    Everything the ambient shell offers under `AUTOMATION_TOOL_*` is stripped
+    first, so a release is never influenced by a variable left over from an
+    acceptance run; what the build compiles in is decided here and nowhere
+    else. A customer Demo adds two things to that decision: the signed
+    deployment profile (`scripts/customer_demo_release.py`), and an action
+    authorization public key whose private half belongs to the deployment
+    rather than to this build.
+    """
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -140,7 +156,12 @@ def release_environment(target: Path, executor_public_key: str) -> dict[str, str
     environment.update(
         {
             "AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY": executor_public_key,
-            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": executor_public_key,
+            # Without a deployment the two keys coincide, as they always have:
+            # a candidate build authorises nothing it did not also sign, and no
+            # Control Plane holds the private half either way.
+            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (
+                action_authorization_public_key or executor_public_key
+            ),
             "AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS": "60",
             "AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT": "1",
             "AUTOMATION_TOOL_UPDATE_ENDPOINT": UPDATE_ENDPOINT,
@@ -149,6 +170,10 @@ def release_environment(target: Path, executor_public_key: str) -> dict[str, str
             "CI": "true",
         }
     )
+    # `build.rs` demands the three profile variables all present or all absent;
+    # anything else is a `panic!`. Passing the mapping the material produced
+    # keeps that an all-or-nothing decision made in one place.
+    environment.update(deployment_profile or {})
     return environment
 
 

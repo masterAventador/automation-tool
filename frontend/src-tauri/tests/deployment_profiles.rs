@@ -162,6 +162,31 @@ fn demo_profile_rejects_a_symlinked_namespace_boundary() {
     fs::remove_dir_all(&outside).expect("remove outside root");
 }
 
+/// Whether the App demands a product account is a property of the deployment
+/// it was configured for, read through one function that every binary compiles.
+/// It used to be a Vite build mode, which meant the release package — built in
+/// the default mode — contained no login screen at all.
+#[test]
+fn the_deployment_configuration_decides_whether_a_product_account_is_required() {
+    // A customer Demo always requires one. No build switch can turn this off:
+    // the demo branch does not consult the isolated-instance configuration.
+    assert!(signed_profile(MANIFEST).requires_product_account());
+
+    // A local build requires one only when it was configured to address an
+    // isolated instance that issues product accounts (U9-04, U9-06). The
+    // switch is one-way — it can add the requirement, never remove one — so an
+    // acceptance build that forgets it fails closed on a login screen.
+    // `scripts/run_c10_07_acceptance.py` compiles this test both ways, so each
+    // branch is a claim that can actually fail: a switch that was read but
+    // ignored fails the first, and one that leaks into an ordinary build fails
+    // the second.
+    if option_env!("AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE").is_some() {
+        assert!(DeploymentProfile::local().requires_product_account());
+    } else {
+        assert!(!DeploymentProfile::local().requires_product_account());
+    }
+}
+
 #[test]
 fn compiled_profile_matches_build_contract() {
     let profile = DeploymentProfile::load().expect("compiled deployment profile");
