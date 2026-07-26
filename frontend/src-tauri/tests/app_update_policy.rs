@@ -329,6 +329,109 @@ fn persisted_policy_is_canonical_private_and_corruption_fails_closed() {
     );
 }
 
+#[test]
+fn previous_policy_schema_is_migrated_and_rewritten_on_startup() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
+            .expect("create policy file"),
+    );
+    fs::write(
+        app_data.policy_file(),
+        br#"{"schemaVersion":0,"configuredChannel":"stable","minimumVersion":"1.0.0","highestObserved":null,"decision":null,"revision":1}"#,
+    )
+    .expect("write previous policy schema");
+
+    let reopened = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        reopened.is_ok(),
+        "previous policy schema must migrate instead of aborting startup"
+    );
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(app_data.policy_file()).expect("rewritten policy"))
+            .expect("valid rewritten policy");
+    assert_eq!(document["schemaVersion"], 1);
+    assert_eq!(document["configuredChannel"], "stable");
+    assert_eq!(document["revision"], 2);
+}
+
+#[test]
+fn configured_channel_change_resets_old_channel_state_and_rewrites_policy() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
+            .expect("create policy file"),
+    );
+    fs::write(
+        app_data.policy_file(),
+        br#"{"schemaVersion":1,"configuredChannel":"preview","minimumVersion":"1.0.0","highestObserved":{"version":"1.1.0","channel":"preview","policy":"optional","target":"darwin","arch":"aarch64","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sizeBytes":1024},"decision":{"version":"1.1.0","decision":"skip_version"},"revision":4}"#,
+    )
+    .expect("write previous channel policy");
+
+    let reopened = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        reopened.is_ok(),
+        "a valid configured channel change must migrate instead of aborting startup"
+    );
+    let record = reopened
+        .expect("migrated channel policy")
+        .record()
+        .expect("policy record");
+    assert_eq!(record.highest_observed_version(), None);
+    assert_eq!(record.decision(), None);
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(app_data.policy_file()).expect("rewritten policy"))
+            .expect("valid rewritten policy");
+    assert_eq!(document["configuredChannel"], "stable");
+    assert_eq!(document["revision"], 5);
+}
+
+#[test]
+fn semantically_valid_noncanonical_policy_is_canonicalized_on_startup() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
+            .expect("create policy file"),
+    );
+    fs::write(
+        app_data.policy_file(),
+        b"{\n  \"revision\": 1,\n  \"decision\": null,\n  \"highestObserved\": null,\n  \"minimumVersion\": \"1.0.0\",\n  \"configuredChannel\": \"stable\",\n  \"schemaVersion\": 1\n}\n",
+    )
+    .expect("write noncanonical policy");
+
+    let reopened = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        reopened.is_ok(),
+        "semantic policy compatibility must not depend on JSON byte order"
+    );
+    drop(reopened);
+    assert_eq!(
+        fs::read_to_string(app_data.policy_file()).expect("canonical rewritten policy"),
+        r#"{"schemaVersion":1,"configuredChannel":"stable","minimumVersion":"1.0.0","highestObserved":null,"decision":null,"revision":2}"#
+    );
+}
+
+#[test]
+fn unknown_policy_schema_version_fails_explicitly() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
+            .expect("create policy file"),
+    );
+    fs::write(
+        app_data.policy_file(),
+        br#"{"schemaVersion":99,"configuredChannel":"stable","minimumVersion":"1.0.0","highestObserved":null,"decision":null,"revision":1}"#,
+    )
+    .expect("write unknown policy schema");
+
+    assert_eq!(
+        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
+            .expect_err("unknown policy schema must fail")
+            .code(),
+        UpdatePolicyErrorCode::StorageUnavailable
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn failed_atomic_save_does_not_advance_the_in_memory_policy() {

@@ -201,7 +201,7 @@ git status          # 应显示 On branch codex/resilience-batch，基线 705504
 
 | 任务 | 状态 | 提交 | RED 证据（看到的失败输出） | 备注 / 反驳 |
 |---|---|---|---|---|
-| T63 | ⬜ | | | |
+| T63 | ✅ 完成 | 本提交 | 旧诊断设置、旧策略 schema、通道切换和非规范 JSON 四组断言均先在启动失败处得到 RED | 已知 N-1 自动迁移并原子回写，通道切换清除旧候选/决策，未知版本继续 fail closed；诊断设置 6 项、策略 13 项回归通过 |
 | T64 | ⬜ | | | |
 | T22 | ⬜ | | | |
 | T66a | ✅ 完成 | 本提交 | `over_permissive_secret_files_are_repaired_for_load_save_and_delete` 先在 `repair and load: Unavailable` 断言失败 | 用 `O_NOFOLLOW` 打开并核对 inode 后 `fchmod 0600`；load/save/delete、符号链接拒绝与注册交接 15 项回归通过 |

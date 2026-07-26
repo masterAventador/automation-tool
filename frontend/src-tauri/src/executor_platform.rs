@@ -351,8 +351,19 @@ impl ExecutorPlatformService {
             .map(|source| {
                 let stored = serde_json::from_slice::<StoredBrowserDiagnosticSettings>(&source)
                     .map_err(|_| storage_unavailable())?;
-                if stored.version != BROWSER_DIAGNOSTIC_SETTINGS_VERSION {
-                    return Err(storage_unavailable());
+                match stored.version.as_str() {
+                    BROWSER_DIAGNOSTIC_SETTINGS_VERSION => {}
+                    "0" => {
+                        let migrated = serde_json::to_vec(&StoredBrowserDiagnosticSettings {
+                            version: BROWSER_DIAGNOSTIC_SETTINGS_VERSION.to_owned(),
+                            capture_successful_runs: stored.capture_successful_runs,
+                        })
+                        .map_err(|_| storage_unavailable())?;
+                        browser_diagnostic_settings_store
+                            .save(&migrated)
+                            .map_err(|_| storage_unavailable())?;
+                    }
+                    _ => return Err(storage_unavailable()),
                 }
                 Ok(stored.capture_successful_runs)
             })
@@ -913,19 +924,23 @@ mod tests {
     use super::{ExecutorPlatformErrorCode, ExecutorPlatformService};
     use crate::startup_environment::ExecutorStartupState;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
     struct TemporaryAppData(PathBuf);
 
     impl TemporaryAppData {
         fn new() -> Self {
             Self(std::env::temp_dir().join(format!(
-                "automation-tool-h8-03-reconciliation-{}-{}",
+                "automation-tool-h8-03-reconciliation-{}-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("system time")
                     .as_nanos(),
+                NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
             )))
         }
     }
@@ -997,6 +1012,61 @@ mod tests {
             std::str::from_utf8(&stored).expect("UTF-8 settings"),
             r#"{"version":"1","capture_successful_runs":true}"#
         );
+    }
+
+    #[test]
+    fn previous_browser_diagnostic_settings_version_is_migrated_and_rewritten() {
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        service
+            .set_capture_successful_diagnostics(true)
+            .expect("create settings file");
+        drop(service);
+        let settings_path = app_data
+            .0
+            .join("local-executor/browser-diagnostic-settings-v1");
+        std::fs::write(
+            &settings_path,
+            br#"{"version":"0","capture_successful_runs":true}"#,
+        )
+        .expect("write previous settings version");
+
+        let reopened = ExecutorPlatformService::initialize(&app_data.0);
+        assert!(
+            reopened.is_ok(),
+            "previous settings version must migrate instead of aborting startup"
+        );
+        assert!(reopened
+            .expect("migrated service")
+            .browser_diagnostic_settings()
+            .expect("migrated settings")
+            .capture_successful_runs());
+        assert_eq!(
+            std::fs::read_to_string(settings_path).expect("rewritten settings"),
+            r#"{"version":"1","capture_successful_runs":true}"#
+        );
+    }
+
+    #[test]
+    fn unknown_browser_diagnostic_settings_version_fails_explicitly() {
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        service
+            .set_capture_successful_diagnostics(true)
+            .expect("create settings file");
+        drop(service);
+        std::fs::write(
+            app_data
+                .0
+                .join("local-executor/browser-diagnostic-settings-v1"),
+            br#"{"version":"future","capture_successful_runs":true}"#,
+        )
+        .expect("write unknown settings version");
+
+        let error = ExecutorPlatformService::initialize(&app_data.0)
+            .err()
+            .expect("unknown settings version must fail");
+        assert_eq!(error.code(), ExecutorPlatformErrorCode::StorageUnavailable);
     }
 
     #[test]
