@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -62,9 +63,22 @@ def discover(repository_root: Path) -> list[Path]:
     )
 
 
+def venv_interpreter(project_root: Path) -> Path:
+    """A venv's interpreter, whose location inside the venv is platform-specific.
+
+    Windows puts it in `Scripts/python.exe`; POSIX puts it in `bin/python`.
+    Pinning one spelling makes the runner abort on the other platform before
+    executing anything, which reads as a single `FATAL` line rather than as an
+    unrun suite.
+    """
+    if os.name == "nt":
+        return project_root / ".venv" / "Scripts" / "python.exe"
+    return project_root / ".venv" / "bin" / "python"
+
+
 def interpreter(repository_root: Path) -> Path:
     """The project interpreter, never the caller's ambient `python3`."""
-    return repository_root / "backend" / ".venv" / "bin" / "python"
+    return venv_interpreter(repository_root / "backend")
 
 
 # A script that reaches into a sub-project needs that sub-project's environment.
@@ -81,7 +95,7 @@ def interpreter_for(script: Path, repository_root: Path) -> Path:
     source = script.read_text(encoding="utf-8", errors="replace")
     for directory, marker in SUB_PROJECT_ENVIRONMENTS:
         if directory in source or marker in source:
-            candidate = repository_root / directory / ".venv" / "bin" / "python"
+            candidate = venv_interpreter(repository_root / directory)
             if candidate.is_file():
                 return candidate
     return interpreter(repository_root)
