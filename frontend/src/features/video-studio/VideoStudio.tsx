@@ -84,19 +84,64 @@ const DEFAULT_MOTION_BEATS = resizeMotionBeats(
 );
 
 /**
- * How long a submission that has not come back yet has been going.
+ * How long the authoring pass really takes, measured rather than predicted.
+ *
+ * Seven consecutive successful one-sentence runs on 2026-07-26: median 124
+ * seconds from pressing the button to a finished film, longest 178. These are
+ * the only honest numbers available — the native side's own 600 second budget
+ * is a stall guard, not an expectation, and printing it would invent a ten
+ * minute wait out of a two minute one.
+ *
+ * Spoken to the minute on purpose. "通常 2 分 4 秒" is a precision the median of
+ * seven runs does not have, and a false precision is its own kind of lie.
+ */
+const MOTION_AUTHORING_MEASURED = {
+  typicalSeconds: 124,
+  longestSeconds: 178,
+} as const;
+
+function spokenMinutes(seconds: number): string {
+  return `${Math.round(seconds / 60)} 分钟`;
+}
+
+/**
+ * How long a submission that has not come back yet has been going, and whether
+ * that is normal.
  *
  * There is no job to show for it: `submit_motion_video_brief` writes the job
  * snapshot only after the authoring pass has succeeded, so for 136–178 seconds
  * (measured) the jobs list was literally empty and the operator had no way to
  * tell a submission in flight from one that never happened. Some of them
  * pressed the button again.
+ *
+ * A clock alone fixed only half of that. At 87 seconds the number answers "is
+ * it alive" and says nothing at all about "is this normal", and without a
+ * reference a healthy two minute wait looks exactly like a dead one — which is
+ * the same button-pressed-twice again, just later. So the measured range is on
+ * screen beside the clock.
+ *
+ * Past the longest run ever measured it stops offering reassurance it no longer
+ * has. What it says then is still a fact — this has gone on longer than any
+ * measured run — plus the likeliest reason, because a model that took the
+ * connection and then went quiet is exactly what this looks like from here and
+ * the operator can go and check it. It is not a claim that the run has failed:
+ * nothing here knows that.
  */
 function motionPendingLabel(pending: MotionRunPending, now: number): string {
-  const elapsed = motionSpokenDuration(Math.max(0, Math.floor((now - pending.startedAt) / 1000)));
-  return pending.kind === "one_sentence"
-    ? `正在自动编排这条视频 · 已用 ${elapsed}`
-    : `正在提交本机渲染任务 · 已用 ${elapsed}`;
+  const seconds = Math.max(0, Math.floor((now - pending.startedAt) / 1000));
+  const elapsed = motionSpokenDuration(seconds);
+  if (pending.kind !== "one_sentence") {
+    return `正在提交本机渲染任务 · 已用 ${elapsed}`;
+  }
+  const reference =
+    seconds > MOTION_AUTHORING_MEASURED.longestSeconds
+      ? `已经超过实测最长的 ${spokenMinutes(
+          MOTION_AUTHORING_MEASURED.longestSeconds,
+        )}，可能是视频创作模型服务没有回应`
+      : `通常 ${spokenMinutes(
+          MOTION_AUTHORING_MEASURED.typicalSeconds,
+        )}左右，最长约 ${spokenMinutes(MOTION_AUTHORING_MEASURED.longestSeconds)}`;
+  return `正在自动编排这条视频 · 已用 ${elapsed} · ${reference}`;
 }
 
 /**

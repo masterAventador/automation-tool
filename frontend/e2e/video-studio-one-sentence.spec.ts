@@ -68,8 +68,12 @@ test("a submission and its result survive leaving the page", async ({ page }) =>
   await page.getByRole("menuitem", { name: "工作台" }).click();
   await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
 
-  // Away from the page, the sidebar is the only thing that can still say so.
-  await expect(videoEntry.locator("[title='视频制作正在进行中']")).toBeVisible();
+  // Away from the page, the sidebar is the only thing that can still say so —
+  // and this submission failed, so what it says has to be that. It used to
+  // read 视频制作正在进行中 for a run that was already over, which is how a
+  // failure stayed invisible for twelve minutes in the 2026-07-26 injection.
+  await expect(videoEntry.getByText("失败")).toBeVisible();
+  await expect(videoEntry.locator("[title='视频制作正在进行中']")).toHaveCount(0);
 
   await videoEntry.click();
   await expect(page.getByText(/暂时无法提交|暂时不可用|自动编排/)).toBeVisible();

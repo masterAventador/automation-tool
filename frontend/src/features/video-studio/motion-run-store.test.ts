@@ -4,7 +4,7 @@ import {
   dismissMotionRunMessage,
   failMotionRun,
   forgetMotionJob,
-  motionRunNeedsAttention,
+  motionRunAttention,
   motionRunSnapshot,
   resetMotionRunStore,
   setMotionActiveTab,
@@ -38,7 +38,7 @@ describe("motion run store", () => {
     startMotionRun(PENDING);
 
     expect(motionRunSnapshot().pending).toEqual(PENDING);
-    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(true);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("running");
   });
 
   /**
@@ -57,11 +57,11 @@ describe("motion run store", () => {
       tone: "error",
       text: "自动编排中途出错，视频没有开始制作。",
     });
-    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(true);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("failed");
 
     dismissMotionRunMessage();
     expect(motionRunSnapshot().message).toBeNull();
-    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(false);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
   });
 
   it("hands the pending row over to the real job once the run returns", () => {
@@ -90,7 +90,7 @@ describe("motion run store", () => {
     expect(motionRunSnapshot().selectedMethod).toBe("motion_composition_v1");
     expect(motionRunSnapshot().activeTab).toBe("jobs");
     // 只是把句子放在这里，本身不构成「有东西要看」。
-    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(false);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
   });
 
   it("tells subscribers on every change and stops the moment one leaves", () => {

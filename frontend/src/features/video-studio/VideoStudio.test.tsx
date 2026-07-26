@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  motionRunNeedsAttention,
+  motionRunAttention,
   motionRunSnapshot,
   resetMotionRunStore,
 } from "./motion-run-store";
@@ -924,6 +924,51 @@ describe("video studio shell", () => {
   });
 
   /**
+   * 一个只会往上走的秒表，回答不了「这正常吗」。
+   *
+   * 走字的钟解决的是「它还活着吗」。但等到 87 秒的时候，用户唯一想知道的是这算
+   * 不算久——没有参照物，2 分钟的正常等待和已经挂掉的等待长得一模一样，于是他要
+   * 么白等，要么在正常范围内就重新提交，真的再跑一遍编排。演示当天更糟：讲解人
+   * 得当着客户面盯着一个不知道要转多久的圈。
+   *
+   * 参照物用实测值，不用预测：2026-07-26 连续七次成功，提交到完成中位数 124 秒、
+   * 最长 178 秒。说给人听的时候取整到分钟——「通常 2 分 4 秒」是一种假精度，这个
+   * 数字不配。超过实测最长的那一次之后，说的仍然是事实（已经比实测最长的还久）
+   * 加上最可能的成因，不是断言。
+   */
+  it("says how long the wait normally is, and says when it has gone past that", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const studioGateway = gateway();
+      studioGateway.submitMotionBrief = vi.fn().mockReturnValue(new Promise(() => {}));
+      render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+      const jobs = await screen.findByRole("tabpanel");
+      // 94 秒：还在实测的正常范围里，给出参照物，不要报警。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(94_000);
+      });
+      expect(jobs).toHaveTextContent(/通常 2 分钟左右/u);
+      expect(jobs).toHaveTextContent(/最长约 3 分钟/u);
+      expect(jobs).not.toHaveTextContent(/超过/u);
+
+      // 208 秒：过了实测最长的 178 秒，必须说出来。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(114_000);
+      });
+      expect(jobs).toHaveTextContent(/超过/u);
+      expect(jobs).toHaveTextContent(/视频创作模型服务/u);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * 渲染阶段的任务卡此前只有一条百分比。
    *
    * 而这条百分比在原生侧是**状态的另一种写法**：`validate_snapshot` 只允许
@@ -1050,7 +1095,7 @@ describe("video studio shell", () => {
     // 用户已经处理过这条结果了，侧边栏那个「有事」的标记就该灭掉，
     // 否则它会一直亮到下一次提交。
     expect(screen.queryByText(/已提交一句话自动制作/u)).toBeNull();
-    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(false);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
     expect(
       await screen.findByRole("button", {
         name: "播放用蓝色商务风做一段本周销售增长说明",

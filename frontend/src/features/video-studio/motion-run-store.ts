@@ -151,13 +151,25 @@ export function setMotionActiveTab(tab: string): void {
   commit({ activeTab: tab });
 }
 
+/** What the sidebar has to say about this page from anywhere in the App. */
+export type MotionRunAttention = "none" | "running" | "failed";
+
 /**
- * Whether the sidebar should mark this page as having something on it.
+ * Whether the sidebar should mark this page, and as what.
  *
- * A run in flight, or a result the operator has not been back to see yet.
- * Without it, leaving the page while a film is being authored takes every
- * trace of it off the screen — which is what made an operator submit twice.
+ * "running" is a run in flight, or a result the operator has not been back to
+ * see yet. Without any mark at all, leaving the page while a film is being
+ * authored takes every trace of it off the screen — which is what made an
+ * operator submit twice.
+ *
+ * "failed" is separate because one mark for both is a mark that lies. Measured
+ * on 2026-07-26: a run failed at four seconds, the operator was on another
+ * page, and twelve minutes later the only thing on screen about it was a dot
+ * whose hover text read 视频制作正在进行中. A failure reported as progress is
+ * worse than no report — the operator waits on something that is already over.
  */
-export function motionRunNeedsAttention(current: MotionRunState): boolean {
-  return current.pending !== null || current.message !== null;
+export function motionRunAttention(current: MotionRunState): MotionRunAttention {
+  if (current.message?.tone === "error") return "failed";
+  if (current.pending !== null || current.message !== null) return "running";
+  return "none";
 }
