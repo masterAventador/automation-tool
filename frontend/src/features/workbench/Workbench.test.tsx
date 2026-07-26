@@ -132,7 +132,7 @@ describe("RPA workbench", () => {
     expect(screen.getByRole("heading", { name: "当前任务" })).toBeVisible();
     expect(screen.getAllByText("运行中")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "最近任务" })).toBeVisible();
-    expect(screen.getByText(COMPLETED_TASK_ID)).toBeVisible();
+    expect(screen.getByRole("button", { name: /13:00:00 的任务$/ })).toBeVisible();
     expect(screen.getByText("已成功")).toBeVisible();
     const total = screen.getByText("累计任务").closest(".ant-statistic");
     expect(total).toBeVisible();
@@ -140,6 +140,77 @@ describe("RPA workbench", () => {
     expect(screen.getByText("当前需接管").closest(".ant-statistic")).toHaveTextContent("1");
     expect(screen.getByText("动作结果待确认").closest(".ant-statistic")).toHaveTextContent("1");
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
+  });
+
+  it("names recent Tasks by when they were created, not by their identifier", async () => {
+    // The workbench is the first screen of the product, and until now every row
+    // of 最近任务 was labelled with the Task's UUID — 36 characters that say
+    // nothing about what the Task was. The projection carries no title (see
+    // `taskSnapshotSchema`: taskId/status/revision/lastEventSequence/createdAt/
+    // updatedAt, and it is `.strict()`), so createdAt is the one fact in it that
+    // a person can actually read.
+    renderWorkbench();
+
+    await screen.findByText("本机执行器在线");
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>(".recent-task-list button"),
+    );
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}:\d{2} 的任务$/);
+    }
+    // The fixture's two Tasks were created at 14:00 and 13:00 local time, newest
+    // first — so the label is read off createdAt, not off anything else.
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("14:00:00"),
+      expect.stringContaining("13:00:00"),
+    ]);
+    const list = document.querySelector(".recent-task-list");
+    expect(list).not.toHaveTextContent(RUNNING_TASK_ID);
+    expect(list).not.toHaveTextContent(COMPLETED_TASK_ID);
+  });
+
+  it("keeps the protocol counters out of the current Task body", async () => {
+    // Revision and 事件水位 are the internal consistency counters of the
+    // snapshot/event protocol. They belong to a diagnosis, not to the largest
+    // card on the customer's first screen — but they must stay reachable,
+    // because they are how an operator checks that the authoritative snapshot
+    // and the event projection agree.
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await screen.findByText("本机执行器在线");
+    expect(screen.queryByText("Revision")).not.toBeInTheDocument();
+    expect(screen.queryByText("事件水位")).not.toBeInTheDocument();
+    expect(screen.queryByText(RUNNING_TASK_ID)).not.toBeInTheDocument();
+
+    // Matched loosely: antd puts an `aria-label` on the expand icon, so the
+    // header's accessible name is "<折叠状态> 诊断信息" and the prefix follows
+    // whichever locale the surrounding ConfigProvider supplies.
+    await user.click(screen.getByRole("button", { name: /诊断信息/ }));
+
+    // Presence, not visibility: jsdom does not run the panel's open animation,
+    // so the content stays measured-but-hidden here. That the operator can
+    // actually see it after the click is asserted in e2e/workbench-home.spec.ts.
+    expect(await screen.findByText("Revision")).toBeInTheDocument();
+    expect(screen.getByText("事件水位")).toBeInTheDocument();
+    expect(screen.getByText(RUNNING_TASK_ID)).toBeInTheDocument();
+  });
+
+  it("falls back to the identifier when a Task has no readable creation time", async () => {
+    // Nothing on the wire should get this far — every production path parses the
+    // snapshot through Zod first. But the fallback decides what the customer's
+    // first screen says if one ever does, and "NaN-NaN NaN:NaN:NaN 的任务" is
+    // worse than the UUID this replaces.
+    const taskSource = source();
+    vi.mocked(taskSource.listTasks).mockResolvedValue({
+      items: [task({ status: "succeeded", createdAt: "not a timestamp" })],
+      nextCursor: null,
+    });
+    renderWorkbench(taskSource);
+
+    expect(await screen.findByRole("button", { name: RUNNING_TASK_ID })).toBeVisible();
   });
 
   it("uses the newer live projection in the recent Task summary", async () => {

@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Descriptions,
   Empty,
   Flex,
@@ -70,6 +71,39 @@ function statusColor(status: TaskStatus): string {
   if (status === "awaiting_human") return "gold";
   if (status === "cancelled") return "default";
   return "blue";
+}
+
+function twoDigits(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/**
+ * How a Task is named on the workbench.
+ *
+ * The projection carries no title: `taskSnapshotSchema` is `.strict()` over
+ * taskId, status, revision, lastEventSequence, createdAt and updatedAt, and the
+ * keyword the operator typed lives in a separate table the Task endpoints never
+ * join. So the one fact in the snapshot a person can read is when the Task was
+ * created, and that is what names it here until the contract carries a title.
+ *
+ * Seconds are kept: two Tasks created in the same minute would otherwise render
+ * as two rows with identical text, which is its own defect.
+ *
+ * An unreadable timestamp falls back to the identifier — every production path
+ * parses the snapshot through Zod before it reaches this component, so nothing
+ * should arrive unreadable, but the identifier is exactly what this replaces and
+ * so can never read worse than what was here before. `NaN-NaN NaN:NaN:NaN` can.
+ */
+function taskDisplayName(task: TaskSnapshot): string {
+  const createdAt = new Date(task.createdAt);
+  if (Number.isNaN(createdAt.getTime())) {
+    return task.taskId;
+  }
+  const day = `${twoDigits(createdAt.getMonth() + 1)}-${twoDigits(createdAt.getDate())}`;
+  const time = `${twoDigits(createdAt.getHours())}:${twoDigits(
+    createdAt.getMinutes(),
+  )}:${twoDigits(createdAt.getSeconds())}`;
+  return `${day} ${time} 的任务`;
 }
 
 export function Workbench({
@@ -265,18 +299,49 @@ export function Workbench({
         {latestCurrent === null ? (
           <Empty description="还没有运行中的任务" />
         ) : (
-          <Descriptions column={2} size="small">
-            <Descriptions.Item label="Task ID">{latestCurrent.taskId}</Descriptions.Item>
-            <Descriptions.Item label="状态">
-              <Tag color={statusColor(latestCurrent.status)}>
-                {STATUS_LABELS[latestCurrent.status]}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Revision">{latestCurrent.revision}</Descriptions.Item>
-            <Descriptions.Item label="事件水位">
-              {latestCurrent.lastEventSequence}
-            </Descriptions.Item>
-          </Descriptions>
+          <>
+            <Descriptions column={2} size="small">
+              <Descriptions.Item label="任务">
+                {taskDisplayName(latestCurrent)}
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <Tag color={statusColor(latestCurrent.status)}>
+                  {STATUS_LABELS[latestCurrent.status]}
+                </Tag>
+              </Descriptions.Item>
+            </Descriptions>
+            {/*
+              Revision and 事件水位 are how an operator checks that the
+              authoritative snapshot and the event projection agree, so they stay
+              reachable — but folded, because they are a diagnosis and this is the
+              largest card on the first screen the customer sees. The full
+              identifier joins them: it is what correlates a Task with a log line,
+              and nothing else on this page needs it.
+            */}
+            <Collapse
+              ghost
+              size="small"
+              items={[
+                {
+                  key: "diagnostics",
+                  label: "诊断信息",
+                  children: (
+                    <Descriptions column={2} size="small">
+                      <Descriptions.Item label="Task ID">
+                        {latestCurrent.taskId}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Revision">
+                        {latestCurrent.revision}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="事件水位">
+                        {latestCurrent.lastEventSequence}
+                      </Descriptions.Item>
+                    </Descriptions>
+                  ),
+                },
+              ]}
+            />
+          </>
         )}
         {commandNotice === null ? null : (
           <Alert className="command-notice" type="info" showIcon message={commandNotice} />
@@ -294,7 +359,7 @@ export function Workbench({
             {projectedTasks.slice(0, 5).map((task) => (
               <li key={task.taskId}>
                 <Button type="link" onClick={() => onOpenTask(task.taskId)}>
-                  {task.taskId}
+                  {taskDisplayName(task)}
                 </Button>
                 <Tag color={statusColor(task.status)}>{STATUS_LABELS[task.status]}</Tag>
               </li>
