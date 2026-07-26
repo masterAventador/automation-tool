@@ -244,15 +244,25 @@ def run(
     return result
 
 
-def run_binary(arguments: Sequence[str], *, timeout_seconds: float = 900) -> bytes:
+def run_binary(
+    arguments: Sequence[str],
+    *,
+    environment: Mapping[str, str] | None = None,
+    timeout_seconds: float = 900,
+) -> bytes:
     try:
         result = subprocess.run(
-            list(arguments), check=False, capture_output=True, timeout=timeout_seconds
+            list(arguments),
+            check=False,
+            capture_output=True,
+            timeout=timeout_seconds,
+            env=None if environment is None else dict(environment),
         )
     except subprocess.TimeoutExpired:
         raise DeploymentFailure(f"command timed out: {arguments[0]}") from None
     if result.returncode != 0:
-        raise DeploymentFailure(f"command failed: {' '.join(arguments[:3])}")
+        detail = result.stderr.decode("utf-8", "replace").strip()[:400]
+        raise DeploymentFailure(f"command failed: {' '.join(arguments[:3])} :: {detail}")
     return result.stdout
 
 
@@ -299,13 +309,46 @@ def compose_environment(
     }
 
 
-def compose(*arguments: str, environment: Mapping[str, str], **keywords: Any) -> Any:
+def _compose_argv(arguments: Sequence[str]) -> list[str]:
+    """The single place a Compose command line is built.
+
+    Every Compose call needs the AUTOMATION_TOOL_DEMO_* values or the manifest
+    refuses to interpolate; keeping argv construction and environment merging in
+    one pair of helpers is what stops a second call site from forgetting them.
+    """
+
+    return [
+        "docker",
+        "compose",
+        "--file",
+        str(COMPOSE_FILE),
+        *arguments,
+    ]
+
+
+def _compose_environment(environment: Mapping[str, str]) -> dict[str, str]:
     merged = os.environ.copy()
     merged.update(environment)
+    return merged
+
+
+def compose(*arguments: str, environment: Mapping[str, str], **keywords: Any) -> Any:
     return run(
-        ["docker", "compose", "--file", str(COMPOSE_FILE), *arguments],
-        environment=merged,
+        _compose_argv(arguments),
+        environment=_compose_environment(environment),
         **keywords,
+    )
+
+
+def compose_binary(
+    *arguments: str, environment: Mapping[str, str], timeout_seconds: float = 900
+) -> bytes:
+    """Run a Compose command whose stdout is binary (pg_dump), same argv path."""
+
+    return run_binary(
+        _compose_argv(arguments),
+        environment=_compose_environment(environment),
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -561,22 +604,17 @@ def backup_database(environment: Mapping[str, str]) -> dict[str, str]:
         report("skipped backup: the schema does not exist yet")
         return {"status": "skipped", "reason": "empty-database"}
     BACKUP_DIRECTORY.mkdir(mode=0o700, parents=True, exist_ok=True)
-    dump = run_binary(
-        [
-            "docker",
-            "compose",
-            "--file",
-            str(COMPOSE_FILE),
-            "exec",
-            "-T",
-            "postgres",
-            "pg_dump",
-            "-U",
-            "postgres",
-            "-d",
-            database_name(),
-            "-Fc",
-        ]
+    dump = compose_binary(
+        "exec",
+        "-T",
+        "postgres",
+        "pg_dump",
+        "-U",
+        "postgres",
+        "-d",
+        database_name(),
+        "-Fc",
+        environment=environment,
     )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     artifact = BACKUP_DIRECTORY / f"{database_name()}-{stamp}.dump"

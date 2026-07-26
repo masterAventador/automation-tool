@@ -14,6 +14,7 @@ Run with:
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import re
@@ -191,6 +192,48 @@ class PackageDownloadHost(unittest.TestCase):
                     app_version="0.1.0",
                     vcs_ref=revision,
                 )
+
+
+class ComposeInvocationContract(unittest.TestCase):
+    """Every Compose call must carry the interpolation environment, and every
+    failure must say why.
+
+    Both assertions come from one real defect. `backup_database` built its own
+    `docker compose ... pg_dump` argv without the AUTOMATION_TOOL_DEMO_* values,
+    so Compose refused to interpolate the manifest and exited 1. That path only
+    runs once a schema exists, so the first deployment passed and the *second*
+    one failed -- and the failure said only "command failed: docker compose
+    --file", because the binary runner dropped stderr on the floor.
+    """
+
+    def test_compose_argv_is_built_in_exactly_one_place(self) -> None:
+        source = (CLOUD_ROOT / "deploy_cloud_demo.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            source.count('"docker",\n        "compose",'),
+            1,
+            "a second hand-built Compose argv is how the environment gets dropped",
+        )
+
+    def test_binary_compose_helper_requires_the_environment(self) -> None:
+        signature = inspect.signature(deploy_cloud_demo.compose_binary)
+        self.assertIn("environment", signature.parameters)
+        self.assertIs(
+            signature.parameters["environment"].default,
+            inspect.Parameter.empty,
+            "the environment must not be optional, or it will be forgotten again",
+        )
+
+    def test_binary_command_failures_report_the_underlying_stderr(self) -> None:
+        with self.assertRaises(deploy_cloud_demo.DeploymentFailure) as raised:
+            deploy_cloud_demo.run_binary(
+                ["sh", "-c", "echo interpolation-exploded >&2; exit 1"]
+            )
+        self.assertIn("interpolation-exploded", str(raised.exception))
+
+    def test_text_command_failures_also_report_the_underlying_stderr(self) -> None:
+        with self.assertRaises(deploy_cloud_demo.DeploymentFailure) as raised:
+            deploy_cloud_demo.run(["sh", "-c", "echo text-path-exploded >&2; exit 1"])
+        self.assertIn("text-path-exploded", str(raised.exception))
 
 
 class SourceTransferContract(unittest.TestCase):
