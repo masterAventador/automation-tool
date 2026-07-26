@@ -116,6 +116,25 @@ def _fail(code: EditingProviderErrorCode) -> Never:
     raise EditingProviderFailure(code)
 
 
+def _sync_directory_entry(directory: Path) -> None:
+    """Make the rename durable, on the platforms that can express it.
+
+    Opening a directory read-only in order to `fsync` it is a POSIX idiom;
+    Windows refuses the open outright, so the call raised `PermissionError`
+    and took the whole import down. There is no user-mode equivalent to
+    reach for, so durability of the directory entry rests on NTFS's own
+    metadata journaling there and the payload's own `fsync` still runs on
+    both platforms.
+    """
+    if os.name == "nt":
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class AliyunOssObjectRef:
@@ -210,11 +229,7 @@ class DirectoryEditingOutputPayloadSink:
         except BaseException:
             temporary_path.unlink(missing_ok=True)
             raise
-        directory_fd = os.open(self._directory, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _sync_directory_entry(self._directory)
 
 
 @final
