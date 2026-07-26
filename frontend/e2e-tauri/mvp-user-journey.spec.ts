@@ -11,22 +11,15 @@ const UUID_V4 =
 const PRIVATE_VALUE_PATTERN =
   /\/Applications|Contents\/MacOS|Program Files|chrome\.exe|msedge\.exe|[A-Z]:\\|authorization|token|secret|credential/i;
 
-async function repairTrustedBrowser(): Promise<void> {
-  await expect(await browser.$("h2")).toHaveText("桌面运行环境需要处理");
-  await browser.$("button=打开本地修复工具").click();
-  const firstChoice = await browser.$(
-    ".browser-settings-card label.ant-radio-wrapper",
-  );
-  await expect(firstChoice).toBeDisplayed();
-  await firstChoice.click();
-  await browser.$("button=保存浏览器选择").click();
-  await browser.$("button=重新检查").click();
-  await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-}
-
 describe("H8-16F hidden App original-caller MVP journey", () => {
   it("creates, logs in, discovers, excludes, confirms, acts, and renders results", async () => {
-    await repairTrustedBrowser();
+    // The journey used to start on the blocked diagnostics page and repair the
+    // operating browser from settings. EB-10 (`f34e503`) deleted that user
+    // action: the App no longer discovers, offers or falls back to a system
+    // browser, so the only browser it can run is the verified embedded
+    // Chromium that has to be present before startup. There is nothing left to
+    // repair, and the journey now begins where a real operator begins.
+    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_create_form_for_acceptance"),
     )) as InstallationPreparation;

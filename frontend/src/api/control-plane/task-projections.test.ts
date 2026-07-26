@@ -5,6 +5,7 @@ import {
   TaskProjectionSourceError,
   parseTaskEvent,
   parseTaskSnapshot,
+  taskListQueryOptions,
   taskProjectionKeys,
   taskSnapshotQueryOptions,
   type TaskProjectionSource,
@@ -43,6 +44,14 @@ describe("Task projection query boundary", () => {
   it("keeps polling the authoritative snapshot so an offline emergency stop reconciles", () => {
     const source = {} as TaskProjectionSource;
     const options = taskSnapshotQueryOptions(source, TASK_ID);
+
+    expect(options.refetchInterval).toBe(1_000);
+    expect(options.refetchIntervalInBackground).toBe(true);
+  });
+
+  it("keeps polling the Task list so a Task nobody is following stops going stale", () => {
+    const source = {} as TaskProjectionSource;
+    const options = taskListQueryOptions(source, null, 20);
 
     expect(options.refetchInterval).toBe(1_000);
     expect(options.refetchIntervalInBackground).toBe(true);

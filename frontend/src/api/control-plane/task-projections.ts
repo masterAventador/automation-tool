@@ -278,7 +278,14 @@ export const taskProjectionKeys = {
   detail: (taskId: string) => [...taskProjectionKeys.details(), taskId] as const,
 };
 
-const TASK_SNAPSHOT_REFETCH_INTERVAL_MS = 1_000;
+/// How often an authoritative Task projection is re-read.
+///
+/// The list needs it as much as the snapshot does: the workbench follows the
+/// event stream of exactly one Task, so every other row it shows is whatever
+/// the list happened to return once. A Task that starts running after that read
+/// then keeps rendering its old status until something unrelated invalidates
+/// the list, and the screen reports a running Task as a draft.
+const TASK_PROJECTION_REFETCH_INTERVAL_MS = 1_000;
 
 export function taskSnapshotQueryOptions(source: TaskProjectionSource, taskId: string) {
   return queryOptions({
@@ -286,7 +293,7 @@ export function taskSnapshotQueryOptions(source: TaskProjectionSource, taskId: s
     queryFn: ({ signal }) => source.getTask(taskId, { signal }),
     retry: false,
     staleTime: 0,
-    refetchInterval: TASK_SNAPSHOT_REFETCH_INTERVAL_MS,
+    refetchInterval: TASK_PROJECTION_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: true,
   });
 }
@@ -301,5 +308,7 @@ export function taskListQueryOptions(
     queryFn: ({ signal }) => source.listTasks({ cursor, limit, signal }),
     retry: false,
     staleTime: 0,
+    refetchInterval: TASK_PROJECTION_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: true,
   });
 }

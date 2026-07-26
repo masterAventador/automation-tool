@@ -154,6 +154,33 @@ describe("RPA workbench", () => {
     expect(screen.queryByText("草稿")).not.toBeInTheDocument();
   });
 
+  it("refreshes the recent Task list for a Task the live projection does not cover", async () => {
+    // The workbench follows exactly one Task. Every other row comes from the
+    // list query, so without its own refresh a Task that starts running after
+    // the list was read keeps rendering the status it had at that moment —
+    // which is what the hidden App showed when it listed a running Task as 草稿.
+    const taskSource = source();
+    vi.mocked(taskSource.listTasks)
+      .mockResolvedValueOnce({
+        items: [
+          task({ taskId: COMPLETED_TASK_ID, status: "draft", revision: 1, lastEventSequence: 0 }),
+          task({ status: "draft", revision: 1, lastEventSequence: 0 }),
+        ],
+        nextCursor: null,
+      })
+      .mockResolvedValue({
+        items: [
+          task({ taskId: COMPLETED_TASK_ID, status: "draft", revision: 1, lastEventSequence: 0 }),
+          task(),
+        ],
+        nextCursor: null,
+      });
+    renderWorkbench(taskSource);
+
+    expect(await screen.findByText("本机执行器在线")).toBeVisible();
+    expect(await screen.findByText("运行中", {}, { timeout: 4_000 })).toBeVisible();
+  });
+
   it("confirms and sends global emergency stop through the current Task gateway", async () => {
     const workbenchGateway = gateway();
     const user = userEvent.setup();
