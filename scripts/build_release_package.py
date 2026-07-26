@@ -57,8 +57,12 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from check_packaged_javascript_runtimes import (  # noqa: E402
+    BROWSER_PROBE_EXPECTED,
+    BROWSER_PROBE_EXPRESSION,
     collect_runtime_failures,
     find_javascript_runtimes,
+    probe_embedded_browsers,
+    summarise_jit_grants,
 )
 from check_embedded_browser_package import (  # noqa: E402
     audit_embedded_browser_package,
@@ -460,6 +464,35 @@ def audit_release_artifact(
     announce(
         "Packaged JavaScript runtimes executed an expression: "
         f"{len(find_javascript_runtimes(application))} runtime(s)"
+    )
+    # The other half of the same lesson. Until T104 the two `node` binaries were
+    # the only engines made to prove themselves; the embedded Chromium — the
+    # largest one in the package, and the one every RPA path depends on — was
+    # only ever looked at. Its allow-jit grant was a claim nobody checked, and
+    # the sole thing that would have caught a bad one was a human scanning a QR
+    # code the day before a demo.
+    browser_probe = probe_embedded_browsers(application)
+    if browser_probe.failures:
+        detail = "\n".join(
+            f"  {failure.path}\n    exit {failure.returncode}: {failure.output}"
+            for failure in browser_probe.failures
+        )
+        raise ReleaseFailed(
+            "the embedded browser inside this package cannot evaluate an "
+            f"expression:\n{detail}"
+        )
+    announce(
+        f"Embedded browser evaluated {BROWSER_PROBE_EXPRESSION} to "
+        f"{BROWSER_PROBE_EXPECTED!r} using {len(browser_probe.executed)} binaries"
+    )
+    announce(
+        summarise_jit_grants(
+            application,
+            exercised=[
+                *find_javascript_runtimes(application),
+                *browser_probe.executed,
+            ],
+        )
     )
     report = audit_embedded_browser_package(
         bundle_root=application, target_id=target_id, platform="macos"
