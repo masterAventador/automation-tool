@@ -112,13 +112,24 @@ def unused_loopback_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def alembic_command(*arguments: str) -> list[str]:
+    """Run migrations under this interpreter, never through `PATH`.
+
+    `.venv/bin/python -m pytest` does not put `.venv/bin` on `PATH`, so a bare
+    `alembic` here failed 216 integration tests at once and looked like a
+    product collapse. `sys.executable` is the same pin the rest of this suite
+    already relies on.
+    """
+    return [sys.executable, "-m", "alembic", *arguments]
+
+
 @pytest.fixture
 def alembic_runner() -> AlembicRunner:
     def run(database_url: str, *arguments: str) -> None:
         environment = os.environ.copy()
         environment["AUTOMATION_TOOL_DATABASE_URL"] = database_url
         subprocess.run(
-            ["alembic", *arguments],
+            alembic_command(*arguments),
             check=True,
             capture_output=True,
             cwd=BACKEND_ROOT,
