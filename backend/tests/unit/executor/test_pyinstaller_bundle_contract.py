@@ -40,6 +40,12 @@ def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() ->
     assert "remove_direct_url_metadata" in source
 
 
+def test_executor_spec_packages_the_closed_authoring_refusal_contract() -> None:
+    source = SPEC_PATH.read_text(encoding="utf-8")
+
+    assert '"contracts/video/motion-authoring-refusal.v1.json"' in source
+
+
 def test_every_executor_spec_materializes_safe_internal_pyinstaller_symlinks() -> None:
     spec_paths = (
         SPEC_PATH,

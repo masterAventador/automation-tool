@@ -9,7 +9,9 @@ environment, never in the answer.
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Final, TextIO
@@ -43,14 +45,277 @@ _REQUEST_FIELDS: Final = frozenset(
     }
 )
 _MODEL_FIELDS: Final = frozenset({"baseUrl", "modelId", "apiKey"})
+_REFUSAL_FIELDS: Final = frozenset({"schemaVersion", "status", "rejectionReason"})
+_AGENT_REASON_PREFIX: Final = "motion authoring rejected: "
+_BRIEF_REASON_PREFIX: Final = "brief is outside the declared bounds: "
+_STATIC_GATE_MESSAGE_PREFIX: Final = "composition failed static gates after local fixes: "
+_REFUSAL_CONTRACT_PATH: Final = AUTHORING_WORKFLOW_CONTRACT.with_name(
+    "motion-authoring-refusal.v1.json"
+)
+_WIRE_TOKEN: Final = re.compile(r"^[a-z0-9_]+$")
+
+
+def _load_refusal_contract() -> tuple[frozenset[str], str, frozenset[str]]:
+    try:
+        document = json.loads(_REFUSAL_CONTRACT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("motion authoring refusal contract is unreadable") from error
+    expected = {
+        "schemaVersion",
+        "id",
+        "version",
+        "policy",
+        "fixedReasons",
+        "staticGateReasonPrefix",
+        "staticGateCodes",
+        "rationale",
+    }
+    fixed = document.get("fixedReasons")
+    prefix = document.get("staticGateReasonPrefix")
+    gate_codes = document.get("staticGateCodes")
+    if (
+        not isinstance(document, dict)
+        or set(document) != expected
+        or document.get("schemaVersion") != 1
+        or document.get("id") != "motion-authoring-refusal"
+        or document.get("version") != "motion-authoring-refusal.v1"
+        or document.get("policy") != "fail_closed"
+        or not isinstance(fixed, list)
+        or not fixed
+        or not all(type(value) is str and _WIRE_TOKEN.fullmatch(value) for value in fixed)
+        or fixed != sorted(set(fixed))
+        or type(prefix) is not str
+        or not prefix.endswith(":")
+        or not _WIRE_TOKEN.fullmatch(prefix[:-1])
+        or not isinstance(gate_codes, list)
+        or not gate_codes
+        or not all(type(value) is str and _WIRE_TOKEN.fullmatch(value) for value in gate_codes)
+        or gate_codes != sorted(set(gate_codes))
+    ):
+        raise RuntimeError("motion authoring refusal contract drifted")
+    return frozenset(fixed), prefix, frozenset(gate_codes)
+
+
+(
+    _FIXED_WIRE_REASONS,
+    _STATIC_GATE_REASON_PREFIX,
+    _STATIC_GATE_CODES,
+) = _load_refusal_contract()
+
+_ENTRY_REASON_TOKENS: Final = {
+    "model configuration is not the declared shape": "model_configuration_shape_invalid",
+    "model configuration is not usable": "model_configuration_unusable",
+    "workspace is missing": "workspace_missing",
+    "workspace must be an absolute path the App already created": "workspace_not_absolute",
+    "workspace is not a usable render workspace": "workspace_unusable",
+    "brand assets are not the declared shape": "brand_assets_shape_invalid",
+    "duration must be a whole number of seconds": "duration_not_whole_seconds",
+    "request is not the declared shape": "request_shape_invalid",
+    "unsupported request schema version": "request_schema_unsupported",
+    "video creation model is unavailable": "video_creation_model_unavailable",
+    "request is too large": "request_too_large",
+}
+
+_BRIEF_REASON_TOKENS: Final = {
+    "brief text is out of range": "brief_text_out_of_range",
+    "unsupported aspect ratio": "brief_aspect_ratio_unsupported",
+    "duration is out of range": "brief_duration_out_of_range",
+    "unsupported language": "brief_language_unsupported",
+    "too many brand assets": "brief_too_many_brand_assets",
+    "path must be a non-empty string": "brief_brand_asset_path_empty",
+    "path must be a clean relative posix path": "brief_brand_asset_path_not_clean_relative",
+    "path must not contain empty, current or parent segments": (
+        "brief_brand_asset_path_invalid_segments"
+    ),
+    "path must not name an alternate data stream": "brief_brand_asset_path_alternate_data_stream",
+    "path segment must not end with a dot or a space": (
+        "brief_brand_asset_path_trailing_dot_or_space"
+    ),
+    "path must not name a reserved device": "brief_brand_asset_path_reserved_device",
+}
+
+# Every fixed message the current authoring agent can raise. This is not the
+# wire vocabulary: it is the allowlist that permits one internal finding to be
+# translated into a dedicated token. A new message is generic until this list,
+# the shared token contract and the source-coverage test are all updated.
+_AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
+    {
+        "api key is malformed",
+        "base url must be https",
+        "beat timing is out of range",
+        "beat timing must be numeric",
+        "beat_id is malformed",
+        "beats count is out of range",
+        "brief must be a MotionBrief",
+        "brief text is out of range",
+        "catalog purposes missing",
+        "catalog_parts must be locked catalog ids",
+        "composition html must be a non-empty string",
+        "composition not seekable",
+        "config must be a VideoCreationModelConfig",
+        "config shape invalid",
+        "declared asset must exist",
+        "design has an unexpected key set",
+        "design must be an object",
+        "digest must be lowercase hex",
+        "duplicate beat id",
+        "duration exceeds the snapshot frame budget for this fps",
+        "duration is out of range",
+        "each beat must be a bounded string",
+        "entry html must exist in workspace",
+        "expected a regular file inside the workspace",
+        "file entry invalid",
+        "first response must carry the four closed fields",
+        "fix response must carry only the html",
+        "fix rounds out of range",
+        "fps out of range",
+        "frame count out of range",
+        "locked motion catalog drifted",
+        "locked motion catalog is unreadable",
+        "model catalog or secret is unreadable",
+        "model id required",
+        "model output must be a JSON object",
+        "model output was not JSON",
+        "model reply must be a string",
+        "model returned empty content",
+        "model stream exceeded the size budget",
+        "model timeout out of range",
+        "not a MotionAuthoringTools instance",
+        "one_message is out of range",
+        "one-sentence brief contract drifted",
+        "one-sentence brief contract is unreadable",
+        "path collides with an existing entry that differs only by case",
+        "path escapes the workspace",
+        "path must be a clean relative posix path",
+        "path must be a non-empty string",
+        "path must not contain empty, current or parent segments",
+        "path must not name a reserved device",
+        "path must not name an alternate data stream",
+        "path segment must not end with a dot or a space",
+        "pinned workflow file digest drifted",
+        "pinned workflow file is missing or a symlink",
+        "primary_color must be a #rrggbb color",
+        "purpose is out of range",
+        "reference budget out of range",
+        "refusing to write through a symlink",
+        "render canvas contract drifted",
+        "render canvas contract is unreadable",
+        "script has an unexpected key set",
+        "script must be an object",
+        "secondary_color must be a #rrggbb color",
+        "storyboard beat has an unexpected key set",
+        "storyboard beat must be an object",
+        "storyboard beats count is out of range",
+        "storyboard duration contract drifted",
+        "storyboard duration contract is unreadable",
+        "storyboard has an unexpected key set",
+        "storyboard must be an object",
+        "too many brand assets",
+        "tool surface does not match the closed allowlist",
+        "tools require an AuthoringWorkspace",
+        "typography note is out of range",
+        "unknown style preset",
+        "unsupported aspect ratio",
+        "unsupported language",
+        "video model id missing",
+        "video_creative purpose missing",
+        "workflow contract is malformed",
+        "workflow contract is unreadable",
+        "workflow reference exceeded its budget",
+        "workflow reference required",
+        "workspace required",
+        "workspace root must be a real, non-symlink directory",
+        "workspace root must be an absolute path",
+    }
+)
+
+
+def _agent_reason_token(body: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", body.lower()).strip("_")
+    return f"agent_{normalized}"
+
+
+def _closed_wire_reason(value: object) -> str | None:
+    if type(value) is not str:
+        return None
+    if value in _FIXED_WIRE_REASONS:
+        return value
+    suffix = value.removeprefix(_STATIC_GATE_REASON_PREFIX)
+    if suffix == value or not suffix:
+        return None
+    codes = suffix.split("+")
+    if codes != sorted(set(codes)) or not all(code in _STATIC_GATE_CODES for code in codes):
+        return None
+    return value
+
+
+def _closed_static_gate_reason(raw: str) -> str | None:
+    if not raw.startswith(_STATIC_GATE_MESSAGE_PREFIX):
+        return None
+    encoded = raw.removeprefix(_STATIC_GATE_MESSAGE_PREFIX)
+    if len(encoded) > 1024:
+        return None
+    try:
+        codes = ast.literal_eval(encoded)
+    except (SyntaxError, ValueError):
+        return None
+    if (
+        not isinstance(codes, list)
+        or not codes
+        or not all(type(code) is str for code in codes)
+        or codes != sorted(set(codes))
+        or not all(code in _STATIC_GATE_CODES for code in codes)
+        or repr(codes) != encoded
+    ):
+        return None
+    return _closed_wire_reason(_STATIC_GATE_REASON_PREFIX + "+".join(codes))
+
+
+def _closed_rejection_reason(raw: object) -> str | None:
+    """Translate only the current fixed findings into the dedicated wire."""
+    if type(raw) is not str:
+        return None
+    direct = _ENTRY_REASON_TOKENS.get(raw)
+    if direct is not None:
+        return _closed_wire_reason(direct)
+    if raw.startswith(_BRIEF_REASON_PREFIX + _AGENT_REASON_PREFIX):
+        body = raw.removeprefix(_BRIEF_REASON_PREFIX + _AGENT_REASON_PREFIX)
+        return _closed_wire_reason(_BRIEF_REASON_TOKENS.get(body))
+    if raw == "video creation model transport failed":
+        return _closed_wire_reason("video_creation_model_transport_failed")
+    if not raw.startswith(_AGENT_REASON_PREFIX):
+        return None
+    body = raw.removeprefix(_AGENT_REASON_PREFIX)
+    static_gate = _closed_static_gate_reason(body)
+    if static_gate is not None:
+        return static_gate
+    if body not in _AGENT_FIXED_REJECTION_BODIES:
+        return None
+    return _closed_wire_reason(_agent_reason_token(body))
 
 
 class MotionAuthoringEntryRejected(ValueError):
     """Fixed failure boundary for a request this process will not act on."""
 
+    def __init__(self, rejection_reason: str | None) -> None:
+        self.rejection_reason = rejection_reason
+        super().__init__("motion authoring entry rejected")
+
 
 def _reject(reason: str) -> MotionAuthoringEntryRejected:
-    return MotionAuthoringEntryRejected(f"motion authoring entry rejected: {reason}")
+    return MotionAuthoringEntryRejected(_closed_rejection_reason(reason))
+
+
+def parse_motion_authoring_refusal(document: object) -> str | None:
+    """Return the closed refusal token, or None for any wider document."""
+    if (
+        not isinstance(document, dict)
+        or set(document) != _REFUSAL_FIELDS
+        or document["schemaVersion"] != SCHEMA_VERSION
+        or document["status"] != "rejected"
+    ):
+        return None
+    return _closed_wire_reason(document["rejectionReason"])
 
 
 def _model(payload: object) -> VideoCreationModelConfig:
@@ -158,26 +423,34 @@ def serve_one_motion_authoring_request(stream: BinaryIO, out: TextIO) -> int:
         if len(raw) > MAX_REQUEST_BYTES:
             raise _reject("request is too large")
         result = run_motion_authoring_entry(json.loads(raw.decode("utf-8")))
-    except (MotionAuthoringEntryRejected, json.JSONDecodeError, UnicodeError):
-        # The reason is deliberately not forwarded: it is built from caller
-        # input and the caller already knows what it sent, while anything that
-        # travelled through this process may quote it back.
-        json.dump(
-            {"schemaVersion": SCHEMA_VERSION, "status": "rejected"},
-            out,
-            separators=(",", ":"),
-        )
+    except MotionAuthoringEntryRejected as error:
+        # The exception is exported for the Executor boundary tests and future
+        # internal callers. Revalidate at the one serialization sink so a new
+        # caller cannot bypass the closed translator by constructing it with
+        # model output, a credential or a local path.
+        rejection_reason = _closed_wire_reason(error.rejection_reason)
+    except (json.JSONDecodeError, UnicodeError):
+        rejection_reason = None
+    else:
+        json.dump(result, out, separators=(",", ":"), sort_keys=True)
         out.flush()
-        return 70
-    json.dump(result, out, separators=(",", ":"), sort_keys=True)
+        return 0
+    answer: dict[str, object] = {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "rejected",
+    }
+    if rejection_reason is not None:
+        answer["rejectionReason"] = rejection_reason
+    json.dump(answer, out, separators=(",", ":"), sort_keys=True)
     out.flush()
-    return 0
+    return 70
 
 
 __all__ = [
     "MAX_REQUEST_BYTES",
-    "MotionAuthoringEntryRejected",
     "SCHEMA_VERSION",
+    "MotionAuthoringEntryRejected",
+    "parse_motion_authoring_refusal",
     "run_motion_authoring_entry",
     "serve_one_motion_authoring_request",
 ]

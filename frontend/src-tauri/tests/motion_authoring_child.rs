@@ -124,13 +124,70 @@ fn a_child_that_refuses_through_the_protocol_is_not_reported_as_a_crash() {
     let root = TempDirectory::new();
     let entrypoint = child(
         &root,
-        "printf '%s' '{\"schemaVersion\":1,\"status\":\"rejected\"}'\nexit 70\n",
+        "printf '%s' '{\"schemaVersion\":1,\"status\":\"rejected\",\"rejectionReason\":\"brief_duration_out_of_range\"}'\nexit 70\n",
     );
 
     let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
         .expect_err("a refusal is not an answer to render");
 
     assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringRefused);
+}
+
+/// The App and Executor ship together, but a stale verified package has
+/// existed in the field before. Keep the old two-field refusal classifiable
+/// while requiring every newly present reason to pass the closed contract.
+#[test]
+fn an_older_child_without_a_reason_still_reports_a_refusal() {
+    let root = TempDirectory::new();
+    let entrypoint = child(
+        &root,
+        "printf '%s' '{\"schemaVersion\":1,\"status\":\"rejected\"}'\nexit 70\n",
+    );
+
+    let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
+        .expect_err("a legacy refusal is still a refusal");
+
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringRefused);
+}
+
+/// A rejection reason is a dedicated closed field, not a way to reopen the
+/// general native error wire to arbitrary strings.
+#[test]
+fn a_child_cannot_put_an_arbitrary_string_in_the_refusal_reason() {
+    let root = TempDirectory::new();
+    let entrypoint = child(
+        &root,
+        "printf '%s' '{\"schemaVersion\":1,\"status\":\"rejected\",\"rejectionReason\":\"caller path: /Users/private/input.txt\"}'\nexit 70\n",
+    );
+
+    let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
+        .expect_err("an unrecognised reason is not a valid refusal document");
+
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringCrashed);
+}
+
+/// Static analysis can report several failures at once. The wire keeps those
+/// codes because each is actionable, but only as a sorted subset of the
+/// contract's closed gate vocabulary.
+#[test]
+fn a_closed_static_gate_reason_is_a_refusal_but_an_unknown_gate_is_not() {
+    let root = TempDirectory::new();
+    let valid = child(
+        &root,
+        "printf '%s' '{\"schemaVersion\":1,\"status\":\"rejected\",\"rejectionReason\":\"agent_composition_failed_static_gates:remote_reference+undeclared_asset\"}'\nexit 70\n",
+    );
+
+    let error = run_motion_authoring(&valid, &request(), Duration::from_secs(30))
+        .expect_err("a closed static-gate reason is still a refusal");
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringRefused);
+
+    let invalid = child(
+        &root,
+        "printf '%s' '{\"schemaVersion\":1,\"status\":\"rejected\",\"rejectionReason\":\"agent_composition_failed_static_gates:remote_reference+user_supplied\"}'\nexit 70\n",
+    );
+    let error = run_motion_authoring(&invalid, &request(), Duration::from_secs(30))
+        .expect_err("an unknown gate cannot widen the refusal wire");
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::AuthoringCrashed);
 }
 
 /// The child died without completing the protocol.
