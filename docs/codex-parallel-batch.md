@@ -188,6 +188,161 @@ git index 是共享可变状态——从 `git add` 到 `git commit` 之间，别
 
 **要做的**：判定这两个字体的权利状态并登记进 `asset-rights-policy.v1.json`。如果判定结果是「不可再分发」，**那就不能留在包里**，要么换掉要么移除，并说明影响。**判不了的就明确写「无法判定」并说明卡在哪，不要猜一个填进去。**
 
+### 族 E —— 验收基建的真根因（T74）
+
+文件面：`scripts/desktop_e2e_prerequisites.py`。
+
+#### T74（新）执行器包缓存键是常量，34 个驱动永远拿不到新执行器
+
+**现象**：`scripts/desktop_e2e_prerequisites.py:75`
+
+```python
+SHARED_EXECUTOR_BUILD_ID: Final = "desktop-e2e-startup-gate"
+```
+
+`ensure_signed_executor_package(build_id=SHARED_EXECUTOR_BUILD_ID)` 用它当缓存键，命中就直接返回缓存目录。**执行器源码不参与这个键。** 而 `grep -rln 'desktop_e2e_prerequisites' scripts/` 有 **34 个驱动**。
+
+**后果**：缓存一旦建立，执行器的任何改动就**再也进不了那 34 条验收**。今天已经吃过一次：一句话生成视频的验收连续失败，表现是子进程 exit 2、stdout 空、错误码 `authoring_crashed`——看起来像产品崩溃，实际是**验收装的是一个早于 `--author-motion` 入口的旧执行器包**，它把编排请求当 bootstrap 读了。
+
+**这条为什么还在**：当时的修复只在 `run_t36_acceptance.py` 一个驱动里加了「起跑前先探这个包，不合格就重建」，**根因原封不动**。另外 33 个驱动仍然在这个坑里。
+
+**依据**：`SHARED_EXECUTOR_BUILD_ID` 的定义就在那一行，是常量不是推断；34 这个数字是 `grep -rln` 实测。
+
+**要做的**：把缓存键改成**从执行器实际输入内容推导**（backend 源码树的摘要 + spec 文件 + 相关契约），源码一变键就变、缓存自动失效。参考同仓库已有的做法——项目里多处用「逐文件 SHA-256 清单」做同类事情（`distribution-manifest`、`release-package-resources`）。
+
+**验收要求（重要）**：写一个测试证明**改一行执行器源码后，缓存键会变**。这条不能只靠读代码判断，因为整个问题的性质就是「看起来在刷新，实际没有」。
+
+**注意**：`wt/sweep-desktop` 和 `wt/sweep-suite` 里有主线的扫描线在用这个文件。worktree 是隔离的，你在 `wt/codex` 里改不会影响它们，但**合并时主线会重新验证那两条线的结论**。
+
+**同一个文件里还有一条，一起修**：`desktop_e2e_prerequisites.py:90` **硬编码 `REPOSITORY_ROOT/.local/`**，没有用仓库**专门为此写的** `archive_path()`。后果是**那 34 个驱动从任何 worktree 里跑都在第一步就死**——这是桌面扫描线实测出来的，不是推断。改成走 `archive_path()`。
+
+#### T75（新）另一处吞掉 PyInstaller 输出的地方
+
+`scripts/run_e4_07_acceptance.py:226` 的 `build_signed_executor` **也用 `capture_output=True` 抓走 PyInstaller 输出然后丢掉**，构建失败时零诊断。
+
+**这是主线的漏修**：`ce45efd` 只修了 `backend/src/automation_tool/executor/macos_candidate.py` 的 `_run_pyinstaller`，**这是另一个函数**，桌面扫描线发现的。
+
+**要做的**：同样让它把构建器说的话带出来。**顺便全仓搜一遍还有没有第三处**——`grep -rn 'capture_output=True' scripts/ backend/src/` 然后看哪些在失败分支里把输出丢了。这类「失败时零诊断」在构建机上代价最大。
+
+### 族 G —— 桌面扫描线抓到的产品与测试缺陷（T76 / T77 / T78）
+
+这三条来自主线桌面 E2E 全量扫描（52 个执行者，39 通过 / 13 失败 / 5 未跑，13 条失败归并后只有 6 类根因）。
+
+#### T76（新）`desktop-e2e` 前端入口让整片断言变成恒真
+
+**现象**：`test:tauri` 和 `test:h8-19-app` **在 37 毫秒内通过**。
+
+扫描线原本预测它们会因为没装启动门禁而失败，**预测错了**——然后它去追「为什么绿」，这才是价值所在：
+
+`vite.config.ts` 按 mode 换入口。`desktop-e2e` 模式用的是 `test-tauri-main.tsx`，它注入的 `desktopShellStartupCheck` 是
+
+```ts
+async check() { return { status: "ready" }; }
+```
+
+**无条件 ready**，从不问 Control Plane 也不问本机环境，并且**完全不注入生产的 17 个 gateway**。
+
+所以 `workbench.spec.ts` 断言「工作台挂载了」在这个构建里**恒真**，而它是该 spec 的**唯一执行者**。
+
+**对照组证明这不是没办法**：`model-service-e2e` 用的 `test-production-main.ts` 是直接 `import("./main")`，那才是正确写法。
+
+**依据补充**：Rust 侧的注释写着「every build compiles exactly this one」，给人一种已经收口的印象——**分叉现在在前端**，Rust 门禁看不见它。主线的 T59 把这个桩纳入了单一构建路径门禁，但**没有改掉入口本身**。
+
+**要做的**：让 `desktop-e2e` 入口走和 `model-service-e2e` 一样的路子（`import("./main")` + 受控测试 Adapter），而不是用一个恒真的桩替代整个启动检查与 gateway 注入。改完 `workbench.spec.ts` 应该真的在测东西——如果它因此变红，那是**真相浮出来**，报告出来别去放宽断言。
+
+#### T77（新）B5-13 前端投影与权威态不一致（疑似产品缺陷）
+
+**现象**：权威态返回 `state: "missing"`，UI 却渲染「暂时无法读取」。
+
+**扫描线的判定**：后端对、前端投影错。
+
+**我的判断**：这是演示路径上用户看得见的错误信息，值得修。但**先自己复核一遍投影逻辑再动手**——扫描线自己标的是「疑似」，不是定案。
+
+**注意**：这条落在前端 `frontend/src/`，与族 A 的 Rust 文件不冲突。
+
+#### T78（新）视频线 7 个驱动 / 8 个 spec 全卡启动门禁
+
+**现象**：视频线的 7 个驱动、8 个 spec **全部卡在启动门禁**。
+
+**已知原因**：`780abce` 拆桩之后驱动没跟上——`prepare_startup_gate` 的 34 个调用者里，这 7 个**一个都没有**。
+
+**已有记录但低估了范围**：`docs/development/T36-oneshot-video-preview.md:116` 记了这件事，但文档说「5 个 spec」，**实测受影响面更大（8 个）**。
+
+**要做的**：给这 7 个驱动补上 `prepare_startup_gate`。改完至少让它们能跑起来——**跑起来之后失败是新信息，跑不起来是没信息**。
+
+**依赖**：这条和 T74（缓存键 + 硬编码路径）在同一批里，建议先做 T74 再做这条，否则你会在一个「执行器包永远是旧的」的地基上判断结果。
+
+### 族 F —— 出厂前该清掉的（T26 / T24 / T45 / T38）
+
+#### T26 剔除内置浏览器里的 Widevine CDM
+
+**先看清楚：任务原标题「换成 Chromium 开源构建」的结论是反的**，完整证据见文末附录和 `docs/development/PLAN-chromium-replacement.md`。**不要换浏览器。**
+
+**要做的是另一件事**：剔除 `libwidevinecdm.dylib`。
+
+**依据**：这是整轮调研里查到的**唯一一条白纸黑字的分发禁令**。macOS 版 Chrome for Testing 内置的
+
+```
+chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
+  Google Chrome for Testing Framework.framework/Versions/149.0.7827.55/
+  Libraries/WidevineCdm/
+    LICENSE                                            (473 B)
+    _platform_specific/mac_arm64/libwidevinecdm.dylib  (20,183,440 B)
+```
+
+那份 473 字节的 LICENSE 原文：
+
+> Google LLC and its affiliates ("Google") own all legal right, title and interest in and to the content decryption module software ("Software") … **You may not use, modify, sell, or otherwise distribute the Software without a separate license agreement with Google. The Software is not open source software.**
+
+**现状是它被 `distribution-manifest.v1.json` 逐文件摘要锁定，随 macOS 安装包分发给用户。** 不需要任何法律解读，那句话就是字面意思。
+
+**实测过删掉它的后果**（复制 CfT 树 → 删 `Libraries/WidevineCdm/` → 跑 EB-16 那套校验 + 一次真实抖音访问）：
+
+| 检查 | 结果 |
+|---|---|
+| 文件数 / 字节 | 331 / 359,441,871 → **328 / 339,257,128**（省 19.2 MiB） |
+| `codesign -dv` 可执行文件 | `Identifier`、`adhoc`、`linker-signed` **全部保留** |
+| `codesign --verify --strict` | 失败——**但未删改的原始缓存树同样失败、同样报错**（CfT 上游就是 linker-signed、`Sealed Resources=none`），有对照组 |
+| 启动 + 打开抖音 | 正常，渲染出与未删改版本相同的 8 个 `data-e2e` |
+| `canPlayType` avc1/mp4a/hev1 | **全部仍为 `probably`**（H.264/AAC/HEVC 一个没丢） |
+
+另外实测：**Widevine EME 在删之前就已经不可用**（`NotSupportedError`），也就是说这 20 MiB 在我们的启动方式下压根没被启用——**纯负债，零收益**。Windows 版 CfT 里根本没有这个文件。
+
+**具体动作**（1～2 人日）：
+
+1. `contracts/browser/embedded-chromium-staging.v1.json` 每个 target 增加 `excluded_entry_prefixes`（macOS 两个目标填上面那个 `Libraries/WidevineCdm/` 路径，Windows 填空数组）；`archive_sha256` **不变**（仍然锁原始归档），staging 在解包后按白名单**显式剔除**并把剔除动作写进 `staging-manifest.json`；
+2. `scripts/build_embedded_browser_distribution.py` 的 licence block 把 `"redistribution_review": "pending"` 换成有依据的结论——声明已剔除的专有组件清单 + 剩余组件的许可结论；
+3. `RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"]` 343 → **324**（实测 339,257,128 B = 323.6 MiB），连带包上限重算；
+4. 重跑 EB-03 / EB-05 / EB-16（macOS arm64 + x86_64）。Windows 无此文件，确认剔除列表为空时行为不变。
+
+**边界**：**只做剔除 Widevine 这一件事。** 品牌与 CfT 的 ToS 定位问题（产物仍叫 `Google Chrome for Testing.app`）是法律判断不是技术判断，用户还没拍板，**不要碰**。
+
+**时机**：主线暂停出包，等你这批做完再出，所以这条现在做正好——下一版包就带上。
+
+#### T24 执行器包根按 `debug_assertions` 分叉
+
+**现象**：执行器包的根路径按 `debug_assertions` 走不同分支。
+
+**我的判断**：这直接踩项目 `CLAUDE.md` 的「单一构建路径规范」——那条规则明令禁止「用编译期 feature / 环境变量 / 构建模式改变**产品去哪里寻找**文件、资源、进程、可执行程序」，并且写着这条规则来自一次真实事故（测试构建从环境变量读依赖路径、生产构建从安装包资源目录读，结果验收长期全绿而用户拿到的包整块功能不可用）。
+
+**依据**：规则里只允许三类差异（测试驱动的挂载、窗口可见性/日志级别、指向隔离实例的配置值），而「去哪里找执行器包」不属于任何一类。
+
+**要做的**：合成一条路径。如果发现确实需要区分，**说清楚它属于允许的哪一类**——说不出来的一律不许留。
+
+#### T45 Control Plane 镜像被打进 playwright
+
+**现象**：约 50MB 的 Control Plane 相关内容被打进了 playwright 的依赖树。
+
+**我的判断**：代码层守住了 `CLAUDE.md` 4.2 的边界（Control Plane 不依赖 Playwright），**打包层破了**。
+
+**边界**：这条要动 `uv.lock`。**这批你独占它**，主线不碰。改完把 `uv.lock` 的改动放在单独一个提交里。
+
+#### T38 演示后回收清单
+
+纯文档。演示结束后要回收/停用哪些东西（云端实例、测试账号、临时凭据、演示数据、Demo Profile），写成可执行的清单。
+
+**依据**：`~/Documents/at-tools-credentials/project-secrets/` 下有演示账号、两个第三方 API key、签名私钥；云端 `at.xuanbai.tech` 上有 Control Plane 与 PostgreSQL。这些演示后该怎么处理需要有个清单，不能靠记忆。
+
 ---
 
 ## 3. 起点与交回
@@ -208,14 +363,23 @@ git index 是共享可变状态——从 `git add` 到 `git commit` 之间，别
 
 | 任务 | 状态 | 提交 | RED 证据（看到的失败输出） | 备注 / 反驳 |
 |---|---|---|---|---|
-| T69 App 零日志 | ⬜ | | | |
-| T50 注销界面报失败 | ⬜ | | | |
-| T61 artifact 门禁降级为清理 | ⬜ | | | |
-| T65 `cleanup_expired` 无调用方 | ⬜ | | | |
-| T66b 目录权限只检查不修复 | ⬜ | | | |
-| T72 门禁执行者三处空洞 | ⬜ | | | |
-| T73 测试写进只读 vendor | ⬜ | | | |
-| T40/T41 字体权利登记 | ⬜ | | | |
+| **A** T69 App 零日志 | ⬜ | | | 优先 |
+| **A** T50 注销界面报失败 | ⬜ | | | 优先 |
+| **B** T61 artifact 门禁降级为清理 | ⬜ | | | |
+| **B** T65 `cleanup_expired` 无调用方 | ⬜ | | | |
+| **B** T66b 目录权限只检查不修复 | ⬜ | | | |
+| **C** T72 门禁执行者三处空洞 | ⬜ | | | |
+| **C** T73 测试写进只读 vendor | ⬜ | | | |
+| **D** T40/T41 字体权利登记 | ⬜ | | | |
+| **E** T74 执行器缓存键 + 硬编码 `.local/` | ⬜ | | | 建议先做，它是别的判断的地基 |
+| **E** T75 另一处吞掉 PyInstaller 输出 | ⬜ | | | |
+| **F** T26 剔除 Widevine CDM | ⬜ | | | 唯一有书面禁令的风险 |
+| **F** T24 执行器包根按 `debug_assertions` 分叉 | ⬜ | | | |
+| **F** T45 Control Plane 镜像进 playwright | ⬜ | | | 独占 `uv.lock` |
+| **F** T38 演示后回收清单 | ⬜ | | | 纯文档 |
+| **G** T76 `desktop-e2e` 入口让断言恒真 | ⬜ | | | 改完可能变红，那是真相浮出来 |
+| **G** T77 B5-13 前端投影与权威态不一致 | ⬜ | | | 先复核再动手 |
+| **G** T78 视频线 7 驱动缺 `prepare_startup_gate` | ⬜ | | | 依赖 T74 |
 
 ---
 
