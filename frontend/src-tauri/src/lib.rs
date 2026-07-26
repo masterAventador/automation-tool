@@ -653,19 +653,21 @@ pub fn run_motion_authoring(
     }
     // Stdout is read whichever way the child exited. On the failure path it is
     // the only thing that separates "the agent completed the protocol and said
-    // no" from "the agent fell over": one of those is the product working and
-    // the other is a defect, and they call for opposite things from the user.
-    // Standard error stays discarded — a refusal document carries no reason
-    // and no model output, so nothing the model produced is read here.
+    // no" from every way the run can fail without anything having read the
+    // brief: an unreachable model service, one that went silent, a damaged
+    // install, a malformed request, a child that simply fell over. Only the
+    // first of those is the product working, and it is the only one whose
+    // answer to the user is "describe it differently".
+    // Standard error stays discarded — the answer document carries a closed
+    // reason token and no model output, so nothing the model produced is read
+    // here.
     let answer = read_bounded_child_output(&mut child)?;
     if exited_cleanly {
         return Ok(answer);
     }
-    Err(if motion_video_studio::answer_is_refusal(&answer) {
-        motion_video_studio::authoring_refused()
-    } else {
-        motion_video_studio::authoring_crashed()
-    })
+    Err(motion_video_studio::classify_failed_authoring_answer(
+        &answer,
+    ))
 }
 
 /// Read what the authoring child wrote, up to a fixed ceiling.

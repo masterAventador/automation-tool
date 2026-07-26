@@ -136,9 +136,47 @@
     "timeline_not_paused",
     "undeclared_asset"
   ],
+  "nonRefusalOutcomes": {
+    "app_request_invalid": [
+      "brand_assets_shape_invalid",
+      "duration_not_whole_seconds",
+      "model_configuration_shape_invalid",
+      "request_schema_unsupported",
+      "request_shape_invalid",
+      "request_too_large",
+      "workspace_missing",
+      "workspace_not_absolute",
+      "workspace_unusable"
+    ],
+    "installation_damaged": [
+      "agent_digest_must_be_lowercase_hex",
+      "agent_file_entry_invalid",
+      "agent_locked_motion_catalog_drifted",
+      "agent_locked_motion_catalog_is_unreadable",
+      "agent_one_sentence_brief_contract_drifted",
+      "agent_one_sentence_brief_contract_is_unreadable",
+      "agent_pinned_workflow_file_digest_drifted",
+      "agent_pinned_workflow_file_is_missing_or_a_symlink",
+      "agent_reference_budget_out_of_range",
+      "agent_render_canvas_contract_drifted",
+      "agent_render_canvas_contract_is_unreadable",
+      "agent_storyboard_duration_contract_drifted",
+      "agent_storyboard_duration_contract_is_unreadable",
+      "agent_workflow_contract_is_malformed",
+      "agent_workflow_contract_is_unreadable",
+      "agent_workflow_reference_exceeded_its_budget"
+    ],
+    "model_configuration_required": [
+      "model_configuration_unusable",
+      "video_creation_model_unavailable"
+    ],
+    "model_timed_out": ["video_creation_model_timed_out"],
+    "model_transport_failed": ["video_creation_model_transport_failed"]
+  },
   "rationale": {
     "problem": "The one-shot Executor can safely explain a refusal only when the explanation is one of the product's own fixed reasons. An arbitrary string could contain the user's brief, model output, a credential or a local path.",
     "closedWire": "The child writes only a token from fixedReasons, or the staticGateReasonPrefix followed by a sorted, unique '+'-joined subset of staticGateCodes. Unknown text falls back to the generic refusal document without a reason.",
-    "consumerBoundary": "This contract validates the dedicated child-process refusal field. It does not widen the general native command error wire."
+    "consumerBoundary": "This contract validates the dedicated child-process refusal field. It does not widen the general native command error wire.",
+    "nonRefusalOutcomes": "A refusal means the agent read this brief and declined it, and that is the only outcome entitled to ask the user for a different sentence. Findings that reach the same channel without anything having read the brief are listed here instead, grouped by what the user can actually do next: an unreachable model service, a model that took the connection and then went quiet, a model the user has not finished configuring, an installation whose own pinned files no longer verify, and a request this process judged malformed before authoring began. The class name is also the status the child writes, so an App that only knows 'rejected' cannot mistake one of these for a refusal. Each token appears in exactly one class and in fixedReasons."
   }
 }

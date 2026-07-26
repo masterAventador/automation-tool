@@ -379,9 +379,24 @@ def test_a_model_that_never_answers_is_not_the_same_failure_as_one_that_is_not_t
 
     assert str(unreachable.value) != str(stalling_model.value)
     classifier: Any = motion_authoring_entry._closed_rejection_reason
-    assert classifier(str(unreachable.value)) != classifier(str(stalling_model.value))
-    assert classifier(str(unreachable.value)) is not None
-    assert classifier(str(stalling_model.value)) is not None
+    absent_reason = classifier(str(unreachable.value))
+    silent_reason = classifier(str(stalling_model.value))
+    assert absent_reason != silent_reason
+    assert absent_reason is not None
+    assert silent_reason is not None
+
+    # Two reasons are only worth having if they end up saying two different
+    # things. Both used to reach the App as one code, and one code is one
+    # sentence on the card whatever the tokens underneath it were.
+    outcomes = _non_refusal_outcomes()
+    assert absent_reason in outcomes["model_transport_failed"]
+    assert silent_reason in outcomes["model_timed_out"]
+
+
+def _non_refusal_outcomes() -> dict[str, frozenset[str]]:
+    outcomes: Any = getattr(motion_authoring_entry, "_NON_REFUSAL_OUTCOMES", None)
+    assert isinstance(outcomes, dict) and outcomes, "the shared contract must declare the classes"
+    return outcomes
 
 
 @pytest.mark.parametrize(
@@ -419,3 +434,133 @@ def test_a_model_service_failure_is_never_answered_as_a_refusal_of_the_brief(
     assert motion_authoring_entry.parse_motion_authoring_refusal(answer) is None
     assert answer["status"] != "rejected"
     assert answer["rejectionReason"] == reason
+
+
+def test_the_shared_contract_declares_which_findings_are_not_refusals() -> None:
+    """The classes live in the contract both sides read, not in either side's head.
+
+    The App has to tell an unreachable model from a silent one from a damaged
+    install, and it can only do that from the reason token the child writes. If
+    the App kept its own copy of which token means what, a token added here
+    would keep its old meaning over there with nothing failing — the reason
+    would simply stop being understood and the run would fall back to the
+    catch-all sentence. So the mapping is one table in the shared contract and
+    this test is what stops it drifting away from the vocabulary it classifies.
+    """
+    outcomes = _non_refusal_outcomes()
+    fixed: frozenset[str] = motion_authoring_entry._FIXED_WIRE_REASONS
+
+    assert set(outcomes) == {
+        "app_request_invalid",
+        "installation_damaged",
+        "model_configuration_required",
+        "model_timed_out",
+        "model_transport_failed",
+    }
+    seen: set[str] = set()
+    for name, reasons in outcomes.items():
+        assert motion_authoring_entry._WIRE_TOKEN.fullmatch(name), name
+        assert name != "rejected", "a non-refusal class must not reuse the refusal status"
+        assert reasons, name
+        assert reasons <= fixed, (name, reasons - fixed)
+        assert not (reasons & seen), (name, reasons & seen)
+        seen |= reasons
+
+    # Vacuous membership is the failure mode this guards: a class that exists
+    # but classifies nothing would let every one of these findings keep telling
+    # the user to rewrite a sentence nothing read.
+    assert outcomes["model_transport_failed"] == {"video_creation_model_transport_failed"}
+    assert outcomes["model_timed_out"] == {"video_creation_model_timed_out"}
+    assert "video_creation_model_unavailable" in outcomes["model_configuration_required"]
+    assert (
+        "agent_pinned_workflow_file_is_missing_or_a_symlink"
+        in outcomes["installation_damaged"]
+    )
+    assert "request_shape_invalid" in outcomes["app_request_invalid"]
+
+
+@pytest.mark.parametrize(
+    ("name", "reason"),
+    sorted(
+        (name, reason)
+        for name, reasons in _non_refusal_outcomes().items()
+        for reason in reasons
+    )
+    if getattr(motion_authoring_entry, "_NON_REFUSAL_OUTCOMES", None)
+    else [("missing", "missing")],
+)
+def test_every_non_refusal_finding_is_answered_with_its_own_status(
+    monkeypatch: pytest.MonkeyPatch, name: str, reason: str
+) -> None:
+    """The answer's status names the class, so an older App still cannot misread it.
+
+    An App that only knows `rejected` sees an unfamiliar status and falls back
+    to "we could not finish", which is wrong but harmless. The failure this
+    prevents is the opposite one: a status of `rejected` on a finding nothing
+    read would be understood perfectly, and understood as the user's sentence
+    being at fault.
+    """
+
+    def raise_finding(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise MotionAuthoringEntryRejected(reason)
+
+    monkeypatch.setattr(motion_authoring_entry, "run_motion_authoring_entry", raise_finding)
+    output = io.StringIO()
+
+    assert (
+        motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output) != 0
+    )
+    answer = json.loads(output.getvalue())
+    assert answer["status"] == name
+    assert answer["rejectionReason"] == reason
+    assert motion_authoring_entry.parse_motion_authoring_refusal(answer) is None
+
+
+def test_a_request_the_app_built_wrong_is_not_answered_as_a_refusal_of_the_brief() -> None:
+    """No stand-in anywhere: a real malformed request through the real entry.
+
+    `request_shape_invalid` is this process judging what the App sent it. The
+    user typed a sentence that was never looked at, so asking them for a more
+    specific one is both useless and untrue.
+    """
+    output = io.StringIO()
+
+    assert (
+        motion_authoring_entry.serve_one_motion_authoring_request(
+            io.BytesIO(b'{"schemaVersion":1}'), output
+        )
+        != 0
+    )
+    answer = json.loads(output.getvalue())
+    assert answer["rejectionReason"] == "request_shape_invalid"
+    assert answer["status"] == "app_request_invalid"
+    assert motion_authoring_entry.parse_motion_authoring_refusal(answer) is None
+
+
+def test_a_damaged_install_is_not_answered_as_a_refusal_of_the_brief(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path
+) -> None:
+    """A real missing pinned file, produced by pointing at a real empty directory.
+
+    This is the widest mouth of the funnel, and it was found by accident: a tree
+    whose `vendor` was never checked out failed in `load_locked_authoring_workflow`
+    after two seconds, and the card said "请换一句更具体的描述". Nothing about the
+    installation is the user's description, and no rewrite of it will ever put
+    the missing file back.
+
+    The vendor root is redirected to an empty directory rather than stubbed, so
+    the failure is the real `is_file()` check on a real path, reached through the
+    real entry with a real workspace and a real request.
+    """
+    empty_vendor = workspace.parent / "vendor-with-nothing-in-it"
+    empty_vendor.mkdir()
+    monkeypatch.setattr(motion_authoring_entry, "AUTHORING_VENDOR_ROOT", empty_vendor)
+    model = _NeverCalledModel()
+
+    with pytest.raises(MotionAuthoringEntryRejected) as damaged:
+        run_motion_authoring_entry(_request(workspace), model_call=model)
+
+    assert model.calls == 0, "a damaged install must not reach the model service"
+    assert damaged.value.rejection_reason == "agent_pinned_workflow_file_is_missing_or_a_symlink"
+    outcomes = _non_refusal_outcomes()
+    assert damaged.value.rejection_reason in outcomes["installation_damaged"]

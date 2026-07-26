@@ -14,6 +14,7 @@ import { motionSpokenDuration } from "./motion-duration";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import {
   MaterialVideoStudioGatewayError,
+  type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
 } from "./material-video-studio-gateway";
 import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
@@ -690,6 +691,26 @@ describe("video studio shell", () => {
    * 文案必须点名模型服务和网络，并且不许再把责任推给描述；反过来，
    * `authoring_refused` 是代理真的读完并拒绝了，那一句留着才是对的。
    */
+  // 提交一句话需求，让网关以 `code` 失败，把卡片上那条提示原文取回来。
+  const briefFailureText = async (code: MaterialVideoStudioErrorCode) => {
+    resetMotionRunStore();
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    studioGateway.submitMotionBrief = vi
+      .fn()
+      .mockRejectedValue(new MaterialVideoStudioGatewayError(code, true));
+    const view = render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    const text = (await screen.findByRole("alert")).textContent ?? "";
+    view.unmount();
+    return text;
+  };
+
   it("only tells the user to rewrite the sentence when something actually read it", async () => {
     // 只找「叫用户去改这句话」的说法。「不是描述写得不好」是撇清，不是指责，
     // 不能算进来。
@@ -699,30 +720,65 @@ describe("video studio shell", () => {
       ["authoring_timed_out", false],
       ["authoring_crashed", false],
       ["authoring_answer_invalid", false],
+      ["authoring_model_transport_failed", false],
+      ["authoring_model_timed_out", false],
+      ["authoring_installation_damaged", false],
     ] as const) {
-      resetMotionRunStore();
-      const user = userEvent.setup();
-      const studioGateway = gateway();
-      studioGateway.submitMotionBrief = vi
-        .fn()
-        .mockRejectedValue(new MaterialVideoStudioGatewayError(code, true));
-      const view = render(<VideoStudio gateway={studioGateway} />);
-
-      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
-      await user.clear(screen.getByLabelText("一句话视频需求"));
-      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
-      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
-
-      const alert = await screen.findByRole("alert");
-      expect(asksForANewSentence.test(alert.textContent ?? "")).toBe(blames);
-      if (code === "authoring_crashed") {
-        // 模型服务连不上和中途不再回话都落在这个码上，所以它必须说出用户此刻
-        // 真正能做的事：看网络、去「设置与诊断」测模型服务。
-        expect(alert).toHaveTextContent(/视频创作模型服务/u);
-        expect(alert).toHaveTextContent(/网络/u);
-      }
-      view.unmount();
+      expect(asksForANewSentence.test(await briefFailureText(code))).toBe(blames);
     }
+  });
+
+  /**
+   * 拆出来的码只有说出不同的话才算拆开。
+   *
+   * 2026-07-26 的故障注入里，模型连不上和模型接上后不再回话走到同一句，
+   * 一个 2 秒一个 363 秒，用户看到的字一模一样。所以这里既比对每条提示
+   * 各自要带的落脚点，也直接断言几条互不相同。
+   */
+  it("sends each authoring failure to a different place", async () => {
+    const said = new Map<MaterialVideoStudioErrorCode, string>();
+    for (const code of [
+      "authoring_refused",
+      "authoring_timed_out",
+      "authoring_crashed",
+      "authoring_answer_invalid",
+      "authoring_model_transport_failed",
+      "authoring_model_timed_out",
+      "authoring_installation_damaged",
+    ] as const) {
+      said.set(code, await briefFailureText(code));
+    }
+
+    // 一句都不许落到兜底那句上：兜底等于这个码没人写文案。
+    for (const [code, text] of said) {
+      expect(text, code).not.toContain("一句话自动制作暂时无法提交");
+      expect(text.length, code).toBeGreaterThan(10);
+    }
+    expect(new Set(said.values()).size).toBe(said.size);
+
+    // 完全没回应：能查的是网络和模型服务地址。
+    expect(said.get("authoring_model_transport_failed")).toMatch(/网络/u);
+    expect(said.get("authoring_model_transport_failed")).toMatch(/视频创作模型服务/u);
+    // 接上了但不回话：网络没问题，别再让人去查网络。
+    expect(said.get("authoring_model_timed_out")).toMatch(/视频创作模型服务/u);
+    expect(said.get("authoring_model_timed_out")).not.toMatch(/检查网络/u);
+    // 安装坏了：重试没有用，唯一的出路是重装。
+    expect(said.get("authoring_installation_damaged")).toMatch(/重新安装/u);
+    expect(said.get("authoring_installation_damaged")).not.toMatch(/请重试|稍后重试/u);
+  });
+
+  /**
+   * 我们自己的安装包坏了，绝不能说成用户的描述有问题。
+   *
+   * T90 顺手撞见的就是这条：worktree 里 `vendor` 是空的，子进程 2 秒后因为
+   * 锁定文件不在而退出——一个纯打包缺陷，卡片却说「请换一句更具体的描述」。
+   */
+  it("never blames the description for a damaged installation", async () => {
+    const text = await briefFailureText("authoring_installation_damaged");
+
+    expect(text).not.toMatch(/换一句|更具体的描述|把描述写得/u);
+    expect(text).toMatch(/不是描述/u);
+    expect(text).toMatch(/重新安装/u);
   });
 
   // 空描述不该发出去：让原生侧去拒绝，用户看到的是一次失败而不是一条说明。

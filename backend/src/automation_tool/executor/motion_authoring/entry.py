@@ -55,7 +55,9 @@ _REFUSAL_CONTRACT_PATH: Final = AUTHORING_WORKFLOW_CONTRACT.with_name(
 _WIRE_TOKEN: Final = re.compile(r"^[a-z0-9_]+$")
 
 
-def _load_refusal_contract() -> tuple[frozenset[str], str, frozenset[str]]:
+def _load_refusal_contract() -> tuple[
+    frozenset[str], str, frozenset[str], dict[str, frozenset[str]]
+]:
     try:
         document = json.loads(_REFUSAL_CONTRACT_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -68,11 +70,13 @@ def _load_refusal_contract() -> tuple[frozenset[str], str, frozenset[str]]:
         "fixedReasons",
         "staticGateReasonPrefix",
         "staticGateCodes",
+        "nonRefusalOutcomes",
         "rationale",
     }
     fixed = document.get("fixedReasons")
     prefix = document.get("staticGateReasonPrefix")
     gate_codes = document.get("staticGateCodes")
+    outcomes = document.get("nonRefusalOutcomes")
     if (
         not isinstance(document, dict)
         or set(document) != expected
@@ -91,15 +95,54 @@ def _load_refusal_contract() -> tuple[frozenset[str], str, frozenset[str]]:
         or not gate_codes
         or not all(type(value) is str and _WIRE_TOKEN.fullmatch(value) for value in gate_codes)
         or gate_codes != sorted(set(gate_codes))
+        or not _outcomes_are_declared(outcomes, frozenset(fixed))
     ):
         raise RuntimeError("motion authoring refusal contract drifted")
-    return frozenset(fixed), prefix, frozenset(gate_codes)
+    return (
+        frozenset(fixed),
+        prefix,
+        frozenset(gate_codes),
+        {name: frozenset(reasons) for name, reasons in outcomes.items()},
+    )
 
+
+def _outcomes_are_declared(outcomes: object, fixed: frozenset[str]) -> bool:
+    """Is the non-refusal table a partition of known tokens into named classes?
+
+    Overlapping classes are the one shape worth spelling out: a token in two
+    classes would answer with whichever the iteration happened to reach first,
+    and both sides of the wire would still look consistent while the card said
+    two different things on different days.
+    """
+    if not isinstance(outcomes, dict) or not outcomes:
+        return False
+    names = list(outcomes)
+    if names != sorted(set(names)) or not all(
+        type(name) is str and _WIRE_TOKEN.fullmatch(name) and name != _REFUSED_STATUS
+        for name in names
+    ):
+        return False
+    seen: set[str] = set()
+    for reasons in outcomes.values():
+        if (
+            not isinstance(reasons, list)
+            or not reasons
+            or reasons != sorted(set(reasons))
+            or not frozenset(reasons) <= fixed
+            or seen & set(reasons)
+        ):
+            return False
+        seen |= set(reasons)
+    return True
+
+
+_REFUSED_STATUS: Final = "rejected"
 
 (
     _FIXED_WIRE_REASONS,
     _STATIC_GATE_REASON_PREFIX,
     _STATIC_GATE_CODES,
+    _NON_REFUSAL_OUTCOMES,
 ) = _load_refusal_contract()
 
 # Fixed findings that reach this boundary as a bare message, with no agent
@@ -297,30 +340,29 @@ def _closed_rejection_reason(raw: object) -> str | None:
     return _closed_wire_reason(_agent_reason_token(body))
 
 
-_REFUSED_STATUS: Final = "rejected"
+def _answer_status(rejection_reason: str | None) -> str:
+    """Name the outcome, so a refusal stays the one thing a refusal means.
 
-# What the answer says when the model service could not be used at all.
-#
-# The refusal document is not a generic failure envelope: the App recognises it
-# and reports the run as `authoring_refused`, which is worded — correctly — as
-# the agent having read this brief and declined it, and tells the user to
-# describe the film differently. Nothing read the brief when the model was never
-# reached, so a model outage answered as a refusal sends the user to rewrite a
-# sentence that was never the problem. Measured on 2026-07-26: an unreachable
-# model produced exactly that sentence after two seconds, and a model that
-# stopped answering produced it word for word after 363.
-#
-# A status the refusal parser does not accept keeps those runs out of that
-# sentence. The document still carries its own closed reason, so the day the
-# App reads it the two can be told apart without another protocol change.
-_MODEL_UNUSABLE_STATUS: Final = "model_unusable"
-_MODEL_SERVICE_REASONS: Final = frozenset(
-    {
-        "video_creation_model_timed_out",
-        "video_creation_model_transport_failed",
-        "video_creation_model_unavailable",
-    }
-)
+    The refusal document is not a generic failure envelope: the App recognises
+    it and reports the run as `authoring_refused`, which is worded — correctly —
+    as the agent having read this brief and declined it, and tells the user to
+    describe the film differently. Nothing read the brief when the model was
+    never reached, when the pinned files no longer verify, or when the request
+    was malformed before authoring began, so answering any of those as a refusal
+    sends the user to rewrite a sentence that was never the problem. Measured on
+    2026-07-26: an unreachable model produced exactly that sentence after two
+    seconds, a model that stopped answering produced it word for word after 363,
+    and a tree whose `vendor` was never checked out produced it after two.
+
+    The status the App reads is the class name from the shared contract. A
+    status the refusal parser does not accept keeps those runs out of that
+    sentence even on an App too old to know the class, while the document still
+    carries its own closed reason for one that does.
+    """
+    for name, reasons in _NON_REFUSAL_OUTCOMES.items():
+        if rejection_reason in reasons:
+            return name
+    return _REFUSED_STATUS
 
 
 class MotionAuthoringEntryRejected(ValueError):
@@ -466,11 +508,7 @@ def serve_one_motion_authoring_request(stream: BinaryIO, out: TextIO) -> int:
         return 0
     answer: dict[str, object] = {
         "schemaVersion": SCHEMA_VERSION,
-        "status": (
-            _MODEL_UNUSABLE_STATUS
-            if rejection_reason in _MODEL_SERVICE_REASONS
-            else _REFUSED_STATUS
-        ),
+        "status": _answer_status(rejection_reason),
     }
     if rejection_reason is not None:
         answer["rejectionReason"] = rejection_reason

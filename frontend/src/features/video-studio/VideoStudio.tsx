@@ -366,27 +366,42 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
  * untrue. Those two must never share a sentence.
  *
  * Only `authoring_refused` may ask for a different sentence, because it is the
- * only one of the four where anything read the sentence at all. Failure
- * injection on 2026-07-26 found the model service failing two ways — never
- * reached, and reached but silent thereafter — and both told the user their
- * description could not be made: after two seconds and after 363. The child now
- * keeps model-service failures out of the refusal document (see
- * `_MODEL_SERVICE_REASONS` in `entry.py`), so they arrive as `authoring_crashed`
- * and that code has to name the model service and the network, which are what
- * the user can actually go and look at.
+ * only code here where anything read the sentence at all. Failure injection on
+ * 2026-07-26 found three failures wearing that sentence while nothing had read
+ * anything: a model service that was never reached (two seconds), one that took
+ * the connection and then went silent (363 seconds), and a tree whose pinned
+ * files were simply absent (two seconds) — a packaging defect, told to the user
+ * as their own description being impossible.
+ *
+ * Each of those now has its own code, because each has a different next move
+ * and that is the only thing a failure message is for:
+ *
+ * - never reached      → the network, then the address in 设置与诊断
+ * - reached then quiet → not the network; wait, or pick another model
+ * - damaged install    → reinstall; retrying reads the same broken files
+ * - our defect         → retry, then tell us
+ * - actually refused   → and only here, describe the film differently
  *
  * Written once and used by both the studio's open path and the one-sentence
  * submit path so the two can never describe the same code differently.
  */
 const AUTHORING_ERRORS = {
+  // No longer guesses at the model service: a model that never answered has its
+  // own code now, so all this one still knows is that the whole run ran long.
   authoring_timed_out:
-    "自动编排超时，已经停下来，视频没有开始制作。多半是视频创作模型服务一直没有回应，请稍后重试。",
+    "自动编排超时被停下，视频没有开始制作。整个过程超过了允许的最长时间。这不是描述的问题，请稍后重试。",
   authoring_refused:
     "自动编排读完之后，判定这次描述做不出来，视频没有开始制作。这不是网络或模型服务的问题，请换一句更具体的描述后重试。",
   authoring_crashed:
-    "自动编排没能完成，视频没有开始制作。这不是描述的问题：视频创作模型服务可能连不上，或者接上之后不再回应，也可能是我们这边出错。请先检查网络，再到「设置与诊断」测试视频创作模型服务，然后重试。",
+    "自动编排没能完成，视频没有开始制作。这不是描述的问题，是我们这边出错了，请重试；如果一直这样，请反馈给我们。",
   authoring_answer_invalid:
     "自动编排的结果没有通过本机校验，视频没有开始制作。这是我们这边的问题，不是描述写得不好，请重试；如果一直这样请反馈给我们。",
+  authoring_model_transport_failed:
+    "没有收到视频创作模型服务的任何回应，视频没有开始制作。这不是描述的问题：可能是网络不通，也可能是「设置与诊断」里填的服务地址不对或者服务没在运行。请先检查网络，再到「设置与诊断」测试视频创作模型服务，然后重试。",
+  authoring_model_timed_out:
+    "视频创作模型服务已经接上，但超过允许的最长等待时间都没有再返回内容，视频没有开始制作。这不是描述的问题，网络也是通的：服务可能在排队或者过载。请稍后重试；如果一直这样，到「设置与诊断」换一个模型再试。",
+  authoring_installation_damaged:
+    "自动编排要用的程序文件没有通过完整性校验，视频没有开始制作。这不是描述的问题，也不是重试能解决的：请重新安装 App；重装之后仍然这样的话，请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;
 
 const OPEN_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
@@ -414,7 +429,10 @@ const OPEN_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
  * that really does mean a packaged part could not be resolved.
  */
 const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
-  configuration_required: "请先到“设置与诊断”配置视频创作模型服务。",
+  // Also where a saved-but-unusable model configuration lands, so the wording
+  // covers both "you have not set one up" and "the one you saved is not
+  // acceptable" — the move is the same page either way.
+  configuration_required: "请先到“设置与诊断”配置并测试视频创作模型服务。",
   ...AUTHORING_ERRORS,
   render_unavailable: "本机渲染组件暂时不可用，请到“设置与诊断”检查组件。",
 };
