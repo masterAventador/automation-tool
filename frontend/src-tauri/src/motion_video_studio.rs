@@ -1108,9 +1108,13 @@ fn rejection_reason_is_closed(contract: &AuthoringRefusalContract, reason: &str)
 ///
 /// `app_request_invalid` is a real class that genuinely belongs on
 /// `AuthoringCrashed`: the child judged the request this side built, so it is
-/// our defect with no user move beyond retrying. A class this build has never
-/// heard of lands there too, for the same reason it has to: an unknown outcome
-/// is not evidence of anything the user did.
+/// our defect with no user move beyond retrying. `executor_defect` is the same
+/// answer arrived at from the other end — the child's own construction was
+/// wrong — and the two are named apart on the wire even though they report the
+/// same code, because the class is a claim about what happened and only one of
+/// them is a claim about the request. A class this build has never heard of
+/// lands there too, for the same reason it has to: an unknown outcome is not
+/// evidence of anything the user did.
 fn code_for_non_refusal_class(class: &str) -> MotionVideoStudioError {
     match class {
         "installation_damaged" => authoring_installation_damaged(),

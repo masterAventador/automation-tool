@@ -23,7 +23,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -33,9 +33,13 @@ from automation_tool.executor.motion_authoring import (
     run_motion_authoring_entry,
 )
 from automation_tool.executor.motion_authoring.agent import (
+    AuthoringWorkspace,
+    MotionAuthoringAgent,
     MotionAuthoringRejected,
+    MotionAuthoringTools,
     VideoCreationModelConfig,
     call_video_creation_model,
+    verify_closed_tool_surface,
 )
 
 BRIEF = "用蓝色商务风做一段本周销售增长说明"
@@ -558,6 +562,7 @@ def test_the_shared_contract_declares_which_findings_are_not_refusals() -> None:
 
     assert set(outcomes) == {
         "app_request_invalid",
+        "executor_defect",
         "installation_damaged",
         "model_configuration_required",
         "model_timed_out",
@@ -670,3 +675,92 @@ def test_a_damaged_install_is_not_answered_as_a_refusal_of_the_brief(
     assert damaged.value.rejection_reason == "agent_pinned_workflow_file_is_missing_or_a_symlink"
     outcomes = _non_refusal_outcomes()
     assert damaged.value.rejection_reason in outcomes["installation_damaged"]
+
+
+class _ToolsWithAnExtraCapability(MotionAuthoringTools):
+    """A tool surface wider than the closed allowlist — the real drift, not a stub."""
+
+    def read_anything(self, relative_path: str) -> str:  # pragma: no cover - never called
+        raise AssertionError("this capability exists only to widen the surface")
+
+
+def _wiring_defects(workspace: Path) -> dict[str, Any]:
+    """Every guard that can only fire because we wired this process wrong.
+
+    Each entry calls the real constructor or the real verifier with the real
+    wrong argument, so the token asserted below is the token the shipped code
+    actually produces rather than one copied out of the contract by hand. A
+    typo in the contract would classify nothing and leave every side looking
+    consistent, which is the failure this shape rules out.
+    """
+    root = AuthoringWorkspace(workspace)
+    tools = MotionAuthoringTools(root)
+    not_a_workspace = cast(Any, object())
+    not_a_workflow = cast(Any, object())
+    return {
+        "agent_workspace_required": lambda: MotionAuthoringAgent(
+            workspace=not_a_workspace,
+            tools=tools,
+            workflow=not_a_workflow,
+            model_config=None,
+        ),
+        "agent_workflow_reference_required": lambda: MotionAuthoringAgent(
+            workspace=root,
+            tools=tools,
+            workflow=not_a_workflow,
+            model_config=None,
+        ),
+        "agent_not_a_motionauthoringtools_instance": lambda: verify_closed_tool_surface(
+            cast(Any, object())
+        ),
+        "agent_tool_surface_does_not_match_the_closed_allowlist": (
+            lambda: verify_closed_tool_surface(_ToolsWithAnExtraCapability(root))
+        ),
+        # The fifth of the same kind. `entry.py` is the only production caller
+        # and it always passes the AuthoringWorkspace it already validated, so
+        # nothing the user types can reach this guard either.
+        "agent_tools_require_an_authoringworkspace": lambda: MotionAuthoringTools(
+            cast(Any, object())
+        ),
+    }
+
+
+def test_our_own_wiring_defect_is_never_answered_as_a_refusal_of_the_brief(
+    workspace: Path,
+) -> None:
+    """Internal guards were telling the user to rewrite their sentence.
+
+    None of them can be reached by anything the user types. The workspace was
+    not handed over, the pinned workflow reference was not handed over, the
+    tools argument was the wrong type, or the tool surface no longer matches
+    the closed allowlist — every one of them is this process being constructed
+    wrong, and every one of them arrived at the card as
+    "请换一句更具体的描述后重试".
+
+    That is the same mistake T90 removed for an unreachable model service, in a
+    different disguise: our defect worded as the user's fault. The user cannot
+    act on it at all, and the sentence they are sent to rewrite was never read.
+
+    All of them are reported together rather than one assertion per guard, so a
+    contract that classifies some of them names the ones it left behind instead
+    of stopping at the first.
+    """
+    outcomes = _non_refusal_outcomes()
+    classify: Any = motion_authoring_entry._closed_rejection_reason
+    status: Any = motion_authoring_entry._answer_status
+    defects = _wiring_defects(workspace)
+
+    produced: dict[str, object] = {}
+    for expected_token, produce in defects.items():
+        with pytest.raises(MotionAuthoringRejected) as defect:
+            produce()
+        produced[expected_token] = classify(str(defect.value))
+
+    assert produced == {token: token for token in defects}, (
+        "these guards no longer produce the tokens the contract classifies"
+    )
+    ours = outcomes.get("executor_defect", frozenset())
+    unclassified = sorted(token for token in defects if token not in ours)
+    assert not unclassified, f"our own defects are still refusals of the brief: {unclassified}"
+    blamed = sorted(token for token in defects if status(token) == "rejected")
+    assert not blamed, f"these reach the App as a refusal of a sentence nothing read: {blamed}"

@@ -185,6 +185,9 @@ _BRIEF_CONTRACT_PATH: Final = (
 _DURATION_CONTRACT_PATH: Final = (
     _CONTRACTS_ROOT / "video/motion-storyboard-duration.v1.json"
 )
+_MODEL_CALL_CONTRACT_PATH: Final = (
+    _CONTRACTS_ROOT / "video/motion-authoring-model-call.v1.json"
+)
 
 
 def _load_brief_bounds() -> tuple[int, int, frozenset[str], frozenset[str]]:
@@ -252,6 +255,36 @@ def _load_maximum_duration_seconds() -> int:
     return maximum
 
 
+def _load_model_stream_idle_timeout_seconds() -> int:
+    """How long the model may go quiet mid-response before the run gives up.
+
+    Declared in its own contract because the App has to say this number out
+    loud. While it was a literal here the card could only manage "超过允许的最长
+    等待时间", which tells the user nothing they can act on — not whether the
+    wait was long enough to mean anything, and not whether retrying is worth
+    it. Naming it in the sentence instead would have been a hand-copied second
+    version, and the first tuning of this budget would have had the App state a
+    figure this process no longer used.
+    """
+    try:
+        contract = json.loads(_MODEL_CALL_CONTRACT_PATH.read_text(encoding="utf-8"))
+        seconds = contract["streamIdleTimeoutSeconds"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: model call contract is unreadable"
+        ) from error
+    if (
+        contract.get("schemaVersion") != 1
+        or contract.get("policy") != "fail_closed"
+        or type(seconds) is not int
+        or not (1 <= seconds <= MAX_MODEL_TIMEOUT_SECONDS)
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: model call contract drifted"
+        )
+    return seconds
+
+
 (
     MAX_BRIEF_CHARS,
     MAX_BRAND_ASSETS,
@@ -277,9 +310,10 @@ SANDBOX_CPU_PARALLELISM_MAXIMUM: Final = 8
 # A reasoning video-creation model streams a long reasoning phase before the
 # composition. The request is streamed, so this budget bounds the inter-chunk
 # gap, not the whole generation; a whole-response bound of 180s timed out the
-# production one-sentence path.
-MODEL_TIMEOUT_SECONDS: Final = 360
+# production one-sentence path. The value itself lives in the shared contract
+# because the App names it to the user — see the loader above.
 MAX_MODEL_TIMEOUT_SECONDS: Final = 3600
+MODEL_TIMEOUT_SECONDS: Final = _load_model_stream_idle_timeout_seconds()
 MAX_MODEL_RESPONSE_BYTES: Final = 262_144
 
 

@@ -221,6 +221,8 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "frame count out of range",
         "locked motion catalog drifted",
         "locked motion catalog is unreadable",
+        "model call contract drifted",
+        "model call contract is unreadable",
         "model catalog or secret is unreadable",
         "model id required",
         "model output must be a JSON object",

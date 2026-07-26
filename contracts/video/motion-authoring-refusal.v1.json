@@ -36,6 +36,8 @@
     "agent_frame_count_out_of_range",
     "agent_locked_motion_catalog_drifted",
     "agent_locked_motion_catalog_is_unreadable",
+    "agent_model_call_contract_drifted",
+    "agent_model_call_contract_is_unreadable",
     "agent_model_catalog_or_secret_is_unreadable",
     "agent_model_id_required",
     "agent_model_output_must_be_a_json_object",
@@ -148,11 +150,20 @@
       "workspace_not_absolute",
       "workspace_unusable"
     ],
+    "executor_defect": [
+      "agent_not_a_motionauthoringtools_instance",
+      "agent_tool_surface_does_not_match_the_closed_allowlist",
+      "agent_tools_require_an_authoringworkspace",
+      "agent_workflow_reference_required",
+      "agent_workspace_required"
+    ],
     "installation_damaged": [
       "agent_digest_must_be_lowercase_hex",
       "agent_file_entry_invalid",
       "agent_locked_motion_catalog_drifted",
       "agent_locked_motion_catalog_is_unreadable",
+      "agent_model_call_contract_drifted",
+      "agent_model_call_contract_is_unreadable",
       "agent_one_sentence_brief_contract_drifted",
       "agent_one_sentence_brief_contract_is_unreadable",
       "agent_pinned_workflow_file_digest_drifted",
@@ -177,6 +188,7 @@
     "problem": "The one-shot Executor can safely explain a refusal only when the explanation is one of the product's own fixed reasons. An arbitrary string could contain the user's brief, model output, a credential or a local path.",
     "closedWire": "The child writes only a token from fixedReasons, or the staticGateReasonPrefix followed by a sorted, unique '+'-joined subset of staticGateCodes. Unknown text falls back to the generic refusal document without a reason.",
     "consumerBoundary": "This contract validates the dedicated child-process refusal field. It does not widen the general native command error wire.",
-    "nonRefusalOutcomes": "A refusal means the agent read this brief and declined it, and that is the only outcome entitled to ask the user for a different sentence. Findings that reach the same channel without anything having read the brief are listed here instead, grouped by what the user can actually do next: an unreachable model service, a model that took the connection and then went quiet, a model the user has not finished configuring, an installation whose own pinned files no longer verify, and a request this process judged malformed before authoring began. The class name is also the status the child writes, so an App that only knows 'rejected' cannot mistake one of these for a refusal. Each token appears in exactly one class and in fixedReasons."
+    "nonRefusalOutcomes": "A refusal means the agent read this brief and declined it, and that is the only outcome entitled to ask the user for a different sentence. Findings that reach the same channel without anything having read the brief are listed here instead, grouped by what the user can actually do next: an unreachable model service, a model that took the connection and then went quiet, a model the user has not finished configuring, an installation whose own pinned files no longer verify, a request this process judged malformed before authoring began, and this process having been constructed wrong. The class name is also the status the child writes, so an App that only knows 'rejected' cannot mistake one of these for a refusal. Each token appears in exactly one class and in fixedReasons.",
+    "executorDefect": "The five guards on the authoring agent's own construction: the workspace or the pinned workflow reference was not handed over, the tools argument was the wrong type, its surface no longer matches the closed allowlist, or the tools were built on something that is not an AuthoringWorkspace. Every one of them is unreachable from anything the user types — the entry validates the request and builds these itself — so all five could only ever mean we shipped a bug, and all five reached the card as '请换一句更具体的描述后重试'. It is kept apart from app_request_invalid although both report the same code today, because the class name is what the child writes on the wire: labelling a constructor we wired wrong as an invalid request would put a false claim into the one field the App is meant to reason from, and the reason this contract exists is that a wrong label sent users to fix the wrong thing. Merging them is not recoverable later; keeping them apart costs one name."
   }
 }

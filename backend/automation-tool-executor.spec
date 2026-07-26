@@ -37,6 +37,7 @@ motion_authoring_resources = [
     "contracts/quality/motion-catalog.v1.json",
     "contracts/video/motion-render-canvas.v1.json",
     "contracts/video/motion-one-sentence-brief.v1.json",
+    "contracts/video/motion-authoring-model-call.v1.json",
     "contracts/video/motion-authoring-refusal.v1.json",
     "contracts/video/motion-storyboard-duration.v1.json",
     "contracts/video/motion-authoring-workflow.v1.json",
