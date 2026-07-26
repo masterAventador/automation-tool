@@ -18,6 +18,7 @@ import json
 import posixpath
 import re
 import shutil
+import time
 import urllib.request
 from pathlib import Path
 
@@ -33,6 +34,12 @@ PENDING_ASSET_CONCLUSIONS = frozenset(
     {"needs_asset_replacement", "needs_localization_and_asset_replacement"}
 )
 DOWNLOAD_USER_AGENT = "automation-tool-offline-motion-catalog/1.0"
+DOWNLOAD_TIMEOUT_SECONDS = 120
+# Four attempts in total. Sized against `scripts/run_script_tests.py`'s 600s
+# per-script budget: even three full backoffs plus three timed-out connections
+# stay well inside it, while a single reset connection -- the failure actually
+# observed -- costs a second.
+DOWNLOAD_RETRY_BACKOFF_SECONDS = (1.0, 3.0, 8.0)
 
 
 class BuildError(SystemExit):
@@ -71,13 +78,53 @@ def strip_dependency_root(lock: dict, local_path: str) -> str:
     return local_path[len(prefix) :]
 
 
+def is_retryable_download_error(error: OSError) -> bool:
+    """Whether another attempt could plausibly produce a different answer.
+
+    A 404 or a 403 is an answer about the URL itself; repeating it only delays
+    the report by the whole backoff budget. Everything else here -- a reset
+    connection, a DNS failure, a timeout, a 5xx, a 429 -- is about this moment,
+    and the next attempt is the cheapest way to find out.
+    """
+    status = getattr(error, "code", None)
+    if isinstance(status, int) and 400 <= status < 500 and status not in (408, 429):
+        return False
+    return True
+
+
 def fetch(url: str) -> bytes:
+    """Download one locked artifact, surviving a transient network failure.
+
+    This used to make exactly one attempt and turn any `OSError` into a build
+    failure. Measured on 2026-07-26 from a clean tree: 6 requests, 1 of them
+    failed, and the build aborted -- four runs were needed to get through, each
+    one salvaged only by the per-file download cache. A builder that any gate
+    names as its prerequisite cannot have that failure rate: it would make the
+    gate intermittently red for a reason that has nothing to do with the code
+    under test, which is how gates stop being run at all.
+
+    The budget is bounded and the last failure is re-raised, so an endpoint that
+    is genuinely gone still fails the build, and says how hard it tried.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            return response.read()
-    except OSError as error:
-        raise BuildError(f"download failed: {url}: {error}") from error
+    total = len(DOWNLOAD_RETRY_BACKOFF_SECONDS) + 1
+    for attempt in range(1, total + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                return response.read()
+        except OSError as error:
+            if attempt == total or not is_retryable_download_error(error):
+                raise BuildError(
+                    f"download failed after {attempt} attempt(s): {url}: {error}"
+                ) from error
+            delay = DOWNLOAD_RETRY_BACKOFF_SECONDS[attempt - 1]
+            print(
+                f"download attempt {attempt}/{total} failed for {url}: {error}; "
+                f"retrying in {delay:g}s",
+                flush=True,
+            )
+            time.sleep(delay)
+    raise BuildError(f"download loop ended without a result: {url}")
 
 
 def verify_downloads(lock: dict, download_root: Path, offline: bool) -> None:
