@@ -127,7 +127,10 @@ def _run_real_authoring(root: Path) -> None:
     # Re-lint the persisted composition independently: zero remote references.
     html = (root / result.composition_path).read_text(encoding="utf-8")
     independent = lint_composition(
-        html, allowed_assets=workspace.seeded_assets(), max_bytes=512_000
+        html,
+        allowed_assets=workspace.seeded_assets(),
+        max_bytes=512_000,
+        entry_path=result.composition_path,
     )
     if not independent.ok:
         _fail(f"persisted composition is not offline-clean: {sorted(independent.codes())}")
