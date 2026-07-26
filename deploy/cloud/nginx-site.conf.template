@@ -10,6 +10,15 @@ map $http_upgrade $automation_tool_demo_connection_upgrade {
     ''      close;
 }
 
+# The desktop App correlates every reply by comparing the echoed x-request-id
+# against the one it sent, and rejects a mismatch as a protocol violation. So
+# the edge forwards a supplied ID untouched and only mints one when the caller
+# offered none. The Control Plane still validates the value before echoing it.
+map $http_x_request_id $automation_tool_demo_request_id {
+    default $http_x_request_id;
+    ''      $request_id;
+}
+
 limit_req_zone $binary_remote_addr zone=automation_tool_demo_requests:1m rate=10r/s;
 limit_conn_zone $binary_remote_addr zone=automation_tool_demo_connections:1m;
 
@@ -72,7 +81,7 @@ server {
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Request-ID $automation_tool_demo_request_id;
         proxy_hide_header Server;
     }
 }

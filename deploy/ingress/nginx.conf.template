@@ -25,6 +25,16 @@ http {
         '' close;
     }
 
+    # The desktop App correlates every reply by comparing the echoed
+    # x-request-id against the one it sent, and rejects a mismatch as a
+    # protocol violation. So a supplied ID is forwarded untouched and one is
+    # minted only when the caller offered none. The Control Plane still
+    # validates the value before echoing it back.
+    map $http_x_request_id $forwarded_request_id {
+        default $http_x_request_id;
+        '' $request_id;
+    }
+
     limit_req_zone $binary_remote_addr zone=demo_requests:1m rate=10r/s;
     limit_conn_zone $binary_remote_addr zone=demo_connections:1m;
     limit_req_status 429;
@@ -89,7 +99,7 @@ http {
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header X-Request-ID $forwarded_request_id;
             proxy_hide_header Server;
         }
     }

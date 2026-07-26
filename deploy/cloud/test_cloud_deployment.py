@@ -461,6 +461,21 @@ class NginxEdgeContract(unittest.TestCase):
         self.assertIn("proxy_pass http://__CONTROL_PLANE_ENDPOINT__;", self.template)
         self.assertNotIn("proxy_pass $", self.template)
 
+    def test_forwards_the_caller_request_id_instead_of_replacing_it(self) -> None:
+        # The desktop App correlates every reply by comparing the echoed
+        # x-request-id against the one it sent, and treats a mismatch as a
+        # protocol violation. An edge that overwrites a supplied header makes
+        # every App call fail after the Control Plane already accepted it.
+        self.assertNotIn("proxy_set_header X-Request-ID $request_id;", self.template)
+        self.assertIn(
+            "proxy_set_header X-Request-ID $automation_tool_demo_request_id;",
+            self.template,
+        )
+        self.assertRegex(
+            self.template,
+            r"map\s+\$http_x_request_id\s+\$automation_tool_demo_request_id\s*\{",
+        )
+
 
 class RenderedNginxSite(unittest.TestCase):
     """Rendering must be closed over validated inputs, not free-form strings."""
