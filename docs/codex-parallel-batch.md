@@ -37,17 +37,19 @@
 1. **测试结论被污染** —— 桌面 E2E 线测出一片红，实际是另一条线正在改一个 `.tsx` 且处于 TS 编译不过的状态，所有 driver 在 `beforeBuildCommand` 就失败。作业面没重叠，但**整棵树能不能编译是共享状态**；
 2. **交付产物被污染** —— 要交客户的正式包如果在这棵树上构建，会把别人没写完的代码打进去。所有门禁都会绿，因为混进去的是半成品而不是缺东西。
 
-所以：
+**worktree 已经建好了，直接进去开工：**
 
 ```bash
-cd /Users/aventador/code/automation-tool
-git worktree add wt/codex -b codex/resilience-batch <起点commit>
-cd wt/codex
+cd /Users/aventador/code/automation-tool/wt/codex
+git status          # 应显示 On branch codex/resilience-batch，基线 7055041
 ```
 
-- 路径必须是 `<项目根>/wt/<名称>`（项目规则，不许 `/tmp`）；
-- **不要设 `CARGO_TARGET_DIR` 指回主树 target** 省构建时间——主树上有 cargo 在跑，会撞锁。宁可全量构建；
-- `wt/` 已在 `.git/info/exclude`。
+- 分支 `codex/resilience-batch`，基线 `7055041`（= 当时的 `origin/main`）；
+- `frontend/node_modules` 与 `backend/.venv` 已软链到主树，**不要在里面跑 `pnpm install` 或 `uv sync`**——那会改到主树共享的那一份。缺依赖先停下报告；
+- **不要设 `CARGO_TARGET_DIR` 指回主树 target** 省构建时间——主树上有 cargo 在跑，会撞锁。宁可全量构建（第一次会久，正常）；
+- `wt/` 已在 `.git/info/exclude`，不会污染共享 `.gitignore`。
+
+**为什么不是「随便找个目录 clone 一份」**：worktree 与主树共享 object database，你的提交主线 `git log codex/resilience-batch` 直接就能看到，不需要额外配 remote。
 
 ### 1.2 提交
 
