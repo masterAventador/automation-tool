@@ -11,6 +11,7 @@ import { createTransportStartupCheck } from "../app/startup";
 import { createLocalVideoEditingGateway } from "../features/video-editing/local-video-editing-gateway";
 import { HARNESS_SELECTED_VIDEO, TestHarnessPublishing } from "./publishing";
 import { TestHarnessTaskLifecycle } from "./task-lifecycle";
+import { TestHarnessVideoStudio } from "./video-studio";
 import "../styles/global.css";
 
 const HARNESS_RUNTIME_MARKER = "automation-tool-test-harness";
@@ -57,6 +58,10 @@ const publishingProps =
   publishing === undefined
     ? {}
     : { publishWorkspaceGateway: publishing, selectedVideo: HARNESS_SELECTED_VIDEO };
+const videoStudioProps =
+  scenario === "motion-render-failure"
+    ? { materialVideoStudioGateway: new TestHarnessVideoStudio() }
+    : {};
 const taskLifecycleProps =
   taskLifecycle === undefined
     ? {}
@@ -86,6 +91,7 @@ createRoot(root).render(
       videoEditingGateway={videoEditingGateway}
       {...taskLifecycleProps}
       {...publishingProps}
+      {...videoStudioProps}
     />
   </StrictMode>,
 );

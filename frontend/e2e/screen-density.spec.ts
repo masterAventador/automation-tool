@@ -3,9 +3,15 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Screen density: how much a page actually says in the one screen it gets.
  *
- * The viewport here is Playwright's default 1280x800, which is deliberately the
- * same as the production Tauri window (`src-tauri/tauri.conf.json` declares
- * width 1280, height 800) — the size the customer gets on first launch.
+ * The viewport here is 1280x800, the production Tauri window — `tauri.conf.json`
+ * declares it and `playwright.config.ts` reads it from there, so the size the
+ * customer gets on first launch is the size this file measures.
+ *
+ * That was not true when this file was written: it said "Playwright's default
+ * 1280x800", and Playwright's default is 1280x720, which is what these tests
+ * actually ran at until T96. Every assertion below is on width or on the gap
+ * between two stacked elements, and both were re-measured at 800 unchanged
+ * (column 992px, gaps 20/20/24/20/20/20/20/20), so only the claim was wrong.
  *
  * Two findings from the 2026-07-26 sweep are pinned here.
  *

@@ -4,8 +4,11 @@ import {
   dismissMotionRunMessage,
   failMotionRun,
   forgetMotionJob,
+  markMotionJobEnded,
   motionRunAttention,
+  motionRunNeedsWatch,
   motionRunSnapshot,
+  reportMotionRunTracking,
   resetMotionRunStore,
   setMotionActiveTab,
   setMotionBrief,
@@ -14,6 +17,8 @@ import {
   startMotionRun,
   subscribeMotionRun,
 } from "./motion-run-store";
+
+const JOB_ID = "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2";
 
 const PENDING = {
   kind: "one_sentence",
@@ -66,19 +71,81 @@ describe("motion run store", () => {
 
   it("hands the pending row over to the real job once the run returns", () => {
     startMotionRun(PENDING);
-    settleMotionRun("f89d8f18-6b4e-4f5a-8325-8da45f71d7e2", 12, {
+    settleMotionRun(JOB_ID, 12, {
       tone: "info",
       text: "已提交一句话自动制作。",
     });
 
     expect(motionRunSnapshot().pending).toBeNull();
-    expect(motionRunSnapshot().ownJobs.get("f89d8f18-6b4e-4f5a-8325-8da45f71d7e2")).toEqual({
+    expect(motionRunSnapshot().ownJobs.get(JOB_ID)).toEqual({
       startedAt: expect.any(Number),
       filmSeconds: 12,
+      ended: false,
     });
 
-    forgetMotionJob("f89d8f18-6b4e-4f5a-8325-8da45f71d7e2");
+    forgetMotionJob(JOB_ID);
     expect(motionRunSnapshot().ownJobs.size).toBe(0);
+  });
+
+  /**
+   * 提交返回之后，本机渲染那一段仍然要有人看着。
+   *
+   * T91 把结果搬出了组件，可**去查结果的那个动作**还留在组件里：`refresh()` 只在
+   * `VideoStudio` 挂载时轮询。于是渲染阶段失败且用户不在那一页时没有任何东西去查。
+   * 「还要不要看着」必须是一个能从 store 本身算出来的事实，外壳才能据此决定要不要
+   * 起那个定时器——也才能在没事的时候一次都不问。
+   */
+  it("knows a film still needs watching from the moment the render starts", () => {
+    expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(false);
+
+    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(true);
+
+    markMotionJobEnded(JOB_ID);
+    expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(false);
+    // 结束不等于忘掉：成片还要在页面上被announce一次，任务卡也还在。
+    expect(motionRunSnapshot().ownJobs.has(JOB_ID)).toBe(true);
+  });
+
+  it("ignores an ending for a job it never started", () => {
+    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    const before = motionRunSnapshot();
+
+    markMotionJobEnded("00000000-0000-4000-8000-000000000000");
+
+    expect(motionRunSnapshot()).toBe(before);
+  });
+
+  /**
+   * 看不见和没事发生必须说得出区别。
+   *
+   * 一旦把轮询搬出组件，就多了一个会自己失败的东西。它失败的时候如果什么都不说，
+   * 标记就会停在「正在进行中」——那正是本任务在修的形状，不能自己再造一个。
+   */
+  it("says the run cannot be read rather than leaving it looking healthy", () => {
+    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    expect(motionRunAttention(motionRunSnapshot())).toBe("running");
+
+    reportMotionRunTracking("lost");
+    expect(motionRunAttention(motionRunSnapshot())).toBe("unknown");
+
+    reportMotionRunTracking("ok");
+    expect(motionRunAttention(motionRunSnapshot())).toBe("running");
+  });
+
+  it("keeps a real failure ahead of merely not being able to look", () => {
+    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    reportMotionRunTracking("lost");
+    failMotionRun({ tone: "error", text: "这条视频没有做出来。" });
+
+    expect(motionRunAttention(motionRunSnapshot())).toBe("failed");
+  });
+
+  it("does not raise a mark for a lost view of nothing", () => {
+    reportMotionRunTracking("lost");
+
+    expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(false);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
   });
 
   it("holds the sentence, the chosen method and the open tab across a page change", () => {
