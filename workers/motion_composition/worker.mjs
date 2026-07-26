@@ -2,7 +2,7 @@
 /** Isolated process boundary for the motion-composition runtime. */
 
 import { execFile, spawn, spawnSync } from "node:child_process";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { access, lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -49,6 +49,35 @@ const SANDBOX_ASSETS_MAXIMUM = 128;
 const SANDBOX_RELATIVE_PATH_MAXIMUM = 512;
 const SANDBOX_MESSAGE_LIMIT_BYTES = 32 * 1024 * 1024;
 const SANDBOX_FRAMES_DIRECTORY = "frames";
+// A render is rejected as static only when *every* captured frame is
+// byte-identical, and only once there are at least this many frames to
+// compare — one frame carries no evidence either way.
+//
+// Why byte-identity rather than a perceptual threshold, and why "all frames"
+// rather than a first/middle/last sample:
+//
+//   - Anything that moves changes bytes. A one-pixel shift, a fade, a colour
+//     step all produce a different PNG, so a real animation cannot trip this.
+//     The false-positive surface is exactly "not one pixel changed across the
+//     whole duration", which is the defect and not a deliverable: this Worker
+//     exists to turn a seekable timeline into a film.
+//   - Comparing every frame rather than three samples avoids the opposite
+//     mistake. An animation that returns to its opening state — a pulse that
+//     completes a whole number of cycles — can have identical first, middle
+//     and last frames while moving throughout. Requiring *all* frames to match
+//     makes any motion anywhere in the timeline enough to pass.
+//   - Byte-identity is trustworthy here because this render is deterministic
+//     by construction: fonts are awaited, CSS animations are frozen and driven
+//     off the seek time, and the warm-up runs until the page stops changing.
+//     Identical bytes therefore mean an identical rendered state, not sampling
+//     luck.
+//
+// The one way a moving composition could still be called static is if all of
+// its motion fell between two captures. The authoring side asks for
+// `duration * 30` frames, so consecutive captures are 33ms apart and nothing
+// visible fits between them; a caller that asked for a handful of frames over
+// a long duration would be sampling too coarsely to judge motion at all.
+const STATIC_FRAME_COMPARISON_MINIMUM = 2;
 const SANDBOX_CANCEL_FILE = ".automation-tool-cancel";
 // Two animation frames: the current style has actually been composited, so
 // what is captured is what the seek asked for. Cheap enough to run per frame.
@@ -98,6 +127,7 @@ const SANDBOX_FAILURES = {
   output: "render_output_exceeded",
   protocol: "render_protocol_invalid",
   resource: "render_resource_exceeded",
+  static: "render_static_frames",
   timeout: "render_timeout",
   unusable: "render_browser_unusable",
 };
@@ -845,6 +875,9 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
     };
     let framesCaptured = 0;
     let outputBytes = 0;
+    // Motion detection state; see STATIC_FRAME_COMPARISON_MINIMUM.
+    let firstFrameDigest = null;
+    let sawMovement = false;
     const finish = (value) => {
       if (settled) return;
       settled = true;
@@ -1139,8 +1172,17 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           join(resolved.framesDirectory, `frame-${String(index).padStart(5, "0")}.png`),
           bytes,
         );
+        // Remember only whether any frame ever differed from the first, so the
+        // check costs one hash per frame and no growing state.
+        const digest = createHash("sha256").update(bytes).digest("base64");
+        if (firstFrameDigest === null) firstFrameDigest = digest;
+        else if (digest !== firstFrameDigest) sawMovement = true;
         outputBytes += bytes.length;
         framesCaptured = index;
+      }
+      if (!sawMovement && framesCaptured >= STATIC_FRAME_COMPARISON_MINIMUM) {
+        finish({ status: "static" });
+        return;
       }
       closing = true;
       const closed = await pipe.send("Browser.close");

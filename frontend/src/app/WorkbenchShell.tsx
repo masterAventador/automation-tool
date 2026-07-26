@@ -607,11 +607,17 @@ export function WorkbenchShell({
             ) : showingVideoEditing ? (
               <VideoEditingWorkbench gateway={videoEditingGateway} />
             ) : showingPublishing ? (
-              <PublishWorkspace
-                gateway={publishWorkspaceGateway}
-                selectedVideo={selectedVideo}
-                onChangeSelection={chooseAnotherVideo}
-              />
+              // Carries the step below the title row, the same way
+              // `.platform-session-content` does. It belongs out here rather
+              // than on the component's own root because `PublishWorkspace`
+              // returns from three different places.
+              <div className="publish-workspace-content">
+                <PublishWorkspace
+                  gateway={publishWorkspaceGateway}
+                  selectedVideo={selectedVideo}
+                  onChangeSelection={chooseAnotherVideo}
+                />
+              </div>
             ) : showingLegal ? (
               <ThirdPartySoftwareNotice />
             ) : showingDiagnostics ? (

@@ -68,6 +68,31 @@ test("the release resource inventory is declared once and read, never restated",
   }
 });
 
+test("the mounted disk image gives the customer somewhere to drag the app", async () => {
+  const command = await repositoryFile("scripts/build_release_package.py");
+  const start = command.indexOf("def create_disk_image");
+  assert.notEqual(start, -1, "create_disk_image must exist");
+  const next = command.indexOf("\ndef ", start + 1);
+  const body = next === -1 ? command.slice(start) : command.slice(start, next);
+  // `hdiutil create -srcfolder <the .app>` images that one bundle, so the
+  // volume the customer mounts has a single entry and nothing to drag onto.
+  // The image has to be built from a staging directory that also carries the
+  // drop target. Every gate downstream asks Gatekeeper about the file and
+  // none of them ever looks inside the volume, so nothing else can catch this.
+  const srcfolder = /"-srcfolder",\s*os\.fspath\((\w+)\)/u.exec(body);
+  assert.ok(srcfolder, "create_disk_image must hand hdiutil a -srcfolder");
+  assert.notEqual(
+    srcfolder[1],
+    "application",
+    "the image must be built from a staging directory, not the bare .app",
+  );
+  assert.match(
+    body,
+    /"?\/Applications"?/u,
+    "the staged volume must carry a link to /Applications to drag onto",
+  );
+});
+
 test("desktop CI runs the release wiring gate and the package resource audit tests", async () => {
   const workflow = await repositoryFile(".github/workflows/desktop.yml");
   assert.match(

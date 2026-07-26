@@ -34,6 +34,7 @@ import os
 import platform as platform_module
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -358,22 +359,40 @@ def create_disk_image(
     announce("Creating the release disk image from the final App bundle")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
-    run_checked(
-        [
-            "hdiutil",
-            "create",
-            "-volname",
-            application.stem,
-            "-srcfolder",
-            os.fspath(application),
-            "-fs",
-            "HFS+",
-            "-format",
-            "UDZO",
-            "-quiet",
-            os.fspath(output),
-        ]
-    )
+    # Image a staging directory rather than the bare .app, so the volume also
+    # carries the `Applications` symlink the customer drags onto. Handing
+    # `-srcfolder` the .app itself produces a volume containing nothing but
+    # that one bundle — which is what shipped: the 20:52 image had no symlink,
+    # no `.background`, no `.DS_Store`, and no way to install without opening
+    # a second Finder window.
+    #
+    # This cannot be fixed in `tauri.conf.json`. The build runs
+    # `tauri build --bundles app`, so Tauri's DMG bundler never executes and
+    # its `bundle.macOS.dmg` settings are never read. The order is deliberate:
+    # the .app is notarised and stapled above, before imaging, so the ticket
+    # travels inside the bundle the customer drags out.
+    with tempfile.TemporaryDirectory(dir=output.parent) as staging_root:
+        staging = Path(staging_root) / "image"
+        staging.mkdir()
+        # `ditto` preserves the signature; a plain copy does not reliably.
+        run_checked(["ditto", os.fspath(application), os.fspath(staging / application.name)])
+        (staging / "Applications").symlink_to("/Applications")
+        run_checked(
+            [
+                "hdiutil",
+                "create",
+                "-volname",
+                application.stem,
+                "-srcfolder",
+                os.fspath(staging),
+                "-fs",
+                "HFS+",
+                "-format",
+                "UDZO",
+                "-quiet",
+                os.fspath(output),
+            ]
+        )
     # The disk image is itself a downloaded artifact, so it carries its own
     # signature and its own ticket; the customer's first Gatekeeper prompt is
     # about this file, not about the bundle inside it.
