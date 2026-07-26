@@ -15,7 +15,16 @@
 //! answered with something we refused. None of them requires reading a single
 //! byte the model produced.
 //!
-//! The refusal is told from the crash by the document the child wrote on
+//! Splitting those four was not enough. Three failures kept arriving inside the
+//! refusal document having read no sentence at all — a model service that was
+//! never reached, one that answered and then went silent, and an installation
+//! whose pinned files were simply absent — and each was reported to the user as
+//! their description being impossible. They are told apart now by the closed
+//! reason token the child writes, whose classes live in the shared contract
+//! rather than in either side's head; the cases below drive a real child for
+//! every token that contract takes out of the refusal channel.
+//!
+//! The refusal is told from the rest by the document the child wrote on
 //! stdout, not by its exit number. Both would work when everything behaves,
 //! but only the document is *evidence*: a child that fell over cannot produce
 //! it, whereas an exit code is a single integer that a half-finished process
@@ -77,6 +86,202 @@ fn child(root: &TempDirectory, body: &str) -> PathBuf {
 
 fn request() -> serde_json::Value {
     serde_json::json!({ "schemaVersion": 1, "brief": "用蓝色商务风做一段说明" })
+}
+
+/// The code as the card will actually receive it.
+///
+/// Asserted through the serialization rather than the enum so the thing under
+/// test is the wire the React side branches on: a variant renamed without its
+/// `serde` rename following would leave every enum comparison passing while the
+/// card fell through to its catch-all sentence.
+fn wire_code(
+    error: &automation_tool_desktop_lib::motion_video_studio::MotionVideoStudioError,
+) -> String {
+    serde_json::to_value(error)
+        .expect("a command error serializes")
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .expect("a command error carries its code")
+        .to_owned()
+}
+
+/// Run one child that answers `document` and exits non-zero, and report the code.
+fn code_for_answer(root: &TempDirectory, document: &str) -> String {
+    let entrypoint = child(root, &format!("printf '%s' '{document}'\nexit 70\n"));
+    let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
+        .expect_err("a child that exits non-zero has not authored anything");
+    wire_code(&error)
+}
+
+fn answer(status: &str, reason: &str) -> String {
+    format!("{{\"schemaVersion\":1,\"status\":\"{status}\",\"rejectionReason\":\"{reason}\"}}")
+}
+
+const REFUSAL_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-authoring-refusal.v1.json");
+
+/// The code this side owes each class the shared contract declares.
+///
+/// A new class with no entry here fails loudly instead of quietly reaching the
+/// user as the catch-all: that silence is precisely how three unrelated
+/// failures came to share one sentence in the first place.
+fn expected_code_for_class(class: &str) -> &'static str {
+    match class {
+        "app_request_invalid" => "authoring_crashed",
+        "installation_damaged" => "authoring_installation_damaged",
+        "model_configuration_required" => "configuration_required",
+        "model_timed_out" => "authoring_model_timed_out",
+        "model_transport_failed" => "authoring_model_transport_failed",
+        other => panic!("the shared contract declares a class this side cannot report: {other}"),
+    }
+}
+
+fn non_refusal_outcomes() -> serde_json::Map<String, serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(REFUSAL_CONTRACT)
+        .expect("the refusal contract parses")
+        .get("nonRefusalOutcomes")
+        .and_then(|value| value.as_object().cloned())
+        .expect("the refusal contract declares its non-refusal classes")
+}
+
+/// A model service that was never reached is not the agent declining this brief.
+///
+/// Measured on 2026-07-26: an unreachable model told the user their description
+/// could not be made, after two seconds. Nothing had read the description.
+#[test]
+fn a_model_that_was_never_reached_is_reported_as_its_own_failure() {
+    let root = TempDirectory::new();
+
+    let code = code_for_answer(
+        &root,
+        &answer(
+            "model_transport_failed",
+            "video_creation_model_transport_failed",
+        ),
+    );
+
+    assert_eq!(code, "authoring_model_transport_failed");
+}
+
+/// A model that took the connection and then stopped sending is a third thing
+/// again: it was reached, so the network and the address are not where the user
+/// should be sent, and the wait has a known length worth telling them.
+#[test]
+fn a_model_that_went_quiet_is_told_apart_from_one_that_was_never_reached() {
+    let root = TempDirectory::new();
+
+    let silent = code_for_answer(
+        &root,
+        &answer("model_timed_out", "video_creation_model_timed_out"),
+    );
+    let absent = code_for_answer(
+        &root,
+        &answer(
+            "model_transport_failed",
+            "video_creation_model_transport_failed",
+        ),
+    );
+
+    assert_eq!(silent, "authoring_model_timed_out");
+    assert_ne!(
+        silent, absent,
+        "these two arrived as one code and therefore as one sentence"
+    );
+}
+
+/// Our own packaged files failing verification is the widest mouth of this
+/// funnel, and the least excusable one to word as the user's fault: no rewrite
+/// of any sentence puts a missing pinned file back.
+#[test]
+fn a_damaged_installation_is_never_reported_as_the_description_being_wrong() {
+    let root = TempDirectory::new();
+
+    let code = code_for_answer(
+        &root,
+        &answer(
+            "installation_damaged",
+            "agent_pinned_workflow_file_is_missing_or_a_symlink",
+        ),
+    );
+
+    assert_eq!(code, "authoring_installation_damaged");
+}
+
+/// The request the child judged malformed is one this side built. The user
+/// typed a sentence that was never looked at.
+#[test]
+fn a_request_this_side_built_wrong_is_not_reported_as_a_refusal() {
+    let root = TempDirectory::new();
+
+    let code = code_for_answer(
+        &root,
+        &answer("app_request_invalid", "request_shape_invalid"),
+    );
+
+    assert_eq!(code, "authoring_crashed");
+}
+
+/// A packaged Executor from before the statuses split still answers these on
+/// the refusal status. The reason token is the evidence, so it is what decides.
+#[test]
+fn an_older_child_that_still_says_rejected_is_classified_by_its_reason() {
+    let root = TempDirectory::new();
+
+    let code = code_for_answer(
+        &root,
+        &answer("rejected", "video_creation_model_transport_failed"),
+    );
+
+    assert_eq!(code, "authoring_model_transport_failed");
+}
+
+/// Contradictory evidence resolves away from the user, never towards them.
+///
+/// A status naming one class and a reason belonging to another is a child this
+/// side does not understand. Reporting the more specific field would be a guess;
+/// guessing "the user wrote a bad sentence" is the guess that must never be made.
+#[test]
+fn an_answer_that_contradicts_itself_is_reported_as_our_failure() {
+    let root = TempDirectory::new();
+
+    let code = code_for_answer(
+        &root,
+        &answer("installation_damaged", "brief_duration_out_of_range"),
+    );
+
+    assert_eq!(code, "authoring_crashed");
+}
+
+/// Every reason the shared contract takes out of the refusal channel must reach
+/// the user as the code its class calls for — and never as a refusal.
+///
+/// This is the gate that keeps the two sides in step: the vocabulary lives in
+/// the contract, and a token added there without a code here fails now rather
+/// than silently reaching a user as "请换一句更具体的描述".
+#[test]
+fn every_non_refusal_reason_in_the_contract_reaches_its_own_code() {
+    let root = TempDirectory::new();
+    let outcomes = non_refusal_outcomes();
+    assert!(
+        !outcomes.is_empty(),
+        "the contract must declare the classes"
+    );
+
+    let mut checked = 0;
+    for (class, reasons) in &outcomes {
+        let expected = expected_code_for_class(class);
+        for reason in reasons.as_array().expect("a class lists its reasons") {
+            let reason = reason.as_str().expect("a reason is a token");
+            let code = code_for_answer(&root, &answer(class, reason));
+            assert_eq!(code, expected, "class {class} reason {reason}");
+            assert_ne!(
+                code, "authoring_refused",
+                "{reason} would tell the user to rewrite a sentence nothing read"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 20, "only {checked} reasons were covered");
 }
 
 /// The happy path is here to prove the fixtures actually run a child; without

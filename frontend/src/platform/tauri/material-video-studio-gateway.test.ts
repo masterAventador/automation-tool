@@ -210,10 +210,11 @@ describe("Tauri material video studio gateway", () => {
   });
 
   /**
-   * 原生侧把「编排超时被杀」「按协议拒绝」「子进程崩溃」「答复没通过校验」拆成了四个码，
+   * 原生侧把编排失败拆成了七个码：整体超时被杀、按协议拒绝、子进程崩溃、答复没通过校验，
+   * 以及后来补上的模型服务没有任何回应、模型接上后不再回话、安装文件校验不过。
    * 网关这边如果不认它们，`mapError` 会一律压成 `operation_unavailable`——
    * 用户看到一句笼统的话，而下一个排查的人拿不到任何区分。
-   * 这条用例守住四个码原样穿过网关。
+   * 这条用例守住七个码原样穿过网关。
    */
   it("keeps every authoring failure apart instead of flattening them", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
@@ -230,6 +231,9 @@ describe("Tauri material video studio gateway", () => {
       "authoring_refused",
       "authoring_crashed",
       "authoring_answer_invalid",
+      "authoring_model_transport_failed",
+      "authoring_model_timed_out",
+      "authoring_installation_damaged",
     ] as const) {
       invoke.mockRejectedValueOnce({
         code,

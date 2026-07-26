@@ -11,6 +11,7 @@ use crate::video_job_workspace::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -76,7 +77,45 @@ pub enum MotionVideoStudioErrorCode {
     /// Always a defect on our side: the user did nothing wrong and has no move
     /// beyond retrying. A child that crashes cannot write the refusal document,
     /// so its absence is what distinguishes this from `AuthoringRefused`.
+    ///
+    /// It is also where every answer this side cannot make sense of lands — an
+    /// unknown reason, a status contradicting its reason, a class a newer
+    /// Executor declares that this build has no code for. Resolving the unknown
+    /// towards "our failure" is deliberate: the alternative is guessing, and
+    /// the guess that must never be made is "the user wrote a bad sentence".
     AuthoringCrashed,
+    /// Nothing ever came back from the video-creation model service.
+    ///
+    /// Its own code because the user's move is specific and nothing else on
+    /// this path shares it: look at the network, then at the model service
+    /// address in settings. Kept apart from `AuthoringModelTimedOut` because a
+    /// service that answered and then went quiet sends them somewhere else
+    /// entirely.
+    ///
+    /// Named after the transport rather than after "unreachable" because the
+    /// Executor cannot narrow it any further and neither can this side: a
+    /// refused connection, an address that does not resolve, a TLS handshake
+    /// that fails and a connection dropped mid-stream all arrive as one
+    /// `OSError` there and one reason token here. Claiming "could not connect"
+    /// would be a fifth of those four wrong. What is true of all of them is
+    /// that no reply arrived, and that is what the wording says.
+    AuthoringModelTransportFailed,
+    /// The model service took the connection and then stopped sending.
+    ///
+    /// Distinct from `AuthoringModelTransportFailed` in the only way that
+    /// matters to the person waiting: the service is there, the address and the
+    /// network are not the thing to go and check, and the wait had a known
+    /// length worth telling them.
+    AuthoringModelTimedOut,
+    /// Our own packaged files no longer verify.
+    ///
+    /// Pinned workflow files, the locked catalog and the declared contracts are
+    /// read at run time and checked against their digests. When that fails the
+    /// installation is damaged, which is neither a refusal nor something a
+    /// retry can repair — this is the one authoring code whose move is to
+    /// reinstall. It reached users as "describe the film differently" until
+    /// 2026-07-27, which no rewrite of any sentence could ever have fixed.
+    AuthoringInstallationDamaged,
     /// The authoring child answered, and this side refused the answer.
     ///
     /// The answer names the file the renderer loads and the assets the sandbox
@@ -963,6 +1002,10 @@ struct AuthoringRefusalContract {
     fixed_reasons: Vec<String>,
     static_gate_reason_prefix: String,
     static_gate_codes: Vec<String>,
+    /// Which findings are not the agent declining this brief, grouped by what
+    /// the user can do about them. The child writes the class name as its
+    /// answer status, so the two sides never keep separate copies of this.
+    non_refusal_outcomes: BTreeMap<String, Vec<String>>,
     rationale: serde_json::Value,
 }
 
@@ -1001,16 +1044,44 @@ fn refusal_contract() -> Option<AuthoringRefusalContract> {
             .iter()
             .all(|code| is_wire_token(code))
         || !contract.rationale.is_object()
+        || !outcomes_are_declared(&contract)
     {
         return None;
     }
     Some(contract)
 }
 
-fn rejection_reason_is_closed(reason: &str) -> bool {
-    let Some(contract) = refusal_contract() else {
+/// Is the non-refusal table a partition of known tokens into named classes?
+///
+/// Overlap is the shape worth rejecting outright: a token in two classes would
+/// be reported as whichever was iterated first, and both sides would go on
+/// looking consistent while the card said different things on different days.
+fn outcomes_are_declared(contract: &AuthoringRefusalContract) -> bool {
+    if contract.non_refusal_outcomes.is_empty() {
         return false;
-    };
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    for (name, reasons) in &contract.non_refusal_outcomes {
+        if !is_wire_token(name)
+            || name == REFUSED_STATUS
+            || reasons.is_empty()
+            || !strictly_sorted_unique(reasons)
+            || !reasons.iter().all(|reason| {
+                contract
+                    .fixed_reasons
+                    .iter()
+                    .any(|candidate| candidate == reason)
+            })
+            || reasons.iter().any(|reason| seen.contains(&reason.as_str()))
+        {
+            return false;
+        }
+        seen.extend(reasons.iter().map(String::as_str));
+    }
+    true
+}
+
+fn rejection_reason_is_closed(contract: &AuthoringRefusalContract, reason: &str) -> bool {
     if contract
         .fixed_reasons
         .iter()
@@ -1033,26 +1104,87 @@ fn rejection_reason_is_closed(reason: &str) -> bool {
         })
 }
 
-/// Did the child that exited non-zero actually complete the refusal protocol?
+/// The code this build reports for a class the contract declares.
 ///
-/// This is the difference between "the agent decided it could not author this"
-/// and "the agent fell over", which are a product behaviour and a defect
-/// respectively. It is answered from the document rather than the exit status
-/// because only the document is evidence: a process that crashed cannot have
-/// written it, while any half-finished process can still return a number.
+/// `app_request_invalid` is a real class that genuinely belongs on
+/// `AuthoringCrashed`: the child judged the request this side built, so it is
+/// our defect with no user move beyond retrying. A class this build has never
+/// heard of lands there too, for the same reason it has to: an unknown outcome
+/// is not evidence of anything the user did.
+fn code_for_non_refusal_class(class: &str) -> MotionVideoStudioError {
+    match class {
+        "installation_damaged" => authoring_installation_damaged(),
+        "model_configuration_required" => configuration_required(),
+        "model_timed_out" => authoring_model_timed_out(),
+        "model_transport_failed" => authoring_model_transport_failed(),
+        _ => authoring_crashed(),
+    }
+}
+
+/// What actually happened to a child that exited non-zero.
+///
+/// It is answered from the document rather than the exit status because only
+/// the document is evidence: a process that crashed cannot have written it,
+/// while any half-finished process can still return a number.
+///
+/// The distinction that used to be the whole of this function — refused against
+/// crashed — turned out to be too coarse by half. A refusal means the agent read
+/// this brief and declined it, and it is the only outcome entitled to ask the
+/// user for a different sentence. Failure injection on 2026-07-26 found three
+/// things arriving in that document having read no sentence at all: a model
+/// service that was never reached, one that answered and then went silent for
+/// 363 seconds, and a tree whose pinned files were simply not there. All three
+/// told the user to describe the film differently.
+///
+/// So the reason token decides, and the class it belongs to comes from the same
+/// contract the child writes against. The status is corroboration only: an
+/// older Executor answers these on `rejected`, and a status that names a class
+/// other than the reason's is a child this side does not understand, which
+/// resolves to our failure rather than to the user's.
 ///
 /// Nothing here is surfaced — the bytes are classified and dropped — and the
-/// child only ever writes its own two protocol documents to stdout, so no
-/// model output is involved either way.
-pub fn answer_is_refusal(answer: &str) -> bool {
-    serde_json::from_str::<RefusedAuthoringAnswer>(answer).is_ok_and(|answer| {
-        answer.schema_version == 1
-            && answer.status == REFUSED_STATUS
-            && answer
-                .rejection_reason
-                .as_deref()
-                .is_none_or(rejection_reason_is_closed)
-    })
+/// child only ever writes its own protocol documents to stdout, so no model
+/// output is involved on any branch.
+pub fn classify_failed_authoring_answer(answer: &str) -> MotionVideoStudioError {
+    let (Some(contract), Ok(document)) = (
+        refusal_contract(),
+        serde_json::from_str::<RefusedAuthoringAnswer>(answer),
+    ) else {
+        return authoring_crashed();
+    };
+    if document.schema_version != 1 {
+        return authoring_crashed();
+    }
+    let refused_or_crashed = if document.status == REFUSED_STATUS {
+        authoring_refused()
+    } else {
+        authoring_crashed()
+    };
+    // No reason at all is an older packaged Executor, which only ever wrote the
+    // refusal document; there is nothing to classify it by beyond its status.
+    let Some(reason) = document.rejection_reason.as_deref() else {
+        return refused_or_crashed;
+    };
+    if !rejection_reason_is_closed(&contract, reason) {
+        return authoring_crashed();
+    }
+    let class = contract
+        .non_refusal_outcomes
+        .iter()
+        .find_map(|(name, reasons)| {
+            reasons
+                .iter()
+                .any(|candidate| candidate == reason)
+                .then_some(name.as_str())
+        });
+    match class {
+        // The agent read the brief and declined it: the one refusal there is.
+        None => refused_or_crashed,
+        Some(class) if document.status == class || document.status == REFUSED_STATUS => {
+            code_for_non_refusal_class(class)
+        }
+        Some(_) => authoring_crashed(),
+    }
 }
 
 /// Turn an agent answer into a RenderJob, or refuse it.
@@ -1707,6 +1839,37 @@ pub const fn authoring_crashed() -> MotionVideoStudioError {
     MotionVideoStudioError {
         code: MotionVideoStudioErrorCode::AuthoringCrashed,
         retryable: true,
+    }
+}
+
+/// Retryable: an outage or a wrong address can be over or corrected by the time
+/// the user presses the button again, and this side cannot tell which it was.
+pub const fn authoring_model_transport_failed() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringModelTransportFailed,
+        retryable: true,
+    }
+}
+
+pub const fn authoring_model_timed_out() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringModelTimedOut,
+        retryable: true,
+    }
+}
+
+/// Not retryable, and the only authoring failure that is not: the files this
+/// run needs failed their digest check, and pressing the button again reads the
+/// same files and fails the same way.
+///
+/// Nothing in the video studio branches on `retryable` today — the card carries
+/// the same message either way and says in words that retrying will not help.
+/// The flag is set correctly here so that whatever does start reading it finds
+/// the truth rather than a value chosen to match the others.
+pub const fn authoring_installation_damaged() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringInstallationDamaged,
+        retryable: false,
     }
 }
 
