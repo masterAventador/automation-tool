@@ -77,14 +77,24 @@ const navigationItems = [
  * What the mark on the 视频制作 entry looks like, and what it says when hovered.
  *
  * A run in flight is a bare dot, so the entry's accessible name stays 视频制作
- * and nothing that navigates by name has to change. The two states that need
- * the operator to do something carry their own word instead, because a mark
+ * and nothing that navigates by name has to change. The three states that give
+ * the operator something to do carry their own word instead, because a mark
  * whose meaning is only in a `title` is a mark nobody reads.
+ *
+ * 完成 is green and the other two worded marks are not. Colour is the only
+ * thing separating "there is a film waiting for you" from "something is wrong",
+ * and the operator reads it before he reads the word — a finished film wearing
+ * the same red as 失败 and 未知 would make every glance at the sidebar an alarm
+ * and teach him to stop looking. All three are two characters wide on purpose:
+ * whether the 232px sidebar clips this badge is still unverified (T91, T91b),
+ * and a wider word would make that open question worse rather than reuse the
+ * answer.
  */
 const VIDEO_STUDIO_MARKS = {
   running: { title: "视频制作正在进行中", badge: { dot: true } },
   failed: { title: "视频制作失败了，去看看", badge: { count: "失败" } },
   unknown: { title: "读不到视频制作进度，去看看", badge: { count: "未知" } },
+  finished: { title: "视频制作做好了，去看成片", badge: { count: "完成", color: "green" } },
 } as const;
 
 /**
@@ -120,6 +130,13 @@ const VIDEO_STUDIO_MARKS = {
  * itself fail. When the App cannot read a run it is still waiting on, it says
  * so. Falling back to the dot there would put the original lie straight back —
  * a film reported as in progress by an App that has no idea.
+ *
+ * 完成 is the fourth, and it is the same defect with the sign flipped. The
+ * watcher already knew the render had ended; it just had no way to say so, so
+ * the dot went on reading 正在进行中 over a film that had been sitting finished
+ * for minutes. It stays lit until 去看成片 is pressed on the studio page — the
+ * one action that also clears the notice there, so the two surfaces are never
+ * out of step and there is nothing new to remember about when the mark goes.
  */
 function navigationItemsWith(attention: MotionRunAttention) {
   if (attention === "none") return navigationItems;

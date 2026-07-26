@@ -25,20 +25,35 @@ import { useSyncExternalStore } from "react";
 export type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
 
 /**
+ * How a job this session started came to an end.
+ *
+ * The three terminal statuses are kept apart rather than collapsed into one
+ * "it is over" flag, because the sidebar owes the operator a different sentence
+ * for each: a failure has to be reported, a finished film has to be offered,
+ * and a cancellation is something he did on purpose and does not need to be
+ * told about.
+ */
+export type MotionJobEnding = "succeeded" | "failed" | "cancelled";
+
+/**
  * What the App knows about a render job because it is the one that started it.
  *
- * Neither fact is on `MotionRenderJobSnapshot`: it carries no start time and no
- * film length. An App restarted mid-render would otherwise count from the
- * moment it first happened to look and report "已用 3 秒" over a job four
+ * The start time and the film length are not on `MotionRenderJobSnapshot`,
+ * which carries neither. An App restarted mid-render would otherwise count from
+ * the moment it first happened to look and report "已用 3 秒" over a job four
  * minutes in — a wrong number is worse than none when the number's whole job is
  * to be evidence the run is alive. The durable fix is a `startedAt` and a
  * length on the snapshot, which is native-side work.
+ *
+ * The outcome is the third thing, and unlike the other two it could never come
+ * from the snapshot at all: it records what this operator has been told and has
+ * acted on, which is a fact about the App rather than about the render.
  */
 export interface OwnMotionJob {
   readonly startedAt: number;
   readonly filmSeconds: number;
-  /** Whether this job has been seen in a terminal state. */
-  readonly ended: boolean;
+  /** How it ended, or that it has not. */
+  readonly outcome: "running" | MotionJobEnding;
 }
 
 /** A submission that has been sent and has not come back yet. */
@@ -127,7 +142,7 @@ export function settleMotionRun(
     ownJobs: new Map(state.ownJobs).set(renderJobId, {
       startedAt: Date.now(),
       filmSeconds,
-      ended: false,
+      outcome: "running",
     }),
   });
 }
@@ -139,11 +154,17 @@ export function settleMotionRun(
  * Distinct from `forgetMotionJob`, which drops the job entirely. A film that
  * finished is still owed an announcement and a 去看成片 button the next time the
  * operator opens the page, so it has to stay — it just stops being watched.
+ *
+ * How it ended is recorded rather than discarded. The first version of this
+ * kept a bare `ended` flag, which was enough to stop the timer and nothing
+ * else: the store could no longer tell a finished film from a cancelled one, so
+ * the sidebar had nothing to say about either and went on showing the mark for
+ * a run in flight.
  */
-export function markMotionJobEnded(renderJobId: string): void {
+export function endMotionJob(renderJobId: string, ending: MotionJobEnding): void {
   const own = state.ownJobs.get(renderJobId);
-  if (own === undefined || own.ended) return;
-  commit({ ownJobs: new Map(state.ownJobs).set(renderJobId, { ...own, ended: true }) });
+  if (own === undefined || own.outcome !== "running") return;
+  commit({ ownJobs: new Map(state.ownJobs).set(renderJobId, { ...own, outcome: ending }) });
 }
 
 /** Whether the runs still being waited on can be read right now. */
@@ -163,7 +184,24 @@ export function reportMotionRunTracking(tracking: MotionRunTracking): void {
  */
 export function motionRunNeedsWatch(current: MotionRunState): boolean {
   for (const own of current.ownJobs.values()) {
-    if (!own.ended) return true;
+    if (own.outcome === "running") return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a film this session made is finished and has not been opened yet.
+ *
+ * "Opened" is `forgetMotionJob`, which is what 去看成片 calls — the same single
+ * acknowledgement that clears the success notice on the studio page. There is
+ * deliberately no second rule here: no timer, no "clear it when the page is
+ * visited", no clearing on the next submission. A film that was made and never
+ * looked at is still waiting, and the sidebar says exactly what the page says,
+ * for exactly as long.
+ */
+function motionRunHasUnopenedFilm(current: MotionRunState): boolean {
+  for (const own of current.ownJobs.values()) {
+    if (own.outcome === "succeeded") return true;
   }
   return false;
 }
@@ -196,7 +234,7 @@ export function setMotionActiveTab(tab: string): void {
 }
 
 /** What the sidebar has to say about this page from anywhere in the App. */
-export type MotionRunAttention = "none" | "running" | "failed" | "unknown";
+export type MotionRunAttention = "none" | "running" | "failed" | "unknown" | "finished";
 
 /**
  * Whether the sidebar should mark this page, and as what.
@@ -220,10 +258,28 @@ export type MotionRunAttention = "none" | "running" | "failed" | "unknown";
  * would assert something nothing here knows. Not being able to look is its own
  * answer. It ranks below a real failure — a known outcome always beats an
  * unknown one — and it only means anything while something is outstanding.
+ *
+ * "finished" is the good news, and it is here because good news that does not
+ * arrive is still a mark that lies. T91b left this registered: the watcher
+ * already learned the render had ended and recorded it, but the screen was
+ * unchanged — a blue dot whose hover text read 正在进行中 over a film that was
+ * made minutes ago. Nothing about that is dangerous the way a disguised failure
+ * is, which is why it ranks below both problem states: an operator who cannot
+ * see a film that exists will find it, whereas an operator waiting on a film
+ * that is already dead waits forever. But it outranks "running", because it is
+ * the one thing on this list the operator can act on — the film is there and
+ * there is a button that opens it — while "running" asks him to do nothing at
+ * all.
+ *
+ * The ordering is therefore: a known bad outcome, then not being able to look,
+ * then something to collect, then something in flight. Where two of them are
+ * true at once — two films, one failed and one finished — the mark carries the
+ * more consequential one and the studio page shows both.
  */
 export function motionRunAttention(current: MotionRunState): MotionRunAttention {
   if (current.message?.tone === "error") return "failed";
   if (current.tracking === "lost" && motionRunNeedsWatch(current)) return "unknown";
+  if (motionRunHasUnopenedFilm(current)) return "finished";
   if (current.pending !== null || current.message !== null) return "running";
   return "none";
 }

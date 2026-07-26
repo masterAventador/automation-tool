@@ -334,6 +334,41 @@ describe("video studio watched from anywhere in the app", () => {
   });
 
   /**
+   * 好消息也要送到，不能只送坏消息。
+   *
+   * T91b 登记的另一半：成片做好、用户在别的页面时，监视器内部已经知道任务结束了，
+   * 屏幕上却和以前一模一样——蓝点，加一句 `title="视频制作正在进行中"`。对一条已经
+   * 做完的片子那句话是假的，而且它把用户按在原地等一件早就发生完的事。
+   */
+  it("says the film is done even though the operator never came back to the page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const motionJobs = vi.fn().mockResolvedValue([RENDERING_JOB]);
+      renderStartedElsewhere();
+      openShellOnWorkbench(studioGateway(motionJobs));
+
+      motionJobs.mockResolvedValue([SUCCEEDED_JOB]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
+      const mark = within(entry).getByText("完成");
+      expect(mark).toBeVisible();
+      /*
+       * 好消息不许穿着报警的衣服。失败和未知用的是角标默认的红，用户先看到颜色才看到
+       * 字；一条做好的片子也顶着红角标，会把每一次瞥向侧边栏都变成一次惊吓，然后他就
+       * 不看了。这一条守的是这个决定本身——不这么钉住，以后任何人把 color 去掉都没有
+       * 东西会吭声。
+       */
+      expect(mark.closest(".ant-badge-count")).toHaveClass("ant-badge-color-green");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * 看不见和没事发生是两件事，标记必须说得出区别。
    *
    * 把轮询搬到外壳，就等于新造了一个会自己失败的东西：桥断了、命令抛异常、原生侧
@@ -434,7 +469,7 @@ describe("video studio watched from anywhere in the app", () => {
     });
 
     expect(motionRunSnapshot().message?.tone).toBe("info");
-    expect(motionRunSnapshot().ownJobs.get(RENDERING_JOB.renderJobId)?.ended).toBe(false);
+    expect(motionRunSnapshot().ownJobs.get(RENDERING_JOB.renderJobId)?.outcome).toBe("running");
   });
 
   /** 片子做完了就不用再看着了——定时器必须自己停，不能靠用户回到那一页才停。 */
