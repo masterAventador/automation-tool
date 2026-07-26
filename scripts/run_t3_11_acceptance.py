@@ -60,6 +60,10 @@ from automation_tool.executor import (
 )
 from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
+# The five committed events a converged FakeExecutor run produces: started,
+# step started, step progress, step completed, task completed.
+CONVERGED_EVENT_COUNT = 5
+
 
 def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
     environment = {
@@ -169,7 +173,20 @@ def exercise_fake_executor(
         raise RuntimeError("T3-11 FakeExecutor did not process the persistent offer")
 
 
-async def wait_for_convergence(database_url: str, original: TaskCommandRecord) -> None:
+async def wait_for_convergence(
+    database_url: str,
+    original: TaskCommandRecord,
+    *,
+    task_revision_baseline: int = 1,
+) -> None:
+    """Wait for the offered Task to converge to a succeeded five-event timeline.
+
+    Each committed event advances the Task revision by one, so the terminal
+    revision is whatever the Task already carried when the offer was enqueued
+    plus the five events. A Task whose targets were confirmed first enters this
+    wait one revision higher, and freezing the sum here made that read like a
+    projection regression.
+    """
     database = Database.from_url(database_url)
     deadline = time.monotonic() + 10
     try:
@@ -220,9 +237,9 @@ async def wait_for_convergence(database_url: str, original: TaskCommandRecord) -
             complete = (
                 command_row["status"] == TaskCommandStatus.ACKNOWLEDGED.value
                 and task_row["status"] == TaskStatus.SUCCEEDED.value
-                and task_row["last_event_sequence"] == 5
+                and task_row["last_event_sequence"] == CONVERGED_EVENT_COUNT
                 and attempt_row["status"] == ExecutionAttemptStatus.SUCCEEDED.value
-                and len(event_rows) == 5
+                and len(event_rows) == CONVERGED_EVENT_COUNT
             )
             if complete:
                 break
@@ -240,12 +257,17 @@ async def wait_for_convergence(database_url: str, original: TaskCommandRecord) -
     ):
         raise RuntimeError("T3-11 command acknowledgement state is invalid")
     if (
-        task_row["revision"] != 6
+        task_row["revision"] != task_revision_baseline + CONVERGED_EVENT_COUNT
         or attempt_row["revision"] != 3
         or attempt_row["started_at"] is None
         or attempt_row["finished_at"] is None
     ):
-        raise RuntimeError("T3-11 Task or Attempt projection is invalid")
+        raise RuntimeError(
+            "T3-11 Task or Attempt projection is invalid: task "
+            f"revision={task_row['revision']}; attempt revision={attempt_row['revision']} "
+            f"started={attempt_row['started_at'] is not None} "
+            f"finished={attempt_row['finished_at'] is not None}"
+        )
     expected_types = [
         TaskEventType.TASK_STARTED.value,
         TaskEventType.STEP_STARTED.value,
@@ -256,11 +278,20 @@ async def wait_for_convergence(database_url: str, original: TaskCommandRecord) -
     if (
         [row["sequence"] for row in event_rows] != [1, 2, 3, 4, 5]
         or [row["event_type"] for row in event_rows] != expected_types
-        or [row["task_revision"] for row in event_rows] != [2, 3, 4, 5, 6]
+        or [row["task_revision"] for row in event_rows]
+        != [
+            task_revision_baseline + step
+            for step in range(1, CONVERGED_EVENT_COUNT + 1)
+        ]
         or any(len(row["source_fingerprint"]) != 32 for row in event_rows)
         or any(not row["source_idempotency_key"] for row in event_rows)
     ):
-        raise RuntimeError("T3-11 durable event timeline is invalid")
+        raise RuntimeError(
+            "T3-11 durable event timeline is invalid: "
+            f"sequences={[row['sequence'] for row in event_rows]} "
+            f"types={[row['event_type'] for row in event_rows]} "
+            f"task_revisions={[row['task_revision'] for row in event_rows]}"
+        )
 
 
 def main() -> None:

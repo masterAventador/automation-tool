@@ -20,6 +20,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
@@ -384,6 +385,7 @@ def main() -> None:
             ["pnpm", "test:h8-14-app"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, _task_id = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
@@ -399,13 +401,8 @@ def main() -> None:
         verify_app_private_data(private_app_data)
         asyncio.run(verify_final_state(database_url, installation_id))
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

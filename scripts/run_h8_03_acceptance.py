@@ -6,17 +6,19 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import signal
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
-from contextlib import closing, suppress
+from contextlib import closing
 from pathlib import Path
 
-from desktop_e2e_prerequisites import prepare_startup_gate
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    terminate_app_process_tree,
+)
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
     assert_no_executor_process,
@@ -108,24 +110,6 @@ def start_replacement_control_plane(
     )
     wait_for_control_plane(CONTROL_PLANE_PORT, server)
     return server
-
-
-def terminate_app_process_group(process_group_id: int | None) -> None:
-    if process_group_id is None:
-        return
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/PID", str(process_group_id), "/T", "/F"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return
-    with suppress(ProcessLookupError, PermissionError):
-        os.killpg(process_group_id, signal.SIGTERM)
-    time.sleep(0.2)
-    with suppress(ProcessLookupError, PermissionError):
-        os.killpg(process_group_id, signal.SIGKILL)
 
 
 def wait_for_signal(
@@ -355,7 +339,6 @@ def main() -> None:
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
     app_process: subprocess.Popen[bytes] | None = None
-    app_process_group_id: int | None = None
     package_entrypoint: Path | None = None
 
     with tempfile.TemporaryDirectory(prefix=f"{project_name}-") as temporary:
@@ -404,12 +387,11 @@ def main() -> None:
                 ["pnpm", "test:task-run-tauri"],
                 cwd=FRONTEND_ROOT,
                 env=environment,
-                start_new_session=sys.platform != "win32",
+                    start_new_session=sys.platform != "win32",
                 creationflags=(
                     subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
                 ),
             )
-            app_process_group_id = app_process.pid
 
             installation_id, _controlled_task, emergency_task, credential = asyncio.run(
                 wait_for_app_tasks(database_url, private_app_data, app_process)
@@ -509,10 +491,8 @@ def main() -> None:
             verify_local_state(private_app_data, offer, credential)
             print("[H8-03] Hidden-App offline emergency-stop recovery passed")
         finally:
-            terminate_app_process_group(app_process_group_id)
-            if app_process is not None and app_process.poll() is None:
-                with suppress(subprocess.TimeoutExpired):
-                    app_process.wait(timeout=5)
+            if app_process is not None:
+                terminate_app_process_tree(app_process)
             if package_entrypoint is not None:
                 terminate_executor_processes(package_entrypoint)
             if server is not None and server.poll() is None:

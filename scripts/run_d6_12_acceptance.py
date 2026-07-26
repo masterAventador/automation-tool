@@ -21,6 +21,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_d6_10_acceptance import executor_session, seed_healthy_platform, start_executor
 from run_i2_13_acceptance import require_port_closed
@@ -193,11 +194,17 @@ async def verify_database_state(
                 .mappings()
                 .one()
             )
+            # Confirming targets releases the finished discovery attempt, so the
+            # Task no longer names it: `current_attempt_id` is cleared on
+            # `task.targets_confirmed` precisely so the action-execution attempt
+            # can be admitted afterwards. The attempt is therefore located by the
+            # Task it belongs to, and the released slot is asserted below.
             attempt_row = (
                 (
                     await session.execute(
                         select(execution_attempts).where(
-                            execution_attempts.c.id == task_row["current_attempt_id"]
+                            execution_attempts.c.task_id == task_id.uuid,
+                            execution_attempts.c.installation_id == installation_id.uuid,
                         )
                     )
                 )
@@ -249,6 +256,7 @@ async def verify_database_state(
             or task_row["status"] != "queued"
             or task_row["revision"] != 6
             or task_row["last_event_sequence"] != 5
+            or task_row["current_attempt_id"] is not None
             or attempt_row["status"] != "succeeded"
         ):
             raise RuntimeError("D6-12 Task/Attempt did not converge after UI confirmation")
@@ -346,6 +354,7 @@ def main() -> None:
             ["pnpm", "test:task-target-preview-ui-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, task_id, credential = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
@@ -377,13 +386,8 @@ def main() -> None:
                 cleanup_error = RuntimeError("D6-12 formal Executor did not stop")
             elif executor_failures:
                 cleanup_error = RuntimeError("D6-12 formal Executor failed")
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

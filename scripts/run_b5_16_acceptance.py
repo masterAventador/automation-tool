@@ -26,6 +26,7 @@ from desktop_e2e_prerequisites import (
     OPERATIONS_PROFILE_ROOT,
     prepare_startup_gate,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_b5_13_acceptance import (
     require_no_residual_project_processes,
@@ -435,6 +436,7 @@ def main() -> None:
                 ],
                 cwd=FRONTEND_ROOT,
                 env=environment,
+                start_new_session=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -463,7 +465,7 @@ def main() -> None:
             if app_process is not None:
                 if not release_path.exists():
                     release_path.write_text("release", encoding="ascii")
-                terminate_process(app_process)
+                terminate_app_process_tree(app_process)
             if package_entrypoint is not None:
                 terminate_project_processes(private_app_data, package_entrypoint)
             if server is not None:

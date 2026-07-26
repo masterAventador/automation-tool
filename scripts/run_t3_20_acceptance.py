@@ -25,6 +25,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
@@ -37,7 +38,11 @@ from run_t3_06_acceptance import (
     verify_app_private_data,
     wait_for_control_plane,
 )
-from run_t3_14_acceptance import seed_attempt_and_offer
+from run_t3_14_acceptance import (
+    CONFIRMED_TASK_REVISION,
+    seed_attempt_and_offer,
+    seed_task_confirmation,
+)
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -362,7 +367,10 @@ async def read_restart_checkpoint(
             raise RuntimeError("T3-20 pre-restart Event checkpoint is invalid")
         if (
             task["status"] != TaskStatus.CANCELLING.value
-            or task["revision"] != 4
+            # The cancel projects the Task to CANCELLING when the command is
+            # enqueued, one revision beyond the confirmed baseline and the two
+            # committed events.
+            or task["revision"] != CONFIRMED_TASK_REVISION + 1 + len(event_rows)
             or task["last_event_sequence"] != 2
         ):
             raise RuntimeError("T3-20 pre-restart Task checkpoint is invalid")
@@ -462,7 +470,7 @@ async def verify_database_state(
         if (
             task["created_at"] != checkpoint.task_created_at
             or task["status"] != TaskStatus.CANCELLED.value
-            or task["revision"] != 5
+            or task["revision"] != CONFIRMED_TASK_REVISION + 1 + len(event_rows)
             or task["last_event_sequence"] != 3
             or attempt["status"] != ExecutionAttemptStatus.CANCELLED.value
             or attempt["finished_at"] is None
@@ -521,10 +529,19 @@ def main() -> None:
             ["pnpm", "test:task-restart-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
 
         installation_id, task_id, credential = asyncio.run(
             wait_for_task(database_url, private_app_data, app_process)
+        )
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                task_id,
+                include_target_results=False,
+            )
         )
         offer = asyncio.run(
             seed_attempt_and_offer(
@@ -532,6 +549,7 @@ def main() -> None:
                 installation_id,
                 task_id,
                 label="task-restart",
+                confirmed_target_revision=True,
             )
         )
         executor = fake_executor_client(credential, installation_id)
@@ -587,13 +605,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, checkpoint))
         print("[T3-20] Hidden-App Control Plane restart recovery passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             stop_control_plane(server)
         if recovery_thread is not None and recovery_thread.is_alive():

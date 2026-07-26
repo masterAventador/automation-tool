@@ -54,10 +54,16 @@ describe("Task discovery production-path acceptance", () => {
     await browser.$(`button=${preparation.competingTaskId}`).click();
     await expect(await browser.$("h3=任务运行详情")).toExist();
     await browser.$("button=开始目标发现").click();
-    await browser.waitUntil(
-      async () => (await body.getText()).includes("当前设备已有任务正在运行"),
-      { timeout: 10_000, timeoutMsg: "Competing Task did not show Installation busy" },
-    );
+    try {
+      await browser.waitUntil(
+        async () => (await body.getText()).includes("当前设备已有任务正在运行"),
+        { timeout: 10_000 },
+      );
+    } catch {
+      throw new Error(
+        `Competing Task did not show Installation busy: ${await body.getText()}`,
+      );
+    }
     await browser.tauri.execute(({ core }) =>
       core.invoke("signal_task_discovery_busy_for_acceptance"),
     );

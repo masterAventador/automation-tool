@@ -23,6 +23,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
@@ -66,6 +67,7 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     SqlAlchemyTaskCommandRepository,
+    douyin_search_exposure_definitions,
     execution_attempts,
     task_commands,
     task_events,
@@ -89,6 +91,13 @@ from automation_tool.protocol import (
     DouyinCandidateSummary,
     DouyinSearchExposureAction,
 )
+
+# The Task revision a seeded target confirmation establishes. Creating a Task
+# leaves it at revision 1 and confirming its targets advances it once, and the
+# production offer guard only accepts a confirmation whose
+# `confirmed_task_revision` equals the Task's current revision — so both halves
+# of this fixture, and every assertion downstream of it, read the same number.
+CONFIRMED_TASK_REVISION = 2
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-termination-e2e.conf.json"
 CONTROL_PLANE_PORT = reserve_control_plane_port()
@@ -244,7 +253,7 @@ async def seed_attempt_and_offer(
                 )
                 .values(
                     status=TaskStatus.QUEUED.value,
-                    revision=2 if confirmed_target_revision else 1,
+                    revision=CONFIRMED_TASK_REVISION if confirmed_target_revision else 1,
                     updated_at=now,
                 )
             )
@@ -274,7 +283,7 @@ async def seed_attempt_and_offer(
             execution_attempt_id=attempt_id,
             sequence=1,
             command_type=TaskCommandType.TASK_OFFER,
-            idempotency_key=f"task:t314:offer:{label}",
+            idempotency_key=f"task:acceptance:offer:{label}",
             deadline_at=now + timedelta(minutes=3),
         )
     finally:
@@ -288,7 +297,15 @@ async def seed_task_confirmation(
     *,
     include_target_results: bool,
 ) -> tuple[TargetId, ...]:
-    """Seed the current confirmation required by the production offer guard."""
+    """Seed the current confirmation required by the production offer guard.
+
+    The guard compares the confirmed action and copy against the Task's own
+    Douyin search-exposure definition, so both are read from that definition
+    rather than restated here. Drivers whose Task comes from the App's create
+    form get whatever the form submitted — the default action is `browse` with
+    no copy at all — and a fixture that assumed one hard-coded `comment`
+    template silently failed the guard for them.
+    """
     database = Database.from_url(database_url)
     now = datetime.now(UTC)
     candidate_facts = (
@@ -314,6 +331,23 @@ async def seed_task_confirmation(
         for platform_target_id, display_name, public_handle in candidate_facts
     )
     try:
+        async with database.session() as session:
+            definition = (
+                (
+                    await session.execute(
+                        select(
+                            douyin_search_exposure_definitions.c.action,
+                            douyin_search_exposure_definitions.c.message_template,
+                        ).where(
+                            douyin_search_exposure_definitions.c.task_id == task_id.uuid,
+                            douyin_search_exposure_definitions.c.installation_id
+                            == installation_id.uuid,
+                        )
+                    )
+                )
+                .mappings()
+                .one()
+            )
         targets = await SqlAlchemyTaskTargetRepository(database).evaluate_and_replace(
             task_id=task_id,
             installation_id=installation_id,
@@ -331,8 +365,8 @@ async def seed_task_confirmation(
             task_id=task_id,
             page_revision=1,
             confirmation_revision=1,
-            action=DouyinSearchExposureAction.COMMENT,
-            message_template="您好 {{target_display_name}} 期待您的分享",
+            action=DouyinSearchExposureAction(definition["action"]),
+            message_template=definition["message_template"],
             selected_target_ids=selected_target_ids,
         )
         async with database.session() as session:
@@ -352,7 +386,7 @@ async def seed_task_confirmation(
                     installation_id=installation_id.uuid,
                     page_revision=1,
                     selection_task_revision=1,
-                    confirmed_task_revision=2,
+                    confirmed_task_revision=CONFIRMED_TASK_REVISION,
                     selected_target_count=intent.selected_target_count,
                     action=intent.action.value,
                     message_template=intent.message_template,
@@ -562,6 +596,7 @@ def main() -> None:
             ["pnpm", "test:task-termination-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, cancel_task_id, credential = asyncio.run(
             wait_for_app_task(
@@ -644,13 +679,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, cancel_offer, emergency_offer))
         print("[T3-14] Hidden-App cancel/emergency-stop acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

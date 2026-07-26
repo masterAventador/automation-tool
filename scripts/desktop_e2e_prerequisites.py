@@ -28,11 +28,14 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Final
 
@@ -401,6 +404,74 @@ def prepare_startup_gate(
         remove_staged_embedded_browser(resource_root=resource_root)
     if executor_package:
         install_signed_executor_package(private_app_data, build_id=build_id)
+
+
+def terminate_app_process_tree(app_process: subprocess.Popen[bytes]) -> None:
+    """Stop an acceptance App run and everything the run started.
+
+    `pnpm test:*-tauri` is a chain — pnpm launches WebdriverIO, WebdriverIO
+    launches `tauri-driver`, and `tauri-driver` launches the App — and signalling
+    only the pnpm process leaves the rest reparented to init. The orphaned App
+    then rewrites the isolated App data directory its driver just deleted, so the
+    next run of the same driver dies in under a second on "Refusing to reuse an
+    existing … App data directory" and reads like a product failure.
+
+    Drivers therefore start the chain in its own session and stop that session
+    here. Nothing outside the session this driver created is ever signalled.
+    """
+    if app_process.poll() is not None:
+        return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(app_process.pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        with suppress(subprocess.TimeoutExpired):
+            app_process.wait(timeout=10)
+        return
+    group = _process_group(app_process)
+    _stop(app_process, group, signal.SIGTERM)
+    try:
+        app_process.wait(timeout=10)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    _stop(app_process, group, signal.SIGKILL)
+    app_process.wait(timeout=5)
+
+
+def _process_group(app_process: subprocess.Popen[bytes]) -> int | None:
+    """The session the driver started, or `None` where the platform has none."""
+    if not hasattr(os, "getpgid") or not hasattr(os, "killpg"):
+        return None
+    try:
+        group = os.getpgid(app_process.pid)
+    except OSError:
+        return None
+    # A process that never got its own session shares the driver's group, and
+    # signalling that group would take the driver down with it.
+    return group if group != os.getpgid(0) else None
+
+
+def _stop(
+    app_process: subprocess.Popen[bytes],
+    group: int | None,
+    number: int,
+) -> None:
+    if group is not None:
+        try:
+            os.killpg(group, number)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    if number == signal.SIGKILL:
+        app_process.kill()
+    else:
+        app_process.terminate()
 
 
 def private_app_data_directory(identifier: str) -> Path:

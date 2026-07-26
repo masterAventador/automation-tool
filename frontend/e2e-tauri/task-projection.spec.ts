@@ -47,7 +47,10 @@ describe("Task projection production-path acceptance", () => {
     assert.match(summary.taskId, UUID_V4);
     assert.deepEqual(summary.eventSequences, [1, 2, 3, 4, 5]);
     assert.equal(summary.finalStatus, "succeeded");
-    assert.equal(summary.finalRevision, 6);
+    // Confirming the Task's targets establishes revision 2 before the five
+    // executor events; the production offer guard refuses to deliver the offer
+    // without that confirmation, so the terminal revision cannot be lower.
+    assert.equal(summary.finalRevision, 7);
     assert.equal(summary.finalLastEventSequence, 5);
     assert.equal(summary.phases[0], "live");
     assert.equal(summary.phases[summary.phases.length - 1], "terminal");

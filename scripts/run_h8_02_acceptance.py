@@ -14,7 +14,10 @@ import time
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from desktop_e2e_prerequisites import prepare_startup_gate
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    terminate_app_process_tree,
+)
 from run_h8_01_acceptance import (
     run_offer_fixture,
     seed_local_checkpoint,
@@ -263,6 +266,7 @@ def main() -> None:
             ["pnpm", "test:task-termination-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, cancel_task_id, credential = asyncio.run(
             wait_for_app_task(
@@ -398,13 +402,8 @@ def main() -> None:
         verify_app_private_data(private_app_data)
         print("[H8-02] Hidden-App cooperative cancellation acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if executor_process is not None and executor_process.poll() is None:
             executor_process.terminate()
             try:

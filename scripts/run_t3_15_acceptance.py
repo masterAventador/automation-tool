@@ -20,6 +20,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
@@ -32,29 +33,29 @@ from run_t3_06_acceptance import (
     verify_app_private_data,
     wait_for_control_plane,
 )
-from run_t3_11_acceptance import exercise_fake_executor, wait_for_convergence
-from sqlalchemy import insert, select, text, update
+from run_t3_11_acceptance import (
+    CONVERGED_EVENT_COUNT,
+    exercise_fake_executor,
+    wait_for_convergence,
+)
+from run_t3_14_acceptance import (
+    CONFIRMED_TASK_REVISION,
+    seed_attempt_and_offer,
+    seed_task_confirmation,
+)
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from automation_tool.control_plane.application.executor_connection_registry import (
-    ExecutorConnectionRegistry,
-)
 from automation_tool.control_plane.application.task_command_delivery import (
-    TaskCommandDeliveryService,
     TaskCommandRecord,
 )
 from automation_tool.control_plane.domain import (
-    ExecutionAttemptId,
-    ExecutionAttemptStatus,
     InstallationId,
-    TaskCommandType,
     TaskId,
     TaskStatus,
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
-    SqlAlchemyTaskCommandRepository,
-    execution_attempts,
     task_events,
     tasks,
 )
@@ -183,65 +184,6 @@ async def wait_for_app_task(
         await engine.dispose()
 
 
-async def seed_attempt_and_offer(
-    database_url: str,
-    installation_id: InstallationId,
-    task_id: TaskId,
-) -> TaskCommandRecord:
-    database = Database.from_url(database_url)
-    attempt_id = ExecutionAttemptId.new()
-    now = datetime.now(UTC)
-    try:
-        async with database.session() as session:
-            current = await session.scalar(
-                select(tasks.c.status).where(
-                    tasks.c.id == task_id.uuid,
-                    tasks.c.installation_id == installation_id.uuid,
-                )
-            )
-            if current != TaskStatus.DRAFT.value:
-                raise RuntimeError("T3-15 App Task fixture is not draft")
-            await session.execute(
-                update(tasks)
-                .where(
-                    tasks.c.id == task_id.uuid,
-                    tasks.c.installation_id == installation_id.uuid,
-                )
-                .values(status=TaskStatus.QUEUED.value, updated_at=now)
-            )
-            await session.execute(
-                insert(execution_attempts).values(
-                    id=attempt_id.uuid,
-                    task_id=task_id.uuid,
-                    installation_id=installation_id.uuid,
-                    attempt_number=1,
-                    status=ExecutionAttemptStatus.ACCEPTED.value,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            await session.execute(
-                update(tasks)
-                .where(tasks.c.id == task_id.uuid)
-                .values(current_attempt_id=attempt_id.uuid)
-            )
-        service = TaskCommandDeliveryService(
-            repository=SqlAlchemyTaskCommandRepository(database),
-            registry=ExecutorConnectionRegistry(),
-        )
-        return await service.enqueue(
-            installation_id=installation_id,
-            task_id=task_id,
-            execution_attempt_id=attempt_id,
-            sequence=1,
-            command_type=TaskCommandType.TASK_OFFER,
-            idempotency_key="task:t315:offer:1",
-            deadline_at=now + timedelta(minutes=3),
-        )
-    finally:
-        await database.close()
-
-
 async def verify_database_state(database_url: str, original: TaskCommandRecord) -> None:
     database = Database.from_url(database_url)
     try:
@@ -288,10 +230,13 @@ async def verify_database_state(database_url: str, original: TaskCommandRecord) 
             "app.control-plane",
             "executor.connect",
         ]:
-            raise RuntimeError("T3-15 did not use the expected App and Executor Sessions")
+            raise RuntimeError(
+                "T3-15 did not use the expected App and Executor Sessions: "
+                f"{sorted(session_capabilities)}"
+            )
         if dict(task_projection) != {
             "status": TaskStatus.SUCCEEDED.value,
-            "revision": 6,
+            "revision": CONFIRMED_TASK_REVISION + CONVERGED_EVENT_COUNT,
             "last_event_sequence": 5,
         }:
             raise RuntimeError("T3-15 authoritative Task projection is invalid")
@@ -358,13 +303,36 @@ def main() -> None:
             ["pnpm", "test:task-projection-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, task_id, credential = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
         )
-        original = asyncio.run(seed_attempt_and_offer(database_url, installation_id, task_id))
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                task_id,
+                include_target_results=False,
+            )
+        )
+        original = asyncio.run(
+            seed_attempt_and_offer(
+                database_url,
+                installation_id,
+                task_id,
+                label="task-projection",
+                confirmed_target_revision=True,
+            )
+        )
         exercise_fake_executor(CONTROL_PLANE_PORT, credential, installation_id)
-        asyncio.run(wait_for_convergence(database_url, original))
+        asyncio.run(
+            wait_for_convergence(
+                database_url,
+                original,
+                task_revision_baseline=CONFIRMED_TASK_REVISION,
+            )
+        )
         try:
             app_exit = app_process.wait(timeout=180)
         except subprocess.TimeoutExpired as error:
@@ -376,13 +344,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, original))
         print("[T3-15] Hidden-App Query, Tauri Channel, and reducer acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

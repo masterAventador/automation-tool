@@ -23,6 +23,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
@@ -35,7 +36,11 @@ from run_t3_06_acceptance import (
     verify_app_private_data,
     wait_for_control_plane,
 )
-from run_t3_14_acceptance import seed_attempt_and_offer
+from run_t3_14_acceptance import (
+    CONFIRMED_TASK_REVISION,
+    seed_attempt_and_offer,
+    seed_task_confirmation,
+)
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -289,7 +294,7 @@ async def verify_database_state(
             ],
             TaskStatus.CANCELLED,
             ExecutionAttemptStatus.CANCELLED,
-            7,
+            1,
         ),
         (
             succeeded_offer,
@@ -303,7 +308,7 @@ async def verify_database_state(
             ],
             TaskStatus.SUCCEEDED,
             ExecutionAttemptStatus.SUCCEEDED,
-            6,
+            0,
         ),
     )
     try:
@@ -314,7 +319,7 @@ async def verify_database_state(
                 event_types,
                 task_status,
                 attempt_status,
-                revision,
+                termination_projections,
             ) in expectations:
                 commands = (
                     (
@@ -374,7 +379,8 @@ async def verify_database_state(
                     raise RuntimeError("T3-19 persisted event timeline is invalid")
                 if (
                     task["status"] != task_status.value
-                    or task["revision"] != revision
+                    or task["revision"]
+                    != CONFIRMED_TASK_REVISION + termination_projections + len(event_types)
                     or task["last_event_sequence"] != len(event_types)
                     or attempt["status"] != attempt_status.value
                     or attempt["finished_at"] is None
@@ -464,11 +470,20 @@ def main() -> None:
             ["pnpm", "test:task-lifecycle-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
 
         installation_id, controlled_task_id, credential = asyncio.run(
             wait_for_task(
                 database_url, private_app_data, app_process, CONTROLLED_KEYWORD
+            )
+        )
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                controlled_task_id,
+                include_target_results=False,
             )
         )
         controlled_offer = asyncio.run(
@@ -477,6 +492,7 @@ def main() -> None:
                 installation_id,
                 controlled_task_id,
                 label="task-lifecycle-controlled",
+                confirmed_target_revision=True,
             )
         )
         controlled_thread, controlled_result = start_executor(
@@ -494,12 +510,21 @@ def main() -> None:
         )
         if second_installation_id != installation_id or second_credential != credential:
             raise RuntimeError("T3-19 App lifecycle escaped its Installation vault")
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                succeeded_task_id,
+                include_target_results=False,
+            )
+        )
         succeeded_offer = asyncio.run(
             seed_attempt_and_offer(
                 database_url,
                 installation_id,
                 succeeded_task_id,
                 label="task-lifecycle-succeeded",
+                confirmed_target_revision=True,
             )
         )
         succeeded_thread, succeeded_result = start_executor(
@@ -523,13 +548,8 @@ def main() -> None:
         )
         print("[T3-19] Hidden-App create/control/succeed/refresh acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

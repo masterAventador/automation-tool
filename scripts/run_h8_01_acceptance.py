@@ -17,7 +17,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from desktop_e2e_prerequisites import prepare_startup_gate
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    terminate_app_process_tree,
+)
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -459,6 +462,7 @@ def main() -> None:
             ["pnpm", "test:task-control-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, task_id, credential = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
@@ -542,13 +546,8 @@ def main() -> None:
         verify_app_private_data(private_app_data)
         print("[H8-01] Hidden-App safe pause/resume acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if executor_process is not None and executor_process.poll() is None:
             executor_process.terminate()
             try:

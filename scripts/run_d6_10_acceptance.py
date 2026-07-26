@@ -24,6 +24,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
@@ -46,6 +47,7 @@ from automation_tool.control_plane.domain import InstallationId, TaskId
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     execution_attempts,
+    platform_session_gates,
     platform_session_health,
     task_commands,
     task_events,
@@ -252,6 +254,74 @@ async def seed_healthy_platform(
             )
     finally:
         await database.close()
+
+
+async def report_platform_gate_state(
+    database_url: str,
+    installation_id: InstallationId,
+) -> None:
+    """Name the guard that ran before the Installation-busy check.
+
+    `SqlAlchemyTaskDiscoveryRepository.start` refuses on a platform session gate
+    or a non-healthy platform session *before* it looks for an active execution
+    attempt, and both refusals reach the App as the same opaque
+    `operation_unavailable`. Printing the two rows is what tells the two apart.
+    """
+    database = Database.from_url(database_url)
+    try:
+        async with database.session() as session:
+            health = (
+                (
+                    await session.execute(
+                        select(
+                            platform_session_health.c.platform,
+                            platform_session_health.c.state,
+                            platform_session_health.c.session_revision,
+                        ).where(
+                            platform_session_health.c.installation_id
+                            == installation_id.uuid
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            gates = (
+                (
+                    await session.execute(
+                        select(
+                            platform_session_gates.c.platform,
+                            platform_session_gates.c.session_revision,
+                        ).where(
+                            platform_session_gates.c.installation_id
+                            == installation_id.uuid
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            attempts = (
+                (
+                    await session.execute(
+                        select(
+                            execution_attempts.c.task_id,
+                            execution_attempts.c.status,
+                        ).where(
+                            execution_attempts.c.installation_id == installation_id.uuid
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    finally:
+        await database.close()
+    print(
+        "[D6-10] platform health="
+        f"{[dict(row) for row in health]} gates={[dict(row) for row in gates]} "
+        f"attempts={[dict(row) for row in attempts]}"
+    )
 
 
 def wait_for_busy_signal(
@@ -567,12 +637,17 @@ def main() -> None:
             ["pnpm", "test:task-discovery-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, task_id, credential = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
         )
         asyncio.run(seed_healthy_platform(database_url, installation_id))
-        wait_for_busy_signal(private_app_data / BUSY_SIGNAL_FILE, app_process)
+        try:
+            wait_for_busy_signal(private_app_data / BUSY_SIGNAL_FILE, app_process)
+        except RuntimeError:
+            asyncio.run(report_platform_gate_state(database_url, installation_id))
+            raise
         executor_stop, executor_thread, executor_failures = start_executor(
             private_app_data=private_app_data,
             installation_id=installation_id,
@@ -583,6 +658,7 @@ def main() -> None:
         except subprocess.TimeoutExpired as error:
             raise RuntimeError("D6-10 hidden App acceptance did not finish") from error
         if app_exit != 0:
+            asyncio.run(report_platform_gate_state(database_url, installation_id))
             asyncio.run(verify_database_state(database_url, installation_id, task_id))
             raise RuntimeError(
                 "D6-10 hidden App acceptance failed after the database converged"
@@ -600,13 +676,8 @@ def main() -> None:
                 cleanup_error = RuntimeError("D6-10 formal Executor did not stop")
             elif executor_failures:
                 cleanup_error = RuntimeError("D6-10 formal Executor failed")
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

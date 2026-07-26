@@ -27,6 +27,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -335,6 +336,7 @@ def main() -> None:
             ["pnpm", "test:installation-revocation-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id = asyncio.run(wait_for_registration(database_url, app_process))
         print("[I2-14] Revoking the Installation through the server-operator CLI")
@@ -345,13 +347,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, expected_public_key))
         print("[I2-14] Production-path acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

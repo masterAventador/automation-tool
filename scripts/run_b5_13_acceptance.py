@@ -23,6 +23,7 @@ from desktop_e2e_prerequisites import (
     OPERATIONS_PROFILE_ROOT,
     prepare_startup_gate,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_e4_07_acceptance import build_signed_executor
 from run_e4_14_acceptance import (
@@ -353,6 +354,7 @@ def main() -> None:
                 ["pnpm", "test:platform-session-tauri"],
                 cwd=FRONTEND_ROOT,
                 env=environment,
+                start_new_session=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -377,7 +379,7 @@ def main() -> None:
             )
         finally:
             if app_process is not None:
-                terminate_process(app_process)
+                terminate_app_process_tree(app_process)
             if package_entrypoint is not None:
                 terminate_project_processes(private_app_data, package_entrypoint)
             if server is not None:

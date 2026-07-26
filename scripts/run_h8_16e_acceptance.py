@@ -11,7 +11,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from desktop_e2e_prerequisites import prepare_startup_gate
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    terminate_app_process_tree,
+)
 from run_e4_07_acceptance import build_signed_executor, start_control_plane
 from run_e4_14_acceptance import (
     assert_no_executor_process,
@@ -107,6 +110,7 @@ def main() -> None:
                 [pnpm_executable(), "test:h8-16e-app"],
                 cwd=FRONTEND_ROOT,
                 env=environment,
+                start_new_session=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -124,13 +128,8 @@ def main() -> None:
             assert_no_executor_process(package_entrypoint)
             print("[H8-16E] Hidden-App startup environment acceptance passed")
         finally:
-            if app_process is not None and app_process.poll() is None:
-                app_process.terminate()
-                try:
-                    app_process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    app_process.kill()
-                    app_process.wait(timeout=5)
+            if app_process is not None:
+                terminate_app_process_tree(app_process)
             if package_entrypoint is not None:
                 terminate_executor_processes(package_entrypoint)
             control_plane.stop()

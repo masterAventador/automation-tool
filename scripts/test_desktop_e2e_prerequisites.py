@@ -41,6 +41,17 @@ from desktop_e2e_prerequisites import (  # noqa: E402
 
 SHARED_MODULE = "desktop_e2e_prerequisites"
 
+# The two halves of the one Task-offer fixture in this layer. `run_t3_14_acceptance`
+# owns both; `run_h8_01`–`run_h8_06` and `run_t3_18` already import them. Naming
+# them here is what keeps the next driver from growing a private copy of the offer
+# half and silently dropping the confirmation half.
+SHARED_OFFER_SEEDER = "seed_attempt_and_offer"
+SHARED_CONFIRMATION_SEEDER = "seed_task_confirmation"
+
+# The one way this layer stops an acceptance App run, defined in the shared
+# prerequisites module so the next migration reaches every driver at once.
+SHARED_PROCESS_TREE_TERMINATOR = "terminate_app_process_tree"
+
 
 def check_the_startup_gate_environment_supplies_every_compile_time_input() -> None:
     """All four `option_env!` inputs the gate reads must be set together.
@@ -271,6 +282,58 @@ def check_no_driver_pins_its_own_copy_of_the_executor_ledger_schema_version() ->
     )
 
 
+def check_every_app_created_task_offer_seeds_the_production_confirmation() -> None:
+    """A seeded `task.offer` must satisfy the production unconfirmed-delivery guard.
+
+    `SqlAlchemyTaskCommandRepository.enqueue` refuses a `task.offer` for a Task
+    that carries a Douyin search-exposure definition unless a matching
+    `task_target_confirmations` row exists — the guard that keeps a side effect
+    from reaching a platform before the operator confirmed its targets. Every
+    Task an acceptance App creates through the production `create_task` path
+    carries that definition, so a driver that inserts an attempt and enqueues the
+    offer itself has to seed the confirmation as well.
+
+    Six drivers were migrated when the guard landed and six were not, and the six
+    fail inside their own fixture with `TaskCommandDeliveryRejected` after the App
+    phases already passed, which reads exactly like a product regression.
+    """
+    stale = sorted(
+        path.name
+        for path in control_plane_e2e_drivers()
+        if (
+            SHARED_OFFER_SEEDER in (source := path.read_text(encoding="utf-8"))
+            or "command_type=TaskCommandType.TASK_OFFER" in source
+        )
+        and SHARED_CONFIRMATION_SEEDER not in source
+    )
+    assert not stale, (
+        "these drivers enqueue a task.offer for an App-created Task without seeding "
+        f"the confirmation the production guard requires: {', '.join(stale)}"
+    )
+
+
+def check_every_driver_stops_the_whole_app_process_tree() -> None:
+    """An acceptance App run must be stopped as a tree, not as one process.
+
+    `pnpm test:*-tauri` starts a chain — pnpm, WebdriverIO, `tauri-driver`, the
+    App — and `Popen.terminate()` signals only the first link. The rest is
+    reparented to init, the orphaned App rewrites the isolated App data directory
+    its driver just removed, and the same driver's next run dies in under a
+    second on "Refusing to reuse an existing … App data directory".
+    """
+    stale = sorted(
+        path.name
+        for path in control_plane_e2e_drivers()
+        if "app_process = subprocess.Popen(" in (source := path.read_text(encoding="utf-8"))
+        and (SHARED_PROCESS_TREE_TERMINATOR not in source or "start_new_session" not in source)
+    )
+    assert not stale, (
+        "these drivers spawn an acceptance App without starting it in its own session "
+        f"and stopping the whole tree through {SHARED_PROCESS_TREE_TERMINATOR}: "
+        f"{', '.join(stale)}"
+    )
+
+
 CHECKS = (
     check_the_startup_gate_environment_supplies_every_compile_time_input,
     check_the_startup_gate_environment_does_not_mutate_the_caller,
@@ -284,6 +347,8 @@ CHECKS = (
     check_the_derived_driver_set_matches_the_packaged_builds,
     check_every_driver_names_the_operations_profile_root_the_app_writes,
     check_no_driver_pins_its_own_copy_of_the_executor_ledger_schema_version,
+    check_every_app_created_task_offer_seeds_the_production_confirmation,
+    check_every_driver_stops_the_whole_app_process_tree,
 )
 
 

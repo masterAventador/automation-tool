@@ -21,6 +21,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import post_json, require_port_closed
 from run_t3_06_acceptance import (
@@ -33,21 +34,21 @@ from run_t3_06_acceptance import (
     verify_app_private_data,
     wait_for_control_plane,
 )
-from sqlalchemy import insert, select, text, update
+from run_t3_14_acceptance import (
+    CONFIRMED_TASK_REVISION,
+    seed_attempt_and_offer,
+    seed_task_confirmation,
+)
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from automation_tool.control_plane.application.device_sessions import (
     DeviceSessionCapability,
 )
-from automation_tool.control_plane.application.executor_connection_registry import (
-    ExecutorConnectionRegistry,
-)
 from automation_tool.control_plane.application.task_command_delivery import (
-    TaskCommandDeliveryService,
     TaskCommandRecord,
 )
 from automation_tool.control_plane.domain import (
-    ExecutionAttemptId,
     ExecutionAttemptStatus,
     InstallationId,
     TaskCommandStatus,
@@ -58,7 +59,6 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
-    SqlAlchemyTaskCommandRepository,
     execution_attempts,
     task_commands,
     task_events,
@@ -195,65 +195,6 @@ async def wait_for_app_task(
         await engine.dispose()
 
 
-async def seed_attempt_and_offer(
-    database_url: str,
-    installation_id: InstallationId,
-    task_id: TaskId,
-) -> TaskCommandRecord:
-    database = Database.from_url(database_url)
-    attempt_id = ExecutionAttemptId.new()
-    now = datetime.now(UTC)
-    try:
-        async with database.session() as session:
-            current = await session.scalar(
-                select(tasks.c.status).where(
-                    tasks.c.id == task_id.uuid,
-                    tasks.c.installation_id == installation_id.uuid,
-                )
-            )
-            if current != TaskStatus.DRAFT.value:
-                raise RuntimeError("T3-13 App Task fixture is not draft")
-            await session.execute(
-                update(tasks)
-                .where(
-                    tasks.c.id == task_id.uuid,
-                    tasks.c.installation_id == installation_id.uuid,
-                )
-                .values(status=TaskStatus.QUEUED.value, updated_at=now)
-            )
-            await session.execute(
-                insert(execution_attempts).values(
-                    id=attempt_id.uuid,
-                    task_id=task_id.uuid,
-                    installation_id=installation_id.uuid,
-                    attempt_number=1,
-                    status=ExecutionAttemptStatus.ACCEPTED.value,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            await session.execute(
-                update(tasks)
-                .where(tasks.c.id == task_id.uuid)
-                .values(current_attempt_id=attempt_id.uuid)
-            )
-        service = TaskCommandDeliveryService(
-            repository=SqlAlchemyTaskCommandRepository(database),
-            registry=ExecutorConnectionRegistry(),
-        )
-        return await service.enqueue(
-            installation_id=installation_id,
-            task_id=task_id,
-            execution_attempt_id=attempt_id,
-            sequence=1,
-            command_type=TaskCommandType.TASK_OFFER,
-            idempotency_key="task:t313:offer:1",
-            deadline_at=now + timedelta(minutes=3),
-        )
-    finally:
-        await database.close()
-
-
 def exercise_fake_executor(
     credential: str,
     installation_id: InstallationId,
@@ -347,12 +288,17 @@ async def verify_database_state(database_url: str, original: TaskCommandRecord) 
             raise RuntimeError("T3-13 event timeline is invalid")
         if (
             task_row["status"] != TaskStatus.RUNNING.value
-            or task_row["revision"] != 5
+            or task_row["revision"] != CONFIRMED_TASK_REVISION + len(event_rows)
             or task_row["last_event_sequence"] != 4
             or attempt_row["status"] != ExecutionAttemptStatus.RUNNING.value
             or attempt_row["revision"] != 4
         ):
-            raise RuntimeError("T3-13 final Task or Attempt projection is invalid")
+            raise RuntimeError(
+                "T3-13 final Task or Attempt projection is invalid: task "
+                f"status={task_row['status']} revision={task_row['revision']} "
+                f"last_event_sequence={task_row['last_event_sequence']}; attempt "
+                f"status={attempt_row['status']} revision={attempt_row['revision']}"
+            )
         if capabilities.count(DeviceSessionCapability.EXECUTOR_CONNECT.value) != 1 or any(
             capability
             not in {
@@ -425,11 +371,28 @@ def main() -> None:
             ["pnpm", "test:task-control-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, task_id, credential = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
         )
-        original = asyncio.run(seed_attempt_and_offer(database_url, installation_id, task_id))
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                task_id,
+                include_target_results=False,
+            )
+        )
+        original = asyncio.run(
+            seed_attempt_and_offer(
+                database_url,
+                installation_id,
+                task_id,
+                label="task-control",
+                confirmed_target_revision=True,
+            )
+        )
         exercise_fake_executor(credential, installation_id)
         try:
             app_exit = app_process.wait(timeout=180)
@@ -442,13 +405,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, original))
         print("[T3-13] Hidden-App pause/resume acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

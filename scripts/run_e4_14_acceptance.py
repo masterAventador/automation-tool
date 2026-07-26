@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
     prepare_startup_gate,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_e4_07_acceptance import build_signed_executor
 from run_i2_13_acceptance import (
@@ -451,6 +452,7 @@ def main() -> None:
                 [pnpm_executable(), "test:executor-lifecycle-tauri"],
                 cwd=FRONTEND_ROOT,
                 env=environment,
+                start_new_session=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -478,13 +480,8 @@ def main() -> None:
             asyncio.run(verify_database_state(database_url, installation_id))
             print("[E4-14] Hidden-App signed Executor lifecycle acceptance passed")
         finally:
-            if app_process is not None and app_process.poll() is None:
-                app_process.terminate()
-                try:
-                    app_process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    app_process.kill()
-                    app_process.wait(timeout=5)
+            if app_process is not None:
+                terminate_app_process_tree(app_process)
             if package_entrypoint is not None:
                 terminate_executor_processes(package_entrypoint)
             if server is not None and server.poll() is None:

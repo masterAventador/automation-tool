@@ -22,6 +22,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
@@ -34,7 +35,12 @@ from run_t3_06_acceptance import (
     verify_app_private_data,
     wait_for_control_plane,
 )
-from run_t3_14_acceptance import fake_executor_client, seed_attempt_and_offer
+from run_t3_14_acceptance import (
+    CONFIRMED_TASK_REVISION,
+    fake_executor_client,
+    seed_attempt_and_offer,
+    seed_task_confirmation,
+)
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -239,16 +245,26 @@ async def verify_database_state(database_url: str, offer: TaskCommandRecord) -> 
             raise RuntimeError("T3-16 event timeline is invalid")
         if (
             task["status"] != TaskStatus.OUTCOME_UNCERTAIN.value
-            or task["revision"] != 5
+            # The emergency stop projects the Task to CANCELLING the moment the
+            # command is enqueued, and that projection advances the revision
+            # without committing an event of its own.
+            or task["revision"] != CONFIRMED_TASK_REVISION + 1 + len(events)
             or task["last_event_sequence"] != 3
             or attempt["finished_at"] is None
         ):
-            raise RuntimeError("T3-16 final Task projection is invalid")
+            raise RuntimeError(
+                "T3-16 final Task projection is invalid: task "
+                f"status={task['status']} revision={task['revision']} "
+                f"last_event_sequence={task['last_event_sequence']}; attempt "
+                f"status={attempt['status']} finished={attempt['finished_at'] is not None}"
+            )
         if capabilities.count("executor.connect") != 1 or any(
             capability not in {"app.control-plane", "executor.connect"}
             for capability in capabilities
         ):
-            raise RuntimeError("T3-16 used an unexpected Session capability")
+            raise RuntimeError(
+                f"T3-16 used an unexpected Session capability: {sorted(capabilities)}"
+            )
     finally:
         await database.close()
 
@@ -314,9 +330,18 @@ def main() -> None:
             ["pnpm", "test:workbench-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, task_id, credential = asyncio.run(
             wait_for_app_task(database_url, private_app_data, app_process)
+        )
+        asyncio.run(
+            seed_task_confirmation(
+                database_url,
+                installation_id,
+                task_id,
+                include_target_results=False,
+            )
         )
         offer = asyncio.run(
             seed_attempt_and_offer(
@@ -324,6 +349,7 @@ def main() -> None:
                 installation_id,
                 task_id,
                 label="workbench",
+                confirmed_target_revision=True,
             )
         )
         client = fake_executor_client(credential, installation_id)
@@ -355,13 +381,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, offer))
         print("[T3-16] Hidden-App workbench UI and emergency-stop acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

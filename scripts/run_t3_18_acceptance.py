@@ -22,6 +22,7 @@ from desktop_e2e_prerequisites import (
     require_reserved_port_still_free,
     reserve_control_plane_port,
     startup_gate_environment,
+    terminate_app_process_tree,
 )
 from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
@@ -46,6 +47,7 @@ from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandRecord,
 )
 from automation_tool.control_plane.domain import (
+    TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     ActionId,
     ExecutionAttemptStatus,
     InstallationId,
@@ -331,6 +333,41 @@ async def verify_database_state(
         await database.close()
 
 
+async def wait_for_idle_installation(
+    database_url: str,
+    installation_id: InstallationId,
+) -> None:
+    """Block until the Installation holds no active execution attempt.
+
+    `uq_execution_attempts_one_active_installation` allows exactly one, so the
+    second Task of this acceptance can only be offered after the UI has driven
+    the first one to a terminal state.
+    """
+    database = Database.from_url(database_url)
+    deadline = time.monotonic() + 240
+    terminal = tuple(status.value for status in TERMINAL_EXECUTION_ATTEMPT_STATUSES)
+    try:
+        while True:
+            async with database.session() as session:
+                active = await session.scalar(
+                    select(execution_attempts.c.id)
+                    .where(
+                        execution_attempts.c.installation_id == installation_id.uuid,
+                        execution_attempts.c.status.not_in(terminal),
+                    )
+                    .limit(1)
+                )
+            if active is None:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "T3-18 Installation still holds an active execution attempt"
+                )
+            await asyncio.sleep(0.05)
+    finally:
+        await database.close()
+
+
 async def seed_target_results(
     database_url: str,
     installation_id: InstallationId,
@@ -418,6 +455,8 @@ def main() -> None:
     app_process: subprocess.Popen[bytes] | None = None
     executor_thread: threading.Thread | None = None
     executor_result: queue.Queue[object] = queue.Queue()
+    emergency_thread: threading.Thread | None = None
+    emergency_result: queue.Queue[object] = queue.Queue()
 
     try:
         print("[T3-18] Starting isolated PostgreSQL")
@@ -463,6 +502,7 @@ def main() -> None:
             ["pnpm", "test:task-run-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
+            start_new_session=True,
         )
         installation_id, controlled_task_id, emergency_task_id, credential = asyncio.run(
             wait_for_app_tasks(database_url, private_app_data, app_process)
@@ -500,14 +540,10 @@ def main() -> None:
                 controlled_target_ids,
             )
         )
-        emergency_offer = asyncio.run(
-            seed_attempt_and_offer(
-                database_url,
-                installation_id,
-                emergency_task_id,
-                label="task-run-emergency",
-                confirmed_target_revision=True,
-            )
+        print(
+            "[T3-18] Seeded controlled offer "
+            f"task={controlled_offer.task_id} command={controlled_offer.command_type} "
+            f"status={controlled_offer.status}"
         )
         client = fake_executor_client(credential, installation_id)
 
@@ -517,8 +553,33 @@ def main() -> None:
             except Exception as error:
                 executor_result.put(error)
 
+        # An Installation may hold only one active execution attempt, so the
+        # second Task's offer can only be seeded once the UI has driven the first
+        # one to a terminal state. Seeding both up front used to work and now
+        # violates `uq_execution_attempts_one_active_installation`.
+        def seed_emergency_offer_once_the_installation_is_idle() -> None:
+            try:
+                asyncio.run(wait_for_idle_installation(database_url, installation_id))
+                emergency_result.put(
+                    asyncio.run(
+                        seed_attempt_and_offer(
+                            database_url,
+                            installation_id,
+                            emergency_task_id,
+                            label="task-run-emergency",
+                            confirmed_target_revision=True,
+                        )
+                    )
+                )
+            except Exception as error:
+                emergency_result.put(error)
+
         executor_thread = threading.Thread(target=run_executor, daemon=True)
         executor_thread.start()
+        emergency_thread = threading.Thread(
+            target=seed_emergency_offer_once_the_installation_is_idle, daemon=True
+        )
+        emergency_thread.start()
         try:
             app_exit = app_process.wait(timeout=300)
         except subprocess.TimeoutExpired as error:
@@ -526,6 +587,12 @@ def main() -> None:
         if app_exit != 0:
             raise RuntimeError("T3-18 hidden App acceptance failed")
         app_process = None
+        emergency_thread.join(timeout=10)
+        if emergency_thread.is_alive():
+            raise RuntimeError("T3-18 emergency offer fixture did not finish")
+        emergency_offer = emergency_result.get_nowait()
+        if isinstance(emergency_offer, Exception):
+            raise emergency_offer
         executor_thread.join(timeout=10)
         if executor_thread.is_alive():
             raise RuntimeError("T3-18 FakeExecutor did not finish")
@@ -538,13 +605,8 @@ def main() -> None:
         asyncio.run(verify_database_state(database_url, controlled_offer, emergency_offer))
         print("[T3-18] Hidden-App Task run details and all controls acceptance passed")
     finally:
-        if app_process is not None and app_process.poll() is None:
-            app_process.terminate()
-            try:
-                app_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                app_process.kill()
-                app_process.wait(timeout=5)
+        if app_process is not None:
+            terminate_app_process_tree(app_process)
         if server is not None and server.poll() is None:
             server.terminate()
             try:

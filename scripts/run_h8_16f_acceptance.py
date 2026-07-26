@@ -20,7 +20,10 @@ from pathlib import Path
 
 from automation_tool.executor.ledger import EXECUTOR_LEDGER_SCHEMA_VERSION
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from desktop_e2e_prerequisites import prepare_startup_gate
+from desktop_e2e_prerequisites import (
+    prepare_startup_gate,
+    terminate_app_process_tree,
+)
 from run_b5_13_acceptance import (
     require_no_residual_project_processes,
     terminate_process,
@@ -502,7 +505,7 @@ def main() -> None:
                 [pnpm_executable(), "test:h8-16f-app"],
                 cwd=FRONTEND_ROOT,
                 env=environment,
-                stdout=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 start_new_session=sys.platform != "win32",
             )
@@ -544,7 +547,7 @@ def main() -> None:
             print("[H8-16F] Complete hidden-App MVP user journey passed")
         finally:
             if app_process is not None:
-                terminate_process(app_process)
+                terminate_app_process_tree(app_process)
             if package_entrypoint is not None:
                 terminate_project_processes(private_app_data, package_entrypoint)
                 terminate_executor_processes(package_entrypoint)
