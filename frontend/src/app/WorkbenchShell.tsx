@@ -48,6 +48,7 @@ import {
   useMotionRun,
   type MotionRunAttention,
 } from "../features/video-studio/motion-run-store";
+import { useMotionRunWatch } from "../features/video-studio/motion-run-watch";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import { PublishWorkspace, type SelectedVideo } from "../features/publishing/PublishWorkspace";
 import {
@@ -72,11 +73,19 @@ const navigationItems = [
   { key: "diagnostics", label: "设置与诊断" },
 ];
 
-/** What the mark on the 视频制作 entry says when you hover it. */
-const VIDEO_STUDIO_RUNNING_TITLE = "视频制作正在进行中";
-const VIDEO_STUDIO_FAILED_TITLE = "视频制作失败了，去看看";
-/** The one word a failed run puts on screen from every other page. */
-const VIDEO_STUDIO_FAILED_MARK = "失败";
+/**
+ * What the mark on the 视频制作 entry looks like, and what it says when hovered.
+ *
+ * A run in flight is a bare dot, so the entry's accessible name stays 视频制作
+ * and nothing that navigates by name has to change. The two states that need
+ * the operator to do something carry their own word instead, because a mark
+ * whose meaning is only in a `title` is a mark nobody reads.
+ */
+const VIDEO_STUDIO_MARKS = {
+  running: { title: "视频制作正在进行中", badge: { dot: true } },
+  failed: { title: "视频制作失败了，去看看", badge: { count: "失败" } },
+  unknown: { title: "读不到视频制作进度，去看看", badge: { count: "未知" } },
+} as const;
 
 /**
  * Put a mark on 视频制作 while a film is being made, and until its result has
@@ -105,22 +114,23 @@ const VIDEO_STUDIO_FAILED_MARK = "失败";
  * only reachable from the failed branch. Anything selecting this entry has to
  * match the name as a substring, which is what both Playwright's `getByRole`
  * and the desktop suite's `normalize-space()` XPath already do.
+ *
+ * 未知 is the third thing this entry can say, and it exists because watching a
+ * render from outside the page (`motion-run-watch.ts`) added something that can
+ * itself fail. When the App cannot read a run it is still waiting on, it says
+ * so. Falling back to the dot there would put the original lie straight back —
+ * a film reported as in progress by an App that has no idea.
  */
 function navigationItemsWith(attention: MotionRunAttention) {
   if (attention === "none") return navigationItems;
-  const failed = attention === "failed";
+  const mark = VIDEO_STUDIO_MARKS[attention];
   return navigationItems.map((item) =>
     item.key === "video-studio"
       ? {
           ...item,
           label: (
-            <Badge
-              {...(failed ? { count: VIDEO_STUDIO_FAILED_MARK } : { dot: true })}
-              offset={[6, 2]}
-            >
-              <span title={failed ? VIDEO_STUDIO_FAILED_TITLE : VIDEO_STUDIO_RUNNING_TITLE}>
-                {item.label}
-              </span>
+            <Badge {...mark.badge} offset={[6, 2]}>
+              <span title={mark.title}>{item.label}</span>
             </Badge>
           ),
         }
@@ -459,6 +469,14 @@ export function WorkbenchShell({
   // Read from the store rather than from `VideoStudio`, which is unmounted
   // exactly when this mark matters most.
   const videoStudioAttention = motionRunAttention(useMotionRun());
+  /*
+   * And keep the store true while that component is gone. The mark above can
+   * only be as honest as the last thing that went and looked, and until this
+   * existed the only thing that ever looked was the studio page itself. Costs
+   * and cleanup are argued in `motion-run-watch.ts`; the short version is that
+   * it runs only while a film this session started is still owed an outcome.
+   */
+  useMotionRunWatch(materialVideoStudioGateway);
   const showingVideoEditing = activePage === "video-editing";
   const showingPublishing = activePage === "publishing";
   const showingLegal = activePage === LEGAL_PAGE;

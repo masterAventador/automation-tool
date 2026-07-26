@@ -37,6 +37,8 @@ export type VideoCreationMethodId = "material_montage_v1" | "motion_composition_
 export interface OwnMotionJob {
   readonly startedAt: number;
   readonly filmSeconds: number;
+  /** Whether this job has been seen in a terminal state. */
+  readonly ended: boolean;
 }
 
 /** A submission that has been sent and has not come back yet. */
@@ -52,6 +54,9 @@ export interface MotionRunMessage {
   readonly text: string;
 }
 
+/** Whether the runs this session is still waiting on can currently be read. */
+export type MotionRunTracking = "ok" | "lost";
+
 export interface MotionRunState {
   readonly pending: MotionRunPending | null;
   readonly message: MotionRunMessage | null;
@@ -59,6 +64,7 @@ export interface MotionRunState {
   readonly brief: string;
   readonly selectedMethod: VideoCreationMethodId | null;
   readonly activeTab: string;
+  readonly tracking: MotionRunTracking;
 }
 
 const EMPTY: MotionRunState = {
@@ -68,6 +74,7 @@ const EMPTY: MotionRunState = {
   brief: "",
   selectedMethod: null,
   activeTab: "new",
+  tracking: "ok",
 };
 
 let state: MotionRunState = EMPTY;
@@ -120,8 +127,45 @@ export function settleMotionRun(
     ownJobs: new Map(state.ownJobs).set(renderJobId, {
       startedAt: Date.now(),
       filmSeconds,
+      ended: false,
     }),
   });
+}
+
+/**
+ * This job has been seen in a terminal state, so there is nothing left to learn
+ * by looking at it again.
+ *
+ * Distinct from `forgetMotionJob`, which drops the job entirely. A film that
+ * finished is still owed an announcement and a 去看成片 button the next time the
+ * operator opens the page, so it has to stay — it just stops being watched.
+ */
+export function markMotionJobEnded(renderJobId: string): void {
+  const own = state.ownJobs.get(renderJobId);
+  if (own === undefined || own.ended) return;
+  commit({ ownJobs: new Map(state.ownJobs).set(renderJobId, { ...own, ended: true }) });
+}
+
+/** Whether the runs still being waited on can be read right now. */
+export function reportMotionRunTracking(tracking: MotionRunTracking): void {
+  if (state.tracking === tracking) return;
+  commit({ tracking });
+}
+
+/**
+ * Whether anything this session started is still waiting on an outcome.
+ *
+ * This is what decides whether the App runs a timer at all. Making it a fact
+ * derived from the store, rather than something a component remembers, is what
+ * keeps the watcher off entirely on a machine that has not submitted anything —
+ * and what makes it stop by itself instead of running until the operator
+ * happens to open the studio page again.
+ */
+export function motionRunNeedsWatch(current: MotionRunState): boolean {
+  for (const own of current.ownJobs.values()) {
+    if (!own.ended) return true;
+  }
+  return false;
 }
 
 /** The submission came back a failure — possibly long after the page went away. */
@@ -152,7 +196,7 @@ export function setMotionActiveTab(tab: string): void {
 }
 
 /** What the sidebar has to say about this page from anywhere in the App. */
-export type MotionRunAttention = "none" | "running" | "failed";
+export type MotionRunAttention = "none" | "running" | "failed" | "unknown";
 
 /**
  * Whether the sidebar should mark this page, and as what.
@@ -167,9 +211,19 @@ export type MotionRunAttention = "none" | "running" | "failed";
  * page, and twelve minutes later the only thing on screen about it was a dot
  * whose hover text read 视频制作正在进行中. A failure reported as progress is
  * worse than no report — the operator waits on something that is already over.
+ *
+ * "unknown" is the same argument applied one step further. Watching the render
+ * from outside the page introduced something that can itself fail: the bridge
+ * goes away, the command throws, and the App stops learning anything about a
+ * film it is still waiting on. Reporting that as "running" would rebuild the
+ * exact lie this state machine exists to prevent, and reporting it as "failed"
+ * would assert something nothing here knows. Not being able to look is its own
+ * answer. It ranks below a real failure — a known outcome always beats an
+ * unknown one — and it only means anything while something is outstanding.
  */
 export function motionRunAttention(current: MotionRunState): MotionRunAttention {
   if (current.message?.tone === "error") return "failed";
+  if (current.tracking === "lost" && motionRunNeedsWatch(current)) return "unknown";
   if (current.pending !== null || current.message !== null) return "running";
   return "none";
 }
