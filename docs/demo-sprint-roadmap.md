@@ -17,15 +17,15 @@
 | ✅ 生产装配与出厂门禁 | 31 |
 | ✅ 云端与交付 | 10 |
 | ✅ 视频与内容 | 31 |
-| ✅ 验收基础设施与门禁 | 36 |
+| ✅ 验收基础设施与门禁 | 38 |
 | ❌ 查证不成立（观察真、结论错，无需修） | 7 |
-| **小计：已收口** | **115** |
+| **小计：已收口** | **117** |
 | 一、Demo 前必须收口 | 4 |
-| T73～T100（T10 那轮挖出的新任务） | 3 |
-| 冻结区·今晚撞见的技术债 | 5 |
+| T73～T100（T10 那轮挖出的新任务） | 2 |
+| 冻结区·今晚撞见的技术债 | 4 |
 | 冻结区·原有待办 | 3 |
 | 冻结区·T101/T90b 自报的新窗口 | 0 |
-| **小计：未收口** | **15** |
+| **小计：未收口** | **13** |
 | **去重后总计** | **130** |
 
 **Demo 前要收口的是 3 项**：**T7 要你动手**（Windows GUI，前置 T53 已就绪），**我这边是 T10 与新挖出的 T109**（抖音重新检查按钮，已派线）。
@@ -88,7 +88,6 @@
 | ID | 任务 | 状态 | 归属 | 依据 |
 |---|---|---|---|---|
 | T78 | 视频线 8 驱动 / 9 spec 全卡启动门禁 | 🔍 待验收 | codex | 共享 `video_studio_startup_harness` 已负责隔离环境、内置浏览器、签名 Executor、唯一 Compose project 的隔离 PostgreSQL、正式 Alembic 链与真实 Control Plane。**7 条真实本机桌面驱动全绿**（VF-06 / BM-06 / BM-08 / BM-15 / CQ-01 / IM-05 / VE-03，真实隐藏 Tauri + 真实 IPC + 真实 PG）。**VE-04 缺阿里云凭据，8/8 未闭环**，因此保持 🔍 不标完成。合并后回归 `036c267` 已修（`0e41d59` 删掉被两个模块 import 的共享常量）。见 `docs/development/T78.md` |
-| T79 | 124 个验收驱动无聚合执行器，48 个只被读源码不被执行 | ⬜ | codex | **07-27 实测复核仍成立**：`ls scripts/run_*_acceptance.py \| wc -l` → 124；`run_vf_01_acceptance.py` 在 `scripts/`、`package.json`、`.github/`、`contracts/` 全部零命中；`run_script_tests.py` 与 `commit_gate.py` 都不 glob `run_*_acceptance.py`。第二批的 749 行改动属于 T78（只覆盖 8 个视频构建驱动），**不能替代 124 个驱动的聚合执行者**。`docs/development/T79.md` 自报 `⬜ 未完成`，并写明「不能把 `rg` 零命中包装成已经完成 TDD」 |
 | T90b | **把失败原因区分带到 Rust** | 🔍 待验收 | `model-error-codes` | **已合并**（`8de19ba`）。分类表落在 `contracts/video/motion-authoring-refusal.v1.json`，**Python 与 Rust 都从它读、不留第二份**：`entry.py:53` 与 `motion_video_studio.rs:36` 的 `include_str!` 指向同一份。错误码按传输层/超时/拒绝分开，不再把「连不上」说成「你的描述做不出来」。**缺正式签名包目视**，故 🔍。三处自报缺口已入账为 T106、T107（另一处见 T105），见 `docs/development/T90b.md` 第八节 |
 
 ### 「能在 App 里生成出一个视频」这条链路的收口状态
@@ -128,7 +127,6 @@
 | T113 | **演示前检查清单按今晚七条改动重核** | 🚧 | ✅ 可 | 清单是**用户演示当天照着做的那份**。T70 上一次逐条重核时，23 条里 **11 条已不成立**；那之后又合入 7 条改变行为的改动（T108 窗口可点且外观重做、T109 两个按钮的失败原因不再被吞、T110 新增「正在取消」中间态、T105 侧边栏判据变了、T106/T107 文案变了、T92 编排中位 87→37 秒、T111 出包变慢）。另有两条现场事实必须写进去：**出包必须在屏幕解锁状态下做**（锁屏时公证失败且报「凭据不存在」，方向完全错），以及**构建期从 GitHub 下载字体会瞬时失败需重试**（T112）。已派线 `preflight-reverify` |
 | T115 | **扫码阶段强退 App，代价是重新扫码** | 👤 决策 | T114 查实并明确没擅自改。弃置租约时 **flock 其实早被内核释放**，磁盘上那个 `active` 只是陈旧旗子；但产品要求显式恢复，而唯一的恢复出口「安全注销」会**删掉整个档案**，于是代价是丢掉登录态、重新扫码。**这是有意的 fail-closed 设计**（`killed_lock_holder_preserves_marker_and_requires_explicit_recovery` 钉死了它），不是 bug，所以子代理没动它是对的。**但演示现场撞得到**：产品在「等扫码」时主动把用户支开，正是此刻 App 持着租约；此时强退就要重扫。可选：提供一种不删档案的确认式恢复（判据是它不能把「另一个进程真在用」也一并放行）。**做不做、什么形态，等你定** |
 | T112 | **出包在构建期依赖 GitHub raw，国内网络下会打断构建** | 🤖 | **07-27 03:15 真实撞上**：预建视频运行时时 `subtitle_font_assets.py:407` 取 `https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE` 报 `SSL: UNEXPECTED_EOF_WHILE_READING`，整条 `prepare_video_runtime.py` 退出 1。**判为瞬时而非阻断**：紧接着沙盒内外各 curl 一次，**两次都 HTTP 200、1.3 秒**，重试即通过。来源是 T28 的设计（把 148 MB 专有字体换成 Noto CJK，按摘要构建期下载、不进 Git），本身是对的；问题是**这条网络依赖落在出包的关键路径上，而演示当天在国内网络**。风险面：临场需要重新出包时，这一步可能直接把构建打断，且错误发生在很靠后的位置（三个产物已建了两个）。可选做法：把字体与许可证纳入按摘要校验的本机缓存（同 `.local/offline-motion-deps` 那种形态）、或加有限次重试与镜像源。**没有当场改**：演示前不动出包路径是本轮的既定原则，且已知重试可用 |
-| T58c | 拒绝原因要不要转发给用户 | 🤖 codex | 静态核查已确定**能拿到且不需要读 stderr**：`entry.py` 13 处 `_reject` 与 `agent.py` 全部拒绝消息都是固定字面量，唯二插值是结构标签和门禁码闭集。**07-27 复核**：`motion_video_studio.rs:1010` 已有 `rejection_reason_is_closed()`，但 `:1054` 只用它做校验，字面量仍不进 wire。T90b 已把**类别**带到 Rust，**原因文本**转不转发仍是未决策项，与 T90b 是同一处改动 |
 | T57b | 按 T57 调研结论执行 e2e 入口的并/修/废 | ❌ 卡 `scripts/` 写面 | **⚠️ 部分完成，不是没动。已做**：视频族共用 Tauri build 从 `video-studio-e2e` 切到 `control-plane-e2e`；退役无 Python owner 的 `workbench.spec.ts` / `wdio.conf.ts` 与零点击的 H8-19 `update-policy.spec.ts`；新增动态所有权门禁 `frontend/tests/tauri-e2e-entry-ownership.test.mjs`（解析 npm `wdio run` 与 Python `subprocess.run`，只认真实执行者）。**未做**：B5-04 与两条 update spec 被 Python runner 硬编码，交接单禁止改 `scripts/`，直接删前端会造成确定性悬空。**卡点是 `scripts/` 写面，不是与 T10 冲突**——原理由已过期。见 `docs/development/T57b.md` |
 
 ### 原有待办
@@ -257,6 +255,8 @@
 |---|---|
 | T119 | **Windows 上出不了包：没有可用的 C 编译器** —— 已由 T123 恢复。**入账时我写成「要不要装工具链、等你定」，那个判断是错的**：线索在 T116 记录里就有（`.local\vf04-msys2` 目录、安装器、07-24 的 `ffmpeg.exe` 都还在），**它本来就是这么装的，是环境退化不是从没有过**，不需要用户拍板。证据与恢复步骤见下一行 T123 |
 | T123 | **Windows 的 media toolchain 构建能力已恢复**（`5d5b5b0`）。**真跑了一次：`rc=0`、3 分 14 秒、从空缓存起、产物 48.8 MB**（`ffmpeg.exe` 19,269,632 字节、`ffprobe.exe` 19,109,888 字节）。三条独立佐证：产物在**没有 MSYS2 的普通 PowerShell** 里 `-version` rc=0（证明 `-static` 生效）、`check_video_media_toolchain.py --target windows-x86_64` rc=0（完整能力矩阵 + 两条真实 H.264 编码）、二次运行 0 秒命中缓存。**结论比「装回来了」更有价值：机器上什么都没坏、什么都不缺。** MSYS2 完整在位（1171 MB、114 个包），`gcc 16.1.0 Rev5` 与 07-24 旧产物 `BUILD-INFO.txt` 里的编译器逐字相同，pacman 日志把当初装法完整还原。**本次没装任何新东西、一个字节都没下载**——退化的只是「怎么调用它」从没被任何地方记下来：它装在 `.local\` 下，不写注册表、不进系统 PATH，除非有人显式指向，任何进程都看不见。**主线那条线索指对方向但落点偏了**：Git for Windows 的 bash **也**把 `MSYSTEM` 设成 `MINGW64`，能走过 `build_video_media_toolchain.sh:28` 的守卫再倒在 `No working C compiler found.`——**守卫检查的是「我在哪种 shell 里」，而它真正要保证的是「我有没有 C 编译器」**；改它会让每台机器（含 macOS）缓存全失效重编 ffmpeg，故**只记录不修**，与 T111 的教训一致。**红线守住**：新产物与旧产物大小逐字节相同而 SHA-256 不同（builder 的 `mktemp` 路径被编进 `configuration:` 串），这正是「真的新编了一次」的证据；旧产物只被读过 hash，没有以任何方式进入缓存。**踩到并记录了三个坑**，其中一个是静默成功同族：MSYS2 的 `usr\bin\cmd`（无扩展名 bash shim）会顶掉 PowerShell 的 `cmd.exe`，程序压根不启动而 `$LASTEXITCODE` **保持旧值**——拿到「rc=0 但一秒没跑」，是看 0.13 秒的时间戳才发现的。**T121 的修复立刻回本**：那次真构建死在 `curl: (35) TLS`，能看见这个原因正是因为诊断修复已在检出上 |
+| T79 | **验收驱动归属门禁已建立**（`f12bceb`，07-27 01:48，codex）。1294 行：`acceptance_driver_ownership.v1.json` 归属声明 + 555 行检查器 + 360 行测试。**主线复核**：门禁自跑 rc=0，且 `test_acceptance_driver_ownership.py` 已在 `run_script_tests.py` 里跑着（11 项检查），而脚本聚合是全量回归第七层——**所以它真的进了执行链**，不是又一个没人跑的门禁（那正是 T72 修过的形状）。**台账此前一直挂 ⬜「没做」，是错的**：主线整晚用 `git rev-list main..origin/main` 判断「codex 合了没有」，而那个数字回答的是「远端有没有我还没拉的东西」；主线一直在 codex 的工作之上往前推，所以它**永远是 0，与 codex 做没做完全无关**。正确的查法是「main 上有没有匹配任务号的提交，而台账还挂着未收口」 |
+| T58c | **拒绝原因不原样转发，决策已定**（`475bee5`，07-27 01:49，codex）。**结论：原样转发 0 条。** 依据：那些是机器 token，而把「这句话太抽象」转给用户等于**产品替模型编造理由，而不是转发**。若以后产品确实需要这种反馈，必须另立封闭协议（Rust 只转发已知码，未知/冲突/超长/额外字段统一落到固定失败文案）。**它诚实交代了没有 RED**：为了形式制造一个失败测试，会要求先实现一条本任务明确否决的自由文本通道——决策类任务这样处理是对的 |
 | T124 | **两个夹具改为按平台派生产物名**（`679b59a`）。**单一来源本来就有**：`release-package-resources.v1.json` → `release_assembly._VideoResource.required_for(platform)`，**生产侧三个消费者一直在读它，唯二没读的就是这两个夹具**——它们把 `platform` 写成了常量。所以没有新建来源；新建正好制造出这个仓库反复在修的「同一个事实两份」。**断言一条没放宽**，守的性质原样保留，只是「哪一种拼写」改为派生。**Windows 是真验了、不是待复验**：winbox 同机同检出，先跑 HEAD 再跑本任务版本——`test_prepare_video_runtime` 从 rc=1（**9 项中 3 项失败**）到 rc=0（10 项全过），`test_video_studio_runtime_staging` 从 rc=1 到 rc=0；失败原文逐字是 `runtime/node.exe is missing or empty`，与 T123 的判断（**含 3/9 这个数字**）吻合。覆盖双向：新用例在 macOS 上跑 `windows` 分支、在 Windows 上跑 `macos` 分支。**今晚 T117 加的那道自守检查在这里立刻回本**——同族地加进本文件后，第一时间抓到子代理自己新写的检查没登记；没有它，那一跑会打印「9 checks passed」然后干净退出。**只登记不改**（都属 codex C10）：两处手抄的 `node.exe if os.name == "nt"` 映射，其中一处还有独立理由——它在 `MOTION_WORKER_INPUTS` 缓存键里，动它会让**每台机器**重编一次 Worker。另记一条 Windows 坑：**PowerShell 的 `>` 重定向写的是 UTF-16LE**，读回来必须先 `iconv`，否则看到逐字符加空格的乱码 |
 | T122 | **冻结产物的最小环境，两条前提被实测推翻**（`a2df24c`）。**推翻一：PATH 取值根本不是那个红的原因**——在 winbox 上跑真实 PyInstaller onedir 产物的完整矩阵：换成正确的 `System32` 取值但**不给 `SystemRoot`，一样红**（`WinError 10106` = `WSAEPROVIDERFAILEDINIT`）；给了 `SystemRoot`，连 `.;C:\bin` 都绿。**真正致命的是 `env={"PATH": ...}` 这个写法本身**：交给子进程的环境里只有 PATH，而 Winsock 通过 `%SystemRoot%` 解析服务提供程序目录。**所以该共享的是「环境」而不是「PATH 串」**。**推翻二**：POSIX 上 `os.defpath` 实测是 `/bin:/usr/bin`，**没有前导空项**，POSIX 侧本来就没缺陷——主线复核确认，是主线说错了。**也推翻了派单的第三个猜测**「构建里跑的是 PyInstaller」：PyInstaller 那次 `run` 根本没传 `environment`，`probe_environment()` 只跑已冻结的候选，三处四个调用点跑的都是冻结产物，是同一个事实，因此可以共享——而 `LANG`/`NO_PROXY` 是素材 Worker 自己的关切，留在原处叠加、没塞进共享值。Windows 取值**没有另起答案**，采用 `run_p9_07_acceptance.py:526` 已经在同一台机器上跑着的那一份；两个根都缺时 **raise 而不是猜** `C:\Windows`。守卫按 AST 推导而非手抄三处清单，禁止 `scripts/` 与 `backend/tests/` 再读 `os.defpath`。**主线复核**：11 项自跑通过；变异往 `run_p9_01` 塞一处 `os.defpath`，守卫精确点名；合并后脚本层 61 个测试 / 765 项检查全绿。**待 Windows 复验**：取值本身已在 winbox 实测，但 `test_pyinstaller_bundle.py` 本身没在 Windows 跑过（需要那边能出 Executor 包），素材 Worker 那处仍撞不到，卡在 T119 缺 C 编译器 |
 | T121 | **构建失败的诊断被进度条挤掉真实原因**（`1ab2892`，已修）。Windows 验收机上 media toolchain 构建失败，操作者拿到的是**八行 curl 进度条**，而真实原因 `No working C compiler found.` 就在同一个流里稍靠上，只能靠手工重跑 builder 找回来。**机理不是「尾部太短」**：`str.splitlines()` 把回车也当换行，所以一行原地重绘的进度条会变成一行一次重绘——**实测 20 次重绘裂成 22 行**，无论尾部取 8 行还是 80 行，装的都只有进度条。新增 `process_diagnostics.builder_diagnostic`：只按 `\n` 切、每行只保留最后一个回车段（终端上真正显示的那一段）、两个流都渲染。**没有复用 `run_e4_07_acceptance.py` 里那个近似函数**，因为它正是 codex 第四批 C7 在改的文件，动它会重演上一批「删掉符号害得两个导入方崩掉」；两者收敛作为明账写进了提交信息 |
