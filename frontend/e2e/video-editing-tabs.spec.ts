@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { PRODUCTION_WINDOW } from "./production-window";
 
 /**
  * 视频剪辑 的「时间轴编辑」与「预览」两个页签。
@@ -110,6 +111,19 @@ function expectTabFillsItsColumn(tab: string, geometry: TabGeometry): void {
   }
 }
 
+/** How far the scrolling content area overflows its own box, in CSS pixels. */
+function contentOverflow(page: Page): Promise<number> {
+  return page
+    .locator(".desktop-content")
+    .evaluate((element) => element.scrollHeight - element.clientHeight);
+}
+
+/** Opens 视频剪辑 from the sidebar, the way an operator reaches it. */
+async function openVideoEditing(page: Page): Promise<void> {
+  await page.goto(HARNESS);
+  await page.getByRole("menuitem", { name: "视频剪辑" }).click();
+}
+
 /**
  * Walks the real user path: sidebar → create a project → open its timeline.
  *
@@ -117,8 +131,7 @@ function expectTabFillsItsColumn(tab: string, geometry: TabGeometry): void {
  * thing under test is whether an operator can get here at all.
  */
 async function openTimelineTab(page: Page): Promise<void> {
-  await page.goto(HARNESS);
-  await page.getByRole("menuitem", { name: "视频剪辑" }).click();
+  await openVideoEditing(page);
   await page.getByLabel("剪辑项目标题").fill(PROJECT_TITLE);
   await page.getByLabel("输入素材引用").fill(SOURCE_ARTIFACTS.join("\n"));
   await page.getByRole("button", { name: "创建剪辑项目" }).click();
@@ -150,6 +163,55 @@ test.describe("the two tabs behind a project can be reached at all", () => {
     const text = await activePanelText(page);
 
     expect(text, "「预览」页签没有显示时间轴结构预览").toContain("总时长");
+  });
+});
+
+/**
+ * 剪辑项目 is the tab 视频剪辑 opens on, so its two states are the whole of what
+ * the operator sees on the first click, and both have to fit the window the
+ * product opens at.
+ *
+ * Only this tab. 时间轴编辑 grows one row per clip and one block per track, so
+ * it is a page that is *supposed* to scroll once the work gets real, and
+ * pinning it to one screen would be pinning the wrong thing. The other two are
+ * short by construction.
+ *
+ * The number this guards is small and was earned back exactly once: measured
+ * at the production 1280x800, the empty state needed 687px of the 680px
+ * `main` gets, so seven pixels put a scrollbar on a page that is otherwise one
+ * screen. Seven is not a rounding error to leave alone — it is the difference
+ * between "this page fits" and "this page scrolls", and the operator only ever
+ * sees the second.
+ */
+test.describe("视频剪辑 的首屏在生产窗口里放得下", () => {
+  test(`剪辑项目 空状态 fits ${PRODUCTION_WINDOW.width}x${PRODUCTION_WINDOW.height}`, async ({
+    page,
+  }) => {
+    await openVideoEditing(page);
+
+    const overflow = await contentOverflow(page);
+
+    expect(
+      overflow,
+      `视频剪辑 首屏（还没有项目）比生产窗口高 ${overflow}px，整页出现滚动条`,
+    ).toBeLessThanOrEqual(0);
+  });
+
+  test(`剪辑项目 有项目时 fits ${PRODUCTION_WINDOW.width}x${PRODUCTION_WINDOW.height}`, async ({
+    page,
+  }) => {
+    await openVideoEditing(page);
+    await page.getByLabel("剪辑项目标题").fill(PROJECT_TITLE);
+    await page.getByLabel("输入素材引用").fill(SOURCE_ARTIFACTS.join("\n"));
+    await page.getByRole("button", { name: "创建剪辑项目" }).click();
+    await expect(page.getByText(`已创建剪辑项目：${PROJECT_TITLE}`)).toBeVisible();
+
+    const overflow = await contentOverflow(page);
+
+    expect(
+      overflow,
+      `视频剪辑 建好一个项目后比生产窗口高 ${overflow}px，整页出现滚动条`,
+    ).toBeLessThanOrEqual(0);
   });
 });
 
