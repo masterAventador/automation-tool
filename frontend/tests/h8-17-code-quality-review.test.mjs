@@ -16,7 +16,8 @@ test("H8-17 keeps the desktop startup gate fail closed at the App boundary", asy
   assert.doesNotMatch(app, /startupCheck\?:\s*StartupCheck/u);
   assert.doesNotMatch(app, /startupCheck\s*=\s*desktopShellStartupCheck/u);
   assert.doesNotMatch(app, /import\s*\{[^}]*desktopShellStartupCheck/u);
-  assert.match(testEntry, /startupCheck=\{desktopShellStartupCheck\}/u);
+  assert.match(testEntry, /void\s+import\("\.\/main"\)/u);
+  assert.doesNotMatch(testEntry, /desktopShellStartupCheck/u);
 });
 
 test("H8-17 never converts a failed WDIO App journey into a passing acceptance", async () => {

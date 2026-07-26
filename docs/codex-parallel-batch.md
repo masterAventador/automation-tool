@@ -378,7 +378,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **F** T24 执行器包根按 `debug_assertions` 分叉 | ✅ | 本提交 | 单路径守卫准确失败：`lib.rs::run selects the Local Executor package root by build mode`；验收装配守卫继而失败：`must stage the signed Executor in the debug App resource root` | 所有构建统一从 Tauri `resource_dir()/local-executor/package` 查找；共享与自定义桌面验收均把测试包挂载到同一资源布局，AppData 只留状态 |
 | **F** T45 Control Plane 镜像进 playwright | ✅ | 本提交（锁文件下一提交） | Python 契约准确失败：`KeyError: 'executor'`；Node 镜像契约准确失败：缺少 `--no-group executor` | Playwright 移入默认启用的 `executor` 依赖组，执行器/本地开发保持可用；Control Plane 镜像显式排除该组，离线 dry-run 确认会卸载 Playwright |
 | **F** T38 演示后回收清单 | ⬜ | | | 纯文档 |
-| **G** T76 `desktop-e2e` 入口让断言恒真 | ⬜ | | | 改完可能变红，那是真相浮出来 |
+| **G** T76 `desktop-e2e` 入口让断言恒真 | ✅ | 本提交 | Node 入口契约准确失败：`the desktop test entry must execute the production composition root`；Rust 单路径守卫发现桩白名单漂移 | WDIO 适配器后直接加载生产 `main.tsx` 及完整 gateway；真实 Tauri 现在如实停在“桌面运行环境需要处理”，不再由恒真桩伪造工作台成功 |
 | **G** T77 B5-13 前端投影与权威态不一致 | ⬜ | | | 先复核再动手 |
 | **G** T78 视频线 7 驱动缺 `prepare_startup_gate` | ⬜ | | | 依赖 T74 |
 

@@ -649,10 +649,11 @@ fn the_account_commands_behind_the_login_screen_are_all_or_nothing() {
 // (`vite.config.ts` rewrites `/src/main.tsx`), so a build can bypass the whole
 // gate without a single `#[cfg]` — invisible to every guard in this file.
 //
-// That is not hypothetical. `app/startup.ts` still exports a check whose entire
-// body is `return { status: "ready" }`, and the `desktop-e2e` entry mounts it.
-// It is the same defect as the Rust stub this file was written to kill, in the
-// same place in the same flow, one language over.
+// That is not hypothetical. `app/startup.ts` still exports an isolated shell
+// check whose entire body is `return { status: "ready" }`; the `desktop-e2e`
+// entry once mounted it and thereby made its workbench assertion green by
+// construction. The entry now delegates to `main.tsx`, while this scanner keeps
+// that regression from returning in any Vite mode.
 
 /// The module every release loads. Stubbing it can never be reviewed away: it
 /// *is* the production startup gate.
@@ -687,24 +688,17 @@ fn reports_ready_without_probing(check_body: &str) -> bool {
 /// still tolerated and who owes its removal.
 ///
 /// Asserted by set equality, so adding one *and* removing one both fail. The
-/// point is not that these two are acceptable — they are not — but that no
-/// third one can appear without somebody writing down why.
+/// remaining exception is not acceptable, but no second one can appear without
+/// somebody writing down why.
 const REVIEWED_STUBBED_FRONTEND_ENTRYPOINTS: &[(&str, &str)] = &[
-    // Mounts `app/startup.ts::desktopShellStartupCheck`. Used by every plain
-    // `desktop-e2e` build: `pnpm test:tauri` plus the update-policy,
-    // update-download, update-installation and diagnostic-export acceptance
-    // entries. Those runs are green today *because* this stub answers ready —
-    // they never reach the real gate, so they cannot prove a packaged
-    // dependency exists. Retirement is tracked in
-    // `docs/development/FIX-frontend-startup-gate-stub.md`; it is deliberately
-    // not done here, because switching them to the real gate makes all five
-    // require a reachable Control Plane and a staged embedded browser.
-    ("test-tauri-main.tsx", "plain desktop-e2e UI harness"),
     // Declares its own inline `readyStartup`. Serves B5-04 browser-settings,
     // whose user path (choosing a trusted system browser) was deleted by EB-10
     // per the product rule that forbids system-browser selection. The entry
     // dies with that acceptance rather than being repaired.
-    ("test-browser-settings-main.tsx", "B5-04, pending retirement"),
+    (
+        "test-browser-settings-main.tsx",
+        "B5-04, pending retirement",
+    ),
 ];
 
 fn frontend_directory() -> PathBuf {
