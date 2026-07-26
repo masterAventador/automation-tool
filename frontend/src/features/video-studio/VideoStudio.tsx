@@ -340,48 +340,68 @@ function NewVideoPage({
   const selectedName = VIDEO_CREATION_METHODS.find(
     (method) => method.id === selectedMethod,
   )?.name;
+  /**
+   * Put the one-sentence card on screen the moment it appears.
+   *
+   * The method cards are the last thing on this page, so the operator has
+   * scrolled to the bottom to reach them. Choosing 品牌动效成片 inserts this
+   * card *above* that position; the browser's scroll anchoring then holds the
+   * old view still and the card arrives off screen — measured at y = -412 with
+   * nothing on screen changing except a tag. Pressing the button that starts
+   * the demo looked like it did nothing.
+   *
+   * A callback ref rather than an effect because the one moment that matters is
+   * the node arriving. The optional call is for the unit-test DOM, which has no
+   * layout and therefore does not implement `scrollIntoView`; `toBeInViewport`
+   * in `e2e/video-studio-one-sentence.spec.ts` is what holds the real behaviour.
+   */
+  const revealOneSentenceCard = useCallback((node: HTMLDivElement | null) => {
+    node?.scrollIntoView?.({ block: "start" });
+  }, []);
 
   return (
-    <Card className="video-studio-panel" title="从一句话开始">
+    /*
+     * The card used to be called 从一句话开始 and led with a 1102×115px textarea
+     * that was disabled, unexplained, labelled 视频需求 and bound to the film
+     * *title*. Three separate lies in the first thing a new user sees: the
+     * biggest control on the page did nothing and never said why, its
+     * accessible name described a field it was not, and the real one-sentence
+     * entry was a sub-card further down. Deleting it removes all three at once
+     * and costs nothing — the title it wrote into is still edited by the
+     * 视频标题 field inside 固定模板手工制作, and the one-sentence path never
+     * read that value at all.
+     */
+    <Card className="video-studio-panel" title="新建视频">
       <Space orientation="vertical" size="middle" className="video-studio-new-form">
         <Typography.Text type="secondary">
-          后续可以在这里描述主题、受众和想表达的重点，再选择合适的制作方式。
+          先选择下面的制作方式，再填写这次视频的内容。
         </Typography.Text>
-        <Input.TextArea
-          aria-label="视频需求"
-          disabled={selectedMethod !== "motion_composition_v1"}
-          rows={5}
-          maxLength={80}
-          value={selectedMethod === "motion_composition_v1" ? motionSubject : ""}
-          onChange={(event) => onMotionSubjectChange(event.target.value)}
-          placeholder="例如：用品牌动效介绍新品的三个亮点"
-        />
         {selectedMethod === "motion_composition_v1" ? (
-          <Card size="small" title="一句话自动制作">
-            <Space orientation="vertical" size="small">
-              <Input.TextArea
-                aria-label="一句话视频需求"
-                rows={3}
-                maxLength={MOTION_BRIEF_LIMITS.maxBriefCharacters}
-                value={brief}
-                onChange={(event) => onBriefChange(event.target.value)}
-                placeholder="例如：用蓝色商务风做一段本周销售增长说明"
-              />
-              <Typography.Text type="secondary">
-                描述一句就够了。会生成一段 {MOTION_BRIEF_FILM_SECONDS} 秒的视频，
-                文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。
-                这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。
-              </Typography.Text>
-              <Button
-                type="primary"
-                loading={briefBusy}
-                disabled={briefBusy}
-                onClick={onSubmitBrief}
-              >
-                开始自动制作
-              </Button>
-            </Space>
-          </Card>
+          <div ref={revealOneSentenceCard}>
+            <Card size="small" title="一句话自动制作">
+              <Space orientation="vertical" size="small">
+                <Input.TextArea
+                  aria-label="一句话视频需求"
+                  rows={3}
+                  maxLength={MOTION_BRIEF_LIMITS.maxBriefCharacters}
+                  value={brief}
+                  onChange={(event) => onBriefChange(event.target.value)}
+                  placeholder="例如：用蓝色商务风做一段本周销售增长说明"
+                />
+                <Typography.Text type="secondary">
+                  {`描述一句就够了。会生成一段 ${MOTION_BRIEF_FILM_SECONDS} 秒的视频，文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。`}
+                </Typography.Text>
+                <Button
+                  type="primary"
+                  loading={briefBusy}
+                  disabled={briefBusy}
+                  onClick={onSubmitBrief}
+                >
+                  开始自动制作
+                </Button>
+              </Space>
+            </Card>
+          </div>
         ) : null}
         {selectedMethod === "motion_composition_v1" ? (
           <Card size="small" title="固定模板手工制作">

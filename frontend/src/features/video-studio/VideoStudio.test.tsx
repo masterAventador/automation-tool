@@ -751,4 +751,70 @@ describe("video studio shell", () => {
       expect(button).toBeDisabled();
     }
   });
+
+  /**
+   * 打开 App 后看到的第一个界面里，最大的那个控件是点不动的。
+   *
+   * 实测（2026-07-26，1440×900）：「新建视频」首屏是一张 1102×115px 的输入框，
+   * 灰的、点不动，`title` 和 `aria-describedby` 都是 null——没有任何地方说
+   * 为什么点不动、要做什么才能用。客户第一眼看到的就是它。
+   *
+   * 这条用例不规定怎么修：框可以是能用的，也可以带上说明，也可以根本不摆在这里。
+   * 它只拒绝「又不能用又不解释」这一种。
+   */
+  it("never shows a dead input box with no explanation of why", () => {
+    render(<VideoStudio gateway={gateway()} />);
+
+    for (const box of screen.queryAllByRole("textbox")) {
+      const explained =
+        box.getAttribute("title") !== null ||
+        box.getAttribute("aria-describedby") !== null;
+      const dead = (box as HTMLInputElement | HTMLTextAreaElement).disabled;
+      expect(
+        { name: box.getAttribute("aria-label"), dead, explained },
+        "首屏出现了既不能用又没有说明的输入框",
+      ).not.toMatchObject({ dead: true, explained: false });
+    }
+  });
+
+  /**
+   * 「视频需求」和「视频标题」是同一个字段的两个名字，还同屏显示。
+   *
+   * 实测：两个框都绑 `motionDraft.subject`，改任一个另一个跟着变，而更大更靠上
+   * 的那个叫「视频需求」——它存的其实是标题。用户会以为自己填漏了或者填重了。
+   *
+   * 用例按「值」而不是按「元素个数」断言：只要屏幕上找不到第二个同值输入框，
+   * 无论最后是删掉、合并还是改名，这个歧义就消失了。
+   */
+  it("keeps the film title in exactly one field, under one name", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    const title = screen.getByRole("textbox", { name: "视频标题" });
+    await user.clear(title);
+    await user.type(title, "季度增长");
+
+    const echoes = screen
+      .queryAllByRole("textbox")
+      .filter((box) => (box as HTMLInputElement).value === "季度增长");
+    expect(echoes).toEqual([title]);
+  });
+
+  /**
+   * 一句话卡片的说明文字是多行 JSX 字符串，JSX 把每处折行 + 缩进渲染成一个空格，
+   * 于是这段中文里出现两处句中断裂：「…的视频，␣文案、分镜…」「…本机完成。␣这个入口…」。
+   * 它就在演示路径正中。同一个文件里已经有写对的地方（`{"…"}`），这里只是漏了。
+   */
+  it("writes the one-sentence explanation without JSX line-break spaces", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+
+    const explanation = screen.getByText(/描述一句就够了/u);
+    expect(explanation.textContent).not.toMatch(
+      /[一-鿿、。，；]\s+[一-鿿]/u,
+    );
+  });
 });
