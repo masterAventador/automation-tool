@@ -119,16 +119,74 @@ backend/.venv/bin/python scripts/commit_gate.py HEAD
 其中 `check_gate_judges_the_commit_not_the_working_tree` 是本门禁的存在理由本身：
 它在工作树里写一个语法错误的文件，断言提取出来的树里**没有**它。
 
-## 5. 未做
+## 5. 触发方式
 
-1. **触发方式未接线。** 7 秒的代价可以挂 `pre-push`；但 `pre-push` 是可绕过的
-   （`--no-verify`），且本仓 `.git/hooks` 现由 git-lfs 占用，需与之共存。
-   建议：`pre-push` 调用快档 + 保留显式命令供随时手动跑。**待定，未实现。**
-2. **Windows 半边未接线。** 已确认验收机工具链：`pnpm 11.9.0`（与 CI 一致）、
-   `uv` 已装（`uv sync --locked` 自带 3.12.13 解释器，**系统 Python 3.14 无关**）、
-   `rustc 1.96.1`；**唯一缺口是 Node v22.20.0**，低于 `engines` 的 `>=24 <27`。
-   取码方式建议用 `git bundle` / ssh 推到机上裸库，绕开 GitHub 凭据与计费问题；
+**结论：`pre-push` 挂快档，且不自动安装。**
+
+理由：
+
+- 快档 **6–7 秒**，挂在推送前不会把工作流卡死；而按现在「每个任务默认推送」的节奏，
+  推送前正好是每次改动出门的唯一必经点。
+- **不挂 `pre-commit`**：本地连续提交很频繁，每次 7 秒会让人想绕过；
+  更重要的是 `pre-commit` 跑在**工作树**上——那正是被遮蔽的那个对象，
+  挡不住今天这两个缺陷。`pre-push` 拿到的是**将要存在于远端的那个 sha**，
+  正是必须能构建的东西。
+
+用法：
+
+```bash
+# 显式跑
+backend/.venv/bin/python scripts/commit_gate.py <commit>
+
+# git pre-push 协议（stdin 读 <local ref> <local sha> <remote ref> <remote sha>）
+backend/.venv/bin/python scripts/commit_gate.py --pre-push
+```
+
+`commits_to_gate()` 只取 local sha，并跳过删除分支时的全零 sha。
+
+### 5.1 为什么不由脚本自动装 hook
+
+1. **`.git/hooks/pre-push` 已被 git-lfs 占用**，直接覆盖会破坏 LFS；
+   必须链式调用，而链式写法要根据本机 LFS 版本决定，属本机事实。
+2. **hook 不随仓库分发**，装在谁的机器上是各人的选择，不该由一次任务替所有人决定。
+3. 它会**阻塞推送**——这是工作流层面的改变，应当由人明确启用。
+
+建议的启用方式（人工执行一次，与 git-lfs 共存）：
+
+```sh
+# .git/hooks/pre-push 中，在既有 git-lfs 那行之前插入：
+backend/.venv/bin/python scripts/commit_gate.py --pre-push || exit 1
+```
+
+绕过（应当罕见并说明理由）：`git push --no-verify`。
+
+## 6. Windows 半边：Node 不是快档的阻塞项
+
+复核结论**修正了先前的判断**：
+
+| 项 | 验收机 | 项目要求 | 结论 |
+| --- | --- | --- | --- |
+| pnpm | 11.9.0 | `>=11 <12` | 一致，且与 CI 相同 |
+| Python | 系统 3.14.0 | `>=3.12,<3.13` | **无关**——`uv sync --locked` 自带 3.12.13 解释器 |
+| rustc | 1.96.1 | — | 可用 |
+| Node | **v22.20.0** | `engines: >=24 <27` | 低于下限，但**不阻塞快档**（见下） |
+
+Node 之所以不阻塞快档：仓库**没有 `.npmrc`**，因此 `engine-strict` 是 pnpm 的默认值
+`false`——`engines` 只警告不拒绝；而快档只跑 `tsc`，TypeScript 自身的要求是
+`node >=14.17`。
+
+但**慢档必须对齐**：vitest、playwright、Tauri 构建的行为与 Node 版本相关，
+在与生产不同的运行时上验收，正是本项目吃过亏的那类错误。
+建议在做慢档之前用 `winget` 装 Node 26.x 对齐 CI。**本次未安装**——
+那是对一台共享验收机的系统改动，应当由人明确同意后再做。
+
+## 7. 未做
+
+1. **hook 未安装**（有意，理由见 §5.1）；`--pre-push` 模式本身已实现并实跑。
+2. **Windows 上未实跑门禁。** 取码方式建议用 `git bundle` + ssh 推到机上裸库，
+   绕开 GitHub 凭据与计费问题（Actions 自 07-25 16:50 起因计费每次 5 秒内失败）；
    未实现。
-3. **macOS 专属半边（codesign / DMG / Tauri 构建）未纳入**，那属慢档。
-4. **慢档整体未实现**（pytest、vitest、cargo test、playwright、打包）。
-5. 门禁只在 macOS 上跑过。
+3. **未在验收机安装 Node 26**（有意，见 §6）。
+4. **macOS 专属半边（codesign / DMG / Tauri 构建）未纳入**，那属慢档。
+5. **慢档整体未实现**（pytest、vitest、cargo test、playwright、打包）。
+6. 门禁只在 macOS 上跑过。

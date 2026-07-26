@@ -129,6 +129,27 @@ def check_python_baseline_is_clean_for_blocking_codes() -> None:
             )
 
 
+def check_pre_push_gates_the_tip_of_each_pushed_ref() -> None:
+    """git hands pre-push its work on stdin; the gate must read it, not guess."""
+    stdin = (
+        "refs/heads/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+        "refs/heads/main bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+    )
+    selected = commit_gate.commits_to_gate(stdin)
+    if selected != ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]:
+        _fail(f"pre-push should gate the pushed tip, got {selected}")
+
+
+def check_pre_push_skips_deletions() -> None:
+    """Deleting a remote branch pushes the all-zero sha; there is nothing to check."""
+    stdin = (
+        "(delete) 0000000000000000000000000000000000000000 "
+        "refs/heads/gone bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+    )
+    if commit_gate.commits_to_gate(stdin) != []:
+        _fail("a branch deletion has no commit to gate")
+
+
 def check_checkout_is_removed_after_use() -> None:
     with tempfile.TemporaryDirectory() as scratch:
         destination = Path(scratch) / "tree"
@@ -154,6 +175,8 @@ CHECKS = (
     check_gate_detects_an_injected_typescript_defect,
     check_gate_detects_an_injected_python_defect,
     check_python_baseline_is_clean_for_blocking_codes,
+    check_pre_push_gates_the_tip_of_each_pushed_ref,
+    check_pre_push_skips_deletions,
     check_checkout_is_removed_after_use,
 )
 

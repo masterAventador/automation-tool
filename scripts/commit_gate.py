@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -313,10 +314,67 @@ def run_fast_tier(commit: str) -> list[CheckResult]:
             discard_checkout(checkout)
 
 
+_NULL_SHA: Final = "0" * 40
+
+
+def commits_to_gate(stdin_text: str) -> list[str]:
+    """Pick the commits to check out of git's pre-push protocol.
+
+    git feeds `<local ref> <local sha> <remote ref> <remote sha>` per ref. The
+    local sha is the tip about to exist on the remote, which is exactly what
+    must be buildable. A deletion carries the all-zero sha and has nothing to
+    check.
+    """
+    commits: list[str] = []
+    for line in stdin_text.splitlines():
+        fields = line.split()
+        if len(fields) != 4:
+            continue
+        local_sha = fields[1]
+        if local_sha == _NULL_SHA:
+            continue
+        if local_sha not in commits:
+            commits.append(local_sha)
+    return commits
+
+
+def _report(commit: str, results: list[CheckResult]) -> int:
+    failures = 0
+    for result in results:
+        if result.ok:
+            print(f"ok   {result.name}")
+        else:
+            failures += 1
+            print(f"FAIL {result.name}")
+            print(result.output)
+    if failures:
+        print(f"{failures} check(s) failed on {commit}")
+    else:
+        print(f"commit gate passed on {commit}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("commit", nargs="?", default="HEAD")
+    parser.add_argument(
+        "--pre-push",
+        action="store_true",
+        help="read git's pre-push protocol on stdin and gate each pushed tip",
+    )
     arguments = parser.parse_args()
+
+    if arguments.pre_push:
+        commits = commits_to_gate(sys.stdin.read())
+        if not commits:
+            print("commit gate: nothing to check")
+            return 0
+        failures = 0
+        for commit in commits:
+            print(f"commit gate: fast tier on {commit[:7]}")
+            failures += _report(commit[:7], run_fast_tier(commit))
+        return 1 if failures else 0
+
     resolved = subprocess.run(
         ["git", "rev-parse", "--short", arguments.commit],
         cwd=REPOSITORY_ROOT,
@@ -325,19 +383,7 @@ def main() -> int:
         check=False,
     ).stdout.strip()
     print(f"commit gate: fast tier on {resolved or arguments.commit}")
-    failures = 0
-    for result in run_fast_tier(arguments.commit):
-        if result.ok:
-            print(f"ok   {result.name}")
-        else:
-            failures += 1
-            print(f"FAIL {result.name}")
-            print(result.output)
-    if failures:
-        print(f"{failures} check(s) failed on {resolved}")
-        return 1
-    print(f"commit gate passed on {resolved}")
-    return 0
+    return 1 if _report(resolved, run_fast_tier(arguments.commit)) else 0
 
 
 if __name__ == "__main__":
