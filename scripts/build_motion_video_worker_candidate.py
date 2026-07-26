@@ -71,6 +71,68 @@ def _download(archive: Path, filename: str, expected_sha256: str) -> None:
     raise RuntimeError("Node runtime download failed") from last_error
 
 
+OFFLINE_MOTION_LOCK = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
+OFFLINE_MOTION_CATALOG = ROOT / ".local/offline-motion-deps/catalog"
+AUTHORING_RUNTIME_PACKAGE = "gsap"
+
+
+def _locked_authoring_runtime() -> tuple[str, str, str]:
+    """The declared download URL, local catalog path and digest for the animation runtime."""
+    lock = json.loads(OFFLINE_MOTION_LOCK.read_text(encoding="utf-8"))
+    if lock.get("schemaVersion") != 1:
+        raise RuntimeError("offline motion dependency lock drifted")
+    for artifact in lock["artifacts"]:
+        if artifact.get("package") != AUTHORING_RUNTIME_PACKAGE:
+            continue
+        digest = artifact["sha256"]
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise RuntimeError("locked animation runtime digest is malformed")
+        return artifact["downloadUrl"], artifact["localPath"], digest
+    raise RuntimeError("the dependency lock declares no animation runtime")
+
+
+def _install_authoring_runtime(destination: Path) -> str:
+    """Place the animation runtime the authored composition loads, digest first.
+
+    The bytes come from the locked catalog when this machine has already built
+    it and from the locked URL when it has not, so a clean machine can still
+    produce the package — a build that only works where a git-ignored cache
+    happens to exist is a build only one machine can make. Either way the
+    digest decides: it is checked before the file is written, and a mismatch
+    fails the build rather than shipping a runtime the authoring prompt was
+    not written against.
+    """
+    url, local_path, expected = _locked_authoring_runtime()
+    cached = OFFLINE_MOTION_CATALOG / local_path
+    payload: bytes | None = None
+    if cached.is_file():
+        candidate = cached.read_bytes()
+        if hashlib.sha256(candidate).hexdigest() == expected:
+            payload = candidate
+    if payload is None:
+        last_error: OSError | None = None
+        for attempt in range(3):
+            try:
+                request = urllib.request.Request(
+                    url, headers={"User-Agent": "automation-tool-build/1"}
+                )
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    payload = response.read(8 * 1024 * 1024)
+                break
+            except OSError as error:
+                last_error = error
+                if attempt < 2:
+                    time.sleep(1 + attempt)
+        if payload is None:
+            raise RuntimeError("animation runtime download failed") from last_error
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != expected:
+        raise RuntimeError("animation runtime digest mismatch")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(payload)
+    return actual
+
+
 def _extract_member(archive: Path, suffix: str, destination: Path) -> None:
     if archive.suffix == ".zip":
         with zipfile.ZipFile(archive) as bundle:
@@ -140,6 +202,8 @@ def build_candidate(output: Path) -> CandidateAudit:
         if os.name != "nt":
             executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
     shutil.copyfile(WORKER, app_dir / "worker.mjs")
+    authoring_runtime = contract["packageLayout"]["authoringRuntimeAsset"]
+    _install_authoring_runtime(output / authoring_runtime)
     version = subprocess.check_output(
         [str(executable), "--version"],
         env=isolated_environment(),

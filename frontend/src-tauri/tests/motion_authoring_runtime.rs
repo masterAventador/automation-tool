@@ -231,3 +231,29 @@ fn an_authored_answer_is_rechecked_against_the_brief_before_it_becomes_a_render_
         );
     }
 }
+
+/// The path the package puts the animation runtime at, and the path the render
+/// workspace loads it from, must be the same string.
+///
+/// They are two roles for one relative path: the worker package declares where
+/// the release installs it, and the authoring prompt names where the composition
+/// loads it. If they ever drift, the seed reads a file that is not there and the
+/// one-sentence path fails closed for a reason nobody can see from either side.
+#[test]
+fn the_packaged_runtime_path_matches_the_path_the_composition_loads() {
+    let contract: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../contracts/quality/motion-video-worker-package.v1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        contract["packageLayout"]["authoringRuntimeAsset"]
+            .as_str()
+            .expect("the worker package must declare where the animation runtime lives"),
+        AUTHORING_RUNTIME_ASSET
+    );
+}

@@ -467,11 +467,43 @@ cargo test --tests -- --test-threads=4     42 个测试二进制 / 384 passed / 
   而不是被告知"渲染组件坏了"。前端网关白名单本来就认这个码。
 - **三个 `invoke_handler` 全部注册**（脚本核对 `registered in 3 handlers`）。
 
+### gsap 进包（已完成）
+
+- **落点按已批准的 A**：`motion-video-worker/package/runtime/gsap.min.js`，
+  在 `contracts/quality/motion-video-worker-package.v1.json` 的 `packageLayout` 里
+  显式声明为 `authoringRuntimeAsset` 并写明理由。装配链路自动带上它——
+  `prepare_video_runtime.py` 调的就是 `build_motion_video_worker_candidate.build_candidate`，
+  **`release_assembly.py` 一行没改**（它整包拷贝），因此与那三份逐文件清单和签名顺序毫无耦合。
+- **构建时摘要优先，缓存只是捷径**：`_install_authoring_runtime()` 先看本机 catalog，
+  **摘要对得上才用**；对不上或根本没有就从锁定 URL 下载，再校验。写文件之前先定摘要，
+  不符直接构建失败。
+- **实测两条路径**（不是推断）：
+
+  ```text
+  cached path                        -> c174bfce53a7  72779 bytes
+  clean machine (locked URL)         -> c174bfce53a7  72779 bytes
+  ```
+
+  第二条是把 `OFFLINE_MOTION_CATALOG` 指向一个不存在的目录、模拟没有 `.local` 缓存的机器
+  跑出来的——**干净机器能出包**，不是"只有这台机器能出包"。
+- **路径漂移有测试守着**：包里装配的位置与合成加载的位置是同一个相对路径的两个角色
+  （前者由 Worker 包契约声明，后者由编排提示词命名）。新增用例断言
+  `AUTHORING_RUNTIME_ASSET` 与 `packageLayout.authoringRuntimeAsset` 逐字相同——
+  一旦漂移，seed 会读一个不存在的文件，而两边谁都看不出原因。
+- **运行时仍然只有一条读取路径**：Rust 只从资源目录取，**没有 vendor / `.local` 回退**，
+  取到之后再按 `offline-motion-dependencies.v1.json` 的摘要校验一次才放进渲染工作区。
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_runtime      6 passed
+```
+
 #### 仍然没做完
 
-- **gsap 还没进 `motion-video-worker/package/`**。命令按生产路径去资源目录取
-  `runtime/gsap.min.js`，**没有 vendor / `.local` 回退**，所以在 gsap 装配进包之前，
-  这条命令会在 seed 那步 fail closed。这是有意的：宁可拒绝，也不引入第二条读取路径。
+- **「放置成功」那条用例的覆盖缺口还没完全补上。** 它现在仍从本机 catalog 取真实字节，
+  在没有 `.local` 缓存的机器上会静默跳过。机器无关的保障目前落在构建门禁上
+  （`_install_authoring_runtime()` 每次构建都跑、都校验、不符就失败），
+  但**用例本身仍然是可静默跳过的**，等端到端跑通、资源目录里确有这份文件之后要改成从
+  资源目录取。**这条我没有当成已解决。**
 - 端到端（测试构建）与正式包最终验收都未进行。
 
 ## 失败矩阵

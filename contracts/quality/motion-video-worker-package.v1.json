@@ -11,6 +11,8 @@
   "packageLayout": {
     "runtimeExecutable": "runtime/node",
     "workerEntrypoint": "app/worker.mjs",
+    "authoringRuntimeAsset": "runtime/gsap.min.js",
+    "authoringRuntimeAssetReason": "一句话自动制作产出的合成在浏览器里加载这个动画库。它随动效 Worker 一起装配，是因为它是渲染期依赖，而且这块载荷没有逐文件清单，不与内置浏览器/执行器签名的清单重算耦合。版本与摘要由 contracts/video/offline-motion-dependencies.v1.json 锁定，构建时校验，运行时 Rust 再校验一次才放进渲染工作区。",
     "writesIntoUpstreamCheckout": false
   },
   "archives": {
