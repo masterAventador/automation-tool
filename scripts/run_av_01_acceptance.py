@@ -11,6 +11,37 @@ AV_01_EVIDENCE = (
     REPOSITORY_ROOT / "docs" / "development" / "AV-01.md"
 )
 
+# One verbatim quote per mandatory browser rule in CLAUDE.md. This is a coverage
+# declaration, not a sample: `test_embedded_browser_baseline_declaration.py`
+# re-reads the rules from CLAUDE.md and fails both when a rule goes unquoted and
+# when a quote is loose enough to match two rules, so the baseline cannot grow or
+# be reworded without AV-01 noticing.
+CLAUDE_MD_BROWSER_RULE_QUOTES = (
+    "Playwright 锁定版本严格匹配的内置 Chromium",
+    "App 管理的独立运营 Profile",
+    "可见、可人工接管的独立运营窗口",
+    "用户电脑无需预装 Chrome 或 Edge",
+    "不发现、选择、下载或回退到系统浏览器",
+    "不在 Tauri WebView 内嵌抖音、小红书等运营网页",
+    "不直接自动化用户日常 Chrome/Edge 的默认 Profile",
+    "不读取、复制或上传用户默认浏览器 Cookie",
+    "首期直接创建全新 App 私有运营 Profile",
+    "每个平台首次扫码或登录一次",
+    "浏览器必须默认有界面",
+    "只能暂停并转人工，禁止实现绕过",
+    "MVP 不做 stealth、指纹伪装、验证码识别或隐藏自动化",
+    "登录状态、Profile 路径和执行任务必须隔离",
+    "不能替代独立 Profile 的稳定主链路",
+)
+
+# CLAUDE.md rules AV-01 pins that are not browser rules: the ledger and
+# acceptance baseline the task established alongside the architecture decision.
+CLAUDE_MD_PROCESS_QUOTES = (
+    "专项 Roadmap 例外",
+    "正式 App 的正常用户入口",
+    "docs/development/<任务ID>.md",
+)
+
 
 def read(relative_path: str) -> str:
     return (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
@@ -50,16 +81,7 @@ def main() -> None:
             "不读取、复制或迁移用户默认浏览器",
         ),
     )
-    require_phrases(
-        "CLAUDE.md",
-        (
-            "专项 Roadmap 例外",
-            "内置 Chromium",
-            "用户电脑无需预装 Chrome 或 Edge",
-            "正式 App 的正常用户入口",
-            "docs/development/<任务ID>.md",
-        ),
-    )
+    require_phrases("CLAUDE.md", CLAUDE_MD_BROWSER_RULE_QUOTES + CLAUDE_MD_PROCESS_QUOTES)
     require_phrases(
         "docs/product-plan.md",
         (

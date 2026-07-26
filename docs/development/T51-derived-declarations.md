@@ -140,3 +140,75 @@ demand nothing and pass`。**证明这个集合是每次从源码读出来的，
 mypy --strict 对新文件无告警，ruff（F,E9）通过。每次变异后原样还原并复跑，
 `git status` 确认工作区只剩本组改动。未触碰 `material_video_studio_init.js`
 与 `material_video_studio.rs`（另一条线的作业面），两者都只读。
+
+---
+
+## 3. CLAUDE.md 规则片段（`scripts/test_embedded_browser_baseline_declaration.py`）
+
+> 提交：本小节所在提交
+
+### 3.1 为什么这组是隐患
+
+AV-01 是一条绊线：内置 Chromium 决策写进 CLAUDE.md、ADR 和四份架构文档，
+`run_av_01_acceptance.py` 断言这些措辞还在。**针对"规则被删掉"它有效且响亮。**
+
+针对"基线被扩写"它什么都不做。驱动抄了 5 条 CLAUDE.md 片段，其中**落在 11 条强制浏览器
+规则里的只有 1 条**。明天加第 12 条规则，或者把没被引用的某条悄悄改弱，AV-01 照样全绿——
+它守的从来只是它碰巧抄到的那一句。守 1/14 和守 14/14 在干净的树上给出同一个答案，
+这正是没人发现它是哪一种的原因。
+
+### 3.2 推导规则与两个方向
+
+规则集每次从 CLAUDE.md 重读：浏览器章节的 `text` 围栏基线块 + 强制规则条目，
+**按标题文字定位而不是按章节号**（章节号会变，锚在 `## 5.` 上会在插入新章节那天悄悄读空）。
+
+| 方向 | 判据 |
+| --- | --- |
+| 每条规则都被引用 | 没有任何引文落在某条规则里 → 那条规则 AV-01 没在守 |
+| 每条引文只命中一条规则 | 一条引文同时命中两条规则 → 它哪条都没钉住 |
+
+第二个方向是实测出来的必要条件：原来的 `内置 Chromium` 同时命中围栏基线块和第一条强制规则，
+两条里任意一条被改写它都还在，**读起来像覆盖，实际什么都不保证**。
+
+### 3.3 RED → GREEN
+
+```
+RED   AssertionError: '内置 Chromium' matches 2 rules（原声明里的松引文）
+RED   AssertionError: AV-01 quotes 1 of the 14 mandatory browser rules in CLAUDE.md,
+      so it holds the line on only part of the baseline: （13 条逐条列出）
+GREEN AV-01 pins all 14 CLAUDE.md browser rules with 15 quotes
+```
+
+声明拆成两个常量：`CLAUDE_MD_BROWSER_RULE_QUOTES`（受门禁约束，15 条逐句引文）和
+`CLAUDE_MD_PROCESS_QUOTES`（台账与验收基线，3 条，不属于浏览器规则）。
+
+### 3.4 变异检验（四次）
+
+| 变异 | 结果 |
+| --- | --- |
+| A 声明退回原来的 5 条片段 | ✅ 红：松引文命中 2 条规则 |
+| B 只留原来那条精确引文 | ✅ 红：14 条里只守住 1 条，逐条列出漏掉的 13 条 |
+| C **CLAUDE.md 长出第 15 条规则** | ✅ 推导集合 14 → 15，新规则立即进入未引用清单 |
+| C2 **把某条规则悄悄改弱**（"浏览器必须默认有界面" → "可见性由运行模式决定"） | ✅ 该条进入未引用清单 |
+| D 浏览器章节标题改名 | ✅ 自检：`this check would demand nothing of AV-01 and pass` |
+
+C / C2 / D 走的是"把推导函数喂给改过的文档字符串"——CLAUDE.md 是项目规则本体，
+不为了验证门禁去改它。C2 是这组最重要的一次：**改弱一条规则而不是删掉它**，
+正是原来那条绊线完全看不见的形态。
+
+### 3.5 GREEN 与清理
+
+`run_av_01_acceptance.py` 实跑通过（`AV-01 embedded-browser architecture baseline
+acceptance passed`），mypy --strict 与 ruff（F,E9）通过。变异全部还原后复跑两者均绿，
+`git status` 确认没有改到 CLAUDE.md 或其他线的文件。
+
+---
+
+## 4. 三组之外
+
+审计线判定"不该动"的两类本次也确实没动：`run_c10_10` / `run_c10_11` 点名的 pytest 用例
+（权威运行者是 pytest，用例改名会响亮失败），以及那些"引用不存在路径"的命中（按需构建的
+暂存归档、`run_h8_08` 故意投毒的浏览器发现路径、浏览器 profile 内部路径）。
+
+本次没有发现第四组同类隐患。三个新门禁的文件名都是 `test_*.py`，
+`scripts/run_script_tests.py` 按目录自动发现，无需登记，也不存在"新写的门禁没人跑"这条老路。
