@@ -520,14 +520,27 @@ function NewVideoPage({
                 <Typography.Paragraph className="video-method-summary">
                   {method.shortDescription}
                 </Typography.Paragraph>
-                <dl className="video-method-details">
-                  {method.details.map((detail) => (
-                    <div key={detail.label}>
-                      <dt>{detail.label}</dt>
-                      <dd>{detail.value}</dd>
-                    </div>
-                  ))}
-                </dl>
+                {/*
+                 * The button comes before the ten rows that explain the method,
+                 * not after them.
+                 *
+                 * After them is where it was, and the rows are 466px tall, so
+                 * on the 1280x800 window this product actually ships the two
+                 * 选择 buttons sat at y=1043 and y=1066 — 243 and 266px past
+                 * the fold. Choosing a method is the first move in making a
+                 * video and it is the whole point of this screen, yet the
+                 * opening view of it carried no pressable control at all: the
+                 * customer met a wall of prose and had to scroll roughly 340px
+                 * on faith before finding anything to click.
+                 *
+                 * The rows themselves are kept, in full and unedited — they are
+                 * how someone works out which of the two methods they want, and
+                 * cutting them to win back height would trade one bad screen
+                 * for a different one. Reading them is just no longer the toll
+                 * for reaching the button. `e2e/video-studio-density.spec.ts`
+                 * pins both the fold and this order, because the `<dl>` grows
+                 * with every row added to `VIDEO_CREATION_METHODS`.
+                 */}
                 <Button
                   type={selected ? "primary" : "default"}
                   aria-label={`选择${method.name}`}
@@ -537,6 +550,14 @@ function NewVideoPage({
                 >
                   {selected ? `已选择${method.name}` : `选择${method.name}`}
                 </Button>
+                <dl className="video-method-details">
+                  {method.details.map((detail) => (
+                    <div key={detail.label}>
+                      <dt>{detail.label}</dt>
+                      <dd>{detail.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </article>
             );
           })}
