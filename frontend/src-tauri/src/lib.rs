@@ -128,6 +128,18 @@ fn get_update_policy_record_for_acceptance(
     })
 }
 
+/// 协调器只在这个构建真的配置了更新时才存在。它不存在说明更新被显式关掉了——那是
+/// 受支持的正常配置；它存在但读不出状态才是故障。两条路必须分开报，否则界面只能在
+/// 「对正常构建报错」和「对坏掉的更新器说未启用」之间二选一。
+fn app_update_state_of(
+    coordinator: Option<&std::sync::Arc<app_update_coordinator::AppUpdateCoordinator>>,
+) -> app_updates::UpdateState {
+    match coordinator {
+        Some(coordinator) => coordinator.observed_state(),
+        None => app_updates::UpdateState::Disabled,
+    }
+}
+
 #[tauri::command]
 fn get_app_update_state(
     coordinator: tauri::State<
@@ -135,14 +147,7 @@ fn get_app_update_state(
         Option<std::sync::Arc<app_update_coordinator::AppUpdateCoordinator>>,
     >,
 ) -> app_updates::UpdateState {
-    coordinator
-        .as_ref()
-        .and_then(|coordinator| coordinator.state().ok())
-        .unwrap_or(app_updates::UpdateState::Failed {
-            stage: app_updates::UpdateErrorStage::Configuration,
-            code: app_updates::UpdateErrorCode::ConfigurationInvalid,
-            retryable: false,
-        })
+    app_update_state_of(coordinator.as_ref())
 }
 
 #[tauri::command]
@@ -153,11 +158,7 @@ async fn check_app_update_now(
     >,
 ) -> Result<app_updates::UpdateState, ()> {
     let Some(coordinator) = coordinator.as_ref().cloned() else {
-        return Ok(app_updates::UpdateState::Failed {
-            stage: app_updates::UpdateErrorStage::Configuration,
-            code: app_updates::UpdateErrorCode::ConfigurationInvalid,
-            retryable: false,
-        });
+        return Ok(app_update_state_of(None));
     };
     Ok(coordinator
         .check(app_updates::UpdateCheckTrigger::Manual)
@@ -4702,6 +4703,18 @@ mod tests {
                 "retryable": false,
             })
         );
+    }
+
+    /// 发布构建可以显式关闭更新（`AUTOMATION_TOOL_UPDATE_DISABLED=1`，客户 Demo 包
+    /// 就是这样构建的）。那时协调器不存在，但这是受支持的正常配置，不是失败：把它
+    /// 报成 `failed` 会让设置页在用户什么都没点的情况下显示错误，也会逼前端把真正
+    /// 的 `configuration_invalid` 失败一起降级成中性文案。
+    #[test]
+    fn a_build_with_updates_switched_off_is_not_reported_as_a_failure() {
+        let wire = serde_json::to_value(app_update_state_of(None))
+            .expect("an update state must serialize");
+
+        assert_eq!(wire, serde_json::json!({ "state": "disabled" }));
     }
 
     /// This one has no `retryable`, so it proves the shared serializer does not

@@ -26,6 +26,7 @@ function releaseFrom(state: AppUpdateState | null): AppUpdateRelease | null {
   if (
     state === null ||
     state.state === "idle" ||
+    state.state === "disabled" ||
     state.state === "checking" ||
     state.state === "up_to_date" ||
     state.state === "failed"
@@ -45,18 +46,13 @@ interface UpdateFailurePresentation {
 }
 
 /**
- * 更新服务未配置和暂时连不上更新服务器都不是用户需要处理的错误。发布构建可以显式
- * 关闭更新，此时协调器不存在，原生层只能把这种情况回报成 configuration_invalid；
- * 界面挂载即轮询，用户什么都没点就会看到红色失败文案。
- *
- * 这两种情况改用中性和提示态，但文案仍然说明更新为什么不可用，不做静默处理。下载、
- * 验签、存储和安装的真实失败保持红色错误态；未来新增的失败码默认同样走红色，避免
- * 把真实失败悄悄降级。
+ * 「这个构建没开更新」现在由原生层的独立状态 `disabled` 表达，不再挤进失败码，所以
+ * 这里只处理真正失败的情况：暂时连不上更新服务器是可以自愈的，用提示态并说明原因；
+ * 其余失败（配置真的坏了、清单被拒、验签失败、存储不可用、安装失败）一律保持红色，
+ * 未来新增的失败码默认同样走红色，避免把真实失败悄悄降级成中性文案。
  */
 function failurePresentation(state: FailedAppUpdateState): UpdateFailurePresentation {
   switch (state.code) {
-    case "configuration_invalid":
-      return { text: "此版本未启用自动更新", color: "default" };
     case "transport_unavailable":
       return { text: "暂时无法连接更新服务器，可稍后重试", color: "gold" };
     default:
@@ -72,6 +68,8 @@ function statusText(state: AppUpdateState | null): string {
   switch (state.state) {
     case "idle":
       return "尚未检查更新";
+    case "disabled":
+      return "此版本未启用自动更新";
     case "checking":
       return "正在检查更新";
     case "up_to_date":
