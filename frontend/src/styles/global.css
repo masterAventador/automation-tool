@@ -95,13 +95,28 @@ body {
   box-shadow: none;
 }
 
+/* Pinned to the viewport, not merely at least as tall as it.
+ *
+ * With `min-height` a tall page grew the shell itself, so the document scrolled
+ * and carried the navigation off screen — switching pages meant scrolling back
+ * up first. `.desktop-content` already asked for `overflow: auto`, but nothing
+ * constrained its height, so it could never overflow and that rule never fired. */
 .desktop-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: #f3f6fb;
+}
+
+/* A flex child defaults to `min-height: auto`, which refuses to shrink below
+ * its content. Without this the inner column keeps growing and the height above
+ * is handed straight back. */
+.desktop-shell > .ant-layout {
+  min-height: 0;
 }
 
 .desktop-sidebar {
   position: relative;
+  overflow: hidden;
   border-right: 1px solid #e7ebf2;
 }
 
