@@ -353,6 +353,60 @@ codesign --verify --deep --strict …app → OK
 | symlink 被当普通文件签名 | `signable_nodes` 跳过 symlink；单测守住 |
 | 有人调 `install_and_seal` 忘了传 `seal` | 不再有默认值（原来默认 ad-hoc，且已无任何调用方），必须显式选择；`seal_with_adhoc_signature` 直接删除而不是留着不用 |
 
+## 交付物身份：哪个 DMG 能交，哪个不能
+
+签名接进流水线之后，机器上同时存在多个**文件名完全相同**的
+`自动化运营工具_0.1.0.dmg`，其中大部分是未签名的旧产物。演示前一天拿错的成本很高，
+所以这里把判据和当时的处置写死。
+
+### 唯一判据（不看路径、不看文件名、不看谁说了什么）
+
+对任意一个 DMG 执行：
+
+```bash
+xattr -w com.apple.quarantine "0083;0;Safari;" <dmg>
+spctl -a -vvv -t open --context context:primary-signature <dmg>
+```
+
+- `accepted` + `source=Notarized Developer ID` → 可以交付；
+- 其他任何输出 → **不可交付**，客户双击会看到「移到废纸篓」。
+
+这条判据不依赖任何记录，任何人在任何时候都能自己跑一遍。发版命令产出的
+`release-package.json` 里也会带 `gatekeeper` 与 `signed_by` 两个字段作为出厂记录，
+**没有 `gatekeeper` 字段的产物一律视为不可交付**（旧流水线不写这个字段）。
+
+### 2026-07-26 当时的实测与处置
+
+| 产物 | 判定 | 处置 |
+| --- | --- | --- |
+| `.local/t44-release-verify/…/自动化运营工具_0.1.0.dmg` | accepted / Notarized Developer ID | 保留。当天唯一可交付的产物 |
+| `.local/customer-demo-release/xuanbai/…dmg` | **rejected / no usable signature** | 已删除 |
+| `.local/customer-demo-release/verify/…dmg` | 未签名、无票据 | 已删除 |
+| `.local/eb-16/clean/…dmg`、`.local/eb-16/run/…dmg` | 未签名、无票据 | 保留。EB-16 验收工作区，`--skip-build` 复审依赖它们；目录名与 customer-demo 无关，不是交付候选 |
+
+两个被删的都在 `customer-demo-release/` 下、都指向 at.xuanbai.tech、文件名与可交付产物
+一字不差——这是最容易拿错的组合，所以直接删而不是贴标签（贴标签依赖人在关键时刻去读）。
+构建日志 `xuanbai-build.log` / `verify-build.log` 保留。
+
+### 发版命令现在默认产出到哪里
+
+`scripts/build_release_package.py` 的 `--work-dir` 默认值是
+`DEFAULT_WORK_DIRECTORY = <repo>/.local/release`。该目录**从未被使用过**——至今每次
+构建都显式传了 `--work-dir`，所以历史产物散落在 `.local/` 下多个自定义目录里，这正是
+本节存在的原因。今后不传 `--work-dir` 就会落到 `.local/release`，建议照此使用。
+
+### `.local/customer-demo-release/build-xuanbai.sh` 已失效并改为拒绝执行
+
+该脚本从 worktree `wt/release-build`（停在 `7b776fd`，main 早已越过）构建，而那棵树里的
+`scripts/build_release_package.py` 是签名改造之前的版本——**今天再跑它只会再产出一个
+未签名包**。已改为打印正确命令并 `exit 2`，原件留作 `build-xuanbai.sh.superseded`。
+
+### 本次的产物不是最终交付物
+
+功能尚未定型（动效线「一句话生成视频」在做）。`.local/t44-release-verify/` 里的包是
+**流水线验证产物**，证明签名/公证/门禁这条链路成立；最终交付物需要在功能冻结后用当时的
+main 重新构建一次，并再次通过上面那条判据。
+
 ## 遗留
 
 - **Windows**：本任务只做 macOS。`scripts/run_eb_16_windows_acceptance.py` 仍走
@@ -361,7 +415,12 @@ codesign --verify --deep --strict …app → OK
   但「登录 → 工作台 → 跑一条真实 RPA」这条完整链路本任务没有跑（需要真实账号与
   `~/Library/Application Support/com.aventador.automationtool/`，后者本任务禁止改动）。
   这条属于 U9/EB-16 验收范围，不是签名链路引入的风险；
-- **macOS x86_64**：只验证了 arm64。
+- **macOS x86_64 签名/公证：未做，已知缺口。** 本任务只验证了 arm64。演示机是
+  M4 Air（arm64），本次不阻塞，但**不要当成已经做过**——`build_release_package.py`
+  的 `require_macos_target()` 认得 `macos-x86_64`，签名链路在该架构上一次都没跑过；
+- **Windows 代码签名：未做，已知缺口。** `scripts/run_eb_16_windows_acceptance.py`
+  仍走 `seal_windows_payload`，与本任务的 Developer ID 链路无关，Windows 包至今没有
+  任何签名门禁。本次演示不涉及 Windows，同样**不要当成已经做过**。
 
 ## 清理
 
