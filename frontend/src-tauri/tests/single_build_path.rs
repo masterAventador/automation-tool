@@ -690,18 +690,10 @@ fn reports_ready_without_probing(check_body: &str) -> bool {
 /// still tolerated and who owes its removal.
 ///
 /// Asserted by set equality, so adding one *and* removing one both fail. The
-/// remaining exception is not acceptable, but no second one can appear without
-/// somebody writing down why.
-const REVIEWED_STUBBED_FRONTEND_ENTRYPOINTS: &[(&str, &str)] = &[
-    // Declares its own inline `readyStartup`. Serves B5-04 browser-settings,
-    // whose user path (choosing a trusted system browser) was deleted by EB-10
-    // per the product rule that forbids system-browser selection. The entry
-    // dies with that acceptance rather than being repaired.
-    (
-        "test-browser-settings-main.tsx",
-        "B5-04, pending retirement",
-    ),
-];
+/// list is empty: the last exception was `test-browser-settings-main.tsx`, which
+/// served B5-04 browser-settings, and it died with that acceptance as this guard
+/// said it would. No new one can appear without somebody writing down why.
+const REVIEWED_STUBBED_FRONTEND_ENTRYPOINTS: &[(&str, &str)] = &[];
 
 fn frontend_directory() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../src")
@@ -734,7 +726,7 @@ fn frontend_entrypoints() -> BTreeSet<String> {
          scanner is reading the wrong file"
     );
     assert!(
-        modules.len() >= 5,
+        modules.len() >= 4,
         "found {} frontend entry modules; the scanner is looking in the wrong place",
         modules.len()
     );

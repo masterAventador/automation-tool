@@ -39,30 +39,6 @@ fn desktop_e2e_configuration_enables_only_explicit_test_capabilities() {
 }
 
 #[test]
-fn browser_settings_acceptance_is_isolated_and_hidden() {
-    let config = read_json("tauri.browser-settings-e2e.conf.json");
-    let capabilities = config["app"]["security"]["capabilities"]
-        .as_array()
-        .expect("acceptance capabilities must be an array");
-
-    assert_eq!(
-        config["identifier"],
-        "com.aventador.automationtool.b504acceptance"
-    );
-    assert_eq!(
-        config["app"]["windows"],
-        serde_json::json!([{
-            "label": "main",
-            "title": "自动化运营工具",
-            "visible": false
-        }])
-    );
-    assert_eq!(capabilities[0], "main");
-    assert_eq!(capabilities[1]["identifier"], "wdio-browser-settings");
-    assert_eq!(capabilities[1]["windows"], serde_json::json!(["main"]));
-}
-
-#[test]
 fn model_service_acceptance_is_isolated_and_hidden() {
     let config = read_json("tauri.model-service-e2e.conf.json");
     let capabilities = config["app"]["security"]["capabilities"]

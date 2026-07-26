@@ -221,7 +221,6 @@ frontend/
 │   ├── tauri.dev.conf.json        # 只由 tauri:dev 合并的 loopback URL/devCSP
 │   ├── tauri.test.conf.json       # 后台隐藏的通用桌面测试配置
 │   ├── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
-│   ├── tauri.browser-settings-e2e.conf.json # 后台隐藏的浏览器选择真实入口验收
 │   ├── tauri.installation-revocation-e2e.conf.json # 后台隐藏的吊销验收
 │   ├── tauri.task-creation-e2e.conf.json # 后台隐藏的创建 Task 验收
 │   ├── tauri.task-create-form-e2e.conf.json # 后台隐藏的新建表单真实入口验收
@@ -248,7 +247,6 @@ frontend/
 ├── playwright.config.ts
 ├── wdio.publishing.conf.ts
 ├── wdio.control-plane.conf.ts
-├── wdio.browser-settings.conf.ts
 ├── wdio.installation-revocation.conf.ts
 ├── wdio.task-creation.conf.ts
 ├── wdio.task-create-form.conf.ts
@@ -287,7 +285,7 @@ Test harness implementation ────────> platform interface
 
 B5-02 的 `src-tauri/src/browser_discovery.rs` 是系统浏览器信任根，不是 React Adapter。macOS 只枚举 `/Applications/Google Chrome.app` 与 `/Applications/Microsoft Edge.app`，用 Security.framework 对完整签名、所有 Mach-O 架构、嵌套代码、精确 Bundle signing identifier 和 Developer Team requirement 做验证；同时固定主可执行文件相对路径并在验签前后保存 App/入口的 dev+inode。公开复验 API 只接受模块自己产生的 `TrustedBrowser`，使用前路径缺失、替换、symlink 或签名变化都会 fail closed。B5-04 才把安全浏览器枚举投影给 UI，路径和 identity 永不进入 React。
 
-B5-04 的 `browser_settings.rs` 是选择边界而不是第二套发现逻辑。Tauri setup 从自身 AppData 初始化唯一 service；`get_browser_settings`/`select_browser` 只投影和接收固定枚举，每次保存前调用 B5-02/B5-03 真实发现。canonical v1 选择以私有目录和原子替换保存，React 没有路径 DTO、文本框、文件选择器或服务端回退。专用隐藏 App 验收使用动态已检查 WebDriver 端口和独立标识，刷新后从同一产品页面读回选择，再精确清理 AppData 与端口；测试配置、WDIO 入口和标识继续被 E4-15 正式包扫描拒绝。
+B5-04 的 `browser_settings.rs` 曾是选择边界而不是第二套发现逻辑：Tauri setup 从自身 AppData 初始化唯一 service，`get_browser_settings`/`select_browser` 只投影和接收固定枚举。EB-10（`f34e503`，2026-07-24）按第 5 节「不发现、选择、下载或回退到系统浏览器」删掉了整条用户路径，该模块随之没有任何 React 消费者，`frontend/tests/browser-settings-boundary.test.mjs` 现在直接断言前端不得再出现这两个 Command。原本的专用隐藏 App 验收（`run_b5_04_acceptance.py`、`wdio.browser-settings.conf.ts`、`browser-settings.spec.ts`、`tauri.browser-settings-e2e.conf.json`、`test-browser-settings-main.tsx` 与对应 Vite mode/npm 入口）已在 T57b 一并删除——被测页面不存在了，它只会持续报红。`startup-environment.spec.ts` 反向断言该卡片不再出现；模块本身的退役归 ADR-0001/EB 系列。
 
 B5-05 的 `browser_profiles.rs` 是后续浏览器运行时唯一 Profile 组合根。Tauri setup 从自身 AppData 管理唯一 Store；它当前只允许本机生成/打开 canonical UUIDv4 抖音 Profile，未注册 WebView Command。Unix 用父目录 fd 相对创建/打开并保持 dev+inode，Windows 用父 HANDLE 相对 `NtCreateFile` 并保持 volume/file index；每层私有权限、symlink/reparse、最终路径和重开 identity 均 fail closed。B5-06/B5-07 必须继续使用该对象，不能重新从字符串路径构造 Profile。
 
@@ -299,7 +297,7 @@ H8-20 的 `app_update_coordinator.rs` 是更新调度的唯一组合根：offici
 
 H8-21 的 `app_update_installation.rs` 是唯一安装交接边界。协调层把当前 official `Update` 作为不序列化的 installer 保留；立即安装或 startup 自动安装时先让 cache 以 release identity 和当前签名重验完整 bytes，再隐藏窗口、停止 Executor/释放 Profile，最后调用官方 `Update::install`。预检失败不触碰运行环境，停止或安装失败恢复窗口；Windows 由官方安装器退出接管，macOS 安装成功后 Tauri restart。`decide_app_update` 只接收封闭决策枚举，不接收版本、URL、签名、bytes 或路径；安装探针同时要求 debug、`desktop-e2e` 且排除 `control-plane-e2e`，release/生产和其他验收特性不编译该类型，仅为 H8-21 隐藏 App 验证交接顺序，H8-22 必须以真实签名包替代该平台底层探针。H8-21 配置另用 `frontend/dist-h821`，不复用 production `dist`；runner 前后精确清理它，避免 release 与验收构建资产相互覆盖。
 
-H8-22 的 `features/app-updates/AppUpdateCenter.tsx` 只解释公开状态为设置卡片、进度和可选/强制提示；`platform/tauri/app-update-gateway.ts` 是唯一原生适配器，只调用 `get_app_update_state`、`check_app_update_now`、`decide_app_update`。Rust `UpdateState` enum 字段固定 camelCase，组件以单一 operation gate 阻止主动检查/决策与轮询重叠。生产 `main.tsx` 显式注入该 gateway，业务组件没有 updater JavaScript binding、任意 invoke、URL、签名、包 bytes 或路径。`e2e-tauri/update-ui.spec.ts` 与 `scripts/run_h8_22_acceptance.py` 复用 H8-21 的隔离更新源和三轮真实 App，从页面按钮完成更新决策与安装交接。`tauri.update-macos-package-e2e.conf.json`、`wdio.update-macos-package.conf.ts`、`e2e-tauri/update-macos-package.spec.ts` 与 `scripts/run_h8_22_macos_package_acceptance.py` 只负责 macOS ad-hoc 实包：构建并挂载旧 DMG、从页面触发 official updater、核对 `.app` 版本/哈希/codesign，并注入签名正确但格式损坏的包验证窗口恢复；配置和产物使用唯一 identifier/`dist-h822-mac`/`/private/tmp`，finally 全量清理。对应的 `tauri.update-windows-package-e2e.conf.json`、`wdio.update-windows-package.conf.ts`、`e2e-tauri/update-windows-package.spec.ts` 与 `scripts/run_h8_22_windows_package_acceptance.py` 只允许 Windows x86_64：以唯一 `currentUser` product/identifier/main binary/AppData 构建普通 `NotSigned` NSIS，从页面驱动 0.1.0→0.2.0/0.3.0 与损坏 0.4.0 矩阵，由外层核对安装后 PE 版本/哈希、HKCU 安装/卸载记录、等待 updater 安装器退出并逐轮调用专属卸载器。两个 runner 都明确移除安装探针与运行期私钥且不进入正式包；Windows 实机结果和两平台正式发布签名保留为独立验收。
+H8-22 的 `features/app-updates/AppUpdateCenter.tsx` 只解释公开状态为设置卡片、进度和可选/强制提示；`platform/tauri/app-update-gateway.ts` 是唯一原生适配器，只调用 `get_app_update_state`、`check_app_update_now`、`decide_app_update`。Rust `UpdateState` enum 字段固定 camelCase，组件以单一 operation gate 阻止主动检查/决策与轮询重叠。生产 `main.tsx` 显式注入该 gateway，业务组件没有 updater JavaScript binding、任意 invoke、URL、签名、包 bytes 或路径。`e2e-tauri/update-ui.spec.ts` 由 `scripts/run_h8_21_acceptance.py` 在同一套隔离更新源和三轮真实 App 上执行，从页面按钮完成更新决策与安装交接；它同时是 H8-21 的验收——退役前的 `update-installation.spec.ts` 跑的是同一个 runner、同一个构建、同样三个场景，只是用 IPC 直调 `decide_app_update` 代替点击，属第 8 节所说的分层证据而非验收。`tauri.update-macos-package-e2e.conf.json`、`wdio.update-macos-package.conf.ts`、`e2e-tauri/update-macos-package.spec.ts` 与 `scripts/run_h8_22_macos_package_acceptance.py` 只负责 macOS ad-hoc 实包：构建并挂载旧 DMG、从页面触发 official updater、核对 `.app` 版本/哈希/codesign，并注入签名正确但格式损坏的包验证窗口恢复；配置和产物使用唯一 identifier/`dist-h822-mac`/`/private/tmp`，finally 全量清理。对应的 `tauri.update-windows-package-e2e.conf.json`、`wdio.update-windows-package.conf.ts`、`e2e-tauri/update-windows-package.spec.ts` 与 `scripts/run_h8_22_windows_package_acceptance.py` 只允许 Windows x86_64：以唯一 `currentUser` product/identifier/main binary/AppData 构建普通 `NotSigned` NSIS，从页面驱动 0.1.0→0.2.0/0.3.0 与损坏 0.4.0 矩阵，由外层核对安装后 PE 版本/哈希、HKCU 安装/卸载记录、等待 updater 安装器退出并逐轮调用专属卸载器。两个 runner 都明确移除安装探针与运行期私钥且不进入正式包；Windows 实机结果和两平台正式发布签名保留为独立验收。
 
 规则：
 
@@ -689,7 +687,7 @@ Tauri 正式安装包包含 React WebView 资源、Rust 原生桥接、PyInstall
 
 ### 6.1 AV-01 内置浏览器目标结构
 
-ADR-0001 从 AV-01 起替代“发现并选择系统 Chrome/Edge”的生产基线。现有 `browser_discovery.rs`、`browser_settings.rs` 及 B5 验收说明是尚待 EB 系列迁移的历史实现，不代表允许长期保留生产 fallback。
+ADR-0001 从 AV-01 起替代“发现并选择系统 Chrome/Edge”的生产基线。现有 `browser_discovery.rs`、`browser_settings.rs` 是尚待 EB 系列迁移的历史实现，不代表允许长期保留生产 fallback；它们的 UI 入口和桌面验收已随 EB-10/T57b 删除。
 
 - Tauri Resources 是内置 Chromium 发行物的唯一来源；后续由 EB-03～EB-06 固定双平台目录、浏览器 Manifest 与逐文件摘要，并由 Rust 在启动前验证来源、版本、修订、平台、架构、完整文件集和路径身份。
 - 不接受用户提供的浏览器可执行路径；路径也不得来自 React、Control Plane、任务 payload、普通环境变量或 App 设置，用户不能选择系统浏览器。只有 Rust 验证后的绝对路径可以通过受认证 Executor 启动协议传入本机执行器。
