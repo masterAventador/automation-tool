@@ -5,7 +5,8 @@ import { resolve } from "node:path";
 import { browser, expect } from "@wdio/globals";
 
 const SUBJECT = "BM08 品牌增长验证";
-const SECONDS_PER_BEAT = 1;
+const CANCELLATION_SECONDS_PER_BEAT = 3;
+const EVIDENCE_SECONDS_PER_BEAT = 1;
 const BEATS = [
   ["增长看得见", "字幕：本周销售增长 38%"],
   ["续费驱动增长", "字幕：客户持续选择新版"],
@@ -60,10 +61,12 @@ describe("BM-08 production App native brand-motion acceptance", () => {
     // Drive the real duration control instead of accepting the default, and
     // pin it to the shortest beat so this acceptance keeps rendering exactly
     // the frame count it always has.
-    await studio.$("input#motion-seconds-per-beat").setValue(SECONDS_PER_BEAT);
+    await studio
+      .$("input#motion-seconds-per-beat")
+      .setValue(CANCELLATION_SECONDS_PER_BEAT);
     await expect(studio).toHaveText(
       expect.stringContaining(
-        `共 ${BEATS.length} 段 · 每段 ${SECONDS_PER_BEAT} 秒 · 成片约 ${BEATS.length * SECONDS_PER_BEAT} 秒`,
+        `共 ${BEATS.length} 段 · 每段 ${CANCELLATION_SECONDS_PER_BEAT} 秒 · 成片约 ${BEATS.length * CANCELLATION_SECONDS_PER_BEAT} 秒`,
       ),
     );
     for (let index = 0; index < BEATS.length; index += 1) {
@@ -143,11 +146,21 @@ describe("BM-08 production App native brand-motion acceptance", () => {
       { timeout: 15_000, timeoutMsg: "cancelled motion checkpoint never reached the App" },
     );
 
-    // The cancelled worker exits cooperatively only after it observes the
-    // marker behind the deliberately slowed acceptance browser, so the
+    // The first draft is deliberately longer than the 3-second evidence film,
+    // so cancellation cannot lose a race to a fast machine while every runtime
+    // dependency still comes from the production resource layout. The
     // single-worker orchestrator can stay busy for several seconds. Keep
     // retrying through the real recovery path the App shows for that case
     // until the second real submission is accepted.
+    await studio.$("div[role='tab']=脚本与分镜").click();
+    await studio
+      .$("input#motion-seconds-per-beat")
+      .setValue(EVIDENCE_SECONDS_PER_BEAT);
+    await expect(studio).toHaveText(
+      expect.stringContaining(
+        `共 ${BEATS.length} 段 · 每段 ${EVIDENCE_SECONDS_PER_BEAT} 秒 · 成片约 ${BEATS.length * EVIDENCE_SECONDS_PER_BEAT} 秒`,
+      ),
+    );
     await studio.$("div[role='tab']=预览").click();
     await browser.waitUntil(
       async () => {

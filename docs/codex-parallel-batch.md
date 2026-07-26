@@ -380,7 +380,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **F** T38 演示后回收清单 | ✅ | 本提交 | 纯文档任务无代码 RED；既有 C10-13 文档契约 2/2 通过 | 新增可执行退场手册，覆盖业务冻结、账号/Session/凭据吊销、本机数据、PostgreSQL、对象存储、云资源、证据保留与双人复核；只登记凭据 ID/指纹，禁止读取或记录密钥值 |
 | **G** T76 `desktop-e2e` 入口让断言恒真 | ✅ | 本提交 | Node 入口契约准确失败：`the desktop test entry must execute the production composition root`；Rust 单路径守卫发现桩白名单漂移 | WDIO 适配器后直接加载生产 `main.tsx` 及完整 gateway；真实 Tauri 现在如实停在“桌面运行环境需要处理”，不再由恒真桩伪造工作台成功 |
 | **G** T77 B5-13 前端投影与权威态不一致 | ✅ | 本提交（复核结论） | 无新增 RED：组件/网关 6 项与 B5-13/B5-14 契约 3 项均通过 | `state: "missing"` 已稳定投影为“需要登录”，仅 gateway 拒绝才显示“暂时无法读取”；扫描现象由 T50 的注销投影预算修复覆盖，因此不制造重复改动 |
-| **G** T78 视频线完整启动链 | 🔍 待真实验收 | 本提交 | 仅补 7 个 `prepare_startup_gate` 时旧门禁错误显示 `executed checks: 7`；动态完整门禁随后准确报出 8 个驱动均未导入完整 harness，生命周期测试报 `no attribute 'video_studio_startup_harness'`；后续 RED 又锁住 WDIO 越界、CP 健康失败泄漏、Compose 部分启动失败不清理及环境污染 | 动态范围为 8 个构建驱动 / 9 个唯一 spec；轻量结构与失败清理 11/11 通过。真实 VF-06/其余视频驱动结果由 root 复核后回填 |
+| **G** T78 视频线完整启动链 | ✅ | 本提交 | 仅补 7 个 `prepare_startup_gate` 时旧门禁错误显示 `executed checks: 7`；动态完整门禁随后准确报出 8 个驱动均未导入完整 harness，生命周期测试报 `no attribute 'video_studio_startup_harness'`；后续 RED 又锁住 WDIO 越界、CP 健康失败泄漏、Compose 部分启动失败不清理及环境污染 | 动态范围为 8 个构建驱动 / 9 个唯一 spec；轻量结构与失败清理 11/11 通过。root 串行实跑 VF-06、BM-06、BM-08、BM-15、CQ-01、IM-05、VE-03 全绿；VE-04 在任何云提交前按设计因本机未配置阿里云凭据响亮停止，未读取或复制主工作树密钥 |
 
 ---
 

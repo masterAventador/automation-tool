@@ -63,6 +63,10 @@ async function openStudio() {
   await openMenu("视频制作");
   const studio = await browser.$("section[aria-label='视频制作工作区']");
   await expect(studio).toBeDisplayed();
+  // VideoStudio intentionally remembers the last active tab across navigation.
+  // Each scenario below starts from the creation-method cards, so enter that
+  // page explicitly instead of inheriting state from the preceding scenario.
+  await studio.$("div[role='tab']=新建视频").click();
   return studio;
 }
 
@@ -73,6 +77,12 @@ after(() => {
 });
 
 describe("CQ-01 production App plain-language comprehension acceptance", () => {
+  before(async () => {
+    // Start this file from a fresh production frontend; later scenarios in the
+    // file intentionally exercise state carried through normal navigation.
+    await browser.refresh();
+  });
+
   it("lets a non-technical user pick the right creation method", async () => {
     await openMenu("工作台");
     await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");

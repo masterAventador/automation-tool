@@ -7,18 +7,17 @@ import argparse
 import hashlib
 import json
 import os
-import shlex
 import shutil
-import stat
 import subprocess
 import sys
 from pathlib import Path
 
-from build_embedded_chromium_staging import build_staging, load_staging_contract
 from desktop_e2e_prerequisites import video_studio_startup_harness
-from run_bm_04_acceptance import current_target_id
+from prepare_video_runtime import install as install_video_runtime
+from prepare_video_runtime import prepare as prepare_video_runtime
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
+    DEBUG_APP_RESOURCE_ROOT,
     FRONTEND,
     TAURI_CONFIG,
     app_data_directory,
@@ -28,27 +27,6 @@ from run_vf_06_acceptance import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-CHROMIUM_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-_EB_03_CACHE = ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-
-
-def _first_existing(*candidates: Path) -> Path:
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
-
-
-DEFAULT_ARCHIVES = {
-    # The EB-03 archive cache lives in the primary checkout's .local; resolve
-    # it both from the primary checkout itself and from a wt/<task> worktree.
-    "macos-arm64": _first_existing(
-        ROOT / _EB_03_CACHE,
-        ROOT.parent.parent / _EB_03_CACHE,
-    ),
-    "macos-x86_64": ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
-    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
-}
 DEFAULT_EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-08-evidence"
 
 
@@ -60,84 +38,6 @@ def _run(
     timeout: int = 1_200,
 ) -> None:
     subprocess.run(arguments, cwd=cwd, env=env, check=True, timeout=timeout)
-
-
-def _required_executable(name: str) -> Path:
-    executable = shutil.which(name)
-    if executable is None:
-        raise RuntimeError(f"BM-08 acceptance requires {name}")
-    return Path(executable).resolve(strict=True)
-
-
-def _stage_chromium(archive: Path, run_root: Path) -> tuple[Path, int]:
-    target_id = current_target_id()
-    contract = load_staging_contract(CHROMIUM_CONTRACT)
-    target = contract.targets[target_id]
-    if not target.buildable:
-        raise RuntimeError(f"BM-08 Chromium target is not buildable: {target_id}")
-    result = build_staging(
-        contract=contract,
-        target_id=target_id,
-        archive_path=archive,
-        archive_sha256=target.archive_sha256,
-        output=run_root / "staging",
-    )
-    executable = (result.output / Path(*target.executable.split("/"))).resolve(strict=True)
-    return executable, int(contract.browser_version.split(".")[0])
-
-
-def _write_worker_wrapper(run_root: Path) -> Path:
-    if os.name == "nt":
-        raise RuntimeError(
-            "BM-08 local acceptance wrapper currently runs on macOS; "
-            "Windows package acceptance remains in BM-16"
-        )
-    node = _required_executable("node")
-    worker = (ROOT / "workers/motion_composition/worker.mjs").resolve(strict=True)
-    wrapper = run_root / "motion-video-worker"
-    wrapper.write_text(
-        f"#!/bin/sh\nexec {shlex.quote(str(node))} {shlex.quote(str(worker))}\n",
-        encoding="utf-8",
-    )
-    wrapper.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-    return wrapper.resolve(strict=True)
-
-
-def _write_browser_wrapper(run_root: Path, browser: Path) -> Path:
-    """Delay only browser startup inside the render request.
-
-    The real 90-frame render finishes in about two seconds on Apple
-    silicon, which loses the race against the App-side cancellation
-    choreography that the first acceptance submission must exercise. The
-    delay keeps the worker, the execution protocol, the staged Chromium
-    and FFmpeg fully real while making the cancellation window
-    deterministic on any machine speed.
-    """
-    wrapper = run_root / "motion-video-browser"
-    wrapper.write_text(
-        f'#!/bin/sh\nsleep 3\nexec {shlex.quote(str(browser))} "$@"\n',
-        encoding="utf-8",
-    )
-    wrapper.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-    return wrapper.resolve(strict=True)
-
-
-def _validate_ffmpeg(ffmpeg: Path) -> Path:
-    completed = subprocess.run(
-        [str(ffmpeg), "-version"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
-    contract = json.loads(
-        (ROOT / "contracts/video/ffmpeg-toolchain.v1.json").read_text(encoding="utf-8")
-    )
-    version = contract["ffmpeg"]["version"]
-    if not completed.stdout.startswith(f"ffmpeg version {version} "):
-        raise RuntimeError(f"BM-08 requires locked FFmpeg {version}")
-    ffprobe = ffmpeg.with_name("ffprobe")
-    return ffprobe.resolve(strict=True)
 
 
 def run_deterministic_gates() -> None:
@@ -195,11 +95,30 @@ def _validate_private_app_state(private_app_data: Path) -> None:
         raise RuntimeError("BM-08 renderer left frame scratch files behind")
 
 
+def _print_checkpoint_diagnostics(private_app_data: Path) -> None:
+    """Emit bounded, non-sensitive lifecycle facts before failure cleanup."""
+    summaries: list[dict[str, object]] = []
+    for checkpoint in sorted(private_app_data.rglob("motion-render-job.checkpoint")):
+        try:
+            snapshot = json.loads(checkpoint.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            summaries.append({"checkpoint": "unreadable"})
+            continue
+        summaries.append(
+            {
+                "status": snapshot.get("status"),
+                "progressPercent": snapshot.get("progressPercent"),
+                "failureCode": snapshot.get("failureCode"),
+            }
+        )
+    print(
+        "BM-08 checkpoint diagnostics:",
+        json.dumps(summaries, ensure_ascii=False),
+        file=sys.stderr,
+    )
+
+
 def _run_desktop_acceptance(
-    browser: Path,
-    chromium_major: int,
-    worker: Path,
-    ffmpeg: Path,
     evidence_video: Path,
 ) -> None:
     configuration = json.loads(TAURI_CONFIG.read_text(encoding="utf-8"))
@@ -218,10 +137,6 @@ def _run_desktop_acceptance(
     environment.update(
         {
             "TAURI_WEBDRIVER_PORT": str(port),
-            "AUTOMATION_TOOL_BM08_BROWSER": str(browser),
-            "AUTOMATION_TOOL_BM08_CHROMIUM_MAJOR": str(chromium_major),
-            "AUTOMATION_TOOL_BM08_WORKER": str(worker),
-            "AUTOMATION_TOOL_BM08_FFMPEG": str(ffmpeg),
             "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO": str(evidence_video),
         }
     )
@@ -236,19 +151,23 @@ def _run_desktop_acceptance(
                 env=environment,
             )
             require_port_closed(port)
-            _run(
-                [
-                    pnpm_executable(),
-                    "exec",
-                    "wdio",
-                    "run",
-                    "wdio.video-studio.conf.ts",
-                    "--spec",
-                    "./e2e-tauri/motion-video-native.spec.ts",
-                ],
-                cwd=FRONTEND,
-                env=environment,
-            )
+            try:
+                _run(
+                    [
+                        pnpm_executable(),
+                        "exec",
+                        "wdio",
+                        "run",
+                        "wdio.video-studio.conf.ts",
+                        "--spec",
+                        "./e2e-tauri/motion-video-native.spec.ts",
+                    ],
+                    cwd=FRONTEND,
+                    env=environment,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                _print_checkpoint_diagnostics(private_app_data)
+                raise
             require_port_closed(port)
             _validate_private_app_state(private_app_data)
     finally:
@@ -360,7 +279,7 @@ def _inspect_video(
     )
     (evidence / "frame-sha256.json").write_text(
         json.dumps(
-            {scene.name: digest for scene, digest in zip(scenes, digests)},
+            {scene.name: digest for scene, digest in zip(scenes, digests, strict=True)},
             indent=2,
         )
         + "\n",
@@ -389,12 +308,9 @@ def require_deliverables() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path)
     parser.add_argument("--evidence-directory", type=Path)
     arguments = parser.parse_args()
     require_deliverables()
-    target_id = current_target_id()
-    archive = (arguments.archive or DEFAULT_ARCHIVES[target_id]).resolve(strict=True)
     evidence = (arguments.evidence_directory or DEFAULT_EVIDENCE).resolve()
     evidence_root = (ROOT / ".local/embedded-browser-video-studio").resolve()
     if not evidence.is_relative_to(evidence_root) or evidence == evidence_root:
@@ -405,38 +321,25 @@ def main() -> int:
         shutil.rmtree(evidence)
     evidence.mkdir(parents=True)
     evidence_video = evidence / "bm-08-real-app.mp4"
-    run_root = ROOT / ".local/embedded-browser-video-studio" / f"ebvs-bm08-{os.getpid()}"
-    run_root.mkdir(parents=True, exist_ok=False)
-    try:
-        run_deterministic_gates()
-        staged_browser, chromium_major = _stage_chromium(archive, run_root)
-        browser = _write_browser_wrapper(run_root, staged_browser)
-        worker = _write_worker_wrapper(run_root)
-        ffmpeg = _required_executable("ffmpeg")
-        ffprobe = _validate_ffmpeg(ffmpeg)
-        _run_desktop_acceptance(
-            browser,
-            chromium_major,
-            worker,
-            ffmpeg,
-            evidence_video,
-        )
-        _inspect_video(evidence_video, evidence, ffmpeg, ffprobe)
-    finally:
-        shutil.rmtree(run_root, ignore_errors=True)
-    if os.name != "nt":
-        survivors = subprocess.run(
-            ["pgrep", "-f", str(run_root)],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-        if survivors.stdout.strip():
-            raise RuntimeError(
-                "BM-08 left a staged Chromium or Worker process running: "
-                + survivors.stdout.strip()
-            )
+    run_deterministic_gates()
+    platform = "windows" if sys.platform == "win32" else "macos"
+    runtime_names = ("media-toolchain", "motion-video-worker")
+    staging = prepare_video_runtime(
+        platform=platform,
+        only=runtime_names,
+    )
+    installed = install_video_runtime(
+        staging=staging,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=runtime_names,
+        platform=platform,
+    )
+    suffix = ".exe" if os.name == "nt" else ""
+    toolchain = installed["media-toolchain"]
+    ffmpeg = (toolchain / f"bin/ffmpeg{suffix}").resolve(strict=True)
+    ffprobe = (toolchain / f"bin/ffprobe{suffix}").resolve(strict=True)
+    _run_desktop_acceptance(evidence_video)
+    _inspect_video(evidence_video, evidence, ffmpeg, ffprobe)
     print(
         "BM-08 native App acceptance passed; visual evidence:",
         evidence / "contact-sheet.png",

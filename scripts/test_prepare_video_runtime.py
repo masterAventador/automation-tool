@@ -53,9 +53,7 @@ def stamped_motion_worker(staging: Path) -> Path:
             {
                 "version": STAMP_VERSION,
                 "name": "motion-video-worker",
-                "fingerprint": contract_fingerprint(
-                    [MOTION_WORKER_CONTRACT, MOTION_WORKER_SOURCE]
-                ),
+                "fingerprint": contract_fingerprint([MOTION_WORKER_CONTRACT, MOTION_WORKER_SOURCE]),
             }
         )
         + "\n",
@@ -137,21 +135,55 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 second.returncode,
                 f"a repeat install must succeed:\n{second.stdout}{second.stderr}",
             )
-            self.assertFalse(
-                stale.exists(), "a repeat install must not merge into the old tree"
+            self.assertFalse(stale.exists(), "a repeat install must not merge into the old tree")
+            self.assertTrue(resources.joinpath(*INSTALLED, "runtime", "node").is_file())
+
+    def test_install_replaces_a_linked_resource_root_without_touching_its_target(
+        self,
+    ) -> None:
+        """A worktree must never follow an old resource link into main."""
+        with TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory:
+            base = Path(directory)
+            staging = base / "staging"
+            staging.mkdir()
+            stamped_motion_worker(staging)
+            resources = base / "resources"
+            resources.mkdir()
+            external = base / "main-checkout-motion-worker"
+            external.mkdir()
+            sentinel = external / "belongs-to-main"
+            sentinel.write_text("leave me alone\n", encoding="utf-8")
+            (resources / "motion-video-worker").symlink_to(
+                external,
+                target_is_directory=True,
             )
-            self.assertTrue(
-                resources.joinpath(*INSTALLED, "runtime", "node").is_file()
+
+            completed = run_prepare(
+                "--root",
+                str(staging),
+                "--only",
+                "motion-video-worker",
+                "--install-into",
+                str(resources),
+            )
+
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            installed_root = resources / "motion-video-worker"
+            self.assertFalse(
+                installed_root.is_symlink(),
+                "the worktree resource root must be independently materialized",
+            )
+            self.assertTrue(installed_root.joinpath("package/runtime/node").is_file())
+            self.assertEqual(
+                "leave me alone\n",
+                sentinel.read_text(encoding="utf-8"),
+                "installing in a worktree followed the link and modified main",
             )
 
     def test_an_unknown_resource_name_is_refused(self) -> None:
         with TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory:
-            completed = run_prepare(
-                "--only", "no-such-resource", "--install-into", directory
-            )
-            self.assertNotEqual(
-                0, completed.returncode, "a typo must not silently install nothing"
-            )
+            completed = run_prepare("--only", "no-such-resource", "--install-into", directory)
+            self.assertNotEqual(0, completed.returncode, "a typo must not silently install nothing")
             self.assertIn("no-such-resource", completed.stdout + completed.stderr)
 
 

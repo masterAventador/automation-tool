@@ -13,8 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from desktop_e2e_prerequisites import video_studio_startup_harness  # noqa: E402
-from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from desktop_e2e_prerequisites import video_studio_startup_harness
+from release_assembly import VIDEO_RUNTIME_RESOURCES
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -89,6 +89,14 @@ class VideoRuntimeStagingRejected(RuntimeError):
     """An acceptance App would start without the runtime it needs."""
 
 
+def _remove_resource_tree(path: Path) -> None:
+    """Remove one worktree resource without following a link into another tree."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def stage_video_runtime(*, staging: Path, resource_root: Path) -> dict[str, Path]:
     """Install the prepared video runtime where every build reads it.
 
@@ -111,14 +119,14 @@ def stage_video_runtime(*, staging: Path, resource_root: Path) -> dict[str, Path
                 )
             destination = resource_root.joinpath(*resource.installed_parts)
             top = resource_root / resource.installed_parts[0]
-            shutil.rmtree(top, ignore_errors=True)
+            _remove_resource_tree(top)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(source, destination, symlinks=True)
             written.append(top)
         return require_staged_video_runtime(resource_root=resource_root)
     except BaseException:
         for path in written:
-            shutil.rmtree(path, ignore_errors=True)
+            _remove_resource_tree(path)
         raise
 
 

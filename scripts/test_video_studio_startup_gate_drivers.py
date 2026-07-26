@@ -529,6 +529,7 @@ def _exercise_lifecycle(
             "PATH": os.environ.get("PATH", ""),
             "TAURI_WEBDRIVER_PORT": "4444",
             "AUTOMATION_TOOL_BM08_BROWSER": "/isolated/browser",
+            "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO": "/isolated/evidence.mp4",
             "AUTOMATION_TOOL_IM05_WORKER": "/isolated/worker",
             "AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID": "production",
             "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PRIVATE_KEY": "production-secret",
@@ -548,7 +549,10 @@ def _exercise_lifecycle(
                     events.append("driver_body")
                     assert environment["TAURI_WEBDRIVER_PORT"] == "4444"
                     assert environment["AUTOMATION_TOOL_IM05_WORKER"] == ("/isolated/worker")
-                    assert environment["AUTOMATION_TOOL_BM08_BROWSER"] == ("/isolated/browser")
+                    assert environment["AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO"] == (
+                        "/isolated/evidence.mp4"
+                    )
+                    assert "AUTOMATION_TOOL_BM08_BROWSER" not in environment
                     assert "AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID" not in environment
                     assert "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PRIVATE_KEY" not in environment
                     assert "AUTOMATION_TOOL_ACCOUNT_PASSWORD_PEPPER" not in environment
@@ -567,6 +571,7 @@ def _exercise_lifecycle(
             "PATH": os.environ.get("PATH", ""),
             "TAURI_WEBDRIVER_PORT": "4444",
             "AUTOMATION_TOOL_BM08_BROWSER": "/isolated/browser",
+            "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO": "/isolated/evidence.mp4",
             "AUTOMATION_TOOL_IM05_WORKER": "/isolated/worker",
             "AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID": "production",
             "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PRIVATE_KEY": "production-secret",

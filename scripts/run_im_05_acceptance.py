@@ -19,6 +19,9 @@ from build_material_video_worker_candidate import (
     build_candidate,
 )
 from desktop_e2e_prerequisites import video_studio_startup_harness
+from prepare_video_runtime import install as install_video_runtime
+from prepare_video_runtime import prepare as prepare_video_runtime
+from run_vf_06_acceptance import DEBUG_APP_RESOURCE_ROOT
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -142,8 +145,22 @@ def require_real_frozen_webui(candidate: Path) -> None:
 
 
 def require_normal_app_entry(candidate: Path) -> None:
-    executable = (candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)).resolve(
-        strict=True
+    platform = "windows" if sys.platform == "win32" else "macos"
+    media_staging = prepare_video_runtime(
+        platform=platform,
+        only=("media-toolchain",),
+    )
+    install_video_runtime(
+        staging=media_staging,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=("media-toolchain",),
+        platform=platform,
+    )
+    install_video_runtime(
+        staging=candidate.parent,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=("material-video-worker",),
+        platform=platform,
     )
     private_app_data = app_data_directory()
     if private_app_data.exists():
@@ -152,7 +169,6 @@ def require_normal_app_entry(candidate: Path) -> None:
     require_port_closed(port)
     environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
-    environment["AUTOMATION_TOOL_IM05_WORKER"] = str(executable)
     try:
         with video_studio_startup_harness(
             private_app_data,
@@ -198,7 +214,7 @@ def require_evidence() -> None:
     evidence = (ROOT / "docs/development/IM-05.md").read_text(encoding="utf-8")
     for marker in (
         "# IM-05 完成证据",
-        "状态：🔍 待验收",
+        "状态：🔍 待验收",  # noqa: RUF001 - exact evidence heading
         "## RED",
         "## GREEN",
         "## 正常用户路径验收",

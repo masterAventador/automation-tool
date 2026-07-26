@@ -48,9 +48,7 @@ from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
 ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MEDIA_TOOLCHAIN_CONTRACT = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
-MATERIAL_WORKER_CONTRACT = (
-    ROOT / "contracts/quality/material-video-worker-package.v1.json"
-)
+MATERIAL_WORKER_CONTRACT = ROOT / "contracts/quality/material-video-worker-package.v1.json"
 MEDIA_TOOLCHAIN_BUILDER = ROOT / "scripts/build_video_media_toolchain.sh"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
 
@@ -92,9 +90,7 @@ def _build_media_toolchain(destination: Path, *, platform: str) -> None:
     )
     if completed.returncode != 0:
         tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-8:]
-        raise VideoRuntimeUnavailable(
-            "the media toolchain build failed:\n" + "\n".join(tail)
-        )
+        raise VideoRuntimeUnavailable("the media toolchain build failed:\n" + "\n".join(tail))
 
 
 def _build_motion_worker(destination: Path) -> None:
@@ -150,9 +146,7 @@ def prepare(
         ensure_cached(
             name="media-toolchain",
             contracts=[MEDIA_TOOLCHAIN_CONTRACT, MEDIA_TOOLCHAIN_BUILDER],
-            build=lambda destination: _build_media_toolchain(
-                destination, platform=resolved
-            ),
+            build=lambda destination: _build_media_toolchain(destination, platform=resolved),
             root=staging,
         )
     if "motion-video-worker" in wanted:
@@ -205,6 +199,11 @@ def install(
     resolved = platform or host_platform()
     wanted = set(selected_resources(only))
     installed: dict[str, Path] = {}
+    resource_root = Path(resource_root)
+    if resource_root.is_symlink():
+        raise VideoRuntimeUnavailable(
+            f"the resource root itself may not be a symlink: {resource_root}"
+        )
     for resource in VIDEO_RUNTIME_RESOURCES:
         if resource.staging_name not in wanted:
             continue
@@ -213,7 +212,10 @@ def install(
             raise VideoRuntimeUnavailable(
                 f"the staging tree carries no {resource.staging_name} at {source}"
             )
-        destination = Path(resource_root).joinpath(*resource.installed_parts)
+        top = resource_root / resource.installed_parts[0]
+        if top.is_symlink() or top.is_file():
+            top.unlink()
+        destination = resource_root.joinpath(*resource.installed_parts)
         if destination.is_symlink() or destination.is_file():
             destination.unlink()
         elif destination.is_dir():
@@ -241,10 +243,7 @@ def main() -> int:
         "--only",
         action="append",
         metavar="RESOURCE",
-        help=(
-            "restrict to one resource; repeatable. One of: "
-            + ", ".join(RESOURCE_NAMES)
-        ),
+        help=("restrict to one resource; repeatable. One of: " + ", ".join(RESOURCE_NAMES)),
     )
     parser.add_argument(
         "--install-into",
@@ -257,9 +256,7 @@ def main() -> int:
         ),
     )
     arguments = parser.parse_args()
-    staging = prepare(
-        platform=arguments.platform, root=arguments.root, only=arguments.only
-    )
+    staging = prepare(platform=arguments.platform, root=arguments.root, only=arguments.only)
     if arguments.install_into is not None:
         installed = install(
             staging=staging,
