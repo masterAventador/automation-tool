@@ -420,7 +420,9 @@ describe("video studio shell", () => {
       "增长看得见",
     );
     await user.click(screen.getByRole("button", { name: "播放预览" }));
-    expect(await screen.findByText("第 2 段 / 3")).toBeVisible();
+    // 预览现在按草稿真正的每段时长走（默认 4 秒），不再是写死的 500ms，
+    // 所以等待窗口必须比一段长；默认的 1000ms 只够旧的假节奏。
+    expect(await screen.findByText("第 2 段 / 3", {}, { timeout: 8000 })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
     expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
@@ -911,9 +913,14 @@ describe("video studio shell", () => {
           1000;
 
       expect(screen.getByText(/已用 21 秒/u)).toBeVisible();
+      // 上限只能写成「到点会停」，不能写成「预计还需」：实测 12 秒的片子渲染
+      // 约 10 秒，而契约上限是 174 秒——那是沙箱的卡死保护，不是预期耗时。
       expect(
-        screen.getByText(new RegExp(`最长 ${motionSpokenDuration(ceiling)}`, "u")),
+        screen.getByText(
+          new RegExp(`超过 ${motionSpokenDuration(ceiling)} 会自动停下`, "u"),
+        ),
       ).toBeVisible();
+      expect(screen.queryByText(/预计还需|预计剩余/u)).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -982,5 +989,63 @@ describe("video studio shell", () => {
         name: "播放用蓝色商务风做一段本周销售增长说明",
       }),
     ).toBeVisible();
+  });
+
+  /**
+   * 预览按 500ms 一段放，同一屏上方却写着「每段 4 秒」。
+   *
+   * 这是用户点名的「默认一个片段就 1 秒钟」的镜像：数据层的默认值早就从 1 秒
+   * 改成契约里的 4 秒了，预览播放器的节奏还是写死的 500ms。用户设了 4 秒，
+   * 它按 0.5 秒放，三段 1.5 秒就完了——预览预览的是另一条片子。
+   *
+   * 节奏必须跟着草稿走，而草稿的默认值来自契约，所以用例也从契约取这个数。
+   */
+  it("plays the preview at the beat length the same screen promises", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<VideoStudio gateway={gateway()} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.click(screen.getByRole("tab", { name: "制作设置" }));
+      await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+      await user.click(screen.getByRole("tab", { name: "预览" }));
+
+      const preview = screen.getByRole("region", { name: "品牌动效播放预览" });
+      await user.click(screen.getByRole("button", { name: "播放预览" }));
+
+      const beatMillis = durationContract.secondsPerBeatDefault * 1000;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(beatMillis - 500);
+      });
+      expect(preview).toHaveTextContent("第 1 段 / 3");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(preview).toHaveTextContent("第 2 段 / 3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 全产品 13 个禁用控件，13 个都没有说明——`title` 和 `aria-describedby` 全是 null。
+   * 「新建视频」页上的「打开完整制作界面」是演示路径上第一个撞到的。
+   *
+   * 注意不能用 `title` 修：浏览器对 `disabled` 的按钮不触发原生 tooltip，
+   * 挂上去等于没挂。产品自己已经有一处做对了——预览页「提交本机渲染」禁用时
+   * 旁边有一条写清楚缺什么的旁注——照着那个来。
+   */
+  it("explains every disabled button on the page instead of just greying it", () => {
+    render(<VideoStudio gateway={gateway()} />);
+
+    for (const button of screen.getAllByRole("button")) {
+      if (!(button as HTMLButtonElement).disabled) continue;
+      expect(
+        button,
+        `禁用按钮「${button.textContent}」没有任何说明`,
+      ).toHaveAccessibleDescription();
+    }
   });
 });

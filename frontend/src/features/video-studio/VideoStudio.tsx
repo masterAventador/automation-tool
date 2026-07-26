@@ -100,14 +100,20 @@ interface OwnMotionJob {
  * needed instead: how long it has been going, and the point at which the render
  * sandbox itself would stop it. Both are facts rather than predictions; the
  * ceiling is computed from the shared duration contract, never written down.
+ *
+ * It is worded as the stop condition it is, never as "预计还需". Measured on
+ * 2026-07-26, a twelve second film renders in about ten seconds while its
+ * contract ceiling is 174 — the contract sizes the sandbox's stall guard, not
+ * the expected run. Printing that number as an estimate would invent a
+ * three minute wait out of a ten second one.
  */
 function motionJobTiming(own: OwnMotionJob | undefined, now: number): string | null {
   if (own === undefined) return null;
   const elapsed = Math.max(0, Math.floor((now - own.startedAt) / 1000));
   const ceiling = motionRenderCeilingSeconds(own.filmSeconds);
-  return `已用 ${motionSpokenDuration(elapsed)} · 本机渲染最长 ${motionSpokenDuration(
+  return `已用 ${motionSpokenDuration(elapsed)} · 渲染超过 ${motionSpokenDuration(
     ceiling,
-  )}，超过会自动停下`;
+  )} 会自动停下`;
 }
 
 interface MotionDraft {
@@ -351,6 +357,9 @@ const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
 
 const BRIEF_SUBMIT_FALLBACK = "一句话自动制作暂时无法提交，请稍后重试。";
 
+/** Ties the 打开完整制作界面 button to the note saying why it is greyed out. */
+const OPEN_STUDIO_HINT_ID = "video-studio-open-full-hint";
+
 function NewVideoPage({
   gateway,
   onOpened,
@@ -546,11 +555,23 @@ function NewVideoPage({
         ) : (
           <Alert type={openMessage.type} showIcon title={openMessage.text} />
         )}
-        <div>
+        {/*
+         * A greyed button that never says why.
+         *
+         * Note it cannot be fixed with `title`: browsers do not fire the native
+         * tooltip on a `disabled` button, so the attribute would be there and
+         * the user would still see nothing. A visible note carrying an id the
+         * button points at is the pattern this product already got right on
+         * 提交本机渲染 in the preview tab, and it works for a screen reader too.
+         */}
+        <Space orientation="vertical" size={4}>
           <Button
             type="primary"
             loading={opening}
             disabled={selectedMethod !== "material_montage_v1" || opening}
+            {...(selectedMethod === "material_montage_v1"
+              ? {}
+              : { "aria-describedby": OPEN_STUDIO_HINT_ID })}
             onClick={() => {
               setOpening(true);
               setOpenMessage(null);
@@ -572,7 +593,12 @@ function NewVideoPage({
           >
             打开完整制作界面
           </Button>
-        </div>
+          {selectedMethod === "material_montage_v1" ? null : (
+            <Typography.Text id={OPEN_STUDIO_HINT_ID} type="secondary">
+              这个界面只用于「智能素材成片」，先在上面选中它才能打开。
+            </Typography.Text>
+          )}
+        </Space>
       </Space>
     </Card>
   );
@@ -677,6 +703,18 @@ function MotionPreviewPage({
   const [activeBeat, setActiveBeat] = useState(0);
   const [playing, setPlaying] = useState(false);
   const lastBeat = draft.beats.length - 1;
+  /*
+   * Hold each beat for as long as the film will hold it.
+   *
+   * This was a hard-coded 500ms while the storyboard page one tab away wrote
+   * 「共 3 段 · 每段 4 秒 · 成片约 12 秒」, so the preview ran at eight times
+   * the speed of the thing it was previewing and three beats were over in a
+   * second and a half. It is the mirror of the retired three-second default:
+   * the data layer was fixed to read its length from the duration contract and
+   * the player was left behind. Watching a twelve second film take twelve
+   * seconds is the point of a preview.
+   */
+  const beatMillis = draft.secondsPerBeat * 1000;
   useEffect(() => {
     if (!playing) return;
     const timer = window.setTimeout(() => {
@@ -687,9 +725,9 @@ function MotionPreviewPage({
         }
         return current + 1;
       });
-    }, 500);
+    }, beatMillis);
     return () => window.clearTimeout(timer);
-  }, [activeBeat, lastBeat, playing]);
+  }, [activeBeat, beatMillis, lastBeat, playing]);
   const style = MOTION_STYLE_CATALOG.find((item) => item.id === draft.style.stylePresetId);
   const primary = draft.style.primaryColor || style?.preview.accent || "#1f4fd8";
   const secondary = draft.style.secondaryColor || style?.preview.paper || "#f4f1ea";
