@@ -23,6 +23,7 @@ does not cover it.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -149,25 +150,37 @@ class _VideoResource:
         )
 
 
-VIDEO_RUNTIME_RESOURCES: tuple[_VideoResource, ...] = (
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+# One declaration of what a distributable package must carry, shared with
+# `frontend/scripts/audit-production-package.mjs` and
+# `scripts/check_release_package_wiring.py`. Each gate used to know its own hand
+# copied subset of this list, which is how three video runtime resources reached
+# a user while every gate stayed green.
+RELEASE_RESOURCE_CONTRACT = (
+    REPOSITORY_ROOT / "contracts/quality/release-package-resources.v1.json"
+)
+
+
+def load_release_resources() -> tuple[dict[str, object], ...]:
+    """Return every resource a distributable package must carry, in order."""
+    document = json.loads(RELEASE_RESOURCE_CONTRACT.read_text(encoding="utf-8"))
+    resources = document.get("resources")
+    if not isinstance(resources, list) or not resources:
+        _reject("the release package resource contract declares no resources")
+    return tuple(resources)
+
+
+RELEASE_PACKAGE_RESOURCES: tuple[dict[str, object], ...] = load_release_resources()
+
+VIDEO_RUNTIME_RESOURCES: tuple[_VideoResource, ...] = tuple(
     _VideoResource(
-        staging_name="media-toolchain",
-        installed_parts=("media-toolchain",),
-        required_files=("bin/ffmpeg", "bin/ffprobe", "manifest.json"),
-        windows_executables=("bin/ffmpeg", "bin/ffprobe"),
-    ),
-    _VideoResource(
-        staging_name="motion-video-worker",
-        installed_parts=("motion-video-worker", "package"),
-        required_files=("runtime/node", "app/worker.mjs"),
-        windows_executables=("runtime/node",),
-    ),
-    _VideoResource(
-        staging_name="material-video-worker",
-        installed_parts=("material-video-worker", "package"),
-        required_files=("automation-tool-material-video-worker",),
-        windows_executables=("automation-tool-material-video-worker",),
-    ),
+        staging_name=str(resource["name"]),
+        installed_parts=tuple(resource["installedParts"]),
+        required_files=tuple(resource["requiredFiles"]),
+        windows_executables=tuple(resource["windowsExecutables"]),
+    )
+    for resource in RELEASE_PACKAGE_RESOURCES
+    if resource["category"] == "video"
 )
 
 
@@ -253,10 +266,13 @@ def install_video_runtime(
 
 
 __all__ = [
+    "RELEASE_PACKAGE_RESOURCES",
+    "RELEASE_RESOURCE_CONTRACT",
     "VIDEO_RUNTIME_RESOURCES",
     "ReleaseAssemblyRejected",
     "install_and_seal",
     "install_video_runtime",
+    "load_release_resources",
     "require_packaged_browser",
     "require_packaged_video_runtime",
     "resource_directory",

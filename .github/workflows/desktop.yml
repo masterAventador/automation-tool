@@ -18,6 +18,13 @@ on:
       - backend/tests/unit/executor/test_windows_candidate.py
       - backend/tests/unit/executor/test_process_cli.py
       - backend/tests/unit/executor/test_pyinstaller_bundle_contract.py
+      - scripts/build_release_package.py
+      - scripts/check_release_package_wiring.py
+      - scripts/release_assembly.py
+      - scripts/release_configuration.py
+      - scripts/prepare_video_runtime.py
+      - scripts/run_eb_16_acceptance.py
+      - scripts/run_eb_16_windows_acceptance.py
       - scripts/run_p9_01_acceptance.py
       - scripts/run_p9_02_acceptance.py
       - scripts/run_p9_04_acceptance.py
@@ -44,6 +51,13 @@ on:
       - backend/tests/unit/executor/test_windows_candidate.py
       - backend/tests/unit/executor/test_process_cli.py
       - backend/tests/unit/executor/test_pyinstaller_bundle_contract.py
+      - scripts/build_release_package.py
+      - scripts/check_release_package_wiring.py
+      - scripts/release_assembly.py
+      - scripts/release_configuration.py
+      - scripts/prepare_video_runtime.py
+      - scripts/run_eb_16_acceptance.py
+      - scripts/run_eb_16_windows_acceptance.py
       - scripts/run_p9_01_acceptance.py
       - scripts/run_p9_02_acceptance.py
       - scripts/run_p9_04_acceptance.py
@@ -67,6 +81,38 @@ env:
   CI: true
 
 jobs:
+  release-wiring:
+    # The one path that produces a complete package cannot run here: a macOS
+    # release needs a 340 MB Chromium archive, a PyInstaller Executor, an ffmpeg
+    # build and two video Workers. What CI can decide is whether that path is
+    # still wired to ship every declared resource, and whether the package audit
+    # would refuse one that is not — both of which were false on 2026-07-26,
+    # when three video runtime resources reached a user with every gate green.
+    name: Release resource wiring and package audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: 3.12.13
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.0.0
+      - name: Every declared release resource is owned, assembled and gated
+        run: python3 scripts/check_release_package_wiring.py
+      - name: The wiring gate rejects a release path that drops a resource
+        run: python3 scripts/check_release_package_wiring.py --self-test
+      - name: The assembler refuses a bundle without the browser or video runtime
+        run: python3 scripts/test_release_assembly.py
+      - name: The deterministic package gate
+        run: python3 scripts/test_embedded_browser_package.py
+      - name: The package audit refuses an empty or incomplete resource declaration
+        run: >-
+          node --test
+          frontend/tests/production-package-audit.test.mjs
+          frontend/tests/release-package-gate.test.mjs
+
   executor-bundle:
     name: ${{ matrix.runner }} / Executor onedir smoke
     runs-on: ${{ matrix.runner }}

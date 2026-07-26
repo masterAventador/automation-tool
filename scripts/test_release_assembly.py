@@ -16,6 +16,7 @@ path, and reaching a distributable artifact has to require a verified browser.
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import tempfile
@@ -36,6 +37,8 @@ from build_embedded_chromium_staging import (  # noqa: E402
 )
 from check_embedded_browser_package import browser_resource_root  # noqa: E402
 from release_assembly import (  # noqa: E402
+    RELEASE_RESOURCE_CONTRACT,
+    VIDEO_RUNTIME_RESOURCES,
     ReleaseAssemblyRejected,
     install_and_seal,
     install_video_runtime,
@@ -152,26 +155,204 @@ class ReleaseAssemblyTests(unittest.TestCase):
             )
 
 
-class AssemblerIsTheOnlyPathTests(unittest.TestCase):
-    """The acceptance script must not keep a private copy of the assembly."""
+# The two paths that can produce a distributable artifact. The macOS one is a
+# command in its own right; the Windows one still lives inside its acceptance
+# script, which is recorded here rather than pretended away.
+RELEASE_PATHS = ("build_release_package.py", "run_eb_16_windows_acceptance.py")
 
-    def test_the_acceptance_script_delegates_to_the_shared_assembler(self) -> None:
+
+class AssemblerIsTheOnlyPathTests(unittest.TestCase):
+    """The assembly and its gates must sit on the path that ships, not beside it."""
+
+    def test_the_acceptance_script_delegates_to_the_release_command(self) -> None:
         source = (ROOT / "scripts/run_eb_16_acceptance.py").read_text(encoding="utf-8")
-        self.assertIn("from release_assembly import", source)
+        # The acceptance script used to own the only copy of these steps, which
+        # meant producing a shippable artifact required running an acceptance
+        # suite and no workflow ran one. It now wraps the release command.
+        self.assertIn("from build_release_package import", source)
         # If the acceptance script still called `install_distribution` itself,
         # the verified path and the shipped path could drift apart again.
         self.assertNotIn("install_distribution(", source)
 
-    def test_the_release_path_installs_and_gates_the_video_runtime(self) -> None:
-        # Writing the assembler without wiring it into the one path that
-        # produces a shipped package is exactly how the browser gap survived
-        # its first fix, and how `TauriPublishWorkspaceGateway` shipped
-        # unreachable. The gate has to be on the path, not merely available.
-        for script in ("run_eb_16_acceptance.py", "run_eb_16_windows_acceptance.py"):
+    def test_every_release_path_installs_and_gates_all_five_resources(self) -> None:
+        # Writing the assembler without wiring it into the paths that produce a
+        # shipped package is exactly how the browser gap survived its first fix,
+        # and how `TauriPublishWorkspaceGateway` shipped unreachable. The gate
+        # has to be on the path, not merely available.
+        for script in RELEASE_PATHS:
             with self.subTest(script=script):
                 source = (ROOT / "scripts" / script).read_text(encoding="utf-8")
-                self.assertIn("install_video_runtime(", source)
-                self.assertIn("require_packaged_video_runtime(", source)
+                for call in (
+                    "install_video_runtime(",
+                    "require_packaged_video_runtime(",
+                    "install_and_seal(",
+                    "require_packaged_browser(",
+                ):
+                    self.assertIn(call, source)
+
+    def test_no_release_path_writes_bundle_resources_by_hand(self) -> None:
+        # A hand-written `bundle.resources` is how a resource silently stops
+        # being shipped: nothing relates what the configuration declares to what
+        # the product resolves at runtime. Both paths go through the writer that
+        # derives that list from the contract and refuses an incomplete payload.
+        for script in RELEASE_PATHS:
+            with self.subTest(script=script):
+                source = (ROOT / "scripts" / script).read_text(encoding="utf-8")
+                self.assertNotIn('configuration["bundle"]["resources"]', source)
+
+    def test_every_release_path_shows_the_audit_the_package(self) -> None:
+        # `audit-production-package.mjs` can only assert what a package carries
+        # when it is given the package. Handed a bare binary it audits the
+        # binary alone, which is how an empty `bundle.resources` passed.
+        for script in (*RELEASE_PATHS, "run_eb_16_acceptance.py"):
+            with self.subTest(script=script):
+                source = (ROOT / "scripts" / script).read_text(encoding="utf-8")
+                self.assertIn('"--package-root"', source)
+
+
+class SingleResourceDeclarationTests(unittest.TestCase):
+    """The five release resources are declared once, not once per gate.
+
+    Three video runtime resources shipped absent on 2026-07-26 while every gate
+    stayed green. Each gate that could have caught it knew a different, hand
+    copied subset of "what a package must carry", so adding a resource in one
+    place left the others silently satisfied. The inventory therefore lives in
+    one contract and every gate derives from it.
+    """
+
+    def setUp(self) -> None:
+        self.contract = json.loads(
+            RELEASE_RESOURCE_CONTRACT.read_text(encoding="utf-8")
+        )
+
+    def test_the_video_runtime_resources_are_derived_from_the_contract(self) -> None:
+        declared = [
+            resource
+            for resource in self.contract["resources"]
+            if resource["category"] == "video"
+        ]
+        self.assertEqual(
+            [
+                (
+                    resource.staging_name,
+                    resource.installed_parts,
+                    resource.required_files,
+                    resource.windows_executables,
+                )
+                for resource in VIDEO_RUNTIME_RESOURCES
+            ],
+            [
+                (
+                    resource["name"],
+                    tuple(resource["installedParts"]),
+                    tuple(resource["requiredFiles"]),
+                    tuple(resource["windowsExecutables"]),
+                )
+                for resource in declared
+            ],
+        )
+
+    def test_the_assembler_does_not_restate_the_inventory(self) -> None:
+        source = (ROOT / "scripts/release_assembly.py").read_text(encoding="utf-8")
+        for literal in (
+            "media-toolchain",
+            "motion-video-worker",
+            "material-video-worker",
+            "bin/ffmpeg",
+            "runtime/node",
+            "automation-tool-material-video-worker",
+        ):
+            with self.subTest(literal=literal):
+                self.assertNotIn(f'"{literal}"', source)
+
+    def test_every_declared_resource_names_where_the_resolver_reads_it(self) -> None:
+        names = [resource["name"] for resource in self.contract["resources"]]
+        self.assertEqual(
+            names,
+            [
+                "embedded-browser",
+                "local-executor",
+                "media-toolchain",
+                "motion-video-worker",
+                "material-video-worker",
+            ],
+        )
+        for resource in self.contract["resources"]:
+            with self.subTest(resource=resource["name"]):
+                self.assertTrue(resource["installedParts"])
+                self.assertIn("macos", resource["bundlerDeclared"])
+                self.assertIn("windows", resource["bundlerDeclared"])
+
+
+class ReleaseConfigurationTests(unittest.TestCase):
+    """The Tauri configuration a release builds with must name every resource
+    the bundler is responsible for, and only those.
+
+    Written by hand, this list drifted: the macOS release configuration named
+    the Executor and nothing else, which is correct, while nothing anywhere
+    asserted that the four resources it leaves out are installed by the
+    assembler instead. The writer now derives both halves from the contract.
+    """
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp(prefix="release-configuration-"))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.executor = self.base / "build/executor/automation-tool-executor"
+        self.executor.mkdir(parents=True)
+        self.payload = self.base / "build/payload"
+        self.payload.mkdir(parents=True)
+
+    def test_the_macos_configuration_declares_only_the_executor(self) -> None:
+        from release_configuration import write_macos_release_configuration
+
+        written = write_macos_release_configuration(
+            directory=self.base, executor=self.executor, name="tauri.test.json"
+        )
+        resources = json.loads(written.read_text(encoding="utf-8"))["bundle"][
+            "resources"
+        ]
+        self.assertEqual(sorted(resources.values()), ["local-executor/package/"])
+        self.assertEqual(
+            json.loads(written.read_text(encoding="utf-8"))["bundle"]["macOS"],
+            {"signingIdentity": "-"},
+        )
+
+    def test_the_windows_configuration_declares_every_bundled_resource(self) -> None:
+        from release_configuration import write_windows_release_configuration
+
+        written = write_windows_release_configuration(
+            directory=self.base,
+            executor=self.executor,
+            payload=self.payload,
+            name="tauri.test-windows.json",
+        )
+        resources = json.loads(written.read_text(encoding="utf-8"))["bundle"][
+            "resources"
+        ]
+        self.assertEqual(
+            sorted(resources.values()),
+            [
+                "embedded-browser/",
+                "local-executor/package/",
+                "material-video-worker/package/",
+                "media-toolchain/",
+                "motion-video-worker/package/",
+            ],
+        )
+
+    def test_a_missing_bundler_source_is_refused_rather_than_dropped(self) -> None:
+        from release_configuration import (
+            ReleaseConfigurationRejected,
+            write_release_configuration,
+        )
+
+        with self.assertRaises(ReleaseConfigurationRejected):
+            write_release_configuration(
+                directory=self.base,
+                platform="windows",
+                sources={"local-executor": self.executor},
+                name="tauri.incomplete.json",
+            )
 
 
 def _write_video_runtime(root: Path) -> None:

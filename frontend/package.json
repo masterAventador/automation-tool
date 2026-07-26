@@ -10,6 +10,8 @@
   },
   "scripts": {
     "audit:production-package": "node scripts/audit-production-package.mjs",
+    "release:package": "uv run --project ../backend --locked python ../scripts/build_release_package.py",
+    "check:release-wiring": "python3 ../scripts/check_release_package_wiring.py && python3 ../scripts/check_release_package_wiring.py --self-test",
     "build:customer-demo-assets": "tsc -b && vite build --mode customer-demo",
     "build:control-plane-e2e-assets": "tsc -b && vite build --mode control-plane-e2e",
     "build:browser-settings-e2e-assets": "tsc -b && vite build --mode browser-settings-e2e",

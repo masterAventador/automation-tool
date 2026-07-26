@@ -1,0 +1,57 @@
+{
+  "$comment": "The resource trees a distributable package must carry. Single source: scripts/release_assembly.py derives VIDEO_RUNTIME_RESOURCES from the video entries, frontend/scripts/audit-production-package.mjs derives its required-resource assertion from all of them, and scripts/check_release_package_wiring.py derives the release wiring gate from the same file. Adding a sixth resource here is what makes every one of those gates start demanding it.",
+  "version": 1,
+  "resourceRoot": {
+    "macos": ["Contents", "Resources"],
+    "windows": []
+  },
+  "resources": [
+    {
+      "name": "embedded-browser",
+      "category": "browser",
+      "installedParts": ["embedded-browser"],
+      "requiredFiles": [],
+      "windowsExecutables": [],
+      "bundlerDeclared": { "macos": false, "windows": true },
+      "$comment": "macOS: the bundler follows symlinks and destroys the Chrome for Testing framework, so this tree is installed after the bundle is built by release_assembly.install_and_seal. Windows has no symlinks and an NSIS installer cannot be reopened, so it is declared and copied by the bundler instead. Per-file integrity is proven against the EB-05 manifest by release_assembly.require_packaged_browser and scripts/check_embedded_browser_package.py; this contract only fixes where it must land.",
+      "verifiedBy": "check_embedded_browser_package.py"
+    },
+    {
+      "name": "local-executor",
+      "category": "executor",
+      "installedParts": ["local-executor", "package"],
+      "requiredFiles": [],
+      "windowsExecutables": [],
+      "bundlerDeclared": { "macos": true, "windows": true },
+      "$comment": "The only resource the macOS bundler ships, and the reason an empty bundle.resources must never pass. Its inner inventory and manifest signature are proven by frontend/scripts/audit-release-bundle.mjs and the executor package manifest schema.",
+      "verifiedBy": "audit-release-bundle.mjs"
+    },
+    {
+      "name": "media-toolchain",
+      "category": "video",
+      "installedParts": ["media-toolchain"],
+      "requiredFiles": ["bin/ffmpeg", "bin/ffprobe", "manifest.json"],
+      "windowsExecutables": ["bin/ffmpeg", "bin/ffprobe"],
+      "bundlerDeclared": { "macos": false, "windows": true },
+      "verifiedBy": "release_assembly.require_packaged_video_runtime"
+    },
+    {
+      "name": "motion-video-worker",
+      "category": "video",
+      "installedParts": ["motion-video-worker", "package"],
+      "requiredFiles": ["runtime/node", "app/worker.mjs"],
+      "windowsExecutables": ["runtime/node"],
+      "bundlerDeclared": { "macos": false, "windows": true },
+      "verifiedBy": "release_assembly.require_packaged_video_runtime"
+    },
+    {
+      "name": "material-video-worker",
+      "category": "video",
+      "installedParts": ["material-video-worker", "package"],
+      "requiredFiles": ["automation-tool-material-video-worker"],
+      "windowsExecutables": ["automation-tool-material-video-worker"],
+      "bundlerDeclared": { "macos": false, "windows": true },
+      "verifiedBy": "release_assembly.require_packaged_video_runtime"
+    }
+  ]
+}

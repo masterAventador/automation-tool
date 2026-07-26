@@ -41,24 +41,22 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 sys.path.insert(0, str(BACKEND_ROOT / "src"))
 
-from build_embedded_browser_distribution import (  # noqa: E402
-    build_distribution_manifest,
-)
-from build_embedded_chromium_staging import (  # noqa: E402
-    build_staging,
-    load_staging_contract,
-    sha256_file,
-)
 from check_embedded_browser_package import (  # noqa: E402
     PackageAuditReport,
     audit_embedded_browser_package,
     browser_resource_root,
 )
-from release_assembly import (  # noqa: E402
-    install_and_seal,
-    install_video_runtime,
-    require_packaged_browser,
-    require_packaged_video_runtime,
+from build_release_package import (  # noqa: E402
+    DEFAULT_ARCHIVES,
+    ReleaseFailed,
+    build_executor_candidate,
+    build_release_package,
+    create_disk_image,
+    install_runtime_resources_and_sign,
+    stage_browser_distribution,
+)
+from release_configuration import (  # noqa: E402
+    write_macos_release_configuration,
 )
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from production_assets import (  # noqa: E402
@@ -69,42 +67,16 @@ from production_assets import (  # noqa: E402
 from run_p9_03_acceptance import (  # noqa: E402
     APP_IDENTIFIER,
     BASE_TAURI_CONFIG,
-    CANDIDATE_TAURI_CONFIG,
     CARGO_MANIFEST,
     EXECUTOR_RESOURCE,
     app_binary,
-    executor_signing_material,
     one_directory,
     one_file,
-    pnpm_executable,
     release_environment,
     run_checked,
     verify_manifest_signature,
 )
 
-STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-_EB_03_CACHE = ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-
-
-def _first_existing(*candidates: Path) -> Path:
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
-
-
-DEFAULT_ARCHIVES = {
-    # The EB-03 archive cache lives in the primary checkout's .local; resolve
-    # it both from the primary checkout itself and from a wt/<task> worktree.
-    "macos-arm64": _first_existing(
-        REPOSITORY_ROOT / _EB_03_CACHE,
-        REPOSITORY_ROOT.parent.parent / _EB_03_CACHE,
-    ),
-    "macos-x86_64": _first_existing(
-        REPOSITORY_ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
-        REPOSITORY_ROOT.parent.parent / ".local/eb-mac-x64/chrome-mac-x64.zip",
-    ),
-}
 DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/eb-16/run"
 LAUNCH_ENVIRONMENT_FLAG = "AUTOMATION_TOOL_EB16_LAUNCH_VISIBLE_APP"
 LOCAL_CONTROL_PLANE_PORT = 8765
@@ -144,151 +116,16 @@ def run_deterministic_gate() -> None:
         raise AcceptanceFailed("deterministic package gate failed")
 
 
-def stage_browser_distribution(target_id: str, archive: Path, output: Path) -> None:
-    announce(f"Staging the digest-locked {target_id} Chromium from {archive.name}")
-    if not archive.is_file():
-        raise AcceptanceFailed(f"locked archive is not downloaded yet: {archive}")
-    contract = load_staging_contract(STAGING_CONTRACT)
-    build_staging(
-        contract=contract,
-        target_id=target_id,
-        archive_path=archive,
-        archive_sha256=sha256_file(archive),
-        output=output,
-    )
-    build_distribution_manifest(staging=output, target_id=target_id)
-
-
-def build_executor_candidate(
-    output: Path, architecture: str
-) -> tuple[Path, str, Any]:
-    from automation_tool.executor.macos_candidate import build_macos_executor_candidate
-    from automation_tool.executor.package_manifest import (
-        write_signed_executor_manifest,
-    )
-
-    announce("Building the real signed Local Executor candidate")
-    build_macos_executor_candidate(backend_root=BACKEND_ROOT, output_directory=output)
-    seed, public_key, private_key = executor_signing_material()
-    write_signed_executor_manifest(
-        bundle_directory=output,
-        executor_version="0.1.0",
-        build_id="eb-16-macos-release",
-        target_platform="macos",
-        target_architecture=architecture,
-        signing_private_key=seed,
-    )
-    return output, public_key, private_key
-
-
 def write_release_configuration(directory: Path, executor: Path) -> Path:
-    """Declare only the resources the Tauri bundler can copy safely.
+    """The release configuration this acceptance builds with.
 
-    The embedded browser is deliberately not declared here: the bundler
-    follows symlinks, which drops the Chrome for Testing framework links and
-    breaks its upstream signature. The release packager installs that tree
-    itself right after the bundle is produced.
+    Which resources the bundler may be trusted with is decided once, from
+    `contracts/quality/release-package-resources.v1.json`; only the file name is
+    local to this run, because `--skip-build` reads the same name back.
     """
-    configuration = json.loads(CANDIDATE_TAURI_CONFIG.read_text(encoding="utf-8"))
-    configuration["bundle"]["macOS"] = {"signingIdentity": "-"}
-    configuration["bundle"]["resources"] = {
-        f"{os.fspath(executor)}{os.sep}": f"{EXECUTOR_RESOURCE.as_posix()}/",
-    }
-    destination = directory / "tauri.eb-16.generated.json"
-    destination.write_text(
-        json.dumps(configuration, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
+    return write_macos_release_configuration(
+        directory=directory, executor=executor, name="tauri.eb-16.generated.json"
     )
-    return destination
-
-
-def build_release_package(
-    *, configuration: Path, environment: dict[str, str], target: Path
-) -> Path:
-    announce("Building one production-mode .app (no test features)")
-    bundle_root = target / "release/bundle"
-    if bundle_root.exists():
-        shutil.rmtree(bundle_root)
-    run_checked(
-        [
-            pnpm_executable(),
-            "exec",
-            "tauri",
-            "build",
-            "--bundles",
-            "app",
-            "--config",
-            os.fspath(configuration),
-            "--ci",
-        ],
-        environment=environment,
-    )
-    return one_directory(target / "release/bundle/macos", ".app")
-
-
-def install_runtime_resources_and_sign(
-    application: Path, staging: Path, target_id: str, video_runtime: Path
-) -> None:
-    """Run the shared release assembly step, the same one a release uses.
-
-    The acceptance script must not keep its own copy of this: when it did, the
-    verified path and the shipped path were different paths, and the shipped
-    one had no browser in it at all.
-
-    Ordering matters twice over. The video runtime is installed *before*
-    `install_and_seal`, because that call seals the bundle at the end and a
-    signature taken before a resource lands does not cover it. The browser is
-    installed last for the same reason it is installed here at all: the macOS
-    bundler destroys its symlinked framework, so it cannot be declared under
-    `bundle.resources` and has to arrive afterwards.
-    """
-    announce("Installing the video runtime resources into the built bundle")
-    installed = install_video_runtime(
-        application=application, staging=video_runtime, platform="macos"
-    )
-    announce(f"Video runtime installed: {sorted(installed)}")
-    announce("Installing the embedded browser, verifying it, then re-sealing")
-    install_and_seal(
-        application=application,
-        staging=staging,
-        target_id=target_id,
-        platform="macos",
-        seal=lambda bundle: run_checked(
-            ["codesign", "--force", "--sign", "-", os.fspath(bundle)]
-        ),
-    )
-
-
-def create_disk_image(application: Path, output: Path, target_id: str) -> Path:
-    # A bundle without a verified browser must not reach a distributable
-    # artifact; this is the gate the ordinary candidate build fails.
-    require_packaged_browser(
-        application=application, target_id=target_id, platform="macos"
-    )
-    # The same gate for the video runtime. Without it a package ships whose
-    # video features fail on the user's machine while every acceptance run
-    # stays green, which is exactly what happened.
-    require_packaged_video_runtime(application=application, platform="macos")
-    announce("Creating the release disk image from the final App bundle")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.unlink(missing_ok=True)
-    run_checked(
-        [
-            "hdiutil",
-            "create",
-            "-volname",
-            application.stem,
-            "-srcfolder",
-            os.fspath(application),
-            "-fs",
-            "HFS+",
-            "-format",
-            "UDZO",
-            "-quiet",
-            os.fspath(output),
-        ]
-    )
-    return output
 
 
 def audit_package_payload(application: Path, target_id: str) -> PackageAuditReport:
@@ -347,6 +184,13 @@ def audit_package_content(
             os.fspath(configuration),
             "--dist",
             os.fspath(audited_assets),
+            # Without this the audit only ever sees a binary, and every
+            # statement it makes about the resources a package carries is
+            # vacuous — which is how an empty `bundle.resources` passed.
+            "--package-root",
+            os.fspath(application),
+            "--package-platform",
+            "macos",
         ],
         environment=environment,
     )
@@ -902,7 +746,9 @@ def main() -> int:
         browser = build_directory / "embedded-browser"
         stage_browser_distribution(target_id, archive, browser)
         executor = build_directory / "executor" / "automation-tool-executor"
-        _, public_key, private_key = build_executor_candidate(executor, architecture)
+        _, public_key, private_key = build_executor_candidate(
+            executor, architecture, "eb-16-macos-release"
+        )
         (build_directory / "executor-verifying-key").write_text(
             public_key, encoding="utf-8"
         )
@@ -1030,6 +876,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except AcceptanceFailed as error:
+    except (AcceptanceFailed, ReleaseFailed) as error:
         print(f"EB-16 acceptance failed: {error}")
         raise SystemExit(1) from error

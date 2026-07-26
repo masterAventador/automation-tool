@@ -22,12 +22,50 @@ function assertActionsArePinned(workflow) {
   }
 }
 
+// Anything that would move a build off the runner. "release" used to be banned
+// as a bare word, which stopped being workable once CI started running the
+// read-only checks that guard the release path — those are named after it and
+// publish nothing. It is banned as an action or a command instead, which is the
+// property this guard was always protecting.
+const distributionMarkers = [
+  /\b(deploy|publish|upload-artifact)\b/i,
+  /uses:\s*\S*release\S*@/i,
+  /\bgh\s+release\b/i,
+  /\b(cargo|npm|pnpm)\s+publish\b/i,
+  /\brelease\s+(create|upload)\b/i,
+];
+
 function assertReadOnlyValidationWorkflow(workflow) {
   assert.match(workflow, /^permissions:\n {2}contents: read$/m);
   assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./);
-  assert.doesNotMatch(workflow, /\b(deploy|publish|release|upload-artifact)\b/i);
+  for (const marker of distributionMarkers) {
+    assert.doesNotMatch(workflow, marker);
+  }
   assert.doesNotMatch(workflow, /^\s+(contents|packages|id-token|pull-requests): write$/m);
 }
+
+test("the read-only workflow guard still refuses anything that would distribute a build", async () => {
+  const publishing = [
+    "      - uses: actions/upload-artifact@0000000000000000000000000000000000000000 # v4",
+    "      - uses: softprops/action-gh-release@0000000000000000000000000000000000000000 # v2",
+    "      - run: gh release create v1.0.0 package.dmg",
+    "      - run: npm publish",
+    "      - run: ./deploy-test-macos.sh",
+  ];
+  for (const step of publishing) {
+    assert.throws(
+      () => assertReadOnlyValidationWorkflow(`permissions:\n  contents: read\n${step}\n`),
+      undefined,
+      step,
+    );
+  }
+  // And it still accepts a workflow that only runs the read-only release gates.
+  assert.doesNotThrow(() =>
+    assertReadOnlyValidationWorkflow(
+      "permissions:\n  contents: read\n      - run: python3 scripts/check_release_package_wiring.py\n",
+    ),
+  );
+});
 
 test("quality CI separates Backend, Frontend, and Rust gates", async () => {
   const workflow = await readRepositoryFile(".github/workflows/quality.yml");

@@ -54,7 +54,6 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from check_embedded_browser_package import (  # noqa: E402
-    BROWSER_RESOURCE_NAME,
     PackageAuditReport,
     audit_embedded_browser_package,
     browser_resource_root,
@@ -74,11 +73,13 @@ from production_assets import (  # noqa: E402
     snapshot_production_assets,
 )
 from release_assembly import (  # noqa: E402
-    VIDEO_RUNTIME_RESOURCES,
     install_and_seal,
     install_video_runtime,
     require_packaged_browser,
     require_packaged_video_runtime,
+)
+from release_configuration import (  # noqa: E402
+    write_windows_release_configuration,
 )
 from run_p9_04_acceptance import (  # noqa: E402
     authenticode_facts,
@@ -184,14 +185,6 @@ def seal_windows_payload(payload: Path) -> None:
     announce(f"Payload assembled at {payload} (no Authenticode identity on this host)")
 
 
-def relative_to_tauri_root(path: Path) -> str:
-    """Tauri resolves resource sources against its own root, not the drive."""
-    relative = os.path.relpath(path, TAURI_ROOT).replace(os.sep, "/")
-    if os.path.isabs(relative) or ":" in relative:
-        raise AcceptanceFailed("resource source must be relative to the Tauri root")
-    return relative
-
-
 def write_release_configuration(directory: Path, executor: Path, payload: Path) -> Path:
     """Declare every resource tree the NSIS bundler ships.
 
@@ -200,30 +193,20 @@ def write_release_configuration(directory: Path, executor: Path, payload: Path) 
     cannot be opened after it is built. The trees named here have already been
     verified file-by-file by the release assembler.
 
-    The video runtime resources are declared from the same payload for the
-    same reason. Leaving them out is precisely the defect this wiring exists
-    to prevent: the production video code resolves them from the installed
-    resource directory, and a package that omits them fails on the user's
-    machine while every acceptance run stays green.
+    Which trees those are comes from
+    `contracts/quality/release-package-resources.v1.json`, and the writer
+    refuses a payload that leaves one of them out. Leaving one out silently is
+    precisely the defect this wiring exists to prevent: the production video
+    code resolves them from the installed resource directory, and a package
+    that omits them fails on the user's machine while every acceptance run
+    stays green.
     """
-    configuration = json.loads(CANDIDATE_TAURI_CONFIG.read_text(encoding="utf-8"))
-    resources = {
-        f"{relative_to_tauri_root(executor)}/": f"{EXECUTOR_RESOURCE.as_posix()}/",
-        f"{relative_to_tauri_root(browser_resource_root(payload, 'windows'))}/": (
-            f"{BROWSER_RESOURCE_NAME}/"
-        ),
-    }
-    for resource in VIDEO_RUNTIME_RESOURCES:
-        installed = payload.joinpath(*resource.installed_parts)
-        destination = "/".join(resource.installed_parts)
-        resources[f"{relative_to_tauri_root(installed)}/"] = f"{destination}/"
-    configuration["bundle"]["resources"] = resources
-    destination = directory / "tauri.eb-16-windows.generated.json"
-    destination.write_text(
-        json.dumps(configuration, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
+    return write_windows_release_configuration(
+        directory=directory,
+        executor=executor,
+        payload=payload,
+        name="tauri.eb-16-windows.generated.json",
     )
-    return destination
 
 
 def effective_configuration(overlay: Path, directory: Path) -> Path:
@@ -381,6 +364,13 @@ def audit_package_content(
             os.fspath(configuration),
             "--dist",
             os.fspath(audited_assets),
+            # Without this the audit only ever sees a binary, and every
+            # statement it makes about the resources a package carries is
+            # vacuous — which is how an empty `bundle.resources` passed.
+            "--package-root",
+            os.fspath(root),
+            "--package-platform",
+            "windows",
         ],
         environment=environment,
     )

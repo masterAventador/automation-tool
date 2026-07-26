@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { lstat, readdir, readFile } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -8,6 +8,15 @@ import { assertProductionBoundaries } from "./check-production-boundaries.mjs";
 
 const execFileAsync = promisify(execFile);
 const frontendRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const repositoryRoot = dirname(frontendRoot);
+// One declaration of what a distributable package must carry, shared with
+// `scripts/release_assembly.py` (which derives its video runtime installer from
+// it) and `scripts/check_release_package_wiring.py`. Re-listing the resources
+// here would recreate exactly the drift this audit exists to catch.
+const releaseResourceContract = resolve(
+  repositoryRoot,
+  "contracts/quality/release-package-resources.v1.json",
+);
 const developmentVerifyingKey = "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg";
 const forbiddenBinaryMarkers = [
   "tauri-plugin-wdio",
@@ -130,6 +139,130 @@ function assertLeastPrivilegeTauriConfig(configuration) {
   }
 }
 
+async function loadReleaseResources() {
+  const contract = JSON.parse(await readFile(releaseResourceContract, "utf8"));
+  if (!Array.isArray(contract?.resources) || contract.resources.length === 0) {
+    throw new Error("Release package resource contract is unavailable or empty");
+  }
+  return contract;
+}
+
+function installedDestination(resource) {
+  return resource.installedParts.join("/");
+}
+
+// Tauri accepts either a list of sources (each copied to its own relative path)
+// or a source-to-destination map. Only the destination side can be compared
+// against where the production resolver reads, so both forms are reduced to it.
+function declaredResourceDestinations(resources) {
+  const declared = Array.isArray(resources)
+    ? resources
+    : resources !== null && typeof resources === "object"
+      ? Object.values(resources)
+      : [];
+  return new Set(
+    declared
+      .filter((value) => typeof value === "string")
+      .map((value) => value.replaceAll("\\", "/").replace(/^\.\//u, "").replace(/\/+$/u, "")),
+  );
+}
+
+function assertDeclaredReleaseResources(configuration, platform, contract) {
+  const declared = declaredResourceDestinations(configuration?.bundle?.resources);
+  for (const resource of contract.resources) {
+    if (resource.bundlerDeclared?.[platform] !== true) {
+      continue;
+    }
+    if (!declared.has(installedDestination(resource))) {
+      throw new Error(
+        `Production Tauri config does not declare a required release resource: ${resource.name}`,
+      );
+    }
+  }
+}
+
+function requiredFilesFor(resource, platform) {
+  if (platform !== "windows") {
+    return resource.requiredFiles;
+  }
+  const executables = new Set(resource.windowsExecutables ?? []);
+  return resource.requiredFiles.map((name) => (executables.has(name) ? `${name}.exe` : name));
+}
+
+async function assertPackagedReleaseResources(packageRoot, platform, contract) {
+  const root = resolve(packageRoot, ...(contract.resourceRoot?.[platform] ?? []));
+  for (const resource of contract.resources) {
+    const missing = () =>
+      new Error(
+        `Production package is missing a required release resource: ${resource.name}`,
+      );
+    const location = join(root, ...resource.installedParts);
+    let directory;
+    try {
+      directory = await lstat(location);
+    } catch {
+      throw missing();
+    }
+    if (!directory.isDirectory() || directory.isSymbolicLink()) {
+      throw missing();
+    }
+    const required = requiredFilesFor(resource, platform);
+    if (required.length === 0) {
+      // The resource carries its own stronger gate (`verifiedBy`), so the only
+      // thing asserted here is the one property that gate cannot state on a
+      // tree that never arrived: it is present and it is not an empty shell.
+      if ((await readdir(location)).length === 0) {
+        throw missing();
+      }
+      continue;
+    }
+    for (const name of required) {
+      let payload;
+      try {
+        payload = await lstat(join(location, ...name.split("/")));
+      } catch {
+        throw missing();
+      }
+      // A directory that merely exists is what the production resolver trips
+      // over: it finds the path and then fails to launch.
+      if (!payload.isFile() || payload.size === 0) {
+        throw missing();
+      }
+    }
+  }
+}
+
+// A macOS package is recognised from the audited artifact itself, never from a
+// caller-supplied switch: the binary of a bundled App always sits at
+// `<Name>.app/Contents/MacOS/<binary>`, and a `--no-bundle` release binary never
+// does. Windows has no such structural marker — its release payload is an
+// ordinary directory — so that target passes `--package-root` explicitly and
+// `scripts/check_release_package_wiring.py` is what refuses a release path that
+// leaves it out.
+function macOsBundleContaining(binaryPath) {
+  const parts = resolve(binaryPath).split(sep);
+  if (
+    parts.length >= 4 &&
+    parts.at(-2) === "MacOS" &&
+    parts.at(-3) === "Contents" &&
+    basename(parts.at(-4)).endsWith(".app")
+  ) {
+    return parts.slice(0, -3).join(sep);
+  }
+  return undefined;
+}
+
+function resolvePackageTarget({ binaryPath, packageRoot, packagePlatform }) {
+  if (packageRoot !== undefined) {
+    if (packagePlatform !== "macos" && packagePlatform !== "windows") {
+      throw new Error("Production package platform must be macos or windows");
+    }
+    return { platform: packagePlatform, root: resolve(packageRoot) };
+  }
+  const bundle = macOsBundleContaining(binaryPath);
+  return bundle === undefined ? undefined : { platform: "macos", root: bundle };
+}
+
 function stringsIn(value) {
   if (typeof value === "string") {
     return [value];
@@ -248,6 +381,8 @@ export async function auditProductionPackage({
   dependencyTree,
   distributionPath,
   expectedVerifyingKey,
+  packagePlatform,
+  packageRoot,
   tauriConfigPath,
 }) {
   const decodedExpectedKey = decodeExpectedVerifyingKey(expectedVerifyingKey);
@@ -261,6 +396,19 @@ export async function auditProductionPackage({
   assertProductionDependencyTree(dependencyTree);
   assertTestDependenciesRemainOptional(cargoManifest);
   assertLeastPrivilegeTauriConfig(tauriConfig);
+
+  // Until now everything this audit said about `bundle.resources` was a
+  // negative: it looked for forbidden strings, so an empty declaration and a
+  // complete one were indistinguishable and three video runtime resources
+  // shipped absent with every gate green. A package is now also asked the
+  // positive question — does it declare, and does it carry, each resource the
+  // production Rust code resolves out of its resource directory.
+  const target = resolvePackageTarget({ binaryPath, packagePlatform, packageRoot });
+  if (target !== undefined) {
+    const contract = await loadReleaseResources();
+    assertDeclaredReleaseResources(tauriConfig, target.platform, contract);
+    await assertPackagedReleaseResources(target.root, target.platform, contract);
+  }
 
   for (const marker of forbiddenBinaryMarkers) {
     if (containsBytes(binary, Buffer.from(marker))) {
@@ -334,6 +482,8 @@ async function runCommand() {
     dependencyTree,
     distributionPath: resolve(arguments_.get("--dist") ?? resolve(frontendRoot, "dist")),
     expectedVerifyingKey: process.env.AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY,
+    packagePlatform: arguments_.get("--package-platform"),
+    packageRoot: arguments_.get("--package-root"),
     tauriConfigPath: resolve(
       arguments_.get("--tauri-config") ?? resolve(frontendRoot, "src-tauri/tauri.conf.json"),
     ),
