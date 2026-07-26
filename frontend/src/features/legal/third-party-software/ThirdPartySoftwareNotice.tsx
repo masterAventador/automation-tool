@@ -90,6 +90,11 @@ export function ThirdPartySoftwareNotice() {
                   </Tag>
                 </Space>
                 <Typography.Paragraph>{component.role}</Typography.Paragraph>
+                {component.copyright === null ? null : (
+                  <Typography.Paragraph>
+                    版权声明：{component.copyright}
+                  </Typography.Paragraph>
+                )}
                 <Typography.Paragraph type="secondary">
                   {component.noticeHint}
                 </Typography.Paragraph>

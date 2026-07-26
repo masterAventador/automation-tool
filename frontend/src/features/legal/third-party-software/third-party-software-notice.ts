@@ -2,6 +2,7 @@ import projection from "../../../../../contracts/quality/third-party-notice-ui.v
 import apacheLicenseText from "./license-texts/apache-2.0.txt?raw";
 import gplLicenseText from "./license-texts/gpl-3.0.txt?raw";
 import mitLicenseText from "./license-texts/mit.txt?raw";
+import oflLicenseText from "./license-texts/ofl-1.1.txt?raw";
 
 /**
  * The disclosure model behind the one page that is allowed to name the upstream
@@ -65,6 +66,12 @@ export interface DistributedComponentRecord {
   readonly version: string;
   readonly license: string;
   readonly copyleft: boolean;
+  /**
+   * The copyright notice, for the licences whose own text names no holder.
+   * Derived from the shipped artifact itself by the projection builder, never
+   * retyped, and `null` wherever the licence text already carries it.
+   */
+  readonly copyright: string | null;
   readonly licenseTextId: string | null;
   readonly packagedNoticePath: string | null;
   readonly noticeChannelId: string | null;
@@ -165,13 +172,18 @@ export const LICENSE_TEXTS: Readonly<Record<string, string>> = {
   "mit": mitLicenseText.replace(/\r\n/gu, "\n"),
   "apache-2.0": apacheLicenseText.replace(/\r\n/gu, "\n"),
   "gpl-3.0": gplLicenseText.replace(/\r\n/gu, "\n"),
+  "ofl-1.1": oflLicenseText.replace(/\r\n/gu, "\n"),
 };
+
+/** The one licence here whose text names no copyright holder of its own. */
+const OPEN_FONT_LICENSE = "OFL-1.1";
 
 /** How each shipped licence text is announced to a user. */
 export const LICENSE_TEXT_LABELS: Readonly<Record<string, string>> = {
   "mit": "MIT",
   "apache-2.0": "Apache-2.0",
   "gpl-3.0": "GPL-3.0",
+  "ofl-1.1": "SIL Open Font License 1.1",
 };
 
 /**
@@ -208,6 +220,11 @@ export const DISTRIBUTED_COMPONENT_PRESENTATION: Readonly<
     role: "随安装包分发的 Python 运行环境，用来在本机跑「智能素材成片」的配音、字幕与合成服务。",
     noticeHint:
       "安装包内附带一份清单文件，逐条列出随包分发的每个 Python 组件、版本和它声明的许可证，路径见下。",
+  },
+  "subtitle-fonts": {
+    role: "随安装包分发的开源中文字体，「智能素材成片」用它来把字幕画到画面上；字体本身是完整字符集，不做删减。",
+    noticeHint:
+      "它按 SIL 开放字体许可证授权，许可证要求随字体附带版权声明与许可证正文：正文已收录在本页下方，安装包内也在字体旁边放了一份，路径见下。",
   },
 };
 
@@ -285,6 +302,17 @@ export function buildDistributedComponentNotices(
     }
     if (component.license.trim() === "") {
       throw new Error(`third-party notice: ${component.id} discloses no licence`);
+    }
+    // The SIL OFL text is a template that names no holder, so section 1 is only
+    // half satisfied by the licence text: the copyright notice has to travel
+    // with it, which is why the projection reads it out of the font binary.
+    if (
+      component.license === OPEN_FONT_LICENSE &&
+      (component.copyright ?? "").trim() === ""
+    ) {
+      throw new Error(
+        `third-party notice: ${component.id} publishes no copyright notice beside its open font licence`,
+      );
     }
     let licenseText: string | null = null;
     if (component.licenseTextId !== null) {

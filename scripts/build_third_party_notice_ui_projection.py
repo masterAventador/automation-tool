@@ -19,7 +19,12 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import subtitle_font_assets  # noqa: E402
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCES_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-sources.v1.json"
@@ -52,9 +57,22 @@ LICENSE_TEXT_SPDX: dict[str, str] = {
     "mit": "MIT",
     "apache-2.0": "Apache-2.0",
     "gpl-3.0": "GPL-3.0-only",
+    "ofl-1.1": "OFL-1.1",
 }
 GPL_3_0_SHA256 = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
 LICENSE_TEXT_BY_SPDX: dict[str, str] = {"MIT": "mit", "Apache-2.0": "apache-2.0"}
+
+# The subtitle fonts the installer redistributes in place of the four
+# proprietary Windows/macOS system faces the upstream project bundled. They are
+# one disclosure entry rather than one per face: a user reads about a licence and
+# a copyright holder, and both are identical across the faces — the register and
+# the candidate audit are where the per-file digests live.
+SUBTITLE_FONT_COMPONENT_ID = "subtitle-fonts"
+SUBTITLE_FONT_COMPONENT_NAME = "Noto Sans CJK SC"
+SUBTITLE_FONT_LICENSE_TEXT_ID = "ofl-1.1"
+SUBTITLE_FONT_VERSION = "Sans2.004"
+SUBTITLE_FONT_SOURCE_URL = "https://github.com/notofonts/noto-cjk"
+MATERIAL_WORKER_INTERNAL_PREFIX = "material-video-worker/package/_internal"
 
 # Where a locked submodule's own LICENSE file lands inside the installed
 # package. Only the material-video Worker carries one: its PyInstaller spec
@@ -192,11 +210,71 @@ def _require_shipped_license_texts(sources: dict, texts: list[dict]) -> None:
             )
     if by_id["gpl-3.0"]["sha256"] != GPL_3_0_SHA256:
         raise ProjectionError("gpl-3.0: shipped licence text is not FFmpeg's COPYING.GPLv3")
+    # The App's copy of the OFL and the copy fetched into the package must be
+    # the same bytes, or a user could read one licence on screen while a
+    # different one travels with the fonts.
+    try:
+        packaged_licence = subtitle_font_assets.packaged_license_notice()
+    except subtitle_font_assets.SubtitleFontRightsError as error:
+        raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
+    if by_id[SUBTITLE_FONT_LICENSE_TEXT_ID]["sha256"] != packaged_licence.sha256:
+        raise ProjectionError(
+            f"{SUBTITLE_FONT_LICENSE_TEXT_ID}: the shipped licence text is not the one "
+            "the package fetches beside the fonts"
+        )
 
 
 def _media_toolchain_path(layout: dict, key: str) -> str:
     root = _text(layout.get("root"), "package_layout.root")
     return f"{root}/{_text(layout.get(key), f'package_layout.{key}')}"
+
+
+def subtitle_font_license_path() -> str:
+    """Where the font licence text lands inside the installed package.
+
+    Derived from the asset rights register and the packaging layout the Worker
+    spec uses, so a renamed licence file cannot leave this page pointing at
+    something the installer never writes.
+    """
+    try:
+        notice = subtitle_font_assets.packaged_license_notice()
+    except subtitle_font_assets.SubtitleFontRightsError as error:
+        raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
+    return (
+        f"{MATERIAL_WORKER_INTERNAL_PREFIX}/"
+        f"{subtitle_font_assets.PACKAGED_FONT_DIRECTORY}/{notice.packaged_name}"
+    )
+
+
+def _subtitle_font_component() -> dict:
+    """Disclose the open fonts that replaced the proprietary system faces.
+
+    The SIL Open Font License is unlike the other licences on this page: its text
+    is a template that names no copyright holder, so publishing the text alone
+    would satisfy neither half of section 1. The holder is therefore read out of
+    the ``name`` table of the very font files the installer ships, which is where
+    the licence itself says that notice may live.
+    """
+    try:
+        fonts = subtitle_font_assets.bundled_subtitle_fonts()
+    except subtitle_font_assets.SubtitleFontRightsError as error:
+        raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
+    notices = {font.attribution for font in fonts}
+    if len(notices) != 1:
+        raise ProjectionError("the shipped fonts disagree on their copyright notice")
+    return {
+        "id": SUBTITLE_FONT_COMPONENT_ID,
+        "name": SUBTITLE_FONT_COMPONENT_NAME,
+        "version": SUBTITLE_FONT_VERSION,
+        "license": subtitle_font_assets.OPEN_FONT_LICENSE,
+        "copyleft": False,
+        "copyright": notices.pop(),
+        "licenseTextId": SUBTITLE_FONT_LICENSE_TEXT_ID,
+        "packagedNoticePath": subtitle_font_license_path(),
+        "noticeChannelId": None,
+        "packagedSourcePaths": [],
+        "upstreamSourceUrl": SUBTITLE_FONT_SOURCE_URL,
+    }
 
 
 def _distributed_components(
@@ -235,6 +313,7 @@ def _distributed_components(
             "version": _text(browser.get("browser_version"), "chromium.browser_version"),
             "license": BROWSER_LICENSE,
             "copyleft": False,
+            "copyright": None,
             "licenseTextId": None,
             "packagedNoticePath": None,
             "noticeChannelId": BROWSER_NOTICE_CHANNEL,
@@ -247,6 +326,7 @@ def _distributed_components(
             "version": _text(ffmpeg.get("version"), "ffmpeg.version"),
             "license": _text(ffmpeg.get("license"), "ffmpeg.license"),
             "copyleft": True,
+            "copyright": None,
             "licenseTextId": "gpl-3.0",
             "packagedNoticePath": licence_path,
             "noticeChannelId": None,
@@ -259,6 +339,7 @@ def _distributed_components(
             "version": _text(x264.get("revision"), "x264.revision"),
             "license": _text(x264.get("license"), "x264.license"),
             "copyleft": True,
+            "copyright": None,
             # x264 is GPL-2.0-or-later and is statically linked into the one
             # FFmpeg executable, so the conveyed binary is a single GPL-3.0
             # work and GPL-3.0 is the licence a recipient actually receives it
@@ -275,6 +356,7 @@ def _distributed_components(
             "version": _text(runtime.get("version"), "runtime.version"),
             "license": "MIT",
             "copyleft": False,
+            "copyright": None,
             "licenseTextId": None,
             "packagedNoticePath": "motion-video-worker/package/NODE-LICENSE",
             "noticeChannelId": None,
@@ -287,6 +369,7 @@ def _distributed_components(
             "version": _text(python.get("version"), "python.version"),
             "license": "PSF-2.0",
             "copyleft": False,
+            "copyright": None,
             "licenseTextId": None,
             # The same file lists every Python package frozen into that Worker
             # with the licence each one declares.
@@ -298,6 +381,7 @@ def _distributed_components(
             "packagedSourcePaths": [],
             "upstreamSourceUrl": None,
         },
+        _subtitle_font_component(),
     ]
 
 

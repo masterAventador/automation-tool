@@ -28,6 +28,18 @@ HOST: Final = "127.0.0.1"
 START_TIMEOUT_SECONDS: Final = 25
 STOP_TIMEOUT_SECONDS: Final = 5
 
+# Upstream hard-codes a proprietary Windows face as its default subtitle font
+# (`webui/Main.py` -> DEFAULT_SUBTITLE_SETTINGS) and, when that file is absent,
+# falls back to the alphabetically first face in the directory — which is one of
+# the Latin-only faces and would draw every Chinese subtitle as empty boxes.
+# `webui/Main.py` is a read-only submodule, so the default is pinned the way
+# upstream itself supports: through `[ui] font_name` in the private runtime
+# configuration, whose value comes from the release contract rather than from a
+# second copy of the font name.
+UI_SECTION_HEADER: Final = "[ui]"
+CONFIG_FILE_NAME: Final = "config.toml"
+EXAMPLE_CONFIG_FILE_NAME: Final = "config.example.toml"
+
 
 class WebUiRejected(RuntimeError):
     """Fixed boundary for WebUI startup and configuration failures."""
@@ -74,6 +86,50 @@ def _upstream_paths() -> tuple[Path, Path, Path, Path]:
         upstream / "config.example.toml",
         upstream / "resource",
     )
+
+
+def _worker_contract_path() -> Path:
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if isinstance(frozen_root, str):
+        return Path(frozen_root) / "contracts/material-video-worker-package.v1.json"
+    repository = Path(__file__).resolve().parents[2]
+    return repository / "contracts/quality/material-video-worker-package.v1.json"
+
+
+def default_subtitle_font_name() -> str:
+    """Read the cleared subtitle face the WebUI must preselect."""
+    try:
+        contract = json.loads(_worker_contract_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise WebUiRejected(f"package contract unavailable: {error}") from None
+    build = contract.get("build") if isinstance(contract, dict) else None
+    name = build.get("defaultSubtitleFontName") if isinstance(build, dict) else None
+    if not isinstance(name, str) or not name:
+        raise WebUiRejected("package contract declares no default subtitle font")
+    return name
+
+
+def _private_config_document(example: str, font_name: str) -> str:
+    """Return the upstream example configuration with the subtitle font pinned.
+
+    The value is inserted immediately after the `[ui]` table header rather than
+    by rewriting the document, so every other upstream default, comment and
+    ordering survives verbatim and a future upstream option cannot be dropped by
+    a round trip through a TOML serializer.
+    """
+    if (
+        not font_name
+        or font_name != Path(font_name).name
+        or any(character in font_name for character in '"\\\n\r\t')
+    ):
+        raise WebUiRejected("invalid subtitle font name")
+    lines = example.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.strip() != UI_SECTION_HEADER:
+            continue
+        pinned = f'font_name = "{font_name}"\n'
+        return "".join(lines[: index + 1]) + pinned + "".join(lines[index + 1 :])
+    raise WebUiRejected("upstream configuration has no WebUI section")
 
 
 def _reserve_port() -> int:
@@ -173,7 +229,17 @@ def _preload_private_config(runtime_root: Path) -> None:
     if not app_path.is_dir() or not example.is_file():
         raise WebUiRejected("upstream package unavailable")
     runtime_root.mkdir(mode=0o700, exist_ok=True)
-    (runtime_root / "config.example.toml").write_bytes(example.read_bytes())
+    example_document = example.read_text(encoding="utf-8")
+    (runtime_root / EXAMPLE_CONFIG_FILE_NAME).write_text(
+        example_document, encoding="utf-8"
+    )
+    # Upstream copies the example over only when config.toml is missing, so
+    # writing it here is what makes the pinned subtitle font the effective
+    # default instead of the proprietary face this release no longer ships.
+    (runtime_root / CONFIG_FILE_NAME).write_text(
+        _private_config_document(example_document, default_subtitle_font_name()),
+        encoding="utf-8",
+    )
     app_package = types.ModuleType("app")
     app_package.__path__ = [str(app_path)]
     app_package.__package__ = "app"

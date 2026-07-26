@@ -28,8 +28,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
 from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
 
+ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MEDIA_TOOLCHAIN_CONTRACT = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
 MATERIAL_WORKER_CONTRACT = (
@@ -107,9 +109,14 @@ def prepare(*, platform: str | None = None, root: Path | None = None) -> Path:
         build=_build_motion_worker,
         root=staging,
     )
+    # The cleared subtitle fonts are the fourth locked artifact fetched rather
+    # than committed. They must exist before the material Worker is frozen,
+    # because its PyInstaller spec packages them, and the Worker's own cache key
+    # includes the rights register so a re-pinned font rebuilds the Worker too.
+    ensure_subtitle_fonts(root=staging)
     ensure_cached(
         name="material-video-worker",
-        contracts=[MATERIAL_WORKER_CONTRACT],
+        contracts=[MATERIAL_WORKER_CONTRACT, ASSET_RIGHTS_CONTRACT],
         build=_build_material_worker,
         root=staging,
     )

@@ -70,13 +70,42 @@ describe("ThirdPartySoftwareNotice", () => {
     ).toBeInTheDocument();
   });
 
-  it("states honestly that nothing is bundled while the rights register is empty", () => {
+  it("states how many assets the rights register actually cleared for distribution", () => {
     render(<ThirdPartySoftwareNotice />);
 
+    // The register stopped being empty once the release replaced the four
+    // proprietary system fonts with open-licensed ones, so the page must say so
+    // rather than keep claiming it bundles no third-party asset at all.
     const region = screen.getByRole("region", { name: "字体与素材权利" });
-    expect(ASSET_RIGHTS_NOTICE.registeredEntryCount).toBe(0);
-    expect(within(region).getByText(/尚未随安装包分发/u)).toBeInTheDocument();
+    expect(ASSET_RIGHTS_NOTICE.registeredEntryCount).toBeGreaterThan(0);
+    expect(
+      within(region).getByText(
+        new RegExp(`已登记\\s*${ASSET_RIGHTS_NOTICE.registeredEntryCount}\\s*条`, "u"),
+      ),
+    ).toBeInTheDocument();
     expect(within(region).getByText(/一律不随安装包分发/u)).toBeInTheDocument();
+  });
+
+  it("reproduces the copyright notice the open font licence demands", () => {
+    render(<ThirdPartySoftwareNotice />);
+
+    // The SIL OFL text names no copyright holder, so the licence text alone
+    // would satisfy only half of its section 1.
+    const fonts = DISTRIBUTED_COMPONENT_NOTICES.find(
+      (component) => component.license === "OFL-1.1",
+    );
+    expect(fonts).toBeDefined();
+    expect(fonts?.copyright ?? "").not.toBe("");
+    const region = screen.getByRole("region", { name: "随安装包分发的第三方组件" });
+    expect(
+      within(region).getByText(`版权声明：${fonts?.copyright ?? ""}`),
+    ).toBeInTheDocument();
+    expect(
+      within(region).getByText(`安装包内许可证文件：${fonts?.packagedNoticePath ?? ""}`),
+    ).toBeInTheDocument();
+    // The text itself is covered by the "read every licence in full" case,
+    // which already iterates every shipped licence including this one.
+    expect(LICENSE_TEXTS["ofl-1.1"]).toContain("SIL OPEN FONT LICENSE Version 1.1");
   });
 
   it("drops the internal rights-review progress the notice never owed anyone", () => {

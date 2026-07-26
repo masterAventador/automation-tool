@@ -35,11 +35,27 @@ const COMPONENT = {
   version: "8.1.2",
   license: "GPL-3.0-or-later",
   copyleft: true,
+  copyright: null,
   licenseTextId: "gpl-3.0",
   packagedNoticePath: "media-toolchain/COPYING.GPLv3",
   noticeChannelId: null,
   packagedSourcePaths: ["media-toolchain/source/ffmpeg-8.1.2.tar.xz"],
   upstreamSourceUrl: "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+};
+
+const FONT_COMPONENT = {
+  id: "subtitle-fonts",
+  name: "Noto Sans CJK SC",
+  version: "Sans2.004",
+  license: "OFL-1.1",
+  copyleft: false,
+  copyright: "\u00a9 2014-2021 Adobe (http://www.adobe.com/).",
+  licenseTextId: "ofl-1.1",
+  packagedNoticePath:
+    "material-video-worker/package/_internal/upstream/resource/fonts/NotoSansCJK-LICENSE.txt",
+  noticeChannelId: null,
+  packagedSourcePaths: [],
+  upstreamSourceUrl: "https://github.com/notofonts/noto-cjk",
 };
 
 const MOTION = {
@@ -277,6 +293,31 @@ describe("distributed component notices", () => {
         LICENSE_TEXTS,
       ),
     ).toThrow(/licence/u);
+  });
+
+  it("keeps the copyright notice an open-font licence obliges it to reproduce", () => {
+    const notices = buildDistributedComponentNotices(
+      [FONT_COMPONENT],
+      DISTRIBUTED_COMPONENT_PRESENTATION,
+      LICENSE_TEXTS,
+    );
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.copyright).toBe(FONT_COMPONENT.copyright);
+    expect(notices[0]?.licenseText).toBe(LICENSE_TEXTS["ofl-1.1"]);
+  });
+
+  it("refuses an open-font licensed component with no copyright notice", () => {
+    expect(() =>
+      buildDistributedComponentNotices(
+        [{ ...FONT_COMPONENT, copyright: null }],
+        DISTRIBUTED_COMPONENT_PRESENTATION,
+        LICENSE_TEXTS,
+      ),
+    ).toThrow(/copyright/u);
+  });
+
+  it("ships the open font licence text itself", () => {
+    expect(LICENSE_TEXTS["ofl-1.1"]).toContain("SIL OPEN FONT LICENSE Version 1.1");
   });
 
   it("refuses a component the page has no Chinese explanation for", () => {

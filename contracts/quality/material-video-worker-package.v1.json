@@ -33,7 +33,16 @@
     "excludedUpstreamResources": [
       "songs"
     ],
-    "excludedUpstreamResourcesReason": "The 29 bundled background-music tracks carry no redistribution grant: contracts/quality/third-party-notice-ui.v1.json denies asset rights by default and registers no music_sfx entry. Background music is optional in every render path, so the release ships none and the upstream 'random background music' choice degrades to no music instead of shipping unlicensed audio."
+    "excludedUpstreamResourcesReason": "The 29 bundled background-music tracks carry no redistribution grant: contracts/quality/third-party-notice-ui.v1.json denies asset rights by default and registers no music_sfx entry. Background music is optional in every render path, so the release ships none and the upstream 'random background music' choice degrades to no music instead of shipping unlicensed audio.",
+    "excludedUpstreamResourceFiles": [
+      "fonts/MicrosoftYaHeiBold.ttc",
+      "fonts/MicrosoftYaHeiNormal.ttc",
+      "fonts/STHeitiLight.ttc",
+      "fonts/STHeitiMedium.ttc"
+    ],
+    "excludedUpstreamResourceFilesReason": "Microsoft YaHei ships with Windows and STHeiti ships with macOS; both are proprietary system faces that no operating-system licence lets a commercial installer redistribute, and contracts/quality/asset-rights-policy.v1.json denies every unregistered asset by default. They are replaced by the SIL Open Font License faces registered there, so the release still renders Chinese subtitles without redistributing anything it has no grant for.",
+    "defaultSubtitleFontName": "NotoSansCJKsc-Bold.ttf",
+    "defaultSubtitleFontNameReason": "vendor/moneyprinterturbo/webui/Main.py hard-codes MicrosoftYaHeiBold.ttc as its default and otherwise falls back to the alphabetically first face in the directory, which is Latin-only and would render Chinese subtitles as empty boxes. The private runtime configuration pins this cleared face instead; the name must stay one of the fonts registered in contracts/quality/asset-rights-policy.v1.json."
   },
   "dependencies": {
     "expectedInstalledDistributionCountByTarget": {

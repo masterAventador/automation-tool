@@ -6,7 +6,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import subtitle_font_assets  # noqa: E402
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-sources.v1.json"
@@ -194,7 +199,7 @@ def validate_policy(lock: dict[str, object]) -> list[dict[str, str]]:
     return validated
 
 
-def validate_asset_rights() -> None:
+def validate_asset_rights() -> int:
     rights = load_object(RIGHTS_PATH)
     if rights.get("schemaVersion") != 1 or rights.get("defaultDecision") != "deny":
         fail("asset rights must use schema v1 and deny unregistered assets")
@@ -208,6 +213,18 @@ def validate_asset_rights() -> None:
     entries = rights.get("entries")
     if not isinstance(entries, list):
         fail("asset rights entries must be a list")
+    # A register that only had to exist proved nothing: the point of registering
+    # an asset is that its rights are complete and its bytes are the bytes that
+    # were reviewed. Every font the installer redistributes is re-derived here,
+    # which fails closed on a missing permission, a drifted file or a copyright
+    # notice that no longer matches the one inside the font.
+    try:
+        fonts = subtitle_font_assets.bundled_subtitle_fonts(rights)
+        subtitle_font_assets.packaged_license_notice(rights)
+    except subtitle_font_assets.SubtitleFontRightsError as error:
+        fail(str(error))
+        raise AssertionError("unreachable") from error
+    return len(fonts)
 
 
 def validate_sbom(sources: list[dict[str, str]]) -> None:
@@ -247,9 +264,12 @@ def validate_sbom(sources: list[dict[str, str]]) -> None:
 
 def main() -> None:
     sources = validate_policy(load_object(LOCK_PATH))
-    validate_asset_rights()
+    font_count = validate_asset_rights()
     validate_sbom(sources)
-    print("third-party source locks, licenses, rights policy and SBOM are valid")
+    print(
+        "third-party source locks, licenses, rights policy and SBOM are valid "
+        f"({font_count} redistributable fonts registered)"
+    )
 
 
 if __name__ == "__main__":

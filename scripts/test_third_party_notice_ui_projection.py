@@ -114,6 +114,9 @@ def strip_addresses(projection: dict) -> str:
         del project["sourceUrl"]
     for component in displayed["distributedComponents"]:
         del component["upstreamSourceUrl"]
+        # A copyright notice is reproduced verbatim because a licence says so,
+        # and a font vendor routinely writes its own address into that notice.
+        del component["copyright"]
     return json.dumps(displayed, ensure_ascii=False)
 
 
@@ -227,6 +230,7 @@ def main() -> int:
         "x264",
         "nodejs",
         "material-video-worker-python",
+        "subtitle-fonts",
     }, "every redistributed runtime component is disclosed"
 
     for component in components:
@@ -236,6 +240,7 @@ def main() -> int:
             "version",
             "license",
             "copyleft",
+            "copyright",
             "licenseTextId",
             "packagedNoticePath",
             "noticeChannelId",
@@ -279,6 +284,38 @@ def main() -> int:
     # licence text the package and the App carry.
     assert ffmpeg["licenseTextId"] == x264["licenseTextId"] == "gpl-3.0"
 
+    # The subtitle fonts replaced four proprietary Windows/macOS system faces.
+    # Unlike MIT or Apache-2.0, the SIL Open Font License text names no copyright
+    # holder, so the notice has to publish the holder separately — and it is read
+    # out of the font binary itself rather than retyped.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from subtitle_font_assets import (  # noqa: PLC0415
+        bundled_subtitle_fonts,
+        packaged_license_notice,
+    )
+
+    fonts = bundled_subtitle_fonts()
+    subtitle_fonts = by_id["subtitle-fonts"]
+    assert subtitle_fonts["license"] == "OFL-1.1"
+    assert subtitle_fonts["copyleft"] is False
+    assert subtitle_fonts["licenseTextId"] == "ofl-1.1"
+    # The fonts themselves are fetched at build time, so this page stays offline
+    # and publishes the register's attribution. That value is not free text: the
+    # fetch step and the frozen-candidate audit both reject a font whose own
+    # `name` table carries a different notice.
+    assert subtitle_fonts["copyright"] == fonts[0].attribution, (
+        "the published font copyright is not the registered attribution"
+    )
+    assert len({font.attribution for font in fonts}) == 1
+    assert subtitle_fonts["packagedNoticePath"].endswith(
+        packaged_license_notice().packaged_name
+    ), "the notice does not point at the licence text shipped beside the fonts"
+    for component in components:
+        if component["id"] != "subtitle-fonts":
+            assert component["copyright"] is None, (
+                f"{component['id']}: publishes a copyright the projection cannot derive"
+            )
+
     assert by_id["embedded-browser"]["version"] == chromium["chromium"]["browser_version"]
     assert by_id["nodejs"]["version"] == motion_worker["runtime"]["version"]
     assert (
@@ -309,7 +346,7 @@ def main() -> int:
 
     # The licence texts the App itself carries, bound to their bytes.
     texts = projection["licenseTexts"]
-    assert {text["id"] for text in texts} == {"mit", "apache-2.0", "gpl-3.0"}
+    assert {text["id"] for text in texts} == {"mit", "apache-2.0", "gpl-3.0", "ofl-1.1"}
     for text in texts:
         assert set(text) == {"id", "spdx", "sha256", "bytes"}, (
             f"{text['id']}: closed key set"
@@ -331,6 +368,14 @@ def main() -> int:
     gpl = (LICENSE_TEXT_ROOT / "gpl-3.0.txt").read_text(encoding="utf-8")
     assert "GNU GENERAL PUBLIC LICENSE" in gpl and "Version 3, 29 June 2007" in gpl
     assert len(gpl) > 30000, "the GPL-3.0 text is truncated"
+
+    # The OFL text the App carries must be the very file that travels with the
+    # fonts inside the package, not a second copy that can drift from it.
+    ofl = LICENSE_TEXT_ROOT / "ofl-1.1.txt"
+    assert digest(ofl) == packaged_license_notice().sha256, (
+        "the App's OFL text is not the licence text the package fetches and ships"
+    )
+    assert "SIL OPEN FONT LICENSE Version 1.1" in ofl.read_text(encoding="utf-8")
 
     # Every licence text the projection binds must be reachable from something
     # the product actually distributes; an orphan text is dead weight.
@@ -545,6 +590,11 @@ def main() -> int:
     def drop_copyright(payload: dict) -> None:
         payload["upstreamProjects"][0]["copyright"] = ""
 
+    def drop_font_copyright(payload: dict) -> None:
+        for component in payload["distributedComponents"]:
+            if component["id"] == "subtitle-fonts":
+                component["copyright"] = None
+
     def wrong_digest(payload: dict) -> None:
         for text in payload["licenseTexts"]:
             if text["id"] == "mit":
@@ -557,6 +607,7 @@ def main() -> int:
     obligation_failure("in-package path escaping the resource root", escaping_path)
     obligation_failure("in-package path outside every shipped resource", foreign_path)
     obligation_failure("upstream project with no copyright line", drop_copyright)
+    obligation_failure("OFL component with no copyright notice", drop_font_copyright)
     obligation_failure("shipped licence text whose bytes drifted", wrong_digest)
 
     print("third-party notice ui projection tests passed")

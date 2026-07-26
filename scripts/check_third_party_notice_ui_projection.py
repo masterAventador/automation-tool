@@ -33,7 +33,9 @@ from build_third_party_notice_ui_projection import (  # noqa: E402
     _media_toolchain_path,
     _normalized_bytes,
     compose_projection,
+    subtitle_font_license_path,
 )
+from subtitle_font_assets import OPEN_FONT_LICENSE  # noqa: E402
 from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
 
 # Field names and values that exist only for the internal rights review.
@@ -94,11 +96,17 @@ def _scan_for_leakage(candidate: dict) -> None:
         isinstance(components, list) and components, "no distributed component is disclosed"
     )
     # A copyleft component has to publish where its corresponding source is, so
-    # that one address is as legitimate as a repository URL. Everything else in
-    # the payload is still held to the no-address rule.
+    # that one address is as legitimate as a repository URL. A copyright notice
+    # is the second such case: a licence obliges us to reproduce it verbatim, and
+    # font vendors routinely write their own address into it, so truncating it to
+    # satisfy this scan would break the obligation the notice exists for. Both
+    # values are derived — from the source lock and from the shipped font's own
+    # metadata — never free text. Everything else is still held to the no-address
+    # rule.
     for component in components:
         _require(isinstance(component, dict), "a distributed component is not an object")
         component.pop("upstreamSourceUrl", None)
+        component.pop("copyright", None)
     serialized = json.dumps(displayed, ensure_ascii=False)
     for marker in INTERNAL_REVIEW_MARKERS:
         _require(marker not in serialized, f"projection leaks review detail: {marker}")
@@ -124,10 +132,18 @@ def _contract_declared_paths() -> frozenset[str]:
         layout = contract["package_layout"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
         raise CheckError(f"cannot read the media toolchain layout: {error}") from error
-    return frozenset(
+    paths = {
         _media_toolchain_path(layout, key)
         for key in ("license", "notice", "build_info", "source_archive", "x264_source_archive")
-    )
+    }
+    # The font licence location is declared the same way: the asset rights
+    # register names the packaged file and the Worker spec installs it from that
+    # register, so the page and the installer read one fact.
+    try:
+        paths.add(subtitle_font_license_path())
+    except ProjectionError as error:
+        raise CheckError(f"cannot derive the packaged font licence path: {error}") from error
+    return frozenset(paths)
 
 
 def _require_packaged_path(path: object, owner: str, declared: frozenset[str]) -> None:
@@ -177,7 +193,10 @@ def _require_license_obligations(candidate: dict) -> None:
        source is, both inside the package and upstream (GPL-3.0 section 6);
     3. every upstream project reproduces its copyright line and ships the
        licence text itself, which is the whole of what MIT and Apache-2.0
-       section 4 ask a distributor to carry forward.
+       section 4 ask a distributor to carry forward;
+    4. every open-font-licensed component publishes the copyright notice as
+       well as the licence, because the SIL OFL text is a template that names no
+       holder and section 1 asks for both.
 
     Naming a licence is none of those things, which is exactly how this page
     passed every gate while satisfying none of the three licences it exists for.
@@ -249,6 +268,16 @@ def _require_license_obligations(candidate: dict) -> None:
             bool(identifier) or bool(packaged) or bool(channel),
             f"{owner}: publishes no way for a user to read its licence",
         )
+        # The SIL Open Font License is the one licence on this page whose text
+        # names no copyright holder: section 1 asks for the notice *and* the
+        # licence, so shipping the text alone leaves half the term unmet.
+        if component.get("license") == OPEN_FONT_LICENSE:
+            notice = component.get("copyright")
+            _require(
+                isinstance(notice, str) and notice.strip() != "",
+                f"{owner}: is open-font licensed and publishes no copyright notice, "
+                "which the licence text itself does not carry",
+            )
         sources = component.get("packagedSourcePaths")
         _require(isinstance(sources, list), f"{owner}: packagedSourcePaths must be a list")
         assert isinstance(sources, list)

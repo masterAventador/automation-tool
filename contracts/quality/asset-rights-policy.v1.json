@@ -68,5 +68,56 @@
       "humanRightsReview"
     ]
   },
-  "entries": []
+  "entries": [
+    {
+      "id": "font-noto-sans-cjk-sc-bold",
+      "category": "font",
+      "source": "notofonts/noto-cjk release Sans2.004",
+      "sourceUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf",
+      "license": "OFL-1.1",
+      "licenseVersionOrDate": "SIL Open Font License 1.1, 26 February 2007",
+      "acquiredAt": "2026-07-26",
+      "sha256": "b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a",
+      "bytes": 17002248,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "embeddingAllowed": true,
+      "reviewedBy": "claude-assisted-rights-review",
+      "reviewedAt": "2026-07-26",
+      "attribution": "© 2014-2021 Adobe (http://www.adobe.com/).",
+      "licenseTextUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE",
+      "licenseTextSha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+      "licenseTextBytes": 4301,
+      "packagedLicenseName": "NotoSansCJK-LICENSE.txt",
+      "bundledIn": "material-video-worker",
+      "packagedName": "NotoSansCJKsc-Bold.ttf",
+      "upstreamFileName": "NotoSansCJKsc-Bold.otf",
+      "fileNameNote": "Bytes are the upstream OpenType/CFF release asset unchanged; only the file name differs, because vendor/moneyprinterturbo/webui/Main.py lists a face only when its name ends in .ttf or .ttc. The registered sha256 is the digest of the upstream .otf, so the substitution is checkable rather than hidden."
+    },
+    {
+      "id": "font-noto-sans-cjk-sc-regular",
+      "category": "font",
+      "source": "notofonts/noto-cjk release Sans2.004",
+      "sourceUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+      "license": "OFL-1.1",
+      "licenseVersionOrDate": "SIL Open Font License 1.1, 26 February 2007",
+      "acquiredAt": "2026-07-26",
+      "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+      "bytes": 16437364,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "embeddingAllowed": true,
+      "reviewedBy": "claude-assisted-rights-review",
+      "reviewedAt": "2026-07-26",
+      "attribution": "© 2014-2021 Adobe (http://www.adobe.com/).",
+      "licenseTextUrl": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE",
+      "licenseTextSha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
+      "licenseTextBytes": 4301,
+      "packagedLicenseName": "NotoSansCJK-LICENSE.txt",
+      "bundledIn": "material-video-worker",
+      "packagedName": "NotoSansCJKsc-Regular.ttf",
+      "upstreamFileName": "NotoSansCJKsc-Regular.otf",
+      "fileNameNote": "Bytes are the upstream OpenType/CFF release asset unchanged; only the file name differs, because vendor/moneyprinterturbo/webui/Main.py lists a face only when its name ends in .ttf or .ttc. The registered sha256 is the digest of the upstream .otf, so the substitution is checkable rather than hidden."
+    }
+  ]
 }

@@ -103,10 +103,11 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     "embedded-chromium": 343,
     # Frozen RPA Executor sidecar (284 files, 184,686,384 bytes).
     "local-executor": 177,
-    # Frozen intelligent-material worker after the unreachable-module trim and
-    # the unlicensed background-music removal (484,123,149 bytes; see
-    # contracts/quality/material-video-worker-package.v1.json).
-    "material-video-worker": 465,
+    # Frozen intelligent-material worker after the unreachable-module trim, the
+    # unlicensed background-music removal and the replacement of the four
+    # proprietary system fonts with two open-licensed ones (369,452,875 bytes;
+    # see contracts/quality/material-video-worker-package.v1.json).
+    "material-video-worker": 353,
     # Frozen brand-motion worker with its private Node runtime (113,124,957 bytes).
     "motion-video-worker": 108,
     # Packaged ffmpeg/ffprobe plus the GPL source archive (44,095,804 bytes).
@@ -123,7 +124,7 @@ RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
     min_browser_bytes=320 * _MEBIBYTE,
     max_browser_bytes=420 * _MEBIBYTE,
     min_package_bytes=340 * _MEBIBYTE,
-    max_package_bytes=1270 * _MEBIBYTE,
+    max_package_bytes=1146 * _MEBIBYTE,
 )
 
 

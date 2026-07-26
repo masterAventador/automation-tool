@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterator
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 import platform
@@ -16,8 +17,12 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NoReturn
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import subtitle_font_assets  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / "vendor/moneyprinterturbo"
@@ -155,6 +160,97 @@ def assert_excluded_upstream_resources_absent(
         reject(f"候选仍包含产品不再分发的上游资源：{','.join(present)}")
 
 
+def excluded_upstream_resource_files(contract: dict[str, object]) -> tuple[str, ...]:
+    """Return the individual upstream asset files the release must not ship."""
+    build = contract.get("build")
+    if not isinstance(build, dict):
+        reject("构建工具契约缺失")
+    names = build.get("excludedUpstreamResourceFiles")
+    if not isinstance(names, list) or not names:
+        reject("排除上游资源文件契约缺失")
+    for name in names:
+        if not isinstance(name, str) or not name:
+            reject("排除上游资源文件契约无效")
+        parts = PurePosixPath(name).parts
+        if len(parts) != 2 or PurePosixPath(name).is_absolute() or ".." in parts:
+            reject("排除上游资源文件契约无效")
+    return tuple(str(name) for name in names)
+
+
+def assert_excluded_upstream_resource_files_absent(
+    candidate: Path, contract: dict[str, object]
+) -> None:
+    """Fail closed when the frozen candidate still carries a proprietary asset."""
+    resource_root = candidate / "_internal/upstream/resource"
+    present = sorted(
+        name
+        for name in excluded_upstream_resource_files(contract)
+        if (resource_root / PurePosixPath(name)).exists()
+    )
+    if present:
+        reject(f"候选仍包含无授权的上游资源文件：{','.join(present)}")
+
+
+def assert_bundled_subtitle_fonts_present(
+    candidate: Path,
+    contract: dict[str, object],
+    *,
+    fonts: tuple[subtitle_font_assets.BundledSubtitleFont, ...] | None = None,
+    notice: subtitle_font_assets.PackagedLicenseNotice | None = None,
+    default_font_name: str | None = None,
+) -> None:
+    """Fail closed unless every cleared subtitle face really landed in the package.
+
+    Removing the proprietary faces without landing the replacements would still
+    produce a Worker that starts, probes clean and renders video — with every
+    Chinese subtitle drawn as empty boxes, because the only remaining faces are
+    Latin-only. Since the fonts are now fetched at build time, "the download
+    failed" reaches exactly the same state, which is why this audit checks the
+    shipped artifact rather than the download step: bytes, digest, and the
+    copyright notice the licence obliges the disclosure page to reproduce.
+    """
+    font_root = candidate / "_internal" / subtitle_font_assets.PACKAGED_FONT_DIRECTORY
+    try:
+        if fonts is None:
+            fonts = subtitle_font_assets.bundled_subtitle_fonts()
+        if notice is None:
+            notice = subtitle_font_assets.packaged_license_notice()
+        if default_font_name is None:
+            default_font_name = subtitle_font_assets.default_subtitle_font_name(contract)
+    except subtitle_font_assets.SubtitleFontRightsError as error:
+        reject(f"字幕字体权利登记无效：{error}")
+    missing: list[str] = []
+    drifted: list[str] = []
+    misattributed: list[str] = []
+    for font in fonts:
+        packaged = font_root / font.packaged_name
+        if not packaged.is_file() or packaged.is_symlink():
+            missing.append(font.packaged_name)
+            continue
+        payload = packaged.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != font.sha256:
+            drifted.append(font.packaged_name)
+            continue
+        try:
+            subtitle_font_assets.verify_font_payload(font, payload)
+        except subtitle_font_assets.SubtitleFontUnavailable:
+            misattributed.append(font.packaged_name)
+    packaged_notice = font_root / notice.packaged_name
+    if not packaged_notice.is_file() or packaged_notice.is_symlink():
+        missing.append(notice.packaged_name)
+    if missing:
+        reject(f"候选缺少已登记的开源字幕字体或其许可证：{','.join(sorted(missing))}")
+    if drifted:
+        reject(f"候选中的字幕字体与登记字节不一致：{','.join(sorted(drifted))}")
+    if misattributed:
+        reject(
+            "候选中的字幕字体自带的版权声明与权利登记不一致："
+            f"{','.join(sorted(misattributed))}"
+        )
+    if not (font_root / default_font_name).is_file():
+        reject(f"候选缺少默认字幕字体：{default_font_name}")
+
+
 @contextmanager
 def temporary_build_directory() -> Iterator[Path]:
     path = Path(tempfile.mkdtemp(prefix="material-video-worker-build-"))
@@ -220,6 +316,13 @@ def probe_environment() -> dict[str, str]:
 
 def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
     contract = load_contract()
+    # Fetch and verify the cleared fonts before the twenty-minute PyInstaller
+    # run rather than inside it, so an unreachable or tampered upstream fails
+    # immediately and with the reason, instead of after the whole freeze.
+    try:
+        subtitle_font_assets.ensure_subtitle_fonts()
+    except subtitle_font_assets.SubtitleFontRightsError as error:
+        reject(f"开源字幕字体不可用：{error}")
     output = output.resolve(strict=False)
     if output.exists():
         reject("输出目录已存在，拒绝覆盖")
@@ -376,6 +479,8 @@ def audit_candidate(
         reject("候选错误混入 RPA Executor")
     assert_excluded_modules_absent(candidate, contract)
     assert_excluded_upstream_resources_absent(candidate, contract)
+    assert_excluded_upstream_resource_files_absent(candidate, contract)
+    assert_bundled_subtitle_fonts_present(candidate, contract)
     inventory_path = (
         candidate / "_internal/licenses/material-video-worker-dependencies.json"
     )
