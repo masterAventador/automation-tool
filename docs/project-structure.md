@@ -246,7 +246,7 @@ frontend/
 ├── pnpm-lock.yaml
 ├── vite.config.ts
 ├── playwright.config.ts
-├── wdio.conf.ts
+├── wdio.publishing.conf.ts
 ├── wdio.control-plane.conf.ts
 ├── wdio.browser-settings.conf.ts
 ├── wdio.installation-revocation.conf.ts

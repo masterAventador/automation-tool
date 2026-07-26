@@ -28,17 +28,17 @@ test("the four desktop test layers have explicit commands", async () => {
     packageJson.scripts["test:rust"],
     /cargo test --manifest-path src-tauri\/Cargo\.toml --locked/,
   );
-  assert.match(packageJson.scripts["test:tauri"], /wdio run wdio\.conf\.ts/);
+  assert.equal(packageJson.scripts["test:tauri"], "pnpm test:publishing-tauri");
   assert.equal(
     packageJson.scripts["test:layers"],
     "pnpm test && pnpm test:ui && pnpm test:rust && pnpm test:tauri",
   );
 });
 
-test("WebdriverIO uses the embedded driver against a real Tauri binary", async () => {
+test("the default Tauri layer uses a real production-composed standalone App", async () => {
   const [wdioConfig, desktopSpec] = await Promise.all([
-    readProjectFile("wdio.conf.ts"),
-    readProjectFile("e2e-tauri/workbench.spec.ts"),
+    readProjectFile("wdio.publishing.conf.ts"),
+    readProjectFile("e2e-tauri/publishing.spec.ts"),
   ]);
 
   assert.match(wdioConfig, /@wdio\/tauri-service/);
@@ -46,10 +46,11 @@ test("WebdriverIO uses the embedded driver against a real Tauri binary", async (
   assert.match(wdioConfig, /autoDownloadEdgeDriver:\s*true/);
   assert.match(wdioConfig, /src-tauri[\\/]target[\\/]debug/);
   assert.match(wdioConfig, /browserName:\s*["']tauri["']/);
-  assert.match(wdioConfig, /e2e-tauri\/workbench\.spec\.ts/);
-  assert.doesNotMatch(wdioConfig, /e2e-tauri\/\*\*|control-plane\.spec\.ts/);
-  assert.match(desktopSpec, /RPA 运营工作台/);
-  assert.match(desktopSpec, /listWindows/);
+  assert.match(wdioConfig, /e2e-tauri\/publishing\.spec\.ts/);
+  assert.doesNotMatch(wdioConfig, /e2e-tauri\/\*\*|workbench\.spec\.ts/);
+  assert.match(desktopSpec, /get_publish_workspace/);
+  assert.match(desktopSpec, /begin_publish/);
+  assert.match(desktopSpec, /approve_publish/);
 });
 
 test("WDIO plugins and permissions are isolated from production", async () => {
