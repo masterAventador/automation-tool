@@ -476,6 +476,57 @@ def check_locked_browser_archives_use_shared_archive_resolver() -> None:
     )
 
 
+
+def check_a_stale_cache_names_the_step_that_rebuilds_it() -> None:
+    """A cache that no longer matches the contract has to say what to run.
+
+    Measured 2026-07-27: `d5e5111` changed the staging contract at 21:29 on
+    07-26 to exclude Widevine, and the cached distribution on this machine had
+    been built at 05:00 that morning with `exclusions: null`. Verification
+    refused it correctly — and then said only that the records differ, leaving
+    the reader with a rejected 340 MB tree and no next step. Thirty-six
+    acceptance drivers reach that line; every one of them was stuck from 21:29
+    onward and nothing reported it, because none of them runs in any gate.
+
+    The missing-cache case has named its build step since it was written. This
+    is the same courtesy for the case that actually happened.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        cache = root / "cache"
+        cache.mkdir()
+        # Present, so the missing-cache branch does not claim it, and invalid,
+        # so verification is what rejects it.
+        (cache / "distribution-manifest.v1.json").write_text("{}", encoding="utf-8")
+
+        try:
+            stage_embedded_browser(cache=cache, resource_root=root / "debug")
+        except DesktopPrerequisiteRejected as error:
+            assert "build_embedded_browser_cache" in str(error), (
+                f"the rejection does not name the rebuild step: {error}"
+            )
+        else:
+            raise AssertionError("a stale browser cache was accepted")
+
+
+def check_every_declared_check_is_registered() -> None:
+    """A check that is defined but not listed runs zero times and says nothing.
+
+    Found the hard way while writing the check above: appended after `main()`,
+    it was never executed and the run still printed a tidy "16 checks passed".
+    The count is derived from `CHECKS` and so cannot drift — but membership was
+    hand-maintained, which is the shape this repository has been burned by
+    before (T51, T62).
+    """
+    declared = {
+        name
+        for name, value in globals().items()
+        if name.startswith("check_") and callable(value)
+    }
+    registered = {check.__name__ for check in CHECKS}
+    missing = sorted(declared - registered)
+    assert not missing, f"defined but never run: {missing}"
+
 CHECKS = (
     check_the_startup_gate_environment_supplies_every_compile_time_input,
     check_the_startup_gate_environment_does_not_mutate_the_caller,
@@ -493,6 +544,8 @@ CHECKS = (
     check_every_driver_stops_the_whole_app_process_tree,
     check_executor_cache_key_tracks_real_source_inputs,
     check_locked_browser_archives_use_shared_archive_resolver,
+    check_a_stale_cache_names_the_step_that_rebuilds_it,
+    check_every_declared_check_is_registered,
 )
 
 

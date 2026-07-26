@@ -290,8 +290,18 @@ def verify_embedded_browser(tree: Path, target_id: str | None = None) -> None:
     try:
         verify_distribution(staging=tree, target_id=target_id or release_target_id())
     except DistributionRejected as error:
+        # Naming the remedy, because the reason alone is a dead end. On
+        # 2026-07-27 the staging contract changed at 21:29 the previous evening
+        # to exclude Widevine while the cached tree here had been built that
+        # morning; verification refused it correctly and then said only that
+        # the records differ. Thirty-six acceptance drivers reach this line and
+        # every one of them was stuck from that moment, with nothing to run and
+        # nothing anywhere reporting it — none of them is in a gate.
         raise DesktopPrerequisiteRejected(
-            f"the embedded browser distribution at {tree} failed verification: {error}"
+            f"the embedded browser distribution at {tree} failed verification: "
+            f"{error}. If the contract moved under a cached tree, rebuild it "
+            "with build_embedded_browser_cache (it re-stages from the locked "
+            "archive and verifies the result)."
         ) from error
 
 
