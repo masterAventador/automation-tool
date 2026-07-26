@@ -16,6 +16,7 @@ rebuild happens exactly when the pinned inputs change.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -64,6 +65,105 @@ class ContractFingerprintTests(unittest.TestCase):
             contract_fingerprint([self.base / "absent.json"])
 
 
+class SourcePackageInputTests(unittest.TestCase):
+    """A pinned input can be a source package, not only a single pinning file.
+
+    T32 removed the three background-music options from the material Worker's
+    web UI because all three produced silence. The commit shipped. The package
+    the user installed on 07-26 still had the control, because that Worker's
+    cache key named only two contract files -- the source tree PyInstaller
+    freezes was not part of it, so the release reused a binary built before the
+    fix and the repair never reached anybody.
+
+    A source package is a directory, so the digest has to cover its contents:
+    an edit, a new file and a deleted file each change what the build produces.
+    """
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp(prefix="runtime-cache-package-"))
+        self.package = self.base / "material_montage"
+        (self.package / "webui").mkdir(parents=True)
+        (self.package / "worker_main.py").write_text("main = 1\n", encoding="utf-8")
+        (self.package / "webui" / "runtime.py").write_text("bgm = 3\n", encoding="utf-8")
+
+    def test_editing_a_source_file_changes_the_fingerprint(self) -> None:
+        before = contract_fingerprint([self.package])
+        (self.package / "webui" / "runtime.py").write_text("bgm = 0\n", encoding="utf-8")
+        self.assertNotEqual(
+            before,
+            contract_fingerprint([self.package]),
+            "an edited Worker source file must invalidate the cached artifact",
+        )
+
+    def test_adding_a_source_file_changes_the_fingerprint(self) -> None:
+        # Digesting only the file names that existed at the first build would
+        # miss a new module entirely.
+        before = contract_fingerprint([self.package])
+        (self.package / "gateway.py").write_text("serve = 1\n", encoding="utf-8")
+        self.assertNotEqual(before, contract_fingerprint([self.package]))
+
+    def test_removing_a_source_file_changes_the_fingerprint(self) -> None:
+        (self.package / "gateway.py").write_text("serve = 1\n", encoding="utf-8")
+        before = contract_fingerprint([self.package])
+        (self.package / "gateway.py").unlink()
+        self.assertNotEqual(before, contract_fingerprint([self.package]))
+
+    def test_the_same_package_in_another_checkout_fingerprints_the_same(self) -> None:
+        """Worktrees must share the cache instead of each rebuilding everything.
+
+        Keying by absolute path would give every worktree its own key, turning
+        a shared per-machine cache into one PyInstaller run per checkout.
+        """
+        elsewhere = self.base / "another-worktree"
+        elsewhere.mkdir()
+        shutil.copytree(self.package, elsewhere / self.package.name)
+        self.assertEqual(
+            contract_fingerprint([self.package]),
+            contract_fingerprint([elsewhere / self.package.name]),
+        )
+
+    def test_two_modules_with_one_name_in_different_directories_both_count(self) -> None:
+        """Keying by base name alone would let one file mask the other."""
+        (self.package / "webui" / "adapter.py").write_text("a = 1\n", encoding="utf-8")
+        (self.package / "adapter.py").write_text("a = 1\n", encoding="utf-8")
+        before = contract_fingerprint([self.package])
+        (self.package / "webui" / "adapter.py").write_text("a = 2\n", encoding="utf-8")
+        self.assertNotEqual(before, contract_fingerprint([self.package]))
+
+    def test_compiled_python_caches_do_not_enter_the_fingerprint(self) -> None:
+        """Otherwise merely importing the package would invalidate the cache."""
+        before = contract_fingerprint([self.package])
+        cache = self.package / "__pycache__"
+        cache.mkdir()
+        (cache / "worker_main.cpython-312.pyc").write_bytes(b"\x00compiled")
+        (self.package / "stray.pyc").write_bytes(b"\x00compiled")
+        self.assertEqual(before, contract_fingerprint([self.package]))
+
+    def test_an_empty_source_package_is_rejected(self) -> None:
+        # A vanished source tree must not fingerprint as "nothing changed". The
+        # reason is asserted because refusing every directory would satisfy a
+        # bare assertRaises while making directories unusable as inputs.
+        empty = self.base / "empty_package"
+        empty.mkdir()
+        with self.assertRaisesRegex(VideoRuntimeCacheRejected, "holds no files"):
+            contract_fingerprint([empty])
+
+    def test_a_symlink_inside_a_source_package_is_rejected(self) -> None:
+        """Its target is outside the digest, so its bytes could change unseen."""
+        (self.package / "linked.py").symlink_to(self.base / "outside.py")
+        with self.assertRaisesRegex(VideoRuntimeCacheRejected, "symbolic link"):
+            contract_fingerprint([self.package])
+
+    def test_inputs_that_collide_on_one_cache_key_name_are_rejected(self) -> None:
+        # Two entries sharing a name make the key ambiguous about which file
+        # each digest belongs to, so refuse rather than guess.
+        twin = self.base / "elsewhere" / "material_montage"
+        twin.mkdir(parents=True)
+        (twin / "worker_main.py").write_text("main = 2\n", encoding="utf-8")
+        with self.assertRaisesRegex(VideoRuntimeCacheRejected, "share the cache key"):
+            contract_fingerprint([self.package, twin])
+
+
 class EnsureCachedTests(unittest.TestCase):
     def setUp(self) -> None:
         self.base = Path(tempfile.mkdtemp(prefix="runtime-cache-"))
@@ -101,6 +201,33 @@ class EnsureCachedTests(unittest.TestCase):
         self.contract.write_text('{"pinned": "b"}', encoding="utf-8")
         self.ensure()
         self.assertEqual(len(self.builds), 2)
+
+    def test_editing_a_worker_source_file_rebuilds_the_artifact(self) -> None:
+        """The T32 defect, at the layer that decided the fix would not ship.
+
+        The material Worker's web UI fix was committed and the release still
+        installed the Worker built before it, because the cache answered "still
+        current" for a source tree that had changed underneath it.
+        """
+        package = self.base / "material_montage"
+        package.mkdir()
+        (package / "webui_runtime.py").write_text("bgm_volume_select\n", encoding="utf-8")
+        inputs = [self.contract, package]
+
+        first = ensure_cached(
+            name="material-video-worker", contracts=inputs, build=self.build, root=self.root
+        )
+        (package / "webui_runtime.py").write_text("# control removed\n", encoding="utf-8")
+        second = ensure_cached(
+            name="material-video-worker", contracts=inputs, build=self.build, root=self.root
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            2,
+            len(self.builds),
+            "an edited Worker source file must not be served from the old build",
+        )
 
     def test_a_deleted_artifact_rebuilds_even_though_the_stamp_survives(self) -> None:
         cached = self.ensure()

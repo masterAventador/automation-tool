@@ -49,8 +49,60 @@ ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MEDIA_TOOLCHAIN_CONTRACT = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
 MATERIAL_WORKER_CONTRACT = ROOT / "contracts/quality/material-video-worker-package.v1.json"
+OFFLINE_MOTION_LOCK = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
+THIRD_PARTY_SOURCES_CONTRACT = ROOT / "contracts/quality/third-party-sources.v1.json"
 MEDIA_TOOLCHAIN_BUILDER = ROOT / "scripts/build_video_media_toolchain.sh"
+MEDIA_TOOLCHAIN_MANIFEST_WRITER = ROOT / "scripts/write_video_media_toolchain_manifest.py"
+MOTION_WORKER_BUILDER = ROOT / "scripts/build_motion_video_worker_candidate.py"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
+MATERIAL_WORKER_BUILDER = ROOT / "scripts/build_material_video_worker_candidate.py"
+MATERIAL_WORKER_SOURCE = ROOT / "workers/material_montage"
+SUBTITLE_FONT_ASSETS = ROOT / "scripts/subtitle_font_assets.py"
+
+# What each artifact is made of, in full. A cache key is a promise that nothing
+# outside this list can change the bytes, and the promise is only as good as the
+# list: `material-video-worker` used to name its two contracts and nothing else,
+# so T32's fix to the Worker's web UI was committed, cached over, and shipped as
+# the binary built before it. Every entry below is either a file that pins a
+# version or a directory the build compiles;
+# `test_no_build_driver_reads_a_repository_path_outside_its_cache_key` refuses a
+# build input that is in neither these lists nor its own recorded exemption.
+
+MEDIA_TOOLCHAIN_INPUTS: tuple[Path, ...] = (
+    MEDIA_TOOLCHAIN_CONTRACT,
+    # Carries the ffmpeg and x264 versions, their source digests and every
+    # configure flag, so it is the pin as much as the builder.
+    MEDIA_TOOLCHAIN_BUILDER,
+    # Runs last and writes manifest.json into the toolchain; the release
+    # verifies the package against that file.
+    MEDIA_TOOLCHAIN_MANIFEST_WRITER,
+)
+
+MOTION_WORKER_INPUTS: tuple[Path, ...] = (
+    MOTION_WORKER_CONTRACT,
+    MOTION_WORKER_SOURCE,
+    MOTION_WORKER_BUILDER,
+    # Pins the digest and origin of the animation runtime that is written into
+    # the package, which the Worker contract does not restate.
+    OFFLINE_MOTION_LOCK,
+)
+
+MATERIAL_WORKER_INPUTS: tuple[Path, ...] = (
+    MATERIAL_WORKER_CONTRACT,
+    ASSET_RIGHTS_CONTRACT,
+    # The package PyInstaller freezes, spec file included: this is the input
+    # whose absence shipped a fixed Worker as its unfixed predecessor.
+    MATERIAL_WORKER_SOURCE,
+    MATERIAL_WORKER_BUILDER,
+    # Imported by the spec; decides which font bytes land in the package and
+    # under what name.
+    SUBTITLE_FONT_ASSETS,
+    # Stands in for `vendor/moneyprinterturbo`, whose dependency lock decides
+    # every frozen distribution. The checkout is ~900 MB, far too large to
+    # digest on each cache lookup, and this contract pins its exact commit --
+    # `scripts/check_third_party_sources.py` is what holds the two together.
+    THIRD_PARTY_SOURCES_CONTRACT,
+)
 
 MEDIA_TOOLCHAIN_TARGETS = {
     "macos": "macos-arm64",
@@ -145,14 +197,14 @@ def prepare(
     if "media-toolchain" in wanted:
         ensure_cached(
             name="media-toolchain",
-            contracts=[MEDIA_TOOLCHAIN_CONTRACT, MEDIA_TOOLCHAIN_BUILDER],
+            contracts=MEDIA_TOOLCHAIN_INPUTS,
             build=lambda destination: _build_media_toolchain(destination, platform=resolved),
             root=staging,
         )
     if "motion-video-worker" in wanted:
         ensure_cached(
             name="motion-video-worker",
-            contracts=[MOTION_WORKER_CONTRACT, MOTION_WORKER_SOURCE],
+            contracts=MOTION_WORKER_INPUTS,
             build=_build_motion_worker,
             root=staging,
         )
@@ -165,7 +217,7 @@ def prepare(
         ensure_subtitle_fonts(root=staging)
         ensure_cached(
             name="material-video-worker",
-            contracts=[MATERIAL_WORKER_CONTRACT, ASSET_RIGHTS_CONTRACT],
+            contracts=MATERIAL_WORKER_INPUTS,
             build=_build_material_worker,
             root=staging,
         )

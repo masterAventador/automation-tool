@@ -10,8 +10,14 @@ reproduce a byte-identical result.
 Disposable-per-run is the right policy for a database container or a browser
 profile, and the wrong policy for a version-pinned compiled artifact. This
 module keeps those artifacts on a stable per-machine path, keyed by the digest
-of the contracts that pin them, so a rebuild happens exactly when the pinned
-inputs change and never merely because a new run started.
+of everything they are built from -- the contracts that pin their versions and
+the source trees they are compiled from -- so a rebuild happens exactly when
+those inputs change and never merely because a new run started.
+
+Both halves of that key are load-bearing. Keying only on the contracts is how a
+committed fix to the material Worker's web UI reached no user: the contracts
+were unchanged, so the cache reported the artifact current and the release
+shipped the binary frozen before the fix.
 
 The cache deliberately lives outside the repository: the Worker build scripts
 refuse to write inside the checkout, and repository-scoped cleanup would sweep
@@ -31,6 +37,12 @@ from pathlib import Path
 CACHE_DIRECTORY_NAME = "automation-tool-build"
 STAMP_SUFFIX = ".stamp.json"
 STAMP_VERSION = 1
+
+# Byte-code caches are a side effect of importing a source package, not part of
+# what a build consumes. Digesting them would invalidate an artifact because
+# somebody ran a test.
+IGNORED_SOURCE_PARTS = frozenset({"__pycache__"})
+IGNORED_SOURCE_SUFFIXES = frozenset({".pyc", ".pyo"})
 
 
 class VideoRuntimeCacheRejected(RuntimeError):
@@ -58,25 +70,81 @@ def cache_root() -> Path:
     return Path.home() / ".cache" / CACHE_DIRECTORY_NAME
 
 
+def _source_package_entries(directory: Path) -> list[tuple[str, str]]:
+    """Digest every file in a source package the build compiles or freezes.
+
+    A pinning file names a version; a source package *is* the version, so the
+    whole tree has to be read. Names are relative to the package, never
+    absolute, because a per-machine cache is shared by every worktree and
+    absolute names would give each checkout its own key.
+    """
+    entries: list[tuple[str, str]] = []
+    for path in sorted(directory.rglob("*")):
+        relative = path.relative_to(directory)
+        if IGNORED_SOURCE_PARTS.intersection(relative.parts):
+            continue
+        if path.is_symlink():
+            # Its target lives outside the digest, so its bytes could change
+            # without changing the key.
+            raise VideoRuntimeCacheRejected(
+                f"the pinned source package {directory} contains a symbolic link "
+                f"({relative}), whose target the cache cannot account for"
+            )
+        if not path.is_file() or path.suffix in IGNORED_SOURCE_SUFFIXES:
+            continue
+        entries.append(
+            (
+                f"{directory.name}/{relative.as_posix()}",
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+        )
+    if not entries:
+        raise VideoRuntimeCacheRejected(
+            f"the pinned source package {directory} holds no files, so the cache "
+            "cannot tell whether its artifact is still current"
+        )
+    return entries
+
+
 def contract_fingerprint(contracts: Iterable[Path]) -> str:
-    """Digest the pinning contracts so a changed pin invalidates the cache."""
+    """Digest the pinned inputs so a changed input invalidates the cache.
+
+    An entry is either a file that pins a version or a directory holding source
+    the build consumes. Naming only the pinning files was how a fix to the
+    material Worker's web UI failed to reach a release: the contract files were
+    unchanged, so the cache handed back the binary frozen before the fix.
+    """
     digest = hashlib.sha256()
-    entries = []
+    entries: list[tuple[str, str]] = []
     for contract in contracts:
         path = Path(contract)
+        if path.is_dir() and not path.is_symlink():
+            entries.extend(_source_package_entries(path))
+            continue
         if not path.is_file():
             raise VideoRuntimeCacheRejected(
-                f"the pinning contract {path} does not exist, so the cache cannot "
+                f"the pinned input {path} does not exist, so the cache cannot "
                 "tell whether its artifact is still current"
             )
         entries.append((path.name, hashlib.sha256(path.read_bytes()).hexdigest()))
     if not entries:
         raise VideoRuntimeCacheRejected(
-            "an artifact with no pinning contract cannot be cached safely"
+            "an artifact with no pinned input cannot be cached safely"
         )
-    # Sorted by name so the caller's argument order never changes the key.
+    names = [name for name, _ in entries]
+    collisions = sorted({name for name in names if names.count(name) > 1})
+    if collisions:
+        raise VideoRuntimeCacheRejected(
+            "two pinned inputs share the cache key name "
+            f"{', '.join(collisions)}, so the key cannot say which one changed"
+        )
+    # Sorted by name so the caller's argument order never changes the key. The
+    # name is length-framed because it now carries a path: without a boundary,
+    # two different input sets can concatenate to the same byte stream.
     for name, payload in sorted(entries):
-        digest.update(name.encode("utf-8"))
+        encoded = name.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, byteorder="big"))
+        digest.update(encoded)
         digest.update(payload.encode("ascii"))
     return digest.hexdigest()
 
