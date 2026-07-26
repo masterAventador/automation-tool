@@ -1039,15 +1039,24 @@ fn final_path(file: &File) -> Result<String, BrowserProfileError> {
 }
 
 fn normalized_path_key(path: &Path) -> String {
-    let mut value = path.to_string_lossy().replace('/', "\\");
+    let mut value = path.to_string_lossy().replace('/', "\\").to_lowercase();
     if let Some(stripped) = value.strip_prefix("\\\\?\\") {
-        value = stripped.to_owned();
+        // `\\?\UNC\server\share` is the extended spelling of `\\server\share`,
+        // and `GetFinalPathNameByHandleW` only ever returns the extended one.
+        // Trimming just the `\\?\` left `unc\server\share`, which equals no
+        // path anyone can request, so a UNC-backed profile root could never
+        // match its own resolved path and always read as an unsafe directory.
+        value = match stripped.strip_prefix("unc\\") {
+            Some(share) => format!("\\\\{share}"),
+            None => stripped.to_owned(),
+        };
     }
     while value.ends_with('\\') && value.len() > 3 {
         value.pop();
     }
-    value.to_lowercase()
+    value
 }
+
 fn wide_null(path: &Path) -> Result<Vec<u16>, BrowserProfileError> {
     let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
     if units.is_empty() || units.len() >= MAX_WINDOWS_PATH_UNITS || units.contains(&0) {
@@ -1081,6 +1090,8 @@ fn require_safe_relative_name(value: &str) -> Result<(), BrowserProfileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser_profiles::BrowserProfileErrorCode;
+    use std::process::Command;
     use std::sync::atomic::{AtomicU32, Ordering};
     use windows_sys::Win32::Security::TokenOwner;
 
@@ -1125,10 +1136,49 @@ mod tests {
         }
     }
 
+    /// A `subst` drive letter, unmapped again however the case ends.
+    struct SubstDrive {
+        letter: String,
+    }
+
+    impl SubstDrive {
+        fn map(target: &Path) -> Option<Self> {
+            let letter = ('P'..='Z')
+                .rev()
+                .map(|value| format!("{value}:"))
+                .find(|candidate| !Path::new(&format!("{candidate}\\")).exists())?;
+            let mapped = Command::new("cmd")
+                .args(["/c", "subst", &letter, &target.to_string_lossy()])
+                .status()
+                .ok()?
+                .success();
+            mapped.then(|| Self { letter })
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            PathBuf::from(format!("{}\\{name}", self.letter))
+        }
+    }
+
+    impl Drop for SubstDrive {
+        fn drop(&mut self) {
+            let _ = Command::new("cmd")
+                .args(["/c", "subst", &self.letter, "/d"])
+                .status();
+        }
+    }
+
     fn opened(path: &Path, policy: AclPolicy, purpose: &str) -> DirectoryHandle {
         match open_absolute_directory(path, policy) {
             Ok(directory) => directory,
             Err(error) => panic!("{purpose} (error code {:?})", error.code()),
+        }
+    }
+
+    fn refusal_code(path: &Path, purpose: &str) -> BrowserProfileErrorCode {
+        match open_absolute_directory(path, AclPolicy::Ignore) {
+            Ok(_) => panic!("{purpose}"),
+            Err(error) => error.code(),
         }
     }
 
@@ -1270,4 +1320,106 @@ mod tests {
         assert!(lock.release().is_ok(), "the lock must release");
     }
 
+    #[test]
+    fn a_unc_path_and_its_final_path_form_share_one_key() {
+        // `GetFinalPathNameByHandleW` spells a UNC path `\\?\UNC\server\share`.
+        // Stripping only `\\?\` left `unc\server\share`, which matched nothing,
+        // so every UNC-backed profile root failed as an unsafe directory.
+        assert_eq!(
+            normalized_path_key(Path::new(r"\\server\share\browser-profiles")),
+            normalized_path_key(Path::new(r"\\?\UNC\server\share\browser-profiles")),
+        );
+    }
+
+    #[test]
+    fn a_drive_path_and_its_extended_form_share_one_key() {
+        assert_eq!(
+            normalized_path_key(Path::new(r"C:\Users\Test\browser-profiles")),
+            normalized_path_key(Path::new(r"\\?\C:\Users\Test\browser-profiles")),
+        );
+    }
+
+    #[test]
+    fn keys_ignore_case_separator_and_trailing_slashes() {
+        assert_eq!(
+            normalized_path_key(Path::new("C:/Users/Test/")),
+            normalized_path_key(Path::new(r"c:\users\test")),
+        );
+        assert_eq!(normalized_path_key(Path::new(r"C:\")), "c:\\");
+    }
+
+    #[test]
+    fn an_alias_drive_does_not_share_a_key_with_its_target() {
+        // A `subst` letter is a per-session alias any process in that session
+        // can re-point. Refusing it is the point of comparing the requested
+        // path against the resolved one, so the keys must stay different.
+        assert_ne!(
+            normalized_path_key(Path::new(r"Y:\browser-profiles")),
+            normalized_path_key(Path::new(r"\\?\C:\real\browser-profiles")),
+        );
+    }
+
+    #[test]
+    fn a_subst_alias_drive_is_refused() {
+        let root = TemporaryDirectory::create("subst");
+        let target = root.path.join("target");
+        fs::create_dir(&target).expect("target must be creatable");
+        fs::create_dir(target.join(PROFILE_ROOT)).expect("child must be creatable");
+
+        let Some(drive) = SubstDrive::map(&target) else {
+            panic!("no drive letter could be mapped, so this case did not run");
+        };
+
+        assert_eq!(
+            refusal_code(
+                &drive.path(PROFILE_ROOT),
+                "a path that only resolves through an alias drive must be refused",
+            ),
+            BrowserProfileErrorCode::UnsafeDirectory,
+        );
+        opened(
+            &target.join(PROFILE_ROOT),
+            AclPolicy::Ignore,
+            "the same directory reached by its real path must be accepted",
+        );
+    }
+
+    #[test]
+    fn a_junction_component_is_refused() {
+        let root = TemporaryDirectory::create("junction");
+        let target = root.path.join("target");
+        fs::create_dir(&target).expect("target must be creatable");
+        fs::create_dir(target.join(PROFILE_ROOT)).expect("child must be creatable");
+        let link = root.path.join("link");
+
+        let created = Command::new("cmd")
+            .args([
+                "/c",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &target.to_string_lossy(),
+            ])
+            .status()
+            .expect("mklink must be runnable")
+            .success();
+        assert!(created, "a junction is creatable without elevation");
+
+        // A junction is re-pointable by anyone who can write the parent, so a
+        // component that is one is refused rather than followed. Moving AppData
+        // and leaving a junction behind is therefore a refused layout -- loudly,
+        // which is the intended trade, not an accident of string comparison.
+        assert_eq!(
+            refusal_code(
+                &link.join(PROFILE_ROOT),
+                "a path crossing a junction must be refused",
+            ),
+            BrowserProfileErrorCode::UnsafeDirectory,
+        );
+        opened(
+            &target.join(PROFILE_ROOT),
+            AclPolicy::Ignore,
+            "the same directory reached without the junction must be accepted",
+        );
+    }
 }
