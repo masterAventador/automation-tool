@@ -68,6 +68,39 @@ class BuildSignedExecutorTests(unittest.TestCase):
             self.assertIn(f"{stream}-line-05", message)
             self.assertIn(f"{stream}-line-24", message)
 
+    def test_package_signing_failure_preserves_both_output_streams(self) -> None:
+        successful_build = subprocess.CompletedProcess(
+            args=["python", "-m", "PyInstaller"],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+        failed_signing = subprocess.CompletedProcess(
+            args=["python", "-m", "automation_tool.executor.package_manifest"],
+            returncode=7,
+            stdout=b"manifest stdout: invalid bundle entry\n",
+            stderr=b"manifest stderr: signing traceback\n",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(
+                run_e4_07_acceptance.subprocess,
+                "run",
+                side_effect=[successful_build, failed_signing],
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"^E4-07 package signing failed",
+                ) as raised:
+                    run_e4_07_acceptance.build_signed_executor(
+                        Path(directory) / "workspace",
+                        build_id="signing-diagnostic-test",
+                    )
+
+        message = str(raised.exception)
+        self.assertIn("manifest stdout: invalid bundle entry", message)
+        self.assertIn("manifest stderr: signing traceback", message)
+
     def _assert_probe_builder_preserves_output(self, module: object) -> None:
         failed_build = subprocess.CompletedProcess(
             args=["python", "-m", "PyInstaller"],

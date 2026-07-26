@@ -122,7 +122,7 @@ tao::…::app_delegate::did_finish_launching
 - 本任务证明的是：**当前签名正式包不会因为缺 `Contents/Resources` 而闪退**，
   且该产物今天被真实启动过、没有产生任何崩溃报告；
 - 本任务**没有**证明：客户在自己机器上首次双击（含 Gatekeeper 同意框）后一切正常
-  —— 那条仍是 `DEMO-preflight-checklist.md` §4.3 的人工待办；
+  —— 那条仍是 `docs/demo-preflight-checklist.md` B3 的人工待办；
 - 本任务**没有**在演示机（M4 Air / macOS 26）上跑过任何东西。
 
 ## 6. 清理

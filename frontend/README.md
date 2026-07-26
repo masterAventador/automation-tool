@@ -59,7 +59,7 @@ pnpm check:api
 
 `src/api/generated/control-plane.ts` 禁止手改。后端契约先由 FastAPI 导出快照，前端再生成并检查逐字漂移。
 
-Executor v1 使用 `src/api/protocol/executor-envelope.ts` 的 Zod 判别联合和 `src-tauri/src/executor_protocol.rs` 的 Rust 解析器。两者与 Python `parse_executor_message` 回放 `../contracts/fixtures/executor-v1/` 的同一组 10 个 valid、27 个 invalid 原始 wire 文件；未知字段/类型、重复 key、非规范 UUIDv4、非 UTC 或微秒倒序 deadline、超出 JavaScript 安全整数的 sequence、任务作用域混淆、资源滥用和敏感 payload 都 fail closed。TypeScript/Rust 解析错误只返回固定公开信息，不反射原始输入；I2-13 已在 Control Plane 侧让真实 WebSocket 帧经过 Python 正式入口，E4-02/E4-12 再接入 Local Executor 进程，React 只消费公开投影。
+Executor v1 使用 `src/api/protocol/executor-envelope.ts` 的 Zod 判别联合和 `src-tauri/src/executor_protocol.rs` 的 Rust 解析器。两者与 Python `parse_executor_message` 回放 `../contracts/fixtures/executor-v1/valid` 和 `invalid` 中的全部原始 wire 文件；未知字段/类型、重复 key、非规范 UUIDv4、非 UTC 或微秒倒序 deadline、超出 JavaScript 安全整数的 sequence、任务作用域混淆、资源滥用和敏感 payload 都 fail closed。TypeScript/Rust 解析错误只返回固定公开信息，不反射原始输入；I2-13 已在 Control Plane 侧让真实 WebSocket 帧经过 Python 正式入口，E4-02/E4-12 再接入 Local Executor 进程，React 只消费公开投影。
 
 E4-05 的 `src-tauri/src/executor_package.rs` 是签名 `onedir` 的唯一运行时信任边界。验证器只接受 Rust 原生调用方提供的可信 Ed25519 公钥、显式 `semver` 允许范围和可选已安装版本，没有 Tauri Command、React 参数、服务端 key、URL 或在线下载入口。它先严格验证 `atems1` 对 Manifest 原始字节的签名，再拒绝非 canonical/重复/未知字段，绑定当前 macOS/Windows 与 aarch64/x86_64，最后两次枚举完整目录并以稳定文件 identity 逐项复算大小、SHA-256 和目录摘要；弱公钥、版本越界/回退、symlink、非普通文件、目录增删和 payload 篡改均只返回固定错误。E4-07 装配进程监管时必须从 App 自己的受信资源/编译配置提供公钥和路径，不能新增 IPC 信任参数。
 

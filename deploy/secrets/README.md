@@ -1,6 +1,6 @@
 # Customer Demo runtime secrets
 
-`inventory.v1.json` 是 C10-05 的唯一 Secret inventory。生产 Control Plane 镜像固定 `AUTOMATION_TOOL_RUNTIME_SECRET_MODE=files`，只读取 `/run/secrets` 下 inventory 指定的五个固定文件名；Secret path 不是部署输入，不能通过环境变量或 argv 改写。
+`inventory.v1.json` 是 C10-05 的唯一 Secret inventory。生产 Control Plane 镜像固定 `AUTOMATION_TOOL_RUNTIME_SECRET_MODE=files`，只读取 `/run/secrets` 下 inventory 指定的全部固定文件名；Secret path 不是部署输入，不能通过环境变量或 argv 改写。
 
 Secret Store 投影文件必须是 runtime UID `65532` 自有的 `0400` 普通文件，或 root 自有、runtime group 可读的 `0440` 普通文件。装载器拒绝 symlink、目录、其他 owner、owner/group/other 可写、other 可读、可执行、超过 8192 bytes、空值、非 UTF-8、首尾空白、换行和 NUL。Secret volume 只读挂载；值只在进程启动时读取，轮换必须按 inventory 顺序完成并受控重启对应 consumer。
 

@@ -94,7 +94,7 @@ codesign -dv --verbose=4     → Identifier=com.aventador.automationtool
 > **「客户双击后在同意框上点一次 Open」这一下人工交互，本任务没有走过，也没有任何历史任务走过。**
 > 它离真实客户路径就差这一下，而演示当天客户要做的恰恰就是这一下。
 
-这条**不计入已通过**，已挂到 `docs/development/DEMO-preflight-checklist.md` §4.3，
+这条**不计入已通过**，已挂到 `docs/demo-preflight-checklist.md` B3，
 必须由人在演示机上手工完成，不能用 `spctl` 结论顶替。
 
 ### 3. 隔离启动成功，真实目录零改动

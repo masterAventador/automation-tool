@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What each gate needs before it can run, and the command that produces it.
 
-Five gates in this repository cannot run on a freshly cloned tree. Each one
+Some gates in this repository cannot run on a freshly cloned tree. Each one
 needs a build artifact that no runner produces and that nothing declares:
 
 * `scripts/test_motion_catalog_release.py` needs the BM-12 staged catalog;
@@ -147,7 +147,7 @@ PREREQUISITES: Final[tuple[Prerequisite, ...]] = (
             "input, not something the test can synthesise"
         ),
         caveat=(
-            "downloads 71 digest-pinned artifacts (~3.9 MB) from jsdelivr, "
+            "downloads digest-pinned artifacts from jsdelivr, "
             "gstatic and cdnjs, so it needs network; each file is retried up to "
             "four times and already-cached files are skipped"
         ),

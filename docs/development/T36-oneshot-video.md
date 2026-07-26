@@ -1534,7 +1534,7 @@ T36 one-sentence App acceptance passed
 **未运行 `scripts/run_u9_06_acceptance.py`**；只读列目录核对过用户真实安装
 `~/Library/Application Support/com.aventador.automationtool/` 完好（手工扫码的抖音 Profile 与凭据仍在），
 **全程未写入该目录**；未触碰 `.local/t44-release-verify/` 与
-`docs/development/DEMO-preflight-checklist.md`。
+当时尚存、后来由 C11 删除的演示前检查过程稿。
 
 **本轮（主线程 + 过期执行器包）的清理**：跑了一次完整 `scripts/run_t36_acceptance.py`
 （隔离 Compose project name `automation-tool-t36-99019`，Control Plane 端口 54922，
@@ -1553,7 +1553,7 @@ T36 one-sentence App acceptance passed
 **未运行 `scripts/run_u9_06_acceptance.py`**；只读列目录核对用户真实安装
 `~/Library/Application Support/com.aventador.automationtool/` 完好（手工扫码的抖音凭据仍在），
 **全程未写入该目录**；未触碰 `.local/release/`、`.local/t44-release-verify/`、
-`docs/development/DEMO-preflight-checklist.md`，以及其他工作线占用的
+当时尚存、后来由 C11 删除的演示前检查过程稿，以及其他工作线占用的
 `tests/local_video_orchestrator*.rs`、`tests/material_video_gateway.rs`、
 `scripts/run_bm_02/03/04_acceptance.py`、`scripts/run_im_03/04/05_acceptance.py`。
 
@@ -1568,7 +1568,7 @@ T36 one-sentence App acceptance passed
 `worker.mjs` 进程各 **0 个**。一次性诊断脚本与 `sample` 输出只存在会话临时目录，未进仓库。
 **未运行 `scripts/run_u9_06_acceptance.py`**，未写入
 `~/Library/Application Support/com.aventador.automationtool/`（只读核对完好），
-未触碰 `.local/t44-release-verify/` 与 `docs/development/DEMO-preflight-checklist.md`。
+未触碰 `.local/t44-release-verify/` 与当时尚存、后来由 C11 删除的演示前检查过程稿。
 
 **渲染半段那次实跑的清理**：未启动 App、未启动 Control Plane、未起 Docker。
 三次渲染各起一个无头内置 Chromium 与一个 node worker，由 `WorkerSession` 在成功/失败/收尾
@@ -1579,7 +1579,7 @@ T36 one-sentence App acceptance passed
 密钥仅运行时读自 git-ignored `.local/secrets/bailian-model.json`，未打印、未落盘、未进断言。
 全程未运行 `scripts/run_u9_06_acceptance.py`，未读写
 `~/Library/Application Support/com.aventador.automationtool/`，未触碰
-`.local/t44-release-verify/` 与 `docs/development/DEMO-preflight-checklist.md`。
+`.local/t44-release-verify/` 与当时尚存、后来由 C11 删除的演示前检查过程稿。
 
 ## 未完成（下一条工作线的输入）
 
