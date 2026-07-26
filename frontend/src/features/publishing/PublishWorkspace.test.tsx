@@ -269,6 +269,30 @@ describe("publish workspace", () => {
     expect(gateway.beginPublish).not.toHaveBeenCalled();
   });
 
+  /**
+   * 按钮变灰是有意的，但界面从来没说过要填什么它才会亮。
+   *
+   * 实测这个按钮 `title` 和 `aria-describedby` 都是 null。用户填完标题按钮还是灰的
+   * （还差简介），此时屏幕上没有任何一句话解释差在哪。
+   *
+   * 也不能用 `title` 修：浏览器对 disabled 的按钮不弹原生 tooltip。
+   */
+  it("says what is still missing while the publish button is greyed out", async () => {
+    render(<PublishWorkspace gateway={gatewayReturning(snapshot())} selectedVideo={selectedVideo} />);
+
+    const button = await screen.findByRole("button", { name: /发布到抖音/ });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(/标题/);
+    expect(button).toHaveAccessibleDescription(/简介/);
+
+    await userEvent.type(screen.getByLabelText("标题"), TITLE);
+    await userEvent.type(screen.getByLabelText("简介"), DESCRIPTION);
+
+    // 能按了就不该再挂着一句「还差什么」。
+    expect(screen.getByRole("button", { name: /发布到抖音/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /发布到抖音/ })).not.toHaveAccessibleDescription();
+  });
+
   it("offers no copy to write when no video has been selected", async () => {
     render(<PublishWorkspace gateway={gatewayReturning(snapshot())} />);
 

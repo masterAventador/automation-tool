@@ -43,6 +43,10 @@ import type { ModelServiceGateway } from "../features/settings/model-service-gat
 import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
 import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
 import { VideoStudio } from "../features/video-studio/VideoStudio";
+import {
+  motionRunNeedsAttention,
+  useMotionRun,
+} from "../features/video-studio/motion-run-store";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import { PublishWorkspace, type SelectedVideo } from "../features/publishing/PublishWorkspace";
 import {
@@ -66,6 +70,40 @@ const navigationItems = [
   { key: "platform", label: "平台状态" },
   { key: "diagnostics", label: "设置与诊断" },
 ];
+
+/** What the mark on the 视频制作 entry says when you hover it. */
+const VIDEO_STUDIO_RUNNING_TITLE = "视频制作正在进行中";
+
+/**
+ * Put a mark on 视频制作 while a film is being made, and until its result has
+ * been seen.
+ *
+ * Making one takes minutes — 136 to 178 of them are spent authoring, measured —
+ * and nobody stands on one page that long. Every other surface of this shell
+ * was silent about it: leave the page and the App looked exactly as if nothing
+ * had ever been submitted, which is what made operators submit a second time
+ * and start a second authoring run. A failure that lands while the operator is
+ * elsewhere has the same problem and worse consequences.
+ *
+ * The mark is a dot rather than words so the entry's accessible name stays
+ * 视频制作 and nothing that navigates by name has to change; the reason is
+ * carried in a `title` so it is available rather than merely visible.
+ */
+function navigationItemsWith(videoStudioRunning: boolean) {
+  if (!videoStudioRunning) return navigationItems;
+  return navigationItems.map((item) =>
+    item.key === "video-studio"
+      ? {
+          ...item,
+          label: (
+            <Badge dot offset={[6, 2]}>
+              <span title={VIDEO_STUDIO_RUNNING_TITLE}>{item.label}</span>
+            </Badge>
+          ),
+        }
+      : item,
+  );
+}
 
 /**
  * The open source licence notice is a licence obligation, not a daily operating
@@ -395,6 +433,9 @@ export function WorkbenchShell({
   const showingDiagnostics = activePage === "diagnostics";
   const showingPlatform = activePage === "platform";
   const showingVideoStudio = activePage === "video-studio";
+  // Read from the store rather than from `VideoStudio`, which is unmounted
+  // exactly when this mark matters most.
+  const videoStudioRunning = motionRunNeedsAttention(useMotionRun());
   const showingVideoEditing = activePage === "video-editing";
   const showingPublishing = activePage === "publishing";
   const showingLegal = activePage === LEGAL_PAGE;
@@ -452,7 +493,7 @@ export function WorkbenchShell({
           <Menu
             mode="inline"
             selectedKeys={[showingLegal ? LEGAL_PAGE_SECTION : activePage]}
-            items={navigationItems}
+            items={navigationItemsWith(videoStudioRunning)}
             onClick={({ key }) => {
               if (
                 key === "workbench" ||

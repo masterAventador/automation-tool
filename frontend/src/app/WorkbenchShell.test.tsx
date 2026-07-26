@@ -1,12 +1,21 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
+import {
+  failMotionRun,
+  resetMotionRunStore,
+  startMotionRun,
+} from "../features/video-studio/motion-run-store";
 import { WorkbenchShell } from "./WorkbenchShell";
 
 describe("workbench shell navigation", () => {
+  beforeEach(() => {
+    resetMotionRunStore();
+  });
+
   it("opens video creation from the normal left navigation", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -21,6 +30,61 @@ describe("workbench shell navigation", () => {
     expect(screen.getByRole("heading", { name: "视频制作" })).toBeVisible();
     expect(screen.getByRole("region", { name: "视频制作工作区" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "新建视频" })).toBeVisible();
+  });
+
+  /**
+   * 视频在做的时候，人不会一直停在那一页。
+   *
+   * 实测：提交后切走 75 秒再回来，屏幕上没有任何东西说过「有一条正在做」——
+   * 侧边栏、顶栏、导航项全都没有标记。演示当天讲解人几乎一定会切页去讲别的
+   * 功能，回来看到空列表会以为没提交成功，然后再点一次，于是真的再跑一遍编排。
+   *
+   * 失败也一样：编排是几分钟后才失败的，那时用户可能在别的页面，而这个标记是
+   * 他知道「视频制作那边有事」的唯一途径。
+   */
+  it("marks the video entry while a film is being made and after it fails", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    startMotionRun({
+      kind: "one_sentence",
+      subject: "用蓝色商务风做一段本周销售增长说明",
+      startedAt: Date.now(),
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    const running = screen.getByRole("menuitem", { name: "视频制作" });
+    expect(within(running).getByTitle("视频制作正在进行中")).toBeInTheDocument();
+    // 别的导航项不该跟着亮。
+    expect(
+      within(screen.getByRole("menuitem", { name: "视频剪辑" })).queryByTitle(
+        "视频制作正在进行中",
+      ),
+    ).toBeNull();
+
+    failMotionRun({ tone: "error", text: "自动编排中途出错，视频没有开始制作。" });
+    expect(
+      within(screen.getByRole("menuitem", { name: "视频制作" })).getByTitle(
+        "视频制作正在进行中",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the video entry unmarked when nothing is being made", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      within(screen.getByRole("menuitem", { name: "视频制作" })).queryByTitle(
+        "视频制作正在进行中",
+      ),
+    ).toBeNull();
   });
 
   it("opens the standalone video editing module from its own left entry", async () => {

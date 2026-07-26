@@ -1,8 +1,16 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  motionRunNeedsAttention,
+  motionRunSnapshot,
+  resetMotionRunStore,
+} from "./motion-run-store";
 
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
+import durationContract from "../../../../contracts/video/motion-storyboard-duration.v1.json";
+import { motionSpokenDuration } from "./motion-duration";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import {
   MaterialVideoStudioGatewayError,
@@ -59,6 +67,12 @@ function gateway(): MaterialVideoStudioGateway {
 }
 
 describe("video studio shell", () => {
+  // 运行状态现在活在组件之外（这正是它能挺过切页的原因），所以每条用例开始前
+  // 必须清空，否则上一条的选择和提交会渗进下一条。
+  beforeEach(() => {
+    resetMotionRunStore();
+  });
+
   it("exposes every planned page without inventing jobs or artifacts", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);
@@ -418,7 +432,9 @@ describe("video studio shell", () => {
       "增长看得见",
     );
     await user.click(screen.getByRole("button", { name: "播放预览" }));
-    expect(await screen.findByText("第 2 段 / 3")).toBeVisible();
+    // 预览现在按草稿真正的每段时长走（默认 4 秒），不再是写死的 500ms，
+    // 所以等待窗口必须比一段长；默认的 1000ms 只够旧的假节奏。
+    expect(await screen.findByText("第 2 段 / 3", {}, { timeout: 8000 })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
     expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
@@ -595,7 +611,7 @@ describe("video studio shell", () => {
       }),
     );
     expect(
-      await screen.findByText("已提交一句话自动制作，可到“制作任务”查看进度。"),
+      await screen.findByText("已提交一句话自动制作，编排完成，本机渲染开始了。"),
     ).toBeVisible();
   });
 
@@ -640,6 +656,9 @@ describe("video studio shell", () => {
       ["authoring_crashed", "自动编排中途出错"],
       ["authoring_answer_invalid", "没有通过本机校验"],
     ] as const) {
+      // 运行状态活在组件之外，所以每一轮都要从干净的store 重新开始，
+      // 否则上一轮选中的制作方式会让这一轮的「选择品牌动效成片」找不到。
+      resetMotionRunStore();
       const user = userEvent.setup();
       const studioGateway = gateway();
       studioGateway.submitMotionBrief = vi
@@ -750,5 +769,381 @@ describe("video studio shell", () => {
     })) {
       expect(button).toBeDisabled();
     }
+  });
+
+  /**
+   * 打开 App 后看到的第一个界面里，最大的那个控件是点不动的。
+   *
+   * 实测（2026-07-26，1440×900）：「新建视频」首屏是一张 1102×115px 的输入框，
+   * 灰的、点不动，`title` 和 `aria-describedby` 都是 null——没有任何地方说
+   * 为什么点不动、要做什么才能用。客户第一眼看到的就是它。
+   *
+   * 这条用例不规定怎么修：框可以是能用的，也可以带上说明，也可以根本不摆在这里。
+   * 它只拒绝「又不能用又不解释」这一种。
+   */
+  it("never shows a dead input box with no explanation of why", () => {
+    render(<VideoStudio gateway={gateway()} />);
+
+    for (const box of screen.queryAllByRole("textbox")) {
+      const explained =
+        box.getAttribute("title") !== null ||
+        box.getAttribute("aria-describedby") !== null;
+      const dead = (box as HTMLInputElement | HTMLTextAreaElement).disabled;
+      expect(
+        { name: box.getAttribute("aria-label"), dead, explained },
+        "首屏出现了既不能用又没有说明的输入框",
+      ).not.toMatchObject({ dead: true, explained: false });
+    }
+  });
+
+  /**
+   * 「视频需求」和「视频标题」是同一个字段的两个名字，还同屏显示。
+   *
+   * 实测：两个框都绑 `motionDraft.subject`，改任一个另一个跟着变，而更大更靠上
+   * 的那个叫「视频需求」——它存的其实是标题。用户会以为自己填漏了或者填重了。
+   *
+   * 用例按「值」而不是按「元素个数」断言：只要屏幕上找不到第二个同值输入框，
+   * 无论最后是删掉、合并还是改名，这个歧义就消失了。
+   */
+  it("keeps the film title in exactly one field, under one name", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    const title = screen.getByRole("textbox", { name: "视频标题" });
+    await user.clear(title);
+    await user.type(title, "季度增长");
+
+    const echoes = screen
+      .queryAllByRole("textbox")
+      .filter((box) => (box as HTMLInputElement).value === "季度增长");
+    expect(echoes).toEqual([title]);
+  });
+
+  /**
+   * 一句话卡片的说明文字是多行 JSX 字符串，JSX 把每处折行 + 缩进渲染成一个空格，
+   * 于是这段中文里出现两处句中断裂：「…的视频，␣文案、分镜…」「…本机完成。␣这个入口…」。
+   * 它就在演示路径正中。同一个文件里已经有写对的地方（`{"…"}`），这里只是漏了。
+   */
+  it("writes the one-sentence explanation without JSX line-break spaces", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+
+    const explanation = screen.getByText(/描述一句就够了/u);
+    expect(explanation.textContent).not.toMatch(
+      /[一-鿿、。，；]\s+[一-鿿]/u,
+    );
+  });
+
+  /**
+   * 一句话制作实测 3 分 34 秒，其中 178 秒界面完全不说话。
+   *
+   * 原生侧 `submit_motion_video_brief` 把整个编排跑在这一条命令里：
+   * `run_motion_authoring(...)` 返回之后才 `accept_authored_render_job(...)`
+   * 建出任务快照。也就是说这 178 秒里**任务根本还不存在**——「制作任务」页
+   * 显示的是空态「还没有真实制作任务」，界面上唯一在动的东西是按钮上的转圈。
+   * 没有已用时间，没有阶段，没有任何证据说明它还活着。
+   *
+   * 这条用例要的是一个走字的钟。上限不要：编排的 600 秒预算是 lib.rs 里的一个
+   * 裸常量，不在任何契约里，把它抄进前端就是造第二个事实源；而且对一段 3 分钟的
+   * 等待来说「最长 10 分钟」也安慰不到人。已用时间才是「它没死」的证据。
+   */
+  it("counts the authoring wait out loud instead of only spinning a button", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const studioGateway = gateway();
+      // 编排跑完之前这个 Promise 不会 resolve，实测 178 秒。
+      studioGateway.submitMotionBrief = vi.fn().mockReturnValue(new Promise(() => {}));
+      render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+      expect(await screen.findByText(/正在自动编排这条视频/u)).toBeVisible();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(95_000);
+      });
+
+      expect(screen.getByText(/已用 1 分 35 秒/u)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 渲染阶段的任务卡此前只有一条百分比。
+   *
+   * 而这条百分比在原生侧是**状态的另一种写法**：`validate_snapshot` 只允许
+   * queued=5、rendering=55、encoding=85、succeeded=100 四个值，它在一个阶段里
+   * 一动不动。盯着一个不动的「55%」，用户没有任何办法判断是在跑还是卡死了。
+   *
+   * 已用时间解决「还活着吗」，契约上限解决「什么时候才该担心」。上限来自
+   * motion-storyboard-duration.v1 的 renderWallSecondsBase 与
+   * renderWallMillisPerFrame——沙箱真正会执行的那个数，不是编出来的估计。
+   */
+  it("puts a clock and the contract render ceiling on a job it submitted", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const studioGateway = gateway();
+      render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.click(screen.getByRole("tab", { name: "制作设置" }));
+      await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+      await user.click(screen.getByRole("tab", { name: "预览" }));
+
+      vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+        {
+          renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+          revision: 2,
+          status: "rendering",
+          progressPercent: 55,
+          subject: "新品发布",
+          styleDisplayName: "专业蓝",
+          artifactId: null,
+          artifactSizeBytes: null,
+          failureCode: null,
+        },
+      ]);
+      await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+      await user.click(screen.getByRole("tab", { name: "制作任务" }));
+      expect(await screen.findByText("逐帧渲染中")).toBeVisible();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(21_000);
+      });
+
+      // 默认草稿是 3 段 × 4 秒；上限完全由契约算出，用例里不写死秒数。
+      const film =
+        durationContract.beatCountDefault * durationContract.secondsPerBeatDefault;
+      const ceiling =
+        durationContract.renderWallSecondsBase +
+        (film * durationContract.framesPerSecond * durationContract.renderWallMillisPerFrame) /
+          1000;
+
+      expect(screen.getByText(/已用 21 秒/u)).toBeVisible();
+      // 上限只能写成「到点会停」，不能写成「预计还需」：实测 12 秒的片子渲染
+      // 约 10 秒，而契约上限是 174 秒——那是沙箱的卡死保护，不是预期耗时。
+      expect(
+        screen.getByText(
+          new RegExp(`超过 ${motionSpokenDuration(ceiling)} 会自动停下`, "u"),
+        ),
+      ).toBeVisible();
+      expect(screen.queryByText(/预计还需|预计剩余/u)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 编排返回时用户还停在「新建视频」页，界面只多一行小字让他自己去别的 Tab。
+   * 那条小字是这条链路上唯一的交接，演示时一定会卡在这里。既然编排返回的
+   * 那一刻任务已经真的存在了，就把人带过去。
+   */
+  it("moves to the jobs tab as soon as the authoring run returns", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(await screen.findByText(/已提交一句话自动制作/u)).toBeVisible();
+    expect(screen.getByRole("tab", { name: "制作任务" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  /**
+   * 做完的时候界面什么都不说：任务卡上的取消按钮消失，成片静悄悄出现在另一个 Tab。
+   * 等了三分半的人得自己去翻才知道好了没有。
+   */
+  it("announces a finished film and offers the way to it", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "b1f0d0c6-1d2f-4a0e-9c3a-2b6f5e7d8a90",
+        revision: 6,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "用蓝色商务风做一段本周销售增长说明",
+        styleDisplayName: "一句话自动制作",
+        artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+        artifactSizeBytes: 4096,
+        failureCode: null,
+      },
+    ]);
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(
+      await screen.findByText(/「用蓝色商务风做一段本周销售增长说明」已经做好了/u),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "去看成片" }));
+
+    expect(screen.getByRole("tab", { name: "成片" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // 用户已经处理过这条结果了，侧边栏那个「有事」的标记就该灭掉，
+    // 否则它会一直亮到下一次提交。
+    expect(screen.queryByText(/已提交一句话自动制作/u)).toBeNull();
+    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(false);
+    expect(
+      await screen.findByRole("button", {
+        name: "播放用蓝色商务风做一段本周销售增长说明",
+      }),
+    ).toBeVisible();
+  });
+
+  /**
+   * 预览按 500ms 一段放，同一屏上方却写着「每段 4 秒」。
+   *
+   * 这是用户点名的「默认一个片段就 1 秒钟」的镜像：数据层的默认值早就从 1 秒
+   * 改成契约里的 4 秒了，预览播放器的节奏还是写死的 500ms。用户设了 4 秒，
+   * 它按 0.5 秒放，三段 1.5 秒就完了——预览预览的是另一条片子。
+   *
+   * 节奏必须跟着草稿走，而草稿的默认值来自契约，所以用例也从契约取这个数。
+   */
+  it("plays the preview at the beat length the same screen promises", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<VideoStudio gateway={gateway()} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.click(screen.getByRole("tab", { name: "制作设置" }));
+      await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+      await user.click(screen.getByRole("tab", { name: "预览" }));
+
+      const preview = screen.getByRole("region", { name: "品牌动效播放预览" });
+      await user.click(screen.getByRole("button", { name: "播放预览" }));
+
+      const beatMillis = durationContract.secondsPerBeatDefault * 1000;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(beatMillis - 500);
+      });
+      expect(preview).toHaveTextContent("第 1 段 / 3");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(preview).toHaveTextContent("第 2 段 / 3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 全产品 13 个禁用控件，13 个都没有说明——`title` 和 `aria-describedby` 全是 null。
+   * 「新建视频」页上的「打开完整制作界面」是演示路径上第一个撞到的。
+   *
+   * 注意不能用 `title` 修：浏览器对 `disabled` 的按钮不触发原生 tooltip，
+   * 挂上去等于没挂。产品自己已经有一处做对了——预览页「提交本机渲染」禁用时
+   * 旁边有一条写清楚缺什么的旁注——照着那个来。
+   */
+  it("explains every disabled button on the page instead of just greying it", () => {
+    render(<VideoStudio gateway={gateway()} />);
+
+    for (const button of screen.getAllByRole("button")) {
+      if (!(button as HTMLButtonElement).disabled) continue;
+      expect(
+        button,
+        `禁用按钮「${button.textContent}」没有任何说明`,
+      ).toHaveAccessibleDescription();
+    }
+  });
+
+  /**
+   * 提交完，「制作任务」页还是空的——足足 136 秒。
+   *
+   * 原生侧编排成功之后才写任务快照，实测那次成功的运行任务在 +140 秒才第一次
+   * 出现。也就是说用户点完「开始自动制作」，切到「制作任务」看到的是空态
+   * 「还没有真实制作任务」。他会以为没提交上去，然后再点一次——而再点一次
+   * 会真的再跑一遍编排。
+   *
+   * 所以提交那一刻就得有一条本地记录，不能等原生侧承认它存在。
+   */
+  it("shows the submission in the jobs list from the moment it is sent", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    // 编排跑完之前不 resolve，实测 136～178 秒。
+    studioGateway.submitMotionBrief = vi.fn().mockReturnValue(new Promise(() => {}));
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    await user.click(screen.getByRole("tab", { name: "制作任务" }));
+
+    const jobs = screen.getByRole("tabpanel");
+    expect(within(jobs).queryByText("还没有真实制作任务")).toBeNull();
+    expect(within(jobs).getByText("用蓝色商务风做一段说明")).toBeVisible();
+    expect(within(jobs).getByText(/正在自动编排这条视频/u)).toBeVisible();
+  });
+
+  /**
+   * 切走再切回来，什么都没发生过——而任务其实已经失败了。
+   *
+   * 实测：提交后切走 75 秒再回来，任务列表是空的，输入的句子没了，选中的制作
+   * 方式没了。更糟的是失败被吞掉：编排的 Promise 是几分钟后才 settle 的，
+   * 那时 `WorkbenchShell` 早就把 `VideoStudio` 卸载了，错误文案写进死掉的
+   * state，用户永远不知道任务挂了。云端验收线的一次运行就是这么把失败原因
+   * 永久弄丢的。
+   *
+   * 原生侧没问题：渲染在切页时不会中断。这纯粹是前端状态的生命周期问题。
+   */
+  it("keeps the sentence, the method and a failure that landed after the page was gone", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    let crash: (error: unknown) => void = () => {};
+    studioGateway.submitMotionBrief = vi
+      .fn()
+      .mockReturnValue(
+        new Promise((_resolve, reject) => {
+          crash = reject;
+        }),
+      );
+    const view = render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    // 用户去看别的功能：外壳把整个视频制作页卸载掉。
+    view.unmount();
+
+    // 编排在这之后才失败。
+    await act(async () => {
+      crash(new MaterialVideoStudioGatewayError("authoring_crashed", true));
+      await Promise.resolve();
+    });
+
+    render(<VideoStudio gateway={studioGateway} />);
+
+    expect(await screen.findByText(/自动编排中途出错/u)).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "新建视频" }));
+    // 选择按钮的无障碍名恒为「选择…」，选中与否挂在 aria-pressed 上。
+    expect(screen.getByRole("button", { name: "选择品牌动效成片" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("一句话视频需求")).toHaveValue("用蓝色商务风做一段说明");
   });
 });

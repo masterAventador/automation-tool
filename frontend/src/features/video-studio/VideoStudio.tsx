@@ -30,6 +30,8 @@ import {
 import {
   MOTION_DURATION_LIMITS,
   motionDurationProblem,
+  motionRenderCeilingSeconds,
+  motionSpokenDuration,
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
@@ -38,12 +40,24 @@ import {
   MOTION_BRIEF_FILM_SECONDS,
   motionBriefProblem,
 } from "./motion-one-sentence";
+import {
+  dismissMotionRunMessage,
+  failMotionRun,
+  forgetMotionJob,
+  setMotionActiveTab,
+  setMotionBrief,
+  setMotionMethod,
+  settleMotionRun,
+  startMotionRun,
+  useMotionRun,
+  type MotionRunPending,
+  type OwnMotionJob,
+  type VideoCreationMethodId,
+} from "./motion-run-store";
 import { motionPartsUsage } from "./motion-parts-catalog";
 import { MotionPartsCatalog } from "./MotionPartsCatalog";
 import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
 import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
-
-type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
 
 // The single creation mode the App can submit. Declared once so the parts page
 // and the submitted request can never disagree about which mode is in play.
@@ -68,6 +82,48 @@ const DEFAULT_MOTION_BEATS = resizeMotionBeats(
   MOTION_DURATION_LIMITS.beatCountDefault,
   createMotionBeat,
 );
+
+/**
+ * How long a submission that has not come back yet has been going.
+ *
+ * There is no job to show for it: `submit_motion_video_brief` writes the job
+ * snapshot only after the authoring pass has succeeded, so for 136–178 seconds
+ * (measured) the jobs list was literally empty and the operator had no way to
+ * tell a submission in flight from one that never happened. Some of them
+ * pressed the button again.
+ */
+function motionPendingLabel(pending: MotionRunPending, now: number): string {
+  const elapsed = motionSpokenDuration(Math.max(0, Math.floor((now - pending.startedAt) / 1000)));
+  return pending.kind === "one_sentence"
+    ? `正在自动编排这条视频 · 已用 ${elapsed}`
+    : `正在提交本机渲染任务 · 已用 ${elapsed}`;
+}
+
+/**
+ * What the jobs page says about time while a film this App started is running.
+ *
+ * The percentage alone cannot answer "is it stuck?", because the percentage is
+ * a status in disguise: `validate_snapshot` in `motion_video_studio.rs` admits
+ * exactly four values — queued 5, rendering 55, encoding 85, succeeded 100 — so
+ * the bar stands perfectly still for the whole of each stage. Two numbers are
+ * needed instead: how long it has been going, and the point at which the render
+ * sandbox itself would stop it. Both are facts rather than predictions; the
+ * ceiling is computed from the shared duration contract, never written down.
+ *
+ * It is worded as the stop condition it is, never as "预计还需". Measured on
+ * 2026-07-26, a twelve second film renders in about ten seconds while its
+ * contract ceiling is 174 — the contract sizes the sandbox's stall guard, not
+ * the expected run. Printing that number as an estimate would invent a
+ * three minute wait out of a ten second one.
+ */
+function motionJobTiming(own: OwnMotionJob | undefined, now: number): string | null {
+  if (own === undefined) return null;
+  const elapsed = Math.max(0, Math.floor((now - own.startedAt) / 1000));
+  const ceiling = motionRenderCeilingSeconds(own.filmSeconds);
+  return `已用 ${motionSpokenDuration(elapsed)} · 渲染超过 ${motionSpokenDuration(
+    ceiling,
+  )} 会自动停下`;
+}
 
 interface MotionDraft {
   readonly subject: string;
@@ -310,6 +366,9 @@ const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
 
 const BRIEF_SUBMIT_FALLBACK = "一句话自动制作暂时无法提交，请稍后重试。";
 
+/** Ties the 打开完整制作界面 button to the note saying why it is greyed out. */
+const OPEN_STUDIO_HINT_ID = "video-studio-open-full-hint";
+
 function NewVideoPage({
   gateway,
   onOpened,
@@ -321,6 +380,7 @@ function NewVideoPage({
   onBriefChange,
   briefBusy,
   onSubmitBrief,
+  briefProblem,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
@@ -332,6 +392,15 @@ function NewVideoPage({
   readonly onBriefChange: (brief: string) => void;
   readonly briefBusy: boolean;
   readonly onSubmitBrief: () => void;
+  /**
+   * What is wrong with the sentence as typed, or null.
+   *
+   * Deliberately not in the run store next to the submission results: nothing
+   * has been submitted, the operator is looking straight at the box, and a
+   * complaint about typing has no business surviving a page change or putting
+   * a mark on the sidebar.
+   */
+  readonly briefProblem: string | null;
 }) {
   const [opening, setOpening] = useState(false);
   const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -340,48 +409,71 @@ function NewVideoPage({
   const selectedName = VIDEO_CREATION_METHODS.find(
     (method) => method.id === selectedMethod,
   )?.name;
+  /**
+   * Put the one-sentence card on screen the moment it appears.
+   *
+   * The method cards are the last thing on this page, so the operator has
+   * scrolled to the bottom to reach them. Choosing 品牌动效成片 inserts this
+   * card *above* that position; the browser's scroll anchoring then holds the
+   * old view still and the card arrives off screen — measured at y = -412 with
+   * nothing on screen changing except a tag. Pressing the button that starts
+   * the demo looked like it did nothing.
+   *
+   * A callback ref rather than an effect because the one moment that matters is
+   * the node arriving. The optional call is for the unit-test DOM, which has no
+   * layout and therefore does not implement `scrollIntoView`; `toBeInViewport`
+   * in `e2e/video-studio-one-sentence.spec.ts` is what holds the real behaviour.
+   */
+  const revealOneSentenceCard = useCallback((node: HTMLDivElement | null) => {
+    node?.scrollIntoView?.({ block: "start" });
+  }, []);
 
   return (
-    <Card className="video-studio-panel" title="从一句话开始">
+    /*
+     * The card used to be called 从一句话开始 and led with a 1102×115px textarea
+     * that was disabled, unexplained, labelled 视频需求 and bound to the film
+     * *title*. Three separate lies in the first thing a new user sees: the
+     * biggest control on the page did nothing and never said why, its
+     * accessible name described a field it was not, and the real one-sentence
+     * entry was a sub-card further down. Deleting it removes all three at once
+     * and costs nothing — the title it wrote into is still edited by the
+     * 视频标题 field inside 固定模板手工制作, and the one-sentence path never
+     * read that value at all.
+     */
+    <Card className="video-studio-panel" title="新建视频">
       <Space orientation="vertical" size="middle" className="video-studio-new-form">
         <Typography.Text type="secondary">
-          后续可以在这里描述主题、受众和想表达的重点，再选择合适的制作方式。
+          先选择下面的制作方式，再填写这次视频的内容。
         </Typography.Text>
-        <Input.TextArea
-          aria-label="视频需求"
-          disabled={selectedMethod !== "motion_composition_v1"}
-          rows={5}
-          maxLength={80}
-          value={selectedMethod === "motion_composition_v1" ? motionSubject : ""}
-          onChange={(event) => onMotionSubjectChange(event.target.value)}
-          placeholder="例如：用品牌动效介绍新品的三个亮点"
-        />
         {selectedMethod === "motion_composition_v1" ? (
-          <Card size="small" title="一句话自动制作">
-            <Space orientation="vertical" size="small">
-              <Input.TextArea
-                aria-label="一句话视频需求"
-                rows={3}
-                maxLength={MOTION_BRIEF_LIMITS.maxBriefCharacters}
-                value={brief}
-                onChange={(event) => onBriefChange(event.target.value)}
-                placeholder="例如：用蓝色商务风做一段本周销售增长说明"
-              />
-              <Typography.Text type="secondary">
-                描述一句就够了。会生成一段 {MOTION_BRIEF_FILM_SECONDS} 秒的视频，
-                文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。
-                这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。
-              </Typography.Text>
-              <Button
-                type="primary"
-                loading={briefBusy}
-                disabled={briefBusy}
-                onClick={onSubmitBrief}
-              >
-                开始自动制作
-              </Button>
-            </Space>
-          </Card>
+          <div ref={revealOneSentenceCard}>
+            <Card size="small" title="一句话自动制作">
+              <Space orientation="vertical" size="small">
+                <Input.TextArea
+                  aria-label="一句话视频需求"
+                  rows={3}
+                  maxLength={MOTION_BRIEF_LIMITS.maxBriefCharacters}
+                  value={brief}
+                  onChange={(event) => onBriefChange(event.target.value)}
+                  placeholder="例如：用蓝色商务风做一段本周销售增长说明"
+                />
+                <Typography.Text type="secondary">
+                  {`描述一句就够了。会生成一段 ${MOTION_BRIEF_FILM_SECONDS} 秒的视频，文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。`}
+                </Typography.Text>
+                <Button
+                  type="primary"
+                  loading={briefBusy}
+                  disabled={briefBusy}
+                  onClick={onSubmitBrief}
+                >
+                  开始自动制作
+                </Button>
+                {briefProblem === null ? null : (
+                  <Alert type="error" showIcon title={briefProblem} />
+                )}
+              </Space>
+            </Card>
+          </div>
         ) : null}
         {selectedMethod === "motion_composition_v1" ? (
           <Card size="small" title="固定模板手工制作">
@@ -458,11 +550,23 @@ function NewVideoPage({
         ) : (
           <Alert type={openMessage.type} showIcon title={openMessage.text} />
         )}
-        <div>
+        {/*
+         * A greyed button that never says why.
+         *
+         * Note it cannot be fixed with `title`: browsers do not fire the native
+         * tooltip on a `disabled` button, so the attribute would be there and
+         * the user would still see nothing. A visible note carrying an id the
+         * button points at is the pattern this product already got right on
+         * 提交本机渲染 in the preview tab, and it works for a screen reader too.
+         */}
+        <Space orientation="vertical" size={4}>
           <Button
             type="primary"
             loading={opening}
             disabled={selectedMethod !== "material_montage_v1" || opening}
+            {...(selectedMethod === "material_montage_v1"
+              ? {}
+              : { "aria-describedby": OPEN_STUDIO_HINT_ID })}
             onClick={() => {
               setOpening(true);
               setOpenMessage(null);
@@ -484,7 +588,12 @@ function NewVideoPage({
           >
             打开完整制作界面
           </Button>
-        </div>
+          {selectedMethod === "material_montage_v1" ? null : (
+            <Typography.Text id={OPEN_STUDIO_HINT_ID} type="secondary">
+              这个界面只用于「智能素材成片」，先在上面选中它才能打开。
+            </Typography.Text>
+          )}
+        </Space>
       </Space>
     </Card>
   );
@@ -589,6 +698,18 @@ function MotionPreviewPage({
   const [activeBeat, setActiveBeat] = useState(0);
   const [playing, setPlaying] = useState(false);
   const lastBeat = draft.beats.length - 1;
+  /*
+   * Hold each beat for as long as the film will hold it.
+   *
+   * This was a hard-coded 500ms while the storyboard page one tab away wrote
+   * 「共 3 段 · 每段 4 秒 · 成片约 12 秒」, so the preview ran at eight times
+   * the speed of the thing it was previewing and three beats were over in a
+   * second and a half. It is the mirror of the retired three-second default:
+   * the data layer was fixed to read its length from the duration contract and
+   * the player was left behind. Watching a twelve second film take twelve
+   * seconds is the point of a preview.
+   */
+  const beatMillis = draft.secondsPerBeat * 1000;
   useEffect(() => {
     if (!playing) return;
     const timer = window.setTimeout(() => {
@@ -599,9 +720,9 @@ function MotionPreviewPage({
         }
         return current + 1;
       });
-    }, 500);
+    }, beatMillis);
     return () => window.clearTimeout(timer);
-  }, [activeBeat, lastBeat, playing]);
+  }, [activeBeat, beatMillis, lastBeat, playing]);
   const style = MOTION_STYLE_CATALOG.find((item) => item.id === draft.style.stylePresetId);
   const primary = draft.style.primaryColor || style?.preview.accent || "#1f4fd8";
   const secondary = draft.style.secondaryColor || style?.preview.paper || "#f4f1ea";
@@ -715,19 +836,46 @@ const MOTION_STATUS_COPY = {
 function JobPage({
   jobs,
   motionJobs,
+  ownMotionJobs,
+  pending,
+  now,
   busy,
   onCancel,
   onCancelMotion,
 }: {
   readonly jobs: readonly MaterialRenderJobSnapshot[];
   readonly motionJobs: readonly MotionRenderJobSnapshot[];
+  readonly ownMotionJobs: ReadonlyMap<string, OwnMotionJob>;
+  readonly pending: MotionRunPending | null;
+  readonly now: number;
   readonly busy: boolean;
   readonly onCancel: (id: string) => void;
   readonly onCancelMotion: (id: string) => void;
 }) {
-  if (jobs.length === 0 && motionJobs.length === 0) return <EmptyVideoPage page="jobs" />;
+  if (jobs.length === 0 && motionJobs.length === 0 && pending === null) {
+    return <EmptyVideoPage page="jobs" />;
+  }
   return (
     <Card className="video-studio-panel" title="本机制作任务">
+      {pending === null ? null : (
+        <Space orientation="vertical" size="middle" className="video-job-card">
+          <Space wrap>
+            <Typography.Text strong>{pending.subject}</Typography.Text>
+            <Tag color="blue">品牌动效成片</Tag>
+            <Tag color="processing">
+              {pending.kind === "one_sentence" ? "正在自动编排" : "正在提交"}
+            </Tag>
+          </Space>
+          <Typography.Text type="secondary">
+            {motionPendingLabel(pending, now)}
+          </Typography.Text>
+          {pending.kind === "one_sentence" ? (
+            <Typography.Text type="secondary">
+              文案、分镜和画面由视频创作模型生成，这一步不在本机跑，暂时也不能取消；编排返回后本机渲染才开始。
+            </Typography.Text>
+          ) : null}
+        </Space>
+      )}
       {motionJobs.map((job) => (
         <Space key={job.renderJobId} orientation="vertical" size="middle" className="video-job-card">
           <Space wrap>
@@ -745,6 +893,14 @@ function JobPage({
           {job.status === "failed" ? (
             <Alert type="error" showIcon title={motionFailureAdvice(job.failureCode)} />
           ) : null}
+          {["queued", "rendering", "encoding"].includes(job.status)
+            ? (() => {
+                const timing = motionJobTiming(ownMotionJobs.get(job.renderJobId), now);
+                return timing === null ? null : (
+                  <Typography.Text type="secondary">{timing}</Typography.Text>
+                );
+              })()
+            : null}
           {["queued", "rendering", "encoding"].includes(job.status) ? (
             <Popconfirm
               title="确定取消这个品牌动效任务吗？"
@@ -954,9 +1110,26 @@ export function VideoStudio({
     readonly (readonly string[])[]
   >(() => DEFAULT_MOTION_BEATS.map(() => []));
   const [jobError, setJobError] = useState(false);
-  const [submitMessage, setSubmitMessage] = useState<string | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
-  const [brief, setBrief] = useState("");
+  const [briefProblem, setBriefProblem] = useState<string | null>(null);
+  /*
+   * The run, the sentence, the chosen method and the open tab all live outside
+   * this component, because the shell unmounts it the moment the operator
+   * clicks another sidebar entry and a run takes minutes. See
+   * `motion-run-store.ts` for what that cost before.
+   *
+   * The tab is controlled from there too: finishing a step should move the
+   * operator to where that step's result landed, and it should still be there
+   * when he comes back.
+   */
+  const {
+    pending,
+    message,
+    ownJobs: ownMotionJobs,
+    brief,
+    selectedMethod,
+    activeTab,
+  } = useMotionRun();
+  const [now, setNow] = useState(() => Date.now());
   const [motionDraft, setMotionDraft] = useState<MotionDraft>({
     subject: "新品发布",
     secondsPerBeat: MOTION_DURATION_LIMITS.secondsPerBeatDefault,
@@ -987,6 +1160,17 @@ export function VideoStudio({
     const timer = window.setInterval(refresh, 2000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+  // Only tick while something is being timed. An always-running second hand
+  // would re-render this page forever on a machine with nothing to render.
+  // A stale `now` on the first frame after a clock starts reads as a negative
+  // age, which every reader clamps to zero — the right answer — and the next
+  // tick corrects it a second later. So there is no need to set it here.
+  const timingSomething = pending !== null || ownMotionJobs.size > 0;
+  useEffect(() => {
+    if (!timingSomething) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [timingSomething]);
   const act = (operation: Promise<void>) => {
     setBusy(true);
     void operation.then(refresh).catch(() => setJobError(true)).finally(() => setBusy(false));
@@ -1005,9 +1189,10 @@ export function VideoStudio({
   const submitBrief = () => {
     const problem = motionBriefProblem(brief, MOTION_BRIEF_FILM_SECONDS);
     if (problem !== null) {
-      setSubmitMessage(problem);
+      setBriefProblem(problem);
       return;
     }
+    setBriefProblem(null);
     const request: MotionVideoBriefRequest = {
       creationMode: "one_sentence_v1",
       brief: brief.trim(),
@@ -1016,11 +1201,31 @@ export function VideoStudio({
       language: MOTION_BRIEF_LIMITS.languages[0]!,
     };
     setBusy(true);
-    setSubmitMessage(null);
+    /*
+     * Record the run before it leaves, and move to where it will be watched.
+     *
+     * The native command does not return until the authoring pass is over —
+     * 136 to 178 seconds, measured — and it only writes the job snapshot at the
+     * end of it. Waiting for that to happen before showing anything is what
+     * left the jobs list empty for the whole wait. Every callback below writes
+     * to the store rather than to this component, because by the time they run
+     * this component may well have been unmounted by a sidebar click, and a
+     * failure written into a dead component is a failure the operator is never
+     * told about.
+     */
+    startMotionRun({
+      kind: "one_sentence",
+      subject: request.brief,
+      startedAt: Date.now(),
+    });
+    setMotionActiveTab("jobs");
     void gateway
       .submitMotionBrief(request)
-      .then(() => {
-        setSubmitMessage("已提交一句话自动制作，可到“制作任务”查看进度。");
+      .then((snapshot) => {
+        settleMotionRun(snapshot.renderJobId, MOTION_BRIEF_FILM_SECONDS, {
+          tone: "info",
+          text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
+        });
         refresh();
       })
       .catch((error: unknown) => {
@@ -1028,7 +1233,7 @@ export function VideoStudio({
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        setSubmitMessage(BRIEF_ERRORS[code] ?? BRIEF_SUBMIT_FALLBACK);
+        failMotionRun({ tone: "error", text: BRIEF_ERRORS[code] ?? BRIEF_SUBMIT_FALLBACK });
       })
       .finally(() => setBusy(false));
   };
@@ -1058,11 +1263,20 @@ export function VideoStudio({
             },
     };
     setBusy(true);
-    setSubmitMessage(null);
+    startMotionRun({
+      kind: "manual_template",
+      subject: request.subject,
+      startedAt: Date.now(),
+    });
+    setMotionActiveTab("jobs");
     void gateway
       .submitMotionDraft(request)
-      .then(() => {
-        setSubmitMessage("已提交真实本机渲染任务，可到“制作任务”查看进度。");
+      .then((snapshot) => {
+        settleMotionRun(
+          snapshot.renderJobId,
+          motionDraft.beats.length * motionDraft.secondsPerBeat,
+          { tone: "info", text: "已提交真实本机渲染任务，已经转到「制作任务」。" },
+        );
         refresh();
       })
       .catch((error: unknown) => {
@@ -1070,22 +1284,70 @@ export function VideoStudio({
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        setSubmitMessage(
-          code === "draft_invalid"
-            ? "草稿内容或品牌素材不符合本机冻结规则，请检查后重试。"
-            : code === "render_unavailable"
-              ? "本机渲染组件暂时不可用，请到设置与诊断检查组件。"
-              : "品牌动效任务暂时无法提交，请稍后重试。",
-        );
+        failMotionRun({
+          tone: "error",
+          text:
+            code === "draft_invalid"
+              ? "草稿内容或品牌素材不符合本机冻结规则，请检查后重试。"
+              : code === "render_unavailable"
+                ? "本机渲染组件暂时不可用，请到设置与诊断检查组件。"
+                : "品牌动效任务暂时无法提交，请稍后重试。",
+        });
       })
       .finally(() => setBusy(false));
   };
+  /*
+   * Finishing used to be the quietest moment of the whole run: the cancel
+   * button disappeared from a card the user was probably not looking at, and
+   * the film appeared in a different tab with nothing said. After three and a
+   * half minutes of waiting, the one thing the App owes the operator is to tell
+   * him it is done and open the door to it.
+   *
+   * Only films this session started are announced. A finished job found on
+   * startup is not news.
+   */
+  const finishedOwnJobs = motionJobs.filter(
+    (job) => job.status === "succeeded" && ownMotionJobs.has(job.renderJobId),
+  );
   return (
     <section className="video-studio" aria-label="视频制作工作区">
       {jobError ? <Alert type="warning" showIcon title="暂时无法读取制作任务，请稍后重试。" /> : null}
-      {submitMessage === null ? null : <Alert type="info" showIcon title={submitMessage} />}
+      {message === null ? null : (
+        <Alert
+          type={message.tone}
+          showIcon
+          closable
+          onClose={dismissMotionRunMessage}
+          title={message.text}
+        />
+      )}
+      {finishedOwnJobs.map((job) => (
+        <Alert
+          key={job.renderJobId}
+          type="success"
+          showIcon
+          title={`「${job.subject}」已经做好了`}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                // Acting on the result is what marks it seen: the film stops
+                // being timed, the notice goes, and the sidebar dot with it.
+                // Without this last part the dot stays lit until the next
+                // submission and stops meaning anything.
+                forgetMotionJob(job.renderJobId);
+                dismissMotionRunMessage();
+                setMotionActiveTab("artifacts");
+              }}
+            >
+              去看成片
+            </Button>
+          }
+        />
+      ))}
       <Tabs
-        defaultActiveKey="new"
+        activeKey={activeTab}
+        onChange={setMotionActiveTab}
         items={[
           {
             key: "new",
@@ -1095,15 +1357,16 @@ export function VideoStudio({
                 gateway={gateway}
                 onOpened={refresh}
                 selectedMethod={selectedMethod}
-                onSelectMethod={setSelectedMethod}
+                onSelectMethod={setMotionMethod}
                 motionSubject={motionDraft.subject}
                 onMotionSubjectChange={(subject) =>
                   setMotionDraft((current) => ({ ...current, subject }))
                 }
                 brief={brief}
-                onBriefChange={setBrief}
-                briefBusy={busy}
+                onBriefChange={setMotionBrief}
+                briefBusy={busy || pending !== null}
                 onSubmitBrief={submitBrief}
+                briefProblem={briefProblem}
               />
             ),
           },
@@ -1159,7 +1422,7 @@ export function VideoStudio({
               selectedMethod === "motion_composition_v1" ? (
                 <MotionPreviewPage
                   draft={motionDraft}
-                  submitting={busy}
+                  submitting={busy || pending !== null}
                   onSubmit={submitMotion}
                 />
               ) : (
@@ -1173,6 +1436,9 @@ export function VideoStudio({
               <JobPage
                 jobs={jobs}
                 motionJobs={motionJobs}
+                ownMotionJobs={ownMotionJobs}
+                pending={pending}
+                now={now}
                 busy={busy}
                 onCancel={(id) => act(gateway.cancel(id))}
                 onCancelMotion={(id) => act(gateway.cancelMotionRenderJob(id))}
