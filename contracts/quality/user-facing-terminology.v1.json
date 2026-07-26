@@ -227,6 +227,23 @@
     ],
     "maximumFileBytes": 1048576
   },
+  "embeddedWebUiScan": {
+    "roots": ["vendor/moneyprinterturbo/webui"],
+    "excludedGlobs": [],
+    "textExtensions": [".css", ".json", ".py"],
+    "maximumFileBytes": 1048576,
+    "exposureCount": 10,
+    "exposureSha256": "bb4168583c4ec780306888ec7102a9d108ff67162947b369bcae7dfaa15eed94",
+    "reason": "The material-video WebUI a user opens is upstream code, so it names the upstream project in its own sources on purpose and cannot be scanned like ours. The product neutralises every occurrence in frontend/src-tauri/src/material_video_studio_init.js, which forces the document title, rewrites text nodes and accessibility attributes, strips external links and fails closed when any survives; frontend/e2e-tauri/material-video-webui.spec.ts proves the rendered result through the normal product entry, but only with a full desktop build. Pinning the exposure surface here turns an upstream upgrade that adds, moves or rewords an occurrence red at normal gate speed, so the guard is re-checked before the change can reach a customer.",
+    "surfaces": [
+      "page_title in st.set_page_config",
+      "menu_items 'Report a bug' and 'About', reachable only through the header upstream styles.css already hides",
+      "the brand span inside the .mpt-brand heading",
+      "the GitHub href and its aria-label on the version link",
+      "an aff= tracking parameter inside the Kimi model-list link in webui/i18n/en.json and webui/i18n/zh.json",
+      "one Python comment that never reaches the page"
+    ]
+  },
   "nativeScan": {
     "roots": ["frontend/src-tauri/src", "backend/src"],
     "excludedGlobs": ["**/__pycache__/**"],

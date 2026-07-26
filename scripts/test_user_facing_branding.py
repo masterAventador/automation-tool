@@ -58,9 +58,28 @@ def run_check(root: Path | None = None, contract: Path | None = None):
     )
 
 
+# The embedded WebUI is upstream code, so it names the upstream project in its
+# own sources on purpose and cannot be scanned like ours. What the gate pins is
+# the size and shape of that exposure surface, so an upstream upgrade that adds
+# a new occurrence has to be re-checked against the window guard by a human.
+EMBEDDED_WEBUI_ROOT = "vendor/webui"
+EMBEDDED_WEBUI_OK = '<span class="mpt-brand__name">MoneyPrinterTurbo</span>\n'
+EMBEDDED_WEBUI_DIGEST = (
+    "f1e555f0127df185360cbff5732dedb76a4a32039fabf87722d37a96e733136d"
+)
+
+
 def base_contract() -> dict:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     contract["staticScan"]["roots"] = ["frontend/index.html", "frontend/src"]
+    contract["embeddedWebUiScan"] = {
+        "roots": [EMBEDDED_WEBUI_ROOT],
+        "excludedGlobs": [],
+        "textExtensions": [".py"],
+        "maximumFileBytes": 1048576,
+        "exposureSha256": EMBEDDED_WEBUI_DIGEST,
+        "exposureCount": 1,
+    }
     # The synthetic tree only contains the frontend files each case needs. The
     # native scan was added later and points at real source roots that this
     # tree does not have, so it has to be narrowed here too — otherwise every
@@ -81,7 +100,14 @@ def base_contract() -> dict:
     return contract
 
 
-def materialize(directory: Path, contract: dict, sources: dict[str, str]) -> Path:
+def materialize(
+    directory: Path,
+    contract: dict,
+    sources: dict[str, str],
+    embedded: str = EMBEDDED_WEBUI_OK,
+) -> Path:
+    (directory / EMBEDDED_WEBUI_ROOT).mkdir(parents=True, exist_ok=True)
+    (directory / EMBEDDED_WEBUI_ROOT / "Main.py").write_text(embedded, encoding="utf-8")
     (directory / "frontend/src").mkdir(parents=True, exist_ok=True)
     (directory / "frontend/src-tauri").mkdir(parents=True, exist_ok=True)
     (directory / "contracts/video").mkdir(parents=True, exist_ok=True)
@@ -112,10 +138,17 @@ STUDIO_OK = (
 )
 
 
-def expect(name: str, contract: dict, sources: dict[str, str], *, passes: bool) -> None:
+def expect(
+    name: str,
+    contract: dict,
+    sources: dict[str, str],
+    *,
+    passes: bool,
+    embedded: str = EMBEDDED_WEBUI_OK,
+) -> None:
     with tempfile.TemporaryDirectory(prefix="automation-tool-cq01-test-") as temporary:
         directory = Path(temporary)
-        contract_path = materialize(directory, contract, sources)
+        contract_path = materialize(directory, contract, sources, embedded)
         result = run_check(root=directory, contract=contract_path)
         if passes:
             assert result.returncode == 0, f"{name}: expected pass, got {result.stderr}"
@@ -195,6 +228,34 @@ def main() -> int:
     contract = base_contract()
     contract["conceptDistinctions"] = []
     expect("empty concept distinctions", contract, {"Studio.tsx": STUDIO_OK}, passes=False)
+
+    # The embedded upstream WebUI is a user-visible surface the frontend and
+    # native scans cannot reach. Its brand exposure surface is pinned, so an
+    # upstream upgrade that adds an occurrence has to be re-checked against the
+    # window guard instead of reaching a customer unnoticed.
+    expect(
+        "embedded WebUI brand surface grew",
+        base_contract(),
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        embedded=EMBEDDED_WEBUI_OK + 'st.caption("Powered by MoneyPrinterTurbo")\n',
+    )
+
+    expect(
+        "embedded WebUI brand surface reworded",
+        base_contract(),
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        embedded='<span class="mpt-brand__name">Money Printer Turbo</span>\n',
+    )
+
+    contract = base_contract()
+    del contract["embeddedWebUiScan"]
+    expect("missing embedded WebUI scan", contract, {"Studio.tsx": STUDIO_OK}, passes=False)
+
+    contract = base_contract()
+    contract["embeddedWebUiScan"]["roots"] = []
+    expect("embedded WebUI scan disabled", contract, {"Studio.tsx": STUDIO_OK}, passes=False)
 
     # A bare industry term inside rendered Chinese copy fails closed.
     expect(

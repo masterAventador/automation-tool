@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Scan user-facing source surfaces for forbidden brands and unexplained terms.
 
-Three rules are enforced against ``contracts/quality/user-facing-terminology.v1.json``:
+Four rules are enforced against ``contracts/quality/user-facing-terminology.v1.json``:
 
+0. the brand surface of the embedded upstream WebUI stays exactly as pinned;
 1. upstream project names never reach a user-visible surface;
 2. no declared industry term reaches rendered copy without its plain Chinese
    wording (in the same sentence, or anywhere on the same page for the two
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import re
 import unicodedata
@@ -597,6 +599,57 @@ def read_scan_sources(
     return sources, violations
 
 
+def embedded_web_ui_exposure(
+    root: Path, policy: dict[str, object]
+) -> tuple[list[str], str]:
+    """Return the embedded WebUI's brand occurrences and their digest."""
+    sources, violations = read_scan_sources(root, policy, [])
+    if violations:
+        fail("\n" + "\n".join(sorted(set(violations))))
+    inventory = sorted(
+        f"{relative}:{line.strip()}"
+        for _path, relative, text in sources
+        for line in text.splitlines()
+        if any(term in compact(line) for term in UPSTREAM_COMPACT_TERMS)
+    )
+    return inventory, hashlib.sha256("\n".join(inventory).encode()).hexdigest()
+
+
+def scan_embedded_web_ui(root: Path, policy: dict[str, object]) -> list[str]:
+    """Pin the brand surface of the WebUI the product embeds.
+
+    That WebUI is upstream code, so it names the upstream project in its own
+    sources on purpose and cannot be scanned like ours: rule 1 would fail on
+    every release. What the product guarantees instead is that the studio
+    window's initialization script rewrites every occurrence before the page is
+    shown, and fails closed if any survives — but only the desktop end-to-end
+    run can prove that, and it needs a full App build.
+
+    So this rule pins the exposure surface the guard was written against. An
+    upstream upgrade that adds, moves or rewords a brand occurrence turns red
+    here, at normal gate speed, and forces a human to re-check the guard
+    instead of letting the change reach a customer's screen unnoticed.
+    """
+    if not policy["roots"]:
+        fail("embeddedWebUiScan.roots must not be empty")
+    declared_digest = policy.get("exposureSha256")
+    declared_count = policy.get("exposureCount")
+    if not isinstance(declared_digest, str) or len(declared_digest) != 64:
+        fail("embeddedWebUiScan.exposureSha256 must be a sha256 digest")
+    if not isinstance(declared_count, int) or declared_count < 0:
+        fail("embeddedWebUiScan.exposureCount must be a non-negative integer")
+    inventory, digest = embedded_web_ui_exposure(root, policy)
+    if len(inventory) == declared_count and digest == declared_digest:
+        return []
+    return [
+        "embedded WebUI brand surface changed: "
+        f"found {len(inventory)} occurrences, sha256 {digest}; "
+        f"contract declares {declared_count}, sha256 {declared_digest}. "
+        "Re-check that the studio window guard still rewrites every one of "
+        "them, then update embeddedWebUiScan in the terminology contract."
+    ]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
@@ -616,6 +669,7 @@ def main() -> None:
     mappings = dict(contract["plainLanguageMappings"])  # type: ignore[arg-type]
     static = scan_policy(contract, "staticScan")
     native = scan_policy(contract, "nativeScan")
+    embedded = scan_policy(contract, "embeddedWebUiScan")
     artifact_extensions = native.get("artifactFileExtensions")
     if not isinstance(artifact_extensions, list) or not all(
         isinstance(item, str) and item.startswith(".") for item in artifact_extensions
@@ -649,6 +703,7 @@ def main() -> None:
             scan_forbidden_segments(relative, names, terms, "artifact or export name")
         )
 
+    violations.extend(scan_embedded_web_ui(root, embedded))
     violations.extend(scan_concept_distinctions(root, distinctions, contract))
     violations.extend(scan_parts_projection(root, str(contract["partsCatalogProjection"])))
     if violations:
