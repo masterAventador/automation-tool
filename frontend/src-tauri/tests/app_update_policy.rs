@@ -473,7 +473,7 @@ fn failed_atomic_save_does_not_advance_the_in_memory_policy() {
 
 #[cfg(unix)]
 #[test]
-fn symlinked_or_over_permissive_policy_files_fail_closed() {
+fn symlinked_policy_files_fail_closed_and_over_permissive_files_are_repaired() {
     use std::os::unix::fs::{symlink, PermissionsExt};
 
     let linked = TemporaryAppData::new();
@@ -500,11 +500,17 @@ fn symlinked_or_over_permissive_policy_files_fail_closed() {
     drop(service);
     fs::set_permissions(permissive.policy_file(), fs::Permissions::from_mode(0o644))
         .expect("broaden policy permissions");
-    assert_eq!(
+    drop(
         UpdatePolicyService::initialize(&permissive.0, "1.0.0", "stable")
-            .expect_err("unsafe permissions rejected")
-            .code(),
-        UpdatePolicyErrorCode::StorageUnavailable
+            .expect("repair over-permissive policy file"),
+    );
+    assert_eq!(
+        fs::metadata(permissive.policy_file())
+            .expect("repaired policy metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
     );
 }
 

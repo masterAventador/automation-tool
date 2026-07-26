@@ -27,7 +27,7 @@ pub const MAX_LOCAL_REGISTRATION_HANDOFF_BYTES: usize = 4096;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalRegistrationHandoffErrorCode {
     /// The private file exists but cannot be read safely: a symlink, a
-    /// directory, a mode other users can read, or an oversized body.
+    /// directory, permissions that cannot be repaired, or an oversized body.
     StorageUnavailable,
     /// The document is not the exact canonical grant this App accepts.
     HandoffInvalid,

@@ -55,14 +55,10 @@ impl SecretStore for AppDataSecretStore {
         let Some(metadata) = safe_secret_metadata(&self.path)? else {
             return Ok(None);
         };
+        let (file, metadata) = open_private_secret_file(&self.path, &metadata)?;
         if metadata.len() > MAX_STORED_SECRET_LENGTH as u64 {
             return Err(SecureStoreError::Unavailable);
         }
-        ensure_private_file_permissions(&self.path, &metadata)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .open(&self.path)
-            .map_err(|_| SecureStoreError::Unavailable)?;
         let mut secret = Vec::with_capacity(metadata.len() as usize);
         file.take((MAX_STORED_SECRET_LENGTH + 1) as u64)
             .read_to_end(&mut secret)
@@ -176,16 +172,12 @@ fn safe_secret_metadata(path: &Path) -> Result<Option<fs::Metadata>, SecureStore
 }
 
 #[cfg(unix)]
-fn ensure_private_file_permissions(
+fn open_private_secret_file(
     path: &Path,
     expected_metadata: &fs::Metadata,
-) -> Result<(), SecureStoreError> {
+) -> Result<(fs::File, fs::Metadata), SecureStoreError> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
-
-    if expected_metadata.permissions().mode() & 0o077 == 0 {
-        return Ok(());
-    }
 
     let file = OpenOptions::new()
         .read(true)
@@ -196,18 +188,51 @@ fn ensure_private_file_permissions(
     if !opened_metadata.is_file()
         || opened_metadata.dev() != expected_metadata.dev()
         || opened_metadata.ino() != expected_metadata.ino()
-        || unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0
+    {
+        return Err(SecureStoreError::Unavailable);
+    }
+    if opened_metadata.permissions().mode() & 0o077 != 0
+        && unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0
     {
         return Err(SecureStoreError::Unavailable);
     }
     let repaired_metadata = file.metadata().map_err(|_| SecureStoreError::Unavailable)?;
     if repaired_metadata.dev() != expected_metadata.dev()
         || repaired_metadata.ino() != expected_metadata.ino()
-        || repaired_metadata.permissions().mode() & 0o777 != 0o600
+        || repaired_metadata.permissions().mode() & 0o077 != 0
     {
         return Err(SecureStoreError::Unavailable);
     }
-    Ok(())
+    Ok((file, repaired_metadata))
+}
+
+#[cfg(not(unix))]
+fn open_private_secret_file(
+    path: &Path,
+    _expected_metadata: &fs::Metadata,
+) -> Result<(fs::File, fs::Metadata), SecureStoreError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|_| SecureStoreError::Unavailable)?;
+    let metadata = file.metadata().map_err(|_| SecureStoreError::Unavailable)?;
+    if !metadata.is_file() {
+        return Err(SecureStoreError::Unavailable);
+    }
+    Ok((file, metadata))
+}
+
+#[cfg(unix)]
+fn ensure_private_file_permissions(
+    path: &Path,
+    expected_metadata: &fs::Metadata,
+) -> Result<(), SecureStoreError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if expected_metadata.permissions().mode() & 0o077 == 0 {
+        return Ok(());
+    }
+    open_private_secret_file(path, expected_metadata).map(|_| ())
 }
 
 #[cfg(not(unix))]
@@ -295,7 +320,10 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{AppDataSecretStore, SecretStore, SecureStoreError};
+    use super::{
+        open_private_secret_file, safe_secret_metadata, AppDataSecretStore, SecretStore,
+        SecureStoreError,
+    };
 
     struct TemporaryAppData {
         path: std::path::PathBuf,
@@ -445,6 +473,31 @@ mod tests {
             .expect("set unsafe permissions before delete");
         store.delete().expect("repair and delete");
         assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_open_rejects_path_replacement_after_metadata_check() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let app_data = TemporaryAppData::new();
+        let store = AppDataSecretStore::new(&app_data.path, "device-credential-v1")
+            .expect("create store adapter");
+        let path = app_data.path.join("device-credential-v1");
+        store.save(b"original").expect("save original");
+        let expected = safe_secret_metadata(&path)
+            .expect("read original metadata")
+            .expect("original file");
+
+        fs::remove_file(&path).expect("remove original");
+        fs::write(&path, b"replacement").expect("write replacement");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("make replacement private");
+
+        assert_eq!(
+            open_private_secret_file(&path, &expected).err(),
+            Some(SecureStoreError::Unavailable)
+        );
     }
 
     #[cfg(unix)]

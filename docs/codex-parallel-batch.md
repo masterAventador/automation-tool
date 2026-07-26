@@ -204,7 +204,7 @@ git status          # 应显示 On branch codex/resilience-batch，基线 705504
 | T63 | ✅ 完成 | 本提交 | 旧诊断设置、旧策略 schema、通道切换和非规范 JSON 四组断言均先在启动失败处得到 RED | 已知 N-1 自动迁移并原子回写，通道切换清除旧候选/决策，未知版本继续 fail closed；诊断设置 6 项、策略 13 项回归通过 |
 | T64 | ⬜ | | | |
 | T22 | ⬜ | | | |
-| T66a | ✅ 完成 | 本提交 | `over_permissive_secret_files_are_repaired_for_load_save_and_delete` 先在 `repair and load: Unavailable` 断言失败 | 用 `O_NOFOLLOW` 打开并核对 inode 后 `fchmod 0600`；load/save/delete、符号链接拒绝与注册交接 15 项回归通过 |
+| T66a | ✅ 完成 | `e208b64` + 本提交 | `over_permissive_secret_files_are_repaired_for_load_save_and_delete` 先在 `repair and load: Unavailable` 断言失败 | 用同一个 `O_NOFOLLOW` 文件描述符核对 inode、修复权限并读取，消除复核发现的重开竞态；secure store 7 项、注册交接 15 项、更新策略 14 项回归通过 |
 | T58c | ⬜ | | | |
 | T62 | ✅ 完成 | `cc24156` + 本提交 | 防回归断言先捕获 `37`、`14`、`7/14` 与 `three browser_use scripts` 四处手抄计数 | 散文计数已移除；独立审查后把 guard 收紧为只扫描两份模块文档/注释，并补常见变体防绕过；完整聚合 runner 仍受既存 `tools/browser-use-contract/.venv` 未挂载阻塞 |
 
