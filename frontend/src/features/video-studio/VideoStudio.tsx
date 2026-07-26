@@ -30,6 +30,8 @@ import {
 import {
   MOTION_DURATION_LIMITS,
   motionDurationProblem,
+  motionRenderCeilingSeconds,
+  motionSpokenDuration,
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
@@ -68,6 +70,45 @@ const DEFAULT_MOTION_BEATS = resizeMotionBeats(
   MOTION_DURATION_LIMITS.beatCountDefault,
   createMotionBeat,
 );
+
+/**
+ * What the App knows about a render job because it is the one that started it.
+ *
+ * Neither fact is on `MotionRenderJobSnapshot`: it carries no start time and no
+ * film length. So the clock and the ceiling below are shown for jobs this
+ * session submitted and for no others. An App restarted mid-render would
+ * otherwise start counting from the moment it first happened to look, and
+ * render "已用 3 秒" over a job that has been going for four minutes — a wrong
+ * number is worse here than no number, because the whole point of the clock is
+ * to be the evidence that the job is alive.
+ *
+ * The durable fix is a `startedAt` and a length on the snapshot itself. That is
+ * native-side work and is not done here.
+ */
+interface OwnMotionJob {
+  readonly startedAt: number;
+  readonly filmSeconds: number;
+}
+
+/**
+ * What the jobs page says about time while a film this App started is running.
+ *
+ * The percentage alone cannot answer "is it stuck?", because the percentage is
+ * a status in disguise: `validate_snapshot` in `motion_video_studio.rs` admits
+ * exactly four values — queued 5, rendering 55, encoding 85, succeeded 100 — so
+ * the bar stands perfectly still for the whole of each stage. Two numbers are
+ * needed instead: how long it has been going, and the point at which the render
+ * sandbox itself would stop it. Both are facts rather than predictions; the
+ * ceiling is computed from the shared duration contract, never written down.
+ */
+function motionJobTiming(own: OwnMotionJob | undefined, now: number): string | null {
+  if (own === undefined) return null;
+  const elapsed = Math.max(0, Math.floor((now - own.startedAt) / 1000));
+  const ceiling = motionRenderCeilingSeconds(own.filmSeconds);
+  return `已用 ${motionSpokenDuration(elapsed)} · 本机渲染最长 ${motionSpokenDuration(
+    ceiling,
+  )}，超过会自动停下`;
+}
 
 interface MotionDraft {
   readonly subject: string;
@@ -321,6 +362,7 @@ function NewVideoPage({
   onBriefChange,
   briefBusy,
   onSubmitBrief,
+  authoringElapsedSeconds,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
@@ -332,6 +374,8 @@ function NewVideoPage({
   readonly onBriefChange: (brief: string) => void;
   readonly briefBusy: boolean;
   readonly onSubmitBrief: () => void;
+  /** Seconds the authoring run has been going, or null when none is. */
+  readonly authoringElapsedSeconds: number | null;
 }) {
   const [opening, setOpening] = useState(false);
   const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -399,6 +443,30 @@ function NewVideoPage({
                 >
                   开始自动制作
                 </Button>
+                {/*
+                 * The 178 seconds nobody was told about.
+                 *
+                 * `submit_motion_video_brief` runs the whole authoring pass
+                 * inside the one command and only writes the job snapshot
+                 * afterwards, so for the length of that pass there is no job
+                 * anywhere — the 制作任务 tab reads 还没有真实制作任务 and the
+                 * only moving thing on screen is the spinner in the button
+                 * above. A clock is the cheapest possible proof that the run is
+                 * still alive, and it is the honest one: the authoring budget
+                 * is a bare 600 second constant in `lib.rs`, not a contract, so
+                 * there is no ceiling here that could be quoted without
+                 * inventing a second source for it.
+                 */}
+                {authoringElapsedSeconds === null ? null : (
+                  <Alert
+                    type="info"
+                    showIcon
+                    title={`正在自动编排这条视频 · 已用 ${motionSpokenDuration(
+                      authoringElapsedSeconds,
+                    )}`}
+                    description="文案、分镜和画面由视频创作模型生成，这一步不在本机跑。编排返回后会自动转到「制作任务」，本机渲染才开始。"
+                  />
+                )}
               </Space>
             </Card>
           </div>
@@ -735,12 +803,16 @@ const MOTION_STATUS_COPY = {
 function JobPage({
   jobs,
   motionJobs,
+  ownMotionJobs,
+  now,
   busy,
   onCancel,
   onCancelMotion,
 }: {
   readonly jobs: readonly MaterialRenderJobSnapshot[];
   readonly motionJobs: readonly MotionRenderJobSnapshot[];
+  readonly ownMotionJobs: ReadonlyMap<string, OwnMotionJob>;
+  readonly now: number;
   readonly busy: boolean;
   readonly onCancel: (id: string) => void;
   readonly onCancelMotion: (id: string) => void;
@@ -765,6 +837,14 @@ function JobPage({
           {job.status === "failed" ? (
             <Alert type="error" showIcon title={motionFailureAdvice(job.failureCode)} />
           ) : null}
+          {["queued", "rendering", "encoding"].includes(job.status)
+            ? (() => {
+                const timing = motionJobTiming(ownMotionJobs.get(job.renderJobId), now);
+                return timing === null ? null : (
+                  <Typography.Text type="secondary">{timing}</Typography.Text>
+                );
+              })()
+            : null}
           {["queued", "rendering", "encoding"].includes(job.status) ? (
             <Popconfirm
               title="确定取消这个品牌动效任务吗？"
@@ -977,6 +1057,15 @@ export function VideoStudio({
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<VideoCreationMethodId | null>(null);
   const [brief, setBrief] = useState("");
+  // Controlled so that finishing a step can move the operator to the place that
+  // step's result landed. It used to be `defaultActiveKey`, and every handoff
+  // between the seven tabs was a sentence asking the user to go there himself.
+  const [activeTab, setActiveTab] = useState("new");
+  const [ownMotionJobs, setOwnMotionJobs] = useState<ReadonlyMap<string, OwnMotionJob>>(
+    () => new Map(),
+  );
+  const [authoringSince, setAuthoringSince] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [motionDraft, setMotionDraft] = useState<MotionDraft>({
     subject: "新品发布",
     secondsPerBeat: MOTION_DURATION_LIMITS.secondsPerBeatDefault,
@@ -1007,6 +1096,34 @@ export function VideoStudio({
     const timer = window.setInterval(refresh, 2000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+  // Only tick while something is being timed. An always-running second hand
+  // would re-render this page forever on a machine with nothing to render.
+  const timingSomething = authoringSince !== null || ownMotionJobs.size > 0;
+  useEffect(() => {
+    if (!timingSomething) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [timingSomething]);
+  // `now` is refreshed wherever a clock is started rather than inside the
+  // effect above, so the first second reads 0 instead of whatever `now` held
+  // from the last time anything was being timed.
+  const rememberOwnJob = useCallback(
+    (renderJobId: string, filmSeconds: number) => {
+      const startedAt = Date.now();
+      setNow(startedAt);
+      setOwnMotionJobs((current) =>
+        new Map(current).set(renderJobId, { startedAt, filmSeconds }),
+      );
+    },
+    [],
+  );
+  const forgetOwnJob = useCallback((renderJobId: string) => {
+    setOwnMotionJobs((current) => {
+      const next = new Map(current);
+      next.delete(renderJobId);
+      return next;
+    });
+  }, []);
   const act = (operation: Promise<void>) => {
     setBusy(true);
     void operation.then(refresh).catch(() => setJobError(true)).finally(() => setBusy(false));
@@ -1037,10 +1154,17 @@ export function VideoStudio({
     };
     setBusy(true);
     setSubmitMessage(null);
+    // The native command does not return until the authoring pass is over —
+    // 178 seconds, measured. This is the clock that covers it.
+    const authoringStartedAt = Date.now();
+    setNow(authoringStartedAt);
+    setAuthoringSince(authoringStartedAt);
     void gateway
       .submitMotionBrief(request)
-      .then(() => {
-        setSubmitMessage("已提交一句话自动制作，可到“制作任务”查看进度。");
+      .then((snapshot) => {
+        rememberOwnJob(snapshot.renderJobId, MOTION_BRIEF_FILM_SECONDS);
+        setSubmitMessage("已提交一句话自动制作，已经转到「制作任务」，本机渲染开始了。");
+        setActiveTab("jobs");
         refresh();
       })
       .catch((error: unknown) => {
@@ -1050,7 +1174,10 @@ export function VideoStudio({
             : "operation_unavailable";
         setSubmitMessage(BRIEF_ERRORS[code] ?? BRIEF_SUBMIT_FALLBACK);
       })
-      .finally(() => setBusy(false));
+      .finally(() => {
+        setBusy(false);
+        setAuthoringSince(null);
+      });
   };
   const submitMotion = () => {
     const style = MOTION_STYLE_CATALOG.find(
@@ -1081,8 +1208,13 @@ export function VideoStudio({
     setSubmitMessage(null);
     void gateway
       .submitMotionDraft(request)
-      .then(() => {
-        setSubmitMessage("已提交真实本机渲染任务，可到“制作任务”查看进度。");
+      .then((snapshot) => {
+        rememberOwnJob(
+          snapshot.renderJobId,
+          motionDraft.beats.length * motionDraft.secondsPerBeat,
+        );
+        setSubmitMessage("已提交真实本机渲染任务，已经转到「制作任务」。");
+        setActiveTab("jobs");
         refresh();
       })
       .catch((error: unknown) => {
@@ -1100,12 +1232,45 @@ export function VideoStudio({
       })
       .finally(() => setBusy(false));
   };
+  /*
+   * Finishing used to be the quietest moment of the whole run: the cancel
+   * button disappeared from a card the user was probably not looking at, and
+   * the film appeared in a different tab with nothing said. After three and a
+   * half minutes of waiting, the one thing the App owes the operator is to tell
+   * him it is done and open the door to it.
+   *
+   * Only films this session started are announced. A finished job found on
+   * startup is not news.
+   */
+  const finishedOwnJobs = motionJobs.filter(
+    (job) => job.status === "succeeded" && ownMotionJobs.has(job.renderJobId),
+  );
   return (
     <section className="video-studio" aria-label="视频制作工作区">
       {jobError ? <Alert type="warning" showIcon title="暂时无法读取制作任务，请稍后重试。" /> : null}
       {submitMessage === null ? null : <Alert type="info" showIcon title={submitMessage} />}
+      {finishedOwnJobs.map((job) => (
+        <Alert
+          key={job.renderJobId}
+          type="success"
+          showIcon
+          title={`「${job.subject}」已经做好了`}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                forgetOwnJob(job.renderJobId);
+                setActiveTab("artifacts");
+              }}
+            >
+              去看成片
+            </Button>
+          }
+        />
+      ))}
       <Tabs
-        defaultActiveKey="new"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           {
             key: "new",
@@ -1124,6 +1289,11 @@ export function VideoStudio({
                 onBriefChange={setBrief}
                 briefBusy={busy}
                 onSubmitBrief={submitBrief}
+                authoringElapsedSeconds={
+                  authoringSince === null
+                    ? null
+                    : Math.max(0, Math.floor((now - authoringSince) / 1000))
+                }
               />
             ),
           },
@@ -1193,6 +1363,8 @@ export function VideoStudio({
               <JobPage
                 jobs={jobs}
                 motionJobs={motionJobs}
+                ownMotionJobs={ownMotionJobs}
+                now={now}
                 busy={busy}
                 onCancel={(id) => act(gateway.cancel(id))}
                 onCancelMotion={(id) => act(gateway.cancelMotionRenderJob(id))}

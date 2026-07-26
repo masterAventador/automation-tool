@@ -1,8 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
+import durationContract from "../../../../contracts/video/motion-storyboard-duration.v1.json";
+import { motionSpokenDuration } from "./motion-duration";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import {
   MaterialVideoStudioGatewayError,
@@ -595,7 +597,7 @@ describe("video studio shell", () => {
       }),
     );
     expect(
-      await screen.findByText("已提交一句话自动制作，可到“制作任务”查看进度。"),
+      await screen.findByText("已提交一句话自动制作，已经转到「制作任务」，本机渲染开始了。"),
     ).toBeVisible();
   });
 
@@ -816,5 +818,169 @@ describe("video studio shell", () => {
     expect(explanation.textContent).not.toMatch(
       /[一-鿿、。，；]\s+[一-鿿]/u,
     );
+  });
+
+  /**
+   * 一句话制作实测 3 分 34 秒，其中 178 秒界面完全不说话。
+   *
+   * 原生侧 `submit_motion_video_brief` 把整个编排跑在这一条命令里：
+   * `run_motion_authoring(...)` 返回之后才 `accept_authored_render_job(...)`
+   * 建出任务快照。也就是说这 178 秒里**任务根本还不存在**——「制作任务」页
+   * 显示的是空态「还没有真实制作任务」，界面上唯一在动的东西是按钮上的转圈。
+   * 没有已用时间，没有阶段，没有任何证据说明它还活着。
+   *
+   * 这条用例要的是一个走字的钟。上限不要：编排的 600 秒预算是 lib.rs 里的一个
+   * 裸常量，不在任何契约里，把它抄进前端就是造第二个事实源；而且对一段 3 分钟的
+   * 等待来说「最长 10 分钟」也安慰不到人。已用时间才是「它没死」的证据。
+   */
+  it("counts the authoring wait out loud instead of only spinning a button", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const studioGateway = gateway();
+      // 编排跑完之前这个 Promise 不会 resolve，实测 178 秒。
+      studioGateway.submitMotionBrief = vi.fn().mockReturnValue(new Promise(() => {}));
+      render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+      expect(await screen.findByText(/正在自动编排/u)).toBeVisible();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(95_000);
+      });
+
+      expect(screen.getByText(/已用 1 分 35 秒/u)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 渲染阶段的任务卡此前只有一条百分比。
+   *
+   * 而这条百分比在原生侧是**状态的另一种写法**：`validate_snapshot` 只允许
+   * queued=5、rendering=55、encoding=85、succeeded=100 四个值，它在一个阶段里
+   * 一动不动。盯着一个不动的「55%」，用户没有任何办法判断是在跑还是卡死了。
+   *
+   * 已用时间解决「还活着吗」，契约上限解决「什么时候才该担心」。上限来自
+   * motion-storyboard-duration.v1 的 renderWallSecondsBase 与
+   * renderWallMillisPerFrame——沙箱真正会执行的那个数，不是编出来的估计。
+   */
+  it("puts a clock and the contract render ceiling on a job it submitted", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const studioGateway = gateway();
+      render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.click(screen.getByRole("tab", { name: "制作设置" }));
+      await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+      await user.click(screen.getByRole("tab", { name: "预览" }));
+
+      vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+        {
+          renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+          revision: 2,
+          status: "rendering",
+          progressPercent: 55,
+          subject: "新品发布",
+          styleDisplayName: "专业蓝",
+          artifactId: null,
+          artifactSizeBytes: null,
+          failureCode: null,
+        },
+      ]);
+      await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+      await user.click(screen.getByRole("tab", { name: "制作任务" }));
+      expect(await screen.findByText("逐帧渲染中")).toBeVisible();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(21_000);
+      });
+
+      // 默认草稿是 3 段 × 4 秒；上限完全由契约算出，用例里不写死秒数。
+      const film =
+        durationContract.beatCountDefault * durationContract.secondsPerBeatDefault;
+      const ceiling =
+        durationContract.renderWallSecondsBase +
+        (film * durationContract.framesPerSecond * durationContract.renderWallMillisPerFrame) /
+          1000;
+
+      expect(screen.getByText(/已用 21 秒/u)).toBeVisible();
+      expect(
+        screen.getByText(new RegExp(`最长 ${motionSpokenDuration(ceiling)}`, "u")),
+      ).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 编排返回时用户还停在「新建视频」页，界面只多一行小字让他自己去别的 Tab。
+   * 那条小字是这条链路上唯一的交接，演示时一定会卡在这里。既然编排返回的
+   * 那一刻任务已经真的存在了，就把人带过去。
+   */
+  it("moves to the jobs tab as soon as the authoring run returns", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(await screen.findByText(/已提交一句话自动制作/u)).toBeVisible();
+    expect(screen.getByRole("tab", { name: "制作任务" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  /**
+   * 做完的时候界面什么都不说：任务卡上的取消按钮消失，成片静悄悄出现在另一个 Tab。
+   * 等了三分半的人得自己去翻才知道好了没有。
+   */
+  it("announces a finished film and offers the way to it", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "b1f0d0c6-1d2f-4a0e-9c3a-2b6f5e7d8a90",
+        revision: 6,
+        status: "succeeded",
+        progressPercent: 100,
+        subject: "用蓝色商务风做一段本周销售增长说明",
+        styleDisplayName: "一句话自动制作",
+        artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
+        artifactSizeBytes: 4096,
+        failureCode: null,
+      },
+    ]);
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(
+      await screen.findByText(/「用蓝色商务风做一段本周销售增长说明」已经做好了/u),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "去看成片" }));
+
+    expect(screen.getByRole("tab", { name: "成片" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "播放用蓝色商务风做一段本周销售增长说明",
+      }),
+    ).toBeVisible();
   });
 });

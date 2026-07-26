@@ -14,6 +14,10 @@ export interface MotionDurationLimits {
   readonly secondsPerBeatMaximum: number;
   readonly secondsPerBeatDefault: number;
   readonly totalSecondsMaximum: number;
+  /** Fixed startup cost of a render: browser launch, page load, warm-up. */
+  readonly renderWallSecondsBase: number;
+  /** Per-frame cost of a render: seek, composite, capture. */
+  readonly renderWallMillisPerFrame: number;
 }
 
 export const MOTION_DURATION_LIMITS: MotionDurationLimits = {
@@ -25,7 +29,36 @@ export const MOTION_DURATION_LIMITS: MotionDurationLimits = {
   secondsPerBeatMaximum: contract.secondsPerBeatMaximum,
   secondsPerBeatDefault: contract.secondsPerBeatDefault,
   totalSecondsMaximum: contract.totalSecondsMaximum,
+  renderWallSecondsBase: contract.renderWallSecondsBase,
+  renderWallMillisPerFrame: contract.renderWallMillisPerFrame,
 };
+
+/**
+ * The longest the local render of a film this length may run before the
+ * sandbox stops it.
+ *
+ * A ceiling, not an average: the contract's `renderWall` rationale sizes these
+ * two numbers so that the longest legal film asks for 270 seconds and stays
+ * inside the sandbox's 300 second stall guard. A real twelve second render
+ * finishes well under its ceiling. That is exactly why the number is worth
+ * showing — it is the point at which the software itself gives up, so anything
+ * before it is not yet a reason to think the job is stuck.
+ */
+export function motionRenderCeilingSeconds(filmSeconds: number): number {
+  const limits = MOTION_DURATION_LIMITS;
+  const frames = filmSeconds * limits.framesPerSecond;
+  return limits.renderWallSecondsBase + (frames * limits.renderWallMillisPerFrame) / 1000;
+}
+
+/** A number of seconds, written the way it is said out loud. */
+export function motionSpokenDuration(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  if (minutes === 0) return `${rest} 秒`;
+  if (rest === 0) return `${minutes} 分`;
+  return `${minutes} 分 ${rest} 秒`;
+}
 
 /**
  * The plain-Chinese reason this storyboard cannot be rendered, or null when it
