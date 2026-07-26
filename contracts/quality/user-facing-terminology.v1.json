@@ -246,7 +246,8 @@
   },
   "nativeScan": {
     "roots": ["frontend/src-tauri/src", "backend/src"],
-    "excludedGlobs": ["**/__pycache__/**"],
+    "excludedGlobs": ["**/__pycache__/**", "backend/src/automation_tool/executor/motion_authoring/agent.py"],
+    "excludedGlobsReason": "motion_authoring/agent.py 里的中文全部是发给视频创作模型的提示词，不是给用户看的文案：它必须逐字写出 window.__timelines、GSAP 时间轴、autoAlpha 这些代码标识，模型照着它写合成代码，改成通俗说法会直接把生成链路写坏。该模块不向用户输出任何文案——它的异常是英文内部串，执行器入口有意不转发原因，用户看到的文案由 Rust 侧映射产生。",
     "textExtensions": [".py", ".rs"],
     "artifactFileExtensions": [
       ".csv",

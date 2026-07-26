@@ -283,6 +283,79 @@ python3 scripts/cq_04_ledger_honesty.py                           exit 0
   所以现在点「开始自动制作」在真实 App 里会落到"命令不存在"，前端这一半是先行的；
 - gsap 装配进正式包按决定三排在签名公证线之后，**最终验收在正式包上做**，尚未进行。
 
+### 本次落地：编排代理进执行器包 + 一次性子进程入口（第 3 步剩余）
+
+#### RED
+
+```text
+backend/.venv/bin/python -m pytest tests/unit/executor/test_motion_authoring_entry.py -q
+  ModuleNotFoundError: No module named 'automation_tool.executor.motion_authoring'
+  1 error during collection
+```
+
+只影响这一个新增测试文件，其余套件照常。
+
+#### GREEN
+
+```text
+backend: pytest tests/unit/executor/test_motion_authoring_entry.py test_process_cli.py -q
+  18 passed
+
+backend/.venv/bin/python scripts/test_motion_authoring_agent.py     Ran 72 tests OK   (70 → 72)
+python3 scripts/check_third_party_sources.py                        valid
+python3 scripts/check_user_facing_branding.py                       passed (52 frontend, 252 native)
+backend/.venv/bin/python scripts/test_user_facing_branding.py       passed
+python3 scripts/check_embedded_browser_video_roadmap.py             valid
+python3 scripts/cq_04_ledger_honesty.py                             exit 0
+```
+
+**冻结包实跑（不是推断）**：用 `run_e4_07_acceptance.build_signed_executor` 真构建了一次签名
+执行器包，再直接跑包里的二进制：
+
+```text
+PACKAGE .../dist/automation-tool-executor
+EXIT 70   STDOUT {"schemaVersion":1,"status":"rejected"}   STDERR (空)
+```
+
+退出码 70、stdout 是单个 JSON 文档、stderr 为空——这同时证明了**四份启动期契约在冻结包里
+真的读得到**：`agent.py` 在模块导入时就会读它们，读不到会抛 `MotionAuthoringRejected`，
+那样只会看到 traceback 和别的退出码。
+
+#### 交付
+
+- **代理搬进执行器包**：`tools/motion-authoring/motion_authoring_agent.py` →
+  `backend/src/automation_tool/executor/motion_authoring/agent.py`（`git mv`，保留历史）。
+  依据见上一节「编排代理跑在哪个进程里」。
+- **`_resource_root()` 一处解析两种运行**：冻结时读 `sys._MEIPASS`，源码运行时读仓库根。
+  **不是构建期分叉**——两种构建走的是同一段代码、同一份数据布局，只是根不同；
+  这正是 CLAUDE.md「单一构建路径规范」允许的那类差异之外要极力避免的形态，所以这里
+  刻意做成运行期解析而不是编译期开关。
+- **一次性子进程入口** `entry.py`：stdin 读一份 JSON 请求，stdout 写一份 JSON 答复，然后退出。
+  没有端口、没有常驻、模型密钥只存在于 stdin 的那几个字节里——**不进 argv、不进环境变量、
+  不进答复、不进日志**。答复里也不带工作区路径（App 本来就知道），有专门用例守住这两条。
+  失败一律也在 stdout 上给一份 `{"status":"rejected"}`：只在 stderr 上留 traceback 的话，
+  调用方无法区分"被拒绝"和"崩了"，而用户看到的是同一件事。
+- **拒绝原因有意不转发**：原因由调用方输入构造而成，转发等于把它原样回抛。
+- **执行器 CLI 按参数分派** `--author-motion`，长驻执行器那条路径不变。
+- **打包清单 fail closed**：`automation-tool-executor.spec` 显式声明代理要读的 7 份只读数据
+  （4 份启动期契约 + 工作流契约 + 2 份 hyperframes 参考），缺任何一份**构建直接失败**——
+  宁可构建不出来，也不出一个装好了却用不了一句话制作的包。
+
+#### 两件必须说明的事
+
+1. **`ExecutorEntryTests` 那两条是实现之后补的**，不是先红后绿——入口的实现是由
+   `test_motion_authoring_entry.py` 那批边界 RED 驱动的，而 happy path 当时被我有意排除在
+   执行器侧（为了不复制构图夹具）。补测时没有重新走一遍 RED。作为补偿证据做了**变异检验**：
+   把答复里加进工作区路径 → 2 条报错；把 `frameCount` 改成 0 → 1 条失败；还原后 72 条全绿。
+   两条用例确实有牙，但这不改变它们不符合 TDD 顺序这个事实。
+2. **品牌门禁被这次搬迁触发**：`nativeScan.roots` 本来就含 `backend/src`（不是 T46 新加的），
+   代理一搬进来，它发给模型的提示词就被当成用户文案扫了，`window.__timelines` 里的
+   `timeline` 命中"未解释术语"。提示词必须逐字写出这些代码标识，模型照着它写合成代码，
+   改成通俗说法会直接把生成链路写坏。因此把该文件加进 `nativeScan.excludedGlobs` 并写明理由。
+   **这是在别人刚落地的门禁上开了一个洞**，虽然该模块确实不向用户输出任何文案
+   （异常是英文内部串，入口有意不转发原因，用户文案由 Rust 侧映射产生），
+   但是否要换成更有原则的机制（比如给提示词一个 `promptText` 分类）应由 T46 那条线决定。
+
 ## 失败矩阵
 
 | 场景 | 行为 |

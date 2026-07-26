@@ -25,9 +25,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools/motion-authoring"))
+sys.path.insert(0, str(ROOT / "backend/src"))
 
-from motion_authoring_agent import (  # noqa: E402
+from automation_tool.executor.motion_authoring import (  # noqa: E402
+    run_motion_authoring_entry,
+)
+from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     ALLOWED_TOOLS,
     BRIEF_ASPECT_RATIOS,
     BRIEF_LANGUAGES,
@@ -1156,6 +1159,85 @@ class OneSentenceBriefBoundsTests(unittest.TestCase):
         self.assertEqual(MAX_BRAND_ASSETS, contract["maxBrandAssets"])
         self.assertEqual(sorted(BRIEF_ASPECT_RATIOS), sorted(contract["aspectRatios"]))
         self.assertEqual(sorted(BRIEF_LANGUAGES), sorted(contract["languages"]))
+
+
+class ExecutorEntryTests(unittest.TestCase):
+    """The Executor-hosted process boundary the App actually calls.
+
+    The boundary tests that need no model live beside the Executor in
+    `backend/tests/unit/executor/test_motion_authoring_entry.py`. This one needs
+    a composition the static gates accept, which is the fixture this file
+    already owns, so the authored path is verified here rather than copied there.
+    """
+
+    def test_the_entry_authors_into_the_workspace_and_describes_the_render_job(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            _make_workspace(root)
+            model = ScriptedModel([_valid_model_payload()])
+
+            answer = run_motion_authoring_entry(
+                {
+                    "schemaVersion": 1,
+                    "workspace": str(root),
+                    "brief": "用蓝色商务风做一段本周销售增长说明",
+                    "aspectRatio": "16:9",
+                    "durationSeconds": 6,
+                    "language": "zh",
+                    "brandAssets": [],
+                    "model": {
+                        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "modelId": "qwen3.7-max-2026-06-08",
+                        "apiKey": "sk-" + "a" * 40,
+                    },
+                },
+                model_call=model,
+            )
+
+            self.assertEqual(answer["status"], "authored")
+            self.assertEqual(answer["entryHtml"], COMPOSITION_PATH)
+            self.assertIn(RUNTIME_ASSET, answer["allowedAssets"])
+            self.assertEqual(answer["framesPerSecond"], 30)
+            self.assertEqual(answer["frameCount"], 6 * 30)
+            self.assertEqual(answer["durationSeconds"], 6)
+            self.assertTrue((root / COMPOSITION_PATH).is_file())
+            self.assertTrue((root / "renderjob.json").is_file())
+
+    def test_the_answer_carries_no_workspace_path_and_no_credential(self) -> None:
+        """What comes back must be safe to log and safe to hand to the WebView.
+
+        The App already knows where the workspace is; repeating it here would
+        put a private local path into every place this answer travels.
+        """
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            _make_workspace(root)
+            key = "sk-" + "b" * 40
+            model = ScriptedModel([_valid_model_payload()])
+
+            answer = run_motion_authoring_entry(
+                {
+                    "schemaVersion": 1,
+                    "workspace": str(root),
+                    "brief": "用蓝色商务风做一段本周销售增长说明",
+                    "aspectRatio": "16:9",
+                    "durationSeconds": 6,
+                    "language": "zh",
+                    "brandAssets": [],
+                    "model": {
+                        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "modelId": "qwen3.7-max-2026-06-08",
+                        "apiKey": key,
+                    },
+                },
+                model_call=model,
+            )
+
+            serialized = json.dumps(answer, ensure_ascii=False)
+            self.assertNotIn(key, serialized)
+            self.assertNotIn(str(root), serialized)
 
 
 if __name__ == "__main__":

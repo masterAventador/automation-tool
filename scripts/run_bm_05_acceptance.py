@@ -32,9 +32,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools/motion-authoring"))
+sys.path.insert(0, str(ROOT / "backend/src"))
 
-from motion_authoring_agent import (  # noqa: E402
+from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     AuthoringWorkspace,
     MotionAuthoringAgent,
     MotionAuthoringTools,

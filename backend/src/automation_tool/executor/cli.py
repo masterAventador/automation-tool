@@ -255,10 +255,22 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
     return 0
 
 
+# The one-shot authoring run is a different process shape from the executor
+# itself: it answers one request and exits, so it is selected by argument rather
+# than by anything in the bootstrap the long-lived process reads.
+AUTHOR_MOTION_ARGUMENT = "--author-motion"
+
+
 def main() -> None:
     buffered_stdin = sys.stdin.buffer
     input_stream = getattr(buffered_stdin, "raw", buffered_stdin)
+    if sys.argv[1:] == [AUTHOR_MOTION_ARGUMENT]:
+        from automation_tool.executor.motion_authoring import (  # noqa: PLC0415
+            serve_one_motion_authoring_request,
+        )
+
+        raise SystemExit(serve_one_motion_authoring_request(input_stream, sys.stdout))
     raise SystemExit(run_executor(input_stream, sys.stdout, sys.stderr))
 
 
-__all__ = ["main", "run_executor", "stop_signal_event"]
+__all__ = ["AUTHOR_MOTION_ARGUMENT", "main", "run_executor", "stop_signal_event"]
