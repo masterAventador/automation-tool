@@ -204,15 +204,98 @@ def validate_asset_rights() -> int:
     if rights.get("schemaVersion") != 1 or rights.get("defaultDecision") != "deny":
         fail("asset rights must use schema v1 and deny unregistered assets")
     fields = rights.get("distributionRequiredFields")
-    if not isinstance(fields, list) or len(fields) != len(set(fields)):
+    if (
+        not isinstance(fields, list)
+        or not all(isinstance(field, str) and field for field in fields)
+        or len(fields) != len(set(fields))
+    ):
         fail("distributionRequiredFields must be a unique list")
     categories = rights.get("requiredCategories")
     expected = {"font", "stock_media", "music_sfx", "codec_binary", "map_3d", "generated"}
     if not isinstance(categories, dict) or set(categories) != expected:
         fail("asset rights categories are incomplete")
+    for category, category_fields in categories.items():
+        if (
+            not isinstance(category_fields, list)
+            or not all(
+                isinstance(field, str) and field for field in category_fields
+            )
+            or len(category_fields) != len(set(category_fields))
+        ):
+            fail(f"{category} asset rights fields must be a unique list")
     entries = rights.get("entries")
     if not isinstance(entries, list):
         fail("asset rights entries must be a list")
+    identifiers: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            fail("every asset rights entry must be an object")
+        identifier = entry.get("id")
+        if not isinstance(identifier, str) or not identifier:
+            fail("every asset rights entry must have an id")
+        if identifier in identifiers:
+            fail(f"asset rights id is duplicated: {identifier}")
+        identifiers.add(identifier)
+        category = entry.get("category")
+        if not isinstance(category, str) or category not in categories:
+            fail(f"{identifier} has an unknown asset rights category")
+        required = tuple(dict.fromkeys([*fields, *categories[category]]))
+        for field in required:
+            if field not in entry or entry[field] in (None, "", []):
+                fail(f"{identifier} rights entry is missing {field}")
+        digest = entry.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            character not in "0123456789abcdef" for character in digest
+        ):
+            fail(f"{identifier} rights entry has an invalid sha256")
+        for permission in (
+            "redistributionAllowed",
+            "commercialUseAllowed",
+        ):
+            if not isinstance(entry.get(permission), bool):
+                fail(f"{identifier} rights entry must decide {permission}")
+        if category == "font" and not isinstance(
+            entry.get("embeddingAllowed"), bool
+        ):
+            fail(f"{identifier} rights entry must decide embeddingAllowed")
+
+        status = entry.get("rightsStatus")
+        if status not in (None, "cleared", "undetermined"):
+            fail(f"{identifier} has an unknown rightsStatus")
+        if status == "undetermined":
+            if (
+                entry.get("license") != "NOASSERTION"
+                or entry.get("distributionDecision") != "deny"
+                or any(
+                    entry.get(permission) is not False
+                    for permission in (
+                        "redistributionAllowed",
+                        "commercialUseAllowed",
+                        "embeddingAllowed",
+                    )
+                )
+            ):
+                fail(f"{identifier} undetermined rights must remain denied")
+            if not isinstance(entry.get("rightsBlocker"), str) or not entry[
+                "rightsBlocker"
+            ].strip():
+                fail(f"{identifier} undetermined rights must name the blocker")
+            evidence = entry.get("rightsEvidence")
+            if not isinstance(evidence, list) or not evidence:
+                fail(f"{identifier} undetermined rights must preserve evidence")
+        if status == "cleared" and (
+            entry.get("license") == "NOASSERTION"
+            or entry.get("distributionDecision") != "allow_with_conditions"
+            or any(
+                entry.get(permission) is not True
+                for permission in (
+                    "redistributionAllowed",
+                    "commercialUseAllowed",
+                    "embeddingAllowed",
+                )
+            )
+        ):
+            fail(f"{identifier} cleared font rights are internally inconsistent")
     # A register that only had to exist proved nothing: the point of registering
     # an asset is that its rights are complete and its bytes are the bytes that
     # were reviewed. Every font the installer redistributes is re-derived here,

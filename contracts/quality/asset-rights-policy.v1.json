@@ -118,6 +118,44 @@
       "packagedName": "NotoSansCJKsc-Regular.ttf",
       "upstreamFileName": "NotoSansCJKsc-Regular.otf",
       "fileNameNote": "Bytes are the upstream OpenType/CFF release asset unchanged; only the file name differs, because vendor/moneyprinterturbo/webui/Main.py lists a face only when its name ends in .ttf or .ttc. The registered sha256 is the digest of the upstream .otf, so the substitution is checkable rather than hidden."
+    },
+    {
+      "id": "font-utm-kabel-kt",
+      "category": "font",
+      "source": "MoneyPrinterTurbo v1.3.2 bundled binary; its name table credits Michael Dinh Kien",
+      "sourceUrl": "https://fontchudep.vn/",
+      "license": "NOASSERTION",
+      "licenseVersionOrDate": "No authoritative license located as of 2026-07-26",
+      "acquiredAt": "2026-07-26",
+      "sha256": "4938d601d85ba381cd3611d13b361528f4b504c7cf268bed44d1d8c2fbd85a68",
+      "bytes": 35456,
+      "redistributionAllowed": false,
+      "commercialUseAllowed": false,
+      "embeddingAllowed": false,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-26",
+      "attribution": "Thiet ke boi Michael Dinh Kien - \"In God We Trust - Free for everyone\" Email: fontchudep@gmail.com; www.fontchudep.com; www.fontchudep.vn",
+      "rightsStatus": "undetermined",
+      "distributionDecision": "deny",
+      "permissionSemantics": "A false permission means the project has not obtained a sufficiently explicit grant; it does not assert that the copyright holder forbids that use.",
+      "rightsBlocker": "The exact font says \"Free for everyone\" in name ID 0 but contains no license name or text and no explicit grant covering commercial use, redistribution or embedding. The creator site named by the font offers downloads but publishes no UTM Kabel KT-specific license terms that resolve those rights.",
+      "requiredRemediation": "Do not redistribute or embed this font in a release. Remove it from the material-video Worker package, replace it with a cleared font, or obtain an explicit written license covering commercial redistribution and embedding.",
+      "observedIn": "material-video-worker",
+      "upstreamPath": "vendor/moneyprinterturbo/resource/fonts/UTM Kabel KT.ttf",
+      "rightsEvidence": [
+        {
+          "type": "font-name-table",
+          "file": "vendor/moneyprinterturbo/resource/fonts/UTM Kabel KT.ttf",
+          "nameId": 0,
+          "value": "Thiet ke boi Michael Dinh Kien - \"In God We Trust - Free for everyone\" Email: fontchudep@gmail.com; www.fontchudep.com; www.fontchudep.vn",
+          "finding": "First-party notice embedded in the exact reviewed bytes; it identifies the author and creator sites but states no redistribution, commercial-use or embedding terms."
+        },
+        {
+          "type": "creator-site",
+          "url": "https://fontchudep.vn/",
+          "finding": "Official site identified by the font metadata; no UTM Kabel KT-specific license grant was located during review."
+        }
+      ]
     }
   ]
 }
