@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import type { MaterialVideoStudioGateway } from "./material-video-studio-gateway";
+import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
 import { VideoStudio } from "./VideoStudio";
 
 function gateway(): MaterialVideoStudioGateway {
@@ -593,6 +594,33 @@ describe("video studio shell", () => {
     expect(
       await screen.findByText("已提交一句话自动制作，可到“制作任务”查看进度。"),
     ).toBeVisible();
+  });
+
+  /**
+   * 一句话卡片必须在点按钮之前就说清楚会得到多长的片子。
+   *
+   * 这个入口没有片长控件，成片长度固定。客户在演示现场随口说「做一个三分钟的
+   * 产品介绍」，那句话会作为描述被接受，然后系统安静地做出十几秒的片子——
+   * 需求被丢掉且不给任何提示。这条用例把界面上的数字和真正提交的时长绑在一起，
+   * 免得文案和行为各说各的。
+   */
+  it("says how long the film will be, and submits exactly that length", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    expect(
+      screen.getByText(new RegExp(`${MOTION_BRIEF_FILM_SECONDS} 秒`)),
+    ).toBeVisible();
+
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
+      expect.objectContaining({ durationSeconds: MOTION_BRIEF_FILM_SECONDS }),
+    );
   });
 
   // 空描述不该发出去：让原生侧去拒绝，用户看到的是一次失败而不是一条说明。

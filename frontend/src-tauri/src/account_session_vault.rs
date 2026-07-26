@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use std::path::Path;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -11,11 +10,9 @@ use time::{OffsetDateTime, UtcOffset};
 use uuid::{Uuid, Variant};
 use zeroize::Zeroizing;
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::secure_store::AppDataSecretStore;
 use crate::secure_store::{SecretStore, SecureStoreError};
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 const ACCOUNT_SESSION_FILE_NAME: &str = "product-account-session-v1";
 const ACCOUNT_SESSION_SCHEMA_VERSION: u8 = 1;
 const MAX_ACCOUNT_TOKEN_LENGTH: usize = 256;
@@ -322,10 +319,8 @@ fn require_utc_timestamp(
     Ok(parsed)
 }
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 pub(crate) type ProductionAccountSessionVault = AccountSessionVault<AppDataSecretStore>;
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 pub(crate) fn initialize_production_account_session_vault(
     app_data_directory: &Path,
 ) -> Result<ProductionAccountSessionVault, AccountSessionVaultError> {

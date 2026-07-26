@@ -25,6 +25,24 @@ export const MOTION_BRIEF_LIMITS: MotionBriefLimits = {
   durationSecondsMaximum: MOTION_DURATION_LIMITS.totalSecondsMaximum,
 };
 
+/**
+ * How long a one-sentence film is.
+ *
+ * This entry has no length control: the user describes the film and the agent
+ * writes it, so the length is the storyboard default rather than something
+ * chosen. Declared here once because two places need it and they must not
+ * disagree — the sentence card tells the user this number, and the submitted
+ * request carries it. If they ever drifted, the App would promise one length
+ * and produce another, which is the same complaint the fixed-template path
+ * already collected once when its beat length was hard-coded.
+ *
+ * It is deliberately *not* parsed out of the sentence: reading "three minutes"
+ * out of free text needs the model to be right about it, and a wrong answer
+ * here is a film of the wrong length with no way for the user to tell why.
+ */
+export const MOTION_BRIEF_FILM_SECONDS =
+  MOTION_DURATION_LIMITS.beatCountDefault * MOTION_DURATION_LIMITS.secondsPerBeatDefault;
+
 /** The shortest film worth rendering; below it there is nothing to watch. */
 const DURATION_SECONDS_MINIMUM = 1;
 

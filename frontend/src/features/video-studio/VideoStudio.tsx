@@ -35,6 +35,7 @@ import {
 } from "./motion-duration";
 import {
   MOTION_BRIEF_LIMITS,
+  MOTION_BRIEF_FILM_SECONDS,
   motionBriefProblem,
 } from "./motion-one-sentence";
 import { motionPartsUsage } from "./motion-parts-catalog";
@@ -317,8 +318,9 @@ function NewVideoPage({
                 placeholder="例如：用蓝色商务风做一段本周销售增长说明"
               />
               <Typography.Text type="secondary">
-                描述一句就够了。文案、分镜和画面由视频创作模型自动生成，最长
-                {MOTION_BRIEF_LIMITS.durationSecondsMaximum} 秒，渲染仍在本机完成。
+                描述一句就够了。会生成一段 {MOTION_BRIEF_FILM_SECONDS} 秒的视频，
+                文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。
+                这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。
               </Typography.Text>
               <Button
                 type="primary"
@@ -951,9 +953,7 @@ export function VideoStudio({
    * the typing, not the request.
    */
   const submitBrief = () => {
-    const durationSeconds = MOTION_DURATION_LIMITS.beatCountDefault *
-      MOTION_DURATION_LIMITS.secondsPerBeatDefault;
-    const problem = motionBriefProblem(brief, durationSeconds);
+    const problem = motionBriefProblem(brief, MOTION_BRIEF_FILM_SECONDS);
     if (problem !== null) {
       setSubmitMessage(problem);
       return;
@@ -962,7 +962,7 @@ export function VideoStudio({
       creationMode: "one_sentence_v1",
       brief: brief.trim(),
       aspectRatio: MOTION_BRIEF_LIMITS.aspectRatios[0]!,
-      durationSeconds,
+      durationSeconds: MOTION_BRIEF_FILM_SECONDS,
       language: MOTION_BRIEF_LIMITS.languages[0]!,
     };
     setBusy(true);

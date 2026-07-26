@@ -670,6 +670,142 @@ browser-settings、diagnostic-export、update-policy/download/installation、`pn
 不是因为一句话链路不通，而是因为它所在的构建族当前进不了工作台。
 驱动代码已就位，缺陷修好后即可直接跑。**不把"驱动写完了"说成"验收过了"。**
 
+### 本次落地：修掉账号门禁的接线错误，并补上让它得以发生的覆盖缺口
+
+选择修 cfg 而不是绕到 `control-plane-e2e`：绕开的那个东西本身就是缺陷——
+**测试构建与生产构建行为不同**，正是「单一构建路径规范」明令禁止的形态。
+
+#### RED
+
+```text
+cd frontend/src-tauri && cargo test --test single_build_path
+  ---- the_account_gate_answer_is_reachable_in_every_build ----
+  the handler selected by #[cfg(all(not(feature = "control-plane-e2e"), feature = "desktop-e2e"))]
+  does not register restore_product_account_session; the account gate invokes it before
+  anything is mounted, so in this build the gate cannot answer at all and the workbench
+  never opens
+```
+
+断言失败，不是编译失败，其余 8 条照常通过。
+
+#### 覆盖缺口补在原地（比修 cfg 本身更值钱）
+
+事故能发生是因为 `single_build_path.rs` 只检查启动门禁**函数**是否各构建同源，
+**从不检查命令注册清单**。新增两条：
+
+- **`the_account_gate_answer_is_reachable_in_every_build`**：
+  `restore_product_account_session` 必须出现在**每个** handler 里。
+  它是挂载工作台路上唯一的账号命令——命令不存在时，网关把"没有这个命令"和
+  "账号服务连不上"报成同一件事，门禁落到 `offline`，工作台因为一个跟账号无关的原因不开。
+- **`the_account_commands_behind_the_login_screen_are_all_or_nothing`**：
+  登录屏背后那六个命令要么全注册要么全不注册。它们需要生产设备身份与凭据保险库，
+  而纯 `desktop-e2e` 构建**有意**不创建那两样（源码里有 `_production_credential_boundary`
+  这个刻意的边界标记），所以"一个都没有"是合法的；**"有一部分"不合法**——
+  一个改密码能用、设备列表不能用的登录屏，只会在用户正好走到那一步时才失败，
+  而分别测两半都是绿的。
+
+命令清单不是手写第二份：从 `account-session-gateway.ts` 里把 `safeInvoke("…")` 全部解析出来，
+网关加了第七个命令，门禁自动要求它也被注册。
+
+#### 修复（最小，且尊重既有安全边界）
+
+- `restore_product_account_session` 及其依赖（`clear_account_session`、
+  `map_account_session_vault_error`、`account_session_vault` 模块里那 5 处 cfg）**去掉条件编译**，
+  三个 handler 全部注册；
+- **账号会话保险库改为每个构建都 manage**。它只是把一个路径绑到本构建自己的 App 数据目录，
+  不写、不联网、不铸造任何凭据，在存进会话之前什么都不读；
+- **设备身份与设备凭据保险库原样保持分叉**——那两样会铸造真实设备凭据，
+  纯 `desktop-e2e` 用临时身份是**有意**的安全边界，不动它。
+
+这样本地 Profile（`requires_product_account()` 为假）走到门禁时立刻返回 `not_required`，
+正是那条命令自己注释里写的行为：「在打开保险库、接触网络之前就回答」。
+
+```text
+cargo build --lib                                  OK
+cargo build --lib --features desktop-e2e           OK
+cargo build --lib --features control-plane-e2e     OK
+cargo build --lib --features video-studio-e2e      OK
+cargo test --test single_build_path                9 passed（原 7 条 + 本次 2 条）
+cargo test --tests -- --test-threads=4
+                     42 个测试二进制 / 387 passed / 0 failed   (385 → 387)
+```
+
+四个 feature 组合逐个编译过：改动同时碰到条件编译和 `setup` 里的状态装配，
+只编译其中一个组合看不出另一个组合少了状态或多了未使用导入。
+全量跑了一次而不是只跑相关包——改的是三个构建共用的 `lib.rs` 与账号保险库模块。
+
+顺带解开的入口（本次未逐一实跑）：VF-05/VF-06/BM-06/BM-08、browser-settings、
+diagnostic-export、update-policy/download/installation、`pnpm test:tauri`——
+它们全都用纯 `desktop-e2e` 构建，此前一律卡在同一处。
+
+#### 修完之后再跑一次：账号门禁过了，露出后面**两道**门
+
+```text
+Error: App is blocked at the startup gate:
+  桌面运行环境需要处理 / 业务功能保持关闭
+  · 控制服务不可用
+  · 本地执行器动作配置缺失：当前安装包没有完整的动作信任配置
+```
+
+账号门禁不再出现，说明上面的修复生效。剩下两条都不是一句话链路的问题，
+是这个构建族的**启动门禁**要求：
+
+1. **编译期动作信任三元组**（`AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY` 等三个），
+   由 `desktop_e2e_prerequisites.startup_gate_environment()` 在 `tauri build` 时注入；
+   `run_t36_acceptance.py` 尚未调用它；
+2. **可达的 Control Plane**。`StartupGate` 只在 `status === "ready"` 时挂载 children，
+   `onlyControlPlane` 仅改变文案、**不改变是否放行**，所以控制服务不可用同样挡住工作台。
+
+也就是说 T36 的 App 验收必须按 `run_b5_15_acceptance.py` 那套来：隔离端口 +
+Docker Compose `postgres-test` + `start_control_plane()` + `startup_gate_environment()`。
+一句话制作本身不需要 Control Plane，但它所在的 App 启动门禁需要。
+
+**顺带确认了一件事**：`run_b5_04_acceptance.py`（browser-settings，同样是纯 `desktop-e2e`）
+也没有注入这三元组、也没起 Control Plane，所以那条入口今天同样跑不过。
+上面那批"顺带解开"的入口，解开的只是账号门禁这一层，不等于它们现在就能跑通。
+
+### 本次落地：一句话卡片明示成片时长
+
+**查出来的问题比原计划要验的更重要。** 原本要验「超边界 brief 在 App 里被拒」，
+查完发现**这条路径在 App 里不存在**：一句话卡片只有一个文本框和一个按钮，
+文本框 `maxLength=500`，片长是 `beatCountDefault × secondsPerBeatDefault` 写死的，
+用户改不了。原生那 5 种越界里只有「空 brief」是用户能触发的。
+
+真正的风险是反过来的：客户在演示现场说「做一个三分钟的产品介绍」，
+这句话作为**描述**被接受，App 安静地做出一段十几秒的片子，"三分钟"被丢掉且不给任何提示。
+而且这不是新问题——用户此前就为品牌动效「每段 1 秒写死」抱怨过一次（已改成可配），
+**一句话入口把总时长又写死了一遍**。
+
+#### RED
+
+```text
+cd frontend && npx vitest run src/features/video-studio/motion-one-sentence.test.ts
+  Tests  2 failed | 6 passed        MOTION_BRIEF_FILM_SECONDS 不存在
+
+cd frontend && npx vitest run src/features/video-studio/VideoStudio.test.tsx -t "says how long"
+  Unable to find an element with the text: /12 秒/
+```
+
+#### 交付（只做最小的一档）
+
+- 新增 `MOTION_BRIEF_FILM_SECONDS`，**这个数字只有一个来源**：卡片文案照它说，
+  提交的请求也用它。原先它是 `submitBrief` 里的一个局部表达式，
+  文案要说这个数就必然出现第二份，两份一旦漂移就是"界面承诺一个长度、做出另一个长度"。
+- 卡片文案从「最长 20 秒」（**误导**：暗示可能拿到 20 秒，实际永远是 12 秒）
+  改成「会生成一段 12 秒的视频…这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作」——
+  既说清会得到什么，也给出想要别的长度时的去处。
+- 用例把**界面上的数字**和**真正提交的时长**绑在一起，文案和行为不能各说各的。
+- **有意不做**从 brief 文本里解析时长：那要靠模型正确理解自然语言里的时长表达，
+  答错的结果是一段长度不对、而用户无从判断原因的片子；演示前不引入这种不确定性。
+
+```text
+cd frontend && npx vitest run src/features/video-studio/motion-one-sentence.test.ts \
+      src/features/video-studio/VideoStudio.test.tsx     30 passed
+cd frontend && npx tsc -b                                exit 0
+python3 scripts/check_user_facing_branding.py            passed
+backend/.venv/bin/python scripts/test_user_facing_branding.py   passed
+```
+
 ## 失败矩阵
 
 | 场景 | 行为 |

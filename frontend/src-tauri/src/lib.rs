@@ -35,7 +35,6 @@ pub mod video_editing_service_settings;
 pub mod video_job_workspace;
 pub mod video_media_toolchain;
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use account_session_vault::{
     initialize_production_account_session_vault, AccountSessionSnapshot, AccountSessionVaultError,
     AccountSessionVaultErrorCode, ProductionAccountSessionVault,
@@ -1955,7 +1954,6 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
     }
 }
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn map_account_session_vault_error(error: AccountSessionVaultError) -> ControlPlaneCommandError {
     let code = match error.code() {
         AccountSessionVaultErrorCode::StorageUnavailable => "storage_unavailable",
@@ -1980,7 +1978,6 @@ impl ProductAccountRequirement {
     }
 }
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn clear_account_session(
     vault: &ProductionAccountSessionVault,
 ) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
@@ -1988,7 +1985,6 @@ fn clear_account_session(
     Ok(AccountSessionSnapshot::unauthenticated())
 }
 
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn restore_product_account_session(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -4269,6 +4265,17 @@ pub fn run() {
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
                 &app_data_directory,
             )?);
+            // The account session vault is prepared in every build, because the
+            // account gate answers before the workbench mounts and its command
+            // cannot be reached without this state. Preparing it costs nothing
+            // and reveals nothing: it binds a path inside this build's own App
+            // data directory and reads nothing until a session is stored. The
+            // device identity and credential vault below are a different matter
+            // and stay separated — those mint real device credentials.
+            let account_session_vault =
+                initialize_production_account_session_vault(&app_data_directory)?;
+            app.manage(account_session_vault);
+
             #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
             {
                 let _production_identity_boundary = device_identity::initialize_production_identity;
@@ -4283,14 +4290,11 @@ pub fn run() {
                 let device_identity = initialize_production_identity(&app_data_directory)?;
                 let device_credential_vault =
                     initialize_production_device_credential_vault(&app_data_directory)?;
-                let account_session_vault =
-                    initialize_production_account_session_vault(&app_data_directory)?;
                 let local_registration_handoff =
                     initialize_local_registration_handoff_store(&app_data_directory)?;
                 debug_assert_eq!(device_identity.public_key().len(), 32);
                 app.manage(device_identity);
                 app.manage(device_credential_vault);
-                app.manage(account_session_vault);
                 app.manage(local_registration_handoff);
             }
             Ok(())
@@ -4305,6 +4309,10 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         check_local_startup_environment,
+        // On the path to the workbench in every deployment: the gate blocks the
+        // whole App until this answers, and a deployment that issues no product
+        // accounts is answered without opening the vault or touching the network.
+        restore_product_account_session,
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,

@@ -88,6 +88,12 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     // --- An empty sentence is refused before anything is started ----------
     const studio = await openVideoStudio();
     await expect(await studio.$("textarea[aria-label='一句话视频需求']")).toBeDisplayed();
+    // The entry has no length control, so the length has to be on the card. A
+    // customer who says "make me a three minute intro" otherwise gets a much
+    // shorter film with nothing anywhere saying so.
+    await expect(studio).toHaveText(
+      expect.stringContaining(`会生成一段 ${EXPECTED_FILM_SECONDS} 秒的视频`),
+    );
     await studio.$("button=开始自动制作").click();
     await expect(studio).toHaveText(
       expect.stringContaining("请先用一句话描述你想要的视频内容。"),

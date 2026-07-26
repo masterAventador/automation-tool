@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import contract from "../../../../contracts/video/motion-one-sentence-brief.v1.json";
 import durationContract from "../../../../contracts/video/motion-storyboard-duration.v1.json";
 import {
+  MOTION_BRIEF_FILM_SECONDS,
   MOTION_BRIEF_LIMITS,
   motionBriefProblem,
 } from "./motion-one-sentence";
@@ -54,5 +55,26 @@ describe("one-sentence motion brief limits", () => {
     expect(motionBriefProblem("用蓝色商务风做一段说明", 0)).toBe(
       "片长至少 1 秒，请调长片长。",
     );
+  });
+});
+
+/**
+ * 一句话入口没有片长控件，成片长度是固定的。
+ *
+ * 用户此前就为「每段 1 秒写死」抱怨过一次，那条已经改成可配；这个入口又把总时长
+ * 写死了一遍。写死本身在首期是可以接受的取舍，但**不告诉用户**不行：客户说
+ * 「做一个三分钟的产品介绍」，系统安静地做出十几秒的片子、全程不提示，
+ * 在演示现场比少一个功能更难看。所以这个数字必须只有一个来源，界面照它说。
+ */
+describe("one-sentence film length", () => {
+  it("is the storyboard default, taken from the shared duration contract", () => {
+    expect(MOTION_BRIEF_FILM_SECONDS).toBe(
+      durationContract.beatCountDefault * durationContract.secondsPerBeatDefault,
+    );
+  });
+
+  it("is a length the same entry would accept", () => {
+    expect(motionBriefProblem("用蓝色商务风做一段本周销售增长说明", MOTION_BRIEF_FILM_SECONDS))
+      .toBeNull();
   });
 });

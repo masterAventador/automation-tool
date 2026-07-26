@@ -462,3 +462,124 @@ fn the_startup_gate_is_compiled_identically_in_every_build() {
         );
     }
 }
+
+/// Every `invoke_handler` list in `lib.rs`, with the `#[cfg(...)]` that selects it.
+///
+/// A command that is absent from a build does not fail that build, or that
+/// build's tests: it fails at runtime, in the App, as an invoke error the
+/// frontend has to interpret. That is why this is read from the source rather
+/// than left to a compiler that has no opinion about it.
+fn invoke_handlers() -> Vec<(String, BTreeSet<String>)> {
+    let source = fs::read_to_string(source_directory().join("lib.rs"))
+        .expect("the crate entry point must be readable");
+    let lines: Vec<&str> = source.lines().collect();
+    let mut handlers = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains("generate_handler![") {
+            continue;
+        }
+        let predicate = lines[index - 1].trim().to_owned();
+        let mut commands = BTreeSet::new();
+        for entry in lines[index + 1..].iter() {
+            if entry.trim_start().starts_with(']') {
+                break;
+            }
+            let name = entry.trim().trim_end_matches(',').trim();
+            if !name.is_empty() {
+                commands.insert(name.to_owned());
+            }
+        }
+        handlers.push((predicate, commands));
+    }
+    assert!(
+        handlers.len() >= 3,
+        "found {} invoke_handler lists; the scanner is looking in the wrong place",
+        handlers.len()
+    );
+    handlers
+}
+
+/// The commands the product-account gate can invoke, read from the one gateway
+/// that owns them, so this list cannot drift from the code that calls them.
+fn account_gate_commands() -> BTreeSet<String> {
+    let gateway = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../src/platform/tauri/account-session-gateway.ts");
+    let source =
+        fs::read_to_string(&gateway).expect("the account session gateway must be readable");
+    let mut commands = BTreeSet::new();
+    for (index, _) in source.match_indices("safeInvoke(\"") {
+        let rest = &source[index + "safeInvoke(\"".len()..];
+        let end = rest.find('"').expect("an invoked command name is quoted");
+        commands.insert(rest[..end].to_owned());
+    }
+    assert!(
+        commands.len() >= 6,
+        "found {} account commands in the gateway; the scanner is looking in the wrong place",
+        commands.len()
+    );
+    commands
+}
+
+/// The one account command the App invokes before it can mount anything.
+///
+/// The rest of the gateway is reachable only from the login screen, which is
+/// rendered only after this command answers that an account *is* required. That
+/// asymmetry is why they are treated differently below: this one is on the path
+/// to the workbench in every deployment, the others are not.
+const ACCOUNT_MOUNT_PATH_COMMAND: &str = "restore_product_account_session";
+
+/// The App cannot mount its workbench until the product-account gate answers,
+/// and the gate answers by invoking a command. A build that does not register
+/// that command cannot answer at all: the gateway reports the missing command
+/// the same way it reports an unreachable account service, the gate settles on
+/// "offline", and the workbench stays closed for a reason that has nothing to
+/// do with accounts.
+///
+/// That is a test build behaving differently from the production build, which
+/// is the thing this file exists to prevent — and it went unseen because the
+/// guard above only checks that the startup gate *function* is compiled
+/// identically, never that the commands the App must call are all reachable.
+#[test]
+fn the_account_gate_answer_is_reachable_in_every_build() {
+    let gateway = account_gate_commands();
+    assert!(
+        gateway.contains(ACCOUNT_MOUNT_PATH_COMMAND),
+        "the gateway no longer invokes {ACCOUNT_MOUNT_PATH_COMMAND}; this guard is \
+         naming a command that no longer exists"
+    );
+    for (predicate, commands) in invoke_handlers() {
+        assert!(
+            commands.contains(ACCOUNT_MOUNT_PATH_COMMAND),
+            "the handler selected by {predicate} does not register \
+             {ACCOUNT_MOUNT_PATH_COMMAND}; the account gate invokes it before anything \
+             is mounted, so in this build the gate cannot answer at all and the \
+             workbench never opens"
+        );
+    }
+}
+
+/// The commands behind the login screen are registered together or not at all.
+///
+/// They need the production device identity and credential vault, which a plain
+/// `desktop-e2e` build deliberately never creates — so a build may legitimately
+/// carry none of them. What it may not do is carry some: a login screen whose
+/// password form works and whose device list does not is a build-specific
+/// behaviour that no test of either half would reveal.
+#[test]
+fn the_account_commands_behind_the_login_screen_are_all_or_nothing() {
+    let behind_login: BTreeSet<String> = account_gate_commands()
+        .into_iter()
+        .filter(|command| command != ACCOUNT_MOUNT_PATH_COMMAND)
+        .collect();
+    for (predicate, commands) in invoke_handlers() {
+        let present: BTreeSet<&String> = behind_login.intersection(&commands).collect();
+        assert!(
+            present.is_empty() || present.len() == behind_login.len(),
+            "the handler selected by {predicate} registers {} of the {} commands behind \
+             the login screen; a partially wired login screen fails only at the step the \
+             user happens to reach",
+            present.len(),
+            behind_login.len()
+        );
+    }
+}
