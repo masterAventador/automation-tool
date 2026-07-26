@@ -1,9 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { PlatformSessionGateway } from "./platform-session-gateway";
+import {
+  PlatformSessionGatewayError,
+  type PlatformSessionGateway,
+} from "./platform-session-gateway";
 import { PlatformSessions } from "./PlatformSessions";
 
 function gateway(): PlatformSessionGateway {
@@ -123,5 +126,84 @@ describe("platform status page", () => {
 
     expect(await screen.findByText("暂时无法读取抖音登录状态，请稍后重试。" )).toBeVisible();
     expect(document.body).not.toHaveTextContent("private/profile");
+  });
+
+  /**
+   * T109: a user on a signed build pressed both buttons and got one sentence —
+   * "暂时无法读取抖音登录状态，请稍后重试" — for every possible cause, because the
+   * handler's `catch {}` discarded the error. Six hours of forensics later the
+   * reason still could not be named. These cases pin the three things the page
+   * now has to distinguish, and above all that a fault in our own program is
+   * never dressed up as something the operator should retry.
+   */
+  it("says a packaged-component fault is ours and does not ask the user to retry", async () => {
+    const source = gateway();
+    vi.mocked(source.openDouyinLogin).mockRejectedValue(
+      new PlatformSessionGatewayError("browser_component_missing", false),
+    );
+    const user = userEvent.setup();
+    render(<PlatformSessions gateway={source} />);
+
+    await user.click(await screen.findByRole("button", { name: "打开登录处理" }));
+
+    expect(await screen.findByText(/运营浏览器组件缺失或损坏/u)).toBeVisible();
+    expect(screen.getByText(/browser_component_missing/u)).toBeVisible();
+    expect(document.body).not.toHaveTextContent("请稍后重试");
+  });
+
+  it("offers a retry only for a genuinely temporary local failure", async () => {
+    const source = gateway();
+    vi.mocked(source.recheckDouyinLogin).mockRejectedValue(
+      new PlatformSessionGatewayError("process_unavailable", true),
+    );
+    const user = userEvent.setup();
+    render(<PlatformSessions gateway={source} />);
+
+    await user.click(await screen.findByRole("button", { name: "我已处理，重新检查" }));
+
+    expect(await screen.findByText(/本机执行器暂时不可用/u)).toBeVisible();
+    expect(screen.getByText(/process_unavailable/u)).toBeVisible();
+  });
+
+  it("tells the operator what to do when the operations browser is already in use", async () => {
+    const source = gateway();
+    vi.mocked(source.openDouyinLogin).mockRejectedValue(
+      new PlatformSessionGatewayError("profile_in_use", true),
+    );
+    const user = userEvent.setup();
+    render(<PlatformSessions gateway={source} />);
+
+    await user.click(await screen.findByRole("button", { name: "打开登录处理" }));
+
+    expect(await screen.findByText(/运营浏览器正在被占用/u)).toBeVisible();
+  });
+
+  /**
+   * The local check succeeded; only the authoritative server projection lagged.
+   * Reporting that as "cannot read the login state" would describe the opposite
+   * of what happened, and would send the user back to press the same button.
+   */
+  it("distinguishes a lagging server projection from a failed local check", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const source = gateway();
+      vi.mocked(source.getDouyinSession).mockResolvedValue({
+        platform: "douyin",
+        state: "missing",
+        observedAt: "2026-07-19T14:30:00Z",
+      });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<PlatformSessions gateway={source} />);
+
+      await user.click(await screen.findByRole("button", { name: "我已处理，重新检查" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(screen.getByText(/本机已确认登录正常/u)).toBeVisible();
+      expect(screen.getByText(/health_publication_timed_out/u)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1134,6 +1134,11 @@ fn map_executor_platform_error(
             ("process_unavailable", true)
         }
         executor_platform::ExecutorPlatformErrorCode::TimedOut => ("timed_out", true),
+        // Recoverable, but only by the operator: pressing the same button again
+        // hits the same abandoned lock marker forever.
+        executor_platform::ExecutorPlatformErrorCode::RecoveryRequired => {
+            ("profile_recovery_required", false)
+        }
     };
     ExecutorPlatformCommandError { code, retryable }
 }

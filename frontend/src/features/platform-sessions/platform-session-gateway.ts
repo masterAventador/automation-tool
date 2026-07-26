@@ -73,17 +73,74 @@ export interface PlatformSessionGateway {
   logoutDouyinSession(): Promise<PlatformSessionSnapshot>;
 }
 
+/**
+ * T109: every reason `open_douyin_login` and `recheck_douyin_login` can fail with.
+ *
+ * The two buttons failed on a signed build and no layer could say why: this
+ * gateway had three codes, so the fifteen the bridge can actually answer with
+ * were all flattened into `transport_unavailable` before anyone saw them. The
+ * set is closed on purpose — it mirrors the Rust mappers behind those two
+ * Commands (`map_executor_platform_error`, `map_executor_connection_error`,
+ * `resolve_embedded_browser`, `map_browser_profile_error`) — so an unknown code
+ * is treated as an unknown failure rather than rendered as if it were understood.
+ */
+export const PLATFORM_SESSION_NATIVE_ERROR_CODES: ReadonlySet<string> = new Set([
+  // Executor process and command exchange.
+  "process_unavailable",
+  "timed_out",
+  "already_running",
+  "authentication_rejected",
+  "package_rejected",
+  "configuration_invalid",
+  "storage_unavailable",
+  // Packaged operations browser.
+  "browser_component_missing",
+  "browser_component_invalid",
+  "browser_component_version_incompatible",
+  // The App's private operations Profile.
+  "profile_in_use",
+  "profile_recovery_required",
+  // Control Plane leg of starting the executor.
+  "transport_unavailable",
+  "credential_missing",
+  "installation_access_denied",
+  "installation_conflict",
+  "operation_unavailable",
+]);
+
 export type PlatformSessionGatewayErrorCode =
   | "transport_unavailable"
   | "protocol_mismatch"
-  | "operation_unavailable";
+  | "operation_unavailable"
+  | "storage_unavailable"
+  | "configuration_invalid"
+  | "already_running"
+  | "authentication_rejected"
+  | "package_rejected"
+  | "process_unavailable"
+  | "timed_out"
+  | "browser_component_missing"
+  | "browser_component_invalid"
+  | "browser_component_version_incompatible"
+  | "profile_in_use"
+  | "profile_recovery_required"
+  | "credential_missing"
+  | "installation_access_denied"
+  | "installation_conflict"
+  /**
+   * The executor confirmed the platform login locally, but the authoritative
+   * Control Plane projection did not catch up in time. Nothing is broken on this
+   * machine, so telling the operator to "retry reading the login state" would be
+   * a lie about what happened.
+   */
+  | "health_publication_timed_out";
 
 export class PlatformSessionGatewayError extends Error {
   readonly code: PlatformSessionGatewayErrorCode;
   readonly retryable: boolean;
 
   constructor(code: PlatformSessionGatewayErrorCode, retryable: boolean) {
-    super("Platform Session operation is unavailable");
+    super(`Platform Session operation is unavailable: ${code}`);
     this.name = "PlatformSessionGatewayError";
     this.code = code;
     this.retryable = retryable;

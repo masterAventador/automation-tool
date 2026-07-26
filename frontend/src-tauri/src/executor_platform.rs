@@ -66,6 +66,11 @@ pub enum ExecutorPlatformErrorCode {
     PackageRejected,
     ProcessUnavailable,
     TimedOut,
+    /// The operations Profile still carries the lock marker of a run that never
+    /// released it, so no lease can be taken until the operator clears it. It is
+    /// separate from `StorageUnavailable` because it is the one Profile failure
+    /// the operator can actually do something about.
+    RecoveryRequired,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -857,11 +862,13 @@ fn map_profile_error(error: BrowserProfileError) -> ExecutorPlatformError {
         BrowserProfileErrorCode::ProfileInUse => {
             ExecutorPlatformError::new(ExecutorPlatformErrorCode::AlreadyRunning)
         }
+        BrowserProfileErrorCode::RecoveryRequired => {
+            ExecutorPlatformError::new(ExecutorPlatformErrorCode::RecoveryRequired)
+        }
         BrowserProfileErrorCode::InvalidProfileId
         | BrowserProfileErrorCode::ProfileNotFound
         | BrowserProfileErrorCode::UnsafeDirectory
         | BrowserProfileErrorCode::IdentityChanged
-        | BrowserProfileErrorCode::RecoveryRequired
         | BrowserProfileErrorCode::StorageUnavailable => storage_unavailable(),
     }
 }
@@ -989,11 +996,40 @@ const fn storage_unavailable() -> ExecutorPlatformError {
 
 #[cfg(all(test, any(not(feature = "desktop-e2e"), feature = "control-plane-e2e")))]
 mod tests {
-    use super::ExecutorPlatformService;
+    use super::{map_profile_error, ExecutorPlatformService};
+    use crate::browser_profiles::BrowserProfileError;
     use crate::startup_environment::ExecutorStartupState;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// T109: an abandoned Profile lease is recoverable, and saying so is the
+    /// whole point.
+    ///
+    /// An App that exits while it holds the operations Profile leaves the
+    /// on-disk lock marker `active` — `browser_profile_locks.rs` pins that
+    /// deliberately. The next lease then fails with `RecoveryRequired`, for both
+    /// 抖音 buttons, on every press, until someone runs 安全注销. Folding it into
+    /// the generic storage failure removed the one fact the operator needed and
+    /// left the page telling them to retry something that can never succeed.
+    #[test]
+    fn a_profile_that_needs_explicit_recovery_keeps_its_own_reason() {
+        let recovery = map_profile_error(BrowserProfileError::recovery_required());
+        let storage = map_profile_error(BrowserProfileError::storage_unavailable());
+
+        assert_ne!(
+            recovery.code(),
+            storage.code(),
+            "a 浏览器档案 awaiting explicit recovery must not arrive as a generic storage \
+             failure: the operator can clear the first with 安全注销 and can do nothing about \
+             the second"
+        );
+        assert_eq!(
+            crate::map_executor_platform_error(recovery).code,
+            "profile_recovery_required",
+            "the App must name the recoverable state so the page can say how to clear it"
+        );
+    }
 
     static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
