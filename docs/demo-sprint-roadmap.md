@@ -23,11 +23,33 @@
 | ID | 任务 | 状态 | 证据 / 说明 |
 |---|---|---|---|
 | T36 | 一句话生成视频 + 本地预览 | 🚧 | 五块代码全部合入。**分层已通**：一句话→合成→会动的 mp4（180 帧 / 114 帧互不相同）。**App 内已通**：工作台挂载、设置表单存密钥、空描述被拒。**App 内提交仍失败**，见 T58。`docs/development/T36-oneshot-video.md` |
-| T58 | 提交后 ~15 分钟返回 `authoring_failed` | 🚧 | 真因是编排子进程非零退出，**不是 600 秒超时**（拆码后实测证伪，"加大超时"是错路）。已拆出 `authoring_timed_out` / `authoring_failed` / `authoring_answer_invalid` 三码，`spawn` 失败有意留在 `render_unavailable` |
+| T58 | 提交后 ~15 分钟返回 `authoring_failed` | 🚧 | 真因是编排子进程非零退出，**不是 600 秒超时**（拆码后实测证伪，"加大超时"是错路）。已拆四个码（`2d21091` + `4c42d67`）：`authoring_timed_out` / `authoring_refused` / `authoring_crashed` / `authoring_answer_invalid`，`spawn` 失败有意留在 `render_unavailable`。用协议文档而非退出码判定拒绝，避免 70 在 Python 和 Rust 各存一份后漂移。**「协议拒绝还是崩溃」的实测答案未取得**（重跑到 11 分钟时按收敛指令中止），只有分层证据 |
+| T58a | 提交命令在点击后至少一分钟才开始执行 | ⬜ | 三段时间分解已确定：**打字 0 秒、点击 5 秒、那 15 分钟全部落在提交命令内部**（所以"演示时用户打字慢"可以排除）。但点击后 41 秒和 57 秒两次取样，主线程仍在事件循环、tokio 全 park、无子进程、工作区为空——**命令根本没开始**。这是下一条线的第一个问题 |
 | T48 | 签名包连云端的纵向验收 | 👤 | 包里烧着正确云端地址、带隔离标记安装 Gatekeeper 放行、隔离启动真实目录零改动，**均已验**。**登录→设备绑定未验**，自动化三条路全排除，需人工在演示机走一遍。`docs/development/T48-package-cloud-vertical.md` |
-| T61 | setup 失败即 abort，无兜底 | ⬜ | 产品的 fail-closed 启动诊断页在 setup **之后**才渲染，setup 内失败直接闪退零提示。13:00 那三次崩溃即此形态（`deployment_profile.rs:252` 非递归 `create_dir`）。**调研中，先拿风险面** |
+| T61 | setup 失败即 abort，无兜底 | ⬜ | **风险面已查清，见下**。结论与最初担心的方向相反：全新 Mac 首次启动风险很低，**真正的风险是用过一轮之后的第二次启动** |
 | — | 用最终代码重建一次签名包 | ⬜ | 功能定型后做。判据：`xattr -w com.apple.quarantine` 后 `spctl -a -vvv -t open` 得到 `accepted / Notarized Developer ID`，且 `release-package.json` 有 `gatekeeper` 字段 |
 | — | 演示前检查清单跑一遍 | 🚧 | `docs/development/DEMO-preflight-checklist.md`。§2 后端网络、§5.1 服务器凭据**已实测贴输出**；§3（签名包体）等最终 DMG，§7（功能链路）等 T36 定型 |
+
+### T61 详情：setup abort 风险面（调研已完成，是否修待定）
+
+**23 个 abort 点**：2 个在 Builder 之前（`DeploymentProfile::load().expect()` / `UpdateRuntimeConfiguration::load().expect()`，失败时窗口还没建，表现是"双击没反应"）；21 个在 setup 钩子里（`lib.rs:4203`–`4338`，这些才是闪退）。
+
+**诊断页结构上救不了 setup 失败**（`tauri-2.11.5/src/app.rs:2521` 实证）：窗口先建、setup 后跑 → 失败 = 窗口先出现再瞬间消失；主线程被 setup 占着，WebView 的 JS 一行都执行不了；且 `check_local_startup_environment` 的四个入参全是 `tauri::State`，全部在 setup 里才 `manage`。**那个 fail-closed 诊断页覆盖的是"启动成功之后的运行期降级"，不覆盖启动失败本身。**
+
+**概率分档**：
+- *近似为零（结构决定）*：多数初始化是路径形状校验 + `DirBuilder.recursive(true).mode(0o700)`；全新机器没有旧状态，解析分支不执行
+- *近似为零（每台一样）*：`executor_verifying_key()` 等读编译期 `option_env!`，T44/T48 启动成功即证明发出去的包里是好的
+- *已知唯一元凶*：`deployment_profile.rs:260` 的非递归 `create_dir`，只在 `~/Library/Application Support` 不存在时触发，真实账号必然存在
+- *非零但低（首次）*：磁盘满 / 目录不可写；`ensure_private_file_permissions` 对已存在密钥文件的权限位检查（迁移助理、Time Machine 恢复、iCloud 同步 Library 会造出带 group/other 位的文件）
+
+**⚠️ 真正随使用增长的是第二次启动**（正是演示场景：做完视频 → 关 App → 再打开）：
+- `VideoJobWorkspaceStore::initialize`（`video_job_workspace.rs:349`）建完目录后跑 `recover_interrupted_imports()?` + `validate_artifact_inventory()?` + `discard_staged_publish_artifacts()?`，App 被强退后任意一步不一致就 abort
+- `AppUpdateCache::validate_disk_state()`（`app_update_cache.rs:361`）：包/断点文件与 manifest 对不上就 abort。**这条在发出去的包里是活的**——二进制带 feed URL `https://updates.candidate.invalid/…`（`.invalid` 是永不解析的保留域名，**演示机上点「检查更新」必然失败**）
+- `StoredBrowserDiagnosticSettings.version` 不匹配就 abort → 将来版本号一升，老机器上是**启动即闪退而不是迁移**
+
+**没查完（如实记）**：21 个初始化读到底约 14 个，4 个 vault 只读到顶层；`recover_interrupted_imports` / `validate_artifact_inventory` 内部失败条件**未展开，而那是风险最高的一处**；Windows 路径完全没看。
+
+**演示期缓解（无需改代码）**：演示流程避免"做完视频后重启 App"；若必须重启，先确认上一次是正常退出而不是强退。
 
 ---
 
@@ -119,7 +141,7 @@
 |---|---|---|
 | T60 | 渲染沙箱的安全断言在静默跳过 | `local_video_orchestrator*.rs` 五处裸 `return;`，常规 `cargo test` 一律报 ok。涉及 `real_worker_render_sandbox_isolates_malicious_html` 等。**收敛时可能有未提交改动，需确认** |
 | T50 | 注销成功但界面报失败 | 5 次复现 4 次。内层 ~5 秒轮询包在 60 秒超时里——**不是等不起，是自己先放弃了**。已从演示脚本摘掉「安全注销」 |
-| T58b | 第四个错误码：区分「协议拒绝」与「崩溃」 | `entry.py` 写 `{"status":"rejected"}` 并 `exit 70` 是产品行为，其它非零码是缺陷，两者用户该看到的文案不同。区分不需要读 stderr |
+| T58c | 拒绝原因要不要转发给用户 | 静态核查已确定**能拿到且不需要读 stderr**：`entry.py` 13 处 `_reject` 与 `agent.py` 全部拒绝消息都是固定字面量，唯二插值是结构标签和门禁码闭集，`MotionBrief` 越界消息也不回显 brief 原文。但转发要改共用 error wire，与"细节不进 wire"的决定冲突，代价写在台账里等决策 |
 | T62 | `run_script_tests.py` docstring 写死 "37 self-contained test scripts" | 实际已 41。代码本身是 glob 推导的没有功能问题，但这个会静默落后的散文计数**就写在那份讲"discovery is derived, never curated"的文档里** |
 | T45 | Control Plane 镜像被打进 playwright | 约 50MB。代码层守住了 CLAUDE.md 4.2，打包层破了 |
 | T57 | desktop-e2e 入口的并/修/废 | **并**：VF-06 / BM-15 / VE-03 / VE-04 搬到 control-plane-e2e（+BM-06、CQ-01 并入）。**废**：B5-04（产品 UI 已删）、`workbench.spec.ts`、三条 0-click 的 update spec。**重新设计**：BM-08、IM-05。另注：`video-studio-e2e` 这个 feature 已不门控任何一行产品代码 |
