@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -140,13 +140,39 @@ timeline.to("#bar", { left: 540, duration: 3 }, 0);
 window.__timelines = { main: timeline };
 </script></body></html>`;
 
-async function renderPage(html, executable, major) {
+// Where a real animation runtime may already be staged on this machine, for the
+// T92 test below: it renders the *product's own* template, which loads the same
+// runtime the App seeds into every RenderJob workspace.
+const RUNTIME_ASSET = "runtime/gsap.min.js";
+const RUNTIME_CANDIDATES = [
+  ".local/offline-motion-deps/catalog/offline-deps/js/gsap-3.14.2/gsap.min.js",
+  ".local/release/cargo-target/release/bundle/macos/自动化运营工具.app/Contents/Resources/motion-video-worker/package/runtime/gsap.min.js",
+];
+
+function locateAnimationRuntime() {
+  const explicit = process.env.AUTOMATION_TOOL_RENDER_RUNTIME;
+  if (typeof explicit === "string" && explicit.length > 0 && existsSync(explicit)) {
+    return explicit;
+  }
+  for (const candidate of RUNTIME_CANDIDATES) {
+    const staged = fileURLToPath(new URL(candidate, repositoryRoot));
+    if (existsSync(staged)) return staged;
+  }
+  return null;
+}
+
+async function renderPage(html, executable, major, assets = []) {
   const base = await mkdtemp(join(tmpdir(), "t86-static-"));
   const workspace = join(base, "workspace");
   await mkdir(workspace, { recursive: true });
   await writeFile(join(workspace, "entry.html"), html, "utf8");
+  for (const asset of assets) {
+    const target = join(workspace, asset.relative);
+    await mkdir(join(target, ".."), { recursive: true });
+    await copyFile(asset.source, target);
+  }
   const sandbox = {
-    allowedAssets: [],
+    allowedAssets: assets.map((asset) => asset.relative),
     entryHtml: "entry.html",
     frameCount: FRAME_COUNT,
     maxCpuSeconds: 120,
@@ -219,4 +245,62 @@ test("a composition that actually animates still renders", async (t) => {
     `a moving composition must not be mistaken for a still one, got ${JSON.stringify(event)}`,
   );
   assert.equal(event.framesCaptured, FRAME_COUNT);
+});
+
+// T92 moved the document from model output to `composition_template.py`. That
+// makes the still-frame shape above this project's own liability rather than the
+// model's, so the template's real output is put through the same real Worker and
+// real Chromium: the deterministic Python tests can only prove the document
+// passes the *static* gates, and a document that passes all of them while never
+// repainting is exactly the defect T86 shipped.
+const PYTHON = fileURLToPath(new URL("backend/.venv/bin/python", repositoryRoot));
+const TEMPLATE_DURATION = 3;
+const RENDER_TEMPLATE = `
+import sys
+sys.path.insert(0, "backend/src")
+from automation_tool.executor.motion_authoring.composition_template import (
+    AUTHORING_RUNTIME_ASSET, TemplateScene, render_composition,
+)
+scenes = (
+    TemplateScene("clip-1", "title", "本周销售增长", "三个要点", (), 0.0, 1.5),
+    TemplateScene("clip-2", "points", "转化提升", "渠道与私域", ("投放", "承接"), 1.5, 1.5),
+)
+sys.stdout.write(render_composition(
+    primary_color="#1e3a8a", secondary_color="#38bdf8", scenes=scenes,
+    duration_seconds=${TEMPLATE_DURATION}, stage_width=640, stage_height=360,
+    runtime_asset=AUTHORING_RUNTIME_ASSET,
+))
+`;
+
+test("the local composition template renders a film that actually moves", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const runtime = locateAnimationRuntime();
+  if (runtime === null) {
+    t.skip("no staged animation runtime on this machine");
+    return;
+  }
+  if (!existsSync(PYTHON)) {
+    t.skip("no backend virtual environment on this machine");
+    return;
+  }
+  const { stdout: html } = await execFileAsync(PYTHON, ["-c", RENDER_TEMPLATE], {
+    cwd: fileURLToPath(repositoryRoot),
+    maxBuffer: 4_000_000,
+  });
+  assert.ok(html.includes(`src="${RUNTIME_ASSET}"`), "the template must load the local runtime");
+  const major = await chromiumMajor(executable);
+  const event = await renderPage(html, executable, major, [
+    { relative: RUNTIME_ASSET, source: runtime },
+  ]);
+  assert.equal(
+    event.event,
+    "worker.render.sandboxed",
+    `the shipped template must render as a moving film, got ${JSON.stringify(event)}`,
+  );
+  assert.equal(event.framesCaptured, FRAME_COUNT);
+  assert.equal(event.blockedRequests, 0, "the template must not ask the offline sandbox for anything");
 });

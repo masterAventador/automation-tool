@@ -49,7 +49,7 @@ _MODEL_FIELDS: Final = frozenset({"baseUrl", "modelId", "apiKey"})
 _REFUSAL_FIELDS: Final = frozenset({"schemaVersion", "status", "rejectionReason"})
 _AGENT_REASON_PREFIX: Final = "motion authoring rejected: "
 _BRIEF_REASON_PREFIX: Final = "brief is outside the declared bounds: "
-_STATIC_GATE_MESSAGE_PREFIX: Final = "composition failed static gates after local fixes: "
+_STATIC_GATE_MESSAGE_PREFIX: Final = "composition failed static gates: "
 _REFUSAL_CONTRACT_PATH: Final = AUTHORING_WORKFLOW_CONTRACT.with_name(
     "motion-authoring-refusal.v1.json"
 )
@@ -191,10 +191,12 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
     {
         "api key is malformed",
         "base url must be https",
+        "beat layout is not published",
         "beat timing is out of range",
         "beat timing must be numeric",
         "beat_id is malformed",
         "beats count is out of range",
+        "body is out of range",
         "brief must be a MotionBrief",
         "brief text is out of range",
         "catalog purposes missing",
@@ -214,11 +216,11 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "entry html must exist in workspace",
         "expected a regular file inside the workspace",
         "file entry invalid",
-        "first response must carry the four closed fields",
-        "fix response must carry only the html",
-        "fix rounds out of range",
+        "first response must carry the three closed fields",
         "fps out of range",
         "frame count out of range",
+        "headline is out of range",
+        "items are out of range",
         "locked motion catalog drifted",
         "locked motion catalog is unreadable",
         "model call contract drifted",
@@ -232,9 +234,9 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "model stream exceeded the size budget",
         "model timeout out of range",
         "not a MotionAuthoringTools instance",
-        "one_message is out of range",
         "one-sentence brief contract drifted",
         "one-sentence brief contract is unreadable",
+        "one_message is out of range",
         "path collides with an existing entry that differs only by case",
         "path escapes the workspace",
         "path must be a clean relative posix path",
@@ -257,6 +259,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "storyboard beat has an unexpected key set",
         "storyboard beat must be an object",
         "storyboard beats count is out of range",
+        "storyboard beats must tile the film",
         "storyboard duration contract drifted",
         "storyboard duration contract is unreadable",
         "storyboard has an unexpected key set",

@@ -7,9 +7,11 @@
     "agent_api_key_is_malformed",
     "agent_base_url_must_be_https",
     "agent_beat_id_is_malformed",
+    "agent_beat_layout_is_not_published",
     "agent_beat_timing_is_out_of_range",
     "agent_beat_timing_must_be_numeric",
     "agent_beats_count_is_out_of_range",
+    "agent_body_is_out_of_range",
     "agent_brief_must_be_a_motionbrief",
     "agent_brief_text_is_out_of_range",
     "agent_catalog_parts_must_be_locked_catalog_ids",
@@ -29,11 +31,11 @@
     "agent_entry_html_must_exist_in_workspace",
     "agent_expected_a_regular_file_inside_the_workspace",
     "agent_file_entry_invalid",
-    "agent_first_response_must_carry_the_four_closed_fields",
-    "agent_fix_response_must_carry_only_the_html",
-    "agent_fix_rounds_out_of_range",
+    "agent_first_response_must_carry_the_three_closed_fields",
     "agent_fps_out_of_range",
     "agent_frame_count_out_of_range",
+    "agent_headline_is_out_of_range",
+    "agent_items_are_out_of_range",
     "agent_locked_motion_catalog_drifted",
     "agent_locked_motion_catalog_is_unreadable",
     "agent_model_call_contract_drifted",
@@ -72,6 +74,7 @@
     "agent_storyboard_beat_has_an_unexpected_key_set",
     "agent_storyboard_beat_must_be_an_object",
     "agent_storyboard_beats_count_is_out_of_range",
+    "agent_storyboard_beats_must_tile_the_film",
     "agent_storyboard_duration_contract_drifted",
     "agent_storyboard_duration_contract_is_unreadable",
     "agent_storyboard_has_an_unexpected_key_set",
@@ -128,6 +131,7 @@
     "composition_too_large",
     "determinism_violation",
     "duration_mismatch",
+    "missing_animation_runtime",
     "missing_canvas",
     "missing_clip",
     "missing_composition_root",
@@ -181,8 +185,12 @@
       "model_configuration_unusable",
       "video_creation_model_unavailable"
     ],
-    "model_timed_out": ["video_creation_model_timed_out"],
-    "model_transport_failed": ["video_creation_model_transport_failed"]
+    "model_timed_out": [
+      "video_creation_model_timed_out"
+    ],
+    "model_transport_failed": [
+      "video_creation_model_transport_failed"
+    ]
   },
   "rationale": {
     "problem": "The one-shot Executor can safely explain a refusal only when the explanation is one of the product's own fixed reasons. An arbitrary string could contain the user's brief, model output, a credential or a local path.",

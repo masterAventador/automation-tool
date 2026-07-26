@@ -380,10 +380,13 @@ def test_every_fixed_upstream_rejection_has_its_own_closed_reason_token() -> Non
     assert None not in color_tokens
     assert len(color_tokens) == 2
 
+    # Every static-gate code is now a report about the *local* template rather
+    # than about model output, so each one still has to arrive as its own
+    # reason: a template defect answered as a generic refusal would tell the
+    # user to rewrite a sentence that was never involved.
     gate_tokens = {
         classifier(
-            "motion authoring rejected: "
-            f"composition failed static gates after local fixes: ['{code}']"
+            f"motion authoring rejected: composition failed static gates: ['{code}']"
         )
         for code in (
             "canvas_mismatch",
@@ -395,6 +398,7 @@ def test_every_fixed_upstream_rejection_has_its_own_closed_reason_token() -> Non
             "composition_too_large",
             "determinism_violation",
             "duration_mismatch",
+            "missing_animation_runtime",
             "missing_canvas",
             "missing_clip",
             "missing_composition_root",
@@ -407,19 +411,17 @@ def test_every_fixed_upstream_rejection_has_its_own_closed_reason_token() -> Non
         )
     }
     assert None not in gate_tokens
-    assert len(gate_tokens) == 18
+    assert len(gate_tokens) == 19
     assert (
         classifier(
-            "motion authoring rejected: "
-            "composition failed static gates after local fixes: "
+            "motion authoring rejected: composition failed static gates: "
             "['remote_reference', 'undeclared_asset']"
         )
         is not None
     )
     assert (
         classifier(
-            "motion authoring rejected: "
-            "composition failed static gates after local fixes: ['user_supplied']"
+            "motion authoring rejected: composition failed static gates: ['user_supplied']"
         )
         is None
     )
