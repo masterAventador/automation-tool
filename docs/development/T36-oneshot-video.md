@@ -377,6 +377,10 @@ cd frontend/src-tauri && cargo test --test motion_authoring_runtime
 
 ```text
 cd frontend/src-tauri && cargo test --test motion_authoring_runtime      4 passed
+cd frontend/src-tauri && cargo test --tests -- --test-threads=4
+                                    42 个测试二进制 / 383 passed / 0 failed   (41/379 → 42/383)
+python3 scripts/check_user_facing_branding.py                            passed (52 frontend, 252 native)
+python3 scripts/cq_04_ledger_honesty.py                                  exit 0
 ```
 
 #### 交付
