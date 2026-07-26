@@ -23,6 +23,7 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import subtitle_font_assets  # noqa: E402
+from frozen_artifact_environment import frozen_artifact_environment  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / "vendor/moneyprinterturbo"
@@ -311,12 +312,17 @@ def environment_python(runtime: Path) -> Path:
 
 
 def probe_environment() -> dict[str, str]:
-    environment = {"PATH": os.defpath, "LANG": "C.UTF-8", "NO_PROXY": "*"}
-    for name in ("SystemRoot", "WINDIR", "TEMP", "TMP"):
-        value = os.environ.get(name)
-        if value:
-            environment[name] = value
-    return environment
+    """The frozen candidate's environment: the shared minimum plus this Worker's own.
+
+    `LANG` and `NO_PROXY` are specific to this Worker -- subtitle encoding and
+    keeping the probe off any ambient proxy -- so they stay here rather than
+    joining the shared value that the Executor probes also use.
+    """
+    return {
+        **frozen_artifact_environment(),
+        "LANG": "C.UTF-8",
+        "NO_PROXY": "*",
+    }
 
 
 def build_candidate(output: Path) -> MaterialVideoWorkerAudit:

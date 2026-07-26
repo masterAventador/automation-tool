@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from automation_tool.executor.macos_candidate import build_macos_executor_candidate
 from automation_tool.executor.package_manifest import write_signed_executor_manifest
+from frozen_artifact_environment import frozen_artifact_environment
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
@@ -41,7 +42,7 @@ def main() -> int:
             input=b"",
             capture_output=True,
             check=False,
-            env={"PATH": os.defpath},
+            env=frozen_artifact_environment(),
             timeout=30,
         )
         if (
