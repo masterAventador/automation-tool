@@ -53,6 +53,10 @@ class MotionAuthoringRejected(RuntimeError):
     """A closed-surface, containment or validation boundary was violated."""
 
 
+class MotionAuthoringPersistenceError(RuntimeError):
+    """A workspace write failed after entering the authoring transaction."""
+
+
 class MotionAuthoringUnavailable(RuntimeError):
     """The one-sentence path was invoked without a configured model."""
 
@@ -359,6 +363,7 @@ class AuthoringWorkspace:
         # Snapshot the seeded assets (offline runtime + brand material) that
         # existed before authoring; the composition may reference only these.
         self._seeded_assets = self.provided_assets()
+        self._authored_targets: set[Path] = set()
 
     @property
     def root(self) -> Path:
@@ -375,12 +380,40 @@ class AuthoringWorkspace:
         return target
 
     def write_text(self, relative: str, text: str) -> Path:
-        target = self.resolve(relative)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.is_symlink():
-            _reject("refusing to write through a symlink")
-        target.write_text(text, encoding="utf-8")
+        try:
+            target = self.resolve(relative)
+            if target.relative_to(self._root).as_posix() not in self._seeded_assets:
+                # Record before the write: a short write may create a partial
+                # file and then raise, so recording only after success cannot
+                # roll it back at the process boundary.
+                self._authored_targets.add(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.is_symlink():
+                _reject("refusing to write through a symlink")
+            target.write_text(text, encoding="utf-8")
+        except MotionAuthoringRejected:
+            raise
+        except OSError as error:
+            self.rollback_authored_files()
+            raise MotionAuthoringPersistenceError(
+                "motion authoring workspace persistence failed"
+            ) from error
         return target
+
+    def rollback_authored_files(self) -> None:
+        """Remove files this run introduced without touching seeded assets.
+
+        Cleanup is best-effort because the same disk or permission failure may
+        also prevent unlinking. The caller still has to close the original
+        error into the fixed process response rather than replacing it with a
+        second local-path-bearing exception.
+        """
+        for target in self._authored_targets:
+            try:
+                if target.is_file() and not target.is_symlink():
+                    target.unlink()
+            except OSError:
+                continue
 
     def read_text(self, relative: str) -> str:
         target = self.resolve(relative)
@@ -1556,6 +1589,7 @@ __all__ = [
     "LintFinding",
     "LintResult",
     "MotionAuthoringAgent",
+    "MotionAuthoringPersistenceError",
     "MotionAuthoringRejected",
     "MotionAuthoringTools",
     "COMPOSITION_PATH",

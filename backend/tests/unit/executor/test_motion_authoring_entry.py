@@ -45,6 +45,23 @@ MODEL = {
     "apiKey": "sk-" + "a" * 40,
 }
 
+FIRST_AUTHORING_REPLY = json.dumps(
+    {
+        "design": {
+            "style_preset_id": "blue-professional",
+            "primary_color": "#0b1f3a",
+            "secondary_color": "#2f6fd6",
+            "typography": "restrained bold sans serif",
+        },
+        # The injected DESIGN write failure happens before these fields are
+        # parsed. Keeping them present still exercises the production response
+        # shape without duplicating the large happy-path composition fixture.
+        "script": None,
+        "storyboard": None,
+        "composition_html": None,
+    }
+)
+
 
 class _NeverCalledModel:
     def __init__(self) -> None:
@@ -135,6 +152,95 @@ def test_the_child_process_answers_one_json_document_and_never_echoes_the_key(
     }
     combined = completed.stdout.decode() + completed.stderr.decode()
     assert MODEL["apiKey"] not in combined
+
+
+def test_a_partial_workspace_write_is_closed_and_rolled_back(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path
+) -> None:
+    """A disk failure is an execution failure, not a traceback or model refusal."""
+    private_path = workspace / "operator-private" / "DESIGN.json"
+    original_write_text = Path.write_text
+
+    def short_write_then_fail(
+        path: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if path.name == "DESIGN.json":
+            original_write_text(path, data[:8], encoding=encoding)
+            raise OSError(f"disk full while writing {private_path}")
+        return original_write_text(
+            path,
+            data,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+        )
+
+    monkeypatch.setattr(Path, "write_text", short_write_then_fail)
+    original_entry = motion_authoring_entry.run_motion_authoring_entry
+
+    def run_with_scripted_model(document: object) -> dict[str, object]:
+        return original_entry(
+            document,
+            model_call=lambda *_args, **_kwargs: FIRST_AUTHORING_REPLY,
+        )
+
+    monkeypatch.setattr(
+        motion_authoring_entry,
+        "run_motion_authoring_entry",
+        run_with_scripted_model,
+    )
+    output = io.StringIO()
+
+    try:
+        return_code = motion_authoring_entry.serve_one_motion_authoring_request(
+            io.BytesIO(json.dumps(_request(workspace)).encode()),
+            output,
+        )
+    except Exception as error:  # pragma: no cover - the assertion below is RED today
+        pytest.fail(
+            "workspace persistence failure escaped the closed process boundary: "
+            f"{type(error).__name__}"
+        )
+
+    serialized = output.getvalue()
+    assert return_code == 70
+    assert json.loads(serialized) == {
+        "schemaVersion": 1,
+        "status": "app_request_invalid",
+        "rejectionReason": "workspace_unusable",
+    }
+    assert str(private_path) not in serialized
+    assert MODEL["apiKey"] not in serialized
+    assert not (workspace / "DESIGN.json").exists()
+    assert (workspace / "runtime/gsap.min.js").is_file()
+
+
+def test_a_non_workspace_oserror_is_not_misclassified_as_workspace_unusable(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path
+) -> None:
+    """Only the workspace writer may opt an OSError into this fixed mapping."""
+    private_path = workspace.parent / "installed-workflow" / "SKILL.md"
+
+    def fail_outside_workspace(*_args: object, **_kwargs: object) -> object:
+        raise OSError(f"locked workflow read failed at {private_path}")
+
+    monkeypatch.setattr(
+        motion_authoring_entry,
+        "load_locked_authoring_workflow",
+        fail_outside_workspace,
+    )
+
+    with pytest.raises(OSError) as unexpected_io:
+        motion_authoring_entry.run_motion_authoring_entry(
+            _request(workspace),
+            model_call=lambda *_args, **_kwargs: FIRST_AUTHORING_REPLY,
+        )
+
+    assert str(private_path) in str(unexpected_io.value)
 
 
 def test_the_final_refusal_serializer_revalidates_the_closed_reason(

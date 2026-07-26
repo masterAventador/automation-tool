@@ -21,6 +21,7 @@ from automation_tool.executor.motion_authoring.agent import (
     AUTHORING_WORKFLOW_CONTRACT,
     AuthoringWorkspace,
     MotionAuthoringAgent,
+    MotionAuthoringPersistenceError,
     MotionAuthoringRejected,
     MotionAuthoringTools,
     MotionAuthoringUnavailable,
@@ -469,6 +470,8 @@ def run_motion_authoring_entry(
         raise _reject("video creation model is unavailable") from error
     except MotionAuthoringRejected as error:
         raise _reject(str(error)) from error
+    except MotionAuthoringPersistenceError as error:
+        raise _reject("workspace is not a usable render workspace") from error
     submission = result.submission
     return {
         "schemaVersion": SCHEMA_VERSION,
