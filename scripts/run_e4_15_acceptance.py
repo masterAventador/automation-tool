@@ -30,7 +30,7 @@ INVALID_KEY_ERROR = "release Executor verification key is invalid"
 REQUIRED_UPDATE_ERROR = "release update configuration is required"
 INVALID_UPDATE_ERROR = "release update configuration is invalid"
 ACCEPTANCE_UPDATE_ENDPOINT = (
-    "https://updates.acceptance.invalid/desktop-updates/v1/stable/"
+    "https://127.0.0.1/desktop-updates/v1/stable/"
     "{{target}}/{{arch}}/{{current_version}}"
 )
 ACCEPTANCE_UPDATE_PUBLIC_KEY = base64.b64encode(

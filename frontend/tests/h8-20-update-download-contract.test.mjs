@@ -54,6 +54,64 @@ test("H8-20 keeps resumable verified cache transport-private and business agnost
   }
 });
 
+test("release update configuration rejects reserved placeholder feed hosts", async () => {
+  const [
+    buildScript,
+    coordinator,
+    tauriConfigSource,
+    macosCandidateRunner,
+    windowsCandidateRunner,
+    releaseBuilder,
+  ] = await Promise.all([
+    readFile(new URL("src-tauri/build.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/app_update_coordinator.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/tauri.conf.json", frontendRoot), "utf8"),
+    readFile(new URL("../scripts/run_p9_03_acceptance.py", frontendRoot), "utf8"),
+    readFile(new URL("../scripts/run_p9_04_acceptance.py", frontendRoot), "utf8"),
+    readFile(new URL("../scripts/build_release_package.py", frontendRoot), "utf8"),
+  ]);
+  const tauriConfig = JSON.parse(tauriConfigSource);
+
+  assert.deepEqual(tauriConfig.plugins.updater.endpoints, []);
+  assert.equal(tauriConfig.plugins.updater.pubkey, "");
+  assert.doesNotMatch(tauriConfigSource, /\.invalid/iu);
+  for (const source of [buildScript, coordinator]) {
+    for (const reservedSuffix of [".invalid", ".test", ".example", ".localhost"]) {
+      assert.match(source, new RegExp(`ends_with\\("${reservedSuffix.replace(".", "\\.")}"\\)`));
+    }
+    for (const reservedExampleSuffix of [".example.com", ".example.net", ".example.org"]) {
+      assert.match(
+        source,
+        new RegExp(`ends_with\\("${reservedExampleSuffix.replace(".", "\\.")}"\\)`),
+      );
+    }
+    assert.match(source, /trim_end_matches\('\.'\)/u);
+    for (const reservedHost of [
+      "invalid",
+      "test",
+      "example",
+      "localhost",
+      "example.com",
+      "example.net",
+      "example.org",
+    ]) {
+      assert.match(source, new RegExp(`host == "${reservedHost.replace(".", "\\.")}"`));
+    }
+  }
+  assert.match(buildScript, /AUTOMATION_TOOL_UPDATE_DISABLED/u);
+  for (const candidateRunner of [macosCandidateRunner, windowsCandidateRunner]) {
+    assert.match(
+      candidateRunner,
+      /AUTOMATION_TOOL_UPDATE_DISABLED["']?\]?\s*(?::|=)\s*["']1["']/u,
+    );
+    assert.doesNotMatch(candidateRunner, /updates\.candidate\.invalid/iu);
+  }
+  assert.match(releaseBuilder, /--update-endpoint/u);
+  assert.match(releaseBuilder, /--update-public-key-file/u);
+  assert.match(releaseBuilder, /update_endpoint=update_endpoint/u);
+  assert.match(releaseBuilder, /update_public_key=update_public_key/u);
+});
+
 test("H8-20 validates a real hidden App against the production FastAPI feed", async () => {
   const [tauriConfig, wdioConfig, spec, runner, backendRoute] = await Promise.all([
     readFile(new URL("src-tauri/tauri.update-download-e2e.conf.json", frontendRoot), "utf8"),

@@ -41,14 +41,6 @@ EXECUTOR_RESOURCE = Path("local-executor/package")
 PRODUCT_NAME = "Automation Tool P904 Windows Acceptance"
 APP_IDENTIFIER = "com.aventador.automationtool.p904windowsacceptance"
 MAIN_BINARY_NAME = "automation-tool-p904-windows-acceptance"
-UPDATE_ENDPOINT = (
-    "https://updates.candidate.invalid/desktop-updates/v1/stable/"
-    "{{target}}/{{arch}}/{{current_version}}"
-)
-UPDATE_PUBLIC_KEY = base64.b64encode(
-    b"untrusted comment: minisign public key E7620F1842B4E81F\n"
-    b"RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
-).decode()
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _TAURI_UNKNOWN_BUNDLE_MARKER = b"BUNDLE_TYPE_VAR_UNK"
 _TAURI_NSIS_BUNDLE_MARKER = b"BUNDLE_TYPE_VAR_NSS"
@@ -288,8 +280,7 @@ def release_environment(target: Path, executor_public_key: str) -> dict[str, str
             "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": executor_public_key,
             "AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS": "60",
             "AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT": "1",
-            "AUTOMATION_TOOL_UPDATE_ENDPOINT": UPDATE_ENDPOINT,
-            "AUTOMATION_TOOL_UPDATE_PUBLIC_KEY": UPDATE_PUBLIC_KEY,
+            "AUTOMATION_TOOL_UPDATE_DISABLED": "1",
             "CARGO_TARGET_DIR": os.fspath(target),
             "CI": "true",
         }

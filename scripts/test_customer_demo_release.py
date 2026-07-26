@@ -41,7 +41,11 @@ from customer_demo_release import (  # noqa: E402
     load_signing_seed,
     require_compiled_deployment,
 )
-from build_release_package import parse_arguments  # noqa: E402
+from build_release_package import (  # noqa: E402
+    ReleaseFailed,
+    parse_arguments,
+    resolve_update_configuration,
+)
 from run_p9_03_acceptance import release_environment  # noqa: E402
 
 DEMO_SEED = bytes(range(32))
@@ -291,16 +295,76 @@ class ReleaseArgumentTests(unittest.TestCase):
         self.assertIsNone(arguments.deployment_profile)
         self.assertTrue(arguments.work_dir.is_absolute())
 
+    def test_update_endpoint_and_public_key_file_are_one_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            public_key = Path(temporary) / "update-key"
+            public_key.write_text("encoded-minisign-public-key\n", encoding="utf-8")
+            endpoint = (
+                "https://updates.xuanbai.tech/desktop-updates/v1/stable/"
+                "{{target}}/{{arch}}/{{current_version}}"
+            )
+            arguments = parse_arguments(
+                [
+                    "--update-endpoint",
+                    endpoint,
+                    "--update-public-key-file",
+                    os.fspath(public_key),
+                ]
+            )
+
+            self.assertEqual(
+                resolve_update_configuration(arguments),
+                (endpoint, "encoded-minisign-public-key"),
+            )
+
+        with self.assertRaises(ReleaseFailed):
+            resolve_update_configuration(
+                parse_arguments(["--update-endpoint", endpoint])
+            )
+
 
 class ReleaseEnvironmentTests(unittest.TestCase):
     def test_a_release_without_a_deployment_stays_exactly_as_it_was(self) -> None:
         environment = release_environment(Path("/tmp/target"), "executor-key")
 
         self.assertNotIn("AUTOMATION_TOOL_DEPLOYMENT_PROFILE_PAYLOAD", environment)
+        self.assertEqual(environment["AUTOMATION_TOOL_UPDATE_DISABLED"], "1")
+        self.assertNotIn("AUTOMATION_TOOL_UPDATE_ENDPOINT", environment)
+        self.assertNotIn("AUTOMATION_TOOL_UPDATE_PUBLIC_KEY", environment)
         self.assertEqual(
             environment["AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY"],
             "executor-key",
         )
+
+    def test_a_real_update_configuration_is_compiled_as_one_pair(self) -> None:
+        endpoint = (
+            "https://updates.xuanbai.tech/desktop-updates/v1/stable/"
+            "{{target}}/{{arch}}/{{current_version}}"
+        )
+        environment = release_environment(
+            Path("/tmp/target"),
+            "executor-key",
+            update_endpoint=endpoint,
+            update_public_key="encoded-minisign-public-key",
+        )
+
+        self.assertNotIn("AUTOMATION_TOOL_UPDATE_DISABLED", environment)
+        self.assertEqual(environment["AUTOMATION_TOOL_UPDATE_ENDPOINT"], endpoint)
+        self.assertEqual(
+            environment["AUTOMATION_TOOL_UPDATE_PUBLIC_KEY"],
+            "encoded-minisign-public-key",
+        )
+
+    def test_a_partial_update_configuration_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            release_environment(
+                Path("/tmp/target"),
+                "executor-key",
+                update_endpoint=(
+                    "https://updates.xuanbai.tech/desktop-updates/v1/stable/"
+                    "{{target}}/{{arch}}/{{current_version}}"
+                ),
+            )
 
     def test_a_customer_demo_release_carries_the_profile_and_the_action_key(
         self,

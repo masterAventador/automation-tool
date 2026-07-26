@@ -9,6 +9,7 @@ use url::Url;
 mod deployment_profile;
 
 const EXECUTOR_VERIFYING_KEY_ENVIRONMENT: &str = "AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY";
+const UPDATE_DISABLED_ENVIRONMENT: &str = "AUTOMATION_TOOL_UPDATE_DISABLED";
 const UPDATE_ENDPOINT_ENVIRONMENT: &str = "AUTOMATION_TOOL_UPDATE_ENDPOINT";
 const UPDATE_PUBLIC_KEY_ENVIRONMENT: &str = "AUTOMATION_TOOL_UPDATE_PUBLIC_KEY";
 const DEPLOYMENT_PROFILE_PAYLOAD_ENVIRONMENT: &str = "AUTOMATION_TOOL_DEPLOYMENT_PROFILE_PAYLOAD";
@@ -22,6 +23,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY");
     println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS");
     println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT");
+    println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_UPDATE_DISABLED");
     println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_UPDATE_ENDPOINT");
     println!("cargo:rerun-if-env-changed=AUTOMATION_TOOL_UPDATE_PUBLIC_KEY");
     println!("cargo:rerun-if-env-changed={DEPLOYMENT_PROFILE_PAYLOAD_ENVIRONMENT}");
@@ -88,10 +90,18 @@ fn require_release_update_configuration() {
     if std::env::var("PROFILE").as_deref() != Ok("release") {
         return;
     }
-    let endpoint = std::env::var(UPDATE_ENDPOINT_ENVIRONMENT)
-        .unwrap_or_else(|_| panic!("release update configuration is required"));
-    let encoded_public_key = std::env::var(UPDATE_PUBLIC_KEY_ENVIRONMENT)
-        .unwrap_or_else(|_| panic!("release update configuration is required"));
+    let disabled = std::env::var(UPDATE_DISABLED_ENVIRONMENT).ok();
+    let endpoint = std::env::var(UPDATE_ENDPOINT_ENVIRONMENT).ok();
+    let encoded_public_key = std::env::var(UPDATE_PUBLIC_KEY_ENVIRONMENT).ok();
+    if disabled.as_deref() == Some("1") && endpoint.is_none() && encoded_public_key.is_none() {
+        return;
+    }
+    if disabled.is_some() {
+        panic!("release update configuration is invalid");
+    }
+    let (Some(endpoint), Some(encoded_public_key)) = (endpoint, encoded_public_key) else {
+        panic!("release update configuration is required");
+    };
     if endpoint.len() > 2048
         || endpoint.matches("{{target}}").count() != 1
         || endpoint.matches("{{arch}}").count() != 1
@@ -101,8 +111,10 @@ fn require_release_update_configuration() {
     }
     let parsed =
         Url::parse(&endpoint).unwrap_or_else(|_| panic!("release update configuration is invalid"));
+    let host = parsed.host_str().unwrap_or_default();
     if parsed.scheme() != "https"
-        || parsed.host_str().is_none()
+        || host.is_empty()
+        || is_reserved_update_host(host)
         || !parsed.username().is_empty()
         || parsed.password().is_some()
         || parsed.fragment().is_some()
@@ -122,4 +134,23 @@ fn require_release_update_configuration() {
         .unwrap_or_else(|_| panic!("release update configuration is invalid"));
     PublicKey::decode(public_key_text)
         .unwrap_or_else(|_| panic!("release update configuration is invalid"));
+}
+
+fn is_reserved_update_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host.is_empty()
+        || host == "invalid"
+        || host == "test"
+        || host == "example"
+        || host == "localhost"
+        || host == "example.com"
+        || host == "example.net"
+        || host == "example.org"
+        || host.ends_with(".invalid")
+        || host.ends_with(".test")
+        || host.ends_with(".example")
+        || host.ends_with(".localhost")
+        || host.ends_with(".example.com")
+        || host.ends_with(".example.net")
+        || host.ends_with(".example.org")
 }

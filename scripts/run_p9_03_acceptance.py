@@ -35,14 +35,6 @@ CANDIDATE_TAURI_CONFIG = TAURI_ROOT / "tauri.macos-candidate.conf.json"
 CARGO_MANIFEST = TAURI_ROOT / "Cargo.toml"
 APP_IDENTIFIER = "com.aventador.automationtool"
 EXECUTOR_RESOURCE = Path("local-executor/package")
-UPDATE_ENDPOINT = (
-    "https://updates.candidate.invalid/desktop-updates/v1/stable/"
-    "{{target}}/{{arch}}/{{current_version}}"
-)
-UPDATE_PUBLIC_KEY = base64.b64encode(
-    b"untrusted comment: minisign public key E7620F1842B4E81F\n"
-    b"RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
-).decode()
 
 
 def require_macos() -> str:
@@ -134,6 +126,8 @@ def release_environment(
     *,
     deployment_profile: dict[str, str] | None = None,
     action_authorization_public_key: str | None = None,
+    update_endpoint: str | None = None,
+    update_public_key: str | None = None,
 ) -> dict[str, str]:
     """The environment one release build compiles under.
 
@@ -164,12 +158,17 @@ def release_environment(
             ),
             "AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS": "60",
             "AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT": "1",
-            "AUTOMATION_TOOL_UPDATE_ENDPOINT": UPDATE_ENDPOINT,
-            "AUTOMATION_TOOL_UPDATE_PUBLIC_KEY": UPDATE_PUBLIC_KEY,
             "CARGO_TARGET_DIR": os.fspath(target),
             "CI": "true",
         }
     )
+    if update_endpoint is None and update_public_key is None:
+        environment["AUTOMATION_TOOL_UPDATE_DISABLED"] = "1"
+    elif update_endpoint is not None and update_public_key is not None:
+        environment["AUTOMATION_TOOL_UPDATE_ENDPOINT"] = update_endpoint
+        environment["AUTOMATION_TOOL_UPDATE_PUBLIC_KEY"] = update_public_key
+    else:
+        raise ValueError("release update configuration must be supplied as a pair")
     # `build.rs` demands the three profile variables all present or all absent;
     # anything else is a `panic!`. Passing the mapping the material produced
     # keeps that an all-or-nothing decision made in one place.
