@@ -1035,9 +1035,12 @@ body {
    at 568px inside a 992px column — half the page blank. Every other feature
    declares this: `.settings-stack`, `.platform-session-stack`,
    `.task-create-stack`, `.diagnostics-stack`, `.video-studio-new-form`.
-   `.video-editing-timeline` and `.video-editing-preview` have the same problem
-   but only render once a draft project exists, which the UI Harness gateway
-   cannot create — they are unverified and deliberately left out. */
+   `.video-editing-timeline` and `.video-editing-preview` need no entry here.
+   Both of those tabs open with a `Card`, which is a block and fills the column
+   unaided, and their `Space` one level in is a direct child of `.ant-card-body`
+   — so the panel-scoped rule below already carries them. Measured at 1280x800:
+   both sit at 942px of a 942px card. They are verified now, not assumed; see
+   `e2e/video-editing-tabs.spec.ts`. */
 .video-editing-projects,
 .video-editing-jobs {
   width: 100%;
@@ -1047,7 +1050,9 @@ body {
    column while the `Space` inside it keeps shrink-wrapping, which leaves a wide
    card with its right half blank — worse than the narrow card was. Scoped to
    the panel rather than named per card so the next card added here cannot be
-   the one that gets missed. */
+   the one that gets missed. That scoping is load-bearing and already paid for
+   itself: it is the only thing holding 时间轴编辑 and 预览 open. Delete it and
+   they fall to 718px and 328px of the same 942px card. */
 .video-editing-panel .ant-card-body > .ant-space {
   width: 100%;
 }
