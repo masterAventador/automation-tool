@@ -55,6 +55,10 @@ from build_embedded_chromium_staging import (  # noqa: E402
     load_staging_contract,
     sha256_file,
 )
+from check_packaged_javascript_runtimes import (  # noqa: E402
+    collect_runtime_failures,
+    find_javascript_runtimes,
+)
 from check_embedded_browser_package import (  # noqa: E402
     audit_embedded_browser_package,
     browser_resource_root,
@@ -419,6 +423,25 @@ def audit_release_artifact(
 ) -> None:
     """Every content gate the release has, run against the finished bundle."""
     announce("Auditing the built binary, configuration and whole bundle content")
+    # Before anything that only looks at files: run the JavaScript runtimes.
+    # On 2026-07-26 a package passed every gate below and still shipped two
+    # `node` binaries that could not evaluate an expression, because signing had
+    # applied the hardened runtime without allow-jit. Everything downstream asks
+    # whether files exist and are non-empty; nothing executed them.
+    runtime_failures = collect_runtime_failures(application)
+    if runtime_failures:
+        detail = "\n".join(
+            f"  {failure.path}\n    exit {failure.returncode}: {failure.output}"
+            for failure in runtime_failures
+        )
+        raise ReleaseFailed(
+            "a JavaScript runtime inside this package cannot evaluate an "
+            f"expression:\n{detail}"
+        )
+    announce(
+        "Packaged JavaScript runtimes executed an expression: "
+        f"{len(find_javascript_runtimes(application))} runtime(s)"
+    )
     report = audit_embedded_browser_package(
         bundle_root=application, target_id=target_id, platform="macos"
     )

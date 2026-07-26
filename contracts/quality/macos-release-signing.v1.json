@@ -1,39 +1,51 @@
 {
- "schemaVersion": 1,
- "policy": "fail_closed",
- "certificate": "Developer ID Application: beijing yizhuangjingjikaifaqu wei (HK56FS93AD)",
- "teamId": "HK56FS93AD",
- "notaryKeychainProfile": "at-tools-notary",
- "notes": [
-  "The certificate name and the Team ID are public: both are readable from any signed artifact with `codesign -dvv`.",
-  "`notaryKeychainProfile` is a local alias for credentials stored in the operator's login keychain by `xcrun notarytool store-credentials`. No credential, private key or secret of any kind belongs in this file or anywhere in this repository.",
-  "Chrome for Testing ships ad-hoc/linker-signed (`codesign -dvv` reports `flags=0x20002(adhoc,linker-signed)`, `TeamIdentifier=not set`) — there is no upstream Developer ID signature to preserve, so every Mach-O in the package is re-signed under the identity above.",
-  "An entitlement may only appear here together with a `reasons` entry naming the component and the observed failure that forced it. Every component starts with none; a grant is added when a measurement demands it and removed as soon as it does not."
- ],
- "components": {
-  "application": {
-   "description": "The Tauri desktop bundle the customer launches."
-  },
-  "embedded-browser": {
-   "description": "Chrome for Testing: one .app, one versioned framework, four helper .app bundles.",
-   "entitlements": {
-    "plist": "frontend/src-tauri/entitlements/embedded-browser.entitlements",
-    "reasons": {
-     "com.apple.security.cs.allow-jit": "Measured 2026-07-26. Signed with the hardened runtime and no entitlements, 'Google Chrome for Testing Helper (Renderer)' aborts with EXC_BREAKPOINT/SIGTRAP as soon as a page is created, and Playwright reports 'TargetClosedError: Browser.new_page: Target page, context or browser has been closed'; the same binary signed ad-hoc runs the identical probe. V8 needs write-then-execute pages via MAP_JIT and the hardened runtime denies them without this. Granting only this key is enough: com.apple.security.cs.allow-unsigned-executable-memory was NOT required and is deliberately not granted."
+  "schemaVersion": 1,
+  "policy": "fail_closed",
+  "certificate": "Developer ID Application: beijing yizhuangjingjikaifaqu wei (HK56FS93AD)",
+  "teamId": "HK56FS93AD",
+  "notaryKeychainProfile": "at-tools-notary",
+  "notes": [
+    "The certificate name and the Team ID are public: both are readable from any signed artifact with `codesign -dvv`.",
+    "`notaryKeychainProfile` is a local alias for credentials stored in the operator's login keychain by `xcrun notarytool store-credentials`. No credential, private key or secret of any kind belongs in this file or anywhere in this repository.",
+    "Chrome for Testing ships ad-hoc/linker-signed (`codesign -dvv` reports `flags=0x20002(adhoc,linker-signed)`, `TeamIdentifier=not set`) — there is no upstream Developer ID signature to preserve, so every Mach-O in the package is re-signed under the identity above.",
+    "An entitlement may only appear here together with a `reasons` entry naming the component and the observed failure that forced it. Every component starts with none; a grant is added when a measurement demands it and removed as soon as it does not."
+  ],
+  "components": {
+    "application": {
+      "description": "The Tauri desktop bundle the customer launches."
+    },
+    "embedded-browser": {
+      "description": "Chrome for Testing: one .app, one versioned framework, four helper .app bundles.",
+      "entitlements": {
+        "plist": "frontend/src-tauri/entitlements/embedded-browser.entitlements",
+        "reasons": {
+          "com.apple.security.cs.allow-jit": "Measured 2026-07-26. Signed with the hardened runtime and no entitlements, 'Google Chrome for Testing Helper (Renderer)' aborts with EXC_BREAKPOINT/SIGTRAP as soon as a page is created, and Playwright reports 'TargetClosedError: Browser.new_page: Target page, context or browser has been closed'; the same binary signed ad-hoc runs the identical probe. V8 needs write-then-execute pages via MAP_JIT and the hardened runtime denies them without this. Granting only this key is enough: com.apple.security.cs.allow-unsigned-executable-memory was NOT required and is deliberately not granted."
+        }
+      }
+    },
+    "local-executor": {
+      "description": "The PyInstaller onedir Local Executor sidecar.",
+      "entitlements": {
+        "plist": "frontend/src-tauri/entitlements/local-executor.entitlements",
+        "reasons": {
+          "com.apple.security.cs.allow-jit": "Measured 2026-07-26 with a control group. The packaged Node runtime, whole directory copied so its sibling dylibs stayed intact, signed ad-hoc with --options runtime and no entitlements exits 133 with no output; V8 aborts inside Isolate::Init ('Failed to reserve virtual memory for CodeRange', EXC_BREAKPOINT/SIGTRAP). The identical binary signed with --options runtime plus this key exits 0 and evaluates the expression. V8 needs write-then-execute pages via MAP_JIT and the hardened runtime denies them without this. Granting only this key is enough: com.apple.security.cs.allow-unsigned-executable-memory was NOT required and is deliberately not granted. Real consequence of the omission: the shipped package could open no browser (every RPA path) and render no brand-motion video, while every gate stayed green."
+        }
+      }
+    },
+    "media-toolchain": {
+      "description": "The pinned ffmpeg/ffprobe build used by the video features."
+    },
+    "motion-video-worker": {
+      "description": "The Node runtime and application bundle for brand motion rendering.",
+      "entitlements": {
+        "plist": "frontend/src-tauri/entitlements/motion-video-worker.entitlements",
+        "reasons": {
+          "com.apple.security.cs.allow-jit": "Measured 2026-07-26 with a control group. The packaged Node runtime, whole directory copied so its sibling dylibs stayed intact, signed ad-hoc with --options runtime and no entitlements exits 133 with no output; V8 aborts inside Isolate::Init ('Failed to reserve virtual memory for CodeRange', EXC_BREAKPOINT/SIGTRAP). The identical binary signed with --options runtime plus this key exits 0 and evaluates the expression. V8 needs write-then-execute pages via MAP_JIT and the hardened runtime denies them without this. Granting only this key is enough: com.apple.security.cs.allow-unsigned-executable-memory was NOT required and is deliberately not granted. Real consequence of the omission: the shipped package could open no browser (every RPA path) and render no brand-motion video, while every gate stayed green."
+        }
+      }
+    },
+    "material-video-worker": {
+      "description": "The PyInstaller onedir worker for material-based rendering."
     }
-   }
-  },
-  "local-executor": {
-   "description": "The PyInstaller onedir Local Executor sidecar."
-  },
-  "media-toolchain": {
-   "description": "The pinned ffmpeg/ffprobe build used by the video features."
-  },
-  "motion-video-worker": {
-   "description": "The Node runtime and application bundle for brand motion rendering."
-  },
-  "material-video-worker": {
-   "description": "The PyInstaller onedir worker for material-based rendering."
   }
- }
 }
