@@ -24,6 +24,7 @@ Nothing here ever terminates a process or frees a port that is in use.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,15 @@ REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT: Final = REPOSITORY_ROOT / "scripts"
 FRONTEND_ROOT: Final = REPOSITORY_ROOT / "frontend"
 PACKAGE_JSON: Final = FRONTEND_ROOT / "package.json"
+
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from embedded_browser_archives import (  # noqa: E402
+    MACOS_ARM64_ARCHIVE,
+    MACOS_X86_64_ARCHIVE,
+    archive_path,
+)
 
 # `tauri build --debug --no-bundle` produces a bare executable and Tauri treats
 # the directory holding it as the resource directory, which is where the release
@@ -88,15 +98,9 @@ LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS: Final = "1"
 LOCAL_ACTION_TASK_LIMIT: Final = "20"
 
 LOCKED_BROWSER_ARCHIVES: Final = {
-    "macos-arm64": (
-        REPOSITORY_ROOT
-        / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-    ),
-    "macos-x86_64": REPOSITORY_ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
+    "macos-arm64": archive_path(REPOSITORY_ROOT, MACOS_ARM64_ARCHIVE),
+    "macos-x86_64": archive_path(REPOSITORY_ROOT, MACOS_X86_64_ARCHIVE),
 }
-
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 _reserved_control_plane_port: int | None = None
 
@@ -343,16 +347,112 @@ def remove_staged_embedded_browser(
 # Signed Local Executor package
 # --------------------------------------------------------------------------- #
 
+_EXECUTOR_FIXED_INPUTS: Final = (
+    "backend/automation-tool-executor.spec",
+    "backend/pyproject.toml",
+    "backend/uv.lock",
+)
+_EXECUTOR_CONTRACT_ROOTS: Final = ("contracts/protocol",)
+_EXECUTOR_SPEC_RESOURCE_PATTERN: Final = re.compile(
+    r"""["']((?:contracts|vendor)/[^"']+)["']"""
+)
+_IGNORED_EXECUTOR_SOURCE_PARTS: Final = frozenset({"__pycache__"})
+_IGNORED_EXECUTOR_SOURCE_SUFFIXES: Final = frozenset({".pyc", ".pyo"})
+
+
+def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
+    """Return every repository file whose bytes can change the frozen Executor."""
+    source_root = repository_root / "backend/src"
+    if not source_root.is_dir():
+        raise DesktopPrerequisiteRejected(
+            f"the Executor source tree is missing ({source_root})"
+        )
+    inputs = {
+        path
+        for path in source_root.rglob("*")
+        if path.is_file()
+        and not _IGNORED_EXECUTOR_SOURCE_PARTS.intersection(
+            path.relative_to(source_root).parts
+        )
+        and path.suffix not in _IGNORED_EXECUTOR_SOURCE_SUFFIXES
+    }
+    if not inputs:
+        raise DesktopPrerequisiteRejected(
+            f"the Executor source tree contains no build inputs ({source_root})"
+        )
+
+    for relative in _EXECUTOR_FIXED_INPUTS:
+        path = repository_root / relative
+        if not path.is_file():
+            raise DesktopPrerequisiteRejected(
+                f"the Executor package input is missing ({relative})"
+            )
+        inputs.add(path)
+
+    for relative in _EXECUTOR_CONTRACT_ROOTS:
+        contract_root = repository_root / relative
+        if not contract_root.is_dir():
+            raise DesktopPrerequisiteRejected(
+                f"the Executor contract tree is missing ({relative})"
+            )
+        inputs.update(path for path in contract_root.rglob("*") if path.is_file())
+
+    spec_path = repository_root / _EXECUTOR_FIXED_INPUTS[0]
+    for relative in _EXECUTOR_SPEC_RESOURCE_PATTERN.findall(
+        spec_path.read_text(encoding="utf-8")
+    ):
+        resource = Path(relative)
+        if resource.is_absolute() or ".." in resource.parts:
+            raise DesktopPrerequisiteRejected(
+                f"the Executor spec names an unsafe package resource ({relative})"
+            )
+        path = repository_root / resource
+        if not path.is_file():
+            raise DesktopPrerequisiteRejected(
+                f"the Executor spec package resource is missing ({relative})"
+            )
+        inputs.add(path)
+
+    return tuple(
+        sorted(inputs, key=lambda path: path.relative_to(repository_root).as_posix())
+    )
+
+
+def executor_package_input_digest(repository_root: Path | None = None) -> str:
+    """Hash source, build configuration and contracts that feed PyInstaller."""
+    root = REPOSITORY_ROOT if repository_root is None else repository_root
+    digest = hashlib.sha256()
+    for path in _executor_input_paths(root):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        content = path.read_bytes()
+        digest.update(len(relative).to_bytes(8, byteorder="big"))
+        digest.update(relative)
+        digest.update(len(content).to_bytes(8, byteorder="big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def executor_package_cache_key(
+    build_id: str,
+    *,
+    repository_root: Path | None = None,
+) -> str:
+    """Name a cached package by its semantic build id and exact frozen inputs."""
+    return (
+        f"{build_id}-inputs-v1-"
+        f"{executor_package_input_digest(repository_root=repository_root)}"
+    )
+
 
 def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> Path:
-    """Build the signed PyInstaller Executor once per build id and cache it.
+    """Build the signed PyInstaller Executor once per build id and input digest.
 
     The gate calls `validate_installed_package()`, so an App data directory
     without a signed package reports `executor_unavailable`. The PyInstaller
     build takes minutes; running it once per driver would dominate a serial run
     of the whole layer.
     """
-    cached = EXECUTOR_PACKAGE_CACHE_ROOT / build_id
+    cached = EXECUTOR_PACKAGE_CACHE_ROOT / executor_package_cache_key(build_id)
     if (cached / EXECUTOR_MANIFEST_NAME).is_file() and (
         cached / EXECUTOR_MANIFEST_SIGNATURE_NAME
     ).is_file():

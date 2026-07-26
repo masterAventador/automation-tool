@@ -21,7 +21,10 @@ import re
 import socket
 import sys
 import tempfile
+import types
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -38,6 +41,7 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     stage_embedded_browser,
     startup_gate_environment,
 )
+import desktop_e2e_prerequisites as prerequisites  # noqa: E402
 
 SHARED_MODULE = "desktop_e2e_prerequisites"
 
@@ -334,6 +338,143 @@ def check_every_driver_stops_the_whole_app_process_tree() -> None:
     )
 
 
+def _write_executor_input(root: Path, relative: str, content: str) -> None:
+    destination = root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(content, encoding="utf-8")
+
+
+def check_executor_cache_key_tracks_real_source_inputs() -> None:
+    """Changing one Executor source line must make the shared package cache stale."""
+    with tempfile.TemporaryDirectory() as directory:
+        repository_root = Path(directory) / "repository"
+        backend_root = repository_root / "backend"
+        cache_root = repository_root / ".local/desktop-e2e/executor-package"
+        source_path = backend_root / "src/automation_tool/executor/runtime.py"
+        spec_path = backend_root / "automation-tool-executor.spec"
+        contract_path = repository_root / "contracts/video/motion-render-canvas.v1.json"
+
+        _write_executor_input(
+            repository_root,
+            "backend/src/automation_tool/executor/runtime.py",
+            "EXECUTOR_SENTINEL = 'before'\n",
+        )
+        _write_executor_input(
+            repository_root,
+            "backend/automation-tool-executor.spec",
+            "motion_authoring_resources = [\n"
+            '    "contracts/video/motion-render-canvas.v1.json",\n'
+            '    "vendor/hyperframes/skills/hyperframes-core/references/'
+            'minimal-composition.md",\n'
+            "]\n",
+        )
+        _write_executor_input(
+            repository_root,
+            "backend/pyproject.toml",
+            "[project]\nname = 'executor-cache-test'\n",
+        )
+        _write_executor_input(repository_root, "backend/uv.lock", "version = 1\n")
+        for relative in (
+            "contracts/protocol/executor-v1.schema.json",
+            "contracts/quality/motion-catalog.v1.json",
+            "contracts/video/motion-render-canvas.v1.json",
+            "contracts/video/motion-one-sentence-brief.v1.json",
+            "contracts/video/motion-authoring-refusal.v1.json",
+            "contracts/video/motion-storyboard-duration.v1.json",
+            "contracts/video/motion-authoring-workflow.v1.json",
+            "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
+            "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
+        ):
+            _write_executor_input(repository_root, relative, f"{relative}\n")
+
+        build_ids: list[str] = []
+        fake_builder_module = types.ModuleType("run_e4_07_acceptance")
+
+        def fake_build_signed_executor(workspace: Path, *, build_id: str) -> Path:
+            build_ids.append(build_id)
+            package = workspace / "dist/automation-tool-executor"
+            package.mkdir(parents=True, exist_ok=True)
+            (package / prerequisites.EXECUTOR_MANIFEST_NAME).write_text(
+                "{}", encoding="utf-8"
+            )
+            (package / prerequisites.EXECUTOR_MANIFEST_SIGNATURE_NAME).write_text(
+                "test", encoding="utf-8"
+            )
+            return package
+
+        fake_builder_module.build_signed_executor = fake_build_signed_executor  # type: ignore[attr-defined]
+
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.dict(sys.modules, {"run_e4_07_acceptance": fake_builder_module})
+            )
+            stack.enter_context(
+                patch.object(prerequisites, "REPOSITORY_ROOT", repository_root)
+            )
+            stack.enter_context(
+                patch.object(prerequisites, "BACKEND_ROOT", backend_root, create=True)
+            )
+            stack.enter_context(
+                patch.object(
+                    prerequisites,
+                    "EXECUTOR_SOURCE_ROOT",
+                    backend_root / "src",
+                    create=True,
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    prerequisites,
+                    "EXECUTOR_SPEC_PATH",
+                    backend_root / "automation-tool-executor.spec",
+                    create=True,
+                )
+            )
+            stack.enter_context(
+                patch.object(prerequisites, "EXECUTOR_PACKAGE_CACHE_ROOT", cache_root)
+            )
+
+            first_package = prerequisites.ensure_signed_executor_package(
+                build_id="source-sensitive"
+            )
+            unchanged_package = prerequisites.ensure_signed_executor_package(
+                build_id="source-sensitive"
+            )
+            source_path.write_text("EXECUTOR_SENTINEL = 'after'\n", encoding="utf-8")
+            second_package = prerequisites.ensure_signed_executor_package(
+                build_id="source-sensitive"
+            )
+            spec_path.write_text(
+                spec_path.read_text(encoding="utf-8") + "# changed spec\n",
+                encoding="utf-8",
+            )
+            third_package = prerequisites.ensure_signed_executor_package(
+                build_id="source-sensitive"
+            )
+            contract_path.write_text('{"changed": true}\n', encoding="utf-8")
+            fourth_package = prerequisites.ensure_signed_executor_package(
+                build_id="source-sensitive"
+            )
+
+        assert (
+            len({first_package, second_package, third_package, fourth_package}) == 4
+        ), "source, spec and contract bytes must each select a different cached package"
+        assert unchanged_package == first_package, (
+            "unchanged Executor inputs must keep reusing the same cached package"
+        )
+        assert len(build_ids) == 4, (
+            "source, spec and contract input changes must each rebuild instead of "
+            "reusing the stale signed package"
+        )
+
+
+def check_locked_browser_archives_use_shared_archive_resolver() -> None:
+    module_source = Path(prerequisites.__file__).read_text(encoding="utf-8")
+    assert "archive_path(" in module_source, (
+        "locked browser archives must use the shared archive_path() worktree resolver"
+    )
+
+
 CHECKS = (
     check_the_startup_gate_environment_supplies_every_compile_time_input,
     check_the_startup_gate_environment_does_not_mutate_the_caller,
@@ -349,6 +490,8 @@ CHECKS = (
     check_no_driver_pins_its_own_copy_of_the_executor_ledger_schema_version,
     check_every_app_created_task_offer_seeds_the_production_confirmation,
     check_every_driver_stops_the_whole_app_process_tree,
+    check_executor_cache_key_tracks_real_source_inputs,
+    check_locked_browser_archives_use_shared_archive_resolver,
 )
 
 

@@ -371,7 +371,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **C** T72 门禁执行者三处空洞 | ⬜ | | | |
 | **C** T73 测试写进只读 vendor | ⬜ | | | |
 | **D** T40/T41 字体权利登记 | ⬜ | | | |
-| **E** T74 执行器缓存键 + 硬编码 `.local/` | ⬜ | | | 建议先做，它是别的判断的地基 |
+| **E** T74 执行器缓存键 + 硬编码 `.local/` | ✅ | 本提交 | 缓存键测试准确失败：`source, spec and contract bytes must each select a different cached package` | 缓存键纳入 backend 源码、spec、锁文件及相关契约/只读资源摘要；浏览器归档统一走 `archive_path()`，T36 失效清理同步指向摘要键 |
 | **E** T75 另一处吞掉 PyInstaller 输出 | ⬜ | | | |
 | **F** T26 剔除 Widevine CDM | ⬜ | | | 唯一有书面禁令的风险 |
 | **F** T24 执行器包根按 `debug_assertions` 分叉 | ⬜ | | | |
