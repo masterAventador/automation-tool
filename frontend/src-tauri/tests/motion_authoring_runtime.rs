@@ -66,26 +66,71 @@ fn store(root: &Path) -> VideoJobWorkspaceStore {
     .unwrap()
 }
 
-/// The bytes the locked catalog declares, read from the machine's catalog when
-/// it is present. The digest — not this path — is what the product trusts.
-fn locked_runtime() -> Option<Vec<u8>> {
-    let candidate = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.local/offline-motion-deps/catalog/offline-deps/js/gsap-3.14.2/gsap.min.js");
-    fs::read(candidate).ok()
+/// The resource directory this build resolves its packaged parts from.
+///
+/// An integration test binary is written to `<target>/<profile>/deps`, and a
+/// debug App resolves its resources from `<target>/<profile>` — the directory
+/// one level up. Deriving it keeps the test on whatever profile is running
+/// instead of naming `debug` a second time.
+fn resource_directory() -> PathBuf {
+    std::env::current_exe()
+        .expect("test executable")
+        .parent()
+        .and_then(Path::parent)
+        .expect("a test binary always sits under <target>/<profile>/deps")
+        .to_path_buf()
 }
 
+/// The animation runtime exactly where the App will read it from.
+///
+/// The directory the release installs the worker package into is declared once,
+/// in the release resource contract; spelling it out here as well would be a
+/// second place to update when it moves, and the failure of the pair drifting
+/// is a runtime that cannot be found at all.
+fn packaged_runtime() -> PathBuf {
+    let contract: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../contracts/quality/release-package-resources.v1.json"),
+        )
+        .expect("the release resource contract must be readable"),
+    )
+    .expect("the release resource contract must be valid JSON");
+    let parts = contract["resources"]
+        .as_array()
+        .expect("the contract must list the installed resources")
+        .iter()
+        .find(|resource| resource["name"] == "motion-video-worker")
+        .and_then(|resource| resource["installedParts"].as_array())
+        .expect("the contract must say where the motion worker package is installed");
+    let mut path = resource_directory();
+    for part in parts {
+        path.push(part.as_str().expect("an installed part is a path segment"));
+    }
+    path.join(AUTHORING_RUNTIME_ASSET)
+}
+
+/// Placement is exercised with the bytes the App itself would load.
+///
+/// This used to read the developer-local offline catalog and return early when
+/// it was absent, which reported as a pass on any machine that had never built
+/// the catalog — the one outcome a gate must never produce. It now reads the
+/// assembled worker package, the same file and the same path the production
+/// command hands to `seed_authoring_runtime`, and a missing package fails
+/// loudly: without it the one-sentence path cannot render at all, so a green
+/// result here would be describing a feature that does not work.
 #[test]
 fn the_declared_runtime_is_placed_where_the_composition_loads_it() {
-    let Some(runtime) = locked_runtime() else {
-        // The catalog is a reproducible download, not a committed asset. Where
-        // it has not been built the placement cannot be exercised, but the
-        // refusal below still can and is the half that protects the user.
-        return;
-    };
+    let source = packaged_runtime();
+    let runtime = fs::read(&source).unwrap_or_else(|error| {
+        panic!(
+            "the assembled motion worker package must provide {}: {error}. \
+             Build it with scripts/prepare_video_runtime.py before running this suite.",
+            source.display()
+        )
+    });
     let root = TempDirectory::new();
     let store = store(&root.0);
-    let source = root.0.join("source-gsap.min.js");
-    fs::write(&source, &runtime).unwrap();
     let workspace = store.create_new().unwrap();
 
     seed_authoring_runtime(&store, &workspace, &source).unwrap();

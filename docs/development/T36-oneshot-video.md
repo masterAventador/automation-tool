@@ -497,14 +497,107 @@ cargo test --tests -- --test-threads=4     42 个测试二进制 / 384 passed / 
 cd frontend/src-tauri && cargo test --test motion_authoring_runtime      6 passed
 ```
 
-#### 仍然没做完
+#### 仍然没做完（已由下一节处理）
 
-- **「放置成功」那条用例的覆盖缺口还没完全补上。** 它现在仍从本机 catalog 取真实字节，
-  在没有 `.local` 缓存的机器上会静默跳过。机器无关的保障目前落在构建门禁上
-  （`_install_authoring_runtime()` 每次构建都跑、都校验、不符就失败），
-  但**用例本身仍然是可静默跳过的**，等端到端跑通、资源目录里确有这份文件之后要改成从
-  资源目录取。**这条我没有当成已解决。**
+- **「放置成功」那条用例的覆盖缺口还没完全补上。** 它当时仍从本机 catalog 取真实字节，
+  在没有 `.local` 缓存的机器上会静默跳过。→ **本条已在下一节闭合。**
 - 端到端（测试构建）与正式包最终验收都未进行。
+
+### 本次落地：渲染半段实跑、静图门禁反向验证、gsap 用例闭合
+
+前一条工作线只跑通了「一句话 → 合成」（执行器 `--author-motion` 一次性子进程 + 真实百炼），
+**「合成 → 会动的 mp4」一次都没跑过**。本次把这半段跑出来了，并且反向验证了静图门禁。
+
+#### 一、成片真的在动（实跑，不是推断）
+
+同一份真实授权产物（真实百炼 `qwen3.7-max-2026-06-08` → 正式 `--author-motion` 入口
+→ 180 帧 / 30fps / 16:9 / `composition.html` / 白名单只含 `runtime/gsap.min.js`），
+交给**正式 `worker.mjs` 渲染沙箱 + 真实内置 Chromium 149 + 包内 ffmpeg**：
+
+```text
+[seed]    gsap c174bfce53a7  72779 bytes          ← 与契约锁定摘要一致
+[render]  worker.render.sandboxed  framesCaptured 180
+          blockedRequests/Navigations/Downloads/Popups/Dialogs 全 0
+[frames]  180 captured, 114 distinct              ← 会动
+[encode]  brand-motion-result.mp4  73597 bytes
+[ffprobe] h264  640x360  duration 6.000000  nb_frames 180
+```
+
+抽 4 帧逐张看过画面：第 1 帧空场蓝底 → 第 60 帧「要点一 +42% 新客户增长」→
+第 120 帧「要点二 +28% 转化率提升」（柱状图起）→ 第 180 帧「要点三 ¥1,280 平均客单价创新高」
+（柱状图更高）。三幕依次出场、互不压字、满幅构图。**不是静图。**
+
+编码参数与 `encode_motion_video()` 生产实现逐字一致（`-framerate`/`-start_number 1`/
+`-frames:v`/`libx264`/`yuv420p`/`+faststart`）。
+
+#### 二、静图门禁反向验证：破坏 gsap 时到底拦不拦得住
+
+这条线出过 180 帧全同的静图事故，所以必须反向验一次。**破坏方式不同，拦住它的门也不同，
+这里三道门分别验过**：
+
+| 破坏方式 | 哪道门 | 实测结果 |
+| --- | --- | --- |
+| 包内 gsap 字节被篡改 | `seed_authoring_runtime` 摘要门 | 拒绝并且**什么都不写下**（本文件 mutation 2 实测） |
+| 工作区里 gsap 文件被删掉 | Worker 工作区/白名单门 | `worker.render.failed` `reasonCode=render_workspace_invalid`，**0 帧**，根本没渲染 |
+| gsap 文件在、但内容失效（不定义 `gsap` 全局） | 静图门禁 | **180 帧全部捕获成功、每一项其他信号都绿**，然后被静图门禁判掉 |
+
+第三行才是 D3 那个缺陷的真实形态，也是唯一一个「每一层都判成功」的形态，实跑输出：
+
+```text
+[broken]  runtime present: True  48 bytes         ← 在，被允许，只是没用
+[worker]  worker.render.sandboxed  framesCaptured 180  blocked* 全 0
+[frames]  180 captured, 1 distinct                ← 每一帧都一样
+```
+
+拿这两批**真实捕获帧**直接喂给正式 `rendered_film_is_static`（一次性探针，跑完即删）：
+
+```text
+REAL intact frames -> is_static = false           ← 会动的片子放行
+REAL broken frames -> is_static = true            ← 静图被拦，不进编码、不入库
+```
+
+也就是说：**门禁的触发条件是真能到达的，不是只在合成夹具里成立**；而且真实会动的片子
+不会被误判。原先 `tests/motion_video_studio.rs` 那 5 条只用文本文件冒充帧，验的是比较算法，
+没验过「真实渲染真的会产出这种输入」。
+
+#### 三、gsap「放置成功」用例闭合（前一条线自己标的未闭合项）
+
+先把动效 Worker 包按正式装配路径（`build_motion_video_worker_candidate.build_candidate`，
+仓库外构建再装入）放进调试资源目录，确认
+`target/debug/motion-video-worker/package/runtime/gsap.min.js` 确有其文，72779 bytes，
+摘要 `c174bfce…`。然后把用例改掉：
+
+- **取字节的地方从本机 catalog 改成资源目录**——就是生产命令递给
+  `seed_authoring_runtime` 的同一个文件、同一条路径，不再是一份开发者本机的缓存；
+- **缺包不再静默跳过，直接失败**并说清楚怎么补（`scripts/prepare_video_runtime.py`）。
+  原来那个 `return` 会在没建过 catalog 的机器上**报成通过**——门禁最不该产出的结果就是这个；
+- 安装目录名不再在用例里再写一遍，从 `release-package-resources.v1.json` 的
+  `installedParts` 读，与发行装配同一个来源；profile 目录由 `current_exe()` 推出来，
+  不把 `debug` 钉死。
+
+这是**只改测试、不改生产代码**的一次收口，所以没有 RED-GREEN；改完按前一条线的办法做变异检验
+证明它真有牙：
+
+```text
+mutation 1  把包内 gsap 移走      -> FAILED  (原实现：静默 return，报 ok)
+mutation 2  把包内 gsap 换成假字节 -> FAILED  (seed 摘要门拒绝)
+还原后                             -> 6 passed，摘要仍为 c174bfce53a7
+```
+
+#### GREEN
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_runtime --test motion_video_studio \
+      --test video_job_workspace --test material_video_artifact --test single_build_path
+  3 + 6 + 13 + 7 + 11 = 40 passed / 0 failed
+```
+
+#### 这一步的边界（不许当成验收通过）
+
+以上全部是**分层探针**：渲染直接驱动 `worker.mjs`，走的是
+`run_bm_16_acceptance.py` 那套驱动，**没有经过 `submit_motion_video_brief`、没有起 App**。
+它证明的是「授权产物交给正式渲染链路能出会动的片子，且静图门禁拦得住」，
+**不能替代生产同路径验收**。四条证据里这一步只拿到第 2 条。
 
 ## 失败矩阵
 
@@ -532,6 +625,17 @@ cd frontend/src-tauri && cargo test --test motion_authoring_runtime      6 passe
 未触碰其他工作线占用的文件：`deploy/`、`scripts/release_assembly.py`、
 `scripts/build_release_package.py`、`frontend/e2e-tauri/`。提交按文件逐个 `git add`，
 未使用 `git add -A`，工作区内云端部署线与签名公证线的未提交改动原样留存。
+
+**渲染半段那次实跑的清理**：未启动 App、未启动 Control Plane、未起 Docker。
+三次渲染各起一个无头内置 Chromium 与一个 node worker，由 `WorkerSession` 在成功/失败/收尾
+三条路径关闭；跑完核对 `Google Chrome for Testing` 0 个、`worker.mjs` 0 个。
+临时工作区、帧目录、mp4 与抽帧 PNG 用完即删（`t36b-render-*`、`t36b-static-*` 均已移除）。
+静图门禁那次一次性 Rust 探针（`tests/t36_probe_static_gate.rs`）跑完立即删除，未进提交。
+装配进 `target/debug/motion-video-worker/package/` 的动效 Worker 包是构建产物、不进 Git。
+密钥仅运行时读自 git-ignored `.local/secrets/bailian-model.json`，未打印、未落盘、未进断言。
+全程未运行 `scripts/run_u9_06_acceptance.py`，未读写
+`~/Library/Application Support/com.aventador.automationtool/`，未触碰
+`.local/t44-release-verify/` 与 `docs/development/DEMO-preflight-checklist.md`。
 
 ## 未完成（下一条工作线的输入）
 
