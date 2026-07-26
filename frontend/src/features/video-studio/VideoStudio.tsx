@@ -36,6 +36,7 @@ import {
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
+import { MOTION_AUTHORING_IDLE_WAIT } from "./motion-model-call";
 import {
   MOTION_BRIEF_LIMITS,
   MOTION_BRIEF_FILM_SECONDS,
@@ -402,8 +403,12 @@ const AUTHORING_ERRORS = {
   // Says the connection was established, not that the network is fine: a
   // connection that dies without an RST also surfaces here as a read timeout,
   // and "网络也是通的" would send that user away from the real cause.
+  //
+  // The wait is named rather than described. It comes from the contract the
+  // Executor obeys, so the figure here cannot drift away from the budget that
+  // actually ran out.
   authoring_model_timed_out:
-    "视频创作模型服务已经接上，但超过允许的最长等待时间都没有再返回内容，视频没有开始制作。这不是描述的问题——服务可能在排队或过载，也可能是连接中途断了。请稍后重试；如果一直这样，到「设置与诊断」测试视频创作模型服务，或者换一个模型。",
+    `视频创作模型服务已经接上，但连续 ${MOTION_AUTHORING_IDLE_WAIT}没有再返回内容，视频没有开始制作。这不是描述的问题——服务可能在排队或过载，也可能是连接中途断了。请稍后重试；如果一直这样，到「设置与诊断」测试视频创作模型服务，或者换一个模型。`,
   authoring_installation_damaged:
     "自动编排要用的程序文件没有通过完整性校验，视频没有开始制作。这不是描述的问题，也不是重试能解决的：请重新安装 App；重装之后仍然这样的话，请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;

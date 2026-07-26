@@ -10,6 +10,7 @@ import {
 
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
 import durationContract from "../../../../contracts/video/motion-storyboard-duration.v1.json";
+import modelCallContract from "../../../../contracts/video/motion-authoring-model-call.v1.json";
 import { motionSpokenDuration } from "./motion-duration";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import {
@@ -775,6 +776,26 @@ describe("video studio shell", () => {
       }
     },
   );
+
+  /**
+   * 「超过允许的最长等待时间」这句话没有告诉用户任何事。
+   *
+   * 它想说的是一个具体的数：模型接上之后，我们最多等它多久不说话才停。用户拿这句话
+   * 判断不了刚才那次到底是等够了才失败，还是别的原因；也判断不了下一次值不值得再等。
+   * 这个数今天只活在 `agent.py` 里，写不进文案的原因就是写进来就多一份手抄的副本。
+   *
+   * 这条走到卡片上的那句话，断言里的数直接来自契约，所以改契约而文案没跟着改会红。
+   * Executor 侧同一个数也从这份契约读、不留副本，那件事由
+   * `frontend/tests/motion-authoring-model-call.test.mjs` 守。
+   */
+  it("tells the user how long the model gets before we stop waiting", async () => {
+    const text = await briefFailureText("authoring_model_timed_out");
+
+    expect(text).toMatch(/\d+\s*分/u);
+    expect(text).toContain(
+      `连续 ${motionSpokenDuration(modelCallContract.streamIdleTimeoutSeconds)}没有再返回内容`,
+    );
+  });
 
   /**
    * 拆出来的码只有说出不同的话才算拆开。

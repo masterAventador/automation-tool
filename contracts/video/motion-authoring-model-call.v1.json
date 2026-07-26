@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-authoring-model-call",
+  "version": "motion-authoring-model-call.v1",
+  "policy": "fail_closed",
+  "streamIdleTimeoutSeconds": 360,
+  "definedIn": [
+    "backend/src/automation_tool/executor/motion_authoring/agent.py",
+    "frontend/src/features/video-studio/motion-model-call.ts"
+  ],
+  "enforcedBy": "frontend/tests/motion-authoring-model-call.test.mjs",
+  "rationale": {
+    "streamIdleTimeoutSeconds": "How long the video-creation model may go quiet mid-response before the authoring run gives up. The request is streamed, so this bounds the gap between chunks rather than the whole generation: a reasoning model streams a long reasoning phase before the composition, and a 180 second bound on the whole response timed out the production one-sentence path. Six minutes of complete silence is a service that has stopped answering, not one that is thinking.",
+    "wholeResponseIsNotBoundedHere": "There is a separate ceiling on the whole authoring child, enforced by the native side, and it surfaces as its own outcome (authoring_timed_out). Restating it here would let the App tell the user one number while the process obeyed another.",
+    "declaredHere": "The number was a literal in agent.py, and that is why the App could not name it. 'You waited longer than we allow' is not something a user can act on: it does not say whether the wait was long enough to mean anything, or whether retrying is worth it. Writing '6 分' into the sentence instead would have created a hand-copied second version that nothing checks, so the first tuning of this budget would have made the App state a figure the Executor no longer used. Both sides read this file, exactly as they already do for motion-storyboard-duration.v1.",
+    "changing": "Raising or lowering it means editing this file alone. The Executor picks it up at import and the sentence on the card is recomposed from it; enforcedBy fails if either side reintroduces a literal."
+  }
+}
