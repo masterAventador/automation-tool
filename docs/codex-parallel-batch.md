@@ -204,7 +204,7 @@ git status          # 应显示 On branch codex/resilience-batch，基线 705504
 | T63 | ⬜ | | | |
 | T64 | ⬜ | | | |
 | T22 | ⬜ | | | |
-| T66a | ⬜ | | | |
+| T66a | ✅ 完成 | 本提交 | `over_permissive_secret_files_are_repaired_for_load_save_and_delete` 先在 `repair and load: Unavailable` 断言失败 | 用 `O_NOFOLLOW` 打开并核对 inode 后 `fchmod 0600`；load/save/delete、符号链接拒绝与注册交接 15 项回归通过 |
 | T58c | ⬜ | | | |
 | T62 | ✅ 完成 | 本提交 | 防回归断言先捕获 `37`、`14`、`7/14` 与 `three browser_use scripts` 四处手抄计数 | 散文计数已移除；定向检查与 Ruff 通过，完整聚合 runner 仍受既存 `tools/browser-use-contract/.venv` 未挂载阻塞 |
 

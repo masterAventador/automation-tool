@@ -717,7 +717,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_grant_readable_by_other_users_is_refused_as_a_storage_failure() {
+    fn a_grant_readable_by_other_users_is_repaired_before_loading() {
         use std::os::unix::fs::PermissionsExt;
 
         let app_data = TemporaryAppData::new("loose-mode");
@@ -727,9 +727,19 @@ mod tests {
         fs::write(&path, document(NOW + 1)).expect("a grant");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("loose mode");
 
+        assert!(
+            store
+                .load(NOW)
+                .expect("repair a migrated grant")
+                .is_some()
+        );
         assert_eq!(
-            store.load(NOW).expect_err("a world readable grant").code(),
-            LocalRegistrationHandoffErrorCode::StorageUnavailable
+            fs::metadata(&path)
+                .expect("repaired grant metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
         );
     }
 }
