@@ -3,8 +3,8 @@
 
 Why this exists
 ---------------
-`scripts/` holds 37 self-contained test scripts. 14 of them are referenced by no
-workflow and no acceptance entrypoint, and `backend/pyproject.toml` sets
+`scripts/` holds self-contained test scripts. Some are referenced by no workflow
+and no acceptance entrypoint, and `backend/pyproject.toml` sets
 `testpaths = ["tests"]`, so pytest never collects them. They only run if a human
 types the filename.
 
@@ -22,9 +22,8 @@ Two properties matter more than convenience here:
 * **The interpreter is pinned.** These scripts do not declare one, and the
   workflows call a bare `python3`. Under macOS's system 3.9 they produce
   failures (`datetime.UTC`, `zip(strict=)`) that are artefacts of the
-  interpreter rather than defects -- 7 false reds out of 14 when measured. The
-  same suite giving different answers on different machines is worse than not
-  running at all.
+  interpreter rather than defects. The same suite giving different answers on
+  different machines is worse than not running at all.
 """
 
 from __future__ import annotations
@@ -70,7 +69,7 @@ def interpreter(repository_root: Path) -> Path:
 
 # A script that reaches into a sub-project needs that sub-project's environment.
 # Pinning one interpreter for everything is necessary but not sufficient: the
-# three `browser_use` scripts import a dependency that lives only in
+# `browser_use` scripts import a dependency that lives only in
 # `tools/browser-use-contract`, and under the backend venv they fail with
 # `ModuleNotFoundError` -- a false red of exactly the same family as running
 # them under the system 3.9.

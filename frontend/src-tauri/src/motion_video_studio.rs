@@ -31,6 +31,8 @@ const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 const BRIEF_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-one-sentence-brief.v1.json");
+const AUTHORING_REFUSAL_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-authoring-refusal.v1.json");
 const OFFLINE_MOTION_DEPENDENCIES: &str =
     include_str!("../../../contracts/video/offline-motion-dependencies.v1.json");
 
@@ -934,14 +936,97 @@ const REFUSED_STATUS: &str = "rejected";
 
 /// The whole of the document a refusing agent writes.
 ///
-/// It carries no reason on purpose: the reason is assembled from the request
-/// and from values that passed through a model, and forwarding it would hand
-/// that text straight back out. Only the fact of the refusal crosses.
+/// A current child includes one dedicated reason token. An older packaged
+/// Executor may omit it, so the field remains optional for classification; if
+/// present, it must belong to the separate closed refusal contract. Arbitrary
+/// text therefore cannot turn this narrow field into a general error-detail
+/// channel.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RefusedAuthoringAnswer {
     schema_version: u8,
     status: String,
+    rejection_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AuthoringRefusalContract {
+    schema_version: u8,
+    id: String,
+    version: String,
+    policy: String,
+    fixed_reasons: Vec<String>,
+    static_gate_reason_prefix: String,
+    static_gate_codes: Vec<String>,
+    rationale: serde_json::Value,
+}
+
+fn is_wire_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn strictly_sorted_unique(values: &[String]) -> bool {
+    values
+        .windows(2)
+        .all(|pair| pair[0].as_str() < pair[1].as_str())
+}
+
+fn refusal_contract() -> Option<AuthoringRefusalContract> {
+    let contract =
+        serde_json::from_str::<AuthoringRefusalContract>(AUTHORING_REFUSAL_CONTRACT).ok()?;
+    let prefix = contract.static_gate_reason_prefix.strip_suffix(':')?;
+    if contract.schema_version != 1
+        || contract.id != "motion-authoring-refusal"
+        || contract.version != "motion-authoring-refusal.v1"
+        || contract.policy != "fail_closed"
+        || contract.fixed_reasons.is_empty()
+        || !strictly_sorted_unique(&contract.fixed_reasons)
+        || !contract
+            .fixed_reasons
+            .iter()
+            .all(|reason| is_wire_token(reason))
+        || !is_wire_token(prefix)
+        || contract.static_gate_codes.is_empty()
+        || !strictly_sorted_unique(&contract.static_gate_codes)
+        || !contract
+            .static_gate_codes
+            .iter()
+            .all(|code| is_wire_token(code))
+        || !contract.rationale.is_object()
+    {
+        return None;
+    }
+    Some(contract)
+}
+
+fn rejection_reason_is_closed(reason: &str) -> bool {
+    let Some(contract) = refusal_contract() else {
+        return false;
+    };
+    if contract
+        .fixed_reasons
+        .iter()
+        .any(|candidate| candidate == reason)
+    {
+        return true;
+    }
+    let Some(suffix) = reason.strip_prefix(&contract.static_gate_reason_prefix) else {
+        return false;
+    };
+    let codes = suffix.split('+').collect::<Vec<_>>();
+    !codes.is_empty()
+        && codes.iter().all(|code| !code.is_empty())
+        && codes.windows(2).all(|pair| pair[0] < pair[1])
+        && codes.iter().all(|code| {
+            contract
+                .static_gate_codes
+                .iter()
+                .any(|candidate| candidate == code)
+        })
 }
 
 /// Did the child that exited non-zero actually complete the refusal protocol?
@@ -956,8 +1041,14 @@ struct RefusedAuthoringAnswer {
 /// child only ever writes its own two protocol documents to stdout, so no
 /// model output is involved either way.
 pub fn answer_is_refusal(answer: &str) -> bool {
-    serde_json::from_str::<RefusedAuthoringAnswer>(answer)
-        .is_ok_and(|answer| answer.schema_version == 1 && answer.status == REFUSED_STATUS)
+    serde_json::from_str::<RefusedAuthoringAnswer>(answer).is_ok_and(|answer| {
+        answer.schema_version == 1
+            && answer.status == REFUSED_STATUS
+            && answer
+                .rejection_reason
+                .as_deref()
+                .is_none_or(rejection_reason_is_closed)
+    })
 }
 
 /// Turn an agent answer into a RenderJob, or refuse it.

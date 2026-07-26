@@ -570,6 +570,57 @@ pub struct UpdateRuntimeConfiguration {
     install_probe: bool,
 }
 
+fn is_reserved_update_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host.is_empty()
+        || host == "invalid"
+        || host == "test"
+        || host == "example"
+        || host == "localhost"
+        || host == "example.com"
+        || host == "example.net"
+        || host == "example.org"
+        || host.ends_with(".invalid")
+        || host.ends_with(".test")
+        || host.ends_with(".example")
+        || host.ends_with(".localhost")
+        || host.ends_with(".example.com")
+        || host.ends_with(".example.net")
+        || host.ends_with(".example.org")
+}
+
+#[cfg(test)]
+mod update_runtime_configuration_tests {
+    use super::is_reserved_update_host;
+
+    #[test]
+    fn reserved_placeholder_update_hosts_are_rejected() {
+        for host in [
+            "invalid",
+            "updates.candidate.invalid",
+            "test",
+            "updates.acceptance.test",
+            "example",
+            "updates.preview.example",
+            "localhost",
+            "updates.localhost",
+            "example.com",
+            "updates.example.com",
+            "example.net",
+            "updates.example.net",
+            "example.org",
+            "updates.example.org",
+            "updates.candidate.invalid.",
+            "example.com.",
+        ] {
+            assert!(is_reserved_update_host(host), "{host}");
+        }
+        for host in ["updates.company.com", "updates.company.cn", "127.0.0.1"] {
+            assert!(!is_reserved_update_host(host), "{host}");
+        }
+    }
+}
+
 impl UpdateRuntimeConfiguration {
     pub fn load() -> Result<Option<Self>, UpdateCheckError> {
         #[cfg(debug_assertions)]
@@ -598,8 +649,10 @@ impl UpdateRuntimeConfiguration {
         }
         let endpoint = reqwest::Url::parse(&endpoint)
             .map_err(|_| UpdateCheckError::configuration_invalid())?;
+        let host = endpoint.host_str().unwrap_or_default();
         if endpoint.scheme() != "https"
-            || endpoint.host_str().is_none()
+            || host.is_empty()
+            || is_reserved_update_host(host)
             || !endpoint.username().is_empty()
             || endpoint.password().is_some()
             || endpoint.fragment().is_some()

@@ -359,28 +359,50 @@ impl AppUpdateCache {
     }
 
     fn validate_disk_state(&self) -> Result<(), UpdateDownloadError> {
-        match self.load_cache_manifest()? {
-            Some(record) => {
-                let metadata = safe_file_metadata(&self.package_path)?.ok_or_else(storage_error)?;
+        let mut changed = false;
+        let cache_manifest = self.load_cache_manifest()?;
+        let package_metadata = safe_file_metadata(&self.package_path)?;
+        match (cache_manifest.as_ref(), package_metadata) {
+            (Some(record), Some(metadata)) => {
                 ensure_private_file_permissions(&metadata)?;
-                if metadata.len() != record.size_bytes {
-                    return Err(storage_error());
+                if metadata.len() != record.size_bytes
+                    || digest_file(&self.package_path)? != record.sha256
+                {
+                    remove_regular_file(&self.package_path)?;
+                    self.cache_manifest.delete().map_err(|_| storage_error())?;
+                    changed = true;
                 }
             }
-            None if safe_file_metadata(&self.package_path)?.is_some() => {
-                return Err(storage_error());
+            (Some(_), None) => {
+                self.cache_manifest.delete().map_err(|_| storage_error())?;
+                changed = true;
             }
-            None => {}
+            (None, Some(_)) => {
+                remove_regular_file(&self.package_path)?;
+                changed = true;
+            }
+            (None, None) => {}
         }
-        match self.load_partial_manifest()? {
-            Some(_) => {
-                let metadata = safe_file_metadata(&self.partial_path)?.ok_or_else(storage_error)?;
+        let partial_manifest = self.load_partial_manifest()?;
+        let partial_metadata = safe_file_metadata(&self.partial_path)?;
+        match (partial_manifest.as_ref(), partial_metadata) {
+            (Some(_), Some(metadata)) => {
                 ensure_private_file_permissions(&metadata)?;
             }
-            None if safe_file_metadata(&self.partial_path)?.is_some() => {
-                return Err(storage_error());
+            (Some(_), None) => {
+                self.partial_manifest
+                    .delete()
+                    .map_err(|_| storage_error())?;
+                changed = true;
             }
-            None => {}
+            (None, Some(_)) => {
+                remove_regular_file(&self.partial_path)?;
+                changed = true;
+            }
+            (None, None) => {}
+        }
+        if changed {
+            sync_directory(&self.directory)?;
         }
         Ok(())
     }
@@ -630,6 +652,14 @@ fn safe_file_metadata(path: &Path) -> Result<Option<fs::Metadata>, UpdateDownloa
         }
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(storage_error()),
+    }
+}
+
+fn remove_regular_file(path: &Path) -> Result<(), UpdateDownloadError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
         Err(_) => Err(storage_error()),
     }
 }

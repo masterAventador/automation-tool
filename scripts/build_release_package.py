@@ -471,6 +471,8 @@ def build_macos_release(
     archive: Path | None,
     build_id: str,
     deployment: CustomerDemoMaterial | None = None,
+    update_endpoint: str | None = None,
+    update_public_key: str | None = None,
 ) -> dict[str, object]:
     """Produce one distributable macOS package and pass every release gate.
 
@@ -519,6 +521,8 @@ def build_macos_release(
         action_authorization_public_key=(
             None if deployment is None else deployment.action_authorization_public_key
         ),
+        update_endpoint=update_endpoint,
+        update_public_key=update_public_key,
     )
     if deployment is not None:
         announce(f"Building for the deployment at {deployment.base_url}")
@@ -587,6 +591,21 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIRECTORY)
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--build-id", default="macos-release")
+    parser.add_argument(
+        "--update-endpoint",
+        help=(
+            "HTTPS update feed template containing target, arch and current_version "
+            "placeholders; omit together with --update-public-key-file to disable updates"
+        ),
+    )
+    parser.add_argument(
+        "--update-public-key-file",
+        type=Path,
+        help=(
+            "path to the canonical Base64-wrapped Minisign public key; omit together "
+            "with --update-endpoint to disable updates"
+        ),
+    )
     # Paths only. The two key files hold private material that must not reach
     # argv, the environment, a log line or this repository.
     parser.add_argument(
@@ -612,11 +631,36 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     # relative path given on the command line would be re-interpreted against
     # a directory the operator never named. Bind them all to the invocation
     # directory once, here, rather than at each of the places they are used.
-    for name in ("work_dir", "archive", *DEPLOYMENT_ARGUMENTS):
+    for name in (
+        "work_dir",
+        "archive",
+        "update_public_key_file",
+        *DEPLOYMENT_ARGUMENTS,
+    ):
         path = getattr(arguments, name)
         if path is not None:
             setattr(arguments, name, path.resolve())
     return arguments
+
+
+def resolve_update_configuration(
+    arguments: argparse.Namespace,
+) -> tuple[str | None, str | None]:
+    endpoint = arguments.update_endpoint
+    public_key_file = arguments.update_public_key_file
+    if endpoint is None and public_key_file is None:
+        return None, None
+    if endpoint is None or public_key_file is None:
+        raise ReleaseFailed(
+            "release updates require both --update-endpoint and --update-public-key-file"
+        )
+    try:
+        public_key = public_key_file.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise ReleaseFailed("the release update public key is unreadable") from error
+    if not public_key:
+        raise ReleaseFailed("the release update public key is empty")
+    return endpoint, public_key
 
 
 def resolve_deployment(arguments: argparse.Namespace) -> CustomerDemoMaterial | None:
@@ -659,11 +703,14 @@ def main() -> int:
     # Resolved before anything is built: a deployment the App would reject is
     # refused now rather than twenty minutes from now.
     deployment = resolve_deployment(arguments)
+    update_endpoint, update_public_key = resolve_update_configuration(arguments)
     result = build_macos_release(
         work_directory=arguments.work_dir,
         archive=arguments.archive,
         build_id=arguments.build_id,
         deployment=deployment,
+        update_endpoint=update_endpoint,
+        update_public_key=update_public_key,
     )
     (arguments.work_dir / "release-package.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True) + "\n",

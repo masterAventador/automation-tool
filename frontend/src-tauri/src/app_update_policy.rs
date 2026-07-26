@@ -15,6 +15,7 @@ use crate::app_updates::{
 use crate::secure_store::{AppDataSecretStore, SecretStore};
 
 const UPDATE_POLICY_SCHEMA_VERSION: u8 = 1;
+const PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION: u8 = 0;
 const UPDATE_POLICY_DIRECTORY: &str = "app-updates";
 const UPDATE_POLICY_FILE: &str = "update-policy-v1";
 
@@ -191,7 +192,11 @@ impl StoredUpdatePolicy {
     }
 
     fn validate(&self) -> Result<(), UpdatePolicyError> {
-        if self.schema_version != UPDATE_POLICY_SCHEMA_VERSION
+        self.validate_schema(UPDATE_POLICY_SCHEMA_VERSION)
+    }
+
+    fn validate_schema(&self, expected_schema: u8) -> Result<(), UpdatePolicyError> {
+        if self.schema_version != expected_schema
             || !is_safe_channel(&self.configured_channel)
             || self.revision == 0
         {
@@ -274,28 +279,44 @@ impl UpdatePolicyService {
         let stored = store
             .load()
             .map_err(|_| UpdatePolicyError::storage_unavailable())?;
-        let mut document = match stored {
+        let (mut document, mut needs_save) = match stored {
             Some(stored) => {
-                let document: StoredUpdatePolicy = serde_json::from_slice(&stored)
+                let mut document: StoredUpdatePolicy = serde_json::from_slice(&stored)
                     .map_err(|_| UpdatePolicyError::storage_unavailable())?;
-                document.validate()?;
+                let mut needs_save = match document.schema_version {
+                    UPDATE_POLICY_SCHEMA_VERSION => {
+                        document.validate()?;
+                        false
+                    }
+                    PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION => {
+                        document.validate_schema(PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION)?;
+                        document.schema_version = UPDATE_POLICY_SCHEMA_VERSION;
+                        true
+                    }
+                    _ => return Err(UpdatePolicyError::storage_unavailable()),
+                };
                 if serde_json::to_vec(&document)
                     .map_err(|_| UpdatePolicyError::storage_unavailable())?
                     != stored.as_slice()
                 {
-                    return Err(UpdatePolicyError::storage_unavailable());
+                    needs_save = true;
                 }
                 if document.configured_channel != configured_channel {
-                    return Err(UpdatePolicyError::configuration_invalid());
+                    document.configured_channel = configured_channel.to_owned();
+                    document.highest_observed = None;
+                    document.decision = None;
+                    needs_save = true;
                 }
-                document
+                (document, needs_save)
             }
-            None => StoredUpdatePolicy::new(configured_channel, &current_version),
+            None => (
+                StoredUpdatePolicy::new(configured_channel, &current_version),
+                true,
+            ),
         };
 
         let minimum = parse_canonical_version(&document.minimum_version)
             .map_err(|_| UpdatePolicyError::storage_unavailable())?;
-        let mut needs_save = document.revision == 0;
         if current_version > minimum {
             document.minimum_version = current_version.to_string();
             if document

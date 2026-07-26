@@ -1,7 +1,7 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -186,6 +186,158 @@ fn client() -> reqwest::Client {
         .timeout(Duration::from_secs(2))
         .build()
         .expect("download client")
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).expect("create private cache fixture");
+    file.write_all(bytes).expect("write private cache fixture");
+    file.sync_all().expect("sync private cache fixture");
+}
+
+fn partial_manifest_fixture(version: &str) -> Vec<u8> {
+    let signature = STANDARD.encode(SIGNATURE_TEXT);
+    let signature_sha256 = Sha256::digest(signature.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    serde_json::to_vec(&json!({
+        "version": version,
+        "channel": "stable",
+        "policy": "optional",
+        "target": "darwin",
+        "arch": "aarch64",
+        "sha256": payload_digest(),
+        "sizeBytes": PAYLOAD.len(),
+        "signatureSha256": signature_sha256,
+        "etag": null
+    }))
+    .expect("partial manifest fixture")
+}
+
+fn cache_manifest_fixture(version: &str) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "version": version,
+        "channel": "stable",
+        "policy": "optional",
+        "target": "darwin",
+        "arch": "aarch64",
+        "sha256": payload_digest(),
+        "sizeBytes": PAYLOAD.len()
+    }))
+    .expect("cache manifest fixture")
+}
+
+#[test]
+fn startup_removes_a_package_orphaned_before_its_manifest_was_saved() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let orphan = app_data.cache_directory().join("candidate.package");
+    write_private_file(&orphan, PAYLOAD);
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "an orphan package must be cleaned instead of aborting startup"
+    );
+    assert!(!orphan.exists());
+    assert_eq!(
+        reopened
+            .expect("recovered cache")
+            .cached()
+            .expect("cache state"),
+        None
+    );
+}
+
+#[test]
+fn startup_removes_a_partial_file_orphaned_before_its_manifest_was_saved() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let orphan = app_data.cache_directory().join("candidate.partial");
+    write_private_file(&orphan, b"te");
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "an orphan partial file must be cleaned instead of aborting startup"
+    );
+    assert!(!orphan.exists());
+}
+
+#[test]
+fn startup_preserves_a_valid_package_and_removes_the_stale_partial_manifest() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    write_private_file(
+        &app_data.cache_directory().join("candidate.package"),
+        PAYLOAD,
+    );
+    write_private_file(
+        &app_data.cache_directory().join("cache-manifest-v1"),
+        &cache_manifest_fixture("0.2.0"),
+    );
+    let stale_manifest = app_data.cache_directory().join("partial-manifest-v1");
+    write_private_file(&stale_manifest, &partial_manifest_fixture("0.2.0"));
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "a stale partial manifest must be cleaned instead of aborting startup"
+    );
+    let reopened = reopened.expect("recovered cache");
+    assert!(!stale_manifest.exists());
+    assert_eq!(
+        reopened
+            .cached()
+            .expect("preserved cache")
+            .expect("cached record")
+            .version(),
+        "0.2.0"
+    );
+}
+
+#[test]
+fn startup_discards_a_replaced_package_that_no_longer_matches_the_old_manifest() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT))
+            .expect("create cache directory"),
+    );
+    let package = app_data.cache_directory().join("candidate.package");
+    let manifest = app_data.cache_directory().join("cache-manifest-v1");
+    write_private_file(&package, b"tEst");
+    write_private_file(&manifest, &cache_manifest_fixture("0.2.0"));
+
+    let reopened = AppUpdateCache::initialize(&app_data.0, &STANDARD.encode(PUBLIC_KEY_TEXT));
+    assert!(
+        reopened.is_ok(),
+        "a replaced package must be cleaned instead of aborting startup"
+    );
+    assert!(!package.exists());
+    assert!(!manifest.exists());
+    assert_eq!(
+        reopened
+            .expect("recovered cache")
+            .cached()
+            .expect("cache state"),
+        None
+    );
 }
 
 #[test]
