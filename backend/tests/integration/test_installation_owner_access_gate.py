@@ -120,6 +120,7 @@ def seeded_credential(
 def seeded_user(database_url: str) -> UUID:
     async def seed() -> UUID:
         user_id = UserId.new().uuid
+        now = datetime.now(UTC)
         database = Database.from_url(database_url)
         try:
             async with database.session() as session:
@@ -127,6 +128,8 @@ def seeded_user(database_url: str) -> UUID:
                     insert(users).values(
                         id=user_id,
                         login_name=f"owner-{uuid4().hex}",
+                        created_at=now,
+                        updated_at=now,
                     )
                 )
         finally:
