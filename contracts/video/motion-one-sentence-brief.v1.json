@@ -8,7 +8,7 @@
   "aspectRatios": ["16:9", "9:16"],
   "languages": ["zh", "en"],
   "definedIn": [
-    "tools/motion-authoring/motion_authoring_agent.py",
+    "backend/src/automation_tool/executor/motion_authoring/agent.py",
     "frontend/src/features/video-studio/motion-one-sentence.ts"
   ],
   "enforcedBy": "scripts/test_motion_authoring_agent.py",

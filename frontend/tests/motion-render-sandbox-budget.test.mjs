@@ -6,7 +6,7 @@ const repositoryRoot = new URL("../../", import.meta.url);
 
 const SOURCES = {
   acceptance: "scripts/run_bm_16_acceptance.py",
-  agent: "tools/motion-authoring/motion_authoring_agent.py",
+  agent: "backend/src/automation_tool/executor/motion_authoring/agent.py",
   contract: "contracts/video/motion-render-sandbox-budget.v1.json",
   rust: "frontend/src-tauri/src/local_video_orchestrator.rs",
   sandboxTest: "scripts/test_motion_video_render_sandbox.py",

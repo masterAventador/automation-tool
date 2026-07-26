@@ -7,7 +7,7 @@
   "height": 360,
   "definedIn": [
     "workers/motion_composition/worker.mjs",
-    "tools/motion-authoring/motion_authoring_agent.py",
+    "backend/src/automation_tool/executor/motion_authoring/agent.py",
     "frontend/src-tauri/src/motion_video_studio.rs"
   ],
   "enforcedBy": "scripts/test_motion_authoring_agent.py",

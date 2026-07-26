@@ -9,7 +9,7 @@
   "definedIn": [
     "workers/motion_composition/worker.mjs",
     "frontend/src-tauri/src/local_video_orchestrator.rs",
-    "tools/motion-authoring/motion_authoring_agent.py",
+    "backend/src/automation_tool/executor/motion_authoring/agent.py",
     "scripts/test_motion_video_render_sandbox.py"
   ],
   "enforcedBy": "frontend/tests/motion-render-sandbox-budget.test.mjs",
