@@ -195,14 +195,19 @@ def start_control_plane() -> RunningControlPlane:
 
 
 def _completed_process_diagnostic(
-    completed: subprocess.CompletedProcess[str],
+    completed: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
     *,
     lines_per_stream: int = 20,
 ) -> str:
     """Render a bounded tail from each builder output stream."""
     parts: list[str] = []
     for name, output in (("stderr", completed.stderr), ("stdout", completed.stdout)):
-        lines = [line for line in (output or "").splitlines() if line.strip()]
+        rendered = (
+            output.decode("utf-8", errors="replace")
+            if isinstance(output, bytes)
+            else output
+        )
+        lines = [line for line in (rendered or "").splitlines() if line.strip()]
         if lines:
             parts.append(f"{name}:\n" + "\n".join(lines[-lines_per_stream:]))
     return "\n".join(parts) if parts else "(builder produced no output)"
@@ -269,7 +274,8 @@ def build_signed_executor(
         check=False,
     )
     if manifest.returncode != 0:
-        raise RuntimeError("E4-07 package signing failed")
+        diagnostic = _completed_process_diagnostic(manifest)
+        raise RuntimeError(f"E4-07 package signing failed\n{diagnostic}")
     return package_root
 
 
