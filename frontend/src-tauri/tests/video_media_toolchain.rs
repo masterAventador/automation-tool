@@ -311,8 +311,9 @@ fn the_smart_material_worker_process_receives_the_packaged_ffmpeg() {
 
     let launch = material_video_studio::material_worker_launch(executable, asset_root, &toolchain)
         .expect("the studio builds its Worker launch from the packaged toolchain");
-    let orchestrator = LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
-        .expect("orchestrator");
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
+            .expect("orchestrator");
     let status = orchestrator.start(launch).expect("start the probe Worker");
     assert_eq!(status.state(), VideoWorkerState::Running);
     let environment = recorded_environment(&marker);
@@ -360,15 +361,18 @@ fn the_brand_motion_worker_process_receives_the_packaged_pair_and_nothing_else()
         toolchain.brand_motion_environment(),
     )
     .expect("the studio builds its Worker launch from the packaged toolchain");
-    let orchestrator = LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
-        .expect("orchestrator");
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
+            .expect("orchestrator");
     let status = orchestrator.start(launch).expect("start the probe Worker");
     assert_eq!(status.state(), VideoWorkerState::Running);
     let environment = recorded_environment(&marker);
     orchestrator.stop(VideoWorkerKind::Node).expect("stop");
 
     assert_eq!(
-        environment.get("HYPERFRAMES_FFMPEG_PATH").map(String::as_str),
+        environment
+            .get("HYPERFRAMES_FFMPEG_PATH")
+            .map(String::as_str),
         Some(toolchain.ffmpeg_path().to_string_lossy().as_ref()),
     );
     assert_eq!(
@@ -436,7 +440,11 @@ fn every_video_worker_launch_carries_the_packaged_environment_from_its_entry_poi
             "start_motion_render(",
         ),
         (motion, "fn start_motion_render(", "motion_worker_launch("),
-        (motion, "fn start_motion_render(", "brand_motion_environment()"),
+        (
+            motion,
+            "fn start_motion_render(",
+            "brand_motion_environment()",
+        ),
         (motion, "pub fn motion_worker_launch(", "with_environment("),
         // ... and the stored map has to reach the process itself.
         (orchestrator, "fn spawn_worker(", "command.env("),

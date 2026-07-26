@@ -7,6 +7,7 @@
 //! and "publish". A user who had just made a video could not look at it.
 
 use automation_tool_desktop_lib::material_video_studio::read_artifact;
+use automation_tool_desktop_lib::video_job_workspace::generate_uuid_v4;
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
 };
@@ -14,7 +15,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use automation_tool_desktop_lib::video_job_workspace::generate_uuid_v4;
 use uuid::Uuid;
 
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -73,7 +73,12 @@ fn imported_film(store: &VideoJobWorkspaceStore, payload: &[u8]) -> Uuid {
     let output = store.worker_output_directory(&workspace).unwrap();
     fs::write(output.join(MATERIAL_OUTPUT_FILE), payload).unwrap();
     store
-        .import_output(&workspace, MATERIAL_OUTPUT_FILE, "video/mp4", "rendered_video")
+        .import_output(
+            &workspace,
+            MATERIAL_OUTPUT_FILE,
+            "video/mp4",
+            "rendered_video",
+        )
         .unwrap()
         .artifact_id()
 }
@@ -121,7 +126,12 @@ fn only_a_rendered_video_artifact_is_readable() {
     let output = store.worker_output_directory(&workspace).unwrap();
     fs::write(output.join("diagnostic.mp4"), b"not-a-finished-film").unwrap();
     let other = store
-        .import_output(&workspace, "diagnostic.mp4", "video/mp4", "diagnostic_capture")
+        .import_output(
+            &workspace,
+            "diagnostic.mp4",
+            "video/mp4",
+            "diagnostic_capture",
+        )
         .unwrap()
         .artifact_id();
 

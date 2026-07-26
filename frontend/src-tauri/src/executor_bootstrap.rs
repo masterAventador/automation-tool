@@ -460,7 +460,8 @@ impl LocalSessionToken {
         document: &impl Serialize,
     ) -> Result<(), ExecutorBootstrapError> {
         let mut serialized = Zeroizing::new(
-            serde_json::to_vec(document).map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
+            serde_json::to_vec(document)
+                .map_err(|_| ExecutorBootstrapError::bootstrap_rejected())?,
         );
         serialized.push(b'\n');
         if serialized.len() > MAX_PLATFORM_COMMAND_BYTES {
@@ -536,7 +537,9 @@ impl LocalSessionToken {
                 document.state.as_str(),
                 "publish_pre_submit_ready" | "publish_handoff_required" | "publish_blocked"
             ),
-            LocalPlatformCommand::ReleaseDouyinPublishSurface => document.state == "publish_released",
+            LocalPlatformCommand::ReleaseDouyinPublishSurface => {
+                document.state == "publish_released"
+            }
             LocalPlatformCommand::DispatchDouyinPublish => matches!(
                 document.state.as_str(),
                 "publish_verified" | "publish_outcome_uncertain" | "publish_not_dispatched"

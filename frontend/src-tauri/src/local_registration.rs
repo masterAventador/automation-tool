@@ -109,8 +109,8 @@ pub fn parse_local_registration_handoff(
     {
         return Err(invalid());
     }
-    let bootstrap = DemoBootstrap::new(document.token, document.environment_id)
-        .map_err(|_| invalid())?;
+    let bootstrap =
+        DemoBootstrap::new(document.token, document.environment_id).map_err(|_| invalid())?;
     if document.expires_at <= now_unix {
         return Err(LocalRegistrationHandoffError::new(
             LocalRegistrationHandoffErrorCode::HandoffExpired,
@@ -156,9 +156,8 @@ pub(crate) type ProductionLocalRegistrationHandoffStore =
 pub(crate) fn initialize_local_registration_handoff_store(
     app_data_directory: &Path,
 ) -> Result<ProductionLocalRegistrationHandoffStore, LocalRegistrationHandoffError> {
-    let store =
-        AppDataSecretStore::new(app_data_directory, LOCAL_REGISTRATION_HANDOFF_FILE_NAME)
-            .map_err(map_store_error)?;
+    let store = AppDataSecretStore::new(app_data_directory, LOCAL_REGISTRATION_HANDOFF_FILE_NAME)
+        .map_err(map_store_error)?;
     Ok(LocalRegistrationHandoffStore::new(store))
 }
 
@@ -251,10 +250,10 @@ mod tests {
 
     use super::{
         ensure_installation_registered, initialize_local_registration_handoff_store,
-        parse_local_registration_handoff, InstallationRegistrar,
-        InstallationRegistrationOutcome, LocalRegistrationHandoffErrorCode,
-        LocalRegistrationHandoffStore, HANDOFF_DOCUMENT_VERSION, LOCAL_ENVIRONMENT_ID,
-        LOCAL_REGISTRATION_HANDOFF_FILE_NAME, MAX_LOCAL_REGISTRATION_HANDOFF_BYTES,
+        parse_local_registration_handoff, InstallationRegistrar, InstallationRegistrationOutcome,
+        LocalRegistrationHandoffErrorCode, LocalRegistrationHandoffStore, HANDOFF_DOCUMENT_VERSION,
+        LOCAL_ENVIRONMENT_ID, LOCAL_REGISTRATION_HANDOFF_FILE_NAME,
+        MAX_LOCAL_REGISTRATION_HANDOFF_BYTES,
     };
     use crate::control_plane::{ControlPlaneErrorCode, DemoBootstrap};
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -341,7 +340,10 @@ mod tests {
             contract["fileName"].as_str(),
             Some(LOCAL_REGISTRATION_HANDOFF_FILE_NAME)
         );
-        assert_eq!(contract["environmentId"].as_str(), Some(LOCAL_ENVIRONMENT_ID));
+        assert_eq!(
+            contract["environmentId"].as_str(),
+            Some(LOCAL_ENVIRONMENT_ID)
+        );
         assert_eq!(
             contract["documentVersion"].as_u64(),
             Some(u64::from(HANDOFF_DOCUMENT_VERSION))
@@ -386,11 +388,8 @@ mod tests {
 
     #[test]
     fn a_document_the_local_service_really_wrote_is_accepted_unchanged() {
-        parse_local_registration_handoff(
-            ISSUED_BY_THE_LOCAL_SERVICE.as_bytes(),
-            1_785_010_655,
-        )
-        .expect("the issuer's own output must satisfy the reader's canonical form");
+        parse_local_registration_handoff(ISSUED_BY_THE_LOCAL_SERVICE.as_bytes(), 1_785_010_655)
+            .expect("the issuer's own output must satisfy the reader's canonical form");
 
         assert_eq!(
             parse_local_registration_handoff(
@@ -535,7 +534,10 @@ mod tests {
         let app_data = TemporaryAppData::new("frozen-name");
         let store = initialize_local_registration_handoff_store(&app_data.path)
             .expect("an initialised handoff store");
-        assert!(store.load(NOW).expect("an empty app data directory").is_none());
+        assert!(store
+            .load(NOW)
+            .expect("an empty app data directory")
+            .is_none());
 
         fs::write(
             app_data.path.join(LOCAL_REGISTRATION_HANDOFF_FILE_NAME),
@@ -727,12 +729,7 @@ mod tests {
         fs::write(&path, document(NOW + 1)).expect("a grant");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("loose mode");
 
-        assert!(
-            store
-                .load(NOW)
-                .expect("repair a migrated grant")
-                .is_some()
-        );
+        assert!(store.load(NOW).expect("repair a migrated grant").is_some());
         assert_eq!(
             fs::metadata(&path)
                 .expect("repaired grant metadata")

@@ -522,7 +522,8 @@ fn start_motion_render(
 {
     let render_job_id = prepared.render_job_id();
     let allowed_assets = prepared.allowed_assets().to_vec();
-    let (asset_root, _, _) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
+    let (asset_root, _, _) =
+        motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
     let discard = || {
         if let Ok(workspace) = workspaces.open(render_job_id) {
             let _ = workspaces.finish(
@@ -606,8 +607,8 @@ pub fn run_motion_authoring(
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|_| motion_video_studio::render_unavailable())?;
-    let payload = serde_json::to_vec(request)
-        .map_err(|_| motion_video_studio::render_unavailable())?;
+    let payload =
+        serde_json::to_vec(request).map_err(|_| motion_video_studio::render_unavailable())?;
     let written = child
         .stdin
         .take()
@@ -1703,12 +1704,13 @@ async fn begin_publish(
     let prepared = async {
         ensure_executor_running(&client, &vault, &executor).await?;
         let executable_path = resolve_embedded_browser(&authority)?;
-        let profile = profiles
-            .current_douyin_profile()
-            .map_err(|_| ExecutorPlatformCommandError {
-                code: "storage_unavailable",
-                retryable: false,
-            })?;
+        let profile =
+            profiles
+                .current_douyin_profile()
+                .map_err(|_| ExecutorPlatformCommandError {
+                    code: "storage_unavailable",
+                    retryable: false,
+                })?;
         Ok::<_, ExecutorPlatformCommandError>((executable_path, profile))
     }
     .await;

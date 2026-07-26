@@ -36,7 +36,10 @@ fn an_unconfigured_platform_stays_listed_instead_of_taking_the_module_down() {
     let snapshot = workspace.snapshot();
 
     let bilibili = snapshot.platform("bilibili").expect("bilibili is listed");
-    assert_eq!(bilibili.availability, PublishAvailability::AwaitingConfiguration);
+    assert_eq!(
+        bilibili.availability,
+        PublishAvailability::AwaitingConfiguration
+    );
     let douyin = snapshot.platform("douyin").expect("douyin is listed");
     assert_eq!(douyin.availability, PublishAvailability::AwaitingSignIn);
     assert_eq!(snapshot.platforms.len(), 2);
@@ -74,7 +77,9 @@ fn a_signed_in_operations_browser_makes_the_visible_platform_publishable() {
 fn the_projected_snapshot_never_names_the_mechanism() {
     let mut workspace = PublishWorkspace::new(true);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(1)).expect("a publishable platform");
+    workspace
+        .begin("douyin", publish_job(1))
+        .expect("a publishable platform");
     workspace.await_approval(ready_approval());
 
     let projected = serde_json::to_string(&workspace.snapshot()).expect("serializable");
@@ -100,7 +105,9 @@ fn a_publish_walks_one_stage_at_a_time_to_a_settled_outcome() {
     workspace.observe_douyin_signed_in(true);
 
     assert_eq!(workspace.snapshot().stage, PublishStage::Idle);
-    workspace.begin("douyin", publish_job(2)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(2))
+        .expect("publishable");
     assert_eq!(workspace.snapshot().stage, PublishStage::Preparing);
     workspace.await_approval(ready_approval());
     assert_eq!(workspace.snapshot().stage, PublishStage::AwaitingApproval);
@@ -113,14 +120,19 @@ fn a_publish_walks_one_stage_at_a_time_to_a_settled_outcome() {
     let snapshot = workspace.snapshot();
     assert_eq!(snapshot.stage, PublishStage::Settled);
     assert_eq!(snapshot.outcome, Some(PublishOutcome::Published));
-    assert!(snapshot.approval.is_none(), "a spent approval is not shown again");
+    assert!(
+        snapshot.approval.is_none(),
+        "a spent approval is not shown again"
+    );
 }
 
 #[test]
 fn the_critical_point_hands_over_the_account_summary_and_copy() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(3)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(3))
+        .expect("publishable");
 
     workspace.await_approval(ready_approval());
 
@@ -136,9 +148,14 @@ fn the_critical_point_hands_over_the_account_summary_and_copy() {
 fn approving_without_a_pending_critical_point_is_refused() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(4)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(4))
+        .expect("publishable");
 
-    assert_eq!(workspace.approve(), Err(PublishWorkspaceError::NoApprovalPending));
+    assert_eq!(
+        workspace.approve(),
+        Err(PublishWorkspaceError::NoApprovalPending)
+    );
     assert_eq!(workspace.snapshot().stage, PublishStage::Preparing);
 }
 
@@ -146,8 +163,14 @@ fn approving_without_a_pending_critical_point_is_refused() {
 fn a_platform_that_is_not_publishable_cannot_be_started() {
     let mut workspace = PublishWorkspace::new(false);
 
-    assert_eq!(workspace.begin("bilibili", publish_job(5)), Err(PublishWorkspaceError::NotPublishable));
-    assert_eq!(workspace.begin("douyin", publish_job(6)), Err(PublishWorkspaceError::NotPublishable));
+    assert_eq!(
+        workspace.begin("bilibili", publish_job(5)),
+        Err(PublishWorkspaceError::NotPublishable)
+    );
+    assert_eq!(
+        workspace.begin("douyin", publish_job(6)),
+        Err(PublishWorkspaceError::NotPublishable)
+    );
     assert_eq!(workspace.snapshot().stage, PublishStage::Idle);
 }
 
@@ -168,7 +191,9 @@ fn a_platform_outside_the_two_supported_ones_is_refused() {
 fn cancelling_before_the_click_settles_as_cancelled() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(7)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(7))
+        .expect("publishable");
     workspace.await_approval(ready_approval());
 
     workspace.cancel().expect("a publish is in flight");
@@ -183,11 +208,16 @@ fn cancelling_before_the_click_settles_as_cancelled() {
 fn cancelling_after_the_click_is_refused_because_it_would_be_a_lie() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(8)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(8))
+        .expect("publishable");
     workspace.await_approval(ready_approval());
     workspace.approve().expect("pending");
 
-    assert_eq!(workspace.cancel(), Err(PublishWorkspaceError::AlreadyDispatched));
+    assert_eq!(
+        workspace.cancel(),
+        Err(PublishWorkspaceError::AlreadyDispatched)
+    );
     assert_eq!(workspace.snapshot().stage, PublishStage::Publishing);
 }
 
@@ -195,7 +225,9 @@ fn cancelling_after_the_click_is_refused_because_it_would_be_a_lie() {
 fn an_uncertain_outcome_carries_its_own_explanation() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(9)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(9))
+        .expect("publishable");
     workspace.await_approval(ready_approval());
     workspace.approve().expect("pending");
     workspace.begin_verification();
@@ -204,7 +236,10 @@ fn an_uncertain_outcome_carries_its_own_explanation() {
 
     let snapshot = workspace.snapshot();
     assert_eq!(snapshot.outcome, Some(PublishOutcome::OutcomeUncertain));
-    assert!(!snapshot.retryable, "an uncertain publish is never offered as a retry");
+    assert!(
+        !snapshot.retryable,
+        "an uncertain publish is never offered as a retry"
+    );
 }
 
 #[test]
@@ -258,7 +293,9 @@ fn every_step_of_a_publish_is_recorded_in_order() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
 
-    workspace.begin("douyin", publish_job(10)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(10))
+        .expect("publishable");
     workspace.await_approval(ready_approval());
     workspace.approve().expect("pending");
     workspace.begin_verification();
@@ -286,7 +323,9 @@ fn every_step_of_a_publish_is_recorded_in_order() {
 fn the_audit_records_the_decision_and_never_the_content() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(11)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(11))
+        .expect("publishable");
     workspace.await_approval(ready_approval());
     workspace.approve().expect("pending");
     workspace.settle(PublishOutcome::Published);
@@ -316,7 +355,9 @@ fn a_refused_step_leaves_no_trace_in_the_audit() {
 fn a_cancelled_publish_is_recorded_as_cancelled() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(13)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(13))
+        .expect("publishable");
     workspace.await_approval(ready_approval());
 
     workspace.cancel().expect("in flight");
@@ -331,10 +372,14 @@ fn a_cancelled_publish_is_recorded_as_cancelled() {
 fn starting_a_second_publish_keeps_the_first_ones_record() {
     let mut workspace = PublishWorkspace::new(false);
     workspace.observe_douyin_signed_in(true);
-    workspace.begin("douyin", publish_job(14)).expect("publishable");
+    workspace
+        .begin("douyin", publish_job(14))
+        .expect("publishable");
     workspace.settle(PublishOutcome::NotPublished);
 
-    workspace.begin("douyin", publish_job(15)).expect("publishable again");
+    workspace
+        .begin("douyin", publish_job(15))
+        .expect("publishable again");
 
     assert_eq!(workspace.snapshot().audit.len(), 3);
 }
@@ -366,7 +411,10 @@ fn a_preflight_result_moves_the_workspace_only_where_it_is_entitled_to() {
 fn a_dispatch_result_never_turns_an_unknown_answer_into_a_publish() {
     use automation_tool_desktop_lib::publish_workspace::dispatch_outcome;
 
-    assert_eq!(dispatch_outcome("publish_verified"), PublishOutcome::Published);
+    assert_eq!(
+        dispatch_outcome("publish_verified"),
+        PublishOutcome::Published
+    );
     assert_eq!(
         dispatch_outcome("publish_outcome_uncertain"),
         PublishOutcome::OutcomeUncertain
@@ -377,7 +425,12 @@ fn a_dispatch_result_never_turns_an_unknown_answer_into_a_publish() {
     );
     // The click may already have happened, so an answer we cannot read is
     // uncertain, never "did not publish".
-    for unreadable in ["", "healthy", "publish_pre_submit_ready", "publish_released"] {
+    for unreadable in [
+        "",
+        "healthy",
+        "publish_pre_submit_ready",
+        "publish_released",
+    ] {
         assert_eq!(
             dispatch_outcome(unreadable),
             PublishOutcome::OutcomeUncertain,
@@ -429,7 +482,10 @@ fn a_publishable_official_platform_still_refuses_to_borrow_the_other_route() {
     let mut workspace = PublishWorkspace::new(true);
 
     let platform = workspace
-        .begin("bilibili", "223e4567-e89b-42d3-a456-426614174031".to_owned())
+        .begin(
+            "bilibili",
+            "223e4567-e89b-42d3-a456-426614174031".to_owned(),
+        )
         .expect("a configured platform may be started");
 
     assert_eq!(platform, PublishPlatform::Bilibili);

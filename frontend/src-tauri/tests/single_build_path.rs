@@ -194,7 +194,11 @@ fn source_directory() -> PathBuf {
 fn source_files() -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = fs::read_dir(source_directory())
         .expect("the crate source directory must be readable")
-        .map(|entry| entry.expect("source directory entries must be readable").path())
+        .map(|entry| {
+            entry
+                .expect("source directory entries must be readable")
+                .path()
+        })
         .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
         .collect();
     files.sort();
@@ -497,13 +501,11 @@ fn the_executor_package_root_comes_from_tauri_resources_in_every_build() {
 #[test]
 fn desktop_acceptance_stages_the_executor_at_the_same_resource_root() {
     let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let prerequisites = fs::read_to_string(
-        repository_root.join("scripts/desktop_e2e_prerequisites.py"),
-    )
-    .expect("desktop prerequisite source");
-    let lifecycle =
-        fs::read_to_string(repository_root.join("scripts/run_e4_14_acceptance.py"))
-            .expect("Executor lifecycle acceptance source");
+    let prerequisites =
+        fs::read_to_string(repository_root.join("scripts/desktop_e2e_prerequisites.py"))
+            .expect("desktop prerequisite source");
+    let lifecycle = fs::read_to_string(repository_root.join("scripts/run_e4_14_acceptance.py"))
+        .expect("Executor lifecycle acceptance source");
     assert!(
         prerequisites.contains("install_executor_package(")
             && prerequisites.contains("resource_root=resource_root"),
@@ -717,8 +719,9 @@ fn frontend_source(module: &str) -> String {
 /// brings its entry into this guard automatically instead of silently opting
 /// out of it.
 fn frontend_entrypoints() -> BTreeSet<String> {
-    let config = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../vite.config.ts"))
-        .expect("the Vite configuration must be readable");
+    let config =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../vite.config.ts"))
+            .expect("the Vite configuration must be readable");
     let mut modules = BTreeSet::new();
     for (index, _) in config.match_indices("\"/src/") {
         let rest = &config[index + "\"/src/".len()..];
@@ -813,11 +816,15 @@ fn mounted_startup_check(module: &str) -> (String, String) {
         let assigned = head
             .split_once('=')
             .map(|(_, rest)| rest.trim())
-            .unwrap_or_else(|| panic!("{origin} declares `{name}` in a shape this guard cannot read"));
+            .unwrap_or_else(|| {
+                panic!("{origin} declares `{name}` in a shape this guard cannot read")
+            });
         let factory = assigned
             .split_once('(')
             .map(|(callee, _)| callee.trim())
-            .unwrap_or_else(|| panic!("{origin} assigns `{name}` from a shape this guard cannot read"));
+            .unwrap_or_else(|| {
+                panic!("{origin} assigns `{name}` from a shape this guard cannot read")
+            });
         let startup = frontend_source(FRONTEND_STARTUP_MODULE);
         let signature = format!("export function {factory}(");
         let factory_start = startup.find(&signature).unwrap_or_else(|| {
@@ -829,10 +836,7 @@ fn mounted_startup_check(module: &str) -> (String, String) {
         );
     }
 
-    (
-        format!("{origin}::{name}"),
-        balanced_block(&owner, start),
-    )
+    (format!("{origin}::{name}"), balanced_block(&owner, start))
 }
 
 /// No build may reach the workbench without the startup gate having run.
@@ -848,11 +852,9 @@ fn no_frontend_entrypoint_declares_the_environment_ready_without_probing() {
     let mut probing = BTreeSet::new();
     for module in frontend_entrypoints() {
         let (origin, block) = mounted_startup_check(&module);
-        let opening = block.find("check(").and_then(|index| {
-            block[index..]
-                .find('{')
-                .map(|offset| index + offset)
-        });
+        let opening = block
+            .find("check(")
+            .and_then(|index| block[index..].find('{').map(|offset| index + offset));
         let opening = opening.unwrap_or_else(|| {
             panic!(
                 "{module} resolves to {origin}, which declares no `check()`; this guard \

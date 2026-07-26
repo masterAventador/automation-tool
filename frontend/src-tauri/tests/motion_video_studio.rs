@@ -90,8 +90,10 @@ fn beats(count: usize) -> Vec<MotionVideoBeatDraft> {
 fn sized_draft(
     seconds_per_beat: u32,
     beat_count: usize,
-) -> Result<MotionVideoDraftRequest, automation_tool_desktop_lib::motion_video_studio::MotionVideoStudioError>
-{
+) -> Result<
+    MotionVideoDraftRequest,
+    automation_tool_desktop_lib::motion_video_studio::MotionVideoStudioError,
+> {
     MotionVideoDraftRequest::manual_template(
         "新品发布".to_owned(),
         "blue-professional".to_owned(),
@@ -154,16 +156,43 @@ fn the_declared_duration_limits_reject_out_of_range_beats_seconds_and_their_comb
     let store = store(&root.0);
     let limits = duration_limits().expect("the storyboard duration contract must load");
 
-    assert!(sized_draft(4, 5).is_ok(), "five four-second beats must stay admissible");
+    assert!(
+        sized_draft(4, 5).is_ok(),
+        "five four-second beats must stay admissible"
+    );
     for (seconds_per_beat, beat_count, why) in [
-        (4_u32, limits.beat_count_minimum() as usize - 1, "no beats at all"),
-        (4, limits.beat_count_maximum() as usize + 1, "one beat past the maximum"),
-        (limits.seconds_per_beat_minimum() - 1, 3, "zero seconds per beat"),
-        (limits.seconds_per_beat_maximum() + 1, 3, "one second past the maximum"),
-        (6, 6, "two in-range factors whose product exceeds the total budget"),
+        (
+            4_u32,
+            limits.beat_count_minimum() as usize - 1,
+            "no beats at all",
+        ),
+        (
+            4,
+            limits.beat_count_maximum() as usize + 1,
+            "one beat past the maximum",
+        ),
+        (
+            limits.seconds_per_beat_minimum() - 1,
+            3,
+            "zero seconds per beat",
+        ),
+        (
+            limits.seconds_per_beat_maximum() + 1,
+            3,
+            "one second past the maximum",
+        ),
+        (
+            6,
+            6,
+            "two in-range factors whose product exceeds the total budget",
+        ),
     ] {
         let error = sized_draft(seconds_per_beat, beat_count).expect_err(why);
-        assert_eq!(error.code(), MotionVideoStudioErrorCode::DraftInvalid, "{why}");
+        assert_eq!(
+            error.code(),
+            MotionVideoStudioErrorCode::DraftInvalid,
+            "{why}"
+        );
     }
     assert!(
         store.list_workspaces().unwrap().is_empty(),
@@ -220,7 +249,10 @@ fn manual_template_freezes_editable_copy_and_seekable_composition_in_private_ren
     assert!(html.contains("增长看得见"));
     assert!(html.contains("字幕：本周销售增长 38%"));
     assert!(html.contains("window.__timelines"));
-    assert!(html.contains(&format!("data-duration=\"{}\"", 3 * FIXTURE_SECONDS_PER_BEAT)));
+    assert!(html.contains(&format!(
+        "data-duration=\"{}\"",
+        3 * FIXTURE_SECONDS_PER_BEAT
+    )));
     assert!(!html.contains("http://"));
     assert!(!html.contains("https://"));
 
@@ -298,7 +330,11 @@ fn bm16_all_twelve_locked_styles_freeze_seekable_compositions() {
         .iter()
         .map(|preset| preset["id"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(presets.len(), 12, "locked style contract must expose 12 presets");
+    assert_eq!(
+        presets.len(),
+        12,
+        "locked style contract must expose 12 presets"
+    );
 
     let export = std::env::var_os("AUTOMATION_TOOL_BM16_STYLE_SWEEP_DIR").map(PathBuf::from);
     if let Some(directory) = &export {
@@ -336,13 +372,21 @@ fn bm16_all_twelve_locked_styles_freeze_seekable_compositions() {
         let workspace = store.open(prepared.render_job_id()).unwrap();
         let assets = store.worker_asset_directory(&workspace).unwrap();
         let html = fs::read_to_string(assets.join("composition.html")).unwrap();
-        assert!(html.contains("window.__timelines"), "style {preset} lost the timeline");
         assert!(
-            html.contains(&format!("data-duration=\"{}\"", 3 * FIXTURE_SECONDS_PER_BEAT)),
+            html.contains("window.__timelines"),
+            "style {preset} lost the timeline"
+        );
+        assert!(
+            html.contains(&format!(
+                "data-duration=\"{}\"",
+                3 * FIXTURE_SECONDS_PER_BEAT
+            )),
             "style {preset} lost the configured duration"
         );
-        assert!(!html.contains("http://") && !html.contains("https://"),
-            "style {preset} leaked a remote reference");
+        assert!(
+            !html.contains("http://") && !html.contains("https://"),
+            "style {preset} leaked a remote reference"
+        );
         let freeze = fs::read_to_string(assets.join("style-freeze.json")).unwrap();
         assert!(
             freeze.contains(&format!("\"stylePresetId\":\"{preset}\"")),
@@ -433,7 +477,15 @@ fn a_static_render_reaches_the_user_as_its_own_failure_code() {
     let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
     let job = prepared.render_job_id();
 
-    advance(&store, job, MotionRenderJobStatus::Rendering, 55, None, None).unwrap();
+    advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Rendering,
+        55,
+        None,
+        None,
+    )
+    .unwrap();
     let snapshot = advance(
         &store,
         job,

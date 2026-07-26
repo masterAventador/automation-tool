@@ -199,7 +199,10 @@ fn a_closed_static_gate_reason_is_a_refusal_but_an_unknown_gate_is_not() {
 #[test]
 fn a_child_that_dies_without_answering_is_reported_as_a_crash() {
     let root = TempDirectory::new();
-    let entrypoint = child(&root, "echo 'Traceback (most recent call last):' >&2\nexit 1\n");
+    let entrypoint = child(
+        &root,
+        "echo 'Traceback (most recent call last):' >&2\nexit 1\n",
+    );
 
     let error = run_motion_authoring(&entrypoint, &request(), Duration::from_secs(30))
         .expect_err("a child that never answered has not refused anything");
