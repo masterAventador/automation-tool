@@ -358,51 +358,84 @@ impl AppUpdateCache {
         Ok(candidate)
     }
 
+    /// Reconciles whatever the last run left in the cache directory.
+    ///
+    /// `download` renames the verified partial onto the package path, saves the
+    /// cache manifest, then deletes the partial manifest. Being killed between
+    /// any two of those steps leaves a pair that disagrees, and each of those
+    /// pairs is resolved here.
+    ///
+    /// Nothing found in this directory is worth refusing to launch over.
+    /// Everything in it is a disposable copy of an artifact we can fetch again
+    /// and verify again, so residue from a kill, a manifest a newer build wrote
+    /// and this one cannot parse, a file a restore tool handed to other users,
+    /// and a link someone dropped in our path all resolve to the same safe
+    /// state: no cached update, which is where every first launch begins. The
+    /// alternative costs the user the App itself, with no way to know why.
     fn validate_disk_state(&self) -> Result<(), UpdateDownloadError> {
-        let mut changed = false;
-        let cache_manifest = self.load_cache_manifest()?;
-        let package_metadata = safe_file_metadata(&self.package_path)?;
+        let mut recovered = false;
+        // A manifest this build cannot read is worth exactly what no manifest is
+        // worth: either way the package has to be fetched again.
+        let cache_manifest = match self.load_cache_manifest() {
+            Ok(record) => record,
+            Err(_) => {
+                self.cache_manifest.delete().map_err(|_| storage_error())?;
+                recovered = true;
+                None
+            }
+        };
+        let package_metadata = trusted_cache_file(&self.package_path, &mut recovered)?;
         match (cache_manifest.as_ref(), package_metadata) {
             (Some(record), Some(metadata)) => {
-                ensure_private_file_permissions(&metadata)?;
+                let digest = digest_file(&self.package_path).ok();
                 if metadata.len() != record.size_bytes
-                    || digest_file(&self.package_path)? != record.sha256
+                    || digest.as_deref() != Some(record.sha256.as_str())
                 {
-                    remove_regular_file(&self.package_path)?;
+                    remove_cache_entry(&self.package_path)?;
                     self.cache_manifest.delete().map_err(|_| storage_error())?;
-                    changed = true;
+                    recovered = true;
                 }
             }
             (Some(_), None) => {
                 self.cache_manifest.delete().map_err(|_| storage_error())?;
-                changed = true;
+                recovered = true;
             }
             (None, Some(_)) => {
-                remove_regular_file(&self.package_path)?;
-                changed = true;
+                remove_cache_entry(&self.package_path)?;
+                recovered = true;
             }
             (None, None) => {}
         }
-        let partial_manifest = self.load_partial_manifest()?;
-        let partial_metadata = safe_file_metadata(&self.partial_path)?;
-        match (partial_manifest.as_ref(), partial_metadata) {
-            (Some(_), Some(metadata)) => {
-                ensure_private_file_permissions(&metadata)?;
+        let partial_manifest = match self.load_partial_manifest() {
+            Ok(record) => record,
+            Err(_) => {
+                self.partial_manifest
+                    .delete()
+                    .map_err(|_| storage_error())?;
+                recovered = true;
+                None
             }
+        };
+        let partial_metadata = trusted_cache_file(&self.partial_path, &mut recovered)?;
+        match (partial_manifest.as_ref(), partial_metadata) {
+            (Some(_), Some(_)) => {}
             (Some(_), None) => {
                 self.partial_manifest
                     .delete()
                     .map_err(|_| storage_error())?;
-                changed = true;
+                recovered = true;
             }
             (None, Some(_)) => {
-                remove_regular_file(&self.partial_path)?;
-                changed = true;
+                remove_cache_entry(&self.partial_path)?;
+                recovered = true;
             }
             (None, None) => {}
         }
-        if changed {
+        if recovered {
             sync_directory(&self.directory)?;
+            crate::app_logging::record(
+                crate::app_logging::DesktopLogEvent::UpdateCacheStateRecovered,
+            );
         }
         Ok(())
     }
@@ -656,12 +689,43 @@ fn safe_file_metadata(path: &Path) -> Result<Option<fs::Metadata>, UpdateDownloa
     }
 }
 
-fn remove_regular_file(path: &Path) -> Result<(), UpdateDownloadError> {
+fn remove_cache_entry(path: &Path) -> Result<(), UpdateDownloadError> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
         Err(_) => Err(storage_error()),
     }
+}
+
+/// The metadata of a cache file this build is still willing to read, after
+/// clearing away anything it is not.
+///
+/// `Ok(None)` covers both an empty path and one that held something unusable,
+/// because for a disposable download those are the same starting point.
+///
+/// A link or any other non-file entry is unlinked rather than opened, so its
+/// target is never touched - and unlinking is what actually removes the block,
+/// where refusing to launch would leave both the entry and a dead App behind. A
+/// file other users could have read or rewritten is deleted for the same
+/// reason: we will not install from it, and we do not need to keep it to say so.
+fn trusted_cache_file(
+    path: &Path,
+    recovered: &mut bool,
+) -> Result<Option<fs::Metadata>, UpdateDownloadError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(storage_error()),
+    };
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || ensure_private_file_permissions(&metadata).is_err()
+    {
+        remove_cache_entry(path)?;
+        *recovered = true;
+        return Ok(None);
+    }
+    Ok(Some(metadata))
 }
 
 #[cfg(unix)]

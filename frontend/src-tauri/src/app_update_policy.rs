@@ -279,35 +279,26 @@ impl UpdatePolicyService {
         let stored = store
             .load()
             .map_err(|_| UpdatePolicyError::storage_unavailable())?;
-        let (mut document, mut needs_save) = match stored {
-            Some(stored) => {
-                let mut document: StoredUpdatePolicy = serde_json::from_slice(&stored)
-                    .map_err(|_| UpdatePolicyError::storage_unavailable())?;
-                let mut needs_save = match document.schema_version {
-                    UPDATE_POLICY_SCHEMA_VERSION => {
-                        document.validate()?;
-                        false
-                    }
-                    PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION => {
-                        document.validate_schema(PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION)?;
-                        document.schema_version = UPDATE_POLICY_SCHEMA_VERSION;
-                        true
-                    }
-                    _ => return Err(UpdatePolicyError::storage_unavailable()),
-                };
-                if serde_json::to_vec(&document)
-                    .map_err(|_| UpdatePolicyError::storage_unavailable())?
-                    != stored.as_slice()
-                {
-                    needs_save = true;
+        let (mut document, mut needs_save) = match stored
+            .as_deref()
+            .map(|stored| usable_document(stored, configured_channel))
+        {
+            Some(Some((document, repaired))) => {
+                if repaired {
+                    crate::app_logging::record(
+                        crate::app_logging::DesktopLogEvent::UpdatePolicyDocumentMigrated,
+                    );
                 }
-                if document.configured_channel != configured_channel {
-                    document.configured_channel = configured_channel.to_owned();
-                    document.highest_observed = None;
-                    document.decision = None;
-                    needs_save = true;
-                }
-                (document, needs_save)
+                (document, repaired)
+            }
+            Some(None) => {
+                crate::app_logging::record(
+                    crate::app_logging::DesktopLogEvent::UpdatePolicyDocumentReplaced,
+                );
+                (
+                    StoredUpdatePolicy::new(configured_channel, &current_version),
+                    true,
+                )
             }
             None => (
                 StoredUpdatePolicy::new(configured_channel, &current_version),
@@ -464,6 +455,55 @@ fn action_for_observation(
             Some(UpdateDecision::InstallNow) => UpdatePolicyAction::InstallRequested,
         },
     )
+}
+
+/// The stored policy this build can go on using, and whether reading it had to
+/// repair anything.
+///
+/// `None` means the file has to be replaced. That covers a schema this build
+/// does not know - which is what a rollback from a newer build leaves behind -
+/// a file that is not a document at all, and a document that no longer holds
+/// its own invariants. None of those is worth refusing to launch over. All the
+/// file carries is an update floor plus at most one deferred or skipped choice;
+/// a fresh document rebuilds the floor from the version that is actually
+/// installed, so the whole cost is one re-prompt for an update the user may
+/// have skipped - and being re-asked to update is the safe direction to err in.
+///
+/// The byte comparison below is deliberately not a rejection. It asks whether
+/// the file is exactly what this build's serializer would emit, which stops a
+/// hand edit that survived parsing but stops nothing deliberate: the directory
+/// is ours and private, so anyone who can write the file at all can equally
+/// write it in canonical form. What actually holds the line is checked
+/// elsewhere and on every read - the invariants in `validate_schema`, and
+/// `observe_release` re-deriving the release identity from the feed rather than
+/// trusting the copy on disk. So a mismatch means "rewrite this into our own
+/// form", not "give up", and the rewrite is reported rather than done quietly.
+fn usable_document(stored: &[u8], configured_channel: &str) -> Option<(StoredUpdatePolicy, bool)> {
+    let mut document: StoredUpdatePolicy = serde_json::from_slice(stored).ok()?;
+    let mut repaired = match document.schema_version {
+        UPDATE_POLICY_SCHEMA_VERSION => {
+            document.validate().ok()?;
+            false
+        }
+        PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION => {
+            document
+                .validate_schema(PREVIOUS_UPDATE_POLICY_SCHEMA_VERSION)
+                .ok()?;
+            document.schema_version = UPDATE_POLICY_SCHEMA_VERSION;
+            true
+        }
+        _ => return None,
+    };
+    if serde_json::to_vec(&document).ok()? != stored {
+        repaired = true;
+    }
+    if document.configured_channel != configured_channel {
+        document.configured_channel = configured_channel.to_owned();
+        document.highest_observed = None;
+        document.decision = None;
+        repaired = true;
+    }
+    Some((document, repaired))
 }
 
 fn saved_document(

@@ -44,6 +44,7 @@ const TASK_EMERGENCY_STOP_FILE: &str = "task-emergency-stop-v1";
 const TASK_EMERGENCY_STOP_VERSION: &str = "1";
 const BROWSER_DIAGNOSTIC_SETTINGS_FILE: &str = "browser-diagnostic-settings-v1";
 const BROWSER_DIAGNOSTIC_SETTINGS_VERSION: &str = "1";
+const PREVIOUS_BROWSER_DIAGNOSTIC_SETTINGS_VERSION: &str = "0";
 const EXECUTOR_START_TIMEOUT_SECONDS: u64 = 30;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 const HEARTBEAT_INTERVAL_SECONDS: u8 = 15;
@@ -200,6 +201,55 @@ struct StoredBrowserDiagnosticSettings {
     capture_successful_runs: bool,
 }
 
+/// How much of a stored diagnostics document this build could still use.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StoredSettingsReading {
+    Current,
+    /// An older layout whose value carried over unchanged.
+    Migrated,
+    /// Nothing usable, so the switch went back to its default.
+    Reset,
+}
+
+impl StoredSettingsReading {
+    fn recovery_event(self) -> Option<crate::app_logging::DesktopLogEvent> {
+        match self {
+            Self::Current => None,
+            Self::Migrated => {
+                Some(crate::app_logging::DesktopLogEvent::BrowserDiagnosticSettingsMigrated)
+            }
+            Self::Reset => {
+                Some(crate::app_logging::DesktopLogEvent::BrowserDiagnosticSettingsReset)
+            }
+        }
+    }
+}
+
+/// Reads the successful-run capture switch out of whatever is on disk.
+///
+/// A version this build does not know is what a rollback leaves behind, and a
+/// malformed document is what a half-written or hand-edited file looks like.
+/// Neither can stop the App from launching: the closed state for a switch that
+/// decides whether to keep screenshots of successful runs is `false`, which is
+/// exactly where a machine with no settings file at all starts. Refusing to
+/// launch captures nothing either - it just also takes the product away.
+fn read_browser_diagnostic_settings(source: &[u8]) -> (bool, StoredSettingsReading) {
+    let Ok(stored) = serde_json::from_slice::<StoredBrowserDiagnosticSettings>(source) else {
+        return (false, StoredSettingsReading::Reset);
+    };
+    match stored.version.as_str() {
+        BROWSER_DIAGNOSTIC_SETTINGS_VERSION => (
+            stored.capture_successful_runs,
+            StoredSettingsReading::Current,
+        ),
+        PREVIOUS_BROWSER_DIAGNOSTIC_SETTINGS_VERSION => (
+            stored.capture_successful_runs,
+            StoredSettingsReading::Migrated,
+        ),
+        _ => (false, StoredSettingsReading::Reset),
+    }
+}
+
 struct BrowserDiagnosticSettingsState {
     store: AppDataSecretStore,
     capture_successful_runs: bool,
@@ -331,44 +381,58 @@ impl ExecutorPlatformService {
             TASK_EMERGENCY_STOP_FILE,
         )
         .map_err(|_| storage_unavailable())?;
-        let pending_task_emergency_stop = task_emergency_stop_store
+        let pending_task_emergency_stop = match task_emergency_stop_store
             .load()
             .map_err(|_| storage_unavailable())?
-            .map(|source| {
-                serde_json::from_slice::<PendingTaskEmergencyStop>(&source)
-                    .map_err(|_| storage_unavailable())?
-                    .validate()
-            })
-            .transpose()?;
+        {
+            None => None,
+            Some(source) => {
+                let pending = serde_json::from_slice::<PendingTaskEmergencyStop>(&source)
+                    .ok()
+                    .and_then(|record| record.validate().ok());
+                if pending.is_none() {
+                    // A record written by a build whose format this one does not
+                    // know names a task we cannot identify, so there is nothing
+                    // left to reconcile from it. Refusing to launch would not
+                    // reconcile it either - it would only take away the App the
+                    // user needs to stop the task again.
+                    let _ = task_emergency_stop_store.delete();
+                    crate::app_logging::record(
+                        crate::app_logging::DesktopLogEvent::TaskEmergencyStopRecordDropped,
+                    );
+                }
+                pending
+            }
+        };
         let browser_diagnostic_settings_store = AppDataSecretStore::new(
             &app_data_directory.join(EXECUTOR_DIRECTORY),
             BROWSER_DIAGNOSTIC_SETTINGS_FILE,
         )
         .map_err(|_| storage_unavailable())?;
-        let capture_successful_runs = browser_diagnostic_settings_store
+        let capture_successful_runs = match browser_diagnostic_settings_store
             .load()
             .map_err(|_| storage_unavailable())?
-            .map(|source| {
-                let stored = serde_json::from_slice::<StoredBrowserDiagnosticSettings>(&source)
-                    .map_err(|_| storage_unavailable())?;
-                match stored.version.as_str() {
-                    BROWSER_DIAGNOSTIC_SETTINGS_VERSION => {}
-                    "0" => {
-                        let migrated = serde_json::to_vec(&StoredBrowserDiagnosticSettings {
-                            version: BROWSER_DIAGNOSTIC_SETTINGS_VERSION.to_owned(),
-                            capture_successful_runs: stored.capture_successful_runs,
-                        })
-                        .map_err(|_| storage_unavailable())?;
-                        browser_diagnostic_settings_store
-                            .save(&migrated)
-                            .map_err(|_| storage_unavailable())?;
+        {
+            None => false,
+            Some(source) => {
+                let (capture_successful_runs, reading) = read_browser_diagnostic_settings(&source);
+                if let Some(event) = reading.recovery_event() {
+                    // Best effort on purpose: a machine with no settings file at
+                    // all launches without writing anything, so a rewrite that
+                    // fails here must not be worse than that. The value above is
+                    // already the recovered one, and the next launch recovers
+                    // again from the same file.
+                    if let Ok(rewritten) = serde_json::to_vec(&StoredBrowserDiagnosticSettings {
+                        version: BROWSER_DIAGNOSTIC_SETTINGS_VERSION.to_owned(),
+                        capture_successful_runs,
+                    }) {
+                        let _ = browser_diagnostic_settings_store.save(&rewritten);
                     }
-                    _ => return Err(storage_unavailable()),
+                    crate::app_logging::record(event);
                 }
-                Ok(stored.capture_successful_runs)
-            })
-            .transpose()?
-            .unwrap_or(false);
+                capture_successful_runs
+            }
+        };
         Ok(Self {
             manager: Arc::new(manager),
             platform_profile_lease: Arc::new(Mutex::new(None)),
@@ -925,7 +989,7 @@ const fn storage_unavailable() -> ExecutorPlatformError {
 
 #[cfg(all(test, any(not(feature = "desktop-e2e"), feature = "control-plane-e2e")))]
 mod tests {
-    use super::{ExecutorPlatformErrorCode, ExecutorPlatformService};
+    use super::ExecutorPlatformService;
     use crate::startup_environment::ExecutorStartupState;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1052,47 +1116,107 @@ mod tests {
     }
 
     #[test]
-    fn unknown_browser_diagnostic_settings_version_fails_explicitly() {
+    fn a_diagnostic_settings_version_this_build_does_not_know_falls_back_to_capturing_nothing() {
+        // Written by a newer build, read after a rollback. Refusing to launch is
+        // not the closed state for a capture switch - `false` is, which is also
+        // where a machine with no settings file at all starts.
         let app_data = TemporaryAppData::new();
         let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
         service
             .set_capture_successful_diagnostics(true)
             .expect("create settings file");
         drop(service);
+        let settings_path = app_data
+            .0
+            .join("local-executor/browser-diagnostic-settings-v1");
         std::fs::write(
-            app_data
-                .0
-                .join("local-executor/browser-diagnostic-settings-v1"),
+            &settings_path,
             br#"{"version":"future","capture_successful_runs":true}"#,
         )
         .expect("write unknown settings version");
 
-        let error = ExecutorPlatformService::initialize(&app_data.0)
-            .err()
-            .expect("unknown settings version must fail");
-        assert_eq!(error.code(), ExecutorPlatformErrorCode::StorageUnavailable);
+        let reopened = ExecutorPlatformService::initialize(&app_data.0);
+        assert!(
+            reopened.is_ok(),
+            "an unknown settings version must fall back instead of aborting startup"
+        );
+        assert!(!reopened
+            .expect("recovered service")
+            .browser_diagnostic_settings()
+            .expect("recovered settings")
+            .capture_successful_runs());
+        assert_eq!(
+            std::fs::read_to_string(settings_path).expect("rewritten settings"),
+            r#"{"version":"1","capture_successful_runs":false}"#
+        );
     }
 
     #[test]
-    fn malformed_successful_diagnostic_setting_fails_closed() {
+    fn a_malformed_diagnostic_settings_file_falls_back_to_capturing_nothing() {
         let app_data = TemporaryAppData::new();
         let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
         service
             .set_capture_successful_diagnostics(true)
             .expect("save settings");
         drop(service);
+        let settings_path = app_data
+            .0
+            .join("local-executor/browser-diagnostic-settings-v1");
         std::fs::write(
-            app_data
-                .0
-                .join("local-executor/browser-diagnostic-settings-v1"),
+            &settings_path,
             br#"{"version":"1","capture_successful_runs":1}"#,
         )
         .expect("corrupt settings");
 
-        let error = ExecutorPlatformService::initialize(&app_data.0)
-            .err()
-            .expect("reject malformed settings");
-        assert_eq!(error.code(), ExecutorPlatformErrorCode::StorageUnavailable);
+        let reopened = ExecutorPlatformService::initialize(&app_data.0);
+        assert!(
+            reopened.is_ok(),
+            "malformed settings must fall back instead of aborting startup"
+        );
+        assert!(!reopened
+            .expect("recovered service")
+            .browser_diagnostic_settings()
+            .expect("recovered settings")
+            .capture_successful_runs());
+        assert_eq!(
+            std::fs::read_to_string(settings_path).expect("rewritten settings"),
+            r#"{"version":"1","capture_successful_runs":false}"#
+        );
+    }
+
+    #[test]
+    fn a_pending_emergency_stop_record_this_build_cannot_read_is_dropped_not_fatal() {
+        // Keeping the App shut leaves the stop unreconciled and takes away the
+        // one control the user has left. Dropping the record loses the pending
+        // reconciliation, but the executor died with the App and the user can
+        // stop the task again from a workbench that opens.
+        let app_data = TemporaryAppData::new();
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        service
+            .engage_task_emergency_stop(
+                "123e4567-e89b-42d3-a456-426614174005",
+                "task:emergency-stop:t63-unreadable",
+            )
+            .expect("engage emergency stop");
+        drop(service);
+        let record_path = app_data.0.join("local-executor/task-emergency-stop-v1");
+        std::fs::write(
+            &record_path,
+            br#"{"version":"future","task_id":"123e4567-e89b-42d3-a456-426614174005","idempotency_key":"task:emergency-stop:t63-unreadable"}"#,
+        )
+        .expect("write unreadable pending stop");
+
+        let reopened = ExecutorPlatformService::initialize(&app_data.0);
+        assert!(
+            reopened.is_ok(),
+            "an unreadable pending stop must be dropped instead of aborting startup"
+        );
+        assert!(reopened
+            .expect("recovered service")
+            .begin_task_emergency_stop_reconciliation()
+            .expect("reconciliation gate")
+            .is_none());
+        assert!(!record_path.exists());
     }
 
     #[test]
