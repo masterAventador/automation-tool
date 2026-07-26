@@ -3,16 +3,21 @@
 
 Drives the *real* video-creation model (Bailian qwen3.7-max via the OpenAI
 compatible endpoint) through the production authoring path: one sentence brief
-→ DESIGN / SCRIPT / STORYBOARD + a seekable HTML/CSS/JS composition →
-lint / check / snapshot → bounded local fixes → submit RenderJob into the
-RenderJob private directory. It asserts:
+→ DESIGN / SCRIPT / STORYBOARD → the locally rendered composition →
+lint / check / snapshot → submit RenderJob into the RenderJob private
+directory. It asserts:
 
-- the model produced the four closed artifacts and a composition that passes
-  the static gates, with no remote reference anywhere;
+- the model produced the three closed artifacts and the locally rendered
+  composition passes the static gates, with no remote reference anywhere;
 - everything landed inside the RenderJob workspace and nowhere else;
 - the RenderJob submission lines up with the BM-04 sandbox spec (the frame
   render itself is out of scope — BM-08/BM-16 own the real user path);
 - the one-sentence path is *unavailable* when no model is configured.
+
+Since T92 the composition document is rendered locally from the model's beats
+rather than written by the model, so this acceptance is what proves the *real*
+model still answers the narrowed contract — the deterministic tests can only
+prove the parser.
 
 The api key is read at runtime from the git-ignored ``.local/secrets`` file and
 never printed, logged, asserted on, or written into any artifact. No browser is
@@ -103,7 +108,6 @@ def _run_real_authoring(root: Path) -> None:
         ),
         model_config=config,
         model_call=call_video_creation_model,
-        max_fix_rounds=3,
     )
     brief = MotionBrief(text=BRIEF_TEXT, aspect_ratio="16:9", duration_seconds=6, language="zh")
     result = agent.author(brief)

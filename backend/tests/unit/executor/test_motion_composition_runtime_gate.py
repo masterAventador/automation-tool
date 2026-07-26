@@ -10,18 +10,27 @@ keep the `gsap.timeline(...)` calls that depended on it.
 The result passes every other static gate: the text `window.__timelines`, the
 paused timeline, the clip intervals and the canvas are all still there. Only at
 render time is `gsap` undefined, the setup script throws, no timeline registers
-and every frame comes out identical. So the repair instruction itself steers the
+and every frame comes out identical. So the repair instruction itself steered the
 model into the silent failure, which is why this gate exists next to the others.
+
+T92 moved the document to a local template, so the model no longer writes either
+the tag or the calls and the repair loop is gone. That closes the original route
+but not the shape: the same unrunnable document is one bad edit to
+`composition_template.py` away, and this gate is what would catch it. The
+template's own output is checked against it in
+`test_motion_composition_template.py`; what stays here is the gate itself, held
+against the exact shape and against the two innocent shapes it must not touch.
 """
 
 from __future__ import annotations
 
 from automation_tool.executor.motion_authoring.agent import (
-    LintResult,
     MotionBrief,
     _first_message_contract,
-    _fix_message_contract,
     check_composition,
+)
+from automation_tool.executor.motion_authoring.composition_template import (
+    AUTHORING_RUNTIME_ASSET,
 )
 
 DURATION = 6
@@ -78,40 +87,15 @@ def test_composition_loading_the_local_runtime_passes() -> None:
     )
 
 
-def test_the_repair_instruction_explains_how_to_load_the_runtime() -> None:
-    """Rejecting without saying what to do would only stall the fix loop.
-
-    The model reaches this state by obeying the previous round's "remove every
-    remote reference", so the next round has to name the local script path as
-    the replacement rather than repeat the instruction that caused it.
-    """
-    brief = MotionBrief(
-        text="用蓝色商务风做一段本周销售增长说明",
-        aspect_ratio="16:9",
-        duration_seconds=DURATION,
-        language="zh",
-    )
-    message = _fix_message_contract(
-        LintResult(()),
-        check_composition(LOADS_NOTHING, duration_seconds=DURATION),
-        brief,
-    )
-    assert "missing_animation_runtime" in message, (
-        f"the repair round must address the code it reported: {message}"
-    )
-    assert "script" in message, (
-        f"the repair round must name the local script tag as the fix: {message}"
-    )
-
-
-def test_the_authoring_prompt_overrides_the_reference_cdn_example() -> None:
+def test_the_authoring_prompt_no_longer_hands_the_model_the_tag_at_all() -> None:
     """The pinned reference teaches the wrong thing and cannot be edited.
 
     `vendor/hyperframes` is a read-only, digest-verified submodule, so the CDN
     `<script src="https://...gsap...">` on line 12 of its minimal-composition
-    reference stays exactly as it is. A concrete worked example outweighs a
-    prose rule, so the prompt that ships that reference has to name the tag and
-    tell the model to replace it rather than merely mention local assets.
+    reference stays exactly as it is, and it is still shipped in the system
+    message. The prompt used to have to argue with that example; it now removes
+    the job the example belongs to instead — the model is told it writes no
+    markup, so there is no tag for it to copy, keep or delete.
     """
     brief = MotionBrief(
         text="用蓝色商务风做一段本周销售增长说明",
@@ -119,13 +103,11 @@ def test_the_authoring_prompt_overrides_the_reference_cdn_example() -> None:
         duration_seconds=DURATION,
         language="zh",
     )
-    message = _first_message_contract(brief, ("runtime/gsap.min.js",))
-    assert "cdn" in message.lower(), (
-        f"the prompt must name the CDN tag the reference demonstrates: {message}"
+    message = _first_message_contract(brief)
+    assert AUTHORING_RUNTIME_ASSET not in message, (
+        f"the model has no use for the runtime path any more: {message}"
     )
-    assert "runtime/gsap.min.js" in message, (
-        f"the prompt must offer the local path as the replacement: {message}"
-    )
+    assert "<script" not in message, f"the prompt must not hand back a tag: {message}"
 
 
 def test_composition_defining_the_runtime_inline_passes() -> None:
