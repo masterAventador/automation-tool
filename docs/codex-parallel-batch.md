@@ -374,7 +374,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **D** T41 Big Shoulders Display 权利登记 | ✅ | 本提交 | 精确资产登记断言准确失败：`'font-big-shoulders-display' not found` | WOFF2 字节与动效 overlay/offline lock 对齐；按 Google Fonts 锁定 OFL-1.1 与 SIL 官方正文有条件放行，记录保留版权/许可证、不得单独售卖、衍生继续 OFL 等条件 |
 | **E** T74 执行器缓存键 + 硬编码 `.local/` | ✅ | 本提交 | 缓存键测试准确失败：`source, spec and contract bytes must each select a different cached package` | 缓存键纳入 backend 源码、spec、锁文件及相关契约/只读资源摘要；浏览器归档统一走 `archive_path()`，T36 失效清理同步指向摘要键 |
 | **E** T75 另一处吞掉 PyInstaller 输出 | ✅ | 本提交 | 构建失败测试准确失败：`PyInstaller stdout: missing hidden import` 与 `PyInstaller stderr: build traceback` 均不在异常中 | E4-07 及同类 E4-09/E4-10、Windows candidate 均携带 stdout/stderr 各自最后 20 行，空输出也给固定诊断 |
-| **F** T26 剔除 Widevine CDM | ⬜ | | | 唯一有书面禁令的风险 |
+| **F** T26 剔除 Widevine CDM | ✅ | 本提交 | 合成 staging 首先准确失败：`'exclusions' not found`；许可门禁仍为 `pending`，预算断言为 `343 != 324` | 保留 CfT 149 与原归档锁，仅按目标契约物理剔除 macOS Widevine；arm64 真归档 331→328 文件、359,441,871→339,257,128 B，离线启动与篡改拒绝通过；Windows 无该组件，CfT 整体再分发结论仍明确为 `undetermined` |
 | **F** T24 执行器包根按 `debug_assertions` 分叉 | ✅ | 本提交 | 单路径守卫准确失败：`lib.rs::run selects the Local Executor package root by build mode`；验收装配守卫继而失败：`must stage the signed Executor in the debug App resource root` | 所有构建统一从 Tauri `resource_dir()/local-executor/package` 查找；共享与自定义桌面验收均把测试包挂载到同一资源布局，AppData 只留状态 |
 | **F** T45 Control Plane 镜像进 playwright | ✅ | 本提交（锁文件下一提交） | Python 契约准确失败：`KeyError: 'executor'`；Node 镜像契约准确失败：缺少 `--no-group executor` | Playwright 移入默认启用的 `executor` 依赖组，执行器/本地开发保持可用；Control Plane 镜像显式排除该组，离线 dry-run 确认会卸载 Playwright |
 | **F** T38 演示后回收清单 | ✅ | 本提交 | 纯文档任务无代码 RED；既有 C10-13 文档契约 2/2 通过 | 新增可执行退场手册，覆盖业务冻结、账号/Session/凭据吊销、本机数据、PostgreSQL、对象存储、云资源、证据保留与双人复核；只登记凭据 ID/指纹，禁止读取或记录密钥值 |

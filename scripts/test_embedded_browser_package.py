@@ -107,9 +107,18 @@ def _write_zip(
 
 def _synthetic_entries() -> dict[str, bytes]:
     contents = "chrome-mac-arm64/Google Chrome for Testing.app/Contents"
+    widevine = (
+        f"{contents}/Frameworks/Google Chrome for Testing Framework.framework/"
+        "Versions/149.0.7827.55/Libraries/WidevineCdm"
+    )
     return {
         EXECUTABLE: b"synthetic browser binary",
         f"{contents}/Info.plist": b"<plist/>",
+        f"{widevine}/LICENSE": b"synthetic proprietary license",
+        f"{widevine}/manifest.json": b'{"name":"WidevineCdm"}',
+        f"{widevine}/_platform_specific/mac_arm64/libwidevinecdm.dylib": (
+            b"synthetic proprietary binary"
+        ),
     }
 
 
@@ -160,6 +169,11 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
 
     def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
         payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
+        self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"], 324)
+        self.assertEqual(
+            RELEASE_SIZE_BOUNDS.max_package_bytes,
+            1125 * 1024 * 1024,
+        )
         self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
         self.assertLessEqual(
             RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10

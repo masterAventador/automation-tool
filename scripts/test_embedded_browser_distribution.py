@@ -50,6 +50,18 @@ MUTABLE_FILE = (
     if os.name == "nt"
     else "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist"
 )
+WIDEVINE_PREFIX = (
+    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/"
+    "Google Chrome for Testing Framework.framework/Versions/149.0.7827.55/"
+    "Libraries/WidevineCdm/"
+)
+WIDEVINE_FILES = {
+    f"{WIDEVINE_PREFIX}LICENSE": b"synthetic proprietary license",
+    f"{WIDEVINE_PREFIX}manifest.json": b'{"name":"WidevineCdm"}',
+    f"{WIDEVINE_PREFIX}_platform_specific/mac_arm64/libwidevinecdm.dylib": (
+        b"synthetic proprietary binary"
+    ),
+}
 
 
 def _write_zip(path: Path, entries: dict[str, bytes]) -> str:
@@ -72,6 +84,7 @@ def _valid_entries() -> dict[str, bytes]:
     return {
         f"{app}/MacOS/Google Chrome for Testing": b"binary",
         f"{app}/Info.plist": b"<plist/>",
+        **WIDEVINE_FILES,
     }
 
 
@@ -116,6 +129,36 @@ class DistributionTests(unittest.TestCase):
             )
         )
         self.assertIn("licenses", document)
+
+    def test_manifest_records_the_proprietary_component_disposition(self) -> None:
+        manifest_path = self._manifest()
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        review = document["licenses"]["chromium_build"]
+        self.assertEqual(
+            review["redistribution_review"],
+            "widevine_excluded_remaining_cft_terms_unresolved",
+        )
+        disposition = review["proprietary_component_disposition"]
+        target = self.contract.targets[TARGET_ID]
+        self.assertEqual(
+            disposition["excluded_entry_prefixes"],
+            list(target.excluded_entry_prefixes),
+        )
+        self.assertEqual(
+            disposition["status"],
+            (
+                "excluded_from_staging"
+                if target.excluded_entry_prefixes
+                else "absent_from_locked_archive"
+            ),
+        )
+        self.assertIn("separate license agreement", disposition["license_basis"])
+        remaining = review["remaining_license_conclusion"]
+        self.assertEqual(remaining["chromium_sources"], "BSD-3-Clause")
+        self.assertEqual(
+            remaining["assembled_chrome_for_testing"],
+            "undetermined",
+        )
 
     def test_verify_passes_on_untouched_staging(self) -> None:
         self._manifest()
@@ -199,6 +242,40 @@ class DistributionTests(unittest.TestCase):
         manifest_path = self._manifest()
         document = json.loads(manifest_path.read_text(encoding="utf-8"))
         document["runtime"]["chromium"]["browser_version"] = "150.0.0.0"
+        manifest_path.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaises(DistributionRejected):
+            verify_distribution(
+                staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+            )
+
+    def test_pending_license_review_is_rejected(self) -> None:
+        manifest_path = self._manifest()
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        document["licenses"]["chromium_build"]["redistribution_review"] = "pending"
+        manifest_path.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaises(DistributionRejected):
+            verify_distribution(
+                staging=self.staging, target_id=TARGET_ID, enforce_archive_lock=False
+            )
+
+    @unittest.skipIf(os.name == "nt", "the locked Windows archive has no Widevine")
+    def test_excluded_widevine_cannot_be_reintroduced_by_manifest(self) -> None:
+        manifest_path = self._manifest()
+        widevine = self.staging / f"{WIDEVINE_PREFIX}reintroduced.bin"
+        widevine.parent.mkdir(parents=True, exist_ok=True)
+        widevine.write_bytes(b"reintroduced proprietary component")
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        document["entries"].append(
+            {
+                "path": f"{WIDEVINE_PREFIX}reintroduced.bin",
+                "type": "file",
+                "size": widevine.stat().st_size,
+                "sha256": sha256_file(widevine),
+                "executable": False,
+            }
+        )
+        document["fileCount"] += 1
+        document["totalBytes"] += widevine.stat().st_size
         manifest_path.write_text(json.dumps(document), encoding="utf-8")
         with self.assertRaises(DistributionRejected):
             verify_distribution(

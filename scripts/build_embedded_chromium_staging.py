@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
@@ -74,6 +75,7 @@ class StagingTarget:
     archive_sha256: str
     root_entry: str
     executable: str
+    excluded_entry_prefixes: tuple[str, ...]
     forbidden_entry_substrings: tuple[str, ...]
 
 
@@ -91,6 +93,20 @@ class StagingResult:
     manifest_path: Path
     file_count: int
     total_bytes: int
+
+
+def _validated_excluded_prefix(prefix: object, root_entry: str) -> str:
+    if not isinstance(prefix, str) or not prefix.endswith("/"):
+        _reject("excluded entry prefix must be a directory prefix")
+    path = PurePosixPath(prefix.rstrip("/"))
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or len(path.parts) < 2
+        or path.parts[0] != root_entry
+    ):
+        _reject("excluded entry prefix escapes the target root")
+    return prefix
 
 
 def load_staging_contract(path: Path) -> StagingContract:
@@ -116,6 +132,7 @@ def load_staging_contract(path: Path) -> StagingContract:
         if not isinstance(value, dict):
             _reject("contract target invalid")
         allowlist = value.get("redirect_host_allowlist")
+        excluded = value.get("excluded_entry_prefixes")
         forbidden = value.get("forbidden_entry_substrings")
         if (
             not isinstance(value.get("buildable"), bool)
@@ -125,9 +142,16 @@ def load_staging_contract(path: Path) -> StagingContract:
             or not isinstance(value.get("archive_sha256"), str)
             or not isinstance(value.get("root_entry"), str)
             or not isinstance(value.get("executable"), str)
+            or not isinstance(excluded, list)
             or not isinstance(forbidden, list)
         ):
             _reject("contract target field invalid")
+        root_entry = value["root_entry"]
+        excluded_prefixes = tuple(
+            _validated_excluded_prefix(prefix, root_entry) for prefix in excluded
+        )
+        if len(excluded_prefixes) != len(set(excluded_prefixes)):
+            _reject("excluded entry prefixes must be unique")
         targets[target_id] = StagingTarget(
             target_id=target_id,
             buildable=value["buildable"],
@@ -135,8 +159,9 @@ def load_staging_contract(path: Path) -> StagingContract:
             redirect_host_allowlist=tuple(allowlist),
             redirect_path_prefix=value["redirect_path_prefix"],
             archive_sha256=value["archive_sha256"],
-            root_entry=value["root_entry"],
+            root_entry=root_entry,
             executable=value["executable"],
+            excluded_entry_prefixes=excluded_prefixes,
             forbidden_entry_substrings=tuple(forbidden),
         )
     return StagingContract(
@@ -207,6 +232,25 @@ def safe_extract(
             target.chmod(0o755 if _entry_mode(info) & 0o111 else 0o644)
 
 
+def _manifest_entry(base: Path, path: Path) -> dict[str, object] | None:
+    relative = str(PurePosixPath(path.relative_to(base)))
+    if path.is_symlink():
+        return {
+            "path": relative,
+            "type": "symlink",
+            "targetPath": str(path.readlink()),
+        }
+    if path.is_file():
+        return {
+            "path": relative,
+            "type": "file",
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+            "executable": bool(path.stat().st_mode & 0o111),
+        }
+    return None
+
+
 def generate_manifest(base: Path, *, root_entry: str) -> list[dict[str, object]]:
     """Deterministic, sorted per-entry manifest of the staged tree."""
     root = base / root_entry
@@ -214,26 +258,42 @@ def generate_manifest(base: Path, *, root_entry: str) -> list[dict[str, object]]
         _reject("staged root missing")
     entries: list[dict[str, object]] = []
     for path in sorted(root.rglob("*")):
-        relative = str(PurePosixPath(path.relative_to(base)))
-        if path.is_symlink():
-            entries.append(
-                {
-                    "path": relative,
-                    "type": "symlink",
-                    "targetPath": str(path.readlink()),
-                }
-            )
-        elif path.is_file():
-            entries.append(
-                {
-                    "path": relative,
-                    "type": "file",
-                    "size": path.stat().st_size,
-                    "sha256": sha256_file(path),
-                    "executable": bool(path.stat().st_mode & 0o111),
-                }
-            )
+        entry = _manifest_entry(base, path)
+        if entry is not None:
+            entries.append(entry)
     return entries
+
+
+def exclude_entries(
+    base: Path, *, prefixes: tuple[str, ...]
+) -> list[dict[str, object]]:
+    """Remove only contract-listed prefixes and record the exact removed bytes."""
+    exclusions: list[dict[str, object]] = []
+    for prefix in prefixes:
+        relative = PurePosixPath(prefix.rstrip("/"))
+        target = base / Path(*relative.parts)
+        if target.is_symlink() or not target.is_dir():
+            _reject("configured excluded entry prefix is missing")
+        removed_entries = [
+            entry
+            for path in sorted(target.rglob("*"))
+            if (entry := _manifest_entry(base, path)) is not None
+        ]
+        if not removed_entries:
+            _reject("configured excluded entry prefix is empty")
+        removed_bytes = sum(int(entry.get("size", 0)) for entry in removed_entries)
+        shutil.rmtree(target)
+        exclusions.append(
+            {
+                "prefix": prefix,
+                "removedFileCount": sum(
+                    entry["type"] == "file" for entry in removed_entries
+                ),
+                "removedBytes": removed_bytes,
+                "removedEntries": removed_entries,
+            }
+        )
+    return exclusions
 
 
 def build_staging(
@@ -279,6 +339,10 @@ def build_staging(
     if not executable.is_file() or not executable.stat().st_mode & 0o111:
         _reject("locked executable missing from staging")
 
+    exclusions = exclude_entries(
+        output,
+        prefixes=target.excluded_entry_prefixes,
+    )
     entries = generate_manifest(output, root_entry=target.root_entry)
     total_bytes = sum(int(entry.get("size", 0)) for entry in entries)
     manifest = {
@@ -294,6 +358,7 @@ def build_staging(
             "archive_sha256": archive_sha256,
         },
         "executable": target.executable,
+        "exclusions": exclusions,
         "fileCount": sum(1 for entry in entries if entry["type"] == "file"),
         "totalBytes": total_bytes,
         "entries": entries,
