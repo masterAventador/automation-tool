@@ -17,15 +17,15 @@
 | ✅ 生产装配与出厂门禁 | 31 |
 | ✅ 云端与交付 | 10 |
 | ✅ 视频与内容 | 31 |
-| ✅ 验收基础设施与门禁 | 35 |
+| ✅ 验收基础设施与门禁 | 36 |
 | ❌ 查证不成立（观察真、结论错，无需修） | 7 |
-| **小计：已收口** | **114** |
+| **小计：已收口** | **115** |
 | 一、Demo 前必须收口 | 4 |
 | T73～T100（T10 那轮挖出的新任务） | 3 |
-| 冻结区·今晚撞见的技术债 | 6 |
+| 冻结区·今晚撞见的技术债 | 5 |
 | 冻结区·原有待办 | 3 |
 | 冻结区·T101/T90b 自报的新窗口 | 0 |
-| **小计：未收口** | **16** |
+| **小计：未收口** | **15** |
 | **去重后总计** | **130** |
 
 **Demo 前要收口的是 3 项**：**T7 要你动手**（Windows GUI，前置 T53 已就绪），**我这边是 T10 与新挖出的 T109**（抖音重新检查按钮，已派线）。
@@ -61,7 +61,6 @@
 | T10 | 从正式签名包跑一遍所有用例 | 🚧 | ❌ 不可 | 本轮目标本身，必须我做。**已修四条真红**（见下「T10 已抓到的」）。**当前形态：磁盘上没有可演示的包**——`/Applications` 那个主二进制 07-26 20:42，之后又合入 40 笔提交；20:52 的 DMG 卷里没有 `Applications` 链接（T84 的修复 22:42 才进）。必须从当前 HEAD 重新出包，否则 T84/T85/T86 与夜间四条都不在客户拿到的产物里。实测见 `docs/development/T70.md` |
 | T7 | Windows GUI 三项验收 | 👤 | — | 依赖 T53（**已就绪**）。你切到 Windows 上做 |
 | T120 | **T7 的「三项 GUI 验收」到底是哪三项，从来没写下来过** | 👤 | T116 把 roadmap 全部历史版本、交接文档、`development-roadmap.md`、codex 交接单都查过，**没有任何一处列出这三项**。主线整晚都在跟用户说「T7 等你切 Windows 做三项验收」，**而这三项是什么，主线从来没核实过**——又一次照着台账复述而不去查证。**做 T7 之前必须先把它定下来**，否则无从判断做完没有 |
-| T124 | **两个测试夹具写死 macOS 产物名，Windows 上必红** | 🤖 | T123 顺带纠正 T116 的一处归类：`test_prepare_video_runtime`（3/9 红）与 `test_video_studio_runtime_staging` **不是缺 ffmpeg**——夹具写死了 `runtime/node`、`required_for("macos")` 这类 POSIX 产物名，而 Windows 要的是 `node.exe`/`ffmpeg.exe`。工具链恢复后**照样红**，但**不挡出包**。与 T81、T122 同族（测试自身不可移植）。另记：后者是 `check_*` + `main()` 形状，用 `python -m unittest` 会得到 `NO TESTS RAN`（rc=5），别误读成红 |
 
 ### T10 已抓到并修掉的（跑全量的直接产出）
 
@@ -258,6 +257,7 @@
 |---|---|
 | T119 | **Windows 上出不了包：没有可用的 C 编译器** —— 已由 T123 恢复。**入账时我写成「要不要装工具链、等你定」，那个判断是错的**：线索在 T116 记录里就有（`.local\vf04-msys2` 目录、安装器、07-24 的 `ffmpeg.exe` 都还在），**它本来就是这么装的，是环境退化不是从没有过**，不需要用户拍板。证据与恢复步骤见下一行 T123 |
 | T123 | **Windows 的 media toolchain 构建能力已恢复**（`5d5b5b0`）。**真跑了一次：`rc=0`、3 分 14 秒、从空缓存起、产物 48.8 MB**（`ffmpeg.exe` 19,269,632 字节、`ffprobe.exe` 19,109,888 字节）。三条独立佐证：产物在**没有 MSYS2 的普通 PowerShell** 里 `-version` rc=0（证明 `-static` 生效）、`check_video_media_toolchain.py --target windows-x86_64` rc=0（完整能力矩阵 + 两条真实 H.264 编码）、二次运行 0 秒命中缓存。**结论比「装回来了」更有价值：机器上什么都没坏、什么都不缺。** MSYS2 完整在位（1171 MB、114 个包），`gcc 16.1.0 Rev5` 与 07-24 旧产物 `BUILD-INFO.txt` 里的编译器逐字相同，pacman 日志把当初装法完整还原。**本次没装任何新东西、一个字节都没下载**——退化的只是「怎么调用它」从没被任何地方记下来：它装在 `.local\` 下，不写注册表、不进系统 PATH，除非有人显式指向，任何进程都看不见。**主线那条线索指对方向但落点偏了**：Git for Windows 的 bash **也**把 `MSYSTEM` 设成 `MINGW64`，能走过 `build_video_media_toolchain.sh:28` 的守卫再倒在 `No working C compiler found.`——**守卫检查的是「我在哪种 shell 里」，而它真正要保证的是「我有没有 C 编译器」**；改它会让每台机器（含 macOS）缓存全失效重编 ffmpeg，故**只记录不修**，与 T111 的教训一致。**红线守住**：新产物与旧产物大小逐字节相同而 SHA-256 不同（builder 的 `mktemp` 路径被编进 `configuration:` 串），这正是「真的新编了一次」的证据；旧产物只被读过 hash，没有以任何方式进入缓存。**踩到并记录了三个坑**，其中一个是静默成功同族：MSYS2 的 `usr\bin\cmd`（无扩展名 bash shim）会顶掉 PowerShell 的 `cmd.exe`，程序压根不启动而 `$LASTEXITCODE` **保持旧值**——拿到「rc=0 但一秒没跑」，是看 0.13 秒的时间戳才发现的。**T121 的修复立刻回本**：那次真构建死在 `curl: (35) TLS`，能看见这个原因正是因为诊断修复已在检出上 |
+| T124 | **两个夹具改为按平台派生产物名**（`679b59a`）。**单一来源本来就有**：`release-package-resources.v1.json` → `release_assembly._VideoResource.required_for(platform)`，**生产侧三个消费者一直在读它，唯二没读的就是这两个夹具**——它们把 `platform` 写成了常量。所以没有新建来源；新建正好制造出这个仓库反复在修的「同一个事实两份」。**断言一条没放宽**，守的性质原样保留，只是「哪一种拼写」改为派生。**Windows 是真验了、不是待复验**：winbox 同机同检出，先跑 HEAD 再跑本任务版本——`test_prepare_video_runtime` 从 rc=1（**9 项中 3 项失败**）到 rc=0（10 项全过），`test_video_studio_runtime_staging` 从 rc=1 到 rc=0；失败原文逐字是 `runtime/node.exe is missing or empty`，与 T123 的判断（**含 3/9 这个数字**）吻合。覆盖双向：新用例在 macOS 上跑 `windows` 分支、在 Windows 上跑 `macos` 分支。**今晚 T117 加的那道自守检查在这里立刻回本**——同族地加进本文件后，第一时间抓到子代理自己新写的检查没登记；没有它，那一跑会打印「9 checks passed」然后干净退出。**只登记不改**（都属 codex C10）：两处手抄的 `node.exe if os.name == "nt"` 映射，其中一处还有独立理由——它在 `MOTION_WORKER_INPUTS` 缓存键里，动它会让**每台机器**重编一次 Worker。另记一条 Windows 坑：**PowerShell 的 `>` 重定向写的是 UTF-16LE**，读回来必须先 `iconv`，否则看到逐字符加空格的乱码 |
 | T122 | **冻结产物的最小环境，两条前提被实测推翻**（`a2df24c`）。**推翻一：PATH 取值根本不是那个红的原因**——在 winbox 上跑真实 PyInstaller onedir 产物的完整矩阵：换成正确的 `System32` 取值但**不给 `SystemRoot`，一样红**（`WinError 10106` = `WSAEPROVIDERFAILEDINIT`）；给了 `SystemRoot`，连 `.;C:\bin` 都绿。**真正致命的是 `env={"PATH": ...}` 这个写法本身**：交给子进程的环境里只有 PATH，而 Winsock 通过 `%SystemRoot%` 解析服务提供程序目录。**所以该共享的是「环境」而不是「PATH 串」**。**推翻二**：POSIX 上 `os.defpath` 实测是 `/bin:/usr/bin`，**没有前导空项**，POSIX 侧本来就没缺陷——主线复核确认，是主线说错了。**也推翻了派单的第三个猜测**「构建里跑的是 PyInstaller」：PyInstaller 那次 `run` 根本没传 `environment`，`probe_environment()` 只跑已冻结的候选，三处四个调用点跑的都是冻结产物，是同一个事实，因此可以共享——而 `LANG`/`NO_PROXY` 是素材 Worker 自己的关切，留在原处叠加、没塞进共享值。Windows 取值**没有另起答案**，采用 `run_p9_07_acceptance.py:526` 已经在同一台机器上跑着的那一份；两个根都缺时 **raise 而不是猜** `C:\Windows`。守卫按 AST 推导而非手抄三处清单，禁止 `scripts/` 与 `backend/tests/` 再读 `os.defpath`。**主线复核**：11 项自跑通过；变异往 `run_p9_01` 塞一处 `os.defpath`，守卫精确点名；合并后脚本层 61 个测试 / 765 项检查全绿。**待 Windows 复验**：取值本身已在 winbox 实测，但 `test_pyinstaller_bundle.py` 本身没在 Windows 跑过（需要那边能出 Executor 包），素材 Worker 那处仍撞不到，卡在 T119 缺 C 编译器 |
 | T121 | **构建失败的诊断被进度条挤掉真实原因**（`1ab2892`，已修）。Windows 验收机上 media toolchain 构建失败，操作者拿到的是**八行 curl 进度条**，而真实原因 `No working C compiler found.` 就在同一个流里稍靠上，只能靠手工重跑 builder 找回来。**机理不是「尾部太短」**：`str.splitlines()` 把回车也当换行，所以一行原地重绘的进度条会变成一行一次重绘——**实测 20 次重绘裂成 22 行**，无论尾部取 8 行还是 80 行，装的都只有进度条。新增 `process_diagnostics.builder_diagnostic`：只按 `\n` 切、每行只保留最后一个回车段（终端上真正显示的那一段）、两个流都渲染。**没有复用 `run_e4_07_acceptance.py` 里那个近似函数**，因为它正是 codex 第四批 C7 在改的文件，动它会重演上一批「删掉符号害得两个导入方崩掉」；两者收敛作为明账写进了提交信息 |
 | T118 | **门禁执行器自己的 backend 层写死 POSIX venv 布局**（`093c30c`，已修）。九层里只有它把路径写进自己，其余用 `sys.executable` 或 PATH 上的工具。Windows 上直接跑聚合器会给一个与产品无关的红 backend 层——**自己的失败和要守的东西长得一样的门禁，会教人学会无视它**。测试写歪过一次并被实验推翻：先写的「没有任何层的命令以 `.venv` 开头」对修复和缺陷同样失败，因为**派生值与它替掉的字面量长得一模一样，差别在来源，而来源在字符串里看不见**。改成平台派生两分支各断言 + 解释器在本机真实存在；变异验证过 |
