@@ -21,6 +21,16 @@ use tauri::webview::NewWindowResponse;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 const WINDOW_LABEL: &str = "material-video-studio";
+/// The appearance the embedded WebUI is given, rather than the one it picks.
+///
+/// It reads `prefers-color-scheme` once at boot and keeps that palette. On a
+/// desktop set to dark it therefore drew dark fields and near-white labels,
+/// which the product stylesheet then placed on a light page — the labels
+/// disappeared. Settling the appearance here leaves one palette for both
+/// sides, instead of a stylesheet that has to chase every widget colour and
+/// loses the race whenever upstream changes its markup.
+/// Declared alongside `colorScheme` in `material-video-studio-theme.v1.json`.
+const WINDOW_THEME: tauri::Theme = tauri::Theme::Light;
 const WORKER_VERSION: &str = "1.3.2";
 const INIT_SCRIPT: &str = include_str!("material_video_studio_init.js");
 const JOB_CHECKPOINT: &str = "material-render-job";
@@ -201,6 +211,7 @@ pub(crate) fn open(
         .inner_size(1180.0, 760.0)
         .min_inner_size(960.0, 640.0)
         .resizable(true)
+        .theme(Some(WINDOW_THEME))
         .initialization_script(INIT_SCRIPT)
         .devtools(false)
         .on_navigation(move |url| {
@@ -630,7 +641,22 @@ const fn job_unavailable() -> MaterialVideoStudioError {
 
 #[cfg(test)]
 mod theme_tests {
-    use super::INIT_SCRIPT;
+    use super::{INIT_SCRIPT, WINDOW_THEME};
+
+    /// Only the test reads the contract; the window carries a plain constant so
+    /// the shipped binary does not haul a document around to look up one word.
+    const THEME_CONTRACT: &str =
+        include_str!("../../../contracts/quality/material-video-studio-theme.v1.json");
+
+    /// The appearance is a decision, and this pins it against the one other
+    /// place that states it. What it cannot show is that Tauri applies it to
+    /// the real window — that is the desktop acceptance in `docs/development/T108.md`.
+    #[test]
+    fn studio_window_forces_the_appearance_the_theme_contract_declares() {
+        let contract: serde_json::Value = serde_json::from_str(THEME_CONTRACT).unwrap();
+        assert_eq!(contract["colorScheme"], "light");
+        assert_eq!(WINDOW_THEME, tauri::Theme::Light);
+    }
 
     #[test]
     fn initialization_script_is_fail_closed_and_keeps_material_settings() {

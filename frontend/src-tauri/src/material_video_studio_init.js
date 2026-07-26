@@ -7,6 +7,16 @@
   const SETTINGS_NAME = "制作服务设置";
   const ROOT_STATE = "data-automation-tool-studio-state";
   const STYLE_ID = "automation-tool-material-video-theme";
+  // Upstream's onboarding runs on driver.js, whose stylesheet turns
+  // `pointer-events` off for the whole page while a tour is active and back on
+  // only for the highlighted element. The product hides the popover, so a user
+  // has no way to finish the tour — the page renders and nothing responds.
+  // The tour is one-time and asks localStorage whether it was already seen, so
+  // answering before the page boots skips it through upstream's own switch.
+  // It has to be answered on every launch: the WebUI binds a fresh random port
+  // each time, which makes a new origin and an empty localStorage.
+  const TOUR_STORAGE_KEY = "stTour-mpt-onboarding-v1";
+  const TOUR_ACTIVE_CLASSES = ["driver-active", "driver-fade"];
   const FORBIDDEN = /money\s*[-_ ]?\s*printer\s*[-_ ]?\s*turbo|hyper\s*[-_ ]?\s*frames/gi;
   const FORBIDDEN_AUDIT = /money\s*[-_ ]?\s*printer\s*[-_ ]?\s*turbo|hyper\s*[-_ ]?\s*frames/i;
   const ATTRIBUTE_NAMES = ["aria-label", "aria-description", "title", "alt", "placeholder"];
@@ -30,11 +40,16 @@
       :root {
         color-scheme: light;
         --automation-tool-primary: #1677ff;
-        --automation-tool-page: #f5f7fb;
+        --automation-tool-primary-strong: #0958d9;
+        --automation-tool-primary-soft: rgba(22, 119, 255, 0.12);
+        --automation-tool-page: #f3f6fb;
         --automation-tool-surface: #ffffff;
-        --automation-tool-text: #172033;
+        --automation-tool-text: #182230;
         --automation-tool-muted: #667085;
-        --automation-tool-border: #e4e8f0;
+        --automation-tool-border: #e2e8f2;
+        --automation-tool-radius: 12px;
+        --automation-tool-control-radius: 8px;
+        --automation-tool-font: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
       }
       html[${ROOT_STATE}="booting"] body { visibility: hidden !important; }
       html[${ROOT_STATE}="ready"] body,
@@ -43,29 +58,132 @@
         visibility: hidden !important;
         pointer-events: none !important;
       }
-      body, .stApp, [data-testid="stAppViewContainer"] {
+
+      /* The onboarding blockade, defused. driver.js writes
+         \`.driver-active *{pointer-events:none}\` without \`!important\`, so this
+         outranks it however late the tour starts and whatever the class is
+         re-applied to. Without it a window whose tour cannot be dismissed is
+         simply dead. \`:not(...)\` keeps the fail-closed panel untouched. */
+      body.driver-active,
+      body.driver-active *:not(.automation-tool-studio-failed *) {
+        pointer-events: auto !important;
+      }
+      :not(body):has(> .driver-active-element) { overflow: visible !important; }
+
+      body, .stApp, [data-testid="stApp"],
+      [data-testid="stAppViewContainer"], [data-testid="stMain"] {
         background: var(--automation-tool-page) !important;
         color: var(--automation-tool-text) !important;
-        font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif !important;
+        font-family: var(--automation-tool-font) !important;
       }
-      [data-testid="stAppViewBlockContainer"] {
+      [data-testid="stAppViewBlockContainer"],
+      [data-testid="stMainBlockContainer"] {
         max-width: 1280px !important;
-        padding: 28px 32px 40px !important;
+        padding: 28px 32px 44px !important;
       }
+      [data-testid="stHeader"] { background: transparent !important; }
+
+      /* Grouped panels read as cards on the page tint. */
       [data-testid="stVerticalBlockBorderWrapper"],
       [data-testid="stForm"], [data-testid="stExpander"] {
         background: var(--automation-tool-surface) !important;
-        border-color: var(--automation-tool-border) !important;
-        border-radius: 12px !important;
-        box-shadow: 0 4px 18px rgba(23, 32, 51, 0.05) !important;
+        border: 1px solid var(--automation-tool-border) !important;
+        border-radius: var(--automation-tool-radius) !important;
+        box-shadow: 0 4px 18px rgba(24, 34, 48, 0.05) !important;
       }
-      button, input, textarea, [data-baseweb="select"] > div {
-        border-radius: 8px !important;
+      [data-testid="stExpander"] summary { color: var(--automation-tool-text) !important; }
+
+      /* The reported defect: a field's caption was dark-theme grey sitting on a
+         light page. The sentence a user reads is the paragraph inside. */
+      [data-testid="stWidgetLabel"],
+      [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
+      [data-testid="stWidgetLabel"] p {
+        color: var(--automation-tool-text) !important;
+        font-weight: 500 !important;
       }
-      .stButton button[kind="primary"], button[kind="primary"] {
+
+      /* One box for every kind of field. Streamlit draws the visible border on
+         the wrapper and leaves the control inside transparent, so the wrapper
+         carries the surface and the control carries the text. */
+      [data-testid="stTextInputRootElement"],
+      [data-testid="stTextAreaRootElement"],
+      [data-testid="stSelectbox"] div[role="group"],
+      [data-testid="stNumberInput"] div[role="group"],
+      [data-testid="stDateInput"] div[role="group"] {
+        background: var(--automation-tool-surface) !important;
+        border: 1px solid var(--automation-tool-border) !important;
+        border-radius: var(--automation-tool-control-radius) !important;
+      }
+      [data-testid="stTextInputRootElement"]:focus-within,
+      [data-testid="stTextAreaRootElement"]:focus-within,
+      [data-testid="stSelectbox"] div[role="group"]:focus-within,
+      [data-testid="stNumberInput"] div[role="group"]:focus-within {
+        border-color: var(--automation-tool-primary) !important;
+        box-shadow: 0 0 0 3px var(--automation-tool-primary-soft) !important;
+      }
+      input, textarea, select {
+        color: var(--automation-tool-text) !important;
+        background: transparent !important;
+        font-family: var(--automation-tool-font) !important;
+      }
+      input::placeholder, textarea::placeholder {
+        color: var(--automation-tool-muted) !important;
+      }
+
+      /* One accent, the product's own, instead of the embedded page's red. */
+      [data-testid="stBaseButton-primary"] {
+        background: var(--automation-tool-primary) !important;
+        border: 1px solid var(--automation-tool-primary) !important;
+        color: #ffffff !important;
+        border-radius: var(--automation-tool-control-radius) !important;
+        font-weight: 500 !important;
+      }
+      [data-testid="stBaseButton-primary"]:hover {
+        background: var(--automation-tool-primary-strong) !important;
+        border-color: var(--automation-tool-primary-strong) !important;
+      }
+      [data-testid="stBaseButton-secondary"] {
+        background: var(--automation-tool-surface) !important;
+        border: 1px solid var(--automation-tool-border) !important;
+        color: var(--automation-tool-text) !important;
+        border-radius: var(--automation-tool-control-radius) !important;
+      }
+      [data-testid="stBaseButton-secondary"]:hover {
+        border-color: var(--automation-tool-primary) !important;
+        color: var(--automation-tool-primary) !important;
+      }
+      /* The slider's thumb is the one filled element inside it: the track
+         carries \`data-orientation\` and the group carries \`role\`, the thumb
+         neither. Addressed by attribute so a restyle upstream cannot repaint
+         the whole track by accident. */
+      [data-testid="stSlider"] div[data-rac]:not([role]):not([data-orientation]) {
+        background: var(--automation-tool-primary) !important;
+      }
+      /* The filled part of the track is a gradient whose stops carry the
+         current value, so it cannot be repainted without losing the reading.
+         Rotating its hue keeps the geometry and moves the fill off the
+         embedded page's red; the unfilled half is near-grey and barely turns. */
+      [data-testid="stSlider"] div[data-rac][data-orientation] > div:not([data-rac]):not([data-testid]) {
+        filter: hue-rotate(211deg) !important;
+      }
+      [data-testid="stSliderThumbValue"] { color: var(--automation-tool-primary) !important; }
+      /* The box a checkbox draws is a sibling of the hidden input's wrapper,
+         not of the input, so the checked state is read from the label. */
+      [data-testid="stCheckbox"] label > div:not([data-testid]) {
+        border-radius: 4px !important;
+      }
+      [data-testid="stCheckbox"] label:has(input:checked) > div:not([data-testid]) {
         background: var(--automation-tool-primary) !important;
         border-color: var(--automation-tool-primary) !important;
       }
+      [data-testid="stButtonGroup"] button[aria-checked="true"],
+      [data-testid="stButtonGroup"] button[aria-pressed="true"] {
+        background: var(--automation-tool-primary) !important;
+        border-color: var(--automation-tool-primary) !important;
+        color: #ffffff !important;
+      }
+      a, [data-testid="stMarkdownContainer"] a { color: var(--automation-tool-primary) !important; }
+
       .mpt-brand { display: flex !important; align-items: center !important; }
       .mpt-brand__name { color: var(--automation-tool-text) !important; }
       .mpt-brand__version,
@@ -117,7 +235,20 @@
     }
   };
 
+  /// Answer upstream's "already seen this?" before the page can ask.
+  const suppressOnboardingTour = () => {
+    try {
+      window.localStorage.setItem(TOUR_STORAGE_KEY, "1");
+    } catch {
+      // A blocked store only costs the tour its shortcut; the stylesheet above
+      // and the class removal below still keep the page usable.
+    }
+  };
+
   const removeTour = () => {
+    // Hiding the tour is not enough on its own: the class is what disables the
+    // page, and it outlives a popover that the user can never reach.
+    document.body?.classList.remove(...TOUR_ACTIVE_CLASSES);
     document.querySelectorAll(".driver-popover, .driver-overlay").forEach((node) => {
       node.setAttribute("data-automation-tool-hidden", "true");
       node.setAttribute("aria-hidden", "true");
@@ -268,6 +399,7 @@
   };
 
   installTheme();
+  suppressOnboardingTour();
   window.open = () => null;
   observer = new MutationObserver(schedule);
   if (root()) observer.observe(root(), { childList: true, subtree: true });
