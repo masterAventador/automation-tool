@@ -40,6 +40,14 @@ function renderCenter(source: AppUpdateGateway, showSettings: boolean) {
   );
 }
 
+async function statusTag(): Promise<HTMLElement> {
+  return await waitFor(() => {
+    const tag = document.querySelector<HTMLElement>(".ant-tag");
+    if (tag === null) throw new Error("update status tag is missing");
+    return tag;
+  });
+}
+
 async function visibleRole(role: "button" | "heading", name: string): Promise<HTMLElement> {
   let visible: HTMLElement | undefined;
   await waitFor(() => {
@@ -114,6 +122,64 @@ describe("generic App update UI", () => {
     expect(source.getState).toHaveBeenCalledOnce();
     finishCheck?.({ state: "up_to_date", trigger: "manual" });
     expect(await screen.findByText("当前已是最新版本")).toBeVisible();
+  });
+
+  it("does not alarm the user when this build never enabled updates", async () => {
+    const source = gateway({
+      state: "failed",
+      stage: "configuration",
+      code: "configuration_invalid",
+      retryable: false,
+    });
+    renderCenter(source, true);
+
+    const tag = await statusTag();
+    await waitFor(() => expect(tag).toHaveTextContent("此版本未启用自动更新"));
+    expect(tag).not.toHaveClass("ant-tag-red");
+    expect(document.body).not.toHaveTextContent("更新当前不可用");
+  });
+
+  it("treats an unreachable update server as a retryable notice instead of a failure", async () => {
+    const source = gateway({
+      state: "failed",
+      stage: "check",
+      code: "transport_unavailable",
+      retryable: true,
+    });
+    renderCenter(source, true);
+
+    const tag = await statusTag();
+    await waitFor(() => expect(tag).toHaveTextContent("暂时无法连接更新服务器，可稍后重试"));
+    expect(tag).not.toHaveClass("ant-tag-red");
+  });
+
+  it("keeps a rejected signature and a failed installation loudly visible", async () => {
+    const rejected = gateway({
+      state: "failed",
+      stage: "download",
+      code: "signature_rejected",
+      retryable: false,
+    });
+    const { unmount } = renderCenter(rejected, true);
+
+    const rejectedTag = await statusTag();
+    await waitFor(() => expect(rejectedTag).toHaveTextContent("更新当前不可用"));
+    expect(rejectedTag).toHaveClass("ant-tag-red");
+    unmount();
+
+    renderCenter(
+      gateway({
+        state: "failed",
+        stage: "install",
+        code: "installation_failed",
+        retryable: true,
+      }),
+      true,
+    );
+
+    const failedTag = await statusTag();
+    await waitFor(() => expect(failedTag).toHaveTextContent("更新暂时失败，可以重试"));
+    expect(failedTag).toHaveClass("ant-tag-red");
   });
 
   it("maps native failures to fixed public copy without reflecting details", async () => {
