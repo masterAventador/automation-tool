@@ -35,8 +35,7 @@ export class TauriPublishWorkspaceGateway implements PublishWorkspaceGateway {
     return parsePublishWorkspaceSnapshot(
       await projection("begin_publish", {
         platform: request.platform,
-        publishJobId: request.publishJobId,
-        artifactPath: request.artifactPath,
+        artifactId: request.artifactId,
         videoSummary: request.videoSummary,
         title: request.title,
         description: request.description,
@@ -47,7 +46,6 @@ export class TauriPublishWorkspaceGateway implements PublishWorkspaceGateway {
   async approvePublish(request: PublishApprovalRequest): Promise<PublishWorkspaceSnapshot> {
     return parsePublishWorkspaceSnapshot(
       await projection("approve_publish", {
-        publishJobId: request.publishJobId,
         confirmationId: request.confirmationId,
       }),
     );

@@ -118,9 +118,6 @@ export class TestHarnessPublishing implements PublishWorkspaceGateway {
 }
 
 export const HARNESS_SELECTED_VIDEO = {
-  publishJobId: "423e4567-e89b-42d3-a456-426614174001",
-  artifactPath: "/videos/harness-clip.mp4",
+  artifactId: "423e4567-e89b-42d3-a456-426614174001",
   videoSummary: "护肤知识讲解 · 12.4 MB",
-  title: "三分钟讲清油皮护肤",
-  description: "从洁面到防晒，按顺序讲一遍。",
 } as const;

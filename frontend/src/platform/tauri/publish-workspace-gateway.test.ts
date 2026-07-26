@@ -55,20 +55,19 @@ describe("Tauri publish workspace gateway", () => {
 
     await new TauriPublishWorkspaceGateway().beginPublish({
       platform: "douyin",
-      publishJobId: "423e4567-e89b-42d3-a456-426614174001",
-      artifactPath: "/videos/clip.mp4",
+      artifactId: "423e4567-e89b-42d3-a456-426614174001",
       videoSummary: "护肤知识讲解 · 12.4 MB",
       title: "三分钟讲清油皮护肤",
       description: "从洁面到防晒，按顺序讲一遍。",
     });
 
+    // An identity, never a path: the bridge resolves where that video lives.
     expect(invoke.mock.calls).toEqual([
       [
         "begin_publish",
         {
           platform: "douyin",
-          publishJobId: "423e4567-e89b-42d3-a456-426614174001",
-          artifactPath: "/videos/clip.mp4",
+          artifactId: "423e4567-e89b-42d3-a456-426614174001",
           videoSummary: "护肤知识讲解 · 12.4 MB",
           title: "三分钟讲清油皮护肤",
           description: "从洁面到防晒，按顺序讲一遍。",
@@ -86,18 +85,12 @@ describe("Tauri publish workspace gateway", () => {
     });
 
     await new TauriPublishWorkspaceGateway().approvePublish({
-      publishJobId: "423e4567-e89b-42d3-a456-426614174001",
       confirmationId: CONFIRMATION_ID,
     });
 
+    // The publish job identity stays in the bridge, which minted it.
     expect(invoke.mock.calls).toEqual([
-      [
-        "approve_publish",
-        {
-          publishJobId: "423e4567-e89b-42d3-a456-426614174001",
-          confirmationId: CONFIRMATION_ID,
-        },
-      ],
+      ["approve_publish", { confirmationId: CONFIRMATION_ID }],
     ]);
   });
 
