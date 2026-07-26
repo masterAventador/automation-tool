@@ -1,6 +1,12 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  motionRunNeedsAttention,
+  motionRunSnapshot,
+  resetMotionRunStore,
+} from "./motion-run-store";
 
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
 import durationContract from "../../../../contracts/video/motion-storyboard-duration.v1.json";
@@ -61,6 +67,12 @@ function gateway(): MaterialVideoStudioGateway {
 }
 
 describe("video studio shell", () => {
+  // 运行状态现在活在组件之外（这正是它能挺过切页的原因），所以每条用例开始前
+  // 必须清空，否则上一条的选择和提交会渗进下一条。
+  beforeEach(() => {
+    resetMotionRunStore();
+  });
+
   it("exposes every planned page without inventing jobs or artifacts", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);
@@ -599,7 +611,7 @@ describe("video studio shell", () => {
       }),
     );
     expect(
-      await screen.findByText("已提交一句话自动制作，已经转到「制作任务」，本机渲染开始了。"),
+      await screen.findByText("已提交一句话自动制作，编排完成，本机渲染开始了。"),
     ).toBeVisible();
   });
 
@@ -644,6 +656,9 @@ describe("video studio shell", () => {
       ["authoring_crashed", "自动编排中途出错"],
       ["authoring_answer_invalid", "没有通过本机校验"],
     ] as const) {
+      // 运行状态活在组件之外，所以每一轮都要从干净的store 重新开始，
+      // 否则上一轮选中的制作方式会让这一轮的「选择品牌动效成片」找不到。
+      resetMotionRunStore();
       const user = userEvent.setup();
       const studioGateway = gateway();
       studioGateway.submitMotionBrief = vi
@@ -848,7 +863,7 @@ describe("video studio shell", () => {
       await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
       await user.click(screen.getByRole("button", { name: "开始自动制作" }));
 
-      expect(await screen.findByText(/正在自动编排/u)).toBeVisible();
+      expect(await screen.findByText(/正在自动编排这条视频/u)).toBeVisible();
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(95_000);
@@ -984,6 +999,10 @@ describe("video studio shell", () => {
       "aria-selected",
       "true",
     );
+    // 用户已经处理过这条结果了，侧边栏那个「有事」的标记就该灭掉，
+    // 否则它会一直亮到下一次提交。
+    expect(screen.queryByText(/已提交一句话自动制作/u)).toBeNull();
+    expect(motionRunNeedsAttention(motionRunSnapshot())).toBe(false);
     expect(
       await screen.findByRole("button", {
         name: "播放用蓝色商务风做一段本周销售增长说明",
@@ -1047,5 +1066,84 @@ describe("video studio shell", () => {
         `禁用按钮「${button.textContent}」没有任何说明`,
       ).toHaveAccessibleDescription();
     }
+  });
+
+  /**
+   * 提交完，「制作任务」页还是空的——足足 136 秒。
+   *
+   * 原生侧编排成功之后才写任务快照，实测那次成功的运行任务在 +140 秒才第一次
+   * 出现。也就是说用户点完「开始自动制作」，切到「制作任务」看到的是空态
+   * 「还没有真实制作任务」。他会以为没提交上去，然后再点一次——而再点一次
+   * 会真的再跑一遍编排。
+   *
+   * 所以提交那一刻就得有一条本地记录，不能等原生侧承认它存在。
+   */
+  it("shows the submission in the jobs list from the moment it is sent", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    // 编排跑完之前不 resolve，实测 136～178 秒。
+    studioGateway.submitMotionBrief = vi.fn().mockReturnValue(new Promise(() => {}));
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    await user.click(screen.getByRole("tab", { name: "制作任务" }));
+
+    const jobs = screen.getByRole("tabpanel");
+    expect(within(jobs).queryByText("还没有真实制作任务")).toBeNull();
+    expect(within(jobs).getByText("用蓝色商务风做一段说明")).toBeVisible();
+    expect(within(jobs).getByText(/正在自动编排这条视频/u)).toBeVisible();
+  });
+
+  /**
+   * 切走再切回来，什么都没发生过——而任务其实已经失败了。
+   *
+   * 实测：提交后切走 75 秒再回来，任务列表是空的，输入的句子没了，选中的制作
+   * 方式没了。更糟的是失败被吞掉：编排的 Promise 是几分钟后才 settle 的，
+   * 那时 `WorkbenchShell` 早就把 `VideoStudio` 卸载了，错误文案写进死掉的
+   * state，用户永远不知道任务挂了。云端验收线的一次运行就是这么把失败原因
+   * 永久弄丢的。
+   *
+   * 原生侧没问题：渲染在切页时不会中断。这纯粹是前端状态的生命周期问题。
+   */
+  it("keeps the sentence, the method and a failure that landed after the page was gone", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    let crash: (error: unknown) => void = () => {};
+    studioGateway.submitMotionBrief = vi
+      .fn()
+      .mockReturnValue(
+        new Promise((_resolve, reject) => {
+          crash = reject;
+        }),
+      );
+    const view = render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    // 用户去看别的功能：外壳把整个视频制作页卸载掉。
+    view.unmount();
+
+    // 编排在这之后才失败。
+    await act(async () => {
+      crash(new MaterialVideoStudioGatewayError("authoring_crashed", true));
+      await Promise.resolve();
+    });
+
+    render(<VideoStudio gateway={studioGateway} />);
+
+    expect(await screen.findByText(/自动编排中途出错/u)).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "新建视频" }));
+    // 选择按钮的无障碍名恒为「选择…」，选中与否挂在 aria-pressed 上。
+    expect(screen.getByRole("button", { name: "选择品牌动效成片" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("一句话视频需求")).toHaveValue("用蓝色商务风做一段说明");
   });
 });

@@ -40,3 +40,42 @@ test("choosing brand motion brings the one-sentence entry into view", async ({
   await expect(brief).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole("button", { name: "开始自动制作" })).toBeInViewport();
 });
+
+/**
+ * Making a film takes minutes, so the operator leaves the page — and until now
+ * that erased every trace of it.
+ *
+ * Measured against the real App on 2026-07-26: submit, leave for 75 seconds,
+ * come back, and the jobs list read 还没有真实制作任务, the sentence was gone,
+ * the chosen method was gone. Worse, the submission's result was written into a
+ * component the shell had already unmounted, so a run that failed while the
+ * operator was elsewhere failed silently and its reason was lost for good.
+ *
+ * This walks it through the sidebar, the way the operator does. The harness
+ * gives the studio the shell's own gateway, which refuses the submission — so
+ * what is being checked is precisely a result that arrives and then has to
+ * survive a page change.
+ */
+test("a submission and its result survive leaving the page", async ({ page }) => {
+  await page.getByRole("button", { name: "选择品牌动效成片" }).click();
+  await page.getByLabel("一句话视频需求").fill("用蓝色商务风做一段本周销售增长说明");
+  await page.getByRole("button", { name: "开始自动制作" }).click();
+
+  const failure = page.getByText(/暂时无法提交|暂时不可用|自动编排/);
+  await expect(failure).toBeVisible();
+
+  const videoEntry = page.getByRole("menuitem", { name: "视频制作" });
+  await page.getByRole("menuitem", { name: "工作台" }).click();
+  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+
+  // Away from the page, the sidebar is the only thing that can still say so.
+  await expect(videoEntry.locator("[title='视频制作正在进行中']")).toBeVisible();
+
+  await videoEntry.click();
+  await expect(page.getByText(/暂时无法提交|暂时不可用|自动编排/)).toBeVisible();
+
+  await page.getByRole("tab", { name: "新建视频" }).click();
+  await expect(page.getByLabel("一句话视频需求")).toHaveValue(
+    "用蓝色商务风做一段本周销售增长说明",
+  );
+});
