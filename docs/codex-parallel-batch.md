@@ -365,7 +365,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 |---|---|---|---|---|
 | **A** T69 App 零日志 | ✅ | 本提交 | Rust 落盘测试准确失败：`sensitive error detail reached the desktop log: Cookie=session-cookie` | 固定事件白名单覆盖 setup、Control Plane、任务状态与 Sidecar 生命周期；有界异步队列不阻塞业务，单文件 1 MiB、最多 8 个、保留 7 天；T50 的超时现在可由请求失败固定事件直接定位 |
 | **A** T50 注销界面报失败 | ✅ | 本提交 | Node 契约准确失败：`the authoritative projection must receive the full outer command budget` | 轮询预算由约 5 秒对齐为 60 秒；仓内 B5-13/B5-14 演示验收已包含安全注销步骤 |
-| **B** T61 artifact 门禁降级为清理 | ⬜ | | | |
+| **B** T61 artifact 门禁降级为清理 | ✅ | 本提交 | 启动恢复断言准确失败：`restarted store: VideoWorkspaceError { code: StorageUnavailable }` | 启动时仅清理损坏/中断删除的 artifact，清理失败才阻断；运行期 `list_artifacts()` 继续严格失败，外部软链目标不受触碰 |
 | **B** T65 `cleanup_expired` 无调用方 | ⬜ | | | |
 | **B** T66b 目录权限只检查不修复 | ⬜ | | | |
 | **C** T72 门禁执行者三处空洞 | ⬜ | | | |

@@ -376,7 +376,7 @@ impl VideoJobWorkspaceStore {
             policy,
         };
         store.recover_interrupted_imports()?;
-        store.validate_artifact_inventory()?;
+        store.cleanup_invalid_artifacts()?;
         // A publish that was interrupted by a crash left a whole copy of a
         // video behind. Nothing is ever resumed from it, so it goes now rather
         // than sitting in the App's data directory until someone notices.
@@ -930,8 +930,39 @@ impl VideoJobWorkspaceStore {
         Ok(record)
     }
 
-    fn validate_artifact_inventory(&self) -> Result<(), VideoWorkspaceError> {
-        self.list_artifacts().map(|_| ())
+    fn cleanup_invalid_artifacts(&self) -> Result<(), VideoWorkspaceError> {
+        self.revalidate_roots()?;
+        let mut removed = false;
+        for entry in fs::read_dir(&self.artifacts_directory).map_err(|_| storage_unavailable())? {
+            let entry = entry.map_err(|_| storage_unavailable())?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|_| storage_unavailable())?;
+            let artifact_id = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| Uuid::parse_str(name).ok());
+            let private_directory = metadata.is_dir() && !unsafe_path_component(&metadata);
+            let valid = if private_directory {
+                validate_private_directory_metadata(&metadata)?;
+                artifact_id
+                    .is_some_and(|artifact_id| self.load_artifact_record(artifact_id).is_ok())
+            } else {
+                false
+            };
+            if valid {
+                continue;
+            }
+            if private_directory {
+                fs::remove_dir_all(&path).map_err(|_| storage_unavailable())?;
+            } else {
+                fs::remove_file(&path).map_err(|_| storage_unavailable())?;
+            }
+            removed = true;
+        }
+        if removed {
+            sync_directory(&self.artifacts_directory)?;
+        }
+        Ok(())
     }
 
     fn recover_interrupted_imports(&self) -> Result<(), VideoWorkspaceError> {

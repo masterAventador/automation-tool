@@ -342,7 +342,7 @@ fn tampered_artifact_and_non_v4_job_fail_closed_without_path_reflection() {
 }
 
 #[test]
-fn reopening_with_a_stricter_policy_rejects_existing_oversized_artifacts() {
+fn reopening_with_a_stricter_policy_discards_existing_oversized_artifacts() {
     let root = TemporaryRoot::new();
     let initial_policy = VideoJobWorkspacePolicy::new(32, 16, 1, 60, 0).expect("initial policy");
     let store =
@@ -364,12 +364,77 @@ fn reopening_with_a_stricter_policy_rejects_existing_oversized_artifacts() {
     drop(store);
 
     let stricter = VideoJobWorkspacePolicy::new(32, 8, 1, 60, 0).expect("stricter policy");
+    let reopened = VideoJobWorkspaceStore::initialize(root.path(), stricter)
+        .expect("reopened workspace store");
+    assert!(reopened
+        .list_artifacts()
+        .expect("oversized artifact discarded")
+        .is_empty());
+}
+
+#[test]
+fn startup_discards_corrupt_artifacts_while_runtime_listing_stays_strict() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174213"))
+        .expect("workspace");
+    let outputs = store
+        .worker_output_directory(&workspace)
+        .expect("worker output");
+    fs::write(outputs.join("missing-manifest.mp4"), b"first-video").expect("first output");
+    fs::write(outputs.join("size-mismatch.mp4"), b"second-video").expect("second output");
+    let missing_manifest = store
+        .import_output(
+            &workspace,
+            "missing-manifest.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("first artifact");
+    let size_mismatch = store
+        .import_output(
+            &workspace,
+            "size-mismatch.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("second artifact");
+    let artifacts = root.path().join("video-workspaces-v1").join("artifacts");
+    let missing_manifest_directory =
+        artifacts.join(missing_manifest.artifact_id().hyphenated().to_string());
+    let size_mismatch_directory =
+        artifacts.join(size_mismatch.artifact_id().hyphenated().to_string());
+    fs::remove_file(missing_manifest_directory.join("manifest.json"))
+        .expect("simulate interrupted deletion");
+    fs::write(size_mismatch_directory.join("payload"), b"short")
+        .expect("simulate interrupted payload persistence");
     assert_eq!(
-        VideoJobWorkspaceStore::initialize(root.path(), stricter)
-            .expect_err("oversized stored artifact rejected")
+        store
+            .list_artifacts()
+            .expect_err("runtime inventory remains strict")
             .code(),
         VideoWorkspaceErrorCode::StorageUnavailable,
     );
+    let outside = root.path().join("outside-artifact-data");
+    fs::create_dir(&outside).expect("outside directory");
+    fs::write(outside.join("sentinel"), b"must-survive").expect("outside sentinel");
+    std::os::unix::fs::symlink(&outside, missing_manifest_directory.join("linked-outside"))
+        .expect("linked outside directory");
+    drop(store);
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert!(!missing_manifest_directory.exists());
+    assert!(!size_mismatch_directory.exists());
+    assert_eq!(
+        fs::read(outside.join("sentinel")).expect("outside data survives cleanup"),
+        b"must-survive",
+    );
+    assert!(restarted
+        .list_artifacts()
+        .expect("clean inventory")
+        .is_empty());
 }
 
 #[test]
