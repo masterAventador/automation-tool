@@ -61,13 +61,17 @@ from release_assembly import (  # noqa: E402
     require_packaged_video_runtime,
 )
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
+from production_assets import (  # noqa: E402
+    AUDITED_DISTRIBUTION_NAME,
+    require_frozen_distribution,
+    snapshot_production_assets,
+)
 from run_p9_03_acceptance import (  # noqa: E402
     APP_IDENTIFIER,
     BASE_TAURI_CONFIG,
     CANDIDATE_TAURI_CONFIG,
     CARGO_MANIFEST,
     EXECUTOR_RESOURCE,
-    PRODUCTION_ASSETS,
     app_binary,
     executor_signing_material,
     one_directory,
@@ -328,6 +332,7 @@ def audit_package_content(
     executor_package: Path,
     environment: dict[str, str],
     configuration: Path,
+    audited_assets: Path,
 ) -> None:
     announce("Auditing the built binary, configuration and whole bundle content")
     run_checked(
@@ -341,7 +346,7 @@ def audit_package_content(
             "--tauri-config",
             os.fspath(configuration),
             "--dist",
-            os.fspath(PRODUCTION_ASSETS),
+            os.fspath(audited_assets),
         ],
         environment=environment,
     )
@@ -907,6 +912,11 @@ def main() -> int:
         application = build_release_package(
             configuration=configuration, environment=environment, target=cargo_target
         )
+        # Frozen here, next to the artifact it belongs to, so that a later
+        # `--skip-build` re-audit of this same package reuses this exact copy.
+        audited_assets = snapshot_production_assets(
+            build_directory / AUDITED_DISTRIBUTION_NAME
+        )
         announce("Preparing the pinned video runtime resources (cached per machine)")
         video_runtime = prepare_video_runtime(platform="macos")
         install_runtime_resources_and_sign(
@@ -926,6 +936,9 @@ def main() -> int:
         effective = effective_configuration(
             build_directory / "tauri.eb-16.generated.json", build_directory
         )
+        audited_assets = require_frozen_distribution(
+            build_directory / AUDITED_DISTRIBUTION_NAME
+        )
         bundle_root = cargo_target / "release/bundle"
         application = one_directory(bundle_root / "macos", ".app")
         disk_image = one_file(bundle_root / "dmg", ".dmg")
@@ -939,6 +952,7 @@ def main() -> int:
         application / "Contents/Resources" / EXECUTOR_RESOURCE,
         environment,
         effective,
+        audited_assets,
     )
     verify_code_signatures(application, target_id)
     if private_key is not None:

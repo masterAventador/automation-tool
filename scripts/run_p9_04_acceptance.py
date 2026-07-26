@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from automation_tool.executor.package_manifest import write_signed_executor_manifest
+from production_assets import snapshot_production_assets
 from automation_tool.executor.windows_candidate import (
     audit_windows_executor_candidate,
     build_windows_executor_candidate,
@@ -36,7 +37,6 @@ TAURI_ROOT = FRONTEND_ROOT / "src-tauri"
 BASE_TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 CANDIDATE_TAURI_CONFIG = TAURI_ROOT / "tauri.windows-candidate.conf.json"
 CARGO_MANIFEST = TAURI_ROOT / "Cargo.toml"
-PRODUCTION_ASSETS = FRONTEND_ROOT / "dist"
 EXECUTOR_RESOURCE = Path("local-executor/package")
 PRODUCT_NAME = "Automation Tool P904 Windows Acceptance"
 APP_IDENTIFIER = "com.aventador.automationtool.p904windowsacceptance"
@@ -679,6 +679,7 @@ def main() -> int:
             ],
             environment=environment,
         )
+        audited_assets = snapshot_production_assets(temporary / "audited-distribution")
         binary = target / "release" / f"{MAIN_BINARY_NAME}.exe"
         installer = one_file(
             target / "release/bundle/nsis",
@@ -699,7 +700,7 @@ def main() -> int:
                 "--tauri-config",
                 os.fspath(BASE_TAURI_CONFIG),
                 "--dist",
-                os.fspath(PRODUCTION_ASSETS),
+                os.fspath(audited_assets),
             ],
             environment=environment,
         )

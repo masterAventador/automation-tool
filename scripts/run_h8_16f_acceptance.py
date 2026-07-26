@@ -446,11 +446,12 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing H8-16F App data directory")
-    # The journey starts on the blocked diagnostics page and repairs the browser
-    # from settings, so the component has to be genuinely absent at startup.
-    prepare_startup_gate(
-        private_app_data, embedded_browser=False, executor_package=False
-    )
+    # EB-10 removed the in-App browser repair, so a missing embedded Chromium is
+    # no longer a state this journey can leave — the operator's first screen is
+    # the workbench, and that requires the verified distribution to be staged.
+    # The Executor package is still this driver's own: it builds and installs a
+    # signed one with the controlled pages this journey needs.
+    prepare_startup_gate(private_app_data, executor_package=False)
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
     app_process: subprocess.Popen[bytes] | None = None

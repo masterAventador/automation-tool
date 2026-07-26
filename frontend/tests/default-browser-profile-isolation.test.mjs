@@ -60,7 +60,11 @@ test("B5-16 proves the hidden App launches only its private persistent Profile",
   assert.match(spec, /prepare_platform_session_reuse_for_acceptance/u);
   assert.match(runner, /lsof/u);
   assert.match(runner, /--user-data-dir/u);
-  assert.match(runner, /browser-profiles/u);
+  // The driver used to spell the operations Profile root inline. It now takes
+  // it from the shared prerequisites module, which is the point — one
+  // definition, not one per driver. Assert that it reaches the root through
+  // that shared name rather than pinning the literal string here.
+  assert.match(runner, /OPERATIONS_PROFILE_ROOT/u);
   assert.match(runner, /require_no_residual_project_processes/u);
   assert.doesNotMatch(spec, /profileDirectory|profileId|cookie/iu);
 

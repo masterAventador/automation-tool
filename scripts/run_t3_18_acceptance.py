@@ -324,11 +324,21 @@ async def verify_database_state(
             capabilities = list(
                 await session.scalars(text("select capability from device_sessions order by id"))
             )
-        if capabilities.count("executor.connect") != 1 or any(
+        # Two Executor Sessions: the FakeExecutor this driver hosts, and the one
+        # the App issues for itself at the end of the journey. Since `10c2870`
+        # (2026-07-21, offline emergency stop) a Task emergency stop always ends
+        # in `reconcile_pending_task_emergency_stop`, which brings the local
+        # Executor back up with a fresh Session — a T3-16 request-timeline probe
+        # recorded that exact pair. The `app.control-plane` count is not
+        # asserted: the App exchanges one Session per Control Plane call and the
+        # workbench polls, so it tracks App uptime, not this acceptance.
+        if capabilities.count("executor.connect") != 2 or any(
             capability not in {"app.control-plane", "executor.connect"}
             for capability in capabilities
         ):
-            raise RuntimeError("T3-18 used an unexpected Session capability")
+            raise RuntimeError(
+                f"T3-18 used an unexpected Session capability: {sorted(capabilities)}"
+            )
     finally:
         await database.close()
 

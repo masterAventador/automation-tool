@@ -154,9 +154,63 @@ async function filesUnder(directory) {
   return nested.flat();
 }
 
-async function assertNoTestAssets(distributionPath) {
+// Vite writes every content-hashed file of a build under `assets/`, and Tauri
+// stores each embedded asset's key as a plain string just ahead of that asset's
+// compressed payload. The keys are therefore recoverable from the artifact
+// itself even though the contents are not, and two builds of different sources
+// never agree on them.
+const hashedAssetDirectory = "assets";
+const hashedAssetPrefix = `/${hashedAssetDirectory}/`;
+
+function countBytes(haystack, needle) {
+  let count = 0;
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    count += 1;
+  }
+  return count;
+}
+
+function distributionHashedAssetKeys(distributionPath, files) {
+  const keys = new Set();
+  for (const path of files) {
+    const rendered = relative(distributionPath, path).replaceAll("\\", "/");
+    if (rendered.startsWith(`${hashedAssetDirectory}/`)) {
+      keys.add(`/${rendered}`);
+    }
+  }
+  return keys;
+}
+
+// `frontend/dist` is a single directory shared by every build in the checkout,
+// so a concurrent `pnpm build:tauri:*-test` can replace it while a release audit
+// is still running. Without this check the audit reports on whichever build
+// happens to be on disk: on 2026-07-26 that produced one false rejection of a
+// clean package, and one pass that survived by a 13 second margin. Binding the
+// distribution to the binary makes the verdict a property of the artifact —
+// a distribution this binary did not embed is refused outright instead of
+// being described.
+function assertDistributionBelongsToBinary(binary, distributionPath, files) {
+  const provided = distributionHashedAssetKeys(distributionPath, files);
+  // Membership, never extraction. Each key sits immediately before its own
+  // compressed payload, so a key read *out* of the binary can run into whatever
+  // byte follows it and be wrong; asking whether a key the distribution already
+  // names is present cannot be. The occurrence count then closes the other
+  // direction: the binary must embed no asset this distribution fails to
+  // account for.
+  const unembedded = [...provided].filter((key) => !containsBytes(binary, Buffer.from(key)));
+  const embeddedCount = countBytes(binary, Buffer.from(hashedAssetPrefix));
+  if (provided.size === 0 || unembedded.length > 0 || embeddedCount !== provided.size) {
+    throw new Error(
+      "Production distribution does not belong to the audited binary: " +
+        `${provided.size} hashed asset(s) offered, ${unembedded.length} of them not embedded, ` +
+        `${embeddedCount} embedded by the binary`,
+    );
+  }
+}
+
+async function assertNoTestAssets(distributionPath, files) {
   await assertProductionBoundaries(distributionPath);
-  for (const path of await filesUnder(distributionPath)) {
+  for (const path of files) {
     const normalized = relative(distributionPath, path).replaceAll("\\", "/").toLowerCase();
     if (forbiddenResourceMarkers.some((marker) => normalized.includes(marker))) {
       throw new Error("Production assets contain a test resource");
@@ -207,7 +261,6 @@ export async function auditProductionPackage({
   assertProductionDependencyTree(dependencyTree);
   assertTestDependenciesRemainOptional(cargoManifest);
   assertLeastPrivilegeTauriConfig(tauriConfig);
-  await assertNoTestAssets(distributionPath);
 
   for (const marker of forbiddenBinaryMarkers) {
     if (containsBytes(binary, Buffer.from(marker))) {
@@ -228,6 +281,14 @@ export async function auditProductionPackage({
   ) {
     throw new Error("Production binary does not contain the expected release verification key");
   }
+
+  // The binary is judged first and on its own bytes, so a genuinely bad
+  // artifact keeps its precise diagnosis. Only once the binary is accepted does
+  // the distribution have to prove it is that binary's own product, before any
+  // statement is made about its contents.
+  const files = await filesUnder(distributionPath);
+  assertDistributionBelongsToBinary(binary, distributionPath, files);
+  await assertNoTestAssets(distributionPath, files);
 }
 
 function parseArguments(arguments_) {

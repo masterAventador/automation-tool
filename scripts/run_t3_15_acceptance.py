@@ -46,6 +46,9 @@ from run_t3_14_acceptance import (
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from automation_tool.control_plane.application.device_sessions import (
+    DeviceSessionCapability,
+)
 from automation_tool.control_plane.application.task_command_delivery import (
     TaskCommandRecord,
 )
@@ -67,6 +70,8 @@ APP_IDENTIFIER = "com.aventador.automationtool.t315acceptance"
 ENVIRONMENT_ID = "t315-acceptance"
 TASK_KEY = "task:projection:tauri-acceptance"
 DEVICE_CREDENTIAL_FILE = "device-credential-v1"
+APP_CONTROL_PLANE_CAPABILITY = DeviceSessionCapability.APP_CONTROL_PLANE.value
+EXECUTOR_CONNECT_CAPABILITY = DeviceSessionCapability.EXECUTOR_CONNECT.value
 
 
 def require_control_plane_port_available() -> None:
@@ -224,12 +229,22 @@ async def verify_database_state(database_url: str, original: TaskCommandRecord) 
             raise RuntimeError("T3-15 durable App event timeline is invalid")
         if [row["progress_percent"] for row in event_rows] != [None, None, 50, None, None]:
             raise RuntimeError("T3-15 structured progress persistence is invalid")
-        if sorted(session_capabilities) != [
-            "app.control-plane",
-            "app.control-plane",
-            "app.control-plane",
-            "executor.connect",
-        ]:
+        # The App exchanges a fresh single-capability device Session for every
+        # Control Plane call, so the `app.control-plane` count is App uptime
+        # times the workbench poll rate, not a property of this acceptance. A
+        # request-timeline probe over two runs of this driver recorded
+        #   POST /tasks, GET /tasks/{id}, GET /tasks/{id}/events   (this Task)
+        #   GET /api/v1/workbench/status, GET /api/v1/tasks        (1 Hz polls)
+        # and the poll fires 0..n times depending on how long the hidden App
+        # lives after registration — the same run pinned to "exactly 3" passed
+        # once and failed once. Three is therefore the floor, not the number.
+        app_sessions = session_capabilities.count(APP_CONTROL_PLANE_CAPABILITY)
+        executor_sessions = session_capabilities.count(EXECUTOR_CONNECT_CAPABILITY)
+        unexpected = sorted(
+            set(session_capabilities)
+            - {APP_CONTROL_PLANE_CAPABILITY, EXECUTOR_CONNECT_CAPABILITY}
+        )
+        if app_sessions < 3 or executor_sessions != 1 or unexpected:
             raise RuntimeError(
                 "T3-15 did not use the expected App and Executor Sessions: "
                 f"{sorted(session_capabilities)}"

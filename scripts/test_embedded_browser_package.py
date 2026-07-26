@@ -524,6 +524,10 @@ class ReleaseBundleAuditTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
 
+RELEASE_ASSET_NAME = "index-RELEASE.js"
+EMBEDDED_ASSET_KEYS = f"/assets/{RELEASE_ASSET_NAME}".encode()
+
+
 class ProductionPackageAuditTests(unittest.TestCase):
     """The E4-15 binary audit must reject hidden test window configuration."""
 
@@ -532,8 +536,11 @@ class ProductionPackageAuditTests(unittest.TestCase):
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
         self.distribution = self.base / "dist"
-        self.distribution.mkdir()
+        (self.distribution / "assets").mkdir(parents=True)
         (self.distribution / "index.html").write_text("<html></html>", encoding="utf-8")
+        (self.distribution / "assets" / RELEASE_ASSET_NAME).write_text(
+            "globalThis.desktop = true;", encoding="utf-8"
+        )
         self.cargo_manifest = self.base / "Cargo.toml"
         self.cargo_manifest.write_text(
             'tauri-plugin-wdio = { version = "1", optional = true }\n'
@@ -581,7 +588,11 @@ class ProductionPackageAuditTests(unittest.TestCase):
         binary = self.base / "release-binary"
         binary.write_bytes(
             b'{"label":"main","visible":true}'
-            b"ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE"
+            # A real Tauri binary carries each embedded asset's key as a plain
+            # string; the audit requires the distribution it is handed to be the
+            # one this binary embedded, so a release fixture has to carry them.
+            + EMBEDDED_ASSET_KEYS
+            + b"ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE"
         )
         result = self._audit(binary)
         self.assertEqual(result.returncode, 0, result.stderr)

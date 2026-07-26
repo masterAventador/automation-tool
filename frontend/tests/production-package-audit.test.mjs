@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -46,7 +46,16 @@ test("E4-15 formal runner builds an ephemeral release artifact and audits it in 
   assert.doesNotMatch(runner, /tauri dev|open\(|Popen/);
 });
 
-async function createProductionFixture() {
+// A real Tauri binary stores every embedded asset's key as a plain string just
+// ahead of that asset's compressed payload, so a fixture binary only models the
+// artifact under audit if it carries the same keys.
+function embeddedAssetPayload(keys) {
+  return Buffer.concat(
+    keys.flatMap((key) => [Buffer.from(key), Buffer.alloc(64, 0xa5)]),
+  );
+}
+
+async function createProductionFixture({ assetName = "app.js" } = {}) {
   const root = await mkdtemp(join(tmpdir(), "automation-tool-package-audit-"));
   const distribution = join(root, "dist");
   const assets = join(distribution, "assets");
@@ -56,10 +65,14 @@ async function createProductionFixture() {
 
   await mkdir(assets, { recursive: true });
   await writeFile(join(distribution, "index.html"), "<main>desktop</main>");
-  await writeFile(join(assets, "app.js"), "console.log('production desktop')");
+  await writeFile(join(assets, assetName), "console.log('production desktop')");
   await writeFile(
     binary,
-    Buffer.concat([Buffer.alloc(4096, 0x7f), Buffer.from(ACCEPTANCE_VERIFYING_KEY)]),
+    Buffer.concat([
+      Buffer.alloc(4096, 0x7f),
+      embeddedAssetPayload(["/index.html", `/assets/${assetName}`]),
+      Buffer.from(ACCEPTANCE_VERIFYING_KEY),
+    ]),
   );
   await writeFile(
     tauriConfig,
@@ -235,6 +248,106 @@ test("H8-15 rejects runtime Profile, database, Cookie, and diagnostic data", asy
     );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// `frontend/dist` is one directory shared by every build in the checkout: a
+// concurrent `pnpm build:tauri:*-test` rewrites it in `desktop-e2e` mode while a
+// release audit is still running. Auditing it in place let a foreign build
+// decide the verdict on this artifact — twice on 2026-07-26, once as a false
+// rejection and once with a 13 second margin. The audit must therefore refuse
+// any distribution it cannot show the audited binary embedded.
+async function overwriteWithForeignTestBuild(distribution) {
+  await rm(join(distribution, "assets"), { recursive: true, force: true });
+  await mkdir(join(distribution, "assets"), { recursive: true });
+  await writeFile(
+    join(distribution, "assets", "index-FOREIGNtest.js"),
+    "globalThis.wdioTauri = true;",
+  );
+  await writeFile(join(distribution, "harness.html"), "<main>harness</main>");
+}
+
+test("E4-15 refuses a distribution the audited binary never embedded", async () => {
+  const fixture = await createProductionFixture({ assetName: "index-PRODUCTION.js" });
+  try {
+    await overwriteWithForeignTestBuild(fixture.distribution);
+    await assert.rejects(
+      auditProductionPackage({
+        binaryPath: fixture.binary,
+        cargoManifestPath: fixture.cargoManifest,
+        dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+        distributionPath: fixture.distribution,
+        expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+        tauriConfigPath: fixture.tauriConfig,
+      }),
+      /Production distribution does not belong to the audited binary/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("E4-15 refuses a distribution that drops an asset the audited binary embedded", async () => {
+  const fixture = await createProductionFixture({ assetName: "index-PRODUCTION.js" });
+  try {
+    await rm(join(fixture.distribution, "assets", "index-PRODUCTION.js"));
+    await assert.rejects(
+      auditProductionPackage({
+        binaryPath: fixture.binary,
+        cargoManifestPath: fixture.cargoManifest,
+        dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+        distributionPath: fixture.distribution,
+        expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+        tauriConfigPath: fixture.tauriConfig,
+      }),
+      /Production distribution does not belong to the audited binary/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("E4-15 keeps its verdict on the audited artifact while the shared build directory is overwritten", async () => {
+  const fixture = await createProductionFixture({ assetName: "index-PRODUCTION.js" });
+  const snapshot = join(fixture.root, "audited-distribution");
+  try {
+    await cp(fixture.distribution, snapshot, { recursive: true });
+    await overwriteWithForeignTestBuild(fixture.distribution);
+    await assert.doesNotReject(
+      auditProductionPackage({
+        binaryPath: fixture.binary,
+        cargoManifestPath: fixture.cargoManifest,
+        dependencyTree: "automation-tool-desktop v0.1.0\ntauri v2.11.5",
+        distributionPath: snapshot,
+        expectedVerifyingKey: ACCEPTANCE_VERIFYING_KEY,
+        tauriConfigPath: fixture.tauriConfig,
+      }),
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("every package audit runner freezes the distribution it audits instead of reading the shared one", async () => {
+  const runners = [
+    "run_e4_15_acceptance.py",
+    "run_eb_16_acceptance.py",
+    "run_eb_16_windows_acceptance.py",
+    "run_p9_03_acceptance.py",
+    "run_p9_04_acceptance.py",
+  ];
+  for (const runner of runners) {
+    const source = await readFile(new URL(`../../scripts/${runner}`, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /snapshot_production_assets/u,
+      `${runner} must audit a frozen copy of the distribution the build consumed`,
+    );
+    assert.doesNotMatch(
+      source,
+      /"--dist",\s*\n?\s*os\.fspath\(PRODUCTION_ASSETS\)/u,
+      `${runner} must not hand the shared frontend/dist to the audit`,
+    );
   }
 });
 

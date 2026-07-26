@@ -61,6 +61,11 @@ def run_check(root: Path | None = None, contract: Path | None = None):
 def base_contract() -> dict:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     contract["staticScan"]["roots"] = ["frontend/index.html", "frontend/src"]
+    # The synthetic tree only contains the frontend files each case needs. The
+    # native scan was added later and points at real source roots that this
+    # tree does not have, so it has to be narrowed here too — otherwise every
+    # case fails on a missing directory before it can exercise anything.
+    contract["nativeScan"]["roots"] = []
     contract["staticScan"]["excludedGlobs"] = ["**/*.test.*", "**/*.spec.*"]
     contract["conceptDistinctions"] = [
         {

@@ -258,7 +258,22 @@ async def verify_database_state(database_url: str, offer: TaskCommandRecord) -> 
                 f"last_event_sequence={task['last_event_sequence']}; attempt "
                 f"status={attempt['status']} finished={attempt['finished_at'] is not None}"
             )
-        if capabilities.count("executor.connect") != 1 or any(
+        # Two Executor Sessions, and both are accounted for. A request-timeline
+        # probe of this driver recorded, in order:
+        #   POST /api/v1/device-sessions  -> WS /api/v1/executors/connect
+        #       the FakeExecutor this driver hosts;
+        #   POST /api/v1/tasks/{id}/emergency-stop
+        #   POST /api/v1/device-sessions  -> GET /api/v1/installations/current
+        #   POST /api/v1/device-sessions  -> WS /api/v1/executors/connect
+        #       `reconcile_pending_task_emergency_stop`, which since `10c2870`
+        #       (2026-07-21, offline emergency stop) always brings the local
+        #       Executor back up with a fresh Session after a Task emergency
+        #       stop. This acceptance was written on 2026-07-18, before that
+        #       path existed, which is why it used to see exactly one.
+        # The `app.control-plane` count is deliberately not asserted: the App
+        # exchanges one Session per Control Plane call and the workbench polls,
+        # so it tracks App uptime rather than anything this Task decides.
+        if capabilities.count("executor.connect") != 2 or any(
             capability not in {"app.control-plane", "executor.connect"}
             for capability in capabilities
         ):

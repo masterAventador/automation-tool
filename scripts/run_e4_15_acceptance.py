@@ -11,11 +11,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+from production_assets import snapshot_production_assets
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = REPOSITORY_ROOT / "frontend"
 CARGO_MANIFEST = FRONTEND_ROOT / "src-tauri" / "Cargo.toml"
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.conf.json"
-PRODUCTION_ASSETS = FRONTEND_ROOT / "dist"
 VERIFYING_KEY_ENVIRONMENT = "AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY"
 UPDATE_ENDPOINT_ENVIRONMENT = "AUTOMATION_TOOL_UPDATE_ENDPOINT"
 UPDATE_PUBLIC_KEY_ENVIRONMENT = "AUTOMATION_TOOL_UPDATE_PUBLIC_KEY"
@@ -141,6 +142,9 @@ def main() -> int:
             [pnpm_executable(), "tauri", "build", "--no-bundle"],
             environment=release_environment,
         )
+        audited_assets = snapshot_production_assets(
+            target_directory / "audited-distribution"
+        )
 
         binary = release_binary(target_directory)
         print("[E4-15] Auditing the real release binary and production dependency tree")
@@ -155,7 +159,7 @@ def main() -> int:
                 "--tauri-config",
                 os.fspath(TAURI_CONFIG),
                 "--dist",
-                os.fspath(PRODUCTION_ASSETS),
+                os.fspath(audited_assets),
             ],
             environment=release_environment,
         )

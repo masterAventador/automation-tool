@@ -68,6 +68,11 @@ from embedded_browser_archives import (  # noqa: E402
     archive_path,
 )
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
+from production_assets import (  # noqa: E402
+    AUDITED_DISTRIBUTION_NAME,
+    require_frozen_distribution,
+    snapshot_production_assets,
+)
 from release_assembly import (  # noqa: E402
     VIDEO_RUNTIME_RESOURCES,
     install_and_seal,
@@ -93,7 +98,6 @@ from run_p9_04_acceptance import (  # noqa: E402
 BASE_TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 CANDIDATE_TAURI_CONFIG = TAURI_ROOT / "tauri.windows-candidate.conf.json"
 CARGO_MANIFEST = TAURI_ROOT / "Cargo.toml"
-PRODUCTION_ASSETS = FRONTEND_ROOT / "dist"
 STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 EXECUTOR_RESOURCE = Path("local-executor/package")
 TARGET_ID = "windows-x86_64"
@@ -358,7 +362,11 @@ def audit_package_payload(root: Path) -> PackageAuditReport:
 
 
 def audit_package_content(
-    root: Path, binary: Path, environment: dict[str, str], configuration: Path
+    root: Path,
+    binary: Path,
+    environment: dict[str, str],
+    configuration: Path,
+    audited_assets: Path,
 ) -> None:
     announce("Auditing the built binary, configuration and whole installed tree")
     run_checked(
@@ -372,7 +380,7 @@ def audit_package_content(
             "--tauri-config",
             os.fspath(configuration),
             "--dist",
-            os.fspath(PRODUCTION_ASSETS),
+            os.fspath(audited_assets),
         ],
         environment=environment,
     )
@@ -584,6 +592,11 @@ def main() -> int:
         binary, installer = build_release_package(
             configuration=configuration, environment=environment, target=cargo_target
         )
+        # Frozen here, next to the artifact it belongs to, so that a later
+        # `--skip-build` re-audit of this same package reuses this exact copy.
+        audited_assets = snapshot_production_assets(
+            build_directory / AUDITED_DISTRIBUTION_NAME
+        )
     else:
         private_key = None
         public_key = (build_directory / "executor-verifying-key").read_text(
@@ -598,6 +611,9 @@ def main() -> int:
             cargo_target / "release/bundle/nsis",
             "*-setup.exe",
             "the NSIS installer was not generated exactly once",
+        )
+        audited_assets = require_frozen_distribution(
+            build_directory / AUDITED_DISTRIBUTION_NAME
         )
 
     announce(f"Built main binary: {binary} ({binary.stat().st_size} bytes)")
@@ -623,7 +639,9 @@ def main() -> int:
         signing["installed_binary"] = authenticode_facts(installed_binary)
         signing["uninstaller"] = authenticode_facts(root / "uninstall.exe")
         installed_report = audit_package_payload(root)
-        audit_package_content(root, installed_binary, environment, effective)
+        audit_package_content(
+            root, installed_binary, environment, effective, audited_assets
+        )
         evidence["clean_machine"] = audit_clean_machine(root)
         if private_key is not None:
             verify_manifest_signature(root / EXECUTOR_RESOURCE, private_key)

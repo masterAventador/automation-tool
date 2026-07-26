@@ -290,7 +290,11 @@ test("E4-14 drives the signed Executor lifecycle through one isolated hidden App
   assert.match(orchestrator, /managed_test_postgres/);
   assert.match(orchestrator, /"pnpm.cmd" if sys.platform == "win32" else "pnpm"/);
   assert.match(orchestrator, /closing\(sqlite3\.connect/);
-  assert.match(orchestrator, /!= \(7,\):/);
+  // The driver used to freeze the ledger schema version as a literal, which
+  // went stale every time the schema moved. It now imports the single source
+  // of truth, so assert that it reads the version from there instead of
+  // pinning whatever number happens to be current.
+  assert.match(orchestrator, /EXECUTOR_LEDGER_SCHEMA_VERSION/);
   assert.match(orchestrator, /browser-diagnostic-settings-v1/);
   assert.match(orchestrator, /automation-tool-e414-/);
   assert.match(orchestrator, /require_port_available/);

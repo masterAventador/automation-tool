@@ -24,6 +24,7 @@ from automation_tool.executor.macos_candidate import (
     build_macos_executor_candidate,
 )
 from automation_tool.executor.package_manifest import write_signed_executor_manifest
+from production_assets import snapshot_production_assets
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
@@ -32,7 +33,6 @@ TAURI_ROOT = FRONTEND_ROOT / "src-tauri"
 BASE_TAURI_CONFIG = TAURI_ROOT / "tauri.conf.json"
 CANDIDATE_TAURI_CONFIG = TAURI_ROOT / "tauri.macos-candidate.conf.json"
 CARGO_MANIFEST = TAURI_ROOT / "Cargo.toml"
-PRODUCTION_ASSETS = FRONTEND_ROOT / "dist"
 APP_IDENTIFIER = "com.aventador.automationtool"
 EXECUTOR_RESOURCE = Path("local-executor/package")
 UPDATE_ENDPOINT = (
@@ -309,6 +309,7 @@ def main() -> int:
             ],
             environment=environment,
         )
+        audited_assets = snapshot_production_assets(temporary / "audited-distribution")
 
         bundle_root = target / "release/bundle"
         app = one_directory(bundle_root / "macos", ".app")
@@ -335,7 +336,7 @@ def main() -> int:
                 "--tauri-config",
                 os.fspath(BASE_TAURI_CONFIG),
                 "--dist",
-                os.fspath(PRODUCTION_ASSETS),
+                os.fspath(audited_assets),
             ],
             environment=environment,
         )
