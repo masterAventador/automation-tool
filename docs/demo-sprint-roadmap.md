@@ -43,7 +43,8 @@
 | ID | 任务 | 状态 | 并行 | 说明 |
 |---|---|---|---|---|
 | T68 | 产品账号登录报「暂时无法完成账号操作」 | 🔍 待验收 | 已完成 | **根因已实证并上线**：边界 nginx 用 `$request_id` 覆盖了 App 送的 `x-request-id`，App 比对回显不一致 → `ProtocolInvalid`，**登录第一个请求就失败**，所以 challenge 与 logout 从未发出（这解释了日志里「只有登录没有挑战」）。已部署实测回显一致。正式包无 WebDriver（T48），**最后一步只能你手工登录**。见 `docs/development/T68.md` |
-| T10 | 从正式签名包跑一遍所有用例 | ⬜ | ❌ 不可 | 本轮目标本身。与 T57b 的 e2e 重组直接冲突，必须我做 |
+| T10 | 从正式签名包跑一遍所有用例 | 🚧 | ❌ 不可 | 本轮目标本身。与 T57b 的 e2e 重组直接冲突，必须我做。**已修四条真红**（见下「T10 已抓到的」）；正式包正在 `wt/release` 出，四条扫描线并行 |
+| T72 | 门禁执行者的三处空洞 | ⬜ | ✅ 可 | 全量扫描的副产物，同一类：① `run_script_tests.py` **没被接进任何门禁**（`grep -rn run_script_tests .github/` 零命中）——为「守卫没人执行」造的解药，自己没人执行；② `deploy/ingress/test_ingress_config.py`(2 条) 与 `deploy/cloud/test_cloud_deployment.py`(46 条) 共 **48 条断言无任何执行者**，pytest 的 `testpaths=["tests"]` 收不到、runner 只 glob `scripts/` 也收不到，唯一调用方式是 `docs/development/T68.md:131` 里一行手敲命令（实跑是绿的，属潜伏风险）；③ runner 只对**失败**脚本打印输出（`:145`），通过的 stdout 直接丢弃，于是「跑 50 条断言」和「什么都没跑就 return 0」在汇总里长得一模一样——实测 41 个脚本共 400 条检查，**11 个「通过」数不出任何执行证据**，其中 `test_video_studio_acceptance_scope.py` 正是当初红着躺了很久那条。另 `test_script_test_runner.py:73` 的元测试用与实现完全相同的子串判据去断言实现，恒真 |
 | T69 | App 全程零日志 | ⬜ | ❌ 不可 | 无 tracing / log / env_logger 依赖，零条日志调用。**演示机上一旦出问题，我们是瞎的**（今天就吃过亏：我让你跑二进制看 stderr，那条命令根本不可能有输出）。Demo 前只加「不改任何行为」的一层 |
 | T61 | setup 失败即 abort，无兜底（含 T66b、T65） | ⬜ | ❌ 不可 | 调研已完成，**紧迫性下降**：「做完视频→正常退出→再打开」经导入链路核实是安全的，前一条线的高风险判断被推翻。剩余真实窗口只有「删成片时强退」和硬断电。建议一处四行兜底，不动 setup 结构。**T66b（目录权限只检查不修复）和 T65（`cleanup_expired` 无调用方）都在 `video_job_workspace.rs` 同一条启动路径上，并进来一起改。** 全部证据见 `docs/development/T61-setup-abort-risk.md` |
 | T70 | 演示前检查清单补完 | 🚧 | ⚠️ 半 | §2、§5.1 已实测贴输出；§3 等最终 DMG，§7 等 T36 定型 |
@@ -53,6 +54,22 @@
 | T53 | Windows 验收机装 Node + pre-push hook | 👤 | — | 当前 v22.20.0 低于 `engines >=24 <27`，快档门禁不需要（`tsc` 只要 `>=14.17`）但**慢档必须对齐**。`.git/hooks/pre-push` 已被 git-lfs 占用，需人工插入共存。挂 pre-push 而非 pre-commit——后者跑在工作树上，而工作树正是被遮蔽的那个对象 |
 | T7 | Windows GUI 三项验收 | 👤 | — | 依赖 T53。你已授权装 Node |
 | T71 | 要不要补背景音乐 | 👤 决策 | — | 合规上无障碍（已有 4 个自制、权利全 `true` 的 `music_sfx`），但那 4 个是 1–2 秒音效不是 BGM。**做不做 / 几首 / 什么风格等你定** |
+
+### T10 已抓到并修掉的（跑全量的直接产出）
+
+| 提交 | 问题 | 判定 |
+|---|---|---|
+| `e4b546e` | 编排代理在 `889cf9e` 搬走后，**4 处引用还指着旧路径**。一处响亮（`.mjs` 直接 open 文件 ENOENT，`pnpm test` 全红），**三处躺在契约的 `definedIn` 里一声不吭**——指向不存在路径的契约管辖的是空集，和管辖一切的长得一模一样 | 产品外的事实源缺陷。补 `check_contract_declared_paths.py`。两种自动推导都不可用（形状规则误报 1462 条、自扩展 key 推导误报 474 条，因为 `path` 是包内相对、`healthPath` 是 URL 路径、`excludedGlobs` 是通配符），只能手工 key 集 + 门禁自报覆盖范围 |
+| `ce45efd` | 发版构建停在 `_run_pyinstaller`，只给一句「被拒绝」。`capture_output=True` 抓走 PyInstaller 输出后 `raise _reject()` 全丢掉，**构建失败零诊断** | 真缺陷。真实原因（缺一个 vendored 文件）是手工重跑同一条命令才拿到的，构建机上没人能这么做 |
+| `dd735dc` | 全量扫描报 **216 条集成失败，一条真的都没有**。夹具 shell 出裸 `alembic` 靠 PATH 解析，而 `.venv/bin/python -m pytest`（完全正常的跑法）不会把 `.venv/bin` 放进 PATH | 基建问题伪装成产品大面积崩溃。改 `sys.executable -m alembic`，用「有 docker、无 venv/bin」的精确复现条件验证 16 条集成用例全过 |
+| `c084f2d` | `upstream-name-leak.spec.ts:77/86` 各卡 30 秒超时点「发布到抖音」 | 测试过期，产品不动。`PublishWorkspace.tsx:215` 的 `disabled={busy \|\| !publishable}` 与 `ui-harness.spec.ts:139` 的 `toBeDisabled()` 断言两处坐实「填完文案前禁用」是有意行为；leak spec 从没填过 |
+
+**跑全量之外，我自己的并行设置也炸了两次**，记在这里因为下次一定还会遇到：
+
+1. **软链 `backend/.venv` 到主树 = 所有并行线的 Python 结论作废。** venv 里 `automation_tool` 是 editable 安装，指针在**单个共享文件** `site-packages/automation_tool.pth` 里；而仓库自己的 `package.json` 有多条 `uv run --project ../backend --locked`（`test:p9-05`、`test:h8-22-windows-package`、`p9-02/04/07`），**这条命令会 sync 并改写它**。做过对照实验定性（跑一次，`.pth` 从 `<root>/backend/src` 变成 `<root>/wt/release/backend/src`），不是谁违规。发现时它指着 `wt/codex`——主树 pytest 在测 codex 的在飞代码，**正在跑的正式包构建也在打包 codex 的后端源码**。已改为每棵树 `uv sync --locked`，四棵共 10.5 秒、依赖零重下。
+2. **软链 `node_modules` 差点被 pnpm 删掉。** pnpm 11 跑任何 script 前校验依赖，软链必然不匹配，它就决定**先删再装**，只有「没有 TTY」挡住了；而它的报错**建议设 `CI=true`**，照做就静默删掉主树那份、三条线一起报废。已改为每棵树独立 `pnpm install`，单树 3.3 秒。
+
+判据：软链安不安全**不看体积，看有没有正常命令会去改写它**。`vendor/*` 只读 submodule 可以软链（先核对各 worktree gitlink 一致），`.venv` 和 `node_modules` 不行。
 
 ### 「能在 App 里生成出一个视频」这条链路的收口状态
 
