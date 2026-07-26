@@ -427,11 +427,19 @@ cargo build --lib --features video-studio-e2e                     OK
 cd frontend && npx tsc -b                                         exit 0
 ```
 
-**本次没有跑出 cargo 全量结果。** 上面列的是实际跑过的：新增二进制 5 条、三种 feature 的
-`cargo build --lib` 全通过、`tsc -b` exit 0，另加 `motion_video_studio` 13 条、
-`material_video_artifact` 3 条、`single_build_path` 7 条。全量在本段结束时仍在跑，
-**没有拿到数就不写数**——台账里 42 二进制 / 383 通过那一处是上一次提交时的实测值，
-不适用于本次改动，下一段必须补跑并核对。
+```text
+cargo test --tests -- --test-threads=4     42 个测试二进制 / 384 passed / 0 failed  (383 → 384)
+```
+
+**这个数字取得过程有一段弯路，记下来免得下次误判。** 中途一次"全量"输出为空却退出码 0——
+原因是 macOS 上没有 `timeout`，那条命令根本没执行。补跑时我又在前一次全量仍在跑的情况下
+并发起了第二次，两次 `cargo test` 抢同一个 target 目录，结果报 `20 个二进制 / 208 通过 /
+4 失败`。单独重跑 `cargo test --test executor_manager` 是 **19 passed / 0 failed**，
+与仓库既有记录一致（该套件在满负载下会出 TimedOut 抖动）。以先启动、未被并发干扰的那次
+为准：**42 / 384 / 0**。
+
+教训有两条：**输出为空 + 退出码 0 不等于通过**（`timeout` 不存在时整条管道会静默成功）；
+**同一个 target 目录上不要并发跑 cargo test**，否则拿到的失败是自己造的。
 
 #### 交付
 
