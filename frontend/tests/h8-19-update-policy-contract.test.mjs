@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const repositoryRoot = new URL("../../", import.meta.url);
@@ -50,24 +50,19 @@ test("H8-19 keeps the policy machine closed, monotonic and business agnostic", a
   }
 });
 
-test("H8-19 validates the production startup wiring through an isolated hidden App", async () => {
-  const [packageManifest, tauriConfig, wdioConfig, spec, nativeEntry] = await Promise.all([
-    readFile(new URL("package.json", frontendRoot), "utf8"),
-    readFile(new URL("src-tauri/tauri.update-policy-e2e.conf.json", frontendRoot), "utf8"),
-    readFile(new URL("wdio.update-policy.conf.ts", frontendRoot), "utf8"),
-    readFile(new URL("e2e-tauri/update-policy.spec.ts", frontendRoot), "utf8"),
-    readFile(new URL("src-tauri/src/lib.rs", frontendRoot), "utf8"),
-  ]);
+test("H8-19 does not claim UI coverage through a zero-click WDIO surrogate", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("package.json", frontendRoot), "utf8"),
+  );
 
-  assert.match(packageManifest, /build:tauri:update-policy-test/u);
-  assert.match(packageManifest, /test:h8-19-app/u);
-  const configuration = JSON.parse(tauriConfig);
-  assert.equal(configuration.identifier, "com.aventador.automationtool.h819acceptance");
-  assert.equal(configuration.app.windows[0].visible, false);
-  assert.match(wdioConfig, /update-policy\.spec\.ts/u);
-  assert.match(wdioConfig, /onPrepare/u);
-  assert.match(wdioConfig, /onComplete/u);
-  assert.match(spec, /get_update_policy_record_for_acceptance/u);
-  assert.match(nativeEntry, /fn get_update_policy_record_for_acceptance/u);
-  assert.match(nativeEntry, /app_update_policy::UpdatePolicyService/u);
+  assert.equal(packageJson.scripts["build:tauri:update-policy-test"], undefined);
+  assert.equal(packageJson.scripts["test:h8-19-app"], undefined);
+  await Promise.all([
+    assert.rejects(access(new URL("wdio.update-policy.conf.ts", frontendRoot)), {
+      code: "ENOENT",
+    }),
+    assert.rejects(access(new URL("e2e-tauri/update-policy.spec.ts", frontendRoot)), {
+      code: "ENOENT",
+    }),
+  ]);
 });
