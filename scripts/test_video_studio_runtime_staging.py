@@ -18,10 +18,12 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from prepare_video_runtime import host_platform  # noqa: E402
 from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
     DEBUG_APP_RESOURCE_ROOT,
@@ -42,9 +44,17 @@ def _write(path: Path, content: bytes = b"payload") -> None:
 
 
 def _complete_staging(root: Path) -> Path:
+    """A staging tree carrying this platform's artifact names, and only those.
+
+    The names are asked of the release resource contract for the platform in
+    force rather than written out for one of them. `bin/ffmpeg` is `ffmpeg.exe`
+    on Windows, and the checker under test reads the same contract, so a
+    fixture that names the other platform's layout fails the way a real missing
+    resource would -- which is what it did on the acceptance machine.
+    """
     staging = root / "staging"
     for resource in VIDEO_RUNTIME_RESOURCES:
-        for name in resource.required_for("macos"):
+        for name in resource.required_for(host_platform()):
             _write(staging / resource.staging_name / name)
     return staging
 
@@ -61,7 +71,7 @@ def check_staging_installs_every_resource_where_the_release_reads_it() -> None:
             location = resources.joinpath(*resource.installed_parts)
             assert location.is_dir(), f"{resource.staging_name} was not installed"
             assert installed[resource.staging_name] == location
-            for name in resource.required_for("macos"):
+            for name in resource.required_for(host_platform()):
                 assert (location / name).is_file(), f"{name} was not installed"
 
 
@@ -97,7 +107,7 @@ def check_an_empty_required_file_is_rejected() -> None:
         staging = _complete_staging(root)
         resources = root / "debug"
         resource = VIDEO_RUNTIME_RESOURCES[0]
-        empty = resource.required_for("macos")[0]
+        empty = resource.required_for(host_platform())[0]
         _write(staging / resource.staging_name / empty, b"")
 
         try:
@@ -217,6 +227,72 @@ def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths
     )
 
 
+def check_the_staging_fixture_matches_what_the_checker_requires_on_every_platform() -> None:
+    """The fixture has to fabricate the artifact names of the platform it runs on.
+
+    Measured on the Windows acceptance machine 2026-07-27 (T123): this file
+    failed there, and nothing it covers had gone wrong. `_complete_staging`
+    asked the release resource contract for `macos` outright, so it wrote
+    `bin/ffmpeg` while `require_staged_video_runtime` -- reading the same
+    contract for the platform it is actually on -- demanded `bin/ffmpeg.exe`.
+    A test whose own scaffolding fails the way a defect would is worse than no
+    test: it costs a diagnosis every time someone runs the suite on Windows.
+
+    Both branches are driven from here by moving the one fact they both derive
+    from, `sys.platform`. Nothing on this path is platform-native -- staging is
+    a copy and the check is a name lookup -- so a macOS run can hold the
+    Windows layout to the same standard. What it cannot reach is a real
+    Windows filesystem; T124 records what was re-verified on one.
+    """
+    for platform_id, expected in (("darwin", "macos"), ("win32", "windows")):
+        with mock.patch.object(sys, "platform", platform_id):
+            assert host_platform() == expected, (
+                "the fixture and the checker no longer read the same platform, so "
+                "staging for one and verifying against the other would pass by luck"
+            )
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                staging = _complete_staging(root)
+
+                for resource in VIDEO_RUNTIME_RESOURCES:
+                    tree = staging / resource.staging_name
+                    staged = {
+                        path.relative_to(tree).as_posix()
+                        for path in tree.rglob("*")
+                        if path.is_file()
+                    }
+                    assert staged == set(resource.required_for(expected)), (
+                        f"on {expected} the fixture staged {sorted(staged)} for "
+                        f"{resource.staging_name}, but the contract names "
+                        f"{sorted(resource.required_for(expected))}; staging both "
+                        "spellings would hide the disagreement rather than settle it"
+                    )
+
+                installed = stage_video_runtime(staging=staging, resource_root=root / "debug")
+                for resource in VIDEO_RUNTIME_RESOURCES:
+                    for name in resource.required_for(expected):
+                        assert (installed[resource.staging_name] / name).is_file(), (
+                            f"{name} was not installed on {expected}"
+                        )
+
+
+def check_every_declared_check_is_registered() -> None:
+    """A check that is defined but not listed runs zero times and says nothing.
+
+    The same guard `test_desktop_e2e_prerequisites.py` grew on 2026-07-27,
+    after a check appended there ran zero times while the output still read as
+    a tidy pass. The count printed below is derived from `CHECKS` and so cannot
+    drift from what ran -- but membership is hand-maintained, and this file is
+    the same shape.
+    """
+    declared = {
+        name for name, value in globals().items() if name.startswith("check_") and callable(value)
+    }
+    registered = {check.__name__ for check in CHECKS}
+    missing = sorted(declared - registered)
+    assert not missing, f"defined but never run: {missing}"
+
+
 CHECKS = (
     check_the_resource_root_is_where_the_acceptance_app_actually_runs,
     check_staging_installs_every_resource_where_the_release_reads_it,
@@ -226,6 +302,8 @@ CHECKS = (
     check_restaging_breaks_a_resource_link_without_touching_its_target,
     check_a_missing_embedded_browser_names_the_provisioning_step,
     check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths,
+    check_the_staging_fixture_matches_what_the_checker_requires_on_every_platform,
+    check_every_declared_check_is_registered,
 )
 
 

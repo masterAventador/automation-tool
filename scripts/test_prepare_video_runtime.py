@@ -37,12 +37,34 @@ SCRIPT = ROOT / "scripts" / "prepare_video_runtime.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import prepare_video_runtime  # noqa: E402
+from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
 from video_runtime_cache import STAMP_VERSION, contract_fingerprint  # noqa: E402
 
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
 # What `release-package-resources.v1.json` says the Worker is installed as.
 INSTALLED = ("motion-video-worker", "package")
+
+# The one declaration of what a staged motion Worker is called, per platform.
+# `required_for` turns `runtime/node` into `runtime/node.exe` on Windows off the
+# same contract entry the production installer reads, so a fixture that asks it
+# cannot stage a tree the installer then refuses.
+MOTION_WORKER = next(
+    resource
+    for resource in VIDEO_RUNTIME_RESOURCES
+    if resource.staging_name == "motion-video-worker"
+)
+# The animation runtime the composition loads. It is not one of the release
+# contract's required files -- that contract fixes what must not be missing,
+# and this asset is proven by the Rust suite instead -- so its name comes from
+# the Worker package contract, the same key `build_motion_video_worker_candidate`
+# writes it from. It carries no extension that varies by platform.
+AUTHORING_RUNTIME_ASSET: str = json.loads(
+    MOTION_WORKER_CONTRACT.read_text(encoding="utf-8")
+)["packageLayout"]["authoringRuntimeAsset"]
+# Exactly the platforms `--platform` accepts, taken from the same mapping that
+# populates its `choices`.
+DECLARED_PLATFORMS = tuple(sorted(prepare_video_runtime.MEDIA_TOOLCHAIN_TARGETS))
 
 
 def declared_inputs(resource: str) -> tuple[Path, ...]:
@@ -112,14 +134,31 @@ def covered_by(inputs: tuple[Path, ...], path: Path) -> bool:
     return any(entry == path or entry in path.parents for entry in inputs)
 
 
+def host_payloads() -> tuple[str, ...]:
+    """The Worker payload names `install()` requires on the platform in force.
+
+    A call rather than a constant: the platform is read at use time, so a test
+    can hold the fixture and its assertions to the other platform's layout.
+    """
+    return MOTION_WORKER.required_for(prepare_video_runtime.host_platform())
+
+
 def stamped_motion_worker(staging: Path) -> Path:
-    """A staging tree the cache accepts as current, so nothing gets rebuilt."""
+    """A staging tree the cache accepts as current, so nothing gets rebuilt.
+
+    The payload names are asked of the release resource contract for the
+    platform this run installs for, rather than written out. They used to be
+    written out as the macOS spelling, which is why three tests in this file
+    failed on the Windows acceptance machine while nothing they cover was
+    broken. Only presence and non-emptiness are read here -- `install()` checks
+    both, and no test in this file executes a staged payload -- so the contents
+    are placeholders and the names are the whole point.
+    """
     package = staging / "motion-video-worker"
-    (package / "runtime").mkdir(parents=True)
-    (package / "app").mkdir(parents=True)
-    (package / "runtime" / "node").write_bytes(b"#!/bin/sh\nexit 0\n")
-    (package / "runtime" / "gsap.min.js").write_text("/* gsap */", encoding="utf-8")
-    (package / "app" / "worker.mjs").write_text("export default 1;\n", encoding="utf-8")
+    for name in (*host_payloads(), AUTHORING_RUNTIME_ASSET):
+        payload = package / name
+        payload.parent.mkdir(parents=True, exist_ok=True)
+        payload.write_bytes(b"staged by test_prepare_video_runtime\n")
     (staging / "motion-video-worker.stamp.json").write_text(
         json.dumps(
             {
@@ -282,6 +321,75 @@ class CacheKeysCoverEveryBuildInput(unittest.TestCase):
 
 
 class InstallIntoAResourceDirectory(unittest.TestCase):
+    def test_the_staged_worker_installs_on_every_platform_it_is_built_for(self) -> None:
+        """The fixture has to name the artifacts of the platform it stages for.
+
+        Measured on the Windows acceptance machine 2026-07-27 (T123): three of
+        this file's tests failed there, and none of them was testing anything
+        that had gone wrong. The staging fixture wrote `runtime/node`, which is
+        what the Worker is called on macOS; `install()` asks the release
+        resource contract, which on Windows names `runtime/node.exe`. The
+        fixture and the code under test disagreed about the artifact's name, so
+        the suite reported a defect that only its own scaffolding had.
+
+        Driving both branches from here is possible because neither the naming
+        nor the install is platform-native work: `--platform` selects which
+        contract entry `install()` enforces, so a macOS run can hold the
+        Windows layout to the same standard. What this cannot prove is anything
+        that needs a real Windows filesystem; see T124 for what was re-verified
+        there.
+        """
+        for platform in DECLARED_PLATFORMS:
+            with (
+                self.subTest(platform=platform),
+                TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory,
+                mock.patch.object(
+                    prepare_video_runtime, "host_platform", return_value=platform
+                ),
+            ):
+                base = Path(directory)
+                staging = base / "staging"
+                staging.mkdir()
+                package = stamped_motion_worker(staging)
+                resources = base / "resources"
+
+                staged = {
+                    path.relative_to(package).as_posix()
+                    for path in package.rglob("*")
+                    if path.is_file()
+                }
+                self.assertEqual(
+                    {*MOTION_WORKER.required_for(platform), AUTHORING_RUNTIME_ASSET},
+                    staged,
+                    "the fixture must stage this platform's artifact names and no "
+                    "others -- staging both spellings would hide the disagreement "
+                    "rather than settle it",
+                )
+
+                completed = run_prepare(
+                    "--platform",
+                    platform,
+                    "--root",
+                    str(staging),
+                    "--only",
+                    "motion-video-worker",
+                    "--install-into",
+                    str(resources),
+                )
+
+                self.assertEqual(
+                    0,
+                    completed.returncode,
+                    f"installing the staged Worker for {platform} must succeed:\n"
+                    f"{completed.stdout}{completed.stderr}",
+                )
+                installed = resources.joinpath(*INSTALLED)
+                for name in MOTION_WORKER.required_for(platform):
+                    self.assertTrue(
+                        (installed / name).is_file(),
+                        f"{name} must be installed at {installed} on {platform}",
+                    )
+
     def test_the_worker_lands_where_the_rust_test_reads_it(self) -> None:
         with TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory:
             base = Path(directory)
@@ -306,13 +414,13 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 f"{completed.stdout}{completed.stderr}",
             )
             installed = resources.joinpath(*INSTALLED)
+            for name in host_payloads():
+                self.assertTrue(
+                    (installed / name).is_file(),
+                    f"the Worker's {name} must be installed at {installed}",
+                )
             self.assertTrue(
-                (installed / "runtime" / "node").is_file(),
-                f"the Worker runtime must be installed at {installed}",
-            )
-            self.assertTrue((installed / "app" / "worker.mjs").is_file())
-            self.assertTrue(
-                (installed / "runtime" / "gsap.min.js").is_file(),
+                (installed / AUTHORING_RUNTIME_ASSET).is_file(),
                 "the animation runtime the composition loads must come with it",
             )
 
@@ -345,7 +453,8 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 f"a repeat install must succeed:\n{second.stdout}{second.stderr}",
             )
             self.assertFalse(stale.exists(), "a repeat install must not merge into the old tree")
-            self.assertTrue(resources.joinpath(*INSTALLED, "runtime", "node").is_file())
+            for name in host_payloads():
+                self.assertTrue(resources.joinpath(*INSTALLED, name).is_file())
 
     def test_install_replaces_a_linked_resource_root_without_touching_its_target(
         self,
@@ -382,7 +491,8 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 installed_root.is_symlink(),
                 "the worktree resource root must be independently materialized",
             )
-            self.assertTrue(installed_root.joinpath("package/runtime/node").is_file())
+            for name in host_payloads():
+                self.assertTrue(installed_root.joinpath(INSTALLED[1], name).is_file())
             self.assertEqual(
                 "leave me alone\n",
                 sentinel.read_text(encoding="utf-8"),
