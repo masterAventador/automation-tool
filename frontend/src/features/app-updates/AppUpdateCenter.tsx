@@ -35,6 +35,38 @@ function releaseFrom(state: AppUpdateState | null): AppUpdateRelease | null {
   return state.release;
 }
 
+type UpdateTagColor = "blue" | "green" | "gold" | "red" | "default";
+
+type FailedAppUpdateState = Extract<AppUpdateState, { state: "failed" }>;
+
+interface UpdateFailurePresentation {
+  readonly text: string;
+  readonly color: UpdateTagColor;
+}
+
+/**
+ * 更新服务未配置和暂时连不上更新服务器都不是用户需要处理的错误。发布构建可以显式
+ * 关闭更新，此时协调器不存在，原生层只能把这种情况回报成 configuration_invalid；
+ * 界面挂载即轮询，用户什么都没点就会看到红色失败文案。
+ *
+ * 这两种情况改用中性和提示态，但文案仍然说明更新为什么不可用，不做静默处理。下载、
+ * 验签、存储和安装的真实失败保持红色错误态；未来新增的失败码默认同样走红色，避免
+ * 把真实失败悄悄降级。
+ */
+function failurePresentation(state: FailedAppUpdateState): UpdateFailurePresentation {
+  switch (state.code) {
+    case "configuration_invalid":
+      return { text: "此版本未启用自动更新", color: "default" };
+    case "transport_unavailable":
+      return { text: "暂时无法连接更新服务器，可稍后重试", color: "gold" };
+    default:
+      return {
+        text: state.retryable ? "更新暂时失败，可以重试" : "更新当前不可用",
+        color: "red",
+      };
+  }
+}
+
 function statusText(state: AppUpdateState | null): string {
   if (state === null) return "正在读取更新状态";
   switch (state.state) {
@@ -69,11 +101,11 @@ function statusText(state: AppUpdateState | null): string {
     case "installation_launched":
       return "安装程序已启动";
     case "failed":
-      return state.retryable ? "更新暂时失败，可以重试" : "更新当前不可用";
+      return failurePresentation(state).text;
   }
 }
 
-function stateColor(state: AppUpdateState | null): "blue" | "green" | "gold" | "red" | "default" {
+function stateColor(state: AppUpdateState | null): UpdateTagColor {
   if (state === null) return "default";
   switch (state.state) {
     case "up_to_date":
@@ -83,7 +115,7 @@ function stateColor(state: AppUpdateState | null): "blue" | "green" | "gold" | "
     case "ready":
       return "gold";
     case "failed":
-      return "red";
+      return failurePresentation(state).color;
     case "checking":
     case "installing":
       return "blue";
