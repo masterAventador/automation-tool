@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What each gate needs before it can run, and the command that produces it.
 
-Four gates in this repository cannot run on a freshly cloned tree. Each one
+Five gates in this repository cannot run on a freshly cloned tree. Each one
 needs a build artifact that no runner produces and that nothing declares:
 
 * `scripts/test_motion_catalog_release.py` needs the BM-12 staged catalog;
@@ -9,6 +9,8 @@ needs a build artifact that no runner produces and that nothing declares:
 * `cargo test --test motion_authoring_runtime` needs the motion Worker package
   installed where a debug App resolves its resources from;
 * `scripts/run_cq_03_acceptance.py` needs an EB-16 release package.
+* video-line WebdriverIO drivers need the verified embedded-browser cache that
+  their shared startup harness stages into the debug App.
 
 The cost of that is not the missing file. It is that a new machine running the
 full suite goes red for reasons unrelated to any change, everyone learns the red
@@ -102,18 +104,34 @@ def _motion_worker_paths() -> tuple[str, ...]:
     import json
 
     contract = json.loads(
-        (REPOSITORY_ROOT / "contracts/quality/release-package-resources.v1.json")
-        .read_text(encoding="utf-8")
+        (
+            REPOSITORY_ROOT / "contracts/quality/release-package-resources.v1.json"
+        ).read_text(encoding="utf-8")
     )
     worker = next(
         resource
         for resource in contract["resources"]
         if resource["name"] == "motion-video-worker"
     )
-    installed = "/".join(
-        ["frontend/src-tauri/target/debug", *worker["installedParts"]]
-    )
+    installed = "/".join(["frontend/src-tauri/target/debug", *worker["installedParts"]])
     return (installed, *(f"{installed}/{name}" for name in worker["requiredFiles"]))
+
+
+def _video_e2e_browser_paths() -> tuple[str, ...]:
+    """The cache manifest the shared video WDIO startup harness consumes."""
+    from desktop_e2e_prerequisites import (
+        DISTRIBUTION_MANIFEST_NAME,
+        DesktopPrerequisiteRejected,
+        embedded_browser_cache,
+        release_target_id,
+    )
+
+    try:
+        target_id = release_target_id()
+    except DesktopPrerequisiteRejected:
+        target_id = f"unsupported-{sys.platform}"
+    manifest = embedded_browser_cache(target_id) / DISTRIBUTION_MANIFEST_NAME
+    return (manifest.relative_to(REPOSITORY_ROOT).as_posix(),)
 
 
 PREREQUISITES: Final[tuple[Prerequisite, ...]] = (
@@ -190,6 +208,25 @@ PREREQUISITES: Final[tuple[Prerequisite, ...]] = (
             "identity — this is deliberately not run for you"
         ),
     ),
+    Prerequisite(
+        name="video-e2e-embedded-browser",
+        gate=(
+            "video-line WebdriverIO drivers using scripts/desktop_e2e_prerequisites.py"
+        ),
+        produces=_video_e2e_browser_paths(),
+        producer=("{python}", "scripts/desktop_e2e_prerequisites.py"),
+        automatic=True,
+        why=(
+            "the shared startup harness stages only a verified platform cache; "
+            "without its distribution manifest the App is blocked before any "
+            "video spec reaches its first assertion"
+        ),
+        caveat=(
+            "builds the platform cache from the already-downloaded locked "
+            "Chromium archive and verifies every file; it does not download "
+            "the archive"
+        ),
+    ),
 )
 
 
@@ -202,9 +239,7 @@ def by_name(name: str) -> Prerequisite:
 
 
 def explain(prerequisite: Prerequisite, missing: list[Path]) -> str:
-    absent = ", ".join(
-        path.relative_to(REPOSITORY_ROOT).as_posix() for path in missing
-    )
+    absent = ", ".join(path.relative_to(REPOSITORY_ROOT).as_posix() for path in missing)
     lines = [
         f"{prerequisite.gate} cannot run: {absent} is missing.",
         f"  why: {prerequisite.why}",

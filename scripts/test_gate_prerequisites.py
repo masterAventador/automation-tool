@@ -21,6 +21,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -34,13 +35,14 @@ from gate_prerequisites import (  # noqa: E402
     require,
 )
 
-# The four gates this registry exists for. Named here so that deleting a
+# The gates this registry exists for. Named here so that deleting a
 # declaration is a test failure rather than a silent loss of coverage.
 EXPECTED_NAMES = {
     "offline-motion-catalog",
     "frontend-dist",
     "motion-authoring-runtime",
     "eb-16-release-package",
+    "video-e2e-embedded-browser",
 }
 
 
@@ -182,6 +184,37 @@ class PathsAreDerivedNotRetyped(unittest.TestCase):
             *(f"{installed}/{name}" for name in worker["requiredFiles"]),
         )
         self.assertEqual(expected, by_name("motion-authoring-runtime").produces)
+
+    def test_the_video_e2e_browser_cache_path_matches_the_real_harness(self) -> None:
+        from desktop_e2e_prerequisites import (
+            DISTRIBUTION_MANIFEST_NAME,
+            embedded_browser_cache,
+        )
+
+        manifest = embedded_browser_cache() / DISTRIBUTION_MANIFEST_NAME
+        expected = (manifest.relative_to(ROOT).as_posix(),)
+        prerequisite = by_name("video-e2e-embedded-browser")
+
+        self.assertEqual(expected, prerequisite.produces)
+        self.assertEqual(
+            ("{python}", "scripts/desktop_e2e_prerequisites.py"),
+            prerequisite.producer,
+        )
+
+    def test_an_unsupported_host_can_still_inspect_the_registry(self) -> None:
+        import desktop_e2e_prerequisites
+        import gate_prerequisites
+
+        with mock.patch.object(desktop_e2e_prerequisites.sys, "platform", "linux"):
+            paths = gate_prerequisites._video_e2e_browser_paths()
+
+        self.assertEqual(
+            (
+                ".local/desktop-e2e/embedded-browser/"
+                "unsupported-linux/distribution-manifest.v1.json",
+            ),
+            paths,
+        )
 
 
 class ConsumersReadTheDeclarationRatherThanRetypingIt(unittest.TestCase):
