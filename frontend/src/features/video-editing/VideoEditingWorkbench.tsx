@@ -180,7 +180,23 @@ function ProjectsPage({
   const [sourceReferences, setSourceReferences] = useState("");
   return (
     <Space orientation="vertical" size="middle" className="video-editing-projects">
-      <Card className="video-editing-panel" title="新建剪辑项目">
+      {/*
+       * No card head.
+       *
+       * It said 「新建剪辑项目」 directly under the 「剪辑项目」 tab, and directly
+       * above 「输入项目标题和要剪辑的素材引用…」 and the 「创建剪辑项目」 button —
+       * four consecutive lines, 剪辑项目 in every one of them. The head is the
+       * one carrying nothing the other three do not: the tab says which step
+       * this is, the sentence says what to do, the button says what happens.
+       *
+       * It cost 56px, and this page had 680px of `main` at the production
+       * 1280x800 window while needing 687px, so those 56px were also the
+       * difference between one screen and a scrollbar. The same head was
+       * removed from 新建视频 on 视频制作 for the same reason; that card is the
+       * shape this one now matches — no head, leading with the secondary line
+       * that explains it. `e2e/video-editing-tabs.spec.ts` holds the fold.
+       */}
+      <Card className="video-editing-panel">
         <Space orientation="vertical" size="middle" className="video-editing-create-form">
           <Typography.Text type="secondary">
             输入项目标题和要剪辑的素材引用，素材可以来自视频制作的成片或已导入的文件。
