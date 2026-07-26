@@ -8,6 +8,7 @@ import {
 } from "../api/control-plane/transport";
 import { App } from "../app/App";
 import { createTransportStartupCheck } from "../app/startup";
+import { createLocalVideoEditingGateway } from "../features/video-editing/local-video-editing-gateway";
 import { HARNESS_SELECTED_VIDEO, TestHarnessPublishing } from "./publishing";
 import { TestHarnessTaskLifecycle } from "./task-lifecycle";
 import "../styles/global.css";
@@ -66,10 +67,23 @@ const taskLifecycleProps =
         workbenchGateway: taskLifecycle,
       };
 
+/**
+ * The same gateway the product runs on, not a harness stand-in.
+ *
+ * 视频剪辑 drafts live in the browser's own storage (the cloud editing provider
+ * is not connected yet), so `src/main.tsx` builds this exact object. Leaving it
+ * out here made `WorkbenchShell` fall back to `shellVideoEditingGateway`, whose
+ * `createProject` throws `draft_storage_unavailable` — which meant 时间轴编辑 and
+ * 预览 could never render, and neither tab could be tested or even looked at.
+ * Playwright gives each test a fresh context, so the store starts empty.
+ */
+const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
+
 createRoot(root).render(
   <StrictMode>
     <App
       startupCheck={createTransportStartupCheck(transport)}
+      videoEditingGateway={videoEditingGateway}
       {...taskLifecycleProps}
       {...publishingProps}
     />
