@@ -372,7 +372,7 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 | **C** T73 测试写进只读 vendor | ⬜ | | | |
 | **D** T40/T41 字体权利登记 | ⬜ | | | |
 | **E** T74 执行器缓存键 + 硬编码 `.local/` | ✅ | 本提交 | 缓存键测试准确失败：`source, spec and contract bytes must each select a different cached package` | 缓存键纳入 backend 源码、spec、锁文件及相关契约/只读资源摘要；浏览器归档统一走 `archive_path()`，T36 失效清理同步指向摘要键 |
-| **E** T75 另一处吞掉 PyInstaller 输出 | ⬜ | | | |
+| **E** T75 另一处吞掉 PyInstaller 输出 | ✅ | 本提交 | 构建失败测试准确失败：`PyInstaller stdout: missing hidden import` 与 `PyInstaller stderr: build traceback` 均不在异常中 | E4-07 及同类 E4-09/E4-10、Windows candidate 均携带 stdout/stderr 各自最后 20 行，空输出也给固定诊断 |
 | **F** T26 剔除 Widevine CDM | ⬜ | | | 唯一有书面禁令的风险 |
 | **F** T24 执行器包根按 `debug_assertions` 分叉 | ⬜ | | | |
 | **F** T45 Control Plane 镜像进 playwright | ⬜ | | | 独占 `uv.lock` |

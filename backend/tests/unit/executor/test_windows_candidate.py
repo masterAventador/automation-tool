@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import stat
+import subprocess
 from pathlib import Path
 from typing import cast
 
@@ -302,3 +303,29 @@ def test_builder_rejects_other_platforms_and_a_missing_spec(
             backend_root=backend_root,
             output_directory=output,
         )
+
+
+def test_a_failed_pyinstaller_run_carries_its_own_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout=b"the Executor package cannot be built without vendor/x/y.md\n",
+            stderr=b"PyInstaller traceback\n",
+        )
+
+    monkeypatch.setattr(windows_candidate.subprocess, "run", failing_run)
+
+    with pytest.raises(WindowsExecutorCandidateRejected) as captured:
+        windows_candidate._run_pyinstaller(
+            backend_root=tmp_path,
+            config_directory=tmp_path / "cache",
+            distribution_root=tmp_path / "dist",
+            python_executable=Path("C:/Python/python.exe"),
+            work_root=tmp_path / "work",
+        )
+
+    assert "vendor/x/y.md" in str(captured.value)
+    assert "PyInstaller traceback" in str(captured.value)

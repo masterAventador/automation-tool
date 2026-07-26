@@ -17,6 +17,7 @@ from run_e4_07_acceptance import (
     INSTALLATION_ID,
     RUST_ROOT,
     TEST_SIGNING_SEED,
+    _completed_process_diagnostic,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +52,10 @@ def build_signed_probe(workspace: Path) -> Path:
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError("E4-10 PyInstaller diagnostic probe build failed")
+        diagnostic = _completed_process_diagnostic(completed)
+        raise RuntimeError(
+            f"E4-10 PyInstaller diagnostic probe build failed\n{diagnostic}"
+        )
     package_root = distribution / "automation-tool-executor"
     architecture = "x86_64" if platform.machine().lower() in {"x86_64", "amd64"} else "aarch64"
     target_platform = "windows" if platform.system() == "Windows" else "macos"

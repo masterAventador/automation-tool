@@ -194,6 +194,20 @@ def start_control_plane() -> RunningControlPlane:
     return RunningControlPlane(server, thread, port, registry, material.session_token)
 
 
+def _completed_process_diagnostic(
+    completed: subprocess.CompletedProcess[str],
+    *,
+    lines_per_stream: int = 20,
+) -> str:
+    """Render a bounded tail from each builder output stream."""
+    parts: list[str] = []
+    for name, output in (("stderr", completed.stderr), ("stdout", completed.stdout)):
+        lines = [line for line in (output or "").splitlines() if line.strip()]
+        if lines:
+            parts.append(f"{name}:\n" + "\n".join(lines[-lines_per_stream:]))
+    return "\n".join(parts) if parts else "(builder produced no output)"
+
+
 def build_signed_executor(
     workspace: Path,
     *,
@@ -227,7 +241,8 @@ def build_signed_executor(
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError("E4-07 PyInstaller build failed")
+        diagnostic = _completed_process_diagnostic(completed)
+        raise RuntimeError(f"E4-07 PyInstaller build failed\n{diagnostic}")
     package_root = distribution / "automation-tool-executor"
     architecture = "x86_64" if platform.machine().lower() in {"x86_64", "amd64"} else "aarch64"
     manifest_platform = "windows" if platform.system() == "Windows" else "macos"
