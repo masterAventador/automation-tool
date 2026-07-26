@@ -13,21 +13,35 @@ once per pinned-input change (see `video_runtime_cache`) and lays them out
 under a single staging root whose directory names are what
 `release_assembly.install_video_runtime` expects.
 
+Staging is not installing. The staging root is the build cache, which is not
+where anything reads these resources from at runtime: a packaged App reads them
+from its resource directory, and a debug binary reads them from the directory
+holding the executable. `frontend/src-tauri/tests/motion_authoring_runtime.rs`
+told its reader to run this script, and running it did not help, because until
+`--install-into` existed this script had no way to put anything there. A remedy
+that exits 0 while leaving the failure in place is worse than no remedy.
+
 Usage:
     python3 scripts/prepare_video_runtime.py            # ensure all three
     python3 scripts/prepare_video_runtime.py --print    # ensure and print root
+    python3 scripts/prepare_video_runtime.py \\
+        --only motion-video-worker \\
+        --install-into frontend/src-tauri/target/debug   # for cargo test
 """
 
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
 from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
 from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
 
@@ -44,6 +58,12 @@ MEDIA_TOOLCHAIN_TARGETS = {
     "macos": "macos-arm64",
     "windows": "windows-x86_64",
 }
+
+# The resource names, taken from the release resource contract rather than
+# spelled out again here. `--only` accepts exactly these.
+RESOURCE_NAMES: tuple[str, ...] = tuple(
+    resource.staging_name for resource in VIDEO_RUNTIME_RESOURCES
+)
 
 
 class VideoRuntimeUnavailable(RuntimeError):
@@ -89,38 +109,127 @@ def _build_material_worker(destination: Path) -> None:
     build_candidate(destination)
 
 
-def prepare(*, platform: str | None = None, root: Path | None = None) -> Path:
-    """Ensure all three resources exist under one staging root and return it."""
+def selected_resources(only: Sequence[str] | None = None) -> tuple[str, ...]:
+    """Which resources this invocation covers, defaulting to all of them.
+
+    A misspelt name is refused rather than quietly selecting nothing: a run that
+    installs zero resources and exits 0 is the same failure shape as the remedy
+    that sent the reader here in the first place.
+    """
+    if only is None:
+        return RESOURCE_NAMES
+    requested = tuple(only)
+    unknown = [name for name in requested if name not in RESOURCE_NAMES]
+    if unknown:
+        raise VideoRuntimeUnavailable(
+            f"unknown video runtime resource(s): {', '.join(unknown)}; "
+            f"declared: {', '.join(RESOURCE_NAMES)}"
+        )
+    return tuple(name for name in RESOURCE_NAMES if name in set(requested))
+
+
+def prepare(
+    *,
+    platform: str | None = None,
+    root: Path | None = None,
+    only: Sequence[str] | None = None,
+) -> Path:
+    """Ensure the selected resources exist under one staging root and return it.
+
+    `only` exists so a caller that needs one resource does not pay for the other
+    two: building ffmpeg from source costs minutes, and freezing the material
+    Worker costs a PyInstaller run, neither of which a `cargo test` needs. It
+    selects which resources are built, never where any of them is looked up.
+    """
     resolved = platform or host_platform()
     if resolved not in MEDIA_TOOLCHAIN_TARGETS:
         raise VideoRuntimeUnavailable(f"unsupported platform: {resolved}")
+    wanted = set(selected_resources(only))
     staging = cache_root() if root is None else Path(root)
-    ensure_cached(
-        name="media-toolchain",
-        contracts=[MEDIA_TOOLCHAIN_CONTRACT, MEDIA_TOOLCHAIN_BUILDER],
-        build=lambda destination: _build_media_toolchain(
-            destination, platform=resolved
-        ),
-        root=staging,
-    )
-    ensure_cached(
-        name="motion-video-worker",
-        contracts=[MOTION_WORKER_CONTRACT, MOTION_WORKER_SOURCE],
-        build=_build_motion_worker,
-        root=staging,
-    )
-    # The cleared subtitle fonts are the fourth locked artifact fetched rather
-    # than committed. They must exist before the material Worker is frozen,
-    # because its PyInstaller spec packages them, and the Worker's own cache key
-    # includes the rights register so a re-pinned font rebuilds the Worker too.
-    ensure_subtitle_fonts(root=staging)
-    ensure_cached(
-        name="material-video-worker",
-        contracts=[MATERIAL_WORKER_CONTRACT, ASSET_RIGHTS_CONTRACT],
-        build=_build_material_worker,
-        root=staging,
-    )
+    if "media-toolchain" in wanted:
+        ensure_cached(
+            name="media-toolchain",
+            contracts=[MEDIA_TOOLCHAIN_CONTRACT, MEDIA_TOOLCHAIN_BUILDER],
+            build=lambda destination: _build_media_toolchain(
+                destination, platform=resolved
+            ),
+            root=staging,
+        )
+    if "motion-video-worker" in wanted:
+        ensure_cached(
+            name="motion-video-worker",
+            contracts=[MOTION_WORKER_CONTRACT, MOTION_WORKER_SOURCE],
+            build=_build_motion_worker,
+            root=staging,
+        )
+    if "material-video-worker" in wanted:
+        # The cleared subtitle fonts are the fourth locked artifact fetched
+        # rather than committed. They must exist before the material Worker is
+        # frozen, because its PyInstaller spec packages them, and the Worker's
+        # own cache key includes the rights register so a re-pinned font
+        # rebuilds the Worker too.
+        ensure_subtitle_fonts(root=staging)
+        ensure_cached(
+            name="material-video-worker",
+            contracts=[MATERIAL_WORKER_CONTRACT, ASSET_RIGHTS_CONTRACT],
+            build=_build_material_worker,
+            root=staging,
+        )
     return staging
+
+
+def install(
+    *,
+    staging: Path,
+    resource_root: Path,
+    only: Sequence[str] | None = None,
+    platform: str | None = None,
+) -> dict[str, Path]:
+    """Copy staged resources to where the production resolver reads them.
+
+    The layout comes from `release_assembly.VIDEO_RUNTIME_RESOURCES`, which is
+    derived from `contracts/quality/release-package-resources.v1.json` -- the
+    same file `motion_authoring_runtime.rs` reads to decide where to look. One
+    declaration, so the two cannot drift into disagreeing about the path.
+
+    Unlike `release_assembly.install_video_runtime`, an existing tree is
+    replaced rather than refused. That function assembles a package exactly
+    once and a pre-existing tree there means something went wrong; this one
+    serves a developer loop where reinstalling after a rebuild is the normal
+    case, and refusing would only teach people to `rm -rf` first.
+
+    Every declared required file is checked after the copy. The bug this whole
+    path exists to fix was a producer that exited 0 without producing, so exit
+    status alone is not accepted as evidence here either.
+    """
+    resolved = platform or host_platform()
+    wanted = set(selected_resources(only))
+    installed: dict[str, Path] = {}
+    for resource in VIDEO_RUNTIME_RESOURCES:
+        if resource.staging_name not in wanted:
+            continue
+        source = Path(staging) / resource.staging_name
+        if not source.is_dir():
+            raise VideoRuntimeUnavailable(
+                f"the staging tree carries no {resource.staging_name} at {source}"
+            )
+        destination = Path(resource_root).joinpath(*resource.installed_parts)
+        if destination.is_symlink() or destination.is_file():
+            destination.unlink()
+        elif destination.is_dir():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, destination, symlinks=True)
+        for name in resource.required_for(resolved):
+            payload = destination / name
+            if not payload.is_file() or payload.stat().st_size == 0:
+                raise VideoRuntimeUnavailable(
+                    f"{resource.staging_name} was installed to {destination} but "
+                    f"{name} is missing or empty, so a reader would find the "
+                    "directory and still fail"
+                )
+        installed[resource.staging_name] = destination
+    return installed
 
 
 def main() -> int:
@@ -128,8 +237,38 @@ def main() -> int:
     parser.add_argument("--platform", choices=sorted(MEDIA_TOOLCHAIN_TARGETS))
     parser.add_argument("--root", type=Path)
     parser.add_argument("--print", action="store_true", dest="print_root")
+    parser.add_argument(
+        "--only",
+        action="append",
+        metavar="RESOURCE",
+        help=(
+            "restrict to one resource; repeatable. One of: "
+            + ", ".join(RESOURCE_NAMES)
+        ),
+    )
+    parser.add_argument(
+        "--install-into",
+        type=Path,
+        metavar="DIRECTORY",
+        help=(
+            "after staging, copy the resources to the directory a reader "
+            "resolves them from (for cargo test: "
+            "frontend/src-tauri/target/debug)"
+        ),
+    )
     arguments = parser.parse_args()
-    staging = prepare(platform=arguments.platform, root=arguments.root)
+    staging = prepare(
+        platform=arguments.platform, root=arguments.root, only=arguments.only
+    )
+    if arguments.install_into is not None:
+        installed = install(
+            staging=staging,
+            resource_root=arguments.install_into,
+            only=arguments.only,
+            platform=arguments.platform,
+        )
+        for name, destination in sorted(installed.items()):
+            print(f"installed {name} -> {destination}")
     if arguments.print_root:
         print(staging)
     return 0

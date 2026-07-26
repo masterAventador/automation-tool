@@ -52,6 +52,26 @@ def create_test_directory_link(link: Path, target: Path) -> None:
         raise ContractError("could not create the Windows junction rejection fixture")
 
 
+def remove_test_directory_link(link: Path) -> None:
+    """Tear down whichever of the two fixtures `create_test_directory_link` made.
+
+    The pair is asymmetric and has to stay that way: `os.rmdir` is the only call
+    that removes a Windows junction without following it, and it raises
+    `NotADirectoryError` on a POSIX symlink, where `os.unlink` is correct.
+    Removing only the junction -- which is what this used to do -- made the
+    self-test raise on macOS and Linux from inside a `finally`, long after the
+    assertion it guards had already passed.
+
+    `Path.is_symlink()` answers this on both sides: CPython reports a junction
+    as a directory rather than a link, so Windows still takes the `rmdir` branch.
+    Neither call touches the directory the fixture points at.
+    """
+    if link.is_symlink():
+        link.unlink()
+    else:
+        link.rmdir()
+
+
 def plain_files_under(root: Path) -> set[Path]:
     files: set[Path] = set()
     pending = [root]
@@ -536,7 +556,7 @@ def self_test(document: dict[str, Any]) -> None:
         else:
             raise ContractError("self-test accepted a linked candidate root")
         finally:
-            linked.rmdir()
+            remove_test_directory_link(linked)
 
 
 def parse_args() -> argparse.Namespace:

@@ -48,11 +48,12 @@ from cq_03_concurrent_isolation import (  # noqa: E402
     require_disjoint_profiles,
     require_untouched,
 )
+from gate_prerequisites import PrerequisiteMissing, by_name, require  # noqa: E402
 
-DEFAULT_PACKAGE = (
-    REPOSITORY_ROOT
-    / ".local/eb-16/run/cargo-target/release/bundle/macos/自动化运营工具.app"
-)
+# Declared once in `scripts/gate_prerequisites.py`, next to the command that
+# builds it, so the path this script defaults to and the path the remedy
+# produces cannot drift apart.
+DEFAULT_PACKAGE = REPOSITORY_ROOT / by_name("eb-16-release-package").produces[0]
 LINE_NAMES = ("operations", "browser_use", "render")
 SETTLE_SECONDS = 2.0
 
@@ -164,7 +165,15 @@ def main() -> int:
     if platform.system() != "Darwin":
         fail("this acceptance currently covers macOS only")
     if not application.is_dir():
-        fail(f"no release package at {application} — build it with run_eb_16_acceptance.py")
+        if application == DEFAULT_PACKAGE:
+            # The registry knows the command, its cost and its platform limits;
+            # repeating a shortened version of that here is how a remedy goes
+            # stale without anyone noticing.
+            try:
+                require("eb-16-release-package")
+            except PrerequisiteMissing as error:
+                fail(str(error))
+        fail(f"no release package at {application}")
 
     executable = packaged_browser(application)
     announce(f"All three lines will share one binary: {executable.name}")
