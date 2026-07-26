@@ -3,9 +3,12 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * What the workbench home says, walked the way the customer walks it.
  *
- * The viewport is Playwright's default 1280x800, the same size the production
- * Tauri window opens at (`src-tauri/tauri.conf.json`), so "on the first screen"
- * here means the same thing it means on the customer's machine.
+ * The viewport is 1280x800, the size the production Tauri window opens at —
+ * `src-tauri/tauri.conf.json` declares it and `playwright.config.ts` reads it
+ * from there, so "on the first screen" here means the same thing it means on
+ * the customer's machine. (It said "Playwright's default 1280x800" until T96;
+ * Playwright's default is 720, which is what this ran at. The assertions below
+ * are on rendered text rather than on geometry, so none of them moved.)
  *
  * The 2026-07-26 sweep found the home page leading with the two things a person
  * cannot use: the largest card's body was `Task ID` / `Revision` / `事件水位`,
