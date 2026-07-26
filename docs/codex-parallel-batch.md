@@ -206,7 +206,7 @@ git status          # 应显示 On branch codex/resilience-batch，基线 705504
 | T22 | ✅ 完成 | 本提交 | 发布契约先后在缺少保留域门禁和缺少正式发布参数处得到 RED | Release 只接受“显式禁用”或“真实 endpoint/key 成对配置”，构建期与运行期拒绝占位域及其子域；Node 28 项、Python 53 项和运行时域名单测通过，未改 `lib.rs` |
 | T66a | ✅ 完成 | `e208b64` + 本提交 | `over_permissive_secret_files_are_repaired_for_load_save_and_delete` 先在 `repair and load: Unavailable` 断言失败 | 用同一个 `O_NOFOLLOW` 文件描述符核对 inode、修复权限并读取，消除复核发现的重开竞态；secure store 7 项、注册交接 15 项、更新策略 14 项回归通过 |
 | T58c | ⚠️ 协议层完成，待主线接线 | 本提交 | 子进程专用原因字段、任意路径拒绝和固定消息覆盖断言均先在字段缺失或闭集绕过处得到 RED | Executor 只输出 109 个固定 token 或 18 个静态门禁码的排序子集，Python 最终序列化 sink 与 Rust 均二次校验，Python 84 项、Rust 子进程 9 项/工作室 13 项/运行时 6 项通过；`lib.rs` 为主线独占，当前原生错误仍丢弃 token，需主线接入专用错误字段和 UI 文案后才能对用户生效 |
-| T62 | ✅ 完成 | `cc24156` + 本提交 | 防回归断言先捕获 `37`、`14`、`7/14` 与 `three browser_use scripts` 四处手抄计数 | 散文计数已移除；独立审查后把 guard 收紧为只扫描两份模块文档/注释，并补常见变体防绕过；完整聚合 runner 仍受既存 `tools/browser-use-contract/.venv` 未挂载阻塞 |
+| T62 | ✅ 完成 | `cc24156` + `a76dbf9` + 本提交 | 防回归断言先捕获 `37`、`14`、`7/14` 与 `three browser_use scripts` 四处手抄计数 | 散文计数已移除；独立审查后把 guard 收紧为只扫描两份模块文档/注释，并补常见变体防绕过；复用主工作区 `tools/browser-use-contract/.venv` 后完整聚合 runner 通过 |
 
 ---
 
