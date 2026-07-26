@@ -99,7 +99,7 @@
 | 序 | 环节 | 状态 | 证据 |
 |---|---|---|---|
 | 1 | 装上包、Gatekeeper 放行 | ✅ | 带 quarantine 判 `accepted / Notarized Developer ID`，已装到 `/Applications` |
-| 1.5 | 产品账号登录 | 🔍 | T68 —— 修复已上线，**等你登一次** |
+| 1.5 | 产品账号登录 | ✅ | **07-27 01:22 用户已在正式签名包里登过**。两条互不相干的痕迹对上：App 私有目录 `profiles/demo-xuanbai/product-account-session-v1` 428 字节、创建于 01:22（只看存在性与时间，未读内容）；T109 排查抖音按钮时独立做的 mtime 取证记着「01:22:56 登录产品账号 → 01:24:50 执行器起」。**这一行此前写着「等你登一次」是错的**——今晚第三次撞见台账在「还没做」这个方向落后于现实 |
 | 2 | App 启动到工作台 | ✅ | `control-plane-e2e` 上实测挂载；正式包 setup 全程跑完 |
 | 3 | 设置页存模型密钥 | ✅ | 正式表单存真实密钥且页面不回显 |
 | 4 | 输入一句话、空描述被拒 | ✅ | `getValue` 断言描述确实进表单；空描述被人话拒绝且不产生任务 |
@@ -109,7 +109,7 @@
 | 8 | App 内预览播放 | ✅ | 真实 App：`<video>` + base64 data URL 解码播放，`duration≈12s`、`currentTime>0`、无 `error` |
 
 **环节 5–8 全部实证走通**，总耗时 3 分 34 秒，证据 `docs/development/T36-oneshot-video.md` 与 `.local/embedded-browser-video-studio/t36-evidence/t36-one-sentence.mp4`。
-剩下的只有 1.5（等你登录）和「在正式签名包上重跑」（T10）。
+剩下的只有「在正式签名包上重跑」（T10）——1.5 已于 07-27 01:22 由用户在正式包里完成。
 
 ---
 
