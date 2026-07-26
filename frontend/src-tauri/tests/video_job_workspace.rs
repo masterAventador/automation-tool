@@ -438,6 +438,40 @@ fn startup_discards_corrupt_artifacts_while_runtime_listing_stays_strict() {
 }
 
 #[test]
+fn startup_removes_expired_retained_workspaces_without_manual_cleanup() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let expired_id = job("123e4567-e89b-42d3-a456-426614174214");
+    let active_id = job("123e4567-e89b-42d3-a456-426614174215");
+    let expired = store.create(expired_id).expect("expired workspace");
+    let _active = store.create(active_id).expect("active workspace");
+    store
+        .finish(&expired, VideoWorkspaceDisposition::Keep)
+        .expect("retention marker");
+    fs::write(
+        root.path()
+            .join("video-workspaces-v1")
+            .join("jobs")
+            .join(expired_id.hyphenated().to_string())
+            .join("retained-until"),
+        b"0",
+    )
+    .expect("expired retention deadline");
+    drop(store);
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert_eq!(
+        restarted
+            .open(expired_id)
+            .expect_err("expired workspace removed during startup")
+            .code(),
+        VideoWorkspaceErrorCode::NotFound,
+    );
+    assert!(restarted.open(active_id).is_ok());
+}
+
+#[test]
 fn retention_cleanup_preserves_active_jobs_and_initialization_recovers_partial_imports() {
     let root = TemporaryRoot::new();
     let retained_policy =

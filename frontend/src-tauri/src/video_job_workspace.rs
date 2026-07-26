@@ -377,6 +377,7 @@ impl VideoJobWorkspaceStore {
         };
         store.recover_interrupted_imports()?;
         store.cleanup_invalid_artifacts()?;
+        store.cleanup_expired(current_unix_seconds()?)?;
         // A publish that was interrupted by a crash left a whole copy of a
         // video behind. Nothing is ever resumed from it, so it goes now rather
         // than sitting in the App's data directory until someone notices.
