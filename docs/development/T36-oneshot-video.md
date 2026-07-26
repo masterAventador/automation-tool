@@ -599,6 +599,77 @@ cd frontend/src-tauri && cargo test --test motion_authoring_runtime --test motio
 它证明的是「授权产物交给正式渲染链路能出会动的片子，且静图门禁拦得住」，
 **不能替代生产同路径验收**。四条证据里这一步只拿到第 2 条。
 
+### 本次落地：App 端到端驱动已就位，但被一个更早的产品缺陷挡住
+
+按批准的作业面新增了真实 App 用户路径的驱动，并在第一次实跑时**查出一个先于本任务存在、
+且影响面远超本任务的缺陷**。驱动本身尚未跑通，**不计入验收**。
+
+#### 新增
+
+- **`frontend/e2e-tauri/motion-one-sentence.spec.ts`**：走完整用户路径——
+  设置与诊断填入真实视频创作模型密钥（**用正式表单，不预写配置文件**：预写就等于验收
+  一条没有用户走的路，正是这条线要修的病根）→ 工作台 → 视频制作 → 品牌动效成片 →
+  空 brief 先被人话拒绝且不产生任务 → 填一句话 → 观察阶段推进 → 成片页播放。
+  进度断言不满足于"最后是已完成"：要求至少出现过一个运行中阶段、百分比单调不回退、
+  且经过至少两个不同取值才到 100——只会显示 100 的任务不叫进度。
+  播放断言走既有 `ArtifactPage` 的 `<video>` + base64 `data:` URL，
+  **未新增 capability、未改 CSP、未开放文件系统**。
+- **`scripts/run_t36_acceptance.py`**：装配 → 构建 → 驱动 → 验片。密钥运行时读自
+  git-ignored `.local/secrets`，经环境交给 WebdriverIO，不打印不落盘不进断言。
+  收尾用 `ffprobe -count_frames` 断言成片不是单帧——一个不会动的合成同样能编码出
+  长度正确的 MP4，只看文件大小验不出来。
+- **`scripts/test_video_studio_acceptance_scope.py` 扩了一条真正的孤儿门禁**：
+  原来只硬编码排除 `material-video-webui.spec.ts`。现在排除项写成
+  `DELEGATED_SPECS`（spec → 负责它的入口），并且**校验那个入口确实引用了这个 spec**。
+  否则"从全量里排除"就会变成"没有任何东西执行它"，而本仓库已经反复产出过这种形态。
+  变异检验：把 `run_t36_acceptance.py` 里的 spec 路径改掉 → 门禁报
+  「…no longer references it, so nothing executes it at all」；还原后通过。
+
+#### RED（门禁按预期先红）
+
+```text
+backend/.venv/bin/python scripts/test_video_studio_acceptance_scope.py
+  AssertionError: VF-06 desktop acceptance must keep covering every non-IM-05 spec
+  from the wdio config; expected [... motion-one-sentence.spec.ts], got [...]
+```
+
+新 spec 一进 wdio 清单，VF-06 覆盖门禁立刻红——这正是它该做的事。
+
+#### 实跑结果：App 停在产品账号门禁，工作台根本没挂载
+
+```text
+DIAG_TEXT  暂时无法确认账号状态
+           网络或账号服务暂不可用。业务工作台保持关闭，恢复连接后可重新检查。
+           [重新检查]
+```
+
+**这不是本任务引入的，也不只影响本任务。** 未改动的 `video-studio.spec.ts`
+在同一个构建上同样失败（`Expect $(h2) to have text`）。根因：
+
+- 前端 `AccountSessionGate` 一挂载就 `invoke("restore_product_account_session")`；
+- 该命令的 cfg 是 `#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]`，
+  只注册进**生产**和 **control-plane-e2e** 两个 handler；
+- `video-studio-e2e = ["desktop-e2e"]`，落在第三个 handler（`desktop-e2e && !control-plane-e2e`），
+  那份清单里**六个账号命令一个都没有**；
+- 于是调用失败 → 网关判 `offline` → 工作台不挂载。
+
+讽刺的是这条命令自己的注释写着「在打开保险库、接触网络之前就回答：不发放产品账号的
+部署必须在两者都不可用时也能到达工作台」——`ProductAccountRequirement` 由
+`deployment_profile.requires_product_account()` 决定，本地 Profile 答"否"，
+它本该立刻返回 `not_required`。**cfg 把最需要这个廉价答案的构建族排除在外了。**
+
+影响面：所有纯 `desktop-e2e` 构建的验收入口——VF-05/VF-06/BM-06/BM-08、
+browser-settings、diagnostic-export、update-policy/download/installation、`pnpm test:tauri`。
+`single_build_path.rs` 里已有 `the_startup_gate_is_compiled_identically_in_every_build`，
+但它不覆盖命令注册清单，所以这个差异一直没人看见——**测试构建与生产构建行为不同、
+而现有门禁看不出来**，正是"单一构建路径"要防的那一类。
+
+#### 结论
+
+四条证据里第 2 条已拿到（上一节）。**第 1、3、4 条仍未取得**，
+不是因为一句话链路不通，而是因为它所在的构建族当前进不了工作台。
+驱动代码已就位，缺陷修好后即可直接跑。**不把"驱动写完了"说成"验收过了"。**
+
 ## 失败矩阵
 
 | 场景 | 行为 |

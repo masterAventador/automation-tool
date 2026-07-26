@@ -20,6 +20,7 @@ export const config: WebdriverIO.Config = {
     "./e2e-tauri/motion-style-catalog.spec.ts",
     "./e2e-tauri/plain-language-comprehension.spec.ts",
     "./e2e-tauri/material-video-webui.spec.ts",
+    "./e2e-tauri/motion-one-sentence.spec.ts",
   ],
   maxInstances: 1,
   services: [
