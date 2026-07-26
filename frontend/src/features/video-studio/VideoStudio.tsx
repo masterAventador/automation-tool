@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Empty,
   Input,
   InputNumber,
@@ -440,7 +441,17 @@ function NewVideoPage({
      * 视频标题 field inside 固定模板手工制作, and the one-sentence path never
      * read that value at all.
      */
-    <Card className="video-studio-panel" title="新建视频">
+    /*
+     * No card head.
+     *
+     * It said 「新建视频」, and so does the tab immediately above it — the two
+     * sat 17px apart, y=188 and y=254, the same three words twice. The head cost
+     * 56px of the single screen this step gets while telling the operator
+     * nothing the active tab, the page title and the sidebar entry had not
+     * already told him three times over. The tab is the copy that has to stay:
+     * it is how you come back to this step from the other six.
+     */
+    <Card className="video-studio-panel">
       <Space orientation="vertical" size="middle" className="video-studio-new-form">
         <Typography.Text type="secondary">
           先选择下面的制作方式，再填写这次视频的内容。
@@ -550,14 +561,74 @@ function NewVideoPage({
                 >
                   {selected ? `已选择${method.name}` : `选择${method.name}`}
                 </Button>
-                <dl className="video-method-details">
-                  {method.details.map((detail) => (
-                    <div key={detail.label}>
-                      <dt>{detail.label}</dt>
-                      <dd>{detail.value}</dd>
-                    </div>
-                  ))}
-                </dl>
+                {/*
+                  * Ten rows, behind a disclosure that names its own card.
+                  *
+                  * Expanded, the two `<dl>`s were 466px of the 1240px page and
+                  * the single reason 「新建视频」 could not fit the 736px it is
+                  * given. Collapsed by default rather than open: the one-line
+                  * summary above stays visible and is what tells a first-time
+                  * viewer what each method is for, while these ten rows are the
+                  * comparison you consult once you are choosing between them —
+                  * 最适合 against 不适合, 耗时 against 磁盘 against 隐私. Default
+                  * open would keep the page at 1240px and give back the scroll
+                  * this whole task exists to remove.
+                  *
+                  * The label carries the method name because there are two of
+                  * these controls side by side; 「详细说明」 alone would leave a
+                  * screen reader user with two identical toggles and no way to
+                  * tell which card each one opens. Naming it in the visible
+                  * label rather than an `aria-label` override keeps the
+                  * accessible name and the visible text the same string.
+                  *
+                  * `Collapse` rather than a native `<details>` because this
+                  * product already discloses long reference text exactly this
+                  * way — see the licence texts in `ThirdPartySoftwareNotice`.
+                  */}
+                <Collapse
+                  ghost
+                  size="small"
+                  className="video-method-disclosure"
+                  /*
+                   * Supplying the arrow to keep it out of the button's name.
+                   *
+                   * antd's default expand icon is an `<span role="img">` whose
+                   * `aria-label` is the literal string "collapsed", and a name
+                   * computed from content swallows it: Chromium reported this
+                   * control as 「collapsed 智能素材成片的详细说明」 — an English
+                   * state word read aloud in the middle of a Chinese label, and
+                   * redundant besides, since `aria-expanded` already carries the
+                   * state. Playwright's substring matching hid it; the aria
+                   * snapshot is what showed it. A decorative arrow marked
+                   * `aria-hidden` leaves the name as exactly the label.
+                   */
+                  expandIcon={({ isActive }) => (
+                    <span
+                      aria-hidden="true"
+                      className={
+                        isActive === true
+                          ? "video-method-disclosure-arrow video-method-disclosure-arrow-open"
+                          : "video-method-disclosure-arrow"
+                      }
+                    />
+                  )}
+                  items={[
+                    {
+                      key: "details",
+                      label: `${method.name}的详细说明`,
+                      children: (
+                        <dl className="video-method-details">
+                          {method.details.map((detail) => (
+                            <div key={detail.label}>
+                              <dt>{detail.label}</dt>
+                              <dd>{detail.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      ),
+                    },
+                  ]}
+                />
               </article>
             );
           })}
