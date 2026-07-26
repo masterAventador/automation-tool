@@ -21,6 +21,9 @@ import {
 const MODELS = new Set(["deepseek-v4-pro", "glm-5.2", "qwen3.7-max-2026-06-08"]);
 const NATIVE_ERRORS = new Set<MaterialVideoStudioErrorCode>([
   "configuration_required",
+  "authoring_timed_out",
+  "authoring_failed",
+  "authoring_answer_invalid",
   "process_unavailable",
   "storage_unavailable",
   "view_unavailable",

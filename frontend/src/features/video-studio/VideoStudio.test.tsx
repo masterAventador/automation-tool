@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
-import type { MaterialVideoStudioGateway } from "./material-video-studio-gateway";
+import {
+  MaterialVideoStudioGatewayError,
+  type MaterialVideoStudioGateway,
+} from "./material-video-studio-gateway";
 import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
 import { VideoStudio } from "./VideoStudio";
 
@@ -621,6 +624,37 @@ describe("video studio shell", () => {
     expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
       expect.objectContaining({ durationSeconds: MOTION_BRIEF_FILM_SECONDS }),
     );
+  });
+
+  /**
+   * 一句话自动制作有好几种失败方式，界面上此前是同一句话：
+   * 「本机渲染组件暂时不可用，请到设置与诊断检查组件」。
+   * 如果真因是编排超时、编排子进程失败或者答复没通过本机校验，
+   * 这句话会把用户支去检查一个根本没坏的东西——错误码粗、文案却给了具体指引，
+   * 于是指错方向。三个码各说各的成因，也各给该做的事。
+   */
+  it("says which part of the automatic run failed instead of blaming the renderer", async () => {
+    for (const [code, expected] of [
+      ["authoring_timed_out", "自动编排超时"],
+      ["authoring_failed", "自动编排没有完成"],
+      ["authoring_answer_invalid", "没有通过本机校验"],
+    ] as const) {
+      const user = userEvent.setup();
+      const studioGateway = gateway();
+      studioGateway.submitMotionBrief = vi
+        .fn()
+        .mockRejectedValue(new MaterialVideoStudioGatewayError(code, true));
+      const view = render(<VideoStudio gateway={studioGateway} />);
+
+      await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+      await user.clear(screen.getByLabelText("一句话视频需求"));
+      await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+      expect(await screen.findByText(new RegExp(expected))).toBeVisible();
+      expect(screen.queryByText(/本机渲染组件暂时不可用/)).toBeNull();
+      view.unmount();
+    }
   });
 
   // 空描述不该发出去：让原生侧去拒绝，用户看到的是一次失败而不是一条说明。

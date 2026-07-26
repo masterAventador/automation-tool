@@ -25,6 +25,44 @@ const EXPECTED_FILM_SECONDS = 12;
 /** The stage names a user watches go by, in the order they must appear. */
 const RUNNING_STAGES = ["准备中", "逐帧渲染中", "正在合成视频"] as const;
 
+/**
+ * Every way the submission can come back a failure, and what each one means.
+ *
+ * The previous run of this spec ended in `render_unavailable` after roughly
+ * fourteen minutes, and that single code is produced at five different places
+ * in the submit command — so the run proved only that something went wrong.
+ * The native side now distinguishes the authoring outcomes, and this table
+ * turns the card's wording back into the place it came from, so one run is
+ * enough to know where the time went. The copy is matched, not the code,
+ * because the card is all a user path exposes.
+ */
+const SUBMIT_FAILURES: readonly (readonly [string, string])[] = [
+  [
+    "请先到“设置与诊断”配置视频创作模型服务。",
+    "configuration_required — the App did not find the model credential just saved",
+  ],
+  [
+    "自动编排超时",
+    "authoring_timed_out — the child outlived MOTION_AUTHORING_DEADLINE and was killed; the model round trip does not fit the budget",
+  ],
+  [
+    "自动编排没有完成",
+    "authoring_failed — the authoring child exited non-zero: it refused the request or it crashed",
+  ],
+  [
+    "没有通过本机校验",
+    "authoring_answer_invalid — the child answered and accept_authored_render_job refused the answer",
+  ],
+  [
+    "本机渲染组件暂时不可用",
+    "render_unavailable — a packaged part could not be resolved: motion_runtime_paths, seed_authoring_runtime, verified_entrypoint or the worker launch",
+  ],
+  [
+    "一句话自动制作暂时无法提交",
+    "the native command refused the submission with a code the gateway does not recognise",
+  ],
+];
+
 async function openWorkbenchSection(name: string): Promise<void> {
   await browser
     .$(`//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='${name}']]`)
@@ -59,7 +97,14 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     // A run that dies mid-way must say how far it got. Without these the only
     // signal is a bare "Timeout" and the next person cannot tell a slow model
     // from a stuck render from a page that never mounted.
-    const step = (name: string): void => console.log(`[T36 step] ${name}`);
+    //
+    // The elapsed time comes with it because the previous run's whole finding
+    // was "about fourteen minutes, somewhere". Which step spent them is a fact
+    // about this driver's own clock — it is not a detail the App reports and
+    // nothing about it travels on the command wire.
+    const startedAt = Date.now();
+    const step = (name: string): void =>
+      console.log(`[T36 step] +${Math.round((Date.now() - startedAt) / 1000)}s ${name}`);
 
     const startupScreen = async (): Promise<string> =>
       browser.execute(() => document.body?.innerText ?? "<empty document>");
@@ -114,18 +159,34 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     step("empty brief refused, no job created");
     // --- One sentence, and nothing else ------------------------------------
     await studio.$("textarea[aria-label='一句话视频需求']").setValue(BRIEF);
+    // The card refuses an empty sentence with the same words it showed a moment
+    // ago, so a sentence that never reached the form's state produces no visible
+    // change at all — indistinguishable from a submission that never came back,
+    // and the wait below would sit there for its full budget blaming the model.
+    // Confirm the box holds the sentence before anything is submitted.
+    assert.equal(
+      await studio.$("textarea[aria-label='一句话视频需求']").getValue(),
+      BRIEF,
+      "the brief never reached the form, so nothing was submitted",
+    );
+    // Typing and submitting are marked separately from the wait that follows.
+    // The previous two runs both reported "about fifteen minutes, somewhere
+    // after the empty brief", and process inspection during the second one
+    // found the App completely idle — no command running, no authoring child —
+    // for minutes on end, which means part of that budget is spent before the
+    // submission is ever made. One marker each is enough to say which.
+    step("brief typed into the form");
     await studio.$("button=开始自动制作").click();
+    step("submit clicked");
     await browser.waitUntil(
       async () => {
         const text = await studio.getText();
-        if (text.includes("请先到“设置与诊断”配置视频创作模型服务。")) {
-          throw new Error("the App did not find the model credential just saved");
-        }
-        if (text.includes("本机渲染组件暂时不可用")) {
-          throw new Error("the App could not resolve the packaged render runtime");
-        }
-        if (text.includes("一句话自动制作暂时无法提交")) {
-          throw new Error("the one-sentence submission was refused by the native command");
+        for (const [copy, meaning] of SUBMIT_FAILURES) {
+          if (text.includes(copy)) {
+            throw new Error(
+              `submission failed after ${Math.round((Date.now() - startedAt) / 1000)}s: ${meaning}`,
+            );
+          }
         }
         return text.includes("已提交一句话自动制作");
       },

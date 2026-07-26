@@ -85,8 +85,22 @@ export interface RenderedVideoArtifactPayload {
   readonly base64: string;
 }
 
+/**
+ * The three ways an automatic authoring run ends badly, kept apart from each
+ * other and from `render_unavailable`.
+ *
+ * They used to be one code, together with a missing packaged runtime and a
+ * worker that will not start, so a run that failed after fourteen minutes could
+ * not be told from one that failed instantly on a broken install. Any code the
+ * native side sends that this file does not list is flattened to
+ * `operation_unavailable` by the gateway, which on screen looks like the job
+ * vanishing — so a new native code must always arrive here too.
+ */
 export type MaterialVideoStudioErrorCode =
   | "configuration_required"
+  | "authoring_timed_out"
+  | "authoring_failed"
+  | "authoring_answer_invalid"
   | "process_unavailable"
   | "storage_unavailable"
   | "view_unavailable"

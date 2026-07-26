@@ -209,6 +209,39 @@ describe("Tauri material video studio gateway", () => {
     expect(invoke).toHaveBeenCalledWith("submit_motion_video_brief", { request });
   });
 
+  /**
+   * 原生侧把「编排超时被杀」「编排子进程非零退出」「答复没通过校验」拆成了三个码，
+   * 网关这边如果不认它们，`mapError` 会一律压成 `operation_unavailable`——
+   * 用户看到一句笼统的话，而下一个排查的人拿不到任何区分。
+   * 这条用例守住三个码原样穿过网关。
+   */
+  it("keeps the three authoring failures apart instead of flattening them", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const request = {
+      creationMode: "one_sentence_v1" as const,
+      brief: "用蓝色商务风做一段本周销售增长说明",
+      aspectRatio: "16:9" as const,
+      durationSeconds: 12,
+      language: "zh" as const,
+    };
+
+    for (const code of [
+      "authoring_timed_out",
+      "authoring_failed",
+      "authoring_answer_invalid",
+    ] as const) {
+      invoke.mockRejectedValueOnce({
+        code,
+        message: `native command error: ${code}`,
+        retryable: true,
+      });
+      await expect(gateway.submitMotionBrief(request)).rejects.toMatchObject({
+        code,
+        retryable: true,
+      });
+    }
+  });
+
   it("refuses a brief the shared contract would reject before reaching the native side", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     await expect(

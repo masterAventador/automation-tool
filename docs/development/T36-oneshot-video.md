@@ -974,10 +974,179 @@ python3 scripts/check_user_facing_branding.py            passed
 backend/.venv/bin/python scripts/test_user_facing_branding.py   passed
 ```
 
+### 本次落地：编排失败拆成三个可分辨的码，并改掉指错方向的文案
+
+上一条工作线停在第六道门：提交一句话后约 14 分钟返回 `render_unavailable`。
+那个码在 `submit_motion_video_brief` 里有**五个产出点**
+（`motion_runtime_paths` / `seed_authoring_runtime` / `verified_entrypoint` /
+`accept_authored_render_job` / `start_motion_render`），而编排子进程的 stderr 是
+**有意丢弃**的（防止模型回显把用户描述或密钥片段带进日志），所以从外部无法断定是哪一处。
+**在能分辨之前，加大超时或改文案都是猜。** 本次只做「让失败可分辨」这一件事。
+
+#### 拆出来的三个码
+
+| 码 | 含义 | 产出点 |
+| --- | --- | --- |
+| `authoring_timed_out` | 编排跑满预算被我们杀掉 | `run_motion_authoring` 的等待循环过 deadline |
+| `authoring_failed` | 编排子进程非零退出（自己拒绝了，或者崩了） | 非零退出状态；另含 stdin 断管与无法观察子进程两种「这次编排没跑成」的情形 |
+| `authoring_answer_invalid` | 子进程答了，但答复没通过本机校验 | `accept_authored_render_job` 原有的 5 处拒绝，外加 stdout 读不出来 / 不是 UTF-8 |
+
+**这三样全都是我们自己这一侧知道的事**：一个退出码、一个我们自己设的预算、
+以及交回来的字节能不能读。**没有一处需要读子进程 stderr**，模型回显的边界原样保留。
+
+**有意留在 `render_unavailable` 的**：子进程根本起不来（`spawn` 失败）。
+那是装好的执行器包的问题，压根没有发生过一次编排，混进编排码会让三个新码不再各表其意。
+`motion_runtime_paths` / `seed_authoring_runtime` / `start_motion_render` 同理不动——
+拆完之后 `render_unavailable` 才真的只剩「包内某样东西解析不出来」这一个意思，
+它那句「请到设置与诊断检查组件」也才第一次名副其实。
+
+#### 耗时有意不进 wire
+
+`command_error.rs` 顶部写死了 message 只由 code 派生、不含路径/凭据/平台载荷/OS 细节，
+「想追加细节的调用方必须改这个函数」。拆码本身已经回答了「哪个环节失败」这个当前唯一挡路的问题；
+耗时的增量价值只在区分「秒退」和「跑很久才崩」，那是诊断信息不是用户信息。
+演示前不动这个所有命令共用的序列化。**验收侧要的耗时改由驱动自己的秒表给**
+（`[T36 step] +Ns`），那是驱动的时钟，不经过命令。
+
+#### RED
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_child --test motion_authoring_runtime
+  error[E0603]: function `run_motion_authoring` is private
+  error[E0599]: no variant ... named `AuthoringTimedOut` found for enum `MotionVideoStudioErrorCode`
+  error[E0599]: no variant ... named `AuthoringFailed`
+  error[E0599]: no variant ... named `AuthoringAnswerInvalid`
+```
+
+```text
+cd frontend && npx vitest run src/features/video-studio/VideoStudio.test.tsx \
+      src/platform/tauri/material-video-studio-gateway.test.ts
+  × keeps the three authoring failures apart instead of flattening them
+      expected MaterialVideoStudioGatewayError … to match object { code: 'authoring_timed_out' }
+  × says which part of the automatic run failed instead of blaming the renderer
+      Unable to find an element with the text: /自动编排超时/
+  Test Files  2 failed (2)      Tests  2 failed | 35 passed (37)
+```
+
+两条前端 RED 是断言失败、Rust 那两条只影响新增与既有的两个测试二进制，`lib` 全程可编译。
+网关那条**必须先红**：新码不进 `NATIVE_ERRORS` 会被 `mapError` 压成
+`operation_unavailable`，界面上表现为任务凭空消失——这个坑
+`FIX-one-sentence-video-wiring.md` 已经踩过一次。
+
+#### GREEN
+
+```text
+cd frontend/src-tauri && cargo test --test motion_authoring_child          4 passed
+cd frontend/src-tauri && cargo test --test motion_authoring_runtime        6 passed
+cd frontend/src-tauri && cargo build --lib                                 OK
+cd frontend/src-tauri && cargo build --lib --features desktop-e2e          OK
+cd frontend/src-tauri && cargo build --lib --features control-plane-e2e    OK
+cd frontend/src-tauri && cargo build --lib --features video-studio-e2e     OK
+cd frontend/src-tauri && cargo test --tests -- --test-threads=4
+                       43 个测试二进制 / 391 passed / 0 failed   (42/387 → 43/391)
+
+cd frontend && npx vitest run          60 文件 / 501 passed / 1 expected fail
+cd frontend && npx tsc -b              exit 0
+python3 scripts/check_user_facing_branding.py                    passed (52 frontend, 252 native)
+backend/.venv/bin/python scripts/test_user_facing_branding.py    passed
+backend/.venv/bin/python scripts/test_video_studio_acceptance_scope.py   passed
+python3 scripts/check_embedded_browser_video_roadmap.py          valid
+python3 scripts/cq_04_ledger_honesty.py                          exit 0
+```
+
+四个 feature 组合逐个编译、全量而不是只跑相关包：改的是三个构建共用的 `lib.rs` 与
+`motion_video_studio.rs`。
+
+#### 交付
+
+- **`run_motion_authoring` 改为可测**：新增 `budget` 形参（生产调用点传
+  `MOTION_AUTHORING_DEADLINE`，用例传毫秒级预算），并公开给集成测试。
+  这不是构建期分叉——同一段代码、同一条路径，只是一个入参。
+- **新增 `tests/motion_authoring_child.rs`**：用假入口脚本驱动真实子进程，
+  覆盖「答复原样读回」「超时被杀且不等到子进程自己退出」「非零退出」「入口起不来仍是
+  `render_unavailable`」。第一条 happy path 是**证明夹具真的起了子进程**——
+  没有它，三条失败用例可能因为夹具坏了而全部「通过」。
+  文件 `#![cfg(unix)]`：被测的映射逻辑与平台无关，只有「假子进程怎么写」是。
+- **既有那条 7 种变异用例收紧**：从 `is_err()` 改成断言码是 `AuthoringAnswerInvalid`。
+  只断言「报错了」的用例，正是这次事故里让五个产出点长期混成一个码的那种用例。
+- **文案按码各说各的**（`AUTHORING_ERRORS` 写一次，开工作室与提交两条路径共用）：
+  超时 → 稍后重试、把描述写短些；非零退出 → 换一句更具体的描述重试；
+  答复不合格 → **明说这是我们这边的问题，不是描述写得不好**。
+  提交路径的分支从五层三元表达式改成查表，新码不会再悄悄掉进兜底那句。
+- **验收驱动改为自报卡点**：`SUBMIT_FAILURES` 把卡片上的每一句失败文案映射回它来自哪个码、
+  哪一个产出点，一次运行就能知道时间花在哪。阶段标记加上 `+Ns` 秒表。
+
+#### 拆完之后跑的那一次：答案是 `authoring_failed`
+
+```text
+backend/.venv/bin/python scripts/run_t36_acceptance.py
+
+[T36 step] +0s workbench mounted
+[T36 step] +0s model credential saved
+[T36 step] +0s empty brief refused, no job created
+Error: submission failed after 905s:
+  authoring_failed — the authoring child exited non-zero: it refused the request or it crashed
+1 failing (15m 5s)
+```
+
+**这是上一条工作线拿不到的那句话。** 五个产出点里现在指名了一个，而且顺手排除掉三种此前
+无法排除的可能：
+
+| 可能 | 结论 |
+| --- | --- |
+| 跑满 `MOTION_AUTHORING_DEADLINE`（600 秒）被我们杀掉 | ❌ **不是**。那会是 `authoring_timed_out` |
+| 包内某样东西解析不出来（`motion_runtime_paths` / `seed_authoring_runtime` / `verified_entrypoint` / worker 启动） | ❌ **不是**。那仍是 `render_unavailable` |
+| 编排答复不合格 | ❌ **不是**。那会是 `authoring_answer_invalid` |
+| **编排子进程自己非零退出** | ✅ **就是它**。子进程跑起来了，然后以非零状态结束 |
+
+也就是说：**「加大 600 秒超时」这条路是错的**——超时压根没到。上一条工作线把它列为
+最可能的推断，实测证伪。
+
+#### 同一次运行还查出第二件事：这 15 分钟有相当一部分根本不在子进程里
+
+跑的过程中对 App 进程做了两次 `sample`（16:06、16:08，均在提交之后），外加多次
+`pgrep -P <app>`：
+
+```text
+主线程        2114/2114 采样都在 tauri::app::App::run 事件循环里
+40+ tokio 线程 全部 park 在 condvar 上
+唯一在跑的     get_motion_render_jobs（前端每 2 秒一次的任务轮询）
+子进程         0 个
+工作区         video-workspaces-v1/jobs/ 空
+App CPU        100 秒里累计 0.78 秒
+```
+
+**提交之后至少 16:04–16:07:31 这段时间里，`submit_motion_video_brief` 没有在任何线程上执行，
+也没有编排子进程存在。** 结合最终码是 `authoring_failed`（子进程确实跑过），只能得出：
+**提交命令是很晚才开始的**，前面那几分钟花在了 App 之外——即驱动往文本框里写这句中文
+描述、以及点按钮这两步上。
+
+这一段此前完全看不见，因为「空描述被拒」和「提交后没回应」在卡片上是**同一句话**
+（`请先用一句话描述你想要的视频内容。`），描述没进 React 状态与提交迟迟不回来，
+界面表现一模一样。已经补两处：
+
+- `setValue` 之后断言文本框真的持有这句话，附「描述没进表单，所以什么都没提交」的说明；
+- 打字与点击各自一个阶段标记，下一次运行会直接给出
+  `+Ns brief typed` / `+Ns submit clicked` / `+Ns 失败`，三段时间各归各的。
+
+#### 仍然分不出的一件事（留给下一次决定，本轮有意不做）
+
+`authoring_failed` 同时覆盖两种情况：**子进程按协议拒绝**（`entry.py` 在 stdout 写
+`{"schemaVersion":1,"status":"rejected"}` 并 `exit 70`）与**子进程崩溃**（其它非零退出）。
+两者该做的事不同：前者是编排代理判定这次请求不可行，后者是我们的代码或依赖出了问题。
+
+**区分它不需要读 stderr**：退出码 70 与那句 `{"status":"rejected"}` 都是我们自己定的协议常量，
+不含任何模型输出。但这超出了本轮「让失败可分辨」的范围，是否再拆一个码由下一条线决定。
+
 ## 失败矩阵
 
 | 场景 | 行为 |
 | --- | --- |
+| 编排子进程跑满预算 | 杀掉子进程 → `authoring_timed_out`；界面说超时并建议稍后重试或缩短描述，不提渲染组件 |
+| 编排子进程非零退出（自己拒绝或崩溃） | `authoring_failed`；不读 stderr、不转发原因，界面建议换一句更具体的描述 |
+| 编排答复不合格（解析失败、与 brief 不符、白名单越界、缺动画运行时、stdout 非 UTF-8） | `authoring_answer_invalid`；工作区删除，界面明说是我们的问题 |
+| 执行器入口起不到（`spawn` 失败） | 仍是 `render_unavailable`：一次编排都没发生，属于包的问题 |
+| 三个新码没进前端白名单 | 会被 `mapError` 压成 `operation_unavailable`（有网关用例守住，避免任务凭空消失） |
 | 成片在点击播放前被删掉 | `NotFound` → `job_unavailable`，界面提示「暂时无法读取这条成片」，不报存储故障 |
 | 成片大于 32 MB | `QuotaExceeded` → `job_unavailable`，不把整条视频读进内存，也不给出误导性的存储错误 |
 | Artifact 存在但角色不是 `rendered_video` | 拒绝读取（有专门用例守住），播放器不会被喂到工作区里的其他文件 |
@@ -1000,6 +1169,18 @@ backend/.venv/bin/python scripts/test_user_facing_branding.py   passed
 未触碰其他工作线占用的文件：`deploy/`、`scripts/release_assembly.py`、
 `scripts/build_release_package.py`、`frontend/e2e-tauri/`。提交按文件逐个 `git add`，
 未使用 `git add -A`，工作区内云端部署线与签名公证线的未提交改动原样留存。
+
+**拆码那一轮的清理**：跑了一次完整 `scripts/run_t36_acceptance.py`（隔离 Compose project name
+`automation-tool-t36-4613`，两个 loopback 端口开跑前均确认空闲，未接管任何来源不明的进程）。
+跑完核对：`docker ps -a` / `volume ls` / `network ls` 里 **0 个 t36 资源**，
+两个端口已释放，验收专属 App 数据目录
+`~/Library/Application Support/com.aventador.automationtool.t36acceptance` 已删除，
+`automation-tool-desktop` / `automation-tool-executor` / `Chrome for Testing` 进程各 **0 个**。
+诊断用的两份 `sample` 输出只写在会话临时目录，未进仓库。
+**未运行 `scripts/run_u9_06_acceptance.py`**；只读列目录核对过用户真实安装
+`~/Library/Application Support/com.aventador.automationtool/` 完好（手工扫码的抖音 Profile 与凭据仍在），
+**全程未写入该目录**；未触碰 `.local/t44-release-verify/` 与
+`docs/development/DEMO-preflight-checklist.md`。
 
 **渲染半段那次实跑的清理**：未启动 App、未启动 Control Plane、未起 Docker。
 三次渲染各起一个无头内置 Chromium 与一个 node worker，由 `WorkerSession` 在成功/失败/收尾

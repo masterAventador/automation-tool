@@ -52,6 +52,23 @@ pub enum MotionVideoStudioErrorCode {
     /// up yet. It is its own code because "go configure a model" and "the
     /// renderer is broken" send the user to two different places.
     ConfigurationRequired,
+    /// The authoring run outlived its budget and was killed.
+    ///
+    /// Splitting the three authoring outcomes out of `RenderUnavailable` is
+    /// what makes this path diagnosable at all: the child's standard error is
+    /// deliberately discarded so a model echo cannot reach a log, so the exit
+    /// status and the deadline are the only things this side knows — and both
+    /// of them are ours, containing nothing the model produced.
+    AuthoringTimedOut,
+    /// The authoring child exited non-zero: it refused the request or it
+    /// crashed. Nothing was rendered and no packaged part was implicated.
+    AuthoringFailed,
+    /// The authoring child answered, and this side refused the answer.
+    ///
+    /// The answer names the file the renderer loads and the assets the sandbox
+    /// allows, so it is re-checked field by field. A refusal here is a defect
+    /// on our side of the boundary, never something the user typed wrong.
+    AuthoringAnswerInvalid,
     DraftInvalid,
     JobUnavailable,
     RenderUnavailable,
@@ -914,7 +931,7 @@ pub fn accept_authored_render_job(
     answer: &str,
 ) -> Result<PreparedMotionRenderJob, MotionVideoStudioError> {
     let answer: AuthoredCompositionAnswer =
-        serde_json::from_str(answer).map_err(|_| render_unavailable())?;
+        serde_json::from_str(answer).map_err(|_| authoring_answer_invalid())?;
     let plan = duration_limits()?.brief_plan(request.duration_seconds())?;
     if answer.schema_version != 1
         || answer.status != AUTHORED_STATUS
@@ -924,13 +941,13 @@ pub fn accept_authored_render_job(
         || answer.frames_per_second != plan.frames_per_second()
         || answer.frame_count != plan.frame_count()
     {
-        return Err(render_unavailable());
+        return Err(authoring_answer_invalid());
     }
     let work = store
         .worker_asset_directory(workspace)
         .map_err(map_workspace_error)?;
     if !work.join(MOTION_COMPOSITION_FILE).is_file() {
-        return Err(render_unavailable());
+        return Err(authoring_answer_invalid());
     }
     let mut allowed_assets = Vec::new();
     for asset in &answer.allowed_assets {
@@ -946,7 +963,7 @@ pub fn accept_authored_render_job(
                 .any(|component| !matches!(component, std::path::Component::Normal(_)))
             || !work.join(asset).is_file()
         {
-            return Err(render_unavailable());
+            return Err(authoring_answer_invalid());
         }
         allowed_assets.push(asset.clone());
     }
@@ -954,7 +971,7 @@ pub fn accept_authored_render_job(
         .iter()
         .any(|asset| asset == AUTHORING_RUNTIME_ASSET)
     {
-        return Err(render_unavailable());
+        return Err(authoring_answer_invalid());
     }
     let snapshot = MotionRenderJobSnapshot {
         render_job_id: workspace.job_id(),
@@ -1530,6 +1547,29 @@ const fn job_unavailable() -> MotionVideoStudioError {
 pub const fn render_unavailable() -> MotionVideoStudioError {
     MotionVideoStudioError {
         code: MotionVideoStudioErrorCode::RenderUnavailable,
+        retryable: true,
+    }
+}
+
+pub const fn authoring_timed_out() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringTimedOut,
+        retryable: true,
+    }
+}
+
+pub const fn authoring_failed() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringFailed,
+        retryable: true,
+    }
+}
+
+/// Retryable because the same brief may well be authored acceptably on a second
+/// attempt — the answer we refused came out of a model, not out of the user.
+pub const fn authoring_answer_invalid() -> MotionVideoStudioError {
+    MotionVideoStudioError {
+        code: MotionVideoStudioErrorCode::AuthoringAnswerInvalid,
         retryable: true,
     }
 }

@@ -577,12 +577,23 @@ const MOTION_AUTHORING_DEADLINE: std::time::Duration = std::time::Duration::from
 /// The model credential travels on stdin and nowhere else: not in `argv`, where
 /// every process listing would carry it, and not in the environment, which is
 /// inherited by whatever the child starts. The child is killed if it outlives
-/// its deadline, so a stalled model cannot pin the command open.
-fn run_motion_authoring(
+/// its budget, so a stalled model cannot pin the command open.
+///
+/// Each way this can end has its own error code. It used to have one — the same
+/// code a missing packaged runtime and a worker that will not start return —
+/// and the child's standard error is discarded on purpose so a model echo
+/// cannot reach a log, which left a failed run with nothing to read at all.
+/// Everything reported here is known on this side: an exit status, a budget we
+/// set, and whether the bytes handed back were readable. None of it repeats
+/// anything the model produced.
+pub fn run_motion_authoring(
     entrypoint: &std::path::Path,
     request: &serde_json::Value,
+    budget: std::time::Duration,
 ) -> Result<String, motion_video_studio::MotionVideoStudioError> {
     use std::io::Write as _;
+    // Nothing was authored because nothing started: that is the packaged
+    // Executor, not the authoring run, and it keeps the component code.
     let mut child = std::process::Command::new(entrypoint)
         .arg("--author-motion")
         .stdin(std::process::Stdio::piped())
@@ -597,27 +608,36 @@ fn run_motion_authoring(
         .take()
         .ok_or_else(motion_video_studio::render_unavailable)
         .and_then(|mut stdin| {
+            // A broken pipe here means the child is already gone before it
+            // ever read the request.
             stdin
                 .write_all(&payload)
-                .map_err(|_| motion_video_studio::render_unavailable())
+                .map_err(|_| motion_video_studio::authoring_failed())
         });
-    if written.is_err() {
+    if let Err(error) = written {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(motion_video_studio::render_unavailable());
+        return Err(error);
     }
-    let deadline = std::time::Instant::now() + MOTION_AUTHORING_DEADLINE;
+    let deadline = std::time::Instant::now() + budget;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) => return Err(motion_video_studio::render_unavailable()),
+            Ok(Some(_)) => return Err(motion_video_studio::authoring_failed()),
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
-            _ => {
+            Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(motion_video_studio::render_unavailable());
+                return Err(motion_video_studio::authoring_timed_out());
+            }
+            Err(_) => {
+                // The child can no longer be observed, so the run is over
+                // whatever it was doing.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(motion_video_studio::authoring_failed());
             }
         }
     }
@@ -629,11 +649,14 @@ fn run_motion_authoring(
         .and_then(|mut stdout| {
             use std::io::Read as _;
             let mut bounded = Vec::new();
+            // The child finished and then handed back bytes that cannot be
+            // read as an answer. That is an unusable answer, not a renderer
+            // that is unavailable.
             std::io::Read::take(&mut stdout, 64 * 1024)
                 .read_to_end(&mut bounded)
-                .map_err(|_| motion_video_studio::render_unavailable())?;
+                .map_err(|_| motion_video_studio::authoring_answer_invalid())?;
             answer = String::from_utf8(bounded)
-                .map_err(|_| motion_video_studio::render_unavailable())?;
+                .map_err(|_| motion_video_studio::authoring_answer_invalid())?;
             Ok(())
         })?;
     Ok(answer)
@@ -695,6 +718,7 @@ fn submit_motion_video_brief(
                     "apiKey": credential.api_key(),
                 },
             }),
+            MOTION_AUTHORING_DEADLINE,
         )?;
         motion_video_studio::accept_authored_render_job(
             &workspaces,

@@ -248,8 +248,32 @@ function EmptyVideoPage({ page }: { readonly page: keyof typeof EMPTY_PAGES }) {
   );
 }
 
+/**
+ * What each way an automatic authoring run can fail means for the user.
+ *
+ * All three used to arrive as `render_unavailable` and therefore read
+ * "本机渲染组件暂时不可用，请到设置与诊断检查组件" — a specific instruction
+ * attached to a code too coarse to justify it, which sends the user to inspect
+ * a component that was never involved. That is the same shape of misdirection
+ * this line already shipped once. Each code now says what happened and what to
+ * do about it, and the one the user cannot influence at all says so plainly
+ * instead of implying they wrote a bad sentence.
+ *
+ * Written once and used by both the studio's open path and the one-sentence
+ * submit path so the two can never describe the same code differently.
+ */
+const AUTHORING_ERRORS = {
+  authoring_timed_out:
+    "自动编排超时，已经停下来，没有开始制作视频。请稍后重试；把描述写得更短、更具体通常会更快完成。",
+  authoring_failed:
+    "自动编排没有完成，视频没有开始制作。请换一句更具体的描述后重试。",
+  authoring_answer_invalid:
+    "自动编排的结果没有通过本机校验，视频没有开始制作。这是我们这边的问题，不是描述写得不好，请重试；如果一直这样请反馈给我们。",
+} as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;
+
 const OPEN_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
   configuration_required: "请先到“设置与诊断”配置并测试文案模型服务。",
+  ...AUTHORING_ERRORS,
   process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
   storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
   view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
@@ -259,6 +283,25 @@ const OPEN_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
   protocol_mismatch: "视频制作服务版本不匹配，请更新 App 后重试。",
   operation_unavailable: "视频制作暂时不可用，请稍后重试。",
 };
+
+/**
+ * What the one-sentence card says when a submission comes back a failure.
+ *
+ * It reads as a lookup rather than a chain of conditionals because the native
+ * side now distinguishes five outcomes here, and a chain that long is where a
+ * new code quietly falls through to the catch-all sentence.
+ *
+ * `render_unavailable` keeps its instruction to go and check the components,
+ * because after the authoring failures were split out it is the only code left
+ * that really does mean a packaged part could not be resolved.
+ */
+const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
+  configuration_required: "请先到“设置与诊断”配置视频创作模型服务。",
+  ...AUTHORING_ERRORS,
+  render_unavailable: "本机渲染组件暂时不可用，请到“设置与诊断”检查组件。",
+};
+
+const BRIEF_SUBMIT_FALLBACK = "一句话自动制作暂时无法提交，请稍后重试。";
 
 function NewVideoPage({
   gateway,
@@ -978,13 +1021,7 @@ export function VideoStudio({
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        setSubmitMessage(
-          code === "configuration_required"
-            ? "请先到“设置与诊断”配置视频创作模型服务。"
-            : code === "render_unavailable"
-              ? "本机渲染组件暂时不可用，请到设置与诊断检查组件。"
-              : "一句话自动制作暂时无法提交，请稍后重试。",
-        );
+        setSubmitMessage(BRIEF_ERRORS[code] ?? BRIEF_SUBMIT_FALLBACK);
       })
       .finally(() => setBusy(false));
   };

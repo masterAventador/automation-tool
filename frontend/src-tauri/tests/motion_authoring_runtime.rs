@@ -269,10 +269,18 @@ fn an_authored_answer_is_rechecked_against_the_brief_before_it_becomes_a_render_
         for (key, value) in mutation.as_object().unwrap() {
             document[key] = value.clone();
         }
-        assert!(
-            accept_authored_render_job(&store, &workspace, &request, &document.to_string())
-                .is_err(),
-            "an answer disagreeing with the brief must not become a RenderJob: {document}"
+        let error = accept_authored_render_job(&store, &workspace, &request, &document.to_string())
+            .expect_err(&format!(
+                "an answer disagreeing with the brief must not become a RenderJob: {document}"
+            ));
+        // The refusal has to name itself. Reporting it as an unavailable
+        // renderer sends the user to check a component that was never
+        // involved, and leaves the next person unable to tell an answer we
+        // rejected from a packaged part we could not find.
+        assert_eq!(
+            error.code(),
+            MotionVideoStudioErrorCode::AuthoringAnswerInvalid,
+            "refusing the agent's answer is not the renderer being unavailable: {document}"
         );
     }
 }
