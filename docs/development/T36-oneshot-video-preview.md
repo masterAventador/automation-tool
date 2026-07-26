@@ -84,27 +84,67 @@ python3 scripts/cq_04_ledger_honesty.py       exit 0
 
 ## 真实边界（生产同路径验收）
 
-**本次没有取得真实 App 用户路径验收证据，原因是作业面边界，不是"来不及"。** 如实登记：
+**结论：真实 App 用户路径验收未取得。不是"来不及"，是整条视频线的验收环境当前不可执行。**
+下面是实测过程，不是推断。
 
-已经具备的真实证据（既有，非本次产生）：真实 Tauri App 里从正常菜单进「视频制作」、编辑、
-提交真实渲染、在 App 内播放解码出的 mp4——这条由 `motion-video-native.spec.ts` +
-`scripts/run_bm_08_acceptance.py` 覆盖，隔离 App 标识 `com.aventador.automationtool.vf06acceptance`、
-隐藏窗口。**本次改动没有触碰这条链路上的任何一环。**
+### 做到哪一步
 
-本次改动缺的那半条，卡在两处：
+在 `wt/video-verify` 独立 worktree 上（干净树，避免掺入其他工作线的半成品）：
 
-1. **唯一能挂载工作台的 e2e 构建里没有发布命令。** `video-studio-e2e` 展开成
-   `desktop-e2e`，该 `invoke_handler` 不含 `get_publish_workspace`，所以在那个 App 里点
-   「去发布」会落到「暂时读不到发布状态」，看不到「待发布视频」卡片。带发布命令的是
-   `control-plane-e2e`，要用它就得新增 `src-tauri/tauri.*.conf.json`、`e2e-tauri/*.spec.ts`
-   和 `wdio.*.conf.ts`——三者都在本次作业面之外。
-2. **本地还没有可用的动效 Worker 包。** `motion_runtime_paths` 已按单一构建路径规范改成
-   只从资源目录解析（`AUTOMATION_TOOL_BM08_*` 那套构建期分叉已被
-   `tests/single_build_path.rs` 明令禁止），而 `target/debug/` 下只有 `embedded-browser`，
-   没有 `motion-video-worker/package`、没有 `media-toolchain`，因此现在直接跑真实渲染必然
-   `render_unavailable`。补装配要动 `scripts/`，同样在作业面之外。
+1. `pnpm install --frozen-lockfile` — OK；
+2. `pnpm build:tauri:video-studio-test` — 首次失败，见下节「顺带查出的事故」；补齐后
+   **构建成功**（52s，产出 `target/debug/automation-tool-desktop`）；
+3. 资源装配：`media-toolchain`、`motion-video-worker/package` 从本机构建缓存
+   （`~/Library/Caches/automation-tool-build/`，两者早已构建好）拷进资源目录；
+   `embedded-browser` 用 `desktop_e2e_prerequisites.stage_embedded_browser` 正式装配 — OK；
+4. 隔离 App 数据目录 `com.aventador.automationtool.vf06acceptance` 重建 + 装签名执行器包 — OK；
+5. 跑 `motion-video-native.spec.ts` — **失败在第一步，工作台根本没挂载。**
 
-据此本任务标 🚧，不标完成。补验收依赖已写在下面「未完成」。
+打出 App 实际页面文字：
+
+```text
+桌面运行环境需要处理
+业务功能保持关闭，处理下面的本机环境问题后重新检查。
+  控制服务不可用
+  本地执行器动作配置缺失   当前安装包没有完整的动作信任配置，请安装由管理员正式配置的版本。
+```
+
+### 根因（已被仓库自己记录在案）
+
+`docs/development/desktop-e2e-run-20260726.md` 已经写明：`780abce` 删掉了
+`video-studio-e2e` 构建里 `check_local_startup_environment` 的桩实现之后，
+**整条视频线（5 个 spec）失去了可执行环境**，`motion-video-native`（BM-08）被单列为
+「因驱动脚本仍依赖已废弃路径注入而未执行」。要跑起来还差三件事：
+
+1. 编译期动作信任三元组（`AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY` /
+   `..._LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS` / `..._LOCAL_ACTION_TASK_LIMIT`）必须在
+   `tauri build` 时 `option_env!` 进去；
+2. 一个可达的 Control Plane（要 Docker PostgreSQL + uvicorn，每个 control-plane 驱动各自
+   起一套，没有可复用的单次调用）；
+3. 签名执行器包（本次已装好，但被前两项挡在后面）。
+
+该文件同时写明这套 harness「属于 VF-06 自己的任务范围，不是一次执行记录该顺手发明的东西」。
+本次同样不发明它。
+
+### 即便环境修好，本次改动仍有一半验不了
+
+`video-studio-e2e` 展开成 `desktop-e2e`，其 `invoke_handler` **不含**
+`get_publish_workspace`。所以在这个构建里点「去发布」只会落到「暂时读不到发布状态」，
+看不到「待发布视频」卡片。带发布命令的是 `control-plane-e2e`，要用它得新增
+`src-tauri/tauri.*.conf.json`、`e2e-tauri/*.spec.ts` 和 `wdio.*.conf.ts` —— 都在本次作业面之外。
+
+### 顺带查出的事故：main 自 11:10 起编译不过
+
+在干净 worktree 上构建时第一步就挂了，6 个 TS 错误全在本次改动之外：`c0cc760` 把发布口
+类型从 `publishJobId`+`artifactPath` 改成 `artifactId`，只同步了 `features/publishing/` 下的
+文件，漏了 `platform/tauri/publish-workspace-gateway.ts` 和 `test-harness/publishing.ts`
+两个消费方。本机一直看着正常，是因为修复正躺在工作区未提交，把真实状态遮住了 ——
+**共享工作树 + 未提交改动，会让 HEAD 坏掉而没人看见。** 已由 `7b776fd` 修复。
+
+本次改动在 `7b776fd` 上复验：`npx tsc -b` exit 0；`npx vitest run` 59 文件 / 481 通过 /
+1 条既有 expected fail。
+
+据此本任务标 🚧，不标完成。补验收依赖见下面「未完成」。
 
 ## 失败矩阵
 
@@ -119,9 +159,15 @@ python3 scripts/cq_04_ledger_honesty.py       exit 0
 
 ## 清理
 
-本次只改前端源码与测试，没有启动浏览器、模拟器、渲染进程或本地服务，因此无进程、无
-Profile、无临时文件需要回收。未运行 `scripts/run_u9_06_acceptance.py`，未触碰
-`~/Library/Application Support/com.aventador.automationtool/`。
+验收尝试期间启动过一次隐藏窗口的隔离 App 与 tauri-driver，跑完核对 `pgrep` 无残留
+（`automation-tool-desktop` / `tauri-driver` / `wdio` 均无进程）。用完删除：
+`wt/video-verify` worktree（含其中装配的 Chromium、media-toolchain、Worker 包）、隔离
+App 数据目录 `com.aventador.automationtool.vf06acceptance`。`wt/` 已写入
+`.git/info/exclude`，不污染共享 `.gitignore`。
+
+未运行 `scripts/run_u9_06_acceptance.py`，全程未触碰
+`~/Library/Application Support/com.aventador.automationtool/`（用户手工扫码的抖音凭据在那里）。
+未修改 `scripts/`、`src-tauri/`、`main.tsx` 及其他工作线占用的文件。
 
 ## 未完成（下一条工作线的输入）
 
@@ -133,7 +179,11 @@ Profile、无临时文件需要回收。未运行 `scripts/run_u9_06_acceptance.
    提交 RenderJob；工作区 seed 真实 `gsap.min.js`。
 3. **前端 `one_sentence_v1` 制作方式**：网关加一个方法，「新建视频」页把那句话真正提交出去，
    进度沿用既有 `motionJobs` 轮询，成片沿用既有播放器——预览这一半不需要再造。
-4. **本地视频运行时装配**：`media-toolchain` 与 `motion-video-worker/package` 进
-   `target/debug/`，否则本机跑不了真实渲染。
+4. **恢复视频线的验收环境（挡在最前面，先做这个）**：编译期动作信任三元组 + 可达
+   Control Plane + 签名执行器包，并把 `run_bm_08_acceptance.py` 里已废弃的
+   `AUTOMATION_TOOL_BM08_*` 注入和依赖 `sleep 3` 浏览器包装的取消窗口重新设计。
+   在这条修好之前，**「本地预览」这个 Demo 底线没有任何可执行的真实 App 证据**——
+   注意资源本身不缺：`media-toolchain` 与 `motion-video-worker` 在本机构建缓存里都是现成的，
+   拷进资源目录即可，挡路的是启动门禁那三项。
 5. **真实 App 用户路径验收**：需要一个同时具备视频命令与发布命令的构建（`control-plane-e2e`
    系），走完 一句话 → 进度 → 播放预览 → 去发布 → 发布页显示待发布视频。
