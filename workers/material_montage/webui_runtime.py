@@ -57,6 +57,21 @@ BACKGROUND_MUSIC_REMOVED_WIDGET_KEYS: Final = (
 BACKGROUND_MUSIC_NOTICE_WIDGET_KEY: Final = "bgm_type_select"
 BACKGROUND_MUSIC_NOTICE: Final = "当前版本不提供背景音乐素材，成片不会添加背景音乐。"
 
+# Rendering happens inside this child, and upstream's subtitle step falls back
+# to Whisper whenever the Edge timeline is missing (`app/services/task.py` ->
+# "fallback to whisper"). That fallback resolves the model name through Hugging
+# Face, so on a machine without a warm cache it starts an unannounced ~1.5 GB
+# download in the middle of a render, with only a spinner on screen. The
+# package deliberately ships no model, so the download could only ever be that
+# surprise. `HF_HUB_OFFLINE` is Hugging Face's own switch for exactly this: a
+# missing model raises immediately, upstream catches it, logs it, and the
+# render completes without subtitles instead of hanging on the network.
+CHILD_ENVIRONMENT: Final = {
+    "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
+    "STREAMLIT_SERVER_HEADLESS": "true",
+    "HF_HUB_OFFLINE": "1",
+}
+
 
 class WebUiRejected(RuntimeError):
     """Fixed boundary for WebUI startup and configuration failures."""
@@ -243,11 +258,7 @@ def start_webui(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=runtime_root,
-        env={
-            **os.environ,
-            "STREAMLIT_BROWSER_GATHER_USAGE_STATS": "false",
-            "STREAMLIT_SERVER_HEADLESS": "true",
-        },
+        env={**os.environ, **CHILD_ENVIRONMENT},
     )
     try:
         assert process.stdin is not None

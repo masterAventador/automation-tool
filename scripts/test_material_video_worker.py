@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_material_video_worker_candidate as build_candidate_module  # noqa: E402
 import subtitle_font_assets  # noqa: E402
+import webui_runtime  # noqa: E402
 import worker_main  # noqa: E402
 from job_observation_bridge import (  # noqa: E402
     CANCEL_FILE,
@@ -708,6 +709,37 @@ class MaterialVideoWorkerDefaultSubtitleFontTest(unittest.TestCase):
         excluded = build_candidate_module.excluded_upstream_resource_files(contract)
         self.assertIn("fonts/MicrosoftYaHeiBold.ttc", excluded)
         self.assertNotEqual(default_subtitle_font_name(), "MicrosoftYaHeiBold.ttc")
+
+
+class MaterialVideoWorkerSubtitleFallbackTest(unittest.TestCase):
+    """No render path may start a large model download the user cannot see.
+
+    Upstream falls back to Whisper when the Edge subtitle timeline is missing,
+    and that fallback resolves the model through Hugging Face, which downloads
+    roughly 1.5 GB on first use with nothing on screen but a spinner. The
+    package ships the code but no model, so the WebUI child runs with the
+    Hugging Face offline switch and the fallback fails immediately instead.
+    """
+
+    def test_upstream_still_falls_back_to_a_downloaded_model(self) -> None:
+        task = (
+            ROOT / "vendor/moneyprinterturbo/app/services/task.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("fallback to whisper", task)
+        subtitle = (
+            ROOT / "vendor/moneyprinterturbo/app/services/subtitle.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("model_size_or_path=model_path", subtitle)
+
+    def test_webui_child_cannot_start_a_hidden_model_download(self) -> None:
+        self.assertEqual(webui_runtime.CHILD_ENVIRONMENT["HF_HUB_OFFLINE"], "1")
+
+    def test_package_still_ships_no_speech_model(self) -> None:
+        spec = (ROOT / "workers/material_montage/material-video-worker.spec").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("whisper-large", spec)
+        self.assertNotIn("models/whisper", spec)
 
 
 class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
