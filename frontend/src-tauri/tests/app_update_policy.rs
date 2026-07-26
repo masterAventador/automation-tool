@@ -287,7 +287,7 @@ fn stale_versions_and_same_version_identity_mutation_fail_closed() {
 }
 
 #[test]
-fn persisted_policy_is_canonical_private_and_corruption_fails_closed() {
+fn persisted_policy_is_canonical_and_private_and_an_unreadable_one_is_replaced() {
     let app_data = TemporaryAppData::new();
     let service =
         UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable").expect("policy service");
@@ -321,12 +321,18 @@ fn persisted_policy_is_canonical_private_and_corruption_fails_closed() {
     }
 
     fs::write(app_data.policy_file(), b"{\"schemaVersion\":2}").expect("corrupt future schema");
-    assert_eq!(
-        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
-            .expect_err("future or incomplete schema rejected")
-            .code(),
-        UpdatePolicyErrorCode::StorageUnavailable
+    let recovered = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        recovered.is_ok(),
+        "an unreadable policy document must be replaced instead of aborting startup"
     );
+    let record = recovered
+        .expect("replaced policy")
+        .record()
+        .expect("policy record");
+    assert_eq!(record.minimum_version(), "1.0.0");
+    assert_eq!(record.highest_observed_version(), None);
+    assert_eq!(record.decision(), None);
 }
 
 #[test]
@@ -412,7 +418,11 @@ fn semantically_valid_noncanonical_policy_is_canonicalized_on_startup() {
 }
 
 #[test]
-fn unknown_policy_schema_version_fails_explicitly() {
+fn a_policy_schema_from_a_newer_build_is_replaced_rather_than_stopping_startup() {
+    // This is what a rollback leaves behind. The document holds an update floor
+    // and at most one deferred or skipped choice, and a fresh document rebuilds
+    // the floor from the version that is actually installed - so replacing it
+    // costs one re-prompt, while refusing to launch costs the whole App.
     let app_data = TemporaryAppData::new();
     drop(
         UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
@@ -424,11 +434,70 @@ fn unknown_policy_schema_version_fails_explicitly() {
     )
     .expect("write unknown policy schema");
 
+    let recovered = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        recovered.is_ok(),
+        "an unknown policy schema must be replaced instead of aborting startup"
+    );
+    drop(recovered);
     assert_eq!(
+        fs::read_to_string(app_data.policy_file()).expect("replaced policy"),
+        r#"{"schemaVersion":1,"configuredChannel":"stable","minimumVersion":"1.0.0","highestObserved":null,"decision":null,"revision":1}"#
+    );
+}
+
+#[test]
+fn a_policy_document_that_broke_its_own_invariants_is_replaced_at_the_installed_version() {
+    // A stored floor above every real release silently pins the machine to the
+    // build it is on. Whatever produced it, the recovery has to rebuild the
+    // floor from the installed version rather than carry the stored one over.
+    let app_data = TemporaryAppData::new();
+    drop(
         UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
-            .expect_err("unknown policy schema must fail")
-            .code(),
-        UpdatePolicyErrorCode::StorageUnavailable
+            .expect("create policy file"),
+    );
+    fs::write(
+        app_data.policy_file(),
+        br#"{"schemaVersion":1,"configuredChannel":"stable","minimumVersion":"99.0.0","highestObserved":null,"decision":null,"revision":0}"#,
+    )
+    .expect("write policy with a zero revision");
+
+    let recovered = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        recovered.is_ok(),
+        "an invalid policy document must be replaced instead of aborting startup"
+    );
+    assert_eq!(
+        recovered
+            .expect("replaced policy")
+            .record()
+            .expect("policy record")
+            .minimum_version(),
+        "1.0.0"
+    );
+}
+
+#[test]
+fn a_policy_file_that_is_not_a_document_at_all_is_replaced() {
+    let app_data = TemporaryAppData::new();
+    drop(
+        UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable")
+            .expect("create policy file"),
+    );
+    fs::write(app_data.policy_file(), b"not a policy document").expect("write unreadable policy");
+
+    let recovered = UpdatePolicyService::initialize(&app_data.0, "1.0.0", "stable");
+    assert!(
+        recovered.is_ok(),
+        "an unreadable policy file must be replaced instead of aborting startup"
+    );
+    assert_eq!(
+        recovered
+            .expect("replaced policy")
+            .record()
+            .expect("policy record")
+            .minimum_version(),
+        "1.0.0"
     );
 }
 

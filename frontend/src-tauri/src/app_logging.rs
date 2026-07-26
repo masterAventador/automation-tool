@@ -37,6 +37,14 @@ pub(crate) enum DesktopLogEvent {
     ExecutorServiceInitialized,
     CredentialsInitialized,
     AppSetupCompleted,
+    // Startup found persisted state it could not use and put the App back into
+    // a state it can launch from. Recovery that leaves no trace is the failure
+    // this project keeps meeting, so each of these is worth one line.
+    UpdatePolicyDocumentMigrated,
+    UpdatePolicyDocumentReplaced,
+    BrowserDiagnosticSettingsMigrated,
+    BrowserDiagnosticSettingsReset,
+    TaskEmergencyStopRecordDropped,
     ControlPlaneRequestFailed,
     ControlPlaneEventStreamFailed,
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -81,6 +89,13 @@ impl DesktopLogEvent {
             Self::ExecutorServiceInitialized => "app.setup.executor_service.initialized",
             Self::CredentialsInitialized => "app.setup.credentials.initialized",
             Self::AppSetupCompleted => "app.setup.completed",
+            Self::UpdatePolicyDocumentMigrated => "app_update.policy_document.migrated",
+            Self::UpdatePolicyDocumentReplaced => "app_update.policy_document.replaced",
+            Self::BrowserDiagnosticSettingsMigrated => {
+                "executor.browser_diagnostic_settings.migrated"
+            }
+            Self::BrowserDiagnosticSettingsReset => "executor.browser_diagnostic_settings.reset",
+            Self::TaskEmergencyStopRecordDropped => "executor.task_emergency_stop_record.dropped",
             Self::ControlPlaneRequestFailed => "control_plane.request.failed",
             Self::ControlPlaneEventStreamFailed => "control_plane.event_stream.failed",
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
