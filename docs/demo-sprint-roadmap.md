@@ -10,20 +10,26 @@
 
 ## 进度总览
 
-| | 数量 | 含义 |
-|---|---|---|
-| **总计** | **74** | 这一轮登记的全部任务 |
-| ✅ 已完成 | 39 | 有证据、已提交 |
-| ❌ 查证不成立 | 4 | 观察是真的，结论是错的，无需修 |
-| **小计：已收口** | **43（58%）** | 不用再管 |
-| 🔍 待验收 | 1 | 代码已上线，缺最后一步真实验证 |
-| 🚧 进行中 | 1 | |
-| ⬜ 待做 | 3 | 我来做 |
-| 👤 需你本人 | 6 | 我做不了（需真机 / 真账号 / 你的偏好） |
-| 🧊 冻结到 Demo 后 | 20 | 都是真问题，但没有一个挡演示；其中 **6 项已派给 codex 并行** |
-| **小计：未收口** | **31** | 其中**只有 11 项**在 Demo 前 |
+> **数任务只能按小节归属数，不能 grep。** 已完成区的表格没有状态列，用状态符号统计会把 32 行判成「其他」——而且不报错。这条已经吃过一次亏。
 
-**Demo 前要收口的是 11 项，不是 31 项。** 剩下 20 项冻结，其中 6 项走 codex 独立分支（见 `docs/codex-parallel-batch.md`）。
+| 小节 | 数量 |
+|---|---:|
+| ✅ 生产装配与出厂门禁 | 10 |
+| ✅ 云端与交付 | 3 |
+| ✅ 视频与内容 | 12 |
+| ✅ 验收基础设施与门禁 | 14 |
+| ❌ 查证不成立（观察真、结论错，无需修） | 4 |
+| **小计：已收口** | **43** |
+| 一、Demo 前必须收口 | 12 |
+| T73～T83（T10 那轮挖出的新任务） | 11 |
+| 冻结区·今晚撞见的技术债 | 11 |
+| 冻结区·原有待办 | 10 |
+| **小计：未收口** | **44** |
+| **去重后总计** | **87** |
+
+**T10 那一轮把任务从 74 涨到 87**——十三条新的全部来自「真的去跑一遍」，其中 T80/T81/T82 已在同一轮修完合并。
+
+**Demo 前要收口的是 12 项**，其余 55 项冻结或已派给 codex（见 `docs/codex-parallel-batch.md`）。
 
 ---
 
@@ -71,6 +77,25 @@
 
 判据：软链安不安全**不看体积，看有没有正常命令会去改写它**。`vendor/*` 只读 submodule 可以软链（先核对各 worktree gitlink 一致），`.venv` 和 `node_modules` 不行。
 
+### T10 跑全量与并行验收挖出的新任务（T73～T83）
+
+> 这十一条全部产生于 T10 那一轮：五条并行验收线 + 一条 Windows 线 + 包审计两轮。
+> 编号从 T73 起，**T82 归 Windows 提权 ACL**（`docs/development/T82.md` 已占用），生成耗时那条顺延为 T83。
+
+| ID | 任务 | 状态 | 归属 | 依据 |
+|---|---|---|---|---|
+| T73 | 测试把文件写进只读的 vendor submodule | ⬜ | codex | 跑完测试后 hyperframes 有 68 个 `output/compiled.html` 被改写、moneyprinterturbo 有 3 个 `.mp4` 被新建，`check_third_party_sources.py` 判整棵树为脏并拒绝 → **任何一次测试跑完，这道发版门禁就失败**。违反 CLAUDE.md 第 6 节。修复难点：`reset --hard` 清不掉（`.gitattributes` 声明走 LFS 而仓库存的是内容，clean 过滤器转换后与 index 对不上），只能整目录删除 + 全新检出 |
+| T74 | 执行器包缓存键是常量，34 个驱动永远拿不到新执行器 | ⬜ | codex | `desktop_e2e_prerequisites.py:75` 的 `SHARED_EXECUTOR_BUILD_ID` 是常量字符串，执行器源码不参与缓存键。**云端 E2E 线用 A/B 坐实**：旧缓存包 63 秒后 `exit=70`，重建包（只花 9 秒）132 秒成功，直接跑源码也成功。同文件 `:90` 还硬编码 `REPOSITORY_ROOT/.local/` 而不用 `archive_path()`，导致那 34 个驱动**从任何 worktree 跑都在第一步死** |
+| T75 | 另一处吞掉 PyInstaller 输出（主线漏修） | ⬜ | codex | `run_e4_07_acceptance.py:226` 的 `build_signed_executor` 同样 `capture_output=True` 后丢弃。`ce45efd` 只修了 `macos_candidate.py` 的 `_run_pyinstaller`，是另一个函数 |
+| T76 | `desktop-e2e` 前端入口让 workbench 断言恒真 | ⬜ | codex | `test:tauri` 与 `test:h8-19-app` **37 毫秒通过**。`test-tauri-main.tsx` 注入的 `desktopShellStartupCheck` 无条件返回 ready 且**不注入生产的 17 个 gateway**，于是 `workbench.spec.ts` 断言恒真，而它是该 spec 唯一执行者。对照组：`model-service-e2e` 的 `test-production-main.ts` 直接 `import("./main")` |
+| T77 | ~~B5-13 前端投影与权威态不一致~~ → **前提已证伪** | 🔽 降级 | codex | 云端线拿到逐字节响应：权威态是 `{"platform":"douyin","state":"unknown","observedAt":null}`（恰好 57 字节），**不是 `missing`**。而 `unknown` 从 Python 到 Rust 到 Zod 到 UI 完全自洽，界面显示「尚未确认」。B5-13 描述的症状只在一个**被双侧守死、当前不可达**的组合下发生。**不是现网 bug**，改为「确认该链路对 unknown 的处理正确」即可 |
+| T78 | 视频线 7 驱动 / 8 spec 全卡启动门禁 | ⬜ | codex | `780abce` 拆桩后驱动没跟上，`prepare_startup_gate` 的 34 个调用者里这 7 个一个都没有。`T36-oneshot-video-preview.md:116` 记了但说「5 个 spec」，实测 8 个。依赖 T74 |
+| T79 | 124 个验收驱动无聚合执行器，48 个只被读源码不被执行 | ⬜ | codex | 按「引用」与「执行」分开判：被 npm script 点名 37、被真 subprocess 执行 4、**只被读源码从不执行 48**、**零执行者 35**。那 48 个最隐蔽：`.test.mjs` / `test_*.py` 只 `readFile` 驱动源码做文本断言，**绿的是「源码长这样」不是「能跑通」**——`run_t3_12` 在读者下全绿、真执行时 exit=1。`run_vf_01_acceptance.py` 全仓零命中 |
+| T80 | 四处门禁在干净树上跑不起来 | ✅ | 已合并 | `2cbb325`/`def5837`/`5fc876a`。B1 缺 offline 目录、B2 缺 `frontend/dist`（有传染性，`test:layers` 必断）、B3 缺 worker package 且**补救指路指错脚本**、B4 缺 EB-16 正式包。新增 `scripts/gate_prerequisites.py` 把「门禁→产物→生产者」单点声明，**提示信息从 `producer` 字段生成**，所以指错就是命令错。顺带修 `build_offline_motion_catalog.py` 的 `fetch()` 零重试——锁文件声明 **71 个下载产物**，零重试在干净机器上近乎必然失败 |
+| T81 | VF-04 自检只可能在 Windows 通过 | ✅ | 已合并 | `2cbb325`。`check_video_media_toolchain.py:539` 在 POSIX 造符号链接、Windows 造目录联接，而 `finally: linked.rmdir()` 对符号链接必然 `ENOTDIR`。**崩溃在 `finally`，断言本身已经通过了**——所以 macOS/Linux 从写下那天起就是红的 |
+| T82 | 以管理员身份运行时内置浏览器 Profile 子系统整块失效 | ✅ | 已合并 | `a440336`。`apply_private_acl` 只设 DACL（owner 传 `null_mut()`），而 `verify_private_acl_parts` 要求 `owner == TokenUser`；提权会话里 `TokenOwner` 是 `BUILTIN\Administrators` → `EqualSid` 失败 → `UnsafeDirectory`。双向证明：提权 20/20 失败、非提权 12/12 + 8/8 通过。**修创建端不修校验端**——owner 天然持有 `WRITE_DAC`，接受 Administrators 等于让机器上每个管理员都能改写它保护的东西。详见 `docs/development/T82.md` |
+| **T83** | **编排 136～178 秒，产出只有 9 个字段** | ⬜ | **我** | 用户看完成片提出的质疑，查代码后成立。模型实际被要求产出的只有 `DesignArtifact`（4 字段）+ `ScriptArtifact`（3 字段）共 **9 个字段几百字符**，**画面是本机模板渲染的，模型不产出任何动画代码**。qwen3.7-max 出这点 JSON 正常应是几秒，实测差一到两个数量级。三个候选原因有代码依据无实测：① `MAX_FIX_ROUNDS = 2`，最坏 **3 次串行往返**；② `MODEL_TIMEOUT_SECONDS = 360` 且流式超时约束**块间间隔**，docstring 明写按「推理模型会思考一分钟」设计；③ **查不出实际跑了几轮**，因为 App 零日志（T69）。稳定性线已在测纯模型端点对照——**那一刀能切开「模型慢」和「我们慢」**。若是后者，3 分半可能压到几十秒，直接改变演示体验 |
+
 ### 「能在 App 里生成出一个视频」这条链路的收口状态
 
 > 优先级判据：**用户能不能装上包、打开、输一句话、拿到一个能播的视频。** 不在这条链路上的一律不算 P0，哪怕它是真缺陷。
@@ -108,7 +133,7 @@
 | T64 | `AppUpdateCache` 有两个非自愈的强退窗口 | 🤖 codex | `download()` 尾段 351-357：`atomic_replace` 之后、`save_cache_manifest` 之前被杀 → package 有而 manifest 无 → 永久 abort；`partial_manifest.delete()` 之前被杀 → 同型。**本包里是死的**（feed URL 是 `.invalid` 保留域，永不解析），但**换成真 feed URL 就变成「更新到一半被强退 = 砖」的定时炸弹** |
 | T66a | 文件权限只检查不修复（`secure_store.rs` 那半） | 🤖 codex | `ensure_private_file_permissions`（`secure_store.rs:182`）对**文件**只检查不修复，而同文件对**目录**却是强制 `chmod 0700` 修复——同一个文件里两套策略。Time Machine / 迁移助理恢复的账号会造出带 group/other 位的密钥文件 → 永久闪退 |
 | T66b | 目录权限只检查不修复（`video_job_workspace.rs` 那半） | ❌ 我做 | `validate_private_directory_metadata`（`video_job_workspace.rs:1299`）同型，但**和 T61 在同一个文件同一条启动路径上**，并入 T61 一起改 |
-| T67 | Windows 企业域 AppData 重定向会启动即闪退 | 🤖 codex | `browser_profiles_windows.rs:504` 的 `normalized_path_key` 只剥 `\\?\` 前缀，**不处理 `\\?\UNC\`**；文件夹重定向到 UNC 共享或 SUBST 映射盘时 `final_path != normalized_path_key` → abort。另 `ensure_no_reparse_components` 拒绝路径上任何 junction（把 AppData 搬到 D 盘留 junction 是常见场景）。**读代码推断，未上机验证** |
+| T67 | Windows 企业域 AppData 重定向会启动即闪退 | ✅ 已合并 | `browser_profiles_windows.rs:504` 的 `normalized_path_key` 只剥 `\\?\` 前缀，**不处理 `\\?\UNC\`**；文件夹重定向到 UNC 共享或 SUBST 映射盘时 `final_path != normalized_path_key` → abort。另 `ensure_no_reparse_components` 拒绝路径上任何 junction（把 AppData 搬到 D 盘留 junction 是常见场景）。**读代码推断，未上机验证** |
 | T65 | `cleanup_expired` 生产代码里没有任何调用方 | ❌ 与 T61 同文件 | 只有 `tests/video_job_workspace.rs:391` 调。30 天保留策略形同虚设，artifacts 单调增长，**启动时的 abort 面随视频数量线性增长** |
 | T50 | 注销成功但界面报失败 | 🤖 codex | 5 次复现 4 次。内层 ~5 秒轮询包在 60 秒超时里——**不是等不起，是自己先放弃了**。已从演示脚本摘掉「安全注销」 |
 | T58c | 拒绝原因要不要转发给用户 | 🤖 codex | 静态核查已确定**能拿到且不需要读 stderr**：`entry.py` 13 处 `_reject` 与 `agent.py` 全部拒绝消息都是固定字面量，唯二插值是结构标签和门禁码闭集，`MotionBrief` 越界消息也不回显 brief 原文。但转发要改共用 error wire，与「细节不进 wire」的决定冲突，代价写在台账里等决策 |
