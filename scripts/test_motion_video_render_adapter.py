@@ -793,6 +793,7 @@ def main() -> int:
     ]
     assert not leftovers, f"render job directories leaked: {leftovers}"
     print("BM-03 render adapter boundary tests passed")
+    print(f"executed checks: {len(tests)}")
     return 0
 
 

@@ -342,7 +342,7 @@ fn tampered_artifact_and_non_v4_job_fail_closed_without_path_reflection() {
 }
 
 #[test]
-fn reopening_with_a_stricter_policy_rejects_existing_oversized_artifacts() {
+fn reopening_with_a_stricter_policy_discards_existing_oversized_artifacts() {
     let root = TemporaryRoot::new();
     let initial_policy = VideoJobWorkspacePolicy::new(32, 16, 1, 60, 0).expect("initial policy");
     let store =
@@ -364,12 +364,162 @@ fn reopening_with_a_stricter_policy_rejects_existing_oversized_artifacts() {
     drop(store);
 
     let stricter = VideoJobWorkspacePolicy::new(32, 8, 1, 60, 0).expect("stricter policy");
+    let reopened = VideoJobWorkspaceStore::initialize(root.path(), stricter)
+        .expect("reopened workspace store");
+    assert!(reopened
+        .list_artifacts()
+        .expect("oversized artifact discarded")
+        .is_empty());
+}
+
+#[test]
+fn startup_discards_corrupt_artifacts_while_runtime_listing_stays_strict() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174213"))
+        .expect("workspace");
+    let outputs = store
+        .worker_output_directory(&workspace)
+        .expect("worker output");
+    fs::write(outputs.join("missing-manifest.mp4"), b"first-video").expect("first output");
+    fs::write(outputs.join("size-mismatch.mp4"), b"second-video").expect("second output");
+    let missing_manifest = store
+        .import_output(
+            &workspace,
+            "missing-manifest.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("first artifact");
+    let size_mismatch = store
+        .import_output(
+            &workspace,
+            "size-mismatch.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("second artifact");
+    let artifacts = root.path().join("video-workspaces-v1").join("artifacts");
+    let missing_manifest_directory =
+        artifacts.join(missing_manifest.artifact_id().hyphenated().to_string());
+    let size_mismatch_directory =
+        artifacts.join(size_mismatch.artifact_id().hyphenated().to_string());
+    fs::remove_file(missing_manifest_directory.join("manifest.json"))
+        .expect("simulate interrupted deletion");
+    fs::write(size_mismatch_directory.join("payload"), b"short")
+        .expect("simulate interrupted payload persistence");
     assert_eq!(
-        VideoJobWorkspaceStore::initialize(root.path(), stricter)
-            .expect_err("oversized stored artifact rejected")
+        store
+            .list_artifacts()
+            .expect_err("runtime inventory remains strict")
             .code(),
         VideoWorkspaceErrorCode::StorageUnavailable,
     );
+    let outside = root.path().join("outside-artifact-data");
+    fs::create_dir(&outside).expect("outside directory");
+    fs::write(outside.join("sentinel"), b"must-survive").expect("outside sentinel");
+    std::os::unix::fs::symlink(&outside, missing_manifest_directory.join("linked-outside"))
+        .expect("linked outside directory");
+    drop(store);
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert!(!missing_manifest_directory.exists());
+    assert!(!size_mismatch_directory.exists());
+    assert_eq!(
+        fs::read(outside.join("sentinel")).expect("outside data survives cleanup"),
+        b"must-survive",
+    );
+    assert!(restarted
+        .list_artifacts()
+        .expect("clean inventory")
+        .is_empty());
+}
+
+#[test]
+fn startup_removes_expired_retained_workspaces_without_manual_cleanup() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let expired_id = job("123e4567-e89b-42d3-a456-426614174214");
+    let active_id = job("123e4567-e89b-42d3-a456-426614174215");
+    let expired = store.create(expired_id).expect("expired workspace");
+    let _active = store.create(active_id).expect("active workspace");
+    store
+        .finish(&expired, VideoWorkspaceDisposition::Keep)
+        .expect("retention marker");
+    fs::write(
+        root.path()
+            .join("video-workspaces-v1")
+            .join("jobs")
+            .join(expired_id.hyphenated().to_string())
+            .join("retained-until"),
+        b"0",
+    )
+    .expect("expired retention deadline");
+    drop(store);
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert_eq!(
+        restarted
+            .open(expired_id)
+            .expect_err("expired workspace removed during startup")
+            .code(),
+        VideoWorkspaceErrorCode::NotFound,
+    );
+    assert!(restarted.open(active_id).is_ok());
+}
+
+#[test]
+fn startup_repairs_migrated_private_directory_permissions() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace_id = job("123e4567-e89b-42d3-a456-426614174216");
+    let workspace = store.create(workspace_id).expect("workspace");
+    let workspace_directory = store
+        .worker_output_directory(&workspace)
+        .expect("worker output")
+        .parent()
+        .expect("workspace directory")
+        .to_path_buf();
+    drop(store);
+
+    let store_directory = root.path().join("video-workspaces-v1");
+    let drifted_directories = [
+        root.path().to_path_buf(),
+        store_directory.clone(),
+        store_directory.join("jobs"),
+        store_directory.join("artifacts"),
+        store_directory.join("publish-staging"),
+        workspace_directory.clone(),
+        workspace_directory.join("outputs"),
+        workspace_directory.join("checkpoints"),
+        workspace_directory.join("work"),
+    ];
+    for (index, directory) in drifted_directories.iter().enumerate() {
+        let migrated_mode = match drifted_directories.len() - index {
+            1 => 0o600,
+            2 => 0o1700,
+            _ => 0o755,
+        };
+        fs::set_permissions(directory, fs::Permissions::from_mode(migrated_mode))
+            .expect("simulate migrated permissions");
+    }
+
+    let restarted =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("restarted store");
+    assert!(restarted.open(workspace_id).is_ok());
+    for directory in &drifted_directories {
+        assert_eq!(
+            fs::symlink_metadata(directory)
+                .expect("repaired directory metadata")
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o700,
+        );
+    }
 }
 
 #[test]

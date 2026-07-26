@@ -734,6 +734,7 @@ def main() -> int:
     ]
     assert not leftovers, f"render job directories leaked: {leftovers}"
     print("BM-04 render sandbox boundary tests passed")
+    print(f"executed checks: {len(tests)}")
     return 0
 
 

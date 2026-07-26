@@ -54,6 +54,11 @@ EXECUTABLE = (
     "Google Chrome for Testing"
 )
 INFO_PLIST = "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist"
+WIDEVINE_PREFIX = (
+    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/"
+    "Google Chrome for Testing Framework.framework/Versions/149.0.7827.55/"
+    "Libraries/WidevineCdm/"
+)
 
 
 def _write_zip(path: Path, entries: dict[str, bytes]) -> str:
@@ -63,6 +68,18 @@ def _write_zip(path: Path, entries: dict[str, bytes]) -> str:
             info.external_attr = (0o755 if name == EXECUTABLE else 0o644) << 16
             archive.writestr(info, payload)
     return sha256_file(path)
+
+
+def _synthetic_browser_entries() -> dict[str, bytes]:
+    return {
+        EXECUTABLE: b"synthetic browser binary",
+        INFO_PLIST: b"<plist/>",
+        f"{WIDEVINE_PREFIX}LICENSE": b"synthetic proprietary license",
+        f"{WIDEVINE_PREFIX}manifest.json": b'{"name":"WidevineCdm"}',
+        f"{WIDEVINE_PREFIX}_platform_specific/mac_arm64/libwidevinecdm.dylib": (
+            b"synthetic proprietary binary"
+        ),
+    }
 
 
 class ReleaseAssemblyTests(unittest.TestCase):
@@ -82,7 +99,7 @@ class ReleaseAssemblyTests(unittest.TestCase):
         archive = self.base / "archive.zip"
         digest = _write_zip(
             archive,
-            {EXECUTABLE: b"synthetic browser binary", INFO_PLIST: b"<plist/>"},
+            _synthetic_browser_entries(),
         )
         build_staging(
             contract=load_staging_contract(STAGING_CONTRACT_PATH),
@@ -769,7 +786,7 @@ class StagingInventoryRefreshTests(unittest.TestCase):
         archive = self.base / "archive.zip"
         digest = _write_zip(
             archive,
-            {EXECUTABLE: b"synthetic browser binary", INFO_PLIST: b"<plist/>"},
+            _synthetic_browser_entries(),
         )
         build_staging(
             contract=load_staging_contract(STAGING_CONTRACT_PATH),

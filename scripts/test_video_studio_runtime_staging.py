@@ -32,6 +32,8 @@ from run_vf_06_acceptance import (  # noqa: E402
 )
 
 WDIO_CONFIG = ROOT / "frontend/wdio.video-studio.conf.ts"
+BM08_DRIVER = ROOT / "scripts/run_bm_08_acceptance.py"
+IM05_DRIVER = ROOT / "scripts/run_im_05_acceptance.py"
 
 
 def _write(path: Path, content: bytes = b"payload") -> None:
@@ -126,6 +128,27 @@ def check_restaging_replaces_a_previous_run() -> None:
         )
 
 
+def check_restaging_breaks_a_resource_link_without_touching_its_target() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        staging = _complete_staging(root)
+        resources = root / "debug"
+        resources.mkdir()
+        external = root / "main-checkout-resource"
+        external.mkdir()
+        sentinel = external / "belongs-to-main"
+        _write(sentinel, b"unchanged")
+        linked = resources / VIDEO_RUNTIME_RESOURCES[0].installed_parts[0]
+        linked.symlink_to(external, target_is_directory=True)
+
+        stage_video_runtime(staging=staging, resource_root=resources)
+
+        assert not linked.is_symlink(), "the acceptance resource stayed linked to main"
+        assert sentinel.read_bytes() == b"unchanged", (
+            "restaging followed the worktree link and modified main's resource"
+        )
+
+
 def check_a_missing_embedded_browser_names_the_provisioning_step() -> None:
     with tempfile.TemporaryDirectory() as directory:
         resources = Path(directory)
@@ -160,13 +183,49 @@ def check_the_resource_root_is_where_the_acceptance_app_actually_runs() -> None:
     )
 
 
+def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths() -> None:
+    """Real render/WebUI drivers must feed the production resource resolvers.
+
+    The crate deliberately ignores the old BM08/IM05 path variables. Keeping
+    those variables in a driver makes its setup look complete while the App
+    still reports ``render_unavailable`` from an empty resource directory.
+    """
+    bm08 = BM08_DRIVER.read_text(encoding="utf-8")
+    for variable in (
+        "AUTOMATION_TOOL_BM08_BROWSER",
+        "AUTOMATION_TOOL_BM08_CHROMIUM_MAJOR",
+        "AUTOMATION_TOOL_BM08_WORKER",
+        "AUTOMATION_TOOL_BM08_FFMPEG",
+    ):
+        assert variable not in bm08, f"BM-08 still injects ignored runtime path {variable}"
+    assert "install_video_runtime(" in bm08, (
+        "BM-08 does not install its prepared runtime into the debug App resource root"
+    )
+    assert 'runtime_names = ("media-toolchain", "motion-video-worker")' in bm08, (
+        "BM-08 must install only the two resources its render path uses"
+    )
+
+    im05 = IM05_DRIVER.read_text(encoding="utf-8")
+    normal_app_entry = im05.split("def require_normal_app_entry", 1)[1].split(
+        "def require_evidence", 1
+    )[0]
+    assert "AUTOMATION_TOOL_IM05_WORKER" not in normal_app_entry, (
+        "IM-05 normal App acceptance still injects a Worker path the product ignores"
+    )
+    assert "install_video_runtime(" in normal_app_entry, (
+        "IM-05 does not install its frozen Worker into the debug App resource root"
+    )
+
+
 CHECKS = (
     check_the_resource_root_is_where_the_acceptance_app_actually_runs,
     check_staging_installs_every_resource_where_the_release_reads_it,
     check_incomplete_staging_is_rejected_and_leaves_nothing_behind,
     check_an_empty_required_file_is_rejected,
     check_restaging_replaces_a_previous_run,
+    check_restaging_breaks_a_resource_link_without_touching_its_target,
     check_a_missing_embedded_browser_names_the_provisioning_step,
+    check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths,
 )
 
 
@@ -175,6 +234,7 @@ def main() -> int:
         check()
         print(f"ok  {check.__name__}")
     print(f"video studio runtime staging checks passed ({len(CHECKS)} checks)")
+    print(f"executed checks: {len(CHECKS)}")
     return 0
 
 

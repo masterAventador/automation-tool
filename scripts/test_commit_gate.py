@@ -12,6 +12,7 @@ of them. So the properties under test are not "does it run mypy" but:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -179,6 +180,142 @@ def check_checkout_is_removed_after_use() -> None:
             _fail("discarded checkout is still a registered git worktree")
 
 
+def check_slow_tier_runs_the_aggregate_script_suite() -> None:
+    """The aggregate runner must be reachable from a local commit gate."""
+    checks = getattr(commit_gate, "SLOW_CHECKS", ())
+    names = {getattr(check, "__name__", "") for check in checks}
+    if "run_script_test_check" not in names:
+        _fail("the commit gate has no slow-tier aggregate script test check")
+
+    source = Path(commit_gate.__file__).read_text(encoding="utf-8")
+    if "--slow" not in source:
+        _fail("the local commit gate exposes no --slow entrypoint")
+
+
+def check_slow_tier_requires_a_positive_visible_count() -> None:
+    """The outer gate must preserve the aggregate runner's evidence."""
+    parse_count = getattr(commit_gate, "script_test_check_count", None)
+    if parse_count is None:
+        _fail("the slow tier does not expose the aggregate check count")
+    summary = "all 45 script tests passed (412 checks)"
+    if parse_count(summary) != 412:
+        _fail("the slow tier cannot parse the aggregate runner's count")
+    for untrustworthy in (
+        "all script tests passed",
+        "all 0 script tests passed (0 checks)",
+    ):
+        if parse_count(untrustworthy) is not None:
+            _fail(f"the slow tier accepted uncounted evidence: {untrustworthy}")
+
+
+def check_slow_tier_materializes_vendor_without_writing_source() -> None:
+    """Commit extraction needs read-only vendor content, never source symlinks."""
+    materialize = getattr(commit_gate, "_materialize_vendor_sources", None)
+    if materialize is None:
+        _fail("the slow tier does not materialize vendor sources")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        vendor_root = root / "vendor-source"
+        checkout = root / "checkout"
+        locked_revisions: dict[str, str] = {}
+        for name in ("hyperframes", "moneyprinterturbo"):
+            source = vendor_root / name
+            source.mkdir(parents=True)
+            subprocess.run(["git", "init", "--quiet"], cwd=source, check=True)
+            (source / "tracked.txt").write_text("read only\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Vendor Fixture",
+                    "-c",
+                    "user.email=vendor-fixture@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "fixture",
+                ],
+                cwd=source,
+                check=True,
+            )
+            locked_revisions[name] = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source,
+                text=True,
+            ).strip()
+            (source / "tracked.txt").write_text("newer source head\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Vendor Fixture",
+                    "-c",
+                    "user.email=vendor-fixture@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "newer fixture",
+                ],
+                cwd=source,
+                check=True,
+            )
+
+        lock = checkout / "contracts" / "quality" / "third-party-sources.v1.json"
+        lock.parent.mkdir(parents=True)
+        lock.write_text(
+            json.dumps(
+                {
+                    "sources": [
+                        {
+                            "path": f"vendor/{name}",
+                            "commit": locked_revisions[name],
+                        }
+                        for name in ("hyperframes", "moneyprinterturbo")
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        baseline = materialize(checkout, vendor_root=vendor_root)
+        changed_vendor_files = getattr(commit_gate, "_changed_vendor_files", None)
+        vendor_git_drift = getattr(commit_gate, "_vendor_git_drift", None)
+        if not baseline or changed_vendor_files is None or vendor_git_drift is None:
+            _fail("slow tier has no post-test snapshot for its isolated vendor")
+        isolated_repository = checkout / "vendor" / "moneyprinterturbo"
+        if not (isolated_repository / ".git").is_dir():
+            _fail(
+                "slow-tier vendor copy cannot support tests that require Git metadata"
+            )
+        isolated_revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=isolated_repository,
+            text=True,
+        ).strip()
+        if isolated_revision != locked_revisions["moneyprinterturbo"]:
+            _fail("isolated vendor Git checkout is not at the commit's lock")
+        isolated = checkout / "vendor" / "hyperframes" / "tracked.txt"
+        if isolated.read_text(encoding="utf-8") != "read only\n":
+            _fail("slow tier materialized vendor HEAD instead of the commit's lock")
+        isolated.write_text("generated output\n", encoding="utf-8")
+        source = vendor_root / "hyperframes" / "tracked.txt"
+        if source.read_text(encoding="utf-8") != "newer source head\n":
+            _fail("slow-tier vendor materialization writes through to the submodule")
+        if isolated.is_symlink():
+            _fail("slow-tier vendor materialization must not symlink source files")
+        changed = changed_vendor_files(checkout / "vendor", baseline)
+        if "hyperframes/tracked.txt" not in changed:
+            _fail(f"slow tier missed deliberate isolated-vendor pollution: {changed}")
+        git_drift = vendor_git_drift(checkout / "vendor", locked_revisions)
+        if "hyperframes" not in git_drift:
+            _fail(
+                f"slow tier Git guard missed deliberate vendor pollution: {git_drift}"
+            )
+
+
 CHECKS = (
     check_mypy_path_covers_every_static_sys_path_insert,
     check_every_declared_root_exists,
@@ -190,6 +327,9 @@ CHECKS = (
     check_pre_push_gates_the_tip_of_each_pushed_ref,
     check_pre_push_skips_deletions,
     check_checkout_is_removed_after_use,
+    check_slow_tier_runs_the_aggregate_script_suite,
+    check_slow_tier_requires_a_positive_visible_count,
+    check_slow_tier_materializes_vendor_without_writing_source,
 )
 
 
@@ -207,6 +347,7 @@ def main() -> int:
         print(f"{failures} commit gate check(s) failed")
         return 1
     print(f"commit gate checks passed ({len(CHECKS)} checks)")
+    print(f"executed checks: {len(CHECKS)}")
     return 0
 
 

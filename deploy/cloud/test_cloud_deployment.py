@@ -119,7 +119,10 @@ class ImageIdentityContract(unittest.TestCase):
         lock = (REPOSITORY_ROOT / "backend" / "uv.lock").read_text(encoding="utf-8")
         self.assertGreater(lock.count('hash = "sha256:'), 100)
         dockerfile = (REPOSITORY_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("uv sync --locked --no-dev --no-editable", dockerfile)
+        self.assertIn(
+            "uv sync --locked --no-dev --no-group executor --no-editable",
+            dockerfile,
+        )
 
 
 class PackageDownloadHost(unittest.TestCase):
@@ -153,7 +156,10 @@ class PackageDownloadHost(unittest.TestCase):
     def test_integrity_still_comes_from_the_lock_not_from_the_host(self) -> None:
         # `--locked` plus the pinned sha256 digests are what verify the bytes.
         # Losing either of them would turn the mirror into a trust decision.
-        self.assertIn("uv sync --locked --no-dev --no-editable", self.dockerfile)
+        self.assertIn(
+            "uv sync --locked --no-dev --no-group executor --no-editable",
+            self.dockerfile,
+        )
         self.assertNotIn("--no-verify", self.dockerfile)
         self.assertNotIn("--allow-insecure-host", self.dockerfile)
         self.assertNotIn("trusted-host", self.dockerfile)

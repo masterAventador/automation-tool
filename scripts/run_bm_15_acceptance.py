@@ -17,6 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from desktop_e2e_prerequisites import video_studio_startup_harness
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
     FRONTEND,
@@ -75,33 +76,33 @@ def run_desktop_acceptance() -> None:
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key != "TAURI_WEBDRIVER_PORT"
-    }
+    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
     try:
-        _run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-        )
-        require_port_closed(port)
-        _run(
-            [
-                pnpm_executable(),
-                "exec",
-                "wdio",
-                "run",
-                "wdio.video-studio.conf.ts",
-                "--spec",
-                "./e2e-tauri/motion-parts-catalog.spec.ts",
-            ],
-            cwd=FRONTEND,
-            env=environment,
-        )
-        require_port_closed(port)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            _run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+            )
+            require_port_closed(port)
+            _run(
+                [
+                    pnpm_executable(),
+                    "exec",
+                    "wdio",
+                    "run",
+                    "wdio.video-studio.conf.ts",
+                    "--spec",
+                    "./e2e-tauri/motion-parts-catalog.spec.ts",
+                ],
+                cwd=FRONTEND,
+                env=environment,
+            )
+            require_port_closed(port)
     finally:
         restore = subprocess.run(
             [pnpm_executable(), "build"],

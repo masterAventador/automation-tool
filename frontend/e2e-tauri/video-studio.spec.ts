@@ -4,6 +4,9 @@ import { browser, expect } from "@wdio/globals";
 
 describe("VF-06 production App video studio acceptance", () => {
   it("opens every video page from the normal left navigation without fake results", async () => {
+    // The embedded Tauri service keeps one App alive across WDIO workers.
+    // Reload the production frontend so this file owns its initial state.
+    await browser.refresh();
     await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
     await browser
       .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频制作']]")

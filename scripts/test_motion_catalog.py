@@ -209,6 +209,7 @@ def main() -> int:
     expect_check_failure("stats drift", tampered_catalog, tampered_rights)
 
     print(f"motion catalog tests passed: {removed['name']} tamper matrix rejected")
+    print("executed checks: 9")
     return 0
 
 

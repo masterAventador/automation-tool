@@ -234,7 +234,9 @@ fn reachable_calls(entry: &str, functions: &BTreeMap<String, String>) -> BTreeSe
 #[test]
 fn every_guarded_wait_still_exists_where_it_is_claimed_to_be() {
     for (file, name, reason) in WAITS_ON_THE_WORLD {
-        let defined = functions_in(file).into_iter().any(|item| item.name == *name);
+        let defined = functions_in(file)
+            .into_iter()
+            .any(|item| item.name == *name);
         assert!(
             defined,
             "{file}::{name} is guarded because it {reason}, but no such function exists there \
@@ -270,7 +272,11 @@ fn commands_that_wait_on_the_world_never_run_on_the_ui_thread() {
             })
             .collect();
         if !waits.is_empty() {
-            offenders.push(format!("{}:\n      {}", command.name, waits.join("\n      ")));
+            offenders.push(format!(
+                "{}:\n      {}",
+                command.name,
+                waits.join("\n      ")
+            ));
         }
     }
 

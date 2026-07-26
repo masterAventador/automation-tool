@@ -260,15 +260,15 @@ async check() { return { status: "ready" }; }
 
 **注意**：这条落在前端 `frontend/src/`，与族 A 的 Rust 文件不冲突。
 
-#### T78（新）视频线 7 个驱动 / 8 个 spec 全卡启动门禁
+#### T78（新）视频线 8 个驱动 / 9 个唯一 spec 全卡启动门禁
 
-**现象**：视频线的 7 个驱动、8 个 spec **全部卡在启动门禁**。
+**复核后的实际范围**：从 `scripts/run_*_acceptance.py` 的可执行 AST 动态发现出 **8 个独立构建驱动**（原清单漏了 BM-06），共覆盖 **9 个唯一 spec**。不能再维护手写驱动表。
 
-**已知原因**：`780abce` 拆桩之后驱动没跟上——`prepare_startup_gate` 的 34 个调用者里，这 7 个**一个都没有**。
+**根因比原记录更深**：第一次按旧结论只给 7 个驱动补 `prepare_startup_gate` 后，旧门禁显示 `executed checks: 7`，但这是**假绿**。该函数只准备嵌入浏览器和签名 Executor；它不提供编译期动作授权环境，也不启动生产 Control Plane。`video-studio-e2e` 又固定调用 `http://127.0.0.1:8765`，所以只补这一个调用仍然会在真实启动门禁前失败。
 
-**已有记录但低估了范围**：`docs/development/T36-oneshot-video-preview.md:116` 记了这件事，但文档说「5 个 spec」，**实测受影响面更大（8 个）**。
+**已有记录低估了范围**：`docs/development/T36-oneshot-video-preview.md:116` 记的是 5 个 spec，最初交接写成 7 个驱动 / 8 个 spec；动态复核后的真实面是 8 个驱动 / 9 个唯一 spec。
 
-**要做的**：给这 7 个驱动补上 `prepare_startup_gate`。改完至少让它们能跑起来——**跑起来之后失败是新信息，跑不起来是没信息**。
+**实现**：8 个驱动统一用 `video_studio_startup_harness` 包住 build 与随后 WDIO/App 执行。共享 harness 先隔离环境并准备本地资源，再以随机 Compose project 启动隔离 PostgreSQL、执行生产 Alembic 链、在固定 8765 启动真实 Uvicorn Control Plane；退出和各失败阶段只清理由本轮持有的资源。8765 已占用时直接拒绝，绝不终止未知进程。结构门禁同时拒绝手写漏项、同名假实现、死分支、只包 build 不包 WDIO 的半套接线。
 
 **依赖**：这条和 T74（缓存键 + 硬编码路径）在同一批里，建议先做 T74 再做这条，否则你会在一个「执行器包永远是旧的」的地基上判断结果。
 
@@ -363,23 +363,24 @@ chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
 
 | 任务 | 状态 | 提交 | RED 证据（看到的失败输出） | 备注 / 反驳 |
 |---|---|---|---|---|
-| **A** T69 App 零日志 | ⬜ | | | 优先 |
-| **A** T50 注销界面报失败 | ⬜ | | | 优先 |
-| **B** T61 artifact 门禁降级为清理 | ⬜ | | | |
-| **B** T65 `cleanup_expired` 无调用方 | ⬜ | | | |
-| **B** T66b 目录权限只检查不修复 | ⬜ | | | |
-| **C** T72 门禁执行者三处空洞 | ⬜ | | | |
-| **C** T73 测试写进只读 vendor | ⬜ | | | |
-| **D** T40/T41 字体权利登记 | ⬜ | | | |
-| **E** T74 执行器缓存键 + 硬编码 `.local/` | ⬜ | | | 建议先做，它是别的判断的地基 |
-| **E** T75 另一处吞掉 PyInstaller 输出 | ⬜ | | | |
-| **F** T26 剔除 Widevine CDM | ⬜ | | | 唯一有书面禁令的风险 |
-| **F** T24 执行器包根按 `debug_assertions` 分叉 | ⬜ | | | |
-| **F** T45 Control Plane 镜像进 playwright | ⬜ | | | 独占 `uv.lock` |
-| **F** T38 演示后回收清单 | ⬜ | | | 纯文档 |
-| **G** T76 `desktop-e2e` 入口让断言恒真 | ⬜ | | | 改完可能变红，那是真相浮出来 |
-| **G** T77 B5-13 前端投影与权威态不一致 | ⬜ | | | 先复核再动手 |
-| **G** T78 视频线 7 驱动缺 `prepare_startup_gate` | ⬜ | | | 依赖 T74 |
+| **A** T69 App 零日志 | ✅ | 本提交 | Rust 落盘测试准确失败：`sensitive error detail reached the desktop log: Cookie=session-cookie` | 固定事件白名单覆盖 setup、Control Plane、任务状态与 Sidecar 生命周期；有界异步队列不阻塞业务，单文件 1 MiB、最多 8 个、保留 7 天；T50 的超时现在可由请求失败固定事件直接定位 |
+| **A** T50 注销界面报失败 | ✅ | 本提交 | Node 契约准确失败：`the authoritative projection must receive the full outer command budget` | 轮询预算由约 5 秒对齐为 60 秒；仓内 B5-13/B5-14 演示验收已包含安全注销步骤 |
+| **B** T61 artifact 门禁降级为清理 | ✅ | 本提交 | 启动恢复断言准确失败：`restarted store: VideoWorkspaceError { code: StorageUnavailable }` | 启动时仅清理损坏/中断删除的 artifact，清理失败才阻断；运行期 `list_artifacts()` 继续严格失败，外部软链目标不受触碰 |
+| **B** T65 `cleanup_expired` 无调用方 | ✅ | 本提交 | 启动清理断言准确失败：`expired workspace removed during startup` 实际收到 `Ok` | 初始化完成自愈后按当前时间执行 30 天保留清理；活跃 workspace 保留 |
+| **B** T66b 目录权限只检查不修复 | ✅ | 本提交 | 迁移权限测试准确失败：`restarted store: VideoWorkspaceError { code: PathRejected }` | Unix 目录漂移通过 `O_NOFOLLOW` 打开、dev/inode 复核后 `fchmod 0700`；修复失败才报错，含 setgid/sticky 位也清除 |
+| **C** T72 门禁执行者三处空洞 | ✅ | 本提交 | deploy 断言未被发现；静默 `exit 0`、空 aggregate 与偶然 `(9 checks)` 被误判为成功；host editable 包掩盖被验 commit 源码 | 派生发现 `scripts/test_*.py` 与 `deploy/**/test_*.py`；AST 选择解释器，checkout 源码优先；脚本统一报告正数执行计数，commit gate 新增 `--slow` 且执行被验 commit 的 aggregate runner |
+| **C** T73 测试写进只读 vendor | ✅ | 本提交 | 直接运行上游写入链会污染真实 vendor；安全入口缺失，且 clean 但错误 HEAD 未被拒绝；初次隔离 Hyperframes clone 又被全局 LFS clean filter 误报 68 个文件 dirty | 测试改在 `.local/vendor-tests` 的 shared local clone 中运行，无下载且不写共享 `.git/modules`；真实 vendor 前后同时校验 clean 与 HEAD=lock；slow gate 按被验 commit 的 lock 物化可用 Git checkout，并对内容及 Git 漂移双重守卫 |
+| **D** T40 UTM Kabel KT 权利登记 | ✅ | 本提交 | 权利登记断言准确失败：`'font-utm-kabel-kt' not found`；物理排除断言继而失败：`'fonts/UTM Kabel KT.ttf' not found` | 精确字节仅有 “Free for everyone” 而无商用再分发/嵌入授权，登记为 `NOASSERTION`/undetermined/deny，并从 Worker 冻结清单物理排除、候选审计拒绝回流 |
+| **D** T41 Big Shoulders Display 权利登记 | ✅ | 本提交 | 精确资产登记断言准确失败：`'font-big-shoulders-display' not found` | WOFF2 字节与动效 overlay/offline lock 对齐；按 Google Fonts 锁定 OFL-1.1 与 SIL 官方正文有条件放行，记录保留版权/许可证、不得单独售卖、衍生继续 OFL 等条件 |
+| **E** T74 执行器缓存键 + 硬编码 `.local/` | ✅ | 本提交 | 缓存键测试准确失败：`source, spec and contract bytes must each select a different cached package` | 缓存键纳入 backend 源码、spec、锁文件及相关契约/只读资源摘要；浏览器归档统一走 `archive_path()`，T36 失效清理同步指向摘要键 |
+| **E** T75 另一处吞掉 PyInstaller 输出 | ✅ | 本提交 | 构建失败测试准确失败：`PyInstaller stdout: missing hidden import` 与 `PyInstaller stderr: build traceback` 均不在异常中 | E4-07 及同类 E4-09/E4-10、Windows candidate 均携带 stdout/stderr 各自最后 20 行，空输出也给固定诊断 |
+| **F** T26 剔除 Widevine CDM | ✅ | 本提交 | 合成 staging 首先准确失败：`'exclusions' not found`；许可门禁仍为 `pending`，预算断言为 `343 != 324` | 保留 CfT 149 与原归档锁，仅按目标契约物理剔除 macOS Widevine；arm64 真归档 331→328 文件、359,441,871→339,257,128 B，离线启动与篡改拒绝通过；Windows 无该组件，CfT 整体再分发结论仍明确为 `undetermined` |
+| **F** T24 执行器包根按 `debug_assertions` 分叉 | ✅ | 本提交 | 单路径守卫准确失败：`lib.rs::run selects the Local Executor package root by build mode`；验收装配守卫继而失败：`must stage the signed Executor in the debug App resource root` | 所有构建统一从 Tauri `resource_dir()/local-executor/package` 查找；共享与自定义桌面验收均把测试包挂载到同一资源布局，AppData 只留状态 |
+| **F** T45 Control Plane 镜像进 playwright | ✅ | 本提交（锁文件下一提交） | Python 契约准确失败：`KeyError: 'executor'`；Node 镜像契约准确失败：缺少 `--no-group executor` | Playwright 移入默认启用的 `executor` 依赖组，执行器/本地开发保持可用；Control Plane 镜像显式排除该组，离线 dry-run 确认会卸载 Playwright |
+| **F** T38 演示后回收清单 | ✅ | 本提交 | 纯文档任务无代码 RED；既有 C10-13 文档契约 2/2 通过 | 新增可执行退场手册，覆盖业务冻结、账号/Session/凭据吊销、本机数据、PostgreSQL、对象存储、云资源、证据保留与双人复核；只登记凭据 ID/指纹，禁止读取或记录密钥值 |
+| **G** T76 `desktop-e2e` 入口让断言恒真 | ✅ | 本提交 | Node 入口契约准确失败：`the desktop test entry must execute the production composition root`；Rust 单路径守卫发现桩白名单漂移 | WDIO 适配器后直接加载生产 `main.tsx` 及完整 gateway；真实 Tauri 现在如实停在“桌面运行环境需要处理”，不再由恒真桩伪造工作台成功 |
+| **G** T77 B5-13 前端投影与权威态不一致 | ✅ | 本提交（复核结论） | 无新增 RED：组件/网关 6 项与 B5-13/B5-14 契约 3 项均通过 | `state: "missing"` 已稳定投影为“需要登录”，仅 gateway 拒绝才显示“暂时无法读取”；扫描现象由 T50 的注销投影预算修复覆盖，因此不制造重复改动 |
+| **G** T78 视频线完整启动链 | ✅ | 本提交 | 仅补 7 个 `prepare_startup_gate` 时旧门禁错误显示 `executed checks: 7`；动态完整门禁随后准确报出 8 个驱动均未导入完整 harness，生命周期测试报 `no attribute 'video_studio_startup_harness'`；后续 RED 又锁住 WDIO 越界、CP 健康失败泄漏、Compose 部分启动失败不清理及环境污染 | 动态范围为 8 个构建驱动 / 9 个唯一 spec；轻量结构与失败清理 11/11 通过。root 串行实跑 VF-06、BM-06、BM-08、BM-15、CQ-01、IM-05、VE-03 全绿；VE-04 在任何云提交前按设计因本机未配置阿里云凭据响亮停止，未读取或复制主工作树密钥 |
 
 ---
 

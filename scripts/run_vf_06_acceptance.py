@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from desktop_e2e_prerequisites import video_studio_startup_harness
+from release_assembly import VIDEO_RUNTIME_RESOURCES
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -88,6 +89,14 @@ class VideoRuntimeStagingRejected(RuntimeError):
     """An acceptance App would start without the runtime it needs."""
 
 
+def _remove_resource_tree(path: Path) -> None:
+    """Remove one worktree resource without following a link into another tree."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def stage_video_runtime(*, staging: Path, resource_root: Path) -> dict[str, Path]:
     """Install the prepared video runtime where every build reads it.
 
@@ -110,14 +119,14 @@ def stage_video_runtime(*, staging: Path, resource_root: Path) -> dict[str, Path
                 )
             destination = resource_root.joinpath(*resource.installed_parts)
             top = resource_root / resource.installed_parts[0]
-            shutil.rmtree(top, ignore_errors=True)
+            _remove_resource_tree(top)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(source, destination, symlinks=True)
             written.append(top)
         return require_staged_video_runtime(resource_root=resource_root)
     except BaseException:
         for path in written:
-            shutil.rmtree(path, ignore_errors=True)
+            _remove_resource_tree(path)
         raise
 
 
@@ -176,20 +185,24 @@ def run_desktop_acceptance() -> None:
     environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
     try:
-        subprocess.run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        subprocess.run(
-            [pnpm_executable(), *desktop_wdio_arguments()],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            subprocess.run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            subprocess.run(
+                [pnpm_executable(), *desktop_wdio_arguments()],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
     finally:
         restore = subprocess.run(
             [pnpm_executable(), "build"],
@@ -218,9 +231,7 @@ def main() -> int:
     missing = [path.relative_to(ROOT).as_posix() for path in required if not path.is_file()]
     if missing:
         raise SystemExit(f"VF-06 missing deliverables: {', '.join(missing)}")
-    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(
-        encoding="utf-8"
-    )
+    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     vf06_rows = [line for line in roadmap.splitlines() if line.startswith("| VF-06 |")]
     if len(vf06_rows) != 1 or not vf06_rows[0].endswith("| ✅ 已完成 |"):
         raise SystemExit("VF-06 roadmap row is missing, duplicated or incomplete")

@@ -26,7 +26,7 @@ COPY src ./src
 # The host is a committed constant, not a build argument: every builder -- CI,
 # workstation, cloud host -- resolves dependencies through the exact same path.
 RUN sed -i "s|https://files\.pythonhosted\.org/|https://pypi.tuna.tsinghua.edu.cn/|g" uv.lock \
- && uv sync --locked --no-dev --no-editable
+ && uv sync --locked --no-dev --no-group executor --no-editable
 
 FROM ${PYTHON_IMAGE} AS runtime
 

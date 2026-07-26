@@ -393,7 +393,7 @@ def main() -> None:
                 build_id=EXECUTOR_BUILD_ID,
                 spec_path=EXECUTOR_SPEC,
             )
-            package_root = install_executor_package(package_source, private_app_data)
+            package_root = install_executor_package(package_source)
             package_entrypoint = executor_entrypoint(package_root)
 
             require_port_available(database_port)

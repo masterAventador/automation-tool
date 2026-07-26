@@ -19,7 +19,14 @@ test("B5-07 packages Playwright for an explicit system browser without a WebView
     readRepositoryFile("backend/tests/integration/test_packaged_browser_probe.py"),
   ]);
 
-  assert.match(project, /dependencies\s*=\s*\[[\s\S]*["']playwright/u);
+  assert.doesNotMatch(
+    project,
+    /\[project\][\s\S]*?dependencies\s*=\s*\[[\s\S]*?playwright[\s\S]*?\]\s*\n\s*\[project\.scripts\]/u,
+  );
+  assert.match(
+    project,
+    /\[dependency-groups\][\s\S]*?\nexecutor\s*=\s*\[\s*"playwright==1\.61\.0",?\s*\]/u,
+  );
   assert.match(spec, /collect_all\(["']playwright["']\)/u);
   assert.match(spec, /automation_tool\.executor\.browser_runtime/u);
   assert.match(runtime, /launch_persistent_context/u);

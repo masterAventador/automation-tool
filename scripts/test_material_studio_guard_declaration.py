@@ -161,6 +161,7 @@ def main() -> int:
         f"IM-06 pins all {len(steps)} guard steps, all {len(reasons)} fail-closed reasons "
         f"and all {len(rust_markers)} markers of the Rust list"
     )
+    print("executed checks: 1")
     return 0
 
 

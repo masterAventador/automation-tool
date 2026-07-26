@@ -534,7 +534,7 @@ class SubtitleFontFetchTest(unittest.TestCase):
 
 
 class MaterialVideoWorkerExcludedUpstreamResourceFilesTest(unittest.TestCase):
-    """The four proprietary system faces must never be frozen into the release."""
+    """Every font without redistribution clearance stays out of the release."""
 
     def test_contract_declares_the_excluded_upstream_resource_files(self) -> None:
         contract = build_candidate_module.load_contract()
@@ -544,6 +544,7 @@ class MaterialVideoWorkerExcludedUpstreamResourceFilesTest(unittest.TestCase):
             "fonts/MicrosoftYaHeiNormal.ttc",
             "fonts/STHeitiLight.ttc",
             "fonts/STHeitiMedium.ttc",
+            "fonts/UTM Kabel KT.ttf",
         ):
             self.assertIn(proprietary, excluded)
 
@@ -556,18 +557,19 @@ class MaterialVideoWorkerExcludedUpstreamResourceFilesTest(unittest.TestCase):
 
     def test_candidate_carrying_an_excluded_resource_file_is_rejected(self) -> None:
         contract = build_candidate_module.load_contract()
-        with tempfile.TemporaryDirectory() as directory:
-            candidate = Path(directory) / "candidate"
-            fonts = candidate / "_internal/upstream/resource/fonts"
-            fonts.mkdir(parents=True)
-            (fonts / "MicrosoftYaHeiBold.ttc").write_bytes(b"")
-            with self.assertRaisesRegex(
-                build_candidate_module.MaterialVideoWorkerPackageError,
-                "MicrosoftYaHeiBold.ttc",
-            ):
-                build_candidate_module.assert_excluded_upstream_resource_files_absent(
-                    candidate, contract
-                )
+        for excluded in ("MicrosoftYaHeiBold.ttc", "UTM Kabel KT.ttf"):
+            with self.subTest(excluded=excluded), tempfile.TemporaryDirectory() as directory:
+                candidate = Path(directory) / "candidate"
+                fonts = candidate / "_internal/upstream/resource/fonts"
+                fonts.mkdir(parents=True)
+                (fonts / excluded).write_bytes(b"")
+                with self.assertRaisesRegex(
+                    build_candidate_module.MaterialVideoWorkerPackageError,
+                    excluded,
+                ):
+                    build_candidate_module.assert_excluded_upstream_resource_files_absent(
+                        candidate, contract
+                    )
 
     def test_candidate_without_excluded_resource_files_is_accepted(self) -> None:
         contract = build_candidate_module.load_contract()

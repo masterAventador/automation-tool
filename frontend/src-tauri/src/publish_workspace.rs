@@ -298,7 +298,11 @@ impl PublishWorkspace {
     }
 
     pub fn await_approval(&mut self, approval: PublishApproval) {
-        self.record("approval_presented", Some(approval.confirmation_id.clone()), None);
+        self.record(
+            "approval_presented",
+            Some(approval.confirmation_id.clone()),
+            None,
+        );
         self.stage = PublishStage::AwaitingApproval;
         self.approval = Some(approval);
     }
@@ -309,7 +313,11 @@ impl PublishWorkspace {
             .take()
             .ok_or(PublishWorkspaceError::NoApprovalPending)?;
         self.stage = PublishStage::Publishing;
-        self.record("approval_given", Some(approval.confirmation_id.clone()), None);
+        self.record(
+            "approval_given",
+            Some(approval.confirmation_id.clone()),
+            None,
+        );
         Ok(approval)
     }
 
@@ -419,9 +427,10 @@ pub fn dispatch_outcome(state: &str) -> PublishOutcome {
 fn readable(value: &str) -> bool {
     !value.trim().is_empty()
         && value.chars().count() <= MAX_APPROVAL_FIELD_CHARACTERS
-        && !value
-            .chars()
-            .any(|character| character.is_control() || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        && !value.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
 }
 
 fn canonical_uuid_v4(value: &str) -> bool {

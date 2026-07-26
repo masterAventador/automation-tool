@@ -118,6 +118,87 @@
       "packagedName": "NotoSansCJKsc-Regular.ttf",
       "upstreamFileName": "NotoSansCJKsc-Regular.otf",
       "fileNameNote": "Bytes are the upstream OpenType/CFF release asset unchanged; only the file name differs, because vendor/moneyprinterturbo/webui/Main.py lists a face only when its name ends in .ttf or .ttc. The registered sha256 is the digest of the upstream .otf, so the substitution is checkable rather than hidden."
+    },
+    {
+      "id": "font-utm-kabel-kt",
+      "category": "font",
+      "source": "MoneyPrinterTurbo v1.3.2 bundled binary; its name table credits Michael Dinh Kien",
+      "sourceUrl": "https://fontchudep.vn/",
+      "license": "NOASSERTION",
+      "licenseVersionOrDate": "No authoritative license located as of 2026-07-26",
+      "acquiredAt": "2026-07-26",
+      "sha256": "4938d601d85ba381cd3611d13b361528f4b504c7cf268bed44d1d8c2fbd85a68",
+      "bytes": 35456,
+      "redistributionAllowed": false,
+      "commercialUseAllowed": false,
+      "embeddingAllowed": false,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-26",
+      "attribution": "Thiet ke boi Michael Dinh Kien - \"In God We Trust - Free for everyone\" Email: fontchudep@gmail.com; www.fontchudep.com; www.fontchudep.vn",
+      "rightsStatus": "undetermined",
+      "distributionDecision": "deny",
+      "permissionSemantics": "A false permission means the project has not obtained a sufficiently explicit grant; it does not assert that the copyright holder forbids that use.",
+      "rightsBlocker": "The exact font says \"Free for everyone\" in name ID 0 but contains no license name or text and no explicit grant covering commercial use, redistribution or embedding. The creator site named by the font offers downloads but publishes no UTM Kabel KT-specific license terms that resolve those rights.",
+      "requiredRemediation": "Do not redistribute or embed this font in a release. Remove it from the material-video Worker package, replace it with a cleared font, or obtain an explicit written license covering commercial redistribution and embedding.",
+      "observedIn": "material-video-worker",
+      "upstreamPath": "vendor/moneyprinterturbo/resource/fonts/UTM Kabel KT.ttf",
+      "rightsEvidence": [
+        {
+          "type": "font-name-table",
+          "file": "vendor/moneyprinterturbo/resource/fonts/UTM Kabel KT.ttf",
+          "nameId": 0,
+          "value": "Thiet ke boi Michael Dinh Kien - \"In God We Trust - Free for everyone\" Email: fontchudep@gmail.com; www.fontchudep.com; www.fontchudep.vn",
+          "finding": "First-party notice embedded in the exact reviewed bytes; it identifies the author and creator sites but states no redistribution, commercial-use or embedding terms."
+        },
+        {
+          "type": "creator-site",
+          "url": "https://fontchudep.vn/",
+          "finding": "Official site identified by the font metadata; no UTM Kabel KT-specific license grant was located during review."
+        }
+      ]
+    },
+    {
+      "id": "font-big-shoulders-display",
+      "category": "font",
+      "source": "Google Fonts Big Shoulders Display family locked by BM-12 at commit 00e726a90e0b9698971c37b88c35ef958965448b",
+      "sourceUrl": "https://fonts.gstatic.com/s/bigshouldersdisplay/v24/fC1_PZJEZG-e9gHhdI4-NBbfd2ys3SjJCx1czNDuDJAM2w.woff2",
+      "license": "OFL-1.1",
+      "licenseVersionOrDate": "SIL Open Font License 1.1, 26 February 2007",
+      "acquiredAt": "2026-07-23",
+      "sha256": "203dd8ba4ae61b19cd2e00c66708f0d0f6d8484cdfdb1d7e8be37260d36a99b1",
+      "bytes": 35520,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "embeddingAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-26",
+      "attribution": "Copyright 2019 The Big Shoulders Project Authors (https://github.com/xotypeco/big_shoulders)",
+      "rightsStatus": "cleared",
+      "distributionDecision": "allow_with_conditions",
+      "bundledIn": "motion-catalog-overlay",
+      "packagedName": "big-shoulders-display-latin.woff2",
+      "path": "assets/motion-catalog-overlay/fonts/big-shoulders-display-latin.woff2",
+      "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
+      "licenseTextUrl": "https://github.com/google/fonts/blob/00e726a90e0b9698971c37b88c35ef958965448b/ofl/bigshouldersdisplay/OFL.txt",
+      "licenseTextSha256": "338f9c050f19daeda1d597243faf79f3a3d437c338af58cb7047617d0ce08771",
+      "redistributionConditions": [
+        "Do not sell the font by itself.",
+        "Every redistributed copy must retain the Big Shoulders copyright notice and the SIL Open Font License.",
+        "The font and derivatives must remain under OFL-1.1; Reserved Font Names, if any, require the copyright holder's permission for modified versions.",
+        "Do not use author or copyright-holder names to endorse a modified version."
+      ],
+      "rightsEvidence": [
+        {
+          "type": "official-family-license",
+          "url": "https://github.com/google/fonts/blob/00e726a90e0b9698971c37b88c35ef958965448b/ofl/bigshouldersdisplay/OFL.txt",
+          "finding": "Google Fonts records Big Shoulders Display under OFL-1.1 and identifies the Big Shoulders Project Authors as copyright holders."
+        },
+        {
+          "type": "official-license-text",
+          "url": "https://openfontlicense.org/open-font-license-official-text/",
+          "finding": "OFL-1.1 permits commercial bundling, redistribution and embedding subject to the recorded conditions."
+        }
+      ]
     }
   ]
 }

@@ -1,4 +1,5 @@
 pub mod account_session_vault;
+mod app_logging;
 pub mod app_update_cache;
 pub mod app_update_coordinator;
 pub mod app_update_installation;
@@ -521,7 +522,8 @@ fn start_motion_render(
 {
     let render_job_id = prepared.render_job_id();
     let allowed_assets = prepared.allowed_assets().to_vec();
-    let (asset_root, _, _) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
+    let (asset_root, _, _) =
+        motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
     let discard = || {
         if let Ok(workspace) = workspaces.open(render_job_id) {
             let _ = workspaces.finish(
@@ -605,8 +607,8 @@ pub fn run_motion_authoring(
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|_| motion_video_studio::render_unavailable())?;
-    let payload = serde_json::to_vec(request)
-        .map_err(|_| motion_video_studio::render_unavailable())?;
+    let payload =
+        serde_json::to_vec(request).map_err(|_| motion_video_studio::render_unavailable())?;
     let written = child
         .stdin
         .take()
@@ -1307,6 +1309,7 @@ fn inject_hostile_executor_diagnostics_for_acceptance(
 fn emergency_stop_executor(
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
     platform
         .emergency_stop()
         .map_err(map_executor_platform_error)
@@ -1319,6 +1322,7 @@ async fn restart_executor(
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     platform: tauri::State<'_, executor_platform::ExecutorPlatformService>,
 ) -> Result<executor_manager::ExecutorManagerStatus, ExecutorPlatformCommandError> {
+    app_logging::record(app_logging::DesktopLogEvent::ExecutorRestartRequested);
     let connection = client
         .issue_executor_connection(&vault)
         .await
@@ -1342,6 +1346,7 @@ async fn ensure_executor_running(
     let status = platform.status().map_err(map_executor_platform_error)?;
     match status.state() {
         executor_manager::ExecutorManagerState::Stopped => {
+            app_logging::record(app_logging::DesktopLogEvent::ExecutorAutoStartRequested);
             let connection = client
                 .issue_executor_connection(vault)
                 .await
@@ -1465,6 +1470,9 @@ async fn recheck_douyin_login(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+const DOUYIN_LOGOUT_PROJECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn logout_douyin_session(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -1521,20 +1529,26 @@ async fn logout_douyin_session(
         });
     }
 
-    for _ in 0..100 {
-        let snapshot = client
-            .get_douyin_platform_session(&vault)
-            .await
-            .map_err(map_executor_connection_error)?;
-        if snapshot.state() == "missing" {
-            return Ok(snapshot);
+    match tokio::time::timeout(DOUYIN_LOGOUT_PROJECTION_TIMEOUT, async {
+        loop {
+            let snapshot = client
+                .get_douyin_platform_session(&vault)
+                .await
+                .map_err(map_executor_connection_error)?;
+            if snapshot.state() == "missing" {
+                return Ok(snapshot);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    Err(ExecutorPlatformCommandError {
-        code: "timed_out",
-        retryable: true,
     })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(ExecutorPlatformCommandError {
+            code: "timed_out",
+            retryable: true,
+        }),
+    }
 }
 
 /// PB-07: one operator's publishing view, shared by the four publish Commands.
@@ -1690,12 +1704,13 @@ async fn begin_publish(
     let prepared = async {
         ensure_executor_running(&client, &vault, &executor).await?;
         let executable_path = resolve_embedded_browser(&authority)?;
-        let profile = profiles
-            .current_douyin_profile()
-            .map_err(|_| ExecutorPlatformCommandError {
-                code: "storage_unavailable",
-                retryable: false,
-            })?;
+        let profile =
+            profiles
+                .current_douyin_profile()
+                .map_err(|_| ExecutorPlatformCommandError {
+                    code: "storage_unavailable",
+                    retryable: false,
+                })?;
         Ok::<_, ExecutorPlatformCommandError>((executable_path, profile))
     }
     .await;
@@ -4239,11 +4254,19 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            let app_data_root = app.path().app_data_dir()?;
+            if app_logging::initialize(&app_data_root).is_err() {
+                eprintln!("desktop fixed-event log unavailable");
+            }
+            app_logging::record(app_logging::DesktopLogEvent::AppSetupStarted);
             app.manage(control_plane::ControlPlaneClient::for_deployment_profile(
                 &deployment_profile,
             )?);
-            let app_data_root = app.path().app_data_dir()?;
+            app_logging::record(
+                app_logging::DesktopLogEvent::ControlPlaneClientInitialized,
+            );
             let app_data_directory = deployment_profile.prepare_data_directory(&app_data_root)?;
+            app_logging::record(app_logging::DesktopLogEvent::ProfileDataDirectoryReady);
             app.manage(ProductAccountRequirement(
                 deployment_profile.requires_product_account(),
             ));
@@ -4295,6 +4318,7 @@ pub fn run() {
                 None => None,
             };
             app.manage(update_coordinator);
+            app_logging::record(app_logging::DesktopLogEvent::UpdateCoordinatorInitialized);
             app.manage(embedded_browser_authority::EmbeddedBrowserAuthority::new(
                 app
                     .path()
@@ -4322,6 +4346,7 @@ pub fn run() {
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
             )?);
+            app_logging::record(app_logging::DesktopLogEvent::LocalServicesInitialized);
             app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
                 &app_data_directory,
                 video_job_workspace::production_video_workspace_policy(),
@@ -4329,22 +4354,19 @@ pub fn run() {
             app.manage(browser_profiles::BrowserProfileStore::initialize(
                 &app_data_directory,
             )?);
-            #[cfg(debug_assertions)]
+            app_logging::record(app_logging::DesktopLogEvent::WorkspaceInitialized);
+            let package_root = app
+                .path()
+                .resource_dir()?
+                .join("local-executor")
+                .join("package");
             let executor_platform =
-                executor_platform::ExecutorPlatformService::initialize(&app_data_directory)?;
-            #[cfg(not(debug_assertions))]
-            let executor_platform = {
-                let package_root = app
-                    .path()
-                    .resource_dir()?
-                    .join("local-executor")
-                    .join("package");
                 executor_platform::ExecutorPlatformService::initialize_with_package_root(
                     &app_data_directory,
                     &package_root,
-                )?
-            };
+                )?;
             app.manage(executor_platform);
+            app_logging::record(app_logging::DesktopLogEvent::ExecutorServiceInitialized);
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
                 &app_data_directory,
             )?);
@@ -4380,6 +4402,8 @@ pub fn run() {
                 app.manage(device_credential_vault);
                 app.manage(local_registration_handoff);
             }
+            app_logging::record(app_logging::DesktopLogEvent::CredentialsInitialized);
+            app_logging::record(app_logging::DesktopLogEvent::AppSetupCompleted);
             Ok(())
         });
 
@@ -4601,6 +4625,7 @@ pub fn run() {
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
+            app_logging::record(app_logging::DesktopLogEvent::AppShutdownStarted);
             if let Some(platform) =
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {

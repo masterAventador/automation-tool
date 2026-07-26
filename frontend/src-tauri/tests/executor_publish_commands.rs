@@ -214,7 +214,10 @@ fn a_publish_frame_with_an_unusable_identity_is_refused_before_it_is_written() {
             .write_publish_dispatch_command(&mut frame, command_id, job_id, CONFIRMATION_ID)
             .is_err());
     }
-    assert!(frame.is_empty(), "a refused frame is never partially written");
+    assert!(
+        frame.is_empty(),
+        "a refused frame is never partially written"
+    );
 }
 
 #[test]
@@ -447,7 +450,12 @@ fn approval_terms_that_were_not_signed_are_refused() {
 #[test]
 fn a_result_without_terms_still_verifies_under_the_shorter_binding() {
     let (token, secret) = token();
-    let line = result_line(&secret, COMMAND_ID, "publish_blocked", "douyin.publish-preflight.v1");
+    let line = result_line(
+        &secret,
+        COMMAND_ID,
+        "publish_blocked",
+        "douyin.publish-preflight.v1",
+    );
 
     let parsed = token
         .parse_platform_command_result(
@@ -472,7 +480,10 @@ fn half_a_set_of_terms_is_refused() {
         "自动化运营测试账号",
     ))
     .expect("a JSON result frame");
-    document.as_object_mut().expect("object").remove("targetAccount");
+    document
+        .as_object_mut()
+        .expect("object")
+        .remove("targetAccount");
 
     assert!(token
         .parse_platform_command_result(

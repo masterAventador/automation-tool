@@ -487,6 +487,7 @@ def main() -> None:
     test_fetch_gives_up_loudly_instead_of_retrying_forever()
     test_fetch_does_not_retry_a_url_that_will_never_exist()
     print("offline motion catalog tests passed")
+    print("executed checks: 3")
 
 
 if __name__ == "__main__":

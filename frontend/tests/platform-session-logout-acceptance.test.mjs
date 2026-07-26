@@ -27,6 +27,16 @@ test("B5-14 safe logout uses one persistent gate and the hidden real App path", 
   assert.match(native, /prepare_douyin_platform_session_logout/u);
   assert.match(native, /emergency_stop\(\)[\s\S]*remove_current_douyin_profile/u);
   assert.match(native, /CompleteDouyinLogout/u);
+  assert.match(
+    native,
+    /DOUYIN_LOGOUT_PROJECTION_TIMEOUT[\s\S]*Duration::from_secs\(60\)/u,
+    "the authoritative projection must receive the full outer command budget",
+  );
+  assert.doesNotMatch(
+    native,
+    /for _ in 0\.\.100/u,
+    "safe logout must not abandon an authoritative projection after only five seconds",
+  );
   assert.match(profiles, /remove_current_douyin_profile/u);
   assert.match(repository, /platform_session_gates/u);
   assert.match(migration, /state = 'blocked'/u);

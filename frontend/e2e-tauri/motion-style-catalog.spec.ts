@@ -20,6 +20,9 @@ const contract = JSON.parse(
 
 describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
   it("recommends, brand-tunes and expands all Chinese styles with keyboard selection", async () => {
+    // The embedded service reuses the App across spec workers. Reloading keeps
+    // this scenario's "no method selected" gate independent of earlier tests.
+    await browser.refresh();
     await browser
       .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
       .click();

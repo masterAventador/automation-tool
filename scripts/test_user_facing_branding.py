@@ -435,6 +435,7 @@ def main() -> int:
             raise AssertionError("an empty capture must not silently pass")
 
     print("CQ-01 user-facing plain-language gate tests passed")
+    print("executed checks: 34")
     return 0
 
 

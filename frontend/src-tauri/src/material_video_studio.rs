@@ -552,8 +552,13 @@ fn worker_executable(app: &tauri::AppHandle) -> Result<PathBuf, MaterialVideoStu
 }
 
 /// Verify the packaged FFmpeg pair that ships beside the Worker.
-fn media_toolchain(app: &tauri::AppHandle) -> Result<VideoMediaToolchain, MaterialVideoStudioError> {
-    let resource_directory = app.path().resource_dir().map_err(|_| process_unavailable())?;
+fn media_toolchain(
+    app: &tauri::AppHandle,
+) -> Result<VideoMediaToolchain, MaterialVideoStudioError> {
+    let resource_directory = app
+        .path()
+        .resource_dir()
+        .map_err(|_| process_unavailable())?;
     VideoMediaToolchain::load(&resource_directory).map_err(|_| process_unavailable())
 }
 

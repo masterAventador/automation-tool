@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from desktop_e2e_prerequisites import (  # noqa: E402
     EXECUTOR_PACKAGE_CACHE_ROOT,
     SHARED_EXECUTOR_BUILD_ID,
+    executor_package_cache_key,
     install_signed_executor_package,
     prepare_startup_gate,
     startup_gate_environment,
@@ -187,23 +188,20 @@ def read_model_key(secret: Path) -> str:
     return key
 
 
-def require_authoring_capable_executor(private_app_data: Path) -> None:
+def require_authoring_capable_executor(_private_app_data: Path) -> None:
     """The installed Executor must be able to answer the authoring protocol.
 
-    `ensure_signed_executor_package` caches the PyInstaller build under a
-    constant build id and reuses it whenever the manifest and signature files
-    are present. Nothing about `backend/src/automation_tool/executor/` takes
-    part in that key, so once the cache exists no change to the Executor ever
-    reaches an acceptance run again — the driver silently tests a build from
-    whenever the cache happened to be made.
+    Older shared packages were cached under a constant build id. That is what
+    two T36 runs actually measured: the cached package predated the one-shot
+    authoring entry, so the App started it with `--author-motion`, the frozen
+    binary fell through to the long-lived executor path, read the authoring
+    request as a bootstrap document and exited 2 with an empty stdout — which
+    the App classifies, correctly, as `authoring_crashed`.
 
-    That is what two T36 runs actually measured. The cached package predated
-    the one-shot authoring entry, so the App started it with `--author-motion`,
-    the frozen binary fell through to the long-lived executor path, read the
-    authoring request as a bootstrap document and exited 2 with an empty
-    stdout — which the App classifies, correctly, as `authoring_crashed`. The
-    product code was fine; the artefact under test was stale, and nothing in the
-    run said so.
+    The shared prerequisite now includes the real Executor input digest in its
+    cache key. A signed package can still be locally incomplete, so this probe
+    remains the capability boundary: on failure it removes that exact current
+    digest cache entry before reinstalling, never the obsolete constant path.
 
     An empty request is enough to tell the two apart without a credential and
     without a model round trip: the entry answers every rejection with its
@@ -212,16 +210,22 @@ def require_authoring_capable_executor(private_app_data: Path) -> None:
     package. Anything else means this package cannot author, so it is rebuilt
     rather than run.
     """
-    entrypoint = private_app_data / "local-executor/package/automation-tool-executor"
+    entrypoint = (
+        DEBUG_APP_RESOURCE_ROOT / "local-executor/package/automation-tool-executor"
+    )
     if _answers_the_authoring_protocol(entrypoint):
         return
     print(
         "[T36] The cached signed Executor cannot answer --author-motion; "
         "rebuilding it instead of reporting its age as a product defect"
     )
-    shutil.rmtree(EXECUTOR_PACKAGE_CACHE_ROOT / SHARED_EXECUTOR_BUILD_ID, ignore_errors=True)
-    shutil.rmtree(private_app_data / "local-executor", ignore_errors=True)
-    install_signed_executor_package(private_app_data)
+    shutil.rmtree(
+        EXECUTOR_PACKAGE_CACHE_ROOT
+        / executor_package_cache_key(SHARED_EXECUTOR_BUILD_ID),
+        ignore_errors=True,
+    )
+    shutil.rmtree(DEBUG_APP_RESOURCE_ROOT / "local-executor", ignore_errors=True)
+    install_signed_executor_package(resource_root=DEBUG_APP_RESOURCE_ROOT)
     if not _answers_the_authoring_protocol(entrypoint):
         raise RuntimeError(
             f"{entrypoint} does not answer the one-shot authoring protocol even after a "

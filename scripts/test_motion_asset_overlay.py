@@ -113,6 +113,7 @@ def main() -> None:
         "70 items, 150 asset references, 68 trademark items/121 references, "
         "44 rights-reviewed assets and 5 tamper cases"
     )
+    print("executed checks: 6")
 
 
 if __name__ == "__main__":

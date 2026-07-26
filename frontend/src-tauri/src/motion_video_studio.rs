@@ -857,7 +857,11 @@ fn prepare_inside_workspace(
 fn locked_authoring_runtime_digest() -> Result<String, MotionVideoStudioError> {
     let contract: serde_json::Value =
         serde_json::from_str(OFFLINE_MOTION_DEPENDENCIES).map_err(|_| render_unavailable())?;
-    if contract.get("schemaVersion").and_then(serde_json::Value::as_u64) != Some(1) {
+    if contract
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+    {
         return Err(render_unavailable());
     }
     let digest = contract

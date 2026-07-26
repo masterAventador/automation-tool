@@ -495,6 +495,7 @@ def main() -> None:
     test_windows_unicode_and_read_only_path_semantics()
     test_real_release_build_is_reproducible()
     print("motion catalog release tests passed")
+    print("executed checks: 6")
 
 
 if __name__ == "__main__":

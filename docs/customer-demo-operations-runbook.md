@@ -86,3 +86,6 @@ docker compose -f deploy/customer-demo/compose.v1.json \
 2. 汇总目标、时间线、操作者、请求 ID、镜像 digest、schema revision、备份/恢复 receipt、吊销 revision、健康结果和脱敏日志；所有 Secret 值必须删除。
 3. 删除本次临时 operator payload 与状态目录，按平台保留策略封存备份和旧数据库；不得删除仍在保留期的恢复证据。
 4. 关闭变更单或事故单，并记录下一次恢复演练日期。任一验证未知时保持服务关闭并升级处理。
+
+若 Customer Demo 已正式结束而不是等待恢复，不在本节直接删库或清空 volume；转到
+[`Customer Demo 演示后退场与清理手册`](customer-demo-post-demo-cleanup.md)，按“冻结业务 → 吊销身份与凭据 → 停服 → 本机清理 → 持久数据和云资源退场 → 双人复核”的顺序执行。

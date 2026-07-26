@@ -149,13 +149,13 @@ def managed_test_postgres(
             yield
         return
 
-    subprocess.run(
-        [*compose, "up", "--detach", "--wait", "postgres-test"],
-        check=True,
-        cwd=repository_root,
-        env=environment,
-    )
     try:
+        subprocess.run(
+            [*compose, "up", "--detach", "--wait", "postgres-test"],
+            check=True,
+            cwd=repository_root,
+            env=environment,
+        )
         yield
     finally:
         subprocess.run(

@@ -322,7 +322,7 @@ def main() -> None:
             package_source = build_signed_executor(
                 workspace, build_id=EXECUTOR_BUILD_ID
             )
-            package_root = install_executor_package(package_source, private_app_data)
+            package_root = install_executor_package(package_source)
             package_entrypoint = executor_entrypoint(package_root)
 
             require_port_available(database_port)

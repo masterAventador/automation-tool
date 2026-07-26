@@ -99,8 +99,9 @@ class PackageSizeBounds:
 # cannot run without, so the package ceiling is derived from their sum instead
 # of being picked by hand.
 RELEASE_PAYLOAD_PARTS_MIB: Final = {
-    # Locked Chrome for Testing 149.0.7827.55 (333 files, 359,658,199 bytes).
-    "embedded-chromium": 343,
+    # Locked Chrome for Testing 149.0.7827.55 after Widevine exclusion
+    # (328 files, 339,257,128 bytes).
+    "embedded-chromium": 324,
     # Frozen RPA Executor sidecar (284 files, 184,686,384 bytes).
     "local-executor": 177,
     # Frozen intelligent-material worker after the unreachable-module trim, the
@@ -124,7 +125,7 @@ RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
     min_browser_bytes=320 * _MEBIBYTE,
     max_browser_bytes=420 * _MEBIBYTE,
     min_package_bytes=340 * _MEBIBYTE,
-    max_package_bytes=1146 * _MEBIBYTE,
+    max_package_bytes=1125 * _MEBIBYTE,
 )
 
 

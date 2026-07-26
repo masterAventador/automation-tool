@@ -102,7 +102,7 @@ def main() -> None:
                 Path(temporary),
                 build_id="h8-16e-startup-environment",
             )
-            package_root = install_executor_package(package_source, private_app_data)
+            package_root = install_executor_package(package_source)
             package_entrypoint = executor_entrypoint(package_root)
 
             print("[H8-16E] Running one real Tauri App with visible=false")

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from desktop_e2e_prerequisites import video_studio_startup_harness
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
     FRONTEND,
@@ -44,27 +45,31 @@ def run_desktop_acceptance() -> None:
     for spec in SPECS:
         spec_arguments.extend(["--spec", spec])
     try:
-        subprocess.run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        subprocess.run(
-            [
-                pnpm_executable(),
-                "exec",
-                "wdio",
-                "run",
-                "wdio.video-studio.conf.ts",
-                *spec_arguments,
-            ],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            subprocess.run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            subprocess.run(
+                [
+                    pnpm_executable(),
+                    "exec",
+                    "wdio",
+                    "run",
+                    "wdio.video-studio.conf.ts",
+                    *spec_arguments,
+                ],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
     finally:
         restore = subprocess.run(
             [pnpm_executable(), "build"],
@@ -97,9 +102,7 @@ def main() -> int:
     if missing:
         raise SystemExit(f"VE-03 missing deliverables: {', '.join(missing)}")
 
-    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(
-        encoding="utf-8"
-    )
+    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     rows = [line for line in roadmap.splitlines() if line.startswith("| VE-03 |")]
     if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
         raise SystemExit("VE-03 roadmap row is missing, duplicated or incomplete")

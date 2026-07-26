@@ -721,6 +721,24 @@ fn spawn_executor(
     restart_count: u8,
     diagnostics: Arc<ExecutorDiagnostics>,
 ) -> Result<RunningExecutor, ExecutorManagerError> {
+    crate::app_logging::record(crate::app_logging::DesktopLogEvent::ExecutorProcessStartRequested);
+    let result =
+        spawn_executor_without_logging(package, launch, start_timeout, restart_count, diagnostics);
+    crate::app_logging::record(if result.is_ok() {
+        crate::app_logging::DesktopLogEvent::ExecutorProcessStartSucceeded
+    } else {
+        crate::app_logging::DesktopLogEvent::ExecutorProcessStartFailed
+    });
+    result
+}
+
+fn spawn_executor_without_logging(
+    package: VerifiedExecutorPackage,
+    launch: &ExecutorLaunchConfiguration,
+    start_timeout: Duration,
+    restart_count: u8,
+    diagnostics: Arc<ExecutorDiagnostics>,
+) -> Result<RunningExecutor, ExecutorManagerError> {
     let token = LocalSessionToken::generate()
         .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))?;
     let mut command = Command::new(package.entrypoint_path());
@@ -1024,6 +1042,7 @@ fn reconcile_supervision(
                     return Err(process_unavailable());
                 }
             };
+            crate::app_logging::record(crate::app_logging::DesktopLogEvent::ExecutorProcessExited);
             let process_tree_result = managed.process.process_tree.terminate();
             join_readers(&mut managed.process);
             let restart_count = managed.process.status.restart_count();
@@ -1033,6 +1052,9 @@ fn reconcile_supervision(
             }
             if restartable_exit(exit_status) && restart_count < core.restart_policy.maximum_restarts
             {
+                crate::app_logging::record(
+                    crate::app_logging::DesktopLogEvent::ExecutorRestartScheduled,
+                );
                 let next_restart_count = restart_count + 1;
                 slot.status =
                     ExecutorManagerStatus::restarting(&managed.process.status, next_restart_count);

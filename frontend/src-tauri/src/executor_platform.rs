@@ -408,7 +408,9 @@ impl ExecutorPlatformService {
 
     /// The verified Executor entrypoint, for a one-shot run of that binary.
     pub fn verified_entrypoint(&self) -> Result<std::path::PathBuf, ExecutorPlatformError> {
-        self.manager.verified_entrypoint().map_err(map_manager_error)
+        self.manager
+            .verified_entrypoint()
+            .map_err(map_manager_error)
     }
 
     pub fn diagnostics(&self) -> Result<Vec<String>, ExecutorPlatformError> {
@@ -601,7 +603,9 @@ impl ExecutorPlatformService {
     }
 
     /// Give the operations browser back without publishing anything.
-    pub fn release_publish_surface(&self) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
+    pub fn release_publish_surface(
+        &self,
+    ) -> Result<LocalPlatformCommandResult, ExecutorPlatformError> {
         let result = self
             .manager
             .execute_session_command(LocalPlatformCommand::ReleaseDouyinPublishSurface)

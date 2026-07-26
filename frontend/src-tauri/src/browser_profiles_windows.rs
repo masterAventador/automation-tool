@@ -1121,9 +1121,9 @@ mod tests {
                 .canonicalize()
                 .expect("the temporary root must be canonicalisable")
                 .join(format!(
-                "automation-tool-browser-profiles-{tag}-{}-{unique}",
-                std::process::id()
-            ));
+                    "automation-tool-browser-profiles-{tag}-{}-{unique}",
+                    std::process::id()
+                ));
             let _ = fs::remove_dir_all(&path);
             fs::create_dir_all(&path).expect("temporary directory must be creatable");
             Self { path }

@@ -125,6 +125,91 @@ def _locked_runtime() -> dict[str, object]:
     }
 
 
+def _validated_exclusions(
+    value: object, *, expected_prefixes: tuple[str, ...]
+) -> list[dict[str, object]]:
+    if not isinstance(value, list) or len(value) != len(expected_prefixes):
+        _reject("staging exclusion record differs from the target contract")
+    exclusions: list[dict[str, object]] = []
+    for expected_prefix, exclusion in zip(expected_prefixes, value, strict=True):
+        if (
+            not isinstance(exclusion, dict)
+            or exclusion.get("prefix") != expected_prefix
+        ):
+            _reject("staging exclusion record differs from the target contract")
+        entries = exclusion.get("removedEntries")
+        if not isinstance(entries, list) or not entries:
+            _reject("staging exclusion record has no removed entries")
+        if any(
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("path"), str)
+            or not entry["path"].startswith(expected_prefix)
+            for entry in entries
+        ):
+            _reject("staging exclusion record contains an unrelated entry")
+        removed_files = sum(entry.get("type") == "file" for entry in entries)
+        removed_bytes = sum(
+            int(entry.get("size", 0))
+            for entry in entries
+            if entry.get("type") == "file"
+        )
+        if (
+            exclusion.get("removedFileCount") != removed_files
+            or exclusion.get("removedBytes") != removed_bytes
+        ):
+            _reject("staging exclusion totals are inconsistent")
+        exclusions.append(exclusion)
+    return exclusions
+
+
+def _require_excluded_paths_absent(
+    staging: Path, *, excluded_prefixes: tuple[str, ...]
+) -> None:
+    for prefix in excluded_prefixes:
+        candidate = staging / Path(*PurePosixPath(prefix.rstrip("/")).parts)
+        if candidate.is_symlink() or candidate.exists():
+            _reject("excluded proprietary component is present in staging")
+
+
+def _chromium_license_review(
+    *, excluded_prefixes: tuple[str, ...], exclusions: list[dict[str, object]]
+) -> dict[str, object]:
+    return {
+        "component": "chrome-for-testing",
+        "notice": (
+            "The locked Chrome for Testing archive is staged without Widevine CDM "
+            "where that proprietary component is present. Chromium sources are "
+            "BSD-3-Clause; redistribution of the remaining assembled Chrome for "
+            "Testing binary and its branding still requires a separate legal decision."
+        ),
+        "redistribution_review": "widevine_excluded_remaining_cft_terms_unresolved",
+        "proprietary_component_disposition": {
+            "component": "widevine-cdm",
+            "status": (
+                "excluded_from_staging"
+                if excluded_prefixes
+                else "absent_from_locked_archive"
+            ),
+            "excluded_entry_prefixes": list(excluded_prefixes),
+            "staging_exclusions": exclusions,
+            "license_basis": (
+                "WidevineCdm/LICENSE in the locked macOS archives states that use "
+                "or distribution requires a separate license agreement with Google; "
+                "the locked Windows archive contains no Widevine CDM."
+            ),
+        },
+        "remaining_license_conclusion": {
+            "chromium_sources": "BSD-3-Clause",
+            "assembled_chrome_for_testing": "undetermined",
+            "basis": (
+                "No authoritative redistribution conclusion for the remaining "
+                "assembled Chrome for Testing binary or its branding is recorded; "
+                "that legal decision remains outside this technical exclusion."
+            ),
+        },
+    }
+
+
 def build_distribution_manifest(
     *, staging: Path, target_id: str, enforce_archive_lock: bool = True
 ) -> Path:
@@ -154,6 +239,14 @@ def build_distribution_manifest(
     entries = staging_manifest.get("entries")
     if not isinstance(entries, list) or not entries:
         _reject("staging manifest entries missing")
+    exclusions = _validated_exclusions(
+        staging_manifest.get("exclusions"),
+        expected_prefixes=target.excluded_entry_prefixes,
+    )
+    _require_excluded_paths_absent(
+        staging,
+        excluded_prefixes=target.excluded_entry_prefixes,
+    )
     _require_single_target_tree(staging, target.root_entry)
 
     runtime = _locked_runtime()
@@ -170,16 +263,10 @@ def build_distribution_manifest(
         "totalBytes": staging_manifest["totalBytes"],
         "entries": entries,
         "licenses": {
-            "chromium_build": {
-                "component": "chrome-for-testing",
-                "notice": (
-                    "Chrome for Testing binary; Chromium sources are BSD-3-Clause, "
-                    "the assembled Chrome build ships Google-licensed components. "
-                    "Redistribution review is tracked before the first release "
-                    "package (EB-16)."
-                ),
-                "redistribution_review": "pending",
-            }
+            "chromium_build": _chromium_license_review(
+                excluded_prefixes=target.excluded_entry_prefixes,
+                exclusions=exclusions,
+            )
         },
         "sbom": [
             {
@@ -256,6 +343,23 @@ def verify_distribution(
     ):
         _reject("distribution archive digest does not match the contract lock")
 
+    staging_manifest = _load_json(staging / STAGING_MANIFEST_NAME)
+    exclusions = _validated_exclusions(
+        staging_manifest.get("exclusions"),
+        expected_prefixes=target.excluded_entry_prefixes,
+    )
+    _require_excluded_paths_absent(
+        staging,
+        excluded_prefixes=target.excluded_entry_prefixes,
+    )
+    if document.get("licenses") != {
+        "chromium_build": _chromium_license_review(
+            excluded_prefixes=target.excluded_entry_prefixes,
+            exclusions=exclusions,
+        )
+    }:
+        _reject("distribution license review is stale or unsupported")
+
     entries = document.get("entries")
     if not isinstance(entries, list) or not entries:
         _reject("distribution entries missing")
@@ -266,6 +370,10 @@ def verify_distribution(
         if not isinstance(entry, dict) or type(entry.get("path")) is not str:
             _reject("distribution entry invalid")
         relative = entry["path"]
+        if any(
+            relative.startswith(prefix) for prefix in target.excluded_entry_prefixes
+        ):
+            _reject("distribution manifest reintroduces an excluded component")
         expected_paths.add(relative)
         actual = staging / Path(*relative.split("/"))
         if entry.get("type") == "symlink":

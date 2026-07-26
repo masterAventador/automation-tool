@@ -25,12 +25,12 @@ import os
 import secrets as random_secrets
 import shutil
 import subprocess
-import tempfile
 import urllib.error
 import urllib.request
 from email.utils import formatdate
 from pathlib import Path
 
+from desktop_e2e_prerequisites import video_studio_startup_harness
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
     FRONTEND,
@@ -47,7 +47,7 @@ STAGING_PREFIX = "editing-staging/v1/"
 SPECS = ("./e2e-tauri/video-editing-service.spec.ts",)
 
 LIFECYCLE_RULE_XML = (
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    '<?xml version="1.0" encoding="UTF-8"?>'
     "<LifecycleConfiguration><Rule>"
     "<ID>automation-tool-editing-staging-v1</ID>"
     f"<Prefix>{STAGING_PREFIX}</Prefix>"
@@ -168,7 +168,10 @@ def run_real_oss_staging_acceptance(credentials: dict[str, str]) -> None:
     # 1. Same-region check against the real bucket location.
     status, payload = client.request("GET", bucket, subresource="?location")
     client.assert_no_secret(payload)
-    if status != 200 or f"<LocationConstraint>oss-{region}</LocationConstraint>" not in payload.decode():
+    if (
+        status != 200
+        or f"<LocationConstraint>oss-{region}</LocationConstraint>" not in payload.decode()
+    ):
         raise SystemExit(f"VE-04 bucket location check failed with HTTP {status}")
     print(f"real OSS: bucket location matches oss-{region}")
 
@@ -354,27 +357,31 @@ def run_desktop_acceptance(credentials_path: Path) -> None:
     for spec in SPECS:
         spec_arguments.extend(["--spec", spec])
     try:
-        subprocess.run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        subprocess.run(
-            [
-                pnpm_executable(),
-                "exec",
-                "wdio",
-                "run",
-                "wdio.video-studio.conf.ts",
-                *spec_arguments,
-            ],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            subprocess.run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            subprocess.run(
+                [
+                    pnpm_executable(),
+                    "exec",
+                    "wdio",
+                    "run",
+                    "wdio.video-studio.conf.ts",
+                    *spec_arguments,
+                ],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
     finally:
         restore = subprocess.run(
             [pnpm_executable(), "build"],

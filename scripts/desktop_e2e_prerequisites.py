@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Shared startup-gate preparation for the `control-plane-e2e` desktop E2E layer.
+"""Shared startup-gate preparation for production-composed desktop E2E Apps.
 
-Every acceptance App in this layer compiles the production startup gate, so it
-refuses to mount the workbench unless all four of these hold:
+Every `control-plane-e2e` acceptance App compiles the production startup gate,
+so it refuses to mount the workbench unless all four of these hold:
 
 1. the compile-time action authorization triple is baked into the binary —
    `startup_environment_state()` reads it first and returns
@@ -19,14 +19,22 @@ assertion while 27 task ledgers recorded a pass. Keeping the preparation here �
 rather than as a paragraph copied into 30 drivers — is what makes the next change
 to the gate reach all of them at once.
 
-Nothing here ever terminates a process or frees a port that is in use.
+The `video-studio-e2e` feature is the exception to the configurable-origin
+description above: its production transport always calls 127.0.0.1:8765. This
+module also owns the complete lifecycle harness that keeps a real isolated
+PostgreSQL and Control Plane alive around those Apps' build and WDIO execution.
+
+Nothing here terminates an existing or unknown process to free a port. Lifecycle
+cleanup stops only a `Popen` handle this module's harness successfully started.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -34,15 +42,25 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping
-from contextlib import suppress
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Final
+from uuid import uuid4
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT: Final = REPOSITORY_ROOT / "scripts"
 FRONTEND_ROOT: Final = REPOSITORY_ROOT / "frontend"
 PACKAGE_JSON: Final = FRONTEND_ROOT / "package.json"
+
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from embedded_browser_archives import (  # noqa: E402
+    MACOS_ARM64_ARCHIVE,
+    MACOS_X86_64_ARCHIVE,
+    archive_path,
+)
 
 # `tauri build --debug --no-bundle` produces a bare executable and Tauri treats
 # the directory holding it as the resource directory, which is where the release
@@ -87,16 +105,21 @@ ACTION_AUTHORIZATION_PUBLIC_KEY: Final = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGx
 LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS: Final = "1"
 LOCAL_ACTION_TASK_LIMIT: Final = "20"
 
-LOCKED_BROWSER_ARCHIVES: Final = {
-    "macos-arm64": (
-        REPOSITORY_ROOT
-        / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-    ),
-    "macos-x86_64": REPOSITORY_ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
-}
+# `video-studio-e2e` does not compile the configurable Control Plane origin
+# used by `control-plane-e2e`. Its production transport therefore always calls
+# the product default and the complete harness must own exactly this endpoint.
+VIDEO_STUDIO_CONTROL_PLANE_PORT: Final = 8765
+VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES: Final = frozenset(
+    {
+        "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO",
+        "AUTOMATION_TOOL_IM05_WORKER",
+    }
+)
 
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
+LOCKED_BROWSER_ARCHIVES: Final = {
+    "macos-arm64": archive_path(REPOSITORY_ROOT, MACOS_ARM64_ARCHIVE),
+    "macos-x86_64": archive_path(REPOSITORY_ROOT, MACOS_X86_64_ARCHIVE),
+}
 
 _reserved_control_plane_port: int | None = None
 
@@ -127,12 +150,8 @@ def startup_gate_environment(
     prepared = dict(environment)
     prepared.update(
         {
-            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": control_plane_origin(
-                control_plane_port
-            ),
-            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (
-                ACTION_AUTHORIZATION_PUBLIC_KEY
-            ),
+            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": control_plane_origin(control_plane_port),
+            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (ACTION_AUTHORIZATION_PUBLIC_KEY),
             "AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS": (
                 LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS
             ),
@@ -272,8 +291,7 @@ def verify_embedded_browser(tree: Path, target_id: str | None = None) -> None:
         verify_distribution(staging=tree, target_id=target_id or release_target_id())
     except DistributionRejected as error:
         raise DesktopPrerequisiteRejected(
-            f"the embedded browser distribution at {tree} failed verification: "
-            f"{error}"
+            f"the embedded browser distribution at {tree} failed verification: {error}"
         ) from error
 
 
@@ -326,9 +344,7 @@ def stage_embedded_browser(
     return destination
 
 
-def remove_staged_embedded_browser(
-    *, resource_root: Path = DEBUG_APP_RESOURCE_ROOT
-) -> None:
+def remove_staged_embedded_browser(*, resource_root: Path = DEBUG_APP_RESOURCE_ROOT) -> None:
     """Leave the resource root without a browser component, on purpose.
 
     H8-16E asserts the blocked diagnostics page, so it needs the component
@@ -343,16 +359,95 @@ def remove_staged_embedded_browser(
 # Signed Local Executor package
 # --------------------------------------------------------------------------- #
 
+_EXECUTOR_FIXED_INPUTS: Final = (
+    "backend/automation-tool-executor.spec",
+    "backend/pyproject.toml",
+    "backend/uv.lock",
+)
+_EXECUTOR_CONTRACT_ROOTS: Final = ("contracts/protocol",)
+_EXECUTOR_SPEC_RESOURCE_PATTERN: Final = re.compile(r"""["']((?:contracts|vendor)/[^"']+)["']""")
+_IGNORED_EXECUTOR_SOURCE_PARTS: Final = frozenset({"__pycache__"})
+_IGNORED_EXECUTOR_SOURCE_SUFFIXES: Final = frozenset({".pyc", ".pyo"})
+
+
+def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
+    """Return every repository file whose bytes can change the frozen Executor."""
+    source_root = repository_root / "backend/src"
+    if not source_root.is_dir():
+        raise DesktopPrerequisiteRejected(f"the Executor source tree is missing ({source_root})")
+    inputs = {
+        path
+        for path in source_root.rglob("*")
+        if path.is_file()
+        and not _IGNORED_EXECUTOR_SOURCE_PARTS.intersection(path.relative_to(source_root).parts)
+        and path.suffix not in _IGNORED_EXECUTOR_SOURCE_SUFFIXES
+    }
+    if not inputs:
+        raise DesktopPrerequisiteRejected(
+            f"the Executor source tree contains no build inputs ({source_root})"
+        )
+
+    for relative in _EXECUTOR_FIXED_INPUTS:
+        path = repository_root / relative
+        if not path.is_file():
+            raise DesktopPrerequisiteRejected(f"the Executor package input is missing ({relative})")
+        inputs.add(path)
+
+    for relative in _EXECUTOR_CONTRACT_ROOTS:
+        contract_root = repository_root / relative
+        if not contract_root.is_dir():
+            raise DesktopPrerequisiteRejected(f"the Executor contract tree is missing ({relative})")
+        inputs.update(path for path in contract_root.rglob("*") if path.is_file())
+
+    spec_path = repository_root / _EXECUTOR_FIXED_INPUTS[0]
+    for relative in _EXECUTOR_SPEC_RESOURCE_PATTERN.findall(spec_path.read_text(encoding="utf-8")):
+        resource = Path(relative)
+        if resource.is_absolute() or ".." in resource.parts:
+            raise DesktopPrerequisiteRejected(
+                f"the Executor spec names an unsafe package resource ({relative})"
+            )
+        path = repository_root / resource
+        if not path.is_file():
+            raise DesktopPrerequisiteRejected(
+                f"the Executor spec package resource is missing ({relative})"
+            )
+        inputs.add(path)
+
+    return tuple(sorted(inputs, key=lambda path: path.relative_to(repository_root).as_posix()))
+
+
+def executor_package_input_digest(repository_root: Path | None = None) -> str:
+    """Hash source, build configuration and contracts that feed PyInstaller."""
+    root = REPOSITORY_ROOT if repository_root is None else repository_root
+    digest = hashlib.sha256()
+    for path in _executor_input_paths(root):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        content = path.read_bytes()
+        digest.update(len(relative).to_bytes(8, byteorder="big"))
+        digest.update(relative)
+        digest.update(len(content).to_bytes(8, byteorder="big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def executor_package_cache_key(
+    build_id: str,
+    *,
+    repository_root: Path | None = None,
+) -> str:
+    """Name a cached package by its semantic build id and exact frozen inputs."""
+    return f"{build_id}-inputs-v1-{executor_package_input_digest(repository_root=repository_root)}"
+
 
 def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> Path:
-    """Build the signed PyInstaller Executor once per build id and cache it.
+    """Build the signed PyInstaller Executor once per build id and input digest.
 
     The gate calls `validate_installed_package()`, so an App data directory
     without a signed package reports `executor_unavailable`. The PyInstaller
     build takes minutes; running it once per driver would dominate a serial run
     of the whole layer.
     """
-    cached = EXECUTOR_PACKAGE_CACHE_ROOT / build_id
+    cached = EXECUTOR_PACKAGE_CACHE_ROOT / executor_package_cache_key(build_id)
     if (cached / EXECUTOR_MANIFEST_NAME).is_file() and (
         cached / EXECUTOR_MANIFEST_SIGNATURE_NAME
     ).is_file():
@@ -370,13 +465,15 @@ def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> 
 
 
 def install_signed_executor_package(
-    private_app_data: Path, *, build_id: str = SHARED_EXECUTOR_BUILD_ID
+    *,
+    build_id: str = SHARED_EXECUTOR_BUILD_ID,
+    resource_root: Path = DEBUG_APP_RESOURCE_ROOT,
 ) -> Path:
-    """Install the cached signed package where the debug build looks for it."""
+    """Install the cached signed package in the App's real resource layout."""
     package_source = ensure_signed_executor_package(build_id)
     from run_e4_14_acceptance import install_executor_package  # noqa: PLC0415
 
-    return install_executor_package(package_source, private_app_data)
+    return install_executor_package(package_source, resource_root=resource_root)
 
 
 # --------------------------------------------------------------------------- #
@@ -385,7 +482,7 @@ def install_signed_executor_package(
 
 
 def prepare_startup_gate(
-    private_app_data: Path,
+    _private_app_data: Path,
     *,
     build_id: str = SHARED_EXECUTOR_BUILD_ID,
     embedded_browser: bool = True,
@@ -403,7 +500,135 @@ def prepare_startup_gate(
     else:
         remove_staged_embedded_browser(resource_root=resource_root)
     if executor_package:
-        install_signed_executor_package(private_app_data, build_id=build_id)
+        install_signed_executor_package(build_id=build_id, resource_root=resource_root)
+
+
+def _video_studio_environment(
+    environment: Mapping[str, str],
+    *,
+    database_port: int,
+    development_database_port: int,
+) -> dict[str, str]:
+    """Overlay one isolated database without dropping driver-specific inputs."""
+    database_name = "automation_tool_video_studio"
+    database_password = secrets.token_hex(24)
+    prepared = {
+        key: value
+        for key, value in environment.items()
+        if not key.startswith("AUTOMATION_TOOL_") or key in VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES
+    }
+    prepared.update(
+        {
+            "AUTOMATION_TOOL_DEV_DB_USER": "unused_video_studio_dev",
+            "AUTOMATION_TOOL_DEV_DB_PASSWORD": secrets.token_hex(24),
+            "AUTOMATION_TOOL_DEV_DB_NAME": "unused_video_studio_dev",
+            "AUTOMATION_TOOL_DEV_DB_PORT": str(development_database_port),
+            "AUTOMATION_TOOL_TEST_DB_USER": database_name,
+            "AUTOMATION_TOOL_TEST_DB_PASSWORD": database_password,
+            "AUTOMATION_TOOL_TEST_DB_NAME": database_name,
+            "AUTOMATION_TOOL_TEST_DB_PORT": str(database_port),
+            "AUTOMATION_TOOL_DATABASE_URL": (
+                f"postgresql+asyncpg://{database_name}:{database_password}"
+                f"@127.0.0.1:{database_port}/{database_name}"
+            ),
+        }
+    )
+    return startup_gate_environment(
+        prepared,
+        control_plane_port=VIDEO_STUDIO_CONTROL_PLANE_PORT,
+    )
+
+
+def _terminate_owned_control_plane(server: subprocess.Popen[bytes]) -> None:
+    """Stop only the Control Plane process this harness started."""
+    if server.poll() is not None:
+        return
+    server.terminate()
+    try:
+        server.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        server.kill()
+        server.wait(timeout=5)
+
+
+@contextmanager
+def video_studio_startup_harness(
+    private_app_data: Path,
+    *,
+    environment: Mapping[str, str],
+    resource_root: Path = DEBUG_APP_RESOURCE_ROOT,
+) -> Iterator[dict[str, str]]:
+    """Yield the complete environment around one real video-studio App run.
+
+    Unlike `control-plane-e2e`, the `video-studio-e2e` Rust feature always uses
+    the production default origin, so this harness must own 127.0.0.1:8765.
+    An existing listener is never terminated or reused. The isolated PostgreSQL
+    service, production Alembic chain and production Uvicorn Control Plane stay
+    alive for the caller's build and WDIO run, then are removed even when server
+    startup or the acceptance itself fails.
+    """
+    if not port_is_free(VIDEO_STUDIO_CONTROL_PLANE_PORT):
+        raise DesktopPrerequisiteRejected(
+            "video-studio-e2e is compiled to call http://127.0.0.1:8765, "
+            "but that port is occupied; stop its owner instead of reusing or "
+            "terminating it"
+        )
+
+    # Import lazily: the helpers load backend acceptance dependencies, while
+    # cache/staging-only users of this module must remain stdlib-only.
+    from acceptance_postgres import managed_test_postgres  # noqa: PLC0415
+    from run_e4_14_acceptance import start_control_plane  # noqa: PLC0415
+    from run_i2_13_acceptance import (  # noqa: PLC0415
+        BACKEND_ROOT,
+        compose_command,
+        require_port_closed,
+        unused_loopback_port,
+    )
+
+    prepare_startup_gate(private_app_data, resource_root=resource_root)
+    database_port = unused_loopback_port()
+    development_database_port = unused_loopback_port()
+    while development_database_port == database_port:
+        development_database_port = unused_loopback_port()
+    prepared = _video_studio_environment(
+        environment,
+        database_port=database_port,
+        development_database_port=development_database_port,
+    )
+    project_name = f"automation-tool-video-studio-{uuid4()}"
+    compose = compose_command(project_name)
+    server: subprocess.Popen[bytes] | None = None
+    control_plane_started = False
+
+    try:
+        with managed_test_postgres(
+            compose=compose,
+            database_port=database_port,
+            environment=prepared,
+            repository_root=REPOSITORY_ROOT,
+        ):
+            subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                check=True,
+                cwd=BACKEND_ROOT,
+                env=prepared,
+            )
+            server = start_control_plane(
+                port=VIDEO_STUDIO_CONTROL_PLANE_PORT,
+                environment=prepared,
+            )
+            control_plane_started = True
+            try:
+                yield prepared
+            finally:
+                _terminate_owned_control_plane(server)
+                server = None
+    finally:
+        if server is not None:
+            _terminate_owned_control_plane(server)
+        if control_plane_started:
+            require_port_closed(VIDEO_STUDIO_CONTROL_PLANE_PORT)
+        require_port_closed(database_port)
 
 
 def terminate_app_process_tree(app_process: subprocess.Popen[bytes]) -> None:

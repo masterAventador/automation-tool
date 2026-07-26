@@ -30,8 +30,9 @@ _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 class WindowsExecutorCandidateRejected(ValueError):
     """Fixed failure boundary for an unsafe or incomplete release candidate."""
 
-    def __init__(self) -> None:
-        super().__init__("Windows Executor candidate is rejected")
+    def __init__(self, reason: str = "") -> None:
+        message = "Windows Executor candidate is rejected"
+        super().__init__(f"{message}: {reason}" if reason else message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +43,22 @@ class WindowsExecutorCandidateAudit:
     package_size: int
 
 
-def _reject() -> WindowsExecutorCandidateRejected:
-    return WindowsExecutorCandidateRejected()
+def _reject(reason: str = "") -> WindowsExecutorCandidateRejected:
+    return WindowsExecutorCandidateRejected(reason)
+
+
+_BUILDER_OUTPUT_LINES = 20
+
+
+def _builder_output(completed: subprocess.CompletedProcess[bytes]) -> str:
+    """The tail of what PyInstaller said, so a failed build explains itself."""
+    parts: list[str] = []
+    for name, raw in (("stderr", completed.stderr), ("stdout", completed.stdout)):
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else (raw or "")
+        lines = [line for line in text.splitlines() if line.strip()]
+        if lines:
+            parts.append(f"{name}:\n" + "\n".join(lines[-_BUILDER_OUTPUT_LINES:]))
+    return "\n".join(parts) if parts else "the builder produced no output"
 
 
 def _normalize_architecture(machine: str) -> str:
@@ -226,7 +241,7 @@ def _run_pyinstaller(  # pragma: no cover - exercised by the real Windows packag
         timeout=600,
     )
     if completed.returncode != 0:
-        raise _reject()
+        raise _reject(_builder_output(completed))
 
 
 def build_windows_executor_candidate(

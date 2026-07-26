@@ -29,6 +29,7 @@ import tempfile
 from pathlib import Path
 
 from check_user_facing_branding import CONTRACT_PATH, industry_term_occurs
+from desktop_e2e_prerequisites import video_studio_startup_harness
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
     FRONTEND,
@@ -85,9 +86,7 @@ def require_plain_captured_pages(capture_file: Path) -> None:
             term = entry["term"]
             plain = mappings[term]
             if industry_term_occurs(rendered, term) and plain not in rendered:
-                violations.append(
-                    f"{page['page']}: 未解释的行业词 {term!r}, 应写成 {plain!r}"
-                )
+                violations.append(f"{page['page']}: 未解释的行业词 {term!r}, 应写成 {plain!r}")
     if violations:
         raise RuntimeError(
             "CQ-01 真实 App 页面出现未解释行业词:\n" + "\n".join(sorted(set(violations)))
@@ -108,36 +107,38 @@ def run_desktop_acceptance() -> None:
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
-    environment = {
-        key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"
-    }
+    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
     with tempfile.TemporaryDirectory(prefix="automation-tool-cq01-") as temporary:
         capture_file = Path(temporary) / "captured-pages.json"
         environment["CQ01_PAGE_TEXT_FILE"] = str(capture_file)
         restore_failed = False
         try:
-            _run(
-                [pnpm_executable(), "build:tauri:video-studio-test"],
-                cwd=FRONTEND,
-                env=environment,
-            )
-            require_port_closed(port)
-            _run(
-                [
-                    pnpm_executable(),
-                    "exec",
-                    "wdio",
-                    "run",
-                    "wdio.video-studio.conf.ts",
-                    "--spec",
-                    SPEC,
-                ],
-                cwd=FRONTEND,
-                env=environment,
-            )
-            require_port_closed(port)
-            require_plain_captured_pages(capture_file)
+            with video_studio_startup_harness(
+                private_app_data,
+                environment=environment,
+            ) as environment:
+                _run(
+                    [pnpm_executable(), "build:tauri:video-studio-test"],
+                    cwd=FRONTEND,
+                    env=environment,
+                )
+                require_port_closed(port)
+                _run(
+                    [
+                        pnpm_executable(),
+                        "exec",
+                        "wdio",
+                        "run",
+                        "wdio.video-studio.conf.ts",
+                        "--spec",
+                        SPEC,
+                    ],
+                    cwd=FRONTEND,
+                    env=environment,
+                )
+                require_port_closed(port)
+                require_plain_captured_pages(capture_file)
         finally:
             # Restoring production assets must never replace the original
             # failure, so a restore problem is raised only after the try block

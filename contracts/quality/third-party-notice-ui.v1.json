@@ -140,7 +140,7 @@
   "assetRights": {
     "deniedByDefault": true,
     "sharedRequiredFieldCount": 12,
-    "registeredEntryCount": 2,
+    "registeredEntryCount": 4,
     "categories": [
       {
         "id": "codec_binary",

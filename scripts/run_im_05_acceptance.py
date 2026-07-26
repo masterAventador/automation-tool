@@ -18,6 +18,10 @@ from build_material_video_worker_candidate import (
     MaterialVideoWorkerAudit,
     build_candidate,
 )
+from desktop_e2e_prerequisites import video_studio_startup_harness
+from prepare_video_runtime import install as install_video_runtime
+from prepare_video_runtime import prepare as prepare_video_runtime
+from run_vf_06_acceptance import DEBUG_APP_RESOURCE_ROOT
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -52,9 +56,7 @@ def run(
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     if completed.returncode != 0 or expect_summary not in completed.stdout:
-        raise AssertionError(
-            f"IM-05 expected `{expect_summary}` from: {' '.join(command)}"
-        )
+        raise AssertionError(f"IM-05 expected `{expect_summary}` from: {' '.join(command)}")
 
 
 def app_data_directory() -> Path:
@@ -107,9 +109,9 @@ def require_contract() -> None:
 
 
 def require_real_frozen_webui(candidate: Path) -> None:
-    executable = (
-        candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)
-    ).resolve(strict=True)
+    executable = (candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)).resolve(
+        strict=True
+    )
     environment = dict(os.environ)
     environment["AUTOMATION_TOOL_IM05_WORKER"] = str(executable)
     run(
@@ -139,48 +141,61 @@ def require_real_frozen_webui(candidate: Path) -> None:
         candidate / "_internal/upstream/storage",
     ):
         if forbidden.exists():
-            raise AssertionError(
-                f"IM-05 wrote into frozen upstream package: {forbidden.name}"
-            )
+            raise AssertionError(f"IM-05 wrote into frozen upstream package: {forbidden.name}")
 
 
 def require_normal_app_entry(candidate: Path) -> None:
-    executable = (
-        candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)
-    ).resolve(strict=True)
+    platform = "windows" if sys.platform == "win32" else "macos"
+    media_staging = prepare_video_runtime(
+        platform=platform,
+        only=("media-toolchain",),
+    )
+    install_video_runtime(
+        staging=media_staging,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=("media-toolchain",),
+        platform=platform,
+    )
+    install_video_runtime(
+        staging=candidate.parent,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=("material-video-worker",),
+        platform=platform,
+    )
     private_app_data = app_data_directory()
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
     require_port_closed(port)
-    environment = {
-        key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"
-    }
+    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
     environment["TAURI_WEBDRIVER_PORT"] = str(port)
-    environment["AUTOMATION_TOOL_IM05_WORKER"] = str(executable)
     try:
-        subprocess.run(
-            [pnpm_executable(), "build:tauri:video-studio-test"],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
-        subprocess.run(
-            [
-                pnpm_executable(),
-                "exec",
-                "wdio",
-                "run",
-                "wdio.video-studio.conf.ts",
-                "--spec",
-                "./e2e-tauri/material-video-webui.spec.ts",
-            ],
-            cwd=FRONTEND,
-            env=environment,
-            check=True,
-        )
-        require_port_closed(port)
+        with video_studio_startup_harness(
+            private_app_data,
+            environment=environment,
+        ) as environment:
+            subprocess.run(
+                [pnpm_executable(), "build:tauri:video-studio-test"],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
+            subprocess.run(
+                [
+                    pnpm_executable(),
+                    "exec",
+                    "wdio",
+                    "run",
+                    "wdio.video-studio.conf.ts",
+                    "--spec",
+                    "./e2e-tauri/material-video-webui.spec.ts",
+                ],
+                cwd=FRONTEND,
+                env=environment,
+                check=True,
+            )
+            require_port_closed(port)
     finally:
         subprocess.run(
             [pnpm_executable(), "build"],
@@ -199,7 +214,7 @@ def require_evidence() -> None:
     evidence = (ROOT / "docs/development/IM-05.md").read_text(encoding="utf-8")
     for marker in (
         "# IM-05 完成证据",
-        "状态：🔍 待验收",
+        "状态：🔍 待验收",  # noqa: RUF001 - exact evidence heading
         "## RED",
         "## GREEN",
         "## 正常用户路径验收",
@@ -209,14 +224,10 @@ def require_evidence() -> None:
     ):
         if marker not in evidence:
             raise AssertionError(f"IM-05 evidence is missing {marker}")
-    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(
-        encoding="utf-8"
-    )
+    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
     rows = [line for line in roadmap.splitlines() if line.startswith("| IM-05 |")]
     if len(rows) != 1 or not rows[0].endswith("| 🔍 待验收 |"):
-        raise AssertionError(
-            "IM-05 roadmap status is not pending real generation validation"
-        )
+        raise AssertionError("IM-05 roadmap status is not pending real generation validation")
 
 
 def main() -> int:

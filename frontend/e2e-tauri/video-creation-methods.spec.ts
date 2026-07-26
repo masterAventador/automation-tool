@@ -4,6 +4,9 @@ import { browser, expect } from "@wdio/globals";
 
 describe("VF-07 production App creation method acceptance", () => {
   it("compares and selects exactly two understandable creation methods", async () => {
+    // A WDIO session change does not restart the embedded Tauri App. Reload so
+    // method and tab state from the preceding spec cannot satisfy this one.
+    await browser.refresh();
     await browser
       .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
       .click();
@@ -13,6 +16,10 @@ describe("VF-07 production App creation method acceptance", () => {
       .click();
 
     const studio = await browser.$("section[aria-label='视频制作工作区']");
+    await expect(studio).toBeDisplayed();
+    // Declare this scenario's target page explicitly so a future default-tab
+    // change cannot make the acceptance silently inspect a different panel.
+    await studio.$("div[role='tab']=新建视频").click();
     const materialMethod = await studio.$("button[aria-label='选择智能素材成片']");
     const motionMethod = await studio.$("button[aria-label='选择品牌动效成片']");
     await expect(materialMethod).toBeDisplayed();

@@ -291,6 +291,7 @@ def main() -> int:
             raise AssertionError(f"gate must reject {reason} names")
 
     print("BM-15 motion catalog ui projection tests passed")
+    print(f"executed checks: {1 + len(EXECUTED_SCENARIOS) + 3 + 2}")
     return 0
 
 

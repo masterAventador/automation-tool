@@ -57,6 +57,9 @@ const RUNTIME_DEPENDENCY_RESOLVERS: &[(&str, &str)] = &[
 /// Production functions allowed to carry an inline `cfg(feature = "*-e2e")`
 /// branch, each with the reason it is not a product-behaviour fork.
 const REVIEWED_INLINE_FEATURE_BRANCHES: &[(&str, &str)] = &[
+    // Fixed diagnostics mirror the Executor commands that exist in each build;
+    // the branches add no lookup, input or success path.
+    ("app_logging.rs", "as_str"),
     // Composition root: mounts the WebDriver plugin and registers the command
     // set. Security rules forbid shipping the driver, so the mount itself is a
     // build difference; it changes no lookup the product performs.
@@ -191,7 +194,11 @@ fn source_directory() -> PathBuf {
 fn source_files() -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = fs::read_dir(source_directory())
         .expect("the crate source directory must be readable")
-        .map(|entry| entry.expect("source directory entries must be readable").path())
+        .map(|entry| {
+            entry
+                .expect("source directory entries must be readable")
+                .path()
+        })
         .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
         .collect();
     files.sort();
@@ -463,6 +470,55 @@ fn the_startup_gate_is_compiled_identically_in_every_build() {
     }
 }
 
+#[test]
+fn the_executor_package_root_comes_from_tauri_resources_in_every_build() {
+    let items = functions();
+    let run = items
+        .iter()
+        .find(|item| item.file == "lib.rs" && item.name == "run")
+        .expect("lib.rs::run must compose the desktop application");
+    assert!(
+        !run.body.contains("cfg(debug_assertions)"),
+        "lib.rs::run selects the Local Executor package root by build mode; \
+         every build must exercise resource_dir()/local-executor/package"
+    );
+    assert!(
+        run.body.contains("resource_dir()")
+            && run.body.contains("join(\"local-executor\")")
+            && run.body.contains("join(\"package\")")
+            && run
+                .body
+                .contains("ExecutorPlatformService::initialize_with_package_root"),
+        "lib.rs::run must derive the Local Executor package from Tauri's resource directory"
+    );
+    assert!(
+        !run.body
+            .contains("ExecutorPlatformService::initialize(&app_data_directory)"),
+        "App data owns Executor state, not the signed package the App launches"
+    );
+}
+
+#[test]
+fn desktop_acceptance_stages_the_executor_at_the_same_resource_root() {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let prerequisites =
+        fs::read_to_string(repository_root.join("scripts/desktop_e2e_prerequisites.py"))
+            .expect("desktop prerequisite source");
+    let lifecycle = fs::read_to_string(repository_root.join("scripts/run_e4_14_acceptance.py"))
+        .expect("Executor lifecycle acceptance source");
+    assert!(
+        prerequisites.contains("install_executor_package(")
+            && prerequisites.contains("resource_root=resource_root"),
+        "the shared startup preparation must stage the signed Executor in the \
+         debug App resource root, not in App data"
+    );
+    assert!(
+        lifecycle.contains("DEBUG_APP_RESOURCE_ROOT")
+            && !lifecycle.contains("local_executor = private_app_data"),
+        "custom Executor acceptance packages must use the same Tauri resource layout"
+    );
+}
+
 /// Every `invoke_handler` list in `lib.rs`, with the `#[cfg(...)]` that selects it.
 ///
 /// A command that is absent from a build does not fail that build, or that
@@ -595,10 +651,11 @@ fn the_account_commands_behind_the_login_screen_are_all_or_nothing() {
 // (`vite.config.ts` rewrites `/src/main.tsx`), so a build can bypass the whole
 // gate without a single `#[cfg]` — invisible to every guard in this file.
 //
-// That is not hypothetical. `app/startup.ts` still exports a check whose entire
-// body is `return { status: "ready" }`, and the `desktop-e2e` entry mounts it.
-// It is the same defect as the Rust stub this file was written to kill, in the
-// same place in the same flow, one language over.
+// That is not hypothetical. `app/startup.ts` still exports an isolated shell
+// check whose entire body is `return { status: "ready" }`; the `desktop-e2e`
+// entry once mounted it and thereby made its workbench assertion green by
+// construction. The entry now delegates to `main.tsx`, while this scanner keeps
+// that regression from returning in any Vite mode.
 
 /// The module every release loads. Stubbing it can never be reviewed away: it
 /// *is* the production startup gate.
@@ -633,24 +690,17 @@ fn reports_ready_without_probing(check_body: &str) -> bool {
 /// still tolerated and who owes its removal.
 ///
 /// Asserted by set equality, so adding one *and* removing one both fail. The
-/// point is not that these two are acceptable — they are not — but that no
-/// third one can appear without somebody writing down why.
+/// remaining exception is not acceptable, but no second one can appear without
+/// somebody writing down why.
 const REVIEWED_STUBBED_FRONTEND_ENTRYPOINTS: &[(&str, &str)] = &[
-    // Mounts `app/startup.ts::desktopShellStartupCheck`. Used by every plain
-    // `desktop-e2e` build: `pnpm test:tauri` plus the update-policy,
-    // update-download, update-installation and diagnostic-export acceptance
-    // entries. Those runs are green today *because* this stub answers ready —
-    // they never reach the real gate, so they cannot prove a packaged
-    // dependency exists. Retirement is tracked in
-    // `docs/development/FIX-frontend-startup-gate-stub.md`; it is deliberately
-    // not done here, because switching them to the real gate makes all five
-    // require a reachable Control Plane and a staged embedded browser.
-    ("test-tauri-main.tsx", "plain desktop-e2e UI harness"),
     // Declares its own inline `readyStartup`. Serves B5-04 browser-settings,
     // whose user path (choosing a trusted system browser) was deleted by EB-10
     // per the product rule that forbids system-browser selection. The entry
     // dies with that acceptance rather than being repaired.
-    ("test-browser-settings-main.tsx", "B5-04, pending retirement"),
+    (
+        "test-browser-settings-main.tsx",
+        "B5-04, pending retirement",
+    ),
 ];
 
 fn frontend_directory() -> PathBuf {
@@ -669,8 +719,9 @@ fn frontend_source(module: &str) -> String {
 /// brings its entry into this guard automatically instead of silently opting
 /// out of it.
 fn frontend_entrypoints() -> BTreeSet<String> {
-    let config = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../vite.config.ts"))
-        .expect("the Vite configuration must be readable");
+    let config =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../vite.config.ts"))
+            .expect("the Vite configuration must be readable");
     let mut modules = BTreeSet::new();
     for (index, _) in config.match_indices("\"/src/") {
         let rest = &config[index + "\"/src/".len()..];
@@ -765,11 +816,15 @@ fn mounted_startup_check(module: &str) -> (String, String) {
         let assigned = head
             .split_once('=')
             .map(|(_, rest)| rest.trim())
-            .unwrap_or_else(|| panic!("{origin} declares `{name}` in a shape this guard cannot read"));
+            .unwrap_or_else(|| {
+                panic!("{origin} declares `{name}` in a shape this guard cannot read")
+            });
         let factory = assigned
             .split_once('(')
             .map(|(callee, _)| callee.trim())
-            .unwrap_or_else(|| panic!("{origin} assigns `{name}` from a shape this guard cannot read"));
+            .unwrap_or_else(|| {
+                panic!("{origin} assigns `{name}` from a shape this guard cannot read")
+            });
         let startup = frontend_source(FRONTEND_STARTUP_MODULE);
         let signature = format!("export function {factory}(");
         let factory_start = startup.find(&signature).unwrap_or_else(|| {
@@ -781,10 +836,7 @@ fn mounted_startup_check(module: &str) -> (String, String) {
         );
     }
 
-    (
-        format!("{origin}::{name}"),
-        balanced_block(&owner, start),
-    )
+    (format!("{origin}::{name}"), balanced_block(&owner, start))
 }
 
 /// No build may reach the workbench without the startup gate having run.
@@ -800,11 +852,9 @@ fn no_frontend_entrypoint_declares_the_environment_ready_without_probing() {
     let mut probing = BTreeSet::new();
     for module in frontend_entrypoints() {
         let (origin, block) = mounted_startup_check(&module);
-        let opening = block.find("check(").and_then(|index| {
-            block[index..]
-                .find('{')
-                .map(|offset| index + offset)
-        });
+        let opening = block
+            .find("check(")
+            .and_then(|index| block[index..].find('{').map(|offset| index + offset));
         let opening = opening.unwrap_or_else(|| {
             panic!(
                 "{module} resolves to {origin}, which declares no `check()`; this guard \

@@ -32,6 +32,21 @@ from build_embedded_chromium_staging import (  # noqa: E402
 CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 
 _SYMLINK_MODE = 0xA1FF  # lrwxrwxrwx
+WIDEVINE_PREFIX = (
+    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/"
+    "Google Chrome for Testing Framework.framework/Versions/149.0.7827.55/"
+    "Libraries/WidevineCdm/"
+)
+WIDEVINE_X86_64_PREFIX = WIDEVINE_PREFIX.replace(
+    "chrome-mac-arm64/", "chrome-mac-x64/", 1
+)
+WIDEVINE_FILES = {
+    f"{WIDEVINE_PREFIX}LICENSE": b"synthetic proprietary license",
+    f"{WIDEVINE_PREFIX}manifest.json": b'{"name":"WidevineCdm"}',
+    f"{WIDEVINE_PREFIX}_platform_specific/mac_arm64/libwidevinecdm.dylib": (
+        b"synthetic proprietary binary"
+    ),
+}
 
 
 def _write_zip(path: Path, entries: dict[str, bytes | tuple[str, str]]) -> str:
@@ -62,6 +77,7 @@ def _valid_entries() -> dict[str, bytes | tuple[str, str]]:
         f"{app}/MacOS/Google Chrome for Testing": b"binary",
         f"{app}/Info.plist": b"<plist/>",
         f"{app}/Frameworks/F.framework/Versions/A/F": b"framework",
+        **WIDEVINE_FILES,
     }
     if os.name != "nt":
         entries[f"{app}/Frameworks/F.framework/Versions/Current"] = ("symlink", "A")
@@ -110,9 +126,28 @@ class StagingBuilderTests(unittest.TestCase):
         )
         self.assertRegex(intel.archive_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(
+            getattr(self.target, "excluded_entry_prefixes", None),
+            (WIDEVINE_PREFIX,),
+        )
+        self.assertEqual(
+            getattr(intel, "excluded_entry_prefixes", None),
+            (WIDEVINE_X86_64_PREFIX,),
+        )
+        self.assertEqual(getattr(windows, "excluded_entry_prefixes", None), ())
+        self.assertEqual(
             {self.target.root_entry, intel.root_entry, windows.root_entry},
             {"chrome-mac-arm64", "chrome-mac-x64", "chrome-win64"},
         )
+
+    def test_contract_rejects_an_excluded_prefix_outside_the_target_root(self) -> None:
+        document = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        document["targets"]["macos-arm64"]["excluded_entry_prefixes"] = [
+            "../WidevineCdm/"
+        ]
+        candidate = self.base / "invalid-contract.json"
+        candidate.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaises(StagingRejected):
+            load_staging_contract(candidate)
 
     def test_digest_mismatch_is_rejected(self) -> None:
         archive, _ = self._archive(_valid_entries())
@@ -148,6 +183,26 @@ class StagingBuilderTests(unittest.TestCase):
         self.assertEqual(first.file_count, second.file_count)
         self.assertEqual(manifest_a["chromium"]["browser_version"], "149.0.7827.55")
         self.assertEqual(manifest_a["target"], "macos-arm64")
+        self.assertIn("exclusions", manifest_a)
+        self.assertEqual(len(manifest_a["exclusions"]), 1)
+        exclusion = manifest_a["exclusions"][0]
+        self.assertEqual(exclusion["prefix"], WIDEVINE_PREFIX)
+        self.assertEqual(exclusion["removedFileCount"], 3)
+        self.assertEqual(
+            exclusion["removedBytes"],
+            sum(len(payload) for payload in WIDEVINE_FILES.values()),
+        )
+        self.assertEqual(
+            {entry["path"] for entry in exclusion["removedEntries"]},
+            set(WIDEVINE_FILES),
+        )
+        self.assertFalse(
+            any(
+                entry["path"].startswith(WIDEVINE_PREFIX)
+                for entry in manifest_a["entries"]
+            )
+        )
+        self.assertFalse((self.base / "out-a" / WIDEVINE_PREFIX).exists())
         executable_entry = next(
             entry
             for entry in manifest_a["entries"]
@@ -257,6 +312,7 @@ class StagingBuilderTests(unittest.TestCase):
         self.assertTrue(target.buildable)
         self.assertEqual(manifest["target"], "windows-x86_64")
         self.assertEqual(manifest["executable"], "chrome-win64/chrome.exe")
+        self.assertEqual(manifest["exclusions"], [])
         self.assertTrue((result.output / target.executable).is_file())
 
     def test_windows_target_rejects_symlinks(self) -> None:

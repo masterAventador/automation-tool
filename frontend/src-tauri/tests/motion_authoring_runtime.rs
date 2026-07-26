@@ -169,8 +169,7 @@ fn a_missing_runtime_is_refused_rather_than_silently_skipped() {
     let store = store(&root.0);
     let workspace = store.create_new().unwrap();
 
-    let error =
-        seed_authoring_runtime(&store, &workspace, &root.0.join("absent.js")).unwrap_err();
+    let error = seed_authoring_runtime(&store, &workspace, &root.0.join("absent.js")).unwrap_err();
 
     assert_eq!(error.code(), MotionVideoStudioErrorCode::RenderUnavailable);
 }

@@ -64,6 +64,7 @@ def main() -> int:
         assert "must-not-leak" not in rejected.stderr
         assert directory not in rejected.stderr
     print("BM-02 Node Worker rejection tests passed")
+    print("executed checks: 3")
     return 0
 
 

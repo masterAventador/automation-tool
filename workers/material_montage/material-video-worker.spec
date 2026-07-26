@@ -26,9 +26,9 @@ excluded_modules = list(contract["build"]["excludedModules"])
 excluded_upstream_resources = set(contract["build"]["excludedUpstreamResources"])
 # `excludedUpstreamResourceFiles` removes individual proprietary assets from a
 # directory the release otherwise still ships, which `excludedUpstreamResources`
-# cannot express: `resource/fonts` has to travel because the Latin faces and the
-# open replacements live there, while the four Windows/macOS system faces in the
-# same directory carry no redistribution grant.
+# cannot express: `resource/fonts` has to travel because the cleared faces live
+# there, while the four Windows/macOS system faces and the rights-undetermined
+# UTM Kabel KT face in the same directory carry no sufficient redistribution grant.
 excluded_upstream_resource_files = {
     PurePosixPath(name) for name in contract["build"]["excludedUpstreamResourceFiles"]
 }
