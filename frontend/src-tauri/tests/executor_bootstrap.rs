@@ -14,6 +14,17 @@ const AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-event.v1\0
 const STATE_DIRECTORY: &str = "/private/tmp/automation-tool-executor-bootstrap-test";
 #[cfg(windows)]
 const STATE_DIRECTORY: &str = r"C:\private\tmp\automation-tool-executor-bootstrap-test";
+// Written in each platform's own shape so these are refused for the reason
+// under test -- a Bidi override, or being the volume root -- and not merely for
+// being relative, which is what a POSIX literal amounts to on Windows.
+#[cfg(not(windows))]
+const BIDI_STATE_DIRECTORY: &str = "/private/tmp/\u{202e}state";
+#[cfg(windows)]
+const BIDI_STATE_DIRECTORY: &str = "C:\\private\\tmp\\\u{202e}state";
+#[cfg(not(windows))]
+const VOLUME_ROOT: &str = "/";
+#[cfg(windows)]
+const VOLUME_ROOT: &str = r"C:\";
 
 fn input() -> ExecutorBootstrapInput<'static> {
     ExecutorBootstrapInput::new(
@@ -216,8 +227,8 @@ fn bootstrap_rejects_invalid_inputs_and_failed_writes_without_secret_reflection(
     .is_err());
     for state_directory in [
         Path::new("relative-state"),
-        Path::new("/"),
-        Path::new("/private/tmp/\u{202e}state"),
+        Path::new(VOLUME_ROOT),
+        Path::new(BIDI_STATE_DIRECTORY),
     ] {
         assert!(ExecutorBootstrapInput::new(
             "ws://127.0.0.1:8765/api/v1/executors/connect",

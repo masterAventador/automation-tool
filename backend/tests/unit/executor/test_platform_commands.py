@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -26,8 +27,16 @@ from automation_tool.executor.platform_commands import (
 
 TOKEN = "".join(f"{value:02x}" for value in range(32))
 COMMAND_ID = "123e4567-e89b-42d3-a456-426614174005"
-EXECUTABLE = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-PROFILE = "/private/tmp/automation-tool-profile"
+# Absolute in this platform's own shape. The command validator asks the native
+# path flavour, so a POSIX literal is merely a relative path on Windows and every
+# case below would then pass or fail for a reason that is not under test. The
+# proofs here are computed at run time, so the strings themselves are free.
+if os.name == "nt":
+    EXECUTABLE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    PROFILE = r"C:\automation-tool\profile"
+else:
+    EXECUTABLE = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    PROFILE = "/private/tmp/automation-tool-profile"
 
 
 def command_source(**overrides: object) -> bytes:
