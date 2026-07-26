@@ -1,7 +1,8 @@
 use automation_tool_desktop_lib::local_video_orchestrator::VideoWorkerRenderSandboxRequest;
 use automation_tool_desktop_lib::motion_video_studio::{
-    advance, delete_artifact, duration_limits, import_rendered_output, prepare_manual_render_job,
-    render_sandbox_budget, rendered_film_is_static, MotionRenderFailureCode, MotionRenderJobStatus,
+    advance, cancel, cancel_marker_file_name, cancellation_requested, delete_artifact,
+    duration_limits, import_rendered_output, prepare_manual_render_job, render_sandbox_budget,
+    rendered_film_is_static, snapshot, MotionRenderFailureCode, MotionRenderJobStatus,
     MotionVideoBeatDraft, MotionVideoDraftRequest, MotionVideoStudioErrorCode,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
@@ -224,6 +225,7 @@ fn the_render_sandbox_budget_follows_the_frame_count_instead_of_a_fixed_number()
         VideoWorkerRenderSandboxRequest::new(
             root.0.clone(),
             "composition.html".to_owned(),
+            cancel_marker_file_name().unwrap().to_owned(),
             Vec::new(),
             frames,
             budget.wall_seconds(),
@@ -500,5 +502,230 @@ fn a_static_render_reaches_the_user_as_its_own_failure_code() {
     assert_eq!(
         serde_json::to_value(MotionRenderFailureCode::StaticRender).unwrap(),
         serde_json::json!("static_render"),
+    );
+}
+
+/// The App creates exactly the file the contract declares, and the render
+/// request hands that same name to the Worker.
+///
+/// The two used to be separate literals — `MOTION_CANCEL_FILE` here and
+/// `SANDBOX_CANCEL_FILE` in `worker.mjs`. Editing one was invisible: the button
+/// still answers and the job still settles, and only the render keeps going.
+/// See `contracts/video/motion-render-cancel-marker.v1.json`.
+#[test]
+fn the_cancellation_marker_written_on_disk_is_the_one_the_contract_declares() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+
+    let declared: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../contracts/video/motion-render-cancel-marker.v1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let declared = declared["markerFileName"].as_str().unwrap();
+    assert_eq!(cancel_marker_file_name().unwrap(), declared);
+
+    assert!(!cancellation_requested(&store, job).unwrap());
+    cancel(&store, job).unwrap();
+
+    let workspace = store.open(job).unwrap();
+    let assets = store.worker_asset_directory(&workspace).unwrap();
+    assert!(
+        assets.join(declared).is_file(),
+        "the cancellation marker must be the declared file name",
+    );
+    assert!(cancellation_requested(&store, job).unwrap());
+}
+
+/// A marker name that could leave the RenderJob is refused before a render
+/// starts, so the Worker is never handed a path it would stat outside its
+/// workspace.
+///
+/// Containment is the transport's rule and it holds for any workspace-relative
+/// path, nested ones included. Staying at the workspace root is this product's
+/// narrower rule, and it is enforced where the name is resolved rather than
+/// where it is transported — so both are asserted, in the layer that owns each.
+#[test]
+fn a_cancellation_marker_that_escapes_the_workspace_is_not_a_render_request() {
+    let root = TempDirectory::new();
+    for escaping in ["../outside", "/absolute", "", ".", "..", "a\\b"] {
+        assert!(
+            VideoWorkerRenderSandboxRequest::new(
+                root.0.clone(),
+                "composition.html".to_owned(),
+                escaping.to_owned(),
+                Vec::new(),
+                90,
+                20,
+                20,
+                2048,
+                256 * 1024 * 1024,
+            )
+            .is_err(),
+            "a marker of {escaping:?} must not produce a render request",
+        );
+    }
+
+    let declared = cancel_marker_file_name().unwrap();
+    assert!(
+        !declared.is_empty() && !declared.contains(['/', '\\']),
+        "the declared marker is one file at the workspace root, never a path: {declared:?}",
+    );
+}
+
+/// Pressing cancel records that a stop was *asked for*. It does not settle the
+/// job — only the executor that owns the browser and the encoder can say the
+/// work has actually stopped.
+///
+/// This is `CLAUDE.md` §4.4 applied where it bites: while the App claimed
+/// 已取消 the render Worker was still capturing frames and FFmpeg was still
+/// writing an MP4. Both notice within a frame, so nobody watched the clock —
+/// but the claim was untrue for as long as it took, and the state machine
+/// treated it as final, which is what let the next test's film go missing.
+#[test]
+fn cancelling_records_the_request_and_waits_for_the_executor_to_confirm() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+    advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Rendering,
+        55,
+        None,
+        None,
+    )
+    .unwrap();
+
+    cancel(&store, job).unwrap();
+
+    let requested = snapshot(&store, job).unwrap();
+    assert_eq!(
+        requested.status(),
+        MotionRenderJobStatus::Cancelling,
+        "the command may say a stop was requested, never that it has happened",
+    );
+    assert!(
+        cancellation_requested(&store, job).unwrap(),
+        "the executor has to be able to see the request",
+    );
+
+    // A second press is the same request, not an error and not a second state.
+    cancel(&store, job).unwrap();
+    assert_eq!(
+        snapshot(&store, job).unwrap().status(),
+        MotionRenderJobStatus::Cancelling,
+    );
+
+    let settled = advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Cancelled,
+        55,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(settled.status(), MotionRenderJobStatus::Cancelled);
+}
+
+/// Once a stop has been asked for, the run may only settle. Letting a stage
+/// advance out of it would put the cancel button back on a job that is already
+/// stopping and reset the card to 正在合成视频.
+#[test]
+fn a_requested_cancellation_cannot_be_walked_back_into_a_running_stage() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+    advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Rendering,
+        55,
+        None,
+        None,
+    )
+    .unwrap();
+    cancel(&store, job).unwrap();
+
+    assert!(
+        advance(&store, job, MotionRenderJobStatus::Encoding, 85, None, None).is_err(),
+        "a stage may not start after the operator asked for a stop",
+    );
+    assert_eq!(
+        snapshot(&store, job).unwrap().status(),
+        MotionRenderJobStatus::Cancelling,
+    );
+}
+
+/// A film whose encode had already finished when the cancel arrived is still
+/// the user's film.
+///
+/// This is the concrete cost of settling the job in the command. FFmpeg exits
+/// successfully, the render thread imports the MP4, and the import lands after
+/// the snapshot has gone terminal — so the `Succeeded` write is dropped, the
+/// job reads 已取消 and the artifact it produced is referenced by nothing. It
+/// is not listed on the artifacts page, cannot be played and cannot be deleted,
+/// while still counting against the workspace quota.
+#[test]
+fn a_film_that_finished_before_the_executor_saw_the_cancel_is_not_lost() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+    advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Rendering,
+        55,
+        None,
+        None,
+    )
+    .unwrap();
+    advance(&store, job, MotionRenderJobStatus::Encoding, 85, None, None).unwrap();
+    let workspace = store.open(job).unwrap();
+    let output = store.worker_output_directory(&workspace).unwrap();
+    fs::write(
+        output.join("brand-motion-result.mp4"),
+        b"verified-mp4-payload",
+    )
+    .unwrap();
+
+    // The operator presses cancel in the window between FFmpeg exiting and the
+    // render thread importing what it produced.
+    cancel(&store, job).unwrap();
+    let artifact = import_rendered_output(&store, job).unwrap();
+    let settled = advance(
+        &store,
+        job,
+        MotionRenderJobStatus::Succeeded,
+        100,
+        Some(&artifact),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        settled.status(),
+        MotionRenderJobStatus::Succeeded,
+        "the work was already done when the request arrived; saying otherwise loses the film",
+    );
+    let projected = serde_json::to_value(&settled).unwrap();
+    assert_eq!(
+        projected["artifactId"],
+        serde_json::json!(artifact.artifact_id().to_string()),
+        "the film has to be reachable from the job the user is looking at",
+    );
+    assert_eq!(
+        store.list_artifacts().unwrap().len(),
+        1,
+        "and there must be no second, unreferenced copy",
     );
 }

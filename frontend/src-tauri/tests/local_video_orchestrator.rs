@@ -11,6 +11,7 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
     VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderSandboxRequest,
     VideoWorkerRestartPolicy, VideoWorkerState,
 };
+use automation_tool_desktop_lib::motion_video_studio::cancel_marker_file_name;
 use uuid::Uuid;
 
 static TEMPORARY_WORKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -343,6 +344,9 @@ fn sandbox_request(workspace: &Path) -> VideoWorkerRenderSandboxRequest {
     VideoWorkerRenderSandboxRequest::new(
         workspace.to_path_buf(),
         "entry.html".to_owned(),
+        cancel_marker_file_name()
+            .expect("declared cancellation marker")
+            .to_owned(),
         vec!["assets/style.css".to_owned(), "assets/logo.png".to_owned()],
         6,
         20,
@@ -565,6 +569,9 @@ fn render_sandbox_rejects_invalid_requests() {
         let error = VideoWorkerRenderSandboxRequest::new(
             root.join("workspace"),
             entry.to_owned(),
+            cancel_marker_file_name()
+                .expect("declared cancellation marker")
+                .to_owned(),
             assets.into_iter().map(str::to_owned).collect(),
             frames,
             duration,
@@ -580,6 +587,9 @@ fn render_sandbox_rejects_invalid_requests() {
     let error = VideoWorkerRenderSandboxRequest::new(
         PathBuf::from("relative/workspace"),
         "entry.html".to_owned(),
+        cancel_marker_file_name()
+            .expect("declared cancellation marker")
+            .to_owned(),
         Vec::new(),
         6,
         20,
@@ -610,6 +620,9 @@ fn render_sandbox_scales_the_cpu_budget_with_the_wall_clock_budget() {
         VideoWorkerRenderSandboxRequest::new(
             root.join("workspace"),
             "entry.html".to_owned(),
+            cancel_marker_file_name()
+                .expect("declared cancellation marker")
+                .to_owned(),
             vec!["assets/style.css".to_owned()],
             6,
             duration,
@@ -823,6 +836,9 @@ fn real_worker_render_sandbox_isolates_malicious_html() {
     let request = VideoWorkerRenderSandboxRequest::new(
         workspace.clone(),
         "entry.html".to_owned(),
+        cancel_marker_file_name()
+            .expect("declared cancellation marker")
+            .to_owned(),
         vec!["assets/style.css".to_owned()],
         3,
         60,

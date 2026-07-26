@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-render-cancel-marker",
+  "version": "motion-render-cancel-marker.v1",
+  "policy": "fail_closed",
+  "markerFileName": ".automation-tool-cancel",
+  "definedIn": ["frontend/src-tauri/src/motion_video_studio.rs"],
+  "enforcedBy": "frontend/tests/motion-render-cancel-marker.test.mjs",
+  "rationale": {
+    "problem": "Cancelling a brand-motion render is one file appearing in the RenderJob workspace: the App creates it, and the render Worker gives up the moment it can stat it. The name was a literal in two languages — MOTION_CANCEL_FILE in Rust and SANDBOX_CANCEL_FILE in the Worker — with nothing tying them together. Editing one is a change no test and no type checker can see, and the resulting failure is the worst shape this product has: the cancel button still responds, the job still reads 已取消, and only the render keeps running. Nothing raises anything.",
+    "oneRuntimeValue": "So the name does not exist twice at runtime. The App reads it from this file and sends it to the Worker as `cancelMarker` in the render-sandbox spec, exactly as it already sends `entryHtml`; the Worker watches whatever it was handed and holds no marker constant at all. Two copies that must agree were replaced by one value that travels, which is why this is stated as a wire field rather than as a second file both sides parse — a Worker that never learns the product's cancel convention cannot disagree with it.",
+    "failsClosed": "The spec is validated with an exact key set, so a Worker that does not understand `cancelMarker` rejects the whole render rather than rendering something it cannot cancel. On the other side the App resolves the name from this file before it builds the render request, so a renamed key or an unparsable contract stops the render from starting instead of starting one that ignores the cancel button.",
+    "notFromTheAuthoringSide": "`RenderJobSubmission.to_sandbox_spec` in the authoring agent describes what to render and deliberately omits this field. Cancellation is the App's control channel over its own child process; letting the model-driven authoring side name the file that stops a render would hand it the one input that decides whether the user's cancel button works.",
+    "changing": "Editing `markerFileName` here is the whole change. Nothing else names the file."
+  }
+}

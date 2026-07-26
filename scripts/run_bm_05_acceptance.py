@@ -149,6 +149,11 @@ def _run_real_authoring(root: Path) -> None:
     }
     if set(spec) != expected_keys:
         _fail(f"submission spec keys drifted: {sorted(spec)}")
+    # The render request the App finally sends adds `cancelMarker`; the
+    # authoring submission must not, because that field decides whether the
+    # user's cancel button can reach the render.
+    if "cancelMarker" in spec:
+        _fail("the authoring submission must not name the cancellation marker")
     if spec["frameCount"] != brief.duration_seconds * 30:
         _fail(f"unexpected frame count: {spec['frameCount']}")
     if RUNTIME_ASSET not in spec["allowedAssets"]:

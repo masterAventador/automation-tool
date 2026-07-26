@@ -823,6 +823,12 @@ fn run_motion_render_job(
         let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
             work.clone(),
             motion_video_studio::MOTION_COMPOSITION_FILE.to_owned(),
+            // Resolved before the Worker is asked to render anything: a render
+            // that starts without a cancellation marker it recognises is one the
+            // user's cancel button cannot reach.
+            motion_video_studio::cancel_marker_file_name()
+                .map_err(|_| MotionRenderStageFailure::Render)?
+                .to_owned(),
             allowed_assets,
             frame_count,
             budget.wall_seconds(),
@@ -893,11 +899,33 @@ fn run_motion_render_job(
     let _ = orchestrator.stop(local_video_orchestrator::VideoWorkerKind::Node);
     if let Err(failure) = outcome {
         let current = motion_video_studio::snapshot(&workspaces, render_job_id).ok();
-        if current.as_ref().is_some_and(|snapshot| {
-            snapshot.status() == motion_video_studio::MotionRenderJobStatus::Cancelled
-        }) {
-            // The command already wrote the authoritative cancelled state.
-        } else if !matches!(failure, MotionRenderStageFailure::Cancelled) {
+        let stop_was_requested = current.as_ref().is_some_and(|snapshot| {
+            snapshot.status() == motion_video_studio::MotionRenderJobStatus::Cancelling
+        });
+        if matches!(failure, MotionRenderStageFailure::Cancelled) || stop_was_requested {
+            // Everything this thread owns has now stopped: the Worker is
+            // stopped above and FFmpeg was killed and its partial output
+            // removed before the stage returned. This is the first moment
+            // anything is entitled to say the render is over, so this is where
+            // the terminal state is written — not in the command that asked.
+            //
+            // A stage that failed for its own reasons while a stop was pending
+            // also settles as cancelled: the operator asked for the run to end
+            // and it ended with no film, which is what 已取消 says. Reporting
+            // 制作失败 would offer him a fix for a run he had already abandoned.
+            let progress = current
+                .map(|snapshot| snapshot.progress_percent())
+                .unwrap_or(5)
+                .min(99);
+            let _ = motion_video_studio::advance(
+                &workspaces,
+                render_job_id,
+                motion_video_studio::MotionRenderJobStatus::Cancelled,
+                progress,
+                None,
+                None,
+            );
+        } else {
             let code = match failure {
                 MotionRenderStageFailure::Render => {
                     motion_video_studio::MotionRenderFailureCode::RenderFailed

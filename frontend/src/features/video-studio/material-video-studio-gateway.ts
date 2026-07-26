@@ -54,7 +54,17 @@ export interface MotionVideoBriefRequest {
   readonly language: string;
 }
 
-export type MotionRenderJobStatus = "queued" | "rendering" | "encoding" | "succeeded" | "failed" | "cancelled";
+export type MotionRenderJobStatus =
+  | "queued"
+  | "rendering"
+  | "encoding"
+  // A stop has been asked for; the executor has not confirmed it yet.
+  // Cancellation is collaborative, so "asked" and "happened" are two
+  // states rather than one.
+  | "cancelling"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
 
 export interface MotionRenderJobSnapshot {
   readonly renderJobId: string;
