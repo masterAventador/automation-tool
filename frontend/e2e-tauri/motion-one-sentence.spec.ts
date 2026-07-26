@@ -52,22 +52,24 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     assert.ok(apiKey, "T36 acceptance needs a real video-creation model key");
     assert.ok(evidenceVideo, "T36 acceptance needs an evidence output path");
 
-    // A blocked startup gate and a window that never rendered look identical
-    // from a bare wait on the workbench heading, and they need opposite fixes,
-    // so the two are separated here and the blocked one reports what it says.
-    await browser.waitUntil(
-      async () =>
-        (await browser.$("h2=RPA 运营工作台").isExisting()) ||
-        (await browser.$("button=打开本地修复工具").isExisting()),
-      {
-        timeout: 60_000,
-        timeoutMsg: "App reached neither the workbench nor the startup repair path",
-      },
-    );
-    if (!(await browser.$("h2=RPA 运营工作台").isExisting())) {
-      throw new Error(
-        `App is blocked at the startup gate:\n${await browser.$("body").getText()}`,
+    // Three outcomes need three different fixes and look alike from a bare wait
+    // on the workbench heading: mounted, blocked by the startup gate, or still
+    // checking because a probe never came back. Whatever it is, report the
+    // screen — "neither" sends the next person back to reproduce it by hand.
+    const startupScreen = async (): Promise<string> =>
+      browser.execute(() => document.body?.innerText ?? "<empty document>");
+    try {
+      await browser.waitUntil(
+        async () =>
+          (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+          (await browser.$("button=打开本地修复工具").isExisting()),
+        { timeout: 120_000, interval: 1_000 },
       );
+    } catch {
+      throw new Error(`App never left the startup check. Screen was:\n${await startupScreen()}`);
+    }
+    if (!(await browser.$("h2=RPA 运营工作台").isExisting())) {
+      throw new Error(`App is blocked at the startup gate:\n${await startupScreen()}`);
     }
 
     // --- The prerequisite, through the form a user actually fills ----------

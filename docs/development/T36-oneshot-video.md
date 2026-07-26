@@ -764,6 +764,80 @@ Docker Compose `postgres-test` + `start_control_plane()` + `startup_gate_environ
 也没有注入这三元组、也没起 Control Plane，所以那条入口今天同样跑不过。
 上面那批"顺带解开"的入口，解开的只是账号门禁这一层，不等于它们现在就能跑通。
 
+### 本次落地：`run_t36_acceptance.py` 接上隔离 Control Plane 与 PostgreSQL
+
+按 `run_b5_15_acceptance.py` 的既有模板补齐，没有发明新机制：
+
+- **隔离端口**：两个 loopback 端口都先 `require_port_available`。端口被占用一律**另换一个**，
+  不接管、不杀来源不明的进程——这台机器上还跑着别的东西；
+- **资源命名全部可追溯**：Compose project name 为 `automation-tool-t36-<pid>`，
+  容器 / 网络 / 卷都由它派生（实测运行中容器名 `automation-tool-t36-80292-postgres-test-1`），
+  显式 `--project-name`，**不依赖 Compose 默认项目名**；
+- **只清理本次实例**：`finally` 里按同一个 project name 做 `down --volumes --remove-orphans`，
+  外加终止本次起的 Control Plane 进程、删除本次的隔离 App 数据目录、核对两个端口已释放。
+  实测上一次失败运行结束后 `docker ps -a` / `volume ls` / `network ls` 里 **0 个 t36 资源**；
+- **编译期三元组**经 `startup_gate_environment()` 注入，因为 `tauri build` 要把它烤进二进制，
+  只在运行时给不管用。
+
+#### 第三道门：Control Plane 起不来（本次修掉）
+
+`start_control_plane` 把子进程的 stderr 丢弃，只报「stopped during startup」。
+单独跑一次把 stderr 接出来才看到真因：
+
+```text
+RegistrationConfigurationError: Installation registration configuration is invalid
+  registration.py:85  registration_service_from_environment
+```
+
+我按 `b5_15` 抄环境时带上了 `AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID`，却没有配对的
+`AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY`——这两个是**要么都给要么都不给**，
+给一半直接拒绝启动（fail closed，行为是对的）。
+
+修法是**两个都不给**：这条验收不注册任何 Installation，App 走本地 Profile、用临时身份，
+启动门禁只向 Control Plane 要 health（无需 bootstrap 信任）。`b5_15` 需要那对密钥是因为
+它验的就是设备注册与握手，T36 不是。改完实测 Control Plane 正常起来。
+
+#### 第四道门：App 停在启动检查里，没有结论（**本次未修，按上限停手**）
+
+Postgres、迁移、Control Plane、`tauri build` 全部成功之后：
+
+```text
+Error: App reached neither the workbench nor the startup repair path
+1 failing (1m)
+```
+
+**既不是工作台，也不是修复页。** 与第一次实跑不同——那次明确停在账号门禁那张卡上，
+这次两张都没出现。`StartupGate` 只有三种落点，排除掉两种，剩下的是
+`status === "checking"`（"正在启动运营工作台"）：**启动检查在 60 秒内没有返回结论。**
+
+这与账号门禁修复是自洽的：修之前账号网关立刻失败（命令不存在）→ 马上落到 `offline` 卡片；
+修之后它答 `not_required` 并放行到下一步，于是第一次真正走到本机环境检查
+（内置浏览器 / Profile 存储 / 执行器）与控制服务健康检查，然后卡在那里。
+
+**没有继续往下挖**（约定的两道门用完了）。只把用例改成能自己说清楚：
+等待覆盖三种落点、超时把整屏文字打出来，下次跑的人第一手就能看到卡在哪一项，
+不用再手工复现一遍。
+
+#### 目前的结论：这个构建族积了多少陈旧配置
+
+四道门里**三道是环境前置从没接线**（编译期三元组、Control Plane、注册密钥对），
+**一道是产品行为本身不对**（账号门禁命令没注册，已修）。
+`run_b5_04_acceptance.py`、`run_vf_06_acceptance.py` 都缺同样的前置，
+`run_vf_06_acceptance.py` 里 `stage_video_runtime` / `require_staged_*` 甚至定义了却没人调用。
+**这批纯 `desktop-e2e` 入口整体处于长期未运行状态**，不是单点故障。
+是继续逐个修通，还是把视频线的验收改建在已经在跑的 `control-plane-e2e` 构建上，
+需要单独决定——不在本任务里顺手做。
+
+### 四条证据的当前状态（不许含糊）
+
+| 证据 | 状态 |
+| --- | --- |
+| 1 进度是真的 | ❌ 未取得（App 进不去） |
+| 2 成片真的在动 + 静图门禁拦得住 | ✅ 已取得（分层实跑，见上文） |
+| 3 预览能播 | ❌ 未取得（App 进不去） |
+| 4 超边界 brief 在 App 里被拒 | ⚠️ 查明**该路径不存在**：入口没有片长控件、文本框有 `maxLength`，
+五种越界里只有"空 brief"用户能触发。已改为明示成片时长，用例断言能到达的那一半 |
+
 ### 本次落地：一句话卡片明示成片时长
 
 **查出来的问题比原计划要验的更重要。** 原本要验「超边界 brief 在 App 里被拒」，

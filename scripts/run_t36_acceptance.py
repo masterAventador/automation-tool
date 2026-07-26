@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -34,8 +35,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from desktop_e2e_prerequisites import prepare_startup_gate  # noqa: E402
+from desktop_e2e_prerequisites import (  # noqa: E402
+    prepare_startup_gate,
+    startup_gate_environment,
+)
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
+from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
+from run_i2_13_acceptance import BACKEND_ROOT, REPOSITORY_ROOT, compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
     APP_IDENTIFIER,
     DEBUG_APP_RESOURCE_ROOT,
@@ -54,6 +60,70 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = "./e2e-tauri/motion-one-sentence.spec.ts"
 DEFAULT_SECRET = ROOT / ".local/secrets/bailian-model.json"
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/t36-evidence"
+# Every isolated resource this run creates carries this stem plus the pid, so a
+# stray container, network or volume can always be traced back to one run of
+# this entrypoint and cleaned up without guessing whose it is.
+PROJECT_STEM = "automation-tool-t36"
+
+
+def isolated_ports() -> tuple[int, int]:
+    """Two free loopback ports this run owns.
+
+    Ports are never reused or taken over: an occupied port belongs to something
+    else on this machine, and this run picks a different one rather than
+    deciding what else may be stopped.
+    """
+    control_plane_port = unused_loopback_port()
+    database_port = unused_loopback_port()
+    while database_port == control_plane_port:
+        database_port = unused_loopback_port()
+    require_port_available(control_plane_port)
+    require_port_available(database_port)
+    return control_plane_port, database_port
+
+
+def isolated_environment(*, control_plane_port: int, database_port: int) -> dict[str, str]:
+    """The environment the App is *built* with and the Control Plane runs with.
+
+    The startup gate reads three of these at compile time, so they have to be
+    present for `tauri build`, not only for the run: an App built without them
+    reports "本地执行器动作配置缺失" and never mounts the workbench, which reads
+    like a broken product rather than a runner that forgot a variable.
+    """
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("AUTOMATION_TOOL_")
+    }
+    database_password = secrets.token_hex(24)
+    database_name = "automation_tool_t36"
+    environment.update(
+        {
+            "AUTOMATION_TOOL_DEV_DB_USER": "unused_t36_dev",
+            "AUTOMATION_TOOL_DEV_DB_PASSWORD": secrets.token_hex(24),
+            "AUTOMATION_TOOL_DEV_DB_NAME": "unused_t36_dev",
+            "AUTOMATION_TOOL_DEV_DB_PORT": str(unused_loopback_port()),
+            "AUTOMATION_TOOL_TEST_DB_USER": database_name,
+            "AUTOMATION_TOOL_TEST_DB_PASSWORD": database_password,
+            "AUTOMATION_TOOL_TEST_DB_NAME": database_name,
+            "AUTOMATION_TOOL_TEST_DB_PORT": str(database_port),
+            "AUTOMATION_TOOL_DATABASE_URL": (
+                f"postgresql+asyncpg://{database_name}:{database_password}"
+                f"@127.0.0.1:{database_port}/{database_name}"
+            ),
+            # Installation registration is left unconfigured on purpose. The
+            # environment id and the bootstrap public key are a both-or-neither
+            # pair, and this acceptance registers nothing: the App runs on the
+            # local profile with an ephemeral identity, and the startup gate
+            # only asks the Control Plane for health, which needs no bootstrap
+            # trust. Setting half the pair is what made the service refuse to
+            # start at all.
+            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": (
+                f"http://127.0.0.1:{control_plane_port}"
+            ),
+        }
+    )
+    return startup_gate_environment(environment, control_plane_port=control_plane_port)
 
 
 def read_model_key(secret: Path) -> str:
@@ -97,7 +167,9 @@ def prepare_resources() -> None:
         )
 
 
-def run_desktop_acceptance(api_key: str, evidence_video: Path) -> None:
+def run_desktop_acceptance(
+    api_key: str, evidence_video: Path, base_environment: dict[str, str]
+) -> None:
     configuration = json.loads(TAURI_CONFIG.read_text(encoding="utf-8"))
     windows = configuration.get("app", {}).get("windows", [])
     if (
@@ -109,7 +181,7 @@ def run_desktop_acceptance(api_key: str, evidence_video: Path) -> None:
     private_app_data = app_data_directory()
     port = unused_loopback_port()
     environment = {
-        key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"
+        key: value for key, value in base_environment.items() if key != "TAURI_WEBDRIVER_PORT"
     }
     environment.update(
         {
@@ -194,8 +266,61 @@ def main() -> int:
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     prepare_resources()
-    run_desktop_acceptance(api_key, evidence_video)
-    inspect_film(evidence_video)
+
+    control_plane_port, database_port = isolated_ports()
+    project_name = f"{PROJECT_STEM}-{os.getpid()}"
+    environment = isolated_environment(
+        control_plane_port=control_plane_port, database_port=database_port
+    )
+    compose = compose_command(project_name)
+    server: subprocess.Popen[bytes] | None = None
+    try:
+        # The one-sentence feature needs no Control Plane, but the App's startup
+        # gate does: it holds the workbench closed until control-plane health
+        # answers, so an acceptance of anything behind the workbench has to
+        # bring one up.
+        require_port_available(database_port)
+        print(f"[T36] Starting isolated PostgreSQL as {project_name}")
+        subprocess.run(
+            [*compose, "up", "--detach", "--wait", "postgres-test"],
+            check=True,
+            cwd=REPOSITORY_ROOT,
+            env=environment,
+        )
+        print("[T36] Applying the production Alembic migration chain")
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            check=True,
+            cwd=BACKEND_ROOT,
+            env=environment,
+        )
+        print(f"[T36] Starting Control Plane on isolated port {control_plane_port}")
+        server = start_control_plane(port=control_plane_port, environment=environment)
+        run_desktop_acceptance(api_key, evidence_video, environment)
+        inspect_film(evidence_video)
+    finally:
+        if server is not None:
+            server.terminate()
+            try:
+                server.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+        # Only what this run created: the project name carries this entrypoint
+        # and this pid, so nothing another project or another run owns is in
+        # scope here.
+        subprocess.run(
+            [*compose, "down", "--volumes", "--remove-orphans"],
+            check=False,
+            cwd=REPOSITORY_ROOT,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if private_app_data.exists():
+            shutil.rmtree(private_app_data)
+        require_port_closed(control_plane_port)
+        require_port_closed(database_port)
     print("T36 one-sentence App acceptance passed; evidence:", evidence_video)
     return 0
 
