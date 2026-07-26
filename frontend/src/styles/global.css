@@ -189,6 +189,31 @@ body {
   align-items: center;
 }
 
+/* 视频剪辑服务 sits directly under 模型服务 on 设置与诊断 and is built the same
+   way — a `Card`, a vertical `Space`, a `<section>`, then an inner `Space` of
+   `<label>`s around a `Select` and two `Input`s. 模型服务 declares every level of
+   that above; 视频剪辑服务 declared none, so its inner `Space` kept `inline-flex`
+   and shrink-wrapped to 358px of a 942px card while the region `Select` fell
+   back to antd's own 134px. Two credential cards on one page, one full width and
+   one at a third of it. Measured at 1280x800 and at the 960x640 minimum window;
+   see `e2e/unstyled-class-hooks.spec.ts`.
+
+   `.video-editing-service-stack` and `.video-editing-service-fields` are not
+   listed: the first is held open by the long paragraph it wraps and the second
+   is a block-level `<section>`, so both already measure the full 942px. That is
+   incidental rather than declared for the stack, and it is noted in T88b. */
+.video-editing-service-inputs,
+.video-editing-service-inputs label,
+.video-editing-service-inputs .ant-select,
+.video-editing-service-inputs .ant-input-password {
+  width: 100%;
+}
+
+.video-editing-service-inputs label {
+  display: grid;
+  gap: 8px;
+}
+
 .video-studio {
   margin-top: 20px;
 }
@@ -1096,4 +1121,26 @@ body {
    they fall to 718px and 328px of the same 942px card. */
 .video-editing-panel .ant-card-body > .ant-space {
   width: 100%;
+}
+
+/* The 转场 control in a clip row is the app's only bare `<select>`; everything
+   beside it in that row is an antd `Input` or `Button`. Form controls do not
+   inherit font or box styling, so with no rule behind its class name it kept the
+   platform widget: 19px tall against 32px inputs, Arial against the app's stack,
+   13.33px text against 14px, square corners against 8px — one row, five controls,
+   one of them visibly not from the same product.
+
+   Written in antd's own tokens rather than in numbers. `borderRadius: 8` and the
+   font stack are set once, in the `ConfigProvider` theme in `src/app/App.tsx`;
+   repeating either literal here would mean a theme change silently stops applying
+   to this one control, which is the failure this rule exists to fix. */
+.video-editing-transition-select {
+  height: var(--ant-control-height);
+  padding: 0 var(--ant-control-padding-horizontal);
+  color: var(--ant-color-text);
+  font-family: var(--ant-font-family);
+  font-size: var(--ant-font-size);
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border);
+  border-radius: var(--ant-border-radius);
 }
