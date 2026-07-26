@@ -1,391 +1,133 @@
-# codex 并行批次交接单（第二批）
+# codex 并行批次交接单（第三批）
 
-> 面向在**独立分支**上与主线并行工作的 codex。本文件是这批任务的完整输入，读完即可开工。
+> 第二批（`cf6e5a7 merge: 合并 Codex 并行批次 2`，112 个文件）已合入 main，谢谢。**本文件已整体替换为新的一批。**
 >
-> 日期：2026-07-26 ｜ 分支：`codex/batch-2` ｜ 主线这批只做 T10（正式包全量验收）与文档
->
-> 第一批（T22 / T58c / T62 / T63 / T64 / T66a）已交付，谢谢。**本文件已整体替换为新的一批。**
+> 日期：2026-07-26 ｜ 主线同时在跑五条线。切法仍然是**文件面不重叠**，不是按优先级。
 
 ---
 
-## 0. 这批怎么切的
+## 0. 先说第二批留下的一个真回归（主线已修，你不用再动，但请看一眼）
 
-第一批按「文件族」切，有效。这批**切法变了**：主线把整个 Rust 产品代码面让出来，自己只做正式包验收和文档。
+第二批合并后跑最终门禁，**三层红**：
 
-理由：T10「从正式签名包跑一遍所有用例」只有主线能做——它要逐条判定失败属于产品缺陷 / 测试过期 / 环境缺失 / 基建问题，而这个判定依赖大量只存在于主对话里的上下文。反过来，产品代码的具体修复是可以完整交付的。
+```
+eslint    ✖ 2 errors                      ← 这条是主线自己的（T86 测试文件里两个未使用常量）
+backend   ImportError: cannot import name 'CHROMIUM_CONTRACT'
+          from 'run_bm_08_acceptance'     ← 整个 integration 收集失败
+scripts   同一个 ImportError              ← 54 条里挂 1 条
+```
 
-所以你拿到的是**四个完整的文件族**。这批期间**主线不碰任何 `frontend/src-tauri/src/*.rs`**。
+根因：`0e41d59` 为 T78 重写 `run_bm_08_acceptance.py` 时删掉了模块级的 `CHROMIUM_CONTRACT`、`DEFAULT_ARCHIVES`、`_first_existing`，**但两个导入方没跟上**——`backend/tests/integration/conftest.py:191` 与 `scripts/run_bm_16_acceptance.py:28`。
 
-**主线这批会碰的**（你别动）：`docs/demo-sprint-roadmap.md`、`docs/development/T10*.md`、`wt/release/` 下的一切。
+更值得注意的是：被删的 `_first_existing` 正是 `07975d8 fix(bm-08): 验收脚本 Chromium 缓存路径兼容主仓库与 worktree 双布局` 专门加的。EB-03 缓存写在主检出的 `.local` 下，而 `wt/<task>` worktree 在它下面两层，两个根都要试。**删掉它等于把那次修复一起删了。**
+
+主线的修法不是把常量抄回去，而是搬进 `build_embedded_chromium_staging.py`——两个导入方本来就都为 `load_staging_contract` 依赖它，一处定义服务所有调用方，不再由某个验收脚本"顺便拥有"。
+
+**这件事本身就是下面 C4 的由来。**
 
 ---
 
-## 1. 硬约束（违反其一，产出即作废）
+## 1. 硬约束（每条都出过事故）
 
-### 1.1 隔离与环境
+1. **每棵 worktree 必须独立**：`python3 scripts/new_worktree.py <名字> [--no-vendor]`。
+   **禁止把 `backend/.venv` 或 `frontend/node_modules` 软链到别的树**——`uv run --project` 会改写共享的 `site-packages/automation_tool.pth`（实测后果：主树 pytest 在测另一棵树的在飞代码，同时进行的正式包构建也在打包别人的源码）；pnpm 11 跑任何 script 前校验依赖，软链必然不匹配，它会**先删再装**，而且报错时**建议你设 `CI=true`**——照做就静默删掉主树那份。
+2. **建完树先 `git switch -c <分支名>`**。脚本目前留下游离 HEAD，不建分支主线按分支名合不到你的提交（这条主线正在修，修好前请手动执行）。
+3. **TDD 不可跳过**：先写测试 → **实际运行看到断言失败**（必须是断言失败，不是 import error / 文件不存在这种顺带红）→ 最小实现 → 实际运行通过。
+4. **提交** `git commit -m "..." -- <明确路径>`，不要 `git add -A`；message 用中文，不加 Co-Authored-By 之类署名。
+5. **不要改 `docs/demo-sprint-roadmap.md`**——多线同时改必冲突，台账由主线单点更新。你负责写 `docs/development/<任务ID>.md`。
+6. **别碰这些面**（主线五条线各自占着）：`frontend/src/`、`frontend/e2e/`、`frontend/src-tauri/src/` 里更新相关的 Rust（`app_updates.rs` / `app_update_coordinator.rs` / `app_update_policy.rs` / `lib.rs`）、`contracts/` 下更新相关的 JSON。`scripts/` 主线也在动，**只有 C3/C4/C5 明确授权你改指定文件**，其余请绕开。
 
-```bash
-cd /Users/aventador/code/automation-tool
-git fetch
-git worktree add wt/codex2 -b codex/batch-2 origin/main
-cd wt/codex2
-```
-
-**建好之后必须做这三步**，否则会踩到主线今天已经踩过的坑：
-
-```bash
-(cd backend && uv sync --locked)              # 1. 自己的 venv，不要软链主树的
-(cd frontend && pnpm install --frozen-lockfile) # 2. 自己的 node_modules，不要软链
-git submodule update --init --recursive        # 3. vendor 必须真实检出，不能软链
-```
-
-**这三条各有今天实测的教训**：
-
-- **软链 `backend/.venv` 会毁掉全机器的 Python 结论。** venv 里 `automation_tool` 是 editable 安装，指针写在**单个共享文件** `site-packages/automation_tool.pth` 里；而仓库自己的 `package.json` 有多条 `uv run --project ../backend --locked`（`test:p9-05`、`test:h8-22-windows-package`、`p9-02/04/07`），**这条命令会 sync 并改写那个 .pth**。做过对照实验：跑一次，指针就从主树变成那条线的树。发现时它指着第一批 codex 的树——主树跑的 pytest 在测 codex 的在飞代码，**正在跑的正式包构建也在打包 codex 的后端源码**，只能停掉重来。
-- **软链 `node_modules` 会被 pnpm 删掉。** pnpm 11 跑任何 script 前校验依赖，软链必然不匹配，它就决定**先删再装**，只有「没有 TTY」挡住了；而它的报错**主动建议设 `CI=true`**——照做会静默删掉主树那份。**永远不要对 pnpm 设 `CI=true`**；要绕过校验用 `PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false`（只跳校验、不写任何东西）。
-- **vendor 不能软链。** `tools/motion-authoring/motion_style_freezer.py:105` 显式 `root.is_symlink()` → 拒绝，`test_release_assembly.py:602`、`check_motion_catalog_release.py:44` 多处同型。这是有意的供应链控制：vendor 的信任建立在「这目录就是那个锁定 commit 的检出」上，软链可指向任何地方。**主线在这条上判断错过一次，是第一批的子代理当场推翻的**——那次推翻是对的。
-
-**两条并行安全规则**：
-
-- **`git submodule update` 不要和别的 worktree 同时跑。** `.git/modules` 是共享的。主线今天并行跑三棵树，撞出主树 submodule 被检出成错误 commit（`95dd03e` 而非锁定的 `b1588e1`）+ index 里 204 条暂存删除，修了三轮才回到锁定状态。**串行跑。**
-- **不要设 `CARGO_TARGET_DIR` 指回主树**，会撞 cargo 锁。宁可全量构建。
-
-### 1.2 提交
-
-**一律用 `git commit -m "..." -- <path1> <path2>`。**
-
-git index 是共享可变状态——从 `git add` 到 `git commit` 之间，别的 agent stage 的任何东西都会被你的 commit 带走。实测发生过。
-
-三个陷阱：
-
-- **参数顺序**：写成 `git commit -- <paths> -m "msg"` 会把 `-m` 当成路径。主线今天刚踩过；
-- 涉及**重命名或删除**时，新旧两个路径都要列进去，否则 HEAD 里会同时留下两份（本机看正常，全新 checkout 才发现）；
-- **新增文件仍必须先 `git add`**（`commit --` 不认未跟踪路径）。
-
-### 1.3 TDD 铁律
-
-项目 `CLAUDE.md` 第 8 节，无例外：先写会失败的测试 → **实际运行看到失败，确认失败原因是你预期的那个** → 最小实现 → 转绿 → 跑受影响回归。
-
-**RED 必须是断言失败，不能是编译失败或 ImportError。** 主线今天犯过：测试导入一个还不存在的常量，拿到 ImportError——那不算 RED，补了桩让它返回空值才拿到真正的断言失败。
-
-### 1.4 两条检查习惯
-
-- **macOS 上没有 `timeout` 也没有 `gtimeout`。** 写 `timeout 300 xxx` 会导致整条管道根本没执行，输出为空、退出码 0，看起来像通过。主线和两个子代理各踩过一次。
-- **看到「输出为空 / 没有报错」时，先证明工具真的执行了，再解释这个空。** 今天的核心失效模式是「一个检查报告成功，而它实际只是安静」——安静和成功长得一模一样。也别信管道末尾的退出码：`cmd | tail -60` 的退出码是 `tail` 的，主线因此把 392 个通过的测试数成了 29。
+你这批的主战场：`backend/`、`deploy/`、`workers/`、`frontend/e2e-tauri/`、`docs/development/`。
 
 ---
 
-## 2. 任务清单
+## C1 — 补齐第二批的证据文件（**先做这条**）
 
-每条给了**我的判断 + 判断依据**。依据是可核实的事实，不是印象。
-**你读完代码如果有相反判断，说服我，我不预设立场。**
+第二批做了 19 个任务，`docs/development/` 下**一个证据文件都没有**。核实过：那次合并只动了 3 个 docs 文件（`codex-parallel-batch.md`、`customer-demo-operations-runbook.md`、`customer-demo-post-demo-cleanup.md`）。
 
-### 族 A —— 失败时能看见（T69 / T50）｜**优先做这族**
+这违反 `CLAUDE.md` §2.1：每个小任务必须有独立的 `docs/development/<任务ID>.md`，记录日期、提交、RED、GREEN、失败矩阵、真实边界、清理和文档证据，**并与代码变更在同一提交完成**。
 
-文件面：`frontend/src-tauri/src/lib.rs`、`control_plane.rs`、`Cargo.toml`。主线这批完全不碰。
+按提交逐条补，一个任务一个文件：
 
-#### T69 App 全程零日志，出问题时信息为零
+| 提交 | 任务 | 提交 | 任务 |
+|---|---|---|---|
+| `d5e5111` 剔除 Widevine | T26 | `006078c` 复核登录态投影 | T77 |
+| `d28f819` 统一执行器包资源查找 | T24 | `0e41d59`+`9325219` 视频桌面验收启动链 | T78 |
+| `6197eba` 抖音注销投影超时 | T50 | `98ac834`+`2a3b293`+`92d0367` 隔离浏览器依赖 | T45 |
+| `090e756` 有界隐私安全桌面日志 | T69 | `1660d21` 剔除权利未决 UTM 字体 | T40 |
+| `050dfc9` 脚本与部署门禁执行证据 | T72 | `eb861c2` 登记 Big Shoulders 字体 | T41 |
+| `32f8b55` 隔离只读 vendor 测试写入 | T73 | `b08fb48` 损坏视频产物启动自愈 | T61 |
+| `18ed7fc` 验收缓存跟随执行器输入 | T74 | `f8cc1c1` 启动时清理过期数据 | T65 |
+| `f3c6d00` 保留执行器构建失败诊断 | T75 | `00eb82f` 自动修复视频目录权限 | T66b |
+| `fb6d122` 验收加载生产组合入口 | T76 | `801772e` 演示后退场清单 | T38 |
 
-**现象**：整个 Tauri App **没有任何日志设施**——没有 `tracing` / `log` / `env_logger` 依赖，零条日志调用。
+**写实话，不要补一份漂亮的事后叙述。** 当时没先跑 RED 就写「未按 TDD，事后补测试」；没做真实验收就标 `🔍 待验收` 并写清缺什么。这份台账唯一的用途是让人知道**现在到底能不能发版**——一份诚实的记录比一份好看的有用得多。
 
-**依据**：今天主线让用户「跑一下 App 二进制看 stderr」，那条命令**根本不可能有输出**，因为没有任何东西会往 stderr 写。实测，不是推断。
-
-**为什么现在做**：下周要在客户面前演示，演示机是全新 Mac。**一旦出问题我们是瞎的**——没有日志只能靠复现，而现场没有复现的机会。
-
-**边界（这是演示前的改动，务必守住）**：只加**不改变任何现有行为**的一层。
-
-- 允许：加日志依赖、初始化 subscriber、在关键路径加记录点（setup 各阶段、Sidecar 生命周期、Control Plane 请求失败、任务状态转换）；
-- **不允许**：改任何控制流、改任何错误处理、改任何 `?` 的传播、把 `expect` 改成别的；
-- 日志落到 Tauri `app_data_dir` 下的文件，**带大小与保留期上限**（项目规则第 7 节对截图/Trace 的要求，日志同理）；
-- **绝对不能进日志的**：Cookie、Token、平台消息、联系人、页面原文、本机私有路径、设备私钥、产品账号 access/refresh secret（项目规则第 7 节明令）。**写一个测试证明这些不会出现在日志里**——喂一个带 token 的错误进去，断言落盘内容里没有它。
-- 需要新依赖可以直接改 `Cargo.toml`（这批归你），但**锁文件改动单独一个提交**，方便主线 review。
-
-#### T50 注销成功但界面报失败
-
-**现象**：5 次复现 4 次。注销实际成功，界面报失败。
-
-**依据**：内层约 5 秒的轮询被包在 60 秒超时里——**不是等不起，是自己先放弃了**。已从演示脚本里摘掉「安全注销」来绕开。
-
-**要做的**：让内层轮询的预算与外层一致，或让它在拿到终态前不提前放弃。修完把演示脚本里摘掉的那一步加回去。
-
-**顺手**：这条和 T69 同文件族。做完看一眼——**加了日志之后这个 bug 是不是更容易定位**？如果是，在台账里写一句，那是 T69 价值的直接证据。
-
-### 族 B —— 启动 abort 的自愈（T61 / T65 / T66b）
-
-文件面：`frontend/src-tauri/src/video_job_workspace.rs` 及其测试。三条同文件同启动路径，必须一起做。
-
-**先读 `docs/development/T61-setup-abort-risk.md`**——完整风险面调研（23 个 abort 点、六场景风险表、代码依据）。本节只写结论。
-
-#### T61 setup 失败即 abort，无兜底
-
-**结论先行**：演示场景（全新 Mac → 首次启动 → 做视频 → 正常退出 → 再打开）**实测不会 abort**，前一条线的高风险判断已被推翻。剩余真实窗口只有两个，都不自愈：
-
-- `delete_artifact` 的 `remove_dir_all` 执行到一半被杀 → 目录只剩一个文件 → **永久 abort**；
-- 硬断电造成 payload 大小与 manifest 不符 → **永久 abort**。
-
-**真正的缺陷是策略不一致**：`.import-*` 半成品清理继续 ✅、staging 半成品清理继续 ✅、**已落地 artifact 出任何问题直接 abort** ❌。对自己写的临时垃圾宽容，对自己写的正式产物零容忍到把整个 App 拉崩。
-
-**要做的（约四行）**：把 `validate_artifact_inventory()`（`video_job_workspace.rs:379`）从「启动门禁」降级为「启动清理」——遇到坏 artifact 按 `recover_interrupted_imports` 已有做法删掉或挪进隔离目录，只有**清理动作本身失败**才 `Err`。`list_artifacts()` 作为运行期 API 的严格语义**不要动**。
-
-换来的是把两块永久砖变成「丢一个视频，App 照常开」。已有测试夹具：`tests/video_job_workspace.rs:114/167/483`。
-
-#### T65 `cleanup_expired` 生产代码里没有任何调用方
-
-**现象**：只有 `tests/video_job_workspace.rs:391` 调它。
-
-**我的判断**：30 天保留策略形同虚设，artifacts 单调增长，**启动时的 abort 面随视频数量线性增长**——和 T61 是同一个问题的两端。
-
-**要做的**：接上真实调用方（启动时或任务完成后），写测试证明过期 artifact 真的被清掉。
-
-#### T66b 目录权限只检查不修复
-
-**现象**：`validate_private_directory_metadata`（`video_job_workspace.rs:1299`）对目录**只检查不修复**；而 `deployment_profile` 和 `secure_store` 对目录是**强制 `chmod 0700` 修复**。同一仓库两套策略。
-
-**依据**：你第一批的 T66a 已经把 `secure_store.rs` 的文件那一半改成「发现漂移就修复」。这是同型的另一半。触发场景是 Time Machine / 迁移助理恢复的账号——**演示机是全新 Mac 不触发，但客户机器很可能是迁移过来的**，表现是启动即闪退零提示。
-
-**要做的**：对齐成同样的「发现漂移就修复，只有修复失败才 `Err`」，与你 T66a 的做法保持一致。
-
-### 族 C —— 门禁真的在跑吗（T72 / T73）
-
-文件面：`scripts/`、`deploy/`、`.github/`、`tools/`。主线这批只在 `docs/` 下写东西。
-
-#### T72 门禁执行者的三处空洞
-
-今天全量扫描的副产物，同一类：
-
-1. **`run_script_tests.py` 没被接进任何门禁。** `grep -rn "run_script_tests" .github/` **零命中**。为「守卫没人执行」造的解药，自己没人执行；42 个脚本里 39 个仍靠手敲，被点名的 3 个还是用裸 `python3` 调的——**正是它自己 docstring 警告的写法**。
-2. **`deploy/` 下 48 条断言无任何执行者。** `deploy/ingress/test_ingress_config.py`(2 条) 与 `deploy/cloud/test_cloud_deployment.py`(46 条)，pytest 的 `testpaths=["tests"]` 收不到、runner 只 glob `scripts/` 也收不到，唯一调用方式是 `docs/development/T68.md:131` 里一行手敲命令。**实跑是绿的**，所以是潜伏风险不是当前故障。
-3. **runner 只对失败脚本打印 stdout（`:145`），通过的直接丢弃。** 于是「跑 50 条断言」和「什么都没跑就 `return 0`」在汇总里**完全一样**。实测 41 个脚本共 400 条检查，**11 个「通过」拿不出任何可数证据**——其中就有 `test_video_studio_acceptance_scope.py`，当初那条红着躺很久的守卫。
-
-   **注意措辞**：子代理断言的不是「它们是空壳」，而是「**无法区分**」。修的方向是让通过也可数（要求脚本报告执行条数，runner 汇总并在为 0 时判失败），不是去猜哪个是空壳。
-4. **顺带**：`test_script_test_runner.py:73` 用**和被测实现一模一样的启发式**断言实现符合该启发式，恒真，永远发现不了启发式本身选错环境。
-
-**注意 Actions 的现状**：本仓库 GitHub Actions 已在 2026-07-26 **整体禁用**（账单问题，从来没运行过一行），见 `.github/workflows/README.md`。所以第 1 条**不要接到 Actions 上**——接到 `scripts/commit_gate.py` 的慢档，或一个能在 Windows 验收机上跑的入口。
-
-#### T73（新）测试把文件写进只读的 vendor submodule
-
-**现象**（今天实测）：跑完测试后，
-
-- `vendor/hyperframes` 有 **68 个 `packages/producer/tests/*/output/compiled.html` 被改写**；
-- `vendor/moneyprinterturbo` 有 **3 个 `test/resources/*.png.mp4` 被新建**。
-
-**后果**：`scripts/check_third_party_sources.py` 明确拒绝——`hyperframes submodule is dirty; upstream source is read-only`，退出码 1。**任何一次测试跑完，这道发版门禁就会失败。**
-
-**依据**：直接违反项目 `CLAUDE.md` 第 6 节——两个 vendor 只允许作为**只读 Submodule** 存在，禁止在 Submodule 内修改。主线今天为了把状态修回去折腾了三轮：`reset --hard` 清不掉（`.gitattributes` 声明这些走 LFS，而仓库里存的是真实内容，clean 过滤器转换后与 index 对不上），最后靠整目录删除 + `git submodule update --init` 全新检出才干净。
-
-**要做的**：找出哪条链路往 vendor 里写（大概率是调用上游 producer 测试或渲染时把输出目录指向了 vendor 内部），改成写到 `.local/` 下的隔离目录。**然后加一道门禁**：跑完测试后 vendor submodule 必须仍然干净——这道门禁本身要能自证（故意往 vendor 写一个文件，确认它抓得到）。
-
-### 族 D —— 字体权利登记（T40 / T41）
-
-文件面：`contracts/quality/asset-rights-policy.v1.json` 及相关校验脚本。
-
-- **T40**：包内 UTM Kabel KT 字体**权利未判定**；
-- **T41**：动效叠加字体未进权利登记表——`big-shoulders-display-latin.woff2` 登记在另一份契约里，不在 `asset-rights-policy`。
-
-**我的判断**：合规项，Demo 本身不阻塞，但**在客户面前演示的包里带着权利未判定的字体是有风险的**，而修的成本很低。
-
-**依据**：项目已有完整的字体权利登记机制（T28 把 148MB 专有字体换成 Noto Sans CJK 时建的，包一级四道闸：缺字体 / 被替换 / 版权行不对 / 缺许可证）。这两个是漏网的。
-
-**要做的**：判定这两个字体的权利状态并登记进 `asset-rights-policy.v1.json`。如果判定结果是「不可再分发」，**那就不能留在包里**，要么换掉要么移除，并说明影响。**判不了的就明确写「无法判定」并说明卡在哪，不要猜一个填进去。**
-
-### 族 E —— 验收基建的真根因（T74）
-
-文件面：`scripts/desktop_e2e_prerequisites.py`。
-
-#### T74（新）执行器包缓存键是常量，34 个驱动永远拿不到新执行器
-
-**现象**：`scripts/desktop_e2e_prerequisites.py:75`
-
-```python
-SHARED_EXECUTOR_BUILD_ID: Final = "desktop-e2e-startup-gate"
-```
-
-`ensure_signed_executor_package(build_id=SHARED_EXECUTOR_BUILD_ID)` 用它当缓存键，命中就直接返回缓存目录。**执行器源码不参与这个键。** 而 `grep -rln 'desktop_e2e_prerequisites' scripts/` 有 **34 个驱动**。
-
-**后果**：缓存一旦建立，执行器的任何改动就**再也进不了那 34 条验收**。今天已经吃过一次：一句话生成视频的验收连续失败，表现是子进程 exit 2、stdout 空、错误码 `authoring_crashed`——看起来像产品崩溃，实际是**验收装的是一个早于 `--author-motion` 入口的旧执行器包**，它把编排请求当 bootstrap 读了。
-
-**这条为什么还在**：当时的修复只在 `run_t36_acceptance.py` 一个驱动里加了「起跑前先探这个包，不合格就重建」，**根因原封不动**。另外 33 个驱动仍然在这个坑里。
-
-**依据**：`SHARED_EXECUTOR_BUILD_ID` 的定义就在那一行，是常量不是推断；34 这个数字是 `grep -rln` 实测。
-
-**要做的**：把缓存键改成**从执行器实际输入内容推导**（backend 源码树的摘要 + spec 文件 + 相关契约），源码一变键就变、缓存自动失效。参考同仓库已有的做法——项目里多处用「逐文件 SHA-256 清单」做同类事情（`distribution-manifest`、`release-package-resources`）。
-
-**验收要求（重要）**：写一个测试证明**改一行执行器源码后，缓存键会变**。这条不能只靠读代码判断，因为整个问题的性质就是「看起来在刷新，实际没有」。
-
-**注意**：`wt/sweep-desktop` 和 `wt/sweep-suite` 里有主线的扫描线在用这个文件。worktree 是隔离的，你在 `wt/codex` 里改不会影响它们，但**合并时主线会重新验证那两条线的结论**。
-
-**同一个文件里还有一条，一起修**：`desktop_e2e_prerequisites.py:90` **硬编码 `REPOSITORY_ROOT/.local/`**，没有用仓库**专门为此写的** `archive_path()`。后果是**那 34 个驱动从任何 worktree 里跑都在第一步就死**——这是桌面扫描线实测出来的，不是推断。改成走 `archive_path()`。
-
-#### T75（新）另一处吞掉 PyInstaller 输出的地方
-
-`scripts/run_e4_07_acceptance.py:226` 的 `build_signed_executor` **也用 `capture_output=True` 抓走 PyInstaller 输出然后丢掉**，构建失败时零诊断。
-
-**这是主线的漏修**：`ce45efd` 只修了 `backend/src/automation_tool/executor/macos_candidate.py` 的 `_run_pyinstaller`，**这是另一个函数**，桌面扫描线发现的。
-
-**要做的**：同样让它把构建器说的话带出来。**顺便全仓搜一遍还有没有第三处**——`grep -rn 'capture_output=True' scripts/ backend/src/` 然后看哪些在失败分支里把输出丢了。这类「失败时零诊断」在构建机上代价最大。
-
-### 族 G —— 桌面扫描线抓到的产品与测试缺陷（T76 / T77 / T78）
-
-这三条来自主线桌面 E2E 全量扫描（52 个执行者，39 通过 / 13 失败 / 5 未跑，13 条失败归并后只有 6 类根因）。
-
-#### T76（新）`desktop-e2e` 前端入口让整片断言变成恒真
-
-**现象**：`test:tauri` 和 `test:h8-19-app` **在 37 毫秒内通过**。
-
-扫描线原本预测它们会因为没装启动门禁而失败，**预测错了**——然后它去追「为什么绿」，这才是价值所在：
-
-`vite.config.ts` 按 mode 换入口。`desktop-e2e` 模式用的是 `test-tauri-main.tsx`，它注入的 `desktopShellStartupCheck` 是
-
-```ts
-async check() { return { status: "ready" }; }
-```
-
-**无条件 ready**，从不问 Control Plane 也不问本机环境，并且**完全不注入生产的 17 个 gateway**。
-
-所以 `workbench.spec.ts` 断言「工作台挂载了」在这个构建里**恒真**，而它是该 spec 的**唯一执行者**。
-
-**对照组证明这不是没办法**：`model-service-e2e` 用的 `test-production-main.ts` 是直接 `import("./main")`，那才是正确写法。
-
-**依据补充**：Rust 侧的注释写着「every build compiles exactly this one」，给人一种已经收口的印象——**分叉现在在前端**，Rust 门禁看不见它。主线的 T59 把这个桩纳入了单一构建路径门禁，但**没有改掉入口本身**。
-
-**要做的**：让 `desktop-e2e` 入口走和 `model-service-e2e` 一样的路子（`import("./main")` + 受控测试 Adapter），而不是用一个恒真的桩替代整个启动检查与 gateway 注入。改完 `workbench.spec.ts` 应该真的在测东西——如果它因此变红，那是**真相浮出来**，报告出来别去放宽断言。
-
-#### T77（新）B5-13 前端投影与权威态不一致（疑似产品缺陷）
-
-**现象**：权威态返回 `state: "missing"`，UI 却渲染「暂时无法读取」。
-
-**扫描线的判定**：后端对、前端投影错。
-
-**我的判断**：这是演示路径上用户看得见的错误信息，值得修。但**先自己复核一遍投影逻辑再动手**——扫描线自己标的是「疑似」，不是定案。
-
-**注意**：这条落在前端 `frontend/src/`，与族 A 的 Rust 文件不冲突。
-
-#### T78（新）视频线 8 个驱动 / 9 个唯一 spec 全卡启动门禁
-
-**复核后的实际范围**：从 `scripts/run_*_acceptance.py` 的可执行 AST 动态发现出 **8 个独立构建驱动**（原清单漏了 BM-06），共覆盖 **9 个唯一 spec**。不能再维护手写驱动表。
-
-**根因比原记录更深**：第一次按旧结论只给 7 个驱动补 `prepare_startup_gate` 后，旧门禁显示 `executed checks: 7`，但这是**假绿**。该函数只准备嵌入浏览器和签名 Executor；它不提供编译期动作授权环境，也不启动生产 Control Plane。`video-studio-e2e` 又固定调用 `http://127.0.0.1:8765`，所以只补这一个调用仍然会在真实启动门禁前失败。
-
-**已有记录低估了范围**：`docs/development/T36-oneshot-video-preview.md:116` 记的是 5 个 spec，最初交接写成 7 个驱动 / 8 个 spec；动态复核后的真实面是 8 个驱动 / 9 个唯一 spec。
-
-**实现**：8 个驱动统一用 `video_studio_startup_harness` 包住 build 与随后 WDIO/App 执行。共享 harness 先隔离环境并准备本地资源，再以随机 Compose project 启动隔离 PostgreSQL、执行生产 Alembic 链、在固定 8765 启动真实 Uvicorn Control Plane；退出和各失败阶段只清理由本轮持有的资源。8765 已占用时直接拒绝，绝不终止未知进程。结构门禁同时拒绝手写漏项、同名假实现、死分支、只包 build 不包 WDIO 的半套接线。
-
-**依赖**：这条和 T74（缓存键 + 硬编码路径）在同一批里，建议先做 T74 再做这条，否则你会在一个「执行器包永远是旧的」的地基上判断结果。
-
-### 族 F —— 出厂前该清掉的（T26 / T24 / T45 / T38）
-
-#### T26 剔除内置浏览器里的 Widevine CDM
-
-**先看清楚：任务原标题「换成 Chromium 开源构建」的结论是反的**，完整证据见文末附录和 `docs/development/PLAN-chromium-replacement.md`。**不要换浏览器。**
-
-**要做的是另一件事**：剔除 `libwidevinecdm.dylib`。
-
-**依据**：这是整轮调研里查到的**唯一一条白纸黑字的分发禁令**。macOS 版 Chrome for Testing 内置的
-
-```
-chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/
-  Google Chrome for Testing Framework.framework/Versions/149.0.7827.55/
-  Libraries/WidevineCdm/
-    LICENSE                                            (473 B)
-    _platform_specific/mac_arm64/libwidevinecdm.dylib  (20,183,440 B)
-```
-
-那份 473 字节的 LICENSE 原文：
-
-> Google LLC and its affiliates ("Google") own all legal right, title and interest in and to the content decryption module software ("Software") … **You may not use, modify, sell, or otherwise distribute the Software without a separate license agreement with Google. The Software is not open source software.**
-
-**现状是它被 `distribution-manifest.v1.json` 逐文件摘要锁定，随 macOS 安装包分发给用户。** 不需要任何法律解读，那句话就是字面意思。
-
-**实测过删掉它的后果**（复制 CfT 树 → 删 `Libraries/WidevineCdm/` → 跑 EB-16 那套校验 + 一次真实抖音访问）：
-
-| 检查 | 结果 |
-|---|---|
-| 文件数 / 字节 | 331 / 359,441,871 → **328 / 339,257,128**（省 19.2 MiB） |
-| `codesign -dv` 可执行文件 | `Identifier`、`adhoc`、`linker-signed` **全部保留** |
-| `codesign --verify --strict` | 失败——**但未删改的原始缓存树同样失败、同样报错**（CfT 上游就是 linker-signed、`Sealed Resources=none`），有对照组 |
-| 启动 + 打开抖音 | 正常，渲染出与未删改版本相同的 8 个 `data-e2e` |
-| `canPlayType` avc1/mp4a/hev1 | **全部仍为 `probably`**（H.264/AAC/HEVC 一个没丢） |
-
-另外实测：**Widevine EME 在删之前就已经不可用**（`NotSupportedError`），也就是说这 20 MiB 在我们的启动方式下压根没被启用——**纯负债，零收益**。Windows 版 CfT 里根本没有这个文件。
-
-**具体动作**（1～2 人日）：
-
-1. `contracts/browser/embedded-chromium-staging.v1.json` 每个 target 增加 `excluded_entry_prefixes`（macOS 两个目标填上面那个 `Libraries/WidevineCdm/` 路径，Windows 填空数组）；`archive_sha256` **不变**（仍然锁原始归档），staging 在解包后按白名单**显式剔除**并把剔除动作写进 `staging-manifest.json`；
-2. `scripts/build_embedded_browser_distribution.py` 的 licence block 把 `"redistribution_review": "pending"` 换成有依据的结论——声明已剔除的专有组件清单 + 剩余组件的许可结论；
-3. `RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"]` 343 → **324**（实测 339,257,128 B = 323.6 MiB），连带包上限重算；
-4. 重跑 EB-03 / EB-05 / EB-16（macOS arm64 + x86_64）。Windows 无此文件，确认剔除列表为空时行为不变。
-
-**边界**：**只做剔除 Widevine 这一件事。** 品牌与 CfT 的 ToS 定位问题（产物仍叫 `Google Chrome for Testing.app`）是法律判断不是技术判断，用户还没拍板，**不要碰**。
-
-**时机**：主线暂停出包，等你这批做完再出，所以这条现在做正好——下一版包就带上。
-
-#### T24 执行器包根按 `debug_assertions` 分叉
-
-**现象**：执行器包的根路径按 `debug_assertions` 走不同分支。
-
-**我的判断**：这直接踩项目 `CLAUDE.md` 的「单一构建路径规范」——那条规则明令禁止「用编译期 feature / 环境变量 / 构建模式改变**产品去哪里寻找**文件、资源、进程、可执行程序」，并且写着这条规则来自一次真实事故（测试构建从环境变量读依赖路径、生产构建从安装包资源目录读，结果验收长期全绿而用户拿到的包整块功能不可用）。
-
-**依据**：规则里只允许三类差异（测试驱动的挂载、窗口可见性/日志级别、指向隔离实例的配置值），而「去哪里找执行器包」不属于任何一类。
-
-**要做的**：合成一条路径。如果发现确实需要区分，**说清楚它属于允许的哪一类**——说不出来的一律不许留。
-
-#### T45 Control Plane 镜像被打进 playwright
-
-**现象**：约 50MB 的 Control Plane 相关内容被打进了 playwright 的依赖树。
-
-**我的判断**：代码层守住了 `CLAUDE.md` 4.2 的边界（Control Plane 不依赖 Playwright），**打包层破了**。
-
-**边界**：这条要动 `uv.lock`。**这批你独占它**，主线不碰。改完把 `uv.lock` 的改动放在单独一个提交里。
-
-#### T38 演示后回收清单
-
-纯文档。演示结束后要回收/停用哪些东西（云端实例、测试账号、临时凭据、演示数据、Demo Profile），写成可执行的清单。
-
-**依据**：`~/Documents/at-tools-credentials/project-secrets/` 下有演示账号、两个第三方 API key、签名私钥；云端 `at.xuanbai.tech` 上有 Control Plane 与 PostgreSQL。这些演示后该怎么处理需要有个清单，不能靠记忆。
+另外回答一个主线需要知道的问题：**T79（124 个验收驱动无聚合执行器、48 个只被读源码从不执行）你这批做了吗？** `scripts/test_video_studio_startup_gate_drivers.py` 新增 749 行看着相关，但主线没核实。做了就写证据，没做就明说。
 
 ---
 
-## 3. 起点与交回
+## C4 — 让「删掉别人 import 的名字」当场失败，而不是合并之后才炸
 
-**起点**：`origin/main` 最新提交。开工前 `git fetch && git log --oneline -1 origin/main`。
+**授权你改 `scripts/`（新增检查脚本 + 其测试）。** 这是上面那个回归的根因防线。
 
-**分支**：`codex/batch-2`
+现状：`scripts/` 下脚本互相 import（`build_release_package.py` 一口气 import 了四个），`backend/tests/` 也 import `scripts/` 里的名字。但**没有任何东西检查这些跨文件导入是否解析得了**——`run_bm_08_acceptance.py` 少了两个名字，要等到 pytest 收集期整包炸掉才被发现，而那时它已经合进 main。
 
-**每个任务一个提交**，提交信息用中文（conventional commit 前缀可保留英文），不加任何 AI 署名。
+做一道能在提交前跑完的检查：**每一个跨模块导入的名字，在被导入的模块里必须真实存在。**
 
-**每完成一个任务，更新下面「进度回填」那一行**，提交推送。主线读这里，不翻你的分支历史。
+判据（重要）：
 
-**族 A 优先**——它直接决定演示当天出问题时我们看不看得见。
+- 检查要**能真的红**——写完后故意删掉一个被 import 的名字，确认它报错。这一步是必须的，不是可选的自证；
+- 不要只做正则文本匹配就宣称覆盖。本仓库已经吃过「绿的是源码长这样，不是能跑通」的亏（T79 那 48 个驱动正是这样）；
+- 检查自身必须被聚合执行器收进去（`scripts/run_script_tests.py` 会 glob `scripts/test_*.py`）；
+- **不要 import 到副作用**——有些脚本 import 即执行重活。想清楚怎么规避（`ast` 静态解析 + 只比对模块顶层符号，可能比真 import 更合适），把你的取舍写进 docstring。
 
----
-
-## 4. 进度回填（codex 写这里，主线只读）
-
-| 任务 | 状态 | 提交 | RED 证据（看到的失败输出） | 备注 / 反驳 |
-|---|---|---|---|---|
-| **A** T69 App 零日志 | ✅ | 本提交 | Rust 落盘测试准确失败：`sensitive error detail reached the desktop log: Cookie=session-cookie` | 固定事件白名单覆盖 setup、Control Plane、任务状态与 Sidecar 生命周期；有界异步队列不阻塞业务，单文件 1 MiB、最多 8 个、保留 7 天；T50 的超时现在可由请求失败固定事件直接定位 |
-| **A** T50 注销界面报失败 | ✅ | 本提交 | Node 契约准确失败：`the authoritative projection must receive the full outer command budget` | 轮询预算由约 5 秒对齐为 60 秒；仓内 B5-13/B5-14 演示验收已包含安全注销步骤 |
-| **B** T61 artifact 门禁降级为清理 | ✅ | 本提交 | 启动恢复断言准确失败：`restarted store: VideoWorkspaceError { code: StorageUnavailable }` | 启动时仅清理损坏/中断删除的 artifact，清理失败才阻断；运行期 `list_artifacts()` 继续严格失败，外部软链目标不受触碰 |
-| **B** T65 `cleanup_expired` 无调用方 | ✅ | 本提交 | 启动清理断言准确失败：`expired workspace removed during startup` 实际收到 `Ok` | 初始化完成自愈后按当前时间执行 30 天保留清理；活跃 workspace 保留 |
-| **B** T66b 目录权限只检查不修复 | ✅ | 本提交 | 迁移权限测试准确失败：`restarted store: VideoWorkspaceError { code: PathRejected }` | Unix 目录漂移通过 `O_NOFOLLOW` 打开、dev/inode 复核后 `fchmod 0700`；修复失败才报错，含 setgid/sticky 位也清除 |
-| **C** T72 门禁执行者三处空洞 | ✅ | 本提交 | deploy 断言未被发现；静默 `exit 0`、空 aggregate 与偶然 `(9 checks)` 被误判为成功；host editable 包掩盖被验 commit 源码 | 派生发现 `scripts/test_*.py` 与 `deploy/**/test_*.py`；AST 选择解释器，checkout 源码优先；脚本统一报告正数执行计数，commit gate 新增 `--slow` 且执行被验 commit 的 aggregate runner |
-| **C** T73 测试写进只读 vendor | ✅ | 本提交 | 直接运行上游写入链会污染真实 vendor；安全入口缺失，且 clean 但错误 HEAD 未被拒绝；初次隔离 Hyperframes clone 又被全局 LFS clean filter 误报 68 个文件 dirty | 测试改在 `.local/vendor-tests` 的 shared local clone 中运行，无下载且不写共享 `.git/modules`；真实 vendor 前后同时校验 clean 与 HEAD=lock；slow gate 按被验 commit 的 lock 物化可用 Git checkout，并对内容及 Git 漂移双重守卫 |
-| **D** T40 UTM Kabel KT 权利登记 | ✅ | 本提交 | 权利登记断言准确失败：`'font-utm-kabel-kt' not found`；物理排除断言继而失败：`'fonts/UTM Kabel KT.ttf' not found` | 精确字节仅有 “Free for everyone” 而无商用再分发/嵌入授权，登记为 `NOASSERTION`/undetermined/deny，并从 Worker 冻结清单物理排除、候选审计拒绝回流 |
-| **D** T41 Big Shoulders Display 权利登记 | ✅ | 本提交 | 精确资产登记断言准确失败：`'font-big-shoulders-display' not found` | WOFF2 字节与动效 overlay/offline lock 对齐；按 Google Fonts 锁定 OFL-1.1 与 SIL 官方正文有条件放行，记录保留版权/许可证、不得单独售卖、衍生继续 OFL 等条件 |
-| **E** T74 执行器缓存键 + 硬编码 `.local/` | ✅ | 本提交 | 缓存键测试准确失败：`source, spec and contract bytes must each select a different cached package` | 缓存键纳入 backend 源码、spec、锁文件及相关契约/只读资源摘要；浏览器归档统一走 `archive_path()`，T36 失效清理同步指向摘要键 |
-| **E** T75 另一处吞掉 PyInstaller 输出 | ✅ | 本提交 | 构建失败测试准确失败：`PyInstaller stdout: missing hidden import` 与 `PyInstaller stderr: build traceback` 均不在异常中 | E4-07 及同类 E4-09/E4-10、Windows candidate 均携带 stdout/stderr 各自最后 20 行，空输出也给固定诊断 |
-| **F** T26 剔除 Widevine CDM | ✅ | 本提交 | 合成 staging 首先准确失败：`'exclusions' not found`；许可门禁仍为 `pending`，预算断言为 `343 != 324` | 保留 CfT 149 与原归档锁，仅按目标契约物理剔除 macOS Widevine；arm64 真归档 331→328 文件、359,441,871→339,257,128 B，离线启动与篡改拒绝通过；Windows 无该组件，CfT 整体再分发结论仍明确为 `undetermined` |
-| **F** T24 执行器包根按 `debug_assertions` 分叉 | ✅ | 本提交 | 单路径守卫准确失败：`lib.rs::run selects the Local Executor package root by build mode`；验收装配守卫继而失败：`must stage the signed Executor in the debug App resource root` | 所有构建统一从 Tauri `resource_dir()/local-executor/package` 查找；共享与自定义桌面验收均把测试包挂载到同一资源布局，AppData 只留状态 |
-| **F** T45 Control Plane 镜像进 playwright | ✅ | 本提交（锁文件下一提交） | Python 契约准确失败：`KeyError: 'executor'`；Node 镜像契约准确失败：缺少 `--no-group executor` | Playwright 移入默认启用的 `executor` 依赖组，执行器/本地开发保持可用；Control Plane 镜像显式排除该组，离线 dry-run 确认会卸载 Playwright |
-| **F** T38 演示后回收清单 | ✅ | 本提交 | 纯文档任务无代码 RED；既有 C10-13 文档契约 2/2 通过 | 新增可执行退场手册，覆盖业务冻结、账号/Session/凭据吊销、本机数据、PostgreSQL、对象存储、云资源、证据保留与双人复核；只登记凭据 ID/指纹，禁止读取或记录密钥值 |
-| **G** T76 `desktop-e2e` 入口让断言恒真 | ✅ | 本提交 | Node 入口契约准确失败：`the desktop test entry must execute the production composition root`；Rust 单路径守卫发现桩白名单漂移 | WDIO 适配器后直接加载生产 `main.tsx` 及完整 gateway；真实 Tauri 现在如实停在“桌面运行环境需要处理”，不再由恒真桩伪造工作台成功 |
-| **G** T77 B5-13 前端投影与权威态不一致 | ✅ | 本提交（复核结论） | 无新增 RED：组件/网关 6 项与 B5-13/B5-14 契约 3 项均通过 | `state: "missing"` 已稳定投影为“需要登录”，仅 gateway 拒绝才显示“暂时无法读取”；扫描现象由 T50 的注销投影预算修复覆盖，因此不制造重复改动 |
-| **G** T78 视频线完整启动链 | ✅ | 本提交 | 仅补 7 个 `prepare_startup_gate` 时旧门禁错误显示 `executed checks: 7`；动态完整门禁随后准确报出 8 个驱动均未导入完整 harness，生命周期测试报 `no attribute 'video_studio_startup_harness'`；后续 RED 又锁住 WDIO 越界、CP 健康失败泄漏、Compose 部分启动失败不清理及环境污染 | 动态范围为 8 个构建驱动 / 9 个唯一 spec；轻量结构与失败清理 11/11 通过。root 串行实跑 VF-06、BM-06、BM-08、BM-15、CQ-01、IM-05、VE-03 全绿；VE-04 在任何云提交前按设计因本机未配置阿里云凭据响亮停止，未读取或复制主工作树密钥 |
+顺带把这个也纳进来：**请核实第二批里还有没有别的地方因为同一次重写丢了行为**——不是丢了名字，是丢了行为。名字缺失会炸，行为缺失不会。`_first_existing` 就是后者，它没让任何测试变红。
 
 ---
 
-## 附录：两条不要碰的结论
+## C5 — 核实那 48 条断言现在真的被执行
 
-**T26「内置浏览器换成 Chromium 开源构建」——任务标题的结论是反的。** 调研结论是**不换**，完整证据见 `docs/development/PLAN-chromium-replacement.md`：Playwright 1.61.0 在 macOS/Windows 上已停产 Chromium 构建（实测 rev ≥1210 是 404）；所有 Chromium 开源构建不含 H.264/AAC，实测抖音播放器彻底黑屏；体积不降反增且 Windows 超门禁上限；而且 **CfT 在 `sec-ch-ua` 里报的就已经是 `"Chromium"`**，换掉的只是文件名不是被网站看到的身份。唯一白纸黑字的分发禁令只针对 `libwidevinecdm.dylib` 一个文件（20.2 MiB），删掉零功能损失。正确任务是「留在 CfT + 剔除 Widevine」，但那会改变正式包内容、与主线 T10 冲突，**等 T10 收口后再做**。
+**授权你改 `deploy/`，以及 `scripts/` 里与聚合执行器相关的部分。**
 
-**T67 Windows UNC/junction 不在这批**，因为 `browser_profiles_windows.rs` 是 `#[cfg(target_os = "windows")]`，在 macOS 上根本不参与编译，做不出「先看到失败的测试」这一步。必须在 Windows 机上做。
+T72 的第 ② 项说：`deploy/ingress/test_ingress_config.py`(2 条) 与 `deploy/cloud/test_cloud_deployment.py`(46 条) 共 **48 条断言无任何执行者**——pytest 的 `testpaths=["tests"]` 收不到，runner 只 glob `scripts/` 也收不到，唯一调用方式是文档里一行手敲命令。
+
+你的 `050dfc9` 声称补齐了执行证据。**请核实它现在是不是真的被执行了。** 判据不是「代码里接上了」，而是：**跑一次聚合门禁，能不能从输出里数出这 48 条确实跑了。**
+
+这是本仓库反复吃亏的形状：「跑了 50 条断言」和「什么都没跑就 return 0」在汇总里长得一模一样。runner 现在已经会打印 checks 数（实测 `all 54 script tests passed (674 checks)`），请确认这 48 条计入其中；数不出来就补上。
+
+---
+
+## C2 — T57b：按 T57 调研结论执行 e2e 入口的并 / 修 / 废
+
+T57 调研已完成，结论**推翻了「整族长期未运行」这个前提**（见台账「✅ 验收基础设施与门禁」T57 行）。现在执行调研得出的处置。
+
+面：`frontend/e2e-tauri/`、WebdriverIO 配置、相关 npm script。**不要碰 `frontend/e2e/`**（Playwright，主线在用）。
+
+判据：**每一个保留下来的入口都必须有确定的执行者**；废弃的要真删干净——`CLAUDE.md` 代码删除规范要求直接删除而不是注释掉，并 grep 清理所有引用（配置、npm script、文档提及）。
+
+---
+
+## C3 — T25：视频线 WDIO 验收补齐真实资源前置
+
+与你刚做的 T78 相邻但不是同一件事：视频线的 WebdriverIO 验收需要真实资源（内置 Chromium、执行器包、视频运行时）才能跑，现在缺前置声明。
+
+`scripts/gate_prerequisites.py`（T80 引入）已经把「门禁 → 产物 → 生产者」做成单点声明，**提示信息从 `producer` 字段生成，所以指错就是命令错**。沿用它，只加声明、不动它的结构——这是 `scripts/` 下授权你碰的文件之一。
+
+---
+
+## C6 — backend 侧失败矩阵审计（**先出清单，不要动手改**）
+
+`CLAUDE.md` §9 要求：每个跨进程、跨层或有外部副作用的任务，开发前必须覆盖适用的失败矩阵（非法状态转换、重复请求、多实例竞争、Sidecar 崩溃 / 超时 / 版本不匹配、断网、平台超时、幂等与结果不确定、磁盘满、权限拒绝、敏感信息泄漏、重启恢复……）。
+
+审计 `backend/` 侧现有能力，找出哪些缺覆盖，出清单到 `docs/development/C6-backend-failure-matrix-audit.md`，按「这条缺失在真实用户场景下会怎样」排序。
+
+要求：每条给出**具体文件与行号**，以及你判定「没覆盖」的依据（在哪个测试文件里搜的、搜的什么关键词、零命中）。**不要写「建议加强错误处理」这类无法验证的条目。** 主线看完清单再决定修哪些。
+
+---
+
+## 完成后
+
+每条：相关包测试通过 + `docs/development/<任务ID>.md` 写完 + 中文提交。合并前告诉主线分支名，**台账由主线更新**。
+
+**如果你判断某条的前提不成立，直接说前提不成立并给出证据，不要为了有产出而硬做。** 第二批 T77 那次判断是对的（前端投影与权威态其实自洽），省掉了一次无用改动——这种否定结论同样是交付。

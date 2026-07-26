@@ -23,9 +23,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from build_embedded_chromium_staging import build_staging, load_staging_contract
+from build_embedded_chromium_staging import (
+    CHROMIUM_CONTRACT,
+    DEFAULT_ARCHIVES,
+    build_staging,
+    load_staging_contract,
+)
 from run_bm_04_acceptance import current_target_id
-from run_bm_08_acceptance import CHROMIUM_CONTRACT, DEFAULT_ARCHIVES
 from test_motion_video_render_adapter import (
     WorkerSession,
     bootstrap_document,

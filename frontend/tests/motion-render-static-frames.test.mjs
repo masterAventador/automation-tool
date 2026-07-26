@@ -32,9 +32,7 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../../", import.meta.url);
 const WORKER = fileURLToPath(new URL("workers/motion_composition/worker.mjs", repositoryRoot));
 
-const WORKER_VERSION = "0.7.68";
 const PROTOCOL_VERSION = "1.0";
-const EVENT_DOMAIN = "automation-tool.video-worker-event.v1\0";
 const COMMAND_DOMAIN = "automation-tool.video-worker-command.v1\0";
 const TOKEN = "b".repeat(64);
 const JOB_ID = "7d444840-9dc0-41a2-bcd4-e15b02a4c51e";

@@ -184,11 +184,12 @@ def postgresql_url() -> Iterator[str]:
 
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
 from build_embedded_chromium_staging import (  # noqa: E402
+    CHROMIUM_CONTRACT,
+    DEFAULT_ARCHIVES,
     build_staging,
     load_staging_contract,
 )
 from run_bm_04_acceptance import current_target_id  # noqa: E402
-from run_bm_08_acceptance import CHROMIUM_CONTRACT, DEFAULT_ARCHIVES  # noqa: E402
 
 
 @pytest.fixture(scope="session")
