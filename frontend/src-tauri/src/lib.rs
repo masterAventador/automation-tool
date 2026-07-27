@@ -829,6 +829,14 @@ fn run_motion_render_job(
             motion_video_studio::cancel_marker_file_name()
                 .map_err(|_| MotionRenderStageFailure::Render)?
                 .to_owned(),
+            // The template's own stage: this render is `composition_template`
+            // output, whose type scale is written for it.
+            local_video_orchestrator::VideoWorkerRenderCanvas::new(
+                motion_video_studio::TEMPLATE_CANVAS_WIDTH,
+                motion_video_studio::TEMPLATE_CANVAS_HEIGHT,
+                motion_video_studio::TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+            )
+            .map_err(|_| MotionRenderStageFailure::Render)?,
             allowed_assets,
             frame_count,
             budget.wall_seconds(),

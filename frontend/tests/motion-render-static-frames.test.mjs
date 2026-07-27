@@ -179,6 +179,11 @@ async function renderPage(html, executable, major, assets = []) {
   }
   const sandbox = {
     allowedAssets: assets.map((asset) => asset.relative),
+    // The stage travels with the request now: these fixtures are template-shaped
+    // compositions, so they ask for the template's own canvas. A catalog part
+    // asks for the stage it declares — see
+    // `contracts/video/motion-render-canvas.v1.json`.
+    canvas: { deviceScaleFactor: 2, height: 360, width: 640 },
     // The Worker holds no cancellation name of its own; the caller supplies the
     // declared one. See `contracts/video/motion-render-cancel-marker.v1.json`.
     cancelMarker: CANCEL_MARKER,

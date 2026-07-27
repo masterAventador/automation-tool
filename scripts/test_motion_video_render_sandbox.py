@@ -113,6 +113,10 @@ def cancel_marker_file_name() -> str:
 def sandbox_spec(workspace: Path, **overrides: object) -> dict[str, object]:
     spec: dict[str, object] = {
         "allowedAssets": ["assets/style.css"],
+        # The stage travels with the request: this fixture is template-shaped,
+        # so it asks for the template's canvas. A catalog part asks for the one
+        # it declares. See `contracts/video/motion-render-canvas.v1.json`.
+        "canvas": {"deviceScaleFactor": 2, "height": 360, "width": 640},
         "cancelMarker": cancel_marker_file_name(),
         "entryHtml": "entry.html",
         "frameCount": 3,

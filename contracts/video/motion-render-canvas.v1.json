@@ -9,9 +9,10 @@
   "outputWidth": 1280,
   "outputHeight": 720,
   "definedIn": [
-    "workers/motion_composition/worker.mjs",
     "backend/src/automation_tool/executor/motion_authoring/agent.py",
-    "frontend/src-tauri/src/motion_video_studio.rs"
+    "frontend/src-tauri/src/local_video_orchestrator.rs",
+    "frontend/src-tauri/src/motion_video_studio.rs",
+    "workers/motion_composition/worker.mjs"
   ],
   "enforcedBy": "scripts/test_motion_authoring_agent.py",
   "rationale": {
@@ -19,5 +20,16 @@
     "resolution": "The capture viewport is one declared value read by every side. The authoring gate rejects any composition whose declared stage differs from it, so the mismatch fails before a browser is launched rather than after an MP4 exists.",
     "changing": "Raising the canvas means changing this file and the sandbox spec together; the still-frame gate in the render job is the backstop that keeps a future mismatch loud.",
     "scale": "Sharper output is bought with deviceScaleFactor, not with a larger stage. Every type and spacing rule in composition_template is written for a 640x360 stage — 42px headlines, 40px padding — so enlarging the stage would leave them adrift in a bigger frame rather than filling it, and would require rewriting the whole scale. A higher device pixel ratio re-rasterises text and vector art at the target resolution with no layout rule touched. outputWidth/outputHeight are width/height times this factor and are what a captured PNG actually measures; the composition still declares width/height, which is what the authoring gate compares against. Measured 2026-07-27 on the packaged Chromium with a real catalog part: the per-frame cost of factor 2 sits inside the run-to-run noise of factor 1, so this is close to free. Raising it again (3 gives 1920x1080) needs the same measurement repeated, because cost is not linear in pixels."
+  },
+  "requestedCanvas": {
+    "$comment": "What one render may ask its viewport to be. The template canvas above is still a fixed pair — `composition_template` writes its whole type scale for 640x360 and the authoring gate compares against it. A catalog part is a different thing: an independent composition that declares its own stage, and rendering it on the template's stage captures the top-left corner of it. Measured on the frozen catalog: 105 parts declare 1920x1080, three declare 1080x1920 portrait and one 1440x2560, so the viewport has to travel with the request. The bounds are what keeps that from becoming an open dial: a render that asks for something outside them is refused before a browser starts.",
+    "widthMinimum": 320,
+    "widthMaximum": 2560,
+    "heightMinimum": 320,
+    "heightMaximum": 2560,
+    "deviceScaleFactorMinimum": 1,
+    "deviceScaleFactorMaximum": 3,
+    "pixelsMaximum": 3686400,
+    "pixelsRationale": "1920x1080 at factor 1, and 640x360 at factor 2, both sit inside this. It is the product of output pixels, because that is what a captured PNG costs and what the per-frame budget in motion-render-sandbox-budget.v1.json is written against. Raising it needs the same measurement the deviceScaleFactor rationale above demands, for the same reason: cost is not linear in pixels."
   }
 }

@@ -70,6 +70,18 @@ pub fn cancel_marker_file_name() -> Result<&'static str, MotionVideoStudioError>
 /// the worker asset root. The authoring prompt names this exact path, so it is
 /// declared once here and never spelled out again.
 pub const AUTHORING_RUNTIME_ASSET: &str = "runtime/gsap.min.js";
+/// The stage `composition_template` draws on, and the factor its output is
+/// rasterised at.
+///
+/// Declared here rather than passed in: every type and spacing rule in that
+/// template is written for 640x360, so this pair is a property of the template
+/// and not of a request. A catalog part carries its own stage instead — see
+/// `VideoWorkerRenderCanvas`. Mirrors `width`/`height`/`deviceScaleFactor` in
+/// `contracts/video/motion-render-canvas.v1.json`.
+pub const TEMPLATE_CANVAS_WIDTH: u32 = 640;
+pub const TEMPLATE_CANVAS_HEIGHT: u32 = 360;
+pub const TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR: u32 = 2;
+
 /// The package the locked catalog calls this runtime.
 const AUTHORING_RUNTIME_PACKAGE: &str = "gsap";
 /// The largest runtime this seed will read. The locked build is ~72 KB; a file

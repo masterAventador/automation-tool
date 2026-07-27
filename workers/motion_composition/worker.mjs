@@ -25,19 +25,32 @@ const CHROMIUM_MAJOR_MAXIMUM = 999;
 const RENDER_TIMEOUT_SECONDS_MINIMUM = 1;
 const RENDER_TIMEOUT_SECONDS_MAXIMUM = 60;
 const CHROMIUM_VERSION_PATTERN = /(?:^|\s|\/)(\d+)\.\d+\.\d+\.\d+/;
-// The fixed composition viewport every captured frame must match exactly.
+// The viewport travels with the render request, because more than one kind of
+// composition is rendered now. `composition_template` draws on a 640x360 stage
+// its whole type scale is written for; a catalog part is an independent
+// composition that declares its own — 105 of the frozen catalog's parts are
+// 1920x1080, three are 1080x1920 portrait and one is 1440x2560. Rendering a
+// part on the template's stage captures the top-left corner of it, which is the
+// incident `contracts/video/motion-render-canvas.v1.json` records under
+// `rationale.problem`: a valid MP4 that was a still image, invisible to both
+// the authoring gates and this sandbox because neither knew the other's number.
+//
+// What stays fixed here are the bounds. They mirror `requestedCanvas` in that
+// contract; `frontend/tests/motion-render-canvas-per-render.test.mjs` is what
+// keeps the two from drifting.
+//
 // The created CDP target does not inherit `--window-size`, so the render
-// session also forces these metrics through the DevTools protocol.
-const RENDER_VIEWPORT_WIDTH = 640;
-const RENDER_VIEWPORT_HEIGHT = 360;
-// Output pixels are the CSS stage times this factor. The stage stays 640x360
-// because the whole type scale in `composition_template` is sized for it — a
-// larger stage would leave 42px headlines adrift in a much bigger frame. A
-// higher device pixel ratio instead re-rasterises text and vector art at the
-// target resolution with every layout rule untouched, which is what a sharper
-// film has to mean here. Measured 2026-07-27 on the packaged Chromium: the
-// per-frame cost of factor 2 sits inside the run-to-run noise of factor 1.
-const RENDER_DEVICE_SCALE_FACTOR = 2;
+// session also forces the requested metrics through the DevTools protocol.
+const CANVAS_WIDTH_MINIMUM = 320;
+const CANVAS_WIDTH_MAXIMUM = 2560;
+const CANVAS_HEIGHT_MINIMUM = 320;
+const CANVAS_HEIGHT_MAXIMUM = 2560;
+const CANVAS_DEVICE_SCALE_FACTOR_MINIMUM = 1;
+const CANVAS_DEVICE_SCALE_FACTOR_MAXIMUM = 3;
+// Output pixels, not CSS pixels: a captured PNG costs what it measures, and the
+// per-frame budget in `motion-render-sandbox-budget.v1.json` is written against
+// that. 1920x1080 at factor 1 and 640x360 at factor 2 both sit inside it.
+const CANVAS_OUTPUT_PIXELS_MAXIMUM = 3686400;
 const MAX_PROTOCOL_RESPONSE_BYTES = 64 * 1024;
 const SANDBOX_FRAMES_MAXIMUM = 600;
 // Wall clock is the stall guard: a hung render is killed at this many seconds.
@@ -328,11 +341,29 @@ function boundedInteger(value, minimum, maximum) {
   return Number.isInteger(value) && value >= minimum && value <= maximum;
 }
 
+function validCanvas(value) {
+  if (!hasExactKeys(value, ["deviceScaleFactor", "height", "width"])) return false;
+  if (!boundedInteger(value.width, CANVAS_WIDTH_MINIMUM, CANVAS_WIDTH_MAXIMUM)) return false;
+  if (!boundedInteger(value.height, CANVAS_HEIGHT_MINIMUM, CANVAS_HEIGHT_MAXIMUM)) return false;
+  if (!boundedInteger(
+    value.deviceScaleFactor,
+    CANVAS_DEVICE_SCALE_FACTOR_MINIMUM,
+    CANVAS_DEVICE_SCALE_FACTOR_MAXIMUM,
+  )) return false;
+  // The product is what a frame costs. Checking the sides alone would admit
+  // 2560x2560 at factor 3, which is 59 megapixels a frame.
+  const factor = value.deviceScaleFactor;
+  return value.width * factor * value.height * factor <= CANVAS_OUTPUT_PIXELS_MAXIMUM;
+}
+
+
 function validSandboxSpec(value) {
   if (!hasExactKeys(value, [
-    "allowedAssets", "cancelMarker", "entryHtml", "frameCount", "maxCpuSeconds",
-    "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes", "workspace",
+    "allowedAssets", "canvas", "cancelMarker", "entryHtml", "frameCount",
+    "maxCpuSeconds", "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes",
+    "workspace",
   ])) return false;
+  if (!validCanvas(value.canvas)) return false;
   if (typeof value.workspace !== "string" || !isAbsolute(value.workspace)) return false;
   if (!validSandboxRelativePath(value.entryHtml)) return false;
   // This Worker holds no cancellation name of its own: the caller says which
@@ -831,6 +862,8 @@ class SandboxCdpPipe {
  * memory and output-byte budgets, and process-group kill on every exit.
  */
 function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environment) {
+  // Validated by `validCanvas` before this runs.
+  const canvas = spec.canvas;
   return new Promise((resolve) => {
     let child;
     try {
@@ -865,7 +898,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         "--proxy-bypass-list=<-loopback>",
         `--user-data-dir=${join(jobDirectory, "profile")}`,
         `--crash-dumps-dir=${join(jobDirectory, "crashes")}`,
-        `--window-size=${RENDER_VIEWPORT_WIDTH},${RENDER_VIEWPORT_HEIGHT}`,
+        `--window-size=${canvas.width},${canvas.height}`,
         "about:blank",
       ], {
         detached: true,
@@ -1040,9 +1073,9 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       }
       await installInterception(sessionId);
       const metrics = await pipe.send("Emulation.setDeviceMetricsOverride", {
-        width: RENDER_VIEWPORT_WIDTH,
-        height: RENDER_VIEWPORT_HEIGHT,
-        deviceScaleFactor: RENDER_DEVICE_SCALE_FACTOR,
+        width: canvas.width,
+        height: canvas.height,
+        deviceScaleFactor: canvas.deviceScaleFactor,
         mobile: false,
       }, sessionId);
       if (metrics?.error !== undefined) {
