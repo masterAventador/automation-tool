@@ -158,5 +158,41 @@ class TheImageCarriesWhatWasStaged(unittest.TestCase):
         self.assertFalse(Path("/Volumes", volume_name).exists())
 
 
+class TheOutputDirectoryIsCreatedBeforeItIsUsed(unittest.TestCase):
+    """`create_disk_image` stages under `output.parent`, so it must create it.
+
+    Measured 2026-07-27, three release runs, two of them lost to this: the
+    build died at `tempfile.TemporaryDirectory(dir=output.parent)` with
+    `FileNotFoundError: .../bundle/dmg/tmpXXXX`. `tauri build --bundles app`
+    produces only `bundle/macos/` — Tauri's DMG bundler never runs, so
+    `bundle/dmg/` is never created by the build. The pre-refactor code created
+    it here; when the imaging moved into `fill_disk_image` the `mkdir` moved
+    with it, and `fill_disk_image` runs *after* this staging directory.
+
+    Creating it by hand does not work: `tauri build` rebuilds `bundle/`
+    wholesale on every run (measured — a directory made at 08:31 was gone by
+    08:36:41), so the next run is back where it started.
+
+    Asserted on the source rather than by calling the function, because
+    reaching that line requires notarising a real bundle: forty minutes and a
+    round trip to Apple per assertion.
+    """
+
+    def test_create_disk_image_makes_the_output_directory_first(self) -> None:
+        source = Path(build_release_package.__file__).read_text(encoding="utf-8")
+        start = source.index("def create_disk_image")
+        body = source[start : source.index("\ndef ", start + 1)]
+
+        staging = body.index("TemporaryDirectory(dir=output.parent)")
+        made = body.find("output.parent.mkdir")
+
+        self.assertNotEqual(made, -1, "create_disk_image never creates output.parent")
+        self.assertLess(
+            made,
+            staging,
+            "output.parent is used as a temporary-directory location before "
+            "anything creates it",
+        )
+
 if __name__ == "__main__":
     unittest.main()

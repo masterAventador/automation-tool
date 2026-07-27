@@ -477,6 +477,11 @@ def create_disk_image(
     submission = notarize_and_staple(artifact=application, identity=identity)
     announce(f"Application notarised and stapled (submission {submission})")
     announce("Creating the release disk image from the final App bundle")
+    # Before anything stages under it. `tauri build --bundles app` produces only
+    # `bundle/macos/` — its DMG bundler never runs — so `bundle/dmg/` does not
+    # exist on the first image of a build, and creating it by hand does not
+    # survive: `tauri build` rebuilds `bundle/` wholesale on every run.
+    output.parent.mkdir(parents=True, exist_ok=True)
     # Image a staging directory rather than the bare .app, so the volume also
     # carries the `Applications` symlink the customer drags onto. A volume
     # holding nothing but the bundle is what shipped on 2026-07-26: no symlink,
