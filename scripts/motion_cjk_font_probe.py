@@ -38,6 +38,12 @@ from typing import Final, Iterable, Sequence
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 
+# The Executor package owns the render-time half of PC-13, so this probe reads
+# its ranges from there rather than restating them.
+sys.path.insert(0, str(REPOSITORY_ROOT / "backend/src"))
+
+from automation_tool.executor.motion_authoring import part_typography  # noqa: E402
+
 # Family names that select a class of font rather than a font, plus the two
 # CSS-wide keywords. A part naming one of these is asking the host for whatever
 # it has, which is the fallback this probe exists to replace.
@@ -67,44 +73,24 @@ _GENERIC_FAMILIES: Final = frozenset(
 
 _FONT_FAMILY_DECLARATION: Final = re.compile(r"font-family\s*:\s*([^;}\n]+)", re.IGNORECASE)
 
-# The code points a Chinese face must own. Latin, Latin-1 punctuation and the
-# middle dot are deliberately absent: those stay with the part's own typeface,
-# which is the whole point of the split.
-_CJK_RANGES: Final[tuple[tuple[int, int], ...]] = (
-    (0x2E80, 0x2EFF),  # CJK radicals supplement
-    (0x2F00, 0x2FDF),  # Kangxi radicals
-    (0x3000, 0x303F),  # CJK symbols and punctuation
-    (0x3040, 0x30FF),  # Hiragana and Katakana (present in the SC fonts)
-    (0x3100, 0x312F),  # Bopomofo
-    (0x31C0, 0x31EF),  # CJK strokes
-    (0x3200, 0x33FF),  # Enclosed CJK letters, CJK compatibility
-    (0x3400, 0x4DBF),  # CJK unified ideographs extension A
-    (0x4E00, 0x9FFF),  # CJK unified ideographs
-    (0xF900, 0xFAFF),  # CJK compatibility ideographs
-    (0xFE10, 0xFE1F),  # Vertical forms
-    (0xFE30, 0xFE4F),  # CJK compatibility forms
-    (0xFF00, 0xFFEF),  # Halfwidth and fullwidth forms
-)
+# The code points a Chinese face must own are declared once, in the Executor
+# package, because the production rule generator lives there — it has to ship
+# inside the frozen package, and nothing under `scripts/` does. This probe
+# measures against the same tuple it emits; a second copy here would be two
+# hand-kept lists whose drift only shows up as characters silently rendering in
+# the host font.
+_CJK_RANGES: Final[tuple[tuple[int, int], ...]] = part_typography.CJK_RANGES
 
-_CJK_UNICODE_RANGE: Final = ", ".join(
-    f"U+{start:04X}-{end:04X}" for start, end in _CJK_RANGES
-)
+_CJK_UNICODE_RANGE: Final = part_typography.CHINESE_UNICODE_RANGE
 
 
 def cjk_codepoints() -> frozenset[int]:
     """Every code point the Chinese face claims, as one set."""
-    return frozenset(
-        code for start, end in _CJK_RANGES for code in range(start, end + 1)
-    )
+    return part_typography.cjk_codepoints()
 
 
 def cjk_unicode_range() -> str:
-    """The same claim as a CSS `unicode-range` value.
-
-    Public because the production rule generator must emit the exact range this
-    probe measured; two hand-kept copies would drift and the drift would only
-    show up as characters silently rendering in the host font.
-    """
+    """The same claim as a CSS `unicode-range` value."""
     return _CJK_UNICODE_RANGE
 
 

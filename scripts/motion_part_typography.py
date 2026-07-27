@@ -38,23 +38,20 @@ from pathlib import Path
 from typing import Callable, Final, Iterable, Mapping, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/src"))
 
-from motion_cjk_font_probe import cjk_unicode_range
+from automation_tool.executor.motion_authoring import part_typography  # noqa: E402
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 
-# The Han code points the Chinese face claims, owned by the PC-13 probe so the
-# measurement and the production rule can never drift apart.
-CHINESE_UNICODE_RANGE: Final = cjk_unicode_range()
-# Everything the part's own typeface keeps. Copied from the range Google Fonts
-# uses for its `latin` + `latin-ext` subsets, which is what the packaged woff2
-# files actually contain.
-LATIN_UNICODE_RANGE: Final = (
-    "U+0000-00FF, U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, "
-    "U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2000-206F, "
-    "U+20A0-20C0, U+2113, U+2122, U+2191, U+2193, U+2212, U+2215, U+2C60-2C7F, "
-    "U+A720-A7FF, U+FEFF, U+FFFD"
-)
+# Both ranges, the face record and the rule generator live in the Executor
+# package: emission has to ship inside the frozen package and `scripts/` does
+# not. Re-exported here so this module's own callers and tests keep one name
+# for each, with exactly one definition behind it.
+CHINESE_UNICODE_RANGE: Final = part_typography.CHINESE_UNICODE_RANGE
+LATIN_UNICODE_RANGE: Final = part_typography.LATIN_UNICODE_RANGE
+ResolvedFace = part_typography.ResolvedFace
+part_font_css = part_typography.part_font_css
 CATALOG_CONTRACT_PATH: Final = REPOSITORY_ROOT / "contracts/quality/motion-catalog.v1.json"
 TYPOGRAPHY_CONTRACT_PATH: Final = REPOSITORY_ROOT / "contracts/video/motion-part-typography.v1.json"
 OFFLINE_LOCK_PATH: Final = REPOSITORY_ROOT / "contracts/video/offline-motion-dependencies.v1.json"
@@ -124,15 +121,6 @@ class FamilyPolicy:
     replacement: str | None
     reason: str
     visual_difference: str
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedFace:
-    """One `@font-face` rule: the requested name, served by shippable bytes."""
-
-    css_family: str
-    source_family: str
-    weight: int
 
 
 def _family_names(stack: str) -> set[str]:
@@ -280,37 +268,6 @@ def face_artifact(lock: dict, source_family: str, weight: int) -> tuple[str, ...
                 if face["artifactPath"] not in paths:
                     paths.append(face["artifactPath"])
     return tuple(paths)
-
-
-def part_font_css(
-    faces: Sequence[ResolvedFace],
-    *,
-    chinese_artifact: str,
-    latin_artifact: Callable[[ResolvedFace], str],
-) -> str:
-    """The `<style>` block injected into a part's render-time working copy.
-
-    Two rules per requested pair, split by `unicode-range`: the part's own
-    Latin typeface keeps the Latin code points, and the Chinese face takes the
-    Han ones. Both rules carry the *requested* weight rather than a range,
-    because PC-13 measured that Chromium picks the weight bucket first and
-    never falls back to a lighter face inside the same family.
-    """
-    blocks: list[str] = []
-    for face in faces:
-        blocks.append(
-            f"@font-face{{font-family:'{face.css_family}';font-style:normal;"
-            f"font-weight:{face.weight};font-display:block;"
-            f"src:url({latin_artifact(face)}) format('woff2');"
-            f"unicode-range:{LATIN_UNICODE_RANGE};}}"
-        )
-        blocks.append(
-            f"@font-face{{font-family:'{face.css_family}';font-style:normal;"
-            f"font-weight:{face.weight};font-display:block;"
-            f"src:url({chinese_artifact}) format('woff2');"
-            f"unicode-range:{CHINESE_UNICODE_RANGE};}}"
-        )
-    return "\n".join(blocks)
 
 
 def scan_digest(scanned: Mapping[str, frozenset[tuple[str, int]]]) -> str:

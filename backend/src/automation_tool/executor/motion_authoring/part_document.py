@@ -44,31 +44,71 @@ class TextNode:
     `text` is verbatim, including the surrounding whitespace the document had:
     a slot compares its frozen original against this value, and trimming here
     would make two different documents compare equal.
+
+    `start` and `end` bound the run in the *source* string, which is not the
+    same length as `text`: with `convert_charrefs` on, `Maya &amp; Chen` is
+    reported as the 11-character `Maya & Chen` but occupies 15 source
+    characters. Substitution needs the source span, and it has to come from
+    this walker rather than from a search: two runs can read the same thing,
+    and a search would edit whichever came first.
     """
 
     index: int
     text: str
     parent_tag: str
     visible: bool
+    start: int
+    end: int
 
 
 class _TextWalker(HTMLParser):
-    def __init__(self) -> None:
+    """Walks the document, numbering text runs and bounding them in the source.
+
+    A run's end offset is the start of whatever token follows it, so every
+    handler closes the pending run before doing its own work. `getpos()` was
+    measured to report the *start* of the token being handled, including for
+    the merged run `convert_charrefs` produces, which is what makes this work.
+    """
+
+    def __init__(self, source: str) -> None:
         # convert_charrefs resolves `&amp;` into `&` and hands each text run
         # over whole, so a slot's frozen original is what the document says
         # rather than how it happens to spell it.
         super().__init__(convert_charrefs=True)
+        self._source = source
+        self._line_starts = _line_starts(source)
         self._stack: list[str] = []
+        self._pending: int | None = None
         self.nodes: list[TextNode] = []
 
+    def _offset(self) -> int:
+        line, column = self.getpos()
+        return self._line_starts[line - 1] + column
+
+    def _close_pending(self) -> None:
+        if self._pending is None:
+            return
+        node = self.nodes[self._pending]
+        self.nodes[self._pending] = TextNode(
+            index=node.index,
+            text=node.text,
+            parent_tag=node.parent_tag,
+            visible=node.visible,
+            start=node.start,
+            end=self._offset(),
+        )
+        self._pending = None
+
     def handle_starttag(self, tag: str, attrs: object) -> None:
+        self._close_pending()
         self._stack.append(tag)
 
     def handle_startendtag(self, tag: str, attrs: object) -> None:
         # Self-closing: it opens and closes without ever containing text.
-        return None
+        self._close_pending()
 
     def handle_endtag(self, tag: str) -> None:
+        self._close_pending()
         # An unbalanced close (upstream documents contain a few) must not
         # unwind past the element that actually opened, or every later node
         # would be attributed to the wrong parent.
@@ -76,24 +116,53 @@ class _TextWalker(HTMLParser):
             while self._stack and self._stack.pop() != tag:
                 continue
 
+    def handle_comment(self, data: str) -> None:
+        self._close_pending()
+
+    def handle_decl(self, decl: str) -> None:
+        self._close_pending()
+
+    def handle_pi(self, data: str) -> None:
+        self._close_pending()
+
+    def unknown_decl(self, data: str) -> None:
+        self._close_pending()
+
     def handle_data(self, data: str) -> None:
+        self._close_pending()
         parent = self._stack[-1] if self._stack else ""
         painted = not any(tag in NON_RENDERING_TAGS for tag in self._stack)
+        self._pending = len(self.nodes)
         self.nodes.append(
             TextNode(
                 index=len(self.nodes),
                 text=data,
                 parent_tag=parent,
                 visible=painted and bool(data.strip()),
+                start=self._offset(),
+                # Replaced by `_close_pending`; a run that reaches end of input
+                # is closed against the source length in `enumerate_text_nodes`.
+                end=len(self._source),
             )
         )
 
 
+def _line_starts(source: str) -> tuple[int, ...]:
+    """Absolute offset of each line, so `getpos()` can be made absolute."""
+    starts = [0]
+    for offset, character in enumerate(source):
+        if character == "\n":
+            starts.append(offset + 1)
+    return tuple(starts)
+
+
 def enumerate_text_nodes(html: str) -> tuple[TextNode, ...]:
     """Every text run in document order, numbered densely from zero."""
-    walker = _TextWalker()
+    walker = _TextWalker(html)
     walker.feed(html)
     walker.close()
+    # A trailing run has no following token to bound it; its `end` is already
+    # the source length from construction, so nothing more is needed here.
     return tuple(walker.nodes)
 
 
