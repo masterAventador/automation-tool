@@ -33,6 +33,12 @@ EXPECTED_IDS = {
     for prefix, count in GROUP_COUNTS.items()
     for number in range(1, count + 1)
 }
+# Derived, never typed a second time. The inventory grows when a workstream
+# turns out to need a task nobody planned for, and the two places below that
+# used to spell the total out are the shape this repository has already been
+# bitten by: one gets updated, the other keeps asserting the old number and
+# the gate then rejects the very ledger it was meant to protect.
+TOTAL_TASKS = len(EXPECTED_IDS)
 STATUSES = (
     "⬜ 未开始",
     "🧪 RED",
@@ -101,7 +107,7 @@ def parse_task_rows(roadmap: str) -> dict[str, TaskRow]:
         )
     missing = EXPECTED_IDS - set(rows)
     extra = set(rows) - EXPECTED_IDS
-    if missing or extra or len(rows) != 87:
+    if missing or extra or len(rows) != TOTAL_TASKS:
         fail(
             "task inventory drifted: "
             f"count={len(rows)}, missing={sorted(missing)}, extra={sorted(extra)}"
@@ -130,8 +136,8 @@ def validate_summary(roadmap: str, rows: dict[str, TaskRow]) -> None:
                 f"status summary drifted for {status}: "
                 f"declared={declared[status]}, actual={actual[status]}"
             )
-    if sum(declared.values()) != 87:
-        fail("status summary total must be 87")
+    if sum(declared.values()) != TOTAL_TASKS:
+        fail(f"status summary total must be {TOTAL_TASKS}")
 
 
 def validate_roadmap_text(roadmap: str) -> dict[str, TaskRow]:
