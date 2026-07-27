@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openSidebarDestination, openVideoEditing } from "./navigation";
 
 /**
  * Screen density: how much a page actually says in the one screen it gets.
@@ -35,14 +36,13 @@ const HARNESS = "/harness.html?health=available";
 
 /** Every destination in the sidebar, in the order they appear there. */
 const SIDEBAR_PAGES = [
-  "工作台",
-  "新建任务",
-  "任务记录",
-  "视频制作",
-  "视频剪辑",
-  "作品发布",
-  "平台状态",
-  "设置与诊断",
+  "热点发现",
+  "创作",
+  "发布",
+  "消息与互动",
+  "自动化",
+  "账号与平台",
+  "设置",
 ] as const;
 
 /**
@@ -56,7 +56,7 @@ const MIN_TITLE_GAP = 16;
 /** The column the page content is given, in CSS pixels. */
 function contentColumnWidth(page: Page): Promise<number> {
   return page
-    .locator(".desktop-content main")
+    .locator(".video-editing")
     .evaluate((element) => element.getBoundingClientRect().width);
 }
 
@@ -93,13 +93,14 @@ function narrowCardContents(page: Page): Promise<{ card: number; content: number
 
 async function openSidebarPage(page: Page, name: string): Promise<void> {
   await page.goto(HARNESS);
-  await page.getByRole("menuitem", { name }).click();
+  await openSidebarDestination(page, name);
   await expect(page.getByRole("menuitem", { name })).toBeVisible();
 }
 
 test.describe("视频剪辑 fills the column it is given", () => {
   test("剪辑项目 pane", async ({ page }) => {
-    await openSidebarPage(page, "视频剪辑");
+    await page.goto(HARNESS);
+    await openVideoEditing(page);
 
     const column = await contentColumnWidth(page);
     const pane = await paneWidth(page, ".video-editing-projects");
@@ -111,7 +112,8 @@ test.describe("视频剪辑 fills the column it is given", () => {
   });
 
   test("提交与任务 pane", async ({ page }) => {
-    await openSidebarPage(page, "视频剪辑");
+    await page.goto(HARNESS);
+    await openVideoEditing(page);
     await page.getByRole("tab", { name: "提交与任务" }).click();
 
     const column = await contentColumnWidth(page);
@@ -124,7 +126,8 @@ test.describe("视频剪辑 fills the column it is given", () => {
   });
 
   test("剪辑项目 card contents", async ({ page }) => {
-    await openSidebarPage(page, "视频剪辑");
+    await page.goto(HARNESS);
+    await openVideoEditing(page);
 
     const narrow = await narrowCardContents(page);
 
@@ -133,7 +136,8 @@ test.describe("视频剪辑 fills the column it is given", () => {
   });
 
   test("提交与任务 card contents", async ({ page }) => {
-    await openSidebarPage(page, "视频剪辑");
+    await page.goto(HARNESS);
+    await openVideoEditing(page);
     await page.getByRole("tab", { name: "提交与任务" }).click();
 
     const narrow = await narrowCardContents(page);
@@ -148,17 +152,16 @@ test.describe("the page body starts below the title row, not against it", () => 
     test(name, async ({ page }) => {
       await openSidebarPage(page, name);
 
-      const gap = await page.locator(".desktop-content main").evaluate((main) => {
-        const titleRow = main.children[0];
-        const firstBlock = main.children[1];
-        if (titleRow === undefined || firstBlock === undefined) return null;
+      const gap = await page.locator(".desktop-content").evaluate((content) => {
+        const firstBlock = content.querySelector("main > .ops-page > :first-child");
+        if (firstBlock === null) return null;
         return Math.round(
-          firstBlock.getBoundingClientRect().top - titleRow.getBoundingClientRect().bottom,
+          firstBlock.getBoundingClientRect().top - content.getBoundingClientRect().top,
         );
       });
 
-      expect(gap, `${name}：页面没有渲染出标题行之后的内容块`).not.toBeNull();
-      expect(gap!, `${name}：标题行与首块内容之间只有 ${gap}px`).toBeGreaterThanOrEqual(
+      expect(gap, `${name}：页面没有渲染出内容块`).not.toBeNull();
+      expect(gap!, `${name}：页面内容与顶栏之间只有 ${gap}px`).toBeGreaterThanOrEqual(
         MIN_TITLE_GAP,
       );
     });

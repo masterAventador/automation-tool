@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openPublishingWorkspace } from "./navigation";
 import { writeThePublishCopy } from "./publish-copy";
 
 /**
@@ -41,14 +42,14 @@ const UPSTREAM_NAMES = [
  * still be clean even though the notice now hangs off it.
  */
 const PAGES = [
-  "工作台",
-  "新建任务",
-  "任务记录",
-  "视频制作",
-  "视频剪辑",
-  "作品发布",
-  "平台状态",
-  "设置与诊断",
+  "AI 助理",
+  "热点发现",
+  "创作",
+  "发布",
+  "消息与互动",
+  "自动化",
+  "账号与平台",
+  "设置",
 ];
 
 async function assertNoLeak(page: Page, where: string): Promise<void> {
@@ -77,7 +78,7 @@ test("no page leaks an upstream name into the accessibility tree", async ({ page
 
 test("the publish critical point stays clean once it is rendered", async ({ page }) => {
   await page.goto("/harness.html?health=available&scenario=publishing");
-  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await openPublishingWorkspace(page);
   await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await expect(page.getByRole("group", { name: "确认发布内容" })).toBeVisible();
@@ -87,7 +88,7 @@ test("the publish critical point stays clean once it is rendered", async ({ page
 
 test("a settled uncertain publish stays clean in what it explains", async ({ page }) => {
   await page.goto("/harness.html?health=available&scenario=publishing-uncertain");
-  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await openPublishingWorkspace(page);
   await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await page.getByRole("button", { name: /确认发布/ }).click();

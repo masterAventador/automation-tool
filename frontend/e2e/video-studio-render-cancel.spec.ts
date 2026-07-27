@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openVideoStudio } from "./navigation";
 
 /**
  * 用户自己按下取消，然后走开。
@@ -19,7 +20,7 @@ import { expect, test } from "@playwright/test";
 test("a run the operator cancelled stops being called progress", async ({ page }) => {
   await page.goto("/harness.html?health=available&scenario=motion-render-cancel");
 
-  await page.getByRole("menuitem", { name: "视频制作" }).click();
+  await openVideoStudio(page);
   await expect(page.getByRole("tab", { name: "新建视频" })).toBeVisible();
   await page.getByRole("button", { name: "选择品牌动效成片" }).click();
   await page.getByLabel("一句话视频需求").fill("用蓝色商务风做一段本周销售增长说明");
@@ -27,7 +28,7 @@ test("a run the operator cancelled stops being called progress", async ({ page }
 
   // 编排回来了，本机渲染真的开始了——此刻蓝点是属实的。
   await expect(page.getByText(/本机渲染开始了/)).toBeVisible({ timeout: 15_000 });
-  const videoEntry = page.getByRole("menuitem", { name: /视频制作/ });
+  const videoEntry = page.getByRole("menuitem", { name: /创作/ });
   await expect(videoEntry.locator("[title='视频制作正在进行中']")).toBeVisible();
 
   // 用户按下取消并确认。
@@ -36,8 +37,8 @@ test("a run the operator cancelled stops being called progress", async ({ page }
   await page.getByRole("button", { name: /确\s*定/ }).click();
   await expect(page.getByText("已取消")).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("menuitem", { name: "工作台" }).click();
-  const workbench = page.getByRole("heading", { name: "RPA 运营工作台" });
+  await page.getByRole("menuitem", { name: "AI 助理" }).click();
+  const workbench = page.getByRole("heading", { name: "AI 运营助理" });
   await expect(workbench).toBeVisible();
 
   // 那条运行已经不存在了，侧边栏也就没什么可说的。

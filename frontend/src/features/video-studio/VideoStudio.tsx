@@ -464,6 +464,7 @@ function NewVideoPage({
   briefBusy,
   onSubmitBrief,
   briefProblem,
+  embedded,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
@@ -475,6 +476,7 @@ function NewVideoPage({
   readonly onBriefChange: (brief: string) => void;
   readonly briefBusy: boolean;
   readonly onSubmitBrief: () => void;
+  readonly embedded: boolean;
   /**
    * What is wrong with the sentence as typed, or null.
    *
@@ -715,7 +717,13 @@ function NewVideoPage({
             );
           })}
         </div>
-        {openMessage === null ? (
+        {embedded ? (
+          <Alert
+            type="info"
+            showIcon
+            title="完整制作流程将直接嵌入当前 App，不会打开额外窗口。当前真实内嵌服务尚未接入。"
+          />
+        ) : openMessage === null ? (
           <Alert
             type="info"
             showIcon
@@ -733,41 +741,43 @@ function NewVideoPage({
          * button points at is the pattern this product already got right on
          * 提交本机渲染 in the preview tab, and it works for a screen reader too.
          */}
-        <Space orientation="vertical" size={4}>
-          <Button
-            type="primary"
-            loading={opening}
-            disabled={selectedMethod !== "material_montage_v1" || opening}
-            {...(selectedMethod === "material_montage_v1"
-              ? {}
-              : { "aria-describedby": OPEN_STUDIO_HINT_ID })}
-            onClick={() => {
-              setOpening(true);
-              setOpenMessage(null);
-              void gateway
-                .open()
-                .then(() => {
-                  onOpened();
-                  setOpenMessage({ type: "success", text: "完整制作界面已打开。" });
-                })
-                .catch((error: unknown) => {
-                  const code =
-                    error instanceof MaterialVideoStudioGatewayError
-                      ? error.code
-                      : "operation_unavailable";
-                  setOpenMessage({ type: "error", text: OPEN_ERRORS[code] });
-                })
-                .finally(() => setOpening(false));
-            }}
-          >
-            打开完整制作界面
-          </Button>
-          {selectedMethod === "material_montage_v1" ? null : (
-            <Typography.Text id={OPEN_STUDIO_HINT_ID} type="secondary">
-              这个界面只用于「智能素材成片」，先在上面选中它才能打开。
-            </Typography.Text>
-          )}
-        </Space>
+        {embedded ? null : (
+          <Space orientation="vertical" size={4}>
+            <Button
+              type="primary"
+              loading={opening}
+              disabled={selectedMethod !== "material_montage_v1" || opening}
+              {...(selectedMethod === "material_montage_v1"
+                ? {}
+                : { "aria-describedby": OPEN_STUDIO_HINT_ID })}
+              onClick={() => {
+                setOpening(true);
+                setOpenMessage(null);
+                void gateway
+                  .open()
+                  .then(() => {
+                    onOpened();
+                    setOpenMessage({ type: "success", text: "完整制作界面已打开。" });
+                  })
+                  .catch((error: unknown) => {
+                    const code =
+                      error instanceof MaterialVideoStudioGatewayError
+                        ? error.code
+                        : "operation_unavailable";
+                    setOpenMessage({ type: "error", text: OPEN_ERRORS[code] });
+                  })
+                  .finally(() => setOpening(false));
+              }}
+            >
+              打开完整制作界面
+            </Button>
+            {selectedMethod === "material_montage_v1" ? null : (
+              <Typography.Text id={OPEN_STUDIO_HINT_ID} type="secondary">
+                这个界面只用于「智能素材成片」，先在上面选中它才能打开。
+              </Typography.Text>
+            )}
+          </Space>
+        )}
       </Space>
     </Card>
   );
@@ -1285,8 +1295,10 @@ function ArtifactPage({
 export function VideoStudio({
   gateway,
   onPublishArtifact,
+  embedded = false,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
+  readonly embedded?: boolean | undefined;
   /**
    * Send a finished video on to the publishing page.
    *
@@ -1560,6 +1572,7 @@ export function VideoStudio({
                 briefBusy={busy || pending !== null}
                 onSubmitBrief={submitBrief}
                 briefProblem={briefProblem}
+                embedded={embedded}
               />
             ),
           },

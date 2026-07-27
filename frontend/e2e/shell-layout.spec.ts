@@ -13,7 +13,7 @@ import { expect, test } from "@playwright/test";
  * scroll, and the content region must.
  */
 
-const TALL_PAGE = "设置与诊断";
+const TALL_PAGE = "设置";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html?health=available&scenario=publishing");

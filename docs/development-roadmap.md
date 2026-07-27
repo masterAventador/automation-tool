@@ -2,7 +2,7 @@
 
 > 文档性质：后续开发的任务定义、依赖、状态与当前下一步台账；详细执行证据按任务拆分到 [`docs/development/`](./development/)
 > 建立日期：2026-07-18
-> 当前阶段：Wave 9 本地 MVP 最终验收报告已建立；P9-09 保持待真实账号与双平台正式设备验收；U9-01～U9-06、C10-01～C10-07 已完成，下一工程任务为 C10-08 云端部署
+> 当前阶段：Wave 10 已完成；UI-01 全局 UI 改版已在专用分支通过 React 自动化与视觉验收，保持待真实 Tauri 窗口验收
 > 执行顺序：RPA 运营 > 内容生产与分发 > AI 员工与工作流
 > 当前开发终点：完成 Wave 10 全部任务后停止；第 16 节“RPA 运营增强路线图”及之后任务本轮不启动
 
@@ -39,7 +39,7 @@
 
 ## 3. 当前进度快照
 
-快照日期：2026-07-24。
+快照日期：2026-07-27。
 
 | 范围 | 当前结果 |
 | --- | --- |
@@ -93,6 +93,7 @@
 | 取消/紧停 API | `✅ 已完成` 原子 CANCELLING、幂等重放、ACK 后终态、完成竞态、结果不确定与隐藏 Tauri App/FakeExecutor 生产同路径已验证 |
 | Task 桌面投影 | `✅ 已完成` TanStack Query 权威快照、严格 DTO、事件去重、缺口/版本回拉、有限降级及 Rust SSE→Tauri Channel 已由隐藏 App 生产同路径验证 |
 | UI Harness | `✅ 已完成` Playwright Chromium 覆盖 ready/unavailable/flaky，以及创建→暂停→恢复→取消、独立成功与刷新恢复；正式 dist 排除 Harness 与测试 Adapter 已验证 |
+| 全局 UI 改版 | `🔍 待真实 Tauri 窗口验收` AI 助理默认首页、新信息架构、热点/创作/发布/消息/自动化/账号页面及同窗视频工作区已通过 588 项 Vitest、72 项 Playwright、类型、Lint、构建和同视口视觉对比；不把 Harness 冒充 Tauri/平台能力证据 |
 | 持续集成 | `✅ 已完成` Backend、Frontend、Rust 分层质量门禁，以及 macOS/Windows 真实桌面构建与 Tauri 冒烟矩阵已建立 |
 | Git 仓库 | `✅ 已完成` 已初始化 `main` 分支，规划基线随 R0-10 提交 |
 | GitHub 私有仓库 | `✅ 已完成` `masterAventador/automation-tool` 已创建为 `PRIVATE`，`main` 已推送 |
@@ -414,6 +415,12 @@
 | C10-13 | 部署/回滚手册 | 部署、迁移、备份、恢复、账号/设备吊销、回滚和紧急停服 | C10-12 | ✅ 已完成 |
 | T18-cloud-deploy | 真实云主机 Demo 部署 | 在客户云主机 `at.xuanbai.tech` 上真实落地 Control Plane + PostgreSQL + 主机 nginx 边界；可重复部署脚本进仓库；从本机走公网 HTTPS 完成产品账号登录与认证业务接口验收 | C10-08..C10-13 | ✅ 已完成 |
 
+### 15.1 UI 改版专项
+
+| ID | 任务 | 交付物与完成定义 | 依赖 | 状态 |
+| --- | --- | --- | --- | --- |
+| UI-01 | 全局 UI 改版 | AI 助理默认首页；新导航和核心运营页面；视频制作/剪辑同窗嵌入；发布确认、平台来源、人工接管和响应式契约；React 自动化、构建及同视口视觉 QA 通过，真实 Tauri 窗口另行验收 | C10-13 | 🔍 待真实 Tauri 窗口验收 |
+
 ## 16. RPA 运营增强路线图
 
 只有 C10 完成后，才按以下顺序扩平台和场景。
@@ -572,3 +579,4 @@
 14. `A7-16/A7-17`、`D6-16`、`B5-15`（🔍 待真实账号）：只在用户明确指定的自有/授权目标上补真实平台证据；账号不可用时跳过，不制造外部副作用。`B5-02` 已由 EB-10 替代：历史 Chrome 实机证据保留，未安装 Edge 的历史缺口不再是产品验收项，也不得据此恢复系统浏览器生产入口。
 15. `EB-02`（✅ 已完成）：2026-07-24 在 Windows 11 x86_64 实体机以 Chrome for Testing 149.0.7827.55 / revision 1228 完成同一浏览器的 headed Playwright、Browser Use `executable_path`/随机 CDP、独立渲染和三 Profile 并发隔离；134 个目录项、12 套风格及媒体/GPU/透明/横竖屏矩阵全绿，Windows 证据摘要已写入专项契约，下一 Windows 专项任务为 `EB-04`。
 16. `EB-04`（✅ 已完成）：2026-07-24 从预登记官方地址下载 192,511,857-byte Windows x86_64 Chromium 归档，真实 SHA-256 `ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab` 已写回契约并翻转 `buildable=true`；双暂存 Manifest 字节一致、PE machine `0x8664`、Playwright 离线启动 149.0.7827.55 和按绝对路径零进程残留门禁通过。
+17. `UI-01`（🔍 待真实 Tauri 窗口验收）：2026-07-27 在 `codex/ui-redesign` 专用分支完成 AI 助理默认首页、新导航与核心运营页面改版；588 项 Vitest、72 项 Playwright、类型、Lint、生产构建和同视口视觉 QA 通过，制作/剪辑保持当前 App 内单窗工作区；热点、消息、发布、微信和视频服务未接部分继续明确展示真实状态，不以 Harness 冒充桌面或平台证据。
