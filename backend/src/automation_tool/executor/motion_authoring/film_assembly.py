@@ -17,8 +17,9 @@ One beat becomes one shot:
 * a beat that named none falls back to the template composition on the
   template's stage, whose type scale is written for it.
 
-That mixture is what "本机 4 layout 模板段与零件段可混排" means once it is
-something the code does rather than something the roadmap says.
+That mixture is what the roadmap asks for under PC-06 — template segments and
+part segments in one film — once it is something the code does rather than
+something a document says.
 
 Nothing is written until the whole film is planned. A shot that cannot be
 rendered fails the plan, and a workspace half full of parts for a film that was
@@ -41,7 +42,7 @@ from .film_timeline import (
     estimate_render_cost,
     plan_film,
 )
-from .part_workspace import PART_TO_CATALOG_ROOT, PartSlot, write_part_working_copy
+from .part_workspace import PartSlot, write_part_working_copy
 from .slot_budget import SlotBudget
 
 # From `motion-storyboard-duration.v1.json`. Passed to the timeline rather than
