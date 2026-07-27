@@ -140,6 +140,36 @@ bootstrap Ed25519 种子与 Demo 账号口令。**不进 Git、不进镜像、�
 Pepper 或指纹密钥一旦重新生成，所有已存口令哈希与已签发 Session 立即失效，
 所以部署器只在缺失时生成，永不覆盖。
 
+### 动作授权私钥必须与出包用的是同一把（2026-07-27 实测踩到）
+
+`actionAuthorizationPrivateKey` 是**唯一一把两端都要用的密钥**：服务端拿它签发动作授权
+token，App 拿**编译进包里的公钥**验签。而部署器对它和其它密钥一视同仁——缺失时
+`secrets.token_bytes(32)` 随机生成一把。**于是首次部署会凭空造出一把与任何包都无关的
+密钥，并且不报错。**
+
+实测后果：服务端持有 `V-k9YXpP…` 对应的私钥，而当时已经发出去的包里编译的是
+`gfJEBEJ9s-…`，两端对不上，包装上去也签不出它接受的动作授权。**服务健康检查全绿，
+看不出任何异常。**
+
+所以首次部署前（或补救时）必须把出包用的那把投递进去，再重跑一次部署让它进
+`/run/secrets`：
+
+```sh
+# 私钥只走 stdin，不进 argv、不进 shell history
+cat .local/customer-demo-release/secrets/action-authorization-key \
+  | ssh root@<host> 'python3 -c "import json,sys; k=sys.stdin.read().strip(); \
+      p=\"/etc/automation-tool-demo/secrets.json\"; s=json.load(open(p)); \
+      s[\"actionAuthorizationPrivateKey\"]=k; json.dump(s,open(p,\"w\"),indent=2)"'
+DEPLOY_EXTRA_ARGS=--skip-build deploy/cloud/deploy.sh
+```
+
+核对方法是**比对公钥**（两边都只输出公钥，不输出私钥）：容器内
+`/run/secrets/action-authorization-private-key` 派生出的公钥，必须等于出包日志里
+`build_release_package.py` 记录的那个动作授权公钥。
+
+换这把密钥的代价取决于 `action_risk_authorizations` 里有没有已签发记录：为空时零影响，
+非空时旧 token 全部失效。
+
 ## 6. 重启与恢复
 
 `postgres` 与 `control-plane` 都是 `restart: unless-stopped`，`docker.service` 已 `systemctl enable`，
