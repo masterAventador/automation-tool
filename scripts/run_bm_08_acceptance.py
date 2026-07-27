@@ -28,6 +28,15 @@ from run_vf_06_acceptance import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-08-evidence"
+# The frame size this acceptance expects is derived, never restated. Hard-coding
+# it here is what made this run red after the canvas contract raised its device
+# scale factor: the render was correct and the expectation was stale. The
+# contract is the one place that says how large a captured frame is.
+_RENDER_CANVAS = json.loads(
+    (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(encoding="utf-8")
+)
+EXPECTED_FRAME_WIDTH = _RENDER_CANVAS["outputWidth"]
+EXPECTED_FRAME_HEIGHT = _RENDER_CANVAS["outputHeight"]
 
 
 def _run(
@@ -219,8 +228,8 @@ def _inspect_video(
     duration = float(metadata["format"]["duration"])
     if (
         stream["codec_name"] != "h264"
-        or stream["width"] != 640
-        or stream["height"] != 360
+        or stream["width"] != EXPECTED_FRAME_WIDTH
+        or stream["height"] != EXPECTED_FRAME_HEIGHT
         or stream["pix_fmt"] != "yuv420p"
         or stream["avg_frame_rate"] != "30/1"
         or int(stream["nb_read_frames"]) != 90

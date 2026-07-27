@@ -1148,6 +1148,63 @@ class RenderCanvasGateTests(unittest.TestCase):
         self.assertEqual(RENDER_CANVAS_WIDTH, contract["width"])
         self.assertEqual(RENDER_CANVAS_HEIGHT, contract["height"])
 
+    def test_the_render_worker_reads_the_same_canvas_as_the_authoring_gate(self) -> None:
+        """The Worker's viewport constants are hand-copied and were unguarded.
+
+        The contract names `worker.mjs` in `definedIn`, but this gate only ever
+        checked `agent.py`. A viewport edited on one side and not the other
+        reproduces exactly the defect this contract exists to prevent — a
+        composition rendered as the empty corner of a stage nobody agreed on —
+        and nothing would have failed until an MP4 of still frames existed.
+        """
+        contract = json.loads(
+            (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        source = (ROOT / "workers/motion_composition/worker.mjs").read_text(
+            encoding="utf-8"
+        )
+        for name, expected in (
+            ("RENDER_VIEWPORT_WIDTH", contract["width"]),
+            ("RENDER_VIEWPORT_HEIGHT", contract["height"]),
+            ("RENDER_DEVICE_SCALE_FACTOR", contract["deviceScaleFactor"]),
+        ):
+            self.assertIn(
+                f"const {name} = {expected};",
+                source,
+                f"{name} in worker.mjs disagrees with the canvas contract",
+            )
+
+    def test_the_capture_scale_is_declared_and_applied(self) -> None:
+        """Output pixels are the CSS stage times the device scale factor.
+
+        The stage stays 640x360 because the whole type scale in
+        `composition_template` is sized for it; raising the stage instead would
+        leave 42px headlines adrift in a much larger frame. Scaling the device
+        pixel ratio keeps every layout rule untouched and re-rasterises text at
+        the higher resolution, which is what "sharper" has to mean here.
+        """
+        contract = json.loads(
+            (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        scale = contract["deviceScaleFactor"]
+        self.assertIsInstance(scale, int)
+        self.assertGreaterEqual(scale, 1)
+        self.assertEqual(contract["outputWidth"], contract["width"] * scale)
+        self.assertEqual(contract["outputHeight"], contract["height"] * scale)
+
+        source = (ROOT / "workers/motion_composition/worker.mjs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "deviceScaleFactor: RENDER_DEVICE_SCALE_FACTOR",
+            source,
+            "the worker declares a scale factor but never applies it to the capture",
+        )
+
     def test_check_accepts_a_composition_sized_to_the_capture_viewport(self) -> None:
         self.assertTrue(check_composition(VALID_COMPOSITION, duration_seconds=6).ok)
 

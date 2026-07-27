@@ -5,6 +5,9 @@
   "policy": "fail_closed",
   "width": 640,
   "height": 360,
+  "deviceScaleFactor": 2,
+  "outputWidth": 1280,
+  "outputHeight": 720,
   "definedIn": [
     "workers/motion_composition/worker.mjs",
     "backend/src/automation_tool/executor/motion_authoring/agent.py",
@@ -14,6 +17,7 @@
   "rationale": {
     "problem": "The render sandbox captures a fixed viewport, while the locked upstream authoring reference mandates a 1920x1080 stage. A composition that followed the reference rendered as the empty top-left corner of its own stage: 180 byte-identical frames encoded into a valid MP4 that was a still image. Neither the authoring gates nor the render sandbox could observe the disagreement, because neither knew the other's number.",
     "resolution": "The capture viewport is one declared value read by every side. The authoring gate rejects any composition whose declared stage differs from it, so the mismatch fails before a browser is launched rather than after an MP4 exists.",
-    "changing": "Raising the canvas means changing this file and the sandbox spec together; the still-frame gate in the render job is the backstop that keeps a future mismatch loud."
+    "changing": "Raising the canvas means changing this file and the sandbox spec together; the still-frame gate in the render job is the backstop that keeps a future mismatch loud.",
+    "scale": "Sharper output is bought with deviceScaleFactor, not with a larger stage. Every type and spacing rule in composition_template is written for a 640x360 stage — 42px headlines, 40px padding — so enlarging the stage would leave them adrift in a bigger frame rather than filling it, and would require rewriting the whole scale. A higher device pixel ratio re-rasterises text and vector art at the target resolution with no layout rule touched. outputWidth/outputHeight are width/height times this factor and are what a captured PNG actually measures; the composition still declares width/height, which is what the authoring gate compares against. Measured 2026-07-27 on the packaged Chromium with a real catalog part: the per-frame cost of factor 2 sits inside the run-to-run noise of factor 1, so this is close to free. Raising it again (3 gives 1920x1080) needs the same measurement repeated, because cost is not linear in pixels."
   }
 }

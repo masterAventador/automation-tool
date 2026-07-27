@@ -30,6 +30,14 @@ const CHROMIUM_VERSION_PATTERN = /(?:^|\s|\/)(\d+)\.\d+\.\d+\.\d+/;
 // session also forces these metrics through the DevTools protocol.
 const RENDER_VIEWPORT_WIDTH = 640;
 const RENDER_VIEWPORT_HEIGHT = 360;
+// Output pixels are the CSS stage times this factor. The stage stays 640x360
+// because the whole type scale in `composition_template` is sized for it — a
+// larger stage would leave 42px headlines adrift in a much bigger frame. A
+// higher device pixel ratio instead re-rasterises text and vector art at the
+// target resolution with every layout rule untouched, which is what a sharper
+// film has to mean here. Measured 2026-07-27 on the packaged Chromium: the
+// per-frame cost of factor 2 sits inside the run-to-run noise of factor 1.
+const RENDER_DEVICE_SCALE_FACTOR = 2;
 const MAX_PROTOCOL_RESPONSE_BYTES = 64 * 1024;
 const SANDBOX_FRAMES_MAXIMUM = 600;
 // Wall clock is the stall guard: a hung render is killed at this many seconds.
@@ -1034,7 +1042,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       const metrics = await pipe.send("Emulation.setDeviceMetricsOverride", {
         width: RENDER_VIEWPORT_WIDTH,
         height: RENDER_VIEWPORT_HEIGHT,
-        deviceScaleFactor: 1,
+        deviceScaleFactor: RENDER_DEVICE_SCALE_FACTOR,
         mobile: false,
       }, sessionId);
       if (metrics?.error !== undefined) {
