@@ -1,0 +1,495 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-part-slot-budget.v1",
+  "policy": "fail_closed",
+  "$comment": "Measured, not declared. Produced by frontend/scripts/measure-motion-part-slots.mjs with the packaged Chromium at 1920x1080, after seeking each part's own timeline to its end. Two facts this file exists to carry: a slot's limit is a container width in CSS pixels and the font size drawn in it, because a character count means three different limits depending on the script written; and baselineOverflowsY records the 14 slots that already clip vertically with their original copy, by design, so an overflow test can ask whether copy made it worse rather than whether it overflows.",
+  "measuredWith": {
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "timelinePosition": "end",
+    "browser": "packaged Chromium"
+  },
+  "counts": {
+    "parts": 18,
+    "slots": 48,
+    "baselineOverflowingY": 14
+  },
+  "parts": [
+    {
+      "name": "instagram-follow",
+      "slots": [
+        {
+          "index": 15,
+          "original": "人物创作平台",
+          "usableWidthPx": 249,
+          "fontSizePx": 42,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 21,
+          "original": "@人物创作平台_official",
+          "usableWidthPx": 301,
+          "fontSizePx": 28,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 23,
+          "original": "47.5K followers",
+          "usableWidthPx": 301,
+          "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "logo-outro",
+      "slots": [
+        {
+          "index": 29,
+          "original": "Nothing great is made alone.",
+          "usableWidthPx": 603,
+          "fontSizePx": 44,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 32,
+          "original": "figma.com",
+          "usableWidthPx": 94,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-accent-underline",
+      "slots": [
+        {
+          "index": 12,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 600,
+          "fontSizePx": 76,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 15,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 376,
+          "fontSizePx": 28,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-bold-block",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Maya Chen",
+          "usableWidthPx": 366,
+          "fontSizePx": 58,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 334,
+          "fontSizePx": 24,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-clean-bar",
+      "slots": [
+        {
+          "index": 14,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 348,
+          "fontSizePx": 52,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 348,
+          "fontSizePx": 27,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-color-block",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 661,
+          "fontSizePx": 84,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 15,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 661,
+          "fontSizePx": 24,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-dark-card",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 321,
+          "fontSizePx": 48,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 321,
+          "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-kicker-name",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Episode 47",
+          "usableWidthPx": 154,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 16,
+          "original": "Maya Chen",
+          "usableWidthPx": 393,
+          "fontSizePx": 70,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        }
+      ]
+    },
+    {
+      "name": "lt-mask-reveal",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 477,
+          "fontSizePx": 72,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 17,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 270,
+          "fontSizePx": 28,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-side-rule",
+      "slots": [
+        {
+          "index": 14,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 724,
+          "fontSizePx": 92,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 724,
+          "fontSizePx": 26,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-soft-pill",
+      "slots": [
+        {
+          "index": 15,
+          "original": "Dr. Maya Chen",
+          "usableWidthPx": 290,
+          "fontSizePx": 46,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 17,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 290,
+          "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "lt-stack-bars",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Maya Chen",
+          "usableWidthPx": 292,
+          "fontSizePx": 52,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 17,
+          "original": "Host · Neuroscientist",
+          "usableWidthPx": 319,
+          "fontSizePx": 23,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "macos-notification",
+      "slots": [
+        {
+          "index": 27,
+          "original": "动效画布",
+          "usableWidthPx": 53,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 32,
+          "original": "Prompt to replace this title",
+          "usableWidthPx": 300,
+          "fontSizePx": 15,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 34,
+          "original": "Prompt to change this body text, the app icon, and the app name to match your content.",
+          "usableWidthPx": 300,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "north-korea-locked-down",
+      "slots": [
+        {
+          "index": 16,
+          "original": "LOCKED",
+          "usableWidthPx": 318,
+          "fontSizePx": 60,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 17,
+          "original": "DOWN",
+          "usableWidthPx": 318,
+          "fontSizePx": 60,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        }
+      ]
+    },
+    {
+      "name": "nyc-paris-flight",
+      "slots": [
+        {
+          "index": 27,
+          "original": "New York",
+          "usableWidthPx": 114,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "JFK / NYC",
+          "usableWidthPx": 111,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 32,
+          "original": "Paris",
+          "usableWidthPx": 114,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 33,
+          "original": "CDG / FR",
+          "usableWidthPx": 111,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 50,
+          "original": "ARRIVED",
+          "usableWidthPx": 111,
+          "fontSizePx": 24,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 54,
+          "original": "Six-second transatlantic hop",
+          "usableWidthPx": 710,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 56,
+          "original": "NEW YORK",
+          "usableWidthPx": 710,
+          "fontSizePx": 84,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 57,
+          "original": "TO",
+          "usableWidthPx": 113,
+          "fontSizePx": 84,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 58,
+          "original": "PARIS",
+          "usableWidthPx": 710,
+          "fontSizePx": 84,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": true
+        },
+        {
+          "index": 62,
+          "original": "5,837 km compressed",
+          "usableWidthPx": 266,
+          "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "spotify-card",
+      "slots": [
+        {
+          "index": 22,
+          "original": "动效画布",
+          "usableWidthPx": 662,
+          "fontSizePx": 52,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 24,
+          "original": "人物创作平台",
+          "usableWidthPx": 662,
+          "fontSizePx": 34,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 34,
+          "original": "音频平台",
+          "usableWidthPx": 101,
+          "fontSizePx": 26,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "tiktok-follow",
+      "slots": [
+        {
+          "index": 14,
+          "original": "人物创作平台",
+          "usableWidthPx": 259,
+          "fontSizePx": 42,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 16,
+          "original": "@人物创作平台.com",
+          "usableWidthPx": 259,
+          "fontSizePx": 28,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 18,
+          "original": "1,999 followers",
+          "usableWidthPx": 259,
+          "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "yt-lower-third",
+      "slots": [
+        {
+          "index": 14,
+          "original": "人物创作平台",
+          "usableWidthPx": 202,
+          "fontSizePx": 34,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 16,
+          "original": "82.2K subscribers",
+          "usableWidthPx": 202,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    }
+  ]
+}
