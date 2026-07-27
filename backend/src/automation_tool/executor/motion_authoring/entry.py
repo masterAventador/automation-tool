@@ -45,6 +45,16 @@ _REQUEST_FIELDS: Final = frozenset(
         "model",
     }
 )
+# Optional rather than required: an installation with no parts catalog is a real
+# state, not a malformed request, and the dangerous half of it — a storyboard
+# that names a part while none is available — is refused by the agent with a
+# reason that says so. Making it required would have meant every existing caller
+# becoming shape-invalid to express a condition the agent already reports.
+_OPTIONAL_REQUEST_FIELDS: Final = frozenset(
+    {
+        "catalogRoot",
+    }
+)
 _MODEL_FIELDS: Final = frozenset({"baseUrl", "modelId", "apiKey"})
 _REFUSAL_FIELDS: Final = frozenset({"schemaVersion", "status", "rejectionReason"})
 _AGENT_REASON_PREFIX: Final = "motion authoring rejected: "
@@ -200,6 +210,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "brief must be a MotionBrief",
         "brief text is out of range",
         "catalog purposes missing",
+        "the storyboard names catalog parts but this installation carries no parts catalog",
         "catalog_parts must be selectable catalog ids",
         "composition html must be a non-empty string",
         "composition not seekable",
@@ -456,7 +467,9 @@ def run_motion_authoring_entry(
     workspace paths beyond the entry name it already knows, no model reply, no
     credential.
     """
-    if not isinstance(document, dict) or set(document) != _REQUEST_FIELDS:
+    if not isinstance(document, dict) or not (
+        _REQUEST_FIELDS <= set(document) <= _REQUEST_FIELDS | _OPTIONAL_REQUEST_FIELDS
+    ):
         raise _reject("request is not the declared shape")
     if document["schemaVersion"] != SCHEMA_VERSION:
         raise _reject("unsupported request schema version")
@@ -491,6 +504,10 @@ def run_motion_authoring_entry(
         "framesPerSecond": submission.fps,
         "durationSeconds": submission.duration_seconds,
         "aspectRatio": submission.aspect_ratio,
+        # One render per shot. The first four fields describe the template
+        # segment and stay for the film that is only that; `segments` is what a
+        # film assembled from catalog parts actually needs rendered.
+        "segments": [segment.to_payload() for segment in submission.segments],
     }
 
 

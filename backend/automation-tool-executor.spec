@@ -46,6 +46,10 @@ motion_authoring_resources = [
     # these two at render time, so they ship with the code that reads them.
     "contracts/video/motion-part-typography.v1.json",
     "contracts/video/offline-motion-dependencies.v1.json",
+    # PC-03/PC-12/PC-17: where this film's copy goes in a part, and how much
+    # room it has there.
+    "contracts/video/motion-part-slots.v1.json",
+    "contracts/video/motion-part-slot-budget.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

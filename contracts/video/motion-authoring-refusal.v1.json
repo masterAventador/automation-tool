@@ -82,6 +82,7 @@
     "agent_storyboard_duration_contract_is_unreadable",
     "agent_storyboard_has_an_unexpected_key_set",
     "agent_storyboard_must_be_an_object",
+    "agent_the_storyboard_names_catalog_parts_but_this_installation_carries_no_parts_catalog",
     "agent_too_many_brand_assets",
     "agent_tool_surface_does_not_match_the_closed_allowlist",
     "agent_tools_require_an_authoringworkspace",

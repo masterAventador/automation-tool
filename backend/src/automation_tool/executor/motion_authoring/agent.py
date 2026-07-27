@@ -132,6 +132,99 @@ _MOTION_CATALOG_PATH: Final = _CONTRACTS_ROOT / "quality/motion-catalog.v1.json"
 _MOTION_PART_USABILITY_PATH: Final = (
     _CONTRACTS_ROOT / "video/motion-part-usability.v1.json"
 )
+_MOTION_PART_SLOTS_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-slots.v1.json"
+_MOTION_PART_SLOT_BUDGET_PATH: Final = (
+    _CONTRACTS_ROOT / "video/motion-part-slot-budget.v1.json"
+)
+
+# The stage `composition_template` draws on. Mirrors width/height/
+# deviceScaleFactor in `motion-render-canvas.v1.json`; a catalog part carries
+# its own instead.
+TEMPLATE_CANVAS: Final[dict[str, int]] = {
+    "width": 640,
+    "height": 360,
+    "deviceScaleFactor": 2,
+}
+
+
+def _load_json_document(path: Path) -> dict[str, Any]:
+    """One packaged contract, or a refusal that names it.
+
+    A contract the package does not carry is an installation defect, not
+    something the brief can be rewritten around — see the spec's derived
+    packaging gate.
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise MotionAuthoringRejected(
+            f"motion authoring rejected: packaged contract is unreadable: {path.name}"
+        ) from error
+
+
+class PartsCatalog:
+    """The packaged parts, and what this process needs to know about them.
+
+    Built once per run rather than read per beat: the slot table and the budget
+    are whole files, and re-reading them inside a loop is how two beats end up
+    disagreeing about what a slot is.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.slot_table = _load_json_document(_MOTION_PART_SLOTS_PATH)
+        self.slot_budget = _load_json_document(_MOTION_PART_SLOT_BUDGET_PATH)
+        catalog = _load_json_document(_MOTION_CATALOG_PATH)
+        self.durations = {
+            item["name"]: item["duration"]
+            for item in catalog["items"]
+            if item.get("duration")
+        }
+        self.dimensions = {
+            item["name"]: (item["dimensions"]["width"], item["dimensions"]["height"])
+            for item in catalog["items"]
+            if (item.get("dimensions") or {}).get("width")
+        }
+        self._slots_by_part = {
+            part["name"]: part["slots"] for part in self.slot_table["parts"]
+        }
+
+    def document_for(self, name: str) -> Path:
+        documents = sorted((self.root / "items" / name).glob("*.html"))
+        if len(documents) != 1:
+            _reject(f"the packaged catalog has no single document for {name!r}")
+        return documents[0]
+
+    def copy_for(self, beat: StoryboardBeat) -> dict[int, str]:
+        """Fill the part's slots in order from the copy the model wrote.
+
+        The model writes a headline, a body and a list of items — it does not
+        name slots, and asking it to would mean teaching it 124 anchors it
+        cannot verify. Filling in order is the mapping the slot table already
+        implies: slots are frozen in document order, which is reading order.
+
+        A slot with nothing left to put in it keeps the part's own copy, which
+        is why `write_part_working_copy` treats an unfilled slot as untouched
+        rather than as empty.
+        """
+        if not beat.catalog_parts:
+            return {}
+        slots = self._slots_by_part.get(beat.catalog_parts[0], ())
+        available = [text for text in (beat.headline, beat.body, *beat.items) if text]
+        return {
+            slot["index"]: text for slot, text in zip(slots, available)
+        }
+
+    def assets_for(self, entry_html: str, workspace: AuthoringWorkspace) -> tuple[str, ...]:
+        """Everything the working copy of this part needs, as the sandbox lists it."""
+        prefix = entry_html.rsplit("/", 2)[0] if "/" in entry_html else ""
+        return tuple(
+            sorted(
+                asset
+                for asset in workspace.provided_assets()
+                if asset != entry_html and (not prefix or asset.startswith(prefix))
+            )
+        )
 
 
 def _load_locked_catalog_items() -> tuple[dict[str, Any], ...]:
@@ -1168,6 +1261,29 @@ def snapshot_plan(html: str, *, duration_seconds: int, fps: int) -> SnapshotPlan
 
 
 @dataclass(frozen=True)
+class RenderSegment:
+    """One render inside a film.
+
+    A film is a list of these because the parts do not share a stage: most of
+    the catalog declares 1920x1080, three declare 1080x1920, and the built-in
+    template draws on 640x360. One render per shot is what lets each be itself.
+    """
+
+    entry_html: str
+    allowed_assets: tuple[str, ...]
+    canvas: dict[str, int]
+    frame_count: int
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "entryHtml": self.entry_html,
+            "allowedAssets": list(self.allowed_assets),
+            "canvas": dict(self.canvas),
+            "frameCount": self.frame_count,
+        }
+
+
+@dataclass(frozen=True)
 class RenderJobSubmission:
     job_id: str
     entry_html: str
@@ -1176,6 +1292,7 @@ class RenderJobSubmission:
     fps: int
     duration_seconds: int
     aspect_ratio: str
+    segments: tuple[RenderSegment, ...] = ()
 
     def to_sandbox_spec(self, workspace: str) -> dict[str, object]:
         """Return the BM-04 render-sandbox spec shape for this frozen job."""
@@ -1297,6 +1414,7 @@ class MotionAuthoringTools:
         fps: int,
         duration_seconds: int,
         aspect_ratio: str,
+        segments: tuple[RenderSegment, ...] = (),
     ) -> RenderJobSubmission:
         entry = _validate_relative(entry_html)
         _require(entry in self._workspace.provided_assets(), "entry html must exist in workspace")
@@ -1307,6 +1425,7 @@ class MotionAuthoringTools:
             job_id=str(uuid.uuid4()),
             entry_html=entry,
             allowed_assets=tuple(sorted(set(allowed_assets))),
+            segments=segments,
             frame_count=frame_count,
             fps=fps,
             duration_seconds=duration_seconds,
@@ -1684,7 +1803,13 @@ class MotionAuthoringAgent:
         model_call: Callable[..., str] = call_video_creation_model,
         fps: int = DEFAULT_FPS,
         model_timeout_seconds: int = MODEL_TIMEOUT_SECONDS,
+        catalog_root: Path | None = None,
     ) -> None:
+        # Supplied by the App, which resolves it beside the other packaged
+        # resources; this process does not go looking for it. `None` means this
+        # installation carries no parts, and a storyboard that names one is
+        # refused rather than quietly drawn from the template.
+        self._catalog = PartsCatalog(catalog_root) if catalog_root is not None else None
         if not isinstance(workspace, AuthoringWorkspace):
             _reject("workspace required")
         verify_closed_tool_surface(tools)
@@ -1717,6 +1842,90 @@ class MotionAuthoringAgent:
             raise AssertionError from None  # pragma: no cover
         _require(isinstance(data, dict), "model output must be a JSON object")
         return data
+
+    def _segments_for(
+        self,
+        storyboard: Storyboard,
+        *,
+        template_entry: str,
+        template_assets: tuple[str, ...],
+        template_frames: int,
+    ) -> tuple[RenderSegment, ...]:
+        """One render per beat, with catalog beats drawn on their own stage.
+
+        With no catalog to draw from, every beat is a template beat and the film
+        is the single composition this agent has always produced. A beat that
+        *named* a part while no catalog is available is refused rather than
+        quietly drawn from the template: that silence is how the model's choice
+        came to be discarded for as long as it was.
+        """
+        from .film_assembly import BeatPlan, assemble_film
+        from .part_typography import document_font_css
+        from .part_workspace import PART_TO_CATALOG_ROOT
+
+        named = [beat for beat in storyboard.beats if beat.catalog_parts]
+        if self._catalog is None:
+            if named:
+                _reject(
+                    "the storyboard names catalog parts but this installation "
+                    "carries no parts catalog"
+                )
+            return (
+                RenderSegment(
+                    entry_html=template_entry,
+                    allowed_assets=template_assets,
+                    canvas=dict(TEMPLATE_CANVAS),
+                    frame_count=template_frames,
+                ),
+            )
+
+        catalog = self._catalog
+
+        def font_css_for(name: str) -> str:
+            document = catalog.document_for(name)
+            return document_font_css(
+                document.read_text(encoding="utf-8"),
+                artifact_prefix=PART_TO_CATALOG_ROOT,
+            )
+
+        film = assemble_film(
+            beats=[
+                BeatPlan(
+                    beat_id=beat.beat_id,
+                    # One part per shot: a beat that named several is drawn from
+                    # the first, because a shot is one render and two parts on
+                    # one stage is the sub-composition mechanism route B adds.
+                    part=beat.catalog_parts[0] if beat.catalog_parts else None,
+                    copy=catalog.copy_for(beat),
+                    voice_seconds=None,
+                )
+                for beat in storyboard.beats
+            ],
+            workspace=self._workspace,
+            catalog_root=catalog.root,
+            slot_table=catalog.slot_table,
+            slot_budget=catalog.slot_budget,
+            part_durations=catalog.durations,
+            part_dimensions=catalog.dimensions,
+            template_canvas=TEMPLATE_CANVAS,
+            template_entry=template_entry,
+            frames_per_second=self._fps,
+            segment_frames_maximum=MAX_FRAME_COUNT,
+            font_css_for=font_css_for,
+        )
+        return tuple(
+            RenderSegment(
+                entry_html=segment.entry_html,
+                allowed_assets=(
+                    template_assets
+                    if segment.part is None
+                    else self._catalog.assets_for(segment.entry_html, self._workspace)
+                ),
+                canvas=segment.canvas,
+                frame_count=segment.frames,
+            )
+            for segment in film.segments
+        )
 
     def author(self, brief: MotionBrief) -> AuthoringResult:
         if self._model_config is None:
@@ -1761,6 +1970,16 @@ class MotionAuthoringAgent:
             )
 
         snapshot = self._tools.snapshot(composition_path, brief.duration_seconds, self._fps)
+        # PC-03..PC-09: the beats that named a catalog part become their own
+        # renders, on the stage those parts declare. Beats that named none stay
+        # on the template segment this composition already is. Before this, the
+        # model's choice of parts was validated and then thrown away.
+        segments = self._segments_for(
+            storyboard,
+            template_entry=composition_path,
+            template_assets=allowed_assets,
+            template_frames=snapshot.frame_count,
+        )
         submission = self._tools.submit_render_job(
             entry_html=composition_path,
             allowed_assets=allowed_assets,
@@ -1768,6 +1987,7 @@ class MotionAuthoringAgent:
             fps=self._fps,
             duration_seconds=brief.duration_seconds,
             aspect_ratio=brief.aspect_ratio,
+            segments=segments,
         )
         return AuthoringResult(
             design=design,
