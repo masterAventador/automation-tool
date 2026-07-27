@@ -12,11 +12,312 @@
     "browser": "packaged Chromium"
   },
   "counts": {
-    "parts": 18,
-    "slots": 48,
+    "parts": 37,
+    "slots": 124,
     "baselineOverflowingY": 14
   },
   "parts": [
+    {
+      "name": "code-diff",
+      "slots": [
+        {
+          "index": 22,
+          "original": "greet.js",
+          "usableWidthPx": 93,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "code-highlight",
+      "slots": [
+        {
+          "index": 22,
+          "original": "loadConfig.js",
+          "usableWidthPx": 151,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "code-morph",
+      "slots": [
+        {
+          "index": 22,
+          "original": "refactor.js",
+          "usableWidthPx": 128,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "code-scroll",
+      "slots": [
+        {
+          "index": 22,
+          "original": "fetchWithRetry.js",
+          "usableWidthPx": 197,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-flight",
+      "slots": [
+        {
+          "index": 22,
+          "original": "pipeline.js",
+          "usableWidthPx": 128,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "code-typing",
+      "slots": [
+        {
+          "index": 22,
+          "original": "loadConfig.js",
+          "usableWidthPx": 151,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "data-chart",
+      "slots": [
+        {
+          "index": 17,
+          "original": "Monthly Revenue vs. Conversion Rate",
+          "usableWidthPx": 1840,
+          "fontSizePx": 42,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 19,
+          "original": "Jan–Jun 2024, in thousands",
+          "usableWidthPx": 1840,
+          "fontSizePx": 16,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 24,
+          "original": "Revenue",
+          "usableWidthPx": 61,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 29,
+          "original": "Conversion Rate",
+          "usableWidthPx": 115,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "flowchart",
+      "slots": [
+        {
+          "index": 26,
+          "original": "Yes",
+          "usableWidthPx": 32,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "Not sure",
+          "usableWidthPx": 71,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 31,
+          "original": "Should I learn to code?",
+          "usableWidthPx": 246,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 34,
+          "original": "Yes",
+          "usableWidthPx": 32,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 36,
+          "original": "Not sure",
+          "usableWidthPx": 71,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 41,
+          "original": "Start with Pythom",
+          "usableWidthPx": 184,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 48,
+          "original": "Try no-code first",
+          "usableWidthPx": 184,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 50,
+          "original": "Build a personal website",
+          "usableWidthPx": 261,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 52,
+          "original": "Take a free intro course",
+          "usableWidthPx": 253,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 59,
+          "original": "You",
+          "usableWidthPx": 30,
+          "fontSizePx": 12,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 63,
+          "original": "👍",
+          "usableWidthPx": 38,
+          "fontSizePx": 32,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "flowchart-vertical",
+      "slots": [
+        {
+          "index": 26,
+          "original": "Yes",
+          "usableWidthPx": 25,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "Not sure",
+          "usableWidthPx": 57,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 31,
+          "original": "Should I learn to code?",
+          "usableWidthPx": 197,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 34,
+          "original": "Yes",
+          "usableWidthPx": 25,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 36,
+          "original": "Not sure",
+          "usableWidthPx": 57,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 41,
+          "original": "Start with Pythom",
+          "usableWidthPx": 153,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 48,
+          "original": "Try no-code first",
+          "usableWidthPx": 145,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 50,
+          "original": "Build a personal website",
+          "usableWidthPx": 209,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 52,
+          "original": "Take a free intro course",
+          "usableWidthPx": 203,
+          "fontSizePx": 18,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 59,
+          "original": "You",
+          "usableWidthPx": 22,
+          "fontSizePx": 12,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 63,
+          "original": "👍",
+          "usableWidthPx": 32,
+          "fontSizePx": 32,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
     {
       "name": "instagram-follow",
       "slots": [
@@ -41,6 +342,88 @@
           "original": "47.5K followers",
           "usableWidthPx": 301,
           "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-media-controls",
+      "slots": [
+        {
+          "index": 46,
+          "original": "Midnight Drive",
+          "usableWidthPx": 324,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 50,
+          "original": "Glass Resonance",
+          "usableWidthPx": 129,
+          "fontSizePx": 16,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 89,
+          "original": "34%",
+          "usableWidthPx": 42,
+          "fontSizePx": 17,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-notification",
+      "slots": [
+        {
+          "index": 25,
+          "original": "Render complete",
+          "usableWidthPx": 162,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "rendering",
+          "usableWidthPx": 59,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 31,
+          "original": "Liquid glass preview is encoding with GPU capture.",
+          "usableWidthPx": 328,
+          "fontSizePx": 17,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 39,
+          "original": "M",
+          "usableWidthPx": 48,
+          "fontSizePx": 19,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 43,
+          "original": "Messages",
+          "usableWidthPx": 96,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 48,
+          "original": "Miguel: can it feel alive but still native?",
+          "usableWidthPx": 408,
+          "fontSizePx": 17,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
         }
@@ -94,7 +477,7 @@
         {
           "index": 13,
           "original": "Maya Chen",
-          "usableWidthPx": 366,
+          "usableWidthPx": 365,
           "fontSizePx": 58,
           "baselineOverflowsX": false,
           "baselineOverflowsY": true
@@ -102,7 +485,7 @@
         {
           "index": 16,
           "original": "Host · Neuroscientist",
-          "usableWidthPx": 334,
+          "usableWidthPx": 333,
           "fontSizePx": 24,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
@@ -241,7 +624,7 @@
         {
           "index": 15,
           "original": "Dr. Maya Chen",
-          "usableWidthPx": 290,
+          "usableWidthPx": 311,
           "fontSizePx": 46,
           "baselineOverflowsX": false,
           "baselineOverflowsY": true
@@ -249,7 +632,7 @@
         {
           "index": 17,
           "original": "Host · Neuroscientist",
-          "usableWidthPx": 290,
+          "usableWidthPx": 311,
           "fontSizePx": 25,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
@@ -312,7 +695,7 @@
         {
           "index": 16,
           "original": "LOCKED",
-          "usableWidthPx": 318,
+          "usableWidthPx": 322,
           "fontSizePx": 60,
           "baselineOverflowsX": false,
           "baselineOverflowsY": true
@@ -320,7 +703,7 @@
         {
           "index": 17,
           "original": "DOWN",
-          "usableWidthPx": 318,
+          "usableWidthPx": 322,
           "fontSizePx": 60,
           "baselineOverflowsX": false,
           "baselineOverflowsY": true
@@ -413,12 +796,102 @@
       ]
     },
     {
+      "name": "reddit-post",
+      "slots": [
+        {
+          "index": 22,
+          "original": "r/动效画布",
+          "usableWidthPx": 265,
+          "fontSizePx": 28,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 24,
+          "original": "u/placeholder_user · 3h",
+          "usableWidthPx": 265,
+          "fontSizePx": 24,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 29,
+          "original": "Prompt to change this title to whatever you want",
+          "usableWidthPx": 796,
+          "fontSizePx": 38,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 31,
+          "original": "Prompt to change this body text, the subreddit, username, and vote count to match your\n          content.",
+          "usableWidthPx": 796,
+          "fontSizePx": 28,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 41,
+          "original": "4.2k",
+          "usableWidthPx": 54,
+          "fontSizePx": 26,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 53,
+          "original": "328",
+          "usableWidthPx": 42,
+          "fontSizePx": 24,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "spain-map",
+      "slots": [
+        {
+          "index": 18,
+          "original": "PIB per cápita por Comunidad Autónoma",
+          "usableWidthPx": 914,
+          "fontSizePx": 48,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 20,
+          "original": "Producto Interior Bruto per cápita, estimación 2024",
+          "usableWidthPx": 914,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "Bajo",
+          "usableWidthPx": 29,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 31,
+          "original": "Alto",
+          "usableWidthPx": 27,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
       "name": "spotify-card",
       "slots": [
         {
           "index": 22,
           "original": "动效画布",
-          "usableWidthPx": 662,
+          "usableWidthPx": 690,
           "fontSizePx": 52,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
@@ -426,7 +899,7 @@
         {
           "index": 24,
           "original": "人物创作平台",
-          "usableWidthPx": 662,
+          "usableWidthPx": 690,
           "fontSizePx": 34,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
@@ -434,7 +907,7 @@
         {
           "index": 34,
           "original": "音频平台",
-          "usableWidthPx": 101,
+          "usableWidthPx": 105,
           "fontSizePx": 26,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
@@ -465,6 +938,236 @@
           "original": "1,999 followers",
           "usableWidthPx": 259,
           "fontSizePx": 25,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "us-map",
+      "slots": [
+        {
+          "index": 18,
+          "original": "Population Density by State",
+          "usableWidthPx": 673,
+          "fontSizePx": 52,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 20,
+          "original": "Residents per square mile, 2024 Census estimates",
+          "usableWidthPx": 673,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "Low",
+          "usableWidthPx": 28,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 31,
+          "original": "High",
+          "usableWidthPx": 31,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "us-map-bubble",
+      "slots": [
+        {
+          "index": 18,
+          "original": "Top 20 US Cities by Population",
+          "usableWidthPx": 747,
+          "fontSizePx": 52,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 20,
+          "original": "Proportional bubble markers by metropolitan population",
+          "usableWidthPx": 747,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "us-map-flow",
+      "slots": [
+        {
+          "index": 17,
+          "original": "Interstate Flow Connections",
+          "usableWidthPx": 633,
+          "fontSizePx": 48,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 19,
+          "original": "Relative volume of major city-to-city corridors",
+          "usableWidthPx": 633,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "us-map-hex",
+      "slots": [
+        {
+          "index": 15,
+          "original": "Median Household Income by State",
+          "usableWidthPx": 797,
+          "fontSizePx": 48,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 17,
+          "original": "American Community Survey, 2024",
+          "usableWidthPx": 797,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 25,
+          "original": "$52k",
+          "usableWidthPx": 34,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "$107k",
+          "usableWidthPx": 39,
+          "fontSizePx": 14,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "world-map",
+      "slots": [
+        {
+          "index": 16,
+          "original": "Global GDP per Capita",
+          "usableWidthPx": 538,
+          "fontSizePx": 52,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 18,
+          "original": "Nominal GDP per capita, 2024 IMF estimates",
+          "usableWidthPx": 459,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 26,
+          "original": "Low",
+          "usableWidthPx": 26,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 28,
+          "original": "High",
+          "usableWidthPx": 29,
+          "fontSizePx": 13,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        }
+      ]
+    },
+    {
+      "name": "x-post",
+      "slots": [
+        {
+          "index": 23,
+          "original": "动效画布",
+          "usableWidthPx": 104,
+          "fontSizePx": 26,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 32,
+          "original": "@动效画布",
+          "usableWidthPx": 740,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 42,
+          "original": "Prompt to replace this text with your tweet. Change the display name, handle, timestamp,\n          and engagement counts to match your content.",
+          "usableWidthPx": 806,
+          "fontSizePx": 30,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 43,
+          "original": "#YourHashtag",
+          "usableWidthPx": 202,
+          "fontSizePx": 30,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 47,
+          "original": "1:10 PM · Apr 7, 2026",
+          "usableWidthPx": 806,
+          "fontSizePx": 22,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 59,
+          "original": "34",
+          "usableWidthPx": 25,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 69,
+          "original": "2.3K",
+          "usableWidthPx": 43,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 82,
+          "original": "10.9K",
+          "usableWidthPx": 52,
+          "fontSizePx": 20,
+          "baselineOverflowsX": false,
+          "baselineOverflowsY": false
+        },
+        {
+          "index": 92,
+          "original": "150K",
+          "usableWidthPx": 46,
+          "fontSizePx": 20,
           "baselineOverflowsX": false,
           "baselineOverflowsY": false
         }

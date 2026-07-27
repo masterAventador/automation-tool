@@ -85,11 +85,16 @@ def main() -> int:
     assert len(names) == len(set(names)), "a part may appear once"
 
     usability = json.loads(USABILITY.read_text(encoding="utf-8"))
-    first = {
-        item["name"] for item in usability["items"] if item["batch"] == "first"
+    # PC-12 added the second batch. `deferred` stays out: those 58 are the 30
+    # transition demo pages and the 28 script-injected parts, and neither has
+    # copy a slot can address.
+    gradeable = {
+        item["name"]
+        for item in usability["items"]
+        if item["batch"] in ("first", "second")
     }
-    assert set(names) <= first, (
-        "a slot table may only cover parts the usability grading put in the first batch"
+    assert set(names) <= gradeable, (
+        "a slot table may only cover parts the usability grading made available"
     )
 
     total = 0

@@ -3,10 +3,224 @@
   "id": "motion-part-slots.v1",
   "policy": "fail_closed",
   "counts": {
-    "parts": 18,
-    "slots": 48
+    "parts": 37,
+    "slots": 124
   },
   "parts": [
+    {
+      "name": "code-diff",
+      "documentPath": "code-diff.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "greet.js",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "code-highlight",
+      "documentPath": "code-highlight.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "loadConfig.js",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "code-morph",
+      "documentPath": "code-morph.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "refactor.js",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "code-scroll",
+      "documentPath": "code-scroll.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "fetchWithRetry.js",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "code-snippet-flight",
+      "documentPath": "code-snippet-flight.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "pipeline.js",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "code-typing",
+      "documentPath": "code-typing.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "loadConfig.js",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "data-chart",
+      "documentPath": "data-chart.html",
+      "slots": [
+        {
+          "index": 17,
+          "original": "Monthly Revenue vs. Conversion Rate",
+          "parentTag": "h1"
+        },
+        {
+          "index": 19,
+          "original": "Jan–Jun 2024, in thousands",
+          "parentTag": "p"
+        },
+        {
+          "index": 24,
+          "original": "Revenue",
+          "parentTag": "span"
+        },
+        {
+          "index": 29,
+          "original": "Conversion Rate",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "flowchart",
+      "documentPath": "flowchart.html",
+      "slots": [
+        {
+          "index": 26,
+          "original": "Yes",
+          "parentTag": "div"
+        },
+        {
+          "index": 28,
+          "original": "Not sure",
+          "parentTag": "div"
+        },
+        {
+          "index": 31,
+          "original": "Should I learn to code?",
+          "parentTag": "div"
+        },
+        {
+          "index": 34,
+          "original": "Yes",
+          "parentTag": "div"
+        },
+        {
+          "index": 36,
+          "original": "Not sure",
+          "parentTag": "div"
+        },
+        {
+          "index": 41,
+          "original": "Start with Pythom",
+          "parentTag": "span"
+        },
+        {
+          "index": 48,
+          "original": "Try no-code first",
+          "parentTag": "div"
+        },
+        {
+          "index": 50,
+          "original": "Build a personal website",
+          "parentTag": "div"
+        },
+        {
+          "index": 52,
+          "original": "Take a free intro course",
+          "parentTag": "div"
+        },
+        {
+          "index": 59,
+          "original": "You",
+          "parentTag": "div"
+        },
+        {
+          "index": 63,
+          "original": "👍",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "flowchart-vertical",
+      "documentPath": "flowchart-vertical.html",
+      "slots": [
+        {
+          "index": 26,
+          "original": "Yes",
+          "parentTag": "div"
+        },
+        {
+          "index": 28,
+          "original": "Not sure",
+          "parentTag": "div"
+        },
+        {
+          "index": 31,
+          "original": "Should I learn to code?",
+          "parentTag": "div"
+        },
+        {
+          "index": 34,
+          "original": "Yes",
+          "parentTag": "div"
+        },
+        {
+          "index": 36,
+          "original": "Not sure",
+          "parentTag": "div"
+        },
+        {
+          "index": 41,
+          "original": "Start with Pythom",
+          "parentTag": "span"
+        },
+        {
+          "index": 48,
+          "original": "Try no-code first",
+          "parentTag": "div"
+        },
+        {
+          "index": 50,
+          "original": "Build a personal website",
+          "parentTag": "div"
+        },
+        {
+          "index": 52,
+          "original": "Take a free intro course",
+          "parentTag": "div"
+        },
+        {
+          "index": 59,
+          "original": "You",
+          "parentTag": "div"
+        },
+        {
+          "index": 63,
+          "original": "👍",
+          "parentTag": "div"
+        }
+      ]
+    },
     {
       "name": "instagram-follow",
       "documentPath": "instagram-follow.html",
@@ -24,6 +238,63 @@
         {
           "index": 23,
           "original": "47.5K followers",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-media-controls",
+      "documentPath": "liquid-glass-media-controls.html",
+      "slots": [
+        {
+          "index": 46,
+          "original": "Midnight Drive",
+          "parentTag": "div"
+        },
+        {
+          "index": 50,
+          "original": "Glass Resonance",
+          "parentTag": "div"
+        },
+        {
+          "index": 89,
+          "original": "34%",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass-notification",
+      "documentPath": "liquid-glass-notification.html",
+      "slots": [
+        {
+          "index": 25,
+          "original": "Render complete",
+          "parentTag": "span"
+        },
+        {
+          "index": 28,
+          "original": "rendering",
+          "parentTag": "span"
+        },
+        {
+          "index": 31,
+          "original": "Liquid glass preview is encoding with GPU capture.",
+          "parentTag": "div"
+        },
+        {
+          "index": 39,
+          "original": "M",
+          "parentTag": "div"
+        },
+        {
+          "index": 43,
+          "original": "Messages",
+          "parentTag": "span"
+        },
+        {
+          "index": 48,
+          "original": "Miguel: can it feel alive but still native?",
           "parentTag": "div"
         }
       ]
@@ -298,6 +569,68 @@
       ]
     },
     {
+      "name": "reddit-post",
+      "documentPath": "reddit-post.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "r/动效画布",
+          "parentTag": "span"
+        },
+        {
+          "index": 24,
+          "original": "u/placeholder_user · 3h",
+          "parentTag": "span"
+        },
+        {
+          "index": 29,
+          "original": "Prompt to change this title to whatever you want",
+          "parentTag": "div"
+        },
+        {
+          "index": 31,
+          "original": "Prompt to change this body text, the subreddit, username, and vote count to match your\n          content.",
+          "parentTag": "div"
+        },
+        {
+          "index": 41,
+          "original": "4.2k",
+          "parentTag": "span"
+        },
+        {
+          "index": 53,
+          "original": "328",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "spain-map",
+      "documentPath": "spain-map.html",
+      "slots": [
+        {
+          "index": 18,
+          "original": "PIB per cápita por Comunidad Autónoma",
+          "parentTag": "h1"
+        },
+        {
+          "index": 20,
+          "original": "Producto Interior Bruto per cápita, estimación 2024",
+          "parentTag": "p"
+        },
+        {
+          "index": 28,
+          "original": "Bajo",
+          "parentTag": "span"
+        },
+        {
+          "index": 31,
+          "original": "Alto",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
       "name": "spotify-card",
       "documentPath": "spotify-card.html",
       "slots": [
@@ -336,6 +669,167 @@
           "index": 18,
           "original": "1,999 followers",
           "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "us-map",
+      "documentPath": "us-map.html",
+      "slots": [
+        {
+          "index": 18,
+          "original": "Population Density by State",
+          "parentTag": "h1"
+        },
+        {
+          "index": 20,
+          "original": "Residents per square mile, 2024 Census estimates",
+          "parentTag": "p"
+        },
+        {
+          "index": 28,
+          "original": "Low",
+          "parentTag": "span"
+        },
+        {
+          "index": 31,
+          "original": "High",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "us-map-bubble",
+      "documentPath": "us-map-bubble.html",
+      "slots": [
+        {
+          "index": 18,
+          "original": "Top 20 US Cities by Population",
+          "parentTag": "h1"
+        },
+        {
+          "index": 20,
+          "original": "Proportional bubble markers by metropolitan population",
+          "parentTag": "p"
+        }
+      ]
+    },
+    {
+      "name": "us-map-flow",
+      "documentPath": "us-map-flow.html",
+      "slots": [
+        {
+          "index": 17,
+          "original": "Interstate Flow Connections",
+          "parentTag": "h1"
+        },
+        {
+          "index": 19,
+          "original": "Relative volume of major city-to-city corridors",
+          "parentTag": "p"
+        }
+      ]
+    },
+    {
+      "name": "us-map-hex",
+      "documentPath": "us-map-hex.html",
+      "slots": [
+        {
+          "index": 15,
+          "original": "Median Household Income by State",
+          "parentTag": "h1"
+        },
+        {
+          "index": 17,
+          "original": "American Community Survey, 2024",
+          "parentTag": "p"
+        },
+        {
+          "index": 25,
+          "original": "$52k",
+          "parentTag": "div"
+        },
+        {
+          "index": 28,
+          "original": "$107k",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "world-map",
+      "documentPath": "world-map.html",
+      "slots": [
+        {
+          "index": 16,
+          "original": "Global GDP per Capita",
+          "parentTag": "h1"
+        },
+        {
+          "index": 18,
+          "original": "Nominal GDP per capita, 2024 IMF estimates",
+          "parentTag": "p"
+        },
+        {
+          "index": 26,
+          "original": "Low",
+          "parentTag": "span"
+        },
+        {
+          "index": 28,
+          "original": "High",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "x-post",
+      "documentPath": "x-post.html",
+      "slots": [
+        {
+          "index": 23,
+          "original": "动效画布",
+          "parentTag": "span"
+        },
+        {
+          "index": 32,
+          "original": "@动效画布",
+          "parentTag": "span"
+        },
+        {
+          "index": 42,
+          "original": "Prompt to replace this text with your tweet. Change the display name, handle, timestamp,\n          and engagement counts to match your content.",
+          "parentTag": "div"
+        },
+        {
+          "index": 43,
+          "original": "#YourHashtag",
+          "parentTag": "span"
+        },
+        {
+          "index": 47,
+          "original": "1:10 PM · Apr 7, 2026",
+          "parentTag": "div"
+        },
+        {
+          "index": 59,
+          "original": "34",
+          "parentTag": "span"
+        },
+        {
+          "index": 69,
+          "original": "2.3K",
+          "parentTag": "span"
+        },
+        {
+          "index": 82,
+          "original": "10.9K",
+          "parentTag": "span"
+        },
+        {
+          "index": 92,
+          "original": "150K",
+          "parentTag": "span"
         }
       ]
     },

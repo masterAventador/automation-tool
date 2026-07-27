@@ -46,7 +46,22 @@ await page.evaluate(() => {
   }
 });
 await page.waitForTimeout(200);
-const measured = await page.evaluate((indices) => {
+// Some parts cycle their copy: `morph-text` shows one phrase at a time, so at
+// the end of the timeline the other four measure zero wide. A slot that is
+// hidden at one instant still has a real budget at the instant it is shown, so
+// every position is measured and the widest is the budget.
+async function measureAt(position) {
+  if (position !== null) {
+    await page.evaluate((seconds) => {
+      const timelines = window.__timelines;
+      if (!timelines) return;
+      for (const timeline of Object.values(timelines)) {
+        if (typeof timeline.seek === "function") timeline.seek(seconds);
+      }
+    }, position);
+    await page.waitForTimeout(120);
+  }
+  return page.evaluate((indices) => {
   const walker = document.createTreeWalker(document, NodeFilter.SHOW_TEXT);
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -67,5 +82,24 @@ const measured = await page.evaluate((indices) => {
     };
   });
 }, slots);
+}
+
+const passes = [];
+for (const position of [null, 0, 0.5, 1, 2, 4]) {
+  passes.push(await measureAt(position));
+}
+// The widest reading per slot: a container measured while its own content is
+// on screen, rather than while a sibling phrase has the stage.
+const measured = passes[0].map((_, slot) => {
+  const readings = passes.map((pass) => pass[slot]).filter((r) => r && r.found);
+  if (!readings.length) return passes[0][slot];
+  const widest = readings.reduce((a, b) => (b.usableWidth > a.usableWidth ? b : a));
+  return {
+    ...widest,
+    // Overflow is a property of the settled frame, not of the widest one.
+    overflowsX: readings[0].overflowsX,
+    overflowsY: readings[0].overflowsY,
+  };
+});
 console.log(JSON.stringify(measured));
 await browser.close();

@@ -101,6 +101,42 @@ SCENERY_PARTS: Final[dict[str, str]] = {
     "两者都需要槽位分组，而分组还没有设计",
 }
 
+# PC-12, the second batch: 40 mixed-type parts, read one by one the same way.
+#
+# The answer is that very few of them yield a slot. Most are one of three things
+# the first batch already taught us to exclude — a fake interface, the upstream's
+# own marketing page, or text a script assembles — and being "mixed" is often
+# exactly why: the DOM half is scenery and the JS half is the content.
+SECOND_BATCH_SCENERY: Final[dict[str, str]] = {
+    "macos-tahoe-liquid-glass": "整屏 macOS 桌面仿制，75 个节点是 Finder / File / Edit "
+    "这类界面家具，外加上游自己的站点导航",
+    "ios26-liquid-glass": "整屏 iOS 主屏仿制，54 个节点是应用名",
+    "vfx-liquid-background": "整屏交易应用仿制，49 个节点是虚构的持仓与行情",
+    "liquid-glass-widgets": "小组件仿制，温度 / 电量 / 步数是界面家具",
+    "vfx-iphone-device": "上游自己的网站装在手机框里——「Made with 动效画布」「Log in」，"
+    "与 vfx-magnetic 同一类",
+    "blue-sweater-intro-video": "文字被按字母拆成碎片做动画（Intro | ducin | g），"
+    "不是可寻址的文案；替换任何一片都会弄坏那个逐字动效",
+    "apple-money-count": "唯一的可见节点是计数器起始值 $0，脚本一启动就覆盖它，"
+    "替换它什么都不会发生——这正是「混合型」最会骗人的形态",
+    "vfx-text-cursor": "打字机效果把整句拆成碎片并混入空节点，需要槽位分组，同 news-ticker",
+    "morph-text": "五句文案轮播且从不同时布局——像素预算探针在六个采样时刻量到的宽度"
+    "全是 0。给它开槽就得配一个编出来的预算，而预算是 PC-14 判溢出的唯一依据。"
+    "本轮排除，等槽位分组能表达「轮播的一组」时再收",
+    "code-snippet-apple-terminal-basic": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-clear-dark": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-clear-light": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-grass": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-homebrew": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-man-page": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-novel": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-ocean": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-pro": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-red-sands": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-silver-aerogel": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+    "code-snippet-apple-terminal-solid-colors": "假终端输出——窗口标题 bash — 80×24、Last login、目录列表与命令回显都是布景，与假 macOS 桌面同一类；真正会变的内容在脚本里逐行打字",
+}
+
 # Nodes inside kept parts that must not become slots. Keyed by the exact text as
 # it appears in the shipped document, because that is what the anchor compares.
 FIXED_TEXT: Final[dict[str, str]] = {
@@ -113,7 +149,35 @@ FIXED_TEXT: Final[dict[str, str]] = {
     "HF": "头像里的首字母缩写，由品牌资料决定而不是由这段文案决定",
     "⌘T": "键盘快捷键",
     "⇧⌘N": "键盘快捷键",
+    "— Code Diff": "零件自己的演示标签，不是这部片子的文案",
+    "— Code Highlight Sweep": "同上",
+    "— Code Morph": "同上",
+    "— Code Scroll To Line": "同上",
+    "— Code Snippet Flight": "同上",
+    "— Code Typing": "同上",
+    "Source: Internal analytics": "数据来源署名，改它就是把数据算到别人头上",
+    "Source: U.S. Census Bureau": "同上",
+    "Source: International Monetary Fund": "同上",
+    "Source: Illustrative data": "同上",
+    "Search": "搜索框占位，界面家具",
+    "All": "筛选标签，界面家具",
+    "Favorites": "筛选标签，界面家具",
+    "Recent": "筛选标签，界面家具",
+    "Reply": "按钮",
+    "Mark Read": "按钮",
+    "Share": "按钮",
+    "r/": "被切开的前缀碎片，紧跟其后的 r/xxx 才是可寻址的那一个",
 }
+
+
+# Attribution carries a date or an edition, so it cannot be matched exactly.
+# Prefix rather than substring: the line has to *start* as attribution, or a
+# headline that happened to mention a source would be excluded with it.
+FIXED_TEXT_PREFIXES: Final[tuple[str, ...]] = (
+    "Source:",
+    "Fuente:",
+    "©",
+)
 
 
 class SlotError(ValueError):
@@ -122,6 +186,13 @@ class SlotError(ValueError):
 
 def fail(message: str) -> None:
     raise SlotError(message)
+
+
+def _is_slot_text(text: str) -> bool:
+    """Whether this run is copy at all, rather than furniture or attribution."""
+    if text in FIXED_TEXT:
+        return False
+    return not text.startswith(FIXED_TEXT_PREFIXES)
 
 
 def load_json(path: Path) -> dict:
@@ -154,6 +225,11 @@ def release_item_root() -> Path:
     return root
 
 
+def second_batch_parts() -> list[str]:
+    usability = load_json(USABILITY_PATH)
+    return [item["name"] for item in usability["items"] if item["batch"] == "second"]
+
+
 def first_batch_parts() -> list[str]:
     usability = load_json(USABILITY_PATH)
     return [item["name"] for item in usability["items"] if item["batch"] == "first"]
@@ -169,14 +245,14 @@ def part_document(item_root: Path, name: str) -> Path:
 def build_contract() -> dict[str, object]:
     item_root = release_item_root()
     parts: list[dict[str, object]] = []
-    for name in sorted(first_batch_parts()):
-        if name in SCENERY_PARTS:
+    for name in sorted(first_batch_parts() + second_batch_parts()):
+        if name in SCENERY_PARTS or name in SECOND_BATCH_SCENERY:
             continue
         document = part_document(item_root, name)
         nodes = [
             node
             for node in visible_text_nodes(document.read_text(encoding="utf-8"))
-            if node.text.strip() not in FIXED_TEXT
+            if _is_slot_text(node.text.strip())
         ]
         if not nodes:
             continue
@@ -191,7 +267,6 @@ def build_contract() -> dict[str, object]:
                         "parentTag": node.parent_tag,
                     }
                     for node in nodes
-                    if node.text.strip() not in FIXED_TEXT
                 ],
             }
         )
@@ -210,15 +285,15 @@ def build_contract() -> dict[str, object]:
 def verify(contract: dict) -> None:
     """Re-derive every anchor from the release tree and refuse any difference."""
     item_root = release_item_root()
-    allowed = set(first_batch_parts())
+    allowed = set(first_batch_parts()) | set(second_batch_parts())
     for part in contract.get("parts", []):
         name = part.get("name")
         if name not in allowed:
             fail(
-                f"{name} is not in the first batch of the usability grading, so it "
+                f"{name} is not in a graded batch that may carry slots, so it "
                 "may not carry a slot table"
             )
-        if name in SCENERY_PARTS:
+        if name in SCENERY_PARTS or name in SECOND_BATCH_SCENERY:
             fail(f"{name} is scenery rather than copy and may not carry slots")
         document = part_document(item_root, str(name))
         if document.name != part.get("documentPath"):
@@ -240,10 +315,13 @@ def verify(contract: dict) -> None:
                     f"{slot.get('original')!r} but the shipped document says "
                     f"{node.text.strip()!r}"
                 )
-            if node.text.strip() in FIXED_TEXT:
+            if not _is_slot_text(node.text.strip()):
+                reason = FIXED_TEXT.get(
+                    node.text.strip(), "署名行，改它就是把内容算到别人头上"
+                )
                 fail(
                     f"{name} slot {slot.get('index')} is fixed text that may not be "
-                    f"rewritten: {FIXED_TEXT[node.text.strip()]}"
+                    f"rewritten: {reason}"
                 )
             if node.parent_tag != slot.get("parentTag"):
                 fail(
