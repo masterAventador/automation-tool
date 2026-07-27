@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-part-slots.v1",
+  "policy": "fail_closed",
+  "counts": {
+    "parts": 18,
+    "slots": 48
+  },
+  "parts": [
+    {
+      "name": "instagram-follow",
+      "documentPath": "instagram-follow.html",
+      "slots": [
+        {
+          "index": 15,
+          "original": "人物创作平台",
+          "parentTag": "div"
+        },
+        {
+          "index": 21,
+          "original": "@人物创作平台_official",
+          "parentTag": "div"
+        },
+        {
+          "index": 23,
+          "original": "47.5K followers",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "logo-outro",
+      "documentPath": "logo-outro.html",
+      "slots": [
+        {
+          "index": 29,
+          "original": "Nothing great is made alone.",
+          "parentTag": "div"
+        },
+        {
+          "index": 32,
+          "original": "figma.com",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "lt-accent-underline",
+      "documentPath": "lt-accent-underline.html",
+      "slots": [
+        {
+          "index": 12,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 15,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-bold-block",
+      "documentPath": "lt-bold-block.html",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "lt-clean-bar",
+      "documentPath": "lt-clean-bar.html",
+      "slots": [
+        {
+          "index": 14,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-color-block",
+      "documentPath": "lt-color-block.html",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 15,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-dark-card",
+      "documentPath": "lt-dark-card.html",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-kicker-name",
+      "documentPath": "lt-kicker-name.html",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Episode 47",
+          "parentTag": "span"
+        },
+        {
+          "index": 16,
+          "original": "Maya Chen",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-mask-reveal",
+      "documentPath": "lt-mask-reveal.html",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 17,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-side-rule",
+      "documentPath": "lt-side-rule.html",
+      "slots": [
+        {
+          "index": 14,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 16,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-soft-pill",
+      "documentPath": "lt-soft-pill.html",
+      "slots": [
+        {
+          "index": 15,
+          "original": "Dr. Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 17,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "lt-stack-bars",
+      "documentPath": "lt-stack-bars.html",
+      "slots": [
+        {
+          "index": 13,
+          "original": "Maya Chen",
+          "parentTag": "div"
+        },
+        {
+          "index": 17,
+          "original": "Host · Neuroscientist",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "macos-notification",
+      "documentPath": "macos-notification.html",
+      "slots": [
+        {
+          "index": 27,
+          "original": "动效画布",
+          "parentTag": "span"
+        },
+        {
+          "index": 32,
+          "original": "Prompt to replace this title",
+          "parentTag": "div"
+        },
+        {
+          "index": 34,
+          "original": "Prompt to change this body text, the app icon, and the app name to match your content.",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "north-korea-locked-down",
+      "documentPath": "north-korea-locked-down.html",
+      "slots": [
+        {
+          "index": 16,
+          "original": "LOCKED",
+          "parentTag": "div"
+        },
+        {
+          "index": 17,
+          "original": "DOWN",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "nyc-paris-flight",
+      "documentPath": "nyc-paris-flight.html",
+      "slots": [
+        {
+          "index": 27,
+          "original": "New York",
+          "parentTag": "div"
+        },
+        {
+          "index": 28,
+          "original": "JFK / NYC",
+          "parentTag": "span"
+        },
+        {
+          "index": 32,
+          "original": "Paris",
+          "parentTag": "div"
+        },
+        {
+          "index": 33,
+          "original": "CDG / FR",
+          "parentTag": "span"
+        },
+        {
+          "index": 50,
+          "original": "ARRIVED",
+          "parentTag": "div"
+        },
+        {
+          "index": 54,
+          "original": "Six-second transatlantic hop",
+          "parentTag": "div"
+        },
+        {
+          "index": 56,
+          "original": "NEW YORK",
+          "parentTag": "div"
+        },
+        {
+          "index": 57,
+          "original": "TO",
+          "parentTag": "span"
+        },
+        {
+          "index": 58,
+          "original": "PARIS",
+          "parentTag": "div"
+        },
+        {
+          "index": 62,
+          "original": "5,837 km compressed",
+          "parentTag": "p"
+        }
+      ]
+    },
+    {
+      "name": "spotify-card",
+      "documentPath": "spotify-card.html",
+      "slots": [
+        {
+          "index": 22,
+          "original": "动效画布",
+          "parentTag": "div"
+        },
+        {
+          "index": 24,
+          "original": "人物创作平台",
+          "parentTag": "div"
+        },
+        {
+          "index": 34,
+          "original": "音频平台",
+          "parentTag": "span"
+        }
+      ]
+    },
+    {
+      "name": "tiktok-follow",
+      "documentPath": "tiktok-follow.html",
+      "slots": [
+        {
+          "index": 14,
+          "original": "人物创作平台",
+          "parentTag": "div"
+        },
+        {
+          "index": 16,
+          "original": "@人物创作平台.com",
+          "parentTag": "div"
+        },
+        {
+          "index": 18,
+          "original": "1,999 followers",
+          "parentTag": "div"
+        }
+      ]
+    },
+    {
+      "name": "yt-lower-third",
+      "documentPath": "yt-lower-third.html",
+      "slots": [
+        {
+          "index": 14,
+          "original": "人物创作平台",
+          "parentTag": "div"
+        },
+        {
+          "index": 16,
+          "original": "82.2K subscribers",
+          "parentTag": "div"
+        }
+      ]
+    }
+  ]
+}
