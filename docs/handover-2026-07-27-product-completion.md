@@ -95,7 +95,18 @@ PC-05/06/08/09/10/12/14/15        ⬜   PC-03 之后；PC-15 是字体冗余整�
 3. **24 个 `code-snippet-*` 从此和上游官网预览长得不一样**——它们仿的是 VS Code / Apple Terminal，
    官网用 Menlo/SF Mono，而那些不可再分发，已映射到 JetBrains Mono。**这是许可证决定的，不可逆。**
 
-**为什么不是 ✅**：渲染期注入还没接进执行器。`part_font_css()` 能生成、也用它渲出了真实产物
+**为什么不是 ✅**：渲染期注入还没接进执行器。一条 grep 就能复核——
+
+```
+$ grep -rn "part_font_css" --include=*.py --include=*.rs --include=*.ts .
+scripts/motion_part_typography.py:285      def part_font_css(...)   ← 定义
+scripts/test_motion_part_typography.py:155                          ← 唯一调用方
+```
+
+`backend/src/` 底下一次都没出现，**执行器根本不知道有这个函数**。所以用户点「一句话出片」，
+渲染出来的中文仍旧掉系统字体，和今天早上一模一样。
+
+`part_font_css()` 能生成、也用它渲出了真实产物
 （`lt-bold-block` 22 个字形全部 `isCustomFont: true`，第一轮对照组是 11 个字形全部 PingFang SC），
 但执行器还没有在写 RenderJob 工作区副本时调用它——**那个写副本的点正是 PC-03 要建的文案替换点**。
 加上 Windows 未复测。所以字体已进包、机制已验，但从正式 App 走一遍还看不到效果。
