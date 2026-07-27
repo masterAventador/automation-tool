@@ -33,6 +33,7 @@ source as operator copy.)
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Mapping, Sequence
@@ -138,6 +139,11 @@ def _with_font_rules(html: str, font_css: str) -> str:
 
 
 WORKING_COPY_DIRECTORY: Final = "catalog"
+# How a part document reaches the catalog root: it sits at `items/<name>/`.
+# Font rules are injected into that document while the contract records their
+# artifacts from the root, so the prefix has to be applied by whoever generates
+# them — see `part_typography.document_font_css(artifact_prefix=...)`.
+PART_TO_CATALOG_ROOT: Final = "../../"
 SHARED_DEPENDENCIES: Final = "offline-deps"
 
 
@@ -177,50 +183,83 @@ def write_part_working_copy(
         )
     document = documents[0]
 
-    shared = catalog_root / SHARED_DEPENDENCIES
-    if shared.is_dir():
-        _copy_tree(workspace, shared, f"{directory}/{SHARED_DEPENDENCIES}")
-    _copy_tree(
-        workspace,
-        part_directory,
-        f"{directory}/items/{name}",
-        skip={document.name},
+    rendered = render_part_working_copy(
+        document.read_text(encoding="utf-8"),
+        slots=slots,
+        copy=copy,
+        font_css=font_css,
     )
-
     entry = f"{directory}/items/{name}/{document.name}"
-    workspace.write_text(  # type: ignore[attr-defined]
-        entry,
-        render_part_working_copy(
-            document.read_text(encoding="utf-8"),
-            slots=slots,
-            copy=copy,
-            font_css=font_css,
-        ),
+    workspace.write_text(entry, rendered)  # type: ignore[attr-defined]
+    _copy_referenced(
+        workspace,
+        catalog_root=catalog_root,
+        origin=part_directory,
+        text=rendered,
+        directory=directory,
     )
     return entry
 
 
-def _copy_tree(
-    workspace: object, source: Path, destination: str, *, skip: set[str] | None = None
-) -> None:
-    """Every regular file under `source`, written into the workspace.
+# What a reference can look like in the documents this catalog ships. Kept
+# deliberately small: anything these three miss does not travel, and the
+# sandbox's allowlist then refuses the render rather than letting the browser
+# quietly draw without it.
+_REFERENCE: Final = re.compile(
+    r"""(?:src|href)\s*=\s*["']([^"']+)["']|url\(\s*['"]?([^'")]+)['"]?\s*\)"""
+)
+_COPIED_TEXT_SUFFIXES: Final = frozenset({".css", ".js"})
 
-    Symlinks are skipped rather than followed: the release tree has none, and a
-    link that appeared there would be describing a file outside the tree the
-    manifest accounts for.
+
+def _copy_referenced(
+    workspace: object,
+    *,
+    catalog_root: Path,
+    origin: Path,
+    text: str,
+    directory: str,
+) -> None:
+    """Copy exactly what the finished document reaches for, and what that reaches.
+
+    The sandbox accepts at most 128 allowed assets, and the shared dependency
+    tree alone holds 125 files — copying it wholesale spends the budget before
+    the part's own assets are counted, and five of the 134 parts already exceed
+    it. Reading the references out of the document that will actually be
+    rendered keeps the copy to what is used and needs no list to maintain.
+
+    A reference that leaves the catalog is refused rather than skipped: the
+    release tree is closed by construction, so one pointing outside means this
+    is not the tree the manifest describes.
     """
-    for path in sorted(source.rglob("*")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        relative = path.relative_to(source).as_posix()
-        if skip is not None and relative in skip:
-            continue
-        workspace.write_bytes(  # type: ignore[attr-defined]
-            f"{destination}/{relative}", path.read_bytes()
-        )
+    pending: list[tuple[Path, str]] = [(origin, text)]
+    seen: set[Path] = set()
+    while pending:
+        base, source = pending.pop()
+        for match in _REFERENCE.finditer(source):
+            reference = match.group(1) or match.group(2)
+            if reference.startswith(("http:", "https:", "data:", "#")):
+                continue
+            target = (base / reference.split("?", 1)[0].split("#", 1)[0]).resolve()
+            try:
+                relative = target.relative_to(catalog_root.resolve())
+            except ValueError:
+                raise SlotAnchorRejected(
+                    f"a reference leaves the catalog: {reference}"
+                ) from None
+            if target in seen:
+                continue
+            seen.add(target)
+            if target.is_symlink() or not target.is_file():
+                raise SlotAnchorRejected(f"a reference resolves to nothing: {reference}")
+            workspace.write_bytes(  # type: ignore[attr-defined]
+                f"{directory}/{relative.as_posix()}", target.read_bytes()
+            )
+            if target.suffix.lower() in _COPIED_TEXT_SUFFIXES:
+                pending.append((target.parent, target.read_text(encoding="utf-8", errors="ignore")))
 
 
 __all__ = [
+    "PART_TO_CATALOG_ROOT",
     "PartSlot",
     "SHARED_DEPENDENCIES",
     "SlotAnchorRejected",

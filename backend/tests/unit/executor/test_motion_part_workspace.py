@@ -212,13 +212,26 @@ class _RecordingWorkspace:
         return self._root / relative
 
 
+# The document as it sits in the catalog: same part, plus the relative
+# references every real part carries. Text-node indices are counted from *this*
+# text, not from `PART_HTML` — inserting two head elements moves them.
+CATALOG_PART_HTML = PART_HTML.replace(
+    "</head>",
+    '<script src="../../offline-deps/js/gsap.min.js"></script>'
+    '<style>.b{background:url(assets/grain.png)}</style></head>',
+)
+
+
 def _catalog(tmp_path: Path) -> Path:
     """A catalog laid out the way the release tree is."""
     root = tmp_path / "motion-catalog"
     part = root / "items" / "lt-bold-block"
     part.mkdir(parents=True)
-    (part / "lt-bold-block.html").write_text(PART_HTML, encoding="utf-8")
-    (part / "note.txt").write_text("part asset", encoding="utf-8")
+    # A part reaches its shared runtime and its own assets by relative path, the
+    # way every document in the release tree does.
+    (part / "lt-bold-block.html").write_text(CATALOG_PART_HTML, encoding="utf-8")
+    (part / "assets").mkdir()
+    (part / "assets" / "grain.png").write_bytes(b"grain")
     fonts = root / "offline-deps" / "fonts" / "woff2" / "anton"
     fonts.mkdir(parents=True)
     (fonts / "anton-400.woff2").write_bytes(b"font bytes")
@@ -238,7 +251,7 @@ def test_the_working_copy_keeps_the_layout_the_part_references(tmp_path) -> None
     """
     catalog = _catalog(tmp_path)
     workspace = _RecordingWorkspace(tmp_path / "job")
-    index = slot_index_of(PART_HTML, "Maya Chen")
+    index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
 
     entry = write_part_working_copy(
         workspace=workspace,
@@ -250,16 +263,17 @@ def test_the_working_copy_keeps_the_layout_the_part_references(tmp_path) -> None
     )
 
     assert entry == "catalog/items/lt-bold-block/lt-bold-block.html"
-    assert "catalog/offline-deps/fonts/woff2/anton/anton-400.woff2" in workspace.written
+    # Same relative position as in the catalog, so `../../offline-deps/…` and
+    # `assets/…` both resolve from the written document without rewriting a
+    # single URL.
     assert "catalog/offline-deps/js/gsap.min.js" in workspace.written
-    # The part's own assets travel with it.
-    assert "catalog/items/lt-bold-block/note.txt" in workspace.written
+    assert "catalog/items/lt-bold-block/assets/grain.png" in workspace.written
 
 
 def test_the_written_document_carries_the_copy_and_the_font_rules(tmp_path) -> None:
     catalog = _catalog(tmp_path)
     workspace = _RecordingWorkspace(tmp_path / "job")
-    index = slot_index_of(PART_HTML, "Maya Chen")
+    index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
 
     entry = write_part_working_copy(
         workspace=workspace,
@@ -297,7 +311,7 @@ def test_the_read_only_catalog_is_never_written_to(tmp_path) -> None:
         path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()
     }
     workspace = _RecordingWorkspace(tmp_path / "job")
-    index = slot_index_of(PART_HTML, "Maya Chen")
+    index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
 
     write_part_working_copy(
         workspace=workspace,
@@ -312,3 +326,61 @@ def test_the_read_only_catalog_is_never_written_to(tmp_path) -> None:
         path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()
     }
     assert after == before
+
+
+def test_only_the_shared_files_the_document_asks_for_are_copied(tmp_path) -> None:
+    """The sandbox allowlist has 128 slots and the shared tree has 125 files.
+
+    Copying `offline-deps` wholesale spends the whole budget before the part's
+    own assets are counted — measured on the real tree, `nyc-paris-flight` lands
+    on exactly 128 and five parts of the 134 already exceed it. So the working
+    copy carries what the finished document actually references, resolved from
+    the document itself rather than from a list someone maintains.
+
+    A dependency reached only from script therefore does not travel — and that
+    is the loud failure the allowlist exists to produce, rather than a silent
+    404 inside the render.
+    """
+    catalog = _catalog(tmp_path)
+    unused = catalog / "offline-deps" / "draco"
+    unused.mkdir(parents=True)
+    (unused / "draco_decoder.wasm").write_bytes(b"unused")
+    workspace = _RecordingWorkspace(tmp_path / "job")
+    index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
+
+    write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="lt-bold-block",
+        slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+        copy={index: "张三"},
+        font_css="@font-face{src:url(../../offline-deps/fonts/woff2/anton/anton-400.woff2);}",
+    )
+
+    written = set(workspace.written)
+    assert "catalog/offline-deps/fonts/woff2/anton/anton-400.woff2" in written
+    assert "catalog/offline-deps/draco/draco_decoder.wasm" not in written
+    # Well inside the 128 the sandbox will accept.
+    assert len(written) < 10
+
+
+def test_a_reference_pointing_outside_the_catalog_is_refused(tmp_path) -> None:
+    catalog = _catalog(tmp_path)
+    part = catalog / "items" / "lt-bold-block"
+    (part / "lt-bold-block.html").write_text(
+        CATALOG_PART_HTML.replace(
+            "</head>", '<script src="../../../escape.js"></script></head>'
+        ),
+        encoding="utf-8",
+    )
+    workspace = _RecordingWorkspace(tmp_path / "job")
+
+    with pytest.raises(SlotAnchorRejected):
+        write_part_working_copy(
+            workspace=workspace,
+            catalog_root=catalog,
+            name="lt-bold-block",
+            slots=(),
+            copy={},
+            font_css="",
+        )

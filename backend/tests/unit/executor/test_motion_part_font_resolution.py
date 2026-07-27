@@ -178,3 +178,21 @@ def test_the_gate_script_keeps_no_second_scanner() -> None:
     source = script.read_text(encoding="utf-8")
     assert "def resolve_faces(" not in source
     assert "def packaged_weights(" not in source
+
+
+def test_the_rules_point_at_where_the_document_can_reach_them() -> None:
+    """The contract records artifacts from the catalog root; the document is not there.
+
+    A part document sits at `items/<name>/`, so an unprefixed `url(...)` in the
+    injected rules resolves two levels above the file it should. The browser
+    reports that by drawing in the host font — the exact silence PC-13 removes.
+    Measured on the real tree: every one of the 18 first-batch parts produced
+    rules that resolved to nothing before this argument existed.
+    """
+    css = document_font_css(
+        "<style>.a{font-family:'Anton';font-weight:400}</style>",
+        artifact_prefix="../../",
+    )
+
+    assert "url(../../offline-deps/" in css
+    assert "url(offline-deps/" not in css

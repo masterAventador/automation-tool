@@ -282,6 +282,7 @@ def document_font_css(
     *,
     typography_contract: Mapping[str, object] | None = None,
     offline_lock: Mapping[str, object] | None = None,
+    artifact_prefix: str = "",
 ) -> str:
     """Every rule this one document needs, or a refusal naming what is missing.
 
@@ -293,6 +294,12 @@ def document_font_css(
     caller to supply them would mean the only code able to render is code that
     knows where the package put its own files — the build-time switch on where
     to look that this project has already paid for once.
+
+    `artifact_prefix` is what the artifact paths are relative *to*. The contract
+    records them from the catalog root, while the rules are injected into a
+    document that sits two levels down at `items/<name>/`; emitting them
+    unprefixed produced URLs that resolve to nothing, and a font that fails to
+    load is the silent host-font fallback PC-13 exists to remove.
     """
     if typography_contract is None:
         typography_contract = packaged_typography_contract()
@@ -306,7 +313,9 @@ def document_font_css(
     if unmet:
         named = ", ".join(f"{family} {weight}" for family, weight in unmet)
         raise FontRequestUnmet(f"the package cannot declare a face for: {named}")
-    chinese = typography_contract["chineseFace"]["artifactPath"]  # type: ignore[index]
+    chinese = artifact_prefix + str(
+        typography_contract["chineseFace"]["artifactPath"]  # type: ignore[index]
+    )
 
     def latin(face: ResolvedFace) -> str:
         artifacts = face_artifact(offline_lock, face.source_family, face.weight)
@@ -314,7 +323,7 @@ def document_font_css(
             raise FontRequestUnmet(
                 f"no packaged file serves {face.source_family} {face.weight}"
             )
-        return artifacts[0]
+        return artifact_prefix + artifacts[0]
 
     return part_font_css(faces, chinese_artifact=chinese, latin_artifact=latin)
 
