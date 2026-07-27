@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openVideoStudio } from "./navigation";
 
 /**
  * Picking a creation method has to put the thing it unlocked on screen.
@@ -23,7 +24,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/harness.html?health=available");
-  await page.getByRole("menuitem", { name: "视频制作" }).click();
+  await openVideoStudio(page);
   await expect(page.getByRole("tab", { name: "新建视频" })).toBeVisible();
 });
 
@@ -64,9 +65,9 @@ test("a submission and its result survive leaving the page", async ({ page }) =>
   const failure = page.getByText(/暂时无法提交|暂时不可用|自动编排/);
   await expect(failure).toBeVisible();
 
-  const videoEntry = page.getByRole("menuitem", { name: "视频制作" });
-  await page.getByRole("menuitem", { name: "工作台" }).click();
-  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+  const videoEntry = page.getByRole("menuitem", { name: /创作/ });
+  await page.getByRole("menuitem", { name: "AI 助理" }).click();
+  await expect(page.getByRole("heading", { name: "AI 运营助理" })).toBeVisible();
 
   // Away from the page, the sidebar is the only thing that can still say so —
   // and this submission failed, so what it says has to be that. It used to
@@ -75,7 +76,7 @@ test("a submission and its result survive leaving the page", async ({ page }) =>
   await expect(videoEntry.getByText("失败")).toBeVisible();
   await expect(videoEntry.locator("[title='视频制作正在进行中']")).toHaveCount(0);
 
-  await videoEntry.click();
+  await openVideoStudio(page);
   await expect(page.getByText(/暂时无法提交|暂时不可用|自动编排/)).toBeVisible();
 
   await page.getByRole("tab", { name: "新建视频" }).click();

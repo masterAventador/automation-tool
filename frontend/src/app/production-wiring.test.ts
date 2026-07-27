@@ -28,6 +28,10 @@ import { describe, expect, it } from "vitest";
 const MAIN = resolve("src/main.tsx");
 const source = readFileSync(MAIN, "utf8");
 const shell = readFileSync(resolve("src/app/WorkbenchShell.tsx"), "utf8");
+const operations = readFileSync(
+  resolve("src/features/operations/OperationsWorkspace.tsx"),
+  "utf8",
+);
 
 /** `const x = new TauriFoo(...)` → x ↦ TauriFoo */
 function tauriBindings(text: string): ReadonlyMap<string, string> {
@@ -139,8 +143,12 @@ describe("production wiring", () => {
    * 是同一类病——通道每层都在，只是没有任何东西往里灌值。
    */
   it("hands the finished-videos page a way to send one on to publishing", () => {
-    const handoff = /<VideoStudio[^>]*onPublishArtifact=\{([A-Za-z_$][\w$]*)\}/u.exec(shell);
-    expect(handoff, "VideoStudio is never given a publish handoff").not.toBeNull();
+    const handoff = /<CreationHub[^>]*onPublishArtifact=\{([A-Za-z_$][\w$]*)\}/u.exec(shell);
+    expect(handoff, "CreationHub is never given a publish handoff").not.toBeNull();
+    expect(
+      operations,
+      "CreationHub does not forward its publish handoff to VideoStudio",
+    ).toMatch(/<VideoStudio[^>]*onPublishArtifact=\{onPublishArtifact\}/u);
     // 而且那个回调必须真的把成片写进选择状态，不能只是切页。
     expect(shell).toMatch(new RegExp(`const ${handoff![1]!}[^;]*setSelectedVideo\\(`, "u"));
   });

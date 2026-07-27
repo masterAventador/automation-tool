@@ -30,12 +30,12 @@ test("the legal notice is reachable from settings and names both projects", asyn
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
   await page.goto("/harness.html?health=available");
-  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 运营助理" })).toBeVisible();
 
   await expect(page.getByRole("menuitem", { name: "第三方软件声明" })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "开源软件许可" })).toHaveCount(0);
 
-  await page.getByRole("menuitem", { name: "设置与诊断" }).click();
+  await page.getByRole("menuitem", { name: "设置" }).click();
   await page.getByRole("button", { name: "开源软件许可" }).click();
 
   await expect(page.getByRole("heading", { name: "开源软件许可" })).toBeVisible();
@@ -65,12 +65,12 @@ test("leaving the notice takes the upstream names off the screen again", async (
   page,
 }) => {
   await page.goto("/harness.html?health=available");
-  await page.getByRole("menuitem", { name: "设置与诊断" }).click();
+  await page.getByRole("menuitem", { name: "设置" }).click();
   await page.getByRole("button", { name: "开源软件许可" }).click();
   await expect(page.getByRole("region", { name: "上游开源项目" })).toBeVisible();
 
-  await page.getByRole("menuitem", { name: "视频制作" }).click();
-  await expect(page.getByRole("heading", { name: "视频制作" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "创作" }).click();
+  await expect(page.getByRole("heading", { name: "创作", level: 2 })).toBeVisible();
 
   const tree = (await page.locator("body").ariaSnapshot()).toLowerCase();
   for (const name of ["moneyprinterturbo", "hyperframes"]) {

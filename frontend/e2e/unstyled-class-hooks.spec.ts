@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { openVideoEditing } from "./navigation";
 import { MINIMUM_WINDOW, PRODUCTION_WINDOW } from "./production-window";
 
 /**
@@ -42,7 +43,7 @@ const SOURCE_ARTIFACTS = [
 
 async function openSettings(page: Page): Promise<void> {
   await page.goto(HARNESS);
-  await page.getByRole("menuitem", { name: "设置与诊断" }).click();
+  await page.getByRole("menuitem", { name: "设置" }).click();
   await expect(page.getByRole("heading", { name: "剪辑服务凭据" })).toBeVisible();
 }
 
@@ -159,7 +160,7 @@ for (const size of [PRODUCTION_WINDOW, MINIMUM_WINDOW]) {
 test.describe("片段行的转场下拉和它旁边的输入框长得一样", () => {
   test("高度、字体和圆角与同一行的输入框一致", async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByRole("menuitem", { name: "视频剪辑" }).click();
+    await openVideoEditing(page);
     await page.getByLabel("剪辑项目标题").fill("转场控件验收项目");
     await page.getByLabel("输入素材引用").fill(SOURCE_ARTIFACTS.join("\n"));
     await page.getByRole("button", { name: "创建剪辑项目" }).click();

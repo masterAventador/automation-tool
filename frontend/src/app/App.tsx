@@ -117,8 +117,12 @@ export function App({
         locale={zhCN}
         theme={{
           token: {
-            colorPrimary: "#2f6fed",
-            borderRadius: 8,
+            colorPrimary: "#13a8ad",
+            colorInfo: "#13a8ad",
+            colorSuccess: "#2e9a72",
+            colorBgLayout: "#f6f5f0",
+            colorText: "#17212b",
+            borderRadius: 10,
             fontFamily:
               '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif',
           },

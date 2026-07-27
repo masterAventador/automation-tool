@@ -1,4 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import {
+  openAutomationRuns,
+  openPublishingWorkspace,
+  openTaskCreate,
+} from "./navigation";
 import { writeThePublishCopy } from "./publish-copy";
 
 function failOnConsoleErrors(page: Page): string[] {
@@ -21,7 +26,7 @@ test("available Harness opens the no-login RPA workbench", async ({ page }) => {
     "data-runtime",
     "automation-tool-test-harness",
   );
-  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 运营助理" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "桌面主导航" })).toBeVisible();
   await expect(page.getByRole("button", { name: /登录|注册/ })).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
@@ -47,7 +52,7 @@ test("flaky Harness recovers through the real retry interaction", async ({ page 
 
   await page.getByRole("button", { name: "重新检查" }).click();
 
-  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 运营助理" })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
 
@@ -68,7 +73,7 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
   const consoleErrors = failOnConsoleErrors(page);
   await page.goto("/harness.html?health=available&scenario=task-lifecycle");
 
-  await page.getByRole("menuitem", { name: "新建任务" }).click();
+  await openTaskCreate(page);
   await page.getByLabel("搜索关键词").fill("T3-19 取消链路");
   await page.getByLabel("单任务目标上限").fill("3");
   await page.getByRole("button", { name: "创建任务" }).click();
@@ -87,7 +92,7 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
   await expect(page.getByText("任务已取消")).toBeVisible();
 
   await page.getByRole("button", { name: "返回工作台" }).click();
-  await page.getByRole("menuitem", { name: "新建任务" }).click();
+  await openTaskCreate(page);
   await page.getByLabel("搜索关键词").fill("T3-19 成功链路");
   await page.getByRole("button", { name: "创建任务" }).click();
   const succeededReceipt = page.getByText(/任务已创建：[0-9a-f-]{36}/);
@@ -101,7 +106,8 @@ test("Task lifecycle Harness covers control, success, and refresh recovery", asy
   await expect(page.getByText("100%")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 运营助理" })).toBeVisible();
+  await openAutomationRuns(page);
   // 最近任务 lists newest first and no longer labels its rows with the Task's
   // UUID, so the row is picked the way an operator picks it — the top one — and
   // the identity is then checked on the page it opens.
@@ -125,7 +131,7 @@ test("publishing walks the real user path from the left navigation", async ({ pa
   const consoleErrors = failOnConsoleErrors(page);
 
   await page.goto("/harness.html?health=available&scenario=publishing");
-  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await openPublishingWorkspace(page);
 
   // Both platforms are listed; the one nobody configured says so instead of
   // disappearing or taking the module down with it. Scoped to the cards
@@ -159,7 +165,7 @@ test("an uncertain publish is never offered as something to repeat", async ({ pa
   const consoleErrors = failOnConsoleErrors(page);
 
   await page.goto("/harness.html?health=available&scenario=publishing-uncertain");
-  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await openPublishingWorkspace(page);
   await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await page.getByRole("button", { name: /确认发布/ }).click();
@@ -174,7 +180,7 @@ test("cancelling before the confirmation leaves nothing published", async ({ pag
   const consoleErrors = failOnConsoleErrors(page);
 
   await page.goto("/harness.html?health=available&scenario=publishing");
-  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await openPublishingWorkspace(page);
   await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await page.getByRole("button", { name: /取\s?消/ }).click();
@@ -188,7 +194,7 @@ test("the publishing page never tells the operator how a platform is reached", a
   page,
 }) => {
   await page.goto("/harness.html?health=available&scenario=publishing");
-  await page.getByRole("menuitem", { name: "作品发布" }).click();
+  await openPublishingWorkspace(page);
   await writeThePublishCopy(page);
   await page.getByRole("button", { name: /发布到抖音/ }).click();
   await expect(page.getByRole("group", { name: "确认发布内容" })).toBeVisible();

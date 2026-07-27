@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openVideoEditing as navigateToVideoEditing } from "./navigation";
 import { PRODUCTION_WINDOW } from "./production-window";
 
 /**
@@ -66,7 +67,7 @@ function tabGeometry(page: Page, innerSelectors: readonly string[]): Promise<Tab
   return page.evaluate((selectors) => {
     const widthOf = (element: Element | null): number =>
       element === null ? -1 : element.getBoundingClientRect().width;
-    const main = document.querySelector(".desktop-content main");
+    const main = document.querySelector(".video-editing");
     const panel = document.querySelector(
       '.video-editing [role="tabpanel"]:not([aria-hidden="true"])',
     );
@@ -121,7 +122,7 @@ function contentOverflow(page: Page): Promise<number> {
 /** Opens 视频剪辑 from the sidebar, the way an operator reaches it. */
 async function openVideoEditing(page: Page): Promise<void> {
   await page.goto(HARNESS);
-  await page.getByRole("menuitem", { name: "视频剪辑" }).click();
+  await navigateToVideoEditing(page);
 }
 
 /**
