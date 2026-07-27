@@ -169,6 +169,42 @@ curl -sSI https://raw.githubusercontent.com/... # 看能不能真连上
 
 `SSL: no alternative certificate subject name matches` 这种报错**几乎总是 hosts 里一条过时的 IP 把域名劫持到了别处**，而不是证书或代理出问题。删掉那条通常就好了。
 
+### 五之二、零件目录也是构建期下载的，而且它落在各自的检出里（PC-16）
+
+出包会把 134 个动效零件的发布树装进包（`Contents/Resources/motion-catalog`，46 MB）。
+**这棵树按各自检出解析路径**，所以出包用的那棵树自己要有它：
+
+```bash
+backend/.venv/bin/python scripts/build_offline_motion_catalog.py   # 下载并本地化，含 7.42 MB 中文字体
+backend/.venv/bin/python scripts/build_motion_catalog_release.py   # 合成只读发布树（46 MB / 337 文件）
+```
+
+**症状**（2026-07-27 实测踩到）：
+
+```
+download attempt 1/4 failed for https://fonts.gstatic.com/s/figtree/...woff2:
+  [SSL: UNEXPECTED_EOF_WHILE_READING]
+offline motion catalog build failed: download failed after 3 attempt(s)
+```
+
+第一步要从 `fonts.gstatic.com` 与 `raw.githubusercontent.com` 拉几十个字体文件，
+国内不稳，重试四次也可能全灭。
+
+**处置：从本机另一个已经建好的检出把 `.local/offline-motion-deps` 拷过来，再用目标树自己的门禁校验。**
+
+```bash
+cp -c -p -R <已建好的检出>/.local/offline-motion-deps .local/offline-motion-deps
+backend/.venv/bin/python scripts/check_offline_motion_catalog.py   # 必须 rc=0
+backend/.venv/bin/python scripts/build_motion_catalog_release.py
+```
+
+这不是取巧：离线目录**逐文件锁摘要**，可信度来自那道校验，不来自谁下载的。
+反过来说，**没跑校验就直接用拷来的目录是不行的**——那才是取巧。
+
+如果整台机器都是新的、没有任何建好的检出，就只能想办法让第一步的网络通
+（代理、换网络、或先在别的机器上建好再拷盘）。错误信息指向的是「下载失败」，
+不会告诉你还有「换个办法拿」这条路，所以记在这里。
+
 ---
 
 ## 出包与验收
