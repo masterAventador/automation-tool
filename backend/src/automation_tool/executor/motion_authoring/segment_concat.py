@@ -23,7 +23,10 @@ as operator copy.)
 
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Sequence
 
 
@@ -87,6 +90,11 @@ def normalisation_filter(stream: SegmentStream, canvas: FilmCanvas) -> str | Non
         and stream.pixel_format == FILM_PIXEL_FORMAT
     ):
         return None
+    return canvas_filter(canvas)
+
+
+def canvas_filter(canvas: FilmCanvas) -> str:
+    """The filter chain that puts any source onto this canvas."""
     return (
         f"scale={canvas.width}:{canvas.height}:force_original_aspect_ratio=decrease,"
         f"pad={canvas.width}:{canvas.height}:(ow-iw)/2:(oh-ih)/2:color=black,"
@@ -115,11 +123,166 @@ def require_joinable(
     return total
 
 
+def probe_segment(path: Path, *, ffprobe: Path) -> SegmentStream:
+    """What this file actually is, asked of the same toolchain that made it.
+
+    `-count_frames` rather than the container's frame count: the container is a
+    claim and the decoded stream is the fact, and PC-06's whole reason for
+    existing is that the two disagree without saying so.
+    """
+    completed = subprocess.run(
+        [
+            str(ffprobe),
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,avg_frame_rate,pix_fmt,nb_read_frames",
+            "-of",
+            "json",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SegmentMismatch(f"ffprobe could not read a segment: {path.name}")
+    try:
+        stream = json.loads(completed.stdout)["streams"][0]
+        numerator, denominator = str(stream["avg_frame_rate"]).split("/")
+        rate = int(numerator) // int(denominator) if int(denominator) else 0
+        return SegmentStream(
+            width=int(stream["width"]),
+            height=int(stream["height"]),
+            frames_per_second=rate,
+            pixel_format=str(stream["pix_fmt"]),
+            frames=int(stream["nb_read_frames"]),
+        )
+    except (KeyError, IndexError, ValueError, ZeroDivisionError) as error:
+        raise SegmentMismatch(
+            f"ffprobe answered something unreadable about {path.name}"
+        ) from error
+
+
+def concat_listing(segments: Sequence[Path]) -> str:
+    """The demuxer's list file.
+
+    `-safe 0` lets the list carry absolute paths, which means a path is data the
+    demuxer parses: a single quote inside one would close the entry early. The
+    demuxer's escape for that is `'\''`, the same one a POSIX shell uses.
+    """
+    lines = []
+    for segment in segments:
+        escaped = str(segment).replace("'", "'\\''")
+        lines.append(f"file '{escaped}'")
+    return "\n".join(lines) + "\n"
+
+
+def normalise_segment(
+    source: Path, destination: Path, *, canvas: FilmCanvas, ffmpeg: Path
+) -> None:
+    """Re-encode one segment onto the canvas."""
+    completed = subprocess.run(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(source),
+            "-vf",
+            canvas_filter(canvas),
+            "-r",
+            str(canvas.frames_per_second),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            FILM_PIXEL_FORMAT,
+            str(destination),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SegmentMismatch(f"ffmpeg could not bring {source.name} onto the canvas")
+
+
+def join_segments(
+    segments: Sequence[Path],
+    output: Path,
+    *,
+    canvas: FilmCanvas,
+    ffmpeg: Path,
+    ffprobe: Path,
+    expected_frames: int,
+) -> SegmentStream:
+    """Join segments already on the canvas, then measure what came out.
+
+    The measurement is the point. Concatenating a 1920x1080 segment with a
+    1080x1920 one exits 0 and reports both the right frame count and the right
+    duration while being broken; the only thing that catches it is asking the
+    finished file what it is and comparing that to what was asked for.
+    """
+    if not segments:
+        raise SegmentMismatch("a film needs at least one segment")
+    listing = output.parent / f"{output.stem}.concat.txt"
+    listing.write_text(concat_listing(segments), encoding="utf-8")
+    completed = subprocess.run(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listing),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SegmentMismatch("ffmpeg could not join the segments")
+    joined = probe_segment(output, ffprobe=ffprobe)
+    if joined.frames != expected_frames:
+        raise SegmentMismatch(
+            f"the joined film carries {joined.frames} frames, not the "
+            f"{expected_frames} its segments account for"
+        )
+    if normalisation_filter(joined, canvas) is not None:
+        raise SegmentMismatch(
+            f"the joined film is {joined.width}x{joined.height} at "
+            f"{joined.frames_per_second}fps {joined.pixel_format}, not the film's canvas"
+        )
+    return joined
+
+
 __all__ = [
     "FILM_PIXEL_FORMAT",
     "FilmCanvas",
     "SegmentMismatch",
     "SegmentStream",
+    "canvas_filter",
+    "concat_listing",
+    "join_segments",
     "normalisation_filter",
+    "normalise_segment",
+    "probe_segment",
     "require_joinable",
 ]

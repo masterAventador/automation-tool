@@ -30,6 +30,8 @@ from automation_tool.executor.motion_authoring.segment_concat import (
     FilmCanvas,
     SegmentMismatch,
     SegmentStream,
+    concat_listing,
+    join_segments,
     normalisation_filter,
     require_joinable,
 )
@@ -102,3 +104,51 @@ def test_a_segment_with_no_frames_is_refused() -> None:
 def test_an_empty_film_is_refused() -> None:
     with pytest.raises(SegmentMismatch):
         require_joinable([], CANVAS)
+
+
+# --- 执行层：真正调 ffmpeg，并且不相信它的退出码 -----------------------------
+
+
+def _stub(path, body: str):
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_the_join_is_measured_afterwards_not_trusted(tmp_path) -> None:
+    """The silent failure this module exists for, expressed as a test.
+
+    A stub ffmpeg that exits 0 and writes something, with a probe that reports a
+    frame count other than the sum, is exactly the shape measured on 2026-07-28
+    with the real toolchain: exit code 0, plausible file, wrong pixels. If the
+    product is not re-measured, that file ships.
+    """
+    segments = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
+    for segment in segments:
+        segment.write_bytes(b"segment")
+    ffmpeg = _stub(tmp_path / "ffmpeg", 'touch "$#"; exit 0')
+    ffprobe = _stub(
+        tmp_path / "ffprobe",
+        'echo \'{"streams":[{"width":1920,"height":1080,"avg_frame_rate":"30/1",'
+        '"pix_fmt":"yuv420p","nb_read_frames":"1"}]}\'',
+    )
+
+    with pytest.raises(SegmentMismatch) as failure:
+        join_segments(
+            segments,
+            tmp_path / "film.mp4",
+            canvas=CANVAS,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
+            expected_frames=324,
+        )
+
+    assert "324" in str(failure.value)
+
+
+def test_a_concat_list_quotes_every_path_the_demuxer_reads(tmp_path) -> None:
+    """`-safe 0` accepts absolute paths; a single quote in one would end the entry."""
+    listing = concat_listing([tmp_path / "a b.mp4", tmp_path / "c'd.mp4"])
+
+    assert listing.splitlines()[0] == f"file '{tmp_path / 'a b.mp4'}'"
+    assert "'\\''" in listing.splitlines()[1]
