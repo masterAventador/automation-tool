@@ -74,6 +74,9 @@ from customer_demo_release import (  # noqa: E402
     describe_deployment,
     require_compiled_deployment,
 )
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from production_assets import (  # noqa: E402
     AUDITED_DISTRIBUTION_NAME,
@@ -82,12 +85,14 @@ from production_assets import (  # noqa: E402
 from release_assembly import (  # noqa: E402
     SigningIdentity,
     install_and_seal,
+    install_motion_catalog,
     install_video_runtime,
     inventoried_payloads,
     load_signing_identity,
     notarize_and_staple,
     require_distributable_artifact,
     require_packaged_browser,
+    require_packaged_motion_catalog,
     require_packaged_video_runtime,
     sign_tree,
 )
@@ -298,6 +303,7 @@ def install_runtime_resources_and_sign(
     staging: Path,
     target_id: str,
     video_runtime: Path,
+    motion_catalog: Path,
     identity: SigningIdentity,
 ) -> None:
     """Run the shared release assembly step, the same one a release uses.
@@ -321,6 +327,14 @@ def install_runtime_resources_and_sign(
     )
     announce(f"Video runtime installed: {sorted(installed)}")
     sign_installed_video_runtime(installed, identity, target_id)
+    # PC-16. The catalog carries no Mach-O, so it is not signed on its own —
+    # the outermost seal below covers it. It has to land before that seal for
+    # the same reason everything else does.
+    announce("Installing the frozen catalog of animation parts")
+    catalog = install_motion_catalog(
+        application=application, staging=motion_catalog, platform="macos"
+    )
+    announce(f"Catalog installed: {sorted(catalog)}")
     announce("Installing the embedded browser, verifying it, then sealing the bundle")
     install_and_seal(
         application=application,
@@ -468,6 +482,9 @@ def create_disk_image(
     # video features fail on the user's machine while every acceptance run
     # stays green, which is exactly what happened.
     require_packaged_video_runtime(application=application, platform="macos")
+    # And for the parts. A package without them renders every film from the
+    # four built-in layouts and never says why the catalog was ignored.
+    require_packaged_motion_catalog(application=application, platform="macos")
     # Notarised and stapled before the disk image is built, so the ticket
     # travels inside the .app the customer drags out of it. A ticket stapled
     # only to the disk image is not carried by the copied application, which
@@ -721,8 +738,10 @@ def build_macos_release(
     )
     announce("Preparing the pinned video runtime resources (cached per machine)")
     video_runtime = prepare_video_runtime(platform="macos")
+    announce("Staging the frozen catalog of animation parts")
+    motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
     install_runtime_resources_and_sign(
-        application, browser, target_id, video_runtime, identity
+        application, browser, target_id, video_runtime, motion_catalog, identity
     )
     # Every content gate runs against the sealed bundle *before* notarisation.
     # Notarising twice costs about ten minutes, and a package that is going to

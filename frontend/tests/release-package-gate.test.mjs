@@ -53,6 +53,7 @@ test("the release resource inventory is declared once and read, never restated",
       "media-toolchain",
       "motion-video-worker",
       "material-video-worker",
+      "motion-catalog",
     ],
   );
   const audit = await repositoryFile("frontend/scripts/audit-production-package.mjs");

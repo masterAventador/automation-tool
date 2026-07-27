@@ -83,11 +83,17 @@ def verify_input_digests(release_lock: dict) -> None:
             )
 
 
-def run_staged_gate(staged_root: Path, dep_lock: dict, catalog_contract: dict, rights: dict):
-    """Re-run the full BM-12 static gate before composing anything."""
-    spec = importlib.util.spec_from_file_location("check_offline_motion_catalog", STAGED_GATE_PATH)
+def load_gate(path: Path):
+    """Import a gate script by path so its own checks are reused, not restated."""
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def run_staged_gate(staged_root: Path, dep_lock: dict, catalog_contract: dict, rights: dict):
+    """Re-run the full BM-12 static gate before composing anything."""
+    module = load_gate(STAGED_GATE_PATH)
     try:
         return module.verify_catalog(staged_root, dep_lock, catalog_contract, rights)
     except SystemExit as error:
@@ -393,6 +399,57 @@ def build_release(
         if path.is_file():
             path.chmod(READ_ONLY_MODE)
     return manifest
+
+
+def default_release_root(release_lock: dict | None = None) -> Path:
+    """Where an ordinary build puts the read-only release tree."""
+    lock = release_lock or load_json(RELEASE_LOCK_PATH)
+    return REPOSITORY_ROOT / lock["layout"]["releaseRoot"] / lock["catalogVersion"]
+
+
+def stage_for_release(*, staging: Path, release_root: Path | None = None) -> Path:
+    """Copy the built release tree into a release staging area, verified first.
+
+    The release packager stages every resource tree under one directory and
+    installs from there. This is the catalog's entry into that path, and it is
+    the reason PC-16 exists: until now the 134 parts were only ever a build
+    artifact under `.local/`, so a signed, notarised package carried none of
+    them and nothing refused to ship it.
+
+    The tree is re-verified against the aggregate digest locked in
+    `motion-catalog-release.v1.json` before a byte is copied. Staging an
+    unverified tree would put the one thing the lock exists to guarantee — that
+    the parts a customer renders are the parts the gates checked — behind
+    whatever happened to be on the build machine's disk.
+    """
+    source = release_root or default_release_root()
+    if not source.is_dir():
+        raise BuildError(
+            f"the release tree is not built at {source}; run this script first"
+        )
+    verify = load_gate(REPOSITORY_ROOT / "scripts/check_motion_catalog_release.py")
+    verify.verify_release(
+        source,
+        load_json(RELEASE_LOCK_PATH),
+        load_json(DEP_LOCK_PATH),
+        load_json(CATALOG_CONTRACT_PATH),
+        load_json(OVERLAY_PATH),
+    )
+    return _stage_tree(name="motion-catalog", source=source, staging=staging)
+
+
+def _stage_tree(*, name: str, source: Path, staging: Path) -> Path:
+    destination = staging / name
+    if destination.exists():
+        shutil.rmtree(destination)
+    staging.mkdir(parents=True, exist_ok=True)
+    # The release tree is deliberately read-only; a staged copy has to be
+    # writable or the bundler cannot re-own the files it installs.
+    shutil.copytree(source, destination)
+    for path in destination.rglob("*"):
+        if path.is_file():
+            path.chmod(WRITABLE_MODE)
+    return destination
 
 
 def main() -> None:
