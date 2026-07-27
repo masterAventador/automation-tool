@@ -58,7 +58,7 @@ release assembly rejected: codesign failed:
 
 **根因**：Homebrew 的 `python@3.12` 是 **framework 布局**，PyInstaller 会照着打出一个 `Python.framework`。而 `macos_candidate.py` 里 `shutil.copytree(staged_bundle, output_directory, symlinks=False)` 会把 framework 内的符号链接**实体化**——这是有意的，候选审计禁止产物含 symlink（见 `docs/backend-architecture.md`）。实体化之后，framework 顶层出现真实的 `Resources/Info.plist`，`Versions/Current` 也从符号链接变成真实目录副本，于是这个目录既像 app 又像 framework，codesign 拒绝签它。
 
-代码里已有的 `_prune_redundant_framework_binaries()` 只负责删 `Python.framework/Python` 这一个冗余根别名，管不住 `Resources` 和 `Versions/Current`。
+**从 T129 起，候选审计会当场拒绝任何 `.framework` 并直接告诉你换解释器**，所以你多半是在构建早期看到一句能照做的话，而不是二十分钟后那句 codesign 的 `bundle format is ambiguous`。如果你确实看到了后者，说明你的检出早于 T129。
 
 **修法**：换成 **uv 托管的 standalone CPython**（特征是 `lib/libpython3.12.dylib`、整个安装里没有任何 `.framework`），从源头就不会产生 framework：
 
@@ -81,7 +81,7 @@ grep home backend/.venv/pyvenv.cfg
 
 这条路项目自己一直在走：素材成片 Worker 锁定 CPython 3.11.15，产出的就是 `libpython3.11.dylib`，从来没有过这个问题。
 
-**遗留问题**：产品代码目前对 framework 布局的解释器没有防御，只能靠这份文档和环境约定挡住。真正根治需要让 `_prune_redundant_framework_binaries()` 或拷贝步骤一并处理 `Resources`/`Versions/Current`，尚未做。
+**已加防御（T129）**：候选审计现在拒绝任何 `.framework`，理由是"签它需要 `Versions/Current` 是符号链接，而本载荷禁止 symlink，两者不可兼得"，并在同一句里给出修法。判据是实测出来的——五种 framework 形状里只有两种签得过，一种要 symlink，另一种是被当成老式 bundle 的侥幸，详见 `docs/development/T129.md`。
 
 ---
 

@@ -14,7 +14,6 @@ from automation_tool.executor.macos_candidate import (
     build_macos_executor_candidate,
 )
 
-
 # This module audits the *macOS* candidate, and several of its fixtures are
 # POSIX artefacts rather than incidental spellings: a permission bit that
 # Windows does not model, a FIFO it cannot create, a `file://` development root
@@ -456,58 +455,40 @@ def test_builder_removes_its_new_output_when_the_final_audit_fails(
     assert not output.exists()
 
 
-def test_framework_root_binary_is_pruned_only_when_it_matches_the_versioned_binary(
-    tmp_path: Path,
+def test_audit_rejects_any_framework_because_this_payload_forbids_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A framework can never be both signable and admissible here, so refuse it early.
+
+    On 2026-07-27 a release on a second Mac died at Developer ID signing with
+    `bundle format is ambiguous (could be app or framework)`. That machine's venv
+    stood on Homebrew's framework-layout `python@3.12`, so PyInstaller emitted a
+    `Python.framework`, and the deliberate `copytree(symlinks=False)` below turned
+    its links into real directories.
+
+    Measured against codesign on that machine, only two shapes sign at all: a
+    genuine framework whose `Versions/Current` is a symlink, and one that happens
+    to pass for a legacy bundle. The first needs exactly the symlinks this audit
+    refuses; the second signs a framework as something it is not. Every other
+    shape — including a bare `Versions/3.12/` — fails outright. So the payload
+    must say so here, with a reason the operator can act on, rather than dying
+    twenty minutes later inside codesign with a message about bundle formats that
+    names neither the interpreter nor the fix.
+    """
     bundle = _candidate(tmp_path)
-    framework = bundle / "_internal/Python.framework"
-    root_alias = _write(framework / "Python", b"same-python-binary")
-    canonical = _write(framework / "Versions/3.12/Python", b"same-python-binary")
-    (framework / "Versions/Current").mkdir()
-    _write(framework / "Versions/README")
-    (framework / "Versions/Alias").symlink_to("3.12")
+    _write(bundle / "_internal/Python.framework/Versions/3.12/Python", _arm64_macho())
+    monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
 
-    macos_candidate._prune_redundant_framework_binaries(bundle)
+    with pytest.raises(MacOSExecutorCandidateRejected) as rejection:
+        audit_macos_executor_candidate(
+            bundle_directory=bundle,
+            expected_architecture="aarch64",
+            forbidden_development_roots=(tmp_path / "source",),
+        )
 
-    assert not root_alias.exists()
-    assert canonical.read_bytes() == b"same-python-binary"
-
-    root_alias = _write(framework / "Python", b"different-python-binary")
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        macos_candidate._prune_redundant_framework_binaries(bundle)
-    assert root_alias.read_bytes() == b"different-python-binary"
-
-
-def test_framework_pruning_rejects_ambiguous_shapes(tmp_path: Path) -> None:
-    bundle = _candidate(tmp_path)
-    internal = bundle / "_internal"
-    _write(internal / "Broken.framework")
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        macos_candidate._prune_redundant_framework_binaries(bundle)
-
-    (internal / "Broken.framework").unlink()
-    framework = internal / "Python.framework"
-    (framework / "Versions/3.12").mkdir(parents=True)
-    macos_candidate._prune_redundant_framework_binaries(bundle)
-
-    (framework / "Python").mkdir()
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        macos_candidate._prune_redundant_framework_binaries(bundle)
-    (framework / "Python").rmdir()
-
-    _write(framework / "Python", b"alias")
-    (framework / "Versions/3.13").mkdir()
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        macos_candidate._prune_redundant_framework_binaries(bundle)
-    (framework / "Versions/3.13").rmdir()
-
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        macos_candidate._prune_redundant_framework_binaries(bundle)
-    canonical = _write(framework / "Versions/canonical", b"target")
-    binary = framework / "Versions/3.12/Python"
-    binary.symlink_to(os.path.relpath(canonical, binary.parent))
-    with pytest.raises(MacOSExecutorCandidateRejected):
-        macos_candidate._prune_redundant_framework_binaries(bundle)
+    message = str(rejection.value)
+    assert "Python.framework" in message
+    assert "standalone" in message
 
 
 def test_a_failed_pyinstaller_run_carries_its_own_reason(

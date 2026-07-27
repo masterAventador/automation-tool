@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import filecmp
 import os
 import platform
 import shutil
@@ -196,34 +195,6 @@ def _apply_adhoc_code_signatures(  # pragma: no cover - exercised by the real ma
             raise _reject()
 
 
-def _prune_redundant_framework_binaries(bundle_directory: Path) -> None:
-    for framework in bundle_directory.rglob("*.framework"):
-        if not framework.is_dir():
-            raise _reject()
-        root_alias = framework / framework.stem
-        if not root_alias.exists():
-            continue
-        alias_metadata = root_alias.lstat()
-        if stat.S_ISLNK(alias_metadata.st_mode) or not stat.S_ISREG(alias_metadata.st_mode):
-            raise _reject()
-        versions = framework / "Versions"
-        canonical_versions = tuple(
-            candidate
-            for candidate in versions.iterdir()
-            if candidate.name != "Current" and candidate.is_dir() and not candidate.is_symlink()
-        )
-        if len(canonical_versions) != 1:
-            raise _reject()
-        canonical_binary = canonical_versions[0] / framework.stem
-        if (
-            not canonical_binary.is_file()
-            or canonical_binary.is_symlink()
-            or not filecmp.cmp(root_alias, canonical_binary, shallow=False)
-        ):
-            raise _reject()
-        root_alias.unlink()
-
-
 def audit_macos_executor_candidate(
     *,
     bundle_directory: Path,
@@ -256,6 +227,21 @@ def audit_macos_executor_candidate(
                     _BROWSER_DIRECTORY_PREFIXES
                 ):
                     raise _reject()
+                if lowered.endswith(".framework"):
+                    # A framework only signs when `Versions/Current` is a symlink,
+                    # and this payload forbids symlinks a few lines above. The two
+                    # requirements cannot both hold, so the interpreter that emitted
+                    # this — not the framework — is what has to change. Saying so
+                    # here replaces a codesign message twenty minutes downstream
+                    # that names neither the interpreter nor the fix.
+                    raise _reject(
+                        f"{relative.as_posix()} is a framework, which this payload "
+                        "cannot carry: signing one requires Versions/Current to be a "
+                        "symlink, and symlinks are refused here. Rebuild backend/.venv "
+                        "on a standalone CPython (uv-managed, ships libpython*.dylib) "
+                        "rather than a framework-layout interpreter such as Homebrew "
+                        "python@3.12 — see docs/macos-release-machine-setup.md"
+                    )
                 continue
             if not stat.S_ISREG(metadata.st_mode):
                 raise _reject()
@@ -366,7 +352,6 @@ def build_macos_executor_candidate(
                 work_root=temporary_root / "build",
             )
             staged_bundle = distribution_root / BUNDLE_NAME
-            _prune_redundant_framework_binaries(staged_bundle)
             _apply_adhoc_code_signatures(staged_bundle)
             audit_macos_executor_candidate(
                 bundle_directory=staged_bundle,

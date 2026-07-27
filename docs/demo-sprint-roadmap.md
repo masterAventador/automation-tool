@@ -14,19 +14,19 @@
 
 | 小节 | 数量 |
 |---|---:|
-| ✅ 生产装配与出厂门禁 | 29 |
+| ✅ 生产装配与出厂门禁 | 30 |
 | ✅ 云端与交付 | 9 |
 | ✅ 视频与内容 | 32 |
 | ✅ 验收基础设施与门禁 | 44 |
 | ❌ 查证不成立（观察真、结论错，无需修） | 7 |
-| **小计：已收口** | **121** |
+| **小计：已收口** | **122** |
 | 一、Demo 前必须收口 | 3 |
 | T73～T100（T10 那轮挖出的新任务） | 2 |
 | 冻结区·今晚撞见的技术债 | 4 |
 | 冻结区·原有待办 | 3 |
 | 冻结区·T101/T90b 自报的新窗口 | 0 |
 | **小计：未收口** | **12** |
-| **去重后总计** | **133** |
+| **去重后总计** | **134** |
 
 **Demo 前要收口的是 3 项**：**T7 要你动手**（Windows GUI，前置 T53 已就绪），**我这边是 T10 与新挖出的 T109**（抖音重新检查按钮，已派线）。
 其余 12 项都不挡演示：3 项来自 T10 那轮（T78 缺云凭据、T79 没做、T90b 缺正式包目视），9 项冻结到 Demo 之后。
@@ -196,6 +196,7 @@
 | T45 | **Control Plane 镜像被打进 playwright**（约 50MB）。`98ac834`/`2a3b293`/`92d0367` 把它移进默认启用的 `executor` 依赖组：`backend/pyproject.toml:49-50`、`:54 default-groups = ["dev","executor"]`；`backend/Dockerfile:29 uv sync --locked --no-dev --no-group executor --no-editable`。本机开发与执行器仍直接可用，镜像不再带它。**遗留**：没有留下真实镜像的逐层内容清单 |
 | T84 | **DMG 里没有 `/Applications`，客户当场装不了**。`179a720`（07-26 22:42）：`build_release_package.py:379` `(staging / "Applications").symlink_to("/Applications")`，`:381-394` 改用 `hdiutil create -srcfolder <staging>` 对暂存目录成像而不是对裸 `.app`。**修不在 `tauri.conf.json`**——构建跑的是 `tauri build --bundles app`，Tauri 的 DMG bundler 根本不执行，`bundle.macOS.dmg` 从不被读；`docs/development/T84.md` 记录了这个否定结论。**注意该证据文件写于 22:39，比修复早三分钟，读它会以为没修**。磁盘上 20:52 那个 DMG 缺链接是因为它早于修复，**T10 必须重新出包** |
 | T85 | **更新中心不用点就常显红字**（`ff9f660`）。根因不是 UI 写错：「发布构建显式关闭更新」是 `build.rs` 支持的一等公民配置（客户 Demo 包正是这样构建），却被原生层报成 `failed / configuration_invalid`，而组件挂载即轮询，**不需要用户点任何按钮**就渲染红色。改法是表现层新增单一分类函数 `failurePresentation`，`statusText` 与 `stateColor` 共同引用：`configuration_invalid` → 中性「此版本未启用自动更新」，`transport_unavailable` → 提示色。**派单时写死的边界被遵守**：验签失败、安装失败、存储不可用、清单被拒仍是红，**default 分支兜底为红，新增失败码不会被静默降级**。未改状态机、契约与任何 `.rs` |
+| T129 | **执行器候选里的 framework 当场被拒，不再是二十分钟后死在 codesign**（已修）。第二台 Mac 出包死在 Developer ID 签名：`bundle format is ambiguous (could be app or framework)`——那台 `backend/.venv` 建在 Homebrew 的 framework 布局 `python@3.12` 上，PyInstaller 照着打出 `Python.framework`，而 `copytree(symlinks=False)`（**有意**，候选审计禁止 symlink）把它的符号链接实体化成了真实目录。**判据不靠猜 codesign 的内部逻辑**：拿真实 Mach-O 实测五种形状，只有两种签得过——`Versions/Current` 是符号链接的真 framework（需要审计明令禁止的 symlink），以及恰好被当成老式 bundle 的那种（等于把 framework 签成了别的东西）；含事故形状在内的其余三种直接失败。**两个要求不可兼得，因此这份载荷里的 framework 不可能既可签又可入**，审计现在点名拒绝并直接给出修法（换 uv 托管的 standalone CPython）。**同时删掉 `_prune_redundant_framework_binaries()`**——它为「把 framework 修到能签」而存在，前提既已被推翻，留着就是死代码。真实验证双向：刚出包那份 293 文件产物过审计不误伤，同一份塞进真实 Homebrew framework 后被拒。新机器搭建见 `docs/macos-release-machine-setup.md` |
 
 ### ✅ 云端与交付
 
