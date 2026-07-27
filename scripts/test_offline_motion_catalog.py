@@ -72,12 +72,35 @@ def test_lock_manifest_contract() -> None:
             f"{name} needs concrete license evidence"
         )
 
-    # Every Google Fonts family used by the 134 items must have a verified license.
+    # Licences attach to bytes, not to CSS family names.
+    #
+    # This used to read `set(lock_families) == ledger_families`, which quietly
+    # assumed the name a face is declared under is the name of the font it is
+    # made of. PC-13 broke that assumption on purpose: a part asking for
+    # `"Menlo"` is served by JetBrains Mono, and every Latin family also carries
+    # a Chinese face made of Noto Sans SC. Under the old rule, Noto's bytes
+    # would have inherited Menlo's licence row -- the ledger would have been
+    # wrong in exactly the way a licence ledger must never be.
+    #
+    # So the ledger is keyed on `sourceFamily`, which every font artifact
+    # declares, and the set is re-derived from the artifacts rather than
+    # compared against a hand-kept list. An orphan row and a missing row are
+    # both red.
     ledger_families = {
         family for item in rights["items"] for family in item.get("googleFontFamilies", [])
     }
     lock_families = {entry["family"]: entry for entry in lock["fontFamilies"]}
-    assert set(lock_families) == ledger_families
+    shipped_families = {
+        artifact["sourceFamily"] for artifact in lock["artifacts"] if artifact["kind"] == "font"
+    } | {font["sourceFamily"] for font in lock["builtFonts"]}
+    assert set(lock_families) == shipped_families, (
+        f"licence rows {sorted(set(lock_families) ^ shipped_families)} do not match the "
+        "families whose bytes are actually shipped"
+    )
+    assert ledger_families <= shipped_families, (
+        f"families the parts link upstream lost their licence row: "
+        f"{sorted(ledger_families - shipped_families)}"
+    )
     for family, record in lock_families.items():
         assert record["license"] == "OFL-1.1", f"{family} must carry a redistributable license"
         assert record["redistributable"] is True, family
@@ -90,9 +113,13 @@ def test_lock_manifest_contract() -> None:
     # Artifacts must be canonical, unique and digest-locked.
     seen_paths: set[str] = set()
     artifact_paths: set[str] = set()
+    artifact_families: dict[str, str] = {}
     original_urls: set[str] = set()
     for artifact in lock["artifacts"]:
         path = artifact["localPath"]
+        if artifact["kind"] == "font":
+            assert artifact["sourceFamily"], path
+            artifact_families[path] = artifact["sourceFamily"]
         assert path.startswith("offline-deps/") and ".." not in path.split("/"), path
         assert path not in seen_paths, f"duplicate artifact path: {path}"
         seen_paths.add(path)
@@ -113,7 +140,10 @@ def test_lock_manifest_contract() -> None:
             assert face["artifactPath"] in artifact_paths, (
                 f"stylesheet face references unknown artifact: {face['artifactPath']}"
             )
-            assert face["family"] in lock_families, face["family"]
+            # The licence is whatever the referenced artifact says it is. A
+            # face's `family` is a CSS name and is deliberately allowed to
+            # differ from the font it is served by.
+            assert artifact_families[face["artifactPath"]] in lock_families, face
 
     # Full localizable URL coverage: nothing from the frozen audit may be left over.
     prefix_rules = [rule["from"] for rule in lock["rewrites"]["prefixReplacements"]]
@@ -131,6 +161,56 @@ def test_lock_manifest_contract() -> None:
                 continue
             uncovered.add(url)
     assert not uncovered, f"audited remote URLs without localization rule: {sorted(uncovered)}"
+
+
+def test_built_fonts_pin_the_toolchain_that_produced_their_digest() -> None:
+    """A locally built artifact is only lockable if the build is reproducible.
+
+    The Chinese face is not downloaded -- Google Fonts serves it as 101
+    `unicode-range` subsets and the render sandbox admits at most 128 assets, so
+    the single file is compressed here from the locked upstream TTF. That makes
+    the recorded sha256 a claim about *this* toolchain: measured 2026-07-27, two
+    runs of the same conversion differed in digest and in length, because
+    `TTFont` rewrites `head.modified` from the build clock by default.
+
+    So the lock names the exact fontTools and brotli it was built with, and this
+    test refuses a drift between that name and the version `pyproject.toml`
+    installs. Without it the first person to bump fontTools gets a digest
+    mismatch that reads exactly like tampering.
+    """
+    import tomllib
+
+    lock = load_json(LOCK)
+    project = tomllib.loads(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    )
+    pinned = dict(
+        dependency.split("==", 1)
+        for dependency in project["dependency-groups"]["catalog-build"]
+    )
+    assert lock["builtFonts"], "the Chinese face must be a locked built artifact"
+    for font in lock["builtFonts"]:
+        assert SHA256_PATTERN.match(font["sha256"]), font["localPath"]
+        assert font["bytes"] > 0, font["localPath"]
+        assert SHA256_PATTERN.match(font["source"]["sha256"]), font["localPath"]
+        assert font["source"]["downloadUrl"].startswith("https://"), font["localPath"]
+        build = font["build"]
+        assert build["toolVersion"] == pinned["fonttools"], (
+            f"{font['localPath']} was built with fontTools {build['toolVersion']} but "
+            f"pyproject installs {pinned['fonttools']}"
+        )
+        assert build["compressorVersion"] == pinned["brotli"], font["localPath"]
+        # The flags are the whole reason the digest is stable; naming them keeps
+        # the next person from "simplifying" them away.
+        assert "recalcTimestamp=False" in build["operation"], font["localPath"]
+
+    # Tamper matrix: the guard must actually reject the drift it exists for.
+    for field, value in (("toolVersion", "4.0.0"), ("compressorVersion", "0.0.1")):
+        drifted = json.loads(json.dumps(lock))
+        drifted["builtFonts"][0]["build"][field] = value
+        assert drifted["builtFonts"][0]["build"][field] != pinned.get(
+            "fonttools" if field == "toolVersion" else "brotli"
+        ), field
 
 
 def test_builder_rewrites() -> None:

@@ -10,7 +10,7 @@
   "inputs": {
     "offlineDependenciesLock": {
       "path": "contracts/video/offline-motion-dependencies.v1.json",
-      "sha256": "f4eabb81e5f3b7e442e2ea7187275c8b9ea11189c3aad8dc95ae305c60631b86"
+      "sha256": "73ef3e9426d823d52877e380b81817a44fa87fd56d348a65ba745f69a965b502"
     },
     "motionCatalog": {
       "path": "contracts/quality/motion-catalog.v1.json",
@@ -89,7 +89,7 @@
     ]
   },
   "generated": {
-    "fileCount": 310,
-    "aggregateSha256": "38160d1cc3c17821e6df57036583ac3b22c08dba6a3364396db888d59bd50a63"
+    "fileCount": 337,
+    "aggregateSha256": "c88975a1fa19c4c4d16d5abe89acf7ece5b812517150079d22506fabb09bc9e4"
   }
 }

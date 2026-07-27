@@ -34,7 +34,24 @@ def test_pyinstaller_and_playwright_are_locked_in_their_runtime_scopes() -> None
         dependency.startswith("playwright") for dependency in project["project"]["dependencies"]
     )
     assert not any(dependency.startswith("playwright") for dependency in development_dependencies)
-    assert project["tool"]["uv"]["default-groups"] == ["dev", "executor"]
+
+    # The font toolchain builds the packaged Chinese woff2 and must never reach
+    # the frozen executor. `automation-tool-executor.spec` sets `excludes=[]`,
+    # so nothing is kept out by name -- the import graph alone decides what
+    # ships. Keeping fontTools out of the `executor` group is what makes that
+    # graph unable to reach it; a name-based exclusion would be one rename away
+    # from silently letting a 17 MB build dependency into the installer.
+    catalog_build_dependencies = project["dependency-groups"]["catalog-build"]
+    assert not any(
+        dependency.startswith(("brotli", "fonttools"))
+        for dependency in executor_dependencies + project["project"]["dependencies"]
+    )
+    # Pinned exactly, because the woff2 these produce has its sha256 locked in
+    # `contracts/video/offline-motion-dependencies.v1.json`: a different version
+    # can emit different bytes for the same input, and the gate cannot tell that
+    # apart from tampering.
+    assert sorted(catalog_build_dependencies) == ["brotli==1.2.0", "fonttools==4.63.0"]
+    assert project["tool"]["uv"]["default-groups"] == ["catalog-build", "dev", "executor"]
     assert (
         project["project"]["scripts"]["automation-tool-build-executor-manifest"]
         == "automation_tool.executor.package_manifest:main"

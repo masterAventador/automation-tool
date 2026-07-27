@@ -98,6 +98,16 @@ def cjk_codepoints() -> frozenset[int]:
     )
 
 
+def cjk_unicode_range() -> str:
+    """The same claim as a CSS `unicode-range` value.
+
+    Public because the production rule generator must emit the exact range this
+    probe measured; two hand-kept copies would drift and the drift would only
+    show up as characters silently rendering in the host font.
+    """
+    return _CJK_UNICODE_RANGE
+
+
 def named_font_families(text: str) -> frozenset[str]:
     """The typefaces a document names, ignoring generics and custom properties.
 
