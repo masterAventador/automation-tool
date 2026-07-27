@@ -14,7 +14,7 @@
     },
     "motionCatalog": {
       "path": "contracts/quality/motion-catalog.v1.json",
-      "sha256": "5f802746f53e93ac9bcb19cc6baf85ca9540fe7d783cff2045b6ff3e7b042349"
+      "sha256": "5d09399aaa9d776d79eeca9cf6fadaac4c2d2589ee434d572b23cbcfc3da08a8"
     },
     "motionCatalogRights": {
       "path": "contracts/quality/motion-catalog-rights.v1.json",

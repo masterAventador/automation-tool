@@ -20,9 +20,9 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
-| PC-01 | 零件目录补齐可编排字段 | 把上游 `registry-item.json` 的 `description`/`tags`/`duration`/`dimensions` 补回 `contracts/quality/motion-catalog.v1.json`，与上游逐字一致，漂移即失败；UI 投影、离线目录、发布契约、资产 overlay 四个下游消费方回归通过 | — | 🧪 RED |
+| PC-01 | 零件目录补齐可编排字段 | 把上游 `registry-item.json` 的 `description`/`tags`/`duration`/`dimensions` 补回 `contracts/quality/motion-catalog.v1.json`，与上游逐字一致，漂移即失败；UI 投影、离线目录、发布契约、资产 overlay 四个下游消费方回归通过 | — | ✅ 已完成 |
 | PC-02 | 零件文案槽契约 | 抽取 134 个零件 HTML 的可见文本节点及其稳定定位方式并冻结；区分「可替换文案」与「零件自身标识不可动」；模型只吐字符串，本机替换并走 `escape_untrusted_text` | PC-01 | ⬜ 未开始 |
-| PC-03 | 零件功能维度分档 | 按 `category` + `duration` 分成点缀型／内容型／待判并写进目录契约；无 `duration` 的 25 项与 6–10 秒的 15 项单独判定，判定依据留档 | PC-01 | ⬜ 未开始 |
+| PC-03 | 零件功能维度分档 | 按 `category` + `duration` 把 109 个 block 分成点缀型／内容型／待判并写进目录契约（25 个 component 是贴进宿主的片段，天然点缀，无需判定）；6–10 秒的中间地带逐个判，依据留档 | PC-01 | ⬜ 未开始 |
 | PC-04 | 模型看得见目录 | prompt 里的 134 个裸 id 换成含标题、分类、时长、说明、功能档位的紧凑表；实测模型选出的零件合法率与预估总时长落在预算内 | PC-01,PC-03 | ⬜ 未开始 |
 | PC-05 | 单零件渲染成片段 | 现有 worker 把一个零件按它自己的原生尺寸与时长渲成 mp4 片段，文案由 PC-02 的槽注入；`ffprobe` 读出的尺寸、帧率、帧数与零件声明一致 | PC-02 | ⬜ 未开始 |
 | PC-06 | 片段拼接 | 多个片段 ffmpeg concat 成一条；编码参数、时基、像素格式一致性由门禁保证；本机 4 layout 模板段与零件段可混排 | PC-05 | ⬜ 未开始 |
@@ -84,7 +84,11 @@
 
 134 个里只有 6 个带 `params`，而这 6 个一共 12 个参数**全部是颜色**（`--bg-color`、`--text-color`）。没有任何文本参数机制。而按可见文本节点统计，**125 个零件里带写死的英文文案**——`ui-3d-reveal` 78 段、`vfx-portal` 38 段、`vfx-liquid-background` 41 段；完全没有可见文案的只有 9 个（`grain-overlay`、`motion-blur`、`shimmer-sweep`、`parallax-zoom` 这类纯视觉）。
 
-上游自己的解法在 `skills/hyperframes-registry/SKILL.md` 里：`hyperframes add <name>` 把零件 HTML 装进项目，**然后由 AI 直接改那份 HTML**。这条路 T92 之后我们明确不走（模型不写 HTML）。
+上游自己的解法在 `skills/hyperframes-registry/SKILL.md` 里：`hyperframes add <name>` 把零件 HTML 装进项目，**然后由 AI 直接改那份 HTML**。
+
+**这条路我们不走，理由是算术不是原则。** T92 不是立规矩说模型不许碰 HTML，它是一次实测出来的性能取舍：模型吐字速率恒定约 4.5 KB/s，一句话出片的墙钟时间基本等于模型打字时间，把 markup 收回本机后编排耗时中位数从 87.0 秒降到 36.9 秒。而零件动辄 13 KB（`data-chart`）起，光重吐一份就是 3 秒，一条片子用 4～5 个零件就把整条链路拖回 T92 之前，还得把 T92 顺手拿掉的修复轮重建起来。
+
+**本机做文案槽替换的代价则是一次性的**：建一张槽位表，之后每次出片模型只吐几十字节的文案字符串。所以主路径走槽位表；而「让 AI 补写」（P0-1c 逃生舱）随时可以加回来，只是不该当主路径。
 
 **所以要用零件承载用户内容，必须本机做结构化文案槽替换**——预先登记每个零件哪些 DOM 位置是可替换文案，模型只吐字符串，本机替换并继续走 `escape_untrusted_text`。这是新增的前置（PC-02），原路线图里没有，因为当时以为零件可参数化。不做它，134 个里能用的只有那 9 个纯视觉的。
 
@@ -212,7 +216,8 @@ deepseek-v4-pro 5 个零件   36.3 秒   ❌
 
 **另有两处必须先处理**：
 
-1. **部分零件没有 `duration` 字段**（实测 `caption-kinetic-slam`、`caption-editorial-emphasis` 均为 null），编排时不能假定它一定存在；
+1. ~~**部分零件没有 `duration` 字段**（实测 `caption-kinetic-slam`、`caption-editorial-emphasis` 均为 null），编排时不能假定它一定存在；~~
+   **PC-01 全量核对后更正**：不是「部分零件漏填」，而是 block/component 的结构差异——`duration` 与 `dimensions` present 的恰好是 109 个 block。上游定义里 block 是自带画布与时间轴的独立子合成，component 是贴进宿主的片段，两者都没有。**所以 25 个 component 天然属于点缀型，分档问题只存在于 109 个 block 之间**，需要人工判的中间地带也随之缩小；
 2. **上游其实提供了描述、标签和时长**，是我们冻结目录时丢掉的——`vendor/hyperframes/registry/blocks/<name>/registry-item.json` 里有 `description`、`tags`、`duration`、`dimensions`，而 `contracts/quality/motion-catalog.v1.json` 只摘了 `name/title/category`。**补回这三项是 P0-1a 的前置**，成本极低，收益是模型能按预算选而不是盲选。
 
 **三个时长来源必须定主次**：画面（零件 duration）、语音（TTS 念完的实际秒数）、总预算（沙箱上限）。
