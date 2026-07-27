@@ -34,6 +34,7 @@ source as operator copy.)
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Mapping, Sequence
 
 from .composition_template import escape_untrusted_text
@@ -136,8 +137,94 @@ def _with_font_rules(html: str, font_css: str) -> str:
     return html[:position] + style + html[position:]
 
 
+WORKING_COPY_DIRECTORY: Final = "catalog"
+SHARED_DEPENDENCIES: Final = "offline-deps"
+
+
+def write_part_working_copy(
+    *,
+    workspace: object,
+    catalog_root: Path,
+    name: str,
+    slots: Sequence[PartSlot],
+    copy: Mapping[int, str],
+    font_css: str,
+    directory: str = WORKING_COPY_DIRECTORY,
+) -> str:
+    """Put one part into the RenderJob workspace, ready to render.
+
+    The layout mirrors the catalog exactly — `<directory>/items/<name>/…` beside
+    `<directory>/offline-deps/…` — because every part reaches GSAP, Draco and
+    its typefaces through `../../offline-deps/…`. Flattening the part into the
+    workspace would leave all of that unresolved, and a browser reports a
+    stylesheet that did not load by rendering without it: no error, no failed
+    gate, just a film in the wrong font with no animation.
+
+    Everything is written through the workspace rather than copied with
+    `shutil`, so containment, the symlink refusal and the rollback on a partial
+    write keep covering the largest thing the workspace ever receives.
+
+    The shared dependencies are written once per workspace, not once per part:
+    they are 12 MB and identical for every part in the film.
+
+    Returns the workspace-relative path of the document to render.
+    """
+    part_directory = catalog_root / "items" / name
+    documents = sorted(part_directory.glob("*.html"))
+    if len(documents) != 1:
+        raise SlotAnchorRejected(
+            f"the catalog carries no single document for part {name!r}"
+        )
+    document = documents[0]
+
+    shared = catalog_root / SHARED_DEPENDENCIES
+    if shared.is_dir():
+        _copy_tree(workspace, shared, f"{directory}/{SHARED_DEPENDENCIES}")
+    _copy_tree(
+        workspace,
+        part_directory,
+        f"{directory}/items/{name}",
+        skip={document.name},
+    )
+
+    entry = f"{directory}/items/{name}/{document.name}"
+    workspace.write_text(  # type: ignore[attr-defined]
+        entry,
+        render_part_working_copy(
+            document.read_text(encoding="utf-8"),
+            slots=slots,
+            copy=copy,
+            font_css=font_css,
+        ),
+    )
+    return entry
+
+
+def _copy_tree(
+    workspace: object, source: Path, destination: str, *, skip: set[str] | None = None
+) -> None:
+    """Every regular file under `source`, written into the workspace.
+
+    Symlinks are skipped rather than followed: the release tree has none, and a
+    link that appeared there would be describing a file outside the tree the
+    manifest accounts for.
+    """
+    for path in sorted(source.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(source).as_posix()
+        if skip is not None and relative in skip:
+            continue
+        workspace.write_bytes(  # type: ignore[attr-defined]
+            f"{destination}/{relative}", path.read_bytes()
+        )
+
+
 __all__ = [
     "PartSlot",
+    "SHARED_DEPENDENCIES",
     "SlotAnchorRejected",
+    "WORKING_COPY_DIRECTORY",
     "render_part_working_copy",
+    "write_part_working_copy",
 ]

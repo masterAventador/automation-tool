@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import pytest
 
+from pathlib import Path
+
 from automation_tool.executor.motion_authoring.part_workspace import (
     PartSlot,
     SlotAnchorRejected,
     render_part_working_copy,
+    write_part_working_copy,
 )
 
 # Two runs read "Maya Chen": one is the slot, one is a caption that must not
@@ -181,3 +184,131 @@ def test_copy_addressed_at_a_run_no_slot_declared_fails_closed() -> None:
             copy={other: "主播"},
             font_css=FONT_CSS,
         )
+
+
+# --- PC-03 接线：把零件写进 RenderJob 工作区 ---------------------------------
+
+
+class _RecordingWorkspace:
+    """The write surface `AuthoringWorkspace` offers, with the writes recorded.
+
+    The real one enforces containment, refuses symlinks and rolls back on a
+    partial write. The part writer must go through it rather than copying trees
+    with `shutil`, or those three guarantees stop covering the largest thing the
+    workspace ever receives — so this stand-in records what was asked of it and
+    the test asserts the shape, not the disk.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self.written: dict[str, bytes] = {}
+
+    def write_text(self, relative: str, text: str) -> Path:
+        self.written[relative] = text.encode("utf-8")
+        return self._root / relative
+
+    def write_bytes(self, relative: str, payload: bytes) -> Path:
+        self.written[relative] = bytes(payload)
+        return self._root / relative
+
+
+def _catalog(tmp_path: Path) -> Path:
+    """A catalog laid out the way the release tree is."""
+    root = tmp_path / "motion-catalog"
+    part = root / "items" / "lt-bold-block"
+    part.mkdir(parents=True)
+    (part / "lt-bold-block.html").write_text(PART_HTML, encoding="utf-8")
+    (part / "note.txt").write_text("part asset", encoding="utf-8")
+    fonts = root / "offline-deps" / "fonts" / "woff2" / "anton"
+    fonts.mkdir(parents=True)
+    (fonts / "anton-400.woff2").write_bytes(b"font bytes")
+    js = root / "offline-deps" / "js"
+    js.mkdir(parents=True)
+    (js / "gsap.min.js").write_text("// gsap", encoding="utf-8")
+    return root
+
+
+def test_the_working_copy_keeps_the_layout_the_part_references(tmp_path) -> None:
+    """`../../offline-deps/...` has to keep resolving.
+
+    Every part reaches its shared dependencies with a path relative to the
+    catalog root. A copy that flattened the part into the workspace would load
+    no fonts, no GSAP and no Draco — and would do it silently, because a missing
+    stylesheet is not an error to a browser.
+    """
+    catalog = _catalog(tmp_path)
+    workspace = _RecordingWorkspace(tmp_path / "job")
+    index = slot_index_of(PART_HTML, "Maya Chen")
+
+    entry = write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="lt-bold-block",
+        slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+        copy={index: "张三"},
+        font_css=FONT_CSS,
+    )
+
+    assert entry == "catalog/items/lt-bold-block/lt-bold-block.html"
+    assert "catalog/offline-deps/fonts/woff2/anton/anton-400.woff2" in workspace.written
+    assert "catalog/offline-deps/js/gsap.min.js" in workspace.written
+    # The part's own assets travel with it.
+    assert "catalog/items/lt-bold-block/note.txt" in workspace.written
+
+
+def test_the_written_document_carries_the_copy_and_the_font_rules(tmp_path) -> None:
+    catalog = _catalog(tmp_path)
+    workspace = _RecordingWorkspace(tmp_path / "job")
+    index = slot_index_of(PART_HTML, "Maya Chen")
+
+    entry = write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="lt-bold-block",
+        slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+        copy={index: "张三"},
+        font_css=FONT_CSS,
+    )
+
+    document = workspace.written[entry].decode("utf-8")
+    assert "张三" in document
+    assert document.count(FONT_CSS) == 1
+
+
+def test_a_part_the_catalog_does_not_carry_fails_closed(tmp_path) -> None:
+    catalog = _catalog(tmp_path)
+    workspace = _RecordingWorkspace(tmp_path / "job")
+
+    with pytest.raises(SlotAnchorRejected):
+        write_part_working_copy(
+            workspace=workspace,
+            catalog_root=catalog,
+            name="not-a-part",
+            slots=(),
+            copy={},
+            font_css="",
+        )
+
+
+def test_the_read_only_catalog_is_never_written_to(tmp_path) -> None:
+    """The whole design rests on the release tree staying byte-identical."""
+    catalog = _catalog(tmp_path)
+    before = {
+        path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()
+    }
+    workspace = _RecordingWorkspace(tmp_path / "job")
+    index = slot_index_of(PART_HTML, "Maya Chen")
+
+    write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="lt-bold-block",
+        slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+        copy={index: "张三"},
+        font_css=FONT_CSS,
+    )
+
+    after = {
+        path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()
+    }
+    assert after == before
