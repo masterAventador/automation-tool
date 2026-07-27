@@ -35,6 +35,8 @@
 | PC-12 | 第二批槽位表（混合型 47） | 逐个判定哪些文案在 DOM、哪些在脚本；只给 DOM 那部分开槽，脚本部分标记为不可替换并说明该零件因此损失什么 | PC-03,PC-06 | ⬜ 未开始 |
 | PC-13 | 中文字体内置 + 拉丁字体补齐 | 离线包原有 18 个字体全是拉丁、中文 0 个；且实测 78/134 个零件连拉丁都在吃系统兜底（写了 `Archivo Black`/`Menlo`/`SF Pro` 等名字但从没装车）。落地结果：**净增 7,991,372 B（7.62 MB，占 dmg +1.63%）**——中文 Noto Sans SC 可变全字符集 7.42 MB（一个文件覆盖 7 个字重）、新增 4 个 OFL 拉丁家族 103.9 KB、补齐 4 个已在包内家族缺的 400 字重 100.5 KB、15 个不可再分发字体（Apple/Microsoft/Monotype）映射到包内已有替代花 0 B。新增 `contracts/video/motion-part-typography.v1.json` 记三类策略与逐条视觉差异，`scripts/check_motion_part_typography.py` 从只读 submodule 重算 134 个零件的 71 个 `(family,weight)`，**查得出遗漏**（上线前实测报出 10 条缺口，含替换链上的）。权利归属已从「按家族」改成「按 artifact」。构建期 `catalog-build` 分组精确 pin fonttools/brotli——实测默认 `recalcTimestamp` 会让同一输入每次产出不同字节。**仍差：渲染期注入未接进执行器（等 PC-03 的工作区副本写入点）、Windows 未复测**，见 `docs/development/PC-13.md` 19 节 | PC-02 | 🔍 待验收 |
 
+| PC-15 | 两条链路的中文字体整合 | 安装包现在带**两份**中文字体：素材成片 Worker 里的思源黑体 OTF 两个字重 33.4 MB（`asset-rights-policy.v1.json` 的 `font-noto-sans-cjk-sc-regular/bold`，当初为替换微软雅黑/华文黑体而装），加动效线新增的 Noto Sans SC 可变 woff2 7.42 MB。PC-13 没复用前者，理由成立（只有两个字重、是 OTF、且在另一个 bundle 的资源根下——跨 bundle 取路径是构建路径分叉的开始），但 41 MB 冗余是真的。需评估：让素材线改用可变 woff2，还是各留各的 | PC-13 | ⬜ 未开始 |
+
 #### PC-07 补充：TTS 供应商与接入形态
 
 每段旁白合成为音频并测出真实秒数，且必须在渲染之前拿到——顺序反了就只能事后发现说不完。**供应商已定（产品负责人 2026-07-27）：走已接入的阿里百炼，先随便挑一个够前沿的把 MVP 跑通，不为选型发散。** 建议 pin `qwen3-tts-instruct-flash-2026-01-26`（非 realtime，我们要的是文件不是流；`instruct` 档为将来的语气控制留门）。
