@@ -35,6 +35,7 @@ playwright_hiddenimports.append("automation_tool.executor.browser_runtime")
 repository_root = backend_root.parent
 motion_authoring_resources = [
     "contracts/quality/motion-catalog.v1.json",
+    "contracts/video/motion-part-usability.v1.json",
     "contracts/video/motion-render-canvas.v1.json",
     "contracts/video/motion-one-sentence-brief.v1.json",
     "contracts/video/motion-authoring-model-call.v1.json",

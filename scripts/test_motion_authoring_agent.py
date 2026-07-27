@@ -52,6 +52,7 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     call_video_creation_model,
     COMPOSITION_PATH,
     LOCKED_CATALOG_PART_IDS,
+    SELECTABLE_CATALOG_PARTS,
     RENDER_CANVAS_HEIGHT,
     RENDER_CANVAS_WIDTH,
     _first_message_contract,
@@ -906,11 +907,84 @@ class CatalogPartSelectionTest(unittest.TestCase):
         )
         self.assertEqual(len(LOCKED_CATALOG_PART_IDS), 134)
 
-    def test_first_message_offers_the_locked_parts_for_per_beat_selection(self) -> None:
+    def test_first_message_offers_the_selectable_parts_for_per_beat_selection(self) -> None:
         prompt = _first_message_contract(_brief())
-        self.assertIn("134", prompt)
         self.assertIn("data-chart", prompt)
         self.assertIn("catalog_parts", prompt)
+
+    def test_the_selectable_set_excludes_the_parts_this_product_cannot_fill(self) -> None:
+        """Offering a part we cannot put the user's words into wastes a choice.
+
+        Two shapes are excluded, both measured rather than assumed (PC-02):
+        every transition is a demo page — rendered as-is it reads "SCENE A |
+        SCENE B / Glitch / Prompt / use glitch shader transition" — and the
+        script-driven parts keep their copy in JavaScript with per-word
+        timestamps, so substituting there is re-timing an animation.
+        """
+        usability = json.loads(
+            (ROOT / "contracts/video/motion-part-usability.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        deferred = {
+            item["name"] for item in usability["items"] if item["batch"] == "deferred"
+        }
+        selectable = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
+        self.assertEqual(selectable, LOCKED_CATALOG_PART_IDS - deferred)
+        self.assertEqual(len(selectable), 76)
+        # A transition and a script-driven caption, named so the exclusion is
+        # readable rather than only countable.
+        self.assertNotIn("glitch", selectable)
+        self.assertNotIn("caption-kinetic-slam", selectable)
+        self.assertIn("lt-bold-block", selectable)
+
+    def test_a_deferred_part_is_refused_even_though_the_catalog_lists_it(self) -> None:
+        payload = _valid_storyboard()
+        payload["beats"][0]["catalog_parts"] = ["caption-kinetic-slam"]
+        with self.assertRaises(MotionAuthoringRejected):
+            StoryboardArtifact.from_payload(payload)
+
+    def test_the_prompt_states_what_each_offered_part_is_and_how_long_it_runs(self) -> None:
+        """Bare ids are not a catalog.
+
+        Measured 2026-07-27, two models given only a title and a category
+        picked legal parts and then overshot the 20s sandbox budget by more
+        than 70%, because nothing in the list said `data-chart` runs 15 seconds
+        while `lt-bold-block` runs 4.8.
+        """
+        prompt = _first_message_contract(_brief())
+        chart = next(
+            part for part in SELECTABLE_CATALOG_PARTS if part["name"] == "data-chart"
+        )
+        self.assertIn(chart["title"], prompt)
+        self.assertIn(chart["category"], prompt)
+        self.assertIn("15", prompt)
+        self.assertIn(chart["description"][:40], prompt)
+        # A component has no timeline of its own; the prompt must not invent one.
+        component = next(
+            part for part in SELECTABLE_CATALOG_PARTS if part["duration"] is None
+        )
+        self.assertIn(component["name"], prompt)
+
+    def test_the_prompt_says_a_part_length_spends_the_film_budget(self) -> None:
+        """Listing the durations is not enough; the consequence has to be said.
+
+        Measured 2026-07-27 against the real video-creation model: given the
+        durations and a 12s brief, it picked parts totalling 26s of animation
+        and split the film into obedient 3s beats — a 12s flowchart asked to
+        play inside a 3s shot. After this sentence was added, the same brief
+        came back at 0s of timed parts, and a 20s brief used a 4.8s lower third
+        for the presenter beat.
+        """
+        prompt = _first_message_contract(_brief())
+        self.assertIn("选零件时必须同时看时长", prompt)
+        self.assertIn(str(_brief().duration_seconds), prompt)
+
+    def test_the_prompt_no_longer_dumps_every_locked_id(self) -> None:
+        prompt = _first_message_contract(_brief())
+        for excluded in ("glitch", "caption-kinetic-slam"):
+            self.assertNotIn(f"`{excluded}`", prompt)
+            self.assertNotIn(f"'{excluded}'", prompt)
 
 
 class EntryRelativeAssetResolutionTests(unittest.TestCase):
