@@ -34,9 +34,16 @@ as operator copy.)
 from __future__ import annotations
 
 import html
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Final, Iterable, Mapping, Sequence
+
+from automation_tool.executor.motion_authoring.resources import CONTRACTS_ROOT
+
+TYPOGRAPHY_CONTRACT_PATH: Final = CONTRACTS_ROOT / "video/motion-part-typography.v1.json"
+OFFLINE_LOCK_PATH: Final = CONTRACTS_ROOT / "video/offline-motion-dependencies.v1.json"
 
 # The code points a Chinese face must own. Latin, Latin-1 punctuation and the
 # middle dot are deliberately absent: those stay with the part's own typeface,
@@ -252,18 +259,45 @@ def face_artifact(
     return tuple(paths)
 
 
+def _load(path: Path) -> Mapping[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise FontRequestUnmet("a packaged typography contract is unreadable") from error
+    if not isinstance(value, dict):
+        raise FontRequestUnmet("a packaged typography contract is not an object")
+    return value
+
+
+def packaged_typography_contract() -> Mapping[str, object]:
+    return _load(TYPOGRAPHY_CONTRACT_PATH)
+
+
+def packaged_offline_lock() -> Mapping[str, object]:
+    return _load(OFFLINE_LOCK_PATH)
+
+
 def document_font_css(
     text: str,
     *,
-    typography_contract: Mapping[str, object],
-    offline_lock: Mapping[str, object],
+    typography_contract: Mapping[str, object] | None = None,
+    offline_lock: Mapping[str, object] | None = None,
 ) -> str:
     """Every rule this one document needs, or a refusal naming what is missing.
 
     This is the render-time entry point: the document is the same one being
     copied into the workspace, so what it asks for is read from it rather than
     from a table that could describe a different build of the same part.
+
+    Both contracts default to the ones that ship beside the binary. Requiring a
+    caller to supply them would mean the only code able to render is code that
+    knows where the package put its own files — the build-time switch on where
+    to look that this project has already paid for once.
     """
+    if typography_contract is None:
+        typography_contract = packaged_typography_contract()
+    if offline_lock is None:
+        offline_lock = packaged_offline_lock()
     policies = family_policies(typography_contract)
     weights = packaged_weights(offline_lock)
     faces, unmet = resolve_faces(

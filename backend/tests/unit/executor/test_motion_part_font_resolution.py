@@ -144,6 +144,30 @@ def test_resolve_reports_unmet_rather_than_dropping_them() -> None:
     assert unmet == (("Inter", 900),)
 
 
+def test_the_rules_can_be_built_from_the_packaged_contracts_alone() -> None:
+    """At render time nobody is there to hand the renderer its own contracts.
+
+    The Executor reads them from where they ship, through the same resolution
+    the authoring agent already uses — `sys._MEIPASS` when frozen, the
+    repository from a checkout. Requiring a caller to pass them would mean the
+    only code that could render is code that knows where the package put its
+    own files, which is the build-time switch this project already paid for.
+    """
+    # Emoji are the only families PC-13 left to the host, so this asks the real
+    # contract a question whose answer is fixed: no rule, and no refusal.
+    assert document_font_css("<style>.a{font-family:'Apple Color Emoji'}</style>") == ""
+
+    # And a real packaged family produces real rules pointing at real files.
+    css = document_font_css("<style>.a{font-family:'Anton';font-weight:400}</style>")
+    assert css.count("@font-face") == 2
+    assert "noto-sans-sc-variable-full.woff2" in css
+
+
+def test_a_family_the_shipped_contract_never_heard_of_still_fails_closed() -> None:
+    with pytest.raises(FontRequestUnmet):
+        document_font_css("<style>.a{font-family:'Comic Sans MS'}</style>")
+
+
 def test_the_gate_script_keeps_no_second_scanner() -> None:
     from pathlib import Path
 

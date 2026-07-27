@@ -42,7 +42,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 import urllib.error
 import urllib.request
 import uuid
@@ -57,6 +56,10 @@ from automation_tool.executor.motion_authoring.composition_template import (
     SCENE_LAYOUTS,
     TemplateScene,
     render_composition,
+)
+from automation_tool.executor.motion_authoring.resources import (
+    CONTRACTS_ROOT,
+    RESOURCE_ROOT,
 )
 
 # --------------------------------------------------------------------------- #
@@ -113,24 +116,11 @@ _BEAT_ID: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _CATALOG_PART_ID: Final = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _API_KEY: Final = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}$")
 
-def _resource_root() -> Path:
-    """Where the read-only data this module needs lives.
-
-    Frozen into the Executor package the contracts and the locked authoring
-    reference sit beside the binary; from a source checkout they sit in the
-    repository. Resolving both here is what lets the packaged build and the
-    test build read the same files through the same code — the alternative,
-    a build-time switch on where to look, is the shape that has already cost
-    this project a release.
-    """
-    frozen = getattr(sys, "_MEIPASS", None)
-    if isinstance(frozen, str):
-        return Path(frozen)
-    return Path(__file__).resolve().parents[5]
-
-
-_RESOURCE_ROOT: Final = _resource_root()
-_CONTRACTS_ROOT: Final = _RESOURCE_ROOT / "contracts"
+# Resolved once, in `resources.py`, because the font resolver needs the same
+# answer and two copies of "where our files are" is how a packaged build and a
+# checkout start disagreeing about what exists.
+_RESOURCE_ROOT: Final = RESOURCE_ROOT
+_CONTRACTS_ROOT: Final = CONTRACTS_ROOT
 AUTHORING_VENDOR_ROOT: Final = _RESOURCE_ROOT / "vendor/hyperframes"
 AUTHORING_WORKFLOW_CONTRACT: Final = (
     _CONTRACTS_ROOT / "video/motion-authoring-workflow.v1.json"
