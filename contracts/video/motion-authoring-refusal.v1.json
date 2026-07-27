@@ -95,6 +95,7 @@
     "agent_workflow_contract_is_unreadable",
     "agent_workflow_reference_exceeded_its_budget",
     "agent_workflow_reference_required",
+    "agent_workspace_bytes_must_be_a_bytes_payload",
     "agent_workspace_required",
     "agent_workspace_root_must_be_a_real_non_symlink_directory",
     "agent_workspace_root_must_be_an_absolute_path",

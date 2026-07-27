@@ -503,7 +503,12 @@ class AuthoringWorkspace:
         _require_no_case_collision(self._root, clean)
         return target
 
-    def write_text(self, relative: str, text: str) -> Path:
+    def _write(self, relative: str, emit: Callable[[Path], object]) -> Path:
+        """Containment, symlink refusal and rollback, once for every writer.
+
+        Text and audio differ only in the last statement; duplicating the rest
+        would leave two copies of the rule that decides where bytes may land.
+        """
         try:
             target = self.resolve(relative)
             if target.relative_to(self._root).as_posix() not in self._seeded_assets:
@@ -514,7 +519,7 @@ class AuthoringWorkspace:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 _reject("refusing to write through a symlink")
-            target.write_text(text, encoding="utf-8")
+            emit(target)
         except MotionAuthoringRejected:
             raise
         except OSError as error:
@@ -523,6 +528,15 @@ class AuthoringWorkspace:
                 "motion authoring workspace persistence failed"
             ) from error
         return target
+
+    def write_text(self, relative: str, text: str) -> Path:
+        return self._write(relative, lambda target: target.write_text(text, encoding="utf-8"))
+
+    def write_bytes(self, relative: str, payload: bytes) -> Path:
+        """Synthesized narration lands here, under the same containment rules."""
+        if not isinstance(payload, (bytes, bytearray)):
+            _reject("workspace bytes must be a bytes payload")
+        return self._write(relative, lambda target: target.write_bytes(bytes(payload)))
 
     def rollback_authored_files(self) -> None:
         """Remove files this run introduced without touching seeded assets.

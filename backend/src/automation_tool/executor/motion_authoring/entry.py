@@ -231,6 +231,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "model catalog or secret is unreadable",
         "model id required",
         "model output must be a JSON object",
+        "workspace bytes must be a bytes payload",
         "model output was not JSON",
         "model reply must be a string",
         "model returned empty content",
