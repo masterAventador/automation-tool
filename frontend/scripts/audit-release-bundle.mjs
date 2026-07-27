@@ -137,7 +137,57 @@ function normalizedRelative(root, path) {
   return rendered;
 }
 
-function assertSafePath(rendered) {
+/**
+ * The frozen catalog ships four upstream sound effects, and `.wav` is on the
+ * media ban that keeps captured user content out of a package.
+ *
+ * The ban is not lifted for the directory — that would be a list you get past
+ * by putting your file in the right folder. It is lifted for a *file the
+ * catalog's own manifest accounts for*: every file in that tree carries a
+ * SHA-256 there, and the aggregate of all of them is locked in
+ * `motion-catalog-release.v1.json`. So a media file is allowed exactly when
+ * something already had to declare it.
+ */
+function accountedForByCatalog(rendered, state) {
+  if (state.catalogFiles === undefined || state.catalogRoot === undefined) {
+    return false;
+  }
+  if (!rendered.startsWith(`${state.catalogRoot}/`)) {
+    return false;
+  }
+  return state.catalogFiles.has(rendered.slice(state.catalogRoot.length + 1));
+}
+
+/**
+ * What the frozen catalog says it contains, if this package carries one.
+ *
+ * Absent catalog means an empty answer rather than a rejection: this audit runs
+ * on Windows installs and on fixtures that have no catalog, and a missing
+ * resource is `assertPackagedReleaseResources`' job to report, with a message
+ * that names it.
+ */
+async function readCatalogManifest(root, platform) {
+  const catalogRoot =
+    platform === "macos" ? "Contents/Resources/motion-catalog" : "motion-catalog";
+  try {
+    const raw = await readFile(resolve(root, catalogRoot, "manifest.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed.files)) {
+      throw rejected();
+    }
+    return {
+      catalogRoot,
+      catalogFiles: new Set(parsed.files.map((file) => String(file.path))),
+    };
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return { catalogRoot: undefined, catalogFiles: undefined };
+    }
+    throw rejected();
+  }
+}
+
+function assertSafePath(rendered, state) {
   const segments = rendered.split("/");
   for (const segment of segments) {
     const lowered = segment.toLowerCase();
@@ -145,8 +195,13 @@ function assertSafePath(rendered) {
       lowered === ".env" ||
       lowered.startsWith(".env.") ||
       forbiddenSegments.has(lowered) ||
-      forbiddenNames.has(lowered) ||
-      forbiddenSuffixes.some((suffix) => lowered.endsWith(suffix))
+      forbiddenNames.has(lowered)
+    ) {
+      throw rejected();
+    }
+    if (
+      forbiddenSuffixes.some((suffix) => lowered.endsWith(suffix)) &&
+      !accountedForByCatalog(rendered, state)
     ) {
       throw rejected();
     }
@@ -170,7 +225,7 @@ async function collectBundleFiles(directory, root, state) {
   for (const entry of entries) {
     const path = resolve(directory, entry.name);
     const rendered = normalizedRelative(root, path);
-    assertSafePath(rendered);
+    assertSafePath(rendered, state);
     if (rendered === state.embeddedBrowser) {
       continue;
     }
@@ -318,7 +373,15 @@ export async function auditReleaseBundle({
       throw rejected();
     }
 
-    const state = { embeddedBrowser, fileCount: 0, files: new Set(), packageSize: 0 };
+    const { catalogRoot, catalogFiles } = await readCatalogManifest(root, platform);
+    const state = {
+      catalogFiles,
+      catalogRoot,
+      embeddedBrowser,
+      fileCount: 0,
+      files: new Set(),
+      packageSize: 0,
+    };
     await collectBundleFiles(root, root, state);
     const entry = `${expectedExecutor}/${
       platform === "macos" ? "automation-tool-executor" : "automation-tool-executor.exe"

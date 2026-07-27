@@ -6,6 +6,28 @@ import test from "node:test";
 
 import { auditReleaseBundle } from "../scripts/audit-release-bundle.mjs";
 
+const CATALOG_ROOT = "Contents/Resources/motion-catalog";
+
+/**
+ * Write the frozen catalog tree the release now installs, with `files` naming
+ * exactly what the audit should tolerate.
+ */
+async function writeCatalog(bundle, files) {
+  const root = join(bundle, CATALOG_ROOT);
+  await mkdir(root, { recursive: true });
+  await writeFile(
+    join(root, "manifest.json"),
+    JSON.stringify({ schemaVersion: 1, files: files.map((path) => ({ path })) }),
+  );
+  for (const path of files) {
+    const target = join(root, path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "asset");
+  }
+  return root;
+}
+
+
 async function createBundle(platform = "macos") {
   const root = await mkdtemp(join(tmpdir(), "automation-tool-p905-bundle-"));
   const bundle = join(root, platform === "macos" ? "Automation Tool.app" : "installed");
@@ -192,4 +214,67 @@ test("P9-05 is wired into both platform candidates and one dispatch command", as
   assert.match(auditRunner, /run_p9_03_acceptance\.py/u);
   assert.match(auditRunner, /run_p9_04_acceptance\.py/u);
   assert.match(workflow, /run_p9_05_acceptance\.py/u);
+});
+
+/**
+ * PC-16: four upstream parts ship a `.wav` sound effect, and `.wav` is on the
+ * media suffix ban that keeps captured user content out of a package.
+ *
+ * The ban stays. What changes is that inside the frozen catalog a media file is
+ * allowed exactly when the catalog's own manifest accounts for it — every file
+ * in that tree carries a SHA-256 there and the aggregate is locked in
+ * `motion-catalog-release.v1.json`. A blanket exemption for the directory would
+ * be the shape this project distrusts: a list you can get past by putting your
+ * file in the right folder.
+ */
+test("P9-05 accepts a catalog media asset its own manifest accounts for", async () => {
+  const fixture = await createBundle();
+  try {
+    await writeCatalog(fixture.bundle, ["items/vpn-youtube-spot/assets/soft-pulse.wav"]);
+    const result = await auditReleaseBundle({
+      bundleRoot: fixture.bundle,
+      executorPackagePath: fixture.executor,
+      platform: "macos",
+    });
+    assert.ok(result.fileCount > 4);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 still refuses a catalog media file the manifest never named", async () => {
+  const fixture = await createBundle();
+  try {
+    await writeCatalog(fixture.bundle, ["items/vpn-youtube-spot/assets/soft-pulse.wav"]);
+    const smuggled = join(fixture.bundle, CATALOG_ROOT, "items/vpn-youtube-spot/assets/recording.wav");
+    await writeFile(smuggled, "not in the manifest");
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "macos",
+      }),
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 keeps refusing media outside the catalog even with a catalog present", async () => {
+  const fixture = await createBundle();
+  try {
+    await writeCatalog(fixture.bundle, ["items/vpn-youtube-spot/assets/soft-pulse.wav"]);
+    const target = join(fixture.bundle, "Contents/Resources/materials/user-video.mp4");
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "video");
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "macos",
+      }),
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
 });
