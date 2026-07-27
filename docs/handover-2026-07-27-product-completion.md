@@ -1,6 +1,6 @@
 # 交接文档 · 2026-07-27 下午这一轮（产品补全线）
 
-> 写给换台电脑接着干的人。**先读第五节**——那一节讲的是「只在公司这台 Mac 上、不在 Git 里」的东西，
+> 写给换台电脑接着干的人。**先读第五节和五之二**——那一节讲的是「只在公司这台 Mac 上、不在 Git 里」的东西，
 > 不先处理它，第六节列的下一步全部跑不起来。
 
 分支 `feature-audit`，已推 origin。上一份交接 `docs/handover-2026-07-27.md` 讲的是凌晨那轮出包，
@@ -61,12 +61,39 @@ PC-02  零件可用性分级             ✅   按文案存放形态分 first 36
 PC-04  模型看得见目录             ✅   134 个裸 id → 76 个可用零件的真目录
 PC-07  TTS 接入与时长测量         ✅   百炼 qwen3-tts-instruct-flash，真实 2.080/7.120/4.320 秒
 PC-11  本台账门禁                 ✅   共用判定抽进 scripts/roadmap_ledger.py
-PC-13  中文字体 + 拉丁补齐        🔍   见下方第四节之二
-PC-03  第一批槽位表               ⬜   ← 下一步，依赖 PC-13
+PC-13  中文字体 + 拉丁补齐        🔍   见下方第四节之三
+PC-03  第一批槽位表               🚧   锚定这一半已冻结，见第四节之二
 PC-05/06/08/09/10/12/14/15        ⬜   PC-03 之后；PC-15 是字体冗余整合
 ```
 
-### 之二、字体线（PC-13，`f62a8ac`）已落地，但只能标 🔍
+### 之二、PC-03 已完成「锚定」这一半（`06dff0a`）
+
+冻结 `contracts/video/motion-part-slots.v1.json`：**18 个零件 48 个槽**，每槽是
+「文本节点序号 + 原文」双锚，`check_motion_part_slots.py` 从发布树逐条重算比对。
+
+**最重要的一条：锚必须取自发布树，不能取 submodule。** 每个零件有两份——上游原样那份
+经 BM-12 离线化与 BM-13 品牌 overlay 之后才是进包、才是被复制进 RenderJob 工作区的那份。
+实测 `spotify-card` 两侧**两个锚同时不同**：
+
+```
+submodule   idx=24 'HyperFrames'   idx=26 'HeyGen'       idx=36 'Spotify'
+发布树       idx=22 '动效画布'      idx=24 '人物创作平台'   idx=34 '音频平台'
+```
+
+文字不同是 overlay 换的；序号从 24 移到 22 是因为离线化删掉了前面两个 Google Fonts
+`<link>`，连带少了它们前后的空白文本节点。**从 submodule 建表会让 70 个被 overlay 碰过的
+零件把文案写进错误的节点，而且不报错。**
+
+筛选做了两遍。第一遍只按名字排除 5 个整屏界面仿制件、剩下 116 个全收——那不算筛选。
+逐条读完 116 条后排除四类，理由都写在 `check_motion_part_slots.py` 的 `SCENERY_PARTS`
+与 `FIXED_TEXT` 里：许可署名（`© OpenStreetMap contributors © CARTO`，改它违反地图数据
+许可）、自我宣传演示页（`vfx-magnetic` / `vfx-liquid-glass`）、界面家具
+（`Follow`↔`Following` 是按钮两态，动效正是从前者变后者）、以及需要槽位分组的 `news-ticker`。
+
+**剩三件**：每槽的角色标注、像素预算探针、运行期把文案写进工作区副本。
+最后一项同时是 PC-13 的收口点。
+
+### 之三、字体线（PC-13，`f62a8ac`）已落地，但只能标 🔍
 
 由子代理独立完成，我逐条复核过——**不是采信它的自述**：`check_third_party_sources.py` 退出 0
 （submodule 未被碰）、八道相关门禁全绿、后端 3282 条单测通过、篡改验证真的能判红。
@@ -168,28 +195,50 @@ Homebrew 是 framework 布局，出包会死在执行器签名（`bundle format 
 `chromium-1228` / `1217` / `headless_shell` 三份。缓存过期会把桌面验收全堵死，
 现象与处置见上一份交接文档第二节。
 
+## 五之二、换机后开工前必须先做这三步，否则第一道门禁就是红的
+
+新机器上 `.local/` 是空的，而 **`check_motion_part_slots.py` 需要发布树存在**——
+它要从真正进包的那份文档重算每个锚。所以顺序是：
+
+```
+1. cp docs/credentials-bailian-model.md 里的 apiKey → .local/secrets/bailian-model.json
+2. uv sync（venv 必须建在 standalone Python 上，见第五节之五）
+3. python3 scripts/build_offline_motion_catalog.py     # 下载并本地化依赖，含 7.42 MB 中文字体
+   python3 scripts/build_motion_catalog_release.py     # 合成只读发布树（46 MB / 337 文件）
+```
+
+**第 3 步会从 `raw.githubusercontent.com` 下载 17.7 MB 的 Noto Sans SC 源 TTF。**
+本项目的机器上出现过 `/etc/hosts` 里残留的过期 GitHub IP，表现是 SSL 失败而且**开代理也没用**
+（hosts 优先级高于 DNS）。先 `grep githubusercontent /etc/hosts`，有就删掉那行。
+
+跑完之后这两条应该是绿的：
+
+```
+backend/.venv/bin/python scripts/check_motion_part_slots.py
+python3 scripts/check_motion_catalog_release.py
+```
+
 ## 六、下一步
 
-**PC-03（第一批槽位表）**，前置是 PC-13 把字体定下来。要做的：
+**PC-03 剩下的三件**。第一件是接线，也是最有价值的一件，因为它同时收掉 PC-13：
 
-1. 从 first 批 36 个零件的 **419 个可见文本节点里筛**出真正该开的槽。
-   长尾（`ui-3d-reveal` 136 个、`vpn-youtube-spot` 50 个、`vfx-portal` 45 个）是**假 UI 的布景文字，
-   不是该替换的文案**——26 个零件 ≤5 个节点，那些才是理想形态；
-2. 定位用「**文本节点序号 + 原文逐字**」双锚，不用 CSS 选择器。序号由已经落地的
-   `automation_tool.executor.motion_authoring.part_document` 提供，**它随 Executor 一起打包**，
-   因为冻结时数节点的和渲染时数节点的必须是同一份代码；
-3. 每槽记的是**容器可用像素宽度 + 字号**，不是字数——同样 9 个字符，汉字约 9em、`iiiiiiiii` 约 2.3em、
-   `WWWWWWWWW` 约 12em。字数只作为给模型的软预算；
-4. 替换发生在**运行期写进 RenderJob 工作区的副本**，只读发布树不变。这条沿用 BM-13 的 overlay 思路
-   （那边 121 条商标文本替换已经跑通，`apple` → `星云科技`）。
-
-**PC-03 同时是字体线的收口点**：执行器写 RenderJob 工作区副本时要调 `part_font_css()`
-把字体 CSS 注进去，那正是文案替换发生的地方。两件事在同一处落地，别拆开做。
+1. **运行期把文案与字体写进 RenderJob 工作区副本。** 只读发布树不变，复制一份出来改。
+   槽位表已冻结，替换算法是：按 `part_document.visible_text_nodes` 枚举，第 `index` 个节点
+   必须逐字等于 `original`，否则失败关闭；文案走 `escape_untrusted_text`。
+   **同一处要调 `scripts/motion_part_typography.py` 的 `part_font_css()` 把字体 CSS 注进去**——
+   那是 PC-13 唯一缺的一步，两件事在同一个写副本的动作里落地，别拆开做。
+   做完可以用一次真实 App 验收同时收掉 PC-03 与 PC-13；
+2. **像素预算探针。** 每槽记的是**容器可用像素宽度 + 字号**，不是字数——同样 9 个字符，
+   汉字约 9em、`iiiiiiiii` 约 2.3em、`WWWWWWWWW` 约 12em。用无头 Chromium 加载零件逐槽量。
+   字体已经定了（PC-13 的 Noto Sans SC 可变），现在量出来的数才作数。
+   探针基础设施可参考子代理写的 `scripts/motion_cjk_font_probe.py`；
+3. **角色标注。** 48 个槽给模型看时需要知道每个槽是什么。原文本身已经是很强的提示
+   （`Maya Chen` → 显然是姓名），所以这件可以最后做，甚至可能不需要。
 
 再往后 PC-05（单零件渲染）→ PC-06（拼接）→ PC-08（时间轴主宰）。
 
-新登记的 PC-15：安装包现在带**两份**中文字体（素材成片 Worker 里的思源黑体 OTF 33.4 MB
-＋动效线新增的 7.42 MB），41 MB 冗余。PC-13 不复用前者的理由成立，但值得单独评估。
+**两件已登记但还没排期的**：PC-14（溢出实测与廉价修复轮，依赖 PC-05）、
+PC-15（两条链路各带一份中文字体，41 MB 冗余）。
 
 ## 七、并行开发：一条今天付过代价的规则（已写进 CLAUDE.md §8.2）
 
