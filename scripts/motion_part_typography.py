@@ -29,29 +29,40 @@ makes the gate red rather than silently rendering in the host font.
 from __future__ import annotations
 
 import hashlib
-import html
 import json
-import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Final, Iterable, Mapping, Sequence
+from typing import Final, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend/src"))
 
-from automation_tool.executor.motion_authoring import part_typography  # noqa: E402
+from automation_tool.executor.motion_authoring import (  # noqa: E402
+    part_typography as _rules,
+)
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 
-# Both ranges, the face record and the rule generator live in the Executor
-# package: emission has to ship inside the frozen package and `scripts/` does
-# not. Re-exported here so this module's own callers and tests keep one name
-# for each, with exactly one definition behind it.
-CHINESE_UNICODE_RANGE: Final = part_typography.CHINESE_UNICODE_RANGE
-LATIN_UNICODE_RANGE: Final = part_typography.LATIN_UNICODE_RANGE
-ResolvedFace = part_typography.ResolvedFace
-part_font_css = part_typography.part_font_css
+# The whole render-time chain — the scanner, the policies, the resolver and the
+# rule generator — lives in the Executor package, because it has to run inside
+# the frozen artifact and `scripts/` is not in it. What stays here is the work
+# that only ever happens on a developer machine: reading the submodule, the
+# contract and the lock. The names below are re-exported so this module's
+# callers and gates keep one name each, with one definition behind it.
+CHINESE_UNICODE_RANGE: Final = _rules.CHINESE_UNICODE_RANGE
+LATIN_UNICODE_RANGE: Final = _rules.LATIN_UNICODE_RANGE
+POLICY_PACKAGED: Final = _rules.POLICY_PACKAGED
+POLICY_SUBSTITUTED: Final = _rules.POLICY_SUBSTITUTED
+POLICY_HOST: Final = _rules.POLICY_HOST
+POLICIES: Final = _rules.POLICIES
+FamilyPolicy = _rules.FamilyPolicy
+ResolvedFace = _rules.ResolvedFace
+part_font_css = _rules.part_font_css
+part_typography = _rules.requested_faces
+family_policies = _rules.family_policies
+packaged_weights = _rules.packaged_weights
+resolve_faces = _rules.resolve_faces
+face_artifact = _rules.face_artifact
 CATALOG_CONTRACT_PATH: Final = REPOSITORY_ROOT / "contracts/quality/motion-catalog.v1.json"
 TYPOGRAPHY_CONTRACT_PATH: Final = REPOSITORY_ROOT / "contracts/video/motion-part-typography.v1.json"
 OFFLINE_LOCK_PATH: Final = REPOSITORY_ROOT / "contracts/video/offline-motion-dependencies.v1.json"
@@ -59,103 +70,10 @@ SUBMODULE_ROOT: Final = REPOSITORY_ROOT / "vendor/hyperframes"
 
 _SCANNED_SUFFIXES: Final = frozenset({".html", ".css", ".js"})
 
-# Family names that name a class of font rather than a font. A part naming one
-# of these is asking the host for whatever it has, which is the fallback this
-# whole mechanism exists to replace -- there is no face to declare.
-_GENERIC_FAMILIES: Final = frozenset(
-    {
-        "-apple-system",
-        "blinkmacsystemfont",
-        "cursive",
-        "emoji",
-        "fangsong",
-        "fantasy",
-        "inherit",
-        "initial",
-        "math",
-        "monospace",
-        "revert",
-        "sans-serif",
-        "serif",
-        "system-ui",
-        "ui-monospace",
-        "ui-rounded",
-        "ui-sans-serif",
-        "ui-serif",
-        "unset",
-    }
-)
-
-# CSS's initial `font-weight`. A rule that names a typeface without a weight is
-# a request for 400 and needs a face declared at 400.
-_DEFAULT_WEIGHT: Final = 400
-
-_RULE_BODY: Final = re.compile(r"\{([^{}]*)\}")
-_FONT_FAMILY: Final = re.compile(r"font-family\s*:\s*([^;}\n]+)", re.IGNORECASE)
-_FONT_WEIGHT: Final = re.compile(r"font-weight\s*:\s*(\d{3})")
-# `morph-text` keeps its typeface in an attribute and assigns it to
-# `style.fontFamily` from script; the CSS scan alone never sees it.
-_DATA_FONT: Final = re.compile(r"data-font\s*=\s*\"([^\"]+)\"", re.IGNORECASE)
-
 
 class TypographyError(SystemExit):
     def __init__(self, message: str) -> None:
         super().__init__(f"motion part typography failed: {message}")
-
-
-# What the package can do about a typeface a part names. `host` is a decision
-# and not an escape hatch: it has to be written down per family with a reason,
-# and it is only defensible where the host font renders the text correctly
-# rather than as tofu -- colour emoji, and nothing else so far.
-POLICY_PACKAGED: Final = "packaged"
-POLICY_SUBSTITUTED: Final = "substituted"
-POLICY_HOST: Final = "host"
-POLICIES: Final = frozenset({POLICY_PACKAGED, POLICY_SUBSTITUTED, POLICY_HOST})
-
-
-@dataclass(frozen=True, slots=True)
-class FamilyPolicy:
-    """What the package does about one typeface a part names."""
-
-    policy: str
-    replacement: str | None
-    reason: str
-    visual_difference: str
-
-
-def _family_names(stack: str) -> set[str]:
-    names: set[str] = set()
-    for candidate in stack.split(","):
-        name = candidate.strip().strip("\"'").strip()
-        if not name or name.startswith("var(") or name.startswith("$"):
-            continue
-        if name.lower() in _GENERIC_FAMILIES:
-            continue
-        names.add(name)
-    return names
-
-
-def part_typography(text: str) -> frozenset[tuple[str, int]]:
-    """Every ``(family, weight)`` one part document requests.
-
-    Entities are unescaped first: one part writes its font stack as
-    ``&quot;Inter&quot;`` inside a style block, and a scan over the raw bytes
-    reads the entity as part of the name.
-    """
-    source = html.unescape(text)
-    pairs: set[tuple[str, int]] = set()
-    for body in _RULE_BODY.findall(source):
-        declaration = _FONT_FAMILY.search(body)
-        if declaration is None:
-            continue
-        weight_match = _FONT_WEIGHT.search(body)
-        weight = int(weight_match.group(1)) if weight_match else _DEFAULT_WEIGHT
-        for name in _family_names(declaration.group(1)):
-            pairs.add((name, weight))
-    for stack in _DATA_FONT.findall(source):
-        for name in _family_names(stack):
-            pairs.add((name, _DEFAULT_WEIGHT))
-    return frozenset(pairs)
 
 
 def load_json(path: Path) -> dict:
@@ -196,18 +114,6 @@ def load_typography_contract() -> dict:
     return load_json(TYPOGRAPHY_CONTRACT_PATH)
 
 
-def family_policies(contract: dict) -> dict[str, FamilyPolicy]:
-    policies: dict[str, FamilyPolicy] = {}
-    for entry in contract["families"]:
-        policies[entry["family"]] = FamilyPolicy(
-            entry["policy"],
-            entry.get("replacement"),
-            entry.get("reason", ""),
-            entry.get("visualDifference", ""),
-        )
-    return policies
-
-
 def families_without_policy(
     scanned: Mapping[str, frozenset[tuple[str, int]]], contract: dict
 ) -> frozenset[str]:
@@ -215,59 +121,6 @@ def families_without_policy(
     declared = set(family_policies(contract))
     named = {family for pairs in scanned.values() for family, _ in pairs}
     return frozenset(named - declared)
-
-
-def packaged_weights(lock: dict) -> dict[str, frozenset[int]]:
-    """Which weights the offline package can actually serve, per source family.
-
-    Derived from the locked stylesheet faces, so a font file that was never
-    downloaded cannot be declared against by accident.
-    """
-    weights: dict[str, set[int]] = {}
-    for sheet in lock["stylesheets"]:
-        for face in sheet["faces"]:
-            weights.setdefault(face["family"], set()).add(int(face["weight"]))
-    return {family: frozenset(values) for family, values in weights.items()}
-
-
-def resolve_faces(
-    pairs: Iterable[tuple[str, int]],
-    *,
-    policies: Mapping[str, FamilyPolicy],
-    packaged_weights: Mapping[str, frozenset[int]],
-) -> tuple[tuple[ResolvedFace, ...], tuple[tuple[str, int], ...]]:
-    """Turn requests into declarable faces, and name the ones that cannot be.
-
-    The second element is the whole reason this returns a pair: an unmet
-    request has to reach a gate, because at render time it is indistinguishable
-    from a part that simply looks wrong.
-    """
-    faces: list[ResolvedFace] = []
-    unmet: list[tuple[str, int]] = []
-    for family, weight in sorted(set(pairs)):
-        policy = policies.get(family)
-        if policy is None:
-            unmet.append((family, weight))
-            continue
-        if policy.policy == POLICY_HOST:
-            continue
-        source = policy.replacement if policy.policy == POLICY_SUBSTITUTED else family
-        if source is None or weight not in packaged_weights.get(source, frozenset()):
-            unmet.append((family, weight))
-            continue
-        faces.append(ResolvedFace(css_family=family, source_family=source, weight=weight))
-    return tuple(faces), tuple(unmet)
-
-
-def face_artifact(lock: dict, source_family: str, weight: int) -> tuple[str, ...]:
-    """The locked woff2 paths that serve one source family at one weight."""
-    paths: list[str] = []
-    for sheet in lock["stylesheets"]:
-        for face in sheet["faces"]:
-            if face["family"] == source_family and int(face["weight"]) == weight:
-                if face["artifactPath"] not in paths:
-                    paths.append(face["artifactPath"])
-    return tuple(paths)
 
 
 def scan_digest(scanned: Mapping[str, frozenset[tuple[str, int]]]) -> str:

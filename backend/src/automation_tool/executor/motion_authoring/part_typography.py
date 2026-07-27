@@ -33,8 +33,10 @@ as operator copy.)
 
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import dataclass
-from typing import Callable, Final, Sequence
+from typing import Callable, Final, Iterable, Mapping, Sequence
 
 # The code points a Chinese face must own. Latin, Latin-1 punctuation and the
 # middle dot are deliberately absent: those stay with the part's own typeface,
@@ -70,6 +72,64 @@ LATIN_UNICODE_RANGE: Final = (
 )
 
 
+# Family names that name a class of font rather than a font. A part naming one
+# of these is asking the host for whatever it has, which is the fallback this
+# whole mechanism exists to replace -- there is no face to declare.
+_GENERIC_FAMILIES: Final = frozenset(
+    {
+        "-apple-system",
+        "blinkmacsystemfont",
+        "cursive",
+        "emoji",
+        "fangsong",
+        "fantasy",
+        "inherit",
+        "initial",
+        "math",
+        "monospace",
+        "revert",
+        "sans-serif",
+        "serif",
+        "system-ui",
+        "ui-monospace",
+        "ui-rounded",
+        "ui-sans-serif",
+        "ui-serif",
+        "unset",
+    }
+)
+
+# CSS's initial `font-weight`. A rule that names a typeface without a weight is
+# a request for 400 and needs a face declared at 400.
+_DEFAULT_WEIGHT: Final = 400
+
+_RULE_BODY: Final = re.compile(r"\{([^{}]*)\}")
+_FONT_FAMILY: Final = re.compile(r"font-family\s*:\s*([^;}\n]+)", re.IGNORECASE)
+_FONT_WEIGHT: Final = re.compile(r"font-weight\s*:\s*(\d{3})")
+# `morph-text` keeps its typeface in an attribute and assigns it to
+# `style.fontFamily` from script; the CSS scan alone never sees it.
+_DATA_FONT: Final = re.compile(r"data-font\s*=\s*\"([^\"]+)\"", re.IGNORECASE)
+
+# What the package can do about a typeface a part names. `host` is a decision
+# and not an escape hatch: it has to be written down per family with a reason,
+# and it is only defensible where the host font renders the text correctly
+# rather than as tofu -- colour emoji, and nothing else so far.
+POLICY_PACKAGED: Final = "packaged"
+POLICY_SUBSTITUTED: Final = "substituted"
+POLICY_HOST: Final = "host"
+POLICIES: Final = frozenset({POLICY_PACKAGED, POLICY_SUBSTITUTED, POLICY_HOST})
+
+
+@dataclass(frozen=True, slots=True)
+class FamilyPolicy:
+    """What the package does about one typeface a part names."""
+
+    policy: str
+    replacement: str | None
+    reason: str
+    visual_difference: str
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedFace:
     """One `@font-face` rule: the requested name, served by shippable bytes."""
@@ -77,6 +137,152 @@ class ResolvedFace:
     css_family: str
     source_family: str
     weight: int
+
+
+class FontRequestUnmet(RuntimeError):
+    """A part names a typeface the package cannot declare a face for.
+
+    Not recoverable by retrying and not something the user typed wrong: the
+    gate proves every part's requests are met, so meeting an unmet one here
+    means this installation is not the one that was checked. Rendering anyway
+    would put the text in whatever the host machine has, on one machine and not
+    another, with nothing anywhere reporting it.
+    """
+
+
+def _family_names(stack: str) -> set[str]:
+    names: set[str] = set()
+    for candidate in stack.split(","):
+        name = candidate.strip().strip("\"'").strip()
+        if not name or name.startswith("var(") or name.startswith("$"):
+            continue
+        if name.lower() in _GENERIC_FAMILIES:
+            continue
+        names.add(name)
+    return names
+
+
+def requested_faces(text: str) -> frozenset[tuple[str, int]]:
+    """Every ``(family, weight)`` one part document requests.
+
+    Entities are unescaped first: one part writes its font stack as
+    ``&quot;Inter&quot;`` inside a style block, and a scan over the raw bytes
+    reads the entity as part of the name.
+    """
+    source = html.unescape(text)
+    pairs: set[tuple[str, int]] = set()
+    for body in _RULE_BODY.findall(source):
+        declaration = _FONT_FAMILY.search(body)
+        if declaration is None:
+            continue
+        weight_match = _FONT_WEIGHT.search(body)
+        weight = int(weight_match.group(1)) if weight_match else _DEFAULT_WEIGHT
+        for name in _family_names(declaration.group(1)):
+            pairs.add((name, weight))
+    for stack in _DATA_FONT.findall(source):
+        for name in _family_names(stack):
+            pairs.add((name, _DEFAULT_WEIGHT))
+    return frozenset(pairs)
+
+
+def family_policies(contract: Mapping[str, object]) -> dict[str, FamilyPolicy]:
+    policies: dict[str, FamilyPolicy] = {}
+    for entry in contract["families"]:  # type: ignore[index]
+        policies[entry["family"]] = FamilyPolicy(
+            entry["policy"],
+            entry.get("replacement"),
+            entry.get("reason", ""),
+            entry.get("visualDifference", ""),
+        )
+    return policies
+
+
+def packaged_weights(lock: Mapping[str, object]) -> dict[str, frozenset[int]]:
+    """Which weights the offline package can actually serve, per source family.
+
+    Derived from the locked stylesheet faces, so a font file that was never
+    downloaded cannot be declared against by accident.
+    """
+    weights: dict[str, set[int]] = {}
+    for sheet in lock["stylesheets"]:  # type: ignore[index]
+        for face in sheet["faces"]:
+            weights.setdefault(face["family"], set()).add(int(face["weight"]))
+    return {family: frozenset(values) for family, values in weights.items()}
+
+
+def resolve_faces(
+    pairs: Iterable[tuple[str, int]],
+    *,
+    policies: Mapping[str, FamilyPolicy],
+    packaged_weights: Mapping[str, frozenset[int]],
+) -> tuple[tuple[ResolvedFace, ...], tuple[tuple[str, int], ...]]:
+    """Turn requests into declarable faces, and name the ones that cannot be.
+
+    The second element is the whole reason this returns a pair: an unmet
+    request has to reach a gate, because at render time it is indistinguishable
+    from a part that simply looks wrong.
+    """
+    faces: list[ResolvedFace] = []
+    unmet: list[tuple[str, int]] = []
+    for family, weight in sorted(set(pairs)):
+        policy = policies.get(family)
+        if policy is None:
+            unmet.append((family, weight))
+            continue
+        if policy.policy == POLICY_HOST:
+            continue
+        source = policy.replacement if policy.policy == POLICY_SUBSTITUTED else family
+        if source is None or weight not in packaged_weights.get(source, frozenset()):
+            unmet.append((family, weight))
+            continue
+        faces.append(ResolvedFace(css_family=family, source_family=source, weight=weight))
+    return tuple(faces), tuple(unmet)
+
+
+def face_artifact(
+    lock: Mapping[str, object], source_family: str, weight: int
+) -> tuple[str, ...]:
+    """The locked woff2 paths that serve one source family at one weight."""
+    paths: list[str] = []
+    for sheet in lock["stylesheets"]:  # type: ignore[index]
+        for face in sheet["faces"]:
+            if face["family"] == source_family and int(face["weight"]) == weight:
+                if face["artifactPath"] not in paths:
+                    paths.append(face["artifactPath"])
+    return tuple(paths)
+
+
+def document_font_css(
+    text: str,
+    *,
+    typography_contract: Mapping[str, object],
+    offline_lock: Mapping[str, object],
+) -> str:
+    """Every rule this one document needs, or a refusal naming what is missing.
+
+    This is the render-time entry point: the document is the same one being
+    copied into the workspace, so what it asks for is read from it rather than
+    from a table that could describe a different build of the same part.
+    """
+    policies = family_policies(typography_contract)
+    weights = packaged_weights(offline_lock)
+    faces, unmet = resolve_faces(
+        requested_faces(text), policies=policies, packaged_weights=weights
+    )
+    if unmet:
+        named = ", ".join(f"{family} {weight}" for family, weight in unmet)
+        raise FontRequestUnmet(f"the package cannot declare a face for: {named}")
+    chinese = typography_contract["chineseFace"]["artifactPath"]  # type: ignore[index]
+
+    def latin(face: ResolvedFace) -> str:
+        artifacts = face_artifact(offline_lock, face.source_family, face.weight)
+        if not artifacts:
+            raise FontRequestUnmet(
+                f"no packaged file serves {face.source_family} {face.weight}"
+            )
+        return artifacts[0]
+
+    return part_font_css(faces, chinese_artifact=chinese, latin_artifact=latin)
 
 
 def cjk_codepoints() -> frozenset[int]:
@@ -119,7 +325,19 @@ __all__ = [
     "CHINESE_UNICODE_RANGE",
     "CJK_RANGES",
     "LATIN_UNICODE_RANGE",
+    "POLICIES",
+    "POLICY_HOST",
+    "POLICY_PACKAGED",
+    "POLICY_SUBSTITUTED",
+    "FamilyPolicy",
+    "FontRequestUnmet",
     "ResolvedFace",
     "cjk_codepoints",
+    "document_font_css",
+    "face_artifact",
+    "family_policies",
+    "packaged_weights",
     "part_font_css",
+    "requested_faces",
+    "resolve_faces",
 ]
