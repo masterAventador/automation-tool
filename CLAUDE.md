@@ -271,6 +271,22 @@ App 管理的独立运营 Profile
 - **重新编辑一份被豁免的证据、要往里加新结论时，必须顺手补齐声明与终态，并把它从豁免清单里删掉**——豁免只覆盖「当时那份」，不覆盖后来加进去的主张；
 - **清单里不许出现已经不存在的文件**，由 `test_acceptance_evidence_depth.py` 守着。否则清单会慢慢腐烂成一张万能通行证：往里加个名字就能绕过。这是所有豁免机制的通病，`single_build_path.rs` 的 `REVIEWED_` 清单同理。
 
+### 9.2 `excludes=[]` 意味着 import 图就是打包边界
+
+`backend/automation-tool-executor.spec` 声明 `excludes=[]`：**没有任何东西按名字被挡在冻结包外**，什么会进客户的安装包，完全由 import 图决定。因此包的 `__init__.py` 处在打包边界的根上——它重新导出什么，就等于允许什么被顺带打包。
+
+- **测试替身（`Fake*` / `Mock*` / `Stub*` / `Dummy*`）不得出现在 `automation_tool/executor/__init__.py` 的导入与 `__all__` 中**，由 `backend/tests/unit/executor/test_shipped_package_boundary.py` 守着（读 AST，按标记子串匹配，改名躲不掉）；
+- 需要它们的测试**按模块路径显式导入**（`from automation_tool.executor.fake import ...`），能力不受影响；
+- 判据不是"产物里搜不到就没事"：2026-07-27 实测产物确实没有假执行器，但那是入口恰好只 import 子模块的**运气**，一句 `import automation_tool.executor` 就会改变结论。**结构上断掉比事后扫描可靠。**
+
+### 9.3 本机共享基础设施不适用「用完就关」
+
+「本地联调后停掉服务」针对的是**本次为自己启动的**进程。**全局共享入口不在此列**：colima 的 `/var/run/docker.sock` 由最后启动的 profile 接管，停掉自己的 profile 会把别人挂在那里的链接一并摘掉——容器本身不受影响，但其他项目通过默认 context 的访问会断。
+
+2026-07-27 实测踩过：为跑一次验收启动 `colima --profile default`，用完停掉，结果把另一个项目 profile 提供的 `/var/run/docker.sock` 摘没了。**启动前先看 `colima list` 与 `docker context ls`；若默认入口已被别的 profile 占用，用 `DOCKER_CONTEXT=` 指定实例，不要另起 profile 争抢那个路径。**
+
+**换实例前先确认它有镜像缓存。** 同一天接着踩的第二个：改用 `DOCKER_CONTEXT=` 指向另一个实例后，`docker compose up --wait postgres-test` 卡死二十分钟，当时顺手归因为「跟那 11 个容器抢资源」——**而 CPU 是 0%，那正是「不在算、在等」的反证，就摆在眼前没去看**。真实原因是那个实例的镜像缓存是空的，`postgres:18.4-bookworm` 要现从 Docker Hub 拉，国内直连拉不动。**卡住时先看 CPU：非零看资源，为零看网络与依赖拉取，不要凭印象归因。**
+
 ## 10. 工作方式
 
 - 所有多步骤任务使用带 `[Tn]` 的可见计划，并保持同一时间最多一个 `in_progress`；
