@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openAutomationRuns, openTaskCreate } from "./navigation";
 
 /**
  * What the workbench home says, walked the way the customer walks it.
@@ -41,7 +42,7 @@ const READABLE_TASK_NAME = /^\d{2}-\d{2} \d{2}:\d{2}:\d{2} 的任务$/;
  * one to list.
  */
 async function createTask(page: Page, keyword: string): Promise<void> {
-  await page.getByRole("menuitem", { name: "新建任务" }).click();
+  await openTaskCreate(page);
   await page.getByLabel("搜索关键词").fill(keyword);
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByText(/任务已创建：[0-9a-f-]{36}/)).toBeVisible();
@@ -51,7 +52,7 @@ async function openWorkbenchWithTwoTasks(page: Page): Promise<void> {
   await page.goto(HARNESS);
   await createTask(page, "T93 运行中的任务");
   await createTask(page, "T93 已完成的任务");
-  await page.getByRole("menuitem", { name: "工作台" }).click();
+  await openAutomationRuns(page);
   await expect(page.getByRole("heading", { name: "当前任务" })).toBeVisible();
 }
 

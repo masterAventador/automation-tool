@@ -30,7 +30,7 @@ describe("desktop startup", () => {
 
     expect(await screen.findByRole("heading", { name: "登录自动化运营工具" })).toBeVisible();
     expect(startupCheck.check).not.toHaveBeenCalled();
-    expect(screen.queryByRole("heading", { name: "RPA 运营工作台" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "AI 运营助理" })).not.toBeInTheDocument();
   });
 
   it("opens the RPA workbench without any product login route", async () => {
@@ -40,7 +40,7 @@ describe("desktop startup", () => {
 
     render(<App startupCheck={startupCheck} />);
 
-    expect(await screen.findByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "AI 运营助理" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: "桌面主导航" })).toBeVisible();
     expect(document.body).not.toHaveTextContent(/产品登录|注册账号|账号登录/);
     expect(startupCheck.check).toHaveBeenCalledTimes(1);
@@ -65,7 +65,7 @@ describe("desktop startup", () => {
 
     await user.click(screen.getByRole("button", { name: "重新检查" }));
 
-    expect(await screen.findByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "AI 运营助理" })).toBeVisible();
     expect(startupCheck.check).toHaveBeenCalledTimes(2);
   });
 
@@ -174,9 +174,9 @@ describe("desktop startup", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: "RPA 运营工作台" });
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
-    expect(await screen.findByRole("heading", { name: "设置与诊断" })).toBeVisible();
+    await screen.findByRole("heading", { name: "AI 运营助理" });
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
+    expect(await screen.findByRole("heading", { name: "设置", level: 2 })).toBeVisible();
     expect(await screen.findByText("本地执行器运行中")).toBeVisible();
     expect(screen.getByText("safe app diagnostic")).toBeVisible();
     expect(screen.getByRole("heading", { name: "App 更新" })).toBeVisible();
@@ -199,7 +199,7 @@ describe("desktop startup", () => {
 
     render(<App startupCheck={startupCheck} />);
 
-    await screen.findByRole("heading", { name: "RPA 运营工作台" });
+    await screen.findByRole("heading", { name: "AI 运营助理" });
     const navigation = screen.getByRole("navigation", { name: "桌面主导航" });
     expect(
       within(navigation).queryByRole("menuitem", { name: "第三方软件声明" }),
@@ -231,8 +231,8 @@ describe("desktop startup", () => {
 
     render(<App startupCheck={startupCheck} platformAdapter={platformAdapter} />);
 
-    await screen.findByRole("heading", { name: "RPA 运营工作台" });
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await screen.findByRole("heading", { name: "AI 运营助理" });
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
     await user.click(await screen.findByRole("button", { name: "开源软件许可" }));
 
     expect(screen.getByRole("heading", { name: "开源软件许可" })).toBeVisible();
@@ -263,9 +263,11 @@ describe("desktop startup", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: "RPA 运营工作台" });
-    await user.click(screen.getByRole("menuitem", { name: "平台状态" }));
-    expect(await screen.findByRole("heading", { name: "平台状态" })).toBeVisible();
+    await screen.findByRole("heading", { name: "AI 运营助理" });
+    await user.click(screen.getByRole("menuitem", { name: "账号与平台" }));
+    expect(
+      await screen.findByRole("heading", { name: "账号与平台", level: 2 }),
+    ).toBeVisible();
     expect(await screen.findByText("登录正常")).toBeVisible();
     expect(platformSessionGateway.getDouyinSession).toHaveBeenCalledOnce();
   });

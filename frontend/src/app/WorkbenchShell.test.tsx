@@ -31,11 +31,17 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "视频制作" }));
+    await user.click(screen.getByRole("menuitem", { name: "创作" }));
+    await user.click(screen.getByRole("radio", { name: "智能素材成片" }).closest("label")!);
+    await user.click(screen.getByRole("button", { name: "打开完整制作面板" }));
 
-    expect(screen.getByRole("heading", { name: "视频制作" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "创作", level: 4 })).toBeVisible();
     expect(screen.getByRole("region", { name: "视频制作工作区" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "新建视频" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "打开完整制作界面" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/不会打开额外窗口/u)).toBeVisible();
   });
 
   /**
@@ -60,11 +66,11 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    const running = screen.getByRole("menuitem", { name: "视频制作" });
+    const running = screen.getByRole("menuitem", { name: "创作" });
     expect(within(running).getByTitle("视频制作正在进行中")).toBeInTheDocument();
     // 别的导航项不该跟着亮。
     expect(
-      within(screen.getByRole("menuitem", { name: "视频剪辑" })).queryByTitle(
+      within(screen.getByRole("menuitem", { name: "发布" })).queryByTitle(
         "视频制作正在进行中",
       ),
     ).toBeNull();
@@ -100,7 +106,7 @@ describe("workbench shell navigation", () => {
 
     // 失败那个词也进了这一项的无障碍名（视频制作 失败），所以这里按子串取——
     // 屏幕阅读器听得见它，正是这条用例要的。
-    const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+    const entry = screen.getByRole("menuitem", { name: /创作/u });
     expect(within(entry).getByText("失败")).toBeVisible();
     expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
   });
@@ -114,13 +120,13 @@ describe("workbench shell navigation", () => {
     );
 
     expect(
-      within(screen.getByRole("menuitem", { name: "视频制作" })).queryByTitle(
+      within(screen.getByRole("menuitem", { name: "创作" })).queryByTitle(
         "视频制作正在进行中",
       ),
     ).toBeNull();
   });
 
-  it("opens the standalone video editing module from its own left entry", async () => {
+  it("opens the embedded video editing module from creation", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -129,11 +135,12 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByRole("menuitem", { name: "视频剪辑" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "视频制作" })).toBeVisible();
-    await user.click(screen.getByRole("menuitem", { name: "视频剪辑" }));
+    expect(screen.queryByRole("menuitem", { name: "视频剪辑" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "视频制作" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "创作" }));
+    await user.click(screen.getByRole("radio", { name: "轻量剪辑" }).closest("label")!);
 
-    expect(screen.getByRole("heading", { name: "视频剪辑" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "创作", level: 4 })).toBeVisible();
     expect(screen.getByRole("region", { name: "视频剪辑工作区" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "剪辑项目" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "视频制作工作区" })).not.toBeInTheDocument();
@@ -167,7 +174,7 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
     const entry = screen.getByRole("button", { name: "开源软件许可" });
     expect(entry).toBeVisible();
 
@@ -178,7 +185,7 @@ describe("workbench shell navigation", () => {
     expect(screen.getByRole("region", { name: "字体与素材权利" })).toBeVisible();
   });
 
-  it("keeps 设置与诊断 marked as the section the licence notice belongs to", async () => {
+  it("keeps 设置 marked as the section the licence notice belongs to", async () => {
     // Nothing else in the sidebar leads here, so an unselected sidebar would
     // read as a broken page rather than a sub-page of settings.
     const user = userEvent.setup();
@@ -189,10 +196,10 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "开源软件许可" }));
 
-    expect(screen.getByRole("menuitem", { name: "设置与诊断" })).toHaveClass(
+    expect(screen.getByRole("menuitem", { name: "设置" })).toHaveClass(
       "ant-menu-item-selected",
     );
   });
@@ -206,11 +213,11 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "开源软件许可" }));
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
 
-    expect(screen.getByRole("heading", { name: "设置与诊断" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "设置", level: 2 })).toBeVisible();
     expect(screen.queryByRole("region", { name: "上游开源项目" })).not.toBeInTheDocument();
   });
 
@@ -223,11 +230,11 @@ describe("workbench shell navigation", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("menuitem", { name: "设置与诊断" }));
+    await user.click(screen.getByRole("menuitem", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "开源软件许可" }));
     expect(document.body.textContent?.toLowerCase() ?? "").toContain("moneyprinterturbo");
 
-    await user.click(screen.getByRole("menuitem", { name: "视频制作" }));
+    await user.click(screen.getByRole("menuitem", { name: "创作" }));
     const rendered = document.body.textContent?.toLowerCase() ?? "";
     for (const upstream of ["moneyprinterturbo", "hyperframes"]) {
       expect(rendered).not.toContain(upstream);
@@ -302,7 +309,7 @@ describe("video studio watched from anywhere in the app", () => {
       </QueryClientProvider>,
     );
     // 用户就在别的页面上——这正是缺陷成立的前提。
-    expect(screen.getByRole("heading", { name: "RPA 运营工作台" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "AI 运营助理" })).toBeVisible();
     return mounted;
   }
 
@@ -330,7 +337,7 @@ describe("video studio watched from anywhere in the app", () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
 
-      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      const entry = screen.getByRole("menuitem", { name: /创作/u });
       expect(within(entry).getByText("失败")).toBeVisible();
       expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
     } finally {
@@ -357,7 +364,7 @@ describe("video studio watched from anywhere in the app", () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
 
-      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      const entry = screen.getByRole("menuitem", { name: /创作/u });
       expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
       const mark = within(entry).getByText("完成");
       expect(mark).toBeVisible();
@@ -396,7 +403,7 @@ describe("video studio watched from anywhere in the app", () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
 
-      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      const entry = screen.getByRole("menuitem", { name: /创作/u });
       expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
       expect(entry.querySelector("sup")).toBeNull();
     } finally {
@@ -422,7 +429,7 @@ describe("video studio watched from anywhere in the app", () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
 
-      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      const entry = screen.getByRole("menuitem", { name: /创作/u });
       expect(within(entry).getByText("未知")).toBeVisible();
       expect(within(entry).queryByTitle("视频制作正在进行中")).toBeNull();
     } finally {
@@ -440,7 +447,7 @@ describe("video studio watched from anywhere in the app", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
-      const entry = screen.getByRole("menuitem", { name: /视频制作/u });
+      const entry = screen.getByRole("menuitem", { name: /创作/u });
       expect(within(entry).getByText("未知")).toBeVisible();
 
       motionJobs.mockResolvedValue([RENDERING_JOB]);
@@ -448,7 +455,7 @@ describe("video studio watched from anywhere in the app", () => {
         await vi.advanceTimersByTimeAsync(30_000);
       });
 
-      const recovered = screen.getByRole("menuitem", { name: /视频制作/u });
+      const recovered = screen.getByRole("menuitem", { name: /创作/u });
       expect(within(recovered).queryByText("未知")).toBeNull();
       expect(within(recovered).getByTitle("视频制作正在进行中")).toBeInTheDocument();
     } finally {
@@ -548,9 +555,9 @@ describe("publishing", () => {
   it("is reachable from the main navigation", async () => {
     const user = openPublishing();
 
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
 
-    expect(await screen.findByRole("heading", { name: "作品发布" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "发布", level: 2 })).toBeVisible();
   });
 
   it("says it cannot read the state rather than inventing a publishable one", async () => {
@@ -558,7 +565,8 @@ describe("publishing", () => {
     // publish that nothing could carry out.
     const user = openPublishing();
 
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await user.click(screen.getByRole("button", { name: /新建发布/u }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/发布状态/);
     expect(screen.queryByRole("button", { name: /发布到/ })).toBeNull();
@@ -591,8 +599,9 @@ describe("publishing", () => {
       },
     });
 
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
-    await screen.findByRole("heading", { name: "作品发布" });
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await user.click(screen.getByRole("button", { name: /新建发布/u }));
+    await screen.findByText("真实发布工作台");
 
     expect(screen.getByText("B站")).toBeVisible();
     expect(screen.getByText("抖音")).toBeVisible();
@@ -652,7 +661,8 @@ describe("finished video handed to the publishing page", () => {
   it("carries the chosen video into the publishing page", async () => {
     const user = openShell(chosen);
 
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await user.click(screen.getByRole("button", { name: /新建发布/u }));
 
     const pending = await screen.findByRole("group", { name: "待发布视频" });
     expect(within(pending).getByText("护肤知识讲解 · 12.4 MB")).toBeVisible();
@@ -663,22 +673,25 @@ describe("finished video handed to the publishing page", () => {
     // the operator goes looking for another one is how the wrong video gets
     // published.
     const user = openShell(chosen);
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await user.click(screen.getByRole("button", { name: /新建发布/u }));
     const pending = await screen.findByRole("group", { name: "待发布视频" });
 
     await user.click(within(pending).getByRole("button", { name: "换一个" }));
 
-    expect(screen.getByRole("region", { name: "视频制作工作区" })).toBeVisible();
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
-    await screen.findByRole("heading", { name: "作品发布" });
+    expect(screen.getByRole("heading", { name: "创作", level: 2 })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await user.click(screen.getByRole("button", { name: /新建发布/u }));
+    await screen.findByText("真实发布工作台");
     expect(screen.queryByRole("group", { name: "待发布视频" })).toBeNull();
   });
 
   it("offers nothing to publish until a video has been chosen", async () => {
     const user = openShell();
 
-    await user.click(screen.getByRole("menuitem", { name: "作品发布" }));
-    await screen.findByRole("heading", { name: "作品发布" });
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await user.click(screen.getByRole("button", { name: /新建发布/u }));
+    await screen.findByText("真实发布工作台");
 
     expect(screen.queryByRole("group", { name: "待发布视频" })).toBeNull();
     expect(screen.queryByRole("button", { name: /发布到/ })).toBeNull();

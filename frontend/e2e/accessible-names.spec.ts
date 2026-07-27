@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openAutomationRuns, openTaskCreate, openVideoStudio } from "./navigation";
 
 /**
  * T99: no control carries a widget's internal state word in its accessible name.
@@ -53,18 +54,18 @@ async function expectNoStateWordInNames(page: Page, where: string): Promise<void
 
 async function openLegalNotice(page: Page): Promise<void> {
   await page.goto("/harness.html?health=available");
-  await page.getByRole("menuitem", { name: "设置与诊断" }).click();
+  await page.getByRole("menuitem", { name: "设置" }).click();
   await page.getByRole("button", { name: "开源软件许可" }).click();
   await expect(page.getByRole("heading", { name: "开源软件许可" })).toBeVisible();
 }
 
 async function openWorkbenchWithATask(page: Page): Promise<void> {
   await page.goto("/harness.html?health=available&scenario=task-lifecycle");
-  await page.getByRole("menuitem", { name: "新建任务" }).click();
+  await openTaskCreate(page);
   await page.getByLabel("搜索关键词").fill("T99 可访问名");
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByText(/任务已创建：[0-9a-f-]{36}/)).toBeVisible();
-  await page.getByRole("menuitem", { name: "工作台" }).click();
+  await openAutomationRuns(page);
   await expect(page.getByRole("heading", { name: "当前任务" })).toBeVisible();
 }
 
@@ -104,7 +105,7 @@ test("工作台的诊断信息折叠，名字就是「诊断信息」", async ({
 
 test("视频制作的详细说明折叠，名字就是它的标签", async ({ page }) => {
   await page.goto("/harness.html?health=available");
-  await page.getByRole("menuitem", { name: "视频制作" }).click();
+  await openVideoStudio(page);
 
   for (const method of ["智能素材成片", "品牌动效成片"]) {
     await expect(
@@ -119,14 +120,14 @@ test("每个页面的可访问名里都没有控件状态词", async ({ page }) 
   await page.goto("/harness.html?health=available&scenario=publishing");
 
   for (const label of [
-    "工作台",
-    "新建任务",
-    "任务记录",
-    "视频制作",
-    "视频剪辑",
-    "作品发布",
-    "平台状态",
-    "设置与诊断",
+    "AI 助理",
+    "热点发现",
+    "创作",
+    "发布",
+    "消息与互动",
+    "自动化",
+    "账号与平台",
+    "设置",
   ]) {
     await page.getByRole("menuitem", { name: label }).click();
     await expectNoStateWordInNames(page, `页面 ${label}`);

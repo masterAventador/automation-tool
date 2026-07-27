@@ -1,4 +1,15 @@
-import { Badge, Button, Flex, Layout, Menu, Space, Tag, Typography } from "antd";
+import {
+  FireOutlined,
+  MessageOutlined,
+  PlaySquareOutlined,
+  RobotOutlined,
+  SendOutlined,
+  SettingOutlined,
+  StopOutlined,
+  ThunderboltOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import { Alert, Badge, Button, Layout, Menu, Space, Typography } from "antd";
 import { useState } from "react";
 
 import {
@@ -42,7 +53,6 @@ import { ModelServiceSettings } from "../features/settings/ModelServiceSettings"
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
 import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
-import { VideoStudio } from "../features/video-studio/VideoStudio";
 import {
   motionRunAttention,
   useMotionRun,
@@ -50,27 +60,48 @@ import {
 } from "../features/video-studio/motion-run-store";
 import { useMotionRunWatch } from "../features/video-studio/motion-run-watch";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
-import { PublishWorkspace, type SelectedVideo } from "../features/publishing/PublishWorkspace";
+import type { SelectedVideo } from "../features/publishing/PublishWorkspace";
 import {
   PublishWorkspaceGatewayError,
   type PublishWorkspaceGateway,
 } from "../features/publishing/publish-workspace-gateway";
 import { ThirdPartySoftwareNotice } from "../features/legal/third-party-software/ThirdPartySoftwareNotice";
-import { VideoEditingWorkbench } from "../features/video-editing/VideoEditingWorkbench";
 import {
   VideoEditingGatewayError,
   type VideoEditingGateway,
 } from "../features/video-editing/video-editing-gateway";
+import {
+  AccountPlatformOverview,
+  AiAssistantHome,
+  AutomationCenter,
+  CreationHub,
+  HotspotDiscovery,
+  InteractionCenter,
+  PublishingHub,
+} from "../features/operations/OperationsWorkspace";
 
 const navigationItems = [
-  { key: "workbench", label: "工作台" },
-  { key: "task-create", label: "新建任务" },
-  { key: "task-runs", label: "任务记录" },
-  { key: "video-studio", label: "视频制作" },
-  { key: "video-editing", label: "视频剪辑" },
-  { key: "publishing", label: "作品发布" },
-  { key: "platform", label: "平台状态" },
-  { key: "diagnostics", label: "设置与诊断" },
+  { key: "assistant", icon: <RobotOutlined aria-hidden="true" />, label: "AI 助理" },
+  { key: "hotspots", icon: <FireOutlined aria-hidden="true" />, label: "热点发现" },
+  { key: "creation", icon: <PlaySquareOutlined aria-hidden="true" />, label: "创作" },
+  { key: "publishing", icon: <SendOutlined aria-hidden="true" />, label: "发布" },
+  {
+    key: "interactions",
+    icon: <MessageOutlined aria-hidden="true" />,
+    label: "消息与互动",
+  },
+  {
+    key: "automation",
+    icon: <ThunderboltOutlined aria-hidden="true" />,
+    label: "自动化",
+  },
+  {
+    key: "accounts",
+    className: "sidebar-bottom-start",
+    icon: <UserOutlined aria-hidden="true" />,
+    label: "账号与平台",
+  },
+  { key: "settings", icon: <SettingOutlined aria-hidden="true" />, label: "设置" },
 ];
 
 /**
@@ -142,12 +173,12 @@ function navigationItemsWith(attention: MotionRunAttention) {
   if (attention === "none") return navigationItems;
   const mark = VIDEO_STUDIO_MARKS[attention];
   return navigationItems.map((item) =>
-    item.key === "video-studio"
+    item.key === "creation"
       ? {
           ...item,
           label: (
             <Badge {...mark.badge} offset={[6, 2]}>
-              <span title={mark.title}>{item.label}</span>
+              <span title={mark.title}>创作</span>
             </Badge>
           ),
         }
@@ -162,7 +193,7 @@ function navigationItemsWith(attention: MotionRunAttention) {
  * leads here, and an unselected sidebar would read as a broken page.
  */
 const LEGAL_PAGE = "legal";
-const LEGAL_PAGE_SECTION = "diagnostics";
+const LEGAL_PAGE_SECTION = "settings";
 const LEGAL_PAGE_TITLE = "开源软件许可";
 
 const shellTaskSource: TaskProjectionSource = {
@@ -472,17 +503,19 @@ export function WorkbenchShell({
   publishWorkspaceGateway = shellPublishWorkspaceGateway,
   selectedVideo: initialSelectedVideo,
 }: WorkbenchShellProps) {
-  const [activePage, setActivePage] = useState("workbench");
+  const [activePage, setActivePage] = useState("assistant");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [autoOpenPlatformLogin, setAutoOpenPlatformLogin] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | undefined>(
     initialSelectedVideo,
   );
+  const [emergencyState, setEmergencyState] = useState<
+    "idle" | "stopping" | "stopped" | "failed"
+  >("idle");
   const creatingTask = activePage === "task-create";
   const showingTaskRun = activePage === "task-runs";
-  const showingDiagnostics = activePage === "diagnostics";
-  const showingPlatform = activePage === "platform";
-  const showingVideoStudio = activePage === "video-studio";
+  const showingSettings = activePage === "settings";
+  const showingAccounts = activePage === "accounts";
   // Read from the store rather than from `VideoStudio`, which is unmounted
   // exactly when this mark matters most.
   const videoStudioAttention = motionRunAttention(useMotionRun());
@@ -492,11 +525,15 @@ export function WorkbenchShell({
    * existed the only thing that ever looked was the studio page itself. Costs
    * and cleanup are argued in `motion-run-watch.ts`; the short version is that
    * it runs only while a film this session started is still owed an outcome.
-   */
+  */
   useMotionRunWatch(materialVideoStudioGateway);
-  const showingVideoEditing = activePage === "video-editing";
-  const showingPublishing = activePage === "publishing";
   const showingLegal = activePage === LEGAL_PAGE;
+  const selectedNavigationKey =
+    creatingTask || showingTaskRun
+      ? "automation"
+      : showingLegal
+        ? LEGAL_PAGE_SECTION
+        : activePage;
 
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
@@ -505,7 +542,7 @@ export function WorkbenchShell({
 
   const openPlatformPage = (openLogin: boolean) => {
     setAutoOpenPlatformLogin(openLogin);
-    setActivePage("platform");
+    setActivePage("accounts");
   };
 
   /**
@@ -518,7 +555,7 @@ export function WorkbenchShell({
    */
   const chooseAnotherVideo = () => {
     setSelectedVideo(undefined);
-    setActivePage("video-studio");
+    setActivePage("creation");
   };
 
   /**
@@ -535,33 +572,45 @@ export function WorkbenchShell({
     setActivePage("publishing");
   };
 
+  const emergencyStop = async () => {
+    if (emergencyState === "stopping") return;
+    setEmergencyState("stopping");
+    try {
+      await platformAdapter.emergencyStopExecutor();
+      setEmergencyState("stopped");
+    } catch {
+      setEmergencyState("failed");
+    }
+  };
+
   return (
     <Layout className="desktop-shell">
-      <Layout.Sider className="desktop-sidebar" width={232} theme="light">
-        <Flex className="desktop-brand" align="center" gap={12}>
+      <Layout.Sider className="desktop-sidebar" width={184} theme="dark">
+        <div className="desktop-brand">
           <div className="brand-mark brand-mark--small" aria-hidden="true">
-            A
+            <RobotOutlined />
           </div>
-          <Space orientation="vertical" size={0}>
-            <Typography.Text strong>自动化运营工具</Typography.Text>
-            <Typography.Text className="brand-caption">自动替你操作网页</Typography.Text>
-          </Space>
-        </Flex>
+          <div>
+            <Typography.Text strong>运营助理</Typography.Text>
+            <Typography.Text className="brand-caption">AI 自动化工作台</Typography.Text>
+          </div>
+        </div>
         <nav aria-label="桌面主导航">
           <Menu
             mode="inline"
-            selectedKeys={[showingLegal ? LEGAL_PAGE_SECTION : activePage]}
+            theme="dark"
+            selectedKeys={[selectedNavigationKey]}
             items={navigationItemsWith(videoStudioAttention)}
             onClick={({ key }) => {
               if (
-                key === "workbench" ||
-                key === "task-create" ||
-                key === "task-runs" ||
-                key === "video-studio" ||
-                key === "video-editing" ||
+                key === "assistant" ||
+                key === "hotspots" ||
+                key === "creation" ||
                 key === "publishing" ||
-                key === "diagnostics" ||
-                key === "platform"
+                key === "interactions" ||
+                key === "automation" ||
+                key === "accounts" ||
+                key === "settings"
               ) {
                 setActivePage(key);
               }
@@ -569,151 +618,164 @@ export function WorkbenchShell({
           />
         </nav>
         <div className="sidebar-status">
-          <Badge status="processing" text="桌面端已就绪" />
+          <Badge status="success" text="AI 助理在线" />
+          <Typography.Text>一个长期主会话</Typography.Text>
         </div>
       </Layout.Sider>
 
       <Layout>
         <Layout.Header className="desktop-header">
-          <Typography.Text type="secondary">抖音运营</Typography.Text>
-          <Tag color="blue">本机桌面模式</Tag>
+          <div className="desktop-header__title">
+            <Typography.Title level={4}>
+              {activePage === "assistant"
+                ? "AI 运营助理"
+                : activePage === "hotspots"
+                  ? "热点发现"
+                  : activePage === "creation"
+                    ? "创作"
+                    : activePage === "publishing"
+                      ? "发布"
+                      : activePage === "interactions"
+                        ? "消息与互动"
+                        : activePage === "automation" || creatingTask || showingTaskRun
+                          ? "自动化"
+                          : showingAccounts
+                            ? "账号与平台"
+                            : showingLegal
+                              ? LEGAL_PAGE_TITLE
+                              : "设置"}
+            </Typography.Title>
+            <Badge status="success" text="运行正常" />
+          </div>
+          <Button
+            className="emergency-stop-button"
+            danger
+            icon={<StopOutlined aria-hidden="true" />}
+            loading={emergencyState === "stopping"}
+            onClick={() => void emergencyStop()}
+          >
+            紧急停止
+          </Button>
         </Layout.Header>
-        <Layout.Content className="desktop-content">
+        <Layout.Content
+          className={`desktop-content${activePage === "assistant" ? " desktop-content--assistant" : ""}`}
+        >
           <main>
-            <Flex justify="space-between" align="end" gap={24}>
-              <Space orientation="vertical" size={4}>
-                <Typography.Title level={2}>
-                  {creatingTask
-                    ? "新建运营任务"
-                    : showingPlatform
-                      ? "平台状态"
-                    : showingVideoStudio
-                      ? "视频制作"
-                    : showingVideoEditing
-                      ? "视频剪辑"
-                    : showingPublishing
-                      ? "作品发布"
-                    : showingDiagnostics
-                      ? "设置与诊断"
-                    : showingLegal
-                      ? LEGAL_PAGE_TITLE
-                    : showingTaskRun
-                      ? "任务记录"
-                      : "RPA 运营工作台"}
-                </Typography.Title>
-                <Typography.Text type="secondary">
-                  {creatingTask
-                    ? "配置一个可预览、可确认的抖音搜索曝光任务。"
-                    : showingPlatform
-                      ? "查看抖音登录健康，并在系统运营浏览器中完成人工处理。"
-                    : showingVideoStudio
-                      ? "从需求、脚本与分镜到预览、任务和成片，按真实制作状态逐步推进。"
-                    : showingVideoEditing
-                      ? "把制作或导入的素材整理成时间轴，独立于视频制作管理剪辑项目与任务。"
-                    : showingPublishing
-                      ? "把做好的视频发到 B站或抖音，发布前先确认账号与文案。"
-                    : showingDiagnostics
-                      ? "管理模型服务、受信运营浏览器、本地执行器、诊断与 App 更新。"
-                    : showingLegal
-                      ? "本产品分发的开源组件、它们的许可证、固定版本和源码获取地址。"
-                    : showingTaskRun
-                      ? "从权威快照与持久事件查看运行状态和控制结果。"
-                    : "RPA 就是自动替你操作网页：从一个真实平台、一个任务闭环开始，执行过程可见、可暂停、可接管。"}
-                </Typography.Text>
-              </Space>
-              <Tag variant="filled" color="green">
-                {creatingTask
-                  ? "任务模板已就绪"
-                  : showingPlatform
-                    ? "登录边界"
-                  : showingVideoStudio
-                    ? "视频工作区"
-                  : showingVideoEditing
-                    ? "剪辑工作区"
-                  : showingPublishing
-                    ? "发布边界"
-                  : showingDiagnostics
-                    ? "本地边界"
-                  : showingLegal
-                    ? "开源合规"
-                  : showingTaskRun
-                    ? "任务事实已连接"
-                    : "工作台已就绪"}
-              </Tag>
-            </Flex>
-
-            <AppUpdateCenter gateway={appUpdateGateway} showSettings={showingDiagnostics} />
-
-            {creatingTask ? (
-              <TaskCreate
-                gateway={taskCreationGateway}
-                onCreated={openTask}
+            {emergencyState === "stopped" ? (
+              <Alert
+                className="global-stop-alert"
+                type="warning"
+                showIcon
+                closable
+                title="本机自动执行已停止"
+                description="正在运行的浏览器和本机自动化已进入停止状态。重新启用前不会继续执行动作。"
+                onClose={() => setEmergencyState("idle")}
               />
-            ) : showingPlatform ? (
-              <div className="platform-session-content">
+            ) : emergencyState === "failed" ? (
+              <Alert
+                className="global-stop-alert"
+                type="error"
+                showIcon
+                title="无法确认紧急停止结果"
+                description="请立即检查本机执行器状态；界面不会把这次操作标成已成功。"
+              />
+            ) : null}
+
+            {activePage === "assistant" ? (
+              <AiAssistantHome onOpenHotspots={() => setActivePage("hotspots")} />
+            ) : activePage === "hotspots" ? (
+              <HotspotDiscovery onCreateFromHotspot={() => setActivePage("creation")} />
+            ) : activePage === "creation" ? (
+              <CreationHub
+                gateway={materialVideoStudioGateway}
+                editingGateway={videoEditingGateway}
+                onPublishArtifact={publishSelectedVideo}
+              />
+            ) : activePage === "publishing" ? (
+              <PublishingHub
+                gateway={publishWorkspaceGateway}
+                selectedVideo={selectedVideo}
+                onChangeSelection={chooseAnotherVideo}
+              />
+            ) : activePage === "interactions" ? (
+              <InteractionCenter />
+            ) : activePage === "automation" ? (
+              <AutomationCenter
+                onOpenRuns={() => setActivePage("task-runs")}
+                onCreateTask={() => setActivePage("task-create")}
+              />
+            ) : creatingTask ? (
+              <section className="ops-page legacy-task-page">
+                <Button type="link" onClick={() => setActivePage("automation")}>
+                  返回自动化
+                </Button>
+                <Typography.Title level={2}>新建运营任务</Typography.Title>
+                <TaskCreate gateway={taskCreationGateway} onCreated={openTask} />
+              </section>
+            ) : showingAccounts ? (
+              <AccountPlatformOverview>
                 <PlatformSessions
                   gateway={platformSessionGateway}
                   autoOpenLogin={autoOpenPlatformLogin}
                   onAutoOpenConsumed={() => setAutoOpenPlatformLogin(false)}
                 />
-              </div>
-            ) : showingVideoStudio ? (
-              <VideoStudio
-                gateway={materialVideoStudioGateway}
-                onPublishArtifact={publishSelectedVideo}
-              />
-            ) : showingVideoEditing ? (
-              <VideoEditingWorkbench gateway={videoEditingGateway} />
-            ) : showingPublishing ? (
-              // Carries the step below the title row, the same way
-              // `.platform-session-content` does. It belongs out here rather
-              // than on the component's own root because `PublishWorkspace`
-              // returns from three different places.
-              <div className="publish-workspace-content">
-                <PublishWorkspace
-                  gateway={publishWorkspaceGateway}
-                  selectedVideo={selectedVideo}
-                  onChangeSelection={chooseAnotherVideo}
-                />
-              </div>
+              </AccountPlatformOverview>
             ) : showingLegal ? (
-              <ThirdPartySoftwareNotice />
-            ) : showingDiagnostics ? (
-              <Space orientation="vertical" size="large" className="settings-stack">
-                <ModelServiceSettings gateway={modelServiceGateway} />
-                <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
-                <Diagnostics platform={platformAdapter} />
-                <div className="settings-legal-entry">
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => setActivePage(LEGAL_PAGE)}
-                  >
-                    {LEGAL_PAGE_TITLE}
-                  </Button>
+              <section className="ops-page settings-page">
+                <Button type="link" onClick={() => setActivePage("settings")}>
+                  返回设置
+                </Button>
+                <ThirdPartySoftwareNotice />
+              </section>
+            ) : showingSettings ? (
+              <section className="ops-page settings-page">
+                <div className="ops-page-intro">
+                  <Typography.Text className="ops-eyebrow">本机与服务</Typography.Text>
+                  <Typography.Title level={2}>设置</Typography.Title>
+                  <Typography.Paragraph>
+                    管理模型、视频剪辑服务、本机执行器、诊断和更新。真实凭据不会进入页面状态。
+                  </Typography.Paragraph>
                 </div>
-              </Space>
+                <Space orientation="vertical" size="large" className="settings-stack">
+                  <AppUpdateCenter gateway={appUpdateGateway} showSettings />
+                  <ModelServiceSettings gateway={modelServiceGateway} />
+                  <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
+                  <Diagnostics platform={platformAdapter} />
+                  <div className="settings-legal-entry">
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => setActivePage(LEGAL_PAGE)}
+                    >
+                      {LEGAL_PAGE_TITLE}
+                    </Button>
+                  </div>
+                </Space>
+              </section>
             ) : showingTaskRun && selectedTaskId !== null ? (
-              <TaskRunDetails
-                taskId={selectedTaskId}
-                taskSource={taskSource}
-                controlGateway={taskRunControlGateway}
-                discoveryGateway={taskDiscoveryGateway}
-                taskTargetPreviewSource={taskTargetPreviewSource}
-                taskTargetResultSource={taskTargetResultSource}
-                onBack={() => setActivePage("workbench")}
-                onOpenPlatformSession={() => openPlatformPage(false)}
-                onPlatformLoginRequired={() => openPlatformPage(true)}
-              />
+              <section className="ops-page legacy-task-page">
+                <TaskRunDetails
+                  taskId={selectedTaskId}
+                  taskSource={taskSource}
+                  controlGateway={taskRunControlGateway}
+                  discoveryGateway={taskDiscoveryGateway}
+                  taskTargetPreviewSource={taskTargetPreviewSource}
+                  taskTargetResultSource={taskTargetResultSource}
+                  onBack={() => setActivePage("automation")}
+                  onOpenPlatformSession={() => openPlatformPage(false)}
+                  onPlatformLoginRequired={() => openPlatformPage(true)}
+                />
+              </section>
             ) : showingTaskRun ? (
-              <div className="task-run-empty">
-                <Typography.Title level={4}>请选择一个任务</Typography.Title>
-                <Typography.Text type="secondary">
-                  从工作台当前任务或最近任务进入运行详情。
-                </Typography.Text>
-              </div>
+              <section className="ops-page legacy-task-page">
+                <Button type="link" onClick={() => setActivePage("automation")}>
+                  返回自动化
+                </Button>
+                <Typography.Title level={2}>运行记录</Typography.Title>
+                <Workbench taskSource={taskSource} gateway={gateway} onOpenTask={openTask} />
+              </section>
             ) : (
-              <Workbench taskSource={taskSource} gateway={gateway} onOpenTask={openTask} />
+              <AiAssistantHome onOpenHotspots={() => setActivePage("hotspots")} />
             )}
           </main>
         </Layout.Content>

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openVideoStudio as navigateToVideoStudio } from "./navigation";
 import { MINIMUM_WINDOW } from "./production-window";
 
 /**
@@ -37,7 +38,7 @@ const METHOD_BUTTONS = ["选择智能素材成片", "选择品牌动效成片"] 
 
 async function openVideoStudio(page: Page): Promise<void> {
   await page.goto(HARNESS);
-  await page.getByRole("menuitem", { name: "视频制作" }).click();
+  await navigateToVideoStudio(page);
   await expect(page.getByRole("tab", { name: "新建视频" })).toBeVisible();
 }
 
