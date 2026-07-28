@@ -55,7 +55,6 @@ def test_cloud_editing_database_module_is_gone(module_name: str) -> None:
         importlib.import_module(f"{_DATABASE_PACKAGE}.{module_name}")
 
 
-@pytest.mark.xfail(reason="Task 3 清理 schema.py 之前，两张云剪辑表仍在声明中", strict=True)
 def test_schema_declares_no_cloud_editing_tables() -> None:
     from automation_tool.control_plane.infrastructure.database import schema
 

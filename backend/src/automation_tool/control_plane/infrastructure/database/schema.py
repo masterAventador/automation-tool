@@ -7,20 +7,18 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
     MetaData,
-    Numeric,
     PrimaryKeyConstraint,
     String,
     Table,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import UUID
 
 from automation_tool.control_plane.application.task_target_previews import (
     TASK_TARGET_CONFIRMATION_INTENT_VERSION,
@@ -2339,150 +2337,15 @@ bilibili_upload_parts = Table(
     ),
 )
 
-
-aliyun_editing_intents = Table(
-    "aliyun_editing_intents",
-    metadata,
-    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
-    Column("request_hash", String(length=64), nullable=False),
-    Column("state", String(length=16), nullable=False),
-    Column("vendor_job_id", String(length=128), nullable=True),
-    Column("status", String(length=20), nullable=False),
-    Column("failure_code", String(length=32), nullable=True),
-    Column("output_artifact_ids", ARRAY(UUID(as_uuid=True)), nullable=False),
-    Column(
-        "created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
-    ),
-    Column(
-        "updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
-    ),
-    CheckConstraint(
-        "state in ('prepared', 'dispatched', 'uncertain')",
-        name="ck_aliyun_editing_intents_state",
-    ),
-    CheckConstraint(
-        "status in ('queued', 'running', 'paused', 'cancelling', 'succeeded', "
-        "'failed', 'cancelled', 'outcome_uncertain')",
-        name="ck_aliyun_editing_intents_status",
-    ),
-    CheckConstraint(
-        "request_hash ~ '^[0-9a-f]{64}$'",
-        name="ck_aliyun_editing_intents_request_hash",
-    ),
-    CheckConstraint(
-        "vendor_job_id is null or vendor_job_id ~ '^[A-Za-z0-9-]{8,128}$'",
-        name="ck_aliyun_editing_intents_vendor_job_id",
-    ),
-    CheckConstraint(
-        "state <> 'prepared' or (vendor_job_id is null and status = 'queued'"
-        " and failure_code is null and cardinality(output_artifact_ids) = 0)",
-        name="ck_aliyun_editing_intents_prepared_shape",
-    ),
-    CheckConstraint(
-        "state <> 'uncertain' or (vendor_job_id is null"
-        " and status = 'outcome_uncertain' and failure_code is null"
-        " and cardinality(output_artifact_ids) = 0)",
-        name="ck_aliyun_editing_intents_uncertain_shape",
-    ),
-    CheckConstraint(
-        "state <> 'dispatched' or vendor_job_id is not null",
-        name="ck_aliyun_editing_intents_dispatched_shape",
-    ),
-    CheckConstraint(
-        "status <> 'succeeded' or (cardinality(output_artifact_ids) > 0"
-        " and failure_code is null)",
-        name="ck_aliyun_editing_intents_succeeded_facts",
-    ),
-    CheckConstraint(
-        "status = 'succeeded' or status = 'failed'"
-        " or (cardinality(output_artifact_ids) = 0 and failure_code is null)",
-        name="ck_aliyun_editing_intents_non_terminal_facts",
-    ),
-    CheckConstraint(
-        "status <> 'failed' or (cardinality(output_artifact_ids) = 0"
-        " and failure_code is not null)",
-        name="ck_aliyun_editing_intents_failed_facts",
-    ),
-    PrimaryKeyConstraint("editing_job_id", name="pk_aliyun_editing_intents"),
-)
-
-Index(
-    "ux_aliyun_editing_intents_vendor_job_id",
-    aliyun_editing_intents.c.vendor_job_id,
-    unique=True,
-    postgresql_where=text("vendor_job_id is not null"),
-)
-
-editing_output_lineages = Table(
-    "editing_output_lineages",
-    metadata,
-    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
-    Column("project_id", UUID(as_uuid=True), nullable=False),
-    Column("timeline_id", UUID(as_uuid=True), nullable=False),
-    Column("timeline_revision", Integer, nullable=False),
-    Column("provider_id", String(length=64), nullable=False),
-    Column("provider_contract_verified_at", String(length=10), nullable=False),
-    Column("input_artifact_ids", ARRAY(UUID(as_uuid=True)), nullable=False),
-    Column("cost_source", String(length=16), nullable=False),
-    Column("cost_currency", String(length=3), nullable=False),
-    Column("cost_billed_minutes", Integer, nullable=False),
-    Column("cost_tier_id", String(length=64), nullable=False),
-    Column("cost_unit_price_cny", Numeric(12, 4), nullable=False),
-    Column("cost_total_cny", Numeric(14, 4), nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    Column(
-        "recorded_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
-    ),
-    CheckConstraint(
-        "timeline_revision >= 1", name="ck_editing_output_lineages_revision"
-    ),
-    CheckConstraint(
-        "provider_id ~ '^[a-z0-9_]{2,64}$'", name="ck_editing_output_lineages_provider"
-    ),
-    CheckConstraint(
-        "provider_contract_verified_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'",
-        name="ck_editing_output_lineages_verified_at",
-    ),
-    CheckConstraint(
-        "cardinality(input_artifact_ids) >= 1",
-        name="ck_editing_output_lineages_inputs",
-    ),
-    CheckConstraint(
-        "cost_source in ('estimated', 'billed')",
-        name="ck_editing_output_lineages_cost_source",
-    ),
-    CheckConstraint("cost_currency = 'CNY'", name="ck_editing_output_lineages_currency"),
-    CheckConstraint(
-        "cost_billed_minutes >= 1", name="ck_editing_output_lineages_minutes"
-    ),
-    CheckConstraint(
-        "cost_tier_id ~ '^[a-z0-9][a-z0-9_-]{0,63}$'",
-        name="ck_editing_output_lineages_tier",
-    ),
-    CheckConstraint(
-        "cost_unit_price_cny >= 0", name="ck_editing_output_lineages_unit_price"
-    ),
-    CheckConstraint(
-        "cost_total_cny = cost_unit_price_cny * cost_billed_minutes",
-        name="ck_editing_output_lineages_cost_total",
-    ),
-    PrimaryKeyConstraint("editing_job_id", name="pk_editing_output_lineages"),
-)
-
 editing_output_artifacts = Table(
     "editing_output_artifacts",
     metadata,
     Column("artifact_id", UUID(as_uuid=True), nullable=False),
-    Column(
-        "editing_job_id",
-        UUID(as_uuid=True),
-        ForeignKey(
-            "editing_output_lineages.editing_job_id",
-            name="fk_editing_output_artifacts_lineage",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    ),
+    # `editing_job_id` referenced `editing_output_lineages.editing_job_id` until
+    # LE-01's 20260728_0035 migration dropped that table; the foreign key was
+    # dropped alongside it (see that migration's `upgrade()`), so this column is
+    # now a plain UUID pending LE-05's rewritten lineage table.
+    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
     Column("position", Integer, nullable=False),
     Column("kind", String(length=16), nullable=False),
     Column("media_type", String(length=64), nullable=False),
@@ -2526,7 +2389,6 @@ __all__ = [
     "account_session_families",
     "account_session_tokens",
     "action_risk_authorizations",
-    "aliyun_editing_intents",
     "bilibili_publish_attempts",
     "bilibili_publish_reconciliations",
     "bilibili_upload_parts",
@@ -2534,7 +2396,6 @@ __all__ = [
     "device_sessions",
     "douyin_search_exposure_definitions",
     "editing_output_artifacts",
-    "editing_output_lineages",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
