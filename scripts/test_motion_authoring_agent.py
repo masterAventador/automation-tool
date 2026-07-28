@@ -1646,6 +1646,12 @@ class ExecutorEntryTests(unittest.TestCase):
             low, high = suggested_beat_seconds(duration)
             self.assertLessEqual(low, high, f"{duration} 秒的建议区间是倒的")
             self.assertGreaterEqual(low, 1, f"{duration} 秒建议了不足一秒的镜头")
+            # 建议的镜头长度不能超过整片——同一段 prompt 一边要求铺满 0..duration
+            # 秒、一边建议每段比 duration 还长，模型没有任何解。片长下限是 1 秒，
+            # 而建议下限是 2 秒，这两条撞在一起的就是 1 秒那一档。
+            self.assertLessEqual(
+                low, duration, f"{duration} 秒的片子被建议每段 {low} 秒，铺不出来"
+            )
             # 照建议的**最短**那头切，段数也不能超过上限——否则模型照做就被拒。
             self.assertLessEqual(
                 math.ceil(duration / low),

@@ -60,7 +60,7 @@ export interface OwnMotionJob {
    * The fixed template captures its whole film in one pass, so the sandbox's
    * single-render stall guard is its real ceiling. A one-sentence film is one
    * render per shot and pays the startup again for each — at 180 seconds the
-   * single-render formula understates the legitimate wait by 22 minutes, which
+   * single-render formula puts the bound at 36 minutes against a real 48, which
    * is long enough for the page to tell an operator that a healthy run has
    * already passed the point where it stops itself.
    */

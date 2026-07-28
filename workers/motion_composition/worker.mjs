@@ -141,6 +141,8 @@ function frozenAnimationsExpression(timeMilliseconds) {
   })()`;
 }
 const RESOURCE_MONITOR_INTERVAL_MS = 300;
+/** Rounding slack when comparing a declared window against a declared timeline. */
+const FRAME_TIME_TOLERANCE_SECONDS = 0.001;
 const SANDBOX_FAILURES = {
   cancelled: "render_cancelled",
   mismatch: "chromium_major_mismatch",
@@ -148,6 +150,7 @@ const SANDBOX_FAILURES = {
   protocol: "render_protocol_invalid",
   resource: "render_resource_exceeded",
   static: "render_static_frames",
+  window: "render_window_outside_timeline",
   timeout: "render_timeout",
   unusable: "render_browser_unusable",
 };
@@ -1180,6 +1183,24 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         finish({ status: "timeout" });
         return;
       }
+      // This shot's own stretch of the timeline, resolved once — it does not
+      // change per frame.
+      //
+      // A window the document cannot satisfy is refused rather than narrowed.
+      // Clamping looks harmless and is not: a window of [5s, 9s] against a six
+      // second document moves for a quarter of its frames and then holds, so
+      // `sawMovement` is set by the early ones, the frame count is right, and
+      // the render reports complete over a shot that is three quarters still.
+      // Every gate downstream stays green. That is the same "reasonable default
+      // downstream" this whole line keeps being bitten by — the Worker is the
+      // only layer that knows `seekableDuration`, so it is the only one that
+      // can say no.
+      const windowStart = spec.sourceStartMillis / 1000;
+      const windowEnd = spec.sourceEndMillis / 1000;
+      if (seekableDuration > 0 && windowEnd > seekableDuration + FRAME_TIME_TOLERANCE_SECONDS) {
+        finish({ status: "window" });
+        return;
+      }
       for (let index = 1; index <= spec.frameCount; index += 1) {
         try {
           await access(join(resolved.workspaceReal, spec.cancelMarker));
@@ -1189,11 +1210,6 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           // The cancellation marker the caller named is absent; continue.
         }
         if (seekableDuration > 0) {
-          // This shot's own stretch of the timeline, not the whole of it.
-          // Clamped to what the document actually declares, because a window
-          // past its end would hold the last frame and read as a freeze.
-          const windowStart = Math.min(spec.sourceStartMillis / 1000, seekableDuration);
-          const windowEnd = Math.min(spec.sourceEndMillis / 1000, seekableDuration);
           const time = windowStart + (windowEnd - windowStart) * (index - 1) / spec.frameCount;
           const seek = await pipe.send("Runtime.evaluate", {
             expression: `(() => {

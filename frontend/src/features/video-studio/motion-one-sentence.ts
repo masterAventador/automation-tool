@@ -74,6 +74,20 @@ export const MOTION_AUTHORING_MEASURED = {
 export interface MotionBriefWaitEstimate {
   /** Roughly how many shots a film this long is cut into. */
   readonly shots: number;
+  /** How long the model spends writing the storyboard before anything renders. */
+  readonly authoringSeconds: number;
+  /**
+   * The longest the rendering alone may take.
+   *
+   * Kept apart from the total because the two are read by different screens at
+   * different moments. The jobs page starts its clock when the render starts —
+   * `settleMotionRun` stamps the time in the submission's `.then()`, which is
+   * after authoring returned — so comparing that clock against a total that
+   * still carries three minutes of authoring would call a stalled render
+   * healthy for three minutes longer than it is. For a stall indicator that is
+   * the unsafe direction.
+   */
+  readonly renderCeilingSeconds: number;
   /** The longest the whole run may take: authoring, then every shot's render. */
   readonly ceilingSeconds: number;
 }
@@ -128,11 +142,21 @@ function shotCountCeiling(filmSeconds: number): number {
  */
 export function motionBriefWaitEstimate(filmSeconds: number): MotionBriefWaitEstimate {
   const shots = shotCountCeiling(filmSeconds);
-  const seconds =
-    MOTION_AUTHORING_MEASURED.longestSeconds +
+  const authoringSeconds = MOTION_AUTHORING_MEASURED.longestSeconds;
+  const renderSeconds =
     motionRenderCeilingSeconds(filmSeconds) +
     (shots - 1) * MOTION_DURATION_LIMITS.renderWallSecondsBase;
-  return { shots, ceilingSeconds: Math.ceil(seconds / 60) * 60 };
+  return {
+    shots,
+    authoringSeconds,
+    renderCeilingSeconds: wholeMinutes(renderSeconds),
+    ceilingSeconds: wholeMinutes(authoringSeconds + renderSeconds),
+  };
+}
+
+/** Rounded up, so a ceiling stays a ceiling. */
+function wholeMinutes(seconds: number): number {
+  return Math.ceil(seconds / 60) * 60;
 }
 
 /**

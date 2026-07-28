@@ -756,7 +756,7 @@ describe("video studio shell", () => {
    *
    * 路线 A 是一个镜头渲染一次，每次都重新起一遍浏览器（契约里记作 30 秒固定开销），
    * 所以耗时随镜头数涨而不只随帧数涨。一个只能拉、不说代价的控件，会让人顺手拉到头
-   * 然后等一个多小时，中途以为卡死了——这正是「AI 自测全绿、用户一用傻眼」那类问题的
+   * 然后等将近一小时，中途以为卡死了——这正是「AI 自测全绿、用户一用傻眼」那类问题的
    * 界面版本。
    */
   it("tells the operator what a longer film costs in waiting", async () => {
@@ -787,10 +787,13 @@ describe("video studio shell", () => {
    * 「渲染超过 X 会自动停下」在长片上不能再用单次渲染的公式算。
    *
    * 那个公式是「一次渲染的沙箱停摆阈值」，片长写死 12 秒时它报 174 秒、实际约
-   * 234 秒，差一分钟看不出来。片长放开之后差出 22 分钟：180 秒的片子它报
-   * 36 分 30 秒，而这一轮合法耗时可达 51 分——于是一部**健康**的片子跑到 40 分钟时，
-   * 界面会显示「已用 40 分 · 渲染超过 36 分 30 秒 会自动停下」，
+   * 234 秒，差一分钟看不出来。片长放开之后差出 12 分钟：180 秒的片子它报
+   * 36 分 30 秒，而这一轮渲染合法耗时可达 48 分——于是一部**健康**的片子跑到
+   * 40 分钟时，界面会显示「已用 40 分 · 渲染超过 36 分 30 秒 会自动停下」，
    * 已用时间超过了它自己声称的自动停止点。
+   *
+   * 用的是渲染那一段的上限而不是总时长：这块表是渲染开始才起的（`settleMotionRun`
+   * 在提交返回后才盖时间戳），把编排那三分钟算进参照就是往危险的方向多给时间。
    */
   it("times a one-sentence film by what a film of many shots may take", async () => {
     const user = userEvent.setup();
@@ -826,7 +829,7 @@ describe("video studio shell", () => {
     const longest = motionBriefWaitEstimate(MOTION_BRIEF_LIMITS.durationSecondsMaximum);
     expect(
       await screen.findByText(
-        new RegExp(`渲染超过 ${motionSpokenDuration(longest.ceilingSeconds)} 会自动停下`),
+        new RegExp(`渲染超过 ${motionSpokenDuration(longest.renderCeilingSeconds)} 会自动停下`),
       ),
     ).toBeVisible();
   });

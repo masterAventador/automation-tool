@@ -183,8 +183,21 @@ def assemble_film(
                     # The window the storyboard drew this beat into. The
                     # composition holds every beat on one timeline, so this is
                     # the only thing telling two template renders apart.
+                    #
+                    # Ended at the beat's *declared* length, not at the shot's.
+                    # They are numbers from two different timelines: the
+                    # declared one is where `_compose` drew this card, while the
+                    # shot is max(line, motion) and can be longer. Adding them
+                    # would run the window into the next beat's card — the last
+                    # quarter of shot one showing shot two's card, then a cut,
+                    # then that card again. The extra frames instead resample
+                    # this beat's own stretch, which is the rule a part segment
+                    # already gets.
                     source_start_millis=round(beat.start_seconds * 1000),
-                    source_end_millis=round((beat.start_seconds + planned.seconds) * 1000),
+                    source_end_millis=round(
+                        (beat.start_seconds + (beat.declared_seconds or planned.seconds))
+                        * 1000
+                    ),
                 )
             )
             continue

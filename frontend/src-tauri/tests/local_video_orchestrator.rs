@@ -356,7 +356,7 @@ fn sandbox_request(workspace: &Path) -> VideoWorkerRenderSandboxRequest {
             TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         )
         .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         vec!["assets/style.css".to_owned(), "assets/logo.png".to_owned()],
         6,
         20,
@@ -588,7 +588,7 @@ fn render_sandbox_rejects_invalid_requests() {
             TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         )
         .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             assets.into_iter().map(str::to_owned).collect(),
             frames,
             duration,
@@ -613,7 +613,7 @@ fn render_sandbox_rejects_invalid_requests() {
             TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         )
         .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         Vec::new(),
         6,
         20,
@@ -653,7 +653,7 @@ fn render_sandbox_scales_the_cpu_budget_with_the_wall_clock_budget() {
             TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         )
         .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             vec!["assets/style.css".to_owned()],
             6,
             duration,
@@ -876,7 +876,7 @@ fn real_worker_render_sandbox_isolates_malicious_html() {
             TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         )
         .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         vec!["assets/style.css".to_owned()],
         3,
         60,

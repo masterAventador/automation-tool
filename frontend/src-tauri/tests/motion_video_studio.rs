@@ -235,7 +235,7 @@ fn the_render_sandbox_budget_follows_the_frame_count_instead_of_a_fixed_number()
                 TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
             )
             .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             Vec::new(),
             frames,
             budget.wall_seconds(),
@@ -575,7 +575,7 @@ fn a_cancellation_marker_that_escapes_the_workspace_is_not_a_render_request() {
                     TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
                 )
                 .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0.0, 6.0).expect("a window inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
                 Vec::new(),
                 90,
                 20,

@@ -70,9 +70,10 @@ export function motionRenderCeilingSeconds(filmSeconds: number): number {
  * A number of seconds, written the way it is said out loud.
  *
  * Hours are spelled once the number reaches one, because the longest film this
- * App offers costs more than an hour of waiting and «62 分» is not how anyone
- * hears that. The whole point of showing the number is to make the most
- * expensive choice feel as expensive as it is.
+ * App already costs the better part of an hour, and a run that overruns is
+ * reported by the same function — «75 分» is not how anyone hears that. The
+ * whole point of showing the number is to make a long wait feel as long as it
+ * is, which stops working once the unit is too small for it.
  */
 export function motionSpokenDuration(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));

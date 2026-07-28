@@ -1849,7 +1849,14 @@ def suggested_beat_seconds(duration_seconds: int) -> tuple[int, int]:
     The top of the range is half again as long, so there is room to vary shot
     length rather than a single number to hit exactly.
     """
-    low = max(SUGGESTED_BEAT_SECONDS_MINIMUM, math.ceil(duration_seconds / MAX_STORYBOARD_BEATS))
+    # Never longer than the film. The floor and the shortest admissible brief
+    # cross at one second: telling the model to tile 0..1 seconds with 2 to 3
+    # second beats is a task with no solution, and it would spend the whole
+    # authoring pass before failing.
+    low = min(
+        duration_seconds,
+        max(SUGGESTED_BEAT_SECONDS_MINIMUM, math.ceil(duration_seconds / MAX_STORYBOARD_BEATS)),
+    )
     return low, low + max(1, low // 2)
 
 

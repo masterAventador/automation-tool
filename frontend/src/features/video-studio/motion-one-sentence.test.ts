@@ -122,7 +122,7 @@ describe("片长由操作者选择", () => {
  * 一次渲染**，每次渲染都要重新启动一遍浏览器、装载页面、等它稳定，契约里
  * `renderWallSecondsBase` 把这笔固定开销记作 30 秒。所以耗时不只随帧数涨，
  * 还随镜头数涨——180 秒的片子光启动就是几十次。一个只能选、不告诉代价的滑块，
- * 会让人顺手拉到头然后等一个多小时，中途以为卡死。
+ * 会让人顺手拉到头然后等将近一小时，中途以为卡死。
  */
 describe("片长对应的等待时间", () => {
   const limits = durationContract;
@@ -155,12 +155,39 @@ describe("片长对应的等待时间", () => {
    * 因为浮点往返多报了整整一分钟，五条全绿。单调性也挡不住——多报是往上跳的。
    */
   it("每一档都算出确定的数", () => {
-    // 12 秒：每镜 2 秒 → 6 镜。渲染 6×30 + 12×30×0.4 = 324 秒，
-    // 加编排上限 178 秒 = 502 秒，往上取整到整分钟 = 540 秒。
-    expect(motionBriefWaitEstimate(12)).toEqual({ shots: 6, ceilingSeconds: 540 });
+    // 12 秒：每镜 2 秒 → 6 镜。渲染 6×30 + 12×30×0.4 = 324 秒（取整 360），
+    // 加编排上限 178 秒 = 502 秒，取整到整分钟 = 540 秒。
+    expect(motionBriefWaitEstimate(12)).toEqual({
+      shots: 6,
+      authoringSeconds: 178,
+      renderCeilingSeconds: 360,
+      ceilingSeconds: 540,
+    });
     // 180 秒：撞上 24 镜的硬上限。渲染 24×30 + 180×30×0.4 = 2880 秒，
     // 加 178 = 3058，取整 = 3060 秒。
-    expect(motionBriefWaitEstimate(180)).toEqual({ shots: 24, ceilingSeconds: 3060 });
+    expect(motionBriefWaitEstimate(180)).toEqual({
+      shots: 24,
+      authoringSeconds: 178,
+      renderCeilingSeconds: 2880,
+      ceilingSeconds: 3060,
+    });
+  });
+
+  /**
+   * 「一共要等多久」和「渲染这一段该多久算不正常」是两个数。
+   *
+   * 编排跑完命令才返回，任务卡的计时是从**渲染开始**才起表的（`settleMotionRun`
+   * 在 `.then()` 里盖时间戳）。拿含编排的总时长去当停摆参照，就等于告诉用户
+   * 一个已经卡住的渲染「还正常」——多给三分钟，方向还是危险的那一边。
+   */
+  it("把编排那一段和渲染那一段分开报", () => {
+    const estimate = motionBriefWaitEstimate(180);
+    expect(estimate.authoringSeconds).toBe(178);
+    expect(estimate.ceilingSeconds - estimate.renderCeilingSeconds).toBeGreaterThanOrEqual(
+      estimate.authoringSeconds,
+    );
+    expect(estimate.renderCeilingSeconds).toBeLessThan(estimate.ceilingSeconds);
+    expect(estimate.renderCeilingSeconds % 60).toBe(0);
   });
 
   it("整分钟报出来，别给出没有的精度", () => {

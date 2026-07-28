@@ -157,9 +157,12 @@ function motionJobTiming(own: OwnMotionJob | undefined, now: number): string | n
   // A one-sentence film is many renders, so its bound is the one the length
   // control already showed before the run started — the same number, so the
   // page cannot contradict what the operator was told he was buying.
+  // The render's own bound, not the whole run's: this clock starts when the
+  // render does, and a ceiling that still carried the authoring pass would call
+  // a stalled render healthy for three minutes longer than it is.
   const ceiling =
     own.kind === "one_sentence"
-      ? motionBriefWaitEstimate(own.filmSeconds).ceilingSeconds
+      ? motionBriefWaitEstimate(own.filmSeconds).renderCeilingSeconds
       : motionRenderCeilingSeconds(own.filmSeconds);
   return `已用 ${motionSpokenDuration(elapsed)} · 渲染超过 ${motionSpokenDuration(
     ceiling,
@@ -571,7 +574,7 @@ function NewVideoPage({
                   *
                   * 路线 A 是一个镜头渲染一次，每次都要重新起浏览器（契约记作 30 秒），
                   * 所以等待随镜头数涨、涨得比片长快。只给控件不给这句话，
-                  * 就是请人顺手拉到 180 秒，然后对着不动的屏幕等一个多小时。
+                  * 就是请人顺手拉到 180 秒，然后对着不动的屏幕等将近一小时。
                   */}
                 <Typography.Text type="secondary">
                   {`本机是一个镜头渲染一次：${briefFilmSeconds} 秒大约 ${briefWait.shots} 个镜头，编排加渲染最长约 ${motionSpokenDuration(briefWait.ceilingSeconds)}。片子越长镜头越多，等待时间涨得比片长快。`}

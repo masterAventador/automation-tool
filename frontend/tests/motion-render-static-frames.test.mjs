@@ -191,8 +191,8 @@ async function renderPage(html, executable, major, assets = [], window = null) {
     frameCount: FRAME_COUNT,
     // Which stretch of the entry's own timeline this render covers. Default is
     // the whole of it, which is what a film captured in one pass asks for.
-    sourceStartSeconds: window?.start ?? 0,
-    sourceEndSeconds: window?.end ?? TEMPLATE_DURATION,
+    sourceStartMillis: Math.round((window?.start ?? 0) * 1000),
+    sourceEndMillis: Math.round((window?.end ?? TEMPLATE_DURATION) * 1000),
     maxCpuSeconds: 120,
     maxDurationSeconds: 60,
     // A real Chromium process group idles well above a gigabyte; the budget
@@ -230,13 +230,20 @@ async function renderPage(html, executable, major, assets = [], window = null) {
     // The frames themselves, hashed before the workspace goes away. Without
     // them a render can only be judged by its event, and the defect this file
     // exists to catch is precisely one that reports a perfect event.
-    const frames = [];
+    // A failed render leaves no frames directory, and that has to stay
+    // distinguishable from a successful render of zero frames: swallowing the
+    // error into an empty list is how `assert.notDeepEqual([], [])` would pass
+    // over two renders that never happened. `null` cannot be compared by
+    // accident.
+    let frames = null;
     try {
-      for (const name of (await readdir(join(workspace, "frames"))).sort()) {
+      const names = (await readdir(join(workspace, "frames"))).sort();
+      frames = [];
+      for (const name of names) {
         frames.push(createHash("sha256").update(await readFile(join(workspace, "frames", name))).digest("hex"));
       }
     } catch {
-      // A failed render leaves no frames directory; the event says so.
+      frames = null;
     }
     return { ...event, frameDigests: frames };
   } finally {
@@ -336,6 +343,31 @@ test("the local composition template renders a film that actually moves", async 
 });
 
 /**
+ * 窗口越过文档时间轴时拒绝，而不是悄悄收窄。
+ *
+ * 完全越界还好办——所有帧落在同一点，静帧门禁会响。**部分越界才是阴的**：
+ * [5s, 9s] 对一份 6 秒的文档，前四分之一的帧在动、后四分之三全停在 6 秒处；
+ * `sawMovement` 被前面那几帧置上，帧数对，渲染报 complete，
+ * 而这个镜头四分之三是静止画面，下游每一道门禁都是绿的。
+ *
+ * 收窄是「下游给个合理默认值」——这条线这周被这个模式咬了六次。
+ * Worker 是唯一知道 `seekableDuration` 的一层，所以只能它说不。
+ */
+test("a window the document cannot satisfy is refused, not narrowed", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const major = await chromiumMajor(executable);
+  // 文档声明 3 秒，窗口要到 5 秒。
+  const event = await renderPage(MOVING_PAGE, executable, major, [], { start: 2, end: 5 });
+
+  assert.equal(event.event, "worker.render.failed", JSON.stringify(event));
+  assert.equal(event.reasonCode, "render_window_outside_timeline", JSON.stringify(event));
+});
+
+/**
  * 两个镜头共用一份文档时，各自只渲染自己那一截。
  *
  * 这是 2026-07-28 那条留档成片的成因，也是这个文件唯一抓不到的一类失败：
@@ -358,8 +390,8 @@ test("two shots of one document render different stretches of it", async (t) => 
 
   assert.equal(first.event, "worker.render.sandboxed", JSON.stringify(first));
   assert.equal(second.event, "worker.render.sandboxed", JSON.stringify(second));
-  assert.equal(first.frameDigests.length, FRAME_COUNT);
-  assert.equal(second.frameDigests.length, FRAME_COUNT);
+  assert.equal(first.frameDigests?.length, FRAME_COUNT, "第一段必须真的截出帧来");
+  assert.equal(second.frameDigests?.length, FRAME_COUNT, "第二段必须真的截出帧来");
   assert.notDeepEqual(
     first.frameDigests,
     second.frameDigests,

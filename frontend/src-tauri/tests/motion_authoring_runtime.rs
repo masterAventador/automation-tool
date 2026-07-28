@@ -500,16 +500,17 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": [part_asset],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 144,
-            "sourceStartSeconds": 4.8,
+            "sourceStartMillis": 4800,
             "sourceEndMillis": 4800,
         }]}),
-        // 起点是负的
+        // 起点在结束之后：这一条要真的走到那句判断，所以字段名必须是对的——
+        // 名字写错会被 deny_unknown_fields 提前拒掉，那条判断删了测试也照样绿。
         serde_json::json!({"segments": [{
             "entryHtml": part_entry,
             "allowedAssets": [part_asset],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 144,
-            "sourceStartSeconds": -1.0,
+            "sourceStartMillis": 5000,
             "sourceEndMillis": 4800,
         }]}),
         // 小数：整份 spec 全是整数，签名绑定的规范化 JSON 容不下浮点

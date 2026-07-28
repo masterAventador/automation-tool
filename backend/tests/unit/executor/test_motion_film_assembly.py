@@ -174,6 +174,39 @@ def test_each_template_shot_samples_its_own_stretch_of_the_composition(tmp_path)
     assert first.entry_html == second.entry_html
 
 
+def test_a_template_window_stays_inside_the_beat_even_when_the_line_runs_long(
+    tmp_path,
+) -> None:
+    """镜头变长不等于这一镜在 composition 上占的地方变大。
+
+    `start_seconds` 与 `declared_seconds` 说的是 composition 自己那条时间轴——
+    `_compose` 就是照它把每张卡画上去的。而镜头长度是 max(旁白, 动效)，是另一条
+    时间轴上的数。两者相加就会越界：第一镜声明 6 秒、旁白 8 秒，窗口若取
+    [0, 8000)，而第二镜的卡在 6 秒处就已经出现——于是第一镜的最后四分之一
+    先把第二镜的卡放一遍，切过去再放一遍。
+
+    帧数、时长、编码、静帧门禁全都不会响，和本项修的那个缺陷同一个signature。
+    今天旁白还没接上（`voice_seconds` 恒为 None），所以这条现在守的是将来。
+    """
+    film = assemble(
+        [
+            BeatPlan(beat_id="b1", part=None, copy={}, voice_seconds=8.0,
+                     declared_seconds=6.0, start_seconds=0.0),
+            BeatPlan(beat_id="b2", part=None, copy={}, voice_seconds=None,
+                     declared_seconds=6.0, start_seconds=6.0),
+        ],
+        tmp_path,
+    )
+
+    first, second = film.segments
+    # 镜头真的变长了：8 秒 × 30fps。
+    assert first.frames == 240
+    # 但它在 composition 上仍然只占自己声明的那 6 秒，多出来的帧是把这 6 秒
+    # 重新采样铺满——零件段本来就是这个规则。
+    assert (first.source_start_millis, first.source_end_millis) == (0, 6000)
+    assert (second.source_start_millis, second.source_end_millis) == (6000, 12000)
+
+
 def test_a_part_segment_samples_its_own_document_from_the_start(tmp_path) -> None:
     """A part is its own composition, so its window is its own timeline."""
     film = assemble(
