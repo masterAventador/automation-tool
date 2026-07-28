@@ -224,11 +224,11 @@ class TimelineTrack:
         model ends up accepting states nobody can render.
         """
         if self.kind is TimelineTrackKind.CAPTION:
-            if (
-                clip.source_material_id is not None
-                or clip.gain_db is not None
-                or clip.transition_in is not None
-            ):
+            # No separate `gain_db is not None` check: `_validate_gain` requires
+            # a source window for a level, and `_validate_source_window`
+            # requires a material for a window — so a clip carrying a level
+            # already has a material, which the first disjunct below catches.
+            if clip.source_material_id is not None or clip.transition_in is not None:
                 _reject()
             return
         if clip.text is not None:
