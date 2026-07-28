@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -39,6 +40,35 @@ def test_timeline_id_rejects_a_foreign_identifier_type() -> None:
 
 def test_invalid_timeline_model_is_a_value_error() -> None:
     assert issubclass(InvalidTimelineModel, ValueError)
+
+
+def test_public_timeline_models_have_exact_provider_neutral_fields() -> None:
+    """Same guard `video_creation.py` carried for its own models (T5 review finding):
+    an exact field tuple catches a silently added/renamed field, and the banned
+    fragment set catches a provider concept sneaking in as an *optional* field —
+    which a required-field-only check would miss, since every field here has no
+    default and a required addition already breaks every call site.
+    """
+    expected = {
+        TimelineTransition: ("kind", "duration_ms"),
+        TimelineClip: (
+            "clip_id",
+            "start_ms",
+            "duration_ms",
+            "source_material_id",
+            "source_in_ms",
+            "source_out_ms",
+            "text",
+            "gain_db",
+            "transition_in",
+        ),
+        TimelineTrack: ("track_id", "kind", "clips"),
+        Timeline: ("timeline_id", "revision", "duration_ms", "tracks", "created_at"),
+    }
+    banned_fragments = {"provider", "model", "vendor", "api_key", "base_url", "voice_id"}
+    for model, field_names in expected.items():
+        assert tuple(field.name for field in fields(model)) == field_names
+        assert not banned_fragments.intersection(field_names)
 
 
 def test_track_kinds_split_one_audio_lane_into_three() -> None:

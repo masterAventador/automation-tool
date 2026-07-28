@@ -42,7 +42,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 | --- | --- | --- | --- | --- |
 | LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | ✅ 已完成 |
 | LE-03 | Timeline 重写（含 Material 尺寸形状决策） | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例；**顺带决定 `Material.width`/`height` 对音频素材的形状**——当前音频被强制要求填 [1,8192] 的宽高，属强制荒谬而非可选荒谬，改成 `int | None` 按 kind 分叉是形状变更，LE-02 终审建议单独决策而非顺手折进去 | LE-02 | ✅ 已完成 |
-| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段） | LE-03 | ⬜ 未开始 |
+| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会 | LE-03 | ⬜ 未开始 |
 
 ### 3.3 Control Plane 装配（2 项）
 
@@ -75,7 +75,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片 | LE-06 | ⬜ 未开始 |
+| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同时清理 `video-editing-dto.ts`/`VideoEditingWorkbench.tsx` 与后端 `timeline.py` 脱节的三处 Timeline 词汇**（LE-03 复审实测发现，T1 建 `timeline.py` 起就存在）：`transitionKindSchema` 仍含 `"cut"`（后端已确定硬切=`transition_in=None`，无 `CUT` 成员）、`timelineTrackKindSchema` 仍是 `visual/audio/caption` 单一音频轨（未拆成 visual/narration/ambient/music/caption 五轨）、`MAX_TRACKS = 32`（应为 `len(TimelineTrackKind)` = 5） | LE-06 | ⬜ 未开始 |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；用户可见文案全中文且无未解释术语 | LE-17 | ⬜ 未开始 |
 | LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内更新 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目使其与实际界面一致，并让 `check_user_facing_branding.py` 转绿**（见 §7 已知问题） | LE-16,LE-18 | ⬜ 未开始 |
 | LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化 | LE-16,LE-19 | ⬜ 未开始 |
