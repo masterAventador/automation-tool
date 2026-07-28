@@ -14,6 +14,7 @@
 - **中文 commit message**，conventional 前缀保留英文，冒号后用中文，无任何 AI 署名
 - 禁止 `git add -A`；逐个文件显式 `git add`
 - 后端测试：`cd backend && .venv/bin/python -m pytest <path> -v`
+- **每个 Task 提交前必须跑 `ruff check`**（CI 在 `.github/workflows/quality.yml:57` 跑它）。LE-01 全程的门禁集里漏了后端 ruff——只跑了前端 lint——所以行长、盲断言这类问题一路不会暴露。`line-length = 100`，`B017` 禁止 `pytest.raises(Exception)`，断言具体异常类型
 - **TDD 强制**：每个 Task 先写测试、运行看到失败、再写实现。禁止先写实现后补测试
 - 长命令在前台跑完再继续，不得放后台后结束回合
 - 领域层不得 import 任何 infrastructure、不得做文件或网络 I/O
