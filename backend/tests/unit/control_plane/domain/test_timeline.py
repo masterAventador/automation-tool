@@ -174,6 +174,20 @@ def test_clip_structural_bounds_fail_closed(field: str, value: object) -> None:
         _media_clip(**{field: value})
 
 
+def test_a_transition_cannot_be_as_long_as_or_longer_than_its_own_clip() -> None:
+    """A transition covering the whole clip means the clip never plays on its own."""
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(
+            duration_ms=3_000,
+            transition_in=TimelineTransition(TransitionKind.FADE, 3_000),
+        )
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(
+            duration_ms=3_000,
+            transition_in=TimelineTransition(TransitionKind.FADE, 10_000),
+        )
+
+
 def test_caption_text_is_bounded_and_free_of_control_characters() -> None:
     assert _caption_clip(text="第一行\n第二行").text == "第一行\n第二行"
     with pytest.raises(InvalidTimelineModel):

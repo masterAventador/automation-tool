@@ -139,6 +139,7 @@ class TimelineClip:
             _reject()
         self._validate_source_window()
         self._validate_gain()
+        self._validate_transition()
 
     def _validate_source_window(self) -> None:
         """Where in the source this slice comes from — at both ends or neither.
@@ -173,6 +174,18 @@ class TimelineClip:
         if self.source_in_ms is None:
             _reject()
         if type(self.gain_db) is not float or not MIN_GAIN_DB <= self.gain_db <= MAX_GAIN_DB:
+            _reject()
+
+    def _validate_transition(self) -> None:
+        """A transition may not cover the whole clip — it would never play on its own.
+
+        This only guards the half the clip itself has enough information to
+        judge. Not swallowing the *previous* clip is the track's problem
+        (`TimelineTrack`, T3), since that needs a neighbour to compare against.
+        """
+        if self.transition_in is None:
+            return
+        if self.transition_in.duration_ms >= self.duration_ms:
             _reject()
 
     @property
