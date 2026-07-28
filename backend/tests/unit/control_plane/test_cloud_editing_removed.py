@@ -24,7 +24,10 @@ _REMOVED_DOMAIN_MODULES = (
     "fake_second_editing_provider",
 )
 
-_REMOVED_DATABASE_MODULES = ("aliyun_editing_intent_repository",)
+_REMOVED_DATABASE_MODULES = (
+    "aliyun_editing_intent_repository",
+    "editing_output_ledger_repository",
+)
 
 _DOMAIN_PACKAGE = "automation_tool.control_plane.domain"
 _DATABASE_PACKAGE = "automation_tool.control_plane.infrastructure.database"
