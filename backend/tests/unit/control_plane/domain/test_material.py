@@ -68,6 +68,30 @@ def _video(**overrides: object) -> Material:
     return Material(**defaults)  # type: ignore[arg-type]
 
 
+def _audio(**overrides: object) -> Material:
+    """A valid audio material, with named fields overridable per test."""
+    defaults: dict[str, object] = {
+        "material_id": MaterialId.new(),
+        "kind": MaterialKind.AUDIO,
+        "duration_ms": 30_000,
+        "width": None,
+        "height": None,
+        "content_digest": "b" * 64,
+        "has_audio": True,
+        "audio_loudness_lufs": -18.0,
+        "has_speech": False,
+        "speech_segments_ms": (),
+        "speech_transcript": None,
+        "shot_boundaries_ms": (),
+        "ai_description": None,
+        "ai_tags": (),
+        "description_source": DescriptionSource.AI,
+        "described_at": None,
+    }
+    defaults.update(overrides)
+    return Material(**defaults)  # type: ignore[arg-type]
+
+
 def test_a_valid_video_material_is_accepted() -> None:
     material = _video()
     assert material.kind is MaterialKind.VIDEO
@@ -101,6 +125,36 @@ def test_dimensions_outside_the_supported_range_are_rejected(dimension: int) -> 
         _video(width=dimension)
     with pytest.raises(InvalidMaterialModel):
         _video(height=dimension)
+
+
+def test_audio_material_carries_no_frame_size() -> None:
+    assert _audio().width is None
+    assert _audio().height is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("width", 1920), ("height", 1080), ("width", 0), ("height", -1)],
+)
+def test_audio_material_rejects_any_frame_size(field: str, value: object) -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _audio(**{field: value})
+
+
+@pytest.mark.parametrize("kind", [MaterialKind.VIDEO, MaterialKind.IMAGE])
+@pytest.mark.parametrize("field", ["width", "height"])
+def test_visual_material_requires_a_frame_size(kind: MaterialKind, field: str) -> None:
+    overrides: dict[str, object] = {"kind": kind, field: None}
+    if kind is MaterialKind.IMAGE:
+        overrides["duration_ms"] = None
+    with pytest.raises(InvalidMaterialModel):
+        _video(**overrides)
+
+
+@pytest.mark.parametrize("value", [0, MAX_MATERIAL_DIMENSION + 1, 1080.0, True])
+def test_visual_material_rejects_out_of_range_frame_size(value: object) -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(width=value)
 
 
 @pytest.mark.parametrize(
@@ -222,20 +276,22 @@ def test_image_carries_no_shot_boundaries() -> None:
 
 
 def test_audio_material_with_audio_is_accepted() -> None:
-    material = _video(kind=MaterialKind.AUDIO, has_audio=True)
+    material = _video(kind=MaterialKind.AUDIO, width=None, height=None, has_audio=True)
     assert material.kind is MaterialKind.AUDIO
     assert material.has_audio is True
 
 
 def test_audio_without_audio_is_rejected() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video(kind=MaterialKind.AUDIO, has_audio=False)
+        _video(kind=MaterialKind.AUDIO, width=None, height=None, has_audio=False)
 
 
 def test_audio_carries_no_shot_boundaries() -> None:
     with pytest.raises(InvalidMaterialModel):
         _video(
             kind=MaterialKind.AUDIO,
+            width=None,
+            height=None,
             has_audio=True,
             shot_boundaries_ms=(0, 4_000),
         )

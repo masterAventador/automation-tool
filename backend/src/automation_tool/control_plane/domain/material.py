@@ -78,8 +78,8 @@ class Material:
     material_id: MaterialId
     kind: MaterialKind
     duration_ms: int | None
-    width: int
-    height: int
+    width: int | None
+    height: int | None
     content_digest: str
     has_audio: bool
     audio_loudness_lufs: float | None
@@ -96,18 +96,25 @@ class Material:
         if (
             not isinstance(self.material_id, MaterialId)
             or not isinstance(self.kind, MaterialKind)
-            or type(self.width) is not int
-            or not 1 <= self.width <= MAX_MATERIAL_DIMENSION
-            or type(self.height) is not int
-            or not 1 <= self.height <= MAX_MATERIAL_DIMENSION
             or not isinstance(self.content_digest, str)
             or _SHA256_PATTERN.fullmatch(self.content_digest) is None
         ):
             _reject()
+        self._validate_frame_size()
         self._validate_duration()
         self._validate_audio()
         self._validate_shot_boundaries()
         self._validate_description()
+
+    def _validate_frame_size(self) -> None:
+        """Only material with a picture has a frame size; audio has none to state."""
+        if self.kind is MaterialKind.AUDIO:
+            if self.width is not None or self.height is not None:
+                _reject()
+            return
+        for value in (self.width, self.height):
+            if type(value) is not int or not 1 <= value <= MAX_MATERIAL_DIMENSION:
+                _reject()
 
     def _validate_duration(self) -> None:
         if self.kind is MaterialKind.IMAGE:
