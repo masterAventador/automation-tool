@@ -164,3 +164,30 @@ def test_speech_segment_must_not_exceed_the_material_duration() -> None:
             has_speech=True,
             speech_segments_ms=((0, 6_000),),
         )
+
+
+def test_image_with_audio_is_rejected() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(kind=MaterialKind.IMAGE, duration_ms=None, has_audio=True)
+
+
+def test_image_without_audio_is_accepted() -> None:
+    material = _video(kind=MaterialKind.IMAGE, duration_ms=None, has_audio=False)
+    assert material.has_audio is False
+
+
+def test_image_cannot_smuggle_an_unbounded_speech_segment_via_missing_duration() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            kind=MaterialKind.IMAGE,
+            duration_ms=None,
+            has_audio=True,
+            has_speech=True,
+            speech_segments_ms=((0, 999_999_999),),
+            speech_transcript="hello",
+        )
+
+
+def test_material_with_audio_accepts_a_valid_loudness_value() -> None:
+    material = _video(has_audio=True, audio_loudness_lufs=-23.0)
+    assert material.audio_loudness_lufs == -23.0
