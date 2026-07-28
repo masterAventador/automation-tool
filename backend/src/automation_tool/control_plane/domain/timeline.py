@@ -124,6 +124,7 @@ class TimelineClip:
             or self.start_ms < 0
             or type(self.duration_ms) is not int
             or not 1 <= self.duration_ms <= MAX_TIMELINE_DURATION_MS
+            or self.start_ms + self.duration_ms > MAX_TIMELINE_DURATION_MS
             or (
                 self.source_material_id is not None
                 and not isinstance(self.source_material_id, MaterialId)

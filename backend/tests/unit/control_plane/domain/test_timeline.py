@@ -181,6 +181,19 @@ def test_gain_requires_something_audible_to_adjust() -> None:
         _media_clip(source_in_ms=None, source_out_ms=None, gain_db=-3.0)
 
 
+def test_a_clip_cannot_end_past_the_timeline_upper_bound() -> None:
+    """start_ms has no upper bound of its own — only end_ms staying on the axis does."""
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(start_ms=MAX_TIMELINE_DURATION_MS)
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(start_ms=10**18)
+
+
+def test_a_clip_may_end_exactly_at_the_timeline_upper_bound() -> None:
+    clip = _media_clip(start_ms=MAX_TIMELINE_DURATION_MS - 3_000)
+    assert clip.end_ms == MAX_TIMELINE_DURATION_MS
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
