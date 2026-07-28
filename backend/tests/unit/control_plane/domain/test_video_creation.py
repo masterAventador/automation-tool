@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from automation_tool.control_plane.domain import ArtifactId
+from automation_tool.control_plane.domain import ArtifactId, TimelineId
 from automation_tool.control_plane.domain.video_creation import (
     Artifact,
     ArtifactRole,
@@ -17,19 +17,31 @@ from automation_tool.control_plane.domain.video_creation import (
     Storyboard,
     StoryboardId,
     StoryboardScene,
-    Timeline,
-    TimelineClip,
-    TimelineId,
-    TimelineTrack,
-    TimelineTrackKind,
-    TimelineTransition,
-    TransitionKind,
     VideoAspectRatio,
     VideoCreationMethod,
 )
 
 NOW = datetime(2026, 7, 23, 0, 0, tzinfo=UTC)
 SHA256 = "a" * 64
+
+
+def test_the_creation_line_no_longer_defines_its_own_timeline() -> None:
+    """One Timeline, in one module. Two would drift apart."""
+    import automation_tool.control_plane.domain.video_creation as creation
+
+    leftovers = [
+        name
+        for name in (
+            "Timeline",
+            "TimelineClip",
+            "TimelineTrack",
+            "TimelineTrackKind",
+            "TimelineTransition",
+            "TransitionKind",
+        )
+        if name in vars(creation)
+    ]
+    assert leftovers == []
 
 
 def _artifact(role: ArtifactRole = ArtifactRole.SOURCE_IMAGE) -> Artifact:
@@ -81,54 +93,10 @@ def _storyboard(brief: ContentBrief) -> Storyboard:
     )
 
 
-def _timeline(storyboard: Storyboard, source: Artifact) -> Timeline:
-    return Timeline(
-        timeline_id=TimelineId.new(),
-        storyboard_id=storyboard.storyboard_id,
-        revision=1,
-        duration_ms=30_000,
-        tracks=(
-            TimelineTrack(
-                track_id="visual-main",
-                kind=TimelineTrackKind.VISUAL,
-                clips=(
-                    TimelineClip(
-                        clip_id="visual-1",
-                        start_ms=0,
-                        duration_ms=30_000,
-                        source_artifact_id=source.artifact_id,
-                        text=None,
-                        transition_in=TimelineTransition(
-                            kind=TransitionKind.FADE,
-                            duration_ms=300,
-                        ),
-                    ),
-                ),
-            ),
-            TimelineTrack(
-                track_id="caption-main",
-                kind=TimelineTrackKind.CAPTION,
-                clips=(
-                    TimelineClip(
-                        clip_id="caption-1",
-                        start_ms=0,
-                        duration_ms=12_000,
-                        source_artifact_id=None,
-                        text="核心卖点一",
-                        transition_in=None,
-                    ),
-                ),
-            ),
-        ),
-        created_at=NOW,
-    )
-
-
 def test_video_domain_happy_path_reuses_artifact_id_and_has_no_provider_payload() -> None:
     source = _artifact()
     brief = _brief(source)
     storyboard = _storyboard(brief)
-    timeline = _timeline(storyboard, source)
     output = Artifact(
         artifact_id=ArtifactId.new(),
         role=ArtifactRole.OUTPUT_VIDEO,
@@ -142,7 +110,7 @@ def test_video_domain_happy_path_reuses_artifact_id_and_has_no_provider_payload(
         render_job_id=RenderJobId.new(),
         brief_id=brief.brief_id,
         storyboard_id=storyboard.storyboard_id,
-        timeline_id=timeline.timeline_id,
+        timeline_id=TimelineId.new(),
         method=VideoCreationMethod.MATERIAL_MONTAGE_V1,
         status=RenderJobStatus.SUCCEEDED,
         revision=3,
@@ -153,7 +121,6 @@ def test_video_domain_happy_path_reuses_artifact_id_and_has_no_provider_payload(
         updated_at=NOW,
     )
 
-    assert sum(scene.duration_ms for scene in storyboard.scenes) == timeline.duration_ms
     assert job.input_artifact_ids == brief.source_artifact_ids
     assert tuple(field.name for field in fields(RenderJob)) == (
         "render_job_id",
@@ -193,24 +160,6 @@ def test_public_models_have_exact_provider_neutral_fields() -> None:
             "on_screen_text",
         ),
         Storyboard: ("storyboard_id", "brief_id", "revision", "scenes", "created_at"),
-        TimelineTransition: ("kind", "duration_ms"),
-        TimelineClip: (
-            "clip_id",
-            "start_ms",
-            "duration_ms",
-            "source_artifact_id",
-            "text",
-            "transition_in",
-        ),
-        TimelineTrack: ("track_id", "kind", "clips"),
-        Timeline: (
-            "timeline_id",
-            "storyboard_id",
-            "revision",
-            "duration_ms",
-            "tracks",
-            "created_at",
-        ),
         Artifact: (
             "artifact_id",
             "role",
@@ -304,29 +253,13 @@ def test_text_boundaries_allow_layout_but_reject_controls_and_wrong_id_type() ->
         )
 
 
-def test_scene_transition_clip_and_track_structural_bounds_fail_closed() -> None:
-    source = _artifact()
+def test_scene_structural_bounds_fail_closed() -> None:
     with pytest.raises(InvalidVideoDomainModel):
         StoryboardScene(0, 1_000, "镜头", None, None)
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineTransition(TransitionKind.FADE, 0)
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineClip("Bad_ID", 0, 1_000, source.artifact_id, None, None)
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineClip("empty-clip", 0, 1_000, None, None, None)
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineTrack("Bad_ID", TimelineTrackKind.VISUAL, ())
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineTrack(
-            "visual-main",
-            TimelineTrackKind.VISUAL,
-            (TimelineClip("visual-1", 0, 1_000, source.artifact_id, "错误文字", None),),
-        )
 
 
-def test_storyboard_rejects_non_contiguous_scenes_and_timeline_rejects_overlap() -> None:
-    source = _artifact()
-    brief = _brief(source)
+def test_storyboard_rejects_non_contiguous_scenes() -> None:
+    brief = _brief(_artifact())
     first = StoryboardScene(
         sequence=1,
         duration_ms=1_000,
@@ -342,44 +275,6 @@ def test_storyboard_rejects_non_contiguous_scenes_and_timeline_rejects_overlap()
             scenes=(first, StoryboardScene(3, 1_000, "第三个镜头", None, None)),
             created_at=NOW,
         )
-
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineTrack(
-            track_id="visual-main",
-            kind=TimelineTrackKind.VISUAL,
-            clips=(
-                TimelineClip("clip-1", 0, 800, source.artifact_id, None, None),
-                TimelineClip("clip-2", 700, 300, source.artifact_id, None, None),
-            ),
-        )
-
-
-def test_timeline_rejects_wrong_track_payload_and_out_of_bounds_clip() -> None:
-    source = _artifact()
-    brief = _brief(source)
-    storyboard = _storyboard(brief)
-    with pytest.raises(InvalidVideoDomainModel):
-        TimelineTrack(
-            track_id="caption-main",
-            kind=TimelineTrackKind.CAPTION,
-            clips=(TimelineClip("caption-1", 0, 1_000, source.artifact_id, None, None),),
-        )
-
-    overflowing = TimelineTrack(
-        track_id="visual-main",
-        kind=TimelineTrackKind.VISUAL,
-        clips=(TimelineClip("visual-1", 29_500, 1_000, source.artifact_id, None, None),),
-    )
-    with pytest.raises(InvalidVideoDomainModel):
-        Timeline(TimelineId.new(), storyboard.storyboard_id, 1, 30_000, (overflowing,), NOW)
-
-    caption_only = TimelineTrack(
-        "caption-main",
-        TimelineTrackKind.CAPTION,
-        (TimelineClip("caption-1", 0, 1_000, None, "字幕", None),),
-    )
-    with pytest.raises(InvalidVideoDomainModel):
-        Timeline(TimelineId.new(), storyboard.storyboard_id, 1, 30_000, (caption_only,), NOW)
 
 
 @pytest.mark.parametrize(

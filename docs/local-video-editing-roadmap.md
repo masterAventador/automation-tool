@@ -41,8 +41,8 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | ✅ 已完成 |
-| LE-03 | Timeline 重写（含 Material 尺寸形状决策） | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例；**顺带决定 `Material.width`/`height` 对音频素材的形状**——当前音频被强制要求填 [1,8192] 的宽高，属强制荒谬而非可选荒谬，改成 `int | None` 按 kind 分叉是形状变更，LE-02 终审建议单独决策而非顺手折进去 | LE-02 | 🚧 实现中 |
-| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念 | LE-03 | ⬜ 未开始 |
+| LE-03 | Timeline 重写（含 Material 尺寸形状决策） | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例；**顺带决定 `Material.width`/`height` 对音频素材的形状**——当前音频被强制要求填 [1,8192] 的宽高，属强制荒谬而非可选荒谬，改成 `int | None` 按 kind 分叉是形状变更，LE-02 终审建议单独决策而非顺手折进去 | LE-02 | ✅ 已完成 |
+| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段） | LE-03 | ⬜ 未开始 |
 
 ### 3.3 Control Plane 装配（2 项）
 
@@ -99,14 +99,14 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：2
+- ✅ 已完成：3
 - 🔍 待验收：0
-- 🧪 RED / 🚧 实现中：1
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：21
 
 ## 5. 当前下一步
 
-**LE-03 Timeline 重写。** LE-02 已完成，`TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`，`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption，首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例。
+**LE-04 剪辑项目与任务状态机。** LE-03 已完成，`Timeline` 全族（`TimelineId`/`TimelineTrackKind`/`TransitionKind`/`TimelineTransition`/`TimelineClip`/`TimelineTrack`/`Timeline`）已从 `video_creation.py` 退役，唯一定义收敛到 `domain/timeline.py`，创作线与剪辑线的 `RenderJob.timeline_id` 共用同一个 `TimelineId`。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 
@@ -136,6 +136,14 @@ frontend/src/app/WorkbenchShell.tsx: concept video_editing_module (独立视频�
 **决定：不在 LE-01 内修。** 本线 LE-17、LE-19 会重建剪辑模块，形态还要再变一次，此刻改契约是白定；为让门禁变绿而临时塞一句文案则是糊弄门禁。该门禁的转绿归 LE-19，届时按最终界面更新契约条目。
 
 在此之前，**LE-01 及本线中间任务的全量门禁允许该项为红**，但必须核对输出恰好是上述两条——多出任何一条都说明是新引入的，必须当场处理。
+
+### 7.1 覆盖率与全库门禁（LE-03 实测登记，均非本线引入）
+
+**`material.py` 覆盖率缺口，归属 LE-02。** 实测：在 LE-02 收口提交 `495e922` 上跑 `test_material.py` 得 90%、11 行未覆盖；LE-03 T1（改动 `material.py` 的宽高分叉）之后是 91%、仍是同样 11 行——T1 自己的新代码全覆盖，既没恶化也没改善。门禁 `fail_under = 100`（`backend/pyproject.toml:89`），也就是说 **LE-02 标 ✅ 已完成时，覆盖率门禁在 `material.py` 上就是红的**。归属 LE-02，非本线引入，本线也未修复。
+
+**后端 CI 有三个全库红的门禁，均非本线引入。** `ruff check .` 约 98 个错误、`mypy` 17 个错误、`pytest --cov` 的 `fail_under = 100`；三者都在 `.github/workflows/quality.yml` 的 backend job 里（第 57、58、61 行），意味着该 job 在 main 上本来就过不去。LE-03 T5 复核（2026-07-29）：`ruff check .` 仍 98 个（与 LE-03 改动前后一致，未新增）；`mypy` 仍 17 个，分布跨 8 个文件（`src/automation_tool/executor/` 5 个、`tests/integration/` 3 个、`tests/unit/`（非 executor 子目录）3 个、`tests/unit/executor/` 6 个），并非此前记录所说的"全在 `tests/unit/executor/` 下"，但总数一致，未新增。详见 `docs/development/LE-03.md`。
+
+**`scripts/check_acceptance_evidence_depth.py` 在仓库里不存在**，但项目 `CLAUDE.md` §9.1 引用了它并称之为门禁。LE-03 T5 复核确认依旧不存在。归属未定，登记在此待后续任务处理。
 
 ## 6. 首期不做
 

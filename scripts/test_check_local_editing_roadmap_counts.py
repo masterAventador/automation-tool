@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,18 @@ _SCRIPT = Path(__file__).resolve().parent / "check_local_editing_roadmap_counts.
 _LEDGER = (
     Path(__file__).resolve().parents[1] / "docs/local-video-editing-roadmap.md"
 )
+
+# These read the ledger's *current* counts instead of a hardcoded snapshot: a
+# literal like "- ✅ 已完成：1" goes stale the next time a task finishes, and a
+# stale literal that no longer matches silently turns `.replace()` into a
+# no-op — the "broken" fixture ends up identical to the real, valid ledger,
+# and the test that meant to prove the checker rejects a mismatch instead
+# proves nothing. Deriving from the live value keeps these tests meaningful
+# as the ledger's own progress moves forward.
+_DONE_COUNT = re.compile(r"^- ✅ 已完成：(\d+)$", re.MULTILINE)
+_NOT_STARTED_COUNT = re.compile(r"^- ⬜ 未开始：(\d+)$", re.MULTILINE)
+_IN_FLIGHT_COUNT = re.compile(r"^- 🧪 RED / 🚧 实现中：(\d+)$", re.MULTILINE)
+_NOT_STARTED_ROW = re.compile(r"^\| LE-\d+ \|.*\| ⬜ 未开始 \|$", re.MULTILINE)
 
 
 def _run(ledger_path: Path) -> subprocess.CompletedProcess[str]:
@@ -67,28 +80,25 @@ def test_status_sum_mismatch_fails(tmp_path: Path) -> None:
 def test_two_in_flight_fails(tmp_path: Path) -> None:
     """同一时间最多一个任务处于 RED 或实现中。"""
     text = _LEDGER.read_text(encoding="utf-8")
-    text = text.replace(
-        "| LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/"
-        "has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；"
-        "用户改过的描述不被 AI 覆盖 | LE-01 | ⬜ 未开始 |",
-        "| LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/"
-        "has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；"
-        "用户改过的描述不被 AI 覆盖 | LE-01 | 🚧 实现中 |",
-        1,
-    )
-    text = text.replace(
-        "| LE-03 | Timeline 重写 | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/"
-        "`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；"
-        "首期锁死\"取片时长等于占位时长\"（不变速）并有拒绝用例 | LE-02 | ⬜ 未开始 |",
-        "| LE-03 | Timeline 重写 | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/"
-        "`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；"
-        "首期锁死\"取片时长等于占位时长\"（不变速）并有拒绝用例 | LE-02 | 🚧 实现中 |",
-        1,
-    )
+
+    not_started_rows = _NOT_STARTED_ROW.findall(text)
+    assert len(not_started_rows) >= 2, "需要至少两行「⬜ 未开始」才能构造本场景"
+    for row in not_started_rows[:2]:
+        text = text.replace(row, row[: -len("⬜ 未开始 |")] + "🚧 实现中 |", 1)
+
+    in_flight_match = _IN_FLIGHT_COUNT.search(text)
+    not_started_match = _NOT_STARTED_COUNT.search(text)
+    assert in_flight_match is not None
+    assert not_started_match is not None
     # 同步声明的进度计数，让「相加对不上」与「跨表核对」两类检查都保持通过，
     # 只让「同一时间最多一个任务处于 RED/实现中」这一条单独触发。
-    text = text.replace("- 🧪 RED / 🚧 实现中：0", "- 🧪 RED / 🚧 实现中：2")
-    text = text.replace("- ⬜ 未开始：23", "- ⬜ 未开始：21")
+    text = _IN_FLIGHT_COUNT.sub(
+        f"- 🧪 RED / 🚧 实现中：{int(in_flight_match.group(1)) + 2}", text
+    )
+    text = _NOT_STARTED_COUNT.sub(
+        f"- ⬜ 未开始：{int(not_started_match.group(1)) - 2}", text
+    )
+
     broken = tmp_path / "roadmap.md"
     broken.write_text(text, encoding="utf-8")
     result = _run(broken)
@@ -105,8 +115,10 @@ def test_status_cross_check_mismatch_fails(tmp_path: Path) -> None:
     """
     broken = tmp_path / "roadmap.md"
     text = _LEDGER.read_text(encoding="utf-8")
-    text = text.replace("- ✅ 已完成：1", "- ✅ 已完成：24")
-    text = text.replace("- ⬜ 未开始：23", "- ⬜ 未开始：0")
+    assert _DONE_COUNT.search(text) is not None
+    assert _NOT_STARTED_COUNT.search(text) is not None
+    text = _DONE_COUNT.sub("- ✅ 已完成：24", text)
+    text = _NOT_STARTED_COUNT.sub("- ⬜ 未开始：0", text)
     broken.write_text(text, encoding="utf-8")
     result = _run(broken)
     assert result.returncode != 0

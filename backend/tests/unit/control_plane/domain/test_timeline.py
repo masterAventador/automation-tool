@@ -875,6 +875,15 @@ def test_timeline_structural_bounds_fail_closed(field: str, value: object) -> No
         _timeline(**{field: value})
 
 
+def test_the_domain_package_exports_the_local_editing_timeline() -> None:
+    from automation_tool.control_plane import domain
+    from automation_tool.control_plane.domain import timeline as module
+
+    assert domain.Timeline is module.Timeline
+    assert domain.TimelineTrackKind is module.TimelineTrackKind
+    assert set(domain.TransitionKind) == set(module.TransitionKind)
+
+
 def test_a_timeline_refuses_two_lanes_with_the_same_id() -> None:
     with pytest.raises(InvalidTimelineModel):
         _timeline(

@@ -140,6 +140,17 @@ from automation_tool.control_plane.domain.task_state_machine import (
     TaskStateMachine,
     TaskStatus,
 )
+from automation_tool.control_plane.domain.timeline import (
+    AUDIBLE_TRACK_KINDS,
+    InvalidTimelineModel,
+    Timeline,
+    TimelineClip,
+    TimelineId,
+    TimelineTrack,
+    TimelineTrackKind,
+    TimelineTransition,
+    TransitionKind,
+)
 from automation_tool.control_plane.domain.video_creation import (
     Artifact,
     ArtifactRole,
@@ -153,13 +164,6 @@ from automation_tool.control_plane.domain.video_creation import (
     Storyboard,
     StoryboardId,
     StoryboardScene,
-    Timeline,
-    TimelineClip,
-    TimelineId,
-    TimelineTrack,
-    TimelineTrackKind,
-    TimelineTransition,
-    TransitionKind,
     VideoAspectRatio,
     VideoCreationMethod,
 )
@@ -182,6 +186,7 @@ from automation_tool.control_plane.domain.video_publishing import (
 
 __all__ = [
     "ACTION_RISK_POLICY_VERSION",
+    "AUDIBLE_TRACK_KINDS",
     "BILIBILI_OPEN_API_CONTRACT_VERSION",
     "DOUYIN_CANDIDATE_HISTORY_WINDOW",
     "DOUYIN_CANDIDATE_POLICY_VERSION",
@@ -264,6 +269,7 @@ __all__ = [
     "InvalidTaskDefinition",
     "InvalidTaskEventModel",
     "InvalidTaskTransition",
+    "InvalidTimelineModel",
     "InvalidVideoDomainModel",
     "InvalidVideoPublishingModel",
     "LoginName",
