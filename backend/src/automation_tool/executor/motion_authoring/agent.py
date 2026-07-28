@@ -506,6 +506,29 @@ def _load_brief_beat_bound(field: str) -> int:
     return value
 
 
+def load_thinking_default() -> bool:
+    """Whether the model reasons before it answers, unless the operator says no.
+
+    Read from the same contract the App composes the sentence under the switch
+    from. Written in three places at first — here, in Rust, and in the entry —
+    and only one of them read the file; the day that value flips, the two that
+    did not read it would have quietly kept the old behaviour for every caller
+    that omitted the field.
+    """
+    try:
+        contract = json.loads(_MODEL_CALL_CONTRACT_PATH.read_text(encoding="utf-8"))
+        value = contract["thinking"]["defaultEnabled"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: model call contract is unreadable"
+        ) from error
+    if type(value) is not bool:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: model call contract drifted"
+        )
+    return value
+
+
 def _load_model_stream_idle_timeout_seconds() -> int:
     """How long the model may go quiet mid-response before the run gives up.
 

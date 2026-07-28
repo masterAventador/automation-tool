@@ -201,6 +201,33 @@ fn every_length_the_entry_offers_is_one_the_render_plan_accepts() {
     assert!(limits.brief_plan(0).is_err());
 }
 
+/// 前端发过来的那份 JSON 少了开关，必须响亮地失败。
+///
+/// 这一跳（JS 对象 → serde）是整条链上唯一没有被测试盖住的。原本这个字段带
+/// `#[serde(default)]`，于是漏传会静默回落到「开着」——用户明明关了，片子照样
+/// 按开着跑，没有任何一处报错。App 自带前端、同一次构建产出，不存在旧调用方，
+/// 所以「漏传」只可能是漏写，而不是兼容性。
+#[test]
+fn a_request_that_forgot_the_thinking_choice_is_refused_rather_than_defaulted() {
+    let complete = serde_json::json!({
+        "creationMode": "one_sentence_v1",
+        "brief": "用蓝色商务风做一段本周销售增长说明",
+        "aspectRatio": "16:9",
+        "durationSeconds": 12,
+        "language": "zh",
+        "modelThinking": false,
+    });
+    let parsed: MotionVideoBriefRequest = serde_json::from_value(complete.clone()).unwrap();
+    assert!(!parsed.model_thinking(), "关掉的选择必须被解析出来");
+
+    let mut missing = complete;
+    missing.as_object_mut().unwrap().remove("modelThinking");
+    assert!(
+        serde_json::from_value::<MotionVideoBriefRequest>(missing).is_err(),
+        "少了这个字段必须拒绝，而不是悄悄按默认值跑"
+    );
+}
+
 /// 深度思考的开关要一路走到编排请求里，不能在某一层被吃掉。
 ///
 /// 这条线本周已经栽过七次「一侧改了另一侧没跟上」，其中 `catalogRoot` 那次正是

@@ -156,6 +156,7 @@
       "brand_assets_shape_invalid",
       "duration_not_whole_seconds",
       "model_configuration_shape_invalid",
+      "model_thinking_choice_invalid",
       "request_schema_unsupported",
       "request_shape_invalid",
       "request_too_large",

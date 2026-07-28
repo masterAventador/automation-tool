@@ -271,8 +271,8 @@ body {
   width: 100%;
 }
 
-/* 片长的标签和输入框之间要有间距，否则「成片时长（秒）」会贴着数字框读成一体。 */
-.motion-brief-length {
+/* 一句话卡片上的每个小控件：标签和控件之间要有间距，否则读成一体。 */
+.motion-brief-control {
   display: inline-flex;
   align-items: center;
   gap: 8px;

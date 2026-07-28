@@ -20,31 +20,41 @@ export const MOTION_AUTHORING_IDLE_WAIT = motionSpokenDuration(
 );
 
 /**
- * What the model's own reasoning costs, measured rather than guessed.
+ * What turning the model's own reasoning off saves, measured rather than guessed.
  *
- * The video-creation model reasons before it answers and that phase is most of
- * the wait. Both figures come from the shared contract so the number on screen
- * and the behaviour of the Executor cannot become two different opinions.
+ * A *saving*, never an absolute wait, and that is a correction rather than a
+ * preference. The measurement is in **model seconds** — one round trip — while
+ * everything else this page says about authoring is **end-to-end wall clock**
+ * (`MOTION_AUTHORING_MEASURED`, 136 to 178 seconds). `demo-sprint-roadmap.md`
+ * records the rule that came out of T92: the two are different units, and
+ * swapping one for the other is worse than leaving the old number alone. The
+ * first version of this printed «编排这一步实测约 42 秒» directly above a line
+ * reading «编排加渲染最长约 …», which is both units on one screen.
+ *
+ * The saving is the one figure that carries across, because turning reasoning
+ * off removes the same phase from both.
  */
 export const MOTION_THINKING = {
   defaultEnabled: contract.thinking.defaultEnabled,
-  secondsWithThinking: contract.thinking.measuredSecondsWithThinking,
-  secondsWithoutThinking: contract.thinking.measuredSecondsWithoutThinking,
+  savedSecondsTypical: contract.thinking.savedSecondsTypical,
+  savedSecondsLeast: contract.thinking.savedSecondsLeast,
+  savedSecondsMost: contract.thinking.savedSecondsMost,
 } as const;
 
 /**
  * The one line under the switch, for whichever way it is set.
  *
- * The saving is computed rather than written, so the two figures and the
- * difference between them can never disagree. What is deliberately *not*
- * claimed is that turning it off costs nothing: only the time was measured, so
- * the sentence says the reasoning is what buys the extra care and leaves the
- * judgement to the operator.
+ * Every figure comes from the contract, so the sentence and the Executor cannot
+ * become two opinions. What is deliberately *not* claimed is that turning it
+ * off is worse: only the time was measured, so the sentence says so outright
+ * rather than implying a quality cost nobody has evidence for. Both directions
+ * say the same thing, because a switch whose two labels disagree about the
+ * trade is a recommendation wearing a switch's clothes.
  */
 export function motionThinkingNotice(enabled: boolean): string {
-  const saved = MOTION_THINKING.secondsWithThinking - MOTION_THINKING.secondsWithoutThinking;
+  const { savedSecondsTypical, savedSecondsLeast, savedSecondsMost } = MOTION_THINKING;
   if (enabled) {
-    return `开着：模型会先把思路想一遍再落笔，编排这一步实测约 ${MOTION_THINKING.secondsWithThinking} 秒。关掉能省约 ${saved} 秒，但少了这一遍推敲，分镜和文案可能没那么周全。`;
+    return `开着：模型会先把思路想一遍再落笔。关掉大约能省 ${savedSecondsTypical} 秒（实测 3 次，${savedSecondsLeast}~${savedSecondsMost} 秒）。少了这一遍推敲成片会不会变差，我们还没有量过。`;
   }
-  return `关掉：模型直接落笔，编排这一步实测约 ${MOTION_THINKING.secondsWithoutThinking} 秒，比开着快约 ${saved} 秒。代价是少了先想一遍的那道工序，分镜和文案可能没那么周全。`;
+  return `关掉：模型直接落笔，比开着大约快 ${savedSecondsTypical} 秒。省下的是先想一遍那道工序；它对成片有多大影响，我们还没有量过。`;
 }

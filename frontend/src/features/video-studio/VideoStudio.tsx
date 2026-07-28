@@ -559,7 +559,7 @@ function NewVideoPage({
                   onChange={(event) => onBriefChange(event.target.value)}
                   placeholder="例如：用蓝色商务风做一段本周销售增长说明"
                 />
-                <span className="motion-brief-length">
+                <span className="motion-brief-control">
                   <label htmlFor="motion-brief-seconds">成片时长（秒）</label>
                   <InputNumber
                     id="motion-brief-seconds"
@@ -575,14 +575,7 @@ function NewVideoPage({
                 <Typography.Text type="secondary">
                   {`描述一句就够了。按 ${briefFilmSeconds} 秒来安排内容，实际片长以成片为准、通常会更长一些——每个镜头会等它的话说完、动效播完，不会中途切断。文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。`}
                 </Typography.Text>
-                {/*
-                  * 时间代价必须在拉之前看得见。
-                  *
-                  * 路线 A 是一个镜头渲染一次，每次都要重新起浏览器（契约记作 30 秒），
-                  * 所以等待随镜头数涨、涨得比片长快。只给控件不给这句话，
-                  * 就是请人顺手拉到 180 秒，然后对着不动的屏幕等将近一小时。
-                  */}
-                <span className="motion-brief-length">
+                <span className="motion-brief-control">
                   <Switch
                     id="motion-brief-thinking"
                     aria-label="让模型先想一遍再落笔"
@@ -594,6 +587,13 @@ function NewVideoPage({
                 <Typography.Text type="secondary">
                   {motionThinkingNotice(briefThinking)}
                 </Typography.Text>
+                {/*
+                  * 时间代价必须在拉之前看得见。
+                  *
+                  * 路线 A 是一个镜头渲染一次，每次都要重新起浏览器（契约记作 30 秒），
+                  * 所以等待随镜头数涨、涨得比片长快。只给控件不给这句话，
+                  * 就是请人顺手拉到 180 秒，然后对着不动的屏幕等将近一小时。
+                  */}
                 <Typography.Text type="secondary">
                   {`本机是一个镜头渲染一次：${briefFilmSeconds} 秒大约 ${briefWait.shots} 个镜头，编排加渲染最长约 ${motionSpokenDuration(briefWait.ceilingSeconds)}。片子越长镜头越多，等待时间涨得比片长快。`}
                 </Typography.Text>

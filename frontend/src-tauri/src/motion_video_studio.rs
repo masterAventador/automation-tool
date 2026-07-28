@@ -27,6 +27,8 @@ const MAX_SUBJECT_CHARS: usize = 80;
 const MAX_LOGO_BYTES: usize = 4 * 1024 * 1024;
 const MILLIS_PER_SECOND: u32 = 1000;
 const STYLE_CONTRACT: &str = include_str!("../../../contracts/video/motion-style-freeze.v1.json");
+const MODEL_CALL_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-authoring-model-call.v1.json");
 const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 const BRIEF_CONTRACT: &str =
@@ -381,19 +383,29 @@ pub struct MotionVideoBriefRequest {
     language: String,
     /// Whether the video-creation model reasons before it answers.
     ///
-    /// Per request rather than per installation: measured 2026-07-28, the
-    /// reasoning phase is 31 of the 42 seconds authoring takes, and whether
-    /// that is worth paying depends on whether this particular film is a
-    /// rehearsal or a delivery.
-    #[serde(default = "thinking_default")]
+    /// Per request rather than per installation: turning it off saves about 31
+    /// seconds of model time, and whether that is worth paying depends on
+    /// whether this particular film is a rehearsal or a delivery.
+    ///
+    /// Required, with no serde default. This App ships its own front end, so a
+    /// request missing this field is not an older caller — it is a caller that
+    /// forgot, and a default here would turn "the operator switched it off"
+    /// into "the film quietly ran with it on". That is the shape this line has
+    /// been bitten by seven times: a value crosses a boundary, something
+    /// downstream has a reasonable fallback, and the product silently does less
+    /// than it was told to.
     model_thinking: bool,
 }
 
-/// Reasoning stays on unless the operator turns it off. Only the time it costs
-/// was measured, not the quality of what comes back, and quietly making every
-/// film worse to save half a minute is not this side's trade to make.
-const fn thinking_default() -> bool {
-    true
+/// Reasoning stays on unless the operator turns it off — read from the contract
+/// both sides share rather than written here, because the sentence under the
+/// switch is composed from the same file.
+pub fn thinking_default() -> Result<bool, MotionVideoStudioError> {
+    let contract: serde_json::Value =
+        serde_json::from_str(MODEL_CALL_CONTRACT).map_err(|_| draft_invalid())?;
+    contract["thinking"]["defaultEnabled"]
+        .as_bool()
+        .ok_or_else(draft_invalid)
 }
 
 impl MotionVideoBriefRequest {
@@ -408,7 +420,7 @@ impl MotionVideoBriefRequest {
             aspect_ratio,
             duration_seconds,
             language,
-            thinking_default(),
+            thinking_default()?,
         )
     }
 

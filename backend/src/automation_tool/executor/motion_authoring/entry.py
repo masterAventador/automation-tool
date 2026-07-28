@@ -29,6 +29,7 @@ from automation_tool.executor.motion_authoring.agent import (
     VideoCreationModelConfig,
     call_video_creation_model,
     load_locked_authoring_workflow,
+    load_thinking_default,
 )
 
 SCHEMA_VERSION: Final = 1
@@ -509,7 +510,7 @@ def run_motion_authoring_entry(
     brief = _brief(document)
     model = _model(document["model"])
     try:
-        thinking = document.get("modelThinking", True)
+        thinking = document.get("modelThinking", load_thinking_default())
         if type(thinking) is not bool:
             raise _reject("model thinking choice must be true or false")
         agent = MotionAuthoringAgent(
