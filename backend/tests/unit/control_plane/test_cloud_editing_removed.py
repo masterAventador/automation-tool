@@ -64,7 +64,6 @@ def test_schema_declares_no_cloud_editing_tables() -> None:
     assert "editing_output_artifacts" not in table_names
 
 
-@pytest.mark.xfail(reason="Task 6 删除契约文件之前，该文件仍存在", strict=True)
 def test_aliyun_editing_contract_file_is_gone() -> None:
     repository_root = Path(__file__).resolve().parents[4]
     contract = repository_root / "contracts/video/aliyun-ims-editing-staging.v1.json"

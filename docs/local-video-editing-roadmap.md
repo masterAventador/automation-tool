@@ -34,7 +34,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-01 | 删除云剪辑路线 | 删除阿里云 IMS 全部生产代码与测试、供应商无关 Provider 抽象层、`schema.py` 两张表声明、`aliyun-ims-editing-staging.v1.json`、前端剪辑服务设置页与网关、Tauri 4 个 service command；**迁移文件不删而是新增 `0035` drop 迁移**（`0032` 在链中间，`0033` 指向它，删文件会断链）；从专项台账移除 VE-01～VE-08 并修正计数；新建 `scripts/check_local_editing_roadmap_counts.py` 守护本文件计数；**保留** `frontend/e2e-tauri/video-editing.spec.ts`（由 LE-17 重写而非删除）；全量测试与门禁脚本通过 | — | 🚧 实现中 |
+| LE-01 | 删除云剪辑路线 | 删除阿里云 IMS 全部生产代码与测试、供应商无关 Provider 抽象层、`schema.py` 两张表声明、`aliyun-ims-editing-staging.v1.json`、前端剪辑服务设置页与网关、Tauri 4 个 service command；**迁移文件不删而是新增 `0035` drop 迁移**（`0032` 在链中间，`0033` 指向它，删文件会断链）；从专项台账移除 VE-01～VE-08 并修正计数；新建 `scripts/check_local_editing_roadmap_counts.py` 守护本文件计数；**保留** `frontend/e2e-tauri/video-editing.spec.ts`（由 LE-17 重写而非删除）；全量测试与门禁脚本通过 | — | ✅ 已完成 |
 
 ### 3.2 领域层重写（3 项）
 
@@ -99,14 +99,14 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：0
+- ✅ 已完成：1
 - 🔍 待验收：0
-- 🧪 RED / 🚧 实现中：1
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：23
 
 ## 5. 当前下一步
 
-**LE-01 删除云剪辑路线。** 这是唯一无依赖的任务，且后续所有领域层重写都建立在它之上。
+**LE-02 Material 素材库领域对象。** LE-01 已完成，后续所有领域层重写都建立在 LE-02 之上。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 

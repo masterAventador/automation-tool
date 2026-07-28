@@ -23,11 +23,14 @@ GROUP_COUNTS = {
     "VF": 7,
     "IM": 8,
     "BM": 16,
-    "VE": 8,
     "PB": 8,
     "SA": 7,
     "CQ": 5,
 }
+# VE（独立视频剪辑）线整条废弃，不再是台账追踪的工作线；docs/development/VE-*.md
+# 作为历史证据保留在磁盘上，因此下面的正则不再把 VE 视为已知专项前缀，避免
+# validate_evidence() 把这些历史文件误判成"未知证据文件"。
+
 EXPECTED_IDS = {
     f"{prefix}-{number:02d}"
     for prefix, count in GROUP_COUNTS.items()
@@ -43,8 +46,8 @@ STATUSES = (
 )
 ACTIVE_STATUSES = {"🧪 RED", "🚧 实现中"}
 EVIDENCE_STATUSES = ACTIVE_STATUSES | {"🔍 待验收", "✅ 已完成"}
-TASK_ID_PATTERN = re.compile(r"\b(?:AV|EB|BU|VF|IM|BM|VE|PB|SA|CQ)-\d{2}\b")
-TASK_ROW_PATTERN = re.compile(r"^\| ((?:AV|EB|BU|VF|IM|BM|VE|PB|SA|CQ)-\d{2}) \|")
+TASK_ID_PATTERN = re.compile(r"\b(?:AV|EB|BU|VF|IM|BM|PB|SA|CQ)-\d{2}\b")
+TASK_ROW_PATTERN = re.compile(r"^\| ((?:AV|EB|BU|VF|IM|BM|PB|SA|CQ)-\d{2}) \|")
 DATE_PATTERN = re.compile(r"^> 日期：\d{4}-\d{2}-\d{2}$", re.MULTILINE)
 
 
@@ -101,7 +104,7 @@ def parse_task_rows(roadmap: str) -> dict[str, TaskRow]:
         )
     missing = EXPECTED_IDS - set(rows)
     extra = set(rows) - EXPECTED_IDS
-    if missing or extra or len(rows) != 87:
+    if missing or extra or len(rows) != 79:
         fail(
             "task inventory drifted: "
             f"count={len(rows)}, missing={sorted(missing)}, extra={sorted(extra)}"
@@ -130,8 +133,8 @@ def validate_summary(roadmap: str, rows: dict[str, TaskRow]) -> None:
                 f"status summary drifted for {status}: "
                 f"declared={declared[status]}, actual={actual[status]}"
             )
-    if sum(declared.values()) != 87:
-        fail("status summary total must be 87")
+    if sum(declared.values()) != 79:
+        fail("status summary total must be 79")
 
 
 def validate_roadmap_text(roadmap: str) -> dict[str, TaskRow]:
@@ -184,7 +187,7 @@ def require_evidence_headings(task_id: str, status: str, evidence: str) -> None:
 def validate_evidence(rows: dict[str, TaskRow], evidence_root: Path) -> None:
     if not evidence_root.is_dir() or evidence_root.is_symlink():
         fail("evidence root must be a regular directory")
-    specialized_name = re.compile(r"^(?:AV|EB|BU|VF|IM|BM|VE|PB|SA|CQ)-\d{2}\.md$")
+    specialized_name = re.compile(r"^(?:AV|EB|BU|VF|IM|BM|PB|SA|CQ)-\d{2}\.md$")
     unknown_files = sorted(
         path.name
         for path in evidence_root.iterdir()
