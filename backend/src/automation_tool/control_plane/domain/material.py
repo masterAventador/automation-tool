@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import StrEnum
 from typing import Final, Never, final
 
@@ -86,6 +87,10 @@ class Material:
     speech_segments_ms: tuple[tuple[int, int], ...]
     speech_transcript: str | None
     shot_boundaries_ms: tuple[int, ...]
+    ai_description: str | None
+    ai_tags: tuple[str, ...]
+    description_source: DescriptionSource
+    described_at: datetime | None
 
     def __post_init__(self) -> None:
         if (
@@ -102,6 +107,7 @@ class Material:
         self._validate_duration()
         self._validate_audio()
         self._validate_shot_boundaries()
+        self._validate_description()
 
     def _validate_duration(self) -> None:
         if self.kind is MaterialKind.IMAGE:
@@ -167,3 +173,53 @@ class Material:
             ):
                 _reject()
             previous = boundary
+
+    def _validate_description(self) -> None:
+        if not isinstance(self.description_source, DescriptionSource):
+            _reject()
+        _validate_text(self.ai_description, maximum=MAX_DESCRIPTION_CHARACTERS, optional=True)
+        if not isinstance(self.ai_tags, tuple) or len(self.ai_tags) > MAX_TAGS:
+            _reject()
+        for tag in self.ai_tags:
+            _validate_text(tag, maximum=MAX_TAG_CHARACTERS)
+        if len(set(self.ai_tags)) != len(self.ai_tags):
+            _reject()
+        if self.described_at is not None and (
+            not isinstance(self.described_at, datetime) or self.described_at.tzinfo is None
+        ):
+            _reject()
+        if self.ai_description is None and (self.ai_tags or self.described_at is not None):
+            _reject()
+
+    def with_ai_description(
+        self,
+        description: str,
+        tags: tuple[str, ...],
+        described_at: datetime,
+    ) -> Material:
+        """Record what the model saw — unless a person has already written it.
+
+        Returns self unchanged when the description came from the user. The
+        check lives here rather than in the caller because every future
+        describe pass would otherwise have to remember it, and one that forgets
+        silently destroys the user's edit.
+        """
+        if self.description_source is DescriptionSource.USER:
+            return self
+        return replace(
+            self,
+            ai_description=description,
+            ai_tags=tags,
+            described_at=described_at,
+            description_source=DescriptionSource.AI,
+        )
+
+    def with_user_description(self, description: str) -> Material:
+        """Record what a person typed, and mark the field theirs from now on."""
+        return replace(
+            self,
+            ai_description=description,
+            ai_tags=(),
+            described_at=None,
+            description_source=DescriptionSource.USER,
+        )

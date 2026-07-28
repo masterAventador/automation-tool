@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 
 import pytest
 
 from automation_tool.control_plane.domain.material import (
     MAX_MATERIAL_DIMENSION,
     MAX_MATERIAL_DURATION_MS,
+    MAX_TAG_CHARACTERS,
     DescriptionSource,
     InvalidMaterialModel,
     Material,
@@ -57,6 +59,10 @@ def _video(**overrides: object) -> Material:
         "speech_segments_ms": (),
         "speech_transcript": None,
         "shot_boundaries_ms": (),
+        "ai_description": None,
+        "ai_tags": (),
+        "description_source": DescriptionSource.AI,
+        "described_at": None,
     }
     defaults.update(overrides)
     return Material(**defaults)  # type: ignore[arg-type]
@@ -213,3 +219,68 @@ def test_shot_boundary_must_fall_inside_the_material() -> None:
 def test_image_carries_no_shot_boundaries() -> None:
     with pytest.raises(InvalidMaterialModel):
         _video(kind=MaterialKind.IMAGE, duration_ms=None, shot_boundaries_ms=(0,))
+
+
+def test_a_fresh_material_has_no_description() -> None:
+    material = _video()
+    assert material.ai_description is None
+    assert material.described_at is None
+    assert material.description_source is DescriptionSource.AI
+
+
+def test_ai_description_is_written_onto_an_undescribed_material() -> None:
+    stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    material = _video().with_ai_description("室内一个人在喝水", ("室内", "人物"), stamped)
+    assert material.ai_description == "室内一个人在喝水"
+    assert material.ai_tags == ("室内", "人物")
+    assert material.described_at == stamped
+    assert material.description_source is DescriptionSource.AI
+
+
+def test_ai_may_redescribe_material_it_described_itself() -> None:
+    first = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    second = datetime(2026, 7, 28, 11, 0, tzinfo=UTC)
+    material = _video().with_ai_description("第一版", ("旧",), first)
+    updated = material.with_ai_description("第二版", ("新",), second)
+    assert updated.ai_description == "第二版"
+    assert updated.described_at == second
+
+
+def test_user_description_switches_the_source() -> None:
+    material = _video().with_user_description("我自己写的说明")
+    assert material.ai_description == "我自己写的说明"
+    assert material.description_source is DescriptionSource.USER
+
+
+def test_ai_cannot_overwrite_a_user_written_description() -> None:
+    stamped = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    edited = _video().with_user_description("我自己写的说明")
+    unchanged = edited.with_ai_description("AI 想改成这样", ("模型",), stamped)
+    assert unchanged is edited
+    assert unchanged.ai_description == "我自己写的说明"
+    assert unchanged.description_source is DescriptionSource.USER
+
+
+def test_user_may_rewrite_their_own_description() -> None:
+    edited = _video().with_user_description("第一次写的")
+    rewritten = edited.with_user_description("改了一版")
+    assert rewritten.ai_description == "改了一版"
+    assert rewritten.description_source is DescriptionSource.USER
+
+
+def test_described_at_must_be_timezone_aware() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video().with_ai_description("说明", (), datetime(2026, 7, 28, 10, 0))
+
+
+@pytest.mark.parametrize("tags", [("",), (" 前后有空格 ",), ("x" * (MAX_TAG_CHARACTERS + 1),)])
+def test_tags_are_validated(tags: tuple[str, ...]) -> None:
+    stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    with pytest.raises(InvalidMaterialModel):
+        _video().with_ai_description("说明", tags, stamped)
+
+
+def test_tags_must_be_unique() -> None:
+    stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    with pytest.raises(InvalidMaterialModel):
+        _video().with_ai_description("说明", ("室内", "室内"), stamped)
