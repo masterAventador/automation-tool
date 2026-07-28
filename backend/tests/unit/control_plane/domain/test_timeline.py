@@ -15,6 +15,7 @@ from automation_tool.control_plane.domain.timeline import (
     InvalidTimelineModel,
     TimelineClip,
     TimelineId,
+    TimelineTrack,
     TimelineTrackKind,
     TimelineTransition,
     TransitionKind,
@@ -235,3 +236,319 @@ def test_caption_text_is_bounded_and_free_of_control_characters() -> None:
         _caption_clip(text="带\x00空字符")
     with pytest.raises(InvalidTimelineModel):
         _caption_clip(text="  前后有空白  ")
+
+
+def _visual_track(**overrides: object) -> TimelineTrack:
+    defaults: dict[str, object] = {
+        "track_id": "visual",
+        "kind": TimelineTrackKind.VISUAL,
+        "clips": (
+            _media_clip(clip_id="visual-1", start_ms=0, duration_ms=3_000),
+            _media_clip(
+                clip_id="visual-2",
+                start_ms=3_000,
+                duration_ms=4_000,
+                source_in_ms=0,
+                source_out_ms=4_000,
+            ),
+        ),
+    }
+    defaults.update(overrides)
+    return TimelineTrack(**defaults)  # type: ignore[arg-type]
+
+
+def _audible_clip(**overrides: object) -> TimelineClip:
+    """A clip fit for an audible lane: it states a level and a stretch."""
+    defaults: dict[str, object] = {"gain_db": -12.0}
+    defaults.update(overrides)
+    return _media_clip(**defaults)
+
+
+def test_a_visual_track_runs_end_to_end_from_zero() -> None:
+    track = _visual_track()
+    assert track.clips[0].start_ms == 0
+    assert track.clips[1].start_ms == track.clips[0].end_ms
+
+
+def test_a_visual_track_refuses_a_gap_that_would_render_as_black() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(
+                _media_clip(clip_id="visual-1", start_ms=0, duration_ms=3_000),
+                _media_clip(
+                    clip_id="visual-2",
+                    start_ms=3_500,
+                    duration_ms=4_000,
+                    source_in_ms=0,
+                    source_out_ms=4_000,
+                ),
+            )
+        )
+
+
+def test_a_visual_track_refuses_to_start_late() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(clips=(_media_clip(clip_id="visual-1", start_ms=500, duration_ms=3_000),))
+
+
+def test_a_transition_overlaps_its_two_clips_so_the_film_really_is_that_long() -> None:
+    """xfade renders a + b - transition; the timeline must say the same."""
+    track = _visual_track(
+        clips=(
+            _media_clip(clip_id="visual-1", start_ms=0, duration_ms=3_000),
+            _media_clip(
+                clip_id="visual-2",
+                start_ms=2_200,
+                duration_ms=4_000,
+                source_in_ms=0,
+                source_out_ms=4_000,
+                transition_in=TimelineTransition(TransitionKind.DISSOLVE, 800),
+            ),
+        )
+    )
+    assert track.clips[-1].end_ms == 6_200
+
+
+def test_a_transition_that_does_not_overlap_is_rejected() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(
+                _media_clip(clip_id="visual-1", start_ms=0, duration_ms=3_000),
+                _media_clip(
+                    clip_id="visual-2",
+                    start_ms=3_000,
+                    duration_ms=4_000,
+                    source_in_ms=0,
+                    source_out_ms=4_000,
+                    transition_in=TimelineTransition(TransitionKind.DISSOLVE, 800),
+                ),
+            )
+        )
+
+
+def test_a_transition_cannot_swallow_either_clip_whole() -> None:
+    """The transition (800ms) is exactly as long as the previous clip (800ms).
+
+    `visual-1` needs its own matching source window here — without one it
+    would fail `TimelineClip`'s own duration/window check first, and the
+    test would pass without ever reaching `TimelineTrack`'s layout rule.
+    """
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(
+                _media_clip(
+                    clip_id="visual-1",
+                    start_ms=0,
+                    duration_ms=800,
+                    source_in_ms=0,
+                    source_out_ms=800,
+                ),
+                _media_clip(
+                    clip_id="visual-2",
+                    start_ms=0,
+                    duration_ms=4_000,
+                    source_in_ms=0,
+                    source_out_ms=4_000,
+                    transition_in=TimelineTransition(TransitionKind.DISSOLVE, 800),
+                ),
+            )
+        )
+
+
+def test_the_first_clip_has_nothing_to_transition_from() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(
+                _media_clip(
+                    clip_id="visual-1",
+                    start_ms=0,
+                    duration_ms=3_000,
+                    transition_in=TimelineTransition(TransitionKind.FADE, 500),
+                ),
+            )
+        )
+
+
+def test_a_visual_clip_carries_no_level_of_its_own() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(_media_clip(clip_id="visual-1", start_ms=0, duration_ms=3_000, gain_db=0.0),)
+        )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC],
+)
+def test_an_audible_track_states_a_level_for_every_clip(kind: TimelineTrackKind) -> None:
+    TimelineTrack("sound", kind, (_audible_clip(clip_id="sound-1"),))
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack("sound", kind, (_media_clip(clip_id="sound-1"),))
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC],
+)
+def test_no_audible_lane_will_take_a_clip_with_no_stretch_to_play(
+    kind: TimelineTrackKind,
+) -> None:
+    """A windowless clip cannot carry a level, and an audible lane demands one.
+
+    The clip itself is legal — a still image occupies time without playing
+    any stretch of a source. It is this lane that has no use for it.
+    """
+    windowless = _media_clip(clip_id="sound-1", source_in_ms=None, source_out_ms=None)
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack("sound", kind, (windowless,))
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC],
+)
+def test_audio_gets_no_transitions_in_the_first_release(kind: TimelineTrackKind) -> None:
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack(
+            "sound",
+            kind,
+            (
+                _audible_clip(clip_id="sound-1", start_ms=0, duration_ms=3_000),
+                _audible_clip(
+                    clip_id="sound-2",
+                    start_ms=3_000,
+                    duration_ms=3_000,
+                    source_in_ms=0,
+                    source_out_ms=3_000,
+                    transition_in=TimelineTransition(TransitionKind.FADE, 500),
+                ),
+            ),
+        )
+
+
+def test_a_silent_stretch_between_two_narration_clips_is_fine() -> None:
+    track = TimelineTrack(
+        "narration",
+        TimelineTrackKind.NARRATION,
+        (
+            _audible_clip(
+                clip_id="line-1", start_ms=0, duration_ms=2_000, source_in_ms=0, source_out_ms=2_000
+            ),
+            _audible_clip(
+                clip_id="line-2",
+                start_ms=2_600,
+                duration_ms=2_000,
+                source_in_ms=0,
+                source_out_ms=2_000,
+            ),
+        ),
+    )
+    assert track.clips[1].start_ms > track.clips[0].end_ms
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        TimelineTrackKind.NARRATION,
+        TimelineTrackKind.AMBIENT,
+        TimelineTrackKind.MUSIC,
+        TimelineTrackKind.CAPTION,
+    ],
+)
+def test_no_track_lets_two_clips_play_over_each_other(kind: TimelineTrackKind) -> None:
+    first = _caption_clip if kind is TimelineTrackKind.CAPTION else _audible_clip
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack(
+            "lane",
+            kind,
+            (
+                first(
+                    clip_id="lane-1",
+                    start_ms=0,
+                    duration_ms=2_000,
+                    **(
+                        {}
+                        if kind is TimelineTrackKind.CAPTION
+                        else {"source_in_ms": 0, "source_out_ms": 2_000}
+                    ),
+                ),
+                first(
+                    clip_id="lane-2",
+                    start_ms=1_500,
+                    duration_ms=2_000,
+                    **(
+                        {}
+                        if kind is TimelineTrackKind.CAPTION
+                        else {"source_in_ms": 0, "source_out_ms": 2_000}
+                    ),
+                ),
+            ),
+        )
+
+
+def test_a_caption_track_only_draws_text() -> None:
+    TimelineTrack("caption", TimelineTrackKind.CAPTION, (_caption_clip(),))
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack("caption", TimelineTrackKind.CAPTION, (_media_clip(),))
+
+
+def test_a_caption_lane_refuses_a_clip_that_wants_to_dissolve() -> None:
+    """A caption appears and disappears; only the picture lane dissolves.
+
+    The level half of this rule lives one layer down — a caption clip
+    cannot carry `gain_db` at all, so it never reaches a lane. See
+    `test_gain_requires_something_audible_to_adjust` in Task 2.
+    """
+    dissolving = _caption_clip(transition_in=TimelineTransition(TransitionKind.FADE, 300))
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack("caption", TimelineTrackKind.CAPTION, (dissolving,))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("track_id", "Bad_ID"),
+        ("kind", "visual"),
+        ("clips", ()),
+        ("clips", [_media_clip()]),
+    ],
+)
+def test_track_structural_bounds_fail_closed(field: str, value: object) -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        TimelineTrackKind.VISUAL,
+        TimelineTrackKind.NARRATION,
+        TimelineTrackKind.AMBIENT,
+        TimelineTrackKind.MUSIC,
+    ],
+)
+def test_no_media_lane_will_take_a_caption_shaped_clip(kind: TimelineTrackKind) -> None:
+    """A caption-shaped clip (text, no material) only fits the caption lane."""
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack("lane", kind, (_caption_clip(),))
+
+
+def test_a_track_ends_when_its_last_clip_does() -> None:
+    track = _visual_track()
+    assert track.end_ms == track.clips[-1].end_ms
+
+
+def test_a_track_refuses_two_clips_with_the_same_id() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(
+                _media_clip(clip_id="same", start_ms=0, duration_ms=3_000),
+                _media_clip(
+                    clip_id="same",
+                    start_ms=3_000,
+                    duration_ms=3_000,
+                    source_in_ms=0,
+                    source_out_ms=3_000,
+                ),
+            )
+        )

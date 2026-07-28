@@ -194,6 +194,91 @@ class TimelineClip:
         return self.start_ms + self.duration_ms
 
 
+@dataclass(frozen=True, slots=True)
+class TimelineTrack:
+    """One lane of the film, and everything scheduled on it."""
+
+    track_id: str
+    kind: TimelineTrackKind
+    clips: tuple[TimelineClip, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.track_id, str)
+            or _LOCAL_ID_PATTERN.fullmatch(self.track_id) is None
+            or not isinstance(self.kind, TimelineTrackKind)
+            or not isinstance(self.clips, tuple)
+            or not 1 <= len(self.clips) <= MAX_CLIPS_PER_TRACK
+            or any(not isinstance(clip, TimelineClip) for clip in self.clips)
+            or len({clip.clip_id for clip in self.clips}) != len(self.clips)
+        ):
+            _reject()
+        for clip in self.clips:
+            self._validate_clip_shape(clip)
+        self._validate_layout()
+
+    def _validate_clip_shape(self, clip: TimelineClip) -> None:
+        """What a clip on THIS lane is allowed to carry.
+
+        Every kind gets a rule. A kind with no rule of its own is how a
+        model ends up accepting states nobody can render.
+        """
+        if self.kind is TimelineTrackKind.CAPTION:
+            if (
+                clip.source_material_id is not None
+                or clip.gain_db is not None
+                or clip.transition_in is not None
+            ):
+                _reject()
+            return
+        if clip.text is not None:
+            _reject()
+        if self.kind is TimelineTrackKind.VISUAL:
+            # The picture lane carries no level of its own; a material's own
+            # sound rides the separate AMBIENT lane so it can be ducked.
+            if clip.gain_db is not None:
+                _reject()
+            return
+        # NARRATION / AMBIENT / MUSIC: every clip states its level, and the
+        # first release mixes them with no crossfades. Having a level already
+        # implies having a stretch to play — `TimelineClip` enforces that —
+        # so checking the window again here would be unreachable.
+        if clip.gain_db is None or clip.transition_in is not None:
+            _reject()
+
+    def _validate_layout(self) -> None:
+        """Where the clips sit relative to each other.
+
+        The picture lane runs end to end from zero — a gap would render as
+        black nobody asked for. A transition is a real overlap: `xfade`
+        outputs `a + b - transition`, so the incoming clip must start
+        exactly that much before the outgoing one ends, or the timeline's
+        own duration stops matching the film it describes.
+        """
+        previous_end = 0
+        previous_duration = 0
+        for index, clip in enumerate(self.clips):
+            if self.kind is not TimelineTrackKind.VISUAL:
+                if clip.start_ms < previous_end:
+                    _reject()
+            else:
+                transition = clip.transition_in
+                overlap = 0 if transition is None else transition.duration_ms
+                # `TimelineClip` already refuses a transition that would swallow
+                # the incoming clip. Only the outgoing one needs a neighbour to
+                # judge, so only that half lives here.
+                if transition is not None and (index == 0 or overlap >= previous_duration):
+                    _reject()
+                if clip.start_ms != previous_end - overlap:
+                    _reject()
+            previous_end = clip.end_ms
+            previous_duration = clip.duration_ms
+
+    @property
+    def end_ms(self) -> int:
+        return self.clips[-1].end_ms
+
+
 __all__ = [
     "AUDIBLE_TRACK_KINDS",
     "MAX_CLIPS_PER_TRACK",
@@ -206,6 +291,7 @@ __all__ = [
     "InvalidTimelineModel",
     "TimelineClip",
     "TimelineId",
+    "TimelineTrack",
     "TimelineTrackKind",
     "TimelineTransition",
     "TransitionKind",
