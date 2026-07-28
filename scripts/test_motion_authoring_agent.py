@@ -173,7 +173,15 @@ def _valid_beat(**overrides: object) -> dict[str, object]:
         "purpose": "标题引入",
         "start_seconds": 0.0,
         "duration_seconds": 6.0,
-        "catalog_parts": ["data-chart"],
+        # Empty by default, which the prompt tells the model is allowed. Most
+        # tests here are about something else entirely — a script tag reaching
+        # the frame as text, a budget, a timeout — and a fixture that named a
+        # part made every one of them depend on this installation carrying the
+        # 134 packaged parts. It did not, so ten of them errored with the
+        # no-catalog refusal, which is a true refusal answering a question none
+        # of them asked. Naming a part is now something a test does when the
+        # part is the subject.
+        "catalog_parts": [],
         "layout": "title",
         "headline": "本周销售增长",
         "body": "三个要点带你看完",
@@ -987,6 +995,58 @@ class CatalogPartSelectionTest(unittest.TestCase):
             self.assertNotIn(f"'{excluded}'", prompt)
 
 
+class NoPartsCatalogTests(unittest.TestCase):
+    """What an installation without the packaged parts may still do.
+
+    The App resolves the catalog beside its other packaged resources and sends
+    the path with the request, so `None` here means the request omitted it.
+    Both halves of that are worth pinning, because the wrong one is silent:
+    drawing a beat from the template after the model chose a part for it looks
+    exactly like a film nobody asked to use parts in, and that silence is the
+    whole of what PC-04 was — `catalog_parts` existed on every beat for as long
+    as it did while reaching nothing at all.
+    """
+
+    def _agent(self, workspace: AuthoringWorkspace, model: ScriptedModel) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+        )
+
+    def test_a_storyboard_naming_a_part_is_refused_rather_than_drawn_from_the_template(
+        self,
+    ) -> None:
+        payload = _valid_storyboard([_valid_beat(catalog_parts=["lt-bold-block"])])
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            agent = self._agent(
+                workspace, ScriptedModel([_valid_model_payload(payload)])
+            )
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("no parts catalog", str(ctx.exception))
+
+    def test_a_storyboard_naming_none_is_the_single_template_segment(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            agent = self._agent(workspace, ScriptedModel([_valid_model_payload()]))
+            submission = agent.author(_brief()).submission
+        self.assertEqual(len(submission.segments), 1)
+        segment = submission.segments[0]
+        self.assertEqual(segment.entry_html, submission.entry_html)
+        self.assertEqual(segment.frame_count, submission.frame_count)
+        # The template's own stage, whose type scale is written for it.
+        self.assertEqual(
+            segment.canvas,
+            {"width": 640, "height": 360, "deviceScaleFactor": 2},
+        )
+
+
 class EntryRelativeAssetResolutionTests(unittest.TestCase):
     """Assets must be checked the way the browser resolves them.
 
@@ -1222,34 +1282,6 @@ class RenderCanvasGateTests(unittest.TestCase):
         self.assertEqual(RENDER_CANVAS_WIDTH, contract["width"])
         self.assertEqual(RENDER_CANVAS_HEIGHT, contract["height"])
 
-    def test_the_render_worker_reads_the_same_canvas_as_the_authoring_gate(self) -> None:
-        """The Worker's viewport constants are hand-copied and were unguarded.
-
-        The contract names `worker.mjs` in `definedIn`, but this gate only ever
-        checked `agent.py`. A viewport edited on one side and not the other
-        reproduces exactly the defect this contract exists to prevent — a
-        composition rendered as the empty corner of a stage nobody agreed on —
-        and nothing would have failed until an MP4 of still frames existed.
-        """
-        contract = json.loads(
-            (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        source = (ROOT / "workers/motion_composition/worker.mjs").read_text(
-            encoding="utf-8"
-        )
-        for name, expected in (
-            ("RENDER_VIEWPORT_WIDTH", contract["width"]),
-            ("RENDER_VIEWPORT_HEIGHT", contract["height"]),
-            ("RENDER_DEVICE_SCALE_FACTOR", contract["deviceScaleFactor"]),
-        ):
-            self.assertIn(
-                f"const {name} = {expected};",
-                source,
-                f"{name} in worker.mjs disagrees with the canvas contract",
-            )
-
     def test_the_capture_scale_is_declared_and_applied(self) -> None:
         """Output pixels are the CSS stage times the device scale factor.
 
@@ -1258,6 +1290,18 @@ class RenderCanvasGateTests(unittest.TestCase):
         leave 42px headlines adrift in a much larger frame. Scaling the device
         pixel ratio keeps every layout rule untouched and re-rasterises text at
         the higher resolution, which is what "sharper" has to mean here.
+
+        This class used to assert one more thing — that `worker.mjs` carried
+        `const RENDER_VIEWPORT_WIDTH = 640;` and applied it to the capture. PC-05
+        moved the viewport into the render request, because a catalog part is an
+        independent composition that declares its own stage, so those constants
+        were deleted. The two assertions then said the opposite of what
+        `frontend/tests/motion-render-canvas-per-render.test.mjs` says: that gate
+        asserts the Worker keeps *no* viewport constant of its own. Both were
+        left in place and this one went red, unnoticed, because this file is a
+        script rather than a pytest case and is not in the suite anyone runs.
+        The check the deleted assertions were doing now lives in that mjs gate;
+        what remains here is what only this contract can answer.
         """
         contract = json.loads(
             (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(
@@ -1269,15 +1313,6 @@ class RenderCanvasGateTests(unittest.TestCase):
         self.assertGreaterEqual(scale, 1)
         self.assertEqual(contract["outputWidth"], contract["width"] * scale)
         self.assertEqual(contract["outputHeight"], contract["height"] * scale)
-
-        source = (ROOT / "workers/motion_composition/worker.mjs").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn(
-            "deviceScaleFactor: RENDER_DEVICE_SCALE_FACTOR",
-            source,
-            "the worker declares a scale factor but never applies it to the capture",
-        )
 
     def test_check_accepts_a_composition_sized_to_the_capture_viewport(self) -> None:
         self.assertTrue(check_composition(VALID_COMPOSITION, duration_seconds=6).ok)

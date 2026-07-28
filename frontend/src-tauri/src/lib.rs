@@ -363,8 +363,17 @@ fn delete_material_video_artifact(
 const MOTION_VIDEO_WORKER_DIRECTORY: &str = "motion-video-worker";
 const PACKAGED_WORKER_SUBDIRECTORY: &str = "package";
 
+/// Where the installer puts the 134 packaged motion parts.
+///
+/// Declared in `release-package-resources.v1.json` as the `catalog` resource
+/// and asserted against it by the runtime tests, because this string is the
+/// only thing connecting a tree the release audit requires to a child process
+/// that cannot use parts it is never pointed at.
+pub const MOTION_CATALOG_DIRECTORY: &str = "motion-catalog";
+
 struct MotionRuntimePaths {
     worker_package: std::path::PathBuf,
+    catalog: std::path::PathBuf,
     browser: std::path::PathBuf,
     chromium_major: u32,
     toolchain: video_media_toolchain::VideoMediaToolchain,
@@ -403,6 +412,7 @@ fn motion_runtime_paths(
         worker_package: resource_directory
             .join(MOTION_VIDEO_WORKER_DIRECTORY)
             .join(PACKAGED_WORKER_SUBDIRECTORY),
+        catalog: resource_directory.join(MOTION_CATALOG_DIRECTORY),
         browser,
         chromium_major,
         toolchain,
@@ -522,7 +532,6 @@ fn start_motion_render(
 ) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
 {
     let render_job_id = prepared.render_job_id();
-    let allowed_assets = prepared.allowed_assets().to_vec();
     let (asset_root, _, _) =
         motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
     let discard = || {
@@ -556,18 +565,12 @@ fn start_motion_render(
         return Err(motion_video_studio::render_unavailable());
     }
     let initial = motion_video_studio::snapshot(workspaces, render_job_id)?;
-    let frame_count = prepared.frame_count();
-    let frames_per_second = prepared.frames_per_second();
+    let segments = prepared.segments().to_vec();
+    let film_canvas = prepared.film_canvas();
     let ffmpeg = runtime.toolchain.ffmpeg_path().to_path_buf();
+    let ffprobe = runtime.toolchain.ffprobe_path().to_path_buf();
     std::thread::spawn(move || {
-        run_motion_render_job(
-            app,
-            render_job_id,
-            allowed_assets,
-            frame_count,
-            frames_per_second,
-            ffmpeg,
-        );
+        run_motion_render_job(app, render_job_id, segments, film_canvas, ffmpeg, ffprobe);
     });
     Ok(initial)
 }
@@ -593,6 +596,37 @@ const MOTION_AUTHORING_DEADLINE: std::time::Duration = std::time::Duration::from
 /// Everything reported here is known on this side: an exit status, a budget we
 /// set, and whether the bytes handed back were readable. None of it repeats
 /// anything the model produced.
+/// The one authoring request, built in one place.
+///
+/// Separated from the command that sends it so the fields can be checked
+/// without a running App. What made that worth doing is `catalogRoot`: it was
+/// the field whose absence let the agent build an empty catalog, refuse every
+/// beat that chose a part, and fall back to the single built-in composition —
+/// PC-04's silence surviving one layer further along than anyone looked.
+pub fn motion_authoring_request(
+    work: &std::path::Path,
+    catalog_root: &std::path::Path,
+    request: &motion_video_studio::MotionVideoBriefRequest,
+    model_id: &str,
+    api_key: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "workspace": work,
+        "catalogRoot": catalog_root,
+        "brief": request.brief(),
+        "aspectRatio": request.aspect_ratio(),
+        "durationSeconds": request.duration_seconds(),
+        "language": request.language(),
+        "brandAssets": [],
+        "model": {
+            "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
+            "modelId": model_id,
+            "apiKey": api_key,
+        },
+    })
+}
+
 pub fn run_motion_authoring(
     entrypoint: &std::path::Path,
     request: &serde_json::Value,
@@ -736,20 +770,13 @@ async fn submit_motion_video_brief(
                 .map_err(|_| motion_video_studio::storage_unavailable())?;
             let answer = run_motion_authoring(
                 &entrypoint,
-                &serde_json::json!({
-                    "schemaVersion": 1,
-                    "workspace": work,
-                    "brief": request.brief(),
-                    "aspectRatio": request.aspect_ratio(),
-                    "durationSeconds": request.duration_seconds(),
-                    "language": request.language(),
-                    "brandAssets": [],
-                    "model": {
-                        "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
-                        "modelId": credential.model_id().as_str(),
-                        "apiKey": credential.api_key(),
-                    },
-                }),
+                &motion_authoring_request(
+                    &work,
+                    &runtime.catalog,
+                    &request,
+                    credential.model_id().as_str(),
+                    credential.api_key(),
+                ),
                 MOTION_AUTHORING_DEADLINE,
             )?;
             motion_video_studio::accept_authored_render_job(
@@ -789,91 +816,137 @@ enum MotionRenderStageFailure {
     StaticFilm,
 }
 
+/// Where the shots of a film wait between being encoded and being joined.
+///
+/// Under the workspace's output directory rather than its worker asset root:
+/// these are finished video files, and the asset root is what the render
+/// sandbox is pointed at. Removed once the film exists, on every path.
+const MOTION_SEGMENT_DIRECTORY: &str = "segments";
+
 fn run_motion_render_job(
     app: tauri::AppHandle,
     render_job_id: uuid::Uuid,
-    allowed_assets: Vec<String>,
-    frame_count: u32,
-    frames_per_second: u32,
+    segments: Vec<motion_video_studio::MotionRenderSegment>,
+    film_canvas: motion_video_studio::MotionFilmCanvas,
     ffmpeg: std::path::PathBuf,
+    ffprobe: std::path::PathBuf,
 ) {
     let workspaces = app.state::<video_job_workspace::VideoJobWorkspaceStore>();
     let orchestrator = app.state::<local_video_orchestrator::LocalVideoOrchestrator>();
     let outcome = (|| -> Result<(), MotionRenderStageFailure> {
-        if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
-            .map_err(|_| MotionRenderStageFailure::Render)?
-        {
-            return Err(MotionRenderStageFailure::Cancelled);
-        }
-        motion_video_studio::advance(
-            &workspaces,
-            render_job_id,
-            motion_video_studio::MotionRenderJobStatus::Rendering,
-            55,
-            None,
-            None,
-        )
-        .map_err(|_| MotionRenderStageFailure::Render)?;
-        let (work, _, _) = motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
-            .map_err(|_| MotionRenderStageFailure::Render)?;
-        // Wall clock and CPU seconds both follow the configured film length; a
-        // fixed budget would kill every film longer than the retired template.
-        let budget = motion_video_studio::render_sandbox_budget(frame_count)
-            .map_err(|_| MotionRenderStageFailure::Render)?;
-        let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
-            work.clone(),
-            motion_video_studio::MOTION_COMPOSITION_FILE.to_owned(),
-            // Resolved before the Worker is asked to render anything: a render
-            // that starts without a cancellation marker it recognises is one the
-            // user's cancel button cannot reach.
-            motion_video_studio::cancel_marker_file_name()
+        let (work, outputs, film) =
+            motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
+                .map_err(|_| MotionRenderStageFailure::Render)?;
+        let frames = work.join("frames");
+        let segment_directory = outputs.join(MOTION_SEGMENT_DIRECTORY);
+        std::fs::create_dir_all(&segment_directory)
+            .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        // One render per shot, and the shots are captured in order so the
+        // person watching the progress bar sees the film being made in the
+        // order they will watch it.
+        let mut encoded = Vec::with_capacity(segments.len());
+        let mut total_frames: u32 = 0;
+        for (index, segment) in segments.iter().enumerate() {
+            if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
                 .map_err(|_| MotionRenderStageFailure::Render)?
-                .to_owned(),
-            // The template's own stage: this render is `composition_template`
-            // output, whose type scale is written for it.
-            local_video_orchestrator::VideoWorkerRenderCanvas::new(
-                motion_video_studio::TEMPLATE_CANVAS_WIDTH,
-                motion_video_studio::TEMPLATE_CANVAS_HEIGHT,
-                motion_video_studio::TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
-            )
-            .map_err(|_| MotionRenderStageFailure::Render)?,
-            allowed_assets,
-            frame_count,
-            budget.wall_seconds(),
-            budget.cpu_seconds(),
-            2048,
-            256 * 1024 * 1024,
-        )
-        .map_err(|_| MotionRenderStageFailure::Render)?;
-        orchestrator
-            .render_sandbox(
-                local_video_orchestrator::VideoWorkerKind::Node,
+            {
+                return Err(MotionRenderStageFailure::Cancelled);
+            }
+            // Rendering occupies the range 5..85, divided among the shots. A
+            // film of nine shots that sat at one number until the last one
+            // finished would be indistinguishable from a stuck one.
+            let done = u8::try_from(5 + index * 80 / segments.len()).unwrap_or(55);
+            motion_video_studio::advance(
+                &workspaces,
                 render_job_id,
-                &request,
+                motion_video_studio::MotionRenderJobStatus::Rendering,
+                done,
+                None,
+                None,
             )
-            .map_err(|_| {
-                if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
-                    .unwrap_or(false)
-                {
-                    MotionRenderStageFailure::Cancelled
-                } else {
-                    MotionRenderStageFailure::Render
-                }
-            })?;
-        if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
-            .map_err(|_| MotionRenderStageFailure::Render)?
-        {
-            return Err(MotionRenderStageFailure::Cancelled);
-        }
-        // Between "the worker captured N frames" and "here is your video"
-        // this is the only check that can tell a film from a still image. A
-        // composition sized to the wrong stage, or one whose clips never take
-        // turns, reaches exactly this point with a full set of identical
-        // frames and every other signal green.
-        if motion_video_studio::rendered_film_is_static(&work.join("frames"), frame_count)
-            .map_err(|_| MotionRenderStageFailure::Render)?
-        {
-            return Err(MotionRenderStageFailure::StaticFilm);
+            .map_err(|_| MotionRenderStageFailure::Render)?;
+            // A shot left over from the previous one would be read by the
+            // still-frame gate and by the encoder's numbered-file pattern
+            // alike, so the capture directory starts empty every time.
+            let _ = std::fs::remove_dir_all(&frames);
+            // Wall clock and CPU seconds both follow this shot's length; a
+            // fixed budget would kill every shot longer than the retired
+            // template's three seconds.
+            let budget = motion_video_studio::render_sandbox_budget(segment.frame_count())
+                .map_err(|_| MotionRenderStageFailure::Render)?;
+            let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
+                work.clone(),
+                segment.entry_html().to_owned(),
+                // Resolved before the Worker is asked to render anything: a render
+                // that starts without a cancellation marker it recognises is one the
+                // user's cancel button cannot reach.
+                motion_video_studio::cancel_marker_file_name()
+                    .map_err(|_| MotionRenderStageFailure::Render)?
+                    .to_owned(),
+                // The stage this shot declares. A catalog part is an
+                // independent composition drawn for its own stage, and
+                // capturing it on the template's would capture the top-left
+                // corner of it.
+                local_video_orchestrator::VideoWorkerRenderCanvas::new(
+                    segment.width(),
+                    segment.height(),
+                    segment.device_scale_factor(),
+                )
+                .map_err(|_| MotionRenderStageFailure::Render)?,
+                segment.allowed_assets().to_vec(),
+                segment.frame_count(),
+                budget.wall_seconds(),
+                budget.cpu_seconds(),
+                2048,
+                256 * 1024 * 1024,
+            )
+            .map_err(|_| MotionRenderStageFailure::Render)?;
+            orchestrator
+                .render_sandbox(
+                    local_video_orchestrator::VideoWorkerKind::Node,
+                    render_job_id,
+                    &request,
+                )
+                .map_err(|_| {
+                    if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+                        .unwrap_or(false)
+                    {
+                        MotionRenderStageFailure::Cancelled
+                    } else {
+                        MotionRenderStageFailure::Render
+                    }
+                })?;
+            if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+                .map_err(|_| MotionRenderStageFailure::Render)?
+            {
+                return Err(MotionRenderStageFailure::Cancelled);
+            }
+            // Between "the worker captured N frames" and "here is your video"
+            // this is the only check that can tell a film from a still image. A
+            // composition sized to the wrong stage, or one whose clips never take
+            // turns, reaches exactly this point with a full set of identical
+            // frames and every other signal green. Asked per shot, because a
+            // film assembled from nine shots of which one never moved is nine
+            // times as easy to produce and reads exactly the same at the end.
+            if motion_video_studio::rendered_film_is_static(&frames, segment.frame_count())
+                .map_err(|_| MotionRenderStageFailure::Render)?
+            {
+                return Err(MotionRenderStageFailure::StaticFilm);
+            }
+            let encoded_segment = segment_directory.join(format!("segment-{index:03}.mp4"));
+            encode_motion_segment(
+                &workspaces,
+                render_job_id,
+                &ffmpeg,
+                &frames,
+                &encoded_segment,
+                &film_canvas,
+                segment.frame_count(),
+            )?;
+            total_frames = total_frames
+                .checked_add(segment.frame_count())
+                .ok_or(MotionRenderStageFailure::Encoding)?;
+            encoded.push(encoded_segment);
         }
         motion_video_studio::advance(
             &workspaces,
@@ -884,13 +957,15 @@ fn run_motion_render_job(
             None,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
-        encode_motion_video(
-            &workspaces,
-            render_job_id,
+        motion_video_studio::join_motion_film(
+            &encoded,
+            &film,
+            &film_canvas,
             &ffmpeg,
-            frame_count,
-            frames_per_second,
-        )?;
+            &ffprobe,
+            total_frames,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
         let artifact = motion_video_studio::import_rendered_output(&workspaces, render_job_id)
             .map_err(|_| MotionRenderStageFailure::Encoding)?;
         motion_video_studio::advance(
@@ -960,10 +1035,13 @@ fn run_motion_render_job(
             );
         }
     }
-    if let Ok((work, _, _)) =
+    if let Ok((work, outputs, _)) =
         motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
     {
         let _ = std::fs::remove_dir_all(work.join("frames"));
+        // The shots are an intermediate the film no longer needs, and a
+        // cancelled or failed run leaves as many of them as it got through.
+        let _ = std::fs::remove_dir_all(outputs.join(MOTION_SEGMENT_DIRECTORY));
     }
     if let Ok(workspace) = workspaces.open(render_job_id) {
         let _ = workspaces.finish(
@@ -973,48 +1051,31 @@ fn run_motion_render_job(
     }
 }
 
-fn encode_motion_video(
+/// Encode one captured shot onto the film's canvas, and wait for it here.
+///
+/// The waiting is why this stays in the render job rather than beside the
+/// arguments it runs: this is the loop that notices the user pressed stop, and
+/// kills FFmpeg and removes the half-written file before returning. A shot that
+/// outlives its deadline is treated the same way, because a file that FFmpeg was
+/// still writing is not a shot the join may pick up.
+fn encode_motion_segment(
     workspaces: &video_job_workspace::VideoJobWorkspaceStore,
     render_job_id: uuid::Uuid,
     ffmpeg: &std::path::Path,
+    frames_directory: &std::path::Path,
+    output: &std::path::Path,
+    canvas: &motion_video_studio::MotionFilmCanvas,
     frame_count: u32,
-    frames_per_second: u32,
 ) -> Result<(), MotionRenderStageFailure> {
-    let (work, _, output) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)
-        .map_err(|_| MotionRenderStageFailure::Encoding)?;
-    let input = work.join("frames").join("frame-%05d.png");
-    let frames_per_second = frames_per_second.to_string();
-    let frame_count_argument = frame_count.to_string();
-    let mut child = std::process::Command::new(ffmpeg)
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-y",
-            "-framerate",
-            &frames_per_second,
-            "-start_number",
-            "1",
-            "-i",
-        ])
-        .arg(&input)
-        .args([
-            "-frames:v",
-            &frame_count_argument,
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-        ])
-        .arg(&output)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+    let mut child = motion_video_studio::motion_segment_encode_command(
+        ffmpeg,
+        frames_directory,
+        output,
+        canvas,
+        frame_count,
+    )
+    .spawn()
+    .map_err(|_| MotionRenderStageFailure::Encoding)?;
     // Encoding six times the frames cannot share a fixed deadline either. The
     // derived render budget is the per-frame yardstick; the floor keeps the
     // shortest films on the deadline they already shipped with.
