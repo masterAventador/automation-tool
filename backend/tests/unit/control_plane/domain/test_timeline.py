@@ -8,6 +8,7 @@ from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 from automation_tool.control_plane.domain.timeline import (
     MAX_CLIP_TEXT_CHARACTERS,
+    MAX_CLIPS_PER_TRACK,
     MAX_GAIN_DB,
     MAX_TIMELINE_DURATION_MS,
     MAX_TRANSITION_DURATION_MS,
@@ -268,6 +269,24 @@ def test_a_visual_track_runs_end_to_end_from_zero() -> None:
     track = _visual_track()
     assert track.clips[0].start_ms == 0
     assert track.clips[1].start_ms == track.clips[0].end_ms
+
+
+def test_a_still_image_is_welcome_on_the_visual_track() -> None:
+    """A still image (a material with no source window) is a first-class
+    visual clip — the picture lane's shape rule only cares about level and
+    text, not whether a window is present."""
+    track = _visual_track(
+        clips=(
+            _media_clip(
+                clip_id="visual-1",
+                start_ms=0,
+                duration_ms=2_000,
+                source_in_ms=None,
+                source_out_ms=None,
+            ),
+        )
+    )
+    assert track.clips[0].source_in_ms is None
 
 
 def test_a_visual_track_refuses_a_gap_that_would_render_as_black() -> None:
@@ -623,3 +642,20 @@ def test_a_track_refuses_two_clips_with_the_same_id() -> None:
                 ),
             )
         )
+
+
+def _caption_chain(count: int) -> tuple[TimelineClip, ...]:
+    """`count` non-overlapping caption clips, 2ms apart, for boundary tests."""
+    return tuple(
+        _caption_clip(clip_id=f"c{i}", start_ms=i * 2, duration_ms=1) for i in range(count)
+    )
+
+
+def test_max_clips_per_track_boundary_is_inclusive() -> None:
+    track = TimelineTrack("caption", TimelineTrackKind.CAPTION, _caption_chain(MAX_CLIPS_PER_TRACK))
+    assert len(track.clips) == MAX_CLIPS_PER_TRACK
+
+
+def test_more_than_max_clips_per_track_is_rejected() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack("caption", TimelineTrackKind.CAPTION, _caption_chain(MAX_CLIPS_PER_TRACK + 1))
