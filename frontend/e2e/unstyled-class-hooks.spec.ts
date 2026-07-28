@@ -1,7 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { openVideoEditing } from "./navigation";
-import { MINIMUM_WINDOW, PRODUCTION_WINDOW } from "./production-window";
 
 /**
  * Class names that were written in the JSX and never given a rule.
@@ -14,24 +13,16 @@ import { MINIMUM_WINDOW, PRODUCTION_WINDOW } from "./production-window";
  * only on screen, at a real window size.
  *
  * A sweep of every `className` string under `src/` against `global.css` at
- * 1280x800 and 960x640 turned up two that actually change what the operator
- * sees. Both are pinned below. The rest of the unmatched names — `.legal-notice-item`,
+ * 1280x800 and 960x640 turned up two that actually changed what the operator
+ * saw. One was the 视频剪辑服务 credential form's fields; LE-01 deleted that
+ * form along with the Aliyun route it configured, so the assertions pinning it
+ * went with it. The other — the timeline clip row's 转场 dropdown — is still
+ * pinned below. The rest of the unmatched names — `.legal-notice-item`,
  * `.model-service-settings-card`, `.video-editing-create-form`,
  * `.video-editing-project-row` and friends — were measured too and are correct
  * without a rule, because a `Card`, a `<section>` and a block-level `<li>` fill
  * their parent unaided. Those are spare hooks, not defects, and are deliberately
  * not asserted here.
- *
- * Both window sizes come from `production-window.ts`, which reads them out of
- * `src-tauri/tauri.conf.json` — the file Tauri itself reads. Neither number is
- * written here. Copying them is what broke the baseline once already (T96): the
- * shared config said 800 while every spec ran at 720, so the numbers in the
- * headers were not the numbers the assertions ran against.
- *
- * `PRODUCTION_WINDOW` is already what the shared config hands every spec. The
- * credential-form describe still names it, because it runs the same body at both
- * sizes and the size is what distinguishes the two runs; the clip-row describe
- * below takes the config's word for it and asks for nothing.
  */
 
 const HARNESS = "/harness.html?health=available";
@@ -40,112 +31,6 @@ const SOURCE_ARTIFACTS = [
   "6f1a2b3c-4d5e-4f60-8a1b-2c3d4e5f6071",
   "7a2b3c4d-5e6f-4071-9b2c-3d4e5f607182",
 ];
-
-async function openSettings(page: Page): Promise<void> {
-  await page.goto(HARNESS);
-  await page.getByRole("menuitem", { name: "设置" }).click();
-  await expect(page.getByRole("heading", { name: "剪辑服务凭据" })).toBeVisible();
-}
-
-/**
- * Width of an element and of the content box of the element it sits in.
- *
- * Both, because widening only the outer container is worse than widening
- * nothing: on 视频剪辑 that produced a full-width card with its right half
- * blank, which passed an outer-width assertion while looking wrong on screen.
- * Every level from the card body down to the individual field is checked.
- */
-function fitsInParent(page: Page, selector: string) {
-  return page.locator(selector).evaluate((element) => {
-    const parent = element.parentElement;
-    if (parent === null) {
-      throw new Error(`${element.className} 没有父元素`);
-    }
-    const style = getComputedStyle(parent);
-    return {
-      width: Math.round(element.getBoundingClientRect().width),
-      parent: Math.round(
-        parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-      ),
-    };
-  });
-}
-
-async function expectFillsItsParent(page: Page, selector: string, label: string): Promise<void> {
-  const { width, parent } = await fitsInParent(page, selector);
-  expect(width, `${label}：${selector} 只用了它拿到的 ${parent}px 中的 ${width}px`).toBeGreaterThanOrEqual(
-    parent - 1,
-  );
-}
-
-/**
- * 视频剪辑服务 credential form.
- *
- * It sits directly under 模型服务 on the same page and is built the same way —
- * a `Card`, a vertical `Space`, a `<section>`, an inner vertical `Space` of
- * `<label>`s wrapping a `Select` and two `Input`s. 模型服务 declares
- * `.model-service-settings-stack`, `.model-service-fields`,
- * `.model-service-fields label`, `.model-service-fields .ant-select` and
- * `.model-service-fields .ant-input-password`; 视频剪辑服务 declares nothing at
- * all, so its inner `Space` shrink-wrapped to 358px of a 942px card and the
- * region `Select` fell back to antd's own 134px. Two cards, one page, one at
- * full width and one at a third of it.
- */
-for (const size of [PRODUCTION_WINDOW, MINIMUM_WINDOW]) {
-  test.describe(`视频剪辑服务凭据表单填满它的卡片 @ ${size.width}x${size.height}`, () => {
-    test.use({ viewport: size });
-
-    test("表单每一层都填满上一层", async ({ page }) => {
-      await openSettings(page);
-
-      await expectFillsItsParent(page, ".video-editing-service-stack", "视频剪辑服务");
-      await expectFillsItsParent(page, ".video-editing-service-fields", "视频剪辑服务");
-      await expectFillsItsParent(page, ".video-editing-service-inputs", "视频剪辑服务");
-    });
-
-    test("地域下拉和密钥输入框填满表单", async ({ page }) => {
-      await openSettings(page);
-
-      const form = await page
-        .locator(".video-editing-service-inputs")
-        .evaluate((element) => Math.round(element.getBoundingClientRect().width));
-
-      for (const [selector, name] of [
-        [".video-editing-service-inputs .ant-select", "服务地域下拉"],
-        [".video-editing-service-inputs .ant-input-password", "AccessKey Secret 输入框"],
-      ] as const) {
-        const width = await page
-          .locator(selector)
-          .first()
-          .evaluate((element) => Math.round(element.getBoundingClientRect().width));
-        expect(width, `视频剪辑服务：${name}只用了表单 ${form}px 中的 ${width}px`).toBeGreaterThanOrEqual(
-          form - 1,
-        );
-      }
-    });
-
-    test("和同一页的模型服务表单一样宽", async ({ page }) => {
-      await openSettings(page);
-
-      const widths = await page.evaluate(() => {
-        const widthOf = (selector: string): number => {
-          const element = document.querySelector(selector);
-          return element === null ? -1 : Math.round(element.getBoundingClientRect().width);
-        };
-        return {
-          model: widthOf(".model-service-fields"),
-          editing: widthOf(".video-editing-service-inputs"),
-        };
-      });
-
-      expect(widths.model, "设置页上找不到模型服务表单").toBeGreaterThan(0);
-      expect(
-        widths.editing,
-        `同一页的两张凭据卡不一样宽：模型服务 ${widths.model}px，视频剪辑服务 ${widths.editing}px`,
-      ).toBe(widths.model);
-    });
-  });
-}
 
 /**
  * The 转场 control in a timeline clip row.

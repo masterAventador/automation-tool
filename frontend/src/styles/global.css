@@ -189,31 +189,6 @@ body {
   align-items: center;
 }
 
-/* 视频剪辑服务 sits directly under 模型服务 on 设置与诊断 and is built the same
-   way — a `Card`, a vertical `Space`, a `<section>`, then an inner `Space` of
-   `<label>`s around a `Select` and two `Input`s. 模型服务 declares every level of
-   that above; 视频剪辑服务 declared none, so its inner `Space` kept `inline-flex`
-   and shrink-wrapped to 358px of a 942px card while the region `Select` fell
-   back to antd's own 134px. Two credential cards on one page, one full width and
-   one at a third of it. Measured at 1280x800 and at the 960x640 minimum window;
-   see `e2e/unstyled-class-hooks.spec.ts`.
-
-   `.video-editing-service-stack` and `.video-editing-service-fields` are not
-   listed: the first is held open by the long paragraph it wraps and the second
-   is a block-level `<section>`, so both already measure the full 942px. That is
-   incidental rather than declared for the stack, and it is noted in T88b. */
-.video-editing-service-inputs,
-.video-editing-service-inputs label,
-.video-editing-service-inputs .ant-select,
-.video-editing-service-inputs .ant-input-password {
-  width: 100%;
-}
-
-.video-editing-service-inputs label {
-  display: grid;
-  gap: 8px;
-}
-
 .video-studio {
   margin-top: 20px;
 }

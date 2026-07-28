@@ -80,7 +80,6 @@ const REQUIRED_TAURI_PROPS = [
   "platformSessionGateway",
   "appUpdateGateway",
   "modelServiceGateway",
-  "videoEditingServiceGateway",
   "materialVideoStudioGateway",
   "publishWorkspaceGateway",
 ] as const;
