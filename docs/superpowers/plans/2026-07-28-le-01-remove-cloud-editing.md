@@ -474,11 +474,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise NotImplementedError(
-        "LE-01 dropped the cloud-editing route; recreating these tables would "
-        "resurrect a vendor layer no product path reaches."
-    )
+    # 逐字照抄 20260723_0032 与 20260723_0034 的 upgrade() 建表语句，
+    # 建表顺序与 upgrade 的删除顺序相反：先建被引用的两张，最后建持有
+    # 外键的 editing_output_artifacts。
+    ...
 ```
+
+**`downgrade()` 必须真正重建三张表，不允许抛异常。** 这一条是踩过坑改的：最初写成 `raise NotImplementedError`，理由是"重建等于让供应商层复活"。那个理由不成立——downgrade 只重建表结构，消费它们的代码早已删除，空表不会复活任何东西。而代价是实打实的：`0035` 成为 head 后，**任何 downgrade 路径的第一步都是执行它**，于是 `pytest tests/integration` 出现 **25 failed**，其中 22 个是 `alembic downgrade` 直接失败（退到 base、退到 `20260722_0029`、退到 `20260721_0023` …）。
+
+这些错误在 pytest 输出里只显示为 `subprocess.CalledProcessError`，因为 `alembic_runner` 用 `subprocess.run(check=True, capture_output=True)` 把真实异常吞掉了——**grep `NotImplementedError` 是搜不到的**，只能从失败的命令名反推。
+
+迁移可逆性是这个项目的基础设施契约，二十多个集成测试靠它验证，不能为语义洁癖打穿。
 
 - [ ] **Step 5: 写集成测试，对真实 PostgreSQL 验证迁移**
 
@@ -534,13 +540,19 @@ async def test_migrations_leave_no_cloud_editing_tables(
 
 `AlembicRunner` 的导入路径与 fixture 用法参照现有的 `backend/tests/integration/test_account_device_lifecycle.py:106-112`——若该文件从别处导入 `AlembicRunner`，照它的写法来。
 
-- [ ] **Step 6: 运行集成测试**
+- [ ] **Step 6: 运行完整集成套件（不只是新写的那个）**
+
+**新增迁移会把 alembic head 往前推，任何断言 head 的既有测试都会被牵动。** 只跑自己新写的测试看不到这个——必须跑全套：
 
 ```bash
-cd backend && .venv/bin/python -m pytest tests/integration/test_cloud_editing_tables_dropped.py -v
+cd backend && .venv/bin/python -m pytest tests/integration -q
 ```
 
-Expected: PASS。首次运行会拉起 PostgreSQL 容器，`postgres:18.4-bookworm` 镜像本机已缓存，不需要联网拉取。
+Expected: 全绿。若 `test_database_baseline.py` 报 `assert '20260728_0035' == '20260723_0034'`，说明该文件硬编码了旧 head；**修法是改用共享的 `alembic_head.HEAD_REVISION`**（其余 14 个集成测试都这么做，且该 helper 的 docstring 明确警告过「在每个测试里硬编码 head，会让每条新迁移悄悄弄坏一批不相关的测试」），而不是把字面量改成新值——那样只是把陷阱重新上膛。
+
+顺带 grep 整个 `backend/` 确认没有别处硬编码迁移版本号。
+
+首次运行会拉起 PostgreSQL 容器，`postgres:18.4-bookworm` 镜像本机已缓存，不需要联网拉取。
 
 测试结束后确认容器已被 fixture 清理：
 
