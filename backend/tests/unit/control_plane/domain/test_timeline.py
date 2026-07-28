@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -688,6 +688,48 @@ def test_a_timeline_refuses_to_claim_a_length_its_picture_does_not_fill() -> Non
         _timeline(duration_ms=5_000)
 
 
+def test_timeline_duration_boundaries_are_inclusive() -> None:
+    minimal = _timeline(
+        duration_ms=MIN_TIMELINE_DURATION_MS,
+        tracks=(
+            TimelineTrack(
+                "visual",
+                TimelineTrackKind.VISUAL,
+                (
+                    _media_clip(
+                        clip_id="visual-1",
+                        start_ms=0,
+                        duration_ms=MIN_TIMELINE_DURATION_MS,
+                        source_in_ms=0,
+                        source_out_ms=MIN_TIMELINE_DURATION_MS,
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert minimal.duration_ms == MIN_TIMELINE_DURATION_MS
+
+    maximal = _timeline(
+        duration_ms=MAX_TIMELINE_DURATION_MS,
+        tracks=(
+            TimelineTrack(
+                "visual",
+                TimelineTrackKind.VISUAL,
+                (
+                    _media_clip(
+                        clip_id="visual-1",
+                        start_ms=0,
+                        duration_ms=MAX_TIMELINE_DURATION_MS,
+                        source_in_ms=None,
+                        source_out_ms=None,
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert maximal.duration_ms == MAX_TIMELINE_DURATION_MS
+
+
 def test_a_timeline_without_a_picture_lane_is_not_a_film() -> None:
     with pytest.raises(InvalidTimelineModel):
         _timeline(
@@ -766,6 +808,14 @@ def test_a_full_timeline_carries_picture_narration_ambient_music_and_captions() 
         )
     )
     assert len(timeline.tracks) == len(TimelineTrackKind)
+    music_track = timeline.track_of(TimelineTrackKind.MUSIC)
+    assert music_track is not None
+    assert music_track.track_id == "music"
+
+
+def test_track_of_returns_none_for_a_lane_that_is_absent() -> None:
+    """`_timeline()`'s default carries only the picture lane."""
+    assert _timeline().track_of(TimelineTrackKind.MUSIC) is None
 
 
 def test_nothing_may_run_past_the_end_of_the_film() -> None:
@@ -806,8 +856,18 @@ def test_nothing_may_run_past_the_end_of_the_film() -> None:
         ("duration_ms", 7_000.0),
         ("tracks", ()),
         ("tracks", [_visual_track()]),
+        # A tuple is the right container, but the element inside it is not a
+        # TimelineTrack: without this guard, `{track.track_id for track in
+        # self.tracks}` would raise AttributeError instead of the domain's own
+        # InvalidTimelineModel, leaking an implementation detail.
+        ("tracks", ("not-a-track",)),
         ("created_at", datetime(2026, 7, 29, 10, 0)),
         ("created_at", "2026-07-29T10:00:00Z"),
+        # Timezone-aware but not UTC: the only prior tzinfo case in this file is
+        # UTC itself, so `value.utcoffset() != UTC.utcoffset(value)` has never
+        # fired. This is the value actually likely to slip in from a UTC+8
+        # dev machine, not a naive datetime or a string.
+        ("created_at", datetime(2026, 7, 29, 10, 0, tzinfo=timezone(timedelta(hours=8)))),
     ],
 )
 def test_timeline_structural_bounds_fail_closed(field: str, value: object) -> None:
