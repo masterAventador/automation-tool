@@ -40,7 +40,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | 🚧 实现中 |
+| LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | ✅ 已完成 |
 | LE-03 | Timeline 重写 | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例 | LE-02 | ⬜ 未开始 |
 | LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念 | LE-03 | ⬜ 未开始 |
 
@@ -48,7 +48,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行 | LE-04 | ⬜ 未开始 |
+| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。仿 `backend/tests/unit/executor/test_shipped_package_boundary.py` 的 AST 做法，禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它 | LE-04 | ⬜ 未开始 |
 | LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由：项目 CRUD、素材登记与查询、时间轴保存与修订、任务提交与查询；FastAPI 真实起服务的契约测试 | LE-05 | ⬜ 未开始 |
 
 ### 3.4 本地渲染引擎（6 项）
@@ -99,14 +99,14 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：1
+- ✅ 已完成：2
 - 🔍 待验收：0
-- 🧪 RED / 🚧 实现中：1
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：22
 
 ## 5. 当前下一步
 
-**LE-02 Material 素材库领域对象。** LE-01 已完成，后续所有领域层重写都建立在 LE-02 之上。
+**LE-03 Timeline 重写。** LE-02 已完成，`TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`，`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption，首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 
