@@ -410,9 +410,19 @@ sed -n '2340,2465p' backend/src/automation_tool/control_plane/infrastructure/dat
 
 记下 `aliyun_editing_intents = Table(` 起始行到 `editing_output_lineages` 定义结束行（含其后的 `Index(...)` 声明）。
 
-- [ ] **Step 2: 从 schema.py 删除两张表及其索引**
+- [ ] **Step 2: 从 schema.py 删除三张表及其索引**
 
-删除 `aliyun_editing_intents` 的 `Table(...)` 定义、其 `Index("ux_aliyun_editing_intents_vendor_job_id", ...)`，以及 `editing_output_lineages` 的 `Table(...)` 定义与其全部 `Index` 声明。保留文件中其他表不动。
+删除以下三张表的 `Table(...)` 定义与附带的全部 `Index` 声明，保留文件中其他表不动：
+
+| 表 | 来源迁移 | 为什么删 |
+| --- | --- | --- |
+| `aliyun_editing_intents` | `20260723_0032` | 阿里云剪辑意图 |
+| `editing_output_lineages` | `20260723_0034` | 云剪辑成片谱系 |
+| `editing_output_artifacts` | `20260723_0034` | **与 lineages 同一迁移创建的一对表**；唯一消费者 `editing_output_ledger_repository.py` 已在 Task 2 删除，代码层零引用；其 `kind`/`media_type`/`position`/`sha256_hex` 与 CheckConstraint 是按云剪辑成片形态设计的，LE-05 按新领域模型重建，不复用它 |
+
+**注意 `editing_output_artifacts` 有一个指向 `editing_output_lineages` 的外键。** 三张一起删就不需要 `drop_constraint`——只要在迁移里先删引用方。若只删两张而保留 artifacts，会得到一张无人使用且外键被剥掉的孤儿表，那是债不是修复。
+
+删完后重新确认 `ForeignKey` / `Numeric` / `ARRAY` 等导入是否仍被其他存活的表使用，**用 grep 确认而不是凭记忆**，只删真正不再使用的。
 
 - [ ] **Step 3: 先验证 xfail 触发器，再移除标记**
 
@@ -458,6 +468,7 @@ depends_on: None = None
 
 
 def upgrade() -> None:
+    op.drop_table("editing_output_artifacts")
     op.drop_table("editing_output_lineages")
     op.drop_table("aliyun_editing_intents")
 
@@ -493,7 +504,11 @@ from automation_tool.control_plane.infrastructure.database.session import Databa
 
 from .conftest import AlembicRunner
 
-_REMOVED_TABLES = ("aliyun_editing_intents", "editing_output_lineages")
+_REMOVED_TABLES = (
+    "aliyun_editing_intents",
+    "editing_output_lineages",
+    "editing_output_artifacts",
+)
 
 
 @pytest.mark.asyncio
