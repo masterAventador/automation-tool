@@ -684,13 +684,26 @@ git rm frontend/src-tauri/src/video_editing_service_settings.rs \
 5. 第 259-306 行：4 个 `#[tauri::command]` 函数定义
 6. 第 35 行：`pub mod video_editing_service_settings;`
 
-- [ ] **Step 3: 检查验收诚实性测试是否引用了已删脚本**
+- [ ] **Step 3: 清理 `acceptance_gate_honesty.rs` 的豁免条目**
 
-```bash
-grep -n "video_editing\|ve_03\|ve_04" frontend/src-tauri/tests/acceptance_gate_honesty.rs
+该文件是"门禁的门禁"——它扫描会静默跳过的测试，防止有人把 `#[ignore]` 加上却不让 driver 选中它，从而把验收跑成一场无声的空转。它的 `UNFIXED_SILENT_SKIPS` 是豁免清单，其中两条指向本任务要删除的文件：
+
+```rust
+const UNFIXED_SILENT_SKIPS: &[(&str, &str)] = &[
+    ("video_editing_service_settings_real.rs", "real_gateway_accepts_production_signature"),
+    ("video_editing_service_settings_real.rs", "real_gateway_rejects_tampered_secret_with_sanitized_error"),
+];
 ```
 
-若有条目指向 `run_ve_03_acceptance.py` / `run_ve_04_acceptance.py`，一并移除（脚本本身在 Task 6 删除）。
+**两条都要删掉**，文件都不存在了，豁免自然失去对象。
+
+这不是可做可不做的收尾。`CLAUDE.md §9.1` 点名过这类豁免机制的通病：**清单里留着已不存在的文件，会让它慢慢腐烂成一张万能通行证——往里加个名字就能绕过**。项目里已经有两处同类清单（`acceptance-evidence-depth.v1.json`、`single_build_path.rs` 的 `REVIEWED_` 前缀清单）由测试守着不许出现幽灵条目，这里是第三处。
+
+顺带确认该文件是否还引用 `run_ve_03_acceptance.py` / `run_ve_04_acceptance.py`（脚本本身由 Task 6 删除）：
+
+```bash
+grep -n "video_editing\|ve_03\|ve_04\|run_ve" frontend/src-tauri/tests/acceptance_gate_honesty.rs
+```
 
 - [ ] **Step 4: 编译并跑 Rust 测试**
 
