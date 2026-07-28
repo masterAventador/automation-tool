@@ -221,6 +221,26 @@ def test_image_carries_no_shot_boundaries() -> None:
         _video(kind=MaterialKind.IMAGE, duration_ms=None, shot_boundaries_ms=(0,))
 
 
+def test_audio_material_with_audio_is_accepted() -> None:
+    material = _video(kind=MaterialKind.AUDIO, has_audio=True)
+    assert material.kind is MaterialKind.AUDIO
+    assert material.has_audio is True
+
+
+def test_audio_without_audio_is_rejected() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(kind=MaterialKind.AUDIO, has_audio=False)
+
+
+def test_audio_carries_no_shot_boundaries() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            kind=MaterialKind.AUDIO,
+            has_audio=True,
+            shot_boundaries_ms=(0, 4_000),
+        )
+
+
 def test_a_fresh_material_has_no_description() -> None:
     material = _video()
     assert material.ai_description is None
@@ -306,3 +326,17 @@ def test_user_description_clears_any_existing_ai_tags() -> None:
     described = _video().with_ai_description("说明", ("室内", "人物"), stamped)
     edited = described.with_user_description("我自己写的说明")
     assert edited.ai_tags == ()
+
+
+def test_user_description_must_not_be_empty() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(ai_description=None, description_source=DescriptionSource.USER)
+
+
+def test_user_description_must_not_carry_ai_tags() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            ai_description="我自己写的说明",
+            ai_tags=("室内",),
+            description_source=DescriptionSource.USER,
+        )

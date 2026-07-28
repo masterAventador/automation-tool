@@ -125,6 +125,8 @@ class Material:
             _reject()
         if self.kind is MaterialKind.IMAGE and self.has_audio:
             _reject()
+        if self.kind is MaterialKind.AUDIO and not self.has_audio:
+            _reject()
         if not self.has_audio:
             if self.audio_loudness_lufs is not None or self.has_speech:
                 _reject()
@@ -162,6 +164,8 @@ class Material:
             _reject()
         if not self.shot_boundaries_ms:
             return
+        if self.kind is MaterialKind.AUDIO:
+            _reject()
         if self.duration_ms is None or len(self.shot_boundaries_ms) > MAX_SHOT_BOUNDARIES:
             _reject()
         previous = -1
@@ -197,6 +201,10 @@ class Material:
         ):
             _reject()
         if self.description_source is DescriptionSource.USER and self.described_at is not None:
+            _reject()
+        if self.description_source is DescriptionSource.USER and self.ai_description is None:
+            _reject()
+        if self.description_source is DescriptionSource.USER and self.ai_tags:
             _reject()
 
     def with_ai_description(
