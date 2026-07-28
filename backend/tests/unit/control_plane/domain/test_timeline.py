@@ -355,6 +355,77 @@ def test_a_transition_cannot_swallow_either_clip_whole() -> None:
         )
 
 
+def test_a_transition_chain_cannot_swallow_a_clip_between_two_others() -> None:
+    """Two back-to-back transitions can eat a clip whole even when neither
+    one alone reaches the *original* duration of its immediate neighbour.
+
+    `visual-2` is 1000ms. The incoming transition from `visual-1` eats 999ms
+    of its head; the incoming transition into `visual-3` eats 999ms of its
+    tail. Those two eaten stretches overlap almost completely, so `visual-2`
+    never plays a single frame on its own — checking each transition only
+    against the previous clip's raw `duration_ms` cannot see this, because
+    the previous clip's *own* incoming transition already claimed part of
+    that duration.
+    """
+    with pytest.raises(InvalidTimelineModel):
+        _visual_track(
+            clips=(
+                _media_clip(
+                    clip_id="visual-1",
+                    start_ms=0,
+                    duration_ms=1_000,
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                ),
+                _media_clip(
+                    clip_id="visual-2",
+                    start_ms=1,
+                    duration_ms=1_000,
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                    transition_in=TimelineTransition(TransitionKind.DISSOLVE, 999),
+                ),
+                _media_clip(
+                    clip_id="visual-3",
+                    start_ms=2,
+                    duration_ms=1_000,
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                    transition_in=TimelineTransition(TransitionKind.DISSOLVE, 999),
+                ),
+            )
+        )
+
+
+def test_a_legitimate_transition_chain_is_still_accepted() -> None:
+    """The accepting counterpart to the chain-swallow rejection above: two
+    chained transitions are fine as long as neither exhausts the tail the
+    previous transition already left behind.
+    """
+    track = _visual_track(
+        clips=(
+            _media_clip(clip_id="visual-1", start_ms=0, duration_ms=3_000),
+            _media_clip(
+                clip_id="visual-2",
+                start_ms=2_200,
+                duration_ms=4_000,
+                source_in_ms=0,
+                source_out_ms=4_000,
+                transition_in=TimelineTransition(TransitionKind.DISSOLVE, 800),
+            ),
+            _media_clip(
+                clip_id="visual-3",
+                start_ms=5_400,
+                duration_ms=2_000,
+                source_in_ms=0,
+                source_out_ms=2_000,
+                transition_in=TimelineTransition(TransitionKind.DISSOLVE, 800),
+            ),
+        )
+    )
+    assert track.clips[-1].end_ms == 7_400
+
+
 def test_the_first_clip_has_nothing_to_transition_from() -> None:
     with pytest.raises(InvalidTimelineModel):
         _visual_track(

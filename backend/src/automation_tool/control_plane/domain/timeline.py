@@ -256,8 +256,8 @@ class TimelineTrack:
         own duration stops matching the film it describes.
         """
         previous_end = 0
-        previous_duration = 0
-        for index, clip in enumerate(self.clips):
+        previous_tail = 0
+        for clip in self.clips:
             if self.kind is not TimelineTrackKind.VISUAL:
                 if clip.start_ms < previous_end:
                     _reject()
@@ -266,13 +266,20 @@ class TimelineTrack:
                 overlap = 0 if transition is None else transition.duration_ms
                 # `TimelineClip` already refuses a transition that would swallow
                 # the incoming clip. Only the outgoing one needs a neighbour to
-                # judge, so only that half lives here.
-                if transition is not None and (index == 0 or overlap >= previous_duration):
+                # judge, so only that half lives here — against its *remaining*
+                # tail, not its raw `duration_ms`: an earlier transition may
+                # already have eaten into it, and checking the raw duration
+                # would let a second transition eat the same stretch twice,
+                # swallowing the clip between them whole. The first clip has
+                # no neighbour of its own: `previous_tail` starts at 0 and a
+                # real transition is at least 1ms, so `overlap >= previous_tail`
+                # already rejects it without a separate index check.
+                if transition is not None and overlap >= previous_tail:
                     _reject()
                 if clip.start_ms != previous_end - overlap:
                     _reject()
+                previous_tail = clip.duration_ms - overlap
             previous_end = clip.end_ms
-            previous_duration = clip.duration_ms
 
     @property
     def end_ms(self) -> int:
