@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, Never, final
 
@@ -54,3 +55,37 @@ class DescriptionSource(StrEnum):
 
 def _reject() -> Never:
     raise InvalidMaterialModel
+
+
+@dataclass(frozen=True, slots=True)
+class Material:
+    """One imported source file and everything probing has learned about it."""
+
+    material_id: MaterialId
+    kind: MaterialKind
+    duration_ms: int | None
+    width: int
+    height: int
+    content_digest: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.material_id, MaterialId)
+            or not isinstance(self.kind, MaterialKind)
+            or type(self.width) is not int
+            or not 1 <= self.width <= MAX_MATERIAL_DIMENSION
+            or type(self.height) is not int
+            or not 1 <= self.height <= MAX_MATERIAL_DIMENSION
+            or not isinstance(self.content_digest, str)
+            or _SHA256_PATTERN.fullmatch(self.content_digest) is None
+        ):
+            _reject()
+        self._validate_duration()
+
+    def _validate_duration(self) -> None:
+        if self.kind is MaterialKind.IMAGE:
+            if self.duration_ms is not None:
+                _reject()
+            return
+        if type(self.duration_ms) is not int or not 1 <= self.duration_ms <= MAX_MATERIAL_DURATION_MS:
+            _reject()
