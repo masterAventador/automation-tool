@@ -119,8 +119,8 @@ class Material:
     material_id: MaterialId
     kind: MaterialKind              # video / image / audio
     duration_ms: int | None         # 图片为 None
-    width: int
-    height: int
+    width: int | None               # 音频为 None
+    height: int | None              # 音频为 None
     content_digest: str             # 去重
     has_audio: bool                 # silencedetect 探测结果
     audio_loudness_lufs: float | None
@@ -130,6 +130,7 @@ class Material:
     shot_boundaries_ms: tuple[int, ...]   # 场景检测结果，兼作可切点
     ai_description: str | None      # AI 生成，用户可改
     ai_tags: tuple[str, ...]
+    description_source: DescriptionSource   # AI 生成还是用户已改，防止 AI 覆盖用户编辑
     described_at: datetime | None
 ```
 

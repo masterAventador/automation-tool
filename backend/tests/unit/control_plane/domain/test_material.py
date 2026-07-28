@@ -276,25 +276,19 @@ def test_image_carries_no_shot_boundaries() -> None:
 
 
 def test_audio_material_with_audio_is_accepted() -> None:
-    material = _video(kind=MaterialKind.AUDIO, width=None, height=None, has_audio=True)
+    material = _audio()
     assert material.kind is MaterialKind.AUDIO
     assert material.has_audio is True
 
 
 def test_audio_without_audio_is_rejected() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video(kind=MaterialKind.AUDIO, width=None, height=None, has_audio=False)
+        _audio(has_audio=False, audio_loudness_lufs=None)
 
 
 def test_audio_carries_no_shot_boundaries() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video(
-            kind=MaterialKind.AUDIO,
-            width=None,
-            height=None,
-            has_audio=True,
-            shot_boundaries_ms=(0, 4_000),
-        )
+        _audio(shot_boundaries_ms=(0, 4_000))
 
 
 def test_a_fresh_material_has_no_description() -> None:
