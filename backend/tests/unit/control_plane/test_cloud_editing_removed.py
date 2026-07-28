@@ -33,6 +33,16 @@ _DOMAIN_PACKAGE = "automation_tool.control_plane.domain"
 _DATABASE_PACKAGE = "automation_tool.control_plane.infrastructure.database"
 
 
+def test_parent_packages_still_import() -> None:
+    """The module guards below assert ModuleNotFoundError. A broken parent
+    package raises exactly that too, so without this check those guards could
+    go green because the package itself stopped importing — the opposite of
+    what they are meant to prove.
+    """
+    importlib.import_module(_DOMAIN_PACKAGE)
+    importlib.import_module(_DATABASE_PACKAGE)
+
+
 @pytest.mark.parametrize("module_name", _REMOVED_DOMAIN_MODULES)
 def test_cloud_editing_domain_module_is_gone(module_name: str) -> None:
     with pytest.raises(ModuleNotFoundError):
