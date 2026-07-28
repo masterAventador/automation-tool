@@ -414,13 +414,21 @@ sed -n '2340,2465p' backend/src/automation_tool/control_plane/infrastructure/dat
 
 删除 `aliyun_editing_intents` 的 `Table(...)` 定义、其 `Index("ux_aliyun_editing_intents_vendor_job_id", ...)`，以及 `editing_output_lineages` 的 `Table(...)` 定义与其全部 `Index` 声明。保留文件中其他表不动。
 
-- [ ] **Step 3: 运行 schema 守卫用例，确认转绿**
+- [ ] **Step 3: 先验证 xfail 触发器，再移除标记**
+
+`test_schema_declares_no_cloud_editing_tables` 目前带 `@pytest.mark.xfail(strict=True)`，因为在 Task 3 之前它必然失败。现在表删了，它会开始通过——`xfail_strict` 会把这个 XPASS 变成硬失败。**这是有意设计的提醒**，先跑一次看它触发：
 
 ```bash
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py::test_schema_declares_no_cloud_editing_tables -v
 ```
 
+Expected: FAILED，原因是 `XPASS(strict)`。若它报的是普通 FAILED（断言失败），说明表没删干净，回到 Step 2。
+
+然后删除该函数上方的 `@pytest.mark.xfail(...)` 装饰器那一行，重跑：
+
 Expected: PASS
+
+**只删这一个标记。** `test_aliyun_editing_contract_file_is_gone` 的标记留给 Task 6。
 
 - [ ] **Step 4: 新增 drop 迁移**
 
@@ -650,13 +658,19 @@ git rm contracts/video/aliyun-ims-editing-staging.v1.json \
        scripts/run_ve_04_acceptance.py
 ```
 
-- [ ] **Step 2: 运行后端守卫，确认最后一个用例转绿**
+- [ ] **Step 2: 先验证 xfail 触发器，再移除最后一个标记**
+
+`test_aliyun_editing_contract_file_is_gone` 带 `@pytest.mark.xfail(strict=True)`。契约文件刚被删除，它会开始通过，`xfail_strict` 把 XPASS 变成硬失败——这是有意的提醒。先跑一次看它触发：
 
 ```bash
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py -v
 ```
 
-Expected: 全部 13 个用例 PASS
+Expected: 1 个 FAILED，原因为 `XPASS(strict)`，其余 PASS。
+
+删除该函数上方的 `@pytest.mark.xfail(...)` 装饰器那一行后重跑：
+
+Expected: **全部 13 个用例 PASS，无 xfail 无 xpass**。此时守卫文件里不应再残留任何 `xfail` 标记——Task 3 已移除另一个。
 
 - [ ] **Step 3: 从 CQ-04 验收脚本移除云剪辑环节**
 
