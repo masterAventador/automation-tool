@@ -1395,6 +1395,18 @@ cd frontend && pnpm test -- --run src/app/no-cloud-editing.test.ts
 
 正文记录：日期、提交列表、RED/GREEN、失败矩阵覆盖了哪些、**有意不做的边界**（本计划「本计划有意不做的事」整表照抄，含 LE-05 要补的跨聚合根校验）、清理证据（旧类型确已删除的 grep 结果）、文档证据。
 
+**另外必须记进 LE-03.md 的五笔账**（都是 T1～T4 执行过程中实测得出的，不写下来就会丢）：
+
+1. **考虑过并否决：把 `width`/`height` 收成 `FrameSize | None` 值对象。** T1 的代码质量审查提出（置信度 65），理由是能让「一半有一半没有」在类型层不可构造。**否决理由**：LE-05 建表时 ORM 要把它拍回两列，映射成本落在持久化边界；而运行时完整性已由 363 种 `kind × width × height` 组合的穷举证明（344 拒 / 19 接受 / 0 异常逃逸）。记为「考虑过并否决」而非默默忽略。
+
+2. **`material.py` 有 11 行未覆盖，是 LE-02 的遗留，不是 LE-03 引入的。** 实测证据：在 LE-02 收口提交 `495e922` 上用 `PYTHONPATH` 指向该提交的源码跑 `test_material.py`，得 90%、同样 11 行未覆盖；T1 之后是 91%、仍是同样 11 行——**T1 自己的新代码全覆盖，既没恶化也没改善**。而门禁是 `fail_under = 100`（`backend/pyproject.toml:89`），也就是说 **LE-02 标 ✅ 已完成时，覆盖率门禁在 `material.py` 上就是红的**。这条要同步登记到台账 §7 的已知问题里，并明确归属。
+
+3. **后端 CI 有三个全库红的门禁**，都不是本线引入：`ruff check .` 约 98 个错误、`mypy` 17 个错误（全在 `tests/unit/executor/` 下）、`pytest --cov` 的 `fail_under = 100`。三者都在 `.github/workflows/quality.yml` 的 backend job 里（第 57、58、61 行），意味着该 job 在 main 上就过不去。同步登记到台账 §7。
+
+4. **`scripts/check_acceptance_evidence_depth.py` 在仓库里不存在**，但项目 `CLAUDE.md` §9.1 引用了它并称之为门禁。同步登记到台账 §7。
+
+5. **一条方法论教训，写进 LE-03.md 供后续任务复用**：**coverage.py 把整个 `if` 当一个分支计，`or` 链里的子条件不单独计量**。所以一个永远为假的析取项能带着 100% 覆盖 / 零 partial branch 的成绩混过去——T3 就是这样漏掉字幕轨那处死判断的，只有逐项推导「在下层已有约束下这一项还可能为真吗」才查得出来。**门禁全绿只说明门禁看得见的那部分没问题。**
+
 - [ ] **Step 6: 台账转 ✅**
 
 `docs/local-video-editing-roadmap.md`：
