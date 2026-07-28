@@ -1017,7 +1017,21 @@ python3 scripts/check_local_editing_roadmap_counts.py
 python3 scripts/check_embedded_browser_video_roadmap.py
 ```
 
-Expected: 全部退出 0。`check_embedded_browser_video_roadmap.py` 若因 VE 行移除而报计数不符，按其提示同步修正原台账计数。
+Expected: 除下面这一项外全部退出 0。`check_embedded_browser_video_roadmap.py` 若因 VE 行移除而报计数不符，按其提示同步修正原台账计数。
+
+**`check_user_facing_branding.py` 预期为红，且不由本任务修复。** 它必须**恰好**报这两条：
+
+```
+frontend/src/app/WorkbenchShell.tsx: concept video_editing_module (独立视频剪辑模块)
+  lost the copy '独立于视频制作'
+  lost the copy '视频剪辑'
+```
+
+第一条在分支基点 `origin/main` 上就已存在（UI-01 改版 `c4d0d14` 所致，经临时 worktree 实测确认）；第二条由 Task 4 删除设置页那句描述已删凭据卡片的文案引入——该词此前唯一的满足者就藏在「视频剪辑**服务**」里，属巧合满足。
+
+归属与决定见 `docs/local-video-editing-roadmap.md` §7：剪辑模块形态将由 LE-17、LE-19 重建，此刻改契约是白定，转绿归 LE-19。
+
+**但必须逐条核对输出。** 多出任何第三条都意味着是新引入的，当场处理，不得并入这个已知豁免——豁免一旦变成"这个门禁反正是红的"，就失去意义了。
 
 - [ ] **Step 12: 提交**
 
