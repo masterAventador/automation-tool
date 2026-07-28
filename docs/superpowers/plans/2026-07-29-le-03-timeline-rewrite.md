@@ -666,7 +666,21 @@ git commit -m "feat(le-03): 剪辑片段补入出点与音量，锁死首期不�
 | --- | --- | --- |
 | `CAPTION` | 只画字：无素材、无音量、无转场 | 可留白，不可重叠 |
 | `VISUAL` | 只放画面：有素材、无文字、无音量；可有转场 | **首尾相接**，第一条从 0 开始；有转场时按重叠计算起点 |
-| `NARRATION`/`AMBIENT`/`MUSIC` | 有素材、无文字、**必须有音量**、**必须有入出点**、不可有转场 | 可留白，不可重叠 |
+| `NARRATION`/`AMBIENT`/`MUSIC` | 有素材、无文字、**必须有音量**、不可有转场 | 可留白，不可重叠 |
+
+> **T2 实施后的修订（2026-07-29）**：T2 的实现者穷举字段组合时发现原计划的参考实现有洞——字幕片段与「省略窗口的静态素材」都能带 `gain_db`，而两者都没有声音可调。他在 `TimelineClip._validate_gain` 补了「有 `gain_db` 必须有 `source_in_ms`」的拒绝分支。
+>
+> **这条修订倒灌进本 task，有两个后果，必须照办：**
+>
+> **T2 终审后的第二轮修订**：T2 的代码质量审查（实测 112 种字段组合 + 分支覆盖率）另外定下两件与本 task 相关的事：
+>
+> - **转场「不得吞掉本片段」这半条规则下沉到了 `TimelineClip`**（实测发现 10 秒淡入可以挂在 3 秒片段上，而片段自己就掌握判断所需的全部信息）。所以本 task 的轨道层只判「不得吞掉**上一个**片段」——那半条才真的需要邻居。下面的实现已按此改写，别再写 `min(previous_duration, clip.duration_ms)`。
+> - **`_validate_timestamp` 已从 `timeline.py` 删除**（在 T2 里它是无调用者的死代码，且违反 TDD 铁律）。它由 T4 连同 `Timeline.created_at` 的测试一起加回来，本 task 用不到它。
+>
+> **T2 实施中的第一轮修订**，两个后果必须照办：
+>
+> 1. 音轨分支里**不要再写 `clip.source_in_ms is None`** —— 它已成死代码：有 `gain_db` 就必有窗口（clip 级保证），没 `gain_db` 则 `clip.gain_db is None` 这个析取项先开火，第二项永远到不了。音轨「必须有入出点」这条现在由 clip 级**传递保证**：轨道要求有音量 → 音量要求有窗口。
+> 2. 原计划里两条测试会**为错误的理由通过**（在 `pytest.raises` 块里，clip 构造阶段就抛了，根本没轮到 `TimelineTrack`）。下面 Step 1 已改写，照改写后的版本写。
 
 **为什么视觉轨要「首尾相接且转场按重叠算」**：`xfade` 的输出长度是 `a + b - transition`，两段真的会重叠播放。如果时间轴按「紧挨着不重叠」记，那 `Timeline.duration_ms` 就跟真实成片长度对不上——台账里就会出现一个自己骗自己的数字。所以带转场的一条，起点必须正好等于「上一条结束 - 转场时长」。
 
@@ -696,8 +710,9 @@ def _visual_track(**overrides: object) -> TimelineTrack:
     return TimelineTrack(**defaults)  # type: ignore[arg-type]
 
 
-def _audible_clip(kind_default_gain: float = -12.0, **overrides: object) -> TimelineClip:
-    defaults: dict[str, object] = {"gain_db": kind_default_gain}
+def _audible_clip(**overrides: object) -> TimelineClip:
+    """A clip fit for an audible lane: it states a level and a stretch."""
+    defaults: dict[str, object] = {"gain_db": -12.0}
     defaults.update(overrides)
     return _media_clip(**defaults)
 
@@ -818,15 +833,17 @@ def test_an_audible_track_states_a_level_for_every_clip(kind: TimelineTrackKind)
     "kind",
     [TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC],
 )
-def test_an_audible_clip_always_states_which_stretch_it_plays(
+def test_no_audible_lane_will_take_a_clip_with_no_stretch_to_play(
     kind: TimelineTrackKind,
 ) -> None:
+    """A windowless clip cannot carry a level, and an audible lane demands one.
+
+    The clip itself is legal — a still image occupies time without playing
+    any stretch of a source. It is this lane that has no use for it.
+    """
+    windowless = _media_clip(clip_id="sound-1", source_in_ms=None, source_out_ms=None)
     with pytest.raises(InvalidTimelineModel):
-        TimelineTrack(
-            "sound",
-            kind,
-            (_audible_clip(clip_id="sound-1", source_in_ms=None, source_out_ms=None),),
-        )
+        TimelineTrack("sound", kind, (windowless,))
 
 
 @pytest.mark.parametrize(
@@ -898,17 +915,16 @@ def test_a_caption_track_only_draws_text() -> None:
         TimelineTrack("caption", TimelineTrackKind.CAPTION, (_media_clip(),))
 
 
-def test_a_caption_clip_carries_neither_level_nor_transition() -> None:
+def test_a_caption_lane_refuses_a_clip_that_wants_to_dissolve() -> None:
+    """A caption appears and disappears; only the picture lane dissolves.
+
+    The level half of this rule lives one layer down — a caption clip
+    cannot carry `gain_db` at all, so it never reaches a lane. See
+    `test_gain_requires_something_audible_to_adjust` in Task 2.
+    """
+    dissolving = _caption_clip(transition_in=TimelineTransition(TransitionKind.FADE, 300))
     with pytest.raises(InvalidTimelineModel):
-        TimelineTrack(
-            "caption", TimelineTrackKind.CAPTION, (_caption_clip(gain_db=0.0),)
-        )
-    with pytest.raises(InvalidTimelineModel):
-        TimelineTrack(
-            "caption",
-            TimelineTrackKind.CAPTION,
-            (_caption_clip(transition_in=TimelineTransition(TransitionKind.FADE, 300)),),
-        )
+        TimelineTrack("caption", TimelineTrackKind.CAPTION, (dissolving,))
 
 
 @pytest.mark.parametrize(
@@ -1001,9 +1017,11 @@ class TimelineTrack:
             if clip.gain_db is not None:
                 _reject()
             return
-        # NARRATION / AMBIENT / MUSIC: sound always has a time axis, and the
-        # first release mixes it with no crossfades.
-        if clip.gain_db is None or clip.source_in_ms is None or clip.transition_in is not None:
+        # NARRATION / AMBIENT / MUSIC: every clip states its level, and the
+        # first release mixes them with no crossfades. Having a level already
+        # implies having a stretch to play — `TimelineClip` enforces that —
+        # so checking the window again here would be unreachable.
+        if clip.gain_db is None or clip.transition_in is not None:
             _reject()
 
     def _validate_layout(self) -> None:
@@ -1024,9 +1042,10 @@ class TimelineTrack:
             else:
                 transition = clip.transition_in
                 overlap = 0 if transition is None else transition.duration_ms
-                if transition is not None and (
-                    index == 0 or overlap >= min(previous_duration, clip.duration_ms)
-                ):
+                # `TimelineClip` already refuses a transition that would swallow
+                # the incoming clip. Only the outgoing one needs a neighbour to
+                # judge, so only that half lives here.
+                if transition is not None and (index == 0 or overlap >= previous_duration):
                     _reject()
                 if clip.start_ms != previous_end - overlap:
                     _reject()
@@ -1065,7 +1084,9 @@ git commit -m "feat(le-03): 轨道按种类分叉，画面轨首尾相接、转�
 
 **Interfaces:**
 - Consumes: T2/T3 产出的全部
-- Produces: `Timeline(timeline_id, revision, duration_ms, tracks, created_at)`，供 LE-04 接到 `EditingProject`、LE-05 落库
+- Produces: `Timeline(timeline_id, revision, duration_ms, tracks, created_at)`，供 LE-04 接到 `EditingProject`、LE-05 落库；以及本 task 加回的模块私有 `_validate_timestamp`
+
+> **本 task 要把 `_validate_timestamp` 加回来。** T2 曾照原计划把它写进 `timeline.py`，但当时无任何调用者——T2 的终审判定它是死代码（覆盖率显示它永不可达，且违反「没有失败测试就没有生产代码」），已删除，连同 `from datetime import UTC, datetime` 一起。本 task 是它第一个真实调用者（`Timeline.created_at`），请**先写会失败的时间戳测试，再把函数与 import 一起加回**。函数体照抄 `material.py` / `video_creation.py` 里的同名实现。
 
 **规则：**
 
