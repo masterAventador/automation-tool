@@ -34,20 +34,8 @@ use std::path::{Path, PathBuf};
 /// Silent skips this task could not fix, each with the task that owns it.
 ///
 /// An entry is only admissible when the Rust side and its driver cannot be
-/// changed and verified together here. VE-04 signs a request against the real
-/// Aliyun ICE gateway, so proving the pair still passes needs credentials this
-/// surface does not hold; fixing the test without proving the driver still
-/// selects it would trade a silent skip for a silent no-op.
-const UNFIXED_SILENT_SKIPS: &[(&str, &str)] = &[
-    (
-        "video_editing_service_settings_real.rs",
-        "real_gateway_accepts_production_signature",
-    ),
-    (
-        "video_editing_service_settings_real.rs",
-        "real_gateway_rejects_tampered_secret_with_sanitized_error",
-    ),
-];
+/// changed and verified together here.
+const UNFIXED_SILENT_SKIPS: &[(&str, &str)] = &[];
 
 /// libtest flags that make an `#[ignore]`d test actually run.
 const IGNORED_SELECTORS: &[&str] = &["--ignored", "--include-ignored"];

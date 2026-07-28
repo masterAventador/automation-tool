@@ -32,7 +32,6 @@ pub mod publish_workspace;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
-pub mod video_editing_service_settings;
 pub mod video_job_workspace;
 pub mod video_media_toolchain;
 
@@ -253,59 +252,6 @@ async fn test_model_service_connection(
     model_service_settings::ModelServiceCommandError,
 > {
     settings.test_connection(purpose).await.map_err(Into::into)
-}
-
-#[tauri::command]
-fn get_video_editing_service_settings(
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingServiceSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.snapshot().map_err(Into::into)
-}
-
-#[tauri::command]
-fn configure_video_editing_service(
-    request: video_editing_service_settings::ConfigureVideoEditingServiceRequest,
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingServiceSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.configure(&request).map_err(Into::into)
-}
-
-#[tauri::command]
-fn clear_video_editing_service(
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingServiceSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.clear().map_err(Into::into)
-}
-
-#[tauri::command]
-async fn test_video_editing_service_connection(
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingConnectionSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.test_connection().await.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -4367,11 +4313,6 @@ pub fn run() {
                     &app_data_directory,
                 )?,
             );
-            app.manage(
-                video_editing_service_settings::initialize_production_video_editing_service_settings(
-                    &app_data_directory,
-                )?,
-            );
             app.manage(PublishWorkspaceState(std::sync::Mutex::new(
                 publish_workspace::PublishWorkspace::new(false),
             )));
@@ -4468,10 +4409,6 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
-        get_video_editing_service_settings,
-        configure_video_editing_service,
-        clear_video_editing_service,
-        test_video_editing_service_connection,
         open_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
@@ -4535,10 +4472,6 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
-        get_video_editing_service_settings,
-        configure_video_editing_service,
-        clear_video_editing_service,
-        test_video_editing_service_connection,
         open_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
@@ -4633,10 +4566,6 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
-        get_video_editing_service_settings,
-        configure_video_editing_service,
-        clear_video_editing_service,
-        test_video_editing_service_connection,
         open_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
