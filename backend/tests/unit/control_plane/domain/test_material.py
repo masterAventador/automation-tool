@@ -284,3 +284,25 @@ def test_tags_must_be_unique() -> None:
     stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     with pytest.raises(InvalidMaterialModel):
         _video().with_ai_description("说明", ("室内", "室内"), stamped)
+
+
+def test_ai_description_without_a_timestamp_is_rejected() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(ai_description="没有时间戳的描述", description_source=DescriptionSource.AI)
+
+
+def test_user_description_must_not_carry_an_ai_timestamp() -> None:
+    stamped = datetime(2026, 7, 28, 13, 0, tzinfo=UTC)
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            ai_description="看起来像用户写的",
+            description_source=DescriptionSource.USER,
+            described_at=stamped,
+        )
+
+
+def test_user_description_clears_any_existing_ai_tags() -> None:
+    stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    described = _video().with_ai_description("说明", ("室内", "人物"), stamped)
+    edited = described.with_user_description("我自己写的说明")
+    assert edited.ai_tags == ()

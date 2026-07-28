@@ -190,6 +190,14 @@ class Material:
             _reject()
         if self.ai_description is None and (self.ai_tags or self.described_at is not None):
             _reject()
+        if (
+            self.description_source is DescriptionSource.AI
+            and self.ai_description is not None
+            and self.described_at is None
+        ):
+            _reject()
+        if self.description_source is DescriptionSource.USER and self.described_at is not None:
+            _reject()
 
     def with_ai_description(
         self,
@@ -215,7 +223,14 @@ class Material:
         )
 
     def with_user_description(self, description: str) -> Material:
-        """Record what a person typed, and mark the field theirs from now on."""
+        """Record what a person typed, and mark the field theirs from now on.
+
+        This irreversibly drops any existing `ai_tags`: `description_source`
+        becomes `USER`, a terminal state, so `with_ai_description` will never
+        run again to regenerate them. The dropped tags described the text
+        that just got replaced, so keeping them would misattribute stale
+        classification data to the new, human-written description.
+        """
         return replace(
             self,
             ai_description=description,
