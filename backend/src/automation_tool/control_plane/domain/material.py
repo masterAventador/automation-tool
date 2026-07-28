@@ -85,6 +85,7 @@ class Material:
     has_speech: bool
     speech_segments_ms: tuple[tuple[int, int], ...]
     speech_transcript: str | None
+    shot_boundaries_ms: tuple[int, ...]
 
     def __post_init__(self) -> None:
         if (
@@ -100,6 +101,7 @@ class Material:
             _reject()
         self._validate_duration()
         self._validate_audio()
+        self._validate_shot_boundaries()
 
     def _validate_duration(self) -> None:
         if self.kind is MaterialKind.IMAGE:
@@ -148,3 +150,20 @@ class Material:
             if self.duration_ms is not None and end > self.duration_ms:
                 _reject()
             previous_end = end
+
+    def _validate_shot_boundaries(self) -> None:
+        if not isinstance(self.shot_boundaries_ms, tuple):
+            _reject()
+        if not self.shot_boundaries_ms:
+            return
+        if self.duration_ms is None or len(self.shot_boundaries_ms) > MAX_SHOT_BOUNDARIES:
+            _reject()
+        previous = -1
+        for boundary in self.shot_boundaries_ms:
+            if (
+                type(boundary) is not int
+                or boundary <= previous
+                or not 0 <= boundary < self.duration_ms
+            ):
+                _reject()
+            previous = boundary

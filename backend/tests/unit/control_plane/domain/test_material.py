@@ -56,6 +56,7 @@ def _video(**overrides: object) -> Material:
         "has_speech": False,
         "speech_segments_ms": (),
         "speech_transcript": None,
+        "shot_boundaries_ms": (),
     }
     defaults.update(overrides)
     return Material(**defaults)  # type: ignore[arg-type]
@@ -191,3 +192,24 @@ def test_image_cannot_smuggle_an_unbounded_speech_segment_via_missing_duration()
 def test_material_with_audio_accepts_a_valid_loudness_value() -> None:
     material = _video(has_audio=True, audio_loudness_lufs=-23.0)
     assert material.audio_loudness_lufs == -23.0
+
+
+def test_shot_boundaries_are_strictly_increasing() -> None:
+    material = _video(duration_ms=20_000, shot_boundaries_ms=(0, 4_000, 12_000))
+    assert material.shot_boundaries_ms == (0, 4_000, 12_000)
+    with pytest.raises(InvalidMaterialModel):
+        _video(duration_ms=20_000, shot_boundaries_ms=(4_000, 4_000))
+    with pytest.raises(InvalidMaterialModel):
+        _video(duration_ms=20_000, shot_boundaries_ms=(12_000, 4_000))
+
+
+def test_shot_boundary_must_fall_inside_the_material() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(duration_ms=5_000, shot_boundaries_ms=(0, 6_000))
+    with pytest.raises(InvalidMaterialModel):
+        _video(duration_ms=5_000, shot_boundaries_ms=(-1,))
+
+
+def test_image_carries_no_shot_boundaries() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(kind=MaterialKind.IMAGE, duration_ms=None, shot_boundaries_ms=(0,))
