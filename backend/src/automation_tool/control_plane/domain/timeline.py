@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Final, Never, final
 
@@ -86,6 +87,15 @@ def _validate_text(value: object, *, maximum: int, optional: bool = False) -> No
             continue
         if unicodedata.category(character).startswith("C"):
             _reject()
+
+
+def _validate_timestamp(value: object) -> None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() != UTC.utcoffset(value)
+    ):
+        _reject()
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +296,49 @@ class TimelineTrack:
         return self.clips[-1].end_ms
 
 
+@dataclass(frozen=True, slots=True)
+class Timeline:
+    """One editable cut of one film.
+
+    It has no owning project yet — `EditingProject` arrives in LE-04, and a
+    field pointing at a type that does not exist would be worse than none.
+    """
+
+    timeline_id: TimelineId
+    revision: int
+    duration_ms: int
+    tracks: tuple[TimelineTrack, ...]
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.timeline_id, TimelineId)
+            or type(self.revision) is not int
+            or self.revision < 1
+            or type(self.duration_ms) is not int
+            or not MIN_TIMELINE_DURATION_MS <= self.duration_ms <= MAX_TIMELINE_DURATION_MS
+            or not isinstance(self.tracks, tuple)
+            or not 1 <= len(self.tracks) <= len(TimelineTrackKind)
+            or any(not isinstance(track, TimelineTrack) for track in self.tracks)
+            or len({track.track_id for track in self.tracks}) != len(self.tracks)
+            or len({track.kind for track in self.tracks}) != len(self.tracks)
+        ):
+            _reject()
+        _validate_timestamp(self.created_at)
+        picture = self.track_of(TimelineTrackKind.VISUAL)
+        if picture is None or picture.end_ms != self.duration_ms:
+            _reject()
+        if any(clip.end_ms > self.duration_ms for track in self.tracks for clip in track.clips):
+            _reject()
+
+    def track_of(self, kind: TimelineTrackKind) -> TimelineTrack | None:
+        """The one track on that lane, or None. Lanes are unique by construction."""
+        for track in self.tracks:
+            if track.kind is kind:
+                return track
+        return None
+
+
 __all__ = [
     "AUDIBLE_TRACK_KINDS",
     "MAX_CLIPS_PER_TRACK",
@@ -296,6 +349,7 @@ __all__ = [
     "MIN_GAIN_DB",
     "MIN_TIMELINE_DURATION_MS",
     "InvalidTimelineModel",
+    "Timeline",
     "TimelineClip",
     "TimelineId",
     "TimelineTrack",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from automation_tool.control_plane.domain.material import MaterialId
@@ -13,7 +15,9 @@ from automation_tool.control_plane.domain.timeline import (
     MAX_TIMELINE_DURATION_MS,
     MAX_TRANSITION_DURATION_MS,
     MIN_GAIN_DB,
+    MIN_TIMELINE_DURATION_MS,
     InvalidTimelineModel,
+    Timeline,
     TimelineClip,
     TimelineId,
     TimelineTrack,
@@ -659,3 +663,167 @@ def test_max_clips_per_track_boundary_is_inclusive() -> None:
 def test_more_than_max_clips_per_track_is_rejected() -> None:
     with pytest.raises(InvalidTimelineModel):
         TimelineTrack("caption", TimelineTrackKind.CAPTION, _caption_chain(MAX_CLIPS_PER_TRACK + 1))
+
+
+def _timeline(**overrides: object) -> Timeline:
+    defaults: dict[str, object] = {
+        "timeline_id": TimelineId.new(),
+        "revision": 1,
+        "duration_ms": 7_000,
+        "tracks": (_visual_track(),),
+        "created_at": datetime(2026, 7, 29, 10, 0, tzinfo=UTC),
+    }
+    defaults.update(overrides)
+    return Timeline(**defaults)  # type: ignore[arg-type]
+
+
+def test_a_timeline_is_as_long_as_its_picture_lane() -> None:
+    assert _timeline().duration_ms == _visual_track().end_ms
+
+
+def test_a_timeline_refuses_to_claim_a_length_its_picture_does_not_fill() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(duration_ms=9_000)
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(duration_ms=5_000)
+
+
+def test_a_timeline_without_a_picture_lane_is_not_a_film() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(
+            tracks=(
+                TimelineTrack(
+                    "narration",
+                    TimelineTrackKind.NARRATION,
+                    (
+                        _audible_clip(
+                            clip_id="line-1",
+                            start_ms=0,
+                            duration_ms=7_000,
+                            source_in_ms=0,
+                            source_out_ms=7_000,
+                        ),
+                    ),
+                ),
+            )
+        )
+
+
+def test_each_lane_appears_at_most_once() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(tracks=(_visual_track(track_id="visual-a"), _visual_track(track_id="visual-b")))
+
+
+def test_a_full_timeline_carries_picture_narration_ambient_music_and_captions() -> None:
+    timeline = _timeline(
+        tracks=(
+            _visual_track(),
+            TimelineTrack(
+                "narration",
+                TimelineTrackKind.NARRATION,
+                (
+                    _audible_clip(
+                        clip_id="line-1",
+                        start_ms=0,
+                        duration_ms=6_000,
+                        source_in_ms=0,
+                        source_out_ms=6_000,
+                    ),
+                ),
+            ),
+            TimelineTrack(
+                "ambient",
+                TimelineTrackKind.AMBIENT,
+                (
+                    _audible_clip(
+                        clip_id="room-1",
+                        start_ms=0,
+                        duration_ms=7_000,
+                        source_in_ms=0,
+                        source_out_ms=7_000,
+                    ),
+                ),
+            ),
+            TimelineTrack(
+                "music",
+                TimelineTrackKind.MUSIC,
+                (
+                    _audible_clip(
+                        clip_id="bgm-1",
+                        start_ms=0,
+                        duration_ms=7_000,
+                        source_in_ms=0,
+                        source_out_ms=7_000,
+                        gain_db=-24.0,
+                    ),
+                ),
+            ),
+            TimelineTrack(
+                "caption",
+                TimelineTrackKind.CAPTION,
+                (_caption_clip(clip_id="cap-1", start_ms=0, duration_ms=3_000),),
+            ),
+        )
+    )
+    assert len(timeline.tracks) == len(TimelineTrackKind)
+
+
+def test_nothing_may_run_past_the_end_of_the_film() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(
+            tracks=(
+                _visual_track(),
+                TimelineTrack(
+                    "music",
+                    TimelineTrackKind.MUSIC,
+                    (
+                        _audible_clip(
+                            clip_id="bgm-1",
+                            start_ms=0,
+                            duration_ms=9_000,
+                            source_in_ms=0,
+                            source_out_ms=9_000,
+                        ),
+                    ),
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("timeline_id", "not-an-id"),
+        ("revision", 0),
+        ("revision", 1.0),
+        ("revision", True),
+        ("duration_ms", MIN_TIMELINE_DURATION_MS - 1),
+        ("duration_ms", MAX_TIMELINE_DURATION_MS + 1),
+        # A float that numerically equals the default picture lane's own end_ms:
+        # the range check and the "picture.end_ms == duration_ms" check would both
+        # pass it silently if the type check were ever dropped, the same way
+        # ("revision", True) isolates revision's own type check above.
+        ("duration_ms", 7_000.0),
+        ("tracks", ()),
+        ("tracks", [_visual_track()]),
+        ("created_at", datetime(2026, 7, 29, 10, 0)),
+        ("created_at", "2026-07-29T10:00:00Z"),
+    ],
+)
+def test_timeline_structural_bounds_fail_closed(field: str, value: object) -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(**{field: value})
+
+
+def test_a_timeline_refuses_two_lanes_with_the_same_id() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(
+            tracks=(
+                _visual_track(track_id="same"),
+                TimelineTrack(
+                    "same",
+                    TimelineTrackKind.CAPTION,
+                    (_caption_clip(clip_id="cap-1", start_ms=0, duration_ms=3_000),),
+                ),
+            )
+        )
