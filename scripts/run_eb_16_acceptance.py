@@ -60,6 +60,9 @@ from build_release_package import (  # noqa: E402
 from release_configuration import (  # noqa: E402
     write_macos_release_configuration,
 )
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from production_assets import (  # noqa: E402
     AUDITED_DISTRIBUTION_NAME,
@@ -782,8 +785,15 @@ def main() -> int:
         )
         announce("Preparing the pinned video runtime resources (cached per machine)")
         video_runtime = prepare_video_runtime(platform="macos")
+        # PC-16 added the catalog to the assembly and updated one of the two
+        # callers. This one went on type-checking as a call with a missing
+        # argument — a `TypeError` at the moment a signed package is being
+        # built, in the driver whose whole subject is whether a clean machine
+        # can run what it installed.
+        announce("Staging the frozen catalog of animation parts")
+        motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
         install_runtime_resources_and_sign(
-            application, browser, target_id, video_runtime, identity
+            application, browser, target_id, video_runtime, motion_catalog, identity
         )
         disk_image = create_disk_image(
             application,

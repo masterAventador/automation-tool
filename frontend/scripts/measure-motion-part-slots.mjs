@@ -19,7 +19,6 @@
 // Reports, per slot: the container's usable width in CSS pixels, the font size,
 // and whether the element currently overflows.
 import { chromium } from "@playwright/test";
-import { readFileSync } from "node:fs";
 
 const [, , entryPath, slotsJson] = process.argv;
 const slots = JSON.parse(slotsJson);

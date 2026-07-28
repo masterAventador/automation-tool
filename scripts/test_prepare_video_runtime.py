@@ -37,7 +37,7 @@ SCRIPT = ROOT / "scripts" / "prepare_video_runtime.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import prepare_video_runtime  # noqa: E402
-from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from release_assembly import MOTION_CATALOG_RESOURCES, VIDEO_RUNTIME_RESOURCES  # noqa: E402
 from video_runtime_cache import STAMP_VERSION, contract_fingerprint  # noqa: E402
 
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
@@ -54,6 +54,9 @@ MOTION_WORKER = next(
     for resource in VIDEO_RUNTIME_RESOURCES
     if resource.staging_name == "motion-video-worker"
 )
+# The frozen catalog of animation parts. Built elsewhere, installed by the same
+# code as everything else that has to land where the resolver reads it.
+(MOTION_CATALOG,) = MOTION_CATALOG_RESOURCES
 # The animation runtime the composition loads. It is not one of the release
 # contract's required files -- that contract fixes what must not be missing,
 # and this asset is proven by the Rust suite instead -- so its name comes from
@@ -498,6 +501,56 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 sentinel.read_text(encoding="utf-8"),
                 "installing in a worktree followed the link and modified main",
             )
+
+    def test_the_frozen_catalog_installs_into_a_resource_root_like_any_other_tree(
+        self,
+    ) -> None:
+        """A debug App has to resolve the parts where a packaged one does.
+
+        PC-16 installs the 134 parts into the release bundle and PC-18 made the
+        App send that path to the authoring child. Between the two, a debug
+        build had no catalog at all: `--install-into target/debug` stages the
+        browser, both Workers and ffmpeg and stops, because the catalog is
+        deliberately not a video runtime — those three are built here and cached
+        per machine, while the catalog comes out of
+        `build_motion_catalog_release.py` with its own locked digest.
+
+        The consequence was not a missing directory anyone would notice. The
+        resolver worked, the path existed as a name, and every beat that chose a
+        part failed at the moment its working copy was written — on the machine
+        every acceptance runs on. Installing is the same operation for both
+        kinds of tree, so it is the same code; only who builds the tree differs.
+        """
+        with TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory:
+            base = Path(directory)
+            staging = base / "staging" / "motion-catalog"
+            for name in MOTION_CATALOG.required_for("macos"):
+                payload = staging / name
+                payload.parent.mkdir(parents=True, exist_ok=True)
+                payload.write_text("staged\n", encoding="utf-8")
+            resources = base / "resources"
+
+            completed = run_prepare(
+                "--root",
+                str(base / "staging"),
+                "--only",
+                MOTION_CATALOG.staging_name,
+                "--install-into",
+                str(resources),
+            )
+
+            self.assertEqual(
+                0,
+                completed.returncode,
+                f"installing the staged catalog must succeed:\n"
+                f"{completed.stdout}{completed.stderr}",
+            )
+            installed = resources.joinpath(*MOTION_CATALOG.installed_parts)
+            for name in MOTION_CATALOG.required_for("macos"):
+                self.assertTrue(
+                    (installed / name).is_file(),
+                    f"{name} must be installed at {installed}",
+                )
 
     def test_an_unknown_resource_name_is_refused(self) -> None:
         with TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory:
