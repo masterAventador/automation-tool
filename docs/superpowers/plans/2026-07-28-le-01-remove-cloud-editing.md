@@ -397,8 +397,8 @@ schema.py 的两张表与契约文件分别由后续步骤处理，守卫中对�
 - Test: `backend/tests/unit/control_plane/test_cloud_editing_removed.py::test_schema_declares_no_cloud_editing_tables`
 
 **Interfaces:**
-- Consumes: Task 2 已删除仓储代码
-- Produces: `schema.metadata` 不含两张云剪辑表；alembic 链尾变为 `20260728_0035`，LE-05 的新迁移应以它为 `down_revision`
+- Consumes: Task 2 已删除仓储代码；守卫文件中 `test_schema_declares_no_cloud_editing_tables` 带 `@pytest.mark.xfail(strict=True)`，本任务负责移除该标记
+- Produces: `schema.metadata` 不含两张云剪辑表；alembic 链尾变为 `20260728_0035`，LE-05 的新迁移应以它为 `down_revision`；新增集成测试 `test_cloud_editing_tables_dropped.py` 证明真实库里表已消失
 
 **为什么不删迁移文件**：alembic 链为 `0031 → 0032(aliyun_editing_intents) → 0033(bilibili) → 0034(editing_output_lineages)`。`0032` 位于链中间，`0033` 的 `down_revision` 指向它，删文件会断链；且已执行过迁移的数据库会残留表。迁移是历史记录，只能往前推进。
 
@@ -469,27 +469,79 @@ def downgrade() -> None:
     )
 ```
 
-- [ ] **Step 5: 对真实 PostgreSQL 验证迁移**
+- [ ] **Step 5: 写集成测试，对真实 PostgreSQL 验证迁移**
 
-按项目端口与资源命名规范起隔离实例（**先确认目标端口未被占用**，不得接管来源不明的进程）：
+**不要手动起数据库、不要创建 `.env`。** `backend/tests/integration/conftest.py` 的 `postgresql_url` fixture 已经全包了：它生成唯一 project name（`automation-tool-pytest-<pid>`）、自己找空闲回环端口、生成随机密码、用 `--env-file /dev/null` 绕开 `.env`，并在退出时清理容器。手动起库既多余又会违反项目的资源隔离规范。
 
-```bash
-cd backend && .venv/bin/python -m alembic upgrade head
+创建 `backend/tests/integration/test_cloud_editing_tables_dropped.py`：
+
+```python
+"""The 0035 migration must actually remove the cloud-editing tables.
+
+Dropping the table declarations from schema.py only changes what new
+databases get created with. A database that already ran 0032 and 0034 keeps
+both tables until a migration removes them, which is why the migration files
+stay on disk and 0035 exists.
+"""
+
+from __future__ import annotations
+
+import pytest
+from sqlalchemy import text
+
+from automation_tool.control_plane.infrastructure.database.session import Database
+
+from .conftest import AlembicRunner
+
+_REMOVED_TABLES = ("aliyun_editing_intents", "editing_output_lineages")
+
+
+@pytest.mark.asyncio
+async def test_migrations_leave_no_cloud_editing_tables(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        async with database.session() as session:
+            result = await session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = ANY(:names)"
+                ),
+                {"names": list(_REMOVED_TABLES)},
+            )
+            assert result.scalars().all() == []
+    finally:
+        await database.close()
 ```
 
-Expected: 迁移成功，`20260728_0035` 成为 head。验证两张表确实消失：
+`AlembicRunner` 的导入路径与 fixture 用法参照现有的 `backend/tests/integration/test_account_device_lifecycle.py:106-112`——若该文件从别处导入 `AlembicRunner`，照它的写法来。
+
+- [ ] **Step 6: 运行集成测试**
 
 ```bash
-cd backend && .venv/bin/python -m alembic current
+cd backend && .venv/bin/python -m pytest tests/integration/test_cloud_editing_tables_dropped.py -v
 ```
 
-Expected: 输出含 `20260728_0035 (head)`
+Expected: PASS。首次运行会拉起 PostgreSQL 容器，`postgres:18.4-bookworm` 镜像本机已缓存，不需要联网拉取。
 
-- [ ] **Step 6: 提交**
+测试结束后确认容器已被 fixture 清理：
+
+```bash
+docker ps --filter "name=automation-tool-pytest" --format '{{.Names}}'
+```
+
+Expected: 无输出。若有残留，说明 fixture 清理路径没走到，报告出来。
+
+- [ ] **Step 7: 提交**
 
 ```bash
 git add backend/src/automation_tool/control_plane/infrastructure/database/schema.py \
-        backend/migrations/versions/20260728_0035_drop_cloud_editing_tables.py
+        backend/migrations/versions/20260728_0035_drop_cloud_editing_tables.py \
+        backend/tests/integration/test_cloud_editing_tables_dropped.py \
+        backend/tests/unit/control_plane/test_cloud_editing_removed.py
 git commit -m "refactor(le-01): schema 移除两张云剪辑表，新增 0035 drop 迁移
 
 不删 0032 与 0034 迁移文件：0032 位于链中间且 0033 的 down_revision 指向
