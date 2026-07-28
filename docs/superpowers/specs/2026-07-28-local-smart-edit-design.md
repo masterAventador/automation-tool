@@ -356,7 +356,8 @@ domain/fake_second_editing_provider.py                  （删除）
 
 ### 7.3 其他
 
-- 迁移 `20260723_0032_aliyun_editing_intents.py`、`20260723_0034_editing_output_lineages.py`
+- `schema.py` 中 `aliyun_editing_intents` 与 `editing_output_lineages` 两张表的声明
+- **迁移文件不删**：alembic 链为 `0031 → 0032(aliyun_editing_intents) → 0033(bilibili) → 0034(editing_output_lineages)`，`0032` 位于链中间且 `0033` 的 `down_revision` 指向它，删文件会断链；已执行过迁移的数据库也仍会残留表。改为**新增 `20260728_0035` drop 迁移**把两张表删掉，迁移历史保留
 - 契约 `contracts/video/aliyun-ims-editing-staging.v1.json`
 - 前端 `features/settings/VideoEditingServiceSettings.tsx` 及其网关、`platform/tauri/video-editing-service-gateway.ts`
 - Tauri 4 个 command：`get_video_editing_service_settings`、`configure_video_editing_service`、`clear_video_editing_service`、`test_video_editing_service_connection`
