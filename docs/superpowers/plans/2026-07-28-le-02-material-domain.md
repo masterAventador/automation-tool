@@ -737,6 +737,20 @@ git commit -m "feat(le-02): 描述来源与 AI 覆盖保护
 - Consumes: Task 1–5 的提交
 - Produces: LE-02 标记完成，当前下一步指向 LE-03
 
+- [ ] **Step 0: 把 material 模块接进 `domain/__init__.py`**
+
+`domain/__init__.py` 逐个 import 并重新导出全部 17 个 submodule，`material.py` 是唯一没接的。后果具体：`from automation_tool.control_plane.domain import MaterialKind`——本代码库每个消费方都用的写法——会失败，测试只能改用子模块全路径。
+
+**推迟到这一步而不是在 Task 1 就接，是有意的**：那时 `Material` 还不存在，接进去只能导出基础类型，而后面每个 task 都要再改一次 `__init__.py`，五次无谓改动。现在类型齐了，一次接完。
+
+按该文件既有写法，import 并在 `__all__` 中登记：`MaterialId`、`MaterialKind`、`DescriptionSource`、`InvalidMaterialModel`、`Material`，以及 `MAX_*` 上限常量。**逐条核对新增的 `__all__` 条目都能在你新增的 import 里找到来源**——LE-01 Task 2 花了一整轮修复就是因为这份文件的导出与实际模块不同步。
+
+接完跑一次确认包级导入可用：
+
+```bash
+cd backend && .venv/bin/python -c "from automation_tool.control_plane.domain import Material, MaterialKind, DescriptionSource; print('ok')"
+```
+
 - [ ] **Step 1: 更新台账**
 
 `docs/local-video-editing-roadmap.md`：
