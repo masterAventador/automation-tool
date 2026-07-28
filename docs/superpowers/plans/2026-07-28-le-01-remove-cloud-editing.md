@@ -268,7 +268,7 @@ LE-17 接线成功的验收信号，删掉就丢了。
 
 **Interfaces:**
 - Consumes: Task 1 的后端守卫测试
-- Produces: `automation_tool.control_plane.domain` 下不再有任何 editing 模块；LE-02 将在空白处新建 `material.py` 与 `video_editing.py`
+- Produces: `automation_tool.control_plane.domain` 下不再有任何 editing 模块，且该包的 `__init__.py` 不再重新导出它们；守卫新增 `test_parent_packages_still_import`，用例总数 12 → 13；LE-02 将在空白处新建 `material.py` 与 `video_editing.py`
 
 - [ ] **Step 1: 确认这些模块没有外部引用**
 
@@ -277,9 +277,33 @@ grep -rn "video_editing\|editing_provider\|aliyun_ims_editing\|editing_output\|E
   | grep -v "/domain/aliyun_ims_editing\|/domain/video_editing\|/domain/fake_second_editing\|/database/aliyun_editing_intent\|/database/editing_output_ledger"
 ```
 
-Expected: 只剩 `schema.py` 的表定义行（Task 3 处理）。若出现其他文件，**停下来**——说明有本计划未覆盖的引用，先补进计划再继续。
+Expected: **恰好两处**命中，其余为空：
 
-- [ ] **Step 2: 删除后端生产文件**
+1. `schema.py` 的表定义行 —— Task 3 处理，本任务不动
+2. `backend/src/automation_tool/control_plane/domain/__init__.py` 第 151 行与 166 行的两条 `from ... import (...)`，以及 `__all__` 中对应的重新导出条目 —— **本任务 Step 4 处理**
+
+若出现这两者以外的文件，**停下来报 BLOCKED**——说明有本计划未覆盖的引用，需要先补进计划。
+
+已核实这些符号在 domain 包外的真实消费者只有 `aliyun_editing_intent_repository.py` 与 `editing_output_ledger_repository.py`，两者都在本任务的删除清单内，因此清理 `__init__.py` 不会断开任何保留代码。
+
+- [ ] **Step 2: 给守卫加父包健康断言**
+
+删掉子模块会让父包 `__init__.py` 的 import 失败，而**父包坏掉时 `importlib.import_module` 抛的同样是 `ModuleNotFoundError`**——守卫分辨不出「子模块真的没了」和「父包坏了」，8 个模块用例会因为错误的原因转绿。加一条断言堵住这个：
+
+在 `backend/tests/unit/control_plane/test_cloud_editing_removed.py` 中，紧接 `_DATABASE_PACKAGE` 常量定义之后加入：
+
+```python
+def test_parent_packages_still_import() -> None:
+    """The module guards below assert ModuleNotFoundError. A broken parent
+    package raises exactly that too, so without this check those guards could
+    go green because the package itself stopped importing — the opposite of
+    what they are meant to prove.
+    """
+    importlib.import_module(_DOMAIN_PACKAGE)
+    importlib.import_module(_DATABASE_PACKAGE)
+```
+
+- [ ] **Step 3: 删除后端生产文件**
 
 ```bash
 cd /Users/aventador/sourceCode/automation-tool/wt/smart-edit
@@ -297,7 +321,15 @@ git rm backend/src/automation_tool/control_plane/domain/aliyun_ims_editing_provi
        backend/src/automation_tool/control_plane/infrastructure/database/editing_output_ledger_repository.py
 ```
 
-- [ ] **Step 3: 删除对应测试**
+- [ ] **Step 4: 清理 `domain/__init__.py` 的重新导出**
+
+删除第 151 行起 `from automation_tool.control_plane.domain.video_editing import (...)` 整段（含其 12 个符号），以及第 166 行起 `from automation_tool.control_plane.domain.video_editing_provider import (...)` 整段（含其 12 个符号）。
+
+同时从 `__all__` 中删除这 24 个符号对应的条目。它们包括（以文件中实际出现的为准）：`EDITING_JOB_TERMINAL_STATUSES`、`MAX_EDITING_PROJECT_TITLE_CHARACTERS`、`MAX_EDITING_SOURCE_ARTIFACTS`、`EditingFailureCode`、`EditingJob`、`EditingJobId`、`EditingJobStateMachine`、`EditingJobStatus`、`EditingProject`、`EditingProjectId`、`EditingTimeline`、`InvalidEditingJobTransition`、`InvalidVideoEditingModel`、`MAX_EDITING_IDEMPOTENCY_KEY_CHARACTERS`、`EditingIdempotencyKey`、`EditingProviderCapabilities`、`EditingProviderErrorCode`，以及 `video_editing_provider` 导出的其余符号。
+
+**逐个核对**：`__all__` 里每删一项，都应能在上面两段被删的 import 中找到来源。若某个符号来自其他仍保留的模块，不要删它。
+
+- [ ] **Step 5: 删除对应测试**
 
 ```bash
 git rm backend/tests/unit/control_plane/domain/test_aliyun_ims_editing_provider.py \
@@ -317,21 +349,23 @@ git rm backend/tests/unit/control_plane/domain/test_aliyun_ims_editing_provider.
        backend/tests/real_cloud/test_ve08_aliyun_real_conformance.py
 ```
 
-- [ ] **Step 4: 清掉 `__pycache__` 残留，否则守卫会误判模块仍可导入**
+- [ ] **Step 6: 清掉 `__pycache__` 残留，否则守卫会误判模块仍可导入**
 
 ```bash
 find backend/src backend/tests -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; true
 ```
 
-- [ ] **Step 5: 运行守卫，模块类用例应转绿**
+- [ ] **Step 7: 运行守卫，模块类用例应转绿**
 
 ```bash
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py -v
 ```
 
-Expected: 10 个模块用例 PASS（8 个 domain + 2 个 database）；`test_schema_declares_no_cloud_editing_tables` 与 `test_aliyun_editing_contract_file_is_gone` 仍 FAIL（Task 3、Task 6 处理）。
+Expected: 13 个用例中 11 个 PASS —— 10 个模块用例（8 domain + 2 database）加 `test_parent_packages_still_import`；`test_schema_declares_no_cloud_editing_tables` 与 `test_aliyun_editing_contract_file_is_gone` 仍 FAIL（Task 3、Task 6 处理）。
 
-- [ ] **Step 6: 运行后端全量单元测试，确认没删断别的**
+**`test_parent_packages_still_import` 必须 PASS。** 它红了说明 `__init__.py` 没清干净，此时那 10 个模块用例的绿是假的，不可采信。
+
+- [ ] **Step 8: 运行后端全量单元测试，确认没删断别的**
 
 ```bash
 cd backend && .venv/bin/python -m pytest tests/unit -q
@@ -339,10 +373,11 @@ cd backend && .venv/bin/python -m pytest tests/unit -q
 
 Expected: 除守卫里那 2 个已知 FAIL 外全部通过。若出现 `ImportError` 或 `ModuleNotFoundError`，说明有文件 import 了被删模块而 Step 1 没查出来，**停下来补计划**。
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 9: 提交**
 
 ```bash
 git add -u backend/
+git add backend/tests/unit/control_plane/test_cloud_editing_removed.py
 git commit -m "refactor(le-01): 删除阿里云剪辑领域层、Provider 抽象与全部相关测试
 
 删除 12 个生产文件（约 3000 行）与 15 个测试文件（约 3700 行）。Provider
@@ -621,7 +656,7 @@ git rm contracts/video/aliyun-ims-editing-staging.v1.json \
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py -v
 ```
 
-Expected: 全部 12 个用例 PASS
+Expected: 全部 13 个用例 PASS
 
 - [ ] **Step 3: 从 CQ-04 验收脚本移除云剪辑环节**
 
