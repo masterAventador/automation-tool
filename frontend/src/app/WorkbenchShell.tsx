@@ -708,7 +708,7 @@ export function WorkbenchShell({
                   <Typography.Text className="ops-eyebrow">本机与服务</Typography.Text>
                   <Typography.Title level={2}>设置</Typography.Title>
                   <Typography.Paragraph>
-                    管理模型、视频剪辑服务、本机执行器、诊断和更新。真实凭据不会进入页面状态。
+                    管理模型、本机执行器、诊断和更新。真实凭据不会进入页面状态。
                   </Typography.Paragraph>
                 </div>
                 <Space orientation="vertical" size="large" className="settings-stack">
