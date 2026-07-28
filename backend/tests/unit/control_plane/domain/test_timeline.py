@@ -55,6 +55,20 @@ def test_transition_rejects_an_unusable_duration(duration_ms: object) -> None:
         TimelineTransition(TransitionKind.FADE, duration_ms)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("kind", ["fade", TimelineTrackKind.VISUAL])
+def test_transition_rejects_a_kind_that_is_not_a_transition_kind(kind: object) -> None:
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTransition(kind, 500)  # type: ignore[arg-type]
+
+
+def test_a_valid_transition_can_be_constructed_and_attached_to_a_clip() -> None:
+    transition = TimelineTransition(TransitionKind.FADE, 500)
+    assert transition.kind is TransitionKind.FADE
+    assert transition.duration_ms == 500
+    clip = _media_clip(transition_in=transition)
+    assert clip.transition_in == transition
+
+
 def _media_clip(**overrides: object) -> TimelineClip:
     """A valid clip that plays a slice of one material."""
     defaults: dict[str, object] = {
@@ -122,6 +136,18 @@ def test_a_still_source_may_omit_the_window_it_has_no_time_axis() -> None:
 def test_a_source_window_cannot_start_before_the_source_does() -> None:
     with pytest.raises(InvalidTimelineModel):
         _media_clip(source_in_ms=-1, source_out_ms=2_999)
+
+
+@pytest.mark.parametrize(
+    ("source_in_ms", "source_out_ms"),
+    [(5_000.0, 8_000.0), (True, 3_001)],
+)
+def test_a_source_window_rejects_non_integer_endpoints(
+    source_in_ms: object, source_out_ms: object
+) -> None:
+    """The span still matches duration_ms — only the endpoint types are wrong."""
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(source_in_ms=source_in_ms, source_out_ms=source_out_ms)
 
 
 def test_text_has_nothing_to_slice() -> None:
