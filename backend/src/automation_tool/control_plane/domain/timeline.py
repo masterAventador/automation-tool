@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Final, Never, final
 
@@ -87,15 +86,6 @@ def _validate_text(value: object, *, maximum: int, optional: bool = False) -> No
             continue
         if unicodedata.category(character).startswith("C"):
             _reject()
-
-
-def _validate_timestamp(value: object) -> None:
-    if (
-        not isinstance(value, datetime)
-        or value.tzinfo is None
-        or value.utcoffset() != UTC.utcoffset(value)
-    ):
-        _reject()
 
 
 @dataclass(frozen=True, slots=True)
