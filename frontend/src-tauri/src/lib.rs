@@ -852,15 +852,15 @@ fn run_motion_render_job(
             {
                 return Err(MotionRenderStageFailure::Cancelled);
             }
-            // Rendering occupies the range 5..85, divided among the shots. A
-            // film of nine shots that sat at one number until the last one
-            // finished would be indistinguishable from a stuck one.
-            let done = u8::try_from(5 + index * 80 / segments.len()).unwrap_or(55);
             motion_video_studio::advance(
                 &workspaces,
                 render_job_id,
                 motion_video_studio::MotionRenderJobStatus::Rendering,
-                done,
+                // Asked of the module that also judges it. This used to be a
+                // formula written here, and the judgement still required the
+                // single number a one-render film had — so every render failed
+                // on its first shot.
+                motion_video_studio::rendering_progress_percent(index, segments.len()),
                 None,
                 None,
             )

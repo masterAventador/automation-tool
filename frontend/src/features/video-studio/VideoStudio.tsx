@@ -553,7 +553,7 @@ function NewVideoPage({
                   placeholder="例如：用蓝色商务风做一段本周销售增长说明"
                 />
                 <Typography.Text type="secondary">
-                  {`描述一句就够了。会生成一段 ${MOTION_BRIEF_FILM_SECONDS} 秒的视频，文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。`}
+                  {`描述一句就够了。按 ${MOTION_BRIEF_FILM_SECONDS} 秒来安排内容，实际片长以成片为准、通常会更长一些——每个镜头会等它的话说完、动效播完，不会中途切断。文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。这个入口暂时不能改这个长度；需要别的长度请用下面的固定模板手工制作。`}
                 </Typography.Text>
                 <Button
                   type="primary"

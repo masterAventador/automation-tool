@@ -1549,7 +1549,9 @@ pub fn advance(
         return Err(job_unavailable());
     }
     let valid = match status {
-        MotionRenderJobStatus::Rendering => progress_percent == 55 && artifact.is_none(),
+        MotionRenderJobStatus::Rendering => {
+            RENDERING_PROGRESS.contains(&progress_percent) && artifact.is_none()
+        }
         MotionRenderJobStatus::Encoding => progress_percent == 85 && artifact.is_none(),
         MotionRenderJobStatus::Succeeded => {
             progress_percent == 100 && artifact.is_some() && failure_code.is_none()
@@ -1716,6 +1718,40 @@ pub fn workspace_render_paths(
         .map_err(map_workspace_error)?;
     let video = output.join(MOTION_OUTPUT_FILE);
     Ok((work, output, video))
+}
+
+/// Where the progress bar may sit while shots are being captured.
+///
+/// One band rather than one number, because a film is a list of renders now and
+/// the person watching needs to see it advance. It was a single 55 for as long
+/// as a film was one render, and when the loop started dividing the band among
+/// the shots the state machine still required exactly 55 — so `advance` refused
+/// the first shot's progress and every render failed before a browser started.
+/// The rule lives here once and is read by `advance`, by `validate_snapshot`
+/// and by the loop that produces the numbers, so the three cannot disagree
+/// again.
+///
+/// It stops below the encode stage's 85: a bar that reaches the encode number
+/// while shots are still being captured says the render finished.
+const RENDERING_PROGRESS: std::ops::RangeInclusive<u8> = 5..=84;
+
+/// Where the bar sits while shot `index` of `total` is being captured.
+///
+/// Spread across the band rather than parked on one number: a nine-shot film
+/// that sat still until the last shot finished is indistinguishable from a
+/// stuck one, and these renders are minutes long.
+pub fn rendering_progress_percent(index: usize, total: usize) -> u8 {
+    let start = *RENDERING_PROGRESS.start();
+    let span = u32::from(*RENDERING_PROGRESS.end() - start);
+    if total == 0 {
+        return start;
+    }
+    // Saturating rather than wrapping: `index` comes from a list whose length
+    // the answer decided, and a bar outside its own band is refused by
+    // `advance` — which is exactly the failure this constant was introduced to
+    // stop being possible.
+    let offset = (index as u64 * u64::from(span) / total as u64).min(u64::from(span));
+    start.saturating_add(offset as u8)
 }
 
 /// What a finished film is, as opposed to what any one shot was captured on.
@@ -2174,7 +2210,9 @@ fn validate_snapshot(
         && (snapshot.artifact_id.is_none() || snapshot.status == MotionRenderJobStatus::Succeeded);
     let valid_progress = match snapshot.status {
         MotionRenderJobStatus::Queued => snapshot.progress_percent == 5,
-        MotionRenderJobStatus::Rendering => snapshot.progress_percent == 55,
+        MotionRenderJobStatus::Rendering => {
+            RENDERING_PROGRESS.contains(&snapshot.progress_percent)
+        }
         MotionRenderJobStatus::Encoding => snapshot.progress_percent == 85,
         MotionRenderJobStatus::Succeeded => snapshot.progress_percent == 100,
         MotionRenderJobStatus::Cancelling

@@ -19,7 +19,15 @@ import { browser, expect } from "@wdio/globals";
  */
 const BRIEF = "用蓝色商务风做一段本周销售增长说明，三个要点";
 
-/** Three beats of four seconds: what the form submits, from the shared contract. */
+/**
+ * Three beats of four seconds: what the form submits, from the shared contract.
+ *
+ * Not what the film measures. A shot is as long as its line or its part's own
+ * motion, whichever is longer, and the film is the sum of its shots — so this
+ * number steers how much the storyboard tries to say and does not cut the
+ * result. The form's own wording says exactly that; the finished length is
+ * measured off the artifact by `inspect_film`.
+ */
 const EXPECTED_FILM_SECONDS = 12;
 
 /** The stage names a user watches go by, in the order they must appear. */
@@ -173,7 +181,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     // customer who says "make me a three minute intro" otherwise gets a much
     // shorter film with nothing anywhere saying so.
     await expect(studio).toHaveText(
-      expect.stringContaining(`会生成一段 ${EXPECTED_FILM_SECONDS} 秒的视频`),
+      expect.stringContaining(`按 ${EXPECTED_FILM_SECONDS} 秒来安排内容`),
     );
     await studio.$("button=开始自动制作").click();
     await expect(studio).toHaveText(
@@ -230,7 +238,17 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
         return text.includes("已提交一句话自动制作") ? "submitted" : "";
       },
       { timeout: 900_000, interval: 1_000, timeoutMsg: "one-sentence submission never landed" },
-    );
+    ).catch(async (error: Error) => {
+      // Fifteen minutes of waiting must not end in a sentence that says only
+      // "it didn't". Measured 2026-07-28: this timeout fired while the packaged
+      // Executor, run standalone with the same request, answered in 67 seconds
+      // — so the wait was not the child being slow, and nothing about the bare
+      // message said where else to look. What is on screen is the one thing
+      // this side can still report.
+      throw new Error(
+        `${error.message}. Studio showed:\n${await studio.getText()}\n---\nPage showed:\n${await startupScreen()}`,
+      );
+    });
     if (submission !== "submitted") {
       throw new Error(submission);
     }
@@ -293,17 +311,24 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     await expect(player).toBeDisplayed();
     await browser.waitUntil(
       async () =>
-        browser.execute((expectedSeconds: number) => {
+        browser.execute((minimumSeconds: number) => {
           const video = document.querySelector<HTMLVideoElement>("video[aria-label$='成片播放器']");
           return (
             video !== null &&
             video.error === null &&
             video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
             Number.isFinite(video.duration) &&
-            Math.abs(video.duration - expectedSeconds) < 0.2 &&
+            // Deliberately not `duration === the seconds the form submitted`.
+            // A shot runs for whichever is longer, its line or its part's own
+            // motion, and the film is the sum of its shots — the product
+            // owner's correction of 2026-07-27. The submitted length steers how
+            // much the storyboard tries to say; it does not cut the film. What
+            // the film actually measures is asserted against the artifact by
+            // `inspect_film`, with the packaged ffprobe, on the file itself.
+            video.duration > minimumSeconds &&
             (video.currentTime > 0 || video.ended || video.played.length > 0)
           );
-        }, EXPECTED_FILM_SECONDS),
+        }, 1),
       { timeout: 60_000, interval: 250, timeoutMsg: "the App player never decoded and played the film" },
     );
 

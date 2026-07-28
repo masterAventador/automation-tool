@@ -349,8 +349,6 @@ def run_desktop_acceptance(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if private_app_data.exists():
-            shutil.rmtree(private_app_data)
         require_port_closed(port)
         if restore.returncode != 0:
             raise RuntimeError("T36 failed to restore production Vite assets")
@@ -376,6 +374,21 @@ def inspect_film(video: Path) -> None:
     print(f"T36 evidence film: {json.dumps(stream, ensure_ascii=False)}")
     if int(stream["nb_read_frames"]) < 2:
         raise RuntimeError("the App produced a single-frame film")
+    # PC-18: a film is now joined from shots captured on different stages —
+    # 1920x1080 for most of the catalog, 1080x1920 for three, 640x360 at factor
+    # 2 for the built-in template. A delivered file is one size throughout, and
+    # the size it must be is declared in `motion-render-canvas.v1.json`.
+    # Measured 2026-07-28: concatenating mismatched shots exits 0 and reports
+    # the right frame count while the second half is sideways, so what the
+    # finished file measures is the only thing that settles it.
+    canvas = json.loads(
+        (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(encoding="utf-8")
+    )["film"]["byAspectRatio"]["16:9"]
+    if (int(stream["width"]), int(stream["height"])) != (canvas["width"], canvas["height"]):
+        raise RuntimeError(
+            f"the film is {stream['width']}x{stream['height']}, not the "
+            f"{canvas['width']}x{canvas['height']} canvas a 16:9 film is delivered on"
+        )
 
 
 def main() -> int:
@@ -401,6 +414,12 @@ def main() -> int:
     )
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
+    # A render that fails inside the App leaves its RenderJob workspace, its
+    # snapshot and whatever the Worker wrote in the App data directory. Deleting
+    # all of it on the way out is how a failure becomes "本机渲染未完成" and
+    # nothing else. It is removed at the start of every run, so keeping it on
+    # failure costs one stale copy rather than an accumulation.
+    run_failed = True
     try:
         # The one-sentence feature needs no Control Plane, but the App's startup
         # gate does: it holds the workbench closed until control-plane health
@@ -425,6 +444,7 @@ def main() -> int:
         server = start_control_plane(port=control_plane_port, environment=environment)
         run_desktop_acceptance(api_key, evidence_video, environment)
         inspect_film(evidence_video)
+        run_failed = False
     finally:
         if server is not None:
             server.terminate()
@@ -444,7 +464,13 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if private_app_data.exists():
+        # The second of two cleanups that owned this directory. The first one
+        # started keeping it when a run failed and this one deleted it anyway,
+        # so the diagnosis it was kept for was gone before anyone could look.
+        # One owner decides now, and it is the one that knows the outcome.
+        if run_failed:
+            print(f"[T36] kept the App data directory for diagnosis: {private_app_data}")
+        elif private_app_data.exists():
             shutil.rmtree(private_app_data)
         require_port_closed(control_plane_port)
         require_port_closed(database_port)

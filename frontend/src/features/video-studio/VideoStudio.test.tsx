@@ -678,15 +678,23 @@ describe("video studio shell", () => {
    * 需求被丢掉且不给任何提示。这条用例把界面上的数字和真正提交的时长绑在一起，
    * 免得文案和行为各说各的。
    */
-  it("says how long the film will be, and submits exactly that length", async () => {
+  it("says the length steers the film rather than fixing it, and submits it", async () => {
     const user = userEvent.setup();
     const studioGateway = gateway();
     render(<VideoStudio gateway={studioGateway} />);
 
     await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
-    expect(
-      screen.getByText(new RegExp(`${MOTION_BRIEF_FILM_SECONDS} 秒`)),
-    ).toBeVisible();
+    // The number is still shown — it is what gets submitted and what steers how
+    // much the storyboard tries to say. What it must not do is promise the
+    // finished length: a shot runs for whichever is longer, its line or its
+    // part's own motion, and the film is the sum of its shots (the product
+    // owner's correction of 2026-07-27). Measured 2026-07-28 against the real
+    // model: a 20 second brief produced a 900 frame film — 30 seconds — so the
+    // old wording told the user a number the product would not deliver.
+    const note = screen.getByText(new RegExp(`${MOTION_BRIEF_FILM_SECONDS} 秒`));
+    expect(note).toBeVisible();
+    expect(note.textContent).not.toMatch(new RegExp(`会生成一段 ${MOTION_BRIEF_FILM_SECONDS} 秒的视频`));
+    expect(note.textContent).toMatch(/实际片长|以成片为准|可能更长/);
 
     await user.clear(screen.getByLabelText("一句话视频需求"));
     await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");

@@ -529,3 +529,93 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
     assert_eq!(document["durationSeconds"].as_u64().unwrap(), 6);
     assert_eq!(document["language"].as_str().unwrap(), request.language());
 }
+
+/// The progress the render loop reports must be progress the job will accept.
+///
+/// It was not. `run_motion_render_job` divides the rendering band among the
+/// shots so a nine-shot film does not sit on one number for ten minutes, and
+/// the state machine still required exactly 55 — so `advance` refused the very
+/// first shot's progress (index 0 gives 5, for any number of shots) and every
+/// render failed as `RenderFailed` before a browser was ever launched. 100% of
+/// runs, single shot or nine.
+///
+/// It survived a 450-test suite because `run_motion_render_job` is a private
+/// function on a spawned thread behind an `AppHandle` and nothing covered it.
+/// This test covers the boundary that actually broke: the loop's number and the
+/// job's judgement of it, which is one rule and used to be written down three
+/// times.
+#[test]
+fn every_progress_the_render_loop_reports_is_one_the_job_accepts() {
+    use automation_tool_desktop_lib::motion_video_studio::{
+        accept_authored_render_job, advance, rendering_progress_percent,
+        MotionRenderJobStatus, MOTION_COMPOSITION_FILE,
+    };
+
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let request = MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        6,
+        "zh".to_owned(),
+    )
+    .unwrap();
+
+    for total in [1_usize, 2, 3, 5, 9, 20] {
+        // A real job, produced the way production produces one: the Queued
+        // snapshot `advance` reads is written by accepting an answer, and a
+        // bare workspace has none.
+        let workspace = store.create_new().unwrap();
+        let work = store.worker_asset_directory(&workspace).unwrap();
+        fs::create_dir_all(work.join("runtime")).unwrap();
+        fs::write(work.join(AUTHORING_RUNTIME_ASSET), b"/* runtime */").unwrap();
+        fs::write(work.join(MOTION_COMPOSITION_FILE), b"<html></html>").unwrap();
+        let answer = serde_json::json!({
+            "schemaVersion": 1,
+            "status": "authored",
+            "entryHtml": MOTION_COMPOSITION_FILE,
+            "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+            "frameCount": 6 * 30,
+            "framesPerSecond": 30,
+            "durationSeconds": 6,
+            "aspectRatio": "16:9",
+            "segments": (0..total).map(|_| serde_json::json!({
+                "entryHtml": MOTION_COMPOSITION_FILE,
+                "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+                "canvas": {"width": 640, "height": 360, "deviceScaleFactor": 2},
+                "frameCount": 30,
+            })).collect::<Vec<_>>(),
+        });
+        let prepared = accept_authored_render_job(&store, &workspace, &request, &answer.to_string())
+            .expect("the answer is accepted");
+        assert_eq!(prepared.segments().len(), total);
+        let job = workspace.job_id();
+        let mut previous = 0_u8;
+        for index in 0..total {
+            let percent = rendering_progress_percent(index, total);
+            assert!(
+                percent >= previous,
+                "a shot may not move the bar backwards: {total} shots, shot {index}"
+            );
+            previous = percent;
+            advance(
+                &store,
+                job,
+                MotionRenderJobStatus::Rendering,
+                percent,
+                None,
+                None,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "the job refused the progress its own render loop reports: \
+                     {total} shots, shot {index}, {percent}%, {error:?}"
+                )
+            });
+        }
+        // The encode stage still owns the top of the band, so no shot may reach
+        // it — a bar that hits 85 while shots are still being captured tells the
+        // person watching that the render finished.
+        assert!(previous < 85, "{total} shots ran the bar into the encode stage");
+    }
+}
