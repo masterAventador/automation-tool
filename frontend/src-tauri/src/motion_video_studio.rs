@@ -431,7 +431,9 @@ impl MotionVideoBriefRequest {
                 .any(|value| value == &self.aspect_ratio)
             || !limits.languages.iter().any(|value| value == &self.language)
             || self.duration_seconds == 0
-            || self.duration_seconds > duration.total_seconds_maximum()
+            // The one-sentence entry's own ceiling: this path is one render per
+            // shot, so the sandbox's single-capture limit is not what bounds it.
+            || self.duration_seconds > duration.brief_seconds_maximum()
         {
             return Err(draft_invalid());
         }
@@ -484,6 +486,7 @@ pub struct MotionDurationLimits {
     seconds_per_beat_minimum: u32,
     seconds_per_beat_maximum: u32,
     total_seconds_maximum: u32,
+    brief_seconds_maximum: u32,
     render_wall_seconds_base: u32,
     render_wall_millis_per_frame: u32,
     render_cpu_parallelism: u32,
@@ -512,6 +515,16 @@ impl MotionDurationLimits {
 
     pub const fn total_seconds_maximum(&self) -> u32 {
         self.total_seconds_maximum
+    }
+
+    /// The longest film the one-sentence entry lets the operator ask for.
+    ///
+    /// Larger than `total_seconds_maximum` because the two answer different
+    /// questions: that one is the sandbox's single-capture limit and still
+    /// binds the fixed-template path, while a one-sentence film is one render
+    /// per shot and joined, so its ceiling is a product decision.
+    pub const fn brief_seconds_maximum(&self) -> u32 {
+        self.brief_seconds_maximum
     }
 
     pub const fn frame_count_maximum(&self) -> u32 {
@@ -598,6 +611,7 @@ struct DurationContract {
     seconds_per_beat_maximum: u32,
     seconds_per_beat_default: u32,
     total_seconds_maximum: u32,
+    brief_seconds_maximum: u32,
     render_wall_seconds_base: u32,
     render_wall_millis_per_frame: u32,
     render_cpu_parallelism: u32,
@@ -642,7 +656,18 @@ pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError>
             < contract.beat_count_minimum * contract.seconds_per_beat_minimum
         // A total the render sandbox cannot capture would turn a legal user
         // configuration into an opaque configuration error at submit time.
+        // Still asked of `total_seconds_maximum` and not of the brief ceiling:
+        // the fixed-template path captures its whole film in one pass, so this
+        // is its real limit. A one-sentence film is one render per shot and is
+        // bounded per shot instead, which is what let its ceiling be raised to
+        // something an operator would choose rather than something the sandbox
+        // imposes.
         || frame_count_maximum > crate::local_video_orchestrator::SANDBOX_FRAMES_MAXIMUM
+        // The choice the operator is offered may not be shorter than the one
+        // the template path already allows, and a shot still has to fit one
+        // capture — that bound lives on the segment and is enforced where
+        // segments are accepted.
+        || contract.brief_seconds_maximum < contract.total_seconds_maximum
     {
         return Err(draft_invalid());
     }
@@ -653,6 +678,7 @@ pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError>
         seconds_per_beat_minimum: contract.seconds_per_beat_minimum,
         seconds_per_beat_maximum: contract.seconds_per_beat_maximum,
         total_seconds_maximum: contract.total_seconds_maximum,
+        brief_seconds_maximum: contract.brief_seconds_maximum,
         render_wall_seconds_base: contract.render_wall_seconds_base,
         render_wall_millis_per_frame: contract.render_wall_millis_per_frame,
         render_cpu_parallelism: contract.render_cpu_parallelism,

@@ -23,6 +23,7 @@ describe("motion storyboard duration limits", () => {
       secondsPerBeatMaximum: contract.secondsPerBeatMaximum,
       secondsPerBeatDefault: contract.secondsPerBeatDefault,
       totalSecondsMaximum: contract.totalSecondsMaximum,
+      briefSecondsMaximum: contract.briefSecondsMaximum,
       renderWallSecondsBase: contract.renderWallSecondsBase,
       renderWallMillisPerFrame: contract.renderWallMillisPerFrame,
     });

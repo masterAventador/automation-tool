@@ -1482,10 +1482,27 @@ class OneSentenceBriefBoundsTests(unittest.TestCase):
         )
         self.assertEqual(brief.duration_seconds, maximum)
 
-    def test_a_film_longer_than_the_sandbox_can_capture_is_refused_at_the_brief(
+    def test_a_film_longer_than_the_product_offers_is_refused_at_the_brief(
         self,
     ) -> None:
-        maximum = self._duration_contract()["totalSecondsMaximum"]
+        """The ceiling this path is judged against is its own, not the template's.
+
+        `totalSecondsMaximum` is the sandbox's single-capture limit and still
+        binds the fixed-template path. A film authored here is one render per
+        shot and joined, so the operator may ask for `briefSecondsMaximum` —
+        180 seconds, set by the product owner on 2026-07-28 because at the
+        previous 12 the model declined every catalog part as too expensive for
+        the budget.
+        """
+        contract = self._duration_contract()
+        maximum = contract["briefSecondsMaximum"]
+        self.assertGreaterEqual(maximum, contract["totalSecondsMaximum"])
+        MotionBrief(
+            text="用蓝色商务风做一段本周销售增长说明",
+            aspect_ratio="16:9",
+            duration_seconds=maximum,
+            language="zh",
+        )
         with self.assertRaises(MotionAuthoringRejected):
             MotionBrief(
                 text="用蓝色商务风做一段本周销售增长说明",

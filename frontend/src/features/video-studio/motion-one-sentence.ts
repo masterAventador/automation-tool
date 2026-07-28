@@ -22,23 +22,24 @@ export const MOTION_BRIEF_LIMITS: MotionBriefLimits = {
   maxBriefCharacters: briefContract.maxBriefCharacters,
   aspectRatios: briefContract.aspectRatios,
   languages: briefContract.languages,
-  durationSecondsMaximum: MOTION_DURATION_LIMITS.totalSecondsMaximum,
+  durationSecondsMaximum: MOTION_DURATION_LIMITS.briefSecondsMaximum,
 };
 
 /**
- * How long a one-sentence film is.
+ * How long a one-sentence film is by default.
  *
- * This entry has no length control: the user describes the film and the agent
- * writes it, so the length is the storyboard default rather than something
- * chosen. Declared here once because two places need it and they must not
- * disagree — the sentence card tells the user this number, and the submitted
- * request carries it. If they ever drifted, the App would promise one length
- * and produce another, which is the same complaint the fixed-template path
- * already collected once when its beat length was hard-coded.
+ * The operator can change it now, up to `durationSecondsMaximum`. It was fixed
+ * at this value while the entry had no length control, and that turned out to
+ * be why the 134 packaged parts were never used: measured 2026-07-28 against
+ * the real model, a 12 second budget makes the shortest catalog part cost 37%
+ * of the film and the model declined every one of them — correctly, because the
+ * prompt tells it a part's length is spent from the film's budget. A 20 second
+ * brief picked one to two parts.
  *
  * It is deliberately *not* parsed out of the sentence: reading "three minutes"
  * out of free text needs the model to be right about it, and a wrong answer
- * here is a film of the wrong length with no way for the user to tell why.
+ * here is a film of the wrong length with no way for the user to tell why. The
+ * operator says it in a control instead.
  */
 export const MOTION_BRIEF_FILM_SECONDS =
   MOTION_DURATION_LIMITS.beatCountDefault * MOTION_DURATION_LIMITS.secondsPerBeatDefault;

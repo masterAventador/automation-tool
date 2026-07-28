@@ -14,6 +14,15 @@ export interface MotionDurationLimits {
   readonly secondsPerBeatMaximum: number;
   readonly secondsPerBeatDefault: number;
   readonly totalSecondsMaximum: number;
+  /**
+   * The longest film the one-sentence entry lets the operator ask for.
+   *
+   * Larger than `totalSecondsMaximum`, which is the sandbox's single-capture
+   * limit and still binds the fixed-template path. A one-sentence film is one
+   * render per shot and joined afterwards, so its ceiling is a product decision
+   * rather than a sandbox one.
+   */
+  readonly briefSecondsMaximum: number;
   /** Fixed startup cost of a render: browser launch, page load, warm-up. */
   readonly renderWallSecondsBase: number;
   /** Per-frame cost of a render: seek, composite, capture. */
@@ -29,6 +38,7 @@ export const MOTION_DURATION_LIMITS: MotionDurationLimits = {
   secondsPerBeatMaximum: contract.secondsPerBeatMaximum,
   secondsPerBeatDefault: contract.secondsPerBeatDefault,
   totalSecondsMaximum: contract.totalSecondsMaximum,
+  briefSecondsMaximum: contract.briefSecondsMaximum,
   renderWallSecondsBase: contract.renderWallSecondsBase,
   renderWallMillisPerFrame: contract.renderWallMillisPerFrame,
 };

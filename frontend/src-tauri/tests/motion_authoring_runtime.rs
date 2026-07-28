@@ -176,9 +176,12 @@ fn a_missing_runtime_is_refused_rather_than_silently_skipped() {
 
 #[test]
 fn a_brief_is_judged_against_the_same_contracts_the_agent_reads() {
+    // The one-sentence entry's own ceiling, not the template path's: this path
+    // renders one shot at a time, so the sandbox's single-capture limit is not
+    // what bounds it.
     let longest = automation_tool_desktop_lib::motion_video_studio::duration_limits()
         .unwrap()
-        .total_seconds_maximum();
+        .brief_seconds_maximum();
 
     MotionVideoBriefRequest::one_sentence(
         "用蓝色商务风做一段本周销售增长说明".to_owned(),
@@ -618,4 +621,51 @@ fn every_progress_the_render_loop_reports_is_one_the_job_accepts() {
         // person watching that the render finished.
         assert!(previous < 85, "{total} shots ran the bar into the encode stage");
     }
+}
+
+/// The two paths stopped sharing a ceiling when one of them stopped being one render.
+///
+/// `totalSecondsMaximum` is 20 because a film used to be a single capture and
+/// the sandbox stops at 600 frames. The fixed-template path still is one
+/// capture, so 20 is still its answer. The one-sentence path is route A — one
+/// render per shot, joined — and its ceiling is a product decision rather than
+/// a sandbox limit; the product owner set it at 180 seconds on 2026-07-28 so
+/// the operator can choose, having measured that the 12 second default made the
+/// model decline every catalog part as too expensive for the budget.
+///
+/// Keeping one number for both would have raised the template path's films to
+/// 5400 frames in a single capture, which the sandbox refuses.
+#[test]
+fn the_one_sentence_ceiling_is_the_products_and_the_template_ceiling_is_the_sandboxs() {
+    use automation_tool_desktop_lib::motion_video_studio::duration_limits;
+
+    let limits = duration_limits().unwrap();
+
+    assert_eq!(
+        limits.total_seconds_maximum() * limits.frames_per_second(),
+        600,
+        "the template path is still one capture and must fit the sandbox"
+    );
+    assert_eq!(
+        limits.brief_seconds_maximum(),
+        180,
+        "the one-sentence ceiling the operator may choose up to"
+    );
+
+    MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        limits.brief_seconds_maximum(),
+        "zh".to_owned(),
+    )
+    .expect("the longest film the product offers is accepted");
+
+    let error = MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        limits.brief_seconds_maximum() + 1,
+        "zh".to_owned(),
+    )
+    .expect_err("one second past the ceiling is refused");
+    assert_eq!(error.code(), MotionVideoStudioErrorCode::DraftInvalid);
 }

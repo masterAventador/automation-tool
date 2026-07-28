@@ -444,17 +444,24 @@ def _load_brief_bounds() -> tuple[int, int, frozenset[str], frozenset[str]]:
 
 
 def _load_maximum_duration_seconds() -> int:
-    """The longest film the render sandbox can actually capture.
+    """The longest film the one-sentence entry lets an operator ask for.
 
     Declared once in the storyboard duration contract that the editor and the
     native validator already read. Judging a brief against a looser number here
     only moved the refusal later: `author()` re-checks the frame budget, so a
     minute-long brief was accepted, a model was configured and a workspace was
     created before anything said no.
+
+    Reads `briefSecondsMaximum` rather than `totalSecondsMaximum`. The two
+    stopped being the same number when this path stopped being a single render:
+    the fixed-template path still captures a whole film in one pass and is
+    bounded by the sandbox's 600 frames, while a film authored here is one
+    render per shot and joined, so what bounds a *shot* is `MAX_FRAME_COUNT` and
+    what bounds the film is a product decision.
     """
     try:
         contract = json.loads(_DURATION_CONTRACT_PATH.read_text(encoding="utf-8"))
-        maximum = contract["totalSecondsMaximum"]
+        maximum = contract["briefSecondsMaximum"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
         raise MotionAuthoringRejected(
             "motion authoring rejected: storyboard duration contract is unreadable"

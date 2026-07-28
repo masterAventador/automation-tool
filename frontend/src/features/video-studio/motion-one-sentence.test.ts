@@ -20,9 +20,11 @@ describe("one-sentence motion brief limits", () => {
     expect(MOTION_BRIEF_LIMITS.aspectRatios).toEqual(contract.aspectRatios);
     expect(MOTION_BRIEF_LIMITS.languages).toEqual(contract.languages);
     // 片长上限不在这份契约里：它已经在分镜时长契约里声明过一次，
-    // 再写一遍就是这份契约本身要避免的第二个来源。
+    // 再写一遍就是这份契约本身要避免的第二个来源。取的是一句话入口自己那条
+    // （`briefSecondsMaximum`）——`totalSecondsMaximum` 是沙箱单次捕获的上限，
+    // 管的是固定模板那条路。
     expect(MOTION_BRIEF_LIMITS.durationSecondsMaximum).toBe(
-      durationContract.totalSecondsMaximum,
+      durationContract.briefSecondsMaximum,
     );
   });
 
@@ -41,13 +43,13 @@ describe("one-sentence motion brief limits", () => {
     );
   });
 
-  it("explains a film the local renderer cannot capture", () => {
+  it("explains a film longer than this entry offers", () => {
     const problem = motionBriefProblem(
       "用蓝色商务风做一段本周销售增长说明",
-      durationContract.totalSecondsMaximum + 1,
+      durationContract.briefSecondsMaximum + 1,
     );
     expect(problem).toBe(
-      `本机最长可以制作 ${durationContract.totalSecondsMaximum} 秒的视频，请调短片长。`,
+      `本机最长可以制作 ${durationContract.briefSecondsMaximum} 秒的视频，请调短片长。`,
     );
   });
 
@@ -76,5 +78,38 @@ describe("one-sentence film length", () => {
   it("is a length the same entry would accept", () => {
     expect(motionBriefProblem("用蓝色商务风做一段本周销售增长说明", MOTION_BRIEF_FILM_SECONDS))
       .toBeNull();
+  });
+});
+
+describe("片长由操作者选择", () => {
+  it("上限来自一句话入口自己的天花板，不是固定模板那条", () => {
+    // `totalSecondsMaximum` 是沙箱单次捕获的上限，仍然管着固定模板那条路。
+    // 一句话这条是路线 A：一个镜头一次渲染，拼起来，所以它的上限是产品决定。
+    // 产品负责人 2026-07-28 定 180 秒，理由量过：原来固定 12 秒时，最短的零件
+    // 也要 4.5 秒、占掉 37% 预算，模型每次都判定放不下，134 个零件在原理上够
+    // 得着、实际上一个都用不上。
+    expect(MOTION_BRIEF_LIMITS.durationSecondsMaximum).toBe(
+      durationContract.briefSecondsMaximum,
+    );
+    expect(MOTION_BRIEF_LIMITS.durationSecondsMaximum).toBe(180);
+    expect(MOTION_BRIEF_LIMITS.durationSecondsMaximum).toBeGreaterThan(
+      durationContract.totalSecondsMaximum,
+    );
+  });
+
+  it("默认值仍是原来那个，改的是能不能动它", () => {
+    expect(MOTION_BRIEF_FILM_SECONDS).toBe(
+      durationContract.beatCountDefault * durationContract.secondsPerBeatDefault,
+    );
+  });
+
+  it("操作者选的长度会被逐条判定", () => {
+    const sentence = "用蓝色商务风做一段本周销售增长说明";
+    expect(motionBriefProblem(sentence, MOTION_BRIEF_LIMITS.durationSecondsMaximum)).toBeNull();
+    expect(motionBriefProblem(sentence, 1)).toBeNull();
+    expect(
+      motionBriefProblem(sentence, MOTION_BRIEF_LIMITS.durationSecondsMaximum + 1),
+    ).toContain(`${MOTION_BRIEF_LIMITS.durationSecondsMaximum} 秒`);
+    expect(motionBriefProblem(sentence, 0)).not.toBeNull();
   });
 });
