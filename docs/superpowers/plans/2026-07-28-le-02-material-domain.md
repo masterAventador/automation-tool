@@ -422,6 +422,10 @@ Expected: `TypeError: Material.__init__() got an unexpected keyword argument 'ha
     def _validate_audio(self) -> None:
         if type(self.has_audio) is not bool or type(self.has_speech) is not bool:
             _reject()
+        # 图片没有音轨。不加这条，后面的越界检查会因为图片的 duration_ms
+        # 必须为 None 而静默短路，于是一张静图上可以挂任意长的人声区间。
+        if self.kind is MaterialKind.IMAGE and self.has_audio:
+            _reject()
         if not self.has_audio:
             if (
                 self.audio_loudness_lufs is not None
