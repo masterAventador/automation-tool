@@ -146,7 +146,10 @@ _REMOVED_DOMAIN_MODULES = (
     "fake_second_editing_provider",
 )
 
-_REMOVED_DATABASE_MODULES = ("aliyun_editing_intent_repository",)
+_REMOVED_DATABASE_MODULES = (
+    "aliyun_editing_intent_repository",
+    "editing_output_ledger_repository",
+)
 
 _DOMAIN_PACKAGE = "automation_tool.control_plane.domain"
 _DATABASE_PACKAGE = "automation_tool.control_plane.infrastructure.database"
@@ -184,7 +187,7 @@ def test_aliyun_editing_contract_file_is_gone() -> None:
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py -v
 ```
 
-Expected: FAIL。11 个用例应全部失败——`importlib.import_module` 成功返回而非抛 `ModuleNotFoundError`，`metadata.tables` 里两张表都在，契约文件存在。
+Expected: FAIL。12 个用例应全部失败——`importlib.import_module` 成功返回而非抛 `ModuleNotFoundError`，`metadata.tables` 里两张表都在，契约文件存在。
 
 - [ ] **Step 3: 写前端守卫测试**
 
@@ -326,7 +329,7 @@ find backend/src backend/tests -name '__pycache__' -type d -exec rm -rf {} + 2>/
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py -v
 ```
 
-Expected: 9 个模块用例 PASS；`test_schema_declares_no_cloud_editing_tables` 与 `test_aliyun_editing_contract_file_is_gone` 仍 FAIL（Task 3、Task 6 处理）。
+Expected: 10 个模块用例 PASS（8 个 domain + 2 个 database）；`test_schema_declares_no_cloud_editing_tables` 与 `test_aliyun_editing_contract_file_is_gone` 仍 FAIL（Task 3、Task 6 处理）。
 
 - [ ] **Step 6: 运行后端全量单元测试，确认没删断别的**
 
@@ -618,7 +621,7 @@ git rm contracts/video/aliyun-ims-editing-staging.v1.json \
 cd backend && .venv/bin/python -m pytest tests/unit/control_plane/test_cloud_editing_removed.py -v
 ```
 
-Expected: 全部 11 个用例 PASS
+Expected: 全部 12 个用例 PASS
 
 - [ ] **Step 3: 从 CQ-04 验收脚本移除云剪辑环节**
 
