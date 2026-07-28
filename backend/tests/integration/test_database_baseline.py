@@ -1,6 +1,7 @@
 import subprocess
 
 import pytest
+from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -13,8 +14,6 @@ from automation_tool.control_plane.application.task_event_convergence import (
 from automation_tool.control_plane.application.task_event_stream import TaskEventStreamService
 from automation_tool.control_plane.domain import DependencyUnavailable
 from automation_tool.control_plane.infrastructure.database import Database
-
-HEAD_REVISION = "20260723_0034"
 
 
 @pytest.mark.asyncio
