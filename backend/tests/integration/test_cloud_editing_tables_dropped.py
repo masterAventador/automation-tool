@@ -2,8 +2,8 @@
 
 Dropping the table declarations from schema.py only changes what new
 databases get created with. A database that already ran 0032 and 0034 keeps
-both tables until a migration removes them, which is why the migration files
-stay on disk and 0035 exists.
+all three tables until a migration removes them, which is why the migration
+files stay on disk and 0035 exists.
 """
 
 from __future__ import annotations
@@ -14,7 +14,11 @@ from sqlalchemy import text
 
 from automation_tool.control_plane.infrastructure.database.session import Database
 
-_REMOVED_TABLES = ("aliyun_editing_intents", "editing_output_lineages")
+_REMOVED_TABLES = (
+    "aliyun_editing_intents",
+    "editing_output_lineages",
+    "editing_output_artifacts",
+)
 
 
 @pytest.mark.asyncio

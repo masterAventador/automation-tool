@@ -61,6 +61,7 @@ def test_schema_declares_no_cloud_editing_tables() -> None:
     table_names = set(schema.metadata.tables)
     assert "aliyun_editing_intents" not in table_names
     assert "editing_output_lineages" not in table_names
+    assert "editing_output_artifacts" not in table_names
 
 
 @pytest.mark.xfail(reason="Task 6 删除契约文件之前，该文件仍存在", strict=True)

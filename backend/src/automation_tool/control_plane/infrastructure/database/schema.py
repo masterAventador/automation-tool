@@ -9,7 +9,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
     Index,
-    Integer,
     LargeBinary,
     MetaData,
     PrimaryKeyConstraint,
@@ -2337,50 +2336,6 @@ bilibili_upload_parts = Table(
     ),
 )
 
-editing_output_artifacts = Table(
-    "editing_output_artifacts",
-    metadata,
-    Column("artifact_id", UUID(as_uuid=True), nullable=False),
-    # `editing_job_id` referenced `editing_output_lineages.editing_job_id` until
-    # LE-01's 20260728_0035 migration dropped that table; the foreign key was
-    # dropped alongside it (see that migration's `upgrade()`), so this column is
-    # now a plain UUID pending LE-05's rewritten lineage table.
-    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
-    Column("position", Integer, nullable=False),
-    Column("kind", String(length=16), nullable=False),
-    Column("media_type", String(length=64), nullable=False),
-    Column("byte_size", BigInteger, nullable=False),
-    Column("sha256_hex", String(length=64), nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    CheckConstraint("position >= 0", name="ck_editing_output_artifacts_position"),
-    CheckConstraint(
-        "kind in ('video', 'cover', 'subtitle', 'metadata')",
-        name="ck_editing_output_artifacts_kind",
-    ),
-    CheckConstraint(
-        "(kind = 'video' and media_type in ('video/mp4', 'video/webm'))"
-        " or (kind = 'cover' and media_type in ('image/jpeg', 'image/png'))"
-        " or (kind = 'subtitle' and media_type in ('text/vtt', 'application/x-subrip'))"
-        " or (kind = 'metadata' and media_type = 'application/json')",
-        name="ck_editing_output_artifacts_media",
-    ),
-    CheckConstraint("byte_size >= 1", name="ck_editing_output_artifacts_bytes"),
-    CheckConstraint(
-        "sha256_hex ~ '^[0-9a-f]{64}$'", name="ck_editing_output_artifacts_sha256"
-    ),
-    PrimaryKeyConstraint("artifact_id", name="pk_editing_output_artifacts"),
-    UniqueConstraint(
-        "editing_job_id", "position", name="ux_editing_output_artifacts_position"
-    ),
-)
-
-Index(
-    "ux_editing_output_artifacts_one_video",
-    editing_output_artifacts.c.editing_job_id,
-    unique=True,
-    postgresql_where=text("kind = 'video'"),
-)
-
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2395,7 +2350,6 @@ __all__ = [
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
-    "editing_output_artifacts",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
