@@ -58,6 +58,10 @@ class BeatPlan:
     part: str | None
     copy: Mapping[int, str]
     voice_seconds: float | None
+    # The length the storyboard gave this beat. Only decides a shot nothing else
+    # can — a template beat with no part and, until the narration exists, no
+    # line.
+    declared_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +143,7 @@ def assemble_film(
                 part=beat.part or "template",
                 motion_seconds=part_durations.get(beat.part) if beat.part else None,
                 voice_seconds=beat.voice_seconds,
+                declared_seconds=beat.declared_seconds,
             )
             for beat in beats
         ],

@@ -187,3 +187,39 @@ def test_a_film_far_past_the_old_ceiling_is_planned_rather_than_refused() -> Non
     assert plan.total_seconds == pytest.approx(90.0)
     assert plan.total_frames == 2700
     assert all(shot.frames <= SEGMENT_FRAMES_MAXIMUM for shot in plan.shots)
+
+
+def test_a_beat_with_no_part_and_no_line_runs_for_the_length_it_declared() -> None:
+    """A shot nothing else can measure falls back to what the storyboard said.
+
+    Measured 2026-07-28 against the real model through the real App: with the
+    parts catalog finally reaching the agent, the first film it planned died on
+    `shot 'template' has neither narration nor motion`. A beat the model left
+    without a part has no animation to time, and until the narration is
+    synthesized it has no line either — so one such beat failed the whole film,
+    and a storyboard is free to contain one.
+    """
+    shot = Shot(part="template", motion_seconds=None, voice_seconds=None, declared_seconds=4.0)
+
+    assert shot_seconds(shot) == pytest.approx(4.0)
+
+
+def test_the_declared_length_never_overrides_the_content() -> None:
+    """It is a fallback, not a third candidate for the maximum.
+
+    The model's own durations were measured overshooting the sandbox budget by
+    more than 70%, which is why a shot is as long as its line or its motion and
+    not as long as the model guessed. Letting the declaration win anywhere would
+    put that back.
+    """
+    assert shot_seconds(
+        Shot(part="p", motion_seconds=4.8, voice_seconds=None, declared_seconds=20.0)
+    ) == pytest.approx(4.8)
+    assert shot_seconds(
+        Shot(part="p", motion_seconds=None, voice_seconds=2.0, declared_seconds=20.0)
+    ) == pytest.approx(2.0)
+
+
+def test_a_shot_with_nothing_at_all_is_still_refused() -> None:
+    with pytest.raises(FilmOverBudget):
+        shot_seconds(Shot(part="template", motion_seconds=None, voice_seconds=None))

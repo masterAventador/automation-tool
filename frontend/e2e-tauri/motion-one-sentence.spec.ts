@@ -73,10 +73,34 @@ async function openWorkbenchSection(name: string): Promise<void> {
     .click();
 }
 
+/**
+ * The workbench shell, as opposed to the startup check or the startup gate.
+ *
+ * `h2=RPA 运营工作台` used to be this signal and no longer exists: the redesign
+ * (`c4d0d14`) replaced the single workbench heading with a per-section one, and
+ * the section the App lands on — the assistant — has no heading at all. The
+ * navigation landmark is what survives that, because it is the shell rather
+ * than anything inside it.
+ */
+const WORKBENCH_SHELL = "nav[aria-label='桌面主导航']";
+
+/**
+ * The route to the brand-motion studio, as the redesign left it.
+ *
+ * Was: sidebar 工作台 → sidebar 视频制作. Is: sidebar 创作 → the 品牌动效成片
+ * segment → 打开完整制作面板. Mirrors `frontend/e2e/navigation.ts`, which the
+ * same commit added and keeps green; the studio itself did not move, only the
+ * way in.
+ */
 async function openVideoStudio() {
-  await openWorkbenchSection("工作台");
-  await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-  await openWorkbenchSection("视频制作");
+  await openWorkbenchSection("创作");
+  // `*` rather than `div`: antd renders a Segmented item as a `label`, which
+  // the Playwright side never had to know because `.ant-segmented-item` does
+  // not constrain the tag.
+  await browser
+    .$("//*[contains(@class,'ant-segmented-item')][.//*[normalize-space()='品牌动效成片']]")
+    .click();
+  await browser.$("button=打开完整制作面板").click();
   const studio = await browser.$("section[aria-label='视频制作工作区']");
   await expect(studio).toBeDisplayed();
   await studio.$("button[aria-label='选择品牌动效成片']").click();
@@ -115,21 +139,20 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     try {
       await browser.waitUntil(
         async () =>
-          (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+          (await browser.$(WORKBENCH_SHELL).isExisting()) ||
           (await browser.$("button=打开本地修复工具").isExisting()),
         { timeout: 120_000, interval: 1_000 },
       );
     } catch {
       throw new Error(`App never left the startup check. Screen was:\n${await startupScreen()}`);
     }
-    if (!(await browser.$("h2=RPA 运营工作台").isExisting())) {
+    if (!(await browser.$(WORKBENCH_SHELL).isExisting())) {
       throw new Error(`App is blocked at the startup gate:\n${await startupScreen()}`);
     }
 
     step("workbench mounted");
     // --- The prerequisite, through the form a user actually fills ----------
-    await openWorkbenchSection("设置与诊断");
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
+    await openWorkbenchSection("设置");
     const videoModel = await browser.$(".model-service-purpose--video_creative");
     await expect(videoModel).toBeDisplayed();
     await videoModel.$("input[aria-label='视频创作模型服务 API Key']").setValue(apiKey);

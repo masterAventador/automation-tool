@@ -167,6 +167,8 @@ _ENTRY_REASON_TOKENS: Final = {
     "workspace is missing": "workspace_missing",
     "workspace must be an absolute path the App already created": "workspace_not_absolute",
     "workspace is not a usable render workspace": "workspace_unusable",
+    "catalog root is missing": "catalog_root_missing",
+    "catalog root must be an absolute path the App resolved": "catalog_root_not_absolute",
     "brand assets are not the declared shape": "brand_assets_shape_invalid",
     "duration must be a whole number of seconds": "duration_not_whole_seconds",
     "request is not the declared shape": "request_shape_invalid",
@@ -214,6 +216,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "catalog_parts must be selectable catalog ids",
         "composition html must be a non-empty string",
         "composition not seekable",
+        "motion part slot table is unreadable",
         "config must be a VideoCreationModelConfig",
         "config shape invalid",
         "declared asset must exist",
@@ -437,6 +440,29 @@ def _workspace(payload: object) -> AuthoringWorkspace:
         raise _reject("workspace is not a usable render workspace") from error
 
 
+def _catalog_root(document: dict[str, Any]) -> Path | None:
+    """Where the App says the packaged parts are, or nothing.
+
+    Absent means an installation that carries no catalog, which the agent
+    refuses to paper over: a beat that chose a part is reported rather than
+    quietly drawn from the built-in template.
+
+    Checked here rather than trusted, on the same terms as the workspace. This
+    path is handed to the working-copy writer, which globs and reads under it,
+    so a relative path would resolve against whatever the Executor's working
+    directory happens to be.
+    """
+    payload = document.get("catalogRoot")
+    if payload is None:
+        return None
+    if not isinstance(payload, str) or not payload:
+        raise _reject("catalog root is missing")
+    root = Path(payload)
+    if not root.is_absolute():
+        raise _reject("catalog root must be an absolute path the App resolved")
+    return root
+
+
 def _brief(document: dict[str, Any]) -> MotionBrief:
     assets = document["brandAssets"]
     if not isinstance(assets, list) or not all(type(a) is str for a in assets):
@@ -486,6 +512,7 @@ def run_motion_authoring_entry(
             ),
             model_config=model,
             model_call=model_call,
+            catalog_root=_catalog_root(document),
         )
         result = agent.author(brief)
     except MotionAuthoringUnavailable as error:

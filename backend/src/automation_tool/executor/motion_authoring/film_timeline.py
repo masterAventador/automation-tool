@@ -45,6 +45,15 @@ class Shot:
     part: str
     motion_seconds: float | None
     voice_seconds: float | None
+    # What the storyboard said this beat runs for, used only when nothing else
+    # decides. A beat drawn from the built-in template has no part to animate,
+    # and until the narration is synthesized it has no line either — so before
+    # this existed, one beat the model left without a part failed the whole
+    # film. It is deliberately not a third candidate for `max`: the model's
+    # declared durations were measured overshooting the render budget by 70%,
+    # which is why content and motion decide a shot and its own estimate does
+    # not.
+    declared_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,12 +100,14 @@ class FilmOverBudget(RuntimeError):
 def shot_seconds(shot: Shot) -> float:
     """Whichever takes longer, the line or the motion."""
     candidates = [value for value in (shot.motion_seconds, shot.voice_seconds) if value]
-    if not candidates:
-        raise FilmOverBudget(
-            f"shot {shot.part!r} has neither narration nor motion, so nothing "
-            "decides how long it is"
-        )
-    return max(candidates)
+    if candidates:
+        return max(candidates)
+    if shot.declared_seconds:
+        return shot.declared_seconds
+    raise FilmOverBudget(
+        f"shot {shot.part!r} has neither narration, motion nor a declared "
+        "length, so nothing decides how long it is"
+    )
 
 
 def plan_film(

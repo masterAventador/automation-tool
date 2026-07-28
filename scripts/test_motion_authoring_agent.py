@@ -23,10 +23,13 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend/src"))
 
+from automation_tool.executor.motion_authoring import agent as motion_authoring_agent  # noqa: E402
+from automation_tool.executor.motion_authoring import entry as motion_authoring_entry  # noqa: E402
 from automation_tool.executor.motion_authoring import (  # noqa: E402
     run_motion_authoring_entry,
 )
@@ -938,13 +941,62 @@ class CatalogPartSelectionTest(unittest.TestCase):
             item["name"] for item in usability["items"] if item["batch"] == "deferred"
         }
         selectable = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
-        self.assertEqual(selectable, LOCKED_CATALOG_PART_IDS - deferred)
-        self.assertEqual(len(selectable), 76)
+        self.assertLessEqual(selectable, LOCKED_CATALOG_PART_IDS - deferred)
         # A transition and a script-driven caption, named so the exclusion is
         # readable rather than only countable.
         self.assertNotIn("glitch", selectable)
         self.assertNotIn("caption-kinetic-slam", selectable)
         self.assertIn("lt-bold-block", selectable)
+
+    def test_every_offered_part_is_one_a_film_can_actually_be_assembled_from(
+        self,
+    ) -> None:
+        """Choosing an offered part must never be what kills the film.
+
+        Measured 2026-07-28, the first run in which the catalog actually reached
+        the agent: the model picked `shimmer-sweep` and the run died with
+        `beat 'beat-1' names 'shimmer-sweep', which the catalog does not carry`.
+        It is catalogued, it is not deferred, and it is a pure visual effect —
+        no declared duration, no declared stage, no frozen slots.
+
+        `assemble_film` needs all three, and the grading only ever asked where a
+        part keeps its copy. So 39 of the 76 offered parts were choices that
+        could not be delivered, and picking any one of them failed the whole
+        film rather than that shot. With three beats a film had almost no chance
+        of surviving.
+
+        PC-02 wrote the rule this restates — offering a part we cannot fill
+        spends a choice on nothing. What is new is that "can be filled" and "can
+        be rendered" are different questions, and only the first was being
+        asked.
+        """
+        catalog = json.loads(
+            (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        slots = json.loads(
+            (ROOT / "contracts/video/motion-part-slots.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        renderable = {
+            str(item["name"])
+            for item in catalog["items"]
+            if item.get("duration") and (item.get("dimensions") or {}).get("width")
+        } & {str(part["name"]) for part in slots["parts"]}
+
+        offered = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
+
+        self.assertEqual(
+            offered - renderable,
+            set(),
+            "these parts are offered to the model and cannot be assembled into a film",
+        )
+        # A pure visual effect: catalogued, not deferred, and nothing a shot can
+        # be built from.
+        self.assertNotIn("shimmer-sweep", offered)
+        self.assertIn("lt-bold-block", offered)
 
     def test_a_deferred_part_is_refused_even_though_the_catalog_lists_it(self) -> None:
         payload = _valid_storyboard()
@@ -968,11 +1020,16 @@ class CatalogPartSelectionTest(unittest.TestCase):
         self.assertIn(chart["category"], prompt)
         self.assertIn("15", prompt)
         self.assertIn(chart["description"][:40], prompt)
-        # A component has no timeline of its own; the prompt must not invent one.
-        component = next(
-            part for part in SELECTABLE_CATALOG_PARTS if part["duration"] is None
+        # This used to reach for a component — a part with no timeline of its
+        # own — and check the prompt did not invent a duration for it. There are
+        # none left to reach for: a shot's length comes from its part's declared
+        # duration, so a part without one cannot be assembled into a film and is
+        # no longer offered. The guarantee that replaces it is stronger and is
+        # what the prompt now rests on.
+        self.assertTrue(
+            all(part["duration"] for part in SELECTABLE_CATALOG_PARTS),
+            "every offered part must declare how long it runs",
         )
-        self.assertIn(component["name"], prompt)
 
     def test_the_prompt_says_a_part_length_spends_the_film_budget(self) -> None:
         """Listing the durations is not enough; the consequence has to be said.
@@ -1488,6 +1545,68 @@ class ExecutorEntryTests(unittest.TestCase):
             self.assertEqual(answer["durationSeconds"], 6)
             self.assertTrue((root / COMPOSITION_PATH).is_file())
             self.assertTrue((root / "renderjob.json").is_file())
+
+    def test_the_requested_catalog_root_reaches_the_agent(self) -> None:
+        """Accepting a field and using it are two things, and only one was done.
+
+        `catalogRoot` was added to the accepted request shape and to the agent's
+        constructor, and nothing joined them: the entry validated it and dropped
+        it, so every installation looked to the agent like one carrying no parts
+        at all. Measured 2026-07-28 against the real model through the real App —
+        the submission came back `authoring_refused` after 57 seconds with
+        `the storyboard names catalog parts but this installation carries no
+        parts catalog`, on a machine where the catalog was staged and the App
+        had sent its path.
+
+        This is the third time on this path that a value crossed a boundary and
+        reached nothing: PC-04's `catalog_parts` chosen by the model and read by
+        no one, PC-18's request that never carried the path at all, and this.
+        Each one is invisible from either side — the sender sends, the receiver
+        accepts, and the only symptom is a product that quietly does less.
+
+        The assertion is on what the agent was constructed with rather than on a
+        finished film, because a film needs the 46 MB release tree that is not in
+        the checkout. What failed here is the wiring, and this is where it shows.
+        """
+        seen: dict[str, object] = {}
+        real_agent = motion_authoring_agent.MotionAuthoringAgent
+
+        class RecordingAgent(real_agent):  # type: ignore[misc, valid-type]
+            def __init__(self, **kwargs: object) -> None:
+                seen.update(kwargs)
+                super().__init__(**kwargs)  # type: ignore[arg-type]
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            _make_workspace(root)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            model = ScriptedModel([_valid_model_payload()])
+            request = {
+                "schemaVersion": 1,
+                "workspace": str(root),
+                "catalogRoot": str(catalog),
+                "brief": "用蓝色商务风做一段本周销售增长说明",
+                "aspectRatio": "16:9",
+                "durationSeconds": 6,
+                "language": "zh",
+                "brandAssets": [],
+                "model": {
+                    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "modelId": "qwen3.7-max-2026-06-08",
+                    "apiKey": "sk-" + "a" * 40,
+                },
+            }
+            with mock.patch.object(
+                motion_authoring_entry, "MotionAuthoringAgent", RecordingAgent
+            ):
+                run_motion_authoring_entry(request, model_call=model)
+
+        self.assertEqual(
+            seen.get("catalog_root"),
+            catalog,
+            "the entry accepted catalogRoot and never handed it to the agent",
+        )
 
     def test_the_answer_carries_no_workspace_path_and_no_credential(self) -> None:
         """What comes back must be safe to log and safe to hand to the WebView.

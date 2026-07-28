@@ -43,7 +43,12 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     prepare_startup_gate,
     startup_gate_environment,
 )
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
+from prepare_video_runtime import install as install_resources  # noqa: E402
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
+from release_assembly import MOTION_CATALOG_RESOURCES  # noqa: E402
 from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
 from run_i2_13_acceptance import BACKEND_ROOT, REPOSITORY_ROOT, compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
@@ -58,6 +63,8 @@ from run_vf_06_acceptance import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+# The frozen catalog of animation parts, as the release contract declares it.
+(MOTION_CATALOG,) = MOTION_CATALOG_RESOURCES
 SPEC = "./e2e-tauri/motion-one-sentence.spec.ts"
 
 # Why this acceptance runs on a `control-plane-e2e` build and not on
@@ -255,10 +262,10 @@ def _answers_the_authoring_protocol(entrypoint: Path) -> bool:
 def prepare_resources() -> None:
     """Put the packaged parts where the App resolves them, then verify them.
 
-    The App reads the browser, both Workers and ffmpeg from its resource
-    directory and from nowhere else — there is no environment-variable branch to
-    fall back to — so a missing part here is a product failure the acceptance
-    would report as an unexplained blank window.
+    The App reads the browser, both Workers, ffmpeg and the frozen catalog of
+    animation parts from its resource directory and from nowhere else — there is
+    no environment-variable branch to fall back to — so a missing part here is a
+    product failure the acceptance would report as an unexplained blank window.
     """
     prepare_startup_gate(app_data_directory())
     require_authoring_capable_executor(app_data_directory())
@@ -266,6 +273,18 @@ def prepare_resources() -> None:
     platform = "windows" if sys.platform == "win32" else "macos"
     staging = prepare_video_runtime(platform=platform)
     stage_video_runtime(staging=staging, resource_root=DEBUG_APP_RESOURCE_ROOT)
+    # PC-18: the App now tells the authoring child where the 134 parts are, so a
+    # debug run needs them at the same path a packaged one has them. Without
+    # this the resolver succeeds, the directory is a name with nothing behind
+    # it, and every beat that chose a part fails when its working copy is
+    # written — which reads as the model having produced something unusable.
+    catalog_staging = stage_motion_catalog(staging=ROOT / ".local/t36-catalog").parent
+    install_resources(
+        staging=catalog_staging,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=[MOTION_CATALOG.staging_name],
+        platform=platform,
+    )
     installed = require_staged_video_runtime(resource_root=DEBUG_APP_RESOURCE_ROOT)
     runtime = installed["motion-video-worker"] / "runtime/gsap.min.js"
     if not runtime.is_file() or runtime.stat().st_size == 0:

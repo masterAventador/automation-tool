@@ -137,6 +137,13 @@ _MOTION_PART_SLOT_BUDGET_PATH: Final = (
     _CONTRACTS_ROOT / "video/motion-part-slot-budget.v1.json"
 )
 
+# Where `write_part_working_copy` puts a part inside the RenderJob workspace.
+# Imported from the writer rather than restated: the two have to name the same
+# directory or the sandbox allowlist and the files on disk describe different
+# trees. Imported lazily at module scope is not possible here without a cycle,
+# so it is re-exported from the module that owns it.
+from .part_workspace import WORKING_COPY_DIRECTORY as PART_WORKING_COPY_DIRECTORY  # noqa: E402
+
 # The stage `composition_template` draws on. Mirrors width/height/
 # deviceScaleFactor in `motion-render-canvas.v1.json`; a catalog part carries
 # its own instead.
@@ -216,13 +223,29 @@ class PartsCatalog:
         }
 
     def assets_for(self, entry_html: str, workspace: AuthoringWorkspace) -> tuple[str, ...]:
-        """Everything the working copy of this part needs, as the sandbox lists it."""
-        prefix = entry_html.rsplit("/", 2)[0] if "/" in entry_html else ""
+        """Everything the working copy of this part needs, as the sandbox lists it.
+
+        The whole working-copy tree, not the part's own folder. Every part
+        reaches GSAP, Draco and its typefaces through `../../offline-deps/…`,
+        which is why `write_part_working_copy` mirrors the catalog's layout
+        instead of flattening — and a prefix of `catalog/items` leaves all of it
+        outside the sandbox's allowlist.
+
+        Measured 2026-07-28 on the first film that used parts: 14 files were
+        written into the workspace and each part segment declared one. The
+        twelve shared dependencies were the missing ones, so the part would have
+        been rendered with no animation runtime and no fonts — which a browser
+        reports by drawing the first frame and holding it. The still-frame gate
+        would have caught the result and blamed the composition.
+        """
+        prefix = f"{PART_WORKING_COPY_DIRECTORY}/"
+        if not entry_html.startswith(prefix):
+            return ()
         return tuple(
             sorted(
                 asset
                 for asset in workspace.provided_assets()
-                if asset != entry_html and (not prefix or asset.startswith(prefix))
+                if asset != entry_html and asset.startswith(prefix)
             )
         )
 
@@ -266,11 +289,26 @@ def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
       substituting a string.
 
     Offering either to the model spends a choice on something that cannot be
-    delivered, so the closed set it selects from is the graded remainder. The
-    line drawn here is `deferred`, which is a property of the part; the
-    first/second split in the same contract is only about which slot tables get
-    built first, and baking that scheduling decision into a validation boundary
-    would refuse parts that become usable without anything about them changing.
+    delivered, so the closed set it selects from is the graded remainder.
+
+    That grading answers "can this part be filled". `assemble_film` asks a
+    second question — "can a shot be built from it" — and needs three things to
+    say yes: a declared duration, a declared stage, and a frozen slot table.
+    Measured 2026-07-28 on the first run where the catalog actually reached this
+    agent, the model chose `shimmer-sweep`, a pure visual effect with none of
+    the three, and the film died with "the catalog does not carry" rather than
+    that one shot. 39 of the 76 parts offered were choices like that, so a
+    three-beat film had almost no chance of surviving. The offered set is now
+    the intersection: a part the model can pick is a part a film can be made
+    from.
+
+    `deferred` still draws the first line, and it is still a property of the
+    part rather than of the schedule — the first/second split in the same
+    contract is only about which slot tables were built first. The slot table's
+    presence is a schedule fact today, which means a part joins this set the
+    moment its table is frozen, with nothing about the part changing. That is
+    the intended behaviour: an offer this process cannot honour is worse than a
+    smaller catalog.
     """
     try:
         usability = json.loads(_MOTION_PART_USABILITY_PATH.read_text(encoding="utf-8"))
@@ -287,6 +325,13 @@ def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
         raise MotionAuthoringRejected(
             "motion authoring rejected: motion part usability contract drifted"
         )
+    try:
+        slots = json.loads(_MOTION_PART_SLOTS_PATH.read_text(encoding="utf-8"))
+        anchored = {str(part["name"]) for part in slots["parts"]}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: motion part slot table is unreadable"
+        ) from error
     selectable = tuple(
         {
             "name": str(item["name"]),
@@ -297,6 +342,11 @@ def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
         }
         for item in _LOCKED_CATALOG_ITEMS
         if graded[str(item["name"])] != "deferred"
+        # The three `assemble_film` needs. Asked of the same contracts it reads,
+        # so an offer cannot outlive what makes it deliverable.
+        and item.get("duration")
+        and (item.get("dimensions") or {}).get("width")
+        and str(item["name"]) in anchored
     )
     if not selectable:
         raise MotionAuthoringRejected(
@@ -1898,6 +1948,7 @@ class MotionAuthoringAgent:
                     part=beat.catalog_parts[0] if beat.catalog_parts else None,
                     copy=catalog.copy_for(beat),
                     voice_seconds=None,
+                    declared_seconds=beat.duration_seconds,
                 )
                 for beat in storyboard.beats
             ],
