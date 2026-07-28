@@ -55,6 +55,7 @@ def test_cloud_editing_database_module_is_gone(module_name: str) -> None:
         importlib.import_module(f"{_DATABASE_PACKAGE}.{module_name}")
 
 
+@pytest.mark.xfail(reason="Task 3 清理 schema.py 之前，两张云剪辑表仍在声明中", strict=True)
 def test_schema_declares_no_cloud_editing_tables() -> None:
     from automation_tool.control_plane.infrastructure.database import schema
 
@@ -63,6 +64,7 @@ def test_schema_declares_no_cloud_editing_tables() -> None:
     assert "editing_output_lineages" not in table_names
 
 
+@pytest.mark.xfail(reason="Task 6 删除契约文件之前，该文件仍存在", strict=True)
 def test_aliyun_editing_contract_file_is_gone() -> None:
     repository_root = Path(__file__).resolve().parents[4]
     contract = repository_root / "contracts/video/aliyun-ims-editing-staging.v1.json"
